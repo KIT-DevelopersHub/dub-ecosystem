@@ -4,7 +4,10 @@
 > 目的: 全サービスの API を `@dub/policy-gate` の宣言的認可テーブルに載せるための設計図。
 > **この表の基準コミットは `fb811d04`**(= policy-gate 土台 + drive-share-service 採用済みの状態)。
 > 「現在の認可」「提案ルール」の全記述はこのコミットのツリーを基準に読むこと。
-> 本書自体は調査結果のドキュメントであり、本書の作成ではコードを変更していない。
+> 本書の初版は調査結果のドキュメントであり、初版の作成ではコードを変更していない。
+> **更新(フェーズ 0 完了時)**: b-2 / b-3 / b-4 / b-5 の結論を反映済み。語彙は `AUTHENTICATED` と
+> `internalWithKeys([...])` の 2 形を追加して**5 形で確定**し、1.1 / (b) / (e) / 4.1 を更新した。
+> 棚卸し自体(2 章の全 22 サービス表)は `fb811d04` 基準のまま。
 
 ## 結論
 
@@ -39,13 +42,22 @@
 
 ### 1.1 ルール語彙 (`packages/policy-gate/src/rule.ts`)
 
-| ルール | 意味 | ゲートの挙動 |
-|---|---|---|
-| `PUBLIC` | 無認証で誰でも叩いてよい | 素通し |
-| `INTERNAL` | サービス間専用 | `x-dub-internal` が無ければ 403 |
-| `[key, ...]` | 全キー必須 (AND) | `x-dub-user-id` 必須 + identity `/authz/check` |
-| `appLevel(app, level, ...extra)` | 上記 `RequiredKeys` を生成する糖衣 | 同上 |
-| テーブルに無い | — | **403 (fail-closed)** |
+**語彙は 5 形で閉じている**(フェーズ 0 で `AUTHENTICATED` と `internalWithKeys` を追加済み。
+追加前は 3 形)。
+
+| ルール | 意味 | ゲートの挙動 | `allows()` |
+|---|---|---|---|
+| `PUBLIC` | 無認証で誰でも叩いてよい | 素通し(`userId` は未設定) | `true` |
+| `AUTHENTICATED` | 認証済みなら誰でも・キー不要 | `x-dub-user-id` 無しは 401 / 有れば `userId` を設定して通す。**identity への subrequest は 0 回** | `true` |
+| `INTERNAL` | サービス間専用・キー不要 | `x-dub-internal` が無ければ 403。actor は有れば伝播(無くても通す) | `false` |
+| `[key, ...]` | 全キー必須 (AND) | `x-dub-user-id` 必須 + identity `/authz/check` | 全キー保持で `true` |
+| `internalWithKeys([...])` | 内部専用 **かつ** 全キー必須(連言) | マーカー無しは 403 `internal_only` → `x-dub-user-id` 無しは 401 → キー検査 | `false` |
+| `appLevel(app, level, ...extra)` | `RequiredKeys` を生成する糖衣(`internalWithKeys` にも渡せる) | 同上 | — |
+| テーブルに無い | — | **403 (fail-closed)** | — |
+
+`allows()` 列はロール x エンドポイント行列テストが使う述語。**内部専用の 2 形は常に `false`**
+(外部の一般ユーザーからは到達不能なので、どのロールの到達可能集合にも載せない)。
+`AUTHENTICATED` は逆に**どのキー集合でも `true`**(行列に「全ロール到達可」として現れるのが正しい)。
 
 `appLevel` の展開は `policy.keysForAppLevel` に従う:
 `appLevel("members","view")` -> `["app:members:view"]`、
@@ -87,8 +99,10 @@
 | GET /api/v1/me/participation | ○ | `authenticate()` | 認証のみ(ハンドラ残し) | 本人 id で member-service へ s2s |
 | POST /api/v1/me/participation | ○ | `authenticate()` | 認証のみ(ハンドラ残し) | 対象は常にセッション本人 |
 
-**要確認**: `/me` 系 7 本は「認証のみ・キー無し」。`RequiredKeys` は非空が型で強制されるため、
-語彙上これを表現する手段が無い(`PUBLIC` では認証が外れる)。第 4 の形 `AUTHENTICATED` が要る。
+**解決済み(b-2)**: `/me` 系 7 本は「認証のみ・キー無し」。`AUTHENTICATED` 形を追加したので
+そのまま表現できる(`"GET /api/v1/me": AUTHENTICATED`)。上表「認証のみ(ハンドラ残し)」は
+すべて `AUTHENTICATED` と読む。対象 id をクライアントが指定できない self-scoped ルートに限る
+という条件は `rule.ts` のコメントが正典。
 
 ### 2.2 auth-service
 
@@ -204,8 +218,11 @@ Service Binding 経由で `/authz/check` を叩くため、identity-roster に�
 | PATCH /actions/:id | ○ | `event:write` (スコープ無し) | `appLevel("events","edit","event:write")` | 同上 |
 | DELETE /actions/:id | ○ | `event:write` (スコープ無し・`event:admin` ではない) | `appLevel("events","edit","event:write")` | アーカイブが write 止まり |
 
-**注**: `resourceType:"event"` のリソーススコープは policy-gate の静的テーブルでは表現できない
-(`AuthzQuery.resourceId` を渡す口が `PermissionGranter` に無い)。移行でスコープが失われる。
+**注(b-5 の方針確定済み)**: `resourceType:"event"` のリソーススコープは policy-gate の静的
+テーブルでは表現しない(`PermissionGranter` は**拡張しない**)。表はキー保持の有無(型レベル)
+だけを見て、「この event に対して」(インスタンスレベル)の判定は**ハンドラに明示実装**する。
+上表 12 本は**表エントリと同一コミットでハンドラ側アサーションを書く**ことが移行の必須条件
+(書かないとスコープが黙って org 全体に広がる = 退行)。
 
 ### 2.6 gantt-service
 
@@ -448,9 +465,11 @@ app レベルで `internalOnly` -> `requireAuth()` が全ルートに適用。
 | GET /settings | ×(internal) | + `mail:read` | `["mail:read"]` | キルスイッチ状態 |
 | PATCH /settings | ×(internal) | + `mail:admin` | `["mail:admin"]` | キルスイッチの変更 |
 
-**注**: `INTERNAL` と `RequiredKeys` は同時に書けない(1 ルール 1 形)。
-これらは「内部専用 **かつ** キー必須」なので、語彙上どちらかを捨てることになる。
-`internalOnly` は app レベル middleware として policy-gate と併用するのが現実解。
+**解決済み(b-4)**: 上表の 13 本(`/internal/events-async` 以外)は「内部専用 **かつ** キー必須」。
+`internalWithKeys([...])` 形を追加したので 1 ルールで両方書ける
+(例 `"PATCH /settings": internalWithKeys(["mail:admin"])`)。
+`internalOnly` middleware の併用は**不要**(併用すると「表に書いていない認可」が復活するため、
+移行時は撤去する)。`POST /internal/events-async` は actor を持たないので素の `INTERNAL`。
 
 ### 2.15 github-sync
 
@@ -639,17 +658,19 @@ staging にもデプロイされていない**。根拠は 4 点とも不在で�
 `notif:prefs:self` は全て実在する(複数サービスの「カタログに無い」コメントは**全て陳腐化**。
 github-sync `src/auth.ts`、drive-proxy `src/permissions.ts`、notification `app.ts:256` の 3 箇所)。
 
-不足しているのは**キーではなく語彙**で、**5 件**(b-2〜b-6)。
+不足していたのは**キーではなく語彙**で、**5 件**(b-2〜b-6)。
+うち **b-2 / b-3 / b-4 / b-5 はフェーズ 0 で解決済み**(下表「結論」列)。残るのは b-6 のみ
+(ロール実データの確認待ち = member-service 着手の前提)。
 当初 b-1 として挙げた「`INTERNAL` 未 export」は事実誤認で、実際は export 済み(下表参照)。
 
-| # | 不足 | 影響 | 推奨 |
+| # | 不足 | 影響 | 結論(採用した形) |
 |---|---|---|---|
-| ~~b-1~~ | ~~`INTERNAL` が `index.ts` から export されていない~~ | **誤り(訂正済み)**。`packages/policy-gate/src/index.ts:12` で `PUBLIC` / `INTERNAL` / `appLevel` 等と並べて export 済み。drive-share-service の `policy-table.ts` が実際に `import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate"` している | 対応不要 |
-| b-2 | 「認証のみ・キー不要」を表す形が無い | `RequiredKeys` は非空が型で強制、`PUBLIC` は認証を外す。gateway `/me` 系 7 本、member `GET /members/me/mention-teams`、notification `POST /feedback` が表現不能 | 第 4 の形 `AUTHENTICATED` を追加 |
-| b-3 | 共有シークレット方式が表現不能 | app-health-monitor の `x-monitor-token` 3 本、mail-gateway standalone の `COMPOSE_TOKEN` 1 本 | 第 5 の形にするか、policy-gate 対象外として明示的に除外リスト化 |
-| b-4 | `INTERNAL` と `RequiredKeys` を**同時に**書けない | mail-automation 13 本が「内部専用かつ `mail:admin` 必須」。1 ルール 1 形なのでどちらかを捨てる | `internalOnly` を app レベル middleware として併用(表には鍵だけ書く) |
-| b-5 | リソーススコープ(`resourceType`/`resourceId`)が渡せない | `PermissionGranter` のシグネチャに無い。event-service 12 本・gantt 5 本の event スコープが移行で失われる | スコープはハンドラ残しに降格するか、ポートを拡張 |
-| b-6 | OR セマンティクスが無い(意図的) | member-service `requireAny(["identity:read","app:members:view"])` 3 本の意味が変わる | ロール実データを確認して片方に寄せる |
+| ~~b-1~~ | ~~`INTERNAL` が `index.ts` から export されていない~~ | **誤り(訂正済み)**。`packages/policy-gate/src/index.ts` で `PUBLIC` / `INTERNAL` / `appLevel` 等と並べて export 済み。drive-share-service の `policy-table.ts` が実際に `import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate"` している | 対応不要 |
+| b-2 | 「認証のみ・キー不要」を表す形が無い | `RequiredKeys` は非空が型で強制、`PUBLIC` は認証を外す。gateway `/me` 系 7 本、member `GET /members/me/mention-teams`、notification `POST /feedback` が表現不能 | **解決済み**。第 4 の形 `AUTHENTICATED` を追加。401 or 通過のみで identity への subrequest は 0 回。`allows()` は `true`。**self-scoped ルート限定**(対象 id をクライアントが指定できない)で、「緩くしたい」用途は禁止 — 誤用条件は `rule.ts` のコメントが正典 |
+| b-3 | 共有シークレット方式が表現不能 | app-health-monitor の `x-monitor-token` 3 本、mail-gateway standalone の `COMPOSE_TOKEN` 1 本 | **解決済み(語彙は増やさない)**。第 5 の形は作らず、**policy-gate 対象外として明示除外**(下記 (e))。理由: 門が共有シークレットの一致でありキー検査でもマーカー検査でもないため、表に書いても `policyGate` は何も判定できない |
+| b-4 | `INTERNAL` と `RequiredKeys` を**同時に**書けない | mail-automation 13 本が「内部専用かつ `mail:admin` 必須」。1 ルール 1 形なのでどちらかを捨てる | **解決済み**。`internalWithKeys([...])` を追加(連言)。マーカー検査が先 → 401 → キー検査。`allows()` は `false`。`internalOnly` middleware の併用は不要(= 表外の認可を残さない) |
+| b-5 | リソーススコープ(`resourceType`/`resourceId`)が渡せない | `PermissionGranter` のシグネチャに無い。event-service 12 本・gantt 5 本の event スコープが移行で失われる | **方針確定(ポートは拡張しない)**。`resourceId` はリクエスト側の値なので、渡せるようにすると全ルールがリクエストの関数になり表がコードに戻る。**キー検査は表・リソーススコープはハンドラ**の 2 層に分離する。`gate.ts` 冒頭「NOT this layer's job」節が正典。**移行の必須条件**: 旧ガードが `resourceId` を渡していたルートは、表エントリと**同一コミットで**ハンドラ側アサーションを書く(黙って org 全体に広がるのは退行) |
+| b-6 | OR セマンティクスが無い(意図的) | member-service `requireAny(["identity:read","app:members:view"])` 3 本の意味が変わる | **未解決**。ロール実データを確認して片方に寄せる(member-service 着手前)。語彙追加はしない |
 
 **アプリ追加が要るなら新規キーも要る**(下記 (c) と連動):
 `app:github:view/edit`、`app:audit:view/edit`、`app:webhooks:view/edit` は現在**存在しない**。
@@ -704,6 +725,42 @@ policy-gate の `gate.ts` ヘッダが明示する通り、これはドメイン
 | webhook-ingest | body バイト列への暗号検証(HMAC / timing-safe token / OIDC JWT)。source ごとに検証器が異なる | `POST /hooks/:source` |
 | commander-service | **所有者概念が実装に存在しない**(単独オペレータ前提・ADR 0003)。feature/task/run/chat に作成者カラムが無く owner チェックは**実装不可** | 複数ユーザー開放前にスキーマ追加が必要 |
 
+### (e) policy-gate 対象外の明示除外リスト(b-3 の結論)
+
+**ここに挙げた 8 本だけが `@dub/policy-gate` の管理外。それ以外は全ルートが表に載る。**
+
+理由: 除外の条件は「**門が policy-gate の判定材料(権限キー / `x-dub-internal` マーカー)で
+出来ていない**」ことだけ。共有シークレットの完全一致・HMAC 署名付きチケット・DO RPC は
+どれも `policyGate` が検査できる材料を持たないので、表に書いても 1 行も判定しない。
+書けないものを書いて「表にあるから守られている」と誤読させるのが最悪なので、**書かずに
+除外を明示する**(= 第 5 の形を作らない理由。語彙を増やしても判定能力は増えない)。
+
+| # | 対象 | 実際の門 | 除外して良い理由 |
+|---|---|---|---|
+| e-1 | app-health-monitor `POST /internal/monitor/kick` | `x-monitor-token` 完全一致(未設定は 403 fail-closed) | 公開オリジン(`workers_dev=true`・host ガード無し)なので `x-dub-internal` は**誰でも付けられ**信頼シグナルにならない。共有シークレットを使うのは正しい判断で、policy-gate に置き換えると**弱くなる** |
+| e-2 | app-health-monitor `POST /internal/monitor/run` | 同上 | 同上(全 binding の実プローブ + 通知送信) |
+| e-3 | app-health-monitor `GET /internal/monitor/status` | 同上 | 同上(インフラ構成の露出) |
+| e-4 | mail-gateway standalone `POST /compose/send` | 同一オリジン判定 + `COMPOSE_TOKEN` Bearer | gateway を経由しない別 Worker(`wrangler.standalone.toml`)。`x-dub-user-id` が来ないため権限キーを引く相手が存在しない |
+| e-5 | gantt-service `GET /ws/:eventId` | Origin 検証 + HMAC ws-ticket | Hono の外(DO 直結)。`protectableRouteKeys` に現れず `policyGate` を通らない。**発券側** (`GET /gantt/ws-ticket`) が表に載るので、認可は発券時に 1 回行われている |
+| e-6 | chat-service `GET /ws/:channelId` | Origin 検証 + HMAC ws-ticket | 同上。発券は `GET /chat/channels/:id/ws-ticket` |
+| e-7 | notification `GET /ws/:userId` | Origin 検証 + HMAC ws-ticket | 同上。発券は `GET /notifications/inbox/ws-ticket` |
+| e-8 | chat-service `ChatRoom.publish()` | Service Binding のみ(HTTP でない) | DO RPC。HTTP マスターからの fanout 専用で、そもそも HTTP エントリが存在しない |
+
+**除外に伴う代償と、それを埋める条件**(除外は「安全」ではなく「別の仕組みで守る」):
+
+1. **fail-closed が効かない**。除外ルートには `assertRouteCoverage` の網が掛からないので、
+   同じサービスに**新しいルートを足した時に自動では気付けない**。よって
+   e-1〜e-4 を持つ 2 サービス(app-health-monitor / mail-gateway standalone)に
+   **ルートを追加する時は、この表を更新するか policy-gate を導入するかを必ず判断する**。
+2. **app-health-monitor は 5 本中 3 本が除外** = 表を作っても網羅にならないため、
+   **サービス単位で対象外**とする(`policyGate` を mount しない)。代わりに a-7
+   (`workers_dev=true` + host ガード無しで `GET /` と `/internal/health` が公開)は
+   **policy-gate とは別に**閉じる必要がある(host ガード追加 or `workers_dev=false`)。
+   これは本プロジェクトのスコープ外だが、除外の前提条件として記録しておく。
+3. **WS 4 本(e-5〜e-8)は発券ルートの認可に完全に依存する**。したがって
+   発券ルート(`*/ws-ticket` 3 本)の表エントリは、対応する閲覧権限と**必ず一致**させる
+   (ここを緩めると WS 側の門が実質無くなる)。移行時のレビュー必須項目。
+
 ---
 
 ## 4. 実装順の推奨と概算ルート数
@@ -716,12 +773,24 @@ policy-gate の `gate.ts` ヘッダが明示する通り、これはドメイン
 - ~~drive-share-service を参照実装として移行~~ — 完了。表・マウント・カバレッジテスト・
   `package.json` 依存の 4 点とも揃っている。
 
+**語彙拡張として完了**:
+
+- ~~**`AUTHENTICATED` 形の追加**(b-2)~~ — **完了**。`rule.ts` に第 4 の形として追加。
+  gateway `/me` 系 7 本・`GET /members/me/mention-teams`・notification `POST /feedback` が
+  `PUBLIC` に逃げずに書けるようになった。
+- ~~語彙で扱わないものの**明示的な除外リスト化**(b-3)~~ — **完了**。上記 (e) に 8 本
+  (共有シークレット 4 本 + DO/WS 4 本)と除外理由・代償を記載。第 5 の形は作らない。
+- **`internalWithKeys([...])` の追加**(b-4)— **完了**。mail-automation 13 本の
+  「内部専用かつキー必須」を 1 ルールで表現できる。
+- **リソーススコープの方針確定**(b-5)— **完了**。`PermissionGranter` は拡張せず、
+  スコープ判定はハンドラに残す(2 層構成)。`gate.ts` のヘッダコメントに正典化。
+
 **残り**:
 
-1. **`AUTHENTICATED` 形の追加**(b-2)。gateway `/me` 系と `POST /feedback` が表現できない。
-2. **commander-service の穴(a-1)を塞ぐ**。未デプロイなので緊急ではないが、**deploy より先に**
+1. **commander-service の穴(a-1)を塞ぐ**。未デプロイなので緊急ではないが、**deploy より先に**
    GET にもトークンガードを広げ、`cors` を絞り、両 toml に `workers_dev = false` を明記する。
-3. 語彙で扱わないものを**明示的に除外リスト化**(b-3: 共有シークレット 4 本、DO/WS 4 本)。
+2. **b-6(OR セマンティクス)のロール実データ確認**。member-service 着手の前提
+   (語彙追加はしないので、どのキーに寄せるかの実データ判断だけが残る)。
 
 ### 4.2 フェーズ 1 以降 — 外部到達 × リスクの高い順
 
@@ -737,17 +806,17 @@ policy-gate の `gate.ts` ヘッダが明示する通り、これはドメイン
 | 6 | file-meta | 11 | `DELETE` の判定欠落(d)を同時に修正 |
 | 7 | usage-meter / freeq-drain / audit-log | 5 / 3 / 5 | 小さく単純。`INTERNAL` の素振りに最適 |
 | 8 | webhook-ingest | 5 | a-6 のデッドルートを先に直す |
-| 9 | app-health-monitor | 5 | 共有シークレット方式のまま対象外にするか決める(a-7) |
+| ~~9~~ | ~~app-health-monitor~~ | 5 | **対象外に決定**((e) e-1〜e-3)。共有シークレット方式のまま policy-gate を mount しない。a-7(公開オリジン)は別途閉じる |
 | 10 | task-service | 12 | service principal 素通し(2.7 注)の呼び出し元洗い出しが前提 |
-| 11 | gantt-service | 8 + WS 1 | a-4 の迂回を修正。event スコープ喪失(b-5)の判断が要る |
-| 12 | event-service | 18 | スコープ喪失(b-5)の影響が最大。方針確定後に着手 |
+| 11 | gantt-service | 8 + WS 1 | a-4 の迂回を修正。event スコープは**ハンドラ側に明示実装**(b-5 の方針)。WS 1 本は対象外(e-5) |
+| 12 | event-service | 18 | b-5 の影響が最大。表エントリと**同一コミットで**ハンドラ側の event スコープ判定を書く(12 ルート) |
 | 13 | github-sync | 14 | アプリ追加(c)の判断が要る。素のキーなら単純 |
 | 14 | deploy-service | 8 | `fresh` は保たれる(2.16 訂正)。subrequest 増の評価のみ |
-| 15 | member-service | 20 | OR セマンティクス(b-6)でロール実データの確認が要る |
-| 16 | mail-automation | 14 | `INTERNAL` + キーの併記問題(b-4)の解法確定後 |
+| 15 | member-service | 20 | OR セマンティクス(b-6・**唯一の未解決**)でロール実データの確認が要る。`/me/mention-teams` は `AUTHENTICATED` |
+| 16 | mail-automation | 14 | 13 本を `internalWithKeys([...])`(b-4 解決済み)。`internalOnly` middleware は撤去 |
 | 17 | chat-service | 23 + DO 2 | ハンドラ残しが最多。表は単純だが回帰risk が高い |
 | 18 | notification | 29(二重登録込) | 表が 2 系統要る。最後に |
-| 19 | mail-gateway | 35 + standalone 3 | 最大。standalone Worker(b-3)の扱いを決めてから |
+| 19 | mail-gateway | 35 + standalone 3 | 最大。standalone の `POST /compose/send` は対象外(e-4)、残り 2 本は `PUBLIC` |
 | 20 | identity-roster | 24 | **最後**。granter をインプロセス実装に差し替える特別対応(2.3)が要る |
 
 **合計: 約 310 ルート**(22 サービス。WS/DO エントリ 4 本と非 HTTP エントリは除く)。
@@ -793,4 +862,6 @@ policy-gate の `gate.ts` ヘッダが明示する通り、これはドメイン
 | 外部到達かつ無認可のルート | 上記 a-2〜a-9(a-1 の commander 11 本は未デプロイのため現状は到達不可) |
 | 新規に要る PermissionKey | **0**(アプリ追加を選べば `app:github:*` 等) |
 | APP_MANIFEST 不在で `appLevel` 不可 | github-sync / audit-log / webhook-ingest / app-health-monitor |
-| 語彙の不足 | **5 件**(b-2〜b-6。b-1 は事実誤認で欠落なし) |
+| 語彙の形 | **5 形**(`PUBLIC` / `AUTHENTICATED` / `INTERNAL` / `[key,...]` / `internalWithKeys([...])`。語彙は閉じている) |
+| 語彙の未解決 | **1 件**(b-6 のみ。b-2/b-3/b-4/b-5 はフェーズ 0 で解決・b-1 は事実誤認) |
+| policy-gate 対象外(明示除外) | **8 本**(共有シークレット 4 + DO/WS 4。(e) 参照) |

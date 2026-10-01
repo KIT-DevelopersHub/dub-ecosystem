@@ -36,10 +36,15 @@ export function assertRouteCoverage(app: RoutedApp, table: PolicyTable): void {
   if (result.unlisted.length > 0) {
     lines.push(
       `  ${result.unlisted.length} route(s) have NO rule (the gate denies them) — add to the table:`,
-      // The three rule forms, in the order to consider them: keys first (the common case),
-      // INTERNAL for a service-to-service-only endpoint, PUBLIC only when the open internet
-      // really is meant to reach it. See rule.ts for why a probe is INTERNAL, not PUBLIC.
-      ...result.unlisted.map((k) => `    "${k}": [/* required PermissionKey(s) */] | INTERNAL | PUBLIC`),
+      // The rule forms, in the order to consider them: keys first (the common case), then the
+      // internal forms for a service-to-service-only endpoint, AUTHENTICATED only for a
+      // self-scoped `/me`-shaped route, PUBLIC only when the open internet really is meant to
+      // reach it. See rule.ts for why a probe is INTERNAL and not PUBLIC, and for the
+      // "when this is wrong" note on each of the looser forms.
+      ...result.unlisted.map(
+        (k) =>
+          `    "${k}": [/* required PermissionKey(s) */] | internalWithKeys([...]) | INTERNAL | AUTHENTICATED | PUBLIC`,
+      ),
     );
   }
   if (result.orphaned.length > 0) {

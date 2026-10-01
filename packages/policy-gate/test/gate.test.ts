@@ -9,7 +9,10 @@ import {
   allows,
   missingKeys,
   PUBLIC,
+  AUTHENTICATED,
   INTERNAL,
+  internalWithKeys,
+  requiredKeysOf,
   checkRouteCoverage,
   assertRouteCoverage,
   protectableRouteKeys,
@@ -27,9 +30,21 @@ function holding(...keys: identity.PermissionKey[]): PermissionGranter {
   return async (_u, _o, requested) => requested.filter((k) => held.has(k));
 }
 
+/** Wraps a granter to record whether the gate consulted identity at all. */
+function counting(inner: PermissionGranter): PermissionGranter & { calls: number } {
+  const fn = async (...args: Parameters<PermissionGranter>) => {
+    fn.calls += 1;
+    return inner(...args);
+  };
+  fn.calls = 0;
+  return fn;
+}
+
 const TABLE = definePolicyTable({
   "GET /health": PUBLIC,
+  "GET /me": AUTHENTICATED,
   "GET /internal/drain": INTERNAL,
+  "POST /internal/settings": internalWithKeys(["task:read", "task:write"]),
   "GET /items": ["task:read"],
   "POST /items": ["task:read", "task:write"],
   "DELETE /items/:id": ["task:delete"],
@@ -41,7 +56,9 @@ function build(granted: PermissionGranter, extra?: (app: Hono<{ Variables: Polic
   app.onError(dubErrorHandler({ service: "test" }));
   app.use("*", policyGate({ service: "test", table: TABLE, granted }));
   app.get("/health", (c) => c.json({ ok: true }));
+  app.get("/me", (c) => c.json({ userId: c.get("userId") }));
   app.get("/internal/drain", (c) => c.json({ drained: true, userId: c.get("userId") ?? null }));
+  app.post("/internal/settings", (c) => c.json({ saved: true, userId: c.get("userId") }));
   app.get("/items", (c) => c.json({ userId: c.get("userId") }));
   app.post("/items", (c) => c.json({ ok: true }, 201));
   app.delete("/items/:id", (c) => c.json({ id: c.req.param("id") }));
@@ -115,6 +132,49 @@ describe("policyGate", () => {
   });
 });
 
+// ── AUTHENTICATED: authn without authz, deliberately NOT a synonym for PUBLIC ──
+// The property being pinned: a session is REQUIRED (so this is not PUBLIC) and no key is
+// (so this is not RequiredKeys), and the gate reaches identity zero times — there is nothing
+// to ask. For the routes it is meant for (api-gateway's `/me` family, which take the subject
+// from the session and cannot be told to act on someone else) that is the whole decision.
+describe("AUTHENTICATED routes", () => {
+  it("401s without x-dub-user-id: a session is required, unlike PUBLIC", async () => {
+    const res = await build(holding()).request("/me");
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).error.code).toBe(CommonErrorCodes.UNAUTHENTICATED);
+  });
+
+  it("allows any signed-in caller holding no permission at all, and exposes userId", async () => {
+    const res = await build(holding()).request("/me", { headers: AUTHED });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ userId: "usr_1" });
+  });
+
+  it("never consults identity (no key to ask about, so no subrequest)", async () => {
+    const granter = counting(holding());
+    const res = await build(granter).request("/me", { headers: AUTHED });
+    expect(res.status).toBe(200);
+    expect(granter.calls).toBe(0);
+    // Contrast: a keyed route on the same app does call it exactly once.
+    await build(granter).request("/items", { headers: AUTHED });
+    expect(granter.calls).toBe(1);
+  });
+
+  it("stays allowed even when identity is unreachable (nothing to fail closed on)", async () => {
+    const broken: PermissionGranter = async () => {
+      throw new Error("identity unreachable");
+    };
+    expect((await build(broken).request("/me", { headers: AUTHED })).status).toBe(200);
+    // ...while a keyed route on the same broken identity is denied.
+    expect((await build(broken).request("/items", { headers: AUTHED })).status).toBeGreaterThanOrEqual(500);
+  });
+
+  it("is not reachable by an s2s call that carries the marker but no user", async () => {
+    const res = await build(holding()).request("/me", { headers: S2S });
+    expect(res.status).toBe(401);
+  });
+});
+
 // ── INTERNAL: the second rule form, deliberately NOT a synonym for PUBLIC ──
 // The property being pinned: an internal-only route is closed to every external caller no
 // matter how privileged, and open to a service-to-service call carrying no user at all.
@@ -168,6 +228,74 @@ describe("INTERNAL routes", () => {
   it("still 401s a keyed route reached s2s without a user id", async () => {
     const res = await build(holding("task:read")).request("/items", { headers: S2S });
     expect(res.status).toBe(401);
+  });
+});
+
+// ── internalWithKeys: the conjunction, for a route that is BOTH internal-only and key-gated ──
+// mail-automation's 13 routes are the case: no gateway segment reaches them AND they demand
+// `mail:read`/`mail:admin` of the user the calling service propagated. Writing either half
+// alone would misstate the route in the one artifact reviewers trust, so both are asserted
+// here — and asserted as a conjunction, i.e. each half denies on its own.
+describe("internalWithKeys routes", () => {
+  const S2S_AUTHED = { ...S2S, ...AUTHED };
+  const bothKeys = () => holding("task:read", "task:write");
+
+  it("allows an s2s call whose propagated user holds every key", async () => {
+    const res = await build(bothKeys()).request("/internal/settings", { method: "POST", headers: S2S_AUTHED });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ saved: true, userId: "usr_1" });
+  });
+
+  it("403s internal_only without the marker, however privileged the caller", async () => {
+    const res = await build(bothKeys()).request("/internal/settings", { method: "POST", headers: AUTHED });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as any;
+    expect(body.error.details.reason).toBe("internal_only");
+    expect(body.error.details.route).toBe("POST /internal/settings");
+  });
+
+  // The marker check runs FIRST, so an external caller is told "internal-only" and never
+  // learns which permission would have been required: no permission oracle on a closed door.
+  it("does not leak the required keys to an external caller", async () => {
+    const res = await build(holding()).request("/internal/settings", { method: "POST", headers: AUTHED });
+    const body = (await res.json()) as any;
+    expect(body.error.details.reason).toBe("internal_only");
+    expect(body.error.details.required).toBeUndefined();
+    expect(body.error.details.missing).toBeUndefined();
+  });
+
+  // Unlike a bare INTERNAL route, this form names keys, so it needs an actor to attribute
+  // them to. A marker-only probe is a 401, NOT an anonymous allow.
+  it("401s a marker-carrying call that propagated no user id", async () => {
+    const res = await build(bothKeys()).request("/internal/settings", { method: "POST", headers: S2S });
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).error.code).toBe(CommonErrorCodes.UNAUTHENTICATED);
+  });
+
+  it("403s and names the missing key when the propagated user is short one", async () => {
+    const res = await build(holding("task:read")).request("/internal/settings", {
+      method: "POST",
+      headers: S2S_AUTHED,
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as any;
+    expect(body.error.details.reason).toBe("missing_permission");
+    expect(body.error.details.required).toEqual(["task:read", "task:write"]);
+    expect(body.error.details.missing).toEqual(["task:write"]);
+  });
+
+  it("the marker buys no key: holding nothing is 403 even on a genuine s2s call", async () => {
+    const res = await build(holding()).request("/internal/settings", { method: "POST", headers: S2S_AUTHED });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as any).error.details.missing).toEqual(["task:read", "task:write"]);
+  });
+
+  it("fails closed when identity is unreachable", async () => {
+    const broken: PermissionGranter = async () => {
+      throw new Error("identity unreachable");
+    };
+    const res = await build(broken).request("/internal/settings", { method: "POST", headers: S2S_AUTHED });
+    expect(res.status).toBeGreaterThanOrEqual(500);
   });
 });
 
@@ -230,8 +358,41 @@ describe("rules", () => {
 
   // The documented trap: missingKeys answers "which demanded keys are absent", not "allowed".
   // INTERNAL demands no keys, hence [] — which is exactly why reachability goes through allows.
-  it("missingKeys returns [] for both key-free rule forms", () => {
+  it("missingKeys returns [] for all three key-free rule forms", () => {
     expect(missingKeys(PUBLIC, [])).toEqual([]);
+    expect(missingKeys(AUTHENTICATED, [])).toEqual([]);
     expect(missingKeys(INTERNAL, [])).toEqual([]);
+  });
+
+  // AUTHENTICATED sits at the opposite end of the matrix from INTERNAL: reachable by every
+  // role including one holding nothing. That is the honest answer, and the reason this form
+  // must never be used as a way to quiet a 403 — it removes the route from ロール管理's reach.
+  it("AUTHENTICATED demands no key and is reachable by every role", () => {
+    expect(allows(AUTHENTICATED, [])).toBe(true);
+    expect(allows(AUTHENTICATED, ["task:read"])).toBe(true);
+  });
+
+  it("internalWithKeys reports its keys to missingKeys but is reachable by no role", () => {
+    const rule = internalWithKeys(["task:read", "task:write"]);
+    // The key axis is answered normally (this is what the gate's 403 details come from)...
+    expect(missingKeys(rule, ["task:read"])).toEqual(["task:write"]);
+    expect(missingKeys(rule, ["task:read", "task:write"])).toEqual([]);
+    // ...but reachability stays false even for a caller holding everything, exactly like
+    // INTERNAL. Were this true, the role x endpoint matrices would start claiming an
+    // unreachable internal endpoint as part of a role's surface.
+    expect(allows(rule, ["task:read", "task:write"])).toBe(false);
+    expect(allows(rule, [])).toBe(false);
+  });
+
+  it("internalWithKeys is a declaration, not a mutation of the keys it is given", () => {
+    const keys = ["task:read"] as const;
+    expect(internalWithKeys(keys).keys).toEqual(["task:read"]);
+    // Nothing in the vocabulary lets an empty key list through: an internal route that needs
+    // no key is plain INTERNAL. (`internalWithKeys([])` is a compile error, not a runtime one.)
+    expect(requiredKeysOf(internalWithKeys(keys))).toEqual(["task:read"]);
+    expect(requiredKeysOf(INTERNAL)).toBeUndefined();
+    expect(requiredKeysOf(AUTHENTICATED)).toBeUndefined();
+    expect(requiredKeysOf(PUBLIC)).toBeUndefined();
+    expect(requiredKeysOf(["task:read"])).toEqual(["task:read"]);
   });
 });

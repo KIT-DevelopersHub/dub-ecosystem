@@ -73,8 +73,9 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
 /**
  * The route keys an EXTERNAL caller holding `keys` may call, computed by the gate's own rule
  * comparison. `allows` (not `missingKeys`) is the right primitive here: it answers the
- * reachability question for all three rule forms, so an INTERNAL route correctly lands in no
- * role's set — permission keys never open one to a request arriving through api-gateway.
+ * reachability question for every rule form, so an internal-only route (`INTERNAL` or
+ * `internalWithKeys`) correctly lands in no role's set — permission keys never open one to a
+ * request arriving through api-gateway.
  */
 function allowedRoutes(keys: identity.PermissionKey[]): string[] {
   return Object.entries(POLICY_TABLE)
