@@ -31,7 +31,16 @@ export {
   type InternalWithKeys,
 } from "./rule";
 export { definePolicyTable, type PolicyTable, type RouteKey, type HttpMethod } from "./table";
-export { policyGate, type PolicyGateOptions, type PolicyGateVars, type PermissionGranter } from "./gate";
+export {
+  policyGate,
+  type PolicyGateOptions,
+  type PolicyGateVars,
+  type PermissionGranter,
+  // Authentication port. Services behind the gateway never pass it (the default trusted
+  // header is right for them); api-gateway must, because at the edge that header is
+  // attacker-controlled rather than trusted. See gate.ts's ActorResolver.
+  type ActorResolver,
+} from "./gate";
 export { createAuthzGranter, type AuthzGranterOptions } from "./authz";
 export { checkRouteCoverage, assertRouteCoverage, type CoverageResult } from "./coverage";
 export { routeKey, protectableRouteKeys, matchedRouteKey, type RoutedApp, type RegisteredRoute } from "./routes";

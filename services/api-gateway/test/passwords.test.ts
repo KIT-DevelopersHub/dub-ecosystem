@@ -5,7 +5,7 @@
 // non-admin through.
 import { describe, it, expect } from "vitest";
 import { HDR_INTERNAL } from "@dub/observability";
-import type { auth } from "@dub/types";
+import type { auth, identity } from "@dub/types";
 import { createApp } from "../src/app";
 import { fakeBinding, validSession, json, makeEnv, execCtx, type CapturedBinding } from "./helpers";
 
@@ -32,8 +32,20 @@ function authSvc(opts: {
 
 /** SVC_IDENTITY stub answering /internal/users/:id/permissions. */
 function identityPerms(perms: string[]): CapturedBinding {
-  return fakeBinding((req) => {
+  return fakeBinding(async (req) => {
     const path = new URL(req.url).pathname;
+    // The policy gate's permission source (createAuthzGranter): one batched decision call,
+    // replacing the inline requireAdmin() that used to read /internal/users/:id/permissions.
+    if (path === "/authz/check") {
+      const body = (await req.json()) as identity.AuthzCheckRequest;
+      return json(200, {
+        decisions: body.checks.map((q) => ({
+          allowed: perms.includes(q.permission),
+          evaluatedAt: "2026-01-01T00:00:00Z",
+          ttlSeconds: 60,
+        })),
+      } satisfies identity.AuthzCheckResponse);
+    }
     if (path.startsWith("/internal/users/") && path.endsWith("/permissions")) {
       return json(200, { permissions: perms });
     }

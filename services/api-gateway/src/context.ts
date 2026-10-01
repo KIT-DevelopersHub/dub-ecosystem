@@ -11,7 +11,14 @@ export const GATEWAY_WEBSOCKET_UNSUPPORTED = "GATEWAY_WEBSOCKET_UNSUPPORTED"; //
 
 export interface GatewayVariables {
   requestId: string;
+  /** Acting user, published by the policy gate on every route it authenticates. */
   userId?: string;
+  /**
+   * The verified session, set by the gate's actor resolver (policy.ts) and read by
+   * gateway-owned handlers. Absent on PUBLIC routes and on the proxy path until
+   * `authenticateOnce` runs, so one request never verifies twice.
+   */
+  authed?: import("./auth").Authenticated;
 }
 
 /** Mint (or inherit) x-dub-request-id and expose it on the response. Runs first. */

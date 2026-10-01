@@ -41,7 +41,7 @@
 //   org-wide IS a regression (see `docs/policy-coverage-inventory.md` b-5 / a-4). Migration
 //   rule of thumb: every route whose old guard passed a `resourceId` needs a handler-side
 //   assertion in the same commit as its table entry.
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { errors } from "@dub/errors";
 import { HDR_USER_ID, HDR_INTERNAL } from "@dub/observability";
 import { common, type identity } from "@dub/types";
@@ -71,6 +71,30 @@ export type PermissionGranter = (
   keys: readonly PermissionKey[],
 ) => Promise<readonly PermissionKey[]>;
 
+/**
+ * Port to AUTHENTICATION: who is making this request? Returns the acting user id, or
+ * undefined when there is no session (the gate turns that into 401). It may also throw a
+ * DubError of its own — a service whose authn is a real verify call wants its 401/502 to
+ * reach the client unchanged.
+ *
+ * The DEFAULT (`x-dub-user-id`) is correct for every service BEHIND api-gateway and must
+ * stay the default: the gateway strips every inbound `x-dub-*` and re-adds the user id only
+ * after verifying the session (`services/api-gateway/src/proxy.ts`), so downstream the
+ * header is a trusted fact and reading it costs no subrequest.
+ *
+ * WHY the port exists at all: api-gateway is the service that MINTS that header, so for it
+ * the default is not merely useless but dangerous — an external caller could send
+ * `x-dub-user-id: <any admin>` and the gate would believe it, which is a total authentication
+ * bypass at the trust boundary. The edge must therefore establish the actor from the session
+ * token instead (see `services/api-gateway/src/policy.ts`). Without this seam the policy
+ * layer simply cannot be mounted on the one service that faces the internet.
+ *
+ * Resolution is LAZY: the gate calls this only for rules that need an actor (AUTHENTICATED,
+ * RequiredKeys, internalWithKeys), never for PUBLIC — so a public endpoint still costs zero
+ * verify calls even when the resolver is an expensive one.
+ */
+export type ActorResolver = (c: Context) => Promise<string | undefined> | string | undefined;
+
 /** Hono Variables the gate populates for handlers downstream. */
 export type PolicyGateVars = {
   /**
@@ -95,10 +119,20 @@ export interface PolicyGateOptions {
   granted: PermissionGranter;
   /** Org the request acts in. Defaults to the single P0 org. */
   orgId?: string;
+  /**
+   * How to identify the acting user. Defaults to the trusted `x-dub-user-id` header, which
+   * is right for every service behind api-gateway. Only the edge (api-gateway itself)
+   * overrides it — see `ActorResolver`.
+   */
+  actor?: ActorResolver;
 }
 
 export function policyGate(opts: PolicyGateOptions): MiddlewareHandler<{ Variables: PolicyGateVars }> {
   const orgId = opts.orgId ?? common.DUB_DEFAULT_ORG_ID;
+  const resolveActor: ActorResolver = opts.actor ?? ((c) => c.req.header(HDR_USER_ID));
+  // Keep the default service's 401 message verbatim ("the trusted header was not there");
+  // a custom resolver gets a message that is not a lie about where the actor comes from.
+  const noActor = opts.actor ? "no authenticated actor" : `${HDR_USER_ID} absent`;
 
   return async (c, next) => {
     const key = matchedRouteKey(c);
@@ -121,8 +155,8 @@ export function policyGate(opts: PolicyGateOptions): MiddlewareHandler<{ Variabl
     // subrequest (there are no keys to ask about). Correct only for routes whose subject is
     // the session itself — see rule.ts for the test this form must pass.
     if (rule === AUTHENTICATED) {
-      const actor = c.req.header(HDR_USER_ID);
-      if (!actor) throw errors.unauthenticated(`${HDR_USER_ID} absent`);
+      const actor = await resolveActor(c);
+      if (!actor) throw errors.unauthenticated(noActor);
       c.set("userId", actor);
       return next();
     }
@@ -140,6 +174,10 @@ export function policyGate(opts: PolicyGateOptions): MiddlewareHandler<{ Variabl
         });
       }
       // Propagate the acting user when the caller supplied one; s2s calls often have none.
+      // Deliberately the HEADER and not `actor` even when a resolver is configured: on an
+      // internal route the actor is a fact the trusted calling service propagated (the
+      // marker already proved it is one of ours), not something this service authenticates.
+      // A verify-based resolver would also 401 a legitimate probe that carries no session.
       const actor = c.req.header(HDR_USER_ID);
       if (actor) c.set("userId", actor);
       return next();
@@ -164,8 +202,8 @@ export function policyGate(opts: PolicyGateOptions): MiddlewareHandler<{ Variabl
 
     // Unlike a bare INTERNAL route, this one names keys, so it needs an actor to attribute
     // them to: an s2s call that propagated no user id is a 401 here, not an anonymous allow.
-    const userId = c.req.header(HDR_USER_ID);
-    if (!userId) throw errors.unauthenticated(`${HDR_USER_ID} absent`);
+    const userId = await resolveActor(c);
+    if (!userId) throw errors.unauthenticated(noActor);
     c.set("userId", userId);
 
     const held = await opts.granted(userId, orgId, required);
