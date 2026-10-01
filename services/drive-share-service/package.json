@@ -14,7 +14,8 @@
     "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/http": "workspace:*",
-    "@dub/observability": "workspace:*"
+    "@dub/observability": "workspace:*",
+    "@dub/policy-gate": "workspace:*"
   },
   "peerDependencies": {
     "@cloudflare/workers-types": "^4",
