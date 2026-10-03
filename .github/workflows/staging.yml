@@ -146,7 +146,11 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          MARKERS="$(printf '%s\n' "${PR_BODY:-}" | grep -iE '^[[:space:]]*Liveness-Marker[[:space:]]*:' | head -n1 | sed -E 's/^[^:]*:[[:space:]]*//' || true)"
+          # `tr -d '\r'` + trailing-space strip: a PR body edited in the GitHub web UI is CRLF,
+          # and a trailing \r would be grepped LITERALLY against the served bundle and always
+          # miss. Must stay identical to marker_trailer() in scripts/lib/promote-lib.sh — the
+          # local promotion command and this gate have to agree on the marker strings.
+          MARKERS="$(printf '%s\n' "${PR_BODY:-}" | tr -d '\r' | grep -iE '^[[:space:]]*Liveness-Marker[[:space:]]*:' | head -n1 | sed -E 's/^[^:]*:[[:space:]]*//; s/[[:space:]]+$//' || true)"
           if [ -z "${MARKERS// /}" ]; then
             echo "status=skipped" >> "$GITHUB_OUTPUT"
             echo "detail=no \`Liveness-Marker:\` trailer in the PR body — served bundle not asserted." >> "$GITHUB_OUTPUT"

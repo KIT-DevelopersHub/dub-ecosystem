@@ -111,11 +111,12 @@ node_op() {  # <op> <json-payload>
       console.log(`  git switch -C ${L.integrationBranch} origin/main`);
       for (const e of L.queue) console.log(`  git merge --no-ff origin/${e.branch}   # ${e.slug}`);
       console.log(`  git push -u origin ${L.integrationBranch}`);
-      console.log(`  # then reflect to staging (label gate) and verify-live once:`);
+      console.log(`  # then open the integration PR and reflect it to staging in ONE command`);
+      console.log(`  # (promote-staging does: Liveness-Marker trailer -> stagingへ label -> CI wait -> verify:live -> manifest):`);
       const allMarkers = [...new Set(L.queue.flatMap(e=>e.markers||[]))];
       const q = String.fromCharCode(39);  // single quote, kept out of the bash-single-quoted source
-      console.log(`  #   apply the \`stagingへ\` label to the integration PR (staging.yml deploys)`);
-      console.log(`  bash scripts/verify-live.sh staging ${allMarkers.map(m=>q+m+q).join(" ")}`);
+      console.log(`  gh pr create --base main --head ${L.integrationBranch} --fill`);
+      console.log(`  pnpm deploy:staging --branch ${L.integrationBranch} --markers ${q}${allMarkers.join(", ")}${q}`);
       console.log(`\nFeatures in this flush: ${L.queue.map(e=>e.slug).join(", ")}`);
       if (dry) { console.log("\n[dry-run] ledger unchanged."); process.exit(0); }
       L.flushHistory.push({ flushedAt: now.toISOString(), reason,

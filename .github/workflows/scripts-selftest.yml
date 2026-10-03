@@ -35,7 +35,9 @@ jobs:
           node-version: 24
       - name: bash syntax check
         run: |
-          for f in scripts/*.sh; do bash -n "$f" && echo "  ok syntax $f"; done
+          # find (not a glob): an empty scripts/lib/ would otherwise pass the literal
+          # pattern to bash -n and fail the step for no reason.
+          find scripts -name '*.sh' -print0 | xargs -0 -n1 -I{} sh -c 'bash -n "{}" && echo "  ok syntax {}"'
       - name: verify-live self-test
         run: bash scripts/verify-live.sh --self-test
       - name: deploy-demo-feature self-test
@@ -44,5 +46,13 @@ jobs:
         run: bash scripts/teardown-demo.sh --self-test
       - name: staging-queue self-test
         run: bash scripts/staging-queue.sh --self-test
+      - name: refresh-demos self-test
+        run: bash scripts/refresh-demos.sh --self-test
+      # promote-*: gate logic for staging/prod promotion. promote-prod's self-test also
+      # asserts the script has NO label-adding path (self-approval must stay impossible).
+      - name: promote-staging self-test
+        run: bash scripts/promote-staging.sh --self-test
+      - name: promote-prod self-test
+        run: bash scripts/promote-prod.sh --self-test
       - name: staging-queue seed ledger is valid JSON
         run: node -e 'JSON.parse(require("fs").readFileSync("deploy-state/staging-queue.json","utf8")); console.log("staging-queue.json OK")'

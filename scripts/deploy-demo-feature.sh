@@ -216,7 +216,8 @@ echo "::endgroup::"
 
 # ---- liveness: assert the served per-feature Worker really contains the feature -----
 echo "::group::post-deploy liveness (served $URL)"
-if bash scripts/verify-live.sh --url "$URL/" "${MARKERS[@]}"; then live=true; else live=false; fi
+# --retries: a per-feature Worker created seconds ago needs a moment to reach every edge
+if bash scripts/verify-live.sh --url "$URL/" --retries 6 --retry-delay 10 "${MARKERS[@]}"; then live=true; else live=false; fi
 # also fetch the referenced asset bundles for a thorough check (feature code lives in JS)
 echo "::endgroup::"
 
