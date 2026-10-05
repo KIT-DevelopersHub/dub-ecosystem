@@ -56,7 +56,7 @@ bucket_name = "dub-file-attachments"
 # --- Service bindings (all targets are live free-tier workers) ---
 [[services]]
 binding = "SVC_IDENTITY"
-service = "dub-identity-roster"   # requireAuth / requirePermission (file:* authz)
+service = "dub-identity-roster"   # POST /authz/check — policyGate's PermissionGranter
 
 [[services]]
 binding = "SVC_DRIVE_PROXY"
