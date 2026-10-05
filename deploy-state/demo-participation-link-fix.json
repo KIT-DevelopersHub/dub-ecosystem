@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "participation-link-fix",
+  "worker": "dub-demo-participation-link-fix",
+  "url": "https://dub-demo-participation-link-fix.developershub-site.workers.dev",
+  "deployedSha": "22ef762f",
+  "branch": "fix/participation-member-link-error",
+  "actor": "ko-tarou",
+  "markers": ["participation-already-linked"],
+  "live": true,
+  "verifiedAt": "2026-10-05T15:21:06Z",
+  "updatedAt": "2026-10-05T15:21:06Z",
+  "note": "participation member-link 409 fix (PR #567)"
+}
