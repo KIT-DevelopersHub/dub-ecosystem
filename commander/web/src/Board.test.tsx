@@ -5,9 +5,9 @@ import { Board } from "./Board.tsx";
 import { makeBoardItem, makeFakeApi, makeFakeClient } from "./test/fakes.ts";
 
 describe("<Board>", () => {
-  it("renders all five lanes and an empty state when there are no tasks", async () => {
+  it("renders all six lanes and an empty state when there are no tasks", async () => {
     render(<Board client={makeFakeClient()} api={makeFakeApi([])} pollMs={0} />);
-    for (const lane of ["queued", "running", "review", "needs_fix", "done"]) {
+    for (const lane of ["queued", "running", "review", "needs_fix", "shipped", "done"]) {
       expect(screen.getByTestId(`lane-${lane}`)).toBeInTheDocument();
     }
     expect(await screen.findByTestId("board-empty")).toBeInTheDocument();
@@ -18,13 +18,16 @@ describe("<Board>", () => {
       makeBoardItem({ taskId: "run-t", title: "走行カード", runStatus: "running" }),
       makeBoardItem({ taskId: "rev-t", featureId: "feat-rev", title: "確認カード", featurePhase: "demo_review", runStatus: "succeeded" }),
       makeBoardItem({ taskId: "fix-t", featureId: "feat-fix", title: "修正カード", featurePhase: "demo_rejected", runStatus: "failed" }),
-      makeBoardItem({ taskId: "done-t", featureId: "feat-done", title: "完了カード", featurePhase: "prod_shipped", runStatus: "succeeded" }),
+      makeBoardItem({ taskId: "shp-t", featureId: "feat-shp", title: "本番反映済カード", featurePhase: "prod_shipped", runStatus: "succeeded" }),
+      makeBoardItem({ taskId: "done-t", featureId: "feat-done", title: "アーカイブ済カード", featurePhase: "prod_shipped", runStatus: "succeeded", taskStatus: "done" }),
     ]);
     render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
     expect(await within(screen.getByTestId("lane-running")).findByText("走行カード")).toBeInTheDocument();
     expect(within(screen.getByTestId("lane-review")).getByText("確認カード")).toBeInTheDocument();
     expect(within(screen.getByTestId("lane-needs_fix")).getByText("修正カード")).toBeInTheDocument();
-    expect(within(screen.getByTestId("lane-done")).getByText("完了カード")).toBeInTheDocument();
+    // 本番反映済(まだ触れる)と完了(明示アーカイブ)は別レーン。
+    expect(within(screen.getByTestId("lane-shipped")).getByText("本番反映済カード")).toBeInTheDocument();
+    expect(within(screen.getByTestId("lane-done")).getByText("アーカイブ済カード")).toBeInTheDocument();
   });
 
   it("composer creates a task then starts a run with its taskId + cwd", async () => {
@@ -226,6 +229,42 @@ describe("<Board>", () => {
     expect(prompt).toContain("ボタンを大きく");
     expect(prompt).toContain("元の指示");
     expect(opts.taskId).toBe("rev");
+  });
+
+  it("本番反映済でも追加指示を出せ、フェーズは demo に戻る（本番直行しない）", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "shp", featureId: "feat-1", title: "本番後の不備", featurePhase: "prod_shipped", runStatus: "succeeded" }),
+    ]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-shp"));
+    await userEvent.click(await screen.findByTestId("action-rerun"));
+    expect(screen.getByTestId("rerun-shipped-note")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("rerun-prompt"), "本番で表示が崩れている");
+    await userEvent.click(screen.getByTestId("rerun-submit"));
+
+    await waitFor(() =>
+      expect(api.transition).toHaveBeenCalledWith("feat-1", "demo_building", { approvedByUser: false }),
+    );
+    await waitFor(() => expect(client.startRun).toHaveBeenCalled());
+    const [prompt, opts] = client.startRun.mock.calls.at(-1)!;
+    expect(prompt).toContain("本番で表示が崩れている");
+    expect(opts.taskId).toBe("shp");
+    // 本番へ直行する遷移は一切起こさない。
+    expect(api.transition).not.toHaveBeenCalledWith("feat-1", "prod_shipped", expect.anything());
+  });
+
+  it("アーカイブ済タスクだけが追加指示・完了ボタンを失う", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "arc", featureId: "feat-1", title: "アーカイブ済", featurePhase: "prod_shipped", runStatus: "succeeded", taskStatus: "done" }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-arc"));
+    await screen.findByTestId("next-action-bar");
+    expect(screen.queryByTestId("action-rerun")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("action-archive")).not.toBeInTheDocument();
   });
 
   it("完了 archives the task (updateTaskStatus done)", async () => {

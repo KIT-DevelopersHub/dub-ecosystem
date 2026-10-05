@@ -63,7 +63,12 @@ const TRANSITIONS: Record<FeaturePhase, TransitionSpec[]> = {
   staging_rejected: [
     { to: "demo_building", requiresApproval: false, label: "修正してdemoに戻す" },
   ],
-  prod_shipped: [], // terminal
+  // 本番反映後も「生きている」: 不備が見つかったら同じ機能で直せる。ただし直し方は
+  // demo からやり直す1本だけ — 本番へ戻る道は demo→staging→本番を必ず再走するので
+  // 段飛ばし禁止も自己承認禁止も崩れない(prod_shipped から本番へ直行する辺は作らない)。
+  prod_shipped: [
+    { to: "demo_building", requiresApproval: false, label: "本番反映後の追加指示→demoからやり直し" },
+  ],
 };
 
 export const INITIAL_PHASE: FeaturePhase = "demo_building";
@@ -72,7 +77,10 @@ export function allowedTransitions(from: FeaturePhase): readonly TransitionSpec[
   return TRANSITIONS[from];
 }
 
-/** true iff the phase has no outgoing edges (prod_shipped). */
+/**
+ * true iff the phase has no outgoing edges. No phase is terminal today — 本番反映済でも
+ * 追加指示で demo に戻せる(タスクの終了はフェーズではなく taskStatus=done のアーカイブ)。
+ */
 export function isTerminal(phase: FeaturePhase): boolean {
   return TRANSITIONS[phase].length === 0;
 }

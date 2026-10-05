@@ -61,6 +61,15 @@ export const PROD_DEPLOY_PROMPT =
   "(3) `pnpm verify:live prod \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
   "(4) 完了したら本番 URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
 
+// Phases a 追加指示 must rewind to demo_building before the follow-up run starts.
+// 却下済みは「直して再 demo」、本番反映済は「本番後に見つかった不備も demo からやり直す」
+// = 修正版が demo→staging→本番を必ず再走する(本番直行 = 段飛ばしを作らない)。
+const REWORK_RESET_PHASES: ReadonlySet<FeaturePhase> = new Set<FeaturePhase>([
+  "demo_rejected",
+  "staging_rejected",
+  "prod_shipped",
+]);
+
 export function Board({
   client = defaultClient,
   api = defaultApi,
@@ -80,9 +89,9 @@ export function Board({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [drawerVersion, setDrawerVersion] = useState(0);
   const reconcilingRef = useRef(false);
-  // Feature ids whose staging反映 run was just kicked but whose new (pending) run may not
-  // be visible on the board yet. While a feature sits here, reconcilePhases must NOT
-  // auto-advance staging_deployed→staging_review off the *stale* (succeeded demo) run —
+  // Feature ids whose next run was just kicked (staging反映 / 追加指示の修正 run) but whose
+  // new (pending) run may not be visible on the board yet. While a feature sits here,
+  // reconcilePhases must NOT auto-advance off the *stale* (already succeeded) run —
   // otherwise 「反映中」 would be skipped and the card would jump straight to 確認待ち.
   const deployingRef = useRef<Set<string>>(new Set());
 
@@ -295,11 +304,23 @@ export function Board({
   const handleRerun = useCallback(
     async (prompt: string) => {
       if (!selected) return;
-      // If the feature was rejected, reset to building so a success returns it to review.
-      if (selected.featurePhase === "demo_rejected" || selected.featurePhase === "staging_rejected") {
-        await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
+      // A follow-up instruction means the feature is being worked again, so reset it to
+      // demo_building: 却下済みなら成功で確認待ちに戻り、本番反映済(prod_shipped)なら
+      // 修正版が demo→staging→本番をもう一度通る（本番へ直行させない）。
+      const needsReset = REWORK_RESET_PHASES.has(selected.featurePhase);
+      // Shield the feature until the new run is visible — between the reset and the run
+      // kick the board still sees the *stale* succeeded run and would otherwise
+      // auto-advance demo_building→demo_review (card flashes 確認待ち with no work done).
+      if (needsReset) deployingRef.current.add(selected.featureId);
+      try {
+        if (needsReset) {
+          await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
+        }
+        await startFollowUpRun(selected, prompt);
+      } catch (e) {
+        deployingRef.current.delete(selected.featureId);
+        throw e;
       }
-      await startFollowUpRun(selected, prompt);
       await refreshAfterAction();
     },
     [api, selected, startFollowUpRun, refreshAfterAction],

@@ -72,7 +72,11 @@ erDiagram
 | staging_review | prod_shipped | **必要(user)** | staging 承認→本番反映 |
 | staging_review | staging_rejected | 不要 | staging 却下(要修正) |
 | staging_rejected | demo_building | 不要 | 修正して demo に戻す |
+| prod_shipped | demo_building | 不要 | 本番反映後の追加指示→demo からやり直し |
 
+- 終端フェーズは無い。本番反映済でも不備が見つかれば**同じ機能**で直せる（出口は demo
+  やり直しの 1 本だけ。本番へ直行する辺を作らないので、修正版は必ず demo→staging→本番を
+  再走する）。タスクの終了はフェーズではなく `Task.status=done`（明示アーカイブ）で表す。
 - 表に無い辺は `illegal_transition`（段飛ばし禁止）。
 - 承認必要な辺は `approved_by_user=true` が無ければ `approval_required`（自己承認禁止）。
 - `PHASE_TRANSITION` は監査ログ。誰が(actor)・承認有無・いつを記録する。
