@@ -1,20 +1,37 @@
 // task-service HTTP surface (Hono). Built from injected Deps so it is fully
-// testable without the Cloudflare runtime. Routes + guards follow the P0a design
-// and the FROZEN @dub/types task namespace + P0b decisions (themes 1/3/6/9/13).
+// testable without the Cloudflare runtime. Routes follow the P0a design and the FROZEN
+// @dub/types task namespace + P0b decisions (themes 1/3/6/9/13).
+//
+// AUTHZ — two layers, and both live in known places:
+//
+//  1. ENTRY LAYER (type-level): `policyGate` is mounted FIRST and derives both authn and the
+//     "does this caller hold the key at all" decision from POLICY_TABLE
+//     (src/policy-table.ts), which lists every route below. There is no `requireAuth`, no
+//     `deps.authz.require(...)` per route, and no hand-rolled x-dub-internal middleware left
+//     in this file. Do NOT add one — add the route to the table instead
+//     (test/policy-table.test.ts fails if you forget).
+//
+//  2. INSTANCE LAYER (this file): the decisions that need the request's DATA, which a static
+//     table cannot express — `includeArchived` demanding `task:delete`, the self-scoping of a
+//     bare `GET /tasks`, `origin` being service-only, the origin=github protected fields and
+//     the same-team dependency constraint. Those stay here, next to the row they judge. See
+//     packages/policy-gate/src/gate.ts's "NOT this layer's job" note and
+//     docs/policy-coverage-inventory.md §3(d).
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { dubErrorHandler, errors, type FieldError } from "@dub/errors";
 import { extractContext, type RequestContext } from "@dub/http";
 import { newId, nowIso } from "@dub/db";
-import { HEADERS } from "@dub/observability";
+import { policyGate, type PermissionGranter, type PolicyGateVars } from "@dub/policy-gate";
 import type { DubEventEnvelope } from "@dub/events";
-import type { common, auditLog } from "@dub/types";
+import type { common, auditLog, identity } from "@dub/types";
 // value import: needs the runtime DEPENDENCY_REJECT_REASONS constant (also gives the
 // `task.*` types). Mirrors validate.ts using `task.TASK_STATUS_TRANSITIONS`.
 import { task } from "@dub/types";
 import type { Deps } from "./deps";
+import { POLICY_TABLE } from "./policy-table";
 import { taskErrors } from "./errors";
-import { resolvePrincipal, isServiceRole, actorIdOf, type Principal } from "./principal";
+import { resolvePrincipal, resolveServicePrincipal, isServiceRole, actorIdOf, type Principal } from "./principal";
 import { emit, type EventSpec } from "./events";
 import { dispatchEvent } from "./consumer";
 import { validateDependencies } from "@dub/gantt-calc";
@@ -64,23 +81,73 @@ function auditRecord(
   };
 }
 
-export function buildApp(deps: Deps): Hono {
-  const app = new Hono();
+/**
+ * THE authorization layer: `policyGate` over POLICY_TABLE, with one service-specific seam.
+ *
+ * WHY the wrapper instead of a bare `policyGate({...})` mount: task-service has a SERVICE
+ * principal (principal.ts) — a Service-Binding call carrying `x-dub-internal` + an
+ * allow-listed `x-dub-caller` and NO user id. github-sync is the live caller: it imports and
+ * reconciles GitHub issues as tasks with `sysCtx(requestId)`, i.e. deliberately no acting
+ * user (`services/github-sync/src/engine/sync.ts`). The removed `Authorizer` let that
+ * principal through every key check; the gate's vocabulary cannot express it, because it is
+ * not a KEY fact — there is no OR form and `INTERNAL` is never a substitute for a key
+ * (rule.ts). Writing these routes as `INTERNAL` would be a lie (they are the externally
+ * reachable task API); dropping the principal would 401 every GitHub import.
+ *
+ * So it is expressed through the two ports the gate already provides, which is exactly what
+ * each one is for — and NOT as a second authorization check, of which there are none left:
+ *
+ *   - `actor`      AUTHENTICATION: who is calling? `service:<caller>`, already this service's
+ *                  own name for it (`actorIdOf`, and the id written into every audit record).
+ *   - `granted`    the key facts: a service principal holds every task key, which is the
+ *                  pre-migration behaviour verbatim — neither widened nor narrowed.
+ *
+ * The principal is resolved per request from the headers, never sniffed out of the actor
+ * STRING, so no `x-dub-user-id` value can impersonate a service. The table still states the
+ * keys every external caller needs, which is what a reviewer reads it for.
+ */
+function taskPolicyGate(deps: Deps): MiddlewareHandler {
+  const allKeysHeld: PermissionGranter = (_userId, _orgId, keys) => Promise.resolve(keys);
+  return (c, next) => {
+    const service = resolveServicePrincipal(c, deps.config.serviceCallers);
+    const gate = policyGate({
+      service: "task-service",
+      table: POLICY_TABLE,
+      orgId: deps.config.orgId,
+      granted: service ? allKeysHeld : deps.authz,
+      ...(service ? { actor: () => actorIdOf(service) } : {}),
+    });
+    return gate(c, next);
+  };
+}
+
+export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
+  const app = new Hono<{ Variables: PolicyGateVars }>();
   app.onError(dubErrorHandler({ service: "task-service" }));
 
   const { config } = deps;
 
   const principalOf = (c: Context): Principal => resolvePrincipal(c, config.serviceCallers);
 
-  app.get("/health", (c) => c.json({ ok: true, service: "task-service" }));
+  /**
+   * INSTANCE-LAYER key question: does this caller hold one EXTRA key the request's data
+   * demands? Only `GET /tasks?includeArchived=true` needs it (§3(d)) — the table cannot say
+   * "this key, but only when a query param is set". A service principal holds everything,
+   * same as the entry layer.
+   */
+  const holdsKey = async (c: Context, key: identity.PermissionKey): Promise<boolean> => {
+    const principal = principalOf(c);
+    if (principal.kind === "service") return true;
+    return (await deps.authz(principal.userId, config.orgId, [key])).includes(key);
+  };
 
-  // ---- internal-only guard: /internal/* requires the x-dub-internal marker.
-  // Mirrors the gateway internalOnlyPaths 404 (never expose the compensation route
-  // publicly). Same pattern as audit-log /internal/*. ----
-  app.use("/internal/*", async (c, next) => {
-    if (!c.req.header(HEADERS.internal)) throw errors.notFound("route", c.req.path);
-    await next();
-  });
+  // The authorization layer. First and only — every route below is gated by POLICY_TABLE,
+  // including GET /health and the INTERNAL landing route (which is why the hand-rolled
+  // `/internal/*` marker middleware is gone: the marker check IS the INTERNAL rule now, so
+  // the route is visible in the table rather than invisible to a reader of it).
+  app.use("*", taskPolicyGate(deps));
+
+  app.get("/health", (c) => c.json({ ok: true, service: "task-service" }));
 
   // ---- POST /internal/events-async (free-tier consumer landing route) ----
   // Free-plan replacement for the dub-q-evt-task Queue consumer: event-service's own
@@ -99,9 +166,6 @@ export function buildApp(deps: Deps): Hono {
 
   // ---- GET /tasks/dependencies (LITERAL route registered before :id) ----
   app.get("/tasks/dependencies", async (c) => {
-    const ctx = ctxOf(c);
-    const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:read");
     const eventId = c.req.query("eventId");
     if (!eventId) throw errors.validationFailed([{ field: "eventId", reason: "required" }]);
     const items = await deps.repo.listDependenciesByEvent(eventId);
@@ -113,16 +177,23 @@ export function buildApp(deps: Deps): Hono {
 
   // ---- GET /tasks (list; cursor paging) ----
   app.get("/tasks", async (c) => {
-    const ctx = ctxOf(c);
     const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:read");
 
     const eventId = c.req.query("eventId");
     const assigneeId = c.req.query("assigneeId");
     const teamId = c.req.query("teamId");
     const createdById = c.req.query("createdById");
     const includeArchived = c.req.query("includeArchived") === "true";
-    if (includeArchived) await deps.authz.require(ctx, principal, "task:delete");
+    // INSTANCE LAYER: the table demands `task:read` for this route, but asking for ARCHIVED
+    // rows is the higher-privileged read, so it demands `task:delete` on top (§4.1). Query-
+    // dependent, hence here and not in POLICY_TABLE.
+    if (includeArchived && !(await holdsKey(c, "task:delete"))) {
+      throw errors.forbidden("permission denied: task:delete", {
+        reason: "missing_permission",
+        required: ["task:delete"],
+        missing: ["task:delete"],
+      });
+    }
 
     // eventId may be omitted by: (a) a service-role caller (e.g. gantt-service building
     // a global chart, github-sync) — trusted internal reads; or (b) a user listing their
@@ -161,7 +232,6 @@ export function buildApp(deps: Deps): Hono {
   app.post("/tasks", async (c) => {
     const ctx = ctxOf(c);
     const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:write");
     const body = await readJson<Partial<task.CreateTaskRequest>>(c);
 
     const fe: FieldError[] = [];
@@ -247,9 +317,6 @@ export function buildApp(deps: Deps): Hono {
 
   // ---- GET /tasks/:id ----
   app.get("/tasks/:id", async (c) => {
-    const ctx = ctxOf(c);
-    const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:read");
     const id = c.req.param("id");
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
@@ -260,7 +327,6 @@ export function buildApp(deps: Deps): Hono {
   app.patch("/tasks/:id", async (c) => {
     const ctx = ctxOf(c);
     const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
     const body = await readJson<Partial<task.UpdateTaskRequest>>(c);
 
@@ -397,7 +463,6 @@ export function buildApp(deps: Deps): Hono {
   app.delete("/tasks/:id", async (c) => {
     const ctx = ctxOf(c);
     const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:delete");
     const id = c.req.param("id");
 
     const current = await deps.repo.getById(id);
@@ -422,9 +487,6 @@ export function buildApp(deps: Deps): Hono {
 
   // ---- GET /tasks/:id/attachments (list a task's file/url attachments) ----
   app.get("/tasks/:id/attachments", async (c) => {
-    const ctx = ctxOf(c);
-    const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:read");
     const id = c.req.param("id");
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
@@ -438,9 +500,7 @@ export function buildApp(deps: Deps): Hono {
   // here we persist only the task↔attachment index + display meta. `url` is the
   // file-meta download path (kind=file) or the external URL (kind=url).
   app.post("/tasks/:id/attachments", async (c) => {
-    const ctx = ctxOf(c);
     const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
@@ -479,9 +539,6 @@ export function buildApp(deps: Deps): Hono {
 
   // ---- DELETE /tasks/:id/attachments/:attachmentId (soft-remove) ----
   app.delete("/tasks/:id/attachments/:attachmentId", async (c) => {
-    const ctx = ctxOf(c);
-    const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
     const attachmentId = c.req.param("attachmentId");
     const ok = await deps.repo.archiveAttachment(id, attachmentId, nowIso());
@@ -493,7 +550,6 @@ export function buildApp(deps: Deps): Hono {
   app.put("/tasks/:id/dependencies", async (c) => {
     const ctx = ctxOf(c);
     const principal = principalOf(c);
-    await deps.authz.require(ctx, principal, "task:write");
     const id = c.req.param("id");
     const body = await readJson<Partial<task.ReplaceDependenciesRequest>>(c);
 
