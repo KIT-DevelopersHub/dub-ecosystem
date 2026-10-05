@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { StepRegistry } from "./support/gherkin.ts";
 import { World } from "./support/world.ts";
 import {
+  BDD_SERVICE_TOKEN,
   startDaemon,
   mountService,
   streamRun,
@@ -47,6 +48,24 @@ async function http(
   return { status: res.status, json };
 }
 
+/**
+ * A commander-service call carrying the operator token, exactly as the web app and the
+ * daemon do. Every route but `/health` requires it, so this — not bare `http` — is the
+ * default way a step talks to the service. The 共有トークン認証 scenarios below deliberately
+ * bypass it to assert what happens with a missing or wrong token.
+ */
+async function svc(
+  w: World,
+  method: string,
+  path: string,
+  opts: { body?: unknown } = {},
+): Promise<{ status: number; json: Json | null }> {
+  return http(w.service!.base, method, path, {
+    ...opts,
+    headers: w.serviceToken ? { "x-commander-token": w.serviceToken } : {},
+  });
+}
+
 function lastStatusEvent(events: SseEvent[]): string | undefined {
   const statuses = events.filter((e) => e.type === "status");
   return statuses.length ? statuses[statuses.length - 1]!.status : undefined;
@@ -84,11 +103,19 @@ export function defineSteps(): StepRegistry<World> {
     w.track((w.daemon = await startDaemon({ operatorToken: token })));
   });
   r.add(/^daemon が commander-service への永続化を有効にして起動している$/, async (w) => {
-    w.track((w.daemon = await startDaemon({ serviceUrl: w.service!.base })));
+    // The sink must present the token too: POST /runs is protected like everything else.
+    w.track(
+      (w.daemon = await startDaemon({
+        serviceUrl: w.service!.base,
+        serviceToken: w.serviceToken,
+      })),
+    );
   });
 
   // ── service lifecycle ────────────────────────────────────────────────────────
   r.add(/^commander-service が起動している$/, async (w) => {
+    // mountService always configures a token (fail-closed), so the World must know it.
+    w.serviceToken = BDD_SERVICE_TOKEN;
     w.track((w.service = await mountService()));
   });
   r.add(/^commander-service がトークン "([^"]+)" 付きで起動している$/, async (w, token) => {
@@ -153,7 +180,7 @@ export function defineSteps(): StepRegistry<World> {
   r.add(/^commander-service から run を再取得できる$/, async (w) => {
     // Persistence is best-effort/async; poll briefly until the run + its events land.
     for (let i = 0; i < 40; i++) {
-      const { status, json } = await http(w.service!.base, "GET", `/runs/${w.runId}`);
+      const { status, json } = await svc(w, "GET", `/runs/${w.runId}`);
       const events = (json?.events as unknown[]) ?? [];
       if (status === 200 && events.length > 0) {
         w.lastJson = json as Json;
@@ -179,7 +206,7 @@ export function defineSteps(): StepRegistry<World> {
 
   // ── phase gate (commander-service) ───────────────────────────────────────────
   r.add(/^"([^"]+)" という機能を作成する$/, async (w, title) => {
-    const { json } = await http(w.service!.base, "POST", "/features", { body: { title } });
+    const { json } = await svc(w, "POST", "/features", { body: { title } });
     w.featureId = String((json as { feature: { id: string } }).feature.id);
     w.lastJson = json;
   });
@@ -188,21 +215,21 @@ export function defineSteps(): StepRegistry<World> {
     assert.equal(f.phase, phase);
   });
   r.add(/^機能を "([^"]+)" へ進める$/, async (w, to) => {
-    const res = await http(w.service!.base, "POST", `/features/${w.featureId}/transition`, {
+    const res = await svc(w, "POST", `/features/${w.featureId}/transition`, {
       body: { to },
     });
     w.lastStatus = res.status;
     w.lastJson = res.json;
   });
   r.add(/^機能を "([^"]+)" へ承認付きで進め(?:ようとする|る)$/, async (w, to) => {
-    const res = await http(w.service!.base, "POST", `/features/${w.featureId}/transition`, {
+    const res = await svc(w, "POST", `/features/${w.featureId}/transition`, {
       body: { to, approvedByUser: true, note: "demo確認OK" },
     });
     w.lastStatus = res.status;
     w.lastJson = res.json;
   });
   r.add(/^機能を "([^"]+)" へ承認なしで進めようとする$/, async (w, to) => {
-    const res = await http(w.service!.base, "POST", `/features/${w.featureId}/transition`, {
+    const res = await svc(w, "POST", `/features/${w.featureId}/transition`, {
       body: { to },
     });
     w.lastStatus = res.status;
@@ -215,17 +242,17 @@ export function defineSteps(): StepRegistry<World> {
     assert.equal((w.lastJson as { error?: string })?.error, code);
   });
   r.add(/^機能の phase は "([^"]+)" の(?:ままである|になる)$/, async (w, phase) => {
-    const { json } = await http(w.service!.base, "GET", `/features/${w.featureId}`);
+    const { json } = await svc(w, "GET", `/features/${w.featureId}`);
     assert.equal((json as { feature: { phase: string } }).feature.phase, phase);
   });
   r.add(/^機能の phase は "([^"]+)" になる$/, async (w, phase) => {
-    const { json } = await http(w.service!.base, "GET", `/features/${w.featureId}`);
+    const { json } = await svc(w, "GET", `/features/${w.featureId}`);
     assert.equal((json as { feature: { phase: string } }).feature.phase, phase);
   });
   r.add(
     /^監査ログの最新エントリは actor "([^"]+)" かつ approvedByUser は (true|false) である$/,
     async (w, actor, approved) => {
-      const { json } = await http(w.service!.base, "GET", `/features/${w.featureId}`);
+      const { json } = await svc(w, "GET", `/features/${w.featureId}`);
       const transitions = (json as { transitions: Array<{ actor: string; approvedByUser: boolean }> })
         .transitions;
       const latest = transitions[transitions.length - 1]!;
@@ -264,8 +291,21 @@ export function defineSteps(): StepRegistry<World> {
     });
     w.lastStatus = status;
   });
-  r.add(/^トークン設定時でも service の GET \/features は 200 で開いている$/, async (w) => {
+  // Reads are NOT open: this used to assert `GET /features` answered 200 with no token,
+  // which was the hole itself (run prompts, cwd, logs and chat bodies were readable by
+  // anyone who could reach the port).
+  r.add(/^トークンなしで service の GET \/features は 401 である$/, async (w) => {
     const { status } = await http(w.service!.base, "GET", "/features");
+    assert.equal(status, 401);
+  });
+  r.add(/^トークン "([^"]+)" 付きで service の GET \/features は 200 である$/, async (w, token) => {
+    const { status } = await http(w.service!.base, "GET", "/features", {
+      headers: { "x-commander-token": token },
+    });
+    assert.equal(status, 200);
+  });
+  r.add(/^トークン設定時でも service の \/health は 200 で開いている$/, async (w) => {
+    const { status } = await http(w.service!.base, "GET", "/health");
     assert.equal(status, 200);
   });
 
