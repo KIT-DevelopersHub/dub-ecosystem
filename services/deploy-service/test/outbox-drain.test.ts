@@ -15,7 +15,7 @@ import type { DeployJobMessage } from "../src/jobs";
 import { makeOutboxD1, rows } from "./outbox-d1";
 import { createFakeCf, createFakeAudit, createFakeEvents, createFakeIdentityBinding } from "./helpers";
 import { createInMemoryDeployRepo } from "../src/memory-repo";
-import { createAuthClient } from "@dub/auth-client";
+import { createAuthzGranter } from "@dub/policy-gate";
 
 /** A fake audit-log service binding that records forwarded bodies and returns a status. */
 function fakeAuditSvc(status = 202): { svc: Fetcher; bodies: unknown[]; urls: string[] } {
@@ -147,13 +147,13 @@ describe("runOutboxDrain", () => {
     const audit = createFakeAudit();
     const events = createFakeEvents();
     const { binding } = createFakeIdentityBinding({ usr_admin: ["infra:deploy"] });
-    const auth = createAuthClient({ identityBinding: binding, serviceName: "deploy-service" });
+    const authz = createAuthzGranter(binding, { caller: "deploy-service" });
     const injected: Deps = {
       repo,
       cf,
       audit,
       events,
-      auth,
+      authz,
       async enqueueJob(msg) {
         await enqueueDeployJob(d1, msg); // durable re-enqueue (poll loop) on the free tier
       },
