@@ -3,12 +3,12 @@
   "slug": "participation-link-fix",
   "worker": "dub-demo-participation-link-fix",
   "url": "https://dub-demo-participation-link-fix.developershub-site.workers.dev",
-  "deployedSha": "70209d7e",
+  "deployedSha": "22ef762f",
   "branch": "fix/participation-member-link-error",
   "actor": "ko-tarou",
   "markers": ["participation-already-linked"],
   "live": true,
-  "verifiedAt": "2026-10-05T15:12:14Z",
-  "updatedAt": "2026-10-05T15:12:14Z",
+  "verifiedAt": "2026-10-05T15:21:06Z",
+  "updatedAt": "2026-10-05T15:21:06Z",
   "note": "participation member-link 409 fix (PR #567)"
 }
