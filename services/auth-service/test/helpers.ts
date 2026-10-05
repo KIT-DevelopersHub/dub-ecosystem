@@ -11,12 +11,33 @@ import type { Auditor, AuditInput } from "../src/audit";
 import { KvPasswordStore } from "../src/passwords";
 import { KvRateLimiter } from "../src/ratelimit";
 
+/** Workers KV rejects expirationTtl < 60s; the fake must too (see MemoryKV.put). */
+export const KV_MIN_TTL = 60;
+
+/**
+ * In-memory KVNamespace stand-in. Expiry is NOT simulated (tests drive time via the
+ * injectable clock), but the options bag is VALIDATED: real Workers KV rejects
+ * `expirationTtl` below 60s, and silently swallowing it here is exactly how a 30s
+ * grace-window put shipped to production and 500'd every /auth/refresh.
+ */
 export class MemoryKV {
   store = new Map<string, string>();
+  /** Every accepted write, so tests can assert the TTLs that were actually requested. */
+  puts: { key: string; expirationTtl?: number }[] = [];
   async get(key: string): Promise<string | null> {
     return this.store.has(key) ? this.store.get(key)! : null;
   }
-  async put(key: string, value: string): Promise<void> {
+  async put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void> {
+    const ttl = options?.expirationTtl;
+    if (ttl !== undefined) {
+      if (!Number.isInteger(ttl)) {
+        throw new Error(`KV put ${key}: expirationTtl must be an integer, got ${ttl}`);
+      }
+      if (ttl < KV_MIN_TTL) {
+        throw new Error(`KV put ${key}: expirationTtl of ${ttl}s is below the ${KV_MIN_TTL}s Workers KV minimum`);
+      }
+    }
+    this.puts.push(ttl === undefined ? { key } : { key, expirationTtl: ttl });
     this.store.set(key, value);
   }
   async delete(key: string): Promise<void> {
@@ -131,8 +152,10 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
   let now = Date.parse("2026-08-09T12:00:00Z");
   const clock = () => now;
 
-  const kvPut = async (k: string, v: string): Promise<void> => {
-    kv.store.set(k, v);
+  // Routed through MemoryKV.put (not the raw Map) so the rate-limiter's window TTLs
+  // get the same >=60s KV validation as the session puts.
+  const kvPut = async (k: string, v: string, ttlSec: number): Promise<void> => {
+    await kv.put(k, v, { expirationTtl: ttlSec });
   };
   const kvGet = async (k: string): Promise<string | null> => (kv.store.has(k) ? kv.store.get(k)! : null);
   const kvDelete = async (k: string): Promise<void> => {

@@ -26,6 +26,18 @@ interface StoredSession {
 const SESSION_PREFIX = "session:";
 const REVOKED_PREFIX = "revoked_user:";
 
+// Workers KV REJECTS expirationTtl < 60s (the put throws), so every TTL written here
+// is floored. The floor only extends how long the KV *record* lingers — it grants no
+// extra session lifetime: verify() and refresh() both re-check absoluteExpiresAt (and
+// verify() also re-checks accessExpiresAt), so a floored record past its deadline
+// still resolves to "revoked". Same guard as drive-proxy's cache/ratelimit.
+const KV_MIN_TTL = 60;
+
+/** Floor a TTL to the Workers KV minimum (and integer-ize it). */
+function kvTtl(seconds: number): number {
+  return Math.max(KV_MIN_TTL, Math.ceil(seconds));
+}
+
 function sessionKey(token: string): string {
   return SESSION_PREFIX + token;
 }
@@ -75,7 +87,7 @@ export class SessionService {
       absoluteExpiresAt: now + absSec * 1000,
     };
     const token = newSessionToken();
-    await this.kv.put(sessionKey(token), JSON.stringify(stored), { expirationTtl: absSec });
+    await this.kv.put(sessionKey(token), JSON.stringify(stored), { expirationTtl: kvTtl(absSec) });
     return { token, session: toSessionInfo(stored), absoluteExpiresAt: stored.absoluteExpiresAt };
   }
 
@@ -134,11 +146,13 @@ export class SessionService {
       accessExpiresAt: now + this.config.accessTtlSec * 1000,
     };
     const newToken = newSessionToken();
-    const remainingSec = Math.max(1, Math.ceil((stored.absoluteExpiresAt - now) / 1000));
+    const remainingSec = kvTtl((stored.absoluteExpiresAt - now) / 1000);
     await this.kv.put(sessionKey(newToken), JSON.stringify(rotated), { expirationTtl: remainingSec });
     // Grace: keep the old token briefly as a pointer to the successor instead of
-    // deleting it. TTL is capped by whatever absolute lifetime remains.
-    const graceSec = Math.min(this.config.refreshGraceSec, remainingSec);
+    // deleting it. TTL is capped by whatever absolute lifetime remains, then floored
+    // to the KV minimum — an unfloored grace put (the 30s default) threw at runtime
+    // and turned every hourly refresh into a 500.
+    const graceSec = kvTtl(Math.min(this.config.refreshGraceSec, remainingSec));
     const graceRecord: StoredSession = { ...stored, rotatedTo: newToken };
     await this.kv.put(sessionKey(token), JSON.stringify(graceRecord), { expirationTtl: graceSec });
     return {
@@ -155,7 +169,7 @@ export class SessionService {
 
   /** Force-revoke every session for a user (identity suspend/delete). Flag TTL = longest absolute. */
   async revokeUser(userId: string): Promise<void> {
-    await this.kv.put(revokedKey(userId), "1", { expirationTtl: this.config.absMobileTtlSec });
+    await this.kv.put(revokedKey(userId), "1", { expirationTtl: kvTtl(this.config.absMobileTtlSec) });
   }
 
   private async read(token: string): Promise<StoredSession | null> {

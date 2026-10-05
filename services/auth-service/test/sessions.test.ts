@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeHarness } from "./helpers";
+import { makeHarness, KV_MIN_TTL } from "./helpers";
 
 describe("SessionService", () => {
   it("create -> verify returns valid with frozen SessionInfo shape", async () => {
@@ -134,6 +134,44 @@ describe("SessionService", () => {
       expect("token" in r).toBe(true);
       if ("token" in r) expect((await h.deps.sessions.verify(r.token)).valid).toBe(true);
     }
+  });
+
+  // --- Workers KV expirationTtl floor (hourly-logout bug). The grace put used to ask
+  // for `refreshGraceSec` (30) seconds, which real KV REJECTS, so refresh() threw and
+  // the endpoint 500'd. MemoryKV now enforces the same >=60s rule as production. ---
+  it("every KV write refresh() makes asks for a TTL at or above the 60s KV floor", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_ttl", "web");
+    h.kv.puts.length = 0;
+    const refreshed = await h.deps.sessions.refresh(created.token);
+    if (!("token" in refreshed)) throw new Error("expected rotation");
+    // successor record + grace pointer record
+    expect(h.kv.puts).toHaveLength(2);
+    for (const p of h.kv.puts) {
+      expect(p.expirationTtl).toBeGreaterThanOrEqual(KV_MIN_TTL);
+    }
+  });
+
+  it("refreshes with under 60s of absolute lifetime left, and the floored TTL grants no extra lifetime", async () => {
+    // 1h absolute: the floor (60s) is LONGER than what actually remains, so the KV
+    // record outlives the deadline. The deadline checks must still win.
+    const h = makeHarness({ SESSION_ABS_WEB_TTL_SEC: "3600" });
+    const base = Date.parse("2026-08-09T12:00:00Z");
+    h.setNow(base);
+    const created = await h.deps.sessions.create("usr_edge", "web");
+    h.setNow(base + 3_595_000); // 5s of absolute lifetime left
+
+    const refreshed = await h.deps.sessions.refresh(created.token);
+    expect("token" in refreshed).toBe(true); // no throw, no 500
+    if (!("token" in refreshed)) throw new Error("expected rotation");
+    expect(refreshed.absoluteExpiresAt).toBe(created.absoluteExpiresAt); // deadline untouched
+
+    // Past the absolute deadline the floored record is still physically in KV, yet
+    // neither verify() nor refresh() honours it.
+    h.setNow(base + 3_600_001);
+    expect(h.kv.store.has(`session:${refreshed.token}`)).toBe(true);
+    expect((await h.deps.sessions.verify(refreshed.token)).reason).toBe("revoked");
+    expect(await h.deps.sessions.refresh(refreshed.token)).toEqual({ error: "revoked" });
   });
 
   it("refresh past the grace window (old record evicted) resolves to revoked", async () => {

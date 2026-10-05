@@ -14,6 +14,13 @@ export interface ForwardParams {
   requestId: string;
   userId?: string;
   timeoutMs?: number;
+  /**
+   * Preserve `cookie` / `authorization` on the forwarded request. Opt-in per routing
+   * rule (`GatewayRoute.forwardCredentials`) and set for the auth segment only, because
+   * auth-service must see the real session token to rotate (refresh) or revoke (logout)
+   * it. Everything else keeps the default "token stays at the edge" behaviour.
+   */
+  forwardCredentials?: boolean;
 }
 
 /** Copy incoming headers minus anything the gateway owns or that must not leak downstream. */
@@ -22,7 +29,9 @@ function sanitizeHeaders(incoming: Headers, params: ForwardParams): Headers {
   incoming.forEach((value, key) => {
     const k = key.toLowerCase();
     if (k.startsWith("x-dub-")) return; // strip all trusted headers (spoof defense)
-    if (k === "host" || k === "authorization" || k === "cookie") return; // token stays at the edge
+    if (k === "host") return; // the binding re-targets the origin
+    // Token stays at the edge unless the route is explicitly credential-forwarding.
+    if ((k === "authorization" || k === "cookie") && !params.forwardCredentials) return;
     if (k === "content-length") return; // recomputed by the runtime
     out.set(key, value);
   });

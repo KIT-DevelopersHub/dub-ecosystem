@@ -27,7 +27,7 @@ export interface Env {
   SESSION_ACCESS_TTL_SEC?: string; // access lifetime (default 3600 = 1h)
   SESSION_ABS_WEB_TTL_SEC?: string; // web absolute (default 2592000 = 30d)
   SESSION_ABS_MOBILE_TTL_SEC?: string; // mobile absolute (default 15552000 = 180d)
-  SESSION_REFRESH_GRACE_SEC?: string; // rotation grace window (default 30) — see sessions.ts refresh()
+  SESSION_REFRESH_GRACE_SEC?: string; // rotation grace window (default 60 = KV TTL floor) — see sessions.ts refresh()
   PWLOGIN_MAX_FAILURES?: string; // password-login failures per window before 429 (default 5)
   PWLOGIN_WINDOW_SEC?: string; // password-login rate-limit window (default 900 = 15m)
   PASSWORD_MIN_LENGTH?: string; // min length for user/admin-set passwords (default 8)
@@ -57,7 +57,10 @@ const DEFAULTS = {
   // its successor on /auth/refresh. Absorbs concurrent refresh bursts (multi-tab
   // page loads / Promise.all) and KV read-your-write lag so a duplicate refresh
   // returns the same new token instead of a spurious "Invalid token".
-  refreshGraceSec: 30,
+  // 60 = the Workers KV expirationTtl minimum. The grace record IS a KV write, so a
+  // smaller value cannot be honoured (sessions.ts floors it to 60 anyway); keeping the
+  // default at the floor makes config and runtime agree.
+  refreshGraceSec: 60,
 } as const;
 
 export interface AppConfig {
