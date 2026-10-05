@@ -84,10 +84,16 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
   // thread id against messages we already have on record (改善#3).
   const references = [...allRefs(h["references"]), ...allRefs(h["in-reply-to"])];
 
+  // Owner candidates, envelope recipient FIRST. raw.to is the address Email Routing
+  // actually delivered this copy to, so it is the authoritative owner signal; the To:
+  // header is only a hint and names an external address whenever we are in CC/BCC.
+  // (owner.ts dedups and caps the lookups, so a long To: header cannot crowd it out.)
+  const ownerCandidates = [parseAddress(raw.to), ...message.to];
+
   // Body is persisted for the inbox detail view (frozen MailMessage still carries only
   // the snippet). Email Routing hands us the raw RFC822 as text; we keep the plain-text
   // body. HTML-part extraction is out of this slice's scope → htmlBody stays null.
-  return { message, loop, mailbox: localPart(raw.to), bodyText: extractBody(raw.rawText), htmlBody: null, references };
+  return { message, loop, mailbox: localPart(raw.to), bodyText: extractBody(raw.rawText), htmlBody: null, references, ownerCandidates };
 }
 
 /**
@@ -96,7 +102,7 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
  */
 export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
   const parsed = parseInbound(raw);
-  const { message, loop, mailbox, bodyText, htmlBody, references } = parsed;
+  const { message, loop, mailbox, bodyText, htmlBody, references, ownerCandidates } = parsed;
 
   // Normalize the thread id against messages we already have (改善#3): if any referenced
   // ancestor is a known inbound/sent message, adopt ITS thread so a trimmed References
@@ -109,9 +115,10 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     return { processed: false, message };
   }
 
-  // Per-account Inbox scope: resolve the owning roster user from the recipient
-  // address(es). null when no roster user matches (fail-closed: invisible to all).
-  const ownerUserId = await resolveInboundOwner(deps.identity, deps.ctx, message.to);
+  // Per-account Inbox scope: resolve the owning roster user from the delivery address(es),
+  // envelope recipient first (see parseInbound). null when no roster user matches
+  // (fail-closed: invisible to all).
+  const ownerUserId = await resolveInboundOwner(deps.identity, deps.ctx, ownerCandidates);
 
   const changes = await insertInbound(deps.db, message, {
     mailbox,

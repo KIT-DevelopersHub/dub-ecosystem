@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { handleInbound, parseInbound } from "../src/inbound";
 import type { RawInbound } from "../src/mime";
 import { getInboundById, getInboundDetail, listInbound } from "../src/repo";
-import { makeHarness, inboundDeps } from "./helpers";
+import { makeHarness, inboundDeps, fakeIdentityFetcher } from "./helpers";
 
 function rawMessage(over: Partial<RawInbound> = {}, headers: Record<string, string> = {}): RawInbound {
   return {
@@ -43,6 +43,17 @@ describe("parseInbound", () => {
   it("decodes an RFC2047 Japanese subject", () => {
     const parsed = parseInbound(rawMessage({}, { subject: "=?UTF-8?B?6LOq5ZWP?=" }));
     expect(parsed.message.subject).toBe("質問");
+  });
+
+  it("lists owner candidates envelope-first, then the To: header", () => {
+    const parsed = parseInbound(
+      rawMessage({ to: "makoto.yoshioka@developershub.jp" }, { to: "client@outside.com, other@outside.com" }),
+    );
+    expect(parsed.ownerCandidates.map((a) => a.email)).toEqual([
+      "makoto.yoshioka@developershub.jp", // envelope recipient wins the first lookup
+      "client@outside.com",
+      "other@outside.com",
+    ]);
   });
 
   it("captures loop-prevention headers as passthrough (no logic here)", () => {
@@ -116,5 +127,78 @@ describe("handleInbound", () => {
     // No stray thread got created under the parent id.
     const stray = await listInbound(h.db, { ownerUserId: "usr_info", threadId: "B@x.com", limit: 10 });
     expect(stray.items).toHaveLength(0);
+  });
+});
+
+// Owner resolution drives per-account Inbox visibility, so it is pinned behaviourally:
+// the ENVELOPE recipient (what Email Routing delivered to) must win over the To: header,
+// which names an external address whenever we are only in CC/BCC.
+describe("handleInbound owner resolution (envelope-first)", () => {
+  // The roster: only these two addresses map to a user. Everything else is non-roster.
+  const roster = {
+    usr_makoto: { email: "makoto.yoshioka@developershub.jp" },
+    usr_info: { email: "info@developershub.jp" },
+  };
+  function ownerOf(h: ReturnType<typeof makeHarness>): string | null {
+    const row = h.raw.prepare(`SELECT owner_user_id FROM mail_inbound`).get() as
+      | { owner_user_id: string | null }
+      | undefined;
+    return row?.owner_user_id ?? null;
+  }
+  function depsWithRoster(h: ReturnType<typeof makeHarness>) {
+    return inboundDeps(h, { identity: fakeIdentityFetcher(true, roster) });
+  }
+
+  it("resolves the owner from the envelope recipient when To: is an external address (CC/BCC 受信)", async () => {
+    const h = makeHarness();
+    await handleInbound(
+      depsWithRoster(h),
+      rawMessage({ to: "makoto.yoshioka@developershub.jp" }, { to: "client@outside.com" }),
+    );
+    expect(ownerOf(h)).toBe("usr_makoto");
+  });
+
+  it("still resolves the owner from the To: header when the envelope address is non-roster (非回帰)", async () => {
+    const h = makeHarness();
+    await handleInbound(
+      depsWithRoster(h),
+      rawMessage({ to: "shared-alias@developershub.jp" }, { to: "Info <info@developershub.jp>" }),
+    );
+    expect(ownerOf(h)).toBe("usr_info");
+  });
+
+  it("leaves the owner NULL when neither the envelope nor To: is a roster user (fail-closed)", async () => {
+    const h = makeHarness();
+    await handleInbound(
+      depsWithRoster(h),
+      rawMessage({ to: "nobody@developershub.jp" }, { to: "client@outside.com" }),
+    );
+    expect(ownerOf(h)).toBeNull();
+    // and it is invisible to every account, including the two real roster users.
+    for (const uid of Object.keys(roster)) {
+      expect((await listInbound(h.db, { ownerUserId: uid, limit: 10 })).items).toHaveLength(0);
+    }
+  });
+
+  it("tries the envelope recipient first even when To: carries more addresses than MAX_LOOKUPS", async () => {
+    const h = makeHarness();
+    // 6 non-roster To: addresses > MAX_LOOKUPS (5): a To:-first order would burn every
+    // lookup slot before reaching the envelope address and leave the message ownerless.
+    const crowd = Array.from({ length: 6 }, (_, i) => `bulk${i}@outside.com`).join(", ");
+    await handleInbound(
+      depsWithRoster(h),
+      rawMessage({ to: "makoto.yoshioka@developershub.jp" }, { to: crowd }),
+    );
+    expect(ownerOf(h)).toBe("usr_makoto");
+  });
+
+  it("does not let repeated addresses consume lookup slots", async () => {
+    const h = makeHarness();
+    // The envelope alias repeats 5x (envelope + 4 To: copies) before the roster user.
+    // Deduped that is 2 lookups; if each repeat burned a slot the cap would be hit and
+    // info@ would never be tried.
+    const to = [...Array.from({ length: 4 }, () => "shared-alias@developershub.jp"), "info@developershub.jp"].join(", ");
+    await handleInbound(depsWithRoster(h), rawMessage({ to: "shared-alias@developershub.jp" }, { to }));
+    expect(ownerOf(h)).toBe("usr_info");
   });
 });

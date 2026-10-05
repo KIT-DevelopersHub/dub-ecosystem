@@ -74,6 +74,11 @@ export interface ParsedInbound {
   // so a trimmed References chain still joins the root conversation (改善#3). Empty for a
   // brand-new (unreferenced) message.
   references: string[];
+  // Owner-resolution candidates, MOST AUTHORITATIVE FIRST: the envelope recipient (the
+  // address Email Routing actually delivered this copy to) followed by the To: header
+  // addresses. Envelope-first because To: holds an external address whenever we are only
+  // in CC/BCC — resolving from To: alone left those messages ownerless (invisible).
+  ownerCandidates: mail.MailAddress[];
 }
 
 // ---- reconciled cross-service inbound DTO (統合波 reconcile, 2026-08) ----
