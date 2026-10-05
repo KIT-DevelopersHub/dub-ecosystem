@@ -20,6 +20,8 @@ export const LIST_KEY: QueryKey = queryKeys.feature("participation", "list");
 /** 組織図(体制図)/名簿を描く members overview のキー。反映確定後に無効化して再描画する。 */
 export const MEMBERS_OVERVIEW_KEY: QueryKey = queryKeys.feature("members", "overview");
 export const CANDIDATES_KEY = (id: string): QueryKey => queryKeys.feature("participation", "candidates", id);
+/** 全参加届の突合候補をまとめて無効化する前方一致キー（react-query は prefix 一致）。 */
+export const CANDIDATES_PREFIX: QueryKey = queryKeys.feature("participation", "candidates");
 
 export function useParticipationTeams() {
   const api = useParticipationApi();
@@ -108,6 +110,10 @@ export function useResolveParticipation() {
       // サーバ確定値へ同期＋組織図(重複なし昇格/新ノード)を再描画。
       void qc.invalidateQueries({ queryKey: LIST_KEY });
       void qc.invalidateQueries({ queryKey: MEMBERS_OVERVIEW_KEY });
+      // 突合候補は全参加届ぶん破棄する: link はメンバーの version を +1 するので、他の
+      // 参加届のキャッシュに残った古い expectedVersion を次の確定で送ると 409
+      // (MEMBER_VERSION_CONFLICT) になる。
+      void qc.invalidateQueries({ queryKey: CANDIDATES_PREFIX });
     },
   });
 }

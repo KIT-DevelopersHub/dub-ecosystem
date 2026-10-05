@@ -364,6 +364,15 @@ const JA_BY_CODE: Record<string, string> = {
   NETWORK_ERROR: "ネットワークに接続できませんでした。",
   INTERNAL: "サーバーでエラーが発生しました。",
   CLIENT_CONTRACT_MISMATCH: "予期しない応答を受け取りました。",
+  // member-service (運営メンバー / 参加届)。訳が無いとサーバの英語 message がそのまま
+  // トーストに出て「ただエラーが出た」ように見えるので、原因が分かる日本語を必ず持たせる。
+  MEMBER_NOT_FOUND: "対象の運営メンバーが見つかりませんでした。一覧を再読み込みしてください。",
+  MEMBER_TEAM_NOT_FOUND: "対象のチームが見つかりませんでした。一覧を再読み込みしてください。",
+  MEMBER_VERSION_CONFLICT: "他の変更と競合しました。一覧を再読み込みしてからもう一度お試しください。",
+  MEMBER_PARTICIPATION_NOT_FOUND: "対象の参加届が見つかりませんでした。一覧を再読み込みしてください。",
+  MEMBER_PARTICIPATION_ALREADY_LINKED:
+    "この運営メンバーは既に別の参加届に紐付いています。別の人を選ぶか、新規メンバーとして追加してください。",
+  MEMBER_IDENTITY_ALREADY_LINKED: "このアカウントは既に別の運営メンバーに紐付いています。",
 };
 
 export function toDisplayableError(e: ApiError): DisplayableError {

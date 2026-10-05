@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
+import { ApiError, type ApiClient, type RequestInput } from "../../lib/api-client.tsx";
 import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { createParticipationApi, type ParticipationApi } from "./participationApi.tsx";
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
@@ -292,6 +292,72 @@ describe("ParticipationListPage", () => {
     await waitFor(() =>
       expect(resolve).toHaveBeenCalledWith("p_1", { action: "link", memberId: "m_manual", expectedVersion: 5 }),
     );
+  });
+
+  // 二重紐付け (サーバ 409 MEMBER_PARTICIPATION_ALREADY_LINKED) の再発防止。
+  // 以前は「押せるのに必ず 409 で失敗する」ボタンが出ており、英語のトーストだけが見えていた。
+  it("他の参加届に反映済みのメンバーは 手動検索で『紐付け済み』になり選べない", async () => {
+    const taken = rosterMember({ id: "m_taken", name: "黒川", status: "added", version: 7 });
+    // p_2 が既に m_taken を押さえている（reviewState=added + memberId）。
+    const OTHER: Participation = { ...SUBMISSION, id: "p_2", name: "別提出", reviewState: "added", memberId: "m_taken" };
+    const resolve = vi.fn();
+    const api = makeApi({
+      list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION, OTHER] })),
+      candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
+      overview: vi.fn(() => Promise.resolve({ teams: [], members: [taken] })),
+      resolve,
+    });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-add-p_1"));
+    await userEvent.click(await screen.findByTestId("participation-resolve-manual"));
+    const row = await screen.findByTestId("participation-manual-link-m_taken");
+    expect(screen.getByTestId("participation-taken-m_taken")).toHaveTextContent("「別提出」の参加届に紐付け済み");
+    expect((row as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(row);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("他の参加届に反映済みのメンバーは 自動候補でも選べない", async () => {
+    const candidate: ParticipationCandidate = {
+      memberId: "m_taken", name: "黒川", status: "invited", schoolEmail: "kurokawa@school.ac.jp",
+      gmail: null, version: 3, matchedBy: ["email"],
+    };
+    const OTHER: Participation = { ...SUBMISSION, id: "p_2", name: "別提出", reviewState: "added", memberId: "m_taken" };
+    const resolve = vi.fn();
+    const api = makeApi({
+      list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION, OTHER] })),
+      candidates: vi.fn(() => Promise.resolve({ candidates: [candidate] })),
+      resolve,
+    });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-add-p_1"));
+    const button = await screen.findByTestId("participation-link-m_taken");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(button);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("反映確定のエラーは日本語で理由が出る (409 already linked)", async () => {
+    const resolve = vi.fn(() =>
+      Promise.reject(
+        new ApiError(409, {
+          error: {
+            code: "MEMBER_PARTICIPATION_ALREADY_LINKED",
+            message: "member m_x is already linked to another 参加届",
+            retryable: false,
+          },
+        }),
+      ),
+    );
+    const api = makeApi({
+      list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })),
+      candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
+      resolve,
+    });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-add-p_1"));
+    await userEvent.click(await screen.findByTestId("participation-resolve-create"));
+    expect(await screen.findByText(/既に別の参加届に紐付いています/)).toBeInTheDocument();
   });
 
   it("「しない」→ 確認 → 対象外 (skip) を確定する", async () => {

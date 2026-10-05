@@ -18,6 +18,11 @@ import styles from "./participation.module.css";
 /** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
 type LinkTarget = { memberId: string; version: number };
 
+/** 「このメンバーは既に別の参加届に反映済み」の索引: memberId -> 反映元の参加届。
+ *  サーバは 1メンバー=1参加届 を 409 (MEMBER_PARTICIPATION_ALREADY_LINKED) で守るので、
+ *  UI 側でも同じ相手を選べないようにして「押しても必ず失敗する」導線を消す。 */
+type LinkedIndex = Map<string, { participationId: string; name: string }>;
+
 const STATUS_LABEL: Partial<Record<MemberStatus, string>> = {
   invited: "招待中",
   considering: "検討中",
@@ -82,6 +87,15 @@ export function ParticipationListPage(): JSX.Element {
     const map = new Map((teamsQuery.data?.teams ?? []).map((t) => [t.id, t.name]));
     return (id: string | null): string => (id ? (map.get(id) ?? id) : "—");
   }, [teamsQuery.data]);
+
+  // 反映済み(added)の参加届が押さえているメンバー。紐付け候補から除外する材料。
+  const linkedIndex = useMemo<LinkedIndex>(() => {
+    const idx: LinkedIndex = new Map();
+    for (const p of list.data?.participations ?? []) {
+      if (p.reviewState === "added" && p.memberId) idx.set(p.memberId, { participationId: p.id, name: p.name });
+    }
+    return idx;
+  }, [list.data]);
 
   const doResolve = (id: string, body: Parameters<typeof resolveMut.mutate>[0]["body"]): void => {
     resolveMut.mutate({ id, body });
@@ -170,6 +184,7 @@ export function ParticipationListPage(): JSX.Element {
       {addTarget ? (
         <ResolveDialog
           participation={addTarget}
+          linkedIndex={linkedIndex}
           pending={resolveMut.isPending}
           onCancel={() => setAddTarget(null)}
           onLink={(t) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version })}
@@ -203,6 +218,7 @@ export function ParticipationListPage(): JSX.Element {
  *  氏名/メールでインクリメンタル検索し、自動一致に載らない相手(漢字違い等)にも link できる。 */
 function ResolveDialog({
   participation,
+  linkedIndex,
   pending,
   onCancel,
   onLink,
@@ -210,6 +226,7 @@ function ResolveDialog({
   onSkip,
 }: {
   participation: Participation;
+  linkedIndex: LinkedIndex;
   pending: boolean;
   onCancel: () => void;
   onLink: (target: LinkTarget) => void;
@@ -221,6 +238,11 @@ function ResolveDialog({
   const candidates = candidatesQuery.data?.candidates ?? [];
   const loading = candidatesQuery.isLoading;
   const hasCandidates = !loading && !candidatesQuery.isError && candidates.length > 0;
+  // 自分自身の反映先は「紐付け済み」扱いにしない（再確定で自爆させない）。
+  const takenBy = (memberId: string): string | null => {
+    const hit = linkedIndex.get(memberId);
+    return hit && hit.participationId !== participation.id ? hit.name : null;
+  };
 
   return (
     <Modal
@@ -239,6 +261,7 @@ function ResolveDialog({
         {manual ? (
           <ManualLinkPanel
             participation={participation}
+            takenBy={takenBy}
             pending={pending}
             onLink={onLink}
             onBack={() => setManual(false)}
@@ -254,7 +277,7 @@ function ResolveDialog({
             </p>
             <ul className={styles.candidateList} data-testid="participation-candidates">
               {candidates.map((c) => (
-                <CandidateRow key={c.memberId} c={c} pending={pending} onLink={onLink} />
+                <CandidateRow key={c.memberId} c={c} takenBy={takenBy(c.memberId)} pending={pending} onLink={onLink} />
               ))}
             </ul>
             <div className={styles.resolveDivider}>または</div>
@@ -290,7 +313,18 @@ function ResolveDialog({
   );
 }
 
-function CandidateRow({ c, pending, onLink }: { c: ParticipationCandidate; pending: boolean; onLink: (t: LinkTarget) => void }): JSX.Element {
+function CandidateRow({
+  c,
+  takenBy,
+  pending,
+  onLink,
+}: {
+  c: ParticipationCandidate;
+  /** 既に反映済みの別の参加届の提出者名（紐付け不可）。null なら選べる。 */
+  takenBy: string | null;
+  pending: boolean;
+  onLink: (t: LinkTarget) => void;
+}): JSX.Element {
   return (
     <li className={styles.candidateRow}>
       <div className={styles.candidateInfo}>
@@ -299,6 +333,7 @@ function CandidateRow({ c, pending, onLink }: { c: ParticipationCandidate; pendi
           <Badge tone={STATUS_TONE[c.status] ?? "neutral"} testId={`participation-candidate-status-${c.memberId}`}>
             {STATUS_LABEL[c.status] ?? c.status}
           </Badge>
+          <LinkedBadge memberId={c.memberId} takenBy={takenBy} />
         </span>
         <span className={styles.candidateMeta}>
           {[c.schoolEmail, c.gmail].filter(Boolean).join(" / ") || "メール未登録"}
@@ -308,6 +343,7 @@ function CandidateRow({ c, pending, onLink }: { c: ParticipationCandidate; pendi
       <Button
         size="sm"
         variant="primary"
+        disabled={takenBy !== null}
         loading={pending}
         onClick={() => onLink({ memberId: c.memberId, version: c.version })}
         testId={`participation-link-${c.memberId}`}
@@ -318,16 +354,33 @@ function CandidateRow({ c, pending, onLink }: { c: ParticipationCandidate; pendi
   );
 }
 
+/** 「他の参加届に紐付け済み」タグ（fe7 の アカウント紐付けダイアログと同じ扱い）。 */
+function LinkedBadge({ memberId, takenBy }: { memberId: string; takenBy: string | null }): JSX.Element | null {
+  if (takenBy === null) return null;
+  // 外側の静的 data-testid は demo/staging の liveness マーカー（ASCII・機能固有）。
+  // 内側は従来どおり memberId 付きで、個別の行を指すテストが使う。
+  return (
+    <span data-testid="participation-already-linked">
+      <Badge tone="neutral" testId={`participation-taken-${memberId}`}>
+        「{takenBy}」の参加届に紐付け済み
+      </Badge>
+    </span>
+  );
+}
+
 /** 名簿から手動で紐付ける相手を選ぶパネル。氏名/メールでインクリメンタル検索し、
- *  招待中/検討中/在籍を1人選んで link する（辞退・退任は除外）。既に他の参加届に反映済み
- *  の在籍者へ紐付けるとサーバが 409 で弾く（二重紐付け防止）。 */
+ *  招待中/検討中/在籍を1人選んで link する（辞退は除外）。既に他の参加届へ反映済みの
+ *  メンバーは `紐付け済み` タグを付けて選択不可にする（サーバの 409 二重紐付けガードを
+ *  UI 側で先に見せる — 押せるのに必ず失敗するボタンを出さない）。 */
 function ManualLinkPanel({
   participation,
+  takenBy,
   pending,
   onLink,
   onBack,
 }: {
   participation: Participation;
+  takenBy: (memberId: string) => string | null;
   pending: boolean;
   onLink: (target: LinkTarget) => void;
   onBack: () => void;
@@ -376,6 +429,7 @@ function ManualLinkPanel({
                 <span className={styles.candidateName}>
                   {m.name}
                   <Badge tone={STATUS_TONE[m.status] ?? "neutral"}>{STATUS_LABEL[m.status] ?? m.status}</Badge>
+                  <LinkedBadge memberId={m.id} takenBy={takenBy(m.id)} />
                 </span>
                 <span className={styles.candidateMeta}>
                   {[m.schoolEmail, m.gmail].filter(Boolean).join(" / ") || "メール未登録"}
@@ -384,6 +438,7 @@ function ManualLinkPanel({
               <Button
                 size="sm"
                 variant="primary"
+                disabled={takenBy(m.id) !== null}
                 loading={pending}
                 onClick={() => onLink({ memberId: m.id, version: m.version })}
                 testId={`participation-manual-link-${m.id}`}
