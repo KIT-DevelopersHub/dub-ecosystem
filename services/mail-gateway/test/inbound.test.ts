@@ -22,6 +22,11 @@ function rawMessage(over: Partial<RawInbound> = {}, headers: Record<string, stri
   };
 }
 
+// The production owner-address policy (buildInboundDeps): archive@ is auto-CC'd on every
+// outbound send so it must never own a message; info@ is a real shared inbox but must not
+// outrank an individually-addressed recipient.
+const POLICY = { archiveAddress: "archive@developershub.jp", sharedAddress: "info@developershub.jp" };
+
 describe("parseInbound", () => {
   it("normalizes into the frozen MailMessage DTO", () => {
     const parsed = parseInbound(rawMessage());
@@ -48,11 +53,34 @@ describe("parseInbound", () => {
   it("lists owner candidates envelope-first, then the To: header", () => {
     const parsed = parseInbound(
       rawMessage({ to: "makoto.yoshioka@developershub.jp" }, { to: "client@outside.com, other@outside.com" }),
+      POLICY,
     );
     expect(parsed.ownerCandidates.map((a) => a.email)).toEqual([
       "makoto.yoshioka@developershub.jp", // envelope recipient wins the first lookup
       "client@outside.com",
       "other@outside.com",
+    ]);
+  });
+
+  it("never offers the archive address as an owner candidate (read_all 専用の控え)", () => {
+    const parsed = parseInbound(
+      rawMessage(
+        { to: "archive@developershub.jp" },
+        { to: "client@outside.com", cc: "archive@developershub.jp" },
+      ),
+      POLICY,
+    );
+    expect(parsed.ownerCandidates.map((a) => a.email)).toEqual(["client@outside.com"]);
+  });
+
+  it("demotes the shared system address below the To: header", () => {
+    const parsed = parseInbound(
+      rawMessage({ to: "info@developershub.jp" }, { to: "makoto.yoshioka@developershub.jp" }),
+      POLICY,
+    );
+    expect(parsed.ownerCandidates.map((a) => a.email)).toEqual([
+      "makoto.yoshioka@developershub.jp", // the real addressee wins
+      "info@developershub.jp", // shared alias only as a last resort
     ]);
   });
 
@@ -134,10 +162,14 @@ describe("handleInbound", () => {
 // the ENVELOPE recipient (what Email Routing delivered to) must win over the To: header,
 // which names an external address whenever we are only in CC/BCC.
 describe("handleInbound owner resolution (envelope-first)", () => {
-  // The roster: only these two addresses map to a user. Everything else is non-roster.
+  // The roster: these addresses map to a user; everything else is non-roster. archive@ and
+  // info@ ARE real roster users in prod — identity-roster provisions one active user per
+  // Email-Routing literal address — which is exactly why the policy must exclude/demote
+  // them rather than trust that a lookup will miss.
   const roster = {
     usr_makoto: { email: "makoto.yoshioka@developershub.jp" },
     usr_info: { email: "info@developershub.jp" },
+    usr_archive: { email: "archive@developershub.jp" },
   };
   function ownerOf(h: ReturnType<typeof makeHarness>): string | null {
     const row = h.raw.prepare(`SELECT owner_user_id FROM mail_inbound`).get() as
@@ -190,6 +222,50 @@ describe("handleInbound owner resolution (envelope-first)", () => {
       rawMessage({ to: "makoto.yoshioka@developershub.jp" }, { to: crowd }),
     );
     expect(ownerOf(h)).toBe("usr_makoto");
+  });
+
+  it("keeps the archive copy ownerless so it stays mail:read_all-only (全社員の送信控えを個人受信箱にしない)", async () => {
+    const h = makeHarness();
+    // Every outbound send auto-CCs archive@, and that copy is routed back into this
+    // Worker: envelope = archive@, To: = the original external recipient. archive@ is a
+    // real roster user, so only the policy keeps this out of an ordinary Inbox.
+    await handleInbound(
+      depsWithRoster(h),
+      rawMessage({ to: "archive@developershub.jp" }, { to: "client@outside.com", cc: "archive@developershub.jp" }),
+    );
+    expect(ownerOf(h)).toBeNull();
+    expect((await listInbound(h.db, { ownerUserId: "usr_archive", limit: 10 })).items).toHaveLength(0);
+  });
+
+  it("gives an individually-addressed message to the individual, not the shared alias", async () => {
+    const h = makeHarness();
+    // Routed through the shared info@ alias but addressed To: a person: the person must
+    // keep it (and it must not surface in the shared account's Inbox).
+    await handleInbound(
+      depsWithRoster(h),
+      rawMessage({ to: "info@developershub.jp" }, { to: "makoto.yoshioka@developershub.jp" }),
+    );
+    expect(ownerOf(h)).toBe("usr_makoto");
+    expect((await listInbound(h.db, { ownerUserId: "usr_info", limit: 10 })).items).toHaveLength(0);
+  });
+
+  it("still lets the shared alias own a message nobody else claims (CC/BCC で info@ に届いた分)", async () => {
+    const h = makeHarness();
+    await handleInbound(
+      depsWithRoster(h),
+      rawMessage({ to: "info@developershub.jp" }, { to: "client@outside.com" }),
+    );
+    expect(ownerOf(h)).toBe("usr_info");
+  });
+
+  it("does not let the envelope candidate shrink the To: lookup budget", async () => {
+    const h = makeHarness();
+    // A distinct (non-roster) envelope address plus the full 5-address To: budget, with
+    // the legitimate recipient last. If the envelope candidate ate a slot from the old
+    // 5-lookup cap, info@ would fall out of range and the message would go ownerless.
+    const to = [...Array.from({ length: 4 }, (_, i) => `bulk${i}@outside.com`), "info@developershub.jp"].join(", ");
+    await handleInbound(depsWithRoster(h), rawMessage({ to: "catch-all@developershub.jp" }, { to }));
+    expect(ownerOf(h)).toBe("usr_info");
   });
 
   it("does not let repeated addresses consume lookup slots", async () => {

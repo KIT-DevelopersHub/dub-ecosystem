@@ -13,6 +13,13 @@
 -- (shared alias / departed member) rather than being guessed at -- never widen the mail
 -- visibility boundary on a guess.
 --
+-- archive@ is EXCLUDED, matching the runtime policy (src/types.ts OwnerAddressPolicy):
+-- every outbound send is auto-CC'd to archive@ and the copy is routed back in, so those
+-- rows are mail:read_all oversight material. archive@ is itself an active roster user
+-- (identity-roster provisions one user per Email-Routing address), so without this guard
+-- the backfill would turn the whole company's sent mail into one account's Inbox.
+-- Keep this predicate in sync with MAIL_ARCHIVE_CC if that var is ever changed.
+--
 -- RUN (requires explicit owner approval -- do NOT run unprompted):
 --   1. dry run, count first:
 --      wrangler d1 execute dub-identity --remote --command "$(cat <<'SQL'
@@ -21,14 +28,16 @@
 --        LEFT JOIN identity_users u
 --          ON u.status = 'active'
 --         AND lower(u.email) = lower(i.mailbox) || '@developershub.jp'
+--         AND lower(i.mailbox) <> 'archive'
 --       WHERE i.owner_user_id IS NULL;
 --      SQL
 --      )"
 --   2. apply this file:
 --      wrangler d1 execute dub-identity --remote --file services/mail-gateway/scripts/backfill-inbound-owner.sql
---   3. verify no recoverable rows remain (expect 0):
+--   3. verify no recoverable rows remain (expect 0; archive@ rows stay NULL by design):
 --      wrangler d1 execute dub-identity --remote --command \
---        "SELECT COUNT(*) FROM mail_inbound WHERE owner_user_id IS NULL AND mailbox IS NOT NULL;"
+--        "SELECT COUNT(*) FROM mail_inbound WHERE owner_user_id IS NULL \
+--           AND mailbox IS NOT NULL AND lower(mailbox) <> 'archive';"
 --
 -- Use the same database the mail-gateway Worker's DB binding points at (prod: the
 -- aggregated infra/d1 database that holds both mail_ and identity_ tables).
@@ -44,6 +53,7 @@ UPDATE mail_inbound
  WHERE owner_user_id IS NULL
    AND mailbox IS NOT NULL
    AND mailbox <> ''
+   AND lower(mailbox) <> 'archive'   -- read_all-only compliance copies stay ownerless
    AND EXISTS (
          SELECT 1
            FROM identity_users u

@@ -21,7 +21,7 @@ import { insertInbound, newInboundId, resolveThreadId, seenInbound } from "./rep
 import { persistAttachments, persistDroppedAttachments, type DroppedReason } from "./attachments";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
-import type { InboundDeps, ParsedInbound } from "./types";
+import type { InboundDeps, OwnerAddressPolicy, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
 
 function stripAngle(id: string): string {
@@ -56,7 +56,7 @@ function localPart(address: string): string | null {
  * it is unit-testable without the Worker runtime. threadId = first References token,
  * else In-Reply-To, else the message's own Message-Id (a new thread).
  */
-export function parseInbound(raw: RawInbound): ParsedInbound {
+export function parseInbound(raw: RawInbound, policy: OwnerAddressPolicy = {}): ParsedInbound {
   const h = raw.headers;
   const messageId = firstRef(h["message-id"]) ?? `nomsgid-${ulid()}`;
   const threadId = firstRef(h["references"]) ?? firstRef(h["in-reply-to"]) ?? messageId;
@@ -84,16 +84,56 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
   // thread id against messages we already have on record (改善#3).
   const references = [...allRefs(h["references"]), ...allRefs(h["in-reply-to"])];
 
-  // Owner candidates, envelope recipient FIRST. raw.to is the address Email Routing
-  // actually delivered this copy to, so it is the authoritative owner signal; the To:
-  // header is only a hint and names an external address whenever we are in CC/BCC.
-  // (owner.ts dedups and caps the lookups, so a long To: header cannot crowd it out.)
-  const ownerCandidates = [parseAddress(raw.to), ...message.to];
-
   // Body is persisted for the inbox detail view (frozen MailMessage still carries only
   // the snippet). Email Routing hands us the raw RFC822 as text; we keep the plain-text
   // body. HTML-part extraction is out of this slice's scope → htmlBody stays null.
-  return { message, loop, mailbox: localPart(raw.to), bodyText: extractBody(raw.rawText), htmlBody: null, references, ownerCandidates };
+  return {
+    message,
+    loop,
+    mailbox: localPart(raw.to),
+    bodyText: extractBody(raw.rawText),
+    htmlBody: null,
+    references,
+    ownerCandidates: ownerCandidatesFor(parseAddress(raw.to), message.to, policy),
+  };
+}
+
+function normAddr(value: string | null | undefined): string | null {
+  const v = value?.trim().toLowerCase();
+  return v ? v : null;
+}
+
+/**
+ * Build the ordered owner-resolution candidate list (see OwnerAddressPolicy and owner.ts).
+ *
+ *   1. the envelope recipient — UNLESS it is the archive or the shared system address
+ *   2. the To: header addresses, in order — the archive address filtered out
+ *   3. the envelope recipient when it IS the shared system address (last resort)
+ *
+ * The archive address never appears: the auto-CC'd copy of every outbound send is
+ * delivered there, and it is read_all-only oversight material, not an owned inbox.
+ */
+function ownerCandidatesFor(
+  envelope: mail.MailAddress,
+  headerTo: readonly mail.MailAddress[],
+  policy: OwnerAddressPolicy,
+): mail.MailAddress[] {
+  const archive = normAddr(policy.archiveAddress);
+  const shared = normAddr(policy.sharedAddress);
+  const envelopeEmail = normAddr(envelope.email);
+  const isArchive = !!archive && envelopeEmail === archive;
+  const isShared = !!shared && envelopeEmail === shared;
+
+  const candidates: mail.MailAddress[] = [];
+  if (envelopeEmail && !isArchive && !isShared) candidates.push(envelope);
+  for (const a of headerTo) {
+    if (archive && normAddr(a.email) === archive) continue;
+    candidates.push(a);
+  }
+  // A shared alias IS a real inbox, so it may own a message — but only after the To:
+  // header, so mail addressed to an individual is never hijacked by the shared account.
+  if (isShared) candidates.push(envelope);
+  return candidates;
 }
 
 /**
@@ -101,7 +141,10 @@ export function parseInbound(raw: RawInbound): ParsedInbound {
  * publish mail.message.received. Returns whether it was newly processed.
  */
 export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
-  const parsed = parseInbound(raw);
+  const parsed = parseInbound(raw, {
+    archiveAddress: deps.archiveAddress ?? null,
+    sharedAddress: deps.sharedAddress ?? null,
+  });
   const { message, loop, mailbox, bodyText, htmlBody, references, ownerCandidates } = parsed;
 
   // Normalize the thread id against messages we already have (改善#3): if any referenced
