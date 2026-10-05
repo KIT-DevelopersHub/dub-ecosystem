@@ -59,7 +59,11 @@ describe("feature phase state machine", () => {
     expect(transition("staging_rejected", "demo_building")).toBe("demo_building");
   });
 
-  it("prod_shipped is terminal", () => {
-    expect(allowedTransitions("prod_shipped")).toHaveLength(0);
+  it("prod_shipped は終端ではなく、demo やり直しの1本だけ出口を持つ", () => {
+    // 本番反映後に不備が見つかっても同じタスクで直せる。ただし demo→staging→本番を
+    // 再走させる1本だけ（本番への直行辺は無い＝段飛ばし禁止は不変）。
+    expect(allowedTransitions("prod_shipped").map((t) => t.to)).toEqual(["demo_building"]);
+    expect(transition("prod_shipped", "demo_building")).toBe("demo_building");
+    expect(canTransition("prod_shipped", "staging_deployed")).toBe(false);
   });
 });

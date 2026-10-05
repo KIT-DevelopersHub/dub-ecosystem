@@ -129,8 +129,11 @@ describe("commander-service phase gate", () => {
       "staging_review",
       "prod_shipped",
     ]);
-    // prod_shipped is terminal: no further edges offered.
-    expect(detail.json.allowedTransitions).toHaveLength(0);
+    // 本番反映済でもタスクは生きている: 追加指示で demo からやり直す1本だけ出口が残る
+    // （本番へ直行する辺は無い = 段飛ばし禁止は不変）。
+    expect(detail.json.allowedTransitions.map((t: { to: string }) => t.to)).toEqual([
+      "demo_building",
+    ]);
   });
 
   it("rejects an unknown target phase with 400", async () => {

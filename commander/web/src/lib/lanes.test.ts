@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveLane, groupByLane, type Lane } from "./lanes.ts";
+import { deriveLane, groupByLane, isArchived, type Lane } from "./lanes.ts";
 import type { BoardItem, FeaturePhase, RunStatus } from "./commanderApi.ts";
 
 function item(
@@ -51,13 +51,24 @@ describe("deriveLane", () => {
     expect(deriveLane(item({ phase: "staging_rejected", run: "succeeded" }))).toBe<Lane>("needs_fix");
   });
 
-  it("prod_shipped shows本番反映の進行: running→running(本番反映中), failed→needs_fix, else→done", () => {
-    // 本番承認も staging と同じ進行UIに繋ぐ: 反映 run が走行中なら done へ飛ばさず走行中に見せる。
+  it("prod_shipped shows本番反映の進行: running→running(本番反映中), failed→needs_fix, else→shipped", () => {
+    // 本番承認も staging と同じ進行UIに繋ぐ: 反映 run が走行中なら完了へ飛ばさず走行中に見せる。
     expect(deriveLane(item({ phase: "prod_shipped", run: "running" }))).toBe<Lane>("running");
     expect(deriveLane(item({ phase: "prod_shipped", run: "pending" }))).toBe<Lane>("running");
     expect(deriveLane(item({ phase: "prod_shipped", run: "failed" }))).toBe<Lane>("needs_fix");
-    expect(deriveLane(item({ phase: "prod_shipped", run: "succeeded" }))).toBe<Lane>("done");
-    expect(deriveLane(item({ phase: "prod_shipped", run: null }))).toBe<Lane>("done");
+    expect(deriveLane(item({ phase: "prod_shipped", run: "succeeded" }))).toBe<Lane>("shipped");
+    expect(deriveLane(item({ phase: "prod_shipped", run: null }))).toBe<Lane>("shipped");
+  });
+
+  it("本番反映済(生きている)とアーカイブ済(完了)を分ける", () => {
+    // 完了レーンに入るのは taskStatus=done だけ。prod_shipped は 本番反映済 に留まり、
+    // 追加指示を出せる状態のまま残る（勝手に完了させない）。
+    const shipped = item({ phase: "prod_shipped", run: "succeeded" });
+    expect(deriveLane(shipped)).toBe<Lane>("shipped");
+    expect(isArchived(shipped)).toBe(false);
+    const archived = item({ phase: "prod_shipped", taskStatus: "done", run: "succeeded" });
+    expect(deriveLane(archived)).toBe<Lane>("done");
+    expect(isArchived(archived)).toBe(true);
   });
 
   it("archived prod task (taskStatus done) → done even while a run is in flight", () => {

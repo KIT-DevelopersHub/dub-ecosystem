@@ -149,7 +149,7 @@ killされた run は `failed`（理由を error イベントで先出し）。`
 ## 開発（型/テスト/ビルド）
 
 ```
-pnpm --filter @dub/commander-phases  test      # フェーズ FSM（happy/段飛ばし/未承認/終端）
+pnpm --filter @dub/commander-phases  test      # フェーズ FSM（happy/段飛ばし/未承認/本番後のやり直し）
 pnpm --filter @dub/commander-service test      # フェーズゲート API（409/403 を実 SQLite で実測）
 pnpm --filter @dub/commander-daemon  test      # phases(re-export) + runner(exec bridge)
 pnpm --filter @dub/commander-web     test      # 実行コンソール ＋ フェーズ管理 UI

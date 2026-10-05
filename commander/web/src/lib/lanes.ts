@@ -5,16 +5,24 @@
 // core rule can't silently drift.
 import type { BoardItem } from "./commanderApi.ts";
 
-export type Lane = "queued" | "running" | "review" | "needs_fix" | "done";
+export type Lane = "queued" | "running" | "review" | "needs_fix" | "shipped" | "done";
 
-export const LANES: readonly Lane[] = ["queued", "running", "review", "needs_fix", "done"];
+export const LANES: readonly Lane[] = [
+  "queued",
+  "running",
+  "review",
+  "needs_fix",
+  "shipped",
+  "done",
+];
 
 export const LANE_LABELS: Record<Lane, string> = {
   queued: "投入待ち",
   running: "走行中",
   review: "確認待ち",
   needs_fix: "要修正",
-  done: "完了",
+  shipped: "本番反映済",
+  done: "完了（アーカイブ）",
 };
 
 /** Accent colour per lane (design §6 state-visibility cues). */
@@ -23,17 +31,26 @@ export const LANE_COLORS: Record<Lane, string> = {
   running: "var(--dub-color-info-500, #3b82f6)",
   review: "var(--dub-color-warning-500, #d0870b)",
   needs_fix: "var(--dub-color-danger-500, #e5484d)",
-  done: "var(--dub-color-success-500, #30a46c)",
+  shipped: "var(--dub-color-success-500, #30a46c)",
+  // アーカイブ済は"もう触らない"列なので彩度を落とす（本番反映済の緑と混同させない）。
+  done: "var(--dub-color-gray-500, #6b7280)",
 };
+
+/** アーカイブ済み（ユーザーが明示的に「完了」した）タスクか。 */
+export function isArchived(item: BoardItem): boolean {
+  return item.taskStatus === "done";
+}
 
 /**
  * Derive the board lane for one task.
  *
  * Order matters — it encodes precedence:
- *  1. done      = task archived (taskStatus done).
+ *  1. done      = task archived (taskStatus done) — the ONLY way into 完了. これだけが
+ *                 「もう触らない」状態で、フェーズは終了条件ではない。
  *  2. prod_shipped = 本番反映: a prod-deploy run may still be in flight, so we show its
  *                 progress — running=本番反映中(走行中) / failed=反映失敗(要修正) — and only
- *                 land in 完了 once the run settles (or when there is no deploy run).
+ *                 land in 本番反映済 once the run settles (or when there is no deploy run).
+ *                 本番反映済はまだ生きているタスク（追加指示を出せる）＝完了とは別レーン。
  *  3. needs_fix = feature was rejected (demo/staging) OR the latest run failed.
  *  4. queued    = no run has been started yet.
  *  5. running   = latest run is pending/running.
@@ -41,14 +58,14 @@ export const LANE_COLORS: Record<Lane, string> = {
  */
 export function deriveLane(item: BoardItem): Lane {
   // Archived tasks are always done, whatever the phase/run.
-  if (item.taskStatus === "done") return "done";
+  if (isArchived(item)) return "done";
   const run = item.latestRun;
   // 本番承認は staging と同じ進行UIに繋ぐ: prod_shipped でも実 run が走行中なら「本番反映中」
   // として走行中に見せ、成功で完了 / 失敗で要修正に落とす（先に done へ飛ばさない）。
   if (item.featurePhase === "prod_shipped") {
     if (run && (run.status === "pending" || run.status === "running")) return "running";
     if (run && run.status === "failed") return "needs_fix";
-    return "done";
+    return "shipped";
   }
   if (item.featurePhase === "demo_rejected" || item.featurePhase === "staging_rejected") {
     return "needs_fix";
@@ -67,6 +84,7 @@ export function groupByLane(items: BoardItem[]): Record<Lane, BoardItem[]> {
     running: [],
     review: [],
     needs_fix: [],
+    shipped: [],
     done: [],
   };
   for (const item of items) out[deriveLane(item)].push(item);

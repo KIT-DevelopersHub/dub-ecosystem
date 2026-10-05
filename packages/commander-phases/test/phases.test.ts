@@ -24,11 +24,16 @@ describe("commander feature phase state machine", () => {
     expect(isFeaturePhase(42)).toBe(false);
   });
 
-  it("prod_shipped is terminal; others are not", () => {
-    expect(isTerminal("prod_shipped")).toBe(true);
-    for (const p of PHASES.filter((p) => p !== "prod_shipped")) {
-      expect(isTerminal(p)).toBe(false);
-    }
+  it("has no terminal phase: 本番反映済でも追加指示で demo に戻せる", () => {
+    for (const p of PHASES) expect(isTerminal(p)).toBe(false);
+  });
+
+  it("prod_shipped の出口は demo やり直しの1本だけ(本番直行の辺を生やさない)", () => {
+    expect(allowedTransitions("prod_shipped").map((t) => t.to)).toEqual(["demo_building"]);
+    expect(transition("prod_shipped", "demo_building")).toBe("demo_building");
+    // 段飛ばし: 本番反映済から staging/本番へ直接は戻せない/進めない。
+    expect(canTransition("prod_shipped", "staging_deployed")).toBe(false);
+    expect(canTransition("prod_shipped", "prod_shipped")).toBe(false);
   });
 
   it("allows the happy-path edges", () => {

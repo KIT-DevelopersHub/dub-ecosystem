@@ -88,6 +88,10 @@ export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promis
     operatorToken: "",
     idleTimeoutMs: 0,
     runTimeoutMs: 0,
+    // Mirror the daemon's production defaults so the BDD suite exercises the shipped
+    // behaviour: the spawned CLI gets the minimal allow-listed env (PATH/HOME survive, so
+    // the node fixtures still resolve) and the acceptEdits flag. claudeConfigDir stays ""
+    // (redirect disabled) — tests must not depend on a real Claude config home.
     isolateEnv: true,
     claudeConfigDir: "",
     permissionMode: "acceptEdits",

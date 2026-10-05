@@ -17,7 +17,7 @@ import {
   type RunHistoryApi,
 } from "./lib/commanderApi.ts";
 import { useRunStream } from "./lib/useRunStream.ts";
-import { deriveLane, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import { deriveLane, isArchived, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
 import {
   reflectionOf,
   reflectionLabel,
@@ -32,7 +32,7 @@ import { btnDanger, btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
 function inFlightLabel(kind: InFlight, to: FeaturePhase | null): string {
   if (kind === "approve") {
     if (to === "staging_deployed") return "staging に反映中… 完了すると『確認待ち』に移ります";
-    if (to === "prod_shipped") return "本番に反映中… 完了すると『完了』に移ります";
+    if (to === "prod_shipped") return "本番に反映中… 完了すると『本番反映済』に移ります";
     return "反映中…";
   }
   if (kind === "reject") return "却下を記録し、修正 run を起動中…";
@@ -119,6 +119,10 @@ export function TaskDrawer(props: TaskDrawerProps) {
 
   if (!item) return null;
   const lane = deriveLane(item);
+  // 「もう触らない」の唯一の判定はユーザーの明示アーカイブ。本番反映済(prod_shipped)は
+  // まだ生きているタスクなので、不備が見つかったら追加指示で直せる状態に保つ。
+  const archived = isArchived(item);
+  const shipped = item.featurePhase === "prod_shipped";
   const reflection = reflectionOf(item);
   const approvalEdge = detail?.allowedTransitions.find((tr) => tr.requiresApproval) ?? null;
   const rejectEdge =
@@ -327,7 +331,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               却下（要修正・再投げ）
             </button>
           )}
-          {lane !== "running" && lane !== "done" && (
+          {lane !== "running" && !archived && (
             <button
               type="button"
               data-testid="action-rerun"
@@ -335,7 +339,11 @@ export function TaskDrawer(props: TaskDrawerProps) {
               onClick={() => setRerunOpen((v) => !v)}
               style={btnGhost}
             >
-              {lane === "needs_fix" ? "修正して再実行" : "追加指示"}
+              {lane === "needs_fix"
+                ? "修正して再実行"
+                : shipped
+                  ? "追加指示（demo からやり直し）"
+                  : "追加指示"}
             </button>
           )}
           {lane === "running" && item.latestRun && (
@@ -348,7 +356,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               中止
             </button>
           )}
-          {lane !== "done" && (
+          {!archived && (
             <button
               type="button"
               data-testid="action-archive"
@@ -461,6 +469,23 @@ export function TaskDrawer(props: TaskDrawerProps) {
         {/* additional instruction / fix re-run */}
         {rerunOpen && (
           <div data-testid="rerun-form" style={{ display: "flex", flexDirection: "column", gap: t.space2 }}>
+            {shipped && (
+              <div
+                data-testid="rerun-shipped-note"
+                style={{
+                  padding: t.space3,
+                  borderRadius: t.radius,
+                  border: `1px solid ${t.border}`,
+                  background: t.surface,
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                }}
+              >
+                この機能は<strong>本番反映済</strong>です。追加指示を出すとフェーズは
+                <strong>demo に戻り</strong>、修正版は demo → staging → 本番の順で
+                もう一度確認してもらいます（本番へ直接反映はしません）。
+              </div>
+            )}
             <textarea
               aria-label="rerun-prompt"
               placeholder="追加の指示 / 直してほしい点を書く（同じタスクで新しい run を起動）"

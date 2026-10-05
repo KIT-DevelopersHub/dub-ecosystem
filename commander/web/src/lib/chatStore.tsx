@@ -41,6 +41,9 @@ export interface ChatStore {
   select: (kind: ChatKind, id: string) => void;
   create: (kind: ChatKind) => Promise<ChatSession | null>;
   remove: (kind: ChatKind, id: string) => Promise<void>;
+  /** Give a session an operator-chosen name (optimistic; rolls back on failure).
+   *  Returns false for a rejected (empty) title or a failed write. */
+  rename: (kind: ChatKind, id: string, title: string) => Promise<boolean>;
   /** Start a run in a session; streams into a persisted assistant message. */
   run: (kind: ChatKind, sessionId: string, spec: RunSpec) => Promise<ChatMessage | null>;
 }
@@ -49,6 +52,11 @@ const Ctx = createContext<ChatStore | null>(null);
 
 const KINDS: ChatKind[] = ["ask", "operate"];
 const titleFrom = (text: string): string => text.trim().replace(/\s+/g, " ").slice(0, 40) || "新しいチャット";
+
+/** Max length of an operator-typed name (auto-titles stay at 40). */
+export const TITLE_MAX = 60;
+/** Trim + collapse whitespace; "" means "reject this rename". */
+export const normalizeTitle = (raw: string): string => raw.trim().replace(/\s+/g, " ").slice(0, TITLE_MAX);
 
 export function ChatProvider({
   client = defaultClient,
@@ -67,6 +75,10 @@ export function ChatProvider({
 
   const loadedMsgs = useRef<Set<string>>(new Set());
   const unsubs = useRef<Map<string, () => void>>(new Map());
+  // Current title per session id, kept in a ref so `run()` sees it without waiting for a
+  // re-render: a session created moments earlier (create → first send) is not in the
+  // caller's `sessionsByKind` snapshot yet. This is what gates the auto-title.
+  const titles = useRef<Map<string, string>>(new Map());
 
   // Hydrate the session lists for both kinds on mount (durable history from D1).
   useEffect(() => {
@@ -81,7 +93,11 @@ export function ChatProvider({
         // already-selected active id back to null.
         const merge = (local: ChatSession[], server: ChatSession[]): ChatSession[] => {
           const seen = new Set(local.map((s) => s.id));
-          return [...local, ...server.filter((s) => !seen.has(s.id))];
+          const fresh = server.filter((s) => !seen.has(s.id));
+          // Seed the title cache from D1 so a name given in an earlier visit still blocks
+          // the auto-title. Locally-known sessions already hold the newer value.
+          for (const s of fresh) titles.current.set(s.id, s.title);
+          return [...local, ...fresh];
         };
         setSessionsByKind((prev) => ({ ask: merge(prev.ask, ask), operate: merge(prev.operate, operate) }));
         // Restore the session the operator was last on (so their draft shows), falling
@@ -141,11 +157,21 @@ export function ChatProvider({
     setMessagesBySession((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] ?? []), msg] }));
   }, []);
 
+  /** Write a title to both the render state and the ref the auto-title gate reads. */
+  const applyTitle = useCallback((kind: ChatKind, id: string, title: string) => {
+    titles.current.set(id, title);
+    setSessionsByKind((prev) => ({
+      ...prev,
+      [kind]: prev[kind].map((s) => (s.id === id ? { ...s, title } : s)),
+    }));
+  }, []);
+
   const create = useCallback(
     async (kind: ChatKind): Promise<ChatSession | null> => {
       try {
         const session = await api.createChat(kind);
         loadedMsgs.current.add(session.id);
+        titles.current.set(session.id, session.title);
         setMessagesBySession((prev) => ({ ...prev, [session.id]: [] }));
         setSessionsByKind((prev) => ({ ...prev, [kind]: [session, ...prev[kind]] }));
         setActiveByKind((prev) => ({ ...prev, [kind]: session.id }));
@@ -163,6 +189,25 @@ export function ChatProvider({
     saveActiveId(kind, id);
   }, []);
 
+  const rename = useCallback(
+    async (kind: ChatKind, id: string, raw: string): Promise<boolean> => {
+      const title = normalizeTitle(raw);
+      if (!title) return false; // empty name = keep the current one
+      const previous = titles.current.get(id) ?? "";
+      if (title === previous) return true;
+      applyTitle(kind, id, title); // optimistic
+      try {
+        const saved = await api.renameChat(id, title);
+        if (!saved) throw new Error("rename failed");
+        return true;
+      } catch {
+        applyTitle(kind, id, previous); // rollback
+        return false;
+      }
+    },
+    [api, applyTitle],
+  );
+
   const remove = useCallback(
     async (kind: ChatKind, id: string) => {
       unsubs.current.get(id)?.();
@@ -174,6 +219,7 @@ export function ChatProvider({
         /* ignore */
       }
       loadedMsgs.current.delete(id);
+      titles.current.delete(id);
       setMessagesBySession((prev) => {
         const next = { ...prev };
         delete next[id];
@@ -211,18 +257,16 @@ export function ChatProvider({
       setRunning(sessionId, true);
       bumpSessionToTop(kind, sessionId);
 
-      // Record the user message + set the session title from the first one.
+      // Record the user message + auto-title the session from the first one — but ONLY
+      // while it is still unnamed. A name the operator typed (this visit or a previous
+      // one, see the hydration seed) must never be overwritten by the first question.
       if (spec.userText != null && spec.userText.trim()) {
-        const existing = messagesBySession[sessionId] ?? [];
         const userMsg = await api.addChatMessage(sessionId, { role: "user", text: spec.userText, status: "done" });
         if (userMsg) appendMessage(sessionId, userMsg);
-        if (existing.filter((m) => m.role === "user").length === 0) {
+        if (!(titles.current.get(sessionId) ?? "").trim()) {
           const title = titleFrom(spec.userText);
+          applyTitle(kind, sessionId, title);
           void api.renameChat(sessionId, title).catch(() => {});
-          setSessionsByKind((prev) => ({
-            ...prev,
-            [kind]: prev[kind].map((s) => (s.id === sessionId ? { ...s, title } : s)),
-          }));
         }
       }
 
@@ -278,7 +322,7 @@ export function ChatProvider({
           });
       });
     },
-    [api, client, messagesBySession, appendMessage, patchMessage, setRunning, bumpSessionToTop],
+    [api, client, appendMessage, applyTitle, patchMessage, setRunning, bumpSessionToTop],
   );
 
   const store: ChatStore = useMemo(
@@ -291,9 +335,10 @@ export function ChatProvider({
       select,
       create,
       remove,
+      rename,
       run,
     }),
-    [ready, sessionsByKind, activeByKind, messagesBySession, runningSessions, select, create, remove, run],
+    [ready, sessionsByKind, activeByKind, messagesBySession, runningSessions, select, create, remove, rename, run],
   );
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
