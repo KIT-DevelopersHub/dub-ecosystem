@@ -1,6 +1,8 @@
 // Shared in-memory fakes for drive-proxy unit tests. No network, no real bindings.
 import { errors } from "@dub/errors";
 import type { KVNamespace } from "@cloudflare/workers-types";
+import type { PermissionGranter } from "@dub/policy-gate";
+import type { identity } from "@dub/types";
 import type { Cache } from "../src/cache";
 import type { RateLimiter } from "../src/ratelimit";
 import type {
@@ -13,7 +15,6 @@ import type {
 } from "../src/google/client";
 import type { GoogleFileResource } from "../src/google/mapper";
 import type { EventPublisher, PublishContext, DriveAuditAction } from "../src/events";
-import type { PermissionChecker, DrivePermission } from "../src/permissions";
 import type { WatchChannelRecord, WatchChannelRepo } from "../src/watch/repo";
 
 // ---- in-memory Cache ----
@@ -205,10 +206,27 @@ export function memWatchRepo(seed: WatchChannelRecord[] = []): WatchChannelRepo 
   };
 }
 
-// ---- fake PermissionChecker ----
-export function memAuthz(rule: (userId: string, perm: DrivePermission) => boolean): PermissionChecker {
-  return { async check(userId, _orgId, permission) { return rule(userId, permission); } };
+// ---- fake PermissionGranter (the @dub/policy-gate port the gate calls) ----
+export function memAuthz(rule: (userId: string, perm: identity.PermissionKey) => boolean): PermissionGranter {
+  return async (userId, _orgId, keys) => keys.filter((k) => rule(userId, k));
 }
+
+/** Granter for a caller holding EXACTLY `keys` (anything else is denied). */
+export function memAuthzHolding(...keys: identity.PermissionKey[]): PermissionGranter {
+  const held = new Set<string>(keys);
+  return memAuthz((_u, perm) => held.has(perm));
+}
+
+export const allowAll = memAuthz(() => true);
+
+/** Drive共有 = 閲覧 (+ the legacy domain key) — may read, must not write. */
+export const DRIVE_READER = memAuthzHolding("app:driveshare:view", "drive:read");
+/** Drive共有 = 編集 — the full external surface. */
+export const DRIVE_EDITOR = memAuthzHolding("app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write");
+
+export const AUTHED = { "x-dub-user-id": "usr_1" };
+/** A genuine service-to-service call (what api-gateway can never produce for an outsider). */
+export const S2S = { "x-dub-internal": "1" };
 
 // ---- minimal KVNamespace fake (for KV-backed cache / rate / token tests) ----
 export function fakeKV(now: () => number = Date.now): KVNamespace {
