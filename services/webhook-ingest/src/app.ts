@@ -1,16 +1,26 @@
 // Hono app factory. Routes:
-//   EXT  POST /hooks/:source              external webhook ingress (enabled sources only; else 404)
-//   EXT  GET  /hooks/:source              endpoint reachability handshake (enabled -> 200; else 404)
-//   GW   GET  /api/v1/webhooks/deliveries administrative delivery search (webhook:read)
-//   GW   GET  /api/v1/webhooks/deliveries/:id
+//   EXT  POST /hooks/:source           external webhook ingress (enabled sources only; else 404)
+//   EXT  GET  /hooks/:source           endpoint reachability handshake (enabled -> 200; else 404)
+//   GW   GET  /webhooks/deliveries     administrative delivery search (webhook:read)
+//   GW   GET  /webhooks/deliveries/:id
 //   SB   GET  /internal/health
+//
+// AUTHORIZATION: none in this file. `policyGate` is mounted first and derives every
+// authorization decision from POLICY_TABLE (src/policy-table.ts), which lists every route
+// below. Do NOT add a permission check or an `x-dub-internal` guard to a route or a handler —
+// add the route to the table (test/policy-table.test.ts fails if you forget).
+//
+// The per-source SIGNATURE verification inside POST /hooks/:source is a different thing and
+// DOES stay here: it authenticates a request that carries no session, over the raw body
+// bytes, and consults no permission key. See policy-table.ts for why that is not the double
+// authorization the migration removed.
 import { Hono, type MiddlewareHandler } from "hono";
-import { createAuthClient } from "@dub/auth-client";
 import { createDbClient } from "@dub/db";
 import { DubError, dubErrorHandler, errors } from "@dub/errors";
 import { newRequestId } from "@dub/http";
-import { consoleSink } from "@dub/observability";
-import type { identity, webhook } from "@dub/types";
+import { consoleSink, HDR_REQUEST_ID } from "@dub/observability";
+import { policyGate, sharedAuthzGranter, type PermissionGranter, type PolicyGateVars } from "@dub/policy-gate";
+import type { webhook } from "@dub/types";
 import {
   ENABLED_SOURCES,
   isWebhookSource,
@@ -20,9 +30,12 @@ import {
 } from "./env";
 import { createDeliveryRepo, type DeliveryRepo } from "./repo";
 import { ingest, type IngestDeps } from "./ingest";
+import { POLICY_TABLE } from "./policy-table";
 import { secretsFromEnv, VERIFIERS, pickAllowlistedHeaders, type Verifier } from "./verify";
 
-type Variables = { authn?: unknown; dubCtx?: unknown };
+const SERVICE = "webhook-ingest";
+
+type Variables = PolicyGateVars;
 export type WebhookApp = Hono<{ Bindings: Env; Variables: Variables }>;
 
 export interface AppOptions {
@@ -32,8 +45,8 @@ export interface AppOptions {
   buildRepo?: (env: Env) => DeliveryRepo;
   /** Override verifier registry (tests). */
   verifiers?: Partial<Record<webhook.WebhookSource, Verifier>>;
-  /** Override admin authz chain (tests bypass identity). */
-  requireWebhookRead?: MiddlewareHandler;
+  /** Override the permission source (tests). Production builds one from SVC_IDENTITY. */
+  granted?: PermissionGranter;
   /** Override enabled-source gate (tests). */
   enabledSources?: ReadonlySet<webhook.WebhookSource>;
 }
@@ -54,31 +67,47 @@ function defaultDeps(env: Env): IngestDeps {
   return { repo: defaultRepo(env), raw: env.WEBHOOK_RAW, queues };
 }
 
-// webhook:read is a registered PERMISSION_CATALOG key in @dub/types (identity-roster #3),
-// so this is a plain typed literal — the identity union checks it at compile time.
-const WEBHOOK_READ: identity.PermissionKey = "webhook:read";
-
-function defaultRequireWebhookRead(): MiddlewareHandler {
-  return async (c, next) => {
-    const env = c.env as Env;
-    const authClient = createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "webhook-ingest" });
-    await authClient.requireAuth()(c, async () => {
-      await authClient.requirePermission(WEBHOOK_READ)(c, next);
-    });
-  };
-}
-
 export function createApp(opts: AppOptions = {}): WebhookApp {
   const app = new Hono<{ Bindings: Env; Variables: Variables }>();
-  app.onError(dubErrorHandler({ service: "webhook-ingest" }));
+  app.onError(dubErrorHandler({ service: SERVICE }));
 
   const buildDeps = opts.buildDeps ?? defaultDeps;
   const buildRepo = opts.buildRepo ?? defaultRepo;
   const verifiers = { ...VERIFIERS, ...(opts.verifiers ?? {}) };
   const enabled = opts.enabledSources ?? ENABLED_SOURCES;
-  const requireWebhookRead = opts.requireWebhookRead ?? defaultRequireWebhookRead();
 
-  // ---- health ----
+  // THE authorization layer. First and only — every route below is gated by POLICY_TABLE.
+  //
+  // It is a thin wrapper rather than a bare `policyGate({...})` for one reason: `createApp()`
+  // runs once per isolate (index.ts), so there is no `env` — and therefore no SVC_IDENTITY
+  // binding — at mount time. The wrapper builds the granter from `c.env` and delegates to the
+  // real `policyGate`; no decision logic is re-implemented here. Same shape as api-gateway's
+  // src/policy.ts, which has the identical constraint.
+  //
+  // `sharedAuthzGranter` (not `createAuthzGranter`): the granter is rebuilt per request, so the
+  // identity /authz/check TTL cache has to be memoized per Env to survive between requests in
+  // the same isolate — otherwise every gated route is an unconditional identity subrequest and
+  // identity-roster becomes a hot-path single point of failure (ADR 0004). The two PUBLIC
+  // ingress routes make no identity call at all, so the hot path (provider webhooks) is
+  // unaffected either way.
+  app.use("*", (c, next) => {
+    const env = c.env;
+    const granted =
+      opts.granted ??
+      sharedAuthzGranter(env, env.SVC_IDENTITY, {
+        caller: SERVICE,
+        requestId: c.req.header(HDR_REQUEST_ID) ?? newRequestId(),
+      });
+    const gate = policyGate({ service: SERVICE, table: POLICY_TABLE, granted });
+    // `policyGate` is typed for an app that declares Variables only; this one also declares
+    // Bindings (it needs `c.env` to be `Env`). Structurally compatible in one direction only,
+    // so the cast lives at this single seam rather than spread through the app's types —
+    // same seam api-gateway's src/policy.ts has, for the same reason.
+    return (gate as unknown as MiddlewareHandler<{ Bindings: Env; Variables: Variables }>)(c, next);
+  });
+
+  // ---- health (INTERNAL in the table: reachable only over a Service Binding carrying
+  // x-dub-internal, which is exactly how app-health-monitor probes it). ----
   app.get("/internal/health", (c) => c.json({ status: "ok", service: "webhook-ingest" }));
 
   // ---- external ingress ----
@@ -136,8 +165,13 @@ export function createApp(opts: AppOptions = {}): WebhookApp {
     return c.json({ status: "ok", source }, 200);
   });
 
-  // ---- administrative query (via api-gateway; webhook:read) ----
-  app.get("/api/v1/webhooks/deliveries", requireWebhookRead, async (c) => {
+  // ---- administrative query (via api-gateway; webhook:read in the table) ----
+  // Path is the POST-STRIP path: api-gateway removes API_PREFIX before forwarding, so an
+  // external GET /api/v1/webhooks/deliveries arrives here as /webhooks/deliveries. Registering
+  // it with the prefix (as this did until the policy-gate migration) made both admin routes
+  // dead — 404 at the receiver for every gateway call. See inventory a-6 and
+  // packages/types WEBHOOK_WIRE, which already names the live path.
+  app.get("/webhooks/deliveries", async (c) => {
     const q: webhook.WebhookDeliveryQuery = {};
     const source = c.req.query("source");
     const status = c.req.query("status");
@@ -158,7 +192,7 @@ export function createApp(opts: AppOptions = {}): WebhookApp {
     return c.json(page satisfies webhook.WebhookDeliveryPage);
   });
 
-  app.get("/api/v1/webhooks/deliveries/:id", requireWebhookRead, async (c) => {
+  app.get("/webhooks/deliveries/:id", async (c) => {
     const row = await buildRepo(c.env as Env).getById(c.req.param("id"));
     if (!row) throw errors.notFound("webhook delivery", c.req.param("id"));
     return c.json(row satisfies webhook.WebhookDelivery);
