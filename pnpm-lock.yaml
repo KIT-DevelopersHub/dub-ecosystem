@@ -1037,6 +1037,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1111,6 +1114,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1179,6 +1185,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1275,6 +1284,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1369,6 +1381,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1409,6 +1424,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1442,6 +1460,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1469,6 +1490,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1509,6 +1533,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1546,6 +1573,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1576,6 +1606,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1619,6 +1652,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
