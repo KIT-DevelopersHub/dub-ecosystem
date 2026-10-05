@@ -510,13 +510,18 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Forbidden:
-      description: FORBIDDEN — authenticated but lacking the required permission.
+      description: >-
+        FORBIDDEN — authenticated but lacking the required permission
+        (details.reason = missing_permission). @dub/policy-gate also returns it for an
+        internal-only path reached without the x-dub-internal marker
+        (details.reason = internal_only) and for a route absent from the service policy
+        table (details.reason = no_policy_rule, fail-closed).
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
     NotFound:
-      description: NOT_FOUND — resource does not exist (also returned for internal-only paths hit externally).
+      description: NOT_FOUND — resource does not exist.
       content:
         application/json:
           schema:
