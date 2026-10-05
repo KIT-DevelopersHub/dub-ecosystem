@@ -337,6 +337,39 @@ describe("ParticipationListPage", () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  // 楽観更新に memberId が入っていないと、確定直後〜refetch までの一瞬だけ
+  // 「紐付け済み」が消え、同じメンバーをもう一度選べてしまう (必ず 409 になる)。
+  it("紐付け確定の直後 (refetch 前) も そのメンバーは『紐付け済み』で選べない", async () => {
+    const free = rosterMember({ id: "m_free", name: "黒川", status: "invited", version: 2 });
+    const SECOND: Participation = { ...SUBMISSION, id: "p_2", name: "別提出" };
+    const resolve = vi.fn((id: string) =>
+      Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const, memberId: "m_free" }, member: null }),
+    );
+    // 確定後の一覧 refetch を未完了のままにして「楽観更新だけが効いている窓」を観測する。
+    let listCalls = 0;
+    const api = makeApi({
+      list: vi.fn(() => {
+        listCalls += 1;
+        return listCalls === 1
+          ? Promise.resolve({ participations: [SUBMISSION, SECOND] })
+          : new Promise<never>(() => {});
+      }),
+      candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
+      overview: vi.fn(() => Promise.resolve({ teams: [], members: [free] })),
+      resolve,
+    });
+    render(wrap(<ParticipationListPage />, api));
+    await userEvent.click(await screen.findByTestId("participation-add-p_1"));
+    await userEvent.click(await screen.findByTestId("participation-resolve-manual"));
+    await userEvent.click(await screen.findByTestId("participation-manual-link-m_free"));
+    expect(resolve).toHaveBeenCalledTimes(1);
+    // 別の参加届を開くと、たった今紐付けた相手は既に押さえられている。
+    await userEvent.click(await screen.findByTestId("participation-add-p_2"));
+    await userEvent.click(await screen.findByTestId("participation-resolve-manual"));
+    await screen.findByTestId("participation-manual-link-m_free");
+    expect(screen.getByTestId("participation-taken-m_free")).toHaveTextContent("「黒川」の参加届に紐付け済み");
+  });
+
   it("反映確定のエラーは日本語で理由が出る (409 already linked)", async () => {
     const resolve = vi.fn(() =>
       Promise.reject(

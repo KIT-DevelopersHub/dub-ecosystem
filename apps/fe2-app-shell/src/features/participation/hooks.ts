@@ -84,7 +84,15 @@ export function useResolveParticipation() {
           ? {
               participations: old.participations.map((p) =>
                 p.id === id
-                  ? { ...p, reviewState: nextReviewState, matchKind: body.action === "skip" ? p.matchKind : nextMatchKind }
+                  ? {
+                      ...p,
+                      reviewState: nextReviewState,
+                      matchKind: body.action === "skip" ? p.matchKind : nextMatchKind,
+                      // link は紐付け先が確定済みなので楽観更新でも memberId を入れる。入れないと
+                      // refetch までの一瞬だけ「紐付け済み」タグが出ず、同じメンバーをもう一度
+                      // 選べてしまう (必ず 409 になる導線が復活する)。
+                      memberId: body.action === "link" ? body.memberId : p.memberId,
+                    }
                   : p,
               ),
             }
