@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ArtifactLinks, primaryKey } from "./ArtifactLinks.tsx";
-import { DUB_STAGING_URL } from "./lib/reflection.ts";
+import { DUB_STAGING_URL, DUB_DEMO_URL } from "./lib/reflection.ts";
 
 describe("<ArtifactLinks>", () => {
   it("renders clickable demo / staging / PR links in the drawer variant", () => {
@@ -113,6 +113,29 @@ describe("<ArtifactLinks>", () => {
       render(<ArtifactLinks variant="card" phase="staging_review" urls={all} />);
       expect(screen.getByTestId("artifact-chip-staging")).toHaveAttribute("data-primary", "true");
       expect(screen.getByTestId("artifact-chip-demo")).not.toHaveAttribute("data-primary");
+    });
+
+    it("drawer: demo phase without a captured demo URL falls back to the fixed demo host", () => {
+      // Regression: the 確認待ち board showed 「✅ demoに反映済み」 with NO click-through at
+      // all (no demo chip/button rendered), because only staging had a fixed-host fallback.
+      render(
+        <ArtifactLinks
+          variant="drawer"
+          phase="demo_review"
+          urls={{ demoUrl: null, stagingUrl: null, prUrl: null }}
+        />,
+      );
+      const demo = screen.getByTestId("artifact-link-demo");
+      expect(demo).toHaveAttribute("data-primary", "true");
+      expect(demo).toHaveAttribute("href", DUB_DEMO_URL);
+    });
+
+    it("card: demo phase without a captured demo URL still shows a clickable demo chip", () => {
+      render(
+        <ArtifactLinks variant="card" phase="demo_review" urls={{ demoUrl: null, stagingUrl: null, prUrl: null }} />,
+      );
+      const chip = screen.getByTestId("artifact-chip-demo");
+      expect(chip).toHaveAttribute("href", DUB_DEMO_URL);
     });
   });
 });
