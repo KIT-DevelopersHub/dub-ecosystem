@@ -46,7 +46,22 @@ export const ROUTES: readonly GatewayRoute[] = [
   // so the frontend path stays simple (/api/v1/feedback).
   { segment: "feedback", binding: "SVC_NOTIFICATION", auth: "required" },
   { segment: "files", binding: "SVC_FILE_META", auth: "required" }, // body cap resolved from env at runtime
-  { segment: "drive", binding: "SVC_DRIVE_PROXY", auth: "required" },
+  // Google Drive read/write proxy. The three operational routes are internal-only in
+  // drive-proxy (`requireInternal`): GET /drive/health/quota (quota probe) and the
+  // POST /drive/watch pair (change-notification channel lifecycle, driven by a scheduled
+  // Worker). They were reachable at the edge with nothing but that single in-service guard
+  // between them and the internet — one regression in proxy.ts's x-dub-* stripping and they
+  // would have been open (inventory a-5). Now they 404 here as well, matching how
+  // identity / notifications / mail / audit / members already double-defend their internal
+  // trees. "/drive/watch" (no trailing slash) covers both the bare path and
+  // /drive/watch/:channelId/stop; "/drive/health/" is a prefix so future /drive/health/*
+  // probes are covered too. No external drive route lives under either.
+  {
+    segment: "drive",
+    binding: "SVC_DRIVE_PROXY",
+    auth: "required",
+    internalOnlyPaths: ["/drive/health/", "/drive/watch"],
+  },
   // Hackit Drive sharing manager (fe2 driveshare feature). Manages Google Drive
   // permissions for the shared Gmail via drive-share-service (drive:read / drive:write).
   { segment: "driveshare", binding: "SVC_DRIVE_SHARE", auth: "required" },

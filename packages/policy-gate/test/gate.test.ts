@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
-import { dubErrorHandler, CommonErrorCodes } from "@dub/errors";
+import { dubErrorHandler, errors, CommonErrorCodes } from "@dub/errors";
 import type { identity } from "@dub/types";
 import {
   policyGate,
@@ -16,6 +16,7 @@ import {
   checkRouteCoverage,
   assertRouteCoverage,
   protectableRouteKeys,
+  type ActorResolver,
   type PermissionGranter,
   type PolicyGateVars,
 } from "../src/index";
@@ -172,6 +173,75 @@ describe("AUTHENTICATED routes", () => {
   it("is not reachable by an s2s call that carries the marker but no user", async () => {
     const res = await build(holding()).request("/me", { headers: S2S });
     expect(res.status).toBe(401);
+  });
+});
+
+// ── the actor port: how api-gateway can mount this layer at the internet boundary ──
+// Default actor = the trusted x-dub-user-id header, which is a FACT downstream because
+// api-gateway minted it. At the edge it is attacker input, so the gateway supplies a resolver
+// that verifies the session instead. These pin the properties that make that safe.
+describe("actor resolver (edge wiring)", () => {
+  function buildWithActor(actor: ActorResolver, granted: PermissionGranter = holding("task:read")) {
+    const app = new Hono<{ Variables: PolicyGateVars }>();
+    app.onError(dubErrorHandler({ service: "test" }));
+    app.use("*", policyGate({ service: "test", table: TABLE, granted, actor }));
+    app.get("/health", (c) => c.json({ ok: true }));
+    app.get("/me", (c) => c.json({ userId: c.get("userId") }));
+    app.get("/items", (c) => c.json({ userId: c.get("userId") }));
+    app.get("/internal/drain", (c) => c.json({ userId: c.get("userId") ?? null }));
+    return app;
+  }
+
+  it("identifies the caller from the resolver and IGNORES a spoofed header (AUTHENTICATED)", async () => {
+    const res = await buildWithActor(() => "usr_session").request("/me", { headers: { "x-dub-user-id": "usr_attacker" } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ userId: "usr_session" });
+  });
+
+  it("attributes permissions to the resolved user, not the header (keyed route)", async () => {
+    const seen: string[] = [];
+    const granted: PermissionGranter = async (userId, _org, keys) => {
+      seen.push(userId);
+      return keys;
+    };
+    const res = await buildWithActor(() => "usr_session", granted).request("/items", {
+      headers: { "x-dub-user-id": "usr_attacker" },
+    });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual(["usr_session"]);
+  });
+
+  it("is never called for a PUBLIC route (a public endpoint costs no verify)", async () => {
+    let calls = 0;
+    const res = await buildWithActor(() => {
+      calls += 1;
+      return "usr_session";
+    }).request("/health");
+    expect(res.status).toBe(200);
+    expect(calls).toBe(0);
+  });
+
+  it("401s when the resolver finds no session", async () => {
+    const res = await buildWithActor(() => undefined).request("/me");
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).error.message).toContain("no authenticated actor");
+  });
+
+  it("propagates the resolver's own failure unchanged (a verify outage stays a 502, not a 401)", async () => {
+    const res = await buildWithActor(() => {
+      throw errors.upstreamUnavailable("auth-service");
+    }).request("/me");
+    expect(res.status).toBe(502);
+  });
+
+  it("takes an INTERNAL route's actor from the trusted header, not the resolver", async () => {
+    // On an s2s call the actor is what the calling service propagated; running a
+    // session-verify resolver there would 401 a legitimate probe that carries no session.
+    const res = await buildWithActor(() => {
+      throw new Error("resolver must not run here");
+    }).request("/internal/drain", { headers: { ...S2S, ...AUTHED } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ userId: "usr_1" });
   });
 });
 
