@@ -1,7 +1,6 @@
 // file-meta dependency interfaces. Injected so the app/consumer are testable without
 // D1 / R2 / Queues / identity. Real implementations are built in index.ts from env.
-import type { MiddlewareHandler } from "hono";
-import type { auditLog, common, fileMeta, identity } from "@dub/types";
+import type { auditLog, common, fileMeta } from "@dub/types";
 import type { DubEventName, DubEventPayloadMap } from "@dub/events";
 
 // ---- persistence ----
@@ -107,12 +106,13 @@ export type EmitEvent = <N extends DubEventName>(
 // ---- audit ----
 export type AuditFn = (input: auditLog.AuditRecordInput) => Promise<void>;
 
-// ---- authz gate (wraps @dub/auth-client; test double bypasses identity) ----
-export interface AuthGate {
-  requireAuth(): MiddlewareHandler;
-  requirePermission(permission: identity.PermissionKey): MiddlewareHandler;
-  hasPermission(userId: common.UserId, permission: identity.PermissionKey): Promise<boolean>;
-}
+// ---- authz ----
+// There is no AuthGate port any more. Entry-layer authorization is `policyGate` +
+// src/policy-table.ts (authn included: the gate resolves the trusted x-dub-user-id and
+// publishes it as the `userId` context var), and the one question a handler still asks
+// ("does this caller hold file:admin, so may it reach someone else's private file or
+// reassign an owner?") goes through the SAME `PermissionGranter` the gate uses — so this
+// service has exactly one path to identity. See `holdsKey` in app.ts.
 
 // ---- drive-proxy meta completion (optional; failure falls back to caller values) ----
 export interface DriveMeta {

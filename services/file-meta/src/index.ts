@@ -11,13 +11,13 @@ import {
   type DubEventEnvelope,
 } from "@dub/events";
 import { createServiceClient, extractContext, newRequestId } from "@dub/http";
-import { createAuthClient } from "@dub/auth-client";
-import { common, type drive } from "@dub/types";
+import { sharedAuthzGranter } from "@dub/policy-gate";
+import { type drive } from "@dub/types";
 import { createApp } from "./app";
 import { createConsumer, createEnvelopeConsumer } from "./consumer";
 import { createD1FileRepo, createD1IdempotencyStore } from "./repo";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
-import type { AuthGate, BlobStore, DriveClient, EmitEvent } from "./deps";
+import type { BlobStore, DriveClient, EmitEvent } from "./deps";
 
 export interface Env {
   DB: D1Database;
@@ -79,15 +79,6 @@ function buildAuditEnv(env: Env): { AUDIT_QUEUE: Queue<AuditRecordEnvelopeV1> } 
   return { AUDIT_QUEUE: env.AUDIT_QUEUE ?? outboxQueue<AuditRecordEnvelopeV1>(env.DB, AUDIT_TOPIC) };
 }
 
-function authGate(env: Env): AuthGate {
-  const ac = createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "file-meta" });
-  return {
-    requireAuth: () => ac.requireAuth(),
-    requirePermission: (permission) => ac.requirePermission(permission, () => ({ orgId: common.DUB_DEFAULT_ORG_ID })),
-    hasPermission: (userId, permission) => ac.hasPermission(userId, common.DUB_DEFAULT_ORG_ID, { permission }),
-  };
-}
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const ctx = extractContext(request.headers, { allowGenerate: true });
@@ -98,7 +89,11 @@ export default {
       blobs: r2Blobs(env.R2_FILES),
       emit: emitter(env),
       audit: (input) => publishAudit(buildAuditEnv(env), input),
-      auth: authGate(env),
+      // The single path to identity: `policyGate` runs it for the table's key checks and the
+      // handlers reuse it for their `file:admin` escalation. `sharedAuthzGranter` (not
+      // `createAuthzGranter`) so the ADR 0004 decision cache outlives the request and the
+      // gate does not add one identity subrequest per call.
+      authz: sharedAuthzGranter(env, env.SVC_IDENTITY, { caller: "file-meta", requestId: ctx.requestId }),
       ...(env.SVC_DRIVE_PROXY ? { drive: driveClient(env.SVC_DRIVE_PROXY, ctx.requestId)! } : {}),
       // Free-tier consumer landing (POST /internal/events-async): the SAME handler map
       // as the Queue consumer, with D1 idempotency on the shared dub-core DB.
