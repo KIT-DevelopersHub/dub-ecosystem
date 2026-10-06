@@ -6,7 +6,7 @@
 // free plan. This file stays import-clean for `wrangler dev`.
 import type { Fetcher, Queue, ExecutionContext } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
-import { createAuthClient } from "@dub/auth-client";
+import { sharedAuthzGranter } from "@dub/policy-gate";
 import { createServiceClient, type RequestContext } from "@dub/http";
 import { isDubError } from "@dub/errors";
 import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventEnvelope } from "@dub/events";
@@ -174,10 +174,14 @@ export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext):
     ...(requestId ? { requestId } : {}),
     logger: (e) => consoleSink({ level: "debug", message: "db", service: "chat-service", fields: { sql: e.sql, ms: e.durationMs } }),
   });
-  const authz = createAuthClient({
-    identityBinding: env.SVC_IDENTITY,
-    serviceName: "chat-service",
-    mode: "trustedHeader",
+  // The service's one permission source, used by policyGate for POLICY_TABLE and reused by
+  // ChatService for its `chat:moderate` moderator tier. `sharedAuthzGranter` (not
+  // `createAuthzGranter`): deps are rebuilt per request, so the ADR 0004 decision cache only
+  // pays off if it is memoized per Env and outlives the request. `chat:moderate` is a
+  // dangerous key and is therefore always re-asked rather than served from that cache.
+  const authz = sharedAuthzGranter(env, env.SVC_IDENTITY, {
+    caller: "chat-service",
+    ...(requestId ? { requestId } : {}),
   });
   return {
     repo: createD1ChatRepo(db),
