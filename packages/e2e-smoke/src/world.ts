@@ -8,6 +8,7 @@ import type { Queue } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso, type DbClient } from "@dub/db";
 import { common } from "@dub/types";
 import type { DubEventEnvelope, AuditRecordEnvelopeV1 } from "@dub/events";
+import type { PermissionGranter } from "@dub/policy-gate";
 
 import {
   createApp as createEventApp,
@@ -46,14 +47,19 @@ export function recordingQueue<T>(): { queue: Queue<T>; sends: T[] } {
 }
 
 /**
- * event-service authz fakes. Its authorization is now POLICY_TABLE enforced by
- * @dub/policy-gate, so the seam is the `PermissionGranter` port: grant every key asked for.
- * The smoke world exercises domain flows, not RBAC (which
- * services/event-service/test/policy-table.test.ts owns), and the gate still enforces the
+ * THE authz seam for every policy-gated service in this world (event-service and
+ * task-service today). Their authorization is POLICY_TABLE enforced by @dub/policy-gate, so
+ * the seam is the `PermissionGranter` port — a FUNCTION, not the old `Authorizer` object:
+ * grant every key asked for. The smoke world exercises cross-service domain flows, not RBAC
+ * (which each service's own test/policy-table.test.ts owns), and the gate still enforces the
  * x-dub-user-id contract the old `requireAuth` middleware did.
+ *
+ * One granter for all of them on purpose: a per-service copy is how task-service's seam went
+ * stale (an `{ require }` object survived the migration and TypeError'd every write into a
+ * 500) while event-service's was updated.
  */
-function allowGranter(): EventDeps["authz"] {
-  return async (_userId: string, _orgId: string, keys) => [...keys];
+function allowGranter(): PermissionGranter {
+  return async (_userId, _orgId, keys) => [...keys];
 }
 
 /** Layer 2 seam: the body-dependent, event-scoped `event:admin` demand. Always allow. */
@@ -114,7 +120,7 @@ export function createWorld(): World {
       },
     },
     audit: { record: async () => {} },
-    authz: { require: async () => {} },
+    authz: allowGranter(),
     // Genuine cross-service ref: the event existence gate reads the REAL event row.
     eventClient: {
       getEvent: async (_ctx, id) => {
