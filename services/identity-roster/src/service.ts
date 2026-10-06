@@ -682,23 +682,23 @@ export class IdentityService {
     return { decisions };
   }
 
-  /** Single-check evaluation used by the service's own dogfood authz middleware. */
+  /**
+   * Single-check evaluation. The entry layer no longer calls this (POLICY_TABLE + policyGate
+   * decide every route's keys); its one remaining caller is the SELF EXCEPTION in app.ts —
+   * "may this caller read someone ELSE's detail?", which depends on the request's subject and
+   * so cannot live in the table.
+   */
   async can(userId: string, orgId: string, q: identity.AuthzQuery): Promise<boolean> {
     const ctx = await this.loadEvalContext(userId, orgId);
     return evaluate(ctx, q);
   }
 
   /**
-   * Policy-layer decision (無効/閲覧/編集 + optional fine-grained key) for the service's own
-   * routes. Loads the eval context ONCE and decides over the whole effective set, so a
-   * multi-key requirement costs one context load instead of one per key (what a loop of
-   * `can()` would do). Org-wide grants only — per-app access is never resource-scoped.
+   * Org-wide effective permission set. Serves `GET /internal/users/:id/permissions`, the
+   * gateway's /me aggregation AND — since the policy-gate migration — this service's own
+   * in-process `PermissionGranter` (src/in-process-granter.ts), so the gate decides from the
+   * same evaluator as `POST /authz/check` instead of calling itself over the wire.
    */
-  async decidePolicy(userId: string, orgId: string, req: policy.PolicyRequirement): Promise<policy.PolicyDecision> {
-    const ctx = await this.loadEvalContext(userId, orgId);
-    return policy.decide(effectiveOrgWidePermissions(ctx), req);
-  }
-
   async effectivePermissions(userId: string, orgId: string): Promise<EffectivePermissionsResponse> {
     const ctx = await this.loadEvalContext(userId, orgId);
     return { userId, orgId, permissions: effectiveOrgWidePermissions(ctx) };
