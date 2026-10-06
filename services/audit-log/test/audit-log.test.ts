@@ -136,7 +136,11 @@ describe("POST /internal/log (sync fail-close)", () => {
     expect((await queryLogs(auditDb(d1), {})).items.length).toBe(0);
   });
 
-  it("returns 404 when the x-dub-internal marker is absent (mirrors gateway)", async () => {
+  // The INTERNAL rule of POLICY_TABLE (was: a hand-rolled /internal/* marker middleware
+  // that answered 404). The refusal is now the gate's 403 `internal_only`; the gateway's own
+  // internalOnlyPaths still 404s this path at the edge, so an external caller never gets
+  // this far either way.
+  it("returns 403 internal_only when the x-dub-internal marker is absent", async () => {
     const { d1 } = makeD1();
     const res = await createApp().fetch(
       new Request("https://svc/internal/log", {
@@ -146,7 +150,8 @@ describe("POST /internal/log (sync fail-close)", () => {
       }),
       makeEnv(d1),
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe("internal_only");
   });
 });
 
@@ -218,10 +223,10 @@ describe("POST /internal/audit-async (async ingest, open catalog)", () => {
     expect((await queryLogs(auditDb(d1), {})).items.length).toBe(0);
   });
 
-  it("returns 404 when the x-dub-internal marker is absent (never publicly reachable)", async () => {
+  it("returns 403 internal_only when the x-dub-internal marker is absent (never publicly reachable)", async () => {
     const { d1 } = makeD1();
     const res = await post(makeEnv(d1), envelope("PUBLIC_1", { action: "auth.session.login" }), /* internal */ false);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     expect((await queryLogs(auditDb(d1), {})).items.length).toBe(0);
   });
 

@@ -37,6 +37,7 @@ import type {
   DeployJobMessage,
 } from "../../services/deploy-service/src/index";
 import { createAuthClient } from "@dub/auth-client";
+import { createAuthzGranter } from "@dub/policy-gate";
 import { buildApp as buildAuthApp } from "../../services/auth-service/src/app";
 import { SessionService } from "../../services/auth-service/src/sessions";
 import { configFromEnv as authConfigFromEnv, type Env as AuthEnv } from "../../services/auth-service/src/env";
@@ -294,7 +295,10 @@ function buildDeploy(identityFetcher: Fetcher, stores: Stores): Fetcher {
   const repo = createInMemoryDeployRepo();
   repo.seedAllowedZone({ zoneId: "zone_devhub", zoneName: "devhub.test", registrarManaged: true });
 
-  const auth = createAuthClient({ identityBinding: identityFetcher, serviceName: "deploy-service" });
+  // The REAL @dub/policy-gate granter over the REAL identity-roster app, so the gate's
+  // decisions in this e2e come from the actual roster rows (admin => full infra:*,
+  // maintainer => infra:read+deploy, organizer => infra:read, member => none).
+  const authz = createAuthzGranter(identityFetcher, { caller: "deploy-service" });
 
   const cf: DeployCfClient = {
     createPagesDeployment: async () => ({
@@ -350,7 +354,7 @@ function buildDeploy(identityFetcher: Fetcher, stores: Stores): Fetcher {
     repo,
     cf,
     audit,
-    auth,
+    authz,
     events,
     enqueueJob: async (msg) => void pending.push(msg),
   };
