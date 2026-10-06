@@ -654,7 +654,20 @@ describe("oversight — mail:read_all bypasses account scope", () => {
   const asUser = (userId: string, over: Record<string, string> = {}) =>
     ({ "content-type": "application/json", "x-dub-request-id": "req_ovr", "x-dub-user-id": userId, ...over });
   // An identity where the caller holds BOTH mail:read (guard) and mail:read_all (oversight).
-  const oversightEnv = () => makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, {}, ["mail:read", "mail:read_all", "mail:send"]) });
+  // The app:mail:* tier keys are part of the grant because POLICY_TABLE pairs the ロール管理
+  // 3-tier with the domain key (appLevel("mail", ...)): an oversight role that somehow had
+  // the メール app set to 無効 is denied at the gate before scope ever matters, which is the
+  // point of the tier. This fixture is the role as ロール管理 would actually store it.
+  const oversightEnv = () =>
+    makeEnv({
+      SVC_IDENTITY: fakeIdentityFetcher(true, {}, [
+        "app:mail:view",
+        "app:mail:edit",
+        "mail:read",
+        "mail:read_all",
+        "mail:send",
+      ]),
+    });
 
   const seedOwned = (raw: ReturnType<typeof makeEnv>["raw"], row: { id: string; ownerUserId: string | null; threadId?: string }) => {
     raw
@@ -709,8 +722,8 @@ describe("oversight — mail:read_all bypasses account scope", () => {
   });
 
   it("without mail:read_all a caller stays scoped to their own mail (fail-closed)", async () => {
-    // grant mail:read only (NOT mail:read_all) — the default isolation applies.
-    const { env, raw } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, {}, ["mail:read"]) });
+    // grant メール閲覧 + mail:read only (NOT mail:read_all) — the default isolation applies.
+    const { env, raw } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, {}, ["app:mail:view", "mail:read"]) });
     seedOwned(raw, { id: "in_alice", ownerUserId: "usr_alice" });
     const box = (await (await app.fetch(new Request("https://svc/mail/messages", { headers: asUser("usr_bob") }), env)).json()) as { items: mail.MailMessageListItem[] };
     expect(box.items).toHaveLength(0); // bob (no read_all) sees none of alice's mail
