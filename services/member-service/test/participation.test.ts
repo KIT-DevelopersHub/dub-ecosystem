@@ -21,7 +21,7 @@ describe("member-service 参加届 (participation)", () => {
     expect(anon.status).toBe(401);
   });
 
-  it("admin list requires identity:read", async () => {
+  it("admin list requires 参加届=閲覧 + identity:read", async () => {
     const app = createApp(makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>()) }));
     const res = await call(app, "GET", "/members/participation");
     expect(res.status).toBe(403);
@@ -248,8 +248,12 @@ describe("member-service 参加届 (participation)", () => {
     expect(ov.json.members).toHaveLength(0);
   });
 
-  it("resolve requires identity:admin", async () => {
-    const app = createApp(makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read"])) }));
+  it("resolve requires 参加届=編集 (閲覧 + the domain read key is not enough)", async () => {
+    const app = createApp(
+      makeDeps({
+        authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read", "app:participation:view"])),
+      }),
+    );
     const res = await call(app, "POST", "/members/participation/part_x/resolve", { body: { action: "create" } });
     expect(res.status).toBe(403);
   });
@@ -299,10 +303,14 @@ describe("member-service 参加届 (participation)", () => {
   });
 
   describe("public internal route (POST /members/internal/participation)", () => {
-    it("404s without the x-dub-internal marker (never exposed externally)", async () => {
+    // INTERNAL in POLICY_TABLE. The deny code is 403 internal_only (the hand-rolled guard
+    // used to answer 404 to hide the route); reachability is unchanged because api-gateway
+    // still 404s the /members/internal/ prefix at the edge before this Worker is reached.
+    it("403s without the x-dub-internal marker (never exposed externally)", async () => {
       const app = createApp(makeDeps());
       const res = await call(app, "POST", "/members/internal/participation", { body: { name: "外部太郎", ...EMAILS } });
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(403);
+      expect(res.json.error.details.reason).toBe("internal_only");
     });
 
     it("accepts an unauthenticated s2s submission (system actor), records it pending without reflecting", async () => {
