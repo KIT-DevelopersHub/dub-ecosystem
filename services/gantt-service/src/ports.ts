@@ -13,13 +13,24 @@ export interface UpstreamPort {
   listDependencies(ctx: RequestContext, eventId: common.EventId): Promise<task.TaskDependency[]>;
   /** Existence / visibility check (404 + org-boundary transparency). */
   eventExists(ctx: RequestContext, eventId: common.EventId): Promise<boolean>;
-  /** Persist a row's window by writing the underlying task's startAt/dueAt (PATCH
-   *  /gantt/rows). Read-modify-write against task-service (optimistic version read
-   *  then patch); task-service enforces task:write on the propagated principal. */
+  /**
+   * Persist a row's window by writing the underlying task's startAt/dueAt (PATCH
+   * /gantt/rows). Read-modify-write against task-service (optimistic version read then
+   * patch); task-service enforces its own policy table on the propagated principal.
+   *
+   * `assertWritable` is the INSTANCE-LAYER authorization hook, awaited with the freshly-read
+   * task BEFORE the patch — that ordering is the whole point. The route is task-scoped, so
+   * the request names no event and the policy table cannot judge which event the write lands
+   * in; only the loaded row knows (`task.eventId`). Passing the assertion in here, rather
+   * than re-reading the task in the handler, closes inventory a-4 with no extra subrequest
+   * while keeping the policy decision in app.ts with the rest of it. It runs on every attempt
+   * of the version-conflict retry (identity decisions are cached, so this is cheap).
+   */
   updateTaskDates(
     ctx: RequestContext,
     taskId: common.TaskId,
     dates: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
+    assertWritable: (current: task.Task) => Promise<void>,
   ): Promise<task.Task>;
 }
 
