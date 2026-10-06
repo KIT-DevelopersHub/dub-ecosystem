@@ -19,7 +19,16 @@ import {
 } from "../src/release";
 import { INITIAL_RELEASE_NOTES } from "../src/config";
 import type { IngestDeps } from "../src/ingest";
-import { makeTestEnv, ctx, fakeIdentity, fakeEvent, type TestEnvHandle } from "./helpers";
+import {
+  makeTestEnv,
+  ctx,
+  fakeIdentity,
+  fakeEvent,
+  fakeAuthzFetcher,
+  NOTIF_ADMIN_KEYS,
+  NOTIF_MEMBER_KEYS,
+  type TestEnvHandle,
+} from "./helpers";
 
 // Deps whose recipient resolver is backed by a fake identity that broadcasts `allUsers`.
 function broadcastDeps(h: TestEnvHandle, allUsers: string[]): IngestDeps {
@@ -42,19 +51,11 @@ function broadcastDeps(h: TestEnvHandle, allUsers: string[]): IngestDeps {
   };
 }
 
-// A fake identity binding answering POST /authz/check with a fixed allow/deny — drives
-// the real @dub/auth-client requirePermission("notif:admin") end to end.
+// A fake identity binding: `true` = the caller holds the whole 通知 key set (an admin),
+// `false` = only an ordinary member's keys. Drives the policy gate's
+// appLevel("notifications","edit","notif:admin") rule for POST /release end to end.
 function fakeAuthzIdentity(allow: boolean): Fetcher {
-  return {
-    async fetch(req: Request): Promise<Response> {
-      const url = new URL(req.url);
-      if (url.pathname.endsWith("/authz/check")) {
-        const payload = { decisions: [{ allowed: allow, evaluatedAt: new Date().toISOString(), ttlSeconds: 0 }] };
-        return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
-      }
-      return new Response("not found", { status: 404 });
-    },
-  } as unknown as Fetcher;
+  return fakeAuthzFetcher(() => (allow ? NOTIF_ADMIN_KEYS : NOTIF_MEMBER_KEYS));
 }
 
 function reqOf(app: ReturnType<typeof createApp>, h: TestEnvHandle) {

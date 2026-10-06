@@ -31,11 +31,17 @@ import {
   fakePush,
   fakeBatch,
   envelope,
+  fakeAuthzFetcher,
+  NOTIF_MEMBER_KEYS,
   type TestEnvHandle,
   type RecordingMail,
   type RecordingChat,
   type RecordingPush,
 } from "./helpers";
+
+// A caller at the 編集 tier of the 通知 app: an ordinary member's keys plus
+// app:notifications:edit, which POLICY_TABLE demands for PATCH /preferences.
+const prefsEditorIdentity = () => fakeAuthzFetcher(() => [...NOTIF_MEMBER_KEYS, "app:notifications:edit"]);
 
 // ---- core deps builder (bypasses Fetcher; injects fake ports) ----
 function coreDeps(
@@ -677,8 +683,11 @@ describe("HTTP app", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("NOTIF_INBOX_ITEM_NOT_FOUND");
   });
 
+  // PATCH /preferences sits at the 編集 tier of the 通知 app in POLICY_TABLE, so the caller
+  // needs app:notifications:edit on top of notif:prefs:self; the default test caller is a
+  // 閲覧-tier member and is refused (see the dedicated 403 case below).
   it("preferences: PATCH stores overrides & GET returns merged view", async () => {
-    const h = makeTestEnv();
+    const h = makeTestEnv({ SVC_IDENTITY: prefsEditorIdentity() });
     const patch = await req("/preferences", {
       method: "PATCH",
       headers: { "content-type": "application/json", "x-dub-user-id": "u1" },
@@ -700,7 +709,7 @@ describe("HTTP app", () => {
   });
 
   it("preferences: invalid type pattern -> 400 NOTIF_UNKNOWN_TYPE_PATTERN", async () => {
-    const h = makeTestEnv();
+    const h = makeTestEnv({ SVC_IDENTITY: prefsEditorIdentity() });
     const res = await req("/preferences", {
       method: "PATCH",
       headers: { "content-type": "application/json", "x-dub-user-id": "u1" },
@@ -708,6 +717,23 @@ describe("HTTP app", () => {
     }, h);
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("NOTIF_UNKNOWN_TYPE_PATTERN");
+  });
+
+  // The 編集-tier gate on PATCH /preferences, from the other side: a 閲覧-tier member can
+  // READ its own preferences but not write them. This is the ロール管理 tier being
+  // authoritative server-side — before POLICY_TABLE the route was requireAuth-only, so any
+  // signed-in user could write regardless of the tier an admin had set.
+  it("preferences: a 閲覧-tier member can GET but not PATCH its own preferences", async () => {
+    const h = makeTestEnv();
+    const get = await req("/preferences", { headers: { "x-dub-user-id": "u1" } }, h);
+    expect(get.status).toBe(200);
+
+    const patch = await req("/preferences", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-dub-user-id": "u1" },
+      body: JSON.stringify({ entries: [{ type: "task.assigned", channels: ["in_app"] }] }),
+    }, h);
+    expect(patch.status).toBe(403);
   });
 
   it("unauthenticated inbox access -> 401", async () => {

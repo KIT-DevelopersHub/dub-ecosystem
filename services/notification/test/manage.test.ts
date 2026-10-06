@@ -20,7 +20,15 @@ import {
   unpublishBroadcastBatch,
   buildBroadcastInput,
 } from "../src/broadcast";
-import { makeTestEnv, ctx, fakeIdentity, type TestEnvHandle } from "./helpers";
+import {
+  makeTestEnv,
+  ctx,
+  fakeIdentity,
+  fakeAuthzFetcher,
+  NOTIF_ADMIN_KEYS,
+  NOTIF_MEMBER_KEYS,
+  type TestEnvHandle,
+} from "./helpers";
 import type { IngestInput } from "../src/types";
 import type { notification } from "@dub/types";
 
@@ -39,32 +47,12 @@ function adminInput(over: Partial<IngestInput> = {}): IngestInput {
   };
 }
 
-// authz identity: allow a check only when its subjectUserId is an admin. Drives the real
-// @dub/auth-client both for the manage gate (notif:broadcast_publish) and the inbox
-// admin-viewer flag (notif:admin) end to end.
+// authz identity: a listed user holds the whole 通知 key set, everyone else holds only
+// what an ordinary member holds. Drives the real /authz/check contract end to end, both
+// for the policy gate (app:notifications:* + notif:broadcast_publish) and for the inbox
+// admin-viewer flag (notif:admin).
 function authzIdentityForAdmins(adminUserIds: string[]): Fetcher {
-  return {
-    async fetch(req: Request): Promise<Response> {
-      const url = new URL(req.url);
-      if (url.pathname.endsWith("/authz/check")) {
-        const body = (await req.json().catch(() => ({}))) as {
-          subjectUserId?: string;
-          checks?: unknown[];
-        };
-        const allowed = !!body.subjectUserId && adminUserIds.includes(body.subjectUserId);
-        const decisions = (body.checks ?? [{}]).map(() => ({
-          allowed,
-          evaluatedAt: new Date().toISOString(),
-          ttlSeconds: 0,
-        }));
-        return new Response(JSON.stringify({ decisions }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response("not found", { status: 404 });
-    },
-  } as unknown as Fetcher;
+  return fakeAuthzFetcher((userId) => (adminUserIds.includes(userId) ? NOTIF_ADMIN_KEYS : NOTIF_MEMBER_KEYS));
 }
 
 function reqOf(app: ReturnType<typeof createApp>, h: TestEnvHandle) {

@@ -389,9 +389,21 @@ gateway が `x-dub-*` を剥離するため外部からは詐称不能。
 `PATCH /inbox/:id/unread`, `POST /inbox/read-all`, `GET /preferences`, `PATCH /preferences`。
 **二重登録のためポリシー表も 2 系統必要**(同じキーを 2 回書く)。
 
-**要確認**: `app.ts:256-257` のコメントが「`notif:inbox:self` / `notif:prefs:self` は
-PERMISSION_CATALOG に無い」と主張しているが、`identity.ts:43,44` に**実在する**。
-コメントの陳腐化と思われるが、提案の前提になるため確認が要る。
+**解決済み(旧「要確認」)**: `app.ts` の旧コメントが「`notif:inbox:self` / `notif:prefs:self` は
+PERMISSION_CATALOG に無い」と主張していたが、`packages/types/src/identity.ts:43,44` に**実在し**、
+identity migration `0004_notif_self_perms.sql` で**全システムロールに付与済み**。コメントの陳腐化
+だったので削除し、表どおり両キーを使って移行した(素の `appLevel("notifications","view")` には
+寄せない = ロール管理から revoke できる状態を保つ)。
+
+**移行で判明した副作用(要レビュー)**: `app:notifications:edit` は `0008_per_app_access.sql` で
+**`role_sys_admin` にしか付与されていない**。そのため表の 編集 段(`POST /release`・manage の
+publish/unpublish・`PATCH /feedback/:id/read`・**`PATCH /preferences`**)は現状 admin 専用になる。
+maintainer は `notif:broadcast_publish` を持つが 編集 段が無いため manage の一覧は見えて配信は
+できない。とくに **`PATCH /preferences`(本人設定の更新)が member/organizer/maintainer から 403 になる**
+のはプロダクト影響が大きいので、(a) 下位ロールに `app:notifications:edit` を付与する migration を
+足す / (b) 当該ルールを `appLevel("notifications","view","notif:prefs:self")` に下げる、のいずれかを
+別途判断する必要がある。移行自体は表どおり(厳しい側)で実装し、
+`services/notification/test/policy-table.test.ts` のロール×エンドポイント行列に凍結してある。
 
 ### 2.13 mail-gateway
 
