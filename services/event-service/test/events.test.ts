@@ -145,11 +145,6 @@ describe("validation", () => {
   });
 });
 
-describe("health", () => {
-  it("GET /health is open (no auth)", async () => {
-    const app = createApp(makeDeps());
-    const res = await call(app, "GET", "/health", { userId: null });
-    expect(res.status).toBe(200);
-    expect(res.json.status).toBe("ok");
-  });
-});
+// GET /health used to be asserted here as "open (no auth)". It is now INTERNAL in
+// POLICY_TABLE, so its behaviour is an authorization fact, not an events fact: both halves
+// (marker -> 200, no marker -> 403) live with the table, in test/policy-table.test.ts.

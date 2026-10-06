@@ -5,6 +5,7 @@
 import type { ExecutionContext, Queue } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
+import { sharedAuthzGranter } from "@dub/policy-gate";
 import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventEnvelope } from "@dub/events";
 import { common, type auditLog } from "@dub/types";
 import { consoleSink } from "@dub/observability";
@@ -46,7 +47,16 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     ...(requestId ? { requestId } : {}),
     logger: (e) => consoleSink({ level: "debug", message: "db", service: "event-service", fields: { sql: e.sql, ms: e.durationMs } }),
   });
-  const authz = createAuthClient({
+  // Layer 1 — the POLICY_TABLE granter. sharedAuthzGranter (not createAuthzGranter): the app
+  // is rebuilt per request, so the identity /authz/check TTL cache has to be memoized per Env
+  // to survive between requests in the same isolate — otherwise every gated route is an
+  // unconditional identity subrequest and identity-roster becomes a hot-path SPOF (ADR 0004).
+  const authz = sharedAuthzGranter(env, env.SVC_IDENTITY, {
+    caller: "event-service",
+    ...(requestId ? { requestId } : {}),
+  });
+  // Layer 2 — the one event-scoped, body-dependent assertion (backward phase transition).
+  const scopedAuthz = createAuthClient({
     identityBinding: env.SVC_IDENTITY,
     serviceName: "event-service",
     mode: "trustedHeader",
@@ -54,6 +64,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
   return {
     repo: createD1EventRepo(db),
     authz,
+    scopedAuthz,
     publisher: buildPublisher(env),
     audit: buildAudit(env),
     taskClient: buildTaskClient(env.SVC_TASK),
