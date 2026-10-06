@@ -15,10 +15,15 @@ function deps(over: {
   upstream?: UpstreamPort;
   cache?: DtoCache;
   allow?: boolean;
+  /** Resource-scoped event:read, independent of `allow` (see fakeAuthClient). */
+  eventScope?: boolean;
   views?: AppDeps["views"];
   realtime?: FakeRealtime;
 }): AppDeps {
-  const auth = fakeAuthClient({ allow: over.allow ?? true });
+  const auth = fakeAuthClient({
+    allow: over.allow ?? true,
+    ...(over.eventScope === undefined ? {} : { eventScope: over.eventScope }),
+  });
   const rt = over.realtime ?? fakeRealtime();
   return {
     upstream: () => over.upstream ?? fakeUpstream({}),
@@ -151,10 +156,15 @@ describe("gantt-service POST /internal/events-async (free-tier consumer)", () =>
   const post = (app: ReturnType<typeof createApp>, headers: Record<string, string>, body: unknown) =>
     app.request("/internal/events-async", { method: "POST", headers, body: JSON.stringify(body) }, ENV);
 
-  it("without x-dub-internal -> 404 (route never exposed externally)", async () => {
+  // The marker check is now POLICY_TABLE's `INTERNAL` rule rather than a hand-rolled
+  // middleware, so the refusal is the gate's 403 `internal_only` instead of the old 404.
+  // Both are non-2xx, which is all the caller's freeq drain reads (it keeps the row pending
+  // and retries), and the table now SHOWS that this route is internal-only.
+  it("without x-dub-internal -> 403 internal_only (route never exposed externally)", async () => {
     const evt = createEvent("task.status_changed", { taskId: "task_a", eventId: "event_1", previousStatus: "todo", status: "done" }, ctx);
     const res = await post(createApp(deps({})), { "content-type": "application/json" }, evt);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe("internal_only");
   });
 
   it("task.status_changed -> 202 and purges the DTO cache (same handler as the Queue path)", async () => {
@@ -209,14 +219,49 @@ describe("PATCH /gantt/rows/:taskId (persist a bar window)", () => {
     expect(cache.purges).toEqual(["event_1"]); // next read is fresh
   });
 
-  it("requires auth (401 without x-dub-user-id) and does NOT need event:read scope", async () => {
+  it("401 without x-dub-user-id", async () => {
     const up = fakeUpstream({ tasks: [mkTask({ id: "task_a" })] });
-    const res401 = await patch(createApp(deps({ upstream: up })), "task_a", { startsAt: null, endsAt: null }, H());
-    expect(res401.status).toBe(401);
-    // event:read denied by the authz layer, but the row path is task-scoped → still 200
-    // (task:write is enforced downstream in task-service, not here).
-    const res200 = await patch(createApp(deps({ upstream: up, allow: false })), "task_a", { startsAt: null, endsAt: null });
-    expect(res200.status).toBe(200);
+    const res = await patch(createApp(deps({ upstream: up })), "task_a", { startsAt: null, endsAt: null }, H());
+    expect(res.status).toBe(401);
+  });
+
+  it("403 when the caller lacks the table's keys (ガント編集 + task:write)", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a" })] });
+    const res = await patch(createApp(deps({ upstream: up, allow: false })), "task_a", { startsAt: null, endsAt: null });
+    expect(res.status).toBe(403);
+    expect(up.calls.updateTaskDates).toBe(0);
+  });
+
+  // inventory a-4: the old `guard()` skipped event:read on this route entirely, so holding
+  // task:write was enough to re-schedule a task in an event you cannot read — and the move
+  // was then fanned out over realtime. The scope is now asserted against the task's own
+  // event, after the read and BEFORE the write.
+  it("403 when the keys are held but the task's event is NOT readable (a-4), with no write and no fanout", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a", eventId: "event_secret" })] });
+    const cache = fakeCache();
+    const rt = fakeRealtime();
+    const res = await patch(
+      createApp(deps({ upstream: up, cache, realtime: rt, allow: true, eventScope: false })),
+      "task_a",
+      { startsAt: "2026-08-15T00:00:00.000Z", endsAt: "2026-08-18T00:00:00.000Z" },
+    );
+    expect(res.status).toBe(403);
+    expect(up.calls.updateTaskDates).toBe(0);
+    expect(cache.purges).toEqual([]);
+    expect(rt.moved).toEqual([]);
+  });
+
+  // A task linked to no event belongs to no event-scoped gantt, so there is no scope to
+  // apply: the table's rule is the whole decision and the write proceeds.
+  it("allows the write on an UNLINKED task (eventId null) even when no event is readable", async () => {
+    const up = fakeUpstream({ tasks: [mkTask({ id: "task_a", eventId: null })] });
+    const res = await patch(
+      createApp(deps({ upstream: up, allow: true, eventScope: false })),
+      "task_a",
+      { startsAt: null, endsAt: null },
+    );
+    expect(res.status).toBe(200);
+    expect(up.calls.updateTaskDates).toBe(1);
   });
 
   it("400 on a non-ISO schedule value", async () => {
