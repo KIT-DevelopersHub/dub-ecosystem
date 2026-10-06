@@ -2,7 +2,6 @@
 // from index.ts so tests can assemble the same graph with in-memory adapters.
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createServiceClient } from "@dub/http";
-import { createAuthClient, type AuthClient } from "@dub/auth-client";
 import type { Env } from "./env";
 import { d1Stores } from "./store/d1";
 import type { Stores } from "./store/types";
@@ -25,7 +24,6 @@ export interface Runtime {
   publisher: Publisher;
   engine: SyncEngine;
   service: GithubSyncService;
-  auth: AuthClient;
   originDefault: "internal" | "github";
   selfLogins: string[];
   now: () => string;
@@ -83,11 +81,5 @@ export function buildRuntime(env: Env): Runtime {
     originDefault,
   });
 
-  const auth = createAuthClient({
-    identityBinding: env.SVC_IDENTITY,
-    serviceName: SERVICE_NAME,
-    mode: "trustedHeader",
-  });
-
-  return { stores, github, tasks, identity, events, publisher, engine, service, auth, originDefault, selfLogins, now: nowIso };
+  return { stores, github, tasks, identity, events, publisher, engine, service, originDefault, selfLogins, now: nowIso };
 }

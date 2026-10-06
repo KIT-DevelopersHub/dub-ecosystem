@@ -18,9 +18,9 @@ only adds what is github-sync–specific.
 |---|---|
 | Frozen wire types (minimal) | `packages/types/src/github-sync.ts` (`githubSync` namespace) |
 | Service-local domain / request types | `services/github-sync/src/domain/types.ts` |
-| HTTP routing + authn/authz wiring | `services/github-sync/src/app.ts` |
+| HTTP routing (authz is the table below) | `services/github-sync/src/app.ts` |
 | Route-facing operations + validation | `services/github-sync/src/service.ts` |
-| Permission keys (§8-N5 note) | `services/github-sync/src/auth.ts` |
+| Authorization table (route -> keys) | `services/github-sync/src/policy-table.ts` (`@dub/policy-gate`) |
 | GitHub App client + error table | `services/github-sync/src/clients/github.ts` |
 | Sync engine (conflict/echo/reconcile) | `services/github-sync/src/engine/sync.ts` |
 | Queue consumers (webhook + domain) | `services/github-sync/src/queue.ts`, `src/index.ts` |
@@ -366,7 +366,8 @@ Permission: `github:read`. Unknown id ⇒ `404 NOT_FOUND` (the **common** code h
 ## 4. Endpoint & permission summary
 
 All paths at the external (`/api/v1`) prefix. Permissions are github-sync's own domain keys
-(`github:read \| write \| sync \| admin`, `src/auth.ts`).
+(`github:read \| write \| sync \| admin`). The authoritative mapping is the declarative table
+`src/policy-table.ts`, enforced by `@dub/policy-gate` — the table below mirrors it.
 
 | Method & path | Permission | Purpose |
 |---|---|---|
@@ -382,15 +383,24 @@ All paths at the external (`/api/v1`) prefix. Permissions are github-sync's own 
 | `GET /api/v1/github/sync/runs/:id` | `github:read` | Get one run |
 
 A missing permission ⇒ `403 FORBIDDEN`. Authz is resolved via identity `/authz/check`
-(`auth.md` §10); each route checks exactly one org-scoped key before running.
+(`auth.md` §10) by `@dub/policy-gate`, mounted as the first middleware in `src/app.ts`; each
+route checks exactly one org-scoped key before running. A route **absent** from
+`src/policy-table.ts` is denied (`403`, `reason: "no_policy_rule"`), and
+`test/policy-table.test.ts` fails the build on any drift between router and table.
 
-> **Permission-catalog note — KNOWN GAP 8-N5 (documented deviation).** `github:read`,
-> `github:write`, `github:sync`, `github:admin` are **not yet** in the frozen 23-key
-> `PERMISSION_CATALOG` closed union. github-sync holds them as string constants (`src/auth.ts`)
-> and casts to `identity.PermissionKey` at the `/authz/check` wire boundary (`asPermissionKey`).
-> Until the catalog change lands, identity **default-denies** unknown keys, so **every endpoint here
-> returns `403` in a real deployment**. The wire string is identical, so adding the four keys to the
-> union is a pure tightening with zero caller change (§9).
+The four `/internal/*` routes (`GET /internal/health`,
+`POST /internal/events-async \| /internal/webhooks-async \| /internal/reconcile/kick`) are
+`INTERNAL` in the table: they require the `x-dub-internal` marker that api-gateway strips off
+every external request, and demand no permission key. They are not reachable at `/api/v1`
+(only the `github` segment is bound to this Worker).
+
+> **Permission-catalog note — RESOLVED (was KNOWN GAP 8-N5).** `github:read`, `github:write`,
+> `github:sync`, `github:admin` **are** in `PERMISSION_CATALOG`
+> (`packages/types/src/identity.ts`), so the table names them directly and the old
+> `asPermissionKey` cast (and `src/auth.ts` with it) is gone. Role bundles:
+> `role_sys_maintainer` holds read/write/sync (migration `identity/0002`), `role_sys_admin`
+> holds all four including `github:admin` (migration `identity/0005`); organizer and member
+> hold none, so the whole surface is closed to them.
 
 ---
 

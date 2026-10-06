@@ -1,8 +1,10 @@
 // Shared test doubles: in-memory GitHub / task / identity / event clients,
-// a capturing publisher, and an engine/service factory over memory stores.
+// a capturing publisher, an engine/service factory over memory stores, and the
+// in-memory PermissionGranter the policy gate is driven with.
 import type { RequestContext } from "@dub/http";
 import { DubError } from "@dub/errors";
-import type { task } from "@dub/types";
+import type { PermissionGranter } from "@dub/policy-gate";
+import type { identity, task } from "@dub/types";
 import type { DubEventContext } from "@dub/events";
 import type { GithubApiClient, CreateIssueInput, UpdateIssueInput } from "../src/clients/github";
 import type { TaskServiceClient } from "../src/clients/task";
@@ -230,6 +232,23 @@ export function makeHarness(opts?: { selfLogins?: string[]; originDefault?: Sync
   });
   return { stores, github, tasks, identity, events, publisher, engine, service };
 }
+
+// ---- authorization test doubles (the @dub/policy-gate PermissionGranter port) ----
+
+/** Fake PermissionGranter driven by a rule(userId, key) => holds. */
+export function memAuthz(rule: (userId: string, perm: identity.PermissionKey) => boolean): PermissionGranter {
+  return async (userId, _orgId, keys) => keys.filter((k) => rule(userId, k));
+}
+
+/** Granter for a caller holding EXACTLY `keys` (anything else is denied). */
+export function memAuthzHolding(...keys: identity.PermissionKey[]): PermissionGranter {
+  const held = new Set<string>(keys);
+  return memAuthz((_u, perm) => held.has(perm));
+}
+
+export const allowAll = memAuthz(() => true);
+/** Holds nothing — every keyed route must 403. */
+export const denyAll = memAuthz(() => false);
 
 export function issue(partial: Partial<IssueSnapshot> & { owner: string; repo: string; number: number }): IssueSnapshot {
   return {
