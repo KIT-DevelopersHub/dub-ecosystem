@@ -72,14 +72,20 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 });
 
 // File-relevant grants of each system role, per the identity migrations that define them:
-//   0002 (domain keys: maintainer gets file:read/write), 0005 (admin gets the file:* set),
-//   0008 (per-app tier: admin/maintainer 編集, organizer/member 閲覧 on Drive共有).
+//   0002 (domain keys) grants `file:read` AND `file:write` to ALL FOUR system roles —
+//     admin:21, maintainer:34, organizer:48, member:56 — and `file:admin` to admin alone (:21).
+//     (0005 adds drive:read/drive:write to admin; it does NOT touch the file:* keys.)
+//   0008 (per-app tier): admin/maintainer 編集 on Drive共有, organizer/member 閲覧.
+// Every later migration is INSERT OR IGNORE and there is no revoke anywhere, so this IS the
+// final state. Note the asymmetry it produces: organizer/member DO carry the fine-grained
+// write key but NOT the 編集 tier, so their reads pass and their writes do not. Stating their
+// keys as 閲覧-only would hide exactly the half of the decision this matrix exists to freeze.
 // The last two rows are not roles but the two legacy shapes the table was written to fix.
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   admin: ["app:driveshare:view", "app:driveshare:edit", "file:read", "file:write", "file:admin"],
   maintainer: ["app:driveshare:view", "app:driveshare:edit", "file:read", "file:write"],
-  organizer: ["app:driveshare:view"],
-  member: ["app:driveshare:view"],
+  organizer: ["app:driveshare:view", "file:read", "file:write"],
+  member: ["app:driveshare:view", "file:read", "file:write"],
   // Drive共有 = 無効 in ロール管理, but the role still carries the legacy file keys. Before the
   // gate this uploaded and deleted through the API anyway; the tier now denies it outright.
   "disabled-tier-with-legacy-file-keys": ["file:read", "file:write", "file:admin"],
@@ -121,9 +127,13 @@ describe("role x endpoint matrix (frozen)", () => {
   const EXPECTED: Record<keyof typeof ROLE_KEYS, string[]> = {
     admin: FULL,
     maintainer: FULL,
-    // 閲覧 without file:read reaches nothing: both halves are required, by design.
-    organizer: NONE,
-    member: NONE,
+    // 閲覧 + the legacy file:read/file:write both roles actually hold (0002:48,56). The reads
+    // pass — tier AND fine-grained key are present — and all six writes are denied for want of
+    // `app:driveshare:edit`. Under the old `requirePermission("file:write")` these two roles
+    // COULD upload, relink and delete, so this row is where that loss of reach is visible:
+    // the keys say 書ける, the table says 読むだけ, and the table is what runs now.
+    organizer: READ_ONLY,
+    member: READ_ONLY,
     "disabled-tier-with-legacy-file-keys": NONE,
     "view-tier-with-legacy-write-key": READ_ONLY,
   };
