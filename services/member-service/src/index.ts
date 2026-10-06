@@ -2,7 +2,8 @@
 // AppDeps and serves the Hono app. Must stay import-clean for `wrangler dev`.
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
-import { createAuthClient } from "@dub/auth-client";
+import { newRequestId } from "@dub/http";
+import { sharedAuthzGranter } from "@dub/policy-gate";
 import { common } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
@@ -20,10 +21,13 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     logger: (e) =>
       consoleSink({ level: "debug", message: "db", service: "member-service", fields: { sql: e.sql, ms: e.durationMs } }),
   });
-  const authz = createAuthClient({
-    identityBinding: env.SVC_IDENTITY,
-    serviceName: "member-service",
-    mode: "trustedHeader",
+  // sharedAuthzGranter (not createAuthzGranter): buildDeps runs per request, so the identity
+  // /authz/check TTL cache has to be memoized per Env to survive between requests in the same
+  // isolate — otherwise every gated route is an unconditional identity subrequest and
+  // identity-roster becomes a hot-path single point of failure (ADR 0004).
+  const authz = sharedAuthzGranter(env, env.SVC_IDENTITY, {
+    caller: "member-service",
+    requestId: requestId ?? newRequestId(),
   });
   return {
     repo: createD1MemberRepo(db),
