@@ -126,13 +126,33 @@ export class EventService {
     return toDubEvent(row);
   }
 
-  /** Load an event scoped to the caller's org; 404 (existence-hiding) otherwise. */
+  /**
+   * Load an event, asserting it is in scope for the caller; existence-hiding 404 otherwise.
+   *
+   * THIS IS LAYER 2 of the authorization split `@dub/policy-gate` prescribes (see
+   * src/policy-table.ts and policy-gate's gate.ts). POLICY_TABLE answered the type-level
+   * question ("does the caller hold `event:read` at all?"); it cannot answer the
+   * instance-level one, because the event id lives in the request. Every route that takes an
+   * `:id` therefore passes through here BEFORE reading or writing anything, so an id naming
+   * an event outside the caller's org is refused — and refused as a 404, so the response
+   * cannot be used to probe which event ids exist.
+   *
+   * Removing this call from any method re-opens exactly the hole the table cannot see. The
+   * route-by-route proof lives in test/policy-table.test.ts.
+   */
   private async loadEvent(id: common.EventId): Promise<EventRow> {
     const row = await this.deps.repo.getEvent(id);
     if (!row || row.orgId !== this.deps.orgId) throw errors.notFound("event", id);
     return row;
   }
 
+  /**
+   * Layer 2 for the three routes addressed by ACTION id (`/actions/:id`), where the caller
+   * never names an event: resolve the action's parent event and apply the same scope
+   * assertion as `loadEvent`. An action whose parent event is out of scope is a 404 — the
+   * containment check that keeps a cross-event action id from leaking a row, and the reason
+   * `GET|PATCH|DELETE /actions/:id` are safe with a table entry that names no resource.
+   */
   private async loadAction(id: common.ActionId): Promise<{ action: ActionRow; event: EventRow }> {
     const action = await this.deps.repo.getAction(id);
     if (!action) throw errors.notFound("action", id);
@@ -188,7 +208,11 @@ export class EventService {
       const to = body.phase;
       if (!isValidPhaseTransition(from, to)) throw errInvalidPhase(from, to);
       if (phaseTransitionNeedsAdmin(from, to)) {
-        const ok = await this.deps.authz.hasPermission(ctx.userId, this.deps.orgId, {
+        // Layer 2, the body-dependent half: POLICY_TABLE gates this route on `event:write`,
+        // and only the BODY reveals that this particular update is a transition needing
+        // `event:admin`. Asked WITH the event scope attached, so an admin grant limited to
+        // one event still decides correctly here.
+        const ok = await this.deps.scopedAuthz.hasPermission(ctx.userId, this.deps.orgId, {
           permission: "event:admin",
           resourceType: "event",
           resourceId: id,

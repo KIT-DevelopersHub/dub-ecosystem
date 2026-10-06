@@ -4,7 +4,7 @@
 //   - action request/response shapes (frozen event.ts defines DubAction but no
 //     action request contracts) + participants response.
 import type { common, event, auditLog } from "@dub/types";
-import type { MiddlewareHandler, Context } from "hono";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { DubEventName, DubEventPayloadMap } from "@dub/events";
 
 // ---- internal persistence rows (superset of wire types; created_by is internal) ----
@@ -244,14 +244,20 @@ export interface AuditSink {
   record(input: auditLog.AuditRecordInput): Promise<void>;
 }
 
-// Subset of @dub/auth-client's AuthClient that the app consumes. The real client
-// satisfies this; tests inject a fake.
-export interface Authz {
-  requireAuth(): MiddlewareHandler;
-  requirePermission(
-    permission: import("@dub/types").identity.PermissionKey,
-    resolve?: (c: Context) => { orgId?: string; resourceType?: string; resourceId?: string },
-  ): MiddlewareHandler;
+/**
+ * Layer 2 of the split `@dub/policy-gate` prescribes (gate.ts "RESOURCE SCOPE IS PART OF
+ * THAT"): the INSTANCE-level authorization question the static POLICY_TABLE cannot ask —
+ * "does the caller hold <permission> *on this event*?" — answered where the row is loaded.
+ *
+ * Only ONE call site needs it: the backward phase transition in `EventService.updateEvent`
+ * demands `event:admin`, a key the table does NOT require on `PATCH /events/:id` (the demand
+ * depends on the request body), so this really does decide requests rather than re-asking a
+ * question the gate already answered. Everything else in this service is a plain key check
+ * and therefore belongs in POLICY_TABLE — do not add permission checks here.
+ *
+ * Subset of @dub/auth-client's AuthClient; tests inject a fake.
+ */
+export interface ScopedAuthz {
   hasPermission(
     userId: common.UserId,
     orgId: common.OrgId,
@@ -314,7 +320,13 @@ export interface EventRepo {
 
 export interface AppDeps {
   repo: EventRepo;
-  authz: Authz;
+  /**
+   * Layer 1: the `PermissionGranter` port POLICY_TABLE is enforced through — "which of these
+   * keys does the caller hold org-wide?". Passed straight to `policyGate` in app.ts.
+   */
+  authz: PermissionGranter;
+  /** Layer 2: the one event-scoped, body-dependent assertion (see ScopedAuthz). */
+  scopedAuthz: ScopedAuthz;
   publisher: EventPublisher;
   audit: AuditSink;
   taskClient: TaskClient;
