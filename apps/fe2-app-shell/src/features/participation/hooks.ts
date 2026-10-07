@@ -20,6 +20,8 @@ export const LIST_KEY: QueryKey = queryKeys.feature("participation", "list");
 /** 組織図(体制図)/名簿を描く members overview のキー。反映確定後に無効化して再描画する。 */
 export const MEMBERS_OVERVIEW_KEY: QueryKey = queryKeys.feature("members", "overview");
 export const CANDIDATES_KEY = (id: string): QueryKey => queryKeys.feature("participation", "candidates", id);
+/** 全参加届の突合候補をまとめて無効化する前方一致キー（react-query は prefix 一致）。 */
+export const CANDIDATES_PREFIX: QueryKey = queryKeys.feature("participation", "candidates");
 
 export function useParticipationTeams() {
   const api = useParticipationApi();
@@ -82,7 +84,15 @@ export function useResolveParticipation() {
           ? {
               participations: old.participations.map((p) =>
                 p.id === id
-                  ? { ...p, reviewState: nextReviewState, matchKind: body.action === "skip" ? p.matchKind : nextMatchKind }
+                  ? {
+                      ...p,
+                      reviewState: nextReviewState,
+                      matchKind: body.action === "skip" ? p.matchKind : nextMatchKind,
+                      // link は紐付け先が確定済みなので楽観更新でも memberId を入れる。入れないと
+                      // refetch までの一瞬だけ「紐付け済み」タグが出ず、同じメンバーをもう一度
+                      // 選べてしまう (必ず 409 になる導線が復活する)。
+                      memberId: body.action === "link" ? body.memberId : p.memberId,
+                    }
                   : p,
               ),
             }
@@ -108,6 +118,10 @@ export function useResolveParticipation() {
       // サーバ確定値へ同期＋組織図(重複なし昇格/新ノード)を再描画。
       void qc.invalidateQueries({ queryKey: LIST_KEY });
       void qc.invalidateQueries({ queryKey: MEMBERS_OVERVIEW_KEY });
+      // 突合候補は全参加届ぶん破棄する: link はメンバーの version を +1 するので、他の
+      // 参加届のキャッシュに残った古い expectedVersion を次の確定で送ると 409
+      // (MEMBER_VERSION_CONFLICT) になる。
+      void qc.invalidateQueries({ queryKey: CANDIDATES_PREFIX });
     },
   });
 }

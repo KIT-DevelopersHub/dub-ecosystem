@@ -2463,11 +2463,22 @@ function createMembersStore() {
         return json({ participation: { ...p }, member: null });
       }
       if (action === "link") {
+        if (typeof body?.memberId !== "string" || body.memberId.length === 0) {
+          return json({ error: { code: "VALIDATION_FAILED", message: "memberId required", retryable: false } }, 400);
+        }
+        // 実 API と同じ楽観ロック: expectedVersion は必須で、ズレていれば 409。
+        // (mock が緩いと version 競合バグが demo では再現せず本番だけで出る)
+        if (typeof body?.expectedVersion !== "number") {
+          return json({ error: { code: "VALIDATION_FAILED", message: "expectedVersion required", retryable: false } }, 400);
+        }
         const mem = members.find((m) => m.id === body?.memberId);
         if (!mem) return json({ error: { code: "MEMBER_NOT_FOUND", message: "not found", retryable: false } }, 404);
         // 二重紐付け防止: 同一メンバーが別の参加届に反映済みなら 409。
         const clash = participations.find((o) => o.id !== p.id && o.memberId === mem.id && o.reviewState === "added");
         if (clash) return json({ error: { code: "MEMBER_PARTICIPATION_ALREADY_LINKED", message: "already linked", retryable: false } }, 409);
+        if (mem.version !== body.expectedVersion) {
+          return json({ error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } }, 409);
+        }
         if (mem.status === "invited" || mem.status === "considering") mem.status = "added";
         if (p.desiredTeamId && !mem.teamIds.includes(p.desiredTeamId)) mem.teamIds.push(p.desiredTeamId);
         if (mem.contact === null) mem.contact = p.schoolEmail;
