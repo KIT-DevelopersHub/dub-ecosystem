@@ -15,6 +15,8 @@ import {
   ConfirmDialog,
   SkeletonLoader,
   ErrorState,
+  Menu,
+  useToast,
 } from "@dub/ui";
 import type { SelectOption } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
@@ -25,6 +27,7 @@ import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
 import type { OrgMember } from "./contracts.ts";
 import { ROSTER_FILTER_OPTIONS, matchesRosterFilter, type RosterStatusFilter } from "./memberStatus.ts";
 import { orgChartOrder } from "./orgChartOrder.ts";
+import { buildRosterTable, exportRoster, type RosterExportFormat } from "./rosterExport.ts";
 import styles from "./members.module.css";
 
 export function MemberRosterPage(): JSX.Element {
@@ -85,6 +88,16 @@ export function MemberRosterPage(): JSX.Element {
   const openAddMember = () => setMemberDialog({ open: true, editing: null });
   const openEditMember = (m: OrgMember) => setMemberDialog({ open: true, editing: m });
 
+  // 画面に出ている行(状態フィルタ・検索・並び順を反映)をそのまま書き出す。
+  const toast = useToast();
+  const download = (format: RosterExportFormat) => {
+    try {
+      exportRoster(buildRosterTable(filteredMembers, { teamsById, accountLabels, leaderNames }), format);
+    } catch {
+      toast.show({ kind: "error", title: "ダウンロードに失敗しました" });
+    }
+  };
+
   const confirmDelete = () => {
     if (!confirm) return;
     deleteMember.mutate(confirm.id);
@@ -105,9 +118,23 @@ export function MemberRosterPage(): JSX.Element {
         title="運営名簿"
         description="運営メンバー全員の情報を一覧で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）"
         actions={
-          <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={openAddMember} testId="member-roster-add-member">
-            メンバーを追加
-          </Button>
+          <>
+            <Menu
+              label="ダウンロード"
+              icon="file"
+              variant="secondary"
+              menuLabel="運営名簿をダウンロード"
+              testId="member-roster-export"
+              items={[
+                { id: "xlsx", label: "Excel（.xlsx）", onSelect: () => download("xlsx"), testId: "member-roster-export-xlsx" },
+                { id: "csv", label: "CSV（.csv）", onSelect: () => download("csv"), testId: "member-roster-export-csv" },
+                { id: "pdf", label: "PDF（.pdf）", onSelect: () => download("pdf"), testId: "member-roster-export-pdf" },
+              ]}
+            />
+            <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={openAddMember} testId="member-roster-add-member">
+              メンバーを追加
+            </Button>
+          </>
         }
       />
 
