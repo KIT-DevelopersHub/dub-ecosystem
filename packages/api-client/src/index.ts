@@ -181,19 +181,63 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     return new ApiError(res.status, envelopeFromDubError(dubErr, requestId));
   }
 
-  async function attemptRefresh(): Promise<boolean> {
-    // Browser path: empty body {}, cookie-derived; Set-Cookie rotation server-side.
-    try {
-      const res = await fetchImpl(buildUrl(config.baseUrl, "/api/v1/auth/refresh"), {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+  /** The settled outcome of ONE refresh storm, shared by every caller that awaited it. */
+  interface RefreshAttempt {
+    ok: boolean;
+    /** Fires config.onUnauthenticated at most once for this storm (latch is per-storm). */
+    notifyUnauthenticated(): void;
+  }
+
+  // Single-flight refresh. The access token has a fixed TTL, so when it expires EVERY
+  // in-flight request 401s at the same moment. Without this latch each one POSTs
+  // /auth/refresh; the concurrent rotations race each other server-side and the losers
+  // come back invalid, tearing down the session the user was in the middle of using.
+  // All concurrent 401s instead await the SAME refresh and retry against one rotated
+  // cookie. The latch is per-client (closure, not a module global) so separate clients
+  // and tests never share state, and it is cleared on settle so a LATER expiry refreshes
+  // again (the boolean is never cached).
+  let refreshInFlight: Promise<RefreshAttempt> | null = null;
+
+  function attemptRefresh(): Promise<RefreshAttempt> {
+    if (refreshInFlight) return refreshInFlight;
+    const flight = (async (): Promise<RefreshAttempt> => {
+      // Browser path: empty body {}, cookie-derived; Set-Cookie rotation server-side.
+      let ok = false;
+      try {
+        const res = await fetchImpl(buildUrl(config.baseUrl, "/api/v1/auth/refresh"), {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        ok = res.ok;
+      } catch {
+        ok = false;
+      }
+      // One latch per storm: the shared promise alone is not enough, because each waiting
+      // caller independently reaches its own failure branch and would log the user out
+      // N times (N toasts / N redirects). Closing over `notified` here ties "already
+      // notified" to this settled storm, so a later expiry can notify again.
+      let notified = false;
+      return {
+        ok,
+        notifyUnauthenticated: (): void => {
+          if (notified) return;
+          notified = true;
+          config.onUnauthenticated?.();
+        },
+      };
+    })();
+    refreshInFlight = flight;
+    void flight.then(
+      () => {
+        if (refreshInFlight === flight) refreshInFlight = null;
+      },
+      () => {
+        if (refreshInFlight === flight) refreshInFlight = null;
+      },
+    );
+    return flight;
   }
 
   async function requestOnce<TRes, TBody>(input: RequestInput<TBody>): Promise<TRes> {
@@ -238,18 +282,20 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     } catch (e) {
       // 401 branch judged by HTTP status ONLY (code-name independent).
       if (ApiError.isApiError(e) && e.status === 401) {
-        const refreshed = await attemptRefresh();
-        if (refreshed) {
+        const attempt = await attemptRefresh();
+        if (attempt.ok) {
           try {
             return await requestOnce<TRes, TBody>(input);
           } catch (e2) {
+            // Still 401 after a *successful* rotation = the session is genuinely gone.
+            // Same storm, same latch: one logout for all waiters.
             if (ApiError.isApiError(e2) && e2.status === 401) {
-              config.onUnauthenticated?.();
+              attempt.notifyUnauthenticated();
             }
             throw e2;
           }
         }
-        config.onUnauthenticated?.();
+        attempt.notifyUnauthenticated();
       }
       throw e;
     }
