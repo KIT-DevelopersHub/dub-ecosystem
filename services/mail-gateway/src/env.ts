@@ -1,9 +1,9 @@
 // Worker bindings (wrangler.toml) + Hono per-request variables.
 // Deploy is out of scope for this unit; every Service Binding / Queue is contract-only.
 import type { D1Database, Fetcher, Queue, R2Bucket } from "@cloudflare/workers-types";
-import type { AuthClient, AuthnContext } from "@dub/auth-client";
 import type { AuditRecordEnvelopeV1, DubEventEnvelope } from "@dub/events";
 import type { RequestContext } from "@dub/http";
+import type { PolicyGateVars } from "@dub/policy-gate";
 
 export interface Env {
   // --- data ---
@@ -68,10 +68,14 @@ export interface Env {
 }
 
 // Hono per-request variables.
-export interface Vars {
+//
+// `userId` comes from PolicyGateVars: policyGate (app.ts) publishes the authenticated caller
+// on every key-gated route, so handlers read `c.get("userId")` instead of re-reading the
+// trusted header. The former `authClient` / `authn` vars are gone with `withAuth` — authn is
+// the gate's job now, and the one remaining handler-side authz question (`mail:read_all`, a
+// per-account scope decision) builds its own client where it is asked.
+export interface Vars extends PolicyGateVars {
   dubCtx: RequestContext;
-  authClient: AuthClient;
-  authn: AuthnContext;
 }
 
 export type AppBindings = { Bindings: Env; Variables: Vars };

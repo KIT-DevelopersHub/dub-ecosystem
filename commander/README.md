@@ -105,11 +105,15 @@ daemon のアドレスを変えた場合は `VITE_COMMANDER_DAEMON` で上書き
 
 フェーズ管理 UI を動かすときだけ起動する（実 D1 が要る）。
 
+`dev-up.sh` 経由なら何もしなくてよい（トークンを生成して 3 プロセスへ自動で渡す）。単体で
+起動する場合は **`COMMANDER_OPERATOR_TOKEN` の指定が必須** — 未設定だと全ルートが 503 で
+落ちる（fail-closed。素通しにはしない）。
+
 ```
 # ローカル D1 にスキーマ適用（冪等・集約マイグレーション経由）
 pnpm db:migrate
-# ワーカー起動（miniflare のローカル D1 を使用）
-pnpm --filter @dub/commander-service exec wrangler dev
+# ワーカー起動（miniflare のローカル D1 を使用）。--var でトークンを渡す
+pnpm --filter @dub/commander-service exec wrangler dev --var COMMANDER_OPERATOR_TOKEN:devtoken
 # => http://127.0.0.1:8787
 ```
 
@@ -143,8 +147,12 @@ killされた run は `failed`（理由を error イベントで先出し）。`
 | GET | `/runs/:id` | run 詳細（`{ run, events }`） |
 | GET/POST | `/runs/:id/events` | run イベントの一覧 / 追記（`{ type, payload?, at? }`）。status/exit は run 行に畳み込む |
 
-`COMMANDER_OPERATOR_TOKEN`（任意）を設定すると、POST 系は `x-commander-token` ヘッダ一致を要求
-（未設定なら開放。共有トークン認証の本実装は次フェーズ）。
+認可は宣言的な 1 枚の表（`services/commander-service/src/protection-table.ts`）に集約してあり、
+**GET も含む全ルートが `x-commander-token` の一致を要求**する（例外は `/health` の 1 本だけ）。
+表に無いルートは 403、`COMMANDER_OPERATOR_TOKEN` 未設定は 503 で、どちらも素通りしない。
+ルートを増やしたら表に 1 行足す（足し忘れは `test/protection-table.test.ts` が CI で赤にする）。
+この service が `@dub/policy-gate` ではなく専用の表を持つ理由も同ファイル冒頭に書いてある
+（api-gateway を経由しないので `x-dub-user-id` を信頼できない）。
 
 ## 開発（型/テスト/ビルド）
 

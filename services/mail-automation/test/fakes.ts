@@ -1,6 +1,7 @@
 // Test doubles + builders shared across the mail-automation test suite.
-import type { mail } from "@dub/types";
+import type { identity, mail } from "@dub/types";
 import type { auditLog } from "@dub/types";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { RequestContext } from "@dub/http";
 import type { GatewaySendOptions, MailGatewayClient } from "../src/gateway";
 import type { AuditSink, EventPublisher, RunContext } from "../src/publisher";
@@ -8,6 +9,19 @@ import type { EventInfoClient, PipelineDeps } from "../src/pipeline";
 import { createInMemoryRepo, type MailAutoRepo } from "../src/repo";
 import type { InboundMail } from "../src/types";
 import { DubError } from "@dub/errors";
+
+/**
+ * Fake `PermissionGranter` — the port policyGate asks "which of these keys does the caller
+ * hold?". `"all"` grants every requested key, `"none"` grants nothing, or pass an explicit
+ * key list to model one role exactly (`granter(["mail:read"])` = a maintainer).
+ */
+export function granter(held: "all" | "none" | identity.PermissionKey[]): PermissionGranter {
+  return async (_userId, _orgId, keys) => {
+    if (held === "all") return keys;
+    if (held === "none") return [];
+    return keys.filter((k) => held.includes(k));
+  };
+}
 
 export class Clock {
   constructor(public iso = "2026-08-09T10:00:00.000Z") {}

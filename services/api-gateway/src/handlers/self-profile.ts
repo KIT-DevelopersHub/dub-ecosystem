@@ -14,7 +14,7 @@ import type { GatewayVariables } from "../context";
 import type { gateway, identity } from "@dub/types";
 import type { RequestContext } from "@dub/http";
 import { createServices } from "../services";
-import { authenticate } from "../auth";
+import { authedActor } from "../policy";
 import { getRequestId } from "../context";
 
 type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
@@ -23,7 +23,8 @@ type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
 export async function getSelfProfileHandler(c: Ctx): Promise<Response> {
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
-  const auth = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  // AUTHENTICATED in POLICY_TABLE — the session id is the only subject this can reach.
+  const auth = authedActor(c);
   const ctx: RequestContext = { requestId, userId: auth.userId, caller: "api-gateway" };
   // internal S2S read of the caller's own identity master (same route /me composes).
   const user = await svc.identity.get<identity.IdentityUser>(ctx, `/users/${encodeURIComponent(auth.userId)}`);
@@ -36,7 +37,8 @@ export async function getSelfProfileHandler(c: Ctx): Promise<Response> {
 export async function updateSelfProfileHandler(c: Ctx): Promise<Response> {
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
-  const auth = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  // AUTHENTICATED in POLICY_TABLE — the write target is the session id, never client input.
+  const auth = authedActor(c);
   const ctx: RequestContext = { requestId, userId: auth.userId, caller: "api-gateway" };
 
   const input = await c.req

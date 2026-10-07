@@ -1,13 +1,20 @@
 // Hono app: 2 write routes (internal-only), 2 read routes (audit:read gated), health.
+//
+// AUTHZ: none in this file. `policyGate` is the first decision point and the only one — it
+// derives both authn (the trusted x-dub-user-id header) and authz from POLICY_TABLE
+// (src/policy-table.ts), which lists every route below. Handlers therefore assume an
+// authorized caller. Do NOT add a permission check or an `x-dub-internal` check to a route
+// or a handler — add the route to the table (test/policy-table.test.ts fails if you forget).
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { createDbClient, ulid } from "@dub/db";
 import { dubErrorHandler, errors } from "@dub/errors";
 import { dubContext } from "@dub/http";
-import { createAuthClient } from "@dub/auth-client";
+import { policyGate, sharedAuthzGranter } from "@dub/policy-gate";
 import { HEADERS } from "@dub/observability";
 import type { auditLog } from "@dub/types";
 import type { AppBindings } from "./env";
 import { SERVICE_NAME } from "./config";
+import { POLICY_TABLE } from "./policy-table";
 import { parseAuditRecordInput, assertSyncAction, parseAuditLogQuery, parseAuditIngest } from "./validation";
 import { insertRecord, getById, queryLogs } from "./repo";
 
@@ -20,11 +27,33 @@ export function createApp() {
   const db = (c: Context<AppBindings>) =>
     createDbClient(c.env.DB, { namespace: "audit", requestId: c.get("dubCtx").requestId });
 
-  // ---- internal-only guard: /internal/* requires the x-dub-internal marker.
-  // Mirrors the gateway internalOnlyPaths 404 (never expose write routes publicly).
-  app.use("/internal/*", async (c, next) => {
-    if (!c.req.header(HEADERS.internal)) throw errors.notFound("route", c.req.path);
-    await next();
+  // ---- THE authorization layer. Mounted on every route, so it runs before every handler,
+  // including routes added below it; a route absent from POLICY_TABLE is denied (403), never
+  // served. It replaces BOTH the old per-route requireAuth/requirePermission("audit:read")
+  // pair AND the hand-rolled "/internal/* needs x-dub-internal" middleware — the latter is
+  // now the INTERNAL rule form, so the internal-only routes are visible in the table instead
+  // of hiding in a middleware. `dubContext` above is pure x-dub-* header parsing (it makes
+  // no authorization decision) and stays first so the gate's identity /authz/check call
+  // carries this request's correlation id.
+  //
+  // The granter needs the identity Service Binding, which only exists per request (c.env),
+  // so the gate instance is built here rather than at module scope. `as MiddlewareHandler`
+  // is a typing bridge only: policyGate is declared for an app whose Variables are exactly
+  // PolicyGateVars, while this app's Vars EXTENDS PolicyGateVars and adds Bindings, and
+  // Hono's Context<E> is not comparable across that difference.
+  app.use("*", (c, next) => {
+    const gate = policyGate({
+      service: SERVICE_NAME,
+      table: POLICY_TABLE,
+      // sharedAuthzGranter, not createAuthzGranter: the decision cache ADR 0004 requires is
+      // memoized per Env, so it survives across requests served by the same isolate instead
+      // of being freshly empty on every one (identity-roster sits on the hot path).
+      granted: sharedAuthzGranter(c.env, c.env.SVC_IDENTITY, {
+        caller: SERVICE_NAME,
+        requestId: c.get("dubCtx").requestId,
+      }),
+    }) as MiddlewareHandler;
+    return gate(c, next);
   });
 
   // ---- health
@@ -60,23 +89,14 @@ export function createApp() {
     return c.json(res, 202);
   });
 
-  // ---- read: audit:read (P0 = admin). Build one auth client per request.
-  app.use("/audit/*", async (c, next) => {
-    const client = createAuthClient({ identityBinding: c.env.SVC_IDENTITY, serviceName: SERVICE_NAME });
-    c.set("authClient", client);
-    await next();
-  });
-  const requireAuth: MiddlewareHandler<AppBindings> = (c, next) => c.get("authClient").requireAuth()(c, next);
-  const requireAuditRead: MiddlewareHandler<AppBindings> = (c, next) =>
-    c.get("authClient").requirePermission("audit:read")(c, next);
-
-  app.get("/audit/logs", requireAuth, requireAuditRead, async (c) => {
+  // ---- read: audit:read (P0 = admin), demanded by the table — see policy-table.ts.
+  app.get("/audit/logs", async (c) => {
     const query = parseAuditLogQuery(c.req.query());
     const page = await queryLogs(db(c), query);
     return c.json(page);
   });
 
-  app.get("/audit/logs/:id", requireAuth, requireAuditRead, async (c) => {
+  app.get("/audit/logs/:id", async (c) => {
     const record = await getById(db(c), c.req.param("id"));
     if (!record) throw errors.notFound("audit_log", c.req.param("id"));
     return c.json(record);

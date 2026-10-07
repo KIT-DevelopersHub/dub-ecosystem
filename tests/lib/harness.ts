@@ -37,6 +37,7 @@ import type {
   DeployJobMessage,
 } from "../../services/deploy-service/src/index";
 import { createAuthClient } from "@dub/auth-client";
+import { createAuthzGranter } from "@dub/policy-gate";
 import { buildApp as buildAuthApp } from "../../services/auth-service/src/app";
 import { SessionService } from "../../services/auth-service/src/sessions";
 import { configFromEnv as authConfigFromEnv, type Env as AuthEnv } from "../../services/auth-service/src/env";
@@ -248,10 +249,9 @@ function buildEvent(identityFetcher: Fetcher, stores: Stores): Fetcher {
   const repo = new InMemoryEventRepo();
   // event-service authz client resolves permissions against the REAL identity fetcher.
   // We reuse the auth-client the service ships (trustedHeader mode) by importing it here.
-  const authz = makeEventAuthz(identityFetcher);
   const deps: EventAppDeps = {
     repo,
-    authz,
+    ...makeEventAuthz(identityFetcher),
     publisher: { publish: async () => {} },
     audit: {
       record: async (input) => {
@@ -274,13 +274,30 @@ function buildEvent(identityFetcher: Fetcher, stores: Stores): Fetcher {
   return toFetcher(app);
 }
 
-// The event app's Authz interface is a subset of @dub/auth-client. Build the real one.
-function makeEventAuthz(identityFetcher: Fetcher): EventAppDeps["authz"] {
-  return createAuthClient({
-    identityBinding: identityFetcher,
-    serviceName: "event-service",
-    mode: "trustedHeader",
-  }) as unknown as EventAppDeps["authz"];
+/**
+ * event-service's two authorization deps, both resolving against the REAL identity-roster
+ * app so these tests exercise genuine RBAC (POLICY_TABLE's keys included):
+ *   authz       — @dub/policy-gate's granter (POST /authz/check over the identity fetcher),
+ *                 the port POLICY_TABLE is enforced through.
+ *   scopedAuthz — the body-dependent, event-scoped `event:admin` demand in updateEvent.
+ *
+ * `maxEntries: 0` disables the decision cache: the harness mutates roles mid-test, so a
+ * 60s-cached "allow" would make assertions depend on test order.
+ */
+function makeEventAuthz(
+  identityFetcher: Fetcher,
+): Pick<EventAppDeps, "authz" | "scopedAuthz"> {
+  return {
+    authz: createAuthzGranter(identityFetcher, {
+      caller: "event-service",
+      cacheOptions: { maxEntries: 0 },
+    }),
+    scopedAuthz: createAuthClient({
+      identityBinding: identityFetcher,
+      serviceName: "event-service",
+      mode: "trustedHeader",
+    }),
+  };
 }
 
 // ============================ deploy (REAL) ============================
@@ -294,7 +311,10 @@ function buildDeploy(identityFetcher: Fetcher, stores: Stores): Fetcher {
   const repo = createInMemoryDeployRepo();
   repo.seedAllowedZone({ zoneId: "zone_devhub", zoneName: "devhub.test", registrarManaged: true });
 
-  const auth = createAuthClient({ identityBinding: identityFetcher, serviceName: "deploy-service" });
+  // The REAL @dub/policy-gate granter over the REAL identity-roster app, so the gate's
+  // decisions in this e2e come from the actual roster rows (admin => full infra:*,
+  // maintainer => infra:read+deploy, organizer => infra:read, member => none).
+  const authz = createAuthzGranter(identityFetcher, { caller: "deploy-service" });
 
   const cf: DeployCfClient = {
     createPagesDeployment: async () => ({
@@ -350,7 +370,7 @@ function buildDeploy(identityFetcher: Fetcher, stores: Stores): Fetcher {
     repo,
     cf,
     audit,
-    auth,
+    authz,
     events,
     enqueueJob: async (msg) => void pending.push(msg),
   };

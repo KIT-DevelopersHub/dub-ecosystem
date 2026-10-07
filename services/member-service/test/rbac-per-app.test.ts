@@ -59,21 +59,34 @@ describe("member-service RBAC — per-app keys are authoritative for the roster"
     expect((await call(app, "POST", "/members/teams", { body: { name: "x" } })).status).toBe(403);
   });
 
-  it("domain key reads (backward compat), but a write needs the app's 編集 — identity:admin alone is 403", async () => {
-    const readOnly = createApp(makeDeps({ authz: fakeAuthz(set("identity:read")) }));
-    expect((await call(readOnly, "GET", "/members/overview")).status).toBe(200);
-    // identity:read alone cannot write
-    expect((await call(readOnly, "POST", "/members/teams", { body: { name: "x" } })).status).toBe(403);
+  // The per-app tier is now the WHOLE gate on both axes — the former read gate was
+  // `requireAny(["identity:read", "app:members:view"])` (OR) and @dub/policy-gate has no OR
+  // form (docs/policy-coverage-inventory.md b-6). Collapsing it to the tier loses nobody in
+  // real data: identity migration 0010_app_access_policy_backfill.sql:40-41 grants
+  // app:members:view to every role holding identity:read, and identity-roster/src/seed.ts:31
+  // (`{ id: "members", read: "identity:read" }`) derives the same key for every role seeded
+  // since. A key set with identity:read and NO app:members:view therefore cannot exist in a
+  // deployed org — it is the stale shape this test pins as closed.
+  it("the 運営メンバー tier is the whole gate: identity:read / identity:admin alone reach nothing", async () => {
+    const domainReadOnly = createApp(makeDeps({ authz: fakeAuthz(set("identity:read")) }));
+    expect((await call(domainReadOnly, "GET", "/members/overview")).status).toBe(403);
+    expect((await call(domainReadOnly, "POST", "/members/teams", { body: { name: "x" } })).status).toBe(403);
 
-    // The 3 段階 is now AUTHORITATIVE for writes (policy layer): a role holding the domain key
-    // but NO app:members:edit is 閲覧 on 運営メンバー, so its writes are rejected server-side — the
-    // whole point of "閲覧 にしたらボタンも API も通らない". Real roles that could write before
-    // keep writing because migration 0010 backfills `:edit` onto every identity:admin role.
+    // The 3 段階 is AUTHORITATIVE for writes: a role holding the domain key but NO
+    // app:members:edit is 閲覧 (or 無効) on 運営メンバー, so its writes are rejected server-side —
+    // the whole point of "閲覧 にしたらボタンも API も通らない".
     const adminOnly = createApp(makeDeps({ authz: fakeAuthz(set("identity:admin")) }));
     expect((await call(adminOnly, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(403);
 
+    // What migration 0010 actually produces for a role that could write before: both keys.
     const backfilled = createApp(makeDeps({ authz: fakeAuthz(set("identity:admin", "app:members:view", "app:members:edit")) }));
+    expect((await call(backfilled, "GET", "/members/overview")).status).toBe(200);
     expect((await call(backfilled, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(201);
+
+    // ...and what it produces for a plain reader (member/organizer/maintainer): the view key.
+    const seededReader = createApp(makeDeps({ authz: fakeAuthz(set("identity:read", "app:members:view")) }));
+    expect((await call(seededReader, "GET", "/members/overview")).status).toBe(200);
+    expect((await call(seededReader, "POST", "/members/teams", { body: { name: "x" } })).status).toBe(403);
   });
 
   it("no over-escalation: app:members:edit does NOT unlock 参加届 resolve (identity:admin)", async () => {

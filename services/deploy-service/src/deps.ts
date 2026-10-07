@@ -1,7 +1,7 @@
 // Dependency container. buildDeps() wires the real implementations from Env; tests
 // pass their own DepsFactory to inject fakes (no network, no real CF/D1).
-import { createAuthClient } from "@dub/auth-client";
-import type { AuthClient } from "@dub/auth-client";
+import { sharedAuthzGranter } from "@dub/policy-gate";
+import type { PermissionGranter } from "@dub/policy-gate";
 import { createDbClient } from "@dub/db";
 import type { Env } from "./env";
 import type { DeployRepo } from "./repo";
@@ -21,7 +21,13 @@ export interface Deps {
   repo: DeployRepo;
   cf: CfClient;
   audit: AuditGateway;
-  auth: AuthClient;
+  /**
+   * Which of the requested permission keys the caller holds (identity /authz/check). The
+   * ONLY authorization dependency: it feeds `policyGate` in app.ts, which is the single
+   * decision point. There is no auth client here any more — nothing in this service
+   * performs a permission check of its own.
+   */
+  authz: PermissionGranter;
   events: EventBus;
   enqueueJob(msg: DeployJobMessage, opts?: { delaySeconds?: number }): Promise<void>;
 }
@@ -47,7 +53,14 @@ export const buildDeps: DepsFactory = (env, requestId) => {
       auditQueue: env.AUDIT_QUEUE ?? outboxQueue(env.DB, AUDIT_TOPIC),
       serviceName: SERVICE_NAME,
     }),
-    auth: createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: SERVICE_NAME }),
+    // sharedAuthzGranter, not createAuthzGranter: deps are rebuilt per request, so the
+    // identity decision cache (ADR 0004) has to be memoized per Env to survive between
+    // requests in the same isolate. The three dangerous infra:* keys bypass that cache in
+    // both directions, which is what keeps the old `fresh: true` behaviour intact.
+    authz: sharedAuthzGranter(env, env.SVC_IDENTITY, {
+      caller: SERVICE_NAME,
+      ...(requestId ? { requestId } : {}),
+    }),
     events: createEventBus({ notificationQueue: env.EVT_NOTIFICATION ?? outboxQueue(env.DB, TOPIC_NOTIFICATION) }),
     async enqueueJob(msg, opts) {
       if (env.DEPLOY_JOBS) {

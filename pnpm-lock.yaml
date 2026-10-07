@@ -922,6 +922,27 @@ importers:
 
   packages/observability: {}
 
+  packages/policy-gate:
+    dependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4
+        version: 4.20260702.1
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@dub/http':
+        specifier: workspace:*
+        version: link:../http
+      '@dub/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../types
+      hono:
+        specifier: ^4
+        version: 4.13.1
+
   packages/tokens: {}
 
   packages/types: {}
@@ -958,6 +979,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1013,6 +1037,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1044,6 +1071,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1084,6 +1114,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1152,6 +1185,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1185,6 +1221,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1209,6 +1248,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1242,6 +1284,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1254,9 +1299,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4
         version: 4.20260702.1
-      '@dub/auth-client':
-        specifier: workspace:*
-        version: link:../../packages/auth-client
       '@dub/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -1275,6 +1317,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1284,12 +1329,21 @@ importers:
 
   services/freeq-drain:
     dependencies:
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
       '@dub/freeq':
         specifier: workspace:*
         version: link:../../packages/freeq
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       hono:
         specifier: ^4.6.14
         version: 4.13.1
@@ -1327,6 +1381,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1367,6 +1424,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1400,6 +1460,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1427,6 +1490,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1467,6 +1533,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1504,6 +1573,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1534,6 +1606,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1577,6 +1652,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1596,9 +1674,6 @@ importers:
 
   services/usage-meter:
     dependencies:
-      '@dub/auth-client':
-        specifier: workspace:*
-        version: link:../../packages/auth-client
       '@dub/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -1611,6 +1686,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1630,9 +1708,6 @@ importers:
 
   services/webhook-ingest:
     dependencies:
-      '@dub/auth-client':
-        specifier: workspace:*
-        version: link:../../packages/auth-client
       '@dub/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -1648,6 +1723,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types

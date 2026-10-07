@@ -148,10 +148,15 @@ export class ChatService {
     return row;
   }
 
+  // INSTANCE-level authority over ONE channel, and deliberately not expressible in
+  // POLICY_TABLE: it turns on a membership row, i.e. request data the gate cannot see. The
+  // org-wide fallback asks the same permission port the gate uses (deps.authz), so
+  // "channel admin OR chat:moderate" keeps its exact pre-gate meaning.
   private async isChannelAdmin(ctx: ReqCtx, channel: ChannelRow, membership?: MemberRow | null): Promise<boolean> {
     const m = membership ?? (await this.deps.repo.getMember(channel.id, ctx.userId));
     if (m?.role === "admin") return true;
-    return this.deps.authz.hasPermission(ctx.userId, this.deps.orgId, { permission: "chat:moderate" });
+    const held = await this.deps.authz(ctx.userId, this.deps.orgId, ["chat:moderate"]);
+    return held.includes("chat:moderate");
   }
 
   // ---- channels ----
@@ -493,7 +498,7 @@ export class ChatService {
   }
 
   // PATCH /chat/settings/deletion-policy — optimistic-concurrency on `version`. Authz
-  // (chat:moderate) is enforced at the route (fail-close); this only validates + writes.
+  // (編集 + chat:moderate) is enforced by POLICY_TABLE (fail-close); this only validates + writes.
   async updateDeletionPolicy(ctx: ReqCtx, body: UpdateDeletionPolicyRequest): Promise<DeletionPolicyResponse> {
     if (typeof body.version !== "number") throw errors.validationFailed([{ field: "version", reason: "required" }]);
     const policy = requirePolicy(body.policy);

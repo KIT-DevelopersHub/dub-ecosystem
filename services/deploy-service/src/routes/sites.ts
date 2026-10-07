@@ -1,23 +1,15 @@
-// Site registry routes. Site creation is infra:admin; listing is infra:read.
+// Site registry routes. Site creation is infra:admin; listing is infra:read — both declared
+// in src/policy-table.ts and enforced by policyGate, not here.
 // (Site create is NOT in SYNC_AUDIT_ACTIONS, so no synchronous write-ahead audit.)
 import { Hono } from "hono";
 import type { FieldError } from "@dub/errors";
 import { errors } from "@dub/errors";
 import type { AppEnv } from "../http";
-import {
-  getDeps,
-  reqCtx,
-  requireAuth,
-  requirePermission,
-  readJson,
-  requireString,
-  optionalString,
-  assertValid,
-} from "../http";
+import { getDeps, reqCtx, readJson, requireString, optionalString, assertValid } from "../http";
 import { toSite } from "../mappers";
 
 export function registerSiteRoutes(app: Hono<AppEnv>): void {
-  app.post("/deploy/sites", requireAuth, requirePermission("infra:admin", true), async (c) => {
+  app.post("/deploy/sites", async (c) => {
     const deps = getDeps(c);
     const body = await readJson(c);
     const fe: FieldError[] = [];
@@ -42,7 +34,7 @@ export function registerSiteRoutes(app: Hono<AppEnv>): void {
     return c.json(toSite(row), 201);
   });
 
-  app.get("/deploy/sites", requireAuth, requirePermission("infra:read"), async (c) => {
+  app.get("/deploy/sites", async (c) => {
     const deps = getDeps(c);
     const rows = await deps.repo.listSites();
     return c.json({ items: rows.map(toSite) });

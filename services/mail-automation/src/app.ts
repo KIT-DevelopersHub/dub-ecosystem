@@ -1,14 +1,25 @@
-// Internal-only HTTP surface (Hono). Every route requires x-dub-internal (else 404,
-// gateway internalOnly parity) + trusted-header auth + a mail:read/mail:admin check.
+// Internal-only HTTP surface (Hono). api-gateway has no segment for this service, so no
+// endpoint here is reachable from the internet; every caller arrives over a Service Binding.
+//
+// AUTHZ: none in this file. `policyGate` is mounted first and derives both authn (the
+// trusted x-dub-user-id header the calling service propagated) and authz from POLICY_TABLE
+// (src/policy-table.ts), which lists every route below. The 13 actor-bearing routes are
+// `internalWithKeys([...])` — the x-dub-internal marker AND the key — so the old trio of
+// `internalOnly` + `requireAuth()` + `requirePermission(...)` is gone: keeping any of them
+// would be authorization that the table does not show. Handlers assume an authorized caller
+// and read it with `c.get("userId")`. Do NOT add a permission check to a route or a handler
+// — add the route to the table (test/policy-table.test.ts fails if you forget).
 import { Hono } from "hono";
-import type { Context, MiddlewareHandler } from "hono";
+import type { Context } from "hono";
 import { DubError, dubErrorHandler, errors } from "@dub/errors";
-import { DUB_HEADERS, dubContext, type RequestContext } from "@dub/http";
-import { getUserId, type AuthClient } from "@dub/auth-client";
+import { dubContext, type RequestContext } from "@dub/http";
+import { policyGate, type PermissionGranter, type PolicyGateVars } from "@dub/policy-gate";
 import type { PipelineDeps } from "./pipeline";
 import { dryRun, processInbound } from "./pipeline";
 import type { RunContext } from "./publisher";
 import { validateRuleShape } from "./rules";
+import { handleEventsAsync } from "./events-async";
+import { POLICY_TABLE } from "./policy-table";
 import { ruleReferencesMissingTemplate, ruleNotFound, templateNotFound } from "./errors";
 import type {
   CreateRuleInput,
@@ -23,12 +34,22 @@ import type {
 
 export interface AppDeps {
   pipeline: PipelineDeps;
-  authClient: AuthClient;
+  /** Which of the requested permission keys the caller holds (identity /authz/check). */
+  authz: PermissionGranter;
 }
 
-function runOf(c: Context): RunContext {
-  const dubCtx = c.get("dubCtx") as RequestContext;
-  return { requestId: dubCtx.requestId, actorId: getUserId(c) };
+type Vars = PolicyGateVars & { dubCtx: RequestContext };
+type AppContext = Context<{ Variables: Vars }>;
+
+/** The freeq landing route, which is the one route that must not require x-dub-request-id. */
+const EVENTS_ASYNC_PATH = "/internal/events-async";
+
+function runOf(c: AppContext): RunContext {
+  // Both reads are guaranteed by what is mounted above: `dubCtx` by the request-id
+  // middleware (every route but the freeq landing one, which does not call this), and
+  // `userId` by the table — each of the 13 routes here is `internalWithKeys`, so the gate
+  // has already 401'd a caller that propagated no acting user id.
+  return { requestId: c.get("dubCtx").requestId, actorId: c.get("userId") };
 }
 
 async function jsonBody<T>(c: Context): Promise<T> {
@@ -39,29 +60,32 @@ async function jsonBody<T>(c: Context): Promise<T> {
   }
 }
 
-/** Reject non-internal callers (presence-only x-dub-internal marker). */
-const internalOnly: MiddlewareHandler = async (c, next) => {
-  if (!c.req.header(DUB_HEADERS.internal)) throw errors.notFound("route");
-  await next();
-};
-
 export function createApp(deps: AppDeps) {
-  const { pipeline, authClient } = deps;
+  const { pipeline } = deps;
   const repo = pipeline.repo;
-  const app = new Hono();
+  const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "mail-automation" }));
 
-  // downstream service: require x-dub-request-id (no minting), then internal + auth.
-  app.use("*", dubContext({ allowGenerate: false }));
-  app.use("*", internalOnly);
-  app.use("*", authClient.requireAuth());
+  // The authorization layer. First and only — every route below is gated by POLICY_TABLE.
+  app.use("*", policyGate({ service: "mail-automation", table: POLICY_TABLE, granted: deps.authz }));
 
-  const read = authClient.requirePermission("mail:read");
-  const admin = authClient.requirePermission("mail:admin");
+  // Request-id discipline (downstream service: parse, never mint) — on every route EXCEPT
+  // the freeq landing one. freeq-drain POSTs an envelope with only `content-type` +
+  // `x-dub-internal` and no `x-dub-request-id` (services/freeq-drain/src/routing.ts), and
+  // the envelope carries its own `requestId`, so demanding the header there would 400 every
+  // legitimate delivery. That route used to live at the Worker entry, above this middleware,
+  // for exactly this reason; the skip is explicit rather than relying on mount order.
+  const requireRequestId = dubContext({ allowGenerate: false });
+  app.use("*", (c, next) => (c.req.path === EVENTS_ASYNC_PATH ? next() : requireRequestId(c, next)));
+
+  // ---- free-tier event landing (改善#5) ----
+  // INTERNAL in the table (no acting user on a drained envelope — see policy-table.ts). The
+  // handler owns the freeq contract: 200 = row done, 400 = poison (also acked), 500 = retry.
+  app.post(EVENTS_ASYNC_PATH, (c) => handleEventsAsync(c.req.raw, { repo, pipeline }));
 
   // ---- rules ----
-  app.get("/rules", read, async (c) => {
+  app.get("/rules", async (c) => {
     const filter: RuleFilter = {};
     const enabled = c.req.query("enabled");
     if (enabled !== undefined) filter.enabled = enabled === "true";
@@ -71,24 +95,24 @@ export function createApp(deps: AppDeps) {
     return c.json({ items, nextCursor: null });
   });
 
-  app.post("/rules", admin, async (c) => {
+  app.post("/rules", async (c) => {
     const input = await jsonBody<CreateRuleInput>(c);
     validateRuleShape(input.conditions, input.action);
     if (input.action.type === "reply") {
       const tpl = await repo.getTemplate(input.action.templateId);
       if (!tpl) throw ruleReferencesMissingTemplate(input.action.templateId);
     }
-    const rule = await repo.createRule(input, getUserId(c));
+    const rule = await repo.createRule(input, c.get("userId"));
     return c.json(rule, 201);
   });
 
-  app.get("/rules/:id", read, async (c) => {
+  app.get("/rules/:id", async (c) => {
     const rule = await repo.getRule(c.req.param("id"));
     if (!rule) throw ruleNotFound(c.req.param("id"));
     return c.json(rule);
   });
 
-  app.patch("/rules/:id", admin, async (c) => {
+  app.patch("/rules/:id", async (c) => {
     const patch = await jsonBody<UpdateRuleInput>(c);
     if (patch.conditions && patch.action) validateRuleShape(patch.conditions, patch.action);
     if (patch.action?.type === "reply") {
@@ -100,24 +124,24 @@ export function createApp(deps: AppDeps) {
     return c.json(rule);
   });
 
-  app.delete("/rules/:id", admin, async (c) => {
+  app.delete("/rules/:id", async (c) => {
     const ok = await repo.softDeleteRule(c.req.param("id"));
     if (!ok) throw ruleNotFound(c.req.param("id"));
     return c.body(null, 204);
   });
 
   // ---- templates ----
-  app.get("/templates", read, async (c) => {
+  app.get("/templates", async (c) => {
     return c.json({ items: await repo.listTemplates(), nextCursor: null });
   });
-  app.post("/templates", admin, async (c) => {
+  app.post("/templates", async (c) => {
     const input = await jsonBody<CreateTemplateInput>(c);
     if (!input.name || !input.subject || !input.body) {
       throw errors.validationFailed([{ field: "template", reason: "name_subject_body_required" }]);
     }
     return c.json(await repo.createTemplate(input), 201);
   });
-  app.patch("/templates/:id", admin, async (c) => {
+  app.patch("/templates/:id", async (c) => {
     const patch = await jsonBody<UpdateTemplateInput>(c);
     const tpl = await repo.updateTemplate(c.req.param("id"), patch);
     if (!tpl) throw templateNotFound(c.req.param("id"));
@@ -125,21 +149,21 @@ export function createApp(deps: AppDeps) {
   });
 
   // ---- process / dry-run ----
-  app.post("/process", admin, async (c) => {
+  app.post("/process", async (c) => {
     const body = await jsonBody<ProcessRequest>(c);
     if (!body.mail?.id) throw errors.validationFailed([{ field: "mail.id", reason: "required" }]);
     const res = await processInbound(pipeline, body.mail, { force: body.force ?? false }, runOf(c));
     return c.json(res);
   });
 
-  app.post("/dry-run", read, async (c) => {
+  app.post("/dry-run", async (c) => {
     const body = await jsonBody<DryRunRequest>(c);
     if (!body.mail?.id) throw errors.validationFailed([{ field: "mail.id", reason: "required" }]);
     return c.json(await dryRun(pipeline, body.mail, runOf(c)));
   });
 
   // ---- decisions ----
-  app.get("/decisions", read, async (c) => {
+  app.get("/decisions", async (c) => {
     const filter: DecisionFilter = {};
     const messageId = c.req.query("messageId");
     if (messageId) filter.messageId = messageId;
@@ -153,10 +177,10 @@ export function createApp(deps: AppDeps) {
   });
 
   // ---- settings (kill switch) ----
-  app.get("/settings", read, async (c) => c.json(await repo.getSettings()));
-  app.patch("/settings", admin, async (c) => {
+  app.get("/settings", async (c) => c.json(await repo.getSettings()));
+  app.patch("/settings", async (c) => {
     const patch = await jsonBody<Partial<import("./types").AutomationSettings>>(c);
-    return c.json(await repo.updateSettings(patch, getUserId(c)));
+    return c.json(await repo.updateSettings(patch, c.get("userId")));
   });
 
   // guard against unexpected re-throw of non-Dub errors is handled by onError

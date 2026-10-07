@@ -1,11 +1,11 @@
-// Upstream contract clients (event-service / identity-roster) + Authorizer seam.
+// Upstream contract clients (event-service / identity-roster) + the permission-source seam.
 // Production impls call Service Bindings via @dub/http; tests inject fakes.
 import type { Fetcher } from "@cloudflare/workers-types";
 import { createServiceClient, type RequestContext } from "@dub/http";
-import { DubError, isDubError, CommonErrorCodes } from "@dub/errors";
+import { isDubError } from "@dub/errors";
 import { createAuthClient } from "@dub/auth-client";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { event, identity } from "@dub/types";
-import type { Principal } from "./principal";
 
 // ---- event-service: eventId existence + archived state ----
 export interface EventRef {
@@ -51,29 +51,31 @@ export function createServiceBindingIdentityClient(binding: Fetcher): IdentityCl
   };
 }
 
-// ---- Authorizer: task:* permission check ----
-export interface Authorizer {
-  /** Throws FORBIDDEN when the principal lacks the permission. */
-  require(ctx: RequestContext, principal: Principal, permission: identity.PermissionKey): Promise<void>;
-}
-
+// ---- permission source: which of the requested keys does this user hold? ----
+//
+// The gate's `PermissionGranter` port (@dub/policy-gate), i.e. the SAME seam
+// drive-share-service / file-meta use. It replaced the old `Authorizer.require(ctx,
+// principal, key)` interface, which answered "may this principal do X?" — a decision that
+// now belongs to `policyGate` + POLICY_TABLE alone. This port only reports facts.
+//
+// The service-principal trust decision deliberately does NOT live here (it is not a fact
+// about a user): see `taskPolicyGate` in app.ts.
 /**
- * Production authorizer: service principals are trusted internal callers (bypass);
- * user principals go through identity /authz/check via @dub/auth-client (TTL cache,
- * fail-closed). orgId resolves to the P0 single-org default.
+ * Production granter: identity-roster `/authz/check` through @dub/auth-client, which batches
+ * one round-trip per rule and holds decisions for identity's own TTL. Fail-closed — a
+ * transport failure throws and surfaces as 5xx, never as "no decision, so allow".
  */
-export function createIdentityAuthorizer(identityBinding: Fetcher, orgId: string): Authorizer {
+export function createIdentityGranter(identityBinding: Fetcher, orgId: string): PermissionGranter {
   const authClient = createAuthClient({ identityBinding, serviceName: "task-service" });
-  return {
-    async require(ctx, principal, permission) {
-      if (principal.kind === "service") return;
-      const allowed = await authClient.hasPermission(
-        principal.userId,
-        orgId,
-        { permission },
-        { requestId: ctx.requestId },
-      );
-      if (!allowed) throw new DubError(CommonErrorCodes.FORBIDDEN, `permission denied: ${permission}`, { status: 403 });
-    },
+  return async (userId, _orgId, keys) => {
+    if (keys.length === 0) return [];
+    // orgId comes from AppConfig (the P0 single org), which is also what the gate is mounted
+    // with, so the two can never disagree and the argument is redundant by construction.
+    const res = await authClient.checkPermissions({
+      subjectUserId: userId,
+      orgId,
+      checks: keys.map((permission) => ({ permission })),
+    });
+    return keys.filter((_, i) => res.decisions[i]?.allowed === true);
   };
 }

@@ -1,6 +1,6 @@
 // GET /api/v1/bff/home — SPA home one-shot. Sources are all optional and fetched in
 // parallel with a per-call budget; failures degrade to partialErrors (200). Only a
-// missing/invalid session (401) is a whole-request error (handled in authenticate).
+// missing/invalid session (401) is a whole-request error (raised by the policy gate).
 //
 // Aggregated sources (each degrades independently to a partialErrors entry):
 //   • event-service        /events           → upcomingEvents
@@ -15,7 +15,7 @@ import type { event, notification, gateway, task, member } from "@dub/types";
 import type { RequestContext } from "@dub/http";
 import { isDubError } from "@dub/errors";
 import { createServices } from "../services";
-import { authenticate } from "../auth";
+import { authedActor } from "../policy";
 import { getRequestId } from "../context";
 
 const PER_CALL_TIMEOUT_MS = 3000;
@@ -98,7 +98,9 @@ export async function bffHomeHandler(
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
 
-  const auth = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  // AUTHENTICATED in POLICY_TABLE: the gate verified the session. Every upstream below is
+  // called with this id and authorizes the caller itself — the aggregation adds no authority.
+  const auth = authedActor(c);
   const ctx: RequestContext = { requestId, userId: auth.userId, caller: "api-gateway" };
 
   const [eventsRes, unreadRes, tasksRes, usageRes, membersRes] = await Promise.allSettled([

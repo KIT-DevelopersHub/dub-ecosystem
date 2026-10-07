@@ -44,8 +44,9 @@ function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-/** The /internal/events-async landing handler. The internal-marker gate is applied by the
- *  caller (Worker entry) before this runs. 200 => freeq marks the row done (ok/duplicate/
+/** The /internal/events-async landing handler. The internal-marker check is NOT here: the
+ *  route is `INTERNAL` in POLICY_TABLE, so policyGate refuses a caller without the marker
+ *  (403 internal_only) before this runs. 200 => freeq marks the row done (ok/duplicate/
  *  unknown are all ACK-worthy); 400 => malformed (also acked — a poison row that will never
  *  parse must not loop forever); 500 => handler threw, so the drain keeps the row and retries. */
 export async function handleEventsAsync(request: Request, deps: { repo: MailAutoRepo; pipeline: PipelineDeps }): Promise<Response> {

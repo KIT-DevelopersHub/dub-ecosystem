@@ -1,26 +1,10 @@
 import { describe, it, expect } from "vitest";
-import type { Fetcher } from "@cloudflare/workers-types";
-import { createAuthClient } from "@dub/auth-client";
 import { createApp } from "../src/app";
-import { makeDeps, inbound, type DepsBundle } from "./fakes";
-
-// Fake identity Service Binding: /authz/check -> allow (or deny) uniformly.
-function fakeIdentity(allowed: boolean): Fetcher {
-  const f = {
-    async fetch(_req: Request): Promise<Response> {
-      const body = {
-        decisions: [{ allowed, evaluatedAt: "2026-08-09T10:00:00.000Z", ttlSeconds: 60 }],
-      };
-      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
-    },
-  };
-  return f as unknown as Fetcher;
-}
+import { makeDeps, inbound, granter, type DepsBundle } from "./fakes";
 
 function makeAppBundle(allowed = true): { b: DepsBundle; app: ReturnType<typeof createApp> } {
   const b = makeDeps();
-  const authClient = createAuthClient({ identityBinding: fakeIdentity(allowed), serviceName: "mail-automation" });
-  const app = createApp({ pipeline: b.deps, authClient });
+  const app = createApp({ pipeline: b.deps, authz: granter(allowed ? "all" : "none") });
   return { b, app };
 }
 
@@ -32,10 +16,17 @@ const H = {
 };
 
 describe("internal-only guard", () => {
-  it("missing x-dub-internal => 404", async () => {
+  // The guard moved from a hand-rolled `internalOnly` middleware (404 "route") to the
+  // table's `internalWithKeys` rule, so the refusal is now the gate's 403 `internal_only`.
+  // Same door, stricter artifact: it is declared in src/policy-table.ts instead of hidden
+  // in this file, and the 403 comes BEFORE any key check, so an external caller cannot use
+  // the response to learn which permission the route wants.
+  it("missing x-dub-internal => 403 internal_only", async () => {
     const { app } = makeAppBundle();
     const res = await app.request("/settings", { headers: { "x-dub-request-id": "r", "x-dub-user-id": "u" } });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { details: { reason: string } } };
+    expect(body.error.details.reason).toBe("internal_only");
   });
 
   it("missing x-dub-request-id => 400", async () => {

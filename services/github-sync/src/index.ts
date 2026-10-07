@@ -8,6 +8,8 @@ import type {
   ScheduledController,
 } from "@cloudflare/workers-types";
 import type { DubEventEnvelope, WebhookEventEnvelopeV1 } from "@dub/events";
+import { newRequestId } from "@dub/http";
+import { sharedAuthzGranter } from "@dub/policy-gate";
 import type { Env } from "./env";
 import { WH_GITHUB_QUEUE, EVT_GITHUB_SYNC_QUEUE } from "./env";
 import { buildRuntime } from "./deps";
@@ -22,8 +24,16 @@ export { GithubReconcileDO } from "./reconcile-do";
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const rt = buildRuntime(env);
+    // sharedAuthzGranter (not createAuthzGranter): the granter is built per request, so the
+    // identity /authz/check TTL cache has to be memoized per Env to survive between requests
+    // in the same isolate — otherwise every gated route is an unconditional identity
+    // subrequest and identity-roster becomes a hot-path single point of failure (ADR 0004).
+    const authz = sharedAuthzGranter(env, env.SVC_IDENTITY, {
+      caller: "github-sync",
+      requestId: request.headers.get("x-dub-request-id") ?? newRequestId(),
+    });
     const app = createApp({
-      auth: rt.auth,
+      authz,
       service: rt.service,
       publisher: rt.publisher,
       now: rt.now,

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { Fetcher } from "@cloudflare/workers-types";
 import type { task } from "@dub/types";
+import { DubError, CommonErrorCodes } from "@dub/errors";
 import { createHttpUpstream } from "../src/upstream";
 import type { Env } from "../src/env";
 
@@ -168,15 +169,20 @@ function rmwTaskFetcher(opts: { conflicts: number; startVersion?: number }): {
   return { fetcher, getCount: () => gets, patchCount: () => patches };
 }
 
+/** The instance-layer hook when the caller IS allowed — the retry tests are about versions. */
+const ALLOW_WRITE = async (): Promise<void> => {};
+
 describe("createHttpUpstream.updateTaskDates — version-conflict retry (症状#8 稀リサイズエラー)", () => {
   it("retries the read-modify-write on a 409 and succeeds (spurious self-conflict absorbed)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { fetcher, getCount, patchCount } = rmwTaskFetcher({ conflicts: 1 });
     const up = createHttpUpstream(envWith(fetcher));
-    const res = await up.updateTaskDates(ctx, "t1", {
-      startsAt: "2026-09-07T00:00:00.000Z",
-      endsAt: "2026-09-10T00:00:00.000Z",
-    });
+    const res = await up.updateTaskDates(
+      ctx,
+      "t1",
+      { startsAt: "2026-09-07T00:00:00.000Z", endsAt: "2026-09-10T00:00:00.000Z" },
+      ALLOW_WRITE,
+    );
     expect(res.id).toBe("t1");
     // one conflict => two PATCH attempts, each preceded by a fresh GET (re-read version).
     expect(patchCount()).toBe(2);
@@ -190,10 +196,27 @@ describe("createHttpUpstream.updateTaskDates — version-conflict retry (症状#
     const { fetcher, patchCount } = rmwTaskFetcher({ conflicts: 99 });
     const up = createHttpUpstream(envWith(fetcher));
     await expect(
-      up.updateTaskDates(ctx, "t1", { startsAt: null, endsAt: "2026-09-10T00:00:00.000Z" }),
+      up.updateTaskDates(ctx, "t1", { startsAt: null, endsAt: "2026-09-10T00:00:00.000Z" }, ALLOW_WRITE),
     ).rejects.toMatchObject({ status: 409 });
     expect(patchCount()).toBe(4);
     warn.mockRestore();
+  });
+
+  // inventory a-4: the event-scope assertion must bite BEFORE the task is mutated, which is
+  // only possible after the RMW read (the request names a task, not an event).
+  it("awaits assertWritable with the freshly-read task and writes nothing when it throws", async () => {
+    const { fetcher, getCount, patchCount } = rmwTaskFetcher({ conflicts: 0 });
+    const up = createHttpUpstream(envWith(fetcher));
+    const seen: Array<string | null | undefined> = [];
+    await expect(
+      up.updateTaskDates(ctx, "t1", { startsAt: null, endsAt: null }, async (current) => {
+        seen.push(current.eventId);
+        throw new DubError(CommonErrorCodes.FORBIDDEN, "permission denied: event:read", { status: 403 });
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(seen).toEqual(["event_1"]); // the real row, so its event id is knowable
+    expect(getCount()).toBe(1);
+    expect(patchCount()).toBe(0); // nothing mutated
   });
 
   it("does NOT retry a non-conflict error (404 propagates immediately, no extra attempts)", async () => {
@@ -214,7 +237,7 @@ describe("createHttpUpstream.updateTaskDates — version-conflict retry (症状#
     } as unknown as Fetcher;
     const up = createHttpUpstream(envWith(fetcher));
     await expect(
-      up.updateTaskDates(ctx, "t1", { startsAt: null, endsAt: "2026-09-10T00:00:00.000Z" }),
+      up.updateTaskDates(ctx, "t1", { startsAt: null, endsAt: "2026-09-10T00:00:00.000Z" }, ALLOW_WRITE),
     ).rejects.toMatchObject({ status: 404 });
   });
 });

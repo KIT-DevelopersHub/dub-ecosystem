@@ -2,7 +2,7 @@
 // and a fake identity Service Binding so the REAL @dub/auth-client authz path runs.
 import { vi } from "vitest";
 import type { Fetcher } from "@cloudflare/workers-types";
-import { createAuthClient } from "@dub/auth-client";
+import { createAuthzGranter } from "@dub/policy-gate";
 import { nowIso } from "@dub/db";
 import type { identity } from "@dub/types";
 import type { RequestContext } from "@dub/http";
@@ -97,7 +97,7 @@ export function createFakeEvents(): EventBus & { events: CapturedEvent[] } {
   };
 }
 
-// ---- fake identity Service Binding (drives the REAL auth-client authz path) ----
+// ---- fake identity Service Binding (drives the REAL policy-gate authz path) ----
 export function createFakeIdentityBinding(permsByUser: Record<string, string[]>): {
   binding: Fetcher;
   calls: identity.AuthzCheckRequest[];
@@ -145,13 +145,17 @@ export function makeTestDeps(config: {
   const events = createFakeEvents();
   const jobs: DeployJobMessage[] = [];
   const { binding, calls } = createFakeIdentityBinding(config.perms);
-  const auth = createAuthClient({ identityBinding: binding, serviceName: SERVICE_NAME });
+  // The REAL @dub/policy-gate granter over the fake binding, so the suite exercises the
+  // production authz path (one batched /authz/check, dangerous keys never cached) rather
+  // than a hand-written allow/deny stub. createAuthzGranter, not sharedAuthzGranter: deps
+  // are built once per test, so the granter's own cache is already request-spanning here.
+  const authz = createAuthzGranter(binding, { caller: SERVICE_NAME });
   return {
     repo,
     cf,
     audit,
     events,
-    auth,
+    authz,
     jobs,
     identityCalls: calls,
     async enqueueJob(msg) {

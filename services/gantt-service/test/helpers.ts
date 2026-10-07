@@ -8,7 +8,9 @@ import type { RealtimePublisher } from "../src/realtime";
 export function mkTask(over: Partial<task.Task> & { id: string }): task.Task {
   return {
     id: over.id,
-    eventId: over.eventId ?? "event_1",
+    // `?? "event_1"` would swallow an explicit null, and "unlinked task" (eventId === null) is
+    // a case the event-scope assertion has to be tested against — so honour it.
+    eventId: "eventId" in over ? over.eventId! : "event_1",
     title: over.title ?? over.id,
     description: null,
     status: over.status ?? "todo",
@@ -24,7 +26,20 @@ export function mkTask(over: Partial<task.Task> & { id: string }): task.Task {
   };
 }
 
-export function fakeAuthClient(opts: { allow: boolean }): AuthClient {
+/**
+ * Fake identity client with the TWO axes the policy layers ask about separately:
+ *
+ *   `allow`      the UNSCOPED key question — what `policyGate` asks through its
+ *                `PermissionGranter` (does the caller hold app:gantt:view / event:read at all).
+ *   `eventScope` the RESOURCE-SCOPED question — what `assertEventScope` asks in the handler
+ *                (does that event:read apply to THIS event). Defaults to `allow`.
+ *
+ * Keeping them independent is what lets a test express the case inventory a-4 is about: keys
+ * held, event not readable. One combined switch could not say that, which is precisely why
+ * the bypass went unnoticed.
+ */
+export function fakeAuthClient(opts: { allow: boolean; eventScope?: boolean }): AuthClient {
+  const scoped = opts.eventScope ?? opts.allow;
   const requireAuth = (): MiddlewareHandler => async (c, next) => {
     const userId = c.req.header("x-dub-user-id");
     if (!userId) throw new DubError(CommonErrorCodes.UNAUTHENTICATED, "no user", { status: 401 });
@@ -36,16 +51,22 @@ export function fakeAuthClient(opts: { allow: boolean }): AuthClient {
     if (!opts.allow) throw new DubError(CommonErrorCodes.FORBIDDEN, "denied", { status: 403 });
     await next();
   };
+  const decision = (allowed: boolean) => ({
+    allowed,
+    evaluatedAt: "2026-08-01T00:00:00.000Z",
+    ttlSeconds: 0,
+  });
   return {
     requireAuth,
     requirePermission,
     verify: async () => {
       throw new Error("unused");
     },
-    checkPermissions: async () => ({ decisions: [] }),
-    hasPermission: async () => opts.allow,
-    // Policy gates follow the same `allow` switch as requirePermission: gantt's own tests only
-    // care about allowed-vs-403, not which tier produced it.
+    // The gate's granter goes through here: one decision per requested check, in order.
+    checkPermissions: async (req) => ({
+      decisions: req.checks.map((q) => decision(q.resourceId ? scoped : opts.allow)),
+    }),
+    hasPermission: async (_u, _o, q) => (q.resourceId ? scoped : opts.allow),
     requireAppAccess: (): MiddlewareHandler => requirePermission(),
     appAccessLevel: async () => (opts.allow ? "edit" : "none"),
     invalidateAuthzCache: () => {},
@@ -71,10 +92,13 @@ export function fakeUpstream(init: {
     async eventExists() {
       return init.eventExists ?? true;
     },
-    async updateTaskDates(_ctx, taskId, dates) {
-      state.calls.updateTaskDates++;
+    async updateTaskDates(_ctx, taskId, dates, assertWritable) {
       const cur = byId.get(taskId);
       if (!cur) throw new DubError(CommonErrorCodes.NOT_FOUND, `task not found: ${taskId}`, { status: 404 });
+      // Same order as the real upstream: read, authorize the ROW, only then write. Counting
+      // the call after the assertion is what makes "403 and nothing mutated" assertable.
+      await assertWritable(cur);
+      state.calls.updateTaskDates++;
       const next: task.Task = {
         ...cur,
         startAt: dates.startsAt,

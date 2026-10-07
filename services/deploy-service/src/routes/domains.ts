@@ -1,14 +1,15 @@
-// Domain/zone listing (infra:read). Merges the live CF zone list with the local
+// Domain/zone listing (infra:read — declared in src/policy-table.ts, enforced by policyGate
+// in app.ts, not here). Merges the live CF zone list with the local
 // allowed-zone table. NOTE: the frozen deploy.Domain shape ({name, siteId, verified})
 // is narrower than a CF zone; `verified` carries the allowed-list flag and `siteId`
 // is left empty (zones are not 1:1 with sites in P0). Divergence tracked in notes.
 import { Hono } from "hono";
 import type { deploy } from "@dub/types";
 import type { AppEnv } from "../http";
-import { getDeps, requireAuth, requirePermission } from "../http";
+import { getDeps } from "../http";
 
 export function registerDomainRoutes(app: Hono<AppEnv>): void {
-  app.get("/deploy/domains", requireAuth, requirePermission("infra:read"), async (c) => {
+  app.get("/deploy/domains", async (c) => {
     const deps = getDeps(c);
     const [zones, allowed] = await Promise.all([deps.cf.listZones(), deps.repo.listAllowedZones()]);
     const allowedByName = new Set(allowed.map((z) => z.zoneName));

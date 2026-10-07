@@ -1,5 +1,11 @@
-// Email Routing admin routes (mounted on the external /mail surface, gated mail:admin).
+// Email Routing admin routes (mounted on the external /mail surface).
 // Effective paths through api-gateway: /api/v1/mail/admin/email-routing/*.
+//
+// AUTHZ: none here. Every route below is listed in src/policy-table.ts as `["mail:admin"]`
+// and enforced by the `policyGate` app.ts mounts first — the `ext.use("/admin/email-
+// routing/*", withAuth("mail:admin"))` blanket that used to sit at the top of this function
+// is gone. A route ADDED here without a line in that table is denied at runtime and turns
+// test/policy-table.test.ts red; do not re-add a permission check in this file.
 //
 //   GET    /admin/email-routing/addresses      list destination (forward-target) addresses
 //   POST   /admin/email-routing/addresses      issue a destination address (CF sends a verify mail)
@@ -12,12 +18,12 @@
 // Every MUTATION is audited (publishAudit) with success/failure. Reads are not audited
 // (mirrors the message read routes). When CF_EMAIL_ROUTING_TOKEN is unset, every route
 // answers 503 MAIL_EMAIL_ROUTING_UNCONFIGURED via requireEmailRoutingConfig.
-import type { Context, Hono, MiddlewareHandler } from "hono";
+import type { Context, Hono } from "hono";
 import { DubError } from "@dub/errors";
 import { publishAudit } from "@dub/events";
 import { nowIso } from "@dub/db";
 import { consoleSink, HEADERS } from "@dub/observability";
-import type { auditLog, identity, mail } from "@dub/types";
+import type { auditLog, mail } from "@dub/types";
 import { common } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import { buildAuditEnv, buildSendDeps } from "./deps";
@@ -40,12 +46,8 @@ import {
 } from "./email-routing-validation";
 import { sendMail } from "./send";
 
-type WithAuth = (permission: identity.PermissionKey) => MiddlewareHandler<AppBindings>;
-
 /** Mount the Email Routing admin routes on the external app. */
-export function registerEmailRoutingAdmin(ext: Hono<AppBindings>, withAuth: WithAuth): void {
-  ext.use("/admin/email-routing/*", withAuth("mail:admin"));
-
+export function registerEmailRoutingAdmin(ext: Hono<AppBindings>): void {
   const clientOf = (c: { env: AppBindings["Bindings"] }) => new CfEmailRoutingClient(requireEmailRoutingConfig(c.env));
 
   // ---- destination addresses ----

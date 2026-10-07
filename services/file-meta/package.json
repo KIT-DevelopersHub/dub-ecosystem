@@ -10,13 +10,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@dub/auth-client": "workspace:*",
     "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/events": "workspace:*",
     "@dub/freeq": "workspace:*",
     "@dub/http": "workspace:*",
-    "@dub/observability": "workspace:*"
+    "@dub/observability": "workspace:*",
+    "@dub/policy-gate": "workspace:*"
   },
   "peerDependencies": {
     "@cloudflare/workers-types": "^4",
