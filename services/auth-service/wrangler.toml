@@ -51,8 +51,15 @@ service = "audit-log"
 ENVIRONMENT = "production"
 COOKIE_DOMAIN = ".developershub.jp"
 SESSION_ACCESS_TTL_SEC = "3600"
-SESSION_ABS_WEB_TTL_SEC = "2592000"
+# Web absolute lifetime, SLIDING: each successful /auth/refresh resets it to a full 90d,
+# so an actively-used session is never cut off mid-term. 7776000 = 90d.
+SESSION_ABS_WEB_TTL_SEC = "7776000"
+# Mobile absolute lifetime, FIXED — does NOT slide (sessions.ts isSliding()). 180d.
 SESSION_ABS_MOBILE_TTL_SEC = "15552000"
+# Idle expiry (web only): a session with no /auth/refresh for this long is dead even when
+# sliding window remains. THIS, not the 90d above, is the real ceiling on a session the
+# user abandoned without logging out. 2592000 = 30d.
+SESSION_IDLE_TTL_SEC = "2592000"
 # Grace window (s) where the pre-rotation token still resolves to its successor on
 # /auth/refresh. Absorbs concurrent refresh bursts (multi-tab loads / Promise.all
 # 401s) so a duplicate refresh returns the same new token instead of "Invalid token".

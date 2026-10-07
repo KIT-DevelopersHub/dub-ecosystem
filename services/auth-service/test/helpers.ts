@@ -137,8 +137,10 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
     ALLOWED_LOGIN_DOMAIN: "developershub.jp",
     PASSWORD_ENC_KEY: TEST_ENC_KEY,
     SESSION_ACCESS_TTL_SEC: "3600",
-    SESSION_ABS_WEB_TTL_SEC: "2592000",
+    // Mirrors the production vars: 90d sliding web absolute, 180d fixed mobile, 30d idle.
+    SESSION_ABS_WEB_TTL_SEC: "7776000",
     SESSION_ABS_MOBILE_TTL_SEC: "15552000",
+    SESSION_IDLE_TTL_SEC: "2592000",
     GOOGLE_MOBILE_IOS_CLIENT_ID: "ios-client",
     GOOGLE_MOBILE_ANDROID_CLIENT_ID: "android-client",
     ...envOverrides,

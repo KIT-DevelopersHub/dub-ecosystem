@@ -156,7 +156,9 @@ The app stores `token` in the secure keychain and sends it as `Authorization: Be
 
 The token itself is **opaque** — an internal KV-backed identifier, not a JWT. Clients must
 not parse it. Internally auth-service keeps richer bookkeeping (`issuedAt`,
-`accessExpiresAt`, `absoluteExpiresAt`) that never leaves the service.
+`accessExpiresAt`, `absoluteExpiresAt`, `lastSeenAt`) that never leaves the service. The web
+absolute deadline SLIDES on every successful refresh (90 d) and is bounded by a 30-day idle
+deadline; `Max-Age` above is the earlier of the two. See `auth-service.md` §9.
 
 ---
 

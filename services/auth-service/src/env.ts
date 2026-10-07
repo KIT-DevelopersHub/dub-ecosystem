@@ -25,8 +25,9 @@ export interface Env {
   COOKIE_DOMAIN?: string; // unset/empty -> host-only cookie (no Domain attr; required on *.workers.dev)
   ALLOWED_LOGIN_DOMAIN?: string; // OPTIONAL extra filter; empty (default) => no domain restriction, roster allowlist is authoritative
   SESSION_ACCESS_TTL_SEC?: string; // access lifetime (default 3600 = 1h)
-  SESSION_ABS_WEB_TTL_SEC?: string; // web absolute (default 2592000 = 30d)
-  SESSION_ABS_MOBILE_TTL_SEC?: string; // mobile absolute (default 15552000 = 180d)
+  SESSION_ABS_WEB_TTL_SEC?: string; // web absolute, SLIDING (default 7776000 = 90d)
+  SESSION_ABS_MOBILE_TTL_SEC?: string; // mobile absolute, FIXED (default 15552000 = 180d)
+  SESSION_IDLE_TTL_SEC?: string; // web idle expiry (default 2592000 = 30d) — see sessions.ts
   SESSION_REFRESH_GRACE_SEC?: string; // rotation grace window (default 60 = KV TTL floor) — see sessions.ts refresh()
   PWLOGIN_MAX_FAILURES?: string; // password-login failures per window before 429 (default 5)
   PWLOGIN_WINDOW_SEC?: string; // password-login rate-limit window (default 900 = 15m)
@@ -51,8 +52,20 @@ const DEFAULTS = {
   allowedLoginDomain: "",
   passwordMinLength: 8,
   accessTtlSec: 3600,
-  absWebTtlSec: 30 * 24 * 60 * 60,
+  // Web absolute lifetime. SLIDING: every successful /auth/refresh resets it (see
+  // sessions.ts refresh()), so an actively-used session is never cut off mid-use. The
+  // ceiling on an abandoned-but-not-logged-out session is idleTtlSec, not this.
+  absWebTtlSec: 90 * 24 * 60 * 60,
+  // Mobile absolute lifetime. Deliberately NOT sliding (sessions.ts isSliding()): the
+  // mobile token lives on the device and cannot be dropped by clearing a cookie, so its
+  // fixed 180d deadline is kept as the one guaranteed re-auth point in the system.
   absMobileTtlSec: 180 * 24 * 60 * 60,
+  // Idle expiry (web). A session whose last /auth/refresh is older than this is dead
+  // even when sliding absolute lifetime remains — it is what bounds a session the user
+  // walked away from without logging out. Measured from lastSeenAt, which is written
+  // ONLY on refresh (hourly at most): a per-request touch would mean a KV write per
+  // API call, which the free tier cannot pay for.
+  idleTtlSec: 30 * 24 * 60 * 60,
   // Grace window (seconds) during which the pre-rotation token still resolves to
   // its successor on /auth/refresh. Absorbs concurrent refresh bursts (multi-tab
   // page loads / Promise.all) and KV read-your-write lag so a duplicate refresh
@@ -77,6 +90,7 @@ export interface AppConfig {
   accessTtlSec: number;
   absWebTtlSec: number;
   absMobileTtlSec: number;
+  idleTtlSec: number;
   refreshGraceSec: number;
   passwordLogin: {
     maxFailures: number;
@@ -117,6 +131,7 @@ export function configFromEnv(env: Env): AppConfig {
     accessTtlSec: intVar(env.SESSION_ACCESS_TTL_SEC, DEFAULTS.accessTtlSec),
     absWebTtlSec: intVar(env.SESSION_ABS_WEB_TTL_SEC, DEFAULTS.absWebTtlSec),
     absMobileTtlSec: intVar(env.SESSION_ABS_MOBILE_TTL_SEC, DEFAULTS.absMobileTtlSec),
+    idleTtlSec: intVar(env.SESSION_IDLE_TTL_SEC, DEFAULTS.idleTtlSec),
     refreshGraceSec: intVar(env.SESSION_REFRESH_GRACE_SEC, DEFAULTS.refreshGraceSec),
     passwordLogin: {
       maxFailures: intVar(env.PWLOGIN_MAX_FAILURES, 5),
