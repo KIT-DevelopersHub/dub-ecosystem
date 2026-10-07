@@ -40,8 +40,12 @@ ENVIRONMENT = "production"
 # COOKIE_DOMAIN intentionally UNSET -> host-only cookie on the gateway origin.
 ALLOWED_LOGIN_DOMAIN = "developershub.jp"
 SESSION_ACCESS_TTL_SEC = "3600"
-SESSION_ABS_WEB_TTL_SEC = "2592000"
+# 90d web absolute, SLIDING on each /auth/refresh; 180d mobile absolute, FIXED.
+SESSION_ABS_WEB_TTL_SEC = "7776000"
 SESSION_ABS_MOBILE_TTL_SEC = "15552000"
+# Web idle expiry (30d): no /auth/refresh for this long ends the session regardless of the
+# sliding window. See wrangler.toml / sessions.ts for the full rationale.
+SESSION_IDLE_TTL_SEC = "2592000"
 # Grace window (s) for race-safe refresh-token rotation (see wrangler.toml / sessions.ts).
 # 60 = Workers KV expirationTtl minimum; smaller values are rejected on the grace put.
 SESSION_REFRESH_GRACE_SEC = "60"

@@ -83,6 +83,57 @@ describe("POST /auth/refresh", () => {
   });
 });
 
+// Cookie Max-Age must track the EFFECTIVE deadline = min(sliding absolute, idle). Handing
+// the browser a 90d cookie for a session the idle rule kills in 30d means a month of
+// requests carrying a token the server already rejects.
+// NOTE: app.ts sizes Max-Age off wall-clock Date.now() (Deps carries no clock), so these
+// tests align the harness clock with real time and assert a small tolerance band.
+describe("session cookie Max-Age", () => {
+  const DAY = 86_400;
+  const maxAgeOf = (setCookie: string | null): number => {
+    const m = /Max-Age=(\d+)/.exec(setCookie ?? "");
+    if (!m) throw new Error(`no Max-Age in Set-Cookie: ${setCookie}`);
+    return Number(m[1]);
+  };
+  const near = (actual: number, expected: number): void => {
+    expect(Math.abs(actual - expected)).toBeLessThanOrEqual(5); // ms-level clock skew only
+  };
+
+  it("uses the 30d idle deadline, not the 90d absolute one, on a fresh session", async () => {
+    const h = makeHarness();
+    h.setNow(Date.now());
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/test-login", jsonInit({ userId: "usr_cookie" }));
+    expect(res.status).toBe(200);
+    const maxAge = maxAgeOf(res.headers.get("set-cookie"));
+    near(maxAge, 30 * DAY);
+    expect(maxAge).toBeLessThan(90 * DAY);
+  });
+
+  it("follows the absolute deadline when IT is the smaller of the two", async () => {
+    // Idle window wider than the absolute one => the absolute deadline governs.
+    const h = makeHarness({ SESSION_IDLE_TTL_SEC: String(365 * DAY) });
+    h.setNow(Date.now());
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/test-login", jsonInit({ userId: "usr_cookie2" }));
+    near(maxAgeOf(res.headers.get("set-cookie")), 90 * DAY);
+  });
+
+  it("refresh re-issues the cookie at the slid effective deadline", async () => {
+    const h = makeHarness();
+    const now = Date.now();
+    h.setNow(now);
+    const created = await h.deps.sessions.create("usr_cookie3", "web");
+    // Ten days on, the original idle window has 20d left — but refreshing re-arms both
+    // deadlines, so the replacement cookie is a full 30d from that moment (= now + 40d).
+    h.setNow(now + 10 * DAY * 1000);
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/refresh", jsonInit({}, { cookie: `dub_session=${created.token}` }));
+    expect(res.status).toBe(200);
+    near(maxAgeOf(res.headers.get("set-cookie")), 40 * DAY);
+  });
+});
+
 describe("POST /auth/logout", () => {
   it("cookie path clears the cookie and invalidates the session", async () => {
     const h = makeHarness();

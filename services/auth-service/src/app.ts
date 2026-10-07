@@ -12,6 +12,7 @@ import { extractContext, type RequestContext } from "@dub/http";
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import type { auth, identity } from "@dub/types";
 import type { Deps } from "./deps";
+import type { AppConfig } from "./env";
 import { authErrors } from "./errors";
 import { verifyPassword, setCredential, decryptSecret, generatePassword } from "./passwords";
 
@@ -51,6 +52,25 @@ function buildSessionCookie(name: string, token: string, domain: string, maxAgeS
   if (domain) parts.push(`Domain=${domain}`);
   parts.push("Path=/", `Max-Age=${maxAgeSec}`);
   return parts.join("; ");
+}
+
+/**
+ * Attach the session cookie for a freshly minted / rotated session.
+ *
+ * The ONE place Max-Age is computed. It is the remaining EFFECTIVE lifetime —
+ * min(absolute, idle) as decided by SessionService — not the absolute deadline: a web
+ * session that the idle rule kills in 30 days must not hand the browser a 90-day cookie,
+ * or the client keeps presenting a token the server already rejects. Four routes mint
+ * cookies (password login / refresh / test-login / demo-login); they all go through here
+ * so a fifth cannot drift.
+ */
+function setSessionCookie(
+  c: { header: (name: string, value: string) => void },
+  config: AppConfig,
+  minted: { token: string; effectiveExpiresAt: number },
+): void {
+  const maxAge = Math.max(0, Math.ceil((minted.effectiveExpiresAt - Date.now()) / 1000));
+  c.header("set-cookie", buildSessionCookie(config.cookieName, minted.token, config.cookieDomain, maxAge));
 }
 
 function clearSessionCookie(name: string, domain: string): string {
@@ -184,8 +204,7 @@ export function buildApp(deps: Deps): Hono {
       requestId: ctx.requestId,
       details: { client: "web", method: "password" },
     });
-    const maxAge = Math.ceil((created.absoluteExpiresAt - Date.now()) / 1000);
-    c.header("set-cookie", buildSessionCookie(config.cookieName, created.token, config.cookieDomain, maxAge));
+    setSessionCookie(c, config, created);
     const res: TokenSessionResponse = { token: created.token, session: created.session };
     return c.json(res);
   });
@@ -351,8 +370,7 @@ export function buildApp(deps: Deps): Hono {
       const res: RefreshResponse = { token: result.token, session: result.session };
       return c.json(res);
     }
-    const maxAge = Math.ceil((result.absoluteExpiresAt - Date.now()) / 1000);
-    c.header("set-cookie", buildSessionCookie(config.cookieName, result.token, config.cookieDomain, maxAge));
+    setSessionCookie(c, config, result);
     const res: RefreshResponse = { session: result.session };
     return c.json(res);
   });
@@ -392,8 +410,7 @@ export function buildApp(deps: Deps): Hono {
       result: "success",
       requestId: ctx.requestId,
     });
-    const maxAge = Math.ceil((created.absoluteExpiresAt - Date.now()) / 1000);
-    c.header("set-cookie", buildSessionCookie(config.cookieName, created.token, config.cookieDomain, maxAge));
+    setSessionCookie(c, config, created);
     const res: TokenSessionResponse = { token: created.token, session: created.session };
     return c.json(res);
   });
@@ -421,8 +438,7 @@ export function buildApp(deps: Deps): Hono {
         requestId: ctx.requestId,
         details: { client: "web", method: "demo_autologin" },
       });
-      const maxAge = Math.ceil((created.absoluteExpiresAt - Date.now()) / 1000);
-      c.header("set-cookie", buildSessionCookie(config.cookieName, created.token, config.cookieDomain, maxAge));
+      setSessionCookie(c, config, created);
       const res: TokenSessionResponse = { token: created.token, session: created.session };
       return c.json(res);
     });
