@@ -81,6 +81,10 @@ export const ROUTES: readonly GatewayRoute[] = [
   // 404 it at the edge (double-defense over member-service's own x-dub-internal guard);
   // the public path reaches it via the gateway-owned POST /public/participation.
   { segment: "members", binding: "SVC_MEMBER", auth: "required", internalOnlyPaths: ["/members/internal/"] },
+  // LP管理 (lp-analytics): 流入URL の発行と訪問ログの集計。lp-analytics re-checks the LP管理
+  // policy (app:lp:view / app:lp:edit). /lp/internal/* (the beacon landing) is s2s only —
+  // the public path reaches it via the gateway-owned POST /public/lp-visits.
+  { segment: "lp", binding: "SVC_LP_ANALYTICS", auth: "required", internalOnlyPaths: ["/lp/internal/"] },
 ] as const;
 
 const ROUTE_BY_SEGMENT = new Map<string, GatewayRoute>(ROUTES.map((r) => [r.segment, r]));

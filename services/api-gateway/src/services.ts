@@ -25,6 +25,9 @@ export interface GatewayServices {
   // x-dub-internal (+ a system x-dub-user-id), which member-service's internal-only
   // /members/internal/participation route requires.
   member: ServiceClient;
+  // lp-analytics client for the gateway's OWN public LP beacon forward (x-dub-internal +
+  // a system actor) to /lp/internal/visits.
+  lp: ServiceClient;
   auth: AuthClient; // mode:"verify" — the entry one-shot verify
   // Service-to-service client to auth-service for the admin/self password composition
   // handlers (/api/v1/me/password, /api/v1/admin/users/:id/password). Unlike the
@@ -42,6 +45,7 @@ export function createServices(env: GatewayEnv): GatewayServices {
     task: createServiceClient(env.SVC_TASK, { service: "task-service", caller: CALLER }),
     usage: createServiceClient(env.SVC_USAGE_METER, { service: "usage-meter", caller: CALLER }),
     member: createServiceClient(env.SVC_MEMBER, { service: "member-service", caller: CALLER }),
+    lp: createServiceClient(env.SVC_LP_ANALYTICS, { service: "lp-analytics", caller: CALLER }),
     authSvc: createServiceClient(env.SVC_AUTH, { service: "auth-service", caller: CALLER }),
     auth: createAuthClient({
       identityBinding: env.SVC_IDENTITY,
