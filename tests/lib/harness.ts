@@ -194,8 +194,9 @@ async function buildAuth(identityFetcher: Fetcher): Promise<{ fetcher: Fetcher }
     SPA_ERROR_URL: "https://app.devhub.test/login",
     REDIRECT_ALLOWLIST: "https://app.devhub.test",
     SESSION_ACCESS_TTL_SEC: "3600",
-    SESSION_ABS_WEB_TTL_SEC: "2592000",
+    SESSION_ABS_WEB_TTL_SEC: "7776000", // 90d, sliding (matches wrangler.toml)
     SESSION_ABS_MOBILE_TTL_SEC: "15552000",
+    SESSION_IDLE_TTL_SEC: "2592000", // 30d web idle expiry
     STATE_TTL_SEC: "600",
     GOOGLE_CLIENT_ID: "web",
     GOOGLE_CLIENT_SECRET: "secret",

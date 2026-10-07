@@ -14,7 +14,12 @@ interface StoredSession {
   client: Client;
   issuedAt: number; // epoch ms
   accessExpiresAt: number; // epoch ms (issued + access TTL)
-  absoluteExpiresAt: number; // epoch ms (refresh impossible past this)
+  absoluteExpiresAt: number; // epoch ms (refresh impossible past this); SLIDES on refresh for web
+  // Last successful refresh (epoch ms). Anchors the idle deadline. OPTIONAL by design:
+  // records written before this field existed have none, and `lastSeenOf()` falls back to
+  // issuedAt for them — which reproduces the previous fixed-30d behaviour exactly, so no
+  // already-logged-in user is force-logged-out by the deploy that introduces idle expiry.
+  lastSeenAt?: number;
   // Set on the PRE-rotation record once refresh() mints a successor. Its presence
   // marks this token as "already rotated": it no longer authenticates API calls
   // (verify => revoked), but a duplicate/concurrent refresh that still carries it
@@ -49,10 +54,22 @@ function toSessionInfo(s: StoredSession): auth.SessionInfo {
   return { userId: s.userId, client: s.client, sessionExpiresAt: s.accessExpiresAt };
 }
 
+/** Idle anchor. Legacy records have no lastSeenAt; issuedAt is the backward-compatible one. */
+function lastSeenOf(s: StoredSession): number {
+  return s.lastSeenAt ?? s.issuedAt;
+}
+
 export interface CreatedSession {
   token: string;
   session: auth.SessionInfo;
   absoluteExpiresAt: number;
+  /**
+   * min(absolute deadline, idle deadline) — when this session actually stops working.
+   * Callers MUST size the cookie Max-Age and any KV TTL off THIS, not absoluteExpiresAt:
+   * a web session that dies of idleness in 30d must not carry a 90d cookie (the browser
+   * would keep sending a token the server already rejects).
+   */
+  effectiveExpiresAt: number;
 }
 
 export interface RefreshedSession extends CreatedSession {}
@@ -71,6 +88,36 @@ export class SessionService {
     return client === "mobile" ? this.config.absMobileTtlSec : this.config.absWebTtlSec;
   }
 
+  /**
+   * Does a refresh RESET the absolute deadline? Web yes, mobile no.
+   *
+   * Web: the cookie is browser-resident and killable server-side on logout, and the 90d
+   * window is re-earned only by continued use, so sliding is the right trade for "stop
+   * logging active members out mid-term".
+   * Mobile: the bearer token lives on the device and there is no cookie to clear, so its
+   * FIXED 180d deadline is deliberately left as the one unconditional re-auth point in
+   * the system. Keeping one client capped also bounds the blast radius of this change.
+   */
+  private isSliding(client: Client): boolean {
+    return client !== "mobile";
+  }
+
+  /** Idle TTL in seconds, or 0 when idle expiry does not apply to this client (mobile). */
+  private idleTtlSec(client: Client): number {
+    return client === "mobile" ? 0 : this.config.idleTtlSec;
+  }
+
+  /**
+   * When the session really stops working: min(absolute, idle). Everything that needs a
+   * lifetime — KV expirationTtl, cookie Max-Age, verify() — goes through here so the two
+   * deadlines can never drift apart.
+   */
+  private effectiveDeadline(s: StoredSession): number {
+    const idleSec = this.idleTtlSec(s.client);
+    if (idleSec <= 0) return s.absoluteExpiresAt;
+    return Math.min(s.absoluteExpiresAt, lastSeenOf(s) + idleSec * 1000);
+  }
+
   private async isUserRevoked(userId: string): Promise<boolean> {
     return (await this.kv.get(revokedKey(userId))) !== null;
   }
@@ -85,10 +132,14 @@ export class SessionService {
       issuedAt: now,
       accessExpiresAt: now + this.config.accessTtlSec * 1000,
       absoluteExpiresAt: now + absSec * 1000,
+      lastSeenAt: now,
     };
     const token = newSessionToken();
-    await this.kv.put(sessionKey(token), JSON.stringify(stored), { expirationTtl: kvTtl(absSec) });
-    return { token, session: toSessionInfo(stored), absoluteExpiresAt: stored.absoluteExpiresAt };
+    const effectiveExpiresAt = this.effectiveDeadline(stored);
+    await this.kv.put(sessionKey(token), JSON.stringify(stored), {
+      expirationTtl: kvTtl((effectiveExpiresAt - now) / 1000),
+    });
+    return { token, session: toSessionInfo(stored), absoluteExpiresAt: stored.absoluteExpiresAt, effectiveExpiresAt };
   }
 
   /** Entry-point verify (theme6). Never throws for auth outcomes — returns the contract shape. */
@@ -101,13 +152,22 @@ export class SessionService {
     if (stored.rotatedTo) return this.invalid("revoked");
     if (await this.isUserRevoked(stored.userId)) return this.invalid("revoked");
     const now = this.now();
-    if (now >= stored.absoluteExpiresAt) return this.invalid("revoked");
+    // Effective = min(absolute, idle). Checking the absolute deadline alone is not enough
+    // now that it slides: a record nobody has refreshed for idleTtl is logically dead even
+    // with sliding window left, and the KV TTL floor can keep it physically present.
+    if (now >= this.effectiveDeadline(stored)) return this.invalid("revoked");
     if (now >= stored.accessExpiresAt) return this.invalid("expired");
     return { valid: true, userId: stored.userId, session: toSessionInfo(stored), reason: null };
   }
 
   /**
-   * Rotate the token, preserving the original absolute deadline.
+   * Rotate the token and, for web, SLIDE the absolute deadline forward to a full window.
+   *
+   * Two deadlines govern a rotated session: the (sliding) absolute one and the idle one
+   * anchored at lastSeenAt. A refresh past the idle threshold does not rotate — it rejects
+   * AND deletes the record, so the stale token cannot be retried. lastSeenAt is advanced
+   * ONLY here, never per request: touching it on every verify() would cost one KV write
+   * per API call.
    *
    * Rotation is race-safe. Rather than deleting the old token outright, we overwrite
    * it with a short-lived GRACE record pointing at the successor (`rotatedTo`). A
@@ -128,28 +188,45 @@ export class SessionService {
     // return the successor idempotently so every caller ends up on one token.
     if (stored.rotatedTo) {
       const successor = await this.read(stored.rotatedTo);
-      if (!successor || now >= successor.absoluteExpiresAt || successor.rotatedTo) {
+      if (!successor || now >= this.effectiveDeadline(successor) || successor.rotatedTo) {
         return { error: "revoked" }; // successor gone / expired / itself rotated
       }
       return {
         token: stored.rotatedTo,
         session: toSessionInfo(successor),
         absoluteExpiresAt: successor.absoluteExpiresAt,
+        effectiveExpiresAt: this.effectiveDeadline(successor),
       };
     }
 
     if (now >= stored.absoluteExpiresAt) return { error: "revoked" };
+    // Idle expiry. Nobody refreshed this session for idleTtl, so it is gone regardless of
+    // the sliding window — delete the record rather than just answering "revoked", so the
+    // token is unusable even while the floored KV TTL would still hold it.
+    const idleSec = this.idleTtlSec(stored.client);
+    if (idleSec > 0 && now >= lastSeenOf(stored) + idleSec * 1000) {
+      await this.kv.delete(sessionKey(token));
+      return { error: "revoked" };
+    }
     // access-expired IS allowed here — that is the whole point of refresh.
 
     const rotated: StoredSession = {
       ...stored,
       accessExpiresAt: now + this.config.accessTtlSec * 1000,
+      lastSeenAt: now,
+      // Sliding (web): continued use re-earns the full window. Mobile keeps the original.
+      absoluteExpiresAt: this.isSliding(stored.client)
+        ? now + this.absTtlSec(stored.client) * 1000
+        : stored.absoluteExpiresAt,
     };
     const newToken = newSessionToken();
-    const remainingSec = kvTtl((stored.absoluteExpiresAt - now) / 1000);
+    // Sized off the EFFECTIVE deadline: writing a 90d KV TTL for a record the idle rule
+    // kills in 30d would leave a month of dead records occupying the free-tier namespace.
+    const effectiveExpiresAt = this.effectiveDeadline(rotated);
+    const remainingSec = kvTtl((effectiveExpiresAt - now) / 1000);
     await this.kv.put(sessionKey(newToken), JSON.stringify(rotated), { expirationTtl: remainingSec });
     // Grace: keep the old token briefly as a pointer to the successor instead of
-    // deleting it. TTL is capped by whatever absolute lifetime remains, then floored
+    // deleting it. TTL is capped by whatever effective lifetime remains, then floored
     // to the KV minimum — an unfloored grace put (the 30s default) threw at runtime
     // and turned every hourly refresh into a 500.
     const graceSec = kvTtl(Math.min(this.config.refreshGraceSec, remainingSec));
@@ -159,6 +236,7 @@ export class SessionService {
       token: newToken,
       session: toSessionInfo(rotated),
       absoluteExpiresAt: rotated.absoluteExpiresAt,
+      effectiveExpiresAt,
     };
   }
 
