@@ -4,6 +4,7 @@
 // semantics be unit-tested without SES/Queue/auth being live (9-B/C/E pending).
 import type { auditLog } from "@dub/types";
 import type { IdentityRepo } from "./repo/types";
+import type { WebauthnRepo } from "./repo/webauthn";
 
 export interface RequestCtx {
   requestId: string;
@@ -25,6 +26,8 @@ export interface SessionRevoker {
 
 export interface Deps {
   repo: IdentityRepo;
+  /** Passkey credential store (/internal/webauthn/*). Absent => those routes 503. */
+  webauthn?: WebauthnRepo;
   audit: AuditSink;
   revoker: SessionRevoker;
   now: () => string; // @dub/db nowIso

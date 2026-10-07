@@ -49,3 +49,7 @@ SESSION_IDLE_TTL_SEC = "2592000"
 # Grace window (s) for race-safe refresh-token rotation (see wrangler.toml / sessions.ts).
 # 60 = Workers KV expirationTtl minimum; smaller values are rejected on the grace put.
 SESSION_REFRESH_GRACE_SEC = "60"
+# Passkeys (WebAuthn). rpId/origin = the fe2 SPA host that calls navigator.credentials (not
+# the gateway). Per-environment: gen-staging-configs.sh rewrites both to the staging fe2.
+WEBAUTHN_RP_ID = "dub-fe2-app-shell.developershub-site.workers.dev"
+WEBAUTHN_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev"

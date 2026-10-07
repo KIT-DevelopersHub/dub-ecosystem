@@ -15,6 +15,11 @@ export const AuthErrorCodes = {
   NOT_ON_ALLOWLIST: "AUTH_NOT_ON_ALLOWLIST", // 403 email is not an active identity-roster user (login allowlist)
   PASSWORD_NOT_VIEWABLE: "AUTH_PASSWORD_NOT_VIEWABLE", // 409 no encrypted copy stored for this credential (admin view)
   ENC_KEY_UNAVAILABLE: "AUTH_ENC_KEY_UNAVAILABLE", // 500 PASSWORD_ENC_KEY missing/invalid — admin view/encrypt cannot run
+  PASSKEY_DISABLED: "AUTH_PASSKEY_DISABLED", // 404 WEBAUTHN_RP_ID/ORIGINS not configured for this environment
+  PASSKEY_FAILED: "AUTH_PASSKEY_FAILED", // 401 login / 400 registration: ceremony rejected (challenge, credential, signature, counter)
+  STEP_UP_FAILED: "AUTH_STEP_UP_FAILED", // 403 password re-entry before a sensitive action was wrong
+  PASSKEY_DUPLICATE: "AUTH_PASSKEY_DUPLICATE", // 409 this authenticator is already registered
+  LAST_AUTH_METHOD: "AUTH_LAST_AUTH_METHOD", // 409 refusing to delete the user's only remaining way to sign in
 } as const;
 
 export const authErrors = {
@@ -68,5 +73,27 @@ export const authErrors = {
   // cannot run. A configuration problem, not a client error.
   encKeyUnavailable(message = "Password encryption key is unavailable"): DubError {
     return new DubError(AuthErrorCodes.ENC_KEY_UNAVAILABLE, message, { status: 500, retryable: false });
+  },
+  passkeyDisabled(message = "Passkey login is not configured"): DubError {
+    return new DubError(AuthErrorCodes.PASSKEY_DISABLED, message, { status: 404 });
+  },
+  // Deliberately generic: the client learns only "use another method", never which check
+  // failed (unknown credential vs signature vs counter) — that detail goes to audit.
+  // `status` is 401 for LOGIN only. Registration runs inside a valid session, and the SPA
+  // treats any 401 as "session dead" (refresh, then log out) — so a failed registration
+  // must be 400, or a cancelled Touch ID prompt would sign the user out.
+  passkeyFailed(status: 400 | 401 = 401, message = "Passkey verification failed"): DubError {
+    return new DubError(AuthErrorCodes.PASSKEY_FAILED, message, { status });
+  },
+  // Wrong password on a step-up prompt. 403, not 401, for the same reason as above: the
+  // session is fine, only this one action is refused.
+  stepUpFailed(message = "Password is incorrect"): DubError {
+    return new DubError(AuthErrorCodes.STEP_UP_FAILED, message, { status: 403 });
+  },
+  passkeyDuplicate(message = "This passkey is already registered"): DubError {
+    return new DubError(AuthErrorCodes.PASSKEY_DUPLICATE, message, { status: 409 });
+  },
+  lastAuthMethod(message = "Cannot remove the last remaining sign-in method"): DubError {
+    return new DubError(AuthErrorCodes.LAST_AUTH_METHOD, message, { status: 409 });
   },
 };

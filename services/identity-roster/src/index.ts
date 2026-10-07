@@ -5,6 +5,7 @@ import { createDbClient, newId, nowIso } from "@dub/db";
 import { common } from "@dub/types";
 import { createApp } from "./app";
 import { D1IdentityRepo } from "./repo/d1-repo";
+import { D1WebauthnRepo } from "./repo/webauthn";
 import { createAuditSink, createSessionRevoker } from "./sinks";
 import type { Env } from "./env";
 
@@ -21,6 +22,7 @@ const handler = {
     const app = createApp({
       deps: {
         repo,
+        webauthn: new D1WebauthnRepo(db),
         audit: createAuditSink(env),
         revoker: createSessionRevoker(env),
         now: nowIso,
@@ -42,6 +44,8 @@ export { createApp } from "./app";
 export { IdentityService } from "./service";
 export { MemIdentityRepo } from "./repo/mem-repo";
 export { D1IdentityRepo } from "./repo/d1-repo";
+export { D1WebauthnRepo, MemWebauthnRepo } from "./repo/webauthn";
+export type { WebauthnCredentialRow, WebauthnRepo } from "./repo/webauthn";
 export { seedReferenceData, seedDemoUsers, DEMO_USERS, seedOversightUsers, OVERSIGHT_USERS, backfillAppAccessKeys, computeAppAccessKeys } from "./seed";
 export { IDENTITY_MIGRATIONS, IDENTITY_SCHEMA_SQL } from "./schema";
 export type { Env } from "./env";
