@@ -33,6 +33,14 @@ export interface Env {
   PWLOGIN_WINDOW_SEC?: string; // password-login rate-limit window (default 900 = 15m)
   PASSWORD_MIN_LENGTH?: string; // min length for user/admin-set passwords (default 8)
 
+  // --- passkeys (WebAuthn). Both unset => passkey routes answer AUTH_PASSKEY_DISABLED ---
+  // rpId is the fe2 SPA hostname of THIS environment (the page that calls
+  // navigator.credentials), never the gateway's. Per-env on purpose: a passkey made on
+  // staging must not be valid on production.
+  WEBAUTHN_RP_ID?: string;
+  WEBAUTHN_ORIGINS?: string; // comma-separated exact origins allowed in clientDataJSON
+  WEBAUTHN_RP_NAME?: string; // shown by the authenticator (default "DevHub")
+
   // --- password reversible-encryption key (admin view #5c) ---
   PASSWORD_ENC_KEY?: string; // Worker secret: base64 of 32 bytes (AES-256-GCM). Empty => admin view unavailable.
 
@@ -92,6 +100,8 @@ export interface AppConfig {
   absMobileTtlSec: number;
   idleTtlSec: number;
   refreshGraceSec: number;
+  /** null => passkeys disabled in this environment. */
+  webauthn: { rpId: string; rpName: string; origins: string[] } | null;
   passwordLogin: {
     maxFailures: number;
     windowSec: number;
@@ -106,6 +116,16 @@ function intVar(v: string | undefined, fallback: number): number {
   if (v === undefined) return fallback;
   const n = Number.parseInt(v, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function webauthnConfig(env: Env): AppConfig["webauthn"] {
+  const rpId = (env.WEBAUTHN_RP_ID ?? "").trim().toLowerCase();
+  const origins = (env.WEBAUTHN_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+  if (!rpId || origins.length === 0) return null;
+  return { rpId, rpName: (env.WEBAUTHN_RP_NAME ?? "").trim() || "DevHub", origins };
 }
 
 export function configFromEnv(env: Env): AppConfig {
@@ -133,6 +153,7 @@ export function configFromEnv(env: Env): AppConfig {
     absMobileTtlSec: intVar(env.SESSION_ABS_MOBILE_TTL_SEC, DEFAULTS.absMobileTtlSec),
     idleTtlSec: intVar(env.SESSION_IDLE_TTL_SEC, DEFAULTS.idleTtlSec),
     refreshGraceSec: intVar(env.SESSION_REFRESH_GRACE_SEC, DEFAULTS.refreshGraceSec),
+    webauthn: webauthnConfig(env),
     passwordLogin: {
       maxFailures: intVar(env.PWLOGIN_MAX_FAILURES, 5),
       windowSec: intVar(env.PWLOGIN_WINDOW_SEC, 900),

@@ -66,6 +66,9 @@ SESSION_IDLE_TTL_SEC = "2592000"
 # 60 is the Workers KV expirationTtl MINIMUM — the grace record is a KV write, so any
 # smaller value is rejected at runtime (sessions.ts floors it; do not lower this).
 SESSION_REFRESH_GRACE_SEC = "60"
+# Passkeys (WebAuthn): rpId/origin = the fe2 SPA host (custom-domain deploy).
+WEBAUTHN_RP_ID = "app.developershub.jp"
+WEBAUTHN_ORIGINS = "https://app.developershub.jp"
 
 # Secrets (set via `wrangler secret put`, never committed):
 #   PASSWORD_ENC_KEY  — base64 of 32 random bytes (AES-256-GCM). Enables admin

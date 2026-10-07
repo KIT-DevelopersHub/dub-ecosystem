@@ -1,5 +1,8 @@
-// Login screen (design 2-1). Single path: company email + password (Google OAuth
-// was removed). Access is restricted server-side to @developershub.jp mailboxes.
+// Login screen (design 2-1). Primary path: passkey (usernameless WebAuthn); secondary:
+// company email + password (Google OAuth was removed). When the browser has no WebAuthn
+// or the environment has passkeys off, the passkey button disappears and the password
+// form becomes the primary action — the user is never stuck. Access is restricted
+// server-side to active roster accounts either way.
 // On a successful password login the server has set the session cookie, so we do a
 // full navigation to redirectPath; the shell re-boots, /me returns 200 and the
 // authenticated app renders.
@@ -11,12 +14,17 @@ import { useState } from "react";
 import { Button, TextField } from "@dub/ui";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { passkeysSupported, signInWithPasskey } from "../../lib/passkey.tsx";
 
 export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redirectPath?: string }): JSX.Element {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+  // Hidden for good once the server says passkeys are off here (AUTH_PASSKEY_DISABLED).
+  const [passkeyAvailable, setPasskeyAvailable] = useState(() => passkeysSupported());
 
   function messageFor(e: unknown, fallback: string): string {
     return ApiError.isApiError(e) ? toDisplayableError(e).message : fallback;
@@ -33,6 +41,33 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
       setBusy(false);
       setError(messageFor(e, "メールアドレスまたはパスワードが正しくありません。"));
     }
+  }
+
+  async function submitPasskey(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setPasskeyBusy(true);
+    setError(null);
+    setHint(null);
+    const out = await signInWithPasskey(api);
+    if (out.ok) {
+      globalThis.location.assign(redirectPath);
+      return;
+    }
+    setBusy(false);
+    setPasskeyBusy(false);
+    if (out.kind === "disabled" || out.kind === "unsupported") {
+      setPasskeyAvailable(false);
+      return;
+    }
+    // Closing the OS prompt (or having no passkey yet) is not an error: point at the
+    // password form instead of shouting.
+    if (out.kind === "cancelled") {
+      setHint("パスキーが未登録の場合は、メールアドレスとパスワードでログインしてください。");
+      globalThis.document?.getElementById("fe2-login-email")?.focus();
+      return;
+    }
+    setError(out.message);
   }
 
   // STAGING ONLY. This button is compiled in only when the VITE_DEMO_AUTOLOGIN build flag
@@ -65,6 +100,33 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
           <h1 className="fe2-login-title">DevHub 管理コンソール</h1>
           <p className="fe2-login-sub">運営メンバー専用のサインインです</p>
         </div>
+
+        {passkeyAvailable ? (
+          <>
+            <Button
+              className="fe2-login-block"
+              testId="fe2-login-passkey"
+              variant="primary"
+              size="lg"
+              loading={passkeyBusy}
+              disabled={busy}
+              onClick={() => void submitPasskey()}
+            >
+              パスキーでログイン
+            </Button>
+            {passkeyBusy ? (
+              <p className="fe2-login-hint" role="status" aria-live="polite" data-testid="fe2-login-passkey-status">
+                端末の画面で本人確認を行ってください…
+              </p>
+            ) : null}
+            {hint ? (
+              <p className="fe2-login-hint" data-testid="fe2-login-hint">
+                {hint}
+              </p>
+            ) : null}
+            <div className="fe2-login-divider">またはパスワードで</div>
+          </>
+        ) : null}
 
         <form
           className="fe2-login-form"
@@ -106,8 +168,9 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
             className="fe2-login-block"
             testId="fe2-login-submit"
             type="submit"
+            variant={passkeyAvailable ? "secondary" : "primary"}
             size="lg"
-            loading={busy}
+            loading={busy && !passkeyBusy}
             disabled={!canSubmit}
           >
             ログイン
@@ -120,7 +183,7 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
             testId="fe2-login-demo"
             variant="ghost"
             size="lg"
-            loading={busy}
+            loading={busy && !passkeyBusy}
             disabled={busy}
             onClick={() => void submitDemo()}
           >

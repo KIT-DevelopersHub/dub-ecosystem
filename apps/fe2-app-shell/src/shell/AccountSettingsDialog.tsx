@@ -18,6 +18,7 @@ import { ApiError, toDisplayableError, type ApiClient, type SelfParticipation } 
 import { queryKeys } from "../lib/queryKeys.tsx";
 import { PARTICIPATION_PROFILE_FIELDS, emptySelfParticipation, type ParticipationFieldDescriptor } from "../features/participation/index.tsx";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
+import { PasskeysDialog } from "./PasskeysDialog.tsx";
 
 type MeResponse = gateway.MeResponse;
 
@@ -126,6 +127,7 @@ export function AccountSettingsDialog({
   }, []);
   const [error, setError] = useState<string | null>(null);
   const [pwOpen, setPwOpen] = useState(false);
+  const [passkeysOpen, setPasskeysOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const partSeeded = useRef(false);
 
@@ -342,6 +344,16 @@ export function AccountSettingsDialog({
             </Button>
           </div>
 
+          <div className="fe2-account-password">
+            <div>
+              <div className="fe2-account-password-label">パスキー</div>
+              <div className="fe2-account-password-help">指紋・顔認証・端末の PIN でログインできるようにします。</div>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setPasskeysOpen(true)} testId="fe2-account-passkeys-open">
+              パスキーを管理
+            </Button>
+          </div>
+
           {/* ── 参加情報（参加届） ── */}
           <div className="fe2-account-section" data-testid="fe2-account-participation">
             <div className="fe2-account-section-title">参加情報（参加届）</div>
@@ -378,6 +390,7 @@ export function AccountSettingsDialog({
       </Modal>
 
       <ChangePasswordDialog api={api} open={pwOpen} onClose={() => setPwOpen(false)} />
+      <PasskeysDialog api={api} open={passkeysOpen} onClose={() => setPasskeysOpen(false)} />
     </>
   );
 }
