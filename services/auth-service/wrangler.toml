@@ -56,7 +56,9 @@ SESSION_ABS_MOBILE_TTL_SEC = "15552000"
 # Grace window (s) where the pre-rotation token still resolves to its successor on
 # /auth/refresh. Absorbs concurrent refresh bursts (multi-tab loads / Promise.all
 # 401s) so a duplicate refresh returns the same new token instead of "Invalid token".
-SESSION_REFRESH_GRACE_SEC = "30"
+# 60 is the Workers KV expirationTtl MINIMUM — the grace record is a KV write, so any
+# smaller value is rejected at runtime (sessions.ts floors it; do not lower this).
+SESSION_REFRESH_GRACE_SEC = "60"
 
 # Secrets (set via `wrangler secret put`, never committed):
 #   PASSWORD_ENC_KEY  — base64 of 32 random bytes (AES-256-GCM). Enables admin

@@ -93,6 +93,36 @@ describe("POST /auth/logout", () => {
     expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
     expect((await h.deps.sessions.verify(created.token)).reason).toBe("revoked");
   });
+
+  // Clearing the browser cookie is NOT logout: if the token never reaches this handler
+  // (the gateway used to strip it) sessions.logout() is a silent no-op and the session
+  // stays usable in KV until the 30d absolute TTL. Assert the record is really gone.
+  it("cookie path DELETES the session record server-side (not just the browser cookie)", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_bye", "web");
+    const key = `session:${created.token}`;
+    expect(h.kv.store.has(key)).toBe(true);
+
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/logout", jsonInit({}, { cookie: `dub_session=${created.token}` }));
+    expect(res.status).toBe(200);
+    expect(h.kv.store.has(key)).toBe(false);
+    // Anyone replaying the token afterwards (shared machine, leaked cookie) is rejected.
+    expect((await h.deps.sessions.verify(created.token)).valid).toBe(false);
+  });
+
+  it("without any credential the session survives — the token MUST reach this handler", async () => {
+    const h = makeHarness();
+    const created = await h.deps.sessions.create("usr_stay", "web");
+    const app = buildApp(h.deps);
+    // Exactly what the SPA's logout did while the gateway stripped the cookie: 200 OK,
+    // cookie cleared client-side, session still live server-side. Regression anchor for
+    // the gateway-side forwardCredentials fix.
+    const res = await app.request("/auth/logout", jsonInit({}));
+    expect(res.status).toBe(200);
+    expect(h.kv.store.has(`session:${created.token}`)).toBe(true);
+    expect((await h.deps.sessions.verify(created.token)).valid).toBe(true);
+  });
 });
 
 describe("POST /auth/test-login", () => {
