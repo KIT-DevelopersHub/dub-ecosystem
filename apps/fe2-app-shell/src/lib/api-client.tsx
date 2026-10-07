@@ -128,6 +128,12 @@ export interface ApiClient {
     demoLogin(): Promise<void>;
     logout(): Promise<void>;
     me(): Promise<MeResponse>;
+    /** Rotate the session PROACTIVELY, outside the 401 path (AuthProvider schedules this
+     *  shortly before MeResponse.sessionExpiresAt so nothing ever 401s). Shares the
+     *  single-flight latch with the reactive 401 branch, so a timer firing at the same
+     *  moment as a request storm still produces exactly one POST /auth/refresh.
+     *  Resolves true when the cookie was rotated; never throws. */
+    refresh(): Promise<boolean>;
     /** Self password change (#5b): the logged-in user rotates their OWN password.
      *  The gateway re-verifies the session + current password before storing. */
     changePassword(currentPassword: string, newPassword: string): Promise<void>;
@@ -207,17 +213,27 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     );
   }
 
+  /** The settled outcome of ONE refresh storm, shared by every caller that awaited it. */
+  interface RefreshAttempt {
+    ok: boolean;
+    /** Fires config.onUnauthenticated at most once for this storm (latch is per-storm). */
+    notifyUnauthenticated(): void;
+  }
+
   // Single-flight refresh: when several requests 401 at once (e.g. /me + /bff/home
   // + chat all firing on a fresh mount past the access TTL), they must NOT each POST
   // /auth/refresh. Concurrent refreshes race the server-side token rotation and one
   // would come back "Invalid token", tearing down the shell. Instead they all await
   // the SAME in-flight refresh and then retry against the single rotated cookie.
-  let refreshInFlight: Promise<boolean> | null = null;
+  // Per-client closure (never a module global) so separate clients / tests don't share
+  // state, and cleared on settle so a LATER access expiry can refresh again.
+  let refreshInFlight: Promise<RefreshAttempt> | null = null;
 
-  function attemptRefresh(): Promise<boolean> {
+  function attemptRefresh(): Promise<RefreshAttempt> {
     if (refreshInFlight) return refreshInFlight;
-    refreshInFlight = (async (): Promise<boolean> => {
+    const flight = (async (): Promise<RefreshAttempt> => {
       // Browser path: empty body {}, cookie-derived; Set-Cookie rotation server-side.
+      let ok = false;
       try {
         const res = await fetchImpl(buildUrl(config.baseUrl, "/api/v1/auth/refresh"), {
           method: "POST",
@@ -225,14 +241,33 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           headers: { "content-type": "application/json" },
           body: "{}",
         });
-        return res.ok;
+        ok = res.ok;
       } catch {
-        return false;
+        ok = false;
       }
-    })().finally(() => {
-      refreshInFlight = null;
-    });
-    return refreshInFlight;
+      // One logout per storm. The shared promise alone is not enough: every waiting
+      // caller independently reaches its own failure branch, so without this latch a
+      // 10-request storm would fire onUnauthenticated 10 times (10 redirects/toasts).
+      let notified = false;
+      return {
+        ok,
+        notifyUnauthenticated: (): void => {
+          if (notified) return;
+          notified = true;
+          config.onUnauthenticated?.();
+        },
+      };
+    })();
+    refreshInFlight = flight;
+    void flight.then(
+      () => {
+        if (refreshInFlight === flight) refreshInFlight = null;
+      },
+      () => {
+        if (refreshInFlight === flight) refreshInFlight = null;
+      },
+    );
+    return flight;
   }
 
   async function requestOnce<TRes, TBody>(input: RequestInput<TBody>): Promise<TRes> {
@@ -277,18 +312,19 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     } catch (e) {
       // 401 branch judged by HTTP status ONLY (code-name independent).
       if (ApiError.isApiError(e) && e.status === 401) {
-        const refreshed = await attemptRefresh();
-        if (refreshed) {
+        const attempt = await attemptRefresh();
+        if (attempt.ok) {
           try {
             return await requestOnce<TRes, TBody>(input);
           } catch (e2) {
+            // Still 401 after a *successful* rotation = the session is genuinely gone.
             if (ApiError.isApiError(e2) && e2.status === 401) {
-              config.onUnauthenticated?.();
+              attempt.notifyUnauthenticated();
             }
             throw e2;
           }
         }
-        config.onUnauthenticated?.();
+        attempt.notifyUnauthenticated();
       }
       throw e;
     }
@@ -305,16 +341,16 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
       return await downloadOnce(path);
     } catch (e) {
       if (ApiError.isApiError(e) && e.status === 401) {
-        const refreshed = await attemptRefresh();
-        if (refreshed) {
+        const attempt = await attemptRefresh();
+        if (attempt.ok) {
           try {
             return await downloadOnce(path);
           } catch (e2) {
-            if (ApiError.isApiError(e2) && e2.status === 401) config.onUnauthenticated?.();
+            if (ApiError.isApiError(e2) && e2.status === 401) attempt.notifyUnauthenticated();
             throw e2;
           }
         }
-        config.onUnauthenticated?.();
+        attempt.notifyUnauthenticated();
       }
       throw e;
     }
@@ -346,6 +382,10 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
       demoLogin: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/demo-login", body: {} }),
       logout: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/logout", body: {} }),
       me: () => request<MeResponse>({ method: "GET", path: "/api/v1/me" }),
+      // Deliberately does NOT notify onUnauthenticated on failure: a proactive refresh that
+      // fails must not log the user out on its own (a transient network blip would then end
+      // the session). The reactive 401 path stays the single place that tears the shell down.
+      refresh: () => attemptRefresh().then((a) => a.ok),
       changePassword: (currentPassword: string, newPassword: string) =>
         request<void, { currentPassword: string; newPassword: string }>({
           method: "POST",
