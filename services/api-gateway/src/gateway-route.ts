@@ -65,5 +65,7 @@ export async function gatewayRouteHandler(
   return forwardRequest(binding, internalPath, c.req.raw, {
     requestId,
     ...(userId ? { userId } : {}),
+    // Only the auth segment opts in (routes.ts): auth-service needs the raw token.
+    ...(route.forwardCredentials ? { forwardCredentials: true } : {}),
   });
 }

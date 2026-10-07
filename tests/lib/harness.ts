@@ -208,7 +208,15 @@ async function buildAuth(identityFetcher: Fetcher): Promise<{ fetcher: Fetcher }
   const kv = new Map<string, string>();
   const kvNs = {
     get: async (k: string) => (kv.has(k) ? kv.get(k)! : null),
-    put: async (k: string, v: string) => void kv.set(k, v),
+    // Mirror real Workers KV: expirationTtl below 60s is REJECTED. A fake that
+    // silently swallowed the options bag is how the 30s refresh-grace put reached
+    // production and turned every /auth/refresh into a 500.
+    put: async (k: string, v: string, o?: { expirationTtl?: number }) => {
+      if (o?.expirationTtl !== undefined && o.expirationTtl < 60) {
+        throw new Error(`KV put ${k}: expirationTtl of ${o.expirationTtl}s is below the 60s Workers KV minimum`);
+      }
+      kv.set(k, v);
+    },
     delete: async (k: string) => void kv.delete(k),
   } as unknown as import("@cloudflare/workers-types").KVNamespace;
 
