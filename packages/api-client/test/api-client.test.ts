@@ -118,6 +118,140 @@ describe("createApiClient", () => {
     expect(onUnauthenticated).toHaveBeenCalledTimes(1);
   });
 
+  // ---- single-flight refresh (access-TTL storm) ------------------------------
+  // The access token has one fixed TTL, so at the boundary EVERY open request 401s at the
+  // same instant. These guard both halves of that storm: one refresh, one logout.
+
+  it("coalesces concurrent 401s into a SINGLE refresh, then every caller retries", async () => {
+    let refreshCount = 0;
+    const seen = new Map<string, number>(); // per-path: first hit => 401, retry => 200
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCount++;
+        // hold the promise so every caller piles onto the same in-flight refresh
+        await new Promise((r) => setTimeout(r, 5));
+        return jsonRes({ session: "new" }, 200);
+      }
+      const n = (seen.get(url) ?? 0) + 1;
+      seen.set(url, n);
+      return n === 1 ? jsonRes(errBody("UNAUTHENTICATED"), 401) : jsonRes({ ok: true, url }, 200);
+    });
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    const results = await Promise.all([
+      api.request<{ ok: boolean }>({ method: "GET", path: "/api/v1/me" }),
+      api.request<{ ok: boolean }>({ method: "GET", path: "/api/v1/bff/home" }),
+      api.request<{ ok: boolean }>({ method: "GET", path: "/api/v1/tasks" }),
+    ]);
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(refreshCount).toBe(1);
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+  });
+
+  it("fires onUnauthenticated EXACTLY ONCE when the shared refresh fails", async () => {
+    // A shared promise alone is not enough: each waiting caller reaches its own failure
+    // branch, so without a per-storm latch the user gets N redirects/toasts.
+    let refreshCount = 0;
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCount++;
+        await new Promise((r) => setTimeout(r, 5));
+        return jsonRes(errBody("UNAUTHENTICATED"), 401); // refresh itself fails
+      }
+      return jsonRes(errBody("UNAUTHENTICATED"), 401);
+    });
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    const paths = ["/api/v1/me", "/api/v1/bff/home", "/api/v1/tasks", "/api/v1/notifications", "/api/v1/chat"] as const;
+    const settled = await Promise.allSettled(paths.map((path) => api.request({ method: "GET", path })));
+    expect(settled.every((s) => s.status === "rejected")).toBe(true);
+    expect(refreshCount).toBe(1);
+    expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires onUnauthenticated EXACTLY ONCE when the retry 401s after a successful rotation", async () => {
+    // Refresh says 200 but the rotated cookie is still rejected: same storm, one logout.
+    let refreshCount = 0;
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCount++;
+        await new Promise((r) => setTimeout(r, 5));
+        return jsonRes({ session: "new" }, 200);
+      }
+      return jsonRes(errBody("UNAUTHENTICATED"), 401);
+    });
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    await Promise.allSettled([
+      api.request({ method: "GET", path: "/api/v1/me" }),
+      api.request({ method: "GET", path: "/api/v1/bff/home" }),
+      api.request({ method: "GET", path: "/api/v1/tasks" }),
+    ]);
+    expect(refreshCount).toBe(1);
+    expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets the latch so a LATER access expiry refreshes again", async () => {
+    // The in-flight promise must be cleared on settle and the boolean must NOT be cached,
+    // otherwise the session survives exactly one TTL boundary and then dies.
+    let refreshCount = 0;
+    let expired = true; // the next non-refresh request 401s
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCount++;
+        return jsonRes({ session: "new" }, 200);
+      }
+      if (expired) {
+        expired = false;
+        return jsonRes(errBody("UNAUTHENTICATED"), 401);
+      }
+      return jsonRes({ ok: true }, 200);
+    });
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+
+    await expect(api.request<{ ok: boolean }>({ method: "GET", path: "/api/v1/me" })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(refreshCount).toBe(1);
+
+    // ... an hour later the access token expires again
+    expired = true;
+    await expect(api.request<{ ok: boolean }>({ method: "GET", path: "/api/v1/me" })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(refreshCount).toBe(2);
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+  });
+
+  it("keeps the single-flight latch per client instance (no shared module state)", async () => {
+    const makeFetch = (): ReturnType<typeof vi.fn> => {
+      let expired = true;
+      return vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith("/auth/refresh")) return jsonRes({ session: "new" }, 200);
+        if (expired) {
+          expired = false;
+          return jsonRes(errBody("UNAUTHENTICATED"), 401);
+        }
+        return jsonRes({ ok: true }, 200);
+      });
+    };
+    const fetchA = makeFetch();
+    const fetchB = makeFetch();
+    const apiA = createApiClient({ baseUrl: BASE, fetchImpl: fetchA });
+    const apiB = createApiClient({ baseUrl: BASE, fetchImpl: fetchB });
+    await Promise.all([
+      apiA.request({ method: "GET", path: "/api/v1/me" }),
+      apiB.request({ method: "GET", path: "/api/v1/me" }),
+    ]);
+    // Each client must refresh through its OWN fetch; a module-global latch would let one
+    // client's refresh satisfy the other, leaving one fetch with no refresh call at all.
+    const refreshed = (f: ReturnType<typeof vi.fn>): boolean =>
+      f.mock.calls.some((c) => String(c[0]).endsWith("/auth/refresh"));
+    expect(refreshed(fetchA)).toBe(true);
+    expect(refreshed(fetchB)).toBe(true);
+  });
+
   it("retries GET on 5xx up to maxRetries, then throws", async () => {
     const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(errBody("INTERNAL"), 500));
     const api = createApiClient({ baseUrl: BASE, fetchImpl, sleepImpl: noSleep, retry: { maxRetries: 2, baseDelayMs: 0 } });

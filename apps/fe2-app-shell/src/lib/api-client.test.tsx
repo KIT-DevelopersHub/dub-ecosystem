@@ -103,6 +103,79 @@ describe("createApiClient", () => {
     expect(onUnauthenticated).toHaveBeenCalledTimes(1);
   });
 
+  it("fires onUnauthenticated EXACTLY ONCE for a whole failed refresh storm", async () => {
+    // The access TTL expires for every open request at once. Sharing one refresh promise is
+    // not enough: each waiting caller reaches its own failure branch, so without a per-storm
+    // latch a 5-request storm produced 5 logouts (5 redirects / 5 toasts).
+    let refreshCount = 0;
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCount++;
+        await new Promise((r) => setTimeout(r, 5)); // hold so everyone piles on
+        return jsonRes(errBody("UNAUTHENTICATED"), 401);
+      }
+      return jsonRes(errBody("UNAUTHENTICATED"), 401);
+    });
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    const paths = ["/api/v1/me", "/api/v1/bff/home", "/api/v1/tasks", "/api/v1/notifications", "/api/v1/chat"] as const;
+    const settled = await Promise.allSettled(paths.map((path) => api.request({ method: "GET", path })));
+    expect(settled.every((s) => s.status === "rejected")).toBe(true);
+    expect(refreshCount).toBe(1);
+    expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets the latch so a LATER access expiry refreshes again", async () => {
+    let refreshCount = 0;
+    let expired = true;
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCount++;
+        return jsonRes({ session: "new" }, 200);
+      }
+      if (expired) {
+        expired = false;
+        return jsonRes(errBody("UNAUTHENTICATED"), 401);
+      }
+      return jsonRes({ ok: true }, 200);
+    });
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    await api.request({ method: "GET", path: "/api/v1/me" });
+    expect(refreshCount).toBe(1);
+    expired = true; // ... an hour later
+    await api.request({ method: "GET", path: "/api/v1/me" });
+    expect(refreshCount).toBe(2);
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+  });
+
+  it("auth.refresh() rotates proactively, shares the latch, and never logs the user out", async () => {
+    let refreshCount = 0;
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCount++;
+        await new Promise((r) => setTimeout(r, 5));
+        return jsonRes({ session: "new" }, 200);
+      }
+      return jsonRes({ ok: true }, 200);
+    });
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    // Two proactive rotations racing (timer + visibilitychange) collapse into one POST.
+    expect(await Promise.all([api.auth.refresh(), api.auth.refresh()])).toEqual([true, true]);
+    expect(refreshCount).toBe(1);
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+  });
+
+  it("a FAILED proactive refresh resolves false without logging the user out", async () => {
+    // A transient blip must not end a healthy session; only the reactive 401 path tears down.
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(errBody("UNAUTHENTICATED"), 401));
+    const onUnauthenticated = vi.fn();
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, onUnauthenticated });
+    expect(await api.auth.refresh()).toBe(false);
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+  });
+
   it("retries GET on 5xx up to maxRetries, then throws", async () => {
     const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(errBody("INTERNAL"), 500));
     const api = createApiClient({ baseUrl: BASE, fetchImpl, sleepImpl: noSleep, retry: { maxRetries: 2, baseDelayMs: 0 } });
