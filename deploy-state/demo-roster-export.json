@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "roster-export",
+  "worker": "dub-demo-roster-export",
+  "url": "https://dub-demo-roster-export.developershub-site.workers.dev",
+  "deployedSha": "84c14403",
+  "branch": "feat/members-roster-export",
+  "actor": "ko-tarou",
+  "markers": ["member-roster-export-xlsx","member-roster-export-pdf"],
+  "live": true,
+  "verifiedAt": "2026-10-07T13:47:46Z",
+  "updatedAt": "2026-10-07T13:47:46Z",
+  "note": "運営名簿 Excel/CSV/PDF ダウンロード"
+}
