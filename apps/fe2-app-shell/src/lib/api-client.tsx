@@ -4,6 +4,12 @@
 // exponential retry on 5xx/network. Types come from @dub/types; error envelope
 // from @dub/errors. (Design places this in packages/api-client; implemented
 // inside apps/fe2-app-shell to keep this unit's work self-contained — see notes.)
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/browser";
 import type { ErrorResponse } from "@dub/errors";
 import { isErrorResponse } from "@dub/errors";
 import type { gateway, member } from "@dub/types";
@@ -99,6 +105,15 @@ export interface ResourceClient {
   delete<TRes>(path: string): Promise<TRes>;
 }
 
+/** A registered passkey as shown in アカウント設定 (no key material). */
+export interface PasskeySummary {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  backedUp: boolean;
+}
+
 export interface ApiClient {
   request<TRes, TBody = unknown>(input: RequestInput<TBody>): Promise<TRes>;
   /** GET a binary resource as a Blob (attachments/exports). Same session + one-shot 401
@@ -113,6 +128,12 @@ export interface ApiClient {
     demoLogin(): Promise<void>;
     logout(): Promise<void>;
     me(): Promise<MeResponse>;
+    /** Rotate the session PROACTIVELY, outside the 401 path (AuthProvider schedules this
+     *  shortly before MeResponse.sessionExpiresAt so nothing ever 401s). Shares the
+     *  single-flight latch with the reactive 401 branch, so a timer firing at the same
+     *  moment as a request storm still produces exactly one POST /auth/refresh.
+     *  Resolves true when the cookie was rotated; never throws. */
+    refresh(): Promise<boolean>;
     /** Self password change (#5b): the logged-in user rotates their OWN password.
      *  The gateway re-verifies the session + current password before storing. */
     changePassword(currentPassword: string, newPassword: string): Promise<void>;
@@ -129,6 +150,17 @@ export interface ApiClient {
      *  (member-service getSelfParticipation / updateSelfParticipation). */
     getSelfParticipation(): Promise<SelfParticipation>;
     updateSelfParticipation(input: Partial<SelfParticipation>): Promise<SelfParticipation>;
+    /** Passkeys (WebAuthn). Raw JSON in/out — lib/passkey.tsx drives the browser half. */
+    passkeys: {
+      loginOptions(): Promise<PublicKeyCredentialRequestOptionsJSON>;
+      loginVerify(response: AuthenticationResponseJSON): Promise<void>;
+      /** Step-up: the current password is required to start a registration. */
+      registerOptions(password: string): Promise<PublicKeyCredentialCreationOptionsJSON>;
+      registerVerify(response: RegistrationResponseJSON, label: string): Promise<{ passkey: PasskeySummary }>;
+      list(): Promise<{ items: PasskeySummary[] }>;
+      rename(id: string, label: string): Promise<void>;
+      remove(id: string): Promise<void>;
+    };
   };
   bff: { home(): Promise<BffHomeResponse> };
   events: ResourceClient;
@@ -181,17 +213,27 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     );
   }
 
+  /** The settled outcome of ONE refresh storm, shared by every caller that awaited it. */
+  interface RefreshAttempt {
+    ok: boolean;
+    /** Fires config.onUnauthenticated at most once for this storm (latch is per-storm). */
+    notifyUnauthenticated(): void;
+  }
+
   // Single-flight refresh: when several requests 401 at once (e.g. /me + /bff/home
   // + chat all firing on a fresh mount past the access TTL), they must NOT each POST
   // /auth/refresh. Concurrent refreshes race the server-side token rotation and one
   // would come back "Invalid token", tearing down the shell. Instead they all await
   // the SAME in-flight refresh and then retry against the single rotated cookie.
-  let refreshInFlight: Promise<boolean> | null = null;
+  // Per-client closure (never a module global) so separate clients / tests don't share
+  // state, and cleared on settle so a LATER access expiry can refresh again.
+  let refreshInFlight: Promise<RefreshAttempt> | null = null;
 
-  function attemptRefresh(): Promise<boolean> {
+  function attemptRefresh(): Promise<RefreshAttempt> {
     if (refreshInFlight) return refreshInFlight;
-    refreshInFlight = (async (): Promise<boolean> => {
+    const flight = (async (): Promise<RefreshAttempt> => {
       // Browser path: empty body {}, cookie-derived; Set-Cookie rotation server-side.
+      let ok = false;
       try {
         const res = await fetchImpl(buildUrl(config.baseUrl, "/api/v1/auth/refresh"), {
           method: "POST",
@@ -199,14 +241,33 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           headers: { "content-type": "application/json" },
           body: "{}",
         });
-        return res.ok;
+        ok = res.ok;
       } catch {
-        return false;
+        ok = false;
       }
-    })().finally(() => {
-      refreshInFlight = null;
-    });
-    return refreshInFlight;
+      // One logout per storm. The shared promise alone is not enough: every waiting
+      // caller independently reaches its own failure branch, so without this latch a
+      // 10-request storm would fire onUnauthenticated 10 times (10 redirects/toasts).
+      let notified = false;
+      return {
+        ok,
+        notifyUnauthenticated: (): void => {
+          if (notified) return;
+          notified = true;
+          config.onUnauthenticated?.();
+        },
+      };
+    })();
+    refreshInFlight = flight;
+    void flight.then(
+      () => {
+        if (refreshInFlight === flight) refreshInFlight = null;
+      },
+      () => {
+        if (refreshInFlight === flight) refreshInFlight = null;
+      },
+    );
+    return flight;
   }
 
   async function requestOnce<TRes, TBody>(input: RequestInput<TBody>): Promise<TRes> {
@@ -251,18 +312,19 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     } catch (e) {
       // 401 branch judged by HTTP status ONLY (code-name independent).
       if (ApiError.isApiError(e) && e.status === 401) {
-        const refreshed = await attemptRefresh();
-        if (refreshed) {
+        const attempt = await attemptRefresh();
+        if (attempt.ok) {
           try {
             return await requestOnce<TRes, TBody>(input);
           } catch (e2) {
+            // Still 401 after a *successful* rotation = the session is genuinely gone.
             if (ApiError.isApiError(e2) && e2.status === 401) {
-              config.onUnauthenticated?.();
+              attempt.notifyUnauthenticated();
             }
             throw e2;
           }
         }
-        config.onUnauthenticated?.();
+        attempt.notifyUnauthenticated();
       }
       throw e;
     }
@@ -279,16 +341,16 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
       return await downloadOnce(path);
     } catch (e) {
       if (ApiError.isApiError(e) && e.status === 401) {
-        const refreshed = await attemptRefresh();
-        if (refreshed) {
+        const attempt = await attemptRefresh();
+        if (attempt.ok) {
           try {
             return await downloadOnce(path);
           } catch (e2) {
-            if (ApiError.isApiError(e2) && e2.status === 401) config.onUnauthenticated?.();
+            if (ApiError.isApiError(e2) && e2.status === 401) attempt.notifyUnauthenticated();
             throw e2;
           }
         }
-        config.onUnauthenticated?.();
+        attempt.notifyUnauthenticated();
       }
       throw e;
     }
@@ -320,6 +382,10 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
       demoLogin: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/demo-login", body: {} }),
       logout: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/logout", body: {} }),
       me: () => request<MeResponse>({ method: "GET", path: "/api/v1/me" }),
+      // Deliberately does NOT notify onUnauthenticated on failure: a proactive refresh that
+      // fails must not log the user out on its own (a transient network blip would then end
+      // the session). The reactive 401 path stays the single place that tears the shell down.
+      refresh: () => attemptRefresh().then((a) => a.ok),
       changePassword: (currentPassword: string, newPassword: string) =>
         request<void, { currentPassword: string; newPassword: string }>({
           method: "POST",
@@ -339,6 +405,28 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           path: "/api/v1/me/participation",
           body: input,
         }),
+      passkeys: {
+        loginOptions: () =>
+          request<PublicKeyCredentialRequestOptionsJSON, Record<string, never>>({ method: "POST", path: "/api/v1/auth/passkey/login/options", body: {} }),
+        loginVerify: (response: AuthenticationResponseJSON) =>
+          request<void, { response: AuthenticationResponseJSON }>({ method: "POST", path: "/api/v1/auth/passkey/login/verify", body: { response } }),
+        registerOptions: (password: string) =>
+          request<PublicKeyCredentialCreationOptionsJSON, { password: string }>({
+            method: "POST",
+            path: "/api/v1/auth/passkey/register/options",
+            body: { password },
+          }),
+        registerVerify: (response: RegistrationResponseJSON, label: string) =>
+          request<{ passkey: PasskeySummary }, { response: RegistrationResponseJSON; label: string }>({
+            method: "POST",
+            path: "/api/v1/auth/passkey/register/verify",
+            body: { response, label },
+          }),
+        list: () => request<{ items: PasskeySummary[] }>({ method: "GET", path: "/api/v1/auth/passkeys" }),
+        rename: (id: string, label: string) =>
+          request<void, { label: string }>({ method: "PATCH", path: `/api/v1/auth/passkeys/${encodeURIComponent(id)}`, body: { label } }),
+        remove: (id: string) => request<void>({ method: "DELETE", path: `/api/v1/auth/passkeys/${encodeURIComponent(id)}` }),
+      },
     },
     bff: {
       home: () => request<BffHomeResponse>({ method: "GET", path: "/api/v1/bff/home" }),
@@ -373,6 +461,11 @@ const JA_BY_CODE: Record<string, string> = {
   MEMBER_PARTICIPATION_ALREADY_LINKED:
     "この運営メンバーは既に別の参加届に紐付いています。別の人を選ぶか、新規メンバーとして追加してください。",
   MEMBER_IDENTITY_ALREADY_LINKED: "このアカウントは既に別の運営メンバーに紐付いています。",
+  AUTH_PASSKEY_FAILED: "パスキーで確認できませんでした。もう一度お試しいただくか、パスワードでログインしてください。",
+  AUTH_PASSKEY_DISABLED: "この環境ではパスキーを利用できません。パスワードでログインしてください。",
+  AUTH_PASSKEY_DUPLICATE: "このパスキーはすでに登録されています。",
+  AUTH_STEP_UP_FAILED: "パスワードが正しくありません。",
+  AUTH_LAST_AUTH_METHOD: "最後のログイン手段は削除できません。",
 };
 
 export function toDisplayableError(e: ApiError): DisplayableError {

@@ -5,7 +5,7 @@
 //
 // WHY THIS TABLE LOOKS UNLIKE EVERY OTHER SERVICE'S — read this before "fixing" it:
 // auth-service is the service that ISSUES the session every other table's rules are checked
-// against. Six of its twelve routes are `PUBLIC`, and that is the correct answer rather than a
+// against. Thirteen of its nineteen routes are `PUBLIC` (six session-issuing + seven passkey), and that is the correct answer rather than a
 // gap, because of a chicken-and-egg constraint that no rule form can express away:
 //
 //   api-gateway routes the `auth` segment with `auth="public"` (services/api-gateway/src/
@@ -68,6 +68,23 @@ export const POLICY_TABLE = definePolicyTable({
   // session named by the presented token and clears the cookie. With no valid token there is
   // nothing to revoke, and one caller can never log another user out (no subject parameter).
   "POST /auth/logout": PUBLIC,
+
+  // ---- passkeys (WebAuthn) — same two shapes as above, nothing new ----
+  // login/options + login/verify are the passkey twin of /auth/password/login: they mint a
+  // session, so they cannot require one. The signed assertion is the credential; the handler
+  // verifies it against the stored public key + single-use D1 challenge, then applies the same
+  // roster allowlist and domain filter as password login.
+  "POST /auth/passkey/login/options": PUBLIC,
+  "POST /auth/passkey/login/verify": PUBLIC,
+  // Management routes follow the /auth/password pattern: the gateway forwards no trusted actor
+  // header, so the SESSION TOKEN is the credential and `sessionUserId` proves it. They only act
+  // on the caller's own passkeys (subject from the verified token, never the path/body).
+  // register/options additionally re-checks the current password (step-up).
+  "POST /auth/passkey/register/options": PUBLIC,
+  "POST /auth/passkey/register/verify": PUBLIC,
+  "GET /auth/passkeys": PUBLIC,
+  "PATCH /auth/passkeys/:id": PUBLIC,
+  "DELETE /auth/passkeys/:id": PUBLIC,
 
   // ---- the two routes that LOOK like a backdoor and are not (inventory 3.(a) a-3) ----
   // Both mint a session with no password, so they deserve the suspicion. Neither is gated by

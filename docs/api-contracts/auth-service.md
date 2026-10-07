@@ -131,7 +131,9 @@ Set-Cookie: dub_session=<opaque-token>; HttpOnly; Secure; SameSite=Lax; Domain=.
 Location: https://app.developershub.jp/home
 ```
 
-`Max-Age` is the session's absolute lifetime in seconds (web = 30 days). `Location` is the
+`Max-Age` is the session's **effective** remaining lifetime in seconds — `min(absolute
+deadline, idle deadline)`, which for a fresh web session is the 30-day idle window rather than
+the 90-day absolute one (see §9 Lifetimes). `Location` is the
 `redirectUri` captured at login start (falls back to `SPA_SUCCESS_URL`).
 
 Failure (redirects to `SPA_ERROR_URL` with the code appended as `?error=`):
@@ -173,18 +175,30 @@ The only session object crossing the wire is `auth.SessionInfo`:
 | `sessionExpiresAt` | number (**epoch-ms**) | Access-token expiry (`accessExpiresAt`). The one epoch-ms exception (`_conventions.md` §6.2). Refresh before this to slide the session. |
 
 The token is **opaque** (a KV key, not a JWT) — clients must not parse it. Internally the
-service keeps richer bookkeeping (`issuedAt`, `accessExpiresAt`, `absoluteExpiresAt`) in the
-stored record; it never leaves the service.
+service keeps richer bookkeeping (`issuedAt`, `accessExpiresAt`, `absoluteExpiresAt`,
+`lastSeenAt`) in the stored record; it never leaves the service.
 
 Lifetimes (config-driven, `env.ts` defaults):
 
-| Client | Access TTL | Absolute TTL |
-|---|---|---|
-| web | 3600 s (`SESSION_ACCESS_TTL_SEC`) | 30 days (`SESSION_ABS_WEB_TTL_SEC`) |
-| mobile | 3600 s | 180 days (`SESSION_ABS_MOBILE_TTL_SEC`) |
+| Client | Access TTL | Absolute TTL | Slides on refresh? | Idle TTL |
+|---|---|---|---|---|
+| web | 3600 s (`SESSION_ACCESS_TTL_SEC`) | 90 days (`SESSION_ABS_WEB_TTL_SEC`) | yes | 30 days (`SESSION_IDLE_TTL_SEC`) |
+| mobile | 3600 s | 180 days (`SESSION_ABS_MOBILE_TTL_SEC`) | no (fixed) | none |
 
-Refresh rotates the token but preserves the original absolute deadline; the session cannot
-outlive the absolute TTL.
+A session ends at the EARLIER of its two deadlines:
+
+- **absolute** — for web this *slides*: every successful `/auth/refresh` resets it to a full
+  90 days, so a continuously-active web session is not cut off mid-use. Mobile's 180-day
+  deadline is deliberately fixed (the token is device-resident, with no cookie to clear), so
+  it remains the one unconditional re-auth point.
+- **idle** — `lastSeenAt + SESSION_IDLE_TTL_SEC` (web only). `lastSeenAt` advances **only on
+  refresh** (hourly at most); it is deliberately not touched per request, which would cost a
+  KV write per API call. A refresh past the idle deadline does not rotate: it returns
+  `revoked` and deletes the session record.
+
+`lastSeenAt` is optional in the stored record. Records written before it existed fall back to
+`issuedAt`, which reproduces the previous fixed-30-day behaviour exactly, so introducing idle
+expiry logs nobody out.
 
 ---
 
@@ -224,7 +238,7 @@ Response — **cookie path** (`{ session }` + `Set-Cookie`):
 ```
 
 ```
-Set-Cookie: dub_session=<new-opaque-token>; HttpOnly; Secure; SameSite=Lax; Domain=.developershub.jp; Path=/; Max-Age=<remaining-abs-seconds>
+Set-Cookie: dub_session=<new-opaque-token>; HttpOnly; Secure; SameSite=Lax; Domain=.developershub.jp; Path=/; Max-Age=<remaining-effective-seconds>
 ```
 
 Errors:
@@ -400,6 +414,43 @@ Errors:
 
 ---
 
+## 11a. Passkeys (WebAuthn)
+
+Public via the gateway `auth` segment (cookie forwarded). Disabled per environment unless
+`WEBAUTHN_RP_ID` + `WEBAUTHN_ORIGINS` are set (otherwise every route answers
+`404 AUTH_PASSKEY_DISABLED` and the SPA falls back to password). rpId / origin are the fe2 SPA
+host of that environment (prod `dub-fe2-app-shell.developershub-site.workers.dev`, staging
+rewritten by `infra/deploy/gen-staging-configs.sh`) so a staging passkey never works on prod.
+
+| Route | Auth | Body | Success |
+|---|---|---|---|
+| `POST /auth/passkey/register/options` | session + **step-up password** | `{ password }` | `PublicKeyCredentialCreationOptionsJSON` |
+| `POST /auth/passkey/register/verify` | session | `{ response, label? }` | `{ passkey: PasskeySummary }` |
+| `POST /auth/passkey/login/options` | public | `{}` | `PublicKeyCredentialRequestOptionsJSON` (usernameless) |
+| `POST /auth/passkey/login/verify` | public | `{ response }` | `{ token, session }` + `Set-Cookie` (same session as password login) |
+| `GET /auth/passkeys` | session | — | `{ items: PasskeySummary[] }` |
+| `PATCH /auth/passkeys/:id` | session | `{ label }` | `{ ok: true }` |
+| `DELETE /auth/passkeys/:id` | session | — | `204`; `409 AUTH_LAST_AUTH_METHOD` if it is the account's only way in |
+
+`PasskeySummary = { id, label, createdAt, lastUsedAt, backedUp }` (no key material).
+
+- Challenges: identity D1 `identity_webauthn_challenges` (NOT KV — the public login/options
+  route would otherwise let anyone burn the 1,000/day KV write quota sessions rely on),
+  300 s TTL, redeemed atomically with `DELETE ... RETURNING` (single-use), bound to the
+  ceremony kind and — for registration — to the session's userId.
+- Verification: `@simplewebauthn/server` (origin, rpId, challenge, signature, UV required,
+  counter regression). The assertion's `userHandle` must name the credential's owner.
+- Status codes: login failures are `401 AUTH_PASSKEY_FAILED`; failures inside a valid session
+  are **never 401** (`400 AUTH_PASSKEY_FAILED`, `403 AUTH_STEP_UP_FAILED`) because the SPA
+  treats 401 as "session dead" and logs out.
+- Storage: identity-roster `identity_webauthn_credentials` via internal
+  `/internal/webauthn/*` (identity migration `0005_webauthn_credentials` /
+  `infra/d1/migrations/identity/0013_webauthn_credentials.sql`).
+- Audit: `auth.passkey.registered|renamed|deleted`, and `auth.session.login` with
+  `details.method = "passkey"` (success + failure with reason).
+
+---
+
 ## 12. Error codes (service-specific)
 
 Open half of the catalog, `<SERVICE>_<REASON>` (`services/auth-service/src/errors.ts`).
@@ -428,7 +479,7 @@ auth-service is KV-only (no D1). One namespace (`AUTH_KV`) holds three key famil
 
 | Key | Value | TTL |
 |---|---|---|
-| `session:<token>` | stored session record (`userId`, `client`, `issuedAt`, `accessExpiresAt`, `absoluteExpiresAt`) | absolute TTL (web 30d / mobile 180d) |
+| `session:<token>` | stored session record (`userId`, `client`, `issuedAt`, `accessExpiresAt`, `absoluteExpiresAt`, `lastSeenAt?`) | **effective** TTL = min(absolute, idle) (web 30d / mobile 180d), floored at the 60 s KV minimum |
 | `oauth_state:<state>` | `{ codeVerifier, redirectUri }` (single-use, deleted at callback) | `STATE_TTL_SEC` (default 600 s) |
 | `revoked_user:<userId>` | `"1"` marker | 180 days (longest absolute) |
 

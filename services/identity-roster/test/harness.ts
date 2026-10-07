@@ -6,6 +6,7 @@ import type { auditLog } from "@dub/types";
 import { errors } from "@dub/errors";
 import { createApp } from "../src/app";
 import { MemIdentityRepo } from "../src/repo/mem-repo";
+import { MemWebauthnRepo } from "../src/repo/webauthn";
 import { seedReferenceData } from "../src/seed";
 import type { AuditSink, Deps, RequestCtx, SessionRevoker } from "../src/deps";
 import type { UserRow } from "../src/repo/types";
@@ -80,7 +81,7 @@ export async function makeHarness(): Promise<Harness> {
   await repo.createAssignment({ id: newId("ra"), userId: adminId, roleId: adminRole.id, orgId: ORG_ID, resourceType: null, resourceId: null, grantedBy: adminId, grantedAt: now() });
   await repo.createAssignment({ id: newId("ra"), userId: memberId, roleId: memberRole.id, orgId: ORG_ID, resourceType: null, resourceId: null, grantedBy: adminId, grantedAt: now() });
 
-  const deps: Deps = { repo, audit, revoker, now, newId, defaultOrgId: ORG_ID };
+  const deps: Deps = { repo, webauthn: new MemWebauthnRepo(), audit, revoker, now, newId, defaultOrgId: ORG_ID };
   const app = createApp({ deps, defaultOrgId: ORG_ID });
 
   return { app, repo, audit, revoker, deps, adminId, memberId, adminRoleId: adminRole.id, memberRoleId: memberRole.id };
