@@ -4,6 +4,12 @@
 // exponential retry on 5xx/network. Types come from @dub/types; error envelope
 // from @dub/errors. (Design places this in packages/api-client; implemented
 // inside apps/fe2-app-shell to keep this unit's work self-contained — see notes.)
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/browser";
 import type { ErrorResponse } from "@dub/errors";
 import { isErrorResponse } from "@dub/errors";
 import type { gateway, member } from "@dub/types";
@@ -99,6 +105,15 @@ export interface ResourceClient {
   delete<TRes>(path: string): Promise<TRes>;
 }
 
+/** A registered passkey as shown in アカウント設定 (no key material). */
+export interface PasskeySummary {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  backedUp: boolean;
+}
+
 export interface ApiClient {
   request<TRes, TBody = unknown>(input: RequestInput<TBody>): Promise<TRes>;
   /** GET a binary resource as a Blob (attachments/exports). Same session + one-shot 401
@@ -135,6 +150,17 @@ export interface ApiClient {
      *  (member-service getSelfParticipation / updateSelfParticipation). */
     getSelfParticipation(): Promise<SelfParticipation>;
     updateSelfParticipation(input: Partial<SelfParticipation>): Promise<SelfParticipation>;
+    /** Passkeys (WebAuthn). Raw JSON in/out — lib/passkey.tsx drives the browser half. */
+    passkeys: {
+      loginOptions(): Promise<PublicKeyCredentialRequestOptionsJSON>;
+      loginVerify(response: AuthenticationResponseJSON): Promise<void>;
+      /** Step-up: the current password is required to start a registration. */
+      registerOptions(password: string): Promise<PublicKeyCredentialCreationOptionsJSON>;
+      registerVerify(response: RegistrationResponseJSON, label: string): Promise<{ passkey: PasskeySummary }>;
+      list(): Promise<{ items: PasskeySummary[] }>;
+      rename(id: string, label: string): Promise<void>;
+      remove(id: string): Promise<void>;
+    };
   };
   bff: { home(): Promise<BffHomeResponse> };
   events: ResourceClient;
@@ -379,6 +405,28 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           path: "/api/v1/me/participation",
           body: input,
         }),
+      passkeys: {
+        loginOptions: () =>
+          request<PublicKeyCredentialRequestOptionsJSON, Record<string, never>>({ method: "POST", path: "/api/v1/auth/passkey/login/options", body: {} }),
+        loginVerify: (response: AuthenticationResponseJSON) =>
+          request<void, { response: AuthenticationResponseJSON }>({ method: "POST", path: "/api/v1/auth/passkey/login/verify", body: { response } }),
+        registerOptions: (password: string) =>
+          request<PublicKeyCredentialCreationOptionsJSON, { password: string }>({
+            method: "POST",
+            path: "/api/v1/auth/passkey/register/options",
+            body: { password },
+          }),
+        registerVerify: (response: RegistrationResponseJSON, label: string) =>
+          request<{ passkey: PasskeySummary }, { response: RegistrationResponseJSON; label: string }>({
+            method: "POST",
+            path: "/api/v1/auth/passkey/register/verify",
+            body: { response, label },
+          }),
+        list: () => request<{ items: PasskeySummary[] }>({ method: "GET", path: "/api/v1/auth/passkeys" }),
+        rename: (id: string, label: string) =>
+          request<void, { label: string }>({ method: "PATCH", path: `/api/v1/auth/passkeys/${encodeURIComponent(id)}`, body: { label } }),
+        remove: (id: string) => request<void>({ method: "DELETE", path: `/api/v1/auth/passkeys/${encodeURIComponent(id)}` }),
+      },
     },
     bff: {
       home: () => request<BffHomeResponse>({ method: "GET", path: "/api/v1/bff/home" }),
@@ -404,6 +452,11 @@ const JA_BY_CODE: Record<string, string> = {
   NETWORK_ERROR: "ネットワークに接続できませんでした。",
   INTERNAL: "サーバーでエラーが発生しました。",
   CLIENT_CONTRACT_MISMATCH: "予期しない応答を受け取りました。",
+  AUTH_PASSKEY_FAILED: "パスキーで確認できませんでした。もう一度お試しいただくか、パスワードでログインしてください。",
+  AUTH_PASSKEY_DISABLED: "この環境ではパスキーを利用できません。パスワードでログインしてください。",
+  AUTH_PASSKEY_DUPLICATE: "このパスキーはすでに登録されています。",
+  AUTH_STEP_UP_FAILED: "パスワードが正しくありません。",
+  AUTH_LAST_AUTH_METHOD: "最後のログイン手段は削除できません。",
 };
 
 export function toDisplayableError(e: ApiError): DisplayableError {

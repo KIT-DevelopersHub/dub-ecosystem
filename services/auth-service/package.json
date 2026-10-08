@@ -17,6 +17,7 @@
     "@dub/http": "workspace:*",
     "@dub/observability": "workspace:*",
     "@dub/types": "workspace:*",
+    "@simplewebauthn/server": "13.3.3",
     "hono": "^4.6.14"
   },
   "devDependencies": {

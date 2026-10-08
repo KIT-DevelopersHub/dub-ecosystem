@@ -414,6 +414,43 @@ Errors:
 
 ---
 
+## 11a. Passkeys (WebAuthn)
+
+Public via the gateway `auth` segment (cookie forwarded). Disabled per environment unless
+`WEBAUTHN_RP_ID` + `WEBAUTHN_ORIGINS` are set (otherwise every route answers
+`404 AUTH_PASSKEY_DISABLED` and the SPA falls back to password). rpId / origin are the fe2 SPA
+host of that environment (prod `dub-fe2-app-shell.developershub-site.workers.dev`, staging
+rewritten by `infra/deploy/gen-staging-configs.sh`) so a staging passkey never works on prod.
+
+| Route | Auth | Body | Success |
+|---|---|---|---|
+| `POST /auth/passkey/register/options` | session + **step-up password** | `{ password }` | `PublicKeyCredentialCreationOptionsJSON` |
+| `POST /auth/passkey/register/verify` | session | `{ response, label? }` | `{ passkey: PasskeySummary }` |
+| `POST /auth/passkey/login/options` | public | `{}` | `PublicKeyCredentialRequestOptionsJSON` (usernameless) |
+| `POST /auth/passkey/login/verify` | public | `{ response }` | `{ token, session }` + `Set-Cookie` (same session as password login) |
+| `GET /auth/passkeys` | session | — | `{ items: PasskeySummary[] }` |
+| `PATCH /auth/passkeys/:id` | session | `{ label }` | `{ ok: true }` |
+| `DELETE /auth/passkeys/:id` | session | — | `204`; `409 AUTH_LAST_AUTH_METHOD` if it is the account's only way in |
+
+`PasskeySummary = { id, label, createdAt, lastUsedAt, backedUp }` (no key material).
+
+- Challenges: identity D1 `identity_webauthn_challenges` (NOT KV — the public login/options
+  route would otherwise let anyone burn the 1,000/day KV write quota sessions rely on),
+  300 s TTL, redeemed atomically with `DELETE ... RETURNING` (single-use), bound to the
+  ceremony kind and — for registration — to the session's userId.
+- Verification: `@simplewebauthn/server` (origin, rpId, challenge, signature, UV required,
+  counter regression). The assertion's `userHandle` must name the credential's owner.
+- Status codes: login failures are `401 AUTH_PASSKEY_FAILED`; failures inside a valid session
+  are **never 401** (`400 AUTH_PASSKEY_FAILED`, `403 AUTH_STEP_UP_FAILED`) because the SPA
+  treats 401 as "session dead" and logs out.
+- Storage: identity-roster `identity_webauthn_credentials` via internal
+  `/internal/webauthn/*` (identity migration `0005_webauthn_credentials` /
+  `infra/d1/migrations/identity/0013_webauthn_credentials.sql`).
+- Audit: `auth.passkey.registered|renamed|deleted`, and `auth.session.login` with
+  `details.method = "passkey"` (success + failure with reason).
+
+---
+
 ## 12. Error codes (service-specific)
 
 Open half of the catalog, `<SERVICE>_<REASON>` (`services/auth-service/src/errors.ts`).

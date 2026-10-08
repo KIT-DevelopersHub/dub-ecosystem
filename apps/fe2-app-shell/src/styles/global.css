@@ -313,6 +313,74 @@ svg {
   font-size: var(--dub-font-size-xs);
   color: var(--dub-color-text-muted);
 }
+/* パスキー管理 (PasskeysDialog) */
+.fe2-passkeys {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+.fe2-passkeys-intro,
+.fe2-passkeys-empty {
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+.fe2-passkeys-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.fe2-passkeys-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+}
+.fe2-passkeys-meta {
+  min-width: 0;
+}
+.fe2-passkeys-label {
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.fe2-passkeys-sub {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.fe2-passkeys-actions,
+.fe2-passkeys-add-actions {
+  display: flex;
+  gap: var(--dub-space-2);
+  flex-shrink: 0;
+}
+.fe2-passkeys-add-actions {
+  justify-content: flex-end;
+}
+.fe2-passkeys-danger {
+  color: var(--dub-color-danger-600);
+}
+.fe2-passkeys-rename {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--dub-space-2);
+  width: 100%;
+}
+.fe2-passkeys-add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding-top: var(--dub-space-3);
+  border-top: 1px solid var(--dub-color-border-default);
+}
 .fe2-account-error {
   margin: 0;
   font-size: var(--dub-font-size-sm);
@@ -563,6 +631,12 @@ svg {
 .fe2-login-block {
   width: 100%;
   justify-content: center;
+}
+.fe2-login-hint {
+  margin: 0;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  text-align: center;
 }
 .fe2-login-divider {
   display: flex;
