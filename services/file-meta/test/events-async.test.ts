@@ -1,8 +1,10 @@
 // Free-tier consumer conversion: the retired EVT_FILE_META Queue consumer is exposed as
 // POST /internal/events-async, running the SAME handler map (createEnvelopeConsumer) with
 // D1 idempotency. Producers of drive.* / *.archived drain their deferred `evt.file-meta`
-// outbox rows here over a service binding. Guarded by x-dub-internal (gateway 404s it for
-// external clients). A handler failure returns non-2xx so the caller's row stays pending.
+// outbox rows here over a service binding. Guarded by POLICY_TABLE's `INTERNAL` rule
+// (x-dub-internal marker), which replaced the inline header check — so the refusal is now the
+// gate's 403 instead of a 404, still non-2xx. A handler failure returns non-2xx too, so the
+// caller's row stays pending either way.
 import { describe, it, expect } from "vitest";
 import { createEvent, type DubEventEnvelope, type DubEventName, type DubEventPayloadMap } from "@dub/events";
 import { createApp } from "../src/app";
@@ -12,7 +14,7 @@ import {
   createMemoryFileRepo,
   createMemoryBlobStore,
   createMemoryIdempotency,
-  createStubAuth,
+  createStubGranter,
   createSpyEmit,
   createSpyAudit,
 } from "./mem";
@@ -31,7 +33,7 @@ function build(repoOverride?: FileRepo) {
     blobs: createMemoryBlobStore(),
     emit: emitS.emit,
     audit: createSpyAudit().audit,
-    auth: createStubAuth({}),
+    authz: createStubGranter({}),
     drive,
     consume: createEnvelopeConsumer({ repo, emit: emitS.emit, idempotency: createMemoryIdempotency(), drive }),
   });
@@ -45,10 +47,13 @@ function post(app: ReturnType<typeof build>["app"], body: unknown, internal = tr
 }
 
 describe("POST /internal/events-async (free-tier consumer landing)", () => {
-  it("404s without the x-dub-internal marker (never exposed to external clients)", async () => {
+  it("403s without the x-dub-internal marker (never exposed to external clients)", async () => {
     const { app } = build();
     const res = await post(app, ev("drive.file.created", { driveFileId: "gd-guard" }), false);
-    expect(res.status).toBe(404);
+    // The gate's INTERNAL refusal. Was a hand-rolled 404 before the policy-table migration;
+    // both are non-2xx, so a producer's outbox row keeps retrying as designed.
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe("internal_only");
   });
 
   it("processes drive.file.created (202) — same handler as the Queue consumer", async () => {

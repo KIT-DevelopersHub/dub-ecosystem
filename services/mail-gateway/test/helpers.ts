@@ -85,6 +85,10 @@ export function inboundDeps(h: Harness, over: Partial<InboundDeps> = {}): Inboun
     orgId: "org_devhub",
     ctx: ctx("req_in"),
     identity: fakeIdentityFetcher(true, { usr_info: { email: "info@developershub.jp" } }),
+    // Mirror the production owner-address policy (buildInboundDeps): archive@ can never
+    // own a message, info@ only as a last resort. Tests exercise the real boundary.
+    archiveAddress: "archive@developershub.jp",
+    sharedAddress: "info@developershub.jp",
     ...over,
   };
 }

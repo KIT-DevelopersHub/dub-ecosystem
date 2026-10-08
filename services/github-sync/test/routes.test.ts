@@ -1,35 +1,15 @@
+// Authn/authz here is @dub/policy-gate over src/policy-table.ts — there is no auth
+// middleware left to fake, only the PermissionGranter port (see ./helpers).
 import { describe, it, expect } from "vitest";
-import { DubError } from "@dub/errors";
-import type { AuthClient } from "@dub/auth-client";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { GithubRepoConfig } from "../src/domain/types";
 import { createApp } from "../src/app";
-import { makeHarness, issue, fixedNow, type Harness } from "./helpers";
+import { makeHarness, issue, fixedNow, allowAll, denyAll, type Harness } from "./helpers";
 
-function fakeAuth(): AuthClient {
-  return {
-    requireAuth: () => async (c: any, next: any) => {
-      const uid = c.req.header("x-dub-user-id");
-      if (!uid) throw new DubError("AUTH_INVALID_TOKEN", "no user", { status: 401 });
-      c.set("authn", { userId: uid, source: "trusted_header", session: null });
-      await next();
-    },
-    requirePermission: () => async (c: any, next: any) => {
-      if (c.req.header("x-deny")) throw new DubError("FORBIDDEN", "denied", { status: 403 });
-      await next();
-    },
-    verify: async () => {
-      throw new Error("unused");
-    },
-    checkPermissions: async () => ({ decisions: [] }),
-    hasPermission: async () => true,
-    invalidateAuthzCache: () => {},
-  } as unknown as AuthClient;
-}
-
-function app(h: Harness) {
+function app(h: Harness, authz: PermissionGranter = allowAll) {
   const webhookRaw = { get: async () => null } as unknown as import("@cloudflare/workers-types").R2Bucket;
   return createApp({
-    auth: fakeAuth(),
+    authz,
     service: h.service,
     publisher: h.publisher,
     now: fixedNow,
@@ -59,20 +39,24 @@ describe("HTTP routes", () => {
     expect(res.status).toBe(400);
   });
 
+  // The gate is mounted before dubContext, so authn now answers first: a request with no
+  // x-dub-user-id is 401 UNAUTHENTICATED (policyGate) rather than the old AuthClient's
+  // AUTH_INVALID_TOKEN. Same status, the code is now the common wire code.
   it("401 when the trusted user header is absent", async () => {
     const h = makeHarness();
     const res = await app(h).fetch(new Request("https://svc/github/links", { headers: { "x-dub-request-id": "r" } }));
     expect(res.status).toBe(401);
     const body = (await res.json()) as any;
-    expect(body.error.code).toBe("AUTH_INVALID_TOKEN");
+    expect(body.error.code).toBe("UNAUTHENTICATED");
   });
 
   it("403 when permission is denied", async () => {
     const h = makeHarness();
-    const res = await app(h).fetch(new Request("https://svc/github/links", { headers: headers({ "x-deny": "1" }) }));
+    const res = await app(h, denyAll).fetch(new Request("https://svc/github/links", { headers: headers() }));
     expect(res.status).toBe(403);
     const body = (await res.json()) as any;
     expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.details).toMatchObject({ reason: "missing_permission", missing: ["github:read"] });
   });
 
   it("GET /github/links returns a paginated envelope", async () => {

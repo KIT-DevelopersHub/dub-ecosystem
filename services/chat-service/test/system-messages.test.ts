@@ -4,11 +4,16 @@ import { makeDeps, call, createApp } from "./harness";
 const topic = { type: "topic", visibility: "public", name: "General" } as const;
 
 describe("POST /internal/system-messages", () => {
-  it("without the x-dub-internal marker -> 404 (hidden)", async () => {
+  // The route is INTERNAL in POLICY_TABLE, so the refusal is the gate's 403 `internal_only`
+  // and not the removed hand-rolled guard's 404. Hiding the route's existence from the open
+  // internet is api-gateway's internalOnlyPaths (which still answers 404 at the edge); here
+  // the only caller is a Service Binding, which always carries the marker.
+  it("without the x-dub-internal marker -> 403 internal_only", async () => {
     const app = createApp(makeDeps());
     const c = await call(app, "POST", "/chat/channels", { body: topic });
     const res = await call(app, "POST", "/internal/system-messages", { body: { channelId: c.json.id, body: "sys" } });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(res.json.error.details.reason).toBe("internal_only");
   });
 
   it("posts a system message to a channel (kind=system, authorId=null) without emitting chat.message.created", async () => {

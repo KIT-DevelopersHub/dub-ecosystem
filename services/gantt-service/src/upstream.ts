@@ -80,6 +80,7 @@ export function createHttpUpstream(env: Env): UpstreamPort {
       ctx: RequestContext,
       taskId: common.TaskId,
       dates: { startsAt: common.ISODateTime | null; endsAt: common.ISODateTime | null },
+      assertWritable: (current: task.Task) => Promise<void>,
     ): Promise<task.Task> {
       // Read-modify-write: the task carries the optimistic version, so read it first
       // (404 propagates as-is) then PATCH with the fresh version. gantt maps the bar
@@ -97,6 +98,11 @@ export function createHttpUpstream(env: Env): UpstreamPort {
       const path = `/tasks/${encodeURIComponent(taskId)}`;
       for (let attempt = 0; ; attempt++) {
         const current = await taskSvc.get<task.Task>(ctx, path);
+        // INSTANCE-LAYER authorization, BEFORE the write: the caller holds `task:write` (the
+        // policy table said so) but the event this task belongs to is only knowable from the
+        // row we just read. A throw here means nothing was mutated and nothing was fanned out
+        // over realtime (inventory a-4).
+        await assertWritable(current);
         const patch: task.UpdateTaskRequest = {
           version: current.version,
           startAt: dates.startsAt,

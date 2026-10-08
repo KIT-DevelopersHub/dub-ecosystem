@@ -3,11 +3,16 @@ import { createApp, makeDeps, fakeAuthz, call } from "./harness";
 import type { identity } from "@dub/types";
 
 describe("member-service HTTP surface", () => {
-  it("health is open", async () => {
+  // /health is INTERNAL in POLICY_TABLE, not PUBLIC: its only caller is app-health-monitor,
+  // which probes over the SVC_MEMBER binding with x-dub-internal attached.
+  it("health answers a service-to-service probe, and 403s without the marker", async () => {
     const app = createApp(makeDeps());
-    const res = await call(app, "GET", "/health", { userId: null });
-    expect(res.status).toBe(200);
-    expect(res.json.service).toBe("member-service");
+    const probe = await call(app, "GET", "/health", { userId: null, internal: true });
+    expect(probe.status).toBe(200);
+    expect(probe.json.service).toBe("member-service");
+    const outside = await call(app, "GET", "/health", { userId: null });
+    expect(outside.status).toBe(403);
+    expect(outside.json.error.details.reason).toBe("internal_only");
   });
 
   it("requires auth on /members/*", async () => {
@@ -16,14 +21,16 @@ describe("member-service HTTP surface", () => {
     expect(res.status).toBe(401);
   });
 
-  it("read requires identity:read", async () => {
+  it("read requires 運営メンバー=閲覧", async () => {
     const app = createApp(makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>()) }));
     const res = await call(app, "GET", "/members/overview");
     expect(res.status).toBe(403);
   });
 
-  it("write requires identity:admin", async () => {
-    const app = createApp(makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read"])) }));
+  it("write requires 運営メンバー=編集 (閲覧 + the domain read key is not enough)", async () => {
+    const app = createApp(
+      makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read", "app:members:view"])) }),
+    );
     const res = await call(app, "POST", "/members/teams", { body: { name: "会場" } });
     expect(res.status).toBe(403);
   });

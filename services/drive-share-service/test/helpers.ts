@@ -1,21 +1,30 @@
 // Shared in-memory fakes for drive-share-service unit tests. No network, no real bindings.
-import type { PermissionChecker, DrivePermission } from "../src/permissions";
+import type { PermissionGranter } from "@dub/policy-gate";
+import type { identity } from "@dub/types";
 import type { RoleMembership } from "../src/role-membership";
 import { createRoleGrantsService, type RoleGrantsService } from "../src/role-grants-service";
 import { createInMemoryRoleGrantStore, type RoleGrantStore } from "../src/role-grants-store";
 import type { DriveShareClient } from "../src/drive-client";
 import { common } from "@dub/types";
 
-/** fake PermissionChecker driven by a rule(userId, perm) => allowed. */
-export function memAuthz(rule: (userId: string, perm: DrivePermission) => boolean): PermissionChecker {
-  return {
-    async check(userId, _orgId, permission) {
-      return rule(userId, permission);
-    },
-  };
+/** Fake PermissionGranter driven by a rule(userId, key) => holds. */
+export function memAuthz(rule: (userId: string, perm: identity.PermissionKey) => boolean): PermissionGranter {
+  return async (userId, _orgId, keys) => keys.filter((k) => rule(userId, k));
+}
+
+/** Granter for a caller holding EXACTLY `keys` (anything else is denied). */
+export function memAuthzHolding(...keys: identity.PermissionKey[]): PermissionGranter {
+  const held = new Set<string>(keys);
+  return memAuthz((_u, perm) => held.has(perm));
 }
 
 export const allowAll = memAuthz(() => true);
+
+/** Drive共有 at 閲覧 — may read, must not write. */
+export const DRIVE_READER = memAuthzHolding("app:driveshare:view", "drive:read");
+/** Drive共有 at 編集 — full surface. */
+export const DRIVE_EDITOR = memAuthzHolding("app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write");
+
 export const AUTHED = { "x-dub-user-id": "usr_1" };
 
 /** Fake role membership: static role->emails and role->name maps. Emails are lowercased

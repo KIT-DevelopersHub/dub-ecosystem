@@ -3,35 +3,19 @@
 // plain member and a chat:moderate holder can be distinguished per request — the
 // InMemory harness authz grants a fixed set to everyone, which cannot express tiers.
 import { describe, it, expect } from "vitest";
-import type { MiddlewareHandler } from "hono";
-import { DubError, CommonErrorCodes } from "@dub/errors";
+import type { PermissionGranter } from "@dub/policy-gate";
 import { makeDeps, call, createApp } from "./harness";
-import type { Authz } from "../src/types";
 
 const publicTopic = { type: "topic", visibility: "public", name: "General" } as const;
 const POLICY_PATH = "/chat/settings/deletion-policy";
 
-// chat:moderate is granted only to `moderators`; every other permission is open.
-function tieredAuthz(moderators: Set<string>): Authz {
-  return {
-    requireAuth(): MiddlewareHandler {
-      return async (c, next) => {
-        if (!c.req.header("x-dub-user-id")) throw new DubError("AUTH_INVALID_TOKEN", "x-dub-user-id absent", { status: 401 });
-        await next();
-      };
-    },
-    requirePermission(permission): MiddlewareHandler {
-      return async (c, next) => {
-        const uid = c.req.header("x-dub-user-id") ?? "";
-        const ok = permission === "chat:moderate" ? moderators.has(uid) : true;
-        if (!ok) throw new DubError(CommonErrorCodes.FORBIDDEN, `permission denied: ${permission}`, { status: 403 });
-        await next();
-      };
-    },
-    async hasPermission(userId, _orgId, query) {
-      return query.permission === "chat:moderate" ? moderators.has(userId) : true;
-    },
-  };
+// chat:moderate is granted only to `moderators`; every other permission is open. One port
+// now serves both consumers — policyGate's `chat:moderate` rule on PATCH and ChatService's
+// moderator-tier lookup in isChannelAdmin — so a tier cannot be true for one and false for
+// the other (it could before, when the two were separate methods on the Authz fake).
+function tieredAuthz(moderators: Set<string>): PermissionGranter {
+  return async (userId, _orgId, keys) =>
+    keys.filter((k) => (k === "chat:moderate" ? moderators.has(userId) : true));
 }
 
 describe("deletion policy: read + write", () => {

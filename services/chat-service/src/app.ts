@@ -5,9 +5,23 @@
 // and the internal service-binding surface (/internal/system-messages) stay at bare paths
 // (addressed directly by callers, NOT through the gateway). WS is NOT served here
 // (DO-direct, gateway-bypassing); clients use the doUrl from GET /chat/channels/:id/ws-ticket.
+//
+// AUTHZ — the PERMISSION-KEY half lives in src/policy-table.ts and nowhere else: `policyGate`
+// is mounted once below and every route in this file is listed there (a route that is not is
+// denied, and test/policy-table.test.ts fails). It replaced the per-group
+// `authz.requireAuth()` mounts, the two `authz.requirePermission(...)` route middlewares, and
+// the hand-rolled "x-dub-internal or 404" guard on /internal/system-messages.
+//
+// What did NOT move, and must not: the CHANNEL-scoped half. `loadReadable` (private +
+// non-member -> 404), `ensureCanWrite` (public auto-join / private 403), `isChannelAdmin`,
+// author-only edit and author-or-moderator delete all stay in ChatService, because they need
+// request data (which channel? is the caller a member of it?) that the gate deliberately
+// cannot see. Dropping them would turn `app:chat:view` — a key an ordinary member holds —
+// into read access to every private channel in the org. See src/policy-table.ts's header.
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { dubContext, DUB_HEADERS, INTERNAL_MARKER, type RequestContext } from "@dub/http";
+import { dubContext, DUB_HEADERS, type RequestContext } from "@dub/http";
+import { policyGate, type PolicyGateVars } from "@dub/policy-gate";
 import { dubErrorHandler, errors } from "@dub/errors";
 import type {
   AppDeps,
@@ -22,6 +36,7 @@ import type {
   UpdateDeletionPolicyRequest,
 } from "./types";
 import { ChatService, type ReqCtx } from "./service";
+import { POLICY_TABLE } from "./policy-table";
 import { validateUnfurlUrl, UNFURL_CACHE_TTL_SECONDS, type UnfurlResponse } from "./unfurl";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,6 +44,11 @@ function getDubCtx(c: Context): RequestContext | undefined {
   return (c as any).get("dubCtx") as RequestContext | undefined;
 }
 
+// Request plumbing, NOT an authorization check: the correlation id plus the acting user.
+// `policyGate` has already established the actor on every keyed route (and published it as
+// `userId`) from the same trusted `x-dub-user-id` header read below, so the 401 here is
+// belt-and-braces — it only really fires on the INTERNAL route, where a calling service may
+// legitimately have propagated no user at all.
 function reqCtx(c: Context): ReqCtx {
   const ctx = getDubCtx(c);
   const requestId = ctx?.requestId ?? c.req.header(DUB_HEADERS.requestId) ?? "";
@@ -52,19 +72,32 @@ async function readJson<T>(c: Context): Promise<T> {
   }
 }
 
-export function createApp(deps: AppDeps): Hono {
+type Vars = PolicyGateVars;
+
+export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const svc = new ChatService(deps);
-  const app = new Hono();
+  const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "chat-service" }));
+  // Pure x-dub-* header parsing — it makes no authorization decision — and it stays FIRST so
+  // the gate's identity /authz/check subrequest carries this request's correlation id.
   app.use("*", dubContext({ allowGenerate: true }));
+
+  // ---- THE authorization layer: mounted on every route, so it runs before every handler,
+  // including the ones registered below it. A route absent from POLICY_TABLE is denied (403),
+  // never served. Note the mount is `"*"` (wildcard) rather than a set of exact-path `use`
+  // mounts like the requireAuth() group mounts it replaced: Hono records `use("/chat/search",
+  // mw)` as `ALL /chat/search`, indistinguishable from a real endpoint, so an exact-path
+  // `use` would show up in the coverage test as a route with no rule. Per-route middleware or
+  // a wildcard mount — never an exact-path `use` — in a gated service. ----
+  app.use("*", policyGate({ service: "chat-service", table: POLICY_TABLE, granted: deps.authz }));
 
   app.get("/health", (c) => c.json({ status: "ok", service: "chat-service" }));
 
-  // ---- internal (gateway internalOnlyPaths -> 404 externally; second defence
-  // here: the x-dub-internal marker must be present, else 404 to hide it). ----
+  // ---- internal: INTERNAL in POLICY_TABLE (the x-dub-internal marker, which api-gateway
+  // strips off every external request, so it cannot be forged). The gateway's own
+  // internalOnlyPaths still answers 404 at the edge; the gate's refusal here is 403. ----
   app.post("/internal/system-messages", async (c) => {
-    if (c.req.header(DUB_HEADERS.internal) !== INTERNAL_MARKER) throw errors.notFound("route");
     const ctx = getDubCtx(c);
     const requestId = ctx?.requestId ?? c.req.header(DUB_HEADERS.requestId) ?? "";
     const body = await readJson<PostSystemMessageRequest>(c);
@@ -72,22 +105,8 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(created, 201);
   });
 
-  const { authz } = deps;
-
-  // Auth on all user-facing groups (internal + health excluded). These live under
-  // /chat because the gateway preserves the segment (see file header).
-  app.use("/chat/channels", authz.requireAuth());
-  app.use("/chat/channels/*", authz.requireAuth());
-  app.use("/chat/messages", authz.requireAuth());
-  app.use("/chat/messages/*", authz.requireAuth());
-  app.use("/chat/unread", authz.requireAuth());
-  app.use("/chat/search", authz.requireAuth());
-  app.use("/chat/settings", authz.requireAuth());
-  app.use("/chat/settings/*", authz.requireAuth());
-  app.use("/chat/unfurl", authz.requireAuth());
-
   // ---- link preview (OGP unfurl) ----
-  // Auth-gated (never an anonymous fetch proxy). The URL is validated fail-close
+  // Key-gated by POLICY_TABLE (never an anonymous fetch proxy). The URL is validated fail-close
   // (http(s), public hosts only) BEFORE any outbound request; the resolver itself
   // re-validates every redirect hop. Results are cached 1 day (Cache API, keyed by
   // the normalized URL) so a channel re-rendering the same link does not refetch.
@@ -124,7 +143,7 @@ export function createApp(deps: AppDeps): Hono {
     );
   });
 
-  app.post("/chat/channels", authz.requirePermission("chat:create"), async (c) => {
+  app.post("/chat/channels", async (c) => {
     const body = await readJson<CreateChannelRequest>(c);
     return c.json(await svc.createChannel(reqCtx(c), body), 201);
   });
@@ -228,12 +247,12 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // ---- settings: message deletion policy (RBAC-configurable delete behaviour) ----
-  // Reading is open to any authenticated member (the FE needs it to render the policy
-  // section); writing requires chat:moderate (admin/maintainer) — enforced fail-close.
+  // Reading needs チャット=閲覧 (the FE renders the policy section from it); writing needs
+  // 編集 + chat:moderate (admin/maintainer). Both rules are in POLICY_TABLE, fail-close.
   app.get("/chat/settings/deletion-policy", async (c) => {
     return c.json(await svc.getDeletionPolicy(reqCtx(c)));
   });
-  app.patch("/chat/settings/deletion-policy", authz.requirePermission("chat:moderate"), async (c) => {
+  app.patch("/chat/settings/deletion-policy", async (c) => {
     const body = await readJson<UpdateDeletionPolicyRequest>(c);
     return c.json(await svc.updateDeletionPolicy(reqCtx(c), body));
   });

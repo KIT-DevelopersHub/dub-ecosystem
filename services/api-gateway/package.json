@@ -15,6 +15,7 @@
     "@dub/events": "workspace:*",
     "@dub/http": "workspace:*",
     "@dub/observability": "workspace:*",
+    "@dub/policy-gate": "workspace:*",
     "@dub/types": "workspace:*"
   },
   "peerDependencies": {

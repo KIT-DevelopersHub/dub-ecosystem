@@ -13,7 +13,7 @@ import type { GatewayVariables } from "../context";
 import type { member } from "@dub/types";
 import type { RequestContext } from "@dub/http";
 import { createServices } from "../services";
-import { authenticate } from "../auth";
+import { authedActor } from "../policy";
 import { getRequestId } from "../context";
 
 type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
@@ -22,7 +22,8 @@ type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
 export async function getSelfParticipationHandler(c: Ctx): Promise<Response> {
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
-  const auth = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  // AUTHENTICATED in POLICY_TABLE — member-service resolves the 届 from this session id.
+  const auth = authedActor(c);
   const ctx: RequestContext = { requestId, userId: auth.userId, caller: "api-gateway" };
   const body = await svc.member.get<member.SelfParticipation>(ctx, "/members/internal/me/participation");
   return c.json(body);
@@ -32,7 +33,8 @@ export async function getSelfParticipationHandler(c: Ctx): Promise<Response> {
 export async function updateSelfParticipationHandler(c: Ctx): Promise<Response> {
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
-  const auth = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  // AUTHENTICATED in POLICY_TABLE — the patch can only ever land on the caller's own 届.
+  const auth = authedActor(c);
   const ctx: RequestContext = { requestId, userId: auth.userId, caller: "api-gateway" };
   const input = await c.req
     .json<member.SelfParticipationUpdateRequest>()

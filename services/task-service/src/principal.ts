@@ -9,13 +9,32 @@ export type Principal =
   | { kind: "user"; userId: string }
   | { kind: "service"; caller: string };
 
-export function resolvePrincipal(c: Context, serviceCallers: ReadonlySet<string>): Principal {
+/**
+ * The SERVICE principal of this request, or null when the caller is not one.
+ *
+ * Three conditions, all required: the unforgeable `x-dub-internal` marker (api-gateway strips
+ * every inbound `x-dub-*` and never re-adds this one), an ALLOW-LISTED `x-dub-caller`
+ * (`SERVICE_CALLERS`, default `github-sync`), and no user id — a call that propagated a user
+ * is that user's request, not the service's.
+ *
+ * Split out of `resolvePrincipal` so `taskPolicyGate` (app.ts) can ask the question without
+ * the 401 throw: the gate must be able to run on a PUBLIC/INTERNAL route too.
+ */
+export function resolveServicePrincipal(
+  c: Context,
+  serviceCallers: ReadonlySet<string>,
+): Principal | null {
   const userId = c.req.header(HDR_USER_ID);
   const internal = c.req.header(HDR_INTERNAL) === INTERNAL_HEADER_VALUE;
   const caller = c.req.header(HDR_CALLER);
-  if (internal && caller && serviceCallers.has(caller) && !userId) {
-    return { kind: "service", caller };
-  }
+  if (internal && caller && serviceCallers.has(caller) && !userId) return { kind: "service", caller };
+  return null;
+}
+
+export function resolvePrincipal(c: Context, serviceCallers: ReadonlySet<string>): Principal {
+  const service = resolveServicePrincipal(c, serviceCallers);
+  if (service) return service;
+  const userId = c.req.header(HDR_USER_ID);
   if (userId) return { kind: "user", userId };
   throw new DubError("AUTH_INVALID_TOKEN", "x-dub-user-id absent (no trusted principal)", { status: 401 });
 }

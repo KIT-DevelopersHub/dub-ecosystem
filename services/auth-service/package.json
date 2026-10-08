@@ -16,6 +16,7 @@
     "@dub/freeq": "workspace:*",
     "@dub/http": "workspace:*",
     "@dub/observability": "workspace:*",
+    "@dub/policy-gate": "workspace:*",
     "@dub/types": "workspace:*",
     "@simplewebauthn/server": "13.3.3",
     "hono": "^4.6.14"

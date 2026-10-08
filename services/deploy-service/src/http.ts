@@ -1,8 +1,10 @@
-// Hono context typing + small middleware/validation helpers shared by the routes.
-import type { Context, MiddlewareHandler } from "hono";
+// Hono context typing + small validation helpers shared by the routes.
+// Authorization is NOT here any more: it is declared in src/policy-table.ts and enforced by
+// the single policyGate mount in app.ts. The former requireAuth / requirePermission wrappers
+// went away with it — do not reintroduce a per-route check.
+import type { Context } from "hono";
 import type { RequestContext } from "@dub/http";
-import { getUserId } from "@dub/auth-client";
-import type { identity } from "@dub/types";
+import type { PolicyGateVars } from "@dub/policy-gate";
 import type { FieldError } from "@dub/errors";
 import { errors } from "@dub/errors";
 import type { Deps } from "./deps";
@@ -10,7 +12,9 @@ import type { Env } from "./env";
 
 export interface AppEnv {
   Bindings: Env;
-  Variables: {
+  /** `userId` is inherited from PolicyGateVars: the gate publishes the actor it
+   *  authenticated, which is where `reqCtx` now reads it from. */
+  Variables: PolicyGateVars & {
     deps: Deps;
     dubCtx: RequestContext;
   };
@@ -22,33 +26,18 @@ export function getDeps(c: AppContext): Deps {
   return c.get("deps");
 }
 
-/** Request context (correlation id + acting user) for downstream SB/Queue calls. */
+/**
+ * Request context (correlation id + acting user) for downstream SB/Queue calls, and the
+ * `actorId` every audit record is attributed to.
+ *
+ * The actor comes from the gate's `userId` variable. Every route of this service demands
+ * permission keys, so policyGate has always set it by the time a handler runs — the
+ * fallback keeps the type honest rather than guarding a reachable case.
+ */
 export function reqCtx(c: AppContext): RequestContext {
   const ctx = c.get("dubCtx");
-  const userId = safeUserId(c);
+  const userId = c.get("userId");
   return { requestId: ctx.requestId, ...(userId ? { userId } : {}) };
-}
-
-function safeUserId(c: AppContext): string | undefined {
-  try {
-    return getUserId(c as unknown as Context);
-  } catch {
-    return undefined;
-  }
-}
-
-/** requireAuth bound to the per-request auth client (trusted-header mode). */
-export const requireAuth: MiddlewareHandler<AppEnv> = (c, next) =>
-  getDeps(c).auth.requireAuth()(c as unknown as Context, next);
-
-/** requirePermission bound to the per-request auth client. `fresh` forces a
- *  cache-bypassing sync authz check for the dangerous infra:* keys (design §6). */
-export function requirePermission(permission: identity.PermissionKey, fresh = false): MiddlewareHandler<AppEnv> {
-  return (c, next) =>
-    getDeps(c).auth.requirePermission(permission, undefined, fresh ? { fresh: true } : undefined)(
-      c as unknown as Context,
-      next,
-    );
 }
 
 // ---- tiny validators (VALIDATION_FAILED with FieldError[] details) ----

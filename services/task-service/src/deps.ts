@@ -5,13 +5,13 @@ import { createDbClient } from "@dub/db";
 import type { IdempotencyStore } from "@dub/events";
 import { configFromEnv, type AppConfig, type Env } from "./env";
 import { createD1TaskRepo, type TaskRepo } from "./repo";
+import type { PermissionGranter } from "@dub/policy-gate";
 import {
   createServiceBindingEventClient,
   createServiceBindingIdentityClient,
-  createIdentityAuthorizer,
+  createIdentityGranter,
   type EventClient,
   type IdentityClient,
-  type Authorizer,
 } from "./clients";
 import {
   createQueueEventPublisher,
@@ -28,7 +28,8 @@ export interface Deps {
   repo: TaskRepo;
   events: EventPublisher;
   audit: Auditor;
-  authz: Authorizer;
+  /** Which of the requested permission keys the caller holds (identity /authz/check). */
+  authz: PermissionGranter;
   eventClient: EventClient;
   identity: IdentityClient;
   idempotency: IdempotencyStore;
@@ -43,7 +44,7 @@ export function buildDeps(env: Env): Deps {
     repo: createD1TaskRepo(db),
     events: createQueueEventPublisher(buildPublisherEnv(env)),
     audit: createQueueAuditor(buildAuditEnv(env)),
-    authz: createIdentityAuthorizer(env.SVC_IDENTITY, config.orgId),
+    authz: createIdentityGranter(env.SVC_IDENTITY, config.orgId),
     eventClient: createServiceBindingEventClient(env.SVC_EVENT),
     identity: createServiceBindingIdentityClient(env.SVC_IDENTITY),
     idempotency: createD1IdempotencyStore(db),

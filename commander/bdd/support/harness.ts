@@ -50,12 +50,21 @@ async function listen(server: Server): Promise<{ base: string; close: () => Prom
   };
 }
 
+/**
+ * The operator token every scenario runs with unless it names its own. commander-service is
+ * fail-closed: with `COMMANDER_OPERATOR_TOKEN` unset it 503s every protected route (see
+ * services/commander-service/src/protection-table.ts), so "start it without a token" is no
+ * longer a usable harness mode — it would test a misconfigured deploy, not the app.
+ */
+export const BDD_SERVICE_TOKEN = "bdd-operator-token";
+
 /** Mount the real commander-service Hono app on a node http server + in-memory D1. */
 export async function mountService(opts: { token?: string } = {}): Promise<Running> {
   const app = createApp();
-  const env: Env = opts.token
-    ? { DB: makeD1().d1, COMMANDER_OPERATOR_TOKEN: opts.token }
-    : { DB: makeD1().d1 };
+  const env: Env = {
+    DB: makeD1().d1,
+    COMMANDER_OPERATOR_TOKEN: opts.token ?? BDD_SERVICE_TOKEN,
+  };
 
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];

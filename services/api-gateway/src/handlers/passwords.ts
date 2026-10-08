@@ -9,35 +9,22 @@
 //   POST /api/v1/admin/users/:userId/password     set/re-issue   (identity:admin)
 //   GET  /api/v1/admin/users/:userId/password     view           (identity:admin)
 //
-// Nothing here is public: every handler runs entry verify first (401 on missing/invalid
-// session), and the admin pair additionally require the identity:admin permission (403).
+// Nothing here is public, and no handler below says so itself: POLICY_TABLE does. The gate
+// has already authenticated the caller (AUTHENTICATED on the self route) and, for the admin
+// pair, confirmed identity:admin — the inline requireAdmin() that used to live here is gone,
+// so that 403 is now decided in exactly one place.
 import type { Context } from "hono";
 import { errors } from "@dub/errors";
 import type { RequestContext } from "@dub/http";
-import type { auth, identity } from "@dub/types";
+import type { auth } from "@dub/types";
 import type { GatewayEnv } from "../env";
 import type { GatewayVariables } from "../context";
 import { getRequestId } from "../context";
-import { createServices, type GatewayServices } from "../services";
-import { authenticate, extractToken } from "../auth";
+import { createServices } from "../services";
+import { extractToken } from "../auth";
+import { authedActor } from "../policy";
 
 type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
-
-interface PermissionsResponse {
-  permissions: identity.PermissionKey[];
-}
-
-/** Fail-closed identity:admin gate. Fetches the actor's effective permissions from
- *  identity (internal endpoint) and throws 403 unless identity:admin is present. */
-async function requireAdmin(svc: GatewayServices, ctx: RequestContext, actorId: string): Promise<void> {
-  const perms = await svc.identity.get<PermissionsResponse>(
-    ctx,
-    `/internal/users/${encodeURIComponent(actorId)}/permissions`,
-  );
-  if (!perms.permissions.includes("identity:admin")) {
-    throw errors.forbidden("identity:admin required");
-  }
-}
 
 /** POST /api/v1/me/password — the logged-in user changes their OWN password (#5b).
  *  Session required at the edge; the raw session token is forwarded so auth-service
@@ -46,7 +33,7 @@ export async function selfPasswordHandler(c: Ctx): Promise<Response> {
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
 
-  const authed = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  const authed = authedActor(c);
   const token = extractToken(c.req.raw.headers);
   if (!token) throw errors.unauthenticated("missing bearer/cookie token");
 
@@ -69,9 +56,9 @@ export async function adminSetPasswordHandler(c: Ctx): Promise<Response> {
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
 
-  const authed = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  // identity:admin was already enforced by the gate (POLICY_TABLE).
+  const authed = authedActor(c);
   const ctx: RequestContext = { requestId, userId: authed.userId, caller: "api-gateway" };
-  await requireAdmin(svc, ctx, authed.userId);
 
   const targetId = c.req.param("userId") ?? "";
   const body = await c.req.json<auth.AdminSetPasswordRequest>().catch(() => ({}) as auth.AdminSetPasswordRequest);
@@ -89,9 +76,9 @@ export async function adminViewPasswordHandler(c: Ctx): Promise<Response> {
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
 
-  const authed = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  // identity:admin was already enforced by the gate (POLICY_TABLE).
+  const authed = authedActor(c);
   const ctx: RequestContext = { requestId, userId: authed.userId, caller: "api-gateway" };
-  await requireAdmin(svc, ctx, authed.userId);
 
   const targetId = c.req.param("userId") ?? "";
   const res = await svc.authSvc.get<auth.AdminViewPasswordResponse>(

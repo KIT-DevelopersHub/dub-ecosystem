@@ -38,6 +38,7 @@ import { CalendarProvider } from "../features/calendar/CalendarProvider.tsx";
 import { driveShareRoutes, driveShareNav } from "../features/driveshare/index.tsx";
 import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.tsx";
 import { lpRoutes, lpNav } from "../features/lp/index.tsx";
+import { LpProvider } from "../features/lp/LpProvider.tsx";
 import { commanderRoutes, commanderNav } from "../features/commander/index.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
@@ -352,13 +353,14 @@ function adaptDriveShare(api: ApiClient): FeatureModule {
 }
 
 // ── lp (FE2-local feature module) ─────────────────────────────────────────────
-// LP管理: 北陸ITカンファレンス LP のバージョンを一覧・閲覧する管理ツール。mail/usage と同じく
-// シェル内(features/lp)に住み、バックエンド依存がない（静的なバージョンカタログを読むだけ）ので
-// Provider は不要。nav は driveshare の後・admin の前(order 49)。実際の per-app ゲートは
-// withAppAccessGate が app:lp:view を各ルート/タイルに AND する（APP_MANIFEST 由来）。
-function adaptLp(): FeatureModule {
-  const passthrough: ElementWrapper = (node) => createElement(Fragment, null, node);
-  const routes = (lpRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, passthrough));
+// LP管理: 北陸ITカンファレンス LP のバージョン一覧 + 流入ログ(ログ管理)。mail/usage と同じく
+// シェル内(features/lp)に住む。バージョン一覧は静的カタログだが、ログ管理(/lp/visits)は
+// /api/v1/lp/* を読むので driveshare と同様に LpProvider(= 1 つのシェル api-client 由来の
+// LpApi)で全ルートを包む。nav は driveshare の後・admin の前(order 49)。実際の per-app
+// ゲートは withAppAccessGate が app:lp:view を各ルート/タイルに AND する（APP_MANIFEST 由来）。
+function adaptLp(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(LpProvider, api);
+  const routes = (lpRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
   const nav: NavEntry[] = lpNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 49 }));
   return { id: "lp", routes, nav };
 }
@@ -440,7 +442,7 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptMembers(api),
     adaptParticipation(api),
     adaptDriveShare(api),
-    adaptLp(),
+    adaptLp(api),
     adaptAdmin(api),
     adaptCommander(),
   ].map(withNavAppId).map(withAppAccessGate);

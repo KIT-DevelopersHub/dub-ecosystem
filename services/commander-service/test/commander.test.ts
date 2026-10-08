@@ -3,8 +3,13 @@ import { createApp } from "../src/app";
 import type { Env } from "../src/env";
 import { makeD1 } from "./d1";
 
+// Every route requires the operator token (src/protection-table.ts), so these behaviour
+// tests configure one and present it. Authorization itself is covered by
+// test/protection-table.test.ts — here the token is just the ticket through the door.
+const TOKEN = "test-operator-token";
+
 function makeEnv(overrides: Partial<Env> = {}): Env {
-  return { DB: makeD1().d1, ...overrides };
+  return { DB: makeD1().d1, COMMANDER_OPERATOR_TOKEN: TOKEN, ...overrides };
 }
 
 async function call(
@@ -17,7 +22,7 @@ async function call(
 ) {
   const req = new Request(`http://x${path}`, {
     method,
-    headers: { "content-type": "application/json", ...headers },
+    headers: { "content-type": "application/json", "x-commander-token": TOKEN, ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const res = await app.fetch(req, env as never);
@@ -178,21 +183,37 @@ describe("commander-service phase gate", () => {
 });
 
 describe("commander-service operator token", () => {
-  it("blocks POST without the token and allows it with the token", async () => {
+  it("blocks a write without the token and allows it with the token", async () => {
     const app = createApp();
     const env: Env = { DB: makeD1().d1, COMMANDER_OPERATOR_TOKEN: "s3cret" };
 
-    const denied = await call(app, env, "POST", "/features", { title: "F" });
+    const denied = await call(app, env, "POST", "/features", { title: "F" }, {
+      "x-commander-token": "wrong",
+    });
     expect(denied.status).toBe(401);
 
     const ok = await call(app, env, "POST", "/features", { title: "F" }, {
       "x-commander-token": "s3cret",
     });
     expect(ok.status).toBe(201);
+  });
 
-    // reads stay open
-    const list = await call(app, env, "GET", "/features");
-    expect(list.status).toBe(200);
+  it("blocks READS without the token too (reads are no longer open)", async () => {
+    // This assertion used to read "reads stay open" — that WAS the hole (inventory a-1):
+    // all 11 GETs served run prompts, worktree paths, execution logs and AI conversation
+    // bodies to anyone who could reach the port. The whole surface is now one door.
+    const app = createApp();
+    const env: Env = { DB: makeD1().d1, COMMANDER_OPERATOR_TOKEN: "s3cret" };
+
+    const denied = await call(app, env, "GET", "/features", undefined, {
+      "x-commander-token": "wrong",
+    });
+    expect(denied.status).toBe(401);
+
+    const ok = await call(app, env, "GET", "/features", undefined, {
+      "x-commander-token": "s3cret",
+    });
+    expect(ok.status).toBe(200);
   });
 });
 

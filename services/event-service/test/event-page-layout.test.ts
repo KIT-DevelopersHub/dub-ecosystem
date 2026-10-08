@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeDeps, call, createApp } from "./harness";
-import { fakeAuthz } from "./harness";
+import { fakeAuthz, VIEWER } from "./harness";
 import type { EventRow } from "../src/types";
 
 function seedEvent(deps: ReturnType<typeof makeDeps>, over: Partial<EventRow> = {}): string {
@@ -124,7 +124,7 @@ describe("event page layout store (free block-editor doc)", () => {
   });
 
   it("write requires event:write permission (403 for read-only caller)", async () => {
-    const deps = makeDeps({ authz: fakeAuthz(new Set(["event:read"])) });
+    const deps = makeDeps({ ...fakeAuthz(VIEWER) });
     const id = seedEvent(deps);
     const app = createApp(deps);
 
@@ -133,7 +133,7 @@ describe("event page layout store (free block-editor doc)", () => {
   });
 
   it("read-only caller can still GET the layout", async () => {
-    const deps = makeDeps({ authz: fakeAuthz(new Set(["event:read"])) });
+    const deps = makeDeps({ ...fakeAuthz(VIEWER) });
     const id = seedEvent(deps);
     const app = createApp(deps);
 
