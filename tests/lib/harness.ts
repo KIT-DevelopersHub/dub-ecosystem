@@ -194,8 +194,9 @@ async function buildAuth(identityFetcher: Fetcher): Promise<{ fetcher: Fetcher }
     SPA_ERROR_URL: "https://app.devhub.test/login",
     REDIRECT_ALLOWLIST: "https://app.devhub.test",
     SESSION_ACCESS_TTL_SEC: "3600",
-    SESSION_ABS_WEB_TTL_SEC: "2592000",
+    SESSION_ABS_WEB_TTL_SEC: "7776000", // 90d, sliding (matches wrangler.toml)
     SESSION_ABS_MOBILE_TTL_SEC: "15552000",
+    SESSION_IDLE_TTL_SEC: "2592000", // 30d web idle expiry
     STATE_TTL_SEC: "600",
     GOOGLE_CLIENT_ID: "web",
     GOOGLE_CLIENT_SECRET: "secret",
@@ -208,7 +209,15 @@ async function buildAuth(identityFetcher: Fetcher): Promise<{ fetcher: Fetcher }
   const kv = new Map<string, string>();
   const kvNs = {
     get: async (k: string) => (kv.has(k) ? kv.get(k)! : null),
-    put: async (k: string, v: string) => void kv.set(k, v),
+    // Mirror real Workers KV: expirationTtl below 60s is REJECTED. A fake that
+    // silently swallowed the options bag is how the 30s refresh-grace put reached
+    // production and turned every /auth/refresh into a 500.
+    put: async (k: string, v: string, o?: { expirationTtl?: number }) => {
+      if (o?.expirationTtl !== undefined && o.expirationTtl < 60) {
+        throw new Error(`KV put ${k}: expirationTtl of ${o.expirationTtl}s is below the 60s Workers KV minimum`);
+      }
+      kv.set(k, v);
+    },
     delete: async (k: string) => void kv.delete(k),
   } as unknown as import("@cloudflare/workers-types").KVNamespace;
 

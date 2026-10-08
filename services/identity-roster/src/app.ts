@@ -13,6 +13,7 @@ import type { Deps } from "./deps";
 import type { RequestCtx } from "./deps";
 import { IdentityService } from "./service";
 import { catalog } from "./permissions";
+import type { WebauthnCredentialRow } from "./repo/webauthn";
 
 export interface AppOptions {
   deps: Deps;
@@ -257,6 +258,98 @@ export function createApp(opts: AppOptions): App {
 
   app.get("/internal/users/:id/permissions", requireInternal, async (c) => {
     return c.json(await svc.effectivePermissions(c.req.param("id"), orgId));
+  });
+
+  // ---- passkey credential store (internal S2S: auth-service only) ----
+  // identity holds the rows; auth-service runs the WebAuthn ceremonies and owns every
+  // policy decision (step-up, last-method guard). Writes are scoped by userId in the path
+  // so a credential can only be renamed/deleted under its owner's id.
+  const webauthn = () => {
+    if (!opts.deps.webauthn) throw errors.upstreamUnavailable("webauthn-store");
+    return opts.deps.webauthn;
+  };
+
+  app.post("/internal/webauthn/challenges", requireInternal, async (c) => {
+    const body = await readJson<{ challenge?: string; kind?: string; userId?: string | null; ttlSec?: number }>(c);
+    if (typeof body.challenge !== "string" || !body.challenge || (body.kind !== "register" && body.kind !== "login")) {
+      throw errors.validationFailed([{ field: "challenge/kind", reason: "required" }]);
+    }
+    const ttlSec = typeof body.ttlSec === "number" && body.ttlSec > 0 ? Math.min(body.ttlSec, 600) : 300;
+    const now = opts.deps.now();
+    const expiresAt = new Date(Date.parse(now) + ttlSec * 1000).toISOString();
+    await webauthn().saveChallenge(
+      { id: body.challenge, kind: body.kind, userId: typeof body.userId === "string" ? body.userId : null, expiresAt },
+      now,
+    );
+    return c.json({ ok: true }, 201);
+  });
+
+  app.post("/internal/webauthn/challenges/take", requireInternal, async (c) => {
+    const body = await readJson<{ challenge?: string }>(c);
+    if (typeof body.challenge !== "string" || !body.challenge) throw errors.validationFailed([{ field: "challenge", reason: "required" }]);
+    const row = await webauthn().takeChallenge(body.challenge, opts.deps.now());
+    if (!row) throw errors.notFound("webauthn_challenge");
+    return c.json(row);
+  });
+
+  app.get("/internal/webauthn/users/:id/credentials", requireInternal, async (c) => {
+    return c.json({ items: await webauthn().listByUser(c.req.param("id")) });
+  });
+
+  app.get("/internal/webauthn/credentials/:credentialId", requireInternal, async (c) => {
+    const row = await webauthn().get(c.req.param("credentialId"));
+    if (!row) throw errors.notFound("webauthn_credential", c.req.param("credentialId"));
+    return c.json(row);
+  });
+
+  app.post("/internal/webauthn/users/:id/credentials", requireInternal, async (c) => {
+    const userId = c.req.param("id");
+    const body = await readJson<Partial<WebauthnCredentialRow>>(c);
+    if (typeof body.id !== "string" || !body.id || typeof body.publicKey !== "string" || !body.publicKey) {
+      throw errors.validationFailed([{ field: "id/publicKey", reason: "required" }]);
+    }
+    if (!(await opts.deps.repo.getUser(userId))) throw errors.notFound("user", userId);
+    const at = opts.deps.now();
+    const row: WebauthnCredentialRow = {
+      id: body.id,
+      userId,
+      publicKey: body.publicKey,
+      signCount: typeof body.signCount === "number" ? body.signCount : 0,
+      transports: Array.isArray(body.transports) ? body.transports.filter((t) => typeof t === "string") : [],
+      aaguid: typeof body.aaguid === "string" ? body.aaguid : null,
+      deviceType: typeof body.deviceType === "string" ? body.deviceType : null,
+      backedUp: body.backedUp === true,
+      label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 64) : "パスキー",
+      createdAt: at,
+      updatedAt: at,
+      lastUsedAt: null,
+    };
+    if (!(await webauthn().create(row))) throw errors.conflict("credential already registered");
+    return c.json(row, 201);
+  });
+
+  app.post("/internal/webauthn/credentials/:credentialId/use", requireInternal, async (c) => {
+    const body = await readJson<{ signCount?: number }>(c);
+    if (typeof body.signCount !== "number" || body.signCount < 0) {
+      throw errors.validationFailed([{ field: "signCount", reason: "required" }]);
+    }
+    await webauthn().recordUse(c.req.param("credentialId"), body.signCount, opts.deps.now());
+    return c.json({ ok: true });
+  });
+
+  app.patch("/internal/webauthn/users/:id/credentials/:credentialId", requireInternal, async (c) => {
+    const body = await readJson<{ label?: string }>(c);
+    const label = typeof body.label === "string" ? body.label.trim().slice(0, 64) : "";
+    if (!label) throw errors.validationFailed([{ field: "label", reason: "required" }]);
+    const ok = await webauthn().rename(c.req.param("id"), c.req.param("credentialId"), label, opts.deps.now());
+    if (!ok) throw errors.notFound("webauthn_credential", c.req.param("credentialId"));
+    return c.json({ ok: true });
+  });
+
+  app.delete("/internal/webauthn/users/:id/credentials/:credentialId", requireInternal, async (c) => {
+    const ok = await webauthn().delete(c.req.param("id"), c.req.param("credentialId"));
+    if (!ok) throw errors.notFound("webauthn_credential", c.req.param("credentialId"));
+    return c.body(null, 204);
   });
 
   return app;

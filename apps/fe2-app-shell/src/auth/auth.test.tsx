@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { gateway } from "@dub/types";
@@ -75,6 +75,143 @@ describe("auth guards", () => {
     );
     await waitFor(() => expect(onUnauth).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId("secret")).toBeNull();
+  });
+});
+
+// ── proactive session refresh ────────────────────────────────────────────────────
+// The access token has a fixed TTL, so reacting to 401s alone means the user is ALWAYS
+// interrupted at the TTL boundary (the "logged out every hour" report). The provider must
+// rotate the cookie BEFORE sessionExpiresAt, and must keep doing so indefinitely.
+const HOUR_MS = 60 * 60 * 1000;
+
+function makeRefreshApi(me: () => gateway.MeResponse, refresh: () => Promise<boolean>): ApiClient {
+  return { auth: { me: () => Promise.resolve(me()), refresh } } as unknown as ApiClient;
+}
+
+describe("proactive session refresh", () => {
+  beforeEach(() => {
+    // shouldAdvanceTime keeps the fake clock in step with real time so RTL's waitFor (which
+    // polls on real timers) still resolves; advanceTimersByTimeAsync then jumps the hour.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("schedules from sessionExpiresAt and rotates ~5 min BEFORE it expires", async () => {
+    const refresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const me = { ...ME, sessionExpiresAt: Date.now() + HOUR_MS };
+    wrap(makeRefreshApi(() => me, refresh), <Status />);
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("authenticated"));
+
+    // 54 min in: still well inside the session, nothing rotated yet.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(54 * 60 * 1000);
+    });
+    expect(refresh).not.toHaveBeenCalled();
+
+    // Crossing (expiry - 5 min) rotates, so no request ever sees a 401.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-arms from the REFRESHED expiry (not a one-shot timer)", async () => {
+    // Regression: without invalidating /me the provider never sees the new sessionExpiresAt,
+    // so the timer fires once and the session dies at the next boundary anyway.
+    let expiresAt = Date.now() + HOUR_MS;
+    const refresh = vi.fn<() => Promise<boolean>>().mockImplementation(async () => {
+      expiresAt = Date.now() + HOUR_MS; // server extends the session
+      return true;
+    });
+    wrap(
+      makeRefreshApi(() => ({ ...ME, sessionExpiresAt: expiresAt }), refresh),
+      <Status />,
+    );
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("authenticated"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(56 * 60 * 1000);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Second TTL window: the timer must have been re-armed off the new expiry.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(56 * 60 * 1000);
+    });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("rotates on visibilitychange when the expiry is already near (throttled background tab)", async () => {
+    // A backgrounded tab's timers are throttled or never fire (sleep/suspend) — the
+    // "left it open overnight" logout. Becoming visible must rotate immediately.
+    const refresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
+    const me = { ...ME, sessionExpiresAt: Date.now() + 60_000 }; // inside the 5-min lead
+    wrap(makeRefreshApi(() => me, refresh), <Status />);
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("authenticated"));
+
+    // Delta, not absolute: a near expiry also floors the backup timer to ~1s, which may or
+    // may not have fired by now. What this asserts is that becoming visible rotates at all.
+    const before = refresh.mock.calls.length;
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+    expect(refresh.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("ignores visibilitychange while the session is still far from expiring", async () => {
+    const refresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const me = { ...ME, sessionExpiresAt: Date.now() + HOUR_MS };
+    wrap(makeRefreshApi(() => me, refresh), <Status />);
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("authenticated"));
+
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("clears the timer and the listener on unmount (no leaks, no late rotation)", async () => {
+    const refresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const me = { ...ME, sessionExpiresAt: Date.now() + HOUR_MS };
+    const { unmount } = wrap(makeRefreshApi(() => me, refresh), <Status />);
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("authenticated"));
+    unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * HOUR_MS);
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("clamps a far-future expiry instead of overflowing setTimeout (int32 -> immediate fire)", async () => {
+    // setTimeout stores its delay in an int32: a delay past 2^31-1 ms fires IMMEDIATELY,
+    // which would rotate the session in a hot loop. A ~100-day expiry must stay quiet.
+    const refresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const me = { ...ME, sessionExpiresAt: Date.now() + 100 * 24 * HOUR_MS };
+    wrap(makeRefreshApi(() => me, refresh), <Status />);
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("authenticated"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("does not hot-loop when sessionExpiresAt is ALREADY past", async () => {
+    // Negative delay must be floored, and a failed rotation must not re-arm.
+    const refresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
+    const me = { ...ME, sessionExpiresAt: Date.now() - 10_000 };
+    wrap(makeRefreshApi(() => me, refresh), <Status />);
+    await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("authenticated"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    // One attempt from the floored timer — not a tight loop.
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
 

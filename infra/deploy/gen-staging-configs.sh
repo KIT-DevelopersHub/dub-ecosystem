@@ -153,6 +153,16 @@ gen_one() {
       /^NOTIF_RT_ALLOWED_ORIGINS = "/ {
         print "NOTIF_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
       }
+      # --- passkey (WebAuthn) relying party: rpId + origins are the fe2 page that runs
+      #     navigator.credentials, so they must be the STAGING fe2 host. Left at prod values,
+      #     every staging passkey ceremony fails the rpId/origin check (and a shared rpId
+      #     would let a staging passkey sign in to production). ---
+      /^WEBAUTHN_RP_ID = "/ {
+        h=FE2ORIGIN; sub(/^https?:\/\//, "", h); print "WEBAUTHN_RP_ID = \"" h "\""; next
+      }
+      /^WEBAUTHN_ORIGINS = "/ {
+        print "WEBAUTHN_ORIGINS = \"" FE2ORIGIN "\""; next
+      }
       # --- default: swap resource ids + extend gateway CORS, then print ---
       {
         gsub(DUBCORE_ID, DUBCORE_STG)
