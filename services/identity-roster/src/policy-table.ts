@@ -111,4 +111,15 @@ export const POLICY_TABLE = definePolicyTable({
   // X hold key K?" (a permission oracle), let alone reach the evaluator at all.
   "POST /authz/check": INTERNAL,
   "GET /internal/users/:id/permissions": INTERNAL,
+
+  // Passkey credential store. Only auth-service calls these (it runs the WebAuthn ceremonies
+  // and owns step-up / last-method policy); INTERNAL keeps the store off the internet.
+  "POST /internal/webauthn/challenges": INTERNAL,
+  "POST /internal/webauthn/challenges/take": INTERNAL,
+  "GET /internal/webauthn/users/:id/credentials": INTERNAL,
+  "GET /internal/webauthn/credentials/:credentialId": INTERNAL,
+  "POST /internal/webauthn/users/:id/credentials": INTERNAL,
+  "POST /internal/webauthn/credentials/:credentialId/use": INTERNAL,
+  "PATCH /internal/webauthn/users/:id/credentials/:credentialId": INTERNAL,
+  "DELETE /internal/webauthn/users/:id/credentials/:credentialId": INTERNAL,
 });

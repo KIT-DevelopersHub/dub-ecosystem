@@ -102,7 +102,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 // role x endpoint matrix
 // ---------------------------------------------------------------------------
 
-// The six routes the open internet may call, by decision (see policy-table.ts for why each
+// The routes the open internet may call, by decision (see policy-table.ts for why each
 // one cannot require a session). Any rule change that adds a line here is a widening of the
 // public surface of the login service and must be read as such in review.
 const PUBLIC_ROUTES = [
@@ -112,6 +112,14 @@ const PUBLIC_ROUTES = [
   "POST /auth/password/login",
   "POST /auth/refresh",
   "POST /auth/test-login",
+  // passkeys: login twin of /auth/password/login + self-service management like /auth/password
+  "POST /auth/passkey/login/options",
+  "POST /auth/passkey/login/verify",
+  "POST /auth/passkey/register/options",
+  "POST /auth/passkey/register/verify",
+  "GET /auth/passkeys",
+  "PATCH /auth/passkeys/:id",
+  "DELETE /auth/passkeys/:id",
 ].sort();
 
 // Reachable by NO external caller, whatever they hold: four bare INTERNAL plus the two

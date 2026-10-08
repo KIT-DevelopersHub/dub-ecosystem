@@ -9,6 +9,7 @@ import { ServiceBindingIdentityClient, type IdentityClient } from "./identity-cl
 import { OutboxAuditor, type Auditor } from "./audit";
 import { KvPasswordStore, type PasswordStore } from "./passwords";
 import { KvRateLimiter, type RateLimiter } from "./ratelimit";
+import { PasskeyService } from "./passkeys";
 
 export interface Deps {
   config: AppConfig;
@@ -18,6 +19,8 @@ export interface Deps {
   audit: Auditor;
   passwords: PasswordStore;
   rateLimiter: RateLimiter;
+  /** null when WEBAUTHN_RP_ID / WEBAUTHN_ORIGINS are unset (passkeys off in this env). */
+  passkeys: PasskeyService | null;
 }
 
 /** Wire the production dependencies from Worker bindings. */
@@ -27,13 +30,15 @@ export function buildDeps(env: Env): Deps {
     env.AUTH_KV.put(k, v, { expirationTtl: ttlSec }).then(() => undefined);
   const kvGet = (k: string): Promise<string | null> => env.AUTH_KV.get(k);
   const kvDelete = (k: string): Promise<void> => env.AUTH_KV.delete(k);
+  const identity = new ServiceBindingIdentityClient(env.SVC_IDENTITY);
   return {
     config,
     sessions: new SessionService(env.AUTH_KV, config),
     oauth: new GoogleOAuthProvider(config),
-    identity: new ServiceBindingIdentityClient(env.SVC_IDENTITY),
+    identity,
     audit: new OutboxAuditor(env.OUTBOX_DB),
     passwords: new KvPasswordStore(env.AUTH_KV),
     rateLimiter: new KvRateLimiter({ get: kvGet, put: kvPut, delete: kvDelete }),
+    passkeys: config.webauthn ? new PasskeyService(identity, config.webauthn) : null,
   };
 }

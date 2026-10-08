@@ -6,17 +6,39 @@ import { configFromEnv, type AppConfig, type Env } from "../src/env";
 import { SessionService } from "../src/sessions";
 import type { Deps } from "../src/deps";
 import type { OAuthProvider, GoogleProfile } from "../src/oauth";
-import type { IdentityClient, ProvisionResult, LookupResult } from "../src/identity-client";
+import type { IdentityClient, ProvisionResult, LookupResult, PasskeyRecord, NewPasskey, StoredChallenge } from "../src/identity-client";
+import { PasskeyService } from "../src/passkeys";
 import type { Auditor, AuditInput } from "../src/audit";
 import { KvPasswordStore } from "../src/passwords";
 import { KvRateLimiter } from "../src/ratelimit";
 
+/** Workers KV rejects expirationTtl < 60s; the fake must too (see MemoryKV.put). */
+export const KV_MIN_TTL = 60;
+
+/**
+ * In-memory KVNamespace stand-in. Expiry is NOT simulated (tests drive time via the
+ * injectable clock), but the options bag is VALIDATED: real Workers KV rejects
+ * `expirationTtl` below 60s, and silently swallowing it here is exactly how a 30s
+ * grace-window put shipped to production and 500'd every /auth/refresh.
+ */
 export class MemoryKV {
   store = new Map<string, string>();
+  /** Every accepted write, so tests can assert the TTLs that were actually requested. */
+  puts: { key: string; expirationTtl?: number }[] = [];
   async get(key: string): Promise<string | null> {
     return this.store.has(key) ? this.store.get(key)! : null;
   }
-  async put(key: string, value: string): Promise<void> {
+  async put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void> {
+    const ttl = options?.expirationTtl;
+    if (ttl !== undefined) {
+      if (!Number.isInteger(ttl)) {
+        throw new Error(`KV put ${key}: expirationTtl must be an integer, got ${ttl}`);
+      }
+      if (ttl < KV_MIN_TTL) {
+        throw new Error(`KV put ${key}: expirationTtl of ${ttl}s is below the ${KV_MIN_TTL}s Workers KV minimum`);
+      }
+    }
+    this.puts.push(ttl === undefined ? { key } : { key, expirationTtl: ttl });
     this.store.set(key, value);
   }
   async delete(key: string): Promise<void> {
@@ -84,6 +106,46 @@ export class FakeIdentity implements IdentityClient {
   async hasPermission(_ctx: RequestContext, userId: string, permission: identity.PermissionKey): Promise<boolean> {
     return permission === "identity:admin" ? this.admins.has(userId) : true;
   }
+
+  // passkey store (identity /internal/webauthn/* twin)
+  passkeys = new Map<string, PasskeyRecord>();
+  challenges = new Map<string, StoredChallenge>();
+  async saveChallenge(_ctx: RequestContext, challenge: string, rec: StoredChallenge): Promise<void> {
+    this.challenges.set(challenge, rec);
+  }
+  async takeChallenge(_ctx: RequestContext, challenge: string): Promise<StoredChallenge | null> {
+    const rec = this.challenges.get(challenge) ?? null;
+    this.challenges.delete(challenge);
+    return rec;
+  }
+  async listPasskeys(_ctx: RequestContext, userId: string): Promise<PasskeyRecord[]> {
+    return [...this.passkeys.values()].filter((p) => p.userId === userId);
+  }
+  async getPasskey(_ctx: RequestContext, credentialId: string): Promise<PasskeyRecord | null> {
+    return this.passkeys.get(credentialId) ?? null;
+  }
+  async createPasskey(_ctx: RequestContext, userId: string, input: NewPasskey): Promise<PasskeyRecord | null> {
+    if (this.passkeys.has(input.id)) return null;
+    const at = new Date().toISOString();
+    const rec: PasskeyRecord = { ...input, userId, createdAt: at, updatedAt: at, lastUsedAt: null };
+    this.passkeys.set(input.id, rec);
+    return rec;
+  }
+  async recordPasskeyUse(_ctx: RequestContext, credentialId: string, signCount: number): Promise<void> {
+    const r = this.passkeys.get(credentialId);
+    if (r) this.passkeys.set(credentialId, { ...r, signCount, lastUsedAt: new Date().toISOString() });
+  }
+  async renamePasskey(_ctx: RequestContext, userId: string, credentialId: string, label: string): Promise<boolean> {
+    const r = this.passkeys.get(credentialId);
+    if (!r || r.userId !== userId) return false;
+    this.passkeys.set(credentialId, { ...r, label });
+    return true;
+  }
+  async deletePasskey(_ctx: RequestContext, userId: string, credentialId: string): Promise<boolean> {
+    const r = this.passkeys.get(credentialId);
+    if (!r || r.userId !== userId) return false;
+    return this.passkeys.delete(credentialId);
+  }
 }
 
 export class FakeAuditor implements Auditor {
@@ -116,10 +178,14 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
     ALLOWED_LOGIN_DOMAIN: "developershub.jp",
     PASSWORD_ENC_KEY: TEST_ENC_KEY,
     SESSION_ACCESS_TTL_SEC: "3600",
-    SESSION_ABS_WEB_TTL_SEC: "2592000",
+    // Mirrors the production vars: 90d sliding web absolute, 180d fixed mobile, 30d idle.
+    SESSION_ABS_WEB_TTL_SEC: "7776000",
     SESSION_ABS_MOBILE_TTL_SEC: "15552000",
+    SESSION_IDLE_TTL_SEC: "2592000",
     GOOGLE_MOBILE_IOS_CLIENT_ID: "ios-client",
     GOOGLE_MOBILE_ANDROID_CLIENT_ID: "android-client",
+    WEBAUTHN_RP_ID: "app.test.dev",
+    WEBAUTHN_ORIGINS: "https://app.test.dev",
     ...envOverrides,
   } as unknown as Env;
 
@@ -131,8 +197,10 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
   let now = Date.parse("2026-08-09T12:00:00Z");
   const clock = () => now;
 
-  const kvPut = async (k: string, v: string): Promise<void> => {
-    kv.store.set(k, v);
+  // Routed through MemoryKV.put (not the raw Map) so the rate-limiter's window TTLs
+  // get the same >=60s KV validation as the session puts.
+  const kvPut = async (k: string, v: string, ttlSec: number): Promise<void> => {
+    await kv.put(k, v, { expirationTtl: ttlSec });
   };
   const kvGet = async (k: string): Promise<string | null> => (kv.store.has(k) ? kv.store.get(k)! : null);
   const kvDelete = async (k: string): Promise<void> => {
@@ -146,6 +214,7 @@ export function makeHarness(envOverrides: Partial<Env> = {}): TestHarness {
     audit,
     passwords: new KvPasswordStore(kv as unknown as KVNamespace),
     rateLimiter: new KvRateLimiter({ get: kvGet, put: kvPut, delete: kvDelete }),
+    passkeys: config.webauthn ? new PasskeyService(identity, config.webauthn) : null,
   };
 
   return { deps, kv, oauth, identity, audit, config, setNow: (ms) => (now = ms) };
