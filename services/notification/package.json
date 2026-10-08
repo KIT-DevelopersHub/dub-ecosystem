@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@dub/policy-gate": "workspace:*",
     "@dub/types": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/events": "workspace:*",

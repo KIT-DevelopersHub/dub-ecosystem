@@ -5,9 +5,8 @@
 // present but fall back to the outbox shim when absent, (2) the shim writes durable rows on
 // the right topics, (3) the drain delivers audit rows to audit-log and defers domain events
 // without ever losing a row, and (4) the landing routes run the SAME sync + idempotency as
-// the Queue consumers, guarded by x-dub-internal.
+// the Queue consumers, gated INTERNAL (x-dub-internal) by @dub/policy-gate.
 import { describe, it, expect } from "vitest";
-import type { AuthClient } from "@dub/auth-client";
 import type { Fetcher, Queue, R2Bucket } from "@cloudflare/workers-types";
 import { createEvent, type DubEventContext, type DubEventEnvelope, type WebhookEventEnvelopeV1 } from "@dub/events";
 import type { task } from "@dub/types";
@@ -16,7 +15,7 @@ import { makeOutboxDeliver, runOutboxDrain } from "../src/drain";
 import { AUDIT_TOPIC, TOPIC_NOTIFICATION } from "../src/outbox";
 import { createApp } from "../src/app";
 import type { Env } from "../src/env";
-import { makeHarness, issue, fixedNow, type Harness } from "./helpers";
+import { makeHarness, issue, fixedNow, allowAll, type Harness } from "./helpers";
 import { makeOutboxD1 } from "./outbox-d1";
 
 const CTX: DubEventContext = { requestId: "req_1", actorId: "user_1" };
@@ -136,24 +135,10 @@ describe("outbox drain", () => {
 });
 
 // ---- free-tier consumer landing routes ----
-function fakeAuth(): AuthClient {
-  return {
-    requireAuth: () => async (c: any, next: any) => {
-      c.set("authn", { userId: c.req.header("x-dub-user-id") ?? "u", source: "trusted_header", session: null });
-      await next();
-    },
-    requirePermission: () => async (_c: any, next: any) => next(),
-    verify: async () => ({}),
-    checkPermissions: async () => ({ decisions: [] }),
-    hasPermission: async () => true,
-    invalidateAuthzCache: () => {},
-  } as unknown as AuthClient;
-}
-
 function landingApp(h: Harness) {
   const webhookRaw = { get: async () => null } as unknown as R2Bucket;
   return createApp({
-    auth: fakeAuth(),
+    authz: allowAll,
     service: h.service,
     publisher: h.publisher,
     now: fixedNow,
@@ -184,14 +169,18 @@ async function seedRepo(h: Harness): Promise<void> {
 }
 
 describe("POST /internal/webhooks-async (free-tier wh-github landing route)", () => {
-  it("404s without the x-dub-internal marker (never public)", async () => {
+  // 403 internal_only, not the removed guard's 404: the route is INTERNAL in POLICY_TABLE.
+  // Reachability is unchanged — api-gateway binds only the `github` segment to this Worker,
+  // so /internal/* has no gateway route at all.
+  it("403s without the x-dub-internal marker (never public)", async () => {
     const res = await landingApp(makeHarness()).fetch(
       new Request("https://svc/internal/webhooks-async", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify(webhookEnvelope("wh_1", issue({ owner: "acme", repo: "web", number: 5 }))),
       }),
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as any).error.details.reason).toBe("internal_only");
   });
 
   it("applies the webhook (creates a task) and is idempotent on envelope.id", async () => {
@@ -251,12 +240,13 @@ describe("POST /internal/events-async (free-tier evt-github-sync landing route)"
     expect(h.github.countOp("updateIssue")).toBe(1);
   });
 
-  it("404s without the x-dub-internal marker", async () => {
+  it("403s without the x-dub-internal marker", async () => {
     const ev = createEvent("task.updated", { taskId: "task_q", eventId: "evt_1", changed: ["title"] }, CTX);
     const res = await landingApp(makeHarness()).fetch(
       new Request("https://svc/internal/events-async", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(ev) }),
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as any).error.details.reason).toBe("internal_only");
   });
 
   it("400s on a malformed envelope", async () => {

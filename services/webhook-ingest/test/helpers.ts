@@ -2,6 +2,7 @@
 import { hmacSha256Hex } from "../src/crypto";
 import { encodeCursor, decodeCursor, type DeliveryRepo, type DeliveryRecord, type PurgeResult } from "../src/repo";
 import type { Env } from "../src/env";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { webhook } from "@dub/types";
 
 // ---- fake Queue ----
@@ -102,6 +103,18 @@ export class FakeRepo implements DeliveryRepo {
   }
 }
 
+// ---- policy-gate doubles ----
+// The gate's PermissionGranter port: "which of these keys does the caller hold?". `allowAll`
+// is the test stand-in for identity-roster saying yes to everything, `allowNone` for a denial.
+// Neither re-implements a rule — the gate still compares what it gets back against the table.
+export const allowAll: PermissionGranter = async (_userId, _orgId, keys) => keys;
+export const allowNone: PermissionGranter = async () => [];
+
+/** Headers a signed-in operator's request carries once api-gateway has verified the session. */
+export const AUTHED = { "x-dub-user-id": "usr_ops" } as const;
+/** Headers a Service-Binding caller carries (app-health-monitor's probe sends exactly these). */
+export const S2S = { "x-dub-internal": "1" } as const;
+
 // ---- github request signer ----
 export async function signGithub(
   body: string,
@@ -117,7 +130,7 @@ export async function signGithub(
   return h;
 }
 
-// ---- minimal env for app tests (D1/identity unused when deps/authz overridden) ----
+// ---- minimal env for app tests (D1/identity unused when deps/granted are overridden) ----
 export function fakeEnv(overrides: Partial<Env> = {}): Env {
   return {
     DUB_DB: null as unknown as Env["DUB_DB"],

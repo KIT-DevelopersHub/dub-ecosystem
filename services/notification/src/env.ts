@@ -1,7 +1,7 @@
 // Worker bindings (wrangler.toml) + Hono per-request variables.
 // Deploy is out of scope for this unit; every Service Binding is contract-only.
 import type { D1Database, DurableObjectNamespace, Fetcher, Queue } from "@cloudflare/workers-types";
-import type { AuthClient, AuthnContext } from "@dub/auth-client";
+import type { PolicyGateVars } from "@dub/policy-gate";
 import type { AuditRecordEnvelopeV1 } from "@dub/events";
 import type { RequestContext } from "@dub/http";
 import type { InboxRoom } from "./inbox-room-do";
@@ -48,11 +48,12 @@ export interface Env {
   NOTIF_RT_ALLOWED_ORIGINS?: string;
 }
 
-// Hono per-request variables.
-export interface Vars {
+// Hono per-request variables. `userId` comes from PolicyGateVars: the gate is the single
+// authentication point now (it resolves the trusted x-dub-user-id header and 401s a route
+// that needs an actor without one), so handlers read `c.get("userId")` and nothing in this
+// service keeps its own auth client or authn context on the context any more.
+export interface Vars extends PolicyGateVars {
   dubCtx: RequestContext;
-  authClient: AuthClient;
-  authn: AuthnContext;
 }
 
 export type AppBindings = { Bindings: Env; Variables: Vars };

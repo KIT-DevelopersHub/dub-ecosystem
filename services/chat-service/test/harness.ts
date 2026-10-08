@@ -1,13 +1,15 @@
 // Test harness: builds AppDeps around the in-memory repo with injectable fakes
 // for authz, publisher, audit, realtime, event-service and file-meta. Drives the
-// real Hono app end-to-end without D1 / Service Bindings / Queues.
-import type { MiddlewareHandler, Context } from "hono";
-import { DubError, CommonErrorCodes, errors } from "@dub/errors";
+// real Hono app end-to-end without D1 / Service Bindings / Queues — including the REAL
+// policyGate over the real POLICY_TABLE, since the gate's only dependency is the
+// PermissionGranter `fakeAuthz` below supplies.
+import { errors } from "@dub/errors";
 import type { common, identity, auditLog, chat } from "@dub/types";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { DubEventName, DubEventPayloadMap } from "@dub/events";
 import { createApp } from "../src/app";
 import { InMemoryChatRepo } from "../src/memory-repo";
-import type { AppDeps, Authz, EventPublisher, AuditSink, RealtimePublisher, EventClient, FileClient, MemberClient } from "../src/types";
+import type { AppDeps, EventPublisher, AuditSink, RealtimePublisher, EventClient, FileClient, MemberClient } from "../src/types";
 
 export interface PublishedEvent {
   name: DubEventName;
@@ -79,28 +81,27 @@ export class FakeFileClient implements FileClient {
   }
 }
 
-// Authz granting a fixed permission set. requireAuth enforces x-dub-user-id.
-export function fakeAuthz(granted: Set<identity.PermissionKey>): Authz {
-  return {
-    requireAuth(): MiddlewareHandler {
-      return async (c, next) => {
-        if (!c.req.header("x-dub-user-id")) throw new DubError("AUTH_INVALID_TOKEN", "x-dub-user-id absent", { status: 401 });
-        await next();
-      };
-    },
-    requirePermission(permission: identity.PermissionKey): MiddlewareHandler {
-      return async (_c, next) => {
-        if (!granted.has(permission)) {
-          throw new DubError(CommonErrorCodes.FORBIDDEN, `permission denied: ${permission}`, { status: 403 });
-        }
-        await next();
-      };
-    },
-    async hasPermission(_userId, _orgId, query: identity.AuthzQuery): Promise<boolean> {
-      return granted.has(query.permission);
-    },
-  };
+/**
+ * Stub `PermissionGranter` — the one authz port the service has. It answers exactly the
+ * subset of the asked keys the (every) user holds, like identity's /authz/check, so a test
+ * drives the REAL policyGate and the real POLICY_TABLE rather than a test-local re-reading of
+ * them. Authentication is not its job: the gate 401s on a missing x-dub-user-id itself.
+ *
+ * Grant the ロール管理 tier keys (`app:chat:view` / `app:chat:edit`), not just the 詳細 keys —
+ * every rule in POLICY_TABLE starts from `appLevel("chat", ...)`, so a set without them models
+ * a role whose チャット is 無効 and reaches nothing.
+ */
+export function fakeAuthz(granted: Set<identity.PermissionKey>): PermissionGranter {
+  return async (_userId, _orgId, keys) => keys.filter((k) => granted.has(k));
 }
+
+/** チャット = 編集 plus both 詳細 keys: the admin/maintainer row of the role matrix. */
+export const ALL_CHAT_KEYS: identity.PermissionKey[] = [
+  "app:chat:view",
+  "app:chat:edit",
+  "chat:create",
+  "chat:moderate",
+];
 
 let seq = 0;
 export function resetSeq(): void {
@@ -123,7 +124,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & {
   const memberClient = new FakeMemberClient();
   const deps: AppDeps = {
     repo,
-    authz: fakeAuthz(new Set<identity.PermissionKey>(["chat:create", "chat:moderate"])),
+    authz: fakeAuthz(new Set<identity.PermissionKey>(ALL_CHAT_KEYS)),
     publisher,
     audit,
     realtime,

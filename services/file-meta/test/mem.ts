@@ -1,12 +1,12 @@
-// In-memory test doubles for file-meta (FileRepo, BlobStore, IdempotencyStore, AuthGate)
-// plus spy emit/audit. Mirrors the D1 repo semantics closely enough for unit coverage.
-import type { MiddlewareHandler } from "hono";
-import { DubError, CommonErrorCodes } from "@dub/errors";
+// In-memory test doubles for file-meta (FileRepo, BlobStore, IdempotencyStore,
+// PermissionGranter) plus spy emit/audit. Mirrors the D1 repo semantics closely enough for
+// unit coverage.
+import { DubError } from "@dub/errors";
 import type { IdempotencyStore } from "@dub/events";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { fileMeta, identity } from "@dub/types";
 import type {
   AuditFn,
-  AuthGate,
   BlobObject,
   BlobStore,
   CreateFileInput,
@@ -135,27 +135,17 @@ export function createMemoryIdempotency(): IdempotencyStore & { _seen: Set<strin
   return Object.assign(store, { _seen: seen });
 }
 
-/** Stub auth: x-dub-user-id -> authn; permissions from a per-user grant map. */
-export function createStubAuth(grants: Record<string, identity.PermissionKey[]>): AuthGate {
-  const has = (userId: string, perm: identity.PermissionKey): boolean => (grants[userId] ?? []).includes(perm);
-  return {
-    requireAuth(): MiddlewareHandler {
-      return async (c, next) => {
-        const userId = c.req.header("x-dub-user-id");
-        if (!userId) throw new DubError("AUTH_INVALID_TOKEN", "no user", { status: 401 });
-        c.set("authn", { userId, source: "trusted_header", session: null });
-        await next();
-      };
-    },
-    requirePermission(permission): MiddlewareHandler {
-      return async (c, next) => {
-        const authn = c.get("authn") as { userId?: string } | undefined;
-        if (!authn?.userId) throw new DubError("AUTH_INVALID_TOKEN", "no authn", { status: 401 });
-        if (!has(authn.userId, permission)) throw new DubError(CommonErrorCodes.FORBIDDEN, `denied ${permission}`, { status: 403 });
-        await next();
-      };
-    },
-    async hasPermission(userId, permission) { return has(userId, permission); },
+/**
+ * Stub `PermissionGranter` — the one authz port left (policyGate uses it for the table's key
+ * checks, the handlers for their `file:admin` escalation). Returns the subset of `keys` the
+ * user holds, exactly like identity's /authz/check, so a test exercises the REAL gate rather
+ * than a bypass: authn comes from x-dub-user-id and every 401/403 below is produced by
+ * `policyGate` itself.
+ */
+export function createStubGranter(grants: Record<string, identity.PermissionKey[]>): PermissionGranter {
+  return async (userId, _orgId, keys) => {
+    const held = new Set(grants[userId] ?? []);
+    return keys.filter((k) => held.has(k));
   };
 }
 

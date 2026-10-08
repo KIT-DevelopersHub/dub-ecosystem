@@ -6,8 +6,8 @@
 // that will be lifted into @dub/types `chat` once 9-C freezes the DDL. They live
 // here for now so this unit does not mutate the shared package (unit boundary).
 // The @dub/events chat payloads ARE frozen and are used verbatim by the service.
-import type { common, auditLog, identity, chat } from "@dub/types";
-import type { MiddlewareHandler, Context } from "hono";
+import type { common, auditLog, chat } from "@dub/types";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { DubEventName, DubEventPayloadMap } from "@dub/events";
 import type { Unfurler } from "./unfurl";
 
@@ -226,20 +226,13 @@ export interface RealtimePublisher {
   publishToChannel(channelId: common.ChannelId, event: chat.ChatRealtimeEvent): Promise<void>;
 }
 
-// Subset of @dub/auth-client's AuthClient the app consumes; the real client
-// satisfies it, tests inject a fake.
-export interface Authz {
-  requireAuth(): MiddlewareHandler;
-  requirePermission(
-    permission: identity.PermissionKey,
-    resolve?: (c: Context) => { orgId?: string; resourceType?: string; resourceId?: string },
-  ): MiddlewareHandler;
-  hasPermission(
-    userId: common.UserId,
-    orgId: common.OrgId,
-    query: identity.AuthzQuery,
-  ): Promise<boolean>;
-}
+// The service's ONE permission source: "which of these keys does this user hold?", i.e.
+// identity-roster's /authz/check behind @dub/policy-gate's port. `policyGate` consumes it for
+// POLICY_TABLE's entry-layer rules, and ChatService reuses the SAME port for its one
+// instance-level key question (`chat:moderate`, the moderator tier in isChannelAdmin /
+// deleteMessage) — so the table and the handlers can never disagree about a caller's keys,
+// and a test injects one fake for both. Replaces the old middleware-shaped `Authz` interface
+// (requireAuth / requirePermission), whose per-route mounts the gate made redundant.
 
 // event-service existence check for event-type channels (design §5). Default impl
 // returns true when SVC_EVENT is absent (local/preview); tests inject a fake.
@@ -344,7 +337,7 @@ export interface ChatRepo {
 
 export interface AppDeps {
   repo: ChatRepo;
-  authz: Authz;
+  authz: PermissionGranter;
   publisher: EventPublisher;
   audit: AuditSink;
   realtime: RealtimePublisher;

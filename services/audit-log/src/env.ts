@@ -1,7 +1,6 @@
 import type { D1Database, R2Bucket, Fetcher } from "@cloudflare/workers-types";
-import type { AuthClient } from "@dub/auth-client";
 import type { RequestContext } from "@dub/http";
-import type { AuthnContext } from "@dub/auth-client";
+import type { PolicyGateVars } from "@dub/policy-gate";
 
 // Worker bindings (wrangler.toml). Deploy is out of scope for this unit.
 export interface Env {
@@ -12,11 +11,10 @@ export interface Env {
   SVC_IDENTITY: Fetcher; // identity-roster Service Binding (authz/check)
 }
 
-// Hono per-request variables.
-export interface Vars {
+// Hono per-request variables. `userId` is inherited from PolicyGateVars: @dub/policy-gate
+// establishes the actor and publishes it, so nothing downstream re-reads the trusted header.
+export interface Vars extends PolicyGateVars {
   dubCtx: RequestContext;
-  authClient: AuthClient;
-  authn: AuthnContext;
 }
 
 export type AppBindings = { Bindings: Env; Variables: Vars };

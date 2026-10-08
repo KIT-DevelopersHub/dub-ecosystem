@@ -1,5 +1,7 @@
 // GET /api/v1/me — self info + effective (org-wide) permissions. Composition only:
-// entry verify -> identity master + internal permissions. No cache in P0.
+// identity master + internal permissions. No cache in P0. AUTHENTICATED in POLICY_TABLE:
+// the gate verified the session, so the id used below is always the caller's own (the
+// permission list in the response is DATA about the caller, not an authorization check).
 import type { Context } from "hono";
 import type { GatewayEnv } from "../env";
 import type { GatewayVariables } from "../context";
@@ -7,7 +9,7 @@ import type { identity, gateway } from "@dub/types";
 import { policy } from "@dub/types";
 import type { RequestContext } from "@dub/http";
 import { createServices } from "../services";
-import { authenticate } from "../auth";
+import { authedActor } from "../policy";
 import { getRequestId } from "../context";
 
 interface PermissionsResponse {
@@ -18,7 +20,7 @@ export async function meHandler(c: Context<{ Bindings: GatewayEnv; Variables: Ga
   const requestId = getRequestId(c);
   const svc = createServices(c.env);
 
-  const auth = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
+  const auth = authedActor(c);
   const ctx: RequestContext = { requestId, userId: auth.userId, caller: "api-gateway" };
 
   // parallel: identity master + effective permissions (internal endpoint -> needs x-dub-internal)

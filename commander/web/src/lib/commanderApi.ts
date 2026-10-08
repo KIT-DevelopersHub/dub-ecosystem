@@ -187,9 +187,10 @@ export type RunHistoryApi = Pick<CommanderApi, "listRuns" | "getRun">;
 const DEFAULT_BASE =
   (import.meta.env?.VITE_COMMANDER_API as string | undefined) ?? "http://127.0.0.1:8787";
 
-// Shared operator token (same one the daemon client uses). Reads on the service are
-// open, but writes (createTask / transition = approve·reject) require it — without this
-// default the whole judgment loop 401s in the browser (reads worked, writes didn't).
+// Shared operator token (same one the daemon client uses). EVERY route of the service needs
+// it now, reads included: run prompts, cwd, execution logs and AI chat bodies are no longer
+// served unauthenticated (services/commander-service/src/protection-table.ts). Without this
+// default the whole app 401s in the browser. `dev-up.sh` passes it in automatically.
 const DEFAULT_TOKEN = import.meta.env?.VITE_COMMANDER_TOKEN as string | undefined;
 
 /** Human label for a phase, for badges. */
@@ -209,14 +210,21 @@ export class HttpCommanderApi implements CommanderApi {
     private token: string | undefined = DEFAULT_TOKEN,
   ) {}
 
+  /** Headers for a request WITH a JSON body. */
   private headers(): Record<string, string> {
-    const h: Record<string, string> = { "content-type": "application/json" };
-    if (this.token) h["x-commander-token"] = this.token;
-    return h;
+    return { "content-type": "application/json", ...this.auth() };
+  }
+
+  /** Headers for a bodyless read. Separate so a GET does not claim a content-type it has no
+   *  body for, while still carrying the credential every read now requires. */
+  private auth(): Record<string, string> {
+    return this.token ? { "x-commander-token": this.token } : {};
   }
 
   async health(): Promise<boolean> {
     try {
+      // Deliberately unauthenticated: /health is the one OPEN route, so a failure here means
+      // "service down" rather than "token wrong" — the two the operator must tell apart.
       const res = await fetch(`${this.baseUrl}/health`);
       return res.ok;
     } catch {
@@ -225,7 +233,7 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async listFeatures(): Promise<Feature[]> {
-    const res = await fetch(`${this.baseUrl}/features`);
+    const res = await fetch(`${this.baseUrl}/features`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /features -> ${res.status}`);
     return ((await res.json()) as { features: Feature[] }).features;
   }
@@ -244,7 +252,7 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async getFeature(id: string): Promise<FeatureDetail> {
-    const res = await fetch(`${this.baseUrl}/features/${id}`);
+    const res = await fetch(`${this.baseUrl}/features/${id}`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /features/${id} -> ${res.status}`);
     return (await res.json()) as FeatureDetail;
   }
@@ -280,20 +288,20 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async listRuns(): Promise<RunSummary[]> {
-    const res = await fetch(`${this.baseUrl}/runs`);
+    const res = await fetch(`${this.baseUrl}/runs`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /runs -> ${res.status}`);
     return ((await res.json()) as { runs: RunSummary[] }).runs;
   }
 
   async getRun(id: string): Promise<RunDetail | null> {
-    const res = await fetch(`${this.baseUrl}/runs/${id}`);
+    const res = await fetch(`${this.baseUrl}/runs/${id}`, { headers: this.auth() });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`GET /runs/${id} -> ${res.status}`);
     return (await res.json()) as RunDetail;
   }
 
   async listBoard(): Promise<BoardItem[]> {
-    const res = await fetch(`${this.baseUrl}/tasks`);
+    const res = await fetch(`${this.baseUrl}/tasks`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /tasks -> ${res.status}`);
     return ((await res.json()) as { items: BoardItem[] }).items;
   }
@@ -338,7 +346,7 @@ export class HttpCommanderApi implements CommanderApi {
   // --- AI chat persistence -----------------------------------------------------
 
   async listChats(kind: ChatKind): Promise<ChatSession[]> {
-    const res = await fetch(`${this.baseUrl}/chats?kind=${encodeURIComponent(kind)}`);
+    const res = await fetch(`${this.baseUrl}/chats?kind=${encodeURIComponent(kind)}`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /chats -> ${res.status}`);
     return ((await res.json()) as { sessions: ChatSession[] }).sessions;
   }
@@ -354,7 +362,7 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async getChat(id: string): Promise<{ session: ChatSession; messages: ChatMessage[] } | null> {
-    const res = await fetch(`${this.baseUrl}/chats/${id}`);
+    const res = await fetch(`${this.baseUrl}/chats/${id}`, { headers: this.auth() });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`GET /chats/${id} -> ${res.status}`);
     return (await res.json()) as { session: ChatSession; messages: ChatMessage[] };

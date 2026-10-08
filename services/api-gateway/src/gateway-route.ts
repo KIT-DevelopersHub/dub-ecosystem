@@ -1,14 +1,18 @@
 // Catch-all handler for /api/v1/* transparent routing: resolve rule -> guards
 // (WS reject, body cap, internal-only 404) -> optional entry verify -> forward.
+//
+// AUTHZ: none, deliberately. The policy gate lets a purely proxied request through because
+// the service that owns the route owns the decision (see policy-table.ts). What happens here
+// is authentication plus transport: verify the session, stamp the trusted x-dub-user-id,
+// strip anything spoofed (proxy.ts), forward.
 import type { Context } from "hono";
 import { errors, DubError, CommonErrorCodes } from "@dub/errors";
 import type { GatewayEnv } from "./env";
 import { bindingByName } from "./env";
 import type { GatewayVariables } from "./context";
 import { getRequestId, gatewayError, GATEWAY_ROUTE_NOT_FOUND, GATEWAY_WEBSOCKET_UNSUPPORTED } from "./context";
-import { routeForSegment, stripApiPrefix, firstSegment, isInternalOnly } from "./routes";
-import { createServices } from "./services";
-import { authenticate } from "./auth";
+import { routeForSegment, stripApiPrefix, firstSegment, isInternalOnly, GATEWAY_OWNED_SEGMENTS } from "./routes";
+import { authenticateOnce } from "./policy";
 import { forwardRequest } from "./proxy";
 
 function bodyCap(env: GatewayEnv, segment: string): number {
@@ -28,6 +32,15 @@ export async function gatewayRouteHandler(
     throw gatewayError(GATEWAY_ROUTE_NOT_FOUND, `No route for ${pathname}`, 404);
   }
   const segment = firstSegment(internalPath);
+  // Gateway-owned segments must never be proxied. Reaching here with one means a path under
+  // /me, /bff, /public or /admin matched no concrete gateway route — a 404, never a forward.
+  // ROUTES happens to contain no owned segment today so this is already the outcome; the
+  // explicit check makes GATEWAY_OWNED_SEGMENTS the enforced source of truth instead of a
+  // coincidence, so adding `{ segment: "admin", ... }` to ROUTES cannot silently start
+  // proxying the admin surface. test/policy-table.test.ts pins the invariant.
+  if (GATEWAY_OWNED_SEGMENTS.has(segment)) {
+    throw gatewayError(GATEWAY_ROUTE_NOT_FOUND, `No route for ${pathname}`, 404);
+  }
   const route = routeForSegment(segment);
   if (!route) throw gatewayError(GATEWAY_ROUTE_NOT_FOUND, `No route for ${pathname}`, 404);
 
@@ -54,9 +67,7 @@ export async function gatewayRouteHandler(
 
   let userId: string | undefined;
   if (route.auth === "required") {
-    const svc = createServices(c.env);
-    const auth = await authenticate(svc.auth, { requestId }, c.req.raw.headers);
-    userId = auth.userId;
+    userId = (await authenticateOnce(c)).userId;
   }
 
   const binding = bindingByName(c.env, route.binding);

@@ -1,54 +1,21 @@
 // Test harness: builds AppDeps around the in-memory repo with an injectable fake
-// authz. Drives the real Hono app end-to-end without D1 / Service Bindings.
-import type { MiddlewareHandler, Context } from "hono";
-import { DubError, CommonErrorCodes } from "@dub/errors";
+// PermissionGranter. Drives the real Hono app — @dub/policy-gate included — end to end
+// without D1 / Service Bindings.
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { common, identity } from "@dub/types";
 import { policy } from "@dub/types";
 import { createApp } from "../src/app";
 import { InMemoryMemberRepo } from "../src/memory-repo";
-import type { AppDeps, Authz } from "../src/types";
+import type { AppDeps } from "../src/types";
 
-// Authz that grants a fixed permission set. requireAuth enforces x-dub-user-id.
-export function fakeAuthz(granted: Set<identity.PermissionKey>): Authz {
-  return {
-    requireAuth(): MiddlewareHandler {
-      return async (c, next) => {
-        const userId = c.req.header("x-dub-user-id");
-        if (!userId) throw new DubError("AUTH_INVALID_TOKEN", "x-dub-user-id absent", { status: 401 });
-        await next();
-      };
-    },
-    requirePermission(
-      permission: identity.PermissionKey,
-      _resolve?: (c: Context) => { orgId?: string; resourceType?: string; resourceId?: string },
-    ): MiddlewareHandler {
-      return async (_c, next) => {
-        if (!granted.has(permission)) {
-          throw new DubError(CommonErrorCodes.FORBIDDEN, `permission denied: ${permission}`, { status: 403 });
-        }
-        await next();
-      };
-    },
-    // Mirrors @dub/auth-client's requireAppAccess: decide with the REAL policy module over
-    // the granted set, so a test's permission set exercises the same semantics as production
-    // (no second, hand-rolled notion of 無効/閲覧/編集 in the fake).
-    requireAppAccess(
-      app: string,
-      level: policy.AppAccessLevel,
-      extra?: { permission?: identity.PermissionKey },
-    ): MiddlewareHandler {
-      return async (_c, next) => {
-        const decision = policy.decide(granted, { app, level, ...(extra?.permission ? { permission: extra.permission } : {}) });
-        if (!decision.allowed) {
-          throw new DubError(CommonErrorCodes.FORBIDDEN, policy.denyMessage(decision), { status: 403 });
-        }
-        await next();
-      };
-    },
-    async hasPermission(_userId, _orgId, query: identity.AuthzQuery): Promise<boolean> {
-      return granted.has(query.permission);
-    },
-  };
+/**
+ * The gate's PermissionGranter port over a fixed key set: it answers "which of these keys do
+ * you hold?", exactly like identity's /authz/check. Nothing else is faked — authn (the
+ * x-dub-user-id header), the x-dub-internal marker and the whole rule comparison are the
+ * real policyGate running over the real POLICY_TABLE.
+ */
+export function fakeAuthz(granted: Set<identity.PermissionKey>): PermissionGranter {
+  return async (_userId, _orgId, keys) => keys.filter((k) => granted.has(k));
 }
 
 /** The keys an "admin-like" test subject holds: the identity domain keys plus 編集 on every

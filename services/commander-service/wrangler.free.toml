@@ -13,6 +13,10 @@ main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
+# The header above always CLAIMED "workers.dev disabled", but the line was missing and the
+# default is published — so the claim was false and one deploy would have exposed every route.
+workers_dev = false
+
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-core"

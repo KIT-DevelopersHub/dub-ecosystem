@@ -2,8 +2,8 @@
 // the CANONICAL @dub/types `member` namespace (Team is the single shared team
 // definition across all apps); this file adds only the internal persistence rows and
 // injected-dependency interfaces. Distinct from identity_* (RBAC login accounts).
-import type { common, identity, member, policy } from "@dub/types";
-import type { MiddlewareHandler, Context } from "hono";
+import type { common, member } from "@dub/types";
+import type { PermissionGranter } from "@dub/policy-gate";
 
 export type MemberStatus = member.MemberStatus;
 export const MEMBER_STATUSES = ["added", "invited", "considering", "on_leave", "declined"] as const;
@@ -90,23 +90,6 @@ export interface ParticipationRow {
 }
 
 // ---- injected dependencies (enables full HTTP-level tests with fakes) ----
-export interface Authz {
-  requireAuth(): MiddlewareHandler;
-  requirePermission(
-    permission: identity.PermissionKey,
-    resolve?: (c: Context) => { orgId?: string; resourceType?: string; resourceId?: string },
-  ): MiddlewareHandler;
-  /** Policy gate: the app must be at `level` (無効/閲覧/編集) for the caller's role, AND the
-   *  optional fine-grained key must be held. Structural subset of @dub/auth-client's
-   *  requireAppAccess so the real client satisfies it without an adapter. */
-  requireAppAccess(
-    app: string,
-    level: policy.AppAccessLevel,
-    extra?: { permission?: identity.PermissionKey },
-  ): MiddlewareHandler;
-  hasPermission(userId: common.UserId, orgId: common.OrgId, query: identity.AuthzQuery): Promise<boolean>;
-}
-
 export interface MemberRepo {
   // teams
   createTeam(row: TeamRow): Promise<void>;
@@ -139,7 +122,10 @@ export interface MemberRepo {
 
 export interface AppDeps {
   repo: MemberRepo;
-  authz: Authz;
+  /** Which of the requested permission keys the caller holds (identity /authz/check). The
+   *  ONLY authorization dependency: src/policy-table.ts says what each route demands and
+   *  @dub/policy-gate asks this port once per request. */
+  authz: PermissionGranter;
   orgId: common.OrgId;
   now: () => string;
   newTeamId: () => string;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { event } from "@dub/types";
 import { isDubError } from "@dub/errors";
-import { makeDeps, call, createApp, fakeAuthz } from "./harness";
+import { makeDeps, call, createApp, fakeAuthz, EDITOR, VIEWER } from "./harness";
 import { EventService, type ReqCtx } from "../src/service";
 import type { EventRow } from "../src/types";
 
@@ -63,7 +63,7 @@ describe("phase transition matrix (test #4)", () => {
 
 describe("phase transitions requiring event:admin (test #4)", () => {
   it("forward transition needs only event:write", async () => {
-    const deps = makeDeps({ authz: fakeAuthz(new Set(["event:read", "event:write"])) });
+    const deps = makeDeps({ ...fakeAuthz(EDITOR) });
     const app = createApp(deps);
     seedAt(deps, "planning", "event_fwd");
     const res = await call(app, "PATCH", "/events/event_fwd", { body: { version: 1, phase: "preparing" } });
@@ -72,7 +72,7 @@ describe("phase transitions requiring event:admin (test #4)", () => {
   });
 
   it("back-transition without event:admin -> 403", async () => {
-    const deps = makeDeps({ authz: fakeAuthz(new Set(["event:read", "event:write"])) });
+    const deps = makeDeps({ ...fakeAuthz(EDITOR) });
     const app = createApp(deps);
     seedAt(deps, "preparing", "event_back");
     const res = await call(app, "PATCH", "/events/event_back", { body: { version: 1, phase: "planning" } });
@@ -81,7 +81,7 @@ describe("phase transitions requiring event:admin (test #4)", () => {
   });
 
   it("wrapup->closed without event:admin -> 403; with admin -> 200", async () => {
-    const writeOnly = makeDeps({ authz: fakeAuthz(new Set(["event:read", "event:write"])) });
+    const writeOnly = makeDeps({ ...fakeAuthz(EDITOR) });
     const appWrite = createApp(writeOnly);
     seedAt(writeOnly, "wrapup", "event_close");
     const denied = await call(appWrite, "PATCH", "/events/event_close", { body: { version: 1, phase: "closed" } });
@@ -104,7 +104,7 @@ describe("endpoint authorization (test #5) + authn", () => {
   });
 
   it("read-only principal is denied writes (403) but allowed reads (200)", async () => {
-    const deps = makeDeps({ authz: fakeAuthz(new Set(["event:read"])) });
+    const deps = makeDeps({ ...fakeAuthz(VIEWER) });
     const app = createApp(deps);
     deps.repo.seedEvent({
       id: "event_r", orgId: "org_devhub", title: "R", description: null, phase: "planning",
@@ -117,7 +117,7 @@ describe("endpoint authorization (test #5) + authn", () => {
   });
 
   it("archive requires event:admin (route-level)", async () => {
-    const deps = makeDeps({ authz: fakeAuthz(new Set(["event:read", "event:write"])) });
+    const deps = makeDeps({ ...fakeAuthz(EDITOR) });
     const app = createApp(deps);
     seedAt(deps, "planning", "event_arch");
     const res = await call(app, "DELETE", "/events/event_arch");

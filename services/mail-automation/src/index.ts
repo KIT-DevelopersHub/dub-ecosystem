@@ -4,8 +4,8 @@
 import type { D1Database, Fetcher, Queue, MessageBatch, ExecutionContext } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { common } from "@dub/types";
-import { createServiceClient, type RequestContext } from "@dub/http";
-import { HEADERS } from "@dub/observability";
+import { createServiceClient, newRequestId, type RequestContext } from "@dub/http";
+import { sharedAuthzGranter } from "@dub/policy-gate";
 import {
   createQueueHandler,
   type DubEventEnvelope,
@@ -16,8 +16,7 @@ import { createMailGatewayClient } from "./gateway";
 import { createEventPublisher, createAuditSink } from "./publisher";
 import { createD1Repo, type MailAutoRepo } from "./repo";
 import { type EventInfoClient, type PipelineDeps } from "./pipeline";
-import { eventHandlers, handleEventsAsync } from "./events-async";
-import { createAuthClient } from "@dub/auth-client";
+import { eventHandlers } from "./events-async";
 
 export interface Env {
   DB: D1Database;
@@ -67,20 +66,23 @@ function repoOf(env: Env): MailAutoRepo {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    // 改善#5: system-origin freeq delivery lands here (x-dub-internal, no user), so it lives
-    // at the Worker entry BEFORE createApp's blanket requireAuth (mirrors audit-log's
-    // /internal/audit-async). Everything else goes through the user-gated Hono app.
-    const url = new URL(request.url);
-    if (request.method === "POST" && url.pathname === "/internal/events-async") {
-      if (!request.headers.get(HEADERS.internal)) {
-        return new Response(JSON.stringify({ error: { code: "NOT_FOUND", message: "route not found" } }), { status: 404, headers: { "content-type": "application/json" } });
-      }
-      const repo = repoOf(env);
-      return handleEventsAsync(request, { repo, pipeline: buildPipeline(env, repo) });
-    }
+    // Every route — including the system-origin freeq landing POST /internal/events-async
+    // (改善#5) — now goes through the Hono app, because authorization is the gate over
+    // POLICY_TABLE rather than a blanket requireAuth the landing route had to dodge. The
+    // table marks that route INTERNAL, so the marker check it used to do by hand here is
+    // enforced in the one place a reader looks (src/policy-table.ts).
     const repo = repoOf(env);
-    const authClient = createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "mail-automation" });
-    const app = createApp({ pipeline: buildPipeline(env, repo), authClient });
+    // sharedAuthzGranter (not createAuthzGranter): the app is rebuilt per request, so the
+    // identity /authz/check TTL cache has to be memoized per Env to survive between requests
+    // in the same isolate — otherwise every gated route is an unconditional identity
+    // subrequest and identity-roster becomes a hot-path single point of failure (ADR 0004).
+    const authz = sharedAuthzGranter(env, env.SVC_IDENTITY, {
+      caller: "mail-automation",
+      // The 13 gated routes all require x-dub-request-id (dubContext allowGenerate:false),
+      // so the fallback only ever applies to the freeq landing route, which needs no granter.
+      requestId: request.headers.get("x-dub-request-id") ?? newRequestId(),
+    });
+    const app = createApp({ pipeline: buildPipeline(env, repo), authz });
     return app.fetch(request);
   },
 

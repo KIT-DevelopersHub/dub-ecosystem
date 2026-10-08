@@ -31,10 +31,13 @@ describe("channel create", () => {
   });
 
   it("POST /channels requires chat:create permission", async () => {
-    const deps = makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>([])) });
+    // チャット = 編集 but WITHOUT the 詳細 key, so the only thing missing is chat:create —
+    // granting nothing at all would 403 on the tier keys and prove nothing about chat:create.
+    const deps = makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["app:chat:view", "app:chat:edit"])) });
     const app = createApp(deps);
     const res = await call(app, "POST", "/chat/channels", { body: topic });
     expect(res.status).toBe(403);
+    expect(res.json.error.details.missing).toEqual(["chat:create"]);
   });
 
   it("initial memberIds are added and emit member.added + realtime", async () => {
@@ -128,8 +131,14 @@ describe("channel update / archive (optimistic lock)", () => {
     const app = createApp(deps);
     const c = await call(app, "POST", "/chat/channels", { body: { ...topic, visibility: "private", memberIds: ["user_b"] } });
 
-    // rebuild app with authz that grants nothing (user_b is member role member)
-    const deps2 = makeDeps({ repo: deps.repo, authz: fakeAuthz(new Set<identity.PermissionKey>([])) });
+    // Rebuild with a caller who HOLDS チャット = 編集 (so policyGate lets the request
+    // through) but no chat:moderate — the 403 must therefore come from isChannelAdmin, the
+    // handler-side instance check, which is what this test is about. Granting nothing would
+    // 403 in the gate and leave that layer untested.
+    const deps2 = makeDeps({
+      repo: deps.repo,
+      authz: fakeAuthz(new Set<identity.PermissionKey>(["app:chat:view", "app:chat:edit"])),
+    });
     const app2 = createApp(deps2);
     const res = await call(app2, "POST", `/chat/channels/${c.json.id}/members`, { userId: "user_b", body: { userId: "user_c" } });
     expect(res.status).toBe(403);
