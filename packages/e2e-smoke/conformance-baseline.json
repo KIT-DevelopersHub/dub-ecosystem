@@ -16,8 +16,15 @@
   },
   "auth-service": {
     "missingInSpec": [
+      "DELETE /auth/passkeys/{}",
+      "GET /auth/passkeys",
       "GET /internal/admin/users/{}/password",
+      "PATCH /auth/passkeys/{}",
       "POST /auth/demo-login",
+      "POST /auth/passkey/login/options",
+      "POST /auth/passkey/login/verify",
+      "POST /auth/passkey/register/options",
+      "POST /auth/passkey/register/verify",
       "POST /auth/password",
       "POST /internal/admin/users/{}/password"
     ],
@@ -71,12 +78,20 @@
   },
   "identity-roster": {
     "missingInSpec": [
+      "DELETE /internal/webauthn/users/{}/credentials/{}",
       "GET /internal/users",
+      "GET /internal/webauthn/credentials/{}",
+      "GET /internal/webauthn/users/{}/credentials",
+      "PATCH /internal/webauthn/users/{}/credentials/{}",
       "POST /identity/users/sync-email-routing",
       "POST /identity/users/sync-email-routing/preview",
       "POST /identity/users/{}/offboard",
       "POST /internal/users/lookup",
-      "POST /internal/users/{}/profile"
+      "POST /internal/users/{}/profile",
+      "POST /internal/webauthn/challenges",
+      "POST /internal/webauthn/challenges/take",
+      "POST /internal/webauthn/credentials/{}/use",
+      "POST /internal/webauthn/users/{}/credentials"
     ],
     "missingInCode": []
   },
