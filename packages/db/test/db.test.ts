@@ -64,7 +64,7 @@ function fakeD1() {
 
 describe("@dub/db namespaces + ids", () => {
   it("freezes 20 namespaces and resolves longest-prefix", () => {
-    expect(NAMESPACES.length).toBe(20);
+    expect(NAMESPACES.length).toBe(21);
     expect(namespaceOf("file_meta_files")).toBe("file_meta");
     expect(namespaceOf("commander_features")).toBe("commander");
     expect(namespaceOf("task_dependencies")).toBe("task");

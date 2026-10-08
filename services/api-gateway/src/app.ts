@@ -10,6 +10,7 @@ import { meHandler } from "./handlers/me";
 import { bffHomeHandler } from "./handlers/bff-home";
 import { createPublicInquiryHandler } from "./handlers/public-inquiry";
 import { createPublicParticipationHandler } from "./handlers/public-participation";
+import { publicLpVisitHandler } from "./handlers/public-lp-visit";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
 import { getSelfProfileHandler, updateSelfProfileHandler } from "./handlers/self-profile";
 import { getSelfParticipationHandler, updateSelfParticipationHandler } from "./handlers/self-participation";
@@ -50,6 +51,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.post(`${API_PREFIX}/public/inquiries`, createPublicInquiryHandler(options.turnstile));
   // Public 参加届: unauthenticated submit → member-service internal route (roster reflect).
   app.post(`${API_PREFIX}/public/participation`, createPublicParticipationHandler(options.turnstile));
+  // Public LP pageview beacon (sendBeacon from the conference LP) → lp-analytics internal route.
+  app.post(`${API_PREFIX}/public/lp-visits`, publicLpVisitHandler);
 
   // Password management (themes #5a/#5b/#5c). Gateway-owned because auth-service's admin
   // routes are internal-only and the `auth` proxy segment strips tokens: these compose
