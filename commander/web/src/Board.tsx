@@ -74,9 +74,10 @@ function composePrompt(prior: string | null, addition: string): string {
 // (→ 確認待ち via reconcilePhases) or fails (→ 要修正).
 export const STAGING_DEPLOY_PROMPT =
   "[commander] このタスクの demo で承認された版そのものを staging に反映してください。" +
-  "手順: (1) demo承認版を staging 統合ブランチにマージ (別物を混ぜない・diff照合)、" +
-  "(2) `pnpm deploy:staging` で staging に反映、" +
-  "(3) `pnpm verify:live staging \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
+  "手順: (1) demo承認版の PR を用意 (別物を混ぜない・diff照合)、" +
+  "(2) `bash scripts/staging-pick-slot.sh --pr <PR番号>` で空いている staging 枠を選び、" +
+  "出力の label (`staging2へ` か `stagingへ`) を PR に付けて staging.yml で反映 (両方埋まっていれば待つ)、" +
+  "(3) `bash scripts/verify-live.sh <出力の verify_env> \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
   "(4) 完了したら staging URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
 
 // Instruction the本番反映 run carries when the user approves staging → prod. Mirrors the
