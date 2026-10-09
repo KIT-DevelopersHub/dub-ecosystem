@@ -11,6 +11,7 @@
   "scripts": {
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:integration": "vitest run tests/integration",
     "build": "turbo run build",
     "check": "pnpm typecheck && pnpm test",
     "verify:live": "bash scripts/verify-live.sh",

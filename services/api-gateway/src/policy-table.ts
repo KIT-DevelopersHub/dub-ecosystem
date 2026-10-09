@@ -67,6 +67,9 @@ export const POLICY_TABLE = definePolicyTable({
   // breaking the live LP form. See the report / a-2 for the recommended fix.
   "POST /api/v1/public/inquiries": PUBLIC,
   "POST /api/v1/public/participation": PUBLIC,
+  // LP visit beacon. The handler drops non-LP origins and forwards only a sanitized row to
+  // lp-analytics s2s; there is no session to check and nothing readable comes back (204).
+  "POST /api/v1/public/lp-visits": PUBLIC,
 
   // ---- AUTHENTICATED: the /me family (7) ----
   // Self-scoped in the strict sense rule.ts requires: not one of these paths has a subject
