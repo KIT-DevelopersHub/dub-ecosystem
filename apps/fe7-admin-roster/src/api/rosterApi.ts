@@ -11,6 +11,7 @@ import type {
   RoleAssignment,
   EmailRoutingAddress,
   CreateEmailAddressRequest,
+  DriveGoogleAccountStatus,
   EmailRoutingSyncPreview,
   OffboardUserResult,
   RosterUser,
@@ -31,6 +32,8 @@ const ADMIN = `${BASE}/admin`;
 const EMAIL_ROUTING = `${BASE}/mail/admin/email-routing`;
 // 運営メンバー管理 (member-service) — reverse lookup + 在籍更新 during offboarding.
 const MEMBERS = `${BASE}/members`;
+// Drive共有 の Google アカウント (drive-share-service). 詳細ダイアログの設定パネルが使う。
+const DRIVE_GOOGLE = `${BASE}/driveshare/google-account`;
 
 export interface RosterApi {
   listUsers(filters: UserListFilters): Promise<common.Paginated<RosterUser>>;
@@ -83,6 +86,12 @@ export interface RosterApi {
   listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
   createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
   deleteEmailAddress(id: string): Promise<void>;
+  // ---- Drive共有: the Google account drive-share-service acts as (admin only) ----
+  getDriveGoogleAccount(): Promise<DriveGoogleAccountStatus>;
+  /** Start the consent round-trip; the browser is then sent to `authUrl`. */
+  startDriveGoogleConnect(redirectUri: string): Promise<{ authUrl: string }>;
+  /** Relay Google's `code` + `state` from the return URL. */
+  completeDriveGoogleConnect(code: string, state: string): Promise<DriveGoogleAccountStatus>;
 }
 
 export function createRosterApi(client: ResourceClient): RosterApi {
@@ -137,5 +146,9 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/issued-addresses`),
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/issued-addresses`, req),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/issued-addresses/${id}`),
+    getDriveGoogleAccount: () => client.get<DriveGoogleAccountStatus>(DRIVE_GOOGLE),
+    startDriveGoogleConnect: (redirectUri) => client.post<{ authUrl: string }>(`${DRIVE_GOOGLE}/connect`, { redirectUri }),
+    completeDriveGoogleConnect: (code, state) =>
+      client.post<DriveGoogleAccountStatus>(`${DRIVE_GOOGLE}/callback`, { code, state }),
   };
 }

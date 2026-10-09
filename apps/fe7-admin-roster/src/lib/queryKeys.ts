@@ -21,4 +21,5 @@ export const queryKeys = {
   mailStatus: () => [ADMIN_QK, "mail", "status"] as const,
   emailAddresses: () => [ADMIN_QK, "email-routing", "list"] as const,
   membersOverview: () => [ADMIN_QK, "members", "overview"] as const,
+  driveGoogleAccount: () => [ADMIN_QK, "driveshare", "google-account"] as const,
 } as const;

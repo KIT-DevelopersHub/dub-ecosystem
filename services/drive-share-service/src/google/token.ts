@@ -3,7 +3,7 @@
 // only in Workers Secrets. Access token is cached IN-ISOLATE (no KV needed → $0) with
 // TTL = expiry - 60s. The credential/secret is never surfaced in an error. `fetchImpl`
 // is injectable so tests never hit the network.
-import { errors } from "@dub/errors";
+import { CommonErrorCodes, DubError, errors } from "@dub/errors";
 
 export interface GoogleCredentials {
   clientId: string;
@@ -20,7 +20,22 @@ interface RefreshResponse {
   expires_in?: number;
 }
 
-const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+export const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+
+const INVALID_GRANT = "invalid_grant";
+
+function invalidGrant(): DubError {
+  return new DubError(CommonErrorCodes.UPSTREAM_UNAVAILABLE, "Upstream unavailable: google:auth", {
+    details: { reason: INVALID_GRANT },
+    retryable: false,
+    service: "google:auth",
+  });
+}
+
+/** True when Google rejected the refresh token itself (revoked / expired). */
+export function isInvalidGrant(err: unknown): boolean {
+  return err instanceof DubError && (err.details as { reason?: string } | undefined)?.reason === INVALID_GRANT;
+}
 
 /** In-isolate cached token. A Workers isolate is short-lived; a cold start just
  *  refreshes once. This keeps the service dependency-free (no KV) and $0. */
@@ -57,7 +72,13 @@ export function createTokenProvider(deps: {
       // Never surface the credential/secret; log-worthy but generic to client.
       throw errors.upstreamUnavailable("google:auth", cause);
     }
-    if (!res.ok) throw errors.upstreamUnavailable("google:auth");
+    if (!res.ok) {
+      // invalid_grant = the refresh token was revoked/expired (incl. the 7-day expiry of a
+      // testing-mode consent screen). Tagged so the UI can ask an admin to reconnect.
+      const err = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (err?.error === "invalid_grant") throw invalidGrant();
+      throw errors.upstreamUnavailable("google:auth");
+    }
     const json = (await res.json().catch(() => null)) as RefreshResponse | null;
     if (!json?.access_token) throw errors.upstreamUnavailable("google:auth");
     const ttlSec = typeof json.expires_in === "number" ? Math.max(1, json.expires_in - 60) : 3540;

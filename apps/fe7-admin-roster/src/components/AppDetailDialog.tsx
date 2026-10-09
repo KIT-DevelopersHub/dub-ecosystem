@@ -2,6 +2,8 @@
 //
 //   1. このアプリの権限        … 無効 / 閲覧 / 編集 の 3 段階
 //   2. 細かい権限              … APP_MANIFEST の detailPermissions（チャットの「他人の投稿を削除」等）
+//   3. アプリ固有の設定        … appSettingsPanels.tsx に登録があるアプリだけ最下段に出る
+//                                （Drive共有 の Google アカウント等。全ロール共通・即時反映）
 //
 // どちらも policy / APP_MANIFEST 由来なので、アプリや権限を足せばこのダイアログに自動で現れる。
 // 細かい権限は「アプリが有効（閲覧以上）」のときだけ触れる = アプリを OFF にしたまま配下だけ
@@ -11,6 +13,7 @@ import { policy } from "@dub/types";
 import { Badge, Button, Modal, SegmentedControl } from "@dub/ui";
 import { levelLabel, levelDescription, levelTone, type Level } from "../lib/policyLabels";
 import { PermissionToggleList } from "./PermissionToggleList";
+import { appSettingsPanel } from "./appSettingsPanels";
 
 const blockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-5, 20px)" };
 const headingStyle: React.CSSProperties = { fontWeight: 700, fontSize: 14, margin: 0 };
@@ -43,6 +46,7 @@ export function AppDetailDialog({
   // アプリが「無効」なら配下の細かい設定は触れない（policy.decide も app_disabled で落とすので、
   // ここで既存のキーを黙って剥奪はしない＝表示だけロックする）。
   const appOff = app.level === policy.AppAccessLevel.None;
+  const SettingsPanel = appSettingsPanel(appId);
 
   return (
     <Modal
@@ -105,6 +109,8 @@ export function AppDetailDialog({
       <p style={hintStyle}>
         現在: <Badge tone={levelTone(app.level)}>{levelLabel(app.level)}</Badge> / 権限の変更はダイアログを閉じたあと「保存」で確定します。
       </p>
+
+      {SettingsPanel ? <SettingsPanel idPrefix={idPrefix} /> : null}
     </Modal>
   );
 }

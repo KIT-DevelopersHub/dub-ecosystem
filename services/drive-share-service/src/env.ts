@@ -27,6 +27,17 @@ export interface Env {
   GOOGLE_HACKIT_OAUTH_CLIENT_SECRET?: string;
   GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN?: string;
 
+  // ---- Secrets for connecting the account from ロール管理 (optional) ----
+  // OAuth "Web application" client used by the connect flow (the client above is a Desktop
+  // client, which cannot redirect back to the SPA). Absent => the connect flow falls back
+  // to the client above. A refresh token only works with the client that minted it, so the
+  // D1 row records which client id it belongs to.
+  GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID?: string;
+  GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET?: string;
+  // AES-GCM key (base64 of 32 bytes) sealing the connected refresh token in D1. Absent =>
+  // the connect flow is disabled and only the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret is used.
+  DRIVESHARE_TOKEN_ENC_KEY?: string;
+
   // ---- Explicit mock override ----
   // Force the mock client even if secrets are set (local/preview/E2E). "1"/"true".
   DRIVESHARE_MOCK?: string;
@@ -49,13 +60,35 @@ export function parseConfig(env: Env): DriveShareConfig {
   return { listPageSize: num(env.DRIVESHARE_LIST_PAGE_SIZE, 50) };
 }
 
-/** True when the mock Drive client must be used: either forced via DRIVESHARE_MOCK,
- *  or the real OAuth credentials are not (all) bound yet. */
-export function useMockClient(env: Env): boolean {
-  if (env.DRIVESHARE_MOCK === "1" || env.DRIVESHARE_MOCK === "true") return true;
-  return !(
-    env.GOOGLE_HACKIT_OAUTH_CLIENT_ID &&
-    env.GOOGLE_HACKIT_OAUTH_CLIENT_SECRET &&
-    env.GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN
-  );
+export interface OAuthClient {
+  clientId: string;
+  clientSecret: string;
+}
+
+/** The OAuth client the connect flow uses: the Web client if set, else the base client. */
+export function connectClient(env: Env): OAuthClient | null {
+  if (env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID && env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET) {
+    return { clientId: env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID, clientSecret: env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET };
+  }
+  if (env.GOOGLE_HACKIT_OAUTH_CLIENT_ID && env.GOOGLE_HACKIT_OAUTH_CLIENT_SECRET) {
+    return { clientId: env.GOOGLE_HACKIT_OAUTH_CLIENT_ID, clientSecret: env.GOOGLE_HACKIT_OAUTH_CLIENT_SECRET };
+  }
+  return null;
+}
+
+/** The secret of whichever configured client minted a stored token (null if neither). */
+export function clientById(env: Env, clientId: string): OAuthClient | null {
+  for (const [id, secret] of [
+    [env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID, env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET],
+    [env.GOOGLE_HACKIT_OAUTH_CLIENT_ID, env.GOOGLE_HACKIT_OAUTH_CLIENT_SECRET],
+  ] as const) {
+    if (id && secret && id === clientId) return { clientId: id, clientSecret: secret };
+  }
+  return null;
+}
+
+/** True when DRIVESHARE_MOCK forces the in-memory mock Drive client. Otherwise the client
+ *  is real whenever a refresh token is available (see resolveDriveCredentials). */
+export function mockForced(env: Env): boolean {
+  return env.DRIVESHARE_MOCK === "1" || env.DRIVESHARE_MOCK === "true";
 }

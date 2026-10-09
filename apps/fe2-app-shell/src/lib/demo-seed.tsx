@@ -1770,6 +1770,76 @@ interface DemoDriveFile {
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 
+// ── driveshare: the Google account Drive is accessed as (ロール管理 > Drive共有 詳細) ──
+// No real OAuth in the demo: "connect" returns the SPA's own /admin/roles?code&state, which
+// stands in for Google's redirect. The status lives in sessionStorage so it survives that
+// full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
+// unconfigured on any demo URL (remembered for the tab).
+type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "unconfigured";
+const DEMO_DRIVE_GOOGLE_KEY = "dub-demo:drive-google";
+const DEMO_DRIVE_GOOGLE_STATE_KEY = "dub-demo:drive-google-state";
+
+function demoDriveGoogleStatus(mode: DemoDriveGoogleMode) {
+  const connected = {
+    source: "connected" as const,
+    email: "hackit@gmail.com",
+    connectedAt: "2026-10-01T09:00:00.000Z",
+    connectedBy: "usr_demo_admin",
+    needsReconnect: false,
+    canConnect: true,
+  };
+  if (mode === "none") return { ...connected, source: "none" as const, email: null, connectedAt: null, connectedBy: null };
+  if (mode === "invalid") return { ...connected, needsReconnect: true };
+  if (mode === "unconfigured") return { ...connected, source: "secret" as const, connectedAt: null, connectedBy: null, canConnect: false };
+  return connected;
+}
+
+function createDriveGoogleDemoStore() {
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  const fromUrl = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("driveGoogle");
+  if (fromUrl && ["connected", "none", "invalid", "unconfigured"].includes(fromUrl)) {
+    storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(demoDriveGoogleStatus(fromUrl as DemoDriveGoogleMode)));
+  }
+  const read = () => {
+    const raw = storage()?.getItem(DEMO_DRIVE_GOOGLE_KEY);
+    return raw ? (JSON.parse(raw) as ReturnType<typeof demoDriveGoogleStatus>) : demoDriveGoogleStatus("connected");
+  };
+
+  function handle(method: string, pathname: string, body: unknown): Response | null {
+    if (method === "GET" && pathname === "/api/v1/driveshare/google-account") return json(read());
+    if (method === "POST" && pathname === "/api/v1/driveshare/google-account/connect") {
+      const { redirectUri } = (body ?? {}) as { redirectUri?: string };
+      if (!redirectUri) return problem("VALIDATION_FAILED", "redirectUri is required", 400);
+      const state = `demo_${Math.random().toString(36).slice(2)}`;
+      storage()?.setItem(DEMO_DRIVE_GOOGLE_STATE_KEY, state);
+      return json({ authUrl: `${redirectUri}?code=demo-code&state=${state}` });
+    }
+    if (method === "POST" && pathname === "/api/v1/driveshare/google-account/callback") {
+      const { state } = (body ?? {}) as { state?: string };
+      const expected = storage()?.getItem(DEMO_DRIVE_GOOGLE_STATE_KEY);
+      storage()?.removeItem(DEMO_DRIVE_GOOGLE_STATE_KEY);
+      if (!state || state !== expected) {
+        return problem("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。もう一度「接続」からやり直してください。", 400);
+      }
+      const next = {
+        ...demoDriveGoogleStatus("connected"),
+        email: "hackit.new@gmail.com",
+        connectedAt: new Date().toISOString(),
+      };
+      storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(next));
+      return json(next);
+    }
+    return null;
+  }
+  return { handle };
+}
+
 function createDriveShareStore() {
   const owner = (id: string): DemoDrivePermission => ({
     id,
@@ -2870,6 +2940,7 @@ export function createDemoFetch(): typeof fetch {
   const mailStore = createMailStore();
   // Mutable Hackit Drive sharing state (grant/change/revoke/link toggle persist).
   const driveShareStore = createDriveShareStore();
+  const driveGoogleStore = createDriveGoogleDemoStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
@@ -2901,6 +2972,7 @@ export function createDemoFetch(): typeof fetch {
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
+      driveGoogleStore.handle(method, url.pathname, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??

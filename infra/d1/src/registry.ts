@@ -55,7 +55,12 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
   {
     ns: "driveshare",
     ownerUnit: "drive-share-service",
-    tables: ["driveshare_role_file_grants", "driveshare_role_grant_members"],
+    tables: [
+      "driveshare_role_file_grants",
+      "driveshare_role_grant_members",
+      "driveshare_google_account",
+      "driveshare_google_oauth_states",
+    ],
   },
   {
     ns: "commander",

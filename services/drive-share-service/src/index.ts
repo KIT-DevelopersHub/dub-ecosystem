@@ -1,11 +1,9 @@
 // Worker entrypoint / composition root. buildApp wires bindings -> deps -> Hono app.
-// The ONE auth seam lives here: useMockClient(env) decides whether the REAL Google
-// Drive v3 client (real OAuth refresh-token provider, refresh token from Workers
-// Secrets, access token cached in-isolate) or the in-memory MOCK client is used. When
-// the three GOOGLE_HACKIT_OAUTH_* secrets are absent (or DRIVESHARE_MOCK=1) the mock
-// runs, so this Worker builds, deploys, and is E2E-testable at $0 before any real
-// refresh token exists. Dropping in the real token is exactly this one branch — no
-// other code changes. Authz is POLICY_TABLE (src/policy-table.ts) enforced by @dub/policy-gate,
+// The ONE auth seam lives here: resolveDriveCredentials picks the refresh token — the
+// account an admin connected from ロール管理 (D1, AES-GCM sealed) first, else the
+// GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret — and buildDriveClient wires the REAL Google
+// Drive v3 client over it. With neither (or DRIVESHARE_MOCK=1) the in-memory MOCK client
+// runs, so this Worker builds, deploys, and is E2E-testable at $0 without any token. Authz is POLICY_TABLE (src/policy-table.ts) enforced by @dub/policy-gate,
 // whose decisions come from identity-roster POST /authz/check (TTL-cached per isolate — see
 // sharedAuthzGranter below).
 import type { ExecutionContext } from "@cloudflare/workers-types";
@@ -22,19 +20,30 @@ import { createMockDriveShareClient } from "./mock-client";
 import { createGoogleDriveShareClient } from "./google/client";
 import { createTokenProvider } from "./google/token";
 import type { DriveShareClient } from "./drive-client";
-import { parseConfig, useMockClient, type Env } from "./env";
+import { createD1GoogleAccountStore } from "./google-account-store";
+import { createGoogleAccountService, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
+import { importTokenKey } from "./google/crypto";
+import { mockForced, parseConfig, type Env } from "./env";
 
-/** Pick the Drive client: mock until the Hackit OAuth secrets are bound, real after. */
-function buildDriveClient(env: Env): DriveShareClient {
-  if (useMockClient(env)) return createMockDriveShareClient();
-  const token = createTokenProvider({
-    credentials: {
-      clientId: env.GOOGLE_HACKIT_OAUTH_CLIENT_ID!,
-      clientSecret: env.GOOGLE_HACKIT_OAUTH_CLIENT_SECRET!,
-      refreshToken: env.GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN!,
-    },
-  });
-  return createGoogleDriveShareClient({ token });
+/** Pick the Drive client: real when an account is available (connected from ロール管理, or
+ *  the secret token), mock otherwise or when DRIVESHARE_MOCK forces it. */
+function buildDriveClient(env: Env, resolved: ResolvedCredentials): DriveShareClient {
+  if (mockForced(env) || resolved.source === "none") return createMockDriveShareClient();
+  return createGoogleDriveShareClient({ token: createTokenProvider({ credentials: resolved.credentials }) });
+}
+
+/** Defers the account lookup (a D1 read) to the first Drive call, so health probes and
+ *  the account routes themselves never depend on it. */
+function lazyDriveClient(load: () => Promise<DriveShareClient>): DriveShareClient {
+  let client: Promise<DriveShareClient> | null = null;
+  const get = () => (client ??= load());
+  return {
+    listFiles: async (p) => (await get()).listFiles(p),
+    listPermissions: async (fileId) => (await get()).listPermissions(fileId),
+    createPermission: async (fileId, p) => (await get()).createPermission(fileId, p),
+    updatePermission: async (fileId, permId, role) => (await get()).updatePermission(fileId, permId, role),
+    deletePermission: async (fileId, permId) => (await get()).deletePermission(fileId, permId),
+  };
 }
 
 /** Per-request request context (from the trusted x-dub-* headers). The role-membership
@@ -45,8 +54,16 @@ interface ReqCtx {
   userId?: string;
 }
 
-function buildApp(env: Env, reqCtx: ReqCtx): ReturnType<typeof createApp> {
-  const client = buildDriveClient(env);
+async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof createApp>> {
+  const orgId = common.DUB_DEFAULT_ORG_ID;
+  const accountStore = createD1GoogleAccountStore(
+    createDbClient(env.DB, { namespace: "driveshare", requestId: reqCtx.requestId }),
+  );
+  const key = await importTokenKey(env.DRIVESHARE_TOKEN_ENC_KEY);
+  const googleAccount = createGoogleAccountService({ env, store: accountStore, orgId, key });
+  const client = lazyDriveClient(async () =>
+    buildDriveClient(env, await resolveDriveCredentials({ env, store: accountStore, orgId, key })),
+  );
   const service = createDriveShareService({ client, config: parseConfig(env) });
   // sharedAuthzGranter (not createAuthzGranter): the app is rebuilt per request, so the
   // identity /authz/check TTL cache has to be memoized per Env to survive between requests
@@ -56,7 +73,6 @@ function buildApp(env: Env, reqCtx: ReqCtx): ReturnType<typeof createApp> {
     caller: "drive-share-service",
     requestId: reqCtx.requestId,
   });
-  const orgId = common.DUB_DEFAULT_ORG_ID;
 
   const store = createD1RoleGrantStore(createDbClient(env.DB, { namespace: "driveshare", requestId: reqCtx.requestId }));
   const roster = createIdentityRoleMembership(env.SVC_IDENTITY, {
@@ -72,13 +88,14 @@ function buildApp(env: Env, reqCtx: ReqCtx): ReturnType<typeof createApp> {
     newId: () => newId("dsg"),
   });
 
-  return createApp({ service, roleGrants, authz });
+  return createApp({ service, roleGrants, authz, googleAccount });
 }
 
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const requestId = request.headers.get("x-dub-request-id") ?? newRequestId();
     const userId = request.headers.get("x-dub-user-id") ?? undefined;
-    return buildApp(env, { requestId, ...(userId ? { userId } : {}) }).fetch(request, env, ctx);
+    const app = await buildApp(env, { requestId, ...(userId ? { userId } : {}) });
+    return app.fetch(request, env, ctx);
   },
 };

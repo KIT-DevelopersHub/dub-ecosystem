@@ -18,7 +18,7 @@ import { createApp } from "../src/app";
 import { POLICY_TABLE } from "../src/policy-table";
 import { createDriveShareService } from "../src/service";
 import { createMockDriveShareClient } from "../src/mock-client";
-import { allowAll, AUTHED, buildRoleGrants, fakeRoster } from "./helpers";
+import { allowAll, AUTHED, buildRoleGrants, fakeRoster, stubGoogleAccount } from "./helpers";
 import type { PermissionGranter } from "@dub/policy-gate";
 
 function buildApp(authz: PermissionGranter = allowAll) {
@@ -28,7 +28,7 @@ function buildApp(authz: PermissionGranter = allowAll) {
     drive: client,
     roster: fakeRoster({ role_sys_member: ["staff-a@example.com"] }, { role_sys_member: "member" }),
   });
-  return createApp({ service, roleGrants, authz });
+  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount() });
 }
 
 describe("route coverage (POLICY_TABLE <-> router)", () => {
@@ -59,7 +59,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 //   0008 (per-app tier: admin/maintainer 編集, organizer/member 閲覧).
 // The last two rows are not roles but the two legacy shapes the table was written to fix.
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  admin: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write"],
+  admin: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin"],
   maintainer: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write"],
   organizer: ["app:driveshare:view"],
   member: ["app:driveshare:view"],
@@ -99,10 +99,17 @@ const WRITES = [
   "POST /driveshare/files/:id/role-grants/:roleId/reapply",
   "PUT /driveshare/files/:id/link",
 ];
+// Switching the Google account the service acts as: system admin only (identity:admin).
+const ADMIN_ONLY = [
+  "GET /driveshare/google-account",
+  "POST /driveshare/google-account/callback",
+  "POST /driveshare/google-account/connect",
+];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /internal/health"];
 // The whole external surface — what a caller can reach through api-gateway at most.
-const FULL = [...READS, ...WRITES].sort();
+const FULL = [...READS, ...WRITES, ...ADMIN_ONLY].sort();
+const OPERATOR = [...READS, ...WRITES].sort();
 const READ_ONLY = [...READS].sort();
 const NONE: string[] = [];
 
@@ -110,7 +117,7 @@ describe("role x endpoint matrix (frozen)", () => {
   // Loosening a rule adds a route to one of these arrays — a visible diff in review.
   const EXPECTED: Record<keyof typeof ROLE_KEYS, string[]> = {
     admin: FULL,
-    maintainer: FULL,
+    maintainer: OPERATOR,
     organizer: NONE,
     member: NONE,
     "disabled-tier-with-legacy-drive-keys": NONE,

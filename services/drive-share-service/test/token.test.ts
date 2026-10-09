@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { CommonErrorCodes } from "@dub/errors";
-import { createTokenProvider } from "../src/google/token";
+import { createTokenProvider, isInvalidGrant } from "../src/google/token";
 
 const CREDS = { clientId: "cid", clientSecret: "sec", refreshToken: "rt" };
 
@@ -38,5 +38,21 @@ describe("token provider", () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: "invalid_grant" }, 400));
     const tp = createTokenProvider({ credentials: CREDS, fetchImpl: fetchImpl as unknown as typeof fetch });
     await expect(tp.getAccessToken()).rejects.toMatchObject({ code: CommonErrorCodes.UPSTREAM_UNAVAILABLE });
+  });
+
+  it("tags invalid_grant (revoked / expired refresh token) so the UI can ask for a reconnect", async () => {
+    const revoked = createTokenProvider({
+      credentials: CREDS,
+      fetchImpl: vi.fn(async () => jsonResponse({ error: "invalid_grant" }, 400)) as unknown as typeof fetch,
+    });
+    const err = await revoked.getAccessToken().catch((e: unknown) => e);
+    expect(isInvalidGrant(err)).toBe(true);
+    expect(JSON.stringify(err)).not.toContain("rt");
+
+    const down = createTokenProvider({
+      credentials: CREDS,
+      fetchImpl: vi.fn(async () => jsonResponse({ error: "server_error" }, 500)) as unknown as typeof fetch,
+    });
+    expect(isInvalidGrant(await down.getAccessToken().catch((e: unknown) => e))).toBe(false);
   });
 });
