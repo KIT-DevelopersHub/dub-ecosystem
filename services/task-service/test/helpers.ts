@@ -3,13 +3,12 @@ import type { RequestContext } from "@dub/http";
 import type { DubEventEnvelope } from "@dub/events";
 import type { IdempotencyStore } from "@dub/events";
 import type { task, common, auditLog, identity } from "@dub/types";
-import { DubError, CommonErrorCodes } from "@dub/errors";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { AppConfig } from "../src/env";
 import type { Deps } from "../src/deps";
 import type { TaskRepo, InsertTaskInput, InsertAttachmentInput, TaskPatch, ListFilter, DueSoonRow } from "../src/repo";
-import type { EventClient, EventRef, IdentityClient, Authorizer } from "../src/clients";
+import type { EventClient, EventRef, IdentityClient } from "../src/clients";
 import type { EventPublisher, Auditor } from "../src/events";
-import type { Principal } from "../src/principal";
 
 interface Rec extends task.Task {
   createdBy: string;
@@ -253,14 +252,18 @@ export class FakeAuditor implements Auditor {
   }
 }
 
-export class FakeAuthorizer implements Authorizer {
+/**
+ * Permission source for tests: every key is held unless named in `denied`.
+ *
+ * It is a `PermissionGranter` — the gate's own port — so a test that denies a key exercises
+ * the real `policyGate` decision path rather than a stand-in for it. Only the KEYS are faked;
+ * `denied.add("task:write")` therefore also denies the writes' `app:tasks:edit` sibling only
+ * if that key is named too, which is what makes a role-shaped test possible.
+ */
+export class FakeGranter {
   denied = new Set<identity.PermissionKey>();
-  async require(_ctx: RequestContext, principal: Principal, permission: identity.PermissionKey): Promise<void> {
-    if (principal.kind === "service") return;
-    if (this.denied.has(permission)) {
-      throw new DubError(CommonErrorCodes.FORBIDDEN, `permission denied: ${permission}`, { status: 403 });
-    }
-  }
+  readonly granter: PermissionGranter = async (_userId, _orgId, keys) =>
+    keys.filter((k) => !this.denied.has(k));
 }
 
 export class FakeEventClient implements EventClient {
@@ -294,7 +297,7 @@ export interface TestHarness {
   repo: InMemoryTaskRepo;
   events: FakeEventPublisher;
   audit: FakeAuditor;
-  authz: FakeAuthorizer;
+  authz: FakeGranter;
   eventClient: FakeEventClient;
   identity: FakeIdentityClient;
   idempotency: FakeIdempotencyStore;
@@ -311,11 +314,11 @@ export function makeHarness(): TestHarness {
   const repo = new InMemoryTaskRepo();
   const events = new FakeEventPublisher();
   const audit = new FakeAuditor();
-  const authz = new FakeAuthorizer();
+  const authz = new FakeGranter();
   const eventClient = new FakeEventClient();
   const identity = new FakeIdentityClient();
   const idempotency = new FakeIdempotencyStore();
-  const deps: Deps = { config, repo, events, audit, authz, eventClient, identity, idempotency };
+  const deps: Deps = { config, repo, events, audit, authz: authz.granter, eventClient, identity, idempotency };
   return { deps, repo, events, audit, authz, eventClient, identity, idempotency, config };
 }
 

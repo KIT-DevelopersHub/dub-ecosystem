@@ -5,16 +5,20 @@ import type { DriveClient } from "../src/deps";
 import {
   createMemoryFileRepo,
   createMemoryBlobStore,
-  createStubAuth,
+  createStubGranter,
   createSpyEmit,
   createSpyAudit,
 } from "./mem";
 
+// Grants carry BOTH halves of each rule, because POLICY_TABLE demands both: the Drive共有
+// ロール管理 tier (`app:driveshare:view` / `:edit`) AND the fine-grained `file:*` key.
 const GRANTS: Record<string, identity.PermissionKey[]> = {
-  admin: ["file:read", "file:write", "file:admin"],
-  writer: ["file:read", "file:write"],
-  reader: ["file:read"],
+  admin: ["app:driveshare:view", "app:driveshare:edit", "file:read", "file:write", "file:admin"],
+  writer: ["app:driveshare:view", "app:driveshare:edit", "file:read", "file:write"],
+  reader: ["app:driveshare:view", "file:read"],
   nobody: [],
+  // A second writer, to exercise "someone else's private file" without using the admin.
+  writer2: ["app:driveshare:view", "app:driveshare:edit", "file:read", "file:write"],
 };
 
 const drive: DriveClient = { async getFile(id) { return { name: `drive-${id}`, mimeType: "application/pdf" }; } };
@@ -24,7 +28,7 @@ function build(grants: Record<string, identity.PermissionKey[]> = GRANTS) {
   const blobs = createMemoryBlobStore();
   const emitS = createSpyEmit();
   const auditS = createSpyAudit();
-  const app = createApp({ repo, blobs, emit: emitS.emit, audit: auditS.audit, auth: createStubAuth(grants), drive });
+  const app = createApp({ repo, blobs, emit: emitS.emit, audit: auditS.audit, authz: createStubGranter(grants), drive });
   return { app, repo, blobs, emit: emitS.calls, audit: auditS.calls };
 }
 
@@ -47,7 +51,9 @@ async function register(app: ReturnType<typeof build>["app"], userId: string, ov
 describe("health", () => {
   it("returns contract version", async () => {
     const { app } = build();
-    const res = await req(app, "GET", "/internal/health");
+    // INTERNAL in POLICY_TABLE: a probe arrives over a Service Binding carrying the marker.
+    // The refusal path for a request without it is asserted in test/policy-table.test.ts.
+    const res = await req(app, "GET", "/internal/health", { headers: { "x-dub-internal": "1" } });
     expect(res.status).toBe(200);
     const body = await res.json() as { status: string; contractVersion: string };
     expect(body.status).toBe("ok");
@@ -208,7 +214,7 @@ describe("R2 upload/download round-trip (test #6, #7)", () => {
     const blobs = createMemoryBlobStore();
     const emitS = createSpyEmit();
     const auditS = createSpyAudit();
-    const app = createApp({ repo, blobs, emit: emitS.emit, audit: auditS.audit, auth: createStubAuth(GRANTS), config: { maxUploadBytes: 4 } });
+    const app = createApp({ repo, blobs, emit: emitS.emit, audit: auditS.audit, authz: createStubGranter(GRANTS), config: { maxUploadBytes: 4 } });
     const res = await req(app, "POST", "/files", { userId: "writer", raw: new Uint8Array([1, 2, 3, 4, 5]) });
     expect(res.status).toBe(413);
   });
@@ -250,6 +256,61 @@ describe("authz + visibility (test #9)", () => {
     const asAdmin = await req(app, "PATCH", `/files/meta/${file.id}`, { userId: "admin", body: { ownerId: "someone" } });
     expect(asAdmin.status).toBe(200);
     expect((await asAdmin.json() as fileMeta.FileMeta).ownerId).toBe("someone");
+  });
+});
+
+// The instance-level half of the policy migration (inventory §3(d)). The table can only say
+// "this caller may write files"; whether THIS private file is theirs to write is asserted in
+// the handler, and before the migration it was not asserted at all on the mutating routes —
+// a `file:write` holder could logically delete, rename and relink a private file it was
+// forbidden to read. These are the regression guards for that fix.
+describe("private-file ownership on mutations (§3(d) fix)", () => {
+  // writer2 holds the full 編集 tier + file:write, i.e. the table lets it in. Only the
+  // instance-level check stands between it and someone else's private file.
+  const privateOf = async (app: ReturnType<typeof build>["app"]): Promise<fileMeta.FileMeta> =>
+    register(app, "writer", { visibility: "private" });
+
+  it("DELETE: a non-owner writer cannot logically delete someone else's private file", async () => {
+    const { app, repo } = build();
+    const file = await privateOf(app);
+    const res = await req(app, "DELETE", `/files/meta/${file.id}`, { userId: "writer2" });
+    expect(res.status).toBe(403);
+    // and the row is genuinely untouched (not a 403 after the write)
+    expect((await repo.getFile(file.id))!.archivedAt).toBeNull();
+  });
+
+  it("DELETE: the owner and a file:admin still can", async () => {
+    const { app } = build();
+    const own = await privateOf(app);
+    expect((await req(app, "DELETE", `/files/meta/${own.id}`, { userId: "writer" })).status).toBe(204);
+    const other = await privateOf(app);
+    expect((await req(app, "DELETE", `/files/meta/${other.id}`, { userId: "admin" })).status).toBe(204);
+  });
+
+  it("PATCH: a non-owner writer cannot edit someone else's private file", async () => {
+    const { app, repo } = build();
+    const file = await privateOf(app);
+    const res = await req(app, "PATCH", `/files/meta/${file.id}`, { userId: "writer2", body: { name: "stolen.txt" } });
+    expect(res.status).toBe(403);
+    expect((await repo.getFile(file.id))!.name).toBe("doc.txt");
+  });
+
+  it("links: a non-owner writer can neither link nor unlink someone else's private file", async () => {
+    const { app } = build();
+    const file = await privateOf(app);
+    const link = { targetType: "event", targetId: "event_1" };
+    expect((await req(app, "POST", `/files/meta/${file.id}/links`, { userId: "writer2", body: link })).status).toBe(403);
+    // owner links it, the other writer still cannot remove it
+    expect((await req(app, "POST", `/files/meta/${file.id}/links`, { userId: "writer", body: link })).status).toBe(201);
+    expect((await req(app, "DELETE", `/files/meta/${file.id}/links`, { userId: "writer2", body: link })).status).toBe(403);
+    expect((await req(app, "DELETE", `/files/meta/${file.id}/links`, { userId: "writer", body: link })).status).toBe(204);
+  });
+
+  it("org files stay writable by any writer (the check narrows private only)", async () => {
+    const { app } = build();
+    const file = await register(app, "writer", { visibility: "org" });
+    expect((await req(app, "PATCH", `/files/meta/${file.id}`, { userId: "writer2", body: { name: "ok.txt" } })).status).toBe(200);
+    expect((await req(app, "DELETE", `/files/meta/${file.id}`, { userId: "writer2" })).status).toBe(204);
   });
 });
 

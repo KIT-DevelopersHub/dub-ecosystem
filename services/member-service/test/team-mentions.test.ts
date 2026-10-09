@@ -47,11 +47,12 @@ describe("GET /members/internal/team-members", () => {
     expect((await call(app, "GET", "/members/internal/team-members", { internal: true })).json.userIds).toEqual([]);
   });
 
-  it("is service-to-service only — an external caller gets 404 (route hidden)", async () => {
+  it("is service-to-service only — an external caller gets 403 internal_only", async () => {
     const app = createApp(makeDeps());
     const { hq } = await seedTeamWithPeople(app);
     const res = await call(app, "GET", `/members/internal/team-members?teamIds=${hq}`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(res.json.error.details.reason).toBe("internal_only");
   });
 });
 

@@ -6,7 +6,7 @@ import { createApp } from "../src/app";
 import type { IngestDeps } from "../src/ingest";
 import type { Env, WebhookEnvelope } from "../src/env";
 import { hmacSha256Hex } from "../src/crypto";
-import { FakeRepo, FakeQueue, FakeR2, fakeEnv } from "./helpers";
+import { FakeRepo, FakeQueue, FakeR2, fakeEnv, allowAll } from "./helpers";
 
 const DRIVE_TOKEN = "drive-token-1";
 const STRIPE_SECRET = "whsec_test";
@@ -30,9 +30,7 @@ function harness() {
   const app = createApp({
     buildDeps: () => deps,
     buildRepo: () => repo,
-    requireWebhookRead: async (_c, next) => {
-      await next();
-    },
+    granted: allowAll,
   });
   const env: Env = fakeEnv({
     DRIVE_WEBHOOK_TOKEN: DRIVE_TOKEN,
@@ -154,9 +152,7 @@ describe("gmail ingress (enabled in 9-B)", () => {
       verifiers: {
         gmail: async () => ({ ok: true, externalId: "msg-42", eventKind: "gmail.push" }),
       },
-      requireWebhookRead: async (_c, next) => {
-        await next();
-      },
+      granted: allowAll,
     });
     const env: Env = fakeEnv({
       GMAIL_WEBHOOK_AUDIENCE: "https://hooks.developershub.jp/hooks/gmail",

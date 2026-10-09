@@ -1,0 +1,29 @@
+{
+  "name": "@dub/policy-gate",
+  "version": "0.1.0",
+  "description": "DevHub (Dub) policy gate — the single entry-layer PEP: one declarative METHOD /path -> PermissionKey[] table per service, fail-closed for any route the table does not mention.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dub/errors": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@dub/types": "workspace:*",
+    "hono": "^4"
+  }
+}

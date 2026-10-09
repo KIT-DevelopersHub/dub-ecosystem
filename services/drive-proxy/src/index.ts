@@ -2,7 +2,8 @@
 // Hono app: the real Google Drive/Sheets client, the real OAuth refresh-token
 // provider (refresh token from Workers Secrets, access token KV-cached), the real KV
 // response cache + soft rate-limiter, the real file-meta + audit queue publishers, and
-// the real identity /authz/check checker. There is NO stub/mock wiring here — the
+// the real @dub/policy-gate granter over identity /authz/check (authz itself is
+// POLICY_TABLE in src/policy-table.ts). There is NO stub/mock wiring here — the
 // injectable fetch/deps seams in the google/* and events modules exist only so unit
 // tests avoid the network. What remains before this Worker can deploy is apply-time
 // provisioning ONLY (the KV namespace id + the `DB` D1 id in wrangler.toml, the three
@@ -13,9 +14,9 @@
 // in the `drive_watch_channels` registry (this D1 is watch state ONLY — file metadata
 // stays with file-meta-service). When no D1 is bound the watch routes 500 and the rest
 // of the surface is unaffected.
-import type { ExecutionContext, Fetcher } from "@cloudflare/workers-types";
-import { createServiceClient, newRequestId } from "@dub/http";
-import type { identity } from "@dub/types";
+import type { ExecutionContext } from "@cloudflare/workers-types";
+import { newRequestId } from "@dub/http";
+import { sharedAuthzGranter } from "@dub/policy-gate";
 import { createApp } from "./app";
 import { createKvCache } from "./cache";
 import { createKvRateLimiter } from "./ratelimit";
@@ -26,31 +27,9 @@ import { createTokenProvider } from "./google/token";
 import { createDriveService } from "./service";
 import { createWatchChannelRepo } from "./watch/repo";
 import { createWatchService, type WatchService } from "./watch/service";
-import type { PermissionChecker, DrivePermission } from "./permissions";
 import { parseConfig, type Env } from "./env";
 
-/**
- * identity /authz/check checker. drive:read / drive:write are not yet in the frozen
- * PermissionKey union (§8-1#2) so the key is cast at the wire boundary; identity
- * resolves it as a plain string. Swap the cast for a typed key when the catalog
- * adds the two entries (no behavioural change).
- */
-function createIdentityAuthz(binding: Fetcher): PermissionChecker {
-  const client = createServiceClient(binding, { service: "identity-roster", caller: "drive-proxy" });
-  return {
-    async check(userId: string, orgId: string, permission: DrivePermission): Promise<boolean> {
-      const req: identity.AuthzCheckRequest = {
-        subjectUserId: userId,
-        orgId,
-        checks: [{ permission: permission as unknown as identity.PermissionKey }],
-      };
-      const res = await client.post<identity.AuthzCheckResponse>({ requestId: newRequestId() }, "/authz/check", req);
-      return res.decisions[0]?.allowed ?? false;
-    },
-  };
-}
-
-function buildApp(env: Env): ReturnType<typeof createApp> {
+function buildApp(env: Env, requestId: string): ReturnType<typeof createApp> {
   const cache = createKvCache(env.KV);
   const config = parseConfig(env);
   const token = createTokenProvider({
@@ -68,7 +47,11 @@ function buildApp(env: Env): ReturnType<typeof createApp> {
   // sees the same {EVT_FILE_META, AUDIT_QUEUE} shape either way — the swap is invisible.
   const events = createEventPublisher(buildPublisherEnv(env));
   const service = createDriveService({ google, cache, rate, events, config });
-  const authz = createIdentityAuthz(env.SVC_IDENTITY);
+  // sharedAuthzGranter (not createAuthzGranter): the app is rebuilt per request, so the
+  // identity /authz/check TTL cache has to be memoized per Env to survive between requests
+  // in the same isolate — otherwise every gated route is an unconditional identity
+  // subrequest and identity-roster becomes a hot-path single point of failure (ADR 0004).
+  const authz = sharedAuthzGranter(env, env.SVC_IDENTITY, { caller: "drive-proxy", requestId });
   const watch = buildWatch(env, google, rate, events, config);
   return createApp({ service, authz, ...(watch ? { watch } : {}) });
 }
@@ -99,7 +82,8 @@ function buildWatch(
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
-    return buildApp(env).fetch(request, env, ctx);
+    const requestId = request.headers.get("x-dub-request-id") ?? newRequestId();
+    return buildApp(env, requestId).fetch(request, env, ctx);
   },
 
   // NOTE: no scheduled() drain here. The freeq outbox is drained centrally by the

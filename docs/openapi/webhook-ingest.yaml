@@ -6,12 +6,12 @@ info:
   title: Webhook Ingest API
   version: 1.0.0
   description: |-
-    Two faces: a provider-facing signature-verified ingress at /hooks/{source} (direct, not proxied), and administrative delivery reads exposed via the gateway at /api/v1/webhooks. Persists a single WebhookEventEnvelopeV1 (payloads >96KB spill to R2) and re-publishes onto the Queue.
+    Two faces: a provider-facing signature-verified ingress at /hooks/{source} (direct, not proxied), and administrative delivery reads exposed through the gateway's /api/v1/webhooks segment (the gateway strips /api/v1, so this service serves them at /webhooks/*). Persists a single WebhookEventEnvelopeV1 (payloads >96KB spill to R2) and re-publishes onto the Queue.
     
     All responses echo the correlation id in the x-dub-request-id header.
 servers:
   - url: https://webhook-ingest.example
-    description: Provider ingress base (/hooks/*) is public and signature-verified. The /api/v1/webhooks/* admin reads are reached through the api-gateway.
+    description: Provider ingress base (/hooks/*) is public and signature-verified. The /webhooks/* admin reads are reached through the api-gateway, which strips /api/v1 before forwarding.
 tags:
   - name: webhooks
   - name: health
@@ -73,13 +73,13 @@ paths:
                   status:
                     type: string
       security: []
-  /api/v1/webhooks/deliveries:
+  /webhooks/deliveries:
     get:
       operationId: listDeliveries
       summary: Search webhook delivery records
       tags:
         - webhooks
-      description: Administrative read via the api-gateway (segment /api/v1/webhooks). Requires webhook:read.
+      description: Administrative read via the api-gateway (external path /api/v1/webhooks/deliveries; API_PREFIX is stripped before it reaches this service). Requires webhook:read.
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
@@ -105,7 +105,7 @@ paths:
       security:
         - sessionCookie: []
         - gatewayIdentity: []
-  /api/v1/webhooks/deliveries/{id}:
+  /webhooks/deliveries/{id}:
     get:
       operationId: getDelivery
       summary: Get a webhook delivery

@@ -21,6 +21,7 @@ export default defineConfig({
         pkg("@dub/db"),
         pkg("@dub/events"),
         pkg("@dub/auth-client"),
+        pkg("@dub/policy-gate"),
         pkg("@dub/gantt-calc"),
       ].map(([k, v]) => [k, v]),
     ),

@@ -1,21 +1,14 @@
 // Deployment routes. POST is async (202): write-ahead intent audit -> persist queued
 // row -> enqueue the private deploy-jobs message. The CF call + result audit + status
 // event happen in the queue consumer (see queue.ts).
+// Authorization (infra:deploy to execute, infra:read to look) is declared in
+// src/policy-table.ts and enforced by policyGate, not here.
 import { Hono } from "hono";
 import type { FieldError } from "@dub/errors";
 import { errors } from "@dub/errors";
 import type { deploy } from "@dub/types";
 import type { AppEnv } from "../http";
-import {
-  getDeps,
-  reqCtx,
-  requireAuth,
-  requirePermission,
-  readJson,
-  requireString,
-  optionalString,
-  assertValid,
-} from "../http";
+import { getDeps, reqCtx, readJson, requireString, optionalString, assertValid } from "../http";
 import { toDeployment } from "../mappers";
 import type { DeployJobMessage } from "../jobs";
 
@@ -24,7 +17,7 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 export function registerDeploymentRoutes(app: Hono<AppEnv>): void {
-  app.post("/deploy/deployments", requireAuth, requirePermission("infra:deploy", true), async (c) => {
+  app.post("/deploy/deployments", async (c) => {
     const deps = getDeps(c);
     const body = await readJson(c);
     const fe: FieldError[] = [];
@@ -75,7 +68,7 @@ export function registerDeploymentRoutes(app: Hono<AppEnv>): void {
     return c.json(toDeployment(row), 202);
   });
 
-  app.get("/deploy/deployments", requireAuth, requirePermission("infra:read"), async (c) => {
+  app.get("/deploy/deployments", async (c) => {
     const deps = getDeps(c);
     const siteId = c.req.query("siteId");
     const statusRaw = c.req.query("status");
@@ -100,7 +93,7 @@ export function registerDeploymentRoutes(app: Hono<AppEnv>): void {
     return c.json(res);
   });
 
-  app.get("/deploy/deployments/:id", requireAuth, requirePermission("infra:read"), async (c) => {
+  app.get("/deploy/deployments/:id", async (c) => {
     const deps = getDeps(c);
     const id = c.req.param("id");
     const row = await deps.repo.getDeployment(id);

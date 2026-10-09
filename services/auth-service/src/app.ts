@@ -6,15 +6,27 @@
 // restricted to a single company domain (ALLOWED_LOGIN_DOMAIN, default
 // developershub.jp). The mobile exchange route (/mobile/exchange) is a separate
 // mobile-client track and is intentionally left untouched.
+//
+// AUTHORIZATION: none in this file. `policyGate` is mounted first and derives every
+// authorization decision from POLICY_TABLE (src/policy-table.ts), which lists every route
+// below. Do NOT add a permission check or an `x-dub-internal` guard to a route or a handler —
+// add the route to the table (test/policy-table.test.ts fails if you forget).
+//
+// AUTHENTICATION is a different thing and DOES live here, because most of this service's
+// surface is `PUBLIC` by necessity (it is what issues sessions, so it cannot require one —
+// see policy-table.ts). The session/credential verification inside the /auth/* handlers
+// proves a credential presented in the request; it never consults a permission key. Removing
+// it would not simplify anything, it would unauthenticate login.
 import { Hono } from "hono";
 import { dubErrorHandler, errors, type FieldError } from "@dub/errors";
-import { extractContext, type RequestContext } from "@dub/http";
-import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
+import { extractContext, newRequestId, type RequestContext } from "@dub/http";
+import { policyGate, type PermissionGranter, type PolicyGateVars } from "@dub/policy-gate";
 import type { auth, identity } from "@dub/types";
 import type { Deps } from "./deps";
 import type { AppConfig } from "./env";
 import { authErrors } from "./errors";
 import { verifyPassword, setCredential, decryptSecret, generatePassword } from "./passwords";
+import { POLICY_TABLE } from "./policy-table";
 import { PasskeyError, toSummary } from "./passkeys";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 
@@ -30,10 +42,6 @@ interface OkResponse {
 
 function ctxOf(c: { req: { raw: Request } }): RequestContext {
   return extractContext(c.req.raw.headers, { allowGenerate: true });
-}
-
-function requireInternal(c: { req: { header: (n: string) => string | undefined } }): void {
-  if (c.req.header(HDR_INTERNAL) !== INTERNAL_HEADER_VALUE) throw authErrors.internalForbidden();
 }
 
 function readCookie(header: string | undefined, name: string): string | null {
@@ -133,12 +141,45 @@ async function provisionOrThrow(
   return result.user;
 }
 
-export function buildApp(deps: Deps): Hono {
-  const app = new Hono();
+/**
+ * The gate's PermissionGranter port, backed by the SAME identity-roster `/authz/check` call
+ * the admin-password handlers used to make inline (`IdentityClient.hasPermission`). Deriving
+ * it from `deps.identity` rather than wiring `createAuthzGranter` separately keeps ONE
+ * permission source for the service and its tests, so the gate decides exactly what the
+ * removed inline checks decided.
+ *
+ * Fail-closed is preserved: `hasPermission` throws on a transport/upstream failure, the gate
+ * propagates it, and the request becomes a 5xx. It never degrades into "no decision, allow".
+ *
+ * `orgId` is ignored deliberately — `hasPermission` asks about `common.DUB_DEFAULT_ORG_ID`,
+ * which is also the gate's default `orgId`, so there is nothing to vary. Only one key
+ * (`identity:admin`) is demanded anywhere in POLICY_TABLE, so the loop is one subrequest.
+ */
+function granterFrom(deps: Deps): PermissionGranter {
+  return async (userId, _orgId, keys) => {
+    // The gate cannot hand us the inbound request context, so mint a correlation id — the
+    // same trade-off @dub/policy-gate's own createAuthzGranter makes.
+    const ctx: RequestContext = { requestId: newRequestId(), caller: "auth-service" };
+    const held: identity.PermissionKey[] = [];
+    for (const key of keys) {
+      if (await deps.identity.hasPermission(ctx, userId, key)) held.push(key);
+    }
+    return held;
+  };
+}
+
+export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
+  const app = new Hono<{ Variables: PolicyGateVars }>();
   app.onError(dubErrorHandler({ service: "auth-service" }));
 
   const { config } = deps;
 
+  // The authorization layer. First and only — every route below is gated by POLICY_TABLE,
+  // including the conditionally registered /auth/demo-login further down.
+  app.use("*", policyGate({ service: "auth-service", table: POLICY_TABLE, granted: granterFrom(deps) }));
+
+  // Liveness. INTERNAL in the table: reachable only over a Service Binding carrying
+  // x-dub-internal, which is exactly how app-health-monitor probes it.
   app.get("/health", (c) => c.json({ ok: true, service: "auth-service" }));
 
   // ---- POST /auth/password/login (public) ----
@@ -253,17 +294,18 @@ export function buildApp(deps: Deps): Hono {
     return c.json(res);
   });
 
-  // ---- POST /internal/admin/users/:userId/password (internal + identity:admin — #5a) ----
+  // ---- POST /internal/admin/users/:userId/password (#5a) ----
   // An admin sets or re-issues a user's initial password (e.g. the roster's
   // github-synced accounts that have no credential yet). Body: { password?, generate?,
   // mustChange? }. When no password is supplied (or generate=true) a strong random one
   // is generated and returned ONCE so the admin can hand it over.
+  //
+  // AUTHZ: `internalWithKeys(["identity:admin"])` in POLICY_TABLE — the x-dub-internal marker
+  // AND identity:admin, both enforced before this runs. That rule also guarantees an actor, so
+  // `c.get("userId")` is always the acting admin here (the gate 401s otherwise).
   app.post("/internal/admin/users/:userId/password", async (c) => {
-    requireInternal(c);
     const ctx = ctxOf(c);
-    const actor = ctx.userId;
-    if (!actor) throw errors.unauthenticated();
-    if (!(await deps.identity.hasPermission(ctx, actor, "identity:admin"))) throw errors.forbidden("identity:admin required");
+    const actor = c.get("userId");
 
     const targetId = c.req.param("userId");
     const target = await deps.identity.getUser(ctx, targetId);
@@ -300,16 +342,16 @@ export function buildApp(deps: Deps): Hono {
     return c.json(res);
   });
 
-  // ---- GET /internal/admin/users/:userId/password (internal + identity:admin — #5c) ----
+  // ---- GET /internal/admin/users/:userId/password (#5c) ----
   // An admin views a user's current password (decision B, risk accepted). The plaintext
   // is NEVER stored: it is decrypted on demand from the AES-GCM copy under the server
   // key, and every view is audited (auth.password.viewed).
+  //
+  // AUTHZ: same rule as the setter above — `internalWithKeys(["identity:admin"])`. A read this
+  // sensitive is not a weaker operation than the write.
   app.get("/internal/admin/users/:userId/password", async (c) => {
-    requireInternal(c);
     const ctx = ctxOf(c);
-    const actor = ctx.userId;
-    if (!actor) throw errors.unauthenticated();
-    if (!(await deps.identity.hasPermission(ctx, actor, "identity:admin"))) throw errors.forbidden("identity:admin required");
+    const actor = c.get("userId");
 
     const targetId = c.req.param("userId");
     const target = await deps.identity.getUser(ctx, targetId);
@@ -337,9 +379,9 @@ export function buildApp(deps: Deps): Hono {
     return c.json({ userId: targetId, email, password });
   });
 
-  // ---- POST /verify (internal: gateway / MO3 only) ----
+  // ---- POST /verify (INTERNAL in the table: gateway / MO3 only) ----
+  // No actor required: the gateway calls this to find out WHO the caller is.
   app.post("/verify", async (c) => {
-    requireInternal(c);
     const body = await readJson<Partial<auth.AuthVerifyRequest>>(c);
     const token = typeof body.token === "string" ? body.token : "";
     const result = await deps.sessions.verify(token);
@@ -446,11 +488,10 @@ export function buildApp(deps: Deps): Hono {
     });
   }
 
-  // ---- POST /mobile/exchange (internal: MO3 only — theme8) ----
+  // ---- POST /mobile/exchange (INTERNAL in the table: MO3 only — theme8) ----
   // Mobile-client login track (native Google sign-in via MO3). Intentionally kept:
   // the web-console Google removal does not touch the mobile exchange contract.
   app.post("/mobile/exchange", async (c) => {
-    requireInternal(c);
     const ctx = ctxOf(c);
     const body = await readJson<Partial<auth.MobileExchangeRequest>>(c);
     const code = requireString(body.code, "code");
@@ -468,9 +509,10 @@ export function buildApp(deps: Deps): Hono {
     return c.json(res);
   });
 
-  // ---- POST /internal/revoke-user (internal: identity-roster only) ----
+  // ---- POST /internal/revoke-user (INTERNAL in the table: identity-roster only) ----
+  // Bare INTERNAL, so an acting user is optional (a sync job has none) — hence the
+  // `ctx.userId ?? null` actor below rather than the gate's guaranteed `userId`.
   app.post("/internal/revoke-user", async (c) => {
-    requireInternal(c);
     const ctx = ctxOf(c);
     const body = await readJson<{ userId?: string; reason?: string }>(c);
     const userId = requireString(body.userId, "userId");

@@ -60,6 +60,12 @@ export interface InboundDeps {
    *  inbound message to a roster userId (Inbox account scope). Optional so unit tests that
    *  don't exercise owner resolution can omit it (owner then resolves to null). */
   identity?: Fetcher;
+  /** Compliance archive address (MAIL_ARCHIVE_CC) — excluded from owner resolution.
+   *  See OwnerAddressPolicy.archiveAddress. */
+  archiveAddress?: string | null;
+  /** Shared system address (MAIL_FROM_ADDRESS) — owner only as a last resort.
+   *  See OwnerAddressPolicy.sharedAddress. */
+  sharedAddress?: string | null;
 }
 
 // Normalized inbound message parsed from a raw RFC822 message (Email Routing).
@@ -74,6 +80,30 @@ export interface ParsedInbound {
   // so a trimmed References chain still joins the root conversation (改善#3). Empty for a
   // brand-new (unreferenced) message.
   references: string[];
+  // Owner-resolution candidates, MOST AUTHORITATIVE FIRST: the envelope recipient (the
+  // address Email Routing actually delivered this copy to) followed by the To: header
+  // addresses. Envelope-first because To: holds an external address whenever we are only
+  // in CC/BCC — resolving from To: alone left those messages ownerless (invisible).
+  // Shared/system addresses are demoted or dropped per OwnerAddressPolicy.
+  ownerCandidates: mail.MailAddress[];
+}
+
+/**
+ * Which delivery addresses may own an inbound message (mail visibility boundary — keep
+ * this conservative). Both are plain addresses; empty/absent disables that rule.
+ */
+export interface OwnerAddressPolicy {
+  /** Compliance archive address (MAIL_ARCHIVE_CC, e.g. archive@). EVERY outbound send is
+   *  auto-CC'd here and the copy is routed back in, so if it could own a message the
+   *  whole company's sent mail would become one account's ordinary Inbox. config.ts
+   *  defines these copies as mail:read_all (oversight) material only → NEVER an owner,
+   *  in any candidate position. */
+  archiveAddress?: string | null;
+  /** Shared system address (MAIL_FROM_ADDRESS, e.g. info@). A genuine shared inbox, so it
+   *  MAY own a message — but it is tried only AFTER the To: header so that mail addressed
+   *  to an individual is not re-homed to the shared account (and hidden from its real
+   *  recipient) just because it was routed through the alias. */
+  sharedAddress?: string | null;
 }
 
 // ---- reconciled cross-service inbound DTO (統合波 reconcile, 2026-08) ----

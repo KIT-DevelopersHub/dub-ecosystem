@@ -1,5 +1,13 @@
-// App wiring. Middleware order: CORS (answers preflight) -> requestId -> rate limit,
-// then gateway-owned routes, then the transparent API_PREFIX/* catch-all, then 404.
+// App wiring. Middleware order: CORS (answers preflight) -> requestId -> rate limit ->
+// policy gate, then gateway-owned routes, then the transparent API_PREFIX/* catch-all,
+// then 404.
+//
+// AUTHZ: none in this file or in any handler. `gatewayPolicyGate` is the single
+// authorization layer and derives every decision from POLICY_TABLE (src/policy-table.ts),
+// which lists all 12 gateway-owned routes. Do NOT add a permission check to a route or a
+// handler — add the route to the table (test/policy-table.test.ts fails if you forget).
+// Proxied /api/v1/* routes are authorized by the service that owns them (see policy-table.ts
+// for why the catch-all is deliberately not a table entry).
 import { Hono } from "hono";
 import type { GatewayEnv } from "./env";
 import { requestIdMiddleware, gatewayErrorHandler, gatewayError, GATEWAY_ROUTE_NOT_FOUND, type GatewayVariables } from "./context";
@@ -16,6 +24,8 @@ import { getSelfProfileHandler, updateSelfProfileHandler } from "./handlers/self
 import { getSelfParticipationHandler, updateSelfParticipationHandler } from "./handlers/self-participation";
 import { gatewayRouteHandler } from "./gateway-route";
 import { API_PREFIX } from "./routes";
+import { gatewayPolicyGate } from "./policy";
+import type { PermissionGranter } from "@dub/policy-gate";
 import type { TurnstileVerifier } from "./turnstile";
 
 export interface CreateAppOptions {
@@ -23,6 +33,8 @@ export interface CreateAppOptions {
   turnstile?: TurnstileVerifier;
   /** override rate limiter (tests / infra native binding). Defaults to in-memory fixed window. */
   rateLimiter?: RateLimiter;
+  /** override the permission source the policy gate consults (tests). Defaults to identity. */
+  authz?: PermissionGranter;
 }
 
 export type GatewayApp = Hono<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
@@ -40,6 +52,22 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.use("*", corsMiddleware());
   app.use("*", requestIdMiddleware());
   app.use("*", rateLimitMiddleware(fallback, { preferEnv: injected === undefined }));
+
+  // THE authorization layer — first and only, ahead of every route below. It is mounted
+  // AFTER these three on purpose, and the order is load-bearing:
+  //   cors      must answer the preflight. An OPTIONS request carries no credentials by
+  //             spec, so authorizing it is meaningless; gating it would make the browser
+  //             report a CORS failure for every cross-origin call the SPA makes.
+  //   requestId the gate's 401/403 are thrown as DubErrors and formatted by onError, which
+  //             stamps the correlation id — mounting the gate first would mint a fresh id
+  //             instead of inheriting the caller's x-dub-request-id on exactly the
+  //             responses that most need tracing.
+  //   rateLimit an unauthenticated flood must be cheap to refuse. Gating first would run an
+  //             auth-service verify per hostile request, and it would also flip the
+  //             established 429-before-401 precedence.
+  // Nothing in those three makes an authorization decision, so the gate is still the only
+  // place where one is made.
+  app.use("*", gatewayPolicyGate(options.authz ? { authz: options.authz } : {}));
 
   // liveness (public, deliberately NOT under API_PREFIX — root-mounted probe).
   app.get("/healthz", healthzHandler);
@@ -70,7 +98,12 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.get(`${API_PREFIX}/me/participation`, getSelfParticipationHandler);
   app.post(`${API_PREFIX}/me/participation`, updateSelfParticipationHandler);
 
-  // transparent routing for everything else under the API prefix
+  // Transparent routing for everything else under the API prefix. `app.all` is deliberate
+  // (and the one exception to the inventory's 4.4 ban): this is a pass-through MOUNT whose
+  // authorization decision belongs to the downstream service, so the gate must let it by —
+  // which is exactly what Hono's ALL + "/*" registration means to `matchedRouteKey`. The
+  // concrete-method routes above always win the same match, so they stay gated. Full
+  // reasoning, and the test that keeps this from becoming a loophole, in policy-table.ts.
   app.all(`${API_PREFIX}/*`, gatewayRouteHandler);
 
   // anything not under the API prefix

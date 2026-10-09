@@ -3,7 +3,7 @@ import type { R2Bucket, Queue } from "@cloudflare/workers-types";
 import { createApp } from "../src/app";
 import type { IngestDeps } from "../src/ingest";
 import type { Env, WebhookEnvelope } from "../src/env";
-import { FakeRepo, FakeQueue, FakeR2, signGithub, fakeEnv } from "./helpers";
+import { FakeRepo, FakeQueue, FakeR2, signGithub, fakeEnv, allowAll, allowNone, AUTHED, S2S } from "./helpers";
 
 const SECRET = "app-secret";
 
@@ -19,10 +19,8 @@ function harness() {
   const app = createApp({
     buildDeps: () => deps,
     buildRepo: () => repo,
-    // bypass identity for admin routes in tests
-    requireWebhookRead: async (_c, next) => {
-      await next();
-    },
+    // The REAL policyGate runs; only the identity round-trip is faked (grants every key).
+    granted: allowAll,
   });
   const env: Env = fakeEnv({ GITHUB_WEBHOOK_SECRET: SECRET });
   return { app, env, repo, queue, r2 };
@@ -101,16 +99,27 @@ describe("POST /hooks/github", () => {
   });
 });
 
-describe("GET /internal/health", () => {
-  it("returns ok", async () => {
+// INTERNAL in POLICY_TABLE: a Service-Binding probe (app-health-monitor sends exactly these
+// headers) passes; the same request without the marker is refused.
+describe("GET /internal/health (INTERNAL)", () => {
+  it("answers a service-to-service probe carrying x-dub-internal", async () => {
     const h = harness();
-    const res = await h.app.fetch(new Request("https://hooks/internal/health"), h.env);
+    const res = await h.app.fetch(new Request("https://hooks/internal/health", { headers: S2S }), h.env);
     expect(res.status).toBe(200);
     expect(((await res.json()) as { status: string }).status).toBe("ok");
   });
+
+  it("403s without the marker, even for an authenticated caller holding everything", async () => {
+    const h = harness();
+    const res = await h.app.fetch(new Request("https://hooks/internal/health", { headers: AUTHED }), h.env);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe(
+      "internal_only",
+    );
+  });
 });
 
-describe("GET /api/v1/webhooks/deliveries (admin query, test #11)", () => {
+describe("GET /webhooks/deliveries (admin query, test #11)", () => {
   it("paginates newest-first with a coherent nextCursor and filters by source", async () => {
     const h = harness();
     // seed 3 rows with monotonically increasing ids (newest last)
@@ -121,13 +130,18 @@ describe("GET /api/v1/webhooks/deliveries (admin query, test #11)", () => {
         processedAt: null, requestId: "r",
       });
     }
-    const p1 = await h.app.fetch(new Request("https://hooks/api/v1/webhooks/deliveries?limit=2&source=github"), h.env);
+    const p1 = await h.app.fetch(
+      new Request("https://hooks/webhooks/deliveries?limit=2&source=github", { headers: AUTHED }),
+      h.env,
+    );
     const page1 = (await p1.json()) as { items: { id: string }[]; nextCursor: string | null };
     expect(page1.items.map((i) => i.id)).toEqual(["wh_c", "wh_b"]); // DESC
     expect(page1.nextCursor).not.toBeNull();
 
     const p2 = await h.app.fetch(
-      new Request(`https://hooks/api/v1/webhooks/deliveries?limit=2&cursor=${encodeURIComponent(page1.nextCursor!)}`),
+      new Request(`https://hooks/webhooks/deliveries?limit=2&cursor=${encodeURIComponent(page1.nextCursor!)}`, {
+        headers: AUTHED,
+      }),
       h.env,
     );
     const page2 = (await p2.json()) as { items: { id: string }[]; nextCursor: string | null };
@@ -142,24 +156,30 @@ describe("GET /api/v1/webhooks/deliveries (admin query, test #11)", () => {
       queue: "dub-q-wh-github", r2Key: null, bodySize: 1, receivedAt: "2026-08-09T00:00:00Z",
       processedAt: null, requestId: "r",
     });
-    const ok = await h.app.fetch(new Request("https://hooks/api/v1/webhooks/deliveries/wh_one"), h.env);
+    const ok = await h.app.fetch(new Request("https://hooks/webhooks/deliveries/wh_one", { headers: AUTHED }), h.env);
     expect(ok.status).toBe(200);
     expect(((await ok.json()) as { id: string }).id).toBe("wh_one");
-    const miss = await h.app.fetch(new Request("https://hooks/api/v1/webhooks/deliveries/wh_missing"), h.env);
+    const miss = await h.app.fetch(
+      new Request("https://hooks/webhooks/deliveries/wh_missing", { headers: AUTHED }),
+      h.env,
+    );
     expect(miss.status).toBe(404);
   });
 
-  it("enforces webhook:read (403 when the authz chain denies)", async () => {
+  it("enforces webhook:read (403 when identity grants nothing)", async () => {
     const repo = new FakeRepo();
-    const app = createApp({
-      buildRepo: () => repo,
-      requireWebhookRead: async () => {
-        // simulate identity denial
-        const { DubError } = await import("@dub/errors");
-        throw new DubError("FORBIDDEN", "permission denied: webhook:read", { status: 403 });
-      },
-    });
-    const res = await app.fetch(new Request("https://hooks/api/v1/webhooks/deliveries"), fakeEnv());
+    const app = createApp({ buildRepo: () => repo, granted: allowNone });
+    const res = await app.fetch(new Request("https://hooks/webhooks/deliveries", { headers: AUTHED }), fakeEnv());
     expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { details: { reason: string; missing: string[] } } };
+    expect(body.error.details.reason).toBe("missing_permission");
+    expect(body.error.details.missing).toEqual(["webhook:read"]);
+  });
+
+  it("401s an unauthenticated caller (no x-dub-user-id) before any repo read", async () => {
+    const repo = new FakeRepo();
+    const app = createApp({ buildRepo: () => repo, granted: allowAll });
+    const res = await app.fetch(new Request("https://hooks/webhooks/deliveries"), fakeEnv());
+    expect(res.status).toBe(401);
   });
 });

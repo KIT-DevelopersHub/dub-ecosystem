@@ -2,8 +2,7 @@ import { describe, it, expect } from "vitest";
 import { CommonErrorCodes } from "@dub/errors";
 import { createApp } from "../src/app";
 import type { DriveService } from "../src/service";
-import { DRIVE_WRITE } from "../src/permissions";
-import { memAuthz } from "./helpers";
+import { allowAll, AUTHED, DRIVE_READER, memAuthz, S2S } from "./helpers";
 
 function stubService(over: Partial<DriveService> = {}): DriveService {
   const base: DriveService = {
@@ -19,9 +18,6 @@ function stubService(over: Partial<DriveService> = {}): DriveService {
   };
   return { ...base, ...over };
 }
-
-const allowAll = memAuthz(() => true);
-const AUTHED = { "x-dub-user-id": "usr_1" };
 
 describe("authn", () => {
   it("401 when x-dub-user-id is absent", async () => {
@@ -40,9 +36,8 @@ describe("authz", () => {
     expect(res.status).toBe(403);
     expect((await res.json() as any).error.code).toBe(CommonErrorCodes.FORBIDDEN);
   });
-  it("member (read-only) is forbidden from POST /drive/files", async () => {
-    const readOnly = memAuthz((_u, perm) => perm !== DRIVE_WRITE);
-    const app = createApp({ service: stubService(), authz: readOnly });
+  it("Drive共有=閲覧 (read-only) is forbidden from POST /drive/files", async () => {
+    const app = createApp({ service: stubService(), authz: DRIVE_READER });
     const res = await app.request("/drive/files", {
       method: "POST",
       headers: { ...AUTHED, "content-type": "application/json" },
@@ -104,10 +99,31 @@ describe("internal-only quota endpoint", () => {
     const res = await app.request("/drive/health/quota");
     expect(res.status).toBe(403);
   });
+  it("403 even for an authenticated caller holding every permission", async () => {
+    const app = createApp({ service: stubService(), authz: allowAll });
+    const res = await app.request("/drive/health/quota", { headers: AUTHED });
+    expect(res.status).toBe(403);
+    expect((await res.json() as any).error.details.reason).toBe("internal_only");
+  });
   it("200 with x-dub-internal", async () => {
     const app = createApp({ service: stubService(), authz: allowAll });
-    const res = await app.request("/drive/health/quota", { headers: { "x-dub-internal": "1" } });
+    const res = await app.request("/drive/health/quota", { headers: S2S });
     expect(res.status).toBe(200);
     expect((await res.json() as any).softLimit).toBe(500);
+  });
+});
+
+// Was unauthenticated before the policy layer (inventory a-9); now INTERNAL.
+describe("GET /internal/health (INTERNAL)", () => {
+  it("answers a service-to-service probe carrying x-dub-internal", async () => {
+    const res = await createApp({ service: stubService(), authz: allowAll }).request("/internal/health", { headers: S2S });
+    expect(res.status).toBe(200);
+    expect(await res.json() as any).toEqual({ status: "ok", service: "drive-proxy" });
+  });
+
+  it("403s without the marker, even for an authenticated caller holding everything", async () => {
+    const res = await createApp({ service: stubService(), authz: allowAll }).request("/internal/health", { headers: AUTHED });
+    expect(res.status).toBe(403);
+    expect((await res.json() as any).error.details.reason).toBe("internal_only");
   });
 });

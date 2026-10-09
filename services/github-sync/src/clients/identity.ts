@@ -1,5 +1,5 @@
 // identity-roster port for user lookups (githubLogin mapping, frozen B4).
-// Authz (/authz/check) is handled by @dub/auth-client, not here.
+// Authz (/authz/check) is handled by @dub/policy-gate over src/policy-table.ts, not here.
 import type { RequestContext, ServiceClient } from "@dub/http";
 import type { identity } from "@dub/types";
 

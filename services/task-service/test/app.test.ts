@@ -1,13 +1,15 @@
 import { describe, it, expect } from "vitest";
-import type { Hono } from "hono";
 import type { task } from "@dub/types";
 import { buildApp } from "../src/app";
 import { makeHarness, userInit, serviceInit, type TestHarness } from "./helpers";
 
+/** The app type `buildApp` now returns (the gate publishes `userId` as a Hono Variable). */
+type TaskApp = ReturnType<typeof buildApp>;
+
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
 async function create(
-  app: Hono,
+  app: TaskApp,
   over: Partial<task.CreateTaskRequest> = {},
   init: (method: string, body?: unknown) => RequestInit = userInit,
 ): Promise<task.Task> {
@@ -16,7 +18,7 @@ async function create(
   return (await res.json()) as task.Task;
 }
 
-function setup(): { h: TestHarness; app: Hono } {
+function setup(): { h: TestHarness; app: TaskApp } {
   const h = makeHarness();
   return { h, app: buildApp(h.deps) };
 }
@@ -142,7 +144,7 @@ describe("PATCH /tasks/:id", () => {
 });
 
 describe("origin=github protection", () => {
-  async function ghTask(h: TestHarness, app: Hono): Promise<task.Task> {
+  async function ghTask(h: TestHarness, app: TaskApp): Promise<task.Task> {
     return create(app, { origin: "github", title: "gh" }, serviceInit);
   }
 
@@ -756,7 +758,7 @@ describe("task attachments", () => {
 });
 
 describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory repo dropped them)", () => {
-  async function get(app: Hono, id: string) {
+  async function get(app: TaskApp, id: string) {
     const res = await app.request(`/tasks/${id}`, userInit("GET"));
     return { status: res.status, body: (await res.json()) as task.Task & { parentTaskId?: string | null; teamId?: string | null; wbs?: string | null } };
   }

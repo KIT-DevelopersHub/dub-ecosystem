@@ -12,6 +12,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@dub/policy-gate": "workspace:*",
     "@dub/auth-client": "workspace:*",
     "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",

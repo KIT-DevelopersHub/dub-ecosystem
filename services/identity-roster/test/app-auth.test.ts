@@ -39,11 +39,16 @@ describe("app-level auth & routing", () => {
     expect(body.every((e) => /^[a-z]+:[a-z_]+(:self)?$/.test(e.key) || /^app:[a-z]+:(view|edit)$/.test(e.key))).toBe(true);
   });
 
+  // policyGate owns authn now, so a missing session answers with the COMMON wire code
+  // (UNAUTHENTICATED) instead of this service's old hand-rolled AUTH_INVALID_TOKEN. Same 401,
+  // same ErrorResponse envelope — identical to the github-sync migration
+  // (services/github-sync/test/routes.test.ts).
   it("error responses use the wire ErrorResponse shape", async () => {
     const h = await makeHarness();
     const res = await h.app.request("/identity/users");
+    expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string; retryable: boolean } };
-    expect(body.error.code).toBe("AUTH_INVALID_TOKEN");
+    expect(body.error.code).toBe("UNAUTHENTICATED");
     expect(typeof body.error.retryable).toBe("boolean");
   });
 });
