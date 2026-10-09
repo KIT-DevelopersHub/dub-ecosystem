@@ -8,7 +8,7 @@
 //
 // さらに横スクロールを抑えるため DataTable の「表示列」ピッカー(columnHiding)を有効化する。
 // 既定 on = 主要列(氏名/担当・役割/ステータス/所属チーム/連絡先) と 操作列(hideable:false・常時表示)。
-// 情報過多で幅の広い列(ローマ字/学科/学年/学校メール/Gmail)は defaultHidden で初期 off にし、
+// 人物プロフィール列(参加届と共通)は ふりがな/名列番号 以外を defaultHidden で初期 off にし、
 // 初期表示の横スクロールを最小化する。developershub.jpメール(紐付いたアカウント)は既定表示 ON。
 // 選択は localStorage にユーザー単位で保存され、全部 on にすれば従来どおり全列表示。
 import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
@@ -16,18 +16,10 @@ import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
 import { hasStatusBadge } from "./memberStatus.ts";
+import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 
-/** 氏名ローマ字を "Last First" で合成 (アルファベットのメール発行の確認用). */
-function romajiName(m: OrgMember): string {
-  const parts = [m.lastNameRomaji, m.firstNameRomaji].filter((x): x is string => !!x && x.trim().length > 0);
-  return parts.length > 0 ? parts.join(" ") : "—";
-}
-
-/** フリガナ(読み仮名)を "せい めい" で合成. 未入力なら "—"。 */
-function kanaName(m: OrgMember): string {
-  const parts = [m.lastNameKana, m.firstNameKana].filter((x): x is string => !!x && x.trim().length > 0);
-  return parts.length > 0 ? parts.join(" ") : "—";
-}
+// 初期表示する人物プロフィール列 (残りは「表示列」から出せる)。
+const DEFAULT_VISIBLE_PROFILE = new Set(["nameKana", "rosterNumber"]);
 
 /** 1 行に収めつつ長い値は省略（…）+ ホバーで全文（title）。max はセルの上限幅. */
 function Truncate({ text, max = "16rem" }: { text: string; max?: string }): JSX.Element {
@@ -72,11 +64,17 @@ export function ListView({
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
-    { key: "nameKana", header: "フリガナ", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={kanaName(m)} max="12rem" /> },
-    { key: "rosterNumber", header: "名列番号", minWidth: "7rem", noWrap: true, cell: (m) => m.rosterNumber ?? "—" },
-    { key: "nameRomaji", header: "氏名（ローマ字）", minWidth: "11rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={romajiName(m)} max="14rem" /> },
-    { key: "department", header: "学科", minWidth: "7rem", noWrap: true, defaultHidden: true, cell: (m) => m.department ?? "—" },
-    { key: "grade", header: "学年", minWidth: "5rem", noWrap: true, defaultHidden: true, cell: (m) => m.grade ?? "—" },
+    // 人物プロフィール列は参加届の回答一覧と共通 (PROFILE_DISPLAY_COLUMNS)。
+    ...PROFILE_DISPLAY_COLUMNS.map(
+      (c): ColumnDef<OrgMember> => ({
+        key: c.id,
+        header: c.header,
+        minWidth: "7rem",
+        noWrap: true,
+        ...(DEFAULT_VISIBLE_PROFILE.has(c.id) ? {} : { defaultHidden: true }),
+        cell: (m) => <Truncate text={c.value(m) || "—"} max="14rem" />,
+      }),
+    ),
     { key: "role", header: "担当・役割", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.roleTitle ?? "—"} max="12rem" /> },
     ...(leaderNames
       ? [
@@ -129,8 +127,6 @@ export function ListView({
         ),
     },
     { key: "contact", header: "連絡先", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.contact ?? "—"} max="12rem" /> },
-    { key: "schoolEmail", header: "学校メール", minWidth: "13rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={m.schoolEmail ?? "—"} max="16rem" /> },
-    { key: "gmail", header: "Gmail", minWidth: "13rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={m.gmail ?? "—"} max="16rem" /> },
     {
       key: "actions",
       header: "操作",

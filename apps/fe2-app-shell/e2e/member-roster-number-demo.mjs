@@ -39,7 +39,8 @@ try {
   await page.getByRole("button", { name: /メンバーを追加|追加/ }).first().click();
   const dialog = page.getByTestId("members-form-dialog");
   await dialog.waitFor();
-  await dialog.getByTestId("members-form-name").fill("名列 テスト");
+  await dialog.getByTestId("members-form-last-name").fill("名列");
+  await dialog.getByTestId("members-form-first-name").fill("テスト");
   await dialog.getByTestId("members-form-roster-number").fill("3EP2");
   await dialog.getByTestId("members-form-submit").click();
   await dialog.getByText("名列番号は 3EP2-26 の形式で入力してください").waitFor({ timeout: 5000 });

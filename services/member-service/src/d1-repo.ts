@@ -1,7 +1,7 @@
 // D1-backed MemberRepo. Owns namespace `member_*` only (enforced by @dub/db strict
 // client). All timestamps come from the service (nowIso), never DDL DEFAULT (D2).
 import type { DbClient } from "@dub/db";
-import type { member } from "@dub/types";
+import { member } from "@dub/types";
 import { composeName } from "./domain";
 import type { MemberRepo, ParticipationRow, PersonRow, TeamRow, MemberStatus } from "./types";
 
@@ -139,7 +139,7 @@ function toPersonRow(r: PersonDbRow): PersonRow {
     roleTitle: r.role_title,
     status: r.status as MemberStatus,
     department: r.department,
-    grade: r.grade,
+    grade: member.normalizeGrade(r.grade ?? "") ?? null,
     rosterNumber: r.roster_number ?? null,
     identityUserId: r.identity_user_id,
     leaderId: r.leader_id,
@@ -163,6 +163,25 @@ function toPersonRow(r: PersonDbRow): PersonRow {
     updatedAt: r.updated_at,
   };
 }
+
+/** PersonProfile の各項目が入る列 (member_people / member_participations 共通)。Record なので
+ *  項目を足すとここが埋まるまでコンパイルが通らず、d1-repo.test.ts が SQL への反映を検査する。 */
+export const PERSON_PROFILE_COLUMN: Record<member.PersonProfileKey, string> = {
+  lastName: "last_name",
+  firstName: "first_name",
+  lastNameKana: "last_name_kana",
+  firstNameKana: "first_name_kana",
+  lastNameRomaji: "last_name_romaji",
+  firstNameRomaji: "first_name_romaji",
+  schoolEmail: "school_email",
+  gmail: "gmail",
+  phone: "phone",
+  grade: "grade",
+  department: "department",
+  rosterNumber: "roster_number",
+  desiredActivity: "desired_activity",
+  note: "note",
+};
 
 export function createD1MemberRepo(db: DbClient): MemberRepo {
   async function replaceLinks(personId: string, teamIds: string[], now: string): Promise<void> {

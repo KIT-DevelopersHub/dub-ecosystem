@@ -117,8 +117,8 @@ describe("ParticipationPage", () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
     await userEvent.click(screen.getByTestId("participation-submit"));
-    expect(screen.getByText("苗字を入力してください")).toBeInTheDocument();
-    expect(screen.getByText("名前を入力してください")).toBeInTheDocument();
+    expect(screen.getByText("氏名（苗字）を入力してください")).toBeInTheDocument();
+    expect(screen.getByText("氏名（名前）を入力してください")).toBeInTheDocument();
     expect(api.submit).not.toHaveBeenCalled();
   });
 
@@ -197,7 +197,7 @@ const SUBMISSION: Participation = {
   id: "p_1", orgId: "org", memberId: null, name: "黒川", lastName: "黒川", firstName: null,
   nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
   nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null, grade: "3",
-  department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
+  department: "情報工学科", rosterNumber: null, contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
   gmail: "kurokawa.dev@gmail.com", desiredTeamId: "t1", desiredActivity: "both", note: "よろしく",
   status: "submitted", matchKind: "created_new", reviewState: "pending", submittedBy: "u_1",
   submittedAt: "2026-08-15T10:00:00.000Z", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",

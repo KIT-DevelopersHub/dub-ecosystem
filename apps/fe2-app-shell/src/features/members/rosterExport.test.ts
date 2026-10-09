@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPdfFromJpegs, buildRosterTable, crc32, toCsv, toXlsx } from "./rosterExport.ts";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
+import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 
 const member = (over: Partial<OrgMember>): OrgMember =>
   ({
@@ -27,9 +28,10 @@ const text = (b: Uint8Array): string => new TextDecoder("latin1").decode(b);
 describe("rosterExport", () => {
   it("builds one row per member with resolved team/account labels", () => {
     const t = buildRosterTable([member({})], ctx);
-    expect(t.headers).toHaveLength(14);
+    // 氏名 + 人物プロフィール列 (参加届の回答一覧と共通) + 運営列 6。
+    expect(t.headers).toEqual(["氏名", ...PROFILE_DISPLAY_COLUMNS.map((c) => c.header), "担当・役割", "リーダー", "ステータス", "developershub.jpメール", "所属チーム", "連絡先"]);
     expect(t.rows[0]).toEqual(expect.arrayContaining(["山田 太郎", "やまだ たろう", "広報", "yamada@developershub.jp"]));
-    expect(t.rows[0]).toHaveLength(14);
+    expect(t.rows[0]).toHaveLength(t.headers.length);
   });
 
   it("CSV has a BOM, quotes special chars and neutralizes formulas but keeps phone numbers", () => {

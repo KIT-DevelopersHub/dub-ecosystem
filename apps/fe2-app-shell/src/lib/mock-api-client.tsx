@@ -13,7 +13,7 @@
 // 404 error envelope so feature screens render their own in-frame fallbacks
 // (never a white screen). Extend `routes`/seed via options to cover more.
 import type { ErrorResponse } from "@dub/errors";
-import type { gateway, mail } from "@dub/types";
+import { member, type gateway, type mail } from "@dub/types";
 
 export interface MockSeed {
   me: gateway.MeResponse;
@@ -329,14 +329,7 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
       // GET/POST /me/participation reads/persists the caller's own 参加届.
       case "GET /api/v1/me/participation":
       case "POST /api/v1/me/participation":
-        return json(
-          {
-            lastName: null, firstName: null, lastNameKana: null, firstNameKana: null,
-            lastNameRomaji: null, firstNameRomaji: null, schoolEmail: null, gmail: null,
-            phone: null, grade: null, department: null, rosterNumber: null, desiredActivity: null, note: null,
-          },
-          200,
-        );
+        return json(member.emptyPersonProfile(), 200);
       // Passkeys: a real WebAuthn ceremony needs the real auth-service (rpId/origin are
       // checked server-side), so offline builds report "disabled" — the login screen then
       // falls back to the password form — and list an empty set in アカウント設定.

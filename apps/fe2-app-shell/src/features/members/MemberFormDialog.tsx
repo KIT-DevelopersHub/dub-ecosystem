@@ -1,8 +1,18 @@
 // Create / edit dialog for an 運営メンバー. Optimistic submit via the members hooks.
+// 人物情報は参加届と共通の PersonProfileFields、運営固有の項目 (役割/ステータス/リーダー/
+// チーム/連絡先) だけをこのダイアログで持つ。
 import { useEffect, useMemo, useState } from "react";
-import { Modal, Button, Form, FormField, TextField, Textarea, Select, Checkbox } from "@dub/ui";
+import { Modal, Button, Form, FormField, TextField, Select, Checkbox } from "@dub/ui";
 import type { SelectOption } from "@dub/ui";
-import { member } from "@dub/types";
+import {
+  PersonProfileFields,
+  joinParts,
+  parseProfileDraft,
+  splitDisplayName,
+  toProfileDraft,
+  type PersonProfileErrors,
+  type PersonProfileKey,
+} from "../../lib/personProfile.tsx";
 import { type MemberStatus, type MemberTeam, type OrgMember } from "./contracts.ts";
 import { WRITE_STATUS_OPTIONS, toWriteStatus } from "./memberStatus.ts";
 import { orgChartOrder, tierOf } from "./orgChartOrder.ts";
@@ -11,6 +21,15 @@ import styles from "./members.module.css";
 
 const STATUS_OPTIONS: SelectOption<MemberStatus>[] = WRITE_STATUS_OPTIONS;
 const NO_LEADER = "";
+// 名簿は管理者が分かる範囲で登録するので、必須は苗字だけ (参加届より緩い)。
+const REQUIRED: readonly PersonProfileKey[] = ["lastName"];
+
+/** 編集時の初期値。姓/名 が無い旧データは表示名を分けて埋める。 */
+function profileDraftOf(m: OrgMember | null) {
+  const d = toProfileDraft(m);
+  if (m && !m.lastName && !m.firstName) Object.assign(d, splitDisplayName(m.name));
+  return d;
+}
 
 export function MemberFormDialog({
   open,
@@ -28,34 +47,28 @@ export function MemberFormDialog({
 }): JSX.Element {
   const create = useCreateMember();
   const update = useUpdateMember();
-  const [name, setName] = useState("");
+  const [profile, setProfile] = useState(() => profileDraftOf(null));
+  // 編集時は開いた時点の値と比べ、変えた項目だけを送る (推測で分けた姓/名や、旧ルールで
+  // 入っていた値を触っていないのに上書き・検証しないため)。
+  const [initialProfile, setInitialProfile] = useState(() => profileDraftOf(null));
+  const [profileErrors, setProfileErrors] = useState<PersonProfileErrors>({});
   const [roleTitle, setRoleTitle] = useState("");
   const [status, setStatus] = useState<MemberStatus>("added");
   const [leaderId, setLeaderId] = useState<string>(NO_LEADER);
   const [teamIds, setTeamIds] = useState<string[]>([]);
-  const [department, setDepartment] = useState("");
-  const [grade, setGrade] = useState("");
-  const [rosterNumber, setRosterNumber] = useState("");
-  const [rosterError, setRosterError] = useState<string | null>(null);
   const [contact, setContact] = useState("");
-  const [note, setNote] = useState("");
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setError(null);
-    setRosterError(null);
-    setName(editing?.name ?? "");
+    setProfile(profileDraftOf(editing));
+    setInitialProfile(profileDraftOf(editing));
+    setProfileErrors({});
     setRoleTitle(editing?.roleTitle ?? "");
     // 通常→"added"、打診系(invited/considering)→"invited" へ書き込み正準値を寄せる。
     setStatus(editing ? toWriteStatus(editing.status) : "added");
     setLeaderId(editing?.leaderId ?? NO_LEADER);
     setTeamIds(editing?.teamIds ?? []);
-    setDepartment(editing?.department ?? "");
-    setGrade(editing?.grade ?? "");
-    setRosterNumber(editing?.rosterNumber ?? "");
     setContact(editing?.contact ?? "");
-    setNote(editing?.note ?? "");
   }, [open, editing]);
 
   const pending = create.isPending || update.isPending;
@@ -79,26 +92,28 @@ export function MemberFormDialog({
     setTeamIds((prev) => (checked ? [...new Set([...prev, id])] : prev.filter((t) => t !== id)));
 
   const submit = () => {
-    if (name.trim().length === 0) {
-      setError("氏名を入力してください");
-      return;
-    }
-    const roster = member.normalizeRosterNumber(rosterNumber);
-    if (roster !== null && !member.ROSTER_NUMBER_PATTERN.test(roster)) {
-      setRosterError("名列番号は 3EP2-26 の形式で入力してください");
-      return;
-    }
+    const { profile: parsed, errors: allErrors } = parseProfileDraft(profile, REQUIRED);
+    const changed = (k: PersonProfileKey) => !editing || profile[k] !== initialProfile[k];
+    const errors = Object.fromEntries(
+      Object.entries(allErrors).filter(([k]) => changed(k as PersonProfileKey)),
+    ) as PersonProfileErrors;
+    setProfileErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    const profilePatch = Object.fromEntries(
+      Object.entries(parsed).filter(([k]) => changed(k as PersonProfileKey)),
+    ) as Partial<typeof parsed>;
+    // 姓/名 はどちらかを変えたら組で送る (サーバは 姓/名 から表示名を合成する)。
+    const nameChanged = changed("lastName") || changed("firstName");
     const payload = {
-      name: name.trim(),
+      ...profilePatch,
+      ...(nameChanged
+        ? { lastName: parsed.lastName, firstName: parsed.firstName, name: joinParts([parsed.lastName, parsed.firstName]) }
+        : {}),
       roleTitle: roleTitle.trim() || null,
       status,
       leaderId: leaderId || null,
       teamIds,
-      department: department.trim() || null,
-      grade: grade.trim() || null,
-      rosterNumber: roster,
       contact: contact.trim() || null,
-      note: note.trim() || null,
     };
     const done = () => onClose();
     if (editing) {
@@ -127,33 +142,19 @@ export function MemberFormDialog({
     >
       <Form onSubmit={submit}>
         <div className={styles.formStack}>
-          <FormField label="氏名" htmlFor="member-name" required {...(error ? { error } : {})}>
-            <TextField id="member-name" value={name} onChange={setName} testId="members-form-name" />
-          </FormField>
+          <div className={styles.formSectionTitle} data-testid="members-form-profile-section">
+            本人の情報（参加届と同じ項目）
+          </div>
+          <PersonProfileFields
+            draft={profile}
+            onChange={setProfile}
+            errors={profileErrors}
+            required={REQUIRED}
+            idPrefix="members-form"
+          />
+          <div className={styles.formSectionTitle}>運営での情報</div>
           <FormField label="担当・役割" htmlFor="member-role" help="例: 会場リーダー">
             <TextField id="member-role" value={roleTitle} onChange={setRoleTitle} />
-          </FormField>
-          <FormField label="学科" htmlFor="member-department" help="任意 (例: 情報工学科)">
-            <TextField id="member-department" value={department} onChange={setDepartment} testId="members-form-department" />
-          </FormField>
-          <FormField label="学年" htmlFor="member-grade" help="任意 (例: 3年 / M1)">
-            <TextField id="member-grade" value={grade} onChange={setGrade} testId="members-form-grade" />
-          </FormField>
-          <FormField
-            label="名列番号"
-            htmlFor="member-roster-number"
-            help="任意 (例: 3EP2-26)"
-            {...(rosterError ? { error: rosterError } : {})}
-          >
-            <TextField
-              id="member-roster-number"
-              value={rosterNumber}
-              onChange={(v) => {
-                setRosterNumber(v);
-                setRosterError(null);
-              }}
-              testId="members-form-roster-number"
-            />
           </FormField>
           <FormField label="ステータス" htmlFor="member-status" required help="通常メンバー（バッジなし）/ 打診中 / 休み中（一時離脱）/ 辞退。辞退にすると名簿一覧からは隠れます（データは残ります）。">
             <Select<MemberStatus>
@@ -192,11 +193,8 @@ export function MemberFormDialog({
               </div>
             )}
           </FormField>
-          <FormField label="連絡先" htmlFor="member-contact" help="任意 (メール / Slack など)">
+          <FormField label="連絡先" htmlFor="member-contact" help="メール / Slack など">
             <TextField id="member-contact" value={contact} onChange={setContact} />
-          </FormField>
-          <FormField label="メモ" htmlFor="member-note">
-            <Textarea id="member-note" value={note} onChange={setNote} rows={3} />
           </FormField>
         </div>
       </Form>

@@ -4,6 +4,7 @@
 // 日本語フォントで canvas に描いたページ画像(JPEG)を 1 枚ずつ埋め込んで生成する。
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { statusLabel } from "./memberStatus.ts";
+import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 
 export type RosterExportFormat = "csv" | "xlsx" | "pdf";
 
@@ -12,32 +13,24 @@ export interface RosterTable {
   rows: string[][];
 }
 
-const join = (parts: (string | null | undefined)[], sep: string): string =>
-  parts.filter((x): x is string => !!x && x.trim().length > 0).join(sep);
-
 export function buildRosterTable(
   members: OrgMember[],
   ctx: { teamsById: Map<string, MemberTeam>; accountLabels: Map<string, string>; leaderNames: Map<string, string> },
 ): RosterTable {
+  // 人物プロフィール列は画面の名簿・参加届の回答一覧と共通 (PROFILE_DISPLAY_COLUMNS)。
   const headers = [
-    "氏名", "フリガナ", "名列番号", "氏名（ローマ字）", "学科", "学年", "担当・役割", "リーダー", "ステータス",
-    "developershub.jpメール", "所属チーム", "連絡先", "学校メール", "Gmail",
+    "氏名", ...PROFILE_DISPLAY_COLUMNS.map((c) => c.header), "担当・役割", "リーダー", "ステータス",
+    "developershub.jpメール", "所属チーム", "連絡先",
   ];
   const rows = members.map((m) => [
     m.name,
-    join([m.lastNameKana, m.firstNameKana], " "),
-    m.rosterNumber ?? "",
-    join([m.lastNameRomaji, m.firstNameRomaji], " "),
-    m.department ?? "",
-    m.grade ?? "",
+    ...PROFILE_DISPLAY_COLUMNS.map((c) => c.value(m)),
     m.roleTitle ?? "",
     m.leaderId ? ctx.leaderNames.get(m.leaderId) ?? "" : "",
     statusLabel(m.status),
     m.identityUserId ? ctx.accountLabels.get(m.identityUserId) ?? m.identityUserId : "",
     m.teamIds.map((id) => ctx.teamsById.get(id)?.name ?? "").filter(Boolean).join("、"),
     m.contact ?? "",
-    m.schoolEmail ?? "",
-    m.gmail ?? "",
   ]);
   return { headers, rows };
 }

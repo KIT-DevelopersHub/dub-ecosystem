@@ -20,14 +20,16 @@ export interface TeamRow {
   createdAt: common.ISODateTime;
   updatedAt: common.ISODateTime;
 }
-export interface PersonRow {
+/** 名簿の永続化行。人物プロフィール項目は PersonProfile (参加届と共通) を必ず持つ。 */
+export interface PersonRow extends member.PersonProfile {
   id: string;
   orgId: common.OrgId;
   name: string;
   roleTitle: string | null;
   status: MemberStatus;
   department: string | null;
-  grade: string | null;
+  /** 学年。旧データの表記ゆれ ("2年" / "３") は読み出し時に normalizeGrade で正規化。 */
+  grade: member.Grade | null;
   /** 名列番号 (例 "3EP2-26")。正規化済み (0011 additive column)。 */
   rosterNumber: string | null;
   /** Linked identity-roster account (identity userId), or null when unlinked. */
@@ -59,7 +61,7 @@ export interface PersonRow {
 
 // 参加届 persistence row (superset of the wire `Participation`). `normalizedName` is
 // the space/width-folded matching key (unique per org for dedupe).
-export interface ParticipationRow {
+export interface ParticipationRow extends member.PersonProfile {
   id: string;
   orgId: common.OrgId;
   memberId: string | null;

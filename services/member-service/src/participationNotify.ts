@@ -11,7 +11,7 @@
 // a participation-scoped dedupKey, so retries never double-notify.
 import type { Fetcher } from "@cloudflare/workers-types";
 import { createServiceClient, type RequestContext } from "@dub/http";
-import type { member, notification } from "@dub/types";
+import { member, type notification } from "@dub/types";
 
 // Admin fan-out roles — mirrors the feedback / usage-alert → admin flow. notification-service
 // expands these to the matching users' inboxes, so admins are reached without any user-id config.
@@ -23,13 +23,10 @@ export const PARTICIPATION_NOTIFY_TYPE = "member.participation.submitted";
 export function buildParticipationNotify(p: member.Participation): notification.NotifyRequest {
   const body = [
     `氏名: ${p.name}`,
-    p.grade ? `学年: ${p.grade}` : null,
-    p.department ? `所属: ${p.department}` : null,
-    p.rosterNumber ? `名列番号: ${p.rosterNumber}` : null,
-    p.desiredActivity ? `希望する活動: ${p.desiredActivity}` : null,
-    `学校メール: ${p.schoolEmail}`,
-    `Gmail: ${p.gmail}`,
-    p.phone ? `電話: ${p.phone}` : null,
+    ...(["grade", "department", "rosterNumber", "desiredActivity", "schoolEmail", "gmail", "phone"] as const).map((k) => {
+      const v = member.formatPersonProfileValue(k, p);
+      return v ? `${member.PERSON_PROFILE_LABEL[k]}: ${v}` : null;
+    }),
   ]
     .filter((line): line is string => line !== null)
     .join("\n");

@@ -6,12 +6,7 @@ import { type common, member } from "@dub/types";
 import type { AppDeps, ParticipationRow, PersonRow, TeamRow } from "./types";
 import {
   composeName,
-  isDesiredActivity,
-  isEmail,
-  isGrade,
   isMemberStatus,
-  isPhone,
-  isRomaji,
   MAX_NAME_LEN,
   normalizeName,
   SORT_ORDER_GAP,
@@ -50,15 +45,11 @@ function optText(value: unknown, field: string): string | null {
   return t.length === 0 ? null : t;
 }
 
-/** 名列番号: 正規化して形式検証。空は null。 */
-function optRosterNumber(value: unknown): string | null {
-  const t = optText(value, "rosterNumber");
-  if (t === null) return null;
-  const n = member.normalizeRosterNumber(t);
-  if (n !== null && !member.ROSTER_NUMBER_PATTERN.test(n)) {
-    throw errors.validationFailed([{ field: "rosterNumber", reason: "invalid_format" }]);
-  }
-  return n;
+/** 人物プロフィール項目 (PersonProfile) を共通ルールで正規化・検証する。渡されたキーだけ返す。 */
+function profilePatch(body: object): Partial<member.PersonProfile> {
+  const { value, errors: bad } = member.parsePersonProfilePatch(body as Record<string, unknown>);
+  if (bad.length > 0) throw errors.validationFailed(bad.map((field) => ({ field, reason: "invalid" })));
+  return value;
 }
 
 /** Upper bound on teams expanded in one チーム単位メンション lookup (see listTeamIdentityUserIds). */
@@ -220,29 +211,17 @@ export class MemberService {
     const now = this.deps.now();
     const memberId = this.deps.newMemberId();
     const leaderId = body.leaderId !== undefined ? await this.resolveLeaderId(body.leaderId, memberId) : null;
+    const profile = { ...member.emptyPersonProfile(), ...profilePatch(body) };
     const row: PersonRow = {
       id: memberId,
       orgId,
-      name: name(body.name),
+      ...profile,
+      name: name(composeName(profile.lastName, profile.firstName) || body.name),
       roleTitle: optText(body.roleTitle, "roleTitle"),
       status: body.status,
-      department: optText(body.department, "department"),
-      grade: optText(body.grade, "grade"),
-      rosterNumber: optRosterNumber(body.rosterNumber),
       identityUserId: null,
       leaderId,
       contact: optText(body.contact, "contact"),
-      schoolEmail: null,
-      gmail: null,
-      lastName: null,
-      firstName: null,
-      lastNameKana: null,
-      firstNameKana: null,
-      lastNameRomaji: null,
-      firstNameRomaji: null,
-      phone: null,
-      desiredActivity: null,
-      note: optText(body.note, "note"),
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,
       archivedAt: null,
@@ -268,18 +247,21 @@ export class MemberService {
         : cur.identityUserId;
     const leaderId =
       body.leaderId !== undefined ? await this.resolveLeaderId(body.leaderId, cur.id) : cur.leaderId;
+    const profile = profilePatch(body);
+    const merged: PersonRow = { ...cur, ...profile };
+    // 姓/名 が来たら表示名を合成し直す (空になる場合は従来どおり name / 現在値)。
+    // 姓/名 を送ったら表示名は必ずそこから合成する (作成時と同じ規則・空なら 400)。
+    const splitSent = "lastName" in profile || "firstName" in profile;
     const next: PersonRow = {
-      ...cur,
-      name: body.name !== undefined ? name(body.name) : cur.name,
+      ...merged,
+      name: splitSent
+        ? name(composeName(merged.lastName, merged.firstName))
+        : body.name !== undefined ? name(body.name) : cur.name,
       roleTitle: body.roleTitle !== undefined ? optText(body.roleTitle, "roleTitle") : cur.roleTitle,
       status: body.status ?? cur.status,
-      department: body.department !== undefined ? optText(body.department, "department") : cur.department,
-      grade: body.grade !== undefined ? optText(body.grade, "grade") : cur.grade,
-      rosterNumber: body.rosterNumber !== undefined ? optRosterNumber(body.rosterNumber) : cur.rosterNumber,
       identityUserId,
       leaderId,
       contact: body.contact !== undefined ? optText(body.contact, "contact") : cur.contact,
-      note: body.note !== undefined ? optText(body.note, "note") : cur.note,
       sortOrder: typeof body.sortOrder === "number" ? body.sortOrder : cur.sortOrder,
       version: cur.version + 1,
       updatedAt: this.deps.now(),
@@ -387,47 +369,23 @@ export class MemberService {
   ): Promise<member.SubmitParticipationResponse> {
     const orgId = this.deps.orgId;
     const now = this.deps.now();
+    // 人物プロフィール項目は名簿と共通のルールで正規化・検証する。
+    const profile = { ...member.emptyPersonProfile(), ...profilePatch(body) };
+    const { lastName, firstName, lastNameKana, firstNameKana, lastNameRomaji, firstNameRomaji } = profile;
     // 氏名: 姓/名 の分割入力を優先し、"姓 名" を合成する。旧クライアントの単一 `name` も
     // 後方互換で受ける (どちらかが揃えば OK)。合成結果が空なら name() が 400 を投げる。
-    const lastName = optText(body.lastName, "lastName");
-    const firstName = optText(body.firstName, "firstName");
     const composed = composeName(lastName, firstName);
     const displayName = name(composed.length > 0 ? composed : body.name);
     const normalized = normalizeName(displayName);
     if (normalized.length === 0) throw errors.validationFailed([{ field: "name", reason: "required" }]);
-
-    const grade = body.grade == null ? null : isGrade(body.grade) ? body.grade : invalid("grade");
-    const desiredActivity =
-      body.desiredActivity == null ? null : isDesiredActivity(body.desiredActivity) ? body.desiredActivity : invalid("desiredActivity");
-    // 振り仮名: せい/めい の分割を優先し合成、無ければ旧単一 nameKana。
-    const lastNameKana = optText(body.lastNameKana, "lastNameKana");
-    const firstNameKana = optText(body.firstNameKana, "firstNameKana");
-    const composedKana = composeName(lastNameKana, firstNameKana);
-    const nameKana = composedKana.length > 0 ? composedKana : optText(body.nameKana, "nameKana");
-    // ローマ字: 姓/名 の分割を優先し合成、無ければ旧単一 nameRomaji。任意フィールドだが
-    // 渡された時だけ英字形式チェック (アルファベットのメール発行に使うため)。
-    const lastNameRomaji = optText(body.lastNameRomaji, "lastNameRomaji");
-    const firstNameRomaji = optText(body.firstNameRomaji, "firstNameRomaji");
-    if (lastNameRomaji !== null && !isRomaji(lastNameRomaji)) {
-      throw errors.validationFailed([{ field: "lastNameRomaji", reason: "invalid" }]);
-    }
-    if (firstNameRomaji !== null && !isRomaji(firstNameRomaji)) {
-      throw errors.validationFailed([{ field: "firstNameRomaji", reason: "invalid" }]);
-    }
-    const composedRomaji = composeName(lastNameRomaji, firstNameRomaji);
-    const nameRomaji = composedRomaji.length > 0 ? composedRomaji : optText(body.nameRomaji, "nameRomaji");
-    const department = optText(body.department, "department");
-    const rosterNumber = optRosterNumber(body.rosterNumber);
+    // 振り仮名 / ローマ字: 分割を優先し合成、無ければ旧単一値。
+    const nameKana = composeName(lastNameKana, firstNameKana) || optText(body.nameKana, "nameKana");
+    const nameRomaji = composeName(lastNameRomaji, firstNameRomaji) || optText(body.nameRomaji, "nameRomaji");
     const contact = optText(body.contact, "contact");
-    const note = optText(body.note, "note");
-    // 電話番号は任意。渡された時だけ緩い形式チェック。
-    const phone = optText(body.phone, "phone");
-    if (phone !== null && !isPhone(phone)) throw errors.validationFailed([{ field: "phone", reason: "invalid" }]);
-    // 学校メール + Gmail は必須 & メール形式.
-    if (!isEmail(body.schoolEmail)) throw errors.validationFailed([{ field: "schoolEmail", reason: "invalid" }]);
-    if (!isEmail(body.gmail)) throw errors.validationFailed([{ field: "gmail", reason: "invalid" }]);
-    const schoolEmail = body.schoolEmail.trim();
-    const gmail = body.gmail.trim();
+    // 学校メール + Gmail は参加届では必須。
+    if (profile.schoolEmail === null) throw errors.validationFailed([{ field: "schoolEmail", reason: "invalid" }]);
+    if (profile.gmail === null) throw errors.validationFailed([{ field: "gmail", reason: "invalid" }]);
+    const { schoolEmail, gmail } = profile;
     const desiredTeamId = await this.optTeamId(body.desiredTeamId);
 
     // 名簿への反映は管理者が一覧で確定する（B案）。提出時は 参加届 を記録するだけで、
@@ -439,26 +397,15 @@ export class MemberService {
       orgId,
       // 未処理のうちは反映先メンバー無し。確定済みの再提出は既存の反映先を保持。
       memberId: existing?.memberId ?? null,
+      ...profile,
       name: displayName,
       normalizedName: normalized,
-      lastName,
-      firstName,
       nameKana,
-      lastNameKana,
-      firstNameKana,
       nameRomaji,
-      lastNameRomaji,
-      firstNameRomaji,
-      grade,
-      department,
-      rosterNumber,
       contact,
-      phone,
       schoolEmail,
       gmail,
       desiredTeamId,
-      desiredActivity,
-      note,
       status: "submitted",
       // matchKind は未処理時は意味を持たない placeholder（reviewState で表示制御）。
       matchKind: existing?.matchKind ?? "created_new",
@@ -619,22 +566,9 @@ export class MemberService {
     const next: PersonRow = {
       ...match,
       status: promote ? "added" : match.status,
-      // 非破壊: 空欄のみ補完。参加届の2アドレスは名簿にも保持 (contact 未設定は学校メール)。
-      department: match.department ?? p.department,
-      grade: match.grade ?? p.grade,
-      rosterNumber: match.rosterNumber ?? p.rosterNumber,
+      // 非破壊: 人物プロフィール項目は空欄のみ参加届で補完 (contact 未設定は学校メール)。
+      ...fillEmptyProfile(match, profileOf(p)),
       contact: match.contact ?? p.schoolEmail,
-      schoolEmail: match.schoolEmail ?? p.schoolEmail,
-      gmail: match.gmail ?? p.gmail,
-      lastName: match.lastName ?? p.lastName,
-      firstName: match.firstName ?? p.firstName,
-      lastNameKana: match.lastNameKana ?? p.lastNameKana,
-      firstNameKana: match.firstNameKana ?? p.firstNameKana,
-      lastNameRomaji: match.lastNameRomaji ?? p.lastNameRomaji,
-      firstNameRomaji: match.firstNameRomaji ?? p.firstNameRomaji,
-      phone: match.phone ?? p.phone,
-      desiredActivity: match.desiredActivity ?? p.desiredActivity,
-      note: match.note ?? p.note,
       version: match.version + 1,
       updatedAt: this.deps.now(),
     };
@@ -652,26 +586,13 @@ export class MemberService {
     const row: PersonRow = {
       id: this.deps.newMemberId(),
       orgId,
+      ...profileOf(p),
       name: p.name,
       roleTitle: null,
       status: "added",
-      department: p.department,
-      grade: p.grade,
-      rosterNumber: p.rosterNumber,
       identityUserId: null,
       leaderId: null,
       contact: p.contact ?? p.schoolEmail,
-      schoolEmail: p.schoolEmail,
-      gmail: p.gmail,
-      lastName: p.lastName,
-      firstName: p.firstName,
-      lastNameKana: p.lastNameKana,
-      firstNameKana: p.firstNameKana,
-      lastNameRomaji: p.lastNameRomaji,
-      firstNameRomaji: p.firstNameRomaji,
-      phone: p.phone,
-      desiredActivity: p.desiredActivity,
-      note: p.note,
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,
       archivedAt: null,
@@ -694,91 +615,19 @@ export class MemberService {
   // their member_people row, so edits round-trip to the real roster (実DB) and survive a
   // reload — distinct from the admin submit/review pipeline (submitParticipation).
   private toSelfParticipation(p: PersonRow): member.SelfParticipation {
-    return {
-      lastName: p.lastName,
-      firstName: p.firstName,
-      lastNameKana: p.lastNameKana,
-      firstNameKana: p.firstNameKana,
-      lastNameRomaji: p.lastNameRomaji,
-      firstNameRomaji: p.firstNameRomaji,
-      schoolEmail: p.schoolEmail,
-      gmail: p.gmail,
-      phone: p.phone,
-      grade: (p.grade as member.Grade | null) ?? null,
-      department: p.department,
-      rosterNumber: p.rosterNumber,
-      desiredActivity: p.desiredActivity,
-      note: p.note,
-    };
-  }
-
-  private emptySelfParticipation(): member.SelfParticipation {
-    return {
-      lastName: null,
-      firstName: null,
-      lastNameKana: null,
-      firstNameKana: null,
-      lastNameRomaji: null,
-      firstNameRomaji: null,
-      schoolEmail: null,
-      gmail: null,
-      phone: null,
-      grade: null,
-      department: null,
-      rosterNumber: null,
-      desiredActivity: null,
-      note: null,
-    };
+    return member.pickPersonProfile(toMember(p, []));
   }
 
   /** The signed-in user's OWN 参加届, resolved via their identity link to a member_people
    *  row. All-null when the caller has no linked roster entry yet. */
   async getSelfParticipation(identityUserId: string): Promise<member.SelfParticipation> {
     const p = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, identityUserId);
-    return p ? this.toSelfParticipation(p) : this.emptySelfParticipation();
+    return p ? this.toSelfParticipation(p) : member.emptyPersonProfile();
   }
 
-  /** Fold a self 参加届 patch onto a PersonRow's editable fields. Only keys present in
-   *  `patch` are touched; strings are trimmed ("" → null); grade / desiredActivity are
-   *  enum-checked; romaji fields are format-checked (アルファベットのみ). */
+  /** Fold a self 参加届 patch onto a PersonRow's profile fields (共通ルールで検証)。 */
   private applySelfPatch(base: PersonRow, patch: member.SelfParticipationUpdateRequest): PersonRow {
-    const next: PersonRow = { ...base };
-    const textKeys = [
-      "lastName",
-      "firstName",
-      "lastNameKana",
-      "firstNameKana",
-      "schoolEmail",
-      "gmail",
-      "phone",
-      "department",
-      "note",
-    ] as const;
-    for (const k of textKeys) {
-      if (k in patch) next[k] = optText(patch[k], k);
-    }
-    for (const k of ["lastNameRomaji", "firstNameRomaji"] as const) {
-      if (k in patch) {
-        const v = optText(patch[k], k);
-        if (v !== null && !isRomaji(v)) invalid(k);
-        next[k] = v;
-      }
-    }
-    if ("rosterNumber" in patch) next.rosterNumber = optRosterNumber(patch.rosterNumber);
-    if ("grade" in patch) {
-      // Value may arrive as "" from an empty <select> — treat blank as a clear.
-      const g = patch.grade as unknown;
-      if (g === null || g === undefined || g === "") next.grade = null;
-      else if (isGrade(g)) next.grade = g;
-      else invalid("grade");
-    }
-    if ("desiredActivity" in patch) {
-      const d = patch.desiredActivity as unknown;
-      if (d === null || d === undefined || d === "") next.desiredActivity = null;
-      else if (isDesiredActivity(d)) next.desiredActivity = d;
-      else invalid("desiredActivity");
-    }
-    return next;
+    return { ...base, ...profilePatch(patch) };
   }
 
   /** Patch the signed-in user's OWN 参加届. Updates the caller's linked member_people row
@@ -813,26 +662,13 @@ export class MemberService {
     const blank: PersonRow = {
       id: this.deps.newMemberId(),
       orgId,
+      ...member.emptyPersonProfile(),
       name: "",
       roleTitle: null,
       status: "added",
-      department: null,
-      grade: null,
-      rosterNumber: null,
       identityUserId,
       leaderId: null,
       contact: null,
-      schoolEmail: null,
-      gmail: null,
-      lastName: null,
-      firstName: null,
-      lastNameKana: null,
-      firstNameKana: null,
-      lastNameRomaji: null,
-      firstNameRomaji: null,
-      phone: null,
-      desiredActivity: null,
-      note: null,
       sortOrder: (await this.deps.repo.maxPersonSortOrder(orgId)) + SORT_ORDER_GAP,
       version: 1,
       archivedAt: null,
@@ -849,6 +685,18 @@ export class MemberService {
   }
 }
 
-function invalid(field: string): never {
-  throw errors.validationFailed([{ field, reason: "invalid" }]);
+/** 参加届の人物項目 (旧データの空文字メールは null に寄せる)。 */
+function profileOf(p: member.PersonProfile): member.PersonProfile {
+  const out = member.pickPersonProfile(p) as unknown as Record<string, unknown>;
+  for (const k of member.PERSON_PROFILE_KEYS) if (out[k] === "") out[k] = null;
+  return out as unknown as member.PersonProfile;
+}
+
+/** 名簿側の空欄だけを参加届の値で埋めた PersonProfile。 */
+function fillEmptyProfile(base: member.PersonProfile, from: member.PersonProfile): member.PersonProfile {
+  const out = member.pickPersonProfile(base);
+  for (const k of member.PERSON_PROFILE_KEYS) {
+    if (out[k] == null) (out as unknown as Record<string, unknown>)[k] = from[k];
+  }
+  return out;
 }

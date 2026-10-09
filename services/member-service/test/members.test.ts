@@ -148,6 +148,53 @@ describe("member-service HTTP surface", () => {
     expect(cleared.json.rosterNumber).toBeNull();
   });
 
+  it("参加届と同じ人物項目(PersonProfile)で追加・編集でき、表示名は 姓/名 から合成される", async () => {
+    const app = createApp(makeDeps());
+    const created = await call(app, "POST", "/members/people", {
+      body: {
+        status: "added",
+        teamIds: [],
+        lastName: "山田",
+        firstName: "太郎",
+        lastNameKana: "やまだ",
+        firstNameKana: "たろう",
+        lastNameRomaji: "Yamada",
+        firstNameRomaji: "Taro",
+        schoolEmail: "yamada@school.ac.jp",
+        gmail: "yamada@gmail.com",
+        phone: "090-1234-5678",
+        grade: "2",
+        department: "情報工学科",
+        rosterNumber: "2ep1-05",
+        desiredActivity: "dev",
+        note: "よろしく",
+      },
+    });
+    expect(created.status).toBe(201);
+    expect(created.json).toMatchObject({
+      name: "山田 太郎",
+      lastNameKana: "やまだ",
+      firstNameRomaji: "Taro",
+      gmail: "yamada@gmail.com",
+      phone: "090-1234-5678",
+      grade: "2",
+      rosterNumber: "2EP1-05",
+      desiredActivity: "dev",
+      note: "よろしく",
+    });
+
+    const upd = await call(app, "PATCH", `/members/people/${created.json.id as string}`, {
+      body: { firstName: "花子", version: 1 },
+    });
+    expect(upd.status).toBe(200);
+    expect(upd.json.name).toBe("山田 花子");
+
+    for (const bad of [{ gmail: "not-mail" }, { grade: "5年" }, { lastNameRomaji: "やまだ" }, { desiredActivity: "x" }]) {
+      const res = await call(app, "PATCH", `/members/people/${created.json.id as string}`, { body: { ...bad, version: 2 } });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it("学科(department)・学年(grade) round-trip as their own fields on create/edit", async () => {
     const app = createApp(makeDeps());
     const created = await call(app, "POST", "/members/people", {
@@ -155,19 +202,20 @@ describe("member-service HTTP surface", () => {
     });
     expect(created.status).toBe(201);
     expect(created.json.department).toBe("情報工学科");
-    expect(created.json.grade).toBe("3年");
+    // 学年は参加届と同じ選択肢 (1〜4 / graduate) に正規化して保存する。
+    expect(created.json.grade).toBe("3");
     const memberId = created.json.id as string;
 
     const ov = await call(app, "GET", "/members/overview");
     expect(ov.json.members[0].department).toBe("情報工学科");
-    expect(ov.json.members[0].grade).toBe("3年");
+    expect(ov.json.members[0].grade).toBe("3");
 
     // edit only 学年, leave 学科 untouched; blanks clear the field
     const upd = await call(app, "PATCH", `/members/people/${memberId}`, {
       body: { grade: "M1", version: 1 },
     });
     expect(upd.status).toBe(200);
-    expect(upd.json.grade).toBe("M1");
+    expect(upd.json.grade).toBe("graduate");
     expect(upd.json.department).toBe("情報工学科");
 
     const cleared = await call(app, "PATCH", `/members/people/${memberId}`, {
