@@ -3,12 +3,12 @@
   "slug": "commander-relay",
   "worker": "dub-demo-commander-relay",
   "url": "https://dub-demo-commander-relay.developershub-site.workers.dev",
-  "deployedSha": "a5b14eb0",
+  "deployedSha": "5bfb3f9c",
   "branch": "feat/commander-relay-ws",
   "actor": "ko-tarou",
-  "markers": ["fe2-commander-relay-status"],
+  "markers": ["fe2-commander-relay-status","fe2-commander-relay-badge"],
   "live": true,
-  "verifiedAt": "2026-10-09T18:02:36Z",
-  "updatedAt": "2026-10-09T18:02:36Z",
-  "note": "fe2 /commander over commander-relay WebSocket (replaces #591 tunnel)"
+  "verifiedAt": "2026-10-09T18:22:13Z",
+  "updatedAt": "2026-10-09T18:22:13Z",
+  "note": "fe2 /commander over commander-relay WebSocket (merged main 5bfb3f9c)"
 }
