@@ -8,6 +8,7 @@
 //   GET    /runs/:id           -> Run                  (with buffered events)
 //   DELETE /runs/:id           -> 202 (cancel) | 404   (cancel a running run)
 //   GET    /runs/:id/events    -> text/event-stream    (replays history, then live)
+//   *      /operate/*          -> catalog / preview / execute (see operate/routes.ts)
 //
 // Auth (ADR 0003): when config.operatorToken is set, every route EXCEPT GET /health
 // and GET / requires the shared token — `Authorization: Bearer <token>` or, for the
@@ -20,6 +21,7 @@ import type { DaemonConfig } from "./types.ts";
 import { RunStore } from "./runner.ts";
 import { nullSink, HttpRunSink, type RunSink } from "./sink.ts";
 import { INDEX_HTML } from "./index-html.ts";
+import { createOperateHandler } from "./operate/routes.ts";
 
 export const VERSION = "0.1.0";
 const SERVICE = "commander-daemon";
@@ -64,6 +66,7 @@ export function createDaemonServer(config: DaemonConfig) {
     ? new HttpRunSink(config.serviceUrl, config.serviceToken)
     : nullSink;
   const store = new RunStore(config, sink);
+  const operate = createOperateHandler(config.operate);
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${config.port}`);
@@ -94,6 +97,19 @@ export function createDaemonServer(config: DaemonConfig) {
     // Shared-token gate for everything else (when a token is configured).
     if (config.operatorToken && !tokenMatches(config.operatorToken, req, url)) {
       return json(res, 401, { error: "unauthorized" });
+    }
+
+    if (pathname.startsWith("/operate/")) {
+      let raw = "";
+      if (method === "POST") {
+        try {
+          raw = await readBody(req);
+        } catch {
+          return json(res, 413, { error: "body_too_large" });
+        }
+      }
+      const out = await operate(method, pathname, raw);
+      return json(res, out.status, out.body);
     }
 
     if (method === "POST" && pathname === "/runs") {

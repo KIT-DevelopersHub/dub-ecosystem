@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { OperateDub } from "./OperateDub.tsx";
 import { ChatProvider } from "./lib/chatStore.tsx";
 import { makeFakeApi, makeFakeClient, type FakeApi } from "./test/fakes.ts";
@@ -7,7 +7,7 @@ import { DUB_OPERATE_CWD, OPERATE_RUN_ARGS } from "./lib/operateDub.ts";
 import type { CommanderClient, DaemonRunEvent } from "./lib/client.ts";
 
 // The planner returns three ops: a read, a plain write, and a DELETE the planner (wrongly)
-// marked non-destructive — the UI's safety net must treat it as destructive.
+// marked non-destructive — still flagged destructive, and none of them is executable.
 const planJson = {
   summary: "テスト計画",
   ops: [
@@ -41,7 +41,7 @@ async function plan(client: CommanderClient) {
   return { api, cards };
 }
 
-describe("<OperateDub> safety gate (multi-session, persisted)", () => {
+describe("<OperateDub> planner (multi-session, persisted)", () => {
   beforeEach(() => localStorage.clear());
 
   it("plans in dub-ecosystem with subagent fan-out disabled", async () => {
@@ -53,51 +53,15 @@ describe("<OperateDub> safety gate (multi-session, persisted)", () => {
     );
   });
 
-  it("runs a READ op immediately (no confirm gate)", async () => {
+  it("renders plan ops without any way to execute them", async () => {
     const client = makeFakeClient(planFlow);
     const { cards } = await plan(client);
-    const read = cards.find((c) => c.getAttribute("data-op-kind") === "d1_read")!;
-    const before = (client.startRun as ReturnType<typeof makeFakeClient>["startRun"]).mock.calls.length;
-    fireEvent.click(within(read).getByTestId("operate-op-run"));
-    await waitFor(() =>
-      expect((client.startRun as ReturnType<typeof makeFakeClient>["startRun"]).mock.calls.length).toBe(before + 1),
-    );
-  });
-
-  it("gates a WRITE op behind an explicit confirm", async () => {
-    const client = makeFakeClient(planFlow);
-    const { cards } = await plan(client);
-    const write = cards.find(
-      (c) => c.getAttribute("data-op-kind") === "d1_write" && c.getAttribute("data-op-destructive") === "0",
-    )!;
     const fn = client.startRun as ReturnType<typeof makeFakeClient>["startRun"];
-    const before = fn.mock.calls.length;
-
-    fireEvent.click(within(write).getByTestId("operate-op-run"));
-    expect(within(write).getByTestId("operate-op-confirm-panel")).toBeInTheDocument();
-    expect(fn.mock.calls.length).toBe(before); // not yet executed
-
-    fireEvent.click(within(write).getByTestId("operate-op-confirm"));
-    await waitFor(() => expect(fn.mock.calls.length).toBe(before + 1));
-  });
-
-  it("requires a typed confirmation for a DESTRUCTIVE op (safety net catches mislabeled DELETE)", async () => {
-    const client = makeFakeClient(planFlow);
-    const { cards } = await plan(client);
-    const del = cards.find((c) => c.getAttribute("data-op-destructive") === "1")!;
-    expect(del).toBeTruthy();
-    const fn = client.startRun as ReturnType<typeof makeFakeClient>["startRun"];
-    const before = fn.mock.calls.length;
-
-    fireEvent.click(within(del).getByTestId("operate-op-run"));
-    const confirmBtn = within(del).getByTestId("operate-op-confirm") as HTMLButtonElement;
-    expect(confirmBtn.disabled).toBe(true);
-    fireEvent.click(confirmBtn);
-    expect(fn.mock.calls.length).toBe(before); // still gated
-
-    fireEvent.change(within(del).getByTestId("operate-op-confirm-input"), { target: { value: "実行" } });
-    expect((within(del).getByTestId("operate-op-confirm") as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(within(del).getByTestId("operate-op-confirm"));
-    await waitFor(() => expect(fn.mock.calls.length).toBe(before + 1));
+    expect(fn).toHaveBeenCalledTimes(1); // the planner only
+    for (const card of cards) {
+      expect(within(card).queryByRole("button")).toBeNull();
+      expect(card.textContent).not.toMatch(/wrangler|curl/);
+    }
+    expect(cards.find((c) => c.getAttribute("data-op-destructive") === "1")).toBeTruthy();
   });
 });
