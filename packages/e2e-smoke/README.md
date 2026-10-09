@@ -53,3 +53,16 @@ any future divergence between code and contract turns the suite red. Current fin
 
 Regenerate the baseline by deleting `conformance-baseline.json` and re-running (it
 bootstraps on absence).
+
+## 3. Read-only live smoke (`src/live-contract.ts`, `scripts/smoke-readonly.ts`)
+
+```
+node scripts/smoke-readonly.ts staging            # or: prod  [--base-url <origin>]
+```
+
+GET only, no credentials, never writes. Each check is a status code plus the body
+validated against the response schema `docs/openapi/api-gateway.yaml` declares for that
+operation (schemas are read from the spec, not re-written). `/healthz` must be 200, and
+anonymous reads of `/api/v1/{me,identity,members,driveshare}` must be the documented 401
+envelope. Retries transport errors / 5xx only. `deploy.yml` runs it against prod as its
+last step; `test/live-contract.test.ts` covers it offline.
