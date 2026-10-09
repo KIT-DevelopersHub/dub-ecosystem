@@ -145,7 +145,7 @@ export function MemberRosterPage(): JSX.Element {
             id="member-roster-search"
             value={search}
             onChange={setSearch}
-            placeholder="氏名・フリガナ・役割・学科・学年で検索"
+            placeholder="氏名・フリガナ・名列番号・役割・学科・学年で検索"
             testId="member-roster-search"
           />
         </div>
