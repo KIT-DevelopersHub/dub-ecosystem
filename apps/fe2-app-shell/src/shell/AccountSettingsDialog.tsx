@@ -3,6 +3,8 @@
 // (which manages OTHER users). One dialog unifies every self-service action:
 //   • プロフィール — display name + avatar (upload / preset / initials)
 //   • 基本情報      — login email (read-only) + password change (nested dialog)
+//   • ブラウザ通知  — per-device opt-in for OS notifications on chat @mentions (applies
+//                     immediately; not part of 保存する since it needs a permission prompt)
 //   • 参加情報      — the fields the user entered in the 参加届 (participation form),
 //                     rendered by the shared PersonProfileFields (運営名簿・参加届と共通の
 //                     PersonProfile) so the set never drifts from the roster / submit contract.
@@ -12,7 +14,15 @@
 // both caches roll back to their pre-save snapshots and an error toast explains.
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Modal, Button, TextField, FormField, Avatar, Skeleton, useToast } from "@dub/ui";
+import { Modal, Button, TextField, FormField, Avatar, Skeleton, Switch, useToast } from "@dub/ui";
+import {
+  getBrowserNotifyEnabled,
+  getBrowserNotifyPermission,
+  requestBrowserNotifyPermission,
+  setBrowserNotifyEnabled,
+  showBrowserNotice,
+  type BrowserNotifyPermission,
+} from "@dub/fe5-notification-inbox";
 import type { gateway } from "@dub/types";
 import { ApiError, toDisplayableError, type ApiClient, type SelfParticipation } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
@@ -307,6 +317,8 @@ export function AccountSettingsDialog({
             </Button>
           </div>
 
+          <BrowserNotifySetting open={open} />
+
           {/* ── 参加情報（参加届） ── */}
           <div className="fe2-account-section" data-testid="fe2-account-participation">
             <div className="fe2-account-section-title">参加情報（参加届）</div>
@@ -343,5 +355,67 @@ export function AccountSettingsDialog({
       <ChangePasswordDialog api={api} open={pwOpen} onClose={() => setPwOpen(false)} />
       <PasskeysDialog api={api} open={passkeysOpen} onClose={() => setPasskeysOpen(false)} />
     </>
+  );
+}
+
+function browserNotifyHelp(perm: BrowserNotifyPermission): string {
+  switch (perm) {
+    case "unsupported":
+      return "このブラウザは通知に対応していません。";
+    case "denied":
+      return "ブラウザで通知がブロックされています。アドレスバーのサイト設定から通知を許可してください。";
+    default:
+      return "チャットで自分宛てのメンションが届いたとき、PC の通知でお知らせします（この端末のこのブラウザで、アプリを開いている間）。";
+  }
+}
+
+/** ブラウザ通知 row — device-local, so it saves the moment it is toggled. */
+function BrowserNotifySetting({ open }: { open: boolean }): JSX.Element {
+  const [perm, setPerm] = useState<BrowserNotifyPermission>(getBrowserNotifyPermission);
+  const [enabled, setEnabled] = useState(getBrowserNotifyEnabled);
+  const [busy, setBusy] = useState(false);
+
+  // Permission can change in the browser's site settings while the dialog is closed.
+  useEffect(() => {
+    if (open) {
+      setPerm(getBrowserNotifyPermission());
+      setEnabled(getBrowserNotifyEnabled());
+    }
+  }, [open]);
+
+  async function onToggle(next: boolean) {
+    if (!next) {
+      setBrowserNotifyEnabled(false);
+      setEnabled(false);
+      return;
+    }
+    setBusy(true);
+    const result = await requestBrowserNotifyPermission();
+    setPerm(result);
+    setBusy(false);
+    if (result !== "granted") return;
+    setBrowserNotifyEnabled(true);
+    setEnabled(true);
+    showBrowserNotice({
+      title: "ブラウザ通知を有効にしました",
+      body: "自分宛てのメンションが届くと、このように通知されます。",
+      tag: "dub-notif-enabled",
+    });
+  }
+
+  return (
+    <div className="fe2-account-notify" data-testid="fe2-account-browser-notify">
+      <Switch
+        id="fe2-account-browser-notify"
+        checked={enabled && perm === "granted"}
+        onChange={(v) => void onToggle(v)}
+        disabled={busy || perm === "unsupported" || perm === "denied"}
+        label="ブラウザの通知を有効にする"
+        testId="fe2-account-browser-notify-toggle"
+      />
+      <div className="fe2-account-password-help" data-testid="fe2-account-browser-notify-help">
+        {browserNotifyHelp(perm)}
+      </div>
+    </div>
   );
 }
