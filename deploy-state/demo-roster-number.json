@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "roster-number",
+  "worker": "dub-demo-roster-number",
+  "url": "https://dub-demo-roster-number.developershub-site.workers.dev",
+  "deployedSha": "13f90402",
+  "branch": "feat/member-roster-number",
+  "actor": "ko-tarou",
+  "markers": ["members-form-roster-number"],
+  "live": true,
+  "verifiedAt": "2026-10-09T06:17:11Z",
+  "updatedAt": "2026-10-09T06:17:11Z",
+  "note": ""
+}
