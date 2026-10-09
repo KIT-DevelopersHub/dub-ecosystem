@@ -159,7 +159,7 @@ gen_one() {
       #     STAGING relay worker + staging fe2 origin (staging-signed tickets are rejected
       #     by the prod relay, and the prod origin list would refuse the staging page). ---
       /^RELAY_WS_URL = "/ {
-        sub(/dub-commander-relay\./, "dub-commander-relay-staging."); print; next
+        sub(/dub-commander-relay\./, "dub-commander-relay" SFX "."); print; next
       }
       /^RELAY_ALLOWED_ORIGINS = "/ {
         print "RELAY_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
