@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "f4bb53b0",
-  "branch": "feat/calendar-app",
-  "actor": "Kota",
-  "markers": ["fe2-calendar", "calendar-view-toggle"],
+  "deployedSha": "0c61db3c",
+  "branch": "feat/hackit-drive-google-account",
+  "actor": "ko-tarou",
+  "markers": ["fe7:oauth-return-app", "dub-demo:drive-google", "fe7:oauth-return-role"],
   "live": true,
-  "verifiedAt": "2026-09-22T06:21:49Z",
-  "updatedAt": "2026-09-22T06:21:49Z",
-  "note": "カレンダーアプリ(共有タスクを月/週表示)"
+  "verifiedAt": "2026-10-09T19:13:03Z",
+  "updatedAt": "2026-10-09T19:13:03Z",
+  "note": "Hackit Drive の Google アカウント切替(ロール管理 > Drive共有 詳細ダイアログ)"
 }

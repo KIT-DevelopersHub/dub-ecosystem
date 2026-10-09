@@ -5,7 +5,7 @@
 import { identity, member } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
 import type { common, auditLog, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
-import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview } from "../contracts/pending";
+import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview, DriveGoogleAccountStatus } from "../contracts/pending";
 import { EMAIL_ROUTING_DOMAIN, MAIL_WORKER_DESTINATION } from "../contracts/pending";
 
 // Mock roster row: the frozen detail model plus provenance (identity-roster exposes it).
@@ -22,6 +22,8 @@ export interface MockSeed {
   me?: gateway.MeResponse;
   /** Seed the /api/v1/mail/status rate-limit view (default: not limited). */
   mailRateLimit?: MailRateLimitStatus;
+  /** Seed the Drive共有 Google account (default: connected, healthy). */
+  driveGoogle?: Partial<DriveGoogleAccountStatus>;
 }
 
 interface MockState {
@@ -36,6 +38,9 @@ interface MockState {
   // userId -> current plaintext password (admin set/view surface, #5a/#5c). The real
   // backend stores an AES copy; the mock keeps the plaintext so the view flow works.
   passwords: Map<string, string>;
+  driveGoogle: DriveGoogleAccountStatus;
+  /** Pending OAuth states issued by the mock connect (single use). */
+  driveGoogleStates: Set<string>;
 }
 
 const ORG = "org_devhub";
@@ -81,7 +86,16 @@ function seedState(seed?: MockSeed): MockState {
   // user_alice starts with a viewable credential (demo/E2E); others are unset until an
   // admin issues one (view then rejects with PASSWORD_NOT_VIEWABLE, like the backend).
   const passwords = new Map<string, string>([["user_alice", "Alice-Init-0001"]]);
-  return { users, roles, assignments, audits, emailAddresses, members, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords };
+  const driveGoogle: DriveGoogleAccountStatus = {
+    source: "connected",
+    email: "hackit@gmail.com",
+    connectedAt: "2026-10-01T09:00:00.000Z",
+    connectedBy: "user_alice",
+    needsReconnect: false,
+    canConnect: true,
+    ...seed?.driveGoogle,
+  };
+  return { users, roles, assignments, audits, emailAddresses, members, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords, driveGoogle, driveGoogleStates: new Set() };
 }
 
 function paginate<T>(items: T[]): common.Paginated<T> {
@@ -153,6 +167,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       return { userId: u.id, email: u.email, password: pw } as unknown as T;
     }
     if (path.endsWith("/me")) return s.me as unknown as T;
+    if (path.endsWith("/driveshare/google-account")) return { ...s.driveGoogle } as unknown as T;
     if (path.endsWith("/mail/status")) {
       const body: MailStatusResponse = { service: "mail-gateway", provider: "resend", rateLimit: s.mailRateLimit };
       return body as unknown as T;
@@ -161,6 +176,27 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
   }
 
   async function post<T>(path: string, body?: unknown): Promise<T> {
+    if (path.endsWith("/driveshare/google-account/connect")) {
+      // Stands in for Google: the "consent URL" is the return page with a code + state.
+      const { redirectUri } = (body ?? {}) as { redirectUri?: string };
+      if (!redirectUri) throw err("VALIDATION_FAILED", "redirectUri required");
+      const state = `mock_state_${s.driveGoogleStates.size + 1}`;
+      s.driveGoogleStates.add(state);
+      return { authUrl: `${redirectUri}?code=mock-code&state=${state}` } as unknown as T;
+    }
+    if (path.endsWith("/driveshare/google-account/callback")) {
+      const { state } = (body ?? {}) as { state?: string };
+      if (!state || !s.driveGoogleStates.delete(state)) throw err("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。");
+      s.driveGoogle = {
+        source: "connected",
+        email: "hackit.new@gmail.com",
+        connectedAt: now(),
+        connectedBy: s.me.user.id,
+        needsReconnect: false,
+        canConnect: true,
+      };
+      return { ...s.driveGoogle } as unknown as T;
+    }
     if (path.endsWith("/users/invite")) {
       const req = body as identity.InviteUserRequest;
       if (!EMAIL_RE.test(req.email)) {

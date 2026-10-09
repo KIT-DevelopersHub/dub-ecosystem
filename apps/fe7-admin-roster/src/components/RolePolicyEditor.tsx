@@ -16,6 +16,8 @@ import type { identity } from "@dub/types";
 import { AppAccessTable } from "./AppAccessTable";
 import { AppDetailDialog } from "./AppDetailDialog";
 import { OtherPermissionsSection } from "./OtherPermissionsSection";
+import { OAUTH_RETURN_APP } from "./appSettingsPanels";
+import { pendingOAuthReturnApp } from "../lib/oauthReturn";
 
 export function RolePolicyEditor({
   selected,
@@ -30,7 +32,8 @@ export function RolePolicyEditor({
   lockedKeys?: readonly identity.PermissionKey[];
   idPrefix?: string;
 }) {
-  const [detailAppId, setDetailAppId] = useState<string | null>(null);
+  // Google の同意画面から戻った直後は、接続を始めたアプリの詳細ダイアログを開き直す。
+  const [detailAppId, setDetailAppId] = useState<string | null>(() => pendingOAuthReturnApp(OAUTH_RETURN_APP));
 
   return (
     <div data-testid={`${idPrefix}-role-policy-editor`}>

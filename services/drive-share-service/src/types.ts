@@ -140,3 +140,40 @@ export interface CreateRoleGrantRequest {
   roleId: string;
   driveRole: AssignableDriveRole;
 }
+
+// ---- Hackit Google account (ロール管理 > Drive共有 の詳細ダイアログ) ----
+
+/** Where the refresh token the service uses comes from:
+ *  connected = connected from the UI (D1) / secret = the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN
+ *  fallback / none = no real account (mock Drive). */
+export type GoogleAccountSource = "connected" | "secret" | "none";
+
+/** GET /driveshare/google-account. Never carries the token itself. */
+export interface GoogleAccountStatus {
+  source: GoogleAccountSource;
+  /** The Google account Drive is accessed as (null when unknown). */
+  email: string | null;
+  connectedAt: string | null;
+  /** Identity user id of the admin who connected it (source=connected only). */
+  connectedBy: string | null;
+  /** Google answered invalid_grant: the token was revoked or expired — reconnect. */
+  needsReconnect: boolean;
+  /** Whether the connect flow is configured (OAuth web client + encryption key). */
+  canConnect: boolean;
+}
+
+/** POST /driveshare/google-account/connect body. */
+export interface StartGoogleConnectRequest {
+  /** Where Google sends the admin back: the SPA's /admin/roles on its own origin. */
+  redirectUri: string;
+}
+
+export interface StartGoogleConnectResponse {
+  authUrl: string;
+}
+
+/** POST /driveshare/google-account/callback body (relayed by the SPA from Google's redirect). */
+export interface CompleteGoogleConnectRequest {
+  code: string;
+  state: string;
+}

@@ -14,13 +14,23 @@ import { errors, dubErrorHandler } from "@dub/errors";
 import { policyGate, type PermissionGranter, type PolicyGateVars } from "@dub/policy-gate";
 import type { DriveShareService } from "./service";
 import type { RoleGrantsService } from "./role-grants-service";
+import type { GoogleAccountService } from "./google-account";
 import { POLICY_TABLE } from "./policy-table";
-import type { CreateRoleGrantRequest, GrantPermissionRequest, SetLinkSharingRequest, UpdatePermissionRequest } from "./types";
+import type {
+  CompleteGoogleConnectRequest,
+  CreateRoleGrantRequest,
+  GrantPermissionRequest,
+  SetLinkSharingRequest,
+  StartGoogleConnectRequest,
+  UpdatePermissionRequest,
+} from "./types";
 
 export interface AppDeps {
   service: DriveShareService;
   /** Role-based sharing fan-out (built per request with the acting user's roster view). */
   roleGrants: RoleGrantsService;
+  /** The Google account the service acts as + the admin connect flow. */
+  googleAccount: GoogleAccountService;
   /** Which of the requested permission keys the caller holds (identity /authz/check). */
   authz: PermissionGranter;
 }
@@ -115,6 +125,19 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.put("/driveshare/files/:id/link", async (c) => {
     const body = await parseBody<SetLinkSharingRequest>(c);
     return c.json(await deps.service.setLinkSharing(c.req.param("id"), body));
+  });
+
+  // ---- Google account the service acts as (ロール管理 > Drive共有 詳細ダイアログ; admin only) ----
+  app.get("/driveshare/google-account", async (c) => c.json(await deps.googleAccount.status()));
+
+  app.post("/driveshare/google-account/connect", async (c) => {
+    const body = await parseBody<Partial<StartGoogleConnectRequest>>(c);
+    return c.json(await deps.googleAccount.startConnect(c.get("userId"), body.redirectUri));
+  });
+
+  app.post("/driveshare/google-account/callback", async (c) => {
+    const body = await parseBody<Partial<CompleteGoogleConnectRequest>>(c);
+    return c.json(await deps.googleAccount.completeConnect(c.get("userId"), body));
   });
 
   return app;

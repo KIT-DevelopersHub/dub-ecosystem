@@ -4,9 +4,10 @@
 // whitespace so only DDL changes trip the guard.
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import { DRIVESHARE_SCHEMA_MIGRATION } from "../src/schema";
+import { DRIVESHARE_GOOGLE_ACCOUNT_MIGRATION, DRIVESHARE_SCHEMA_MIGRATION } from "../src/schema";
 
 const PHYSICAL_SQL_PATH = new URL("../../../infra/d1/migrations/driveshare/0001_init.sql", import.meta.url);
+const GOOGLE_ACCOUNT_SQL_PATH = new URL("../../../infra/d1/migrations/driveshare/0002_google_account.sql", import.meta.url);
 
 function normalizeDdl(sql: string): string {
   return sql
@@ -23,5 +24,10 @@ describe("schema.ts <-> physical migration lockstep", () => {
   it("drive-share-service schema const equals infra/d1/migrations/driveshare/0001_init.sql", () => {
     const physical = readFileSync(PHYSICAL_SQL_PATH, "utf8");
     expect(normalizeDdl(DRIVESHARE_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
+  });
+
+  it("google-account schema const equals infra/d1/migrations/driveshare/0002_google_account.sql", () => {
+    const physical = readFileSync(GOOGLE_ACCOUNT_SQL_PATH, "utf8");
+    expect(normalizeDdl(DRIVESHARE_GOOGLE_ACCOUNT_MIGRATION.up)).toBe(normalizeDdl(physical));
   });
 });
