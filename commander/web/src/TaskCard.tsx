@@ -9,7 +9,6 @@ import {
   deriveLane,
   isRunningLane,
   LANE_COLORS,
-  LANE_LABELS,
   needsFix,
   NEEDS_FIX_COLOR,
 } from "./lib/lanes.ts";
@@ -80,6 +79,7 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
       tabIndex={0}
       aria-label={`${item.title} を開く`}
       data-testid={`task-card-${item.taskId}`}
+      className="cmdr-card"
       onClick={open}
       onKeyDown={(e) => {
         if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
@@ -92,9 +92,8 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
         width: "100%",
         textAlign: "left",
         background: t.surface,
-        border: `1px solid ${t.border}`,
-        borderLeft: `3px solid ${accent}`,
-        borderRadius: t.radius,
+        border: `1px solid ${fix ? NEEDS_FIX_COLOR : t.border}`,
+        borderRadius: "var(--dub-radius-sm, 8px)",
         padding: t.space3,
         color: "inherit",
         cursor: "pointer",
@@ -103,30 +102,51 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
         boxSizing: "border-box",
       }}
     >
-      {/* layer 1: title + lane */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: t.space2 }}>
-        <span style={{ fontWeight: 600, fontSize: 14, flex: 1, overflowWrap: "anywhere" }}>
-          {item.title}
-        </span>
+      {/* layer 1: status icon + target worktree + elapsed（GitHub の「repo #番号」行に相当） */}
+      <div style={{ display: "flex", alignItems: "center", gap: t.space2, fontSize: 12, color: t.textMuted }}>
+        <StatusIcon color={accent} running={isRunning} fix={fix} />
         <span
-          data-testid={`task-lane-${item.taskId}`}
-          style={{ fontSize: 11, fontWeight: 700, color: accent, whiteSpace: "nowrap" }}
+          title={item.latestRun?.cwd ?? ""}
+          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         >
-          {fix ? "要修正" : LANE_LABELS[lane]}
-        </span>
-      </div>
-
-      {/* layer 2: target worktree + elapsed */}
-      <div style={{ display: "flex", gap: t.space2, marginTop: t.space2, fontSize: 12, color: t.textMuted }}>
-        <span title={item.latestRun?.cwd ?? ""} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          📁 {basename(item.latestRun?.cwd ?? "")}
+          {basename(item.latestRun?.cwd ?? "")}
         </span>
         <span style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>{relTime(item.updatedAt)}</span>
       </div>
 
-      {/* reflection badge: 反映済み / 反映失敗 at a glance (requirement #2) */}
-      {reflection && (
-        <ReflectionBadge taskId={item.taskId} reflection={reflection} when={relTime(item.updatedAt)} />
+      {/* layer 2: title */}
+      <div
+        className="cmdr-card-title"
+        style={{ marginTop: t.space1, fontWeight: 600, fontSize: 14, lineHeight: 1.4, overflowWrap: "anywhere" }}
+      >
+        {item.title}
+      </div>
+
+      {/* labels: 要修正 / 反映状況（GitHub のラベル行）。列見出しが状態名を持つので要修正だけ足す。 */}
+      {(fix || reflection) && (
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: t.space1 }}>
+          {fix && (
+            <span
+              data-testid={`task-lane-${item.taskId}`}
+              style={{
+                marginTop: t.space2,
+                fontSize: 11,
+                fontWeight: 600,
+                color: NEEDS_FIX_COLOR,
+                border: `1px solid ${NEEDS_FIX_COLOR}`,
+                borderRadius: 999,
+                padding: "0 8px",
+                lineHeight: "18px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              要修正
+            </span>
+          )}
+          {reflection && (
+            <ReflectionBadge taskId={item.taskId} reflection={reflection} when={relTime(item.updatedAt)} />
+          )}
+        </div>
       )}
 
       {/* artifact links: demo / staging / PR click-throughs (P1-2) */}
@@ -174,22 +194,25 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
         </div>
       )}
 
+      {/* 中止は控えめに右下へ（全走行カードに赤ボタンが並ぶと押し間違えやすい）。 */}
       {isRunning && (
-        <div style={{ marginTop: t.space3 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: t.space2 }}>
           <button
             type="button"
             data-testid={`task-cancel-${item.taskId}`}
+            className="cmdr-cancel"
+            title="この実行を中止"
             onClick={(e) => {
               e.stopPropagation();
               if (item.latestRun) onCancel(item.latestRun.id);
             }}
             style={{
               fontSize: 12,
-              color: t.danger,
+              color: t.textMuted,
               background: "transparent",
               border: `1px solid ${t.border}`,
               borderRadius: "var(--dub-radius-sm, 8px)",
-              padding: `2px ${t.space2}`,
+              padding: `1px ${t.space2}`,
               cursor: "pointer",
               font: "inherit",
             }}
@@ -199,6 +222,25 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
         </div>
       )}
     </div>
+  );
+}
+
+/** GitHub の issue アイコン相当: 走行中は回転、要修正は塗りつぶし、それ以外は輪郭の丸。 */
+function StatusIcon({ color, running, fix }: { color: string; running: boolean; fix: boolean }) {
+  if (running) return <Spinner size={12} color={color} />;
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: 999,
+        border: `2px solid ${color}`,
+        background: fix ? color : "transparent",
+        boxSizing: "border-box",
+        flexShrink: 0,
+      }}
+    />
   );
 }
 
@@ -226,10 +268,11 @@ function ReflectionBadge({
         alignItems: "center",
         gap: t.space2,
         marginTop: t.space2,
-        padding: `2px ${t.space2}`,
-        borderRadius: "var(--dub-radius-sm, 8px)",
+        padding: "0 8px",
+        lineHeight: "18px",
+        borderRadius: 999,
         border: `1px solid ${color}`,
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: 600,
         color,
         maxWidth: "100%",

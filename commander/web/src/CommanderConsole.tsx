@@ -79,9 +79,9 @@ export function CommanderConsole({
         setViewingRunId(id);
         setStatus(detail.run.status);
         setLog(
-          detail.events.map((e) =>
-            formatEvent({ type: e.type, ...e.payload } as DaemonRunEvent),
-          ),
+          detail.events
+            .map((e) => formatEvent({ type: e.type, ...e.payload } as DaemonRunEvent))
+            .filter((l) => l.trim()),
         );
       } catch {
         /* best-effort restore; leave the console as-is on failure */
@@ -103,7 +103,8 @@ export function CommanderConsole({
         runId,
         (ev: DaemonRunEvent) => {
           if (ev.type === "status" && ev.status) setStatus(ev.status);
-          append(formatEvent(ev));
+          const line = formatEvent(ev);
+          if (line.trim()) append(line);
         },
         () => {
           setBusy(false);
