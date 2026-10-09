@@ -239,7 +239,45 @@ const TASKS: task.Task[] = [
     status: "todo", priority: "urgent", assigneeId: ME_ID, teamId: "team_hq", startAt: "2026-09-20T00:00:00Z", dueAt: "2026-09-21T00:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-20T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
   },
+  ...calendarDemoTasks(),
 ];
+
+// カレンダー demo: a few 予定 around TODAY (the fixed seeds above sit in Aug–Sep, so a
+// calendar opened today would be empty). Timed ones carry the local offset exactly
+// like the calendar writes them; 終日 ones are UTC-midnight dates like マイタスク's.
+function calendarDemoTasks(): task.Task[] {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const base = new Date();
+  const dateKey = (offset: number) => {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+  const tz = (() => {
+    const off = -base.getTimezoneOffset();
+    return `${off >= 0 ? "+" : "-"}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
+  })();
+  const at = (offset: number, hhmm: string) => `${dateKey(offset)}T${hhmm}:00${tz}`;
+  const allDay = (offset: number) => `${dateKey(offset)}T00:00:00.000Z`;
+  const mk = (
+    id: string, title: string, status: task.TaskStatus, startAt: string, dueAt: string, description: string | null = null,
+  ): task.Task => ({
+    version: 1, id, eventId: null, title, description, status, priority: "medium", assigneeId: ME_ID, createdBy: ME_ID,
+    teamId: null, startAt, dueAt, origin: "internal", archivedAt: null, createdAt: isoNowSeed(), updatedAt: isoNowSeed(),
+  });
+  return [
+    mk("cal_1", "運営定例ミーティング", "in_progress", at(0, "10:00"), at(0, "11:00"), "進捗共有と次アクションの確認"),
+    mk("cal_2", "スポンサー打ち合わせ", "todo", at(0, "13:00"), at(0, "14:30")),
+    mk("cal_3", "会場への連絡", "todo", at(0, "13:30"), at(0, "14:00")),
+    mk("cal_4", "ふりかえり会", "done", at(-1, "15:00"), at(-1, "16:00")),
+    mk("cal_5", "登壇資料 提出締切", "blocked", allDay(1), allDay(1)),
+    mk("cal_6", "北陸ITカンファレンス 準備週間", "todo", allDay(2), allDay(4)),
+    mk("cal_7", "デザインレビュー", "todo", at(2, "16:00"), at(2, "17:00")),
+  ];
+}
+
+function isoNowSeed(): string {
+  return new Date().toISOString();
+}
 
 const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
@@ -1602,6 +1640,21 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   }
 
   if (method === "POST") {
+    // task create (カレンダーの予定追加 / マイタスク). Appended to the in-memory seed so
+    // the new 予定 survives a refetch within the session.
+    if (pathname === "/api/v1/tasks") {
+      const b = (body ?? {}) as Partial<task.CreateTaskRequest>;
+      if (typeof b.title !== "string" || !b.title.trim()) return notFound(`POST ${pathname}`);
+      const now = new Date().toISOString();
+      const created: task.Task = {
+        version: 1, id: `tsk_demo_${Date.now()}`, eventId: b.eventId ?? null, title: b.title, description: b.description ?? null,
+        status: "todo", priority: b.priority ?? "medium", assigneeId: b.assigneeId ?? null, createdBy: ME_ID,
+        teamId: b.teamId ?? null, startAt: b.startAt ?? null, dueAt: b.dueAt ?? null, origin: "internal",
+        archivedAt: null, createdAt: now, updatedAt: now,
+      };
+      TASKS.push(created);
+      return json(created, 201);
+    }
     // mail read + send are served by the stateful mail store (createMailStore).
     if (pathname === "/api/v1/notifications/inbox/read-all") {
       const now = new Date().toISOString();
@@ -1718,6 +1771,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         if (!t) return notFound(`PATCH ${pathname}`);
         const b = (body ?? {}) as Partial<task.UpdateTaskRequest>;
         if (b.title !== undefined) t.title = b.title;
+        if (b.description !== undefined) t.description = b.description;
         if (b.status !== undefined) t.status = b.status;
         if (b.priority !== undefined) t.priority = b.priority;
         if (b.assigneeId !== undefined) t.assigneeId = b.assigneeId;
@@ -1733,6 +1787,18 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         t.updatedAt = new Date().toISOString();
         return json(t);
       }
+    }
+  }
+
+  // task archive (カレンダーの予定削除). task-service soft-deletes; the demo drops the row
+  // so every list (calendar / マイタスク) stops showing it.
+  if (method === "DELETE") {
+    const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+    if (id) {
+      const i = TASKS.findIndex((x) => x.id === id);
+      if (i < 0) return notFound(`DELETE ${pathname}`);
+      const [gone] = TASKS.splice(i, 1);
+      return json({ ...gone!, archivedAt: new Date().toISOString() });
     }
   }
 

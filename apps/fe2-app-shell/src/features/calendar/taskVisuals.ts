@@ -1,60 +1,33 @@
-// Presentation mapping for a task's status → calendar chip colors + a JA label.
-// Colors reference @dub/tokens CSS vars so light/dark stay consistent. Kept small
-// and dependency-free so it can be unit-tested and reused by month/week views.
+// Status → event color + JA label. Each status acts like one of Google Calendar's
+// "マイカレンダー" (its own color, toggled from the sidebar). Colors are Google's
+// event palette (ピーコック/ブルーベリー/ミカン/セージ/グラファイト) so blocks read the
+// way users already know; text on them is always white, as in Google.
 import type { task } from "@dub/types";
 
 export interface StatusVisual {
   label: string;
-  /** chip background */
-  bg: string;
-  /** chip text/border accent */
-  fg: string;
-  /** status dot color */
-  dot: string;
+  /** solid event color (block / bar / dot / sidebar checkbox) */
+  color: string;
 }
 
 const STATUS_VISUALS: Record<task.TaskStatus, StatusVisual> = {
-  todo: {
-    label: "未着手",
-    bg: "var(--dub-color-surface-sunken, #f1f3f5)",
-    fg: "var(--dub-color-text-secondary, #444)",
-    dot: "var(--dub-color-text-muted, #888)",
-  },
-  in_progress: {
-    label: "進行中",
-    bg: "var(--dub-color-brand-50, #eef2ff)",
-    fg: "var(--dub-color-brand-600, #3b46c4)",
-    dot: "var(--dub-color-brand-500, #4f46e5)",
-  },
-  blocked: {
-    label: "ブロック",
-    bg: "var(--dub-color-warning-50, #fff7e6)",
-    fg: "var(--dub-color-warning-600, #b7791f)",
-    dot: "var(--dub-color-warning-500, #d69e2e)",
-  },
-  done: {
-    label: "完了",
-    bg: "var(--dub-color-success-50, #e9f8ef)",
-    fg: "var(--dub-color-success-600, #2f855a)",
-    dot: "var(--dub-color-success-500, #38a169)",
-  },
-  cancelled: {
-    label: "中止",
-    bg: "var(--dub-color-surface-sunken, #f1f3f5)",
-    fg: "var(--dub-color-text-muted, #888)",
-    dot: "var(--dub-color-text-muted, #888)",
-  },
+  todo: { label: "未着手", color: "#039be5" },
+  in_progress: { label: "進行中", color: "#3f51b5" },
+  blocked: { label: "ブロック", color: "#f4511e" },
+  done: { label: "完了", color: "#33b679" },
+  cancelled: { label: "中止", color: "#616161" },
 };
 
 export function statusVisual(status: task.TaskStatus): StatusVisual {
   return STATUS_VISUALS[status] ?? STATUS_VISUALS.todo;
 }
 
-/** All statuses in a stable order (legend rendering). */
-export const STATUS_ORDER: readonly task.TaskStatus[] = [
-  "todo",
-  "in_progress",
-  "blocked",
-  "done",
-  "cancelled",
-];
+/** All statuses in a stable order (sidebar rendering). */
+export const STATUS_ORDER: readonly task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
+
+export const PRIORITY_LABEL: Record<task.TaskPriority, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+  urgent: "緊急",
+};

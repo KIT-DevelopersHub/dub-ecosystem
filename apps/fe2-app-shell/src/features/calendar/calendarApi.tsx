@@ -3,7 +3,8 @@
 // contract of its own. It rides the ONE shell api-client (src/lib/api-client.tsx:
 // session cookie, 401→refresh, requestId, error normalization) and calls the
 // canonical task-service endpoint GET /api/v1/tasks, typed against @dub/types
-// `task` (the API-contract SoT). No schema is added or changed — additive, read-only.
+// `task` (the API-contract SoT). No schema is added or changed. Writes (予定の追加/編集/削除) use the same
+// task-service create/update/archive endpoints マイタスク uses.
 import type { common, task } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
@@ -40,6 +41,11 @@ export interface CalendarApi {
    * `listAllTasks()` with no scope failed in production ("タスクを取得できませんでした。").
    */
   listMyTasks(currentUserId: common.UserId): Promise<task.Task[]>;
+  /** 予定の追加 — a calendar 予定 is a task with startAt/dueAt (POST /api/v1/tasks). */
+  createTask(req: task.CreateTaskRequest): Promise<task.Task>;
+  updateTask(id: common.TaskId, req: task.UpdateTaskRequest): Promise<task.Task>;
+  /** Archives the task (task-service DELETE is a soft delete). */
+  deleteTask(id: common.TaskId): Promise<void>;
 }
 
 export function createCalendarApi(api: ApiClient): CalendarApi {
@@ -83,5 +89,15 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     return [...byId.values()];
   };
 
-  return { listTasks, listAllTasks, listMyTasks };
+  const createTask: CalendarApi["createTask"] = (req) =>
+    api.request<task.Task>({ method: "POST", path: `${P}/tasks`, body: req });
+
+  const updateTask: CalendarApi["updateTask"] = (id, req) =>
+    api.request<task.Task>({ method: "PATCH", path: `${P}/tasks/${encodeURIComponent(id)}`, body: req });
+
+  const deleteTask: CalendarApi["deleteTask"] = async (id) => {
+    await api.request<unknown>({ method: "DELETE", path: `${P}/tasks/${encodeURIComponent(id)}` });
+  };
+
+  return { listTasks, listAllTasks, listMyTasks, createTask, updateTask, deleteTask };
 }
