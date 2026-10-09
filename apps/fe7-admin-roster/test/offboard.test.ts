@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { member } from "@dub/types";
+import { member } from "@dub/types";
 import { runOffboard, type OffboardApi } from "../src/lib/offboard";
 import type { OffboardUserResult } from "../src/contracts/pending";
 
@@ -19,7 +19,7 @@ function identityResult(): OffboardUserResult {
 }
 
 function member_(over: Partial<member.Member> = {}): member.Member {
-  return { id: "member_bob", orgId: "o", name: "佐藤 太郎", roleTitle: null, status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1, version: 3, createdAt: "t", updatedAt: "t", ...over };
+  return { ...member.emptyPersonProfile(), id: "member_bob", orgId: "o", name: "佐藤 太郎", roleTitle: null, status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1, version: 3, createdAt: "t", updatedAt: "t", ...over };
 }
 
 function fakeApi(over: Partial<OffboardApi> = {}): OffboardApi {

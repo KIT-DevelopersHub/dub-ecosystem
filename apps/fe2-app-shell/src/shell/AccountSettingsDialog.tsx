@@ -4,19 +4,26 @@
 //   • プロフィール — display name + avatar (upload / preset / initials)
 //   • 基本情報      — login email (read-only) + password change (nested dialog)
 //   • 参加情報      — the fields the user entered in the 参加届 (participation form),
-//                     rendered from the SINGLE-SOURCE descriptor (profileFields.ts) so the
-//                     set never drifts from the submit contract.
+//                     rendered by the shared PersonProfileFields (運営名簿・参加届と共通の
+//                     PersonProfile) so the set never drifts from the roster / submit contract.
 //
 // Save is OPTIMISTIC ([[optimistic-ui-principle]]): the /me and 参加届 caches are patched
 // immediately (header avatar + name update at once) and a success toast shows; on failure
 // both caches roll back to their pre-save snapshots and an error toast explains.
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Modal, Button, TextField, Textarea, Select, FormField, Avatar, Skeleton, useToast } from "@dub/ui";
+import { Modal, Button, TextField, FormField, Avatar, Skeleton, useToast } from "@dub/ui";
 import type { gateway } from "@dub/types";
 import { ApiError, toDisplayableError, type ApiClient, type SelfParticipation } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
-import { PARTICIPATION_PROFILE_FIELDS, emptySelfParticipation, type ParticipationFieldDescriptor } from "../features/participation/index.tsx";
+import {
+  PersonProfileFields,
+  emptyProfileDraft,
+  parseProfileDraft,
+  toProfileDraft,
+  type PersonProfileDraft,
+  type PersonProfileErrors,
+} from "../lib/personProfile.tsx";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
 import { PasskeysDialog } from "./PasskeysDialog.tsx";
 
@@ -48,54 +55,9 @@ function presetAvatarDataUrl(color: string, name: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-// ── 参加届 draft helpers (Record<key,string>; "" == null) ──────────────────────
-type PartDraft = Record<string, string>;
-function toDraft(p: SelfParticipation): PartDraft {
-  const d: PartDraft = {};
-  for (const f of PARTICIPATION_PROFILE_FIELDS) {
-    const v = p[f.key];
-    d[f.key] = v == null ? "" : String(v);
-  }
-  return d;
+function draftEquals(a: PersonProfileDraft, b: PersonProfileDraft): boolean {
+  return (Object.keys(a) as (keyof PersonProfileDraft)[]).every((k) => a[k].trim() === b[k].trim());
 }
-function draftToPatch(d: PartDraft): SelfParticipation {
-  const out = emptySelfParticipation();
-  for (const f of PARTICIPATION_PROFILE_FIELDS) {
-    const v = (d[f.key] ?? "").trim();
-    // Values come from constrained controls (selects use the closed unions), so the
-    // string→union cast is runtime-safe; empty clears the field.
-    (out as unknown as Record<string, unknown>)[f.key] = v.length > 0 ? v : null;
-  }
-  return out;
-}
-function draftEquals(a: PartDraft, b: PartDraft): boolean {
-  return PARTICIPATION_PROFILE_FIELDS.every((f) => (a[f.key] ?? "").trim() === (b[f.key] ?? "").trim());
-}
-
-// Group the descriptor into rows: consecutive `half` fields pair up (2-up); full-width
-// fields (textarea) stand alone.
-function toRows(fields: ParticipationFieldDescriptor[]): ParticipationFieldDescriptor[][] {
-  const rows: ParticipationFieldDescriptor[][] = [];
-  let buf: ParticipationFieldDescriptor[] = [];
-  for (const f of fields) {
-    if (f.half) {
-      buf.push(f);
-      if (buf.length === 2) {
-        rows.push(buf);
-        buf = [];
-      }
-    } else {
-      if (buf.length) {
-        rows.push(buf);
-        buf = [];
-      }
-      rows.push([f]);
-    }
-  }
-  if (buf.length) rows.push(buf);
-  return rows;
-}
-const PARTICIPATION_ROWS = toRows(PARTICIPATION_PROFILE_FIELDS);
 
 export function AccountSettingsDialog({
   api,
@@ -115,7 +77,8 @@ export function AccountSettingsDialog({
 
   const [name, setName] = useState(currentName);
   const [avatar, setAvatar] = useState<string | null>(currentAvatar);
-  const [part, setPart] = useState<PartDraft>({});
+  const [part, setPart] = useState<PersonProfileDraft>(emptyProfileDraft);
+  const [partErrors, setPartErrors] = useState<PersonProfileErrors>({});
   const [submitting, setSubmitting] = useState(false);
   // P12 delight UX: the save button flashes a checkmark in place before the dialog
   // closes, so success reads at the button — the toast stays as a secondary trail,
@@ -157,7 +120,8 @@ export function AccountSettingsDialog({
   // by a background refetch).
   useEffect(() => {
     if (open && !partSeeded.current && loadedPart) {
-      setPart(toDraft(loadedPart));
+      setPart(toProfileDraft(loadedPart));
+      setPartErrors({});
       partSeeded.current = true;
     }
   }, [open, loadedPart]);
@@ -166,7 +130,7 @@ export function AccountSettingsDialog({
   const tooLong = trimmed.length > MAX_NAME_LENGTH;
   const nameEmpty = trimmed.length === 0;
   const profileDirty = trimmed !== currentName || avatar !== currentAvatar;
-  const participationDirty = loadedPart != null && partSeeded.current && !draftEquals(part, toDraft(loadedPart));
+  const participationDirty = loadedPart != null && partSeeded.current && !draftEquals(part, toProfileDraft(loadedPart));
   const dirty = profileDirty || participationDirty;
   const canSubmit = dirty && !nameEmpty && !tooLong && !submitting && !saveSuccess;
 
@@ -198,11 +162,13 @@ export function AccountSettingsDialog({
 
   async function save() {
     if (!canSubmit) return;
+    const { profile: nextPart, errors: partErrs } = parseProfileDraft(part);
+    setPartErrors(partErrs);
+    if (participationDirty && Object.keys(partErrs).length > 0) return;
     setSubmitting(true);
     setError(null);
     const prevMe = qc.getQueryData<MeResponse>(queryKeys.me);
     const prevPart = qc.getQueryData<SelfParticipation>(PARTICIPATION_KEY);
-    const nextPart = draftToPatch(part);
     // Optimistic: patch BOTH caches NOW so the header + form reflect immediately.
     if (profileDirty) {
       qc.setQueryData<MeResponse>(queryKeys.me, (old) =>
@@ -243,19 +209,6 @@ export function AccountSettingsDialog({
       toast.show({ kind: "error", title: "アカウント設定を保存できませんでした", description: msg });
       setSubmitting(false);
     }
-  }
-
-  function renderControl(f: ParticipationFieldDescriptor): JSX.Element {
-    const id = `fe2-part-${f.key}`;
-    const val = part[f.key] ?? "";
-    const set = (v: string) => setPart((prev) => ({ ...prev, [f.key]: v }));
-    if (f.kind === "select") {
-      return <Select id={id} value={val.length > 0 ? val : null} onChange={set} options={f.options ?? []} placeholder="選択してください" testId={id} />;
-    }
-    if (f.kind === "textarea") {
-      return <Textarea id={id} value={val} onChange={set} rows={3} testId={id} />;
-    }
-    return <TextField id={id} type={f.kind === "email" ? "email" : "text"} value={val} onChange={set} {...(f.placeholder ? { placeholder: f.placeholder } : {})} testId={id} />;
   }
 
   return (
@@ -369,15 +322,13 @@ export function AccountSettingsDialog({
                 参加情報を読み込めませんでした。
               </p>
             ) : (
-              PARTICIPATION_ROWS.map((row, i) => (
-                <div key={i} className={row.length > 1 ? "fe2-account-prow" : undefined}>
-                  {row.map((f) => (
-                    <FormField key={f.key} label={f.label} htmlFor={`fe2-part-${f.key}`} {...(f.help ? { help: f.help } : {})}>
-                      {renderControl(f)}
-                    </FormField>
-                  ))}
-                </div>
-              ))
+              <PersonProfileFields
+                draft={part}
+                onChange={setPart}
+                errors={partErrors}
+                idPrefix="fe2-part"
+                idFor={(k) => `fe2-part-${k}`}
+              />
             )}
           </div>
 

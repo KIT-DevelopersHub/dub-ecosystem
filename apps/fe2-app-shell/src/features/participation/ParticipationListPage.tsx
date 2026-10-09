@@ -12,7 +12,8 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
-import { ACTIVITY_LABEL, GRADE_LABEL, REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
+import { REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
+import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import styles from "./participation.module.css";
 
 /** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
@@ -120,15 +121,11 @@ export function ParticipationListPage(): JSX.Element {
   const columns: ColumnDef<Participation>[] = [
     reviewColumn,
     { key: "name", header: "氏名", noWrap: true, minWidth: "8rem", cell: (p) => p.name },
-    { key: "nameKana", header: "ふりがな", noWrap: true, minWidth: "8rem", cell: (p) => p.nameKana ?? "—" },
-    { key: "nameRomaji", header: "ローマ字", noWrap: true, minWidth: "9rem", cell: (p) => p.nameRomaji ?? "—" },
-    { key: "schoolEmail", header: "学校メール", noWrap: true, minWidth: "14rem", cell: (p) => p.schoolEmail },
-    { key: "gmail", header: "Gmail", noWrap: true, minWidth: "14rem", cell: (p) => p.gmail },
-    { key: "phone", header: "電話番号", noWrap: true, minWidth: "8rem", cell: (p) => p.phone ?? "—" },
-    { key: "grade", header: "学年", noWrap: true, minWidth: "4rem", cell: (p) => (p.grade ? GRADE_LABEL[p.grade] : "—") },
-    { key: "department", header: "学科", noWrap: true, minWidth: "8rem", cell: (p) => p.department ?? "—" },
+    // 人物プロフィール列は運営名簿と共通 (PROFILE_DISPLAY_COLUMNS)。
+    ...PROFILE_DISPLAY_COLUMNS.map(
+      (c): ColumnDef<Participation> => ({ key: c.id, header: c.header, noWrap: true, minWidth: "7rem", cell: (p) => c.value(p) || "—" }),
+    ),
     { key: "team", header: "希望チーム", noWrap: true, minWidth: "8rem", cell: (p) => teamName(p.desiredTeamId) },
-    { key: "activity", header: "希望活動", noWrap: true, minWidth: "6rem", cell: (p) => (p.desiredActivity ? ACTIVITY_LABEL[p.desiredActivity] : "—") },
     { key: "submittedAt", header: "提出日時", noWrap: true, minWidth: "11rem", cell: (p) => fmtDateTime(p.submittedAt) },
   ];
 
@@ -405,18 +402,11 @@ function ManualLinkPanel({
 function DetailBody({ p, teamName }: { p: Participation; teamName: (id: string | null) => string }): JSX.Element {
   const rows: { label: string; value: string }[] = [
     { label: "氏名", value: p.name },
-    { label: "ふりがな", value: p.nameKana ?? "—" },
-    { label: "氏名（ローマ字）", value: p.nameRomaji ?? "—" },
+    // 人物プロフィール項目は運営名簿と共通 (PROFILE_DISPLAY_COLUMNS)。
+    ...PROFILE_DISPLAY_COLUMNS.map((c) => ({ label: c.header, value: c.value(p) || "—" })),
     { label: "メールアドレス素案", value: (() => { const c = emailCandidate(p); return c ? `${c}@…` : "—"; })() },
-    { label: "学校メールアドレス", value: p.schoolEmail },
-    { label: "Gmail アドレス", value: p.gmail },
-    { label: "電話番号", value: p.phone ?? "—" },
-    { label: "学年", value: p.grade ? GRADE_LABEL[p.grade] : "—" },
-    { label: "学科", value: p.department ?? "—" },
     { label: "希望チーム", value: teamName(p.desiredTeamId) },
-    { label: "希望する活動", value: p.desiredActivity ? ACTIVITY_LABEL[p.desiredActivity] : "—" },
     { label: "運営メンバー反映", value: reviewLabel(p) },
-    { label: "その他", value: p.note ?? "—" },
     { label: "提出日時", value: fmtDateTime(p.submittedAt) },
   ];
   return (

@@ -199,6 +199,42 @@ CREATE INDEX IF NOT EXISTS idx_member_people_leader
 `.trim(),
 };
 
+// 0011: 名列番号 (roster_number, 例 "3EP2-26") を足す additive ALTER (non-destructive)。
+// 既存行は全て null。形式検証・正規化はアプリ層。Mirrors 0011_person_roster_number.sql
+// (schema-lockstep).
+export const MEMBER_PERSON_ROSTER_NUMBER_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0011_person_roster_number",
+  up: `
+ALTER TABLE member_people ADD COLUMN roster_number TEXT;
+`.trim(),
+};
+
+// 0012: 参加届にも名列番号 (roster_number) を足す additive ALTER (non-destructive)。
+// 管理者が確定すると member_people.roster_number へ引き継ぐ。Mirrors
+// 0012_participation_roster_number.sql (schema-lockstep).
+export const MEMBER_PARTICIPATION_ROSTER_NUMBER_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0012_participation_roster_number",
+  up: `
+ALTER TABLE member_participations ADD COLUMN roster_number TEXT;
+`.trim(),
+};
+
+// 0013: 名簿の学年を参加届と同じ選択肢 (1〜4 / graduate) に正規化する (冪等な UPDATE)。
+// Mirrors 0013_person_grade_normalize.sql (schema-lockstep).
+export const MEMBER_PERSON_GRADE_NORMALIZE_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0013_person_grade_normalize",
+  up: `
+UPDATE member_people SET grade = '1' WHERE grade IN ('1年', '1年生', '１', '１年', '１年生');
+UPDATE member_people SET grade = '2' WHERE grade IN ('2年', '2年生', '２', '２年', '２年生');
+UPDATE member_people SET grade = '3' WHERE grade IN ('3年', '3年生', '３', '３年', '３年生');
+UPDATE member_people SET grade = '4' WHERE grade IN ('4年', '4年生', '４', '４年', '４年生');
+UPDATE member_people SET grade = 'graduate' WHERE grade IN ('院生', '大学院', 'M1', 'M2', 'D1', 'D2', 'D3');
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -211,4 +247,7 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PARTICIPATION_REVIEW_STATE_MIGRATION,
   MEMBER_PERSON_DESIRED_ACTIVITY_MIGRATION,
   MEMBER_PERSON_LEADER_MIGRATION,
+  MEMBER_PERSON_ROSTER_NUMBER_MIGRATION,
+  MEMBER_PARTICIPATION_ROSTER_NUMBER_MIGRATION,
+  MEMBER_PERSON_GRADE_NORMALIZE_MIGRATION,
 ];

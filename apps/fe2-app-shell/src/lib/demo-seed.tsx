@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry } from "@dub/types";
+import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { mockUnfurl } from "../composition/featureEntries";
 
@@ -2064,33 +2064,10 @@ interface DemoTeam {
   color: string | null;
   description: string | null;
 }
-interface DemoMember {
-  id: string;
-  orgId: string;
-  name: string;
-  roleTitle: string | null;
+// 運営メンバー = 実 API と同じ Member (人物プロフィールは参加届と共通の PersonProfile)。
+type DemoMember = Omit<import("@dub/types").member.Member, "status"> & {
   status: "added" | "invited" | "considering" | "on_leave" | "declined";
-  teamIds: string[];
-  department: string | null;
-  grade: string | null;
-  identityUserId: string | null;
-  leaderId: string | null;
-  contact: string | null;
-  schoolEmail: string | null;
-  gmail: string | null;
-  lastName: string | null;
-  firstName: string | null;
-  lastNameKana: string | null;
-  firstNameKana: string | null;
-  lastNameRomaji: string | null;
-  firstNameRomaji: string | null;
-  phone: string | null;
-  note: string | null;
-  sortOrder: number;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
+};
 
 function createMembersStore() {
   let seq = 100;
@@ -2118,7 +2095,9 @@ function createMembersStore() {
     identityUserId: string | null = null,
     leaderId: string | null = null,
   ): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, leaderId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    ...memberValues.emptyPersonProfile(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade: memberValues.normalizeGrade(grade ?? "") ?? null,
+    identityUserId, leaderId, contact, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   // leaderId で「配下」を明示し、組織図順ソートと「リーダー」列/フォームのリーダー選択を
   // 実データで確認できるようにする。各チームは オーガナイザー → 複数リーダー → 各リーダー
@@ -2211,6 +2190,15 @@ function createMembersStore() {
       mem.firstNameKana = kana[1];
     }
   }
+  // 名列番号の seed (例 "3EP2-26")。学部生(N年)のみ、学科ごとの仮コード + 連番で付与。
+  const DEPT_CODE: Record<string, string> = {
+    情報工学科: "EP", 電気電子工学科: "EE", 機械工学科: "MM", 経営情報学科: "MI", 建築学科: "AA", メディア情報学科: "MD",
+  };
+  members.forEach((mem, i) => {
+    const year = mem.grade && mem.grade !== "graduate" ? mem.grade : undefined;
+    const code = mem.department ? DEPT_CODE[mem.department] : undefined;
+    if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
+  });
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
   // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
@@ -2230,7 +2218,7 @@ function createMembersStore() {
       id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
-      grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -2240,7 +2228,7 @@ function createMembersStore() {
       id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
       lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
       nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
-      grade: "1", department: "情報工学科", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
       schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -2298,15 +2286,29 @@ function createMembersStore() {
     }
 
     // people
+    // 人物プロフィール項目は実サーバと同じ共通ルール (parsePersonProfilePatch) で検証する。
+    const parseProfile = (): Partial<import("@dub/types").member.PersonProfile> | null => {
+      const r = memberValues.parsePersonProfilePatch((body ?? {}) as Record<string, unknown>);
+      return r.errors.length > 0 ? null : r.value;
+    };
+    const invalidBody = (): Response =>
+      json({ error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } } satisfies ErrorResponse, 400);
+    const composeName = (a: string | null | undefined, b: string | null | undefined): string =>
+      [a, b].filter((x): x is string => !!x && x.length > 0).join(" ");
     if (method === "POST" && pathname === "/api/v1/members/people") {
+      const profile = parseProfile();
+      const newName = composeName(profile?.lastName, profile?.firstName) || String(body?.name ?? "").trim();
+      if (!profile || !newName) return invalidBody();
       const mem: DemoMember = {
-        id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
+        ...memberValues.emptyPersonProfile(),
+        ...profile,
+        id: nid("member"), orgId: ORG,
+        name: newName,
+        roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "added", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
-        department: body?.department ?? null, grade: body?.grade ?? null,
         identityUserId: null,
         leaderId: body?.leaderId ?? null,
-        contact: body?.contact ?? null, schoolEmail: null, gmail: null,
-        lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: body?.note ?? null,
+        contact: body?.contact ?? null,
         sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
@@ -2348,16 +2350,17 @@ function createMembersStore() {
           const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
           return json(err, 409);
         }
+        const profile = parseProfile();
+        if (!profile) return invalidBody();
+        Object.assign(mem, profile);
         if (body?.name !== undefined) mem.name = String(body.name);
+        if ("lastName" in profile || "firstName" in profile) mem.name = composeName(mem.lastName, mem.firstName) || mem.name;
         if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
         if (body?.status !== undefined) mem.status = body.status;
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
-        if (body?.department !== undefined) mem.department = body.department ?? null;
-        if (body?.grade !== undefined) mem.grade = body.grade ?? null;
         if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
         if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
-        if (body?.note !== undefined) mem.note = body.note ?? null;
         if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;
         mem.version += 1;
         mem.updatedAt = isoNow();
@@ -2376,25 +2379,20 @@ function createMembersStore() {
     const recordParticipation = (): { participation: any } => {
       const compose = (a: unknown, b: unknown): string =>
         [a, b].map((x) => (typeof x === "string" ? x.trim() : "")).filter((x) => x.length > 0).join(" ");
-      const lastName: string | null = body?.lastName ?? null;
-      const firstName: string | null = body?.firstName ?? null;
-      const lastNameKana: string | null = body?.lastNameKana ?? null;
-      const firstNameKana: string | null = body?.firstNameKana ?? null;
-      const lastNameRomaji: string | null = body?.lastNameRomaji ?? null;
-      const firstNameRomaji: string | null = body?.firstNameRomaji ?? null;
+      const profile = { ...memberValues.emptyPersonProfile(), ...(parseProfile() ?? {}) };
+      const { lastName, firstName, lastNameKana, firstNameKana, lastNameRomaji, firstNameRomaji } = profile;
       const name = (compose(lastName, firstName) || String(body?.name ?? "")).trim();
       const nameKana: string | null = compose(lastNameKana, firstNameKana) || body?.nameKana || null;
       const nameRomaji: string | null = compose(lastNameRomaji, firstNameRomaji) || body?.nameRomaji || null;
       const target = norm(name);
       const existing = participations.find((p) => p.normalizedName === target);
       const participation = {
+        ...profile,
         id: existing?.id ?? nid("part"), orgId: ORG, memberId: existing?.memberId ?? null, name, normalizedName: target,
-        lastName, firstName, nameKana, lastNameKana, firstNameKana,
-        nameRomaji, lastNameRomaji, firstNameRomaji,
-        grade: body?.grade ?? null, department: body?.department ?? null,
-        contact: body?.contact ?? null, phone: body?.phone ?? null,
-        schoolEmail: String(body?.schoolEmail ?? ""), gmail: String(body?.gmail ?? ""),
-        desiredTeamId: body?.desiredTeamId ?? null, desiredActivity: body?.desiredActivity ?? null, note: body?.note ?? null,
+        nameKana, nameRomaji,
+        contact: body?.contact ?? null,
+        schoolEmail: profile.schoolEmail ?? "", gmail: profile.gmail ?? "",
+        desiredTeamId: body?.desiredTeamId ?? null,
         status: "submitted", matchKind: existing?.matchKind ?? "created_new", reviewState: existing?.reviewState ?? "pending",
         submittedBy: ME_ID, submittedAt: isoNow(), createdAt: existing?.createdAt ?? isoNow(), updatedAt: isoNow(),
       };
@@ -2413,7 +2411,7 @@ function createMembersStore() {
         .filter((x) => x.length > 0)
         .join(" ");
       const hasName = composedName.length > 0 || String(body?.name ?? "").trim().length > 0;
-      if (!hasName || !emailRe.test(school) || !emailRe.test(gm)) {
+      if (!hasName || !emailRe.test(school) || !emailRe.test(gm) || !parseProfile()) {
         const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
         return json(err, 400);
       }
@@ -2471,21 +2469,20 @@ function createMembersStore() {
         if (mem.status === "invited" || mem.status === "considering") mem.status = "added";
         if (p.desiredTeamId && !mem.teamIds.includes(p.desiredTeamId)) mem.teamIds.push(p.desiredTeamId);
         if (mem.contact === null) mem.contact = p.schoolEmail;
-        if (mem.schoolEmail === null && p.schoolEmail) mem.schoolEmail = p.schoolEmail;
-        if (mem.gmail === null && p.gmail) mem.gmail = p.gmail;
-        if (mem.department === null && p.department) mem.department = p.department;
-        if (mem.grade === null && p.grade) mem.grade = p.grade;
+        // 人物プロフィール項目は空欄だけ参加届で補完 (実サーバの fillEmptyProfile と同じ)。
+        for (const k of memberValues.PERSON_PROFILE_KEYS) {
+          if (mem[k] == null && p[k]) (mem as Record<string, unknown>)[k] = p[k];
+        }
         mem.version += 1; mem.updatedAt = isoNow();
         p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
       }
       if (action === "create") {
         const created: DemoMember = {
+          ...memberValues.pickPersonProfile(p),
           id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null, leaderId: null,
-          department: p.department, grade: p.grade, teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
-          contact: p.contact ?? p.schoolEmail, schoolEmail: p.schoolEmail || null, gmail: p.gmail || null,
-          lastName: p.lastName, firstName: p.firstName, lastNameKana: p.lastNameKana, firstNameKana: p.firstNameKana,
-          lastNameRomaji: p.lastNameRomaji, firstNameRomaji: p.firstNameRomaji, phone: p.phone, note: p.note,
+          teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
+          contact: p.contact ?? p.schoolEmail,
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
         };
         members.push(created);
