@@ -1,0 +1,65 @@
+name: cleanup per-feature demos
+
+# Deletes `dub-demo-<slug>` Workers whose review is over (PR merged/closed, or no PR and idle
+# for 14 days) so they stop eating the free plan's 100-Worker cap. Rules live in
+# scripts/cleanup-demos.sh. Only `dub-demo-*` Workers are ever touched.
+on:
+  # A PR closing (merged or not) frees its demo right away.
+  pull_request:
+    types: [closed]
+  schedule:
+    # 20:30 UTC = 05:30 JST, just before refresh-demos (06:00 JST).
+    - cron: '30 20 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only print what would be deleted'
+        type: boolean
+        default: true
+
+concurrency:
+  # share the lock with refresh-demos so a refresh never redeploys a Worker mid-cleanup
+  group: refresh-demos
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  cleanup:
+    name: delete finished demo Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # the manifests/registry that map a demo to its PR live on main
+          ref: main
+      - name: Guard — Cloudflare token present
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN unavailable (fork PR?) — skipping cleanup."
+            exit 0
+          fi
+          echo "ok=1" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        if: env.ok == '1'
+      - uses: actions/setup-node@v4
+        if: env.ok == '1'
+        with:
+          node-version: 24
+      - name: Cleanup
+        if: env.ok == '1'
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          args=(--yes)
+          [ "$DRY_RUN" = "true" ] && args=(--dry-run)
+          [ -n "$HEAD_REF" ] && args+=(--branch "$HEAD_REF")
+          bash scripts/cleanup-demos.sh "${args[@]}"
