@@ -12,12 +12,40 @@ import {
   type CommanderApi,
   type FeaturePhase,
 } from "./lib/commanderApi.ts";
-import { groupByLane, isRunningLane, LANES, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import {
+  groupByLane,
+  isReviewLane,
+  isRunningLane,
+  LANES,
+  LANE_COLORS,
+  LANE_DESCRIPTIONS,
+  LANE_LABELS,
+  type Lane,
+} from "./lib/lanes.ts";
+import { matchesFilter } from "./lib/filter.ts";
 import { TaskCard } from "./TaskCard.tsx";
 import { DoneList } from "./DoneList.tsx";
 import { TaskComposer, type ComposerSubmit } from "./TaskComposer.tsx";
 import { TaskDrawer } from "./TaskDrawer.tsx";
-import { btnGhost, btnPrimary, t } from "./lib/theme.ts";
+import { btnPrimary, input, t } from "./lib/theme.ts";
+
+// ホバー表現はインラインstyleで書けないので、ボード内だけに効くクラスを1つの<style>で持つ。
+const BOARD_CSS = `
+.cmdr-card { transition: border-color .12s, box-shadow .12s; }
+.cmdr-card:hover { border-color: var(--dub-color-border-strong, #3f4759); box-shadow: 0 1px 6px rgba(0,0,0,.25); }
+.cmdr-card:focus-visible, .cmdr-row:focus-visible { outline: 2px solid var(--dub-color-brand-500, #3358e8); outline-offset: 1px; }
+.cmdr-card:hover .cmdr-card-title { text-decoration: underline; }
+.cmdr-row:hover { background: var(--dub-color-surface-raised, #1a1e27); }
+.cmdr-add:hover { background: var(--dub-color-surface-raised, #1a1e27); color: var(--dub-color-text-primary, #e6e6e6); }
+.cmdr-cancel:hover { color: var(--dub-color-danger-500, #e5484d); border-color: var(--dub-color-danger-500, #e5484d); }
+`;
+
+/** 列の幅。GitHub Project 同様に固定幅寄りで並べ、最小幅を割るなら横スクロール。 */
+function columnSize(lane: Lane, count: number, loaded: boolean): { flex: string; minWidth: number } {
+  if (loaded && count === 0) return { flex: "0 0 164px", minWidth: 164 }; // 空の列は細く(見出しは切らない)
+  if (lane === "done") return { flex: "1.2 1 280px", minWidth: 260 };
+  return { flex: "1 1 240px", minWidth: 220 };
+}
 
 interface BoardProps {
   client?: CommanderClient;
@@ -171,8 +199,30 @@ export function Board({
   }, [load, probeHealth, pollMs]);
 
   const all = useMemo(() => [...optimistic, ...items], [optimistic, items]);
-  const lanes = useMemo(() => groupByLane(all), [all]);
-  const runningCount = LANES.filter(isRunningLane).reduce((n, l) => n + lanes[l].length, 0);
+  const [query, setQuery] = useState("");
+  const filterRef = useRef<HTMLInputElement>(null);
+  const shown = useMemo(() => all.filter((i) => matchesFilter(i, query)), [all, query]);
+  const lanes = useMemo(() => groupByLane(shown), [shown]);
+
+  // GitHub と同じく「/」でフィルターへ移動（入力中のキーは奪わない）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (!filterRef.current || filterRef.current.closest("[hidden]")) return; // 非表示タブ
+      e.preventDefault();
+      filterRef.current.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // 件数サマリーはフィルターに左右されない（絞り込み中でも全体の状況を見せる）。
+  const allLanes = useMemo(() => groupByLane(all), [all]);
+  const runningCount = LANES.filter(isRunningLane).reduce((n, l) => n + allLanes[l].length, 0);
+  // Ball is on the operator's side: every card in a 確認 column (要修正 included).
+  const reviewCount = LANES.filter(isReviewLane).reduce((n, l) => n + allLanes[l].length, 0);
+  const filtering = query.trim() !== "";
 
   const cwdSuggestions = useMemo(() => {
     const fromItems = items.map((i) => i.latestRun?.cwd).filter((c): c is string => !!c);
@@ -360,32 +410,94 @@ export function Board({
 
   return (
     <div style={{ color: t.text }}>
-      {/* status bar */}
+      <style>{BOARD_CSS}</style>
+      {/* toolbar: filter (GitHub Project の "Filter by keyword") + counts + new task */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: t.space4,
           flexWrap: "wrap",
-          marginBottom: t.space5,
+          marginBottom: t.space3,
         }}
       >
-        <button
-          type="button"
-          data-testid="open-composer"
-          onClick={() => setComposerOpen(true)}
-          style={btnPrimary}
-        >
-          + 新規タスク
-        </button>
+        <div style={{ position: "relative", flex: "1 1 320px", maxWidth: 560 }}>
+          <span
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: t.space3,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: t.textMuted,
+              fontSize: 13,
+              pointerEvents: "none",
+            }}
+          >
+            ⌕
+          </span>
+          <input
+            ref={filterRef}
+            type="search"
+            data-testid="board-filter"
+            aria-label="タスクを絞り込む"
+            placeholder="タイトル・PR 番号・フォルダで絞り込み（/ で移動）"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setQuery("");
+                e.currentTarget.blur();
+              }
+            }}
+            style={{ ...input, paddingLeft: 30, fontSize: 13 }}
+          />
+        </div>
         <span data-testid="concurrency" style={{ fontSize: 13, color: t.textMuted }}>
           走行中 {runningCount} / 目安上限 {concurrencyLimit}
         </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: t.space3, fontSize: 12 }}>
-          <HealthDot label="daemon" ok={health.daemon} />
-          <HealthDot label="service" ok={health.service} />
+        <span
+          data-testid="review-count"
+          style={{
+            fontSize: 13,
+            fontWeight: reviewCount > 0 ? 700 : 400,
+            color: reviewCount > 0 ? LANE_COLORS.review : t.textMuted,
+          }}
+        >
+          あなたの確認待ち {reviewCount}
+        </span>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: t.space4 }}>
+          <div style={{ display: "flex", gap: t.space3, fontSize: 12 }}>
+            <HealthDot label="daemon" ok={health.daemon} />
+            <HealthDot label="service" ok={health.service} />
+          </div>
+          <button
+            type="button"
+            data-testid="open-composer"
+            onClick={() => setComposerOpen(true)}
+            style={btnPrimary}
+          >
+            + 新規タスク
+          </button>
         </div>
       </div>
+
+      {filtering && (
+        <div
+          data-testid="filter-summary"
+          style={{ display: "flex", alignItems: "center", gap: t.space2, marginBottom: t.space3, fontSize: 12, color: t.textMuted }}
+        >
+          {shown.length} / {all.length} 件を表示中
+          <button
+            type="button"
+            data-testid="filter-clear"
+            onClick={() => setQuery("")}
+            style={{ background: "transparent", border: 0, color: t.primary, cursor: "pointer", font: "inherit", padding: 0 }}
+          >
+            絞り込みを解除
+          </button>
+        </div>
+      )}
 
       {health.daemon === false && (
         <div
@@ -409,38 +521,93 @@ export function Board({
       <div
         data-testid="board-lanes"
         style={{
-          display: "grid",
-          // 完了列は「タイトル / PR」の 1 行一覧なので、値が読めるよう他より広く取る。
-          gridTemplateColumns: LANES.map((l) =>
-            l === "done" ? "minmax(360px, 3fr)" : "minmax(160px, 1fr)",
-          ).join(" "),
-          gap: t.space4,
+          display: "flex",
+          alignItems: "stretch",
+          gap: t.space3,
           overflowX: "auto",
+          paddingBottom: t.space2,
         }}
       >
         {LANES.map((lane) => (
-          <section key={lane} data-testid={`lane-${lane}`} style={{ minWidth: 0 }}>
+          <section
+            key={lane}
+            data-testid={`lane-${lane}`}
+            aria-label={LANE_LABELS[lane]}
+            style={{
+              ...columnSize(lane, lanes[lane].length, loaded),
+              display: "flex",
+              flexDirection: "column",
+              background: t.sunken,
+              border: `1px solid ${t.border}`,
+              borderRadius: t.radius,
+              // 列ごとに縦スクロール（ボード全体は伸ばさない）。
+              maxHeight: "calc(100vh - 220px)",
+              minHeight: 240,
+            }}
+          >
+            <header style={{ padding: `${t.space3} ${t.space3} ${t.space2}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: t.space2, fontSize: 14, fontWeight: 600 }}>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: 999,
+                    border: `2px solid ${LANE_COLORS[lane]}`,
+                    boxSizing: "border-box",
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {LANE_LABELS[lane]}
+                </span>
+                <span
+                  data-testid={`lane-count-${lane}`}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: t.textMuted,
+                    background: t.overlay,
+                    border: `1px solid ${t.border}`,
+                    borderRadius: 999,
+                    padding: "0 8px",
+                    lineHeight: "18px",
+                  }}
+                >
+                  {lanes[lane].length}
+                </span>
+              </div>
+              <div
+                style={{
+                  marginTop: t.space1,
+                  fontSize: 12,
+                  color: t.textMuted,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {LANE_DESCRIPTIONS[lane]}
+              </div>
+            </header>
             <div
               style={{
+                flex: 1,
+                overflowY: "auto",
                 display: "flex",
-                alignItems: "center",
+                flexDirection: "column",
                 gap: t.space2,
-                marginBottom: t.space3,
-                fontSize: 13,
-                fontWeight: 700,
+                padding: `0 ${t.space2} ${t.space2}`,
               }}
             >
-              <span style={{ width: 8, height: 8, borderRadius: 999, background: LANE_COLORS[lane] }} />
-              {LANE_LABELS[lane]}
-              <span style={{ color: t.textMuted, fontWeight: 400 }}>{lanes[lane].length}</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: t.space3 }}>
               {!loaded ? (
                 <Skeleton />
               ) : lane === "done" && lanes.done.length > 0 ? (
                 <DoneList items={lanes.done} onOpen={setSelectedTaskId} />
               ) : lanes[lane].length === 0 ? (
-                <div style={{ fontSize: 12, color: t.textMuted, padding: t.space2 }}>—</div>
+                <div style={{ fontSize: 12, color: t.textMuted, padding: t.space2, textAlign: "center" }}>
+                  {filtering ? "一致なし" : "なし"}
+                </div>
               ) : (
                 lanes[lane].map((item) => (
                   <TaskCard
@@ -455,6 +622,29 @@ export function Board({
                 ))
               )}
             </div>
+            {lane === "queued" && (
+              <button
+                type="button"
+                data-testid="lane-add-task"
+                className="cmdr-add"
+                onClick={() => setComposerOpen(true)}
+                style={{
+                  margin: `0 ${t.space2} ${t.space2}`,
+                  padding: `${t.space2} ${t.space2}`,
+                  textAlign: "left",
+                  background: "transparent",
+                  border: 0,
+                  borderRadius: "var(--dub-radius-sm, 8px)",
+                  color: t.textMuted,
+                  cursor: "pointer",
+                  font: "inherit",
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                + タスクを追加
+              </button>
+            )}
           </section>
         ))}
       </div>

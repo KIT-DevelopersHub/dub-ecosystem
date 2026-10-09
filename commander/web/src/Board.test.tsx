@@ -353,4 +353,43 @@ describe("<Board>", () => {
     render(<Board client={client} api={makeFakeApi([])} pollMs={0} />);
     expect(await screen.findByTestId("daemon-down-hint")).toBeInTheDocument();
   });
+
+  it("filters every lane by keyword while the summary counts stay unfiltered", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "f-run", title: "ログイン画面", runStatus: "running" }),
+      makeBoardItem({ taskId: "f-rev", featureId: "feat-f-rev", title: "チャット改善", featurePhase: "demo_review", runStatus: "succeeded" }),
+      makeBoardItem({ taskId: "f-done", featureId: "feat-f-done", title: "ログイン文言", taskStatus: "done", runStatus: "succeeded" }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+    await screen.findByText("チャット改善");
+
+    await userEvent.type(screen.getByTestId("board-filter"), "ログイン");
+    expect(screen.queryByText("チャット改善")).not.toBeInTheDocument();
+    expect(screen.getByText("ログイン画面")).toBeInTheDocument();
+    expect(screen.getByText("ログイン文言")).toBeInTheDocument();
+    expect(screen.getByTestId("lane-count-review")).toHaveTextContent("0");
+    expect(screen.getByTestId("filter-summary")).toHaveTextContent("2 / 3");
+    expect(screen.getByTestId("review-count")).toHaveTextContent("1");
+
+    await userEvent.click(screen.getByTestId("filter-clear"));
+    expect(screen.getByText("チャット改善")).toBeInTheDocument();
+  });
+
+  it("「/」でフィルターにフォーカスし、Esc で解除する", async () => {
+    render(<Board client={makeFakeClient()} api={makeFakeApi([])} pollMs={0} />);
+    await screen.findByTestId("board-empty");
+    const box = screen.getByTestId("board-filter");
+    await userEvent.keyboard("/");
+    expect(box).toHaveFocus();
+    await userEvent.type(box, "abc");
+    await userEvent.keyboard("{Escape}");
+    expect(box).toHaveValue("");
+  });
+
+  it("投入待ち列の「+ タスクを追加」で新規タスクを開ける", async () => {
+    render(<Board client={makeFakeClient()} api={makeFakeApi([])} pollMs={0} />);
+    await screen.findByTestId("board-empty");
+    await userEvent.click(screen.getByTestId("lane-add-task"));
+    expect(screen.getByLabelText("task-title")).toBeInTheDocument();
+  });
 });

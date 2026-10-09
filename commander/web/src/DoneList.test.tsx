@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { DoneList, matchesDone, prLabel } from "./DoneList.tsx";
+import { DoneList } from "./DoneList.tsx";
+import { matchesFilter, prLabel } from "./lib/filter.ts";
 import { makeBoardItem } from "./test/fakes.ts";
 
 const PR = "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/573";
@@ -11,23 +12,11 @@ const items = [
 ];
 
 describe("<DoneList>", () => {
-  it("1 行に タイトル と PR 番号を key-value で出す", () => {
+  it("1 行に タイトル と PR 番号を出す", () => {
     render(<DoneList items={items} onOpen={() => {}} />);
-    const row = screen.getByTestId("task-card-a");
-    expect(row).toHaveTextContent(/タイトル.*policy 層の展開.*PR.*#573/);
+    expect(screen.getByTestId("task-card-a")).toHaveTextContent(/policy 層の展開.*#573/);
     expect(screen.getByTestId("done-pr-a")).toHaveAttribute("href", PR);
-    expect(screen.getByTestId("task-card-b")).toHaveTextContent(/PR.*—/);
-  });
-
-  it("タイトル / PR 番号で絞り込める", async () => {
-    render(<DoneList items={items} onOpen={() => {}} />);
-    const box = screen.getByTestId("done-search");
-    await userEvent.type(box, "#573");
-    expect(screen.getByTestId("task-card-a")).toBeInTheDocument();
-    expect(screen.queryByTestId("task-card-b")).not.toBeInTheDocument();
-    await userEvent.clear(box);
-    await userEvent.type(box, "zzz");
-    expect(screen.getByTestId("done-no-match")).toBeInTheDocument();
+    expect(screen.getByTestId("task-card-b")).toHaveTextContent(/PR なし/);
   });
 
   it("行クリックでドロワーを開き、PR リンクのクリックでは開かない", async () => {
@@ -38,10 +27,18 @@ describe("<DoneList>", () => {
     await userEvent.click(screen.getByTestId("task-card-b"));
     expect(onOpen).toHaveBeenCalledWith("b");
   });
+});
 
-  it("helpers", () => {
+describe("matchesFilter", () => {
+  it("タイトル / PR 番号 / フォルダに部分一致し、空白区切りは AND", () => {
+    // makeBoardItem の run cwd は "/repo/wt"
+    const card = makeBoardItem({ taskId: "c", title: "ボード改善", runStatus: "running" });
     expect(prLabel(PR)).toBe("#573");
-    expect(matchesDone(items[0]!, "POLICY")).toBe(true);
-    expect(matchesDone(items[1]!, "573")).toBe(false);
+    expect(matchesFilter(items[0]!, "POLICY")).toBe(true);
+    expect(matchesFilter(items[0]!, "#573")).toBe(true);
+    expect(matchesFilter(items[1]!, "573")).toBe(false);
+    expect(matchesFilter(card, "wt ボード")).toBe(true);
+    expect(matchesFilter(card, "wt 無関係")).toBe(false);
+    expect(matchesFilter(items[1]!, "  ")).toBe(true);
   });
 });
