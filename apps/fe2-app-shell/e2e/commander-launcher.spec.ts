@@ -30,11 +30,15 @@ test("Commander tile shows in the launcher and opens the /commander screen", asy
   await expect(tile).toBeVisible();
   await page.screenshot({ path: shot("01-launcher-commander-tile.png") });
 
-  // (2) Opening it navigates to /commander and mounts the console + phase board.
+  // (2) Opening it navigates to /commander and mounts the same workspace as the standalone
+  // Commander (ボード / Dubに聞く / Dubを操作 tabs).
   await tile.click();
   await expect(page).toHaveURL(/\/commander$/);
   await expect(page.getByTestId("fe2-commander")).toBeVisible();
-  await expect(page.getByTestId("fe2-commander-console").getByText("実行コンソール")).toBeVisible();
-  await expect(page.getByTestId("fe2-commander-board")).toBeVisible();
+  const ws = page.getByTestId("fe2-commander-workspace");
+  await expect(ws.getByTestId("tab-board")).toBeVisible();
+  await expect(ws.getByTestId("tab-ask")).toBeVisible();
+  await expect(ws.getByTestId("tab-operate")).toBeVisible();
+  await expect(ws.getByTestId("panel-board")).toBeVisible();
   await page.screenshot({ path: shot("02-commander-screen.png") });
 });

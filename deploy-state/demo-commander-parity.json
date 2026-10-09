@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "commander-parity",
+  "worker": "dub-demo-commander-parity",
+  "url": "https://dub-demo-commander-parity.developershub-site.workers.dev",
+  "deployedSha": "0d409280",
+  "branch": "feat/commander-fe2-parity",
+  "actor": "ko-tarou",
+  "markers": ["fe2-commander-workspace"],
+  "live": true,
+  "verifiedAt": "2026-10-09T16:55:42Z",
+  "updatedAt": "2026-10-09T16:55:42Z",
+  "note": "fe2 /commander = local Commander workspace"
+}
