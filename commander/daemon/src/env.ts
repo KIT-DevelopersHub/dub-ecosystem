@@ -56,6 +56,10 @@ export const ESSENTIAL_ENV_KEYS: readonly string[] = [
  *  knobs + Claude auth/runtime). Personal CLAUDE_CONFIG_DIR is overridden below. */
 const PRESERVE_PREFIXES: readonly string[] = ["COMMANDER_", "ANTHROPIC_", "CLAUDE_"];
 
+/** The "Dubを操作" bot credentials stay in the daemon: a spawned claude never gets them,
+ *  isolated or not, so no run can call the API outside the catalog + approval gate. */
+const DAEMON_ONLY_PREFIX = "COMMANDER_DUB_";
+
 // Operator-supplied credentials passed straight through to the spawned claude so its
 // own tooling (wrangler / the Cloudflare SDK) can authenticate. These are ONLY forwarded
 // when the operator has set them on the daemon's own process.env at launch — absent =>
@@ -98,6 +102,7 @@ export function buildSpawnEnv(
 ): NodeJS.ProcessEnv {
   if (!config.isolateEnv) {
     const env = { ...base };
+    for (const k of Object.keys(env)) if (k.startsWith(DAEMON_ONLY_PREFIX)) delete env[k];
     if (config.claudeConfigDir) env.CLAUDE_CONFIG_DIR = config.claudeConfigDir;
     return env;
   }
@@ -109,6 +114,7 @@ export function buildSpawnEnv(
   }
   for (const [k, v] of Object.entries(base)) {
     if (v === undefined) continue;
+    if (k.startsWith(DAEMON_ONLY_PREFIX)) continue;
     if (PRESERVE_PREFIXES.some((p) => k.startsWith(p))) env[k] = v;
   }
   // CLAUDE_CONFIG_DIR is controlled explicitly (never inherited): a personal value

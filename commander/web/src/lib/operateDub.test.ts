@@ -1,16 +1,12 @@
 import { describe, it, expect } from "vitest";
+import * as operateDub from "./operateDub.ts";
 import {
-  apiCommand,
   classifyD1Sql,
-  commandFor,
-  d1Command,
-  D1_DB_NAME,
   extractJsonBlock,
   isDestructiveSql,
   isWrite,
   normalizeOperation,
   parsePlan,
-  shellQuote,
   type Operation,
 } from "./operateDub.ts";
 
@@ -57,40 +53,11 @@ describe("operateDub classification (safety net)", () => {
   });
 });
 
-describe("operateDub command building", () => {
-  it("single-quotes and escapes for the shell", () => {
-    expect(shellQuote("a'b")).toBe(`'a'\\''b'`);
-  });
-
-  it("d1Command targets --remote and adds --json only for reads", () => {
-    const read = d1Command("SELECT 1");
-    expect(read).toContain(`d1 execute ${D1_DB_NAME}`);
-    expect(read).toContain("--remote");
-    expect(read).toContain("--json");
-    const write = d1Command("INSERT INTO t VALUES(1)");
-    expect(write).toContain("--remote");
-    expect(write).not.toContain("--json");
-  });
-
-  it("apiCommand builds curl with method/url/body", () => {
-    const cmd = apiCommand({
-      id: "1",
-      kind: "api_call",
-      title: "",
-      method: "post",
-      url: "https://x/api",
-      body: '{"a":1}',
-      destructive: false,
-    });
-    expect(cmd).toContain("curl");
-    expect(cmd).toContain("-X POST");
-    expect(cmd).toContain("https://x/api");
-    expect(cmd).toContain('{"a":1}');
-  });
-
-  it("commandFor routes by kind", () => {
-    expect(commandFor({ id: "1", kind: "d1_read", title: "", sql: "SELECT 1", destructive: false })).toContain("d1 execute");
-    expect(commandFor({ id: "2", kind: "api_call", title: "", method: "GET", url: "u", destructive: false })).toContain("curl");
+describe("operateDub has no direct execution path", () => {
+  it("no longer builds wrangler/curl commands or exec prompts", () => {
+    for (const gone of ["d1Command", "apiCommand", "commandFor", "buildExecPrompt", "shellQuote", "D1_DB_NAME"]) {
+      expect(operateDub).not.toHaveProperty(gone);
+    }
   });
 });
 

@@ -41,6 +41,16 @@ describe("buildSpawnEnv — isolation (default)", () => {
   });
 });
 
+describe("buildSpawnEnv — operate bot credentials never reach a run", () => {
+  const base = { ...PERSONAL_BASE, COMMANDER_DUB_BOT_PASSWORD: "bot-secret", COMMANDER_DUB_API_TOKEN: "tok" };
+  it.each([true, false])("drops COMMANDER_DUB_* (isolateEnv=%s)", (isolateEnv) => {
+    const env = buildSpawnEnv({ isolateEnv, claudeConfigDir: "/c" }, base);
+    expect(env.COMMANDER_DUB_BOT_PASSWORD).toBeUndefined();
+    expect(env.COMMANDER_DUB_API_TOKEN).toBeUndefined();
+    expect(env.COMMANDER_PASSTHROUGH).toBe("keep-me");
+  });
+});
+
 describe("buildSpawnEnv — Cloudflare credential passthrough (isolation)", () => {
   it("forwards CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID when present on the parent env", () => {
     const env = buildSpawnEnv(

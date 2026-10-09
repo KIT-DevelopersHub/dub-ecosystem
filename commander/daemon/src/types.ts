@@ -46,6 +46,8 @@ export interface StartRunInput {
   args?: string[];
 }
 
+import type { OperateConfig } from "./operate/routes.ts";
+
 export interface DaemonConfig {
   port: number;
   /** Absolute path to the claude CLI binary. */
@@ -101,4 +103,9 @@ export interface DaemonConfig {
    * `--dangerously-skip-permissions` (that bypasses the deny-list too).
    */
   permissionMode: string;
+  /**
+   * "Dubを操作" API access (bot user + audit log). Absent => /operate/preview|execute
+   * answer 503; the catalog stays readable.
+   */
+  operate?: OperateConfig;
 }
