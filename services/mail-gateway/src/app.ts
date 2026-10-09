@@ -19,7 +19,7 @@
 // owner+status match on the scheduled-send mutations.
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { DubError, errors, dubErrorHandler } from "@dub/errors";
-import { dubContext } from "@dub/http";
+import { createServiceClient, dubContext } from "@dub/http";
 import type { RequestContext } from "@dub/http";
 import { createAuthClient } from "@dub/auth-client";
 import { policyGate, sharedAuthzGranter } from "@dub/policy-gate";
@@ -36,7 +36,7 @@ import { attachmentsFor } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type MailScope } from "./repo";
+import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
 import { parseListMessagesQuery, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
 
 export function createApp() {
@@ -105,6 +105,26 @@ export function createApp() {
       { requestId: ctxOf(c).requestId },
     );
     return readAll ? { readAll: true } : userId;
+  };
+  // INBOUND read scope: `scopeOf` widened by role sharing. A caller whose org-wide role
+  // carries `mail:read_role_shared` also sees inbound mail owned by the other holders of
+  // THAT role (identity-roster resolves the peers per role). Inbound only — Sent /
+  // Scheduled / flags keep `scopeOf` / `ownerOf`. Fail-closed: if the peers call fails the
+  // caller falls back to their own mail. Skipped entirely under read_all.
+  const inboundScopeOf = async (c: Context<AppBindings>): Promise<InboundScope> => {
+    const scope = await scopeOf(c);
+    if (typeof scope !== "string") return scope;
+    try {
+      const client = createServiceClient(c.env.SVC_IDENTITY, { service: "identity-roster", caller: SERVICE_NAME });
+      const res = await client.get<{ userIds?: unknown }>(
+        ctxOf(c),
+        `/internal/users/${encodeURIComponent(scope)}/role-peers?permission=mail:read_role_shared`,
+      );
+      const peers = Array.isArray(res?.userIds) ? res.userIds.filter((id): id is string => typeof id === "string" && id !== scope) : [];
+      return peers.length > 0 ? { userIds: [scope, ...peers] } : scope;
+    } catch {
+      return scope;
+    }
   };
 
   // ---- health (PUBLIC in the table — the one route here that is, see policy-table.ts)
@@ -192,17 +212,17 @@ export function createApp() {
   });
 
   // ---- read routes: メール閲覧 + mail:read in the table (organizer 以上). Each handler's
-  // only remaining job on the authorization side is `scopeOf` — WHOSE mail this caller may
-  // see — which the table cannot answer.
+  // only remaining job on the authorization side is `inboundScopeOf` — WHOSE mail this
+  // caller may see — which the table cannot answer.
   ext.get("/messages", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
-    const page = await listInbound(dbOf(c), { ...q, ownerUserId: await scopeOf(c) });
+    const page = await listInbound(dbOf(c), { ...q, ownerUserId: await inboundScopeOf(c), viewer: ownerOf(c) });
     return c.json(page satisfies common.Paginated<mail.MailMessageListItem>);
   });
 
   ext.get("/messages/:id", async (c) => {
     const db = dbOf(c);
-    const msg = await getInboundDetail(db, c.req.param("id"), await scopeOf(c));
+    const msg = await getInboundDetail(db, c.req.param("id"), await inboundScopeOf(c), ownerOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     const attachments = await attachmentsFor(db, "inbound", msg.id);
     if (attachments.length > 0) msg.attachments = attachments;
@@ -213,7 +233,7 @@ export function createApp() {
   // メール閲覧 + mail:read is sufficient — reading a message you can see also flips its own
   // read flag, and `scopeOf` keeps it to a message this account may see.
   ext.post("/messages/:id/read", async (c) => {
-    const { found } = await markInboundRead(dbOf(c), c.req.param("id"), await scopeOf(c));
+    const { found } = await markInboundRead(dbOf(c), c.req.param("id"), await inboundScopeOf(c));
     if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json({ read: true } satisfies mail.MailMessageState);
   });
@@ -318,7 +338,7 @@ export function createApp() {
   ext.get("/threads/:id", async (c) => {
     const db = dbOf(c);
     const threadId = c.req.param("id");
-    const messages = await listThread(db, threadId, await scopeOf(c));
+    const messages = await listThread(db, threadId, await inboundScopeOf(c), ownerOf(c));
     if (messages.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
     for (const m of messages) {
       const attachments = await attachmentsFor(db, "inbound", m.id);

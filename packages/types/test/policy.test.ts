@@ -204,7 +204,7 @@ describe("decide() — default deny with a usable reason", () => {
 describe("catalog partition — 詳細設定 vs その他", () => {
   it("an app's 詳細 keys resolve to real catalog entries", () => {
     const entries = policy.appDetailPermissions("mail");
-    expect(entries.map((e) => e.key)).toEqual(["mail:read", "mail:send", "mail:read_all", "mail:admin"]);
+    expect(entries.map((e) => e.key)).toEqual(["mail:read", "mail:send", "mail:read_all", "mail:read_role_shared", "mail:admin"]);
     for (const e of entries) expect(e.name.length).toBeGreaterThan(0);
   });
 
@@ -260,7 +260,7 @@ describe("catalog partition — 詳細設定 vs その他", () => {
 
   it("detail badge counts how many of an app's 詳細 keys the role holds", () => {
     const row = policy.appPolicyRows(["app:mail:view", "mail:read", "mail:send"]).find((r) => r.id === "mail")!;
-    expect(row.detail).toEqual({ granted: 2, total: 4 });
+    expect(row.detail).toEqual({ granted: 2, total: 5 });
     expect(row.level).toBe("view");
   });
 });
