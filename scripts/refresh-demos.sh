@@ -192,6 +192,16 @@ for slug in "${SLUGS[@]}"; do
     echo "::error::registry entry for '$slug' is missing ref/markers — skipping." >&2
     FAILED+=("$slug (bad registry entry)"); continue
   fi
+  # A finished review must not be resurrected: cleanup-demos.sh deletes demos of merged/closed
+  # PRs, and redeploying them here every morning would undo that.
+  pr="$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).demos.find(x=>x.slug===process.argv[2]);if(d&&d.pr)console.log(d.pr)' "$REGISTRY" "$slug")"
+  if [ -n "$pr" ] && command -v gh >/dev/null 2>&1; then
+    pr_state="$(gh pr view "$pr" --json state -q .state 2>/dev/null || true)"
+    if [ "$pr_state" = MERGED ] || [ "$pr_state" = CLOSED ]; then
+      echo "skip '$slug': PR #$pr is $pr_state (review finished; cleanup-demos.sh removes its Worker)"
+      continue
+    fi
+  fi
 
   # 1) rebuild the "base + feature" tree in the scratch worktree ------------------------
   git -C "$WT_DIR" merge --abort >/dev/null 2>&1 || true
