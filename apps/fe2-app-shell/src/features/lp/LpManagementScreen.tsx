@@ -20,6 +20,7 @@ import {
 import type { BadgeTone } from "@dub/ui";
 import { listLpVersions, type LpVersion, type LpVersionStatus } from "./lpVersions.ts";
 import { LpViewer } from "./LpViewer.tsx";
+import { LpTabs } from "./LpTabs.tsx";
 
 const LP_VERSIONS_KEY = ["lp", "versions"] as const;
 
@@ -126,6 +127,8 @@ export function LpManagementScreen(): JSX.Element {
   return (
     <Stack gap={6} testId="fe2-lp-screen">
       {header}
+      {/* バージョン ⇄ ログ管理。タブは URL に紐づく（/lp・/lp/visits）。 */}
+      <LpTabs active="versions" />
       {body}
       {viewing ? <LpViewer version={viewing} onBack={() => setViewing(null)} /> : null}
     </Stack>

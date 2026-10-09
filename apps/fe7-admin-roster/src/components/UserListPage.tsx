@@ -52,7 +52,7 @@ const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
 ];
 
 const toolbarStyle: React.CSSProperties = { display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" };
-const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center" };
+const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" };
 const noticeBodyStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
 const noticeTitleStyle: React.CSSProperties = { fontWeight: 600 };
 const noticeTextStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0 };
@@ -169,6 +169,7 @@ export function UserListPage() {
       key: "name",
       header: "名前",
       sortable: true,
+      noWrap: true,
       cell: (u) => (
         <span data-testid={`fe7-users-row-${u.id}`}>
           <button

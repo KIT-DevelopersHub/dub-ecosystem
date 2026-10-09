@@ -147,4 +147,5 @@ export { iconRegistry } from "./icons";
 
 // Keyboard primitives — IME-safe Enter-to-submit (shared by every text field).
 export { isImeComposing, isSubmitEnter, useEnterToSubmit } from "./utils/keyboard";
+export { useMediaQuery, NARROW_VIEWPORT_QUERY, COARSE_POINTER_QUERY } from "./utils/media";
 export type { SubmitEnterOptions, EnterToSubmitHandlers } from "./utils/keyboard";

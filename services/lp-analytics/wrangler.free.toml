@@ -1,0 +1,33 @@
+# Free-tier deploy of lp-analytics as `dub-lp-analytics` (internal; reached only via the
+# api-gateway SVC_LP_ANALYTICS service binding — workers.dev disabled).
+#
+# Deploy (deploy-prod.sh が api-gateway より前に流す):
+#   one-time: apply the lp namespace migration on dub-core
+#   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0001_init.sql
+#   npx wrangler deploy --config services/lp-analytics/wrangler.free.toml
+name = "dub-lp-analytics"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# Shared dub-core D1: lp_* namespace tables.
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (app:lp:view / app:lp:edit)
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+LP_BASE_URL = "https://hokuriku-it-conf.com"
+# Cloudflare Web Analytics (LP のサイト全体アクセス)。トークンは secret:
+#   npx wrangler secret put CF_ANALYTICS_TOKEN   (Account Analytics:Read)
+CF_ACCOUNT_ID = "b8f6ddbf8fa8cf4e421eae870bdb6dac"
+LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
