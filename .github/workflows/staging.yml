@@ -138,6 +138,7 @@ jobs:
           echo "gateway=https://dub-api-gateway${STAGING_SUFFIX}.${SUB}.workers.dev" >> "$GITHUB_OUTPUT"
           echo "fe2=https://dub-fe2-app-shell${STAGING_SUFFIX}.${SUB}.workers.dev"   >> "$GITHUB_OUTPUT"
           echo "label=${STAGING_LABEL}" >> "$GITHUB_OUTPUT"
+          echo "d1=dub-core${STAGING_SUFFIX}" >> "$GITHUB_OUTPUT"
           [ "$STAGING_SLOT" = 1 ] && echo "verify_env=staging" >> "$GITHUB_OUTPUT" || echo "verify_env=staging${STAGING_SLOT}" >> "$GITHUB_OUTPUT"
 
       # Build everything; fe2's Vite bundle bakes in the STAGING gateway base URL.
@@ -154,7 +155,7 @@ jobs:
       - name: D1 schema gate
         env:
           D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'warn' }}
-        run: bash infra/d1/scripts/schema-gate.sh dub-core-staging
+        run: bash infra/d1/scripts/schema-gate.sh "${{ steps.origins.outputs.d1 }}"
 
       - name: Deploy to staging
         run: bash infra/deploy/deploy-staging.sh
