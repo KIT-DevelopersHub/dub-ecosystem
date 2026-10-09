@@ -24,6 +24,8 @@ export interface AnchorRect {
 
 const GAP = 8;
 const MARGIN = 8;
+/** Keep clear of bottom-anchored chrome (demo banner / feedback button). */
+const BOTTOM_MARGIN = 48;
 
 /** Fixed panel placed beside `anchor` (right, else left, else centered), clamped
  *  to the viewport. Closes on Escape and on a pointer-down outside it. */
@@ -63,7 +65,7 @@ export function Floating({
       else left = (vw - w) / 2;
       top = anchor.top;
     }
-    top = Math.max(MARGIN, Math.min(top, vh - h - MARGIN));
+    top = Math.max(MARGIN, Math.min(top, vh - h - BOTTOM_MARGIN));
     left = Math.max(MARGIN, Math.min(left, vw - w - MARGIN));
     setPos({ left, top });
   }, [anchor, width]);

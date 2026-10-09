@@ -39,6 +39,7 @@
   color: var(--dub-color-text-secondary);
 }
 .brandIcon {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -49,6 +50,8 @@
   color: #fff;
 }
 .todayBtn {
+  flex-shrink: 0;
+  white-space: nowrap;
   height: 36px;
   padding: 0 var(--dub-space-4);
   border: 1px solid var(--dub-color-border-strong);
@@ -62,6 +65,7 @@
 }
 .todayBtn:hover { background: var(--dub-color-surface-sunken); }
 .roundBtn {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -76,6 +80,9 @@
 .roundBtn:hover { background: var(--dub-color-surface-sunken); }
 .flip { display: inline-flex; transform: rotate(180deg); }
 .rangeTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   margin-left: var(--dub-space-2);
   font-size: 22px;
   font-weight: 400;
@@ -83,6 +90,23 @@
   white-space: nowrap;
 }
 .spacer { flex: 1; }
+/* Compact 作成 for narrow screens, where the sidebar (and its 作成) is collapsed. */
+.createMini {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--dub-color-surface-raised);
+  color: var(--gcal-blue);
+  font-size: 26px;
+  font-weight: 300;
+  box-shadow: 0 1px 2px 0 rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+  cursor: pointer;
+}
 
 /* ── body: sidebar + main view ─────────────────────────────────────────── */
 .body {
@@ -632,7 +656,9 @@
   .main { border-radius: 0; border-left: 0; }
 }
 @media (max-width: 640px) {
-  .rangeTitle { font-size: 16px; }
+  .topbar { padding: var(--dub-space-2); gap: 2px; }
+  .brand { display: none; }
+  .rangeTitle { font-size: 16px; margin-left: 2px; }
   .todayBtn { padding: 0 var(--dub-space-3); }
   .schedRow { grid-template-columns: 72px 1fr; }
   .schedItem { grid-template-columns: 16px 1fr; }

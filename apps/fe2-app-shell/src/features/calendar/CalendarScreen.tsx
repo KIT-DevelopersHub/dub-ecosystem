@@ -63,7 +63,8 @@ export function CalendarScreen(): JSX.Element {
   const narrow = useMediaQuery("(max-width: 900px)");
 
   const today = dayIndexOf(new Date());
-  const [view, setView] = useState<CalendarView>("week");
+  // Phones open on 日 (seven columns don't fit), desktop on 週 — Google's defaults.
+  const [view, setView] = useState<CalendarView>(() => (narrow ? "day" : "week"));
   const [anchorDay, setAnchorDay] = useState(today);
   const [hidden, setHidden] = useState<ReadonlySet<task.TaskStatus>>(() => new Set());
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
@@ -300,6 +301,17 @@ export function CalendarScreen(): JSX.Element {
           {formatRangeTitle(view, anchorDay)}
         </span>
         <span className={styles.spacer} />
+        {narrow && canWrite && (
+          <button
+            type="button"
+            className={styles.createMini}
+            aria-label="予定を作成"
+            onClick={openCreateDialog}
+            data-testid="calendar-create-mini"
+          >
+            +
+          </button>
+        )}
         <Menu
           label={VIEW_LABEL[view]}
           variant="secondary"
