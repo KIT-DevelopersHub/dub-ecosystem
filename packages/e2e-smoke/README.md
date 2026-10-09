@@ -35,6 +35,22 @@ user → event create → task → assignment → notification inbox → mail se
   provider = `MockMailProvider`). All domain rules and every table write are real, so
   guardrails still bite (missing-event reject, stale-version 409, unauth 401).
 
+## 1b. Authz boundaries across services (`test/authz-boundary.test.ts`)
+
+The smoke world above grants every key, so it cannot see an authorization boundary.
+`createAuthzWorld()` (`src/world.ts`) replaces that seam with the production decision path:
+each service's `policyGate` → `createAuthzGranter` → identity-roster's REAL
+`POST /authz/check` → RBAC over `identity_*` rows in the same seeded D1 (physical
+migrations, so system-role grants match production). Only the Service Binding is faked
+(an in-process `Fetcher` onto identity's Hono app). identity-roster's own routes use its
+in-process granter, exactly as in production (it cannot call `/authz/check` on itself).
+
+Covers identity-roster / member-service (both already mount
+`@dub/policy-gate`): own-org 200, other-org ids 404, other-org admin / key-less role 403
+(never 401), forged `x-dub-internal` buys no key, and every deny body is scanned for
+org_other data. Calls go straight to the service app — no gateway — so the service itself
+must enforce each boundary.
+
 ## 2. Contract conformance (`test/conformance.test.ts`)
 
 Reconciles each service's implemented Hono routes (parsed from `src/app.ts`, incl.
