@@ -3,7 +3,8 @@
 // windows and an undo toast. Owns keyboard shortcuts (c compose / e archive /
 // # delete / r reply / j·k move / x select / / focus search). State lives in the client
 // MailStore, hydrated from the real gateway by useMailSync (inbox + Sent are live data).
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { COARSE_POINTER_QUERY, Drawer, IconButton, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
 import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
 import { ScheduledList } from "./ScheduledList.tsx";
@@ -64,15 +65,23 @@ function useRestoreComposeDraftsOnMount(): void {
   }, []);
 }
 
-function SearchBar(): JSX.Element {
+/** Phones: the folder nav moves into a drawer opened from the search row, and the
+ *  fixed 240px title column gives its width to the search box. */
+function SearchBar({ narrow, onOpenNav }: { narrow: boolean; onOpenNav: () => void }): JSX.Element {
   const { state, dispatch } = useMailStore();
   const ref = useRef<HTMLInputElement>(null);
+  // iOS zooms the page when focusing an input under 16px.
+  const coarse = useMediaQuery(COARSE_POINTER_QUERY);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 16px", flexShrink: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--dub-color-text-primary)", fontWeight: 700, fontSize: "var(--dub-font-size-lg)", width: 240 }}>
-        <MailIcon name="inbox" size={24} style={{ color: "var(--dub-color-brand-500)" }} />
-        メール
-      </div>
+    <div style={{ display: "flex", alignItems: "center", gap: narrow ? 4 : 12, padding: narrow ? "8px 4px" : "8px 16px", flexShrink: 0 }}>
+      {narrow ? (
+        <IconButton name="menu" aria-label="フォルダを開く" testId="fe2-mail-nav-open" onClick={onOpenNav} />
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--dub-color-text-primary)", fontWeight: 700, fontSize: "var(--dub-font-size-lg)", width: 240 }}>
+          <MailIcon name="inbox" size={24} style={{ color: "var(--dub-color-brand-500)" }} />
+          メール
+        </div>
+      )}
       <div
         data-focus-search
         style={{
@@ -95,7 +104,7 @@ function SearchBar(): JSX.Element {
           value={state.search}
           onChange={(e) => dispatch({ type: "SET_SEARCH", search: e.target.value })}
           placeholder="メールを検索"
-          style={{ flex: 1, border: "none", outline: "none", background: "transparent", color: "var(--dub-color-text-primary)", fontSize: "var(--dub-font-size-sm)", fontFamily: "inherit" }}
+          style={{ flex: 1, border: "none", outline: "none", background: "transparent", color: "var(--dub-color-text-primary)", fontSize: coarse ? "var(--dub-font-size-md)" : "var(--dub-font-size-sm)", fontFamily: "inherit", minWidth: 0 }}
         />
         {state.search ? (
           <button type="button" aria-label="検索をクリア" onClick={() => dispatch({ type: "SET_SEARCH", search: "" })} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)" }}>
@@ -103,6 +112,14 @@ function SearchBar(): JSX.Element {
           </button>
         ) : null}
       </div>
+      {narrow ? (
+        <IconButton
+          name="edit"
+          aria-label="作成"
+          testId="fe2-mail-compose-open-mobile"
+          onClick={() => dispatch({ type: "OPEN_COMPOSE", compose: {} })}
+        />
+      ) : null}
     </div>
   );
 }
@@ -184,16 +201,27 @@ function GmailBody(): JSX.Element {
   // APPLY_FLAGS marked it purged — fall back to the list.
   const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId && !t.purged) : undefined;
   const unreadInbox = state.threads.filter((t) => inFolder(t, "inbox") && threadUnread(t)).length;
+  const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => {
+    if (!narrow) setNavOpen(false);
+  }, [narrow]);
 
   return (
     <main
       data-testid="fe2-mail-gmail"
       data-unread={unreadInbox}
-      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 560, background: "var(--dub-color-surface-sunken)" }}
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: narrow ? 0 : 560, background: "var(--dub-color-surface-sunken)" }}
     >
-      <SearchBar />
+      <SearchBar narrow={narrow} onOpenNav={() => setNavOpen(true)} />
       <div style={{ flex: 1, display: "flex", gap: 8, minHeight: 0, padding: "0 8px 8px" }}>
-        <MailSidebar />
+        {narrow ? (
+          <Drawer open={navOpen} onClose={() => setNavOpen(false)} side="left" title="メール" testId="fe2-mail-nav-drawer">
+            <MailSidebar inDrawer onNavigate={() => setNavOpen(false)} />
+          </Drawer>
+        ) : (
+          <MailSidebar />
+        )}
         {state.folder === "scheduled" && !state.labelFilter ? (
           <ScheduledList />
         ) : openThread ? (

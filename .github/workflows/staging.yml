@@ -154,7 +154,7 @@ jobs:
       # Read-only: staging D1 vs the repo's migrations (see infra/d1/scripts/schema-gate.sh).
       - name: D1 schema gate
         env:
-          D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'warn' }}
+          D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'enforce' }}
         run: bash infra/d1/scripts/schema-gate.sh "${{ steps.origins.outputs.d1 }}"
 
       - name: Deploy to staging

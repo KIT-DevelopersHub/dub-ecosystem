@@ -6,6 +6,7 @@
 }
 .pageHeader {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--dub-space-4);
@@ -101,6 +102,7 @@
 }
 .actionRow {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--dub-space-3);
   padding: var(--dub-space-3) var(--dub-space-4);
@@ -114,7 +116,9 @@
   touch-action: none;
 }
 .actionTitle {
-  flex: 1;
+  /* Basis keeps the title readable on phones; the kind badge wraps below instead. */
+  flex: 1 1 8em;
+  min-width: 0;
   color: var(--dub-color-text-primary);
 }
 .spacer {

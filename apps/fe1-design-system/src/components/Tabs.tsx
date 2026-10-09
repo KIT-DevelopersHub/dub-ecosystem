@@ -34,6 +34,14 @@ export function Tabs({ items, activeId, onChange, testId }: TabsProps) {
       setIndicator(null);
       return;
     }
+    // Narrow screens scroll the strip sideways; keep the active tab in view (a
+    // remounted strip starts at scrollLeft 0 and could hide the selected tab).
+    if (list.scrollWidth > list.clientWidth) {
+      const l = activeEl.offsetLeft;
+      const r = l + activeEl.offsetWidth;
+      if (l < list.scrollLeft) list.scrollLeft = l;
+      else if (r > list.scrollLeft + list.clientWidth) list.scrollLeft = r - list.clientWidth;
+    }
     const measure = (): Geom => ({ left: activeEl.offsetLeft, width: activeEl.offsetWidth });
     const apply = (): void => {
       const g = measure();

@@ -80,7 +80,7 @@ export function MembersPage(): JSX.Element {
           title="運営メンバー"
           description="運営メンバーの招待状況と所属チームを管理します（組織図PDFの代替）"
           actions={
-            <span style={{ display: "inline-flex", gap: "var(--dub-space-2)" }}>
+            <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "var(--dub-space-2)" }}>
               <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} disabled={!canEdit} onClick={openAddTeam} testId="members-add-team">
                 チームを追加
               </Button>
