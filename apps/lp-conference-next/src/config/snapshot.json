@@ -46,7 +46,13 @@
   "crowdfunding": {
     "heading": "クラウドファンディング情報",
     "body": "CAMPFIREにて支援プロジェクト公開中。\n応援お待ちしています！",
-    "cta": { "label": "クラウドファンディングを見る", "href": "https://camp-fire.jp/projects/975088/" }
+    "cta": { "label": "クラウドファンディングを見る", "href": "https://camp-fire.jp/projects/975088/" },
+    "banner": {
+      "text": "現在クラウドファンディング開催中！ 北陸ITカンファレンスを応援してください",
+      "shortText": "クラファン開催中！",
+      "ctaLabel": "CAMPFIREで支援する",
+      "href": "https://camp-fire.jp/projects/975088/"
+    }
   },
   "apply": {
     "heading": "応募フォーム",
