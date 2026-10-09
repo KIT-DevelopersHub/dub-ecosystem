@@ -3,12 +3,12 @@
   "slug": "calendar-gcal",
   "worker": "dub-demo-calendar-gcal",
   "url": "https://dub-demo-calendar-gcal.developershub-site.workers.dev",
-  "deployedSha": "28d83781",
+  "deployedSha": "a3c285b4",
   "branch": "feat/calendar-gcal-ui",
   "actor": "ko-tarou",
-  "markers": ["calendar-create-panel","calendar-timegrid"],
+  "markers": ["calendar-create-panel","calendar-timegrid","calendar-create-mini"],
   "live": true,
-  "verifiedAt": "2026-10-09T19:06:56Z",
-  "updatedAt": "2026-10-09T19:06:56Z",
+  "verifiedAt": "2026-10-09T19:12:37Z",
+  "updatedAt": "2026-10-09T19:12:37Z",
   "note": "カレンダー Googleカレンダー風UI + 予定の追加"
 }
