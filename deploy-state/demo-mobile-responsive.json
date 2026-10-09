@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mobile-responsive",
+  "worker": "dub-demo-mobile-responsive",
+  "url": "https://dub-demo-mobile-responsive.developershub-site.workers.dev",
+  "deployedSha": "72dfd9fe",
+  "branch": "feat/mobile-responsive-webview",
+  "actor": "ko-tarou",
+  "markers": ["fe2-mail-nav-open"],
+  "live": true,
+  "verifiedAt": "2026-10-09T17:23:27Z",
+  "updatedAt": "2026-10-09T17:23:27Z",
+  "note": "スマホ幅レスポンシブ修正 (feat/mobile-responsive-webview)"
+}

@@ -426,6 +426,12 @@
   outline: none;
   width: 140px;
 }
+/* iOS zooms the page when focusing an input under 16px. */
+@media (pointer: coarse) {
+  .searchBox input {
+    font-size: var(--dub-font-size-md);
+  }
+}
 .iconBtn {
   display: inline-flex;
   align-items: center;
@@ -1750,5 +1756,46 @@
   }
   20% {
     background: color-mix(in srgb, var(--dub-color-warning-100) 80%, transparent);
+  }
+}
+
+/* Phone channel header — placed after the base rules so it wins the cascade. */
+@media (max-width: 768px) {
+  /* Single column: the channel name keeps the room; the topic and the fixed-width
+     search field give way instead of squeezing the name down to a few letters. */
+  .channelHeader {
+    padding: var(--dub-space-2) var(--dub-space-2);
+    gap: var(--dub-space-2);
+  }
+  .channelTitle {
+    min-width: 0;
+  }
+  .channelTitle > span:not(.channelTitleHash):not([aria-hidden]) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .channelHeaderLeft {
+    flex: 1;
+  }
+  .channelTopic {
+    display: none;
+  }
+  .channelHeaderRight {
+    gap: var(--dub-space-1);
+  }
+  /* Search collapses to its icon (the label still focuses the input) and opens
+     while focused or holding a query. */
+  .searchBox {
+    min-height: 36px;
+  }
+  .searchBox input {
+    width: 0;
+    transition: width var(--dub-motion-fast) var(--dub-motion-easing);
+  }
+  .searchBox:focus-within input,
+  .searchBox input:not(:placeholder-shown) {
+    width: 120px;
   }
 }

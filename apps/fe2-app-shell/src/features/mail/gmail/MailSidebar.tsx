@@ -9,14 +9,17 @@ function count(folder: FolderId, threads: ReturnType<typeof useMailStore>["state
   return threads.filter((t) => inFolder(t, folder) && (!unreadOnly || threadUnread(t))).length;
 }
 
-export function MailSidebar(): JSX.Element {
+/** `inDrawer`: rendered inside the phone nav drawer — fills it, rows grow to a
+ *  44px touch height, and `onNavigate` closes the drawer after a pick. */
+export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boolean; onNavigate?: () => void } = {}): JSX.Element {
   const { state, dispatch } = useMailStore();
+  const rowHeight = inDrawer ? 44 : 32;
 
   return (
     <nav
       data-testid="fe2-mail-sidebar"
       style={{
-        width: 256,
+        width: inDrawer ? "auto" : 256,
         flexShrink: 0,
         padding: "8px 8px 8px 4px",
         display: "flex",
@@ -28,7 +31,10 @@ export function MailSidebar(): JSX.Element {
       <button
         type="button"
         data-testid="fe2-mail-compose-open"
-        onClick={() => dispatch({ type: "OPEN_COMPOSE", compose: {} })}
+        onClick={() => {
+          dispatch({ type: "OPEN_COMPOSE", compose: {} });
+          onNavigate?.();
+        }}
         style={{
           all: "unset",
           cursor: "pointer",
@@ -65,14 +71,17 @@ export function MailSidebar(): JSX.Element {
             type="button"
             data-testid={`fe2-mail-folder-${f.id}`}
             aria-current={active ? "page" : undefined}
-            onClick={() => dispatch({ type: "SET_FOLDER", folder: f.id })}
+            onClick={() => {
+              dispatch({ type: "SET_FOLDER", folder: f.id });
+              onNavigate?.();
+            }}
             style={{
               all: "unset",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
               gap: 16,
-              height: 32,
+              height: rowHeight,
               padding: "0 12px 0 20px",
               borderRadius: "0 16px 16px 0",
               color: active ? "var(--dub-color-brand-700)" : "var(--dub-color-text-secondary)",
@@ -112,14 +121,17 @@ export function MailSidebar(): JSX.Element {
             type="button"
             data-testid={`fe2-mail-label-${l.id}`}
             aria-current={active ? "page" : undefined}
-            onClick={() => dispatch({ type: "SET_LABEL", label: l.id })}
+            onClick={() => {
+              dispatch({ type: "SET_LABEL", label: l.id });
+              onNavigate?.();
+            }}
             style={{
               all: "unset",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
               gap: 16,
-              height: 32,
+              height: rowHeight,
               padding: "0 12px 0 20px",
               borderRadius: "0 16px 16px 0",
               color: active ? "var(--dub-color-text-primary)" : "var(--dub-color-text-secondary)",
