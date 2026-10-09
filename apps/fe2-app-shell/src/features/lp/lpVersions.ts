@@ -17,7 +17,7 @@ export interface LpVersion {
   id: string;
   /** 表示名（例: "v1.0 テキスト版"）。 */
   name: string;
-  /** 一覧に出す 1 行説明。 */
+  /** 変更内容の説明（一覧では畳み、「詳細」で開いたときだけ出す）。 */
   description: string;
   /** 「見る」リンク先の公開 URL。 */
   url: string;
@@ -25,6 +25,8 @@ export interface LpVersion {
   updatedAt: string;
   /** 公開状態。 */
   status: LpVersionStatus;
+  /** この版を入れた PR（分かっている版だけ。「詳細」から開ける）。 */
+  prUrl?: string;
 }
 
 /**
@@ -40,6 +42,7 @@ export const LP_VERSIONS: readonly LpVersion[] = [
     url: "https://hokuriku-it-conf.com",
     updatedAt: "2026-09-28",
     status: "current",
+    prUrl: "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/556",
   },
   {
     id: "v3.3",
@@ -49,6 +52,7 @@ export const LP_VERSIONS: readonly LpVersion[] = [
     url: "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/555",
     updatedAt: "2026-09-23",
     status: "archived",
+    prUrl: "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/555",
   },
   {
     id: "v3.2",

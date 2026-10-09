@@ -21,6 +21,7 @@ import type { BadgeTone } from "@dub/ui";
 import { listLpVersions, type LpVersion, type LpVersionStatus } from "./lpVersions.ts";
 import { LpViewer } from "./LpViewer.tsx";
 import { LpTabs } from "./LpTabs.tsx";
+import styles from "./lp.module.css";
 
 const LP_VERSIONS_KEY = ["lp", "versions"] as const;
 
@@ -35,6 +36,8 @@ function formatUpdated(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("ja-JP");
 }
 
+// 1 版 = 1 行。説明文は畳んでおき「詳細」で開く（版が増えても一覧を一目で見渡せるように）。
+// 列は grid で固定しているので、説明の長さに関係なく全行のボタンが同じ位置に揃う。
 function VersionRow({
   version,
   onView,
@@ -43,32 +46,48 @@ function VersionRow({
   onView: (version: LpVersion) => void;
 }): JSX.Element {
   const status = STATUS_META[version.status];
+  const [open, setOpen] = useState(false);
   return (
-    <Card testId={`fe2-lp-version-${version.id}`}>
-      <Stack direction="row" gap={4} align="center" justify="between" wrap>
-        <Stack gap={2}>
-          <Stack direction="row" gap={3} align="center" wrap>
-            <Icon name="megaphone" />
-            <strong style={{ fontWeight: 700 }}>{version.name}</strong>
-            <Badge tone={status.tone} testId={`fe2-lp-status-${version.id}`}>
-              {status.label}
-            </Badge>
-          </Stack>
-          <span style={{ opacity: 0.85 }}>{version.description}</span>
-          <small style={{ opacity: 0.65 }}>更新日: {formatUpdated(version.updatedAt)}</small>
-        </Stack>
+    <div className={styles.versionRow} data-testid={`fe2-lp-version-${version.id}`}>
+      <div className={styles.versionLine}>
+        <Icon name="megaphone" />
+        <strong className={styles.versionName}>{version.name}</strong>
+        <Badge tone={status.tone} testId={`fe2-lp-status-${version.id}`}>
+          {status.label}
+        </Badge>
+        <small className={styles.versionDate}>{formatUpdated(version.updatedAt)}</small>
+        <Button
+          variant="ghost"
+          size="sm"
+          iconRight={<Icon name={open ? "chevron-down" : "chevron-right"} />}
+          onClick={() => setOpen((v) => !v)}
+          testId={`fe2-lp-details-toggle-${version.id}`}
+        >
+          詳細
+        </Button>
         {/* 「見る」= アプリ内フルスクリーンで LP を表示（別ブラウザタブは開かない）。
             LP 表示中はシェルの chrome を覆って隠し、「アプリに戻る」で通常 UI へ戻る。 */}
         <Button
           variant="secondary"
+          size="sm"
           iconRight={<Icon name="external-link" />}
           onClick={() => onView(version)}
           testId={`fe2-lp-view-${version.id}`}
         >
           見る
         </Button>
-      </Stack>
-    </Card>
+      </div>
+      {open ? (
+        <div className={styles.versionDetails} data-testid={`fe2-lp-details-${version.id}`}>
+          <p className={styles.note}>{version.description}</p>
+          {version.prUrl ? (
+            <a className={styles.urlOpen} href={version.prUrl} target="_blank" rel="noopener noreferrer">
+              変更の PR を開く
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -89,13 +108,9 @@ export function LpManagementScreen(): JSX.Element {
   let body: JSX.Element;
   if (query.isLoading) {
     body = (
-      <Stack gap={4} testId="fe2-lp-loading">
-        {[0, 1, 2].map((i) => (
-          <Card key={i}>
-            <SkeletonLoader lines={3} />
-          </Card>
-        ))}
-      </Stack>
+      <Card testId="fe2-lp-loading">
+        <SkeletonLoader lines={6} />
+      </Card>
     );
   } else if (query.isError) {
     body = (
@@ -116,11 +131,11 @@ export function LpManagementScreen(): JSX.Element {
     );
   } else {
     body = (
-      <Stack gap={4} testId="fe2-lp-list">
+      <Card padded={false} testId="fe2-lp-list">
         {query.data.map((v) => (
           <VersionRow key={v.id} version={v} onView={setViewing} />
         ))}
-      </Stack>
+      </Card>
     );
   }
 

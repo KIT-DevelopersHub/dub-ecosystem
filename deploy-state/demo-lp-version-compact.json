@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-version-compact",
+  "worker": "dub-demo-lp-version-compact",
+  "url": "https://dub-demo-lp-version-compact.developershub-site.workers.dev",
+  "deployedSha": "83ac2293",
+  "branch": "fix/lp-version-list-compact",
+  "actor": "ko-tarou",
+  "markers": ["fe2-lp-details-toggle-"],
+  "live": true,
+  "verifiedAt": "2026-10-09T18:22:46Z",
+  "updatedAt": "2026-10-09T18:22:46Z",
+  "note": "LP管理 バージョン一覧1行化"
+}
