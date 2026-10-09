@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "commander-relay",
+  "worker": "dub-demo-commander-relay",
+  "url": "https://dub-demo-commander-relay.developershub-site.workers.dev",
+  "deployedSha": "a5b14eb0",
+  "branch": "feat/commander-relay-ws",
+  "actor": "ko-tarou",
+  "markers": ["fe2-commander-relay-status"],
+  "live": true,
+  "verifiedAt": "2026-10-09T18:02:36Z",
+  "updatedAt": "2026-10-09T18:02:36Z",
+  "note": "fe2 /commander over commander-relay WebSocket (replaces #591 tunnel)"
+}
