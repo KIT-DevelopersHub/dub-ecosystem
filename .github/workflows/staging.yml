@@ -124,7 +124,15 @@ jobs:
       - name: Resolve staging origins
         id: origins
         run: |
-          . infra/deploy/staging-slot.sh
+          if [ -f infra/deploy/staging-slot.sh ]; then
+            . infra/deploy/staging-slot.sh
+          elif [ "$STAGING_SLOT" = 1 ]; then
+            # PR head predates the 2-slot split: its scripts only know slot 1.
+            STAGING_SUFFIX="-staging"; STAGING_LABEL="stagingへ"; STAGING_RESOURCES_FILE="infra/deploy/staging-resources.env"
+          else
+            echo "::error::この PR は staging2 対応前の main から分岐しています。main を取り込んでから staging2へ を付けてください（このままだと枠1を上書きします）。"
+            exit 1
+          fi
           set -a; . "$STAGING_RESOURCES_FILE"; set +a
           SUB="${STAGING_WORKERS_SUBDOMAIN}"
           echo "gateway=https://dub-api-gateway${STAGING_SUFFIX}.${SUB}.workers.dev" >> "$GITHUB_OUTPUT"

@@ -90,6 +90,7 @@ webhook-ingest）で満杯のため、staging が cron を足すと CF がデプ
 - 空き枠は `bash scripts/staging-pick-slot.sh --pr <n>` で選ぶ（枠2優先・同じ PR が既に持つ枠はそのまま・両方埋まっていれば exit 10）。Commander の staging 反映 run もこれを使う。
 - 枠の切替は `STAGING_SLOT=1|2`（`infra/deploy/staging-slot.sh`）。リソース id は枠1 `staging-resources.env`・枠2 `staging2-resources.env`。
 - 確認が終わったらラベルを外して枠を空ける（付いたままの PR は「使用中」と数える）。
+- 枠2は PR の head に `infra/deploy/staging-slot.sh` が要る。main より古い PR に `staging2へ` を付けると CI が止める（枠1の上書き防止）ので、main を取り込んでから付ける。
 - 枠2の制約: mail-gateway の Email Routing / Resend secrets は未登録（メール送受信は枠1で確認）。cron は枠1と同じく無し。
 - Worker 枠: 1 枠 20 個。2 枠で 40 個（無料枠 100 個の内訳は §3）。
 
