@@ -1,98 +1,93 @@
 import { describe, it, expect } from "vitest";
-import * as operateDub from "./operateDub.ts";
+import type { ChatMessage } from "./commanderApi.ts";
 import {
-  classifyD1Sql,
-  extractJsonBlock,
-  isDestructiveSql,
-  isWrite,
-  normalizeOperation,
-  parsePlan,
-  type Operation,
+  buildAnswerPrompt,
+  buildPlannerPrompt,
+  buildTranscript,
+  describeCatalog,
+  OPERATE_PLANNER_ARGS,
+  OPERATE_PLANNER_CWD,
+  parsePlannerReply,
+  RESULT_PREFIX,
 } from "./operateDub.ts";
+import { FAKE_CATALOG } from "../test/operateFakes.ts";
 
-describe("operateDub classification (safety net)", () => {
-  it("classifies reads vs writes from the SQL itself", () => {
-    expect(classifyD1Sql("SELECT * FROM users")).toBe("d1_read");
-    expect(classifyD1Sql("  pragma table_info(users)")).toBe("d1_read");
-    expect(classifyD1Sql("WITH t AS (SELECT 1) SELECT * FROM t")).toBe("d1_read");
-    expect(classifyD1Sql("INSERT INTO users(id) VALUES('a')")).toBe("d1_write");
-    expect(classifyD1Sql("UPDATE users SET name='x'")).toBe("d1_write");
-    expect(classifyD1Sql("DELETE FROM users")).toBe("d1_write");
-  });
+const msg = (role: ChatMessage["role"], text: string, i = 0): ChatMessage => ({
+  id: `m${i}`,
+  seq: i,
+  sessionId: "s1",
+  role,
+  text,
+  tools: [],
+  status: "done",
+  createdAt: "2026-10-10T00:00:00.000Z",
+});
 
-  it("flags delete/drop/truncate as destructive", () => {
-    expect(isDestructiveSql("DELETE FROM users WHERE id='a'")).toBe(true);
-    expect(isDestructiveSql("DROP TABLE users")).toBe(true);
-    expect(isDestructiveSql("TRUNCATE users")).toBe(true);
-    expect(isDestructiveSql("INSERT INTO users(id) VALUES('a')")).toBe(false);
-    expect(isDestructiveSql("UPDATE users SET name='x'")).toBe(false);
-  });
-
-  it("re-derives kind + destructive even if the planner under-classified", () => {
-    // Planner LIED: says a DELETE is a harmless read. The safety net corrects it.
-    const op = normalizeOperation({
-      id: "op1",
-      kind: "d1_read",
-      title: "掃除",
-      sql: "DELETE FROM users",
-      destructive: false,
-    });
-    expect(op.kind).toBe("d1_write");
-    expect(op.destructive).toBe(true);
-  });
-
-  it("isWrite: reads are false, writes/mutating API calls are true", () => {
-    const read: Operation = { id: "1", kind: "d1_read", title: "", sql: "SELECT 1", destructive: false };
-    const write: Operation = { id: "2", kind: "d1_write", title: "", sql: "INSERT INTO t VALUES(1)", destructive: false };
-    const apiGet: Operation = { id: "3", kind: "api_call", title: "", method: "GET", url: "u", destructive: false };
-    const apiPost: Operation = { id: "4", kind: "api_call", title: "", method: "POST", url: "u", destructive: false };
-    expect(isWrite(read)).toBe(false);
-    expect(isWrite(write)).toBe(true);
-    expect(isWrite(apiGet)).toBe(false);
-    expect(isWrite(apiPost)).toBe(true);
+describe("planner run isolation", () => {
+  it("gives the planner no tools and keeps it out of the repo", () => {
+    expect(OPERATE_PLANNER_ARGS).toEqual(["--tools", "", "--strict-mcp-config"]);
+    expect(OPERATE_PLANNER_CWD).not.toMatch(/dub-ecosystem/);
   });
 });
 
-describe("operateDub has no direct execution path", () => {
-  it("no longer builds wrangler/curl commands or exec prompts", () => {
-    for (const gone of ["d1Command", "apiCommand", "commandFor", "buildExecPrompt", "shellQuote", "D1_DB_NAME"]) {
-      expect(operateDub).not.toHaveProperty(gone);
-    }
+describe("buildPlannerPrompt", () => {
+  it("carries the rules, the catalog, the whole session (incl. results) and the request", () => {
+    const history = [
+      msg("user", "北陸ITカンファレンス2027 を探して", 1),
+      msg("assistant", `${RESULT_PREFIX.preview}イベントを1件見つけました（id ev1）`, 2),
+      msg("assistant", `${RESULT_PREFIX.execution}一部できませんでした`, 3),
+    ];
+    const p = buildPlannerPrompt({ catalog: FAKE_CATALOG, history, request: "失敗した分だけやり直して" });
+    expect(p).toMatch(/返答は必ず日本語/);
+    expect(p).toMatch(/<EVENT_ID> のような仮の値は禁止/);
+    expect(p).toContain("- events.update [書き込み・リスク中・取り消し可] PATCH /events/:id");
+    expect(p).toContain("[ユーザー]\n北陸ITカンファレンス2027 を探して");
+    expect(p).toContain("[システム]\n【確認結果】イベントを1件見つけました（id ev1）");
+    expect(p).toContain("[システム]\n【実行結果】一部できませんでした");
+    expect(p.trim().endsWith("# 今回の依頼\n失敗した分だけやり直して")).toBe(true);
+  });
+
+  it("asks for prose, not a plan, when answering from read results", () => {
+    expect(buildAnswerPrompt({ catalog: FAKE_CATALOG, history: [] })).toMatch(/計画や JSON は書かないこと/);
+  });
+
+  it("labels the risk tier and reversibility of mutations only", () => {
+    const d = describeCatalog(FAKE_CATALOG);
+    expect(d).toContain("- events.list [読み取り] GET /events");
+    expect(d).toContain("[削除・リスク高・取り消し可]");
+    expect(d).toContain("- events.get [読み取り] GET /events/:id — イベント1件の詳細を取得する / version を含む");
   });
 });
 
-describe("operateDub plan parsing", () => {
-  it("extracts the LAST fenced json block", () => {
-    const text = 'まず ```json\n{"a":1}\n``` 次 ```json\n{"b":2}\n```';
-    expect(extractJsonBlock(text)).toBe('{"b":2}');
+describe("buildTranscript", () => {
+  it("keeps the newest messages when over budget and skips streaming ones", () => {
+    const big = "あ".repeat(2900);
+    const history = Array.from({ length: 30 }, (_, i) => msg(i % 2 ? "assistant" : "user", `${i}:${big}`, i));
+    history.push({ ...msg("assistant", "途中", 99), status: "streaming" });
+    const tr = buildTranscript(history);
+    expect(tr).toContain("29:");
+    expect(tr).not.toContain("[ユーザー]\n0:");
+    expect(tr).not.toContain("途中");
+    expect(buildTranscript([])).toBe("（まだありません）");
+  });
+});
+
+describe("parsePlannerReply", () => {
+  it("treats prose as an answer", () => {
+    expect(parsePlannerReply("こんにちは。イベントの編集ができます。")).toEqual({ kind: "answer", text: "こんにちは。イベントの編集ができます。" });
   });
 
-  it("parses a valid plan and normalizes its ops", () => {
-    const answer =
-      "計画です:\n```json\n" +
-      JSON.stringify({
-        summary: "サンプル投入",
-        ops: [
-          { id: "r1", kind: "d1_read", title: "件数", sql: "SELECT count(*) FROM users", destructive: false },
-          { id: "w1", kind: "d1_read", title: "投入", sql: "INSERT INTO users(id) VALUES('a')", destructive: false },
-          { id: "x1", kind: "d1_read", title: "削除", sql: "DELETE FROM users", destructive: false },
-        ],
-      }) +
-      "\n```";
-    const res = parsePlan(answer);
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    expect(res.plan.summary).toBe("サンプル投入");
-    expect(res.plan.ops).toHaveLength(3);
-    // Safety net applied during parse:
-    expect(res.plan.ops[1]!.kind).toBe("d1_write"); // INSERT reclassified
-    expect(res.plan.ops[2]!.kind).toBe("d1_write"); // DELETE reclassified
-    expect(res.plan.ops[2]!.destructive).toBe(true); // DELETE = destructive
+  it("parses a plan and keeps the Japanese intro", () => {
+    const r = parsePlannerReply('概要を差し替えます。\n```json\n{"type":"plan","summary":"1件更新","steps":[{"id":"a","op":"events.list"}]}\n```');
+    expect(r.kind).toBe("plan");
+    if (r.kind !== "plan") return;
+    expect(r.intro).toBe("概要を差し替えます。");
+    expect(r.plan.summary).toBe("1件更新");
+    expect(r.plan.steps).toHaveLength(1);
   });
 
-  it("errors gracefully when no JSON / no ops", () => {
-    expect(parsePlan("ただの文章です").ok).toBe(false);
-    const noOps = parsePlan('```json\n{"summary":"x"}\n```');
-    expect(noOps.ok).toBe(false);
+  it("reports broken or empty plans in Japanese", () => {
+    expect(parsePlannerReply("```json\n{oops\n```")).toMatchObject({ kind: "invalid", error: expect.stringMatching(/読み取れません/) });
+    expect(parsePlannerReply('```json\n{"steps":[]}\n```')).toMatchObject({ kind: "invalid" });
   });
 });
