@@ -72,7 +72,13 @@ erDiagram
 | staging_review | prod_shipped | **必要(user)** | staging 承認→本番反映 |
 | staging_review | staging_rejected | 不要 | staging 却下(要修正) |
 | staging_rejected | demo_building | 不要 | 修正して demo に戻す |
+| staging_deployed / staging_review / staging_rejected | demo_review | 不要(rewind) | フェーズを戻す→demo 確認待ち |
+| prod_shipped | staging_review / demo_review | 不要(rewind) | フェーズを戻す→staging / demo 確認待ち |
 
+- 終端フェーズは無い。追加指示はフェーズを変えずに同じタスクへ run を足すだけ。
+- 「フェーズを戻す」辺(`rewind: true`)は確認待ちにしか着地しない。再び先へ進むには
+  承認必要な辺を通るので、段飛ばし禁止・自己承認禁止は崩れない。デプロイ済みの環境は
+  巻き戻さない（フェーズ表示だけを戻す）。タスクの終了は `Task.status=done`（明示アーカイブ）。
 - 表に無い辺は `illegal_transition`（段飛ばし禁止）。
 - 承認必要な辺は `approved_by_user=true` が無ければ `approval_required`（自己承認禁止）。
 - `PHASE_TRANSITION` は監査ログ。誰が(actor)・承認有無・いつを記録する。

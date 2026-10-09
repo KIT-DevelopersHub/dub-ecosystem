@@ -3,7 +3,7 @@
 // and reloads — Task 3), and a message bubble. "Dubに聞く" and "Dubを操作" both compose these.
 import { useEffect, useRef, useState } from "react";
 import type { ChatKind, ChatMessage, ChatSession } from "./lib/commanderApi.ts";
-import { loadDraft, saveDraft, useChat } from "./lib/chatStore.tsx";
+import { loadDraft, saveDraft, TITLE_MAX, useChat } from "./lib/chatStore.tsx";
 import { btnGhost, btnPrimary, card, input, t } from "./lib/theme.ts";
 import { isSubmitEnter } from "./lib/keyboard.ts";
 
@@ -49,6 +49,9 @@ function SessionRow({
   running: boolean;
 }) {
   const chat = useChat();
+  const [editing, setEditing] = useState(false);
+  const label = session.title || "新しいチャット";
+
   return (
     <div
       data-testid="chat-session"
@@ -58,49 +61,147 @@ function SessionRow({
         alignItems: "center",
         gap: t.space1,
         borderRadius: "var(--dub-radius-sm, 8px)",
-        border: `1px solid ${active ? t.primary : t.border}`,
+        border: `1px solid ${active || editing ? t.primary : t.border}`,
         background: active ? t.overlay : "transparent",
         padding: `${t.space1} ${t.space2}`,
       }}
     >
-      <button
-        type="button"
-        data-testid="chat-select-session"
-        onClick={() => chat.select(kind, session.id)}
-        title={session.title || "新しいチャット"}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          textAlign: "left",
-          background: "transparent",
-          border: 0,
-          color: active ? t.text : t.textMuted,
-          fontSize: 13,
-          fontWeight: active ? 600 : 400,
-          cursor: "pointer",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          fontFamily: "inherit",
-          padding: t.space1,
-        }}
-      >
-        {running && <span style={{ color: t.warning }}>● </span>}
-        {session.title || "新しいチャット"}
-      </button>
-      <button
-        type="button"
-        data-testid="chat-delete-session"
-        title="このチャットを削除（履歴も物理削除）"
-        onClick={() => {
-          if (typeof window !== "undefined" && !window.confirm("このチャットの履歴を削除します。よろしいですか？")) return;
-          void chat.remove(kind, session.id);
-        }}
-        style={{ background: "transparent", border: 0, color: t.textMuted, cursor: "pointer", fontSize: 14, padding: "0 4px" }}
-      >
-        ×
-      </button>
+      {editing ? (
+        // While renaming the row is the input alone: the delete "×" sits one tap away,
+        // so keeping it reachable mid-edit invites a destructive mis-tap.
+        <SessionNameInput
+          initial={session.title}
+          onCommit={(value) => {
+            setEditing(false);
+            void chat.rename(kind, session.id, value);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <>
+          <button
+            type="button"
+            data-testid="chat-select-session"
+            onClick={() => chat.select(kind, session.id)}
+            onDoubleClick={() => setEditing(true)}
+            title={`${label}（ダブルクリックで名前を変更）`}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              textAlign: "left",
+              background: "transparent",
+              border: 0,
+              color: active ? t.text : t.textMuted,
+              fontSize: 13,
+              fontWeight: active ? 600 : 400,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              fontFamily: "inherit",
+              padding: t.space1,
+            }}
+          >
+            {running && <span style={{ color: t.warning }}>● </span>}
+            {label}
+          </button>
+          <button
+            type="button"
+            data-testid="chat-rename-session"
+            aria-label="チャット名を変更"
+            title="チャット名を変更"
+            onClick={() => setEditing(true)}
+            style={iconBtn}
+          >
+            ✎
+          </button>
+          <button
+            type="button"
+            data-testid="chat-delete-session"
+            title="このチャットを削除（履歴も物理削除）"
+            aria-label="このチャットを削除"
+            onClick={() => {
+              if (typeof window !== "undefined" && !window.confirm("このチャットの履歴を削除します。よろしいですか？")) return;
+              void chat.remove(kind, session.id);
+            }}
+            // Extra left margin: the destructive action keeps its distance from ✎.
+            style={{ ...iconBtn, marginLeft: t.space1 }}
+          >
+            ×
+          </button>
+        </>
+      )}
     </div>
+  );
+}
+
+const iconBtn: React.CSSProperties = {
+  background: "transparent",
+  border: 0,
+  color: t.textMuted,
+  cursor: "pointer",
+  fontSize: 14,
+  lineHeight: 1,
+  padding: "2px 4px",
+  flexShrink: 0,
+};
+
+/** Inline name editor for one session row. Enter / blur commit, Escape cancels; an empty
+ *  name is a no-op (the store rejects it, so the old name stays). */
+function SessionNameInput({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  onCommit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const done = useRef(false);
+
+  const commit = () => {
+    if (done.current) return;
+    done.current = true;
+    onCommit(value);
+  };
+  const cancel = () => {
+    if (done.current) return;
+    done.current = true;
+    onCancel();
+  };
+
+  return (
+    <input
+      data-testid="chat-rename-input"
+      aria-label="チャット名"
+      autoFocus
+      value={value}
+      maxLength={TITLE_MAX}
+      onChange={(e) => setValue(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          cancel();
+        }
+      }}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        background: t.surface,
+        color: t.text,
+        border: `1px solid ${t.primary}`,
+        borderRadius: "var(--dub-radius-sm, 6px)",
+        fontSize: 13,
+        fontFamily: "inherit",
+        padding: `2px ${t.space1}`,
+      }}
+    />
   );
 }
 

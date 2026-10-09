@@ -5,7 +5,14 @@
 import { useRunStream } from "./lib/useRunStream.ts";
 import type { CommanderClient } from "./lib/client.ts";
 import type { BoardItem, RunHistoryApi } from "./lib/commanderApi.ts";
-import { deriveLane, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import {
+  deriveLane,
+  isRunningLane,
+  LANE_COLORS,
+  LANE_LABELS,
+  needsFix,
+  NEEDS_FIX_COLOR,
+} from "./lib/lanes.ts";
 import {
   reflectionOf,
   reflectionLabel,
@@ -45,7 +52,7 @@ function relTime(iso: string): string {
 
 export function TaskCard({ item, client, history, onOpen, onCancel, pending }: TaskCardProps) {
   const lane = deriveLane(item);
-  const isRunning = lane === "running" && !!item.latestRun;
+  const isRunning = isRunningLane(lane) && !!item.latestRun;
   // A running deploy phase reads as 「反映中」 rather than a generic run, so the operator can
   // see 「stgに進む」 actually kicked work (not just a badge flip).
   const deployingLabel =
@@ -56,7 +63,9 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
         : null;
   // Only running cards subscribe live; others pass null (no socket).
   const stream = useRunStream(isRunning ? item.latestRun!.id : null, { client, history });
-  const accent = LANE_COLORS[lane];
+  // 要修正は専用列を持たないので、確認列の中でカードを赤くして見分けさせる。
+  const fix = needsFix(item);
+  const accent = fix ? NEEDS_FIX_COLOR : LANE_COLORS[lane];
   // Reflection cue (requirement #2): on a settled card — especially in 確認待ち — show at a
   // glance whether the deploy is 反映済み / 反映失敗 (with time + URL). A running card keeps
   // its live spinner (deployingLabel/lastLine) instead, so we skip the badge there.
@@ -103,7 +112,7 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
           data-testid={`task-lane-${item.taskId}`}
           style={{ fontSize: 11, fontWeight: 700, color: accent, whiteSpace: "nowrap" }}
         >
-          {LANE_LABELS[lane]}
+          {fix ? "要修正" : LANE_LABELS[lane]}
         </span>
       </div>
 
@@ -138,10 +147,10 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
             marginTop: t.space2,
             fontSize: 12,
             fontWeight: 600,
-            color: LANE_COLORS.running,
+            color: LANE_COLORS.implementing,
           }}
         >
-          <Spinner size={12} color={LANE_COLORS.running} />
+          <Spinner size={12} color={LANE_COLORS.implementing} />
           {deployingLabel}…
         </div>
       )}
