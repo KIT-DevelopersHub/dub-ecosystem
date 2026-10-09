@@ -5,7 +5,7 @@
 // Next actions close the judgment loop: 承認 (approval-gated), 却下 (feedback → new run),
 // 追加指示 (new run in the same task, phase unchanged), フェーズを戻す (phase-only step
 // back to a 確認待ち), 完了 (archive to the Done lane).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Drawer } from "./Drawer.tsx";
 import type { CommanderClient } from "./lib/client.ts";
 import {
@@ -114,6 +114,14 @@ export function TaskDrawer(props: TaskDrawerProps) {
 
   const stream = useRunStream(item?.latestRun ? item.latestRun.id : null, { client, history });
 
+  // Keep the log pinned to the newest line unless the operator scrolled up to read.
+  const logRef = useRef<HTMLPreElement>(null);
+  const followRef = useRef(true);
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    if (el && followRef.current) el.scrollTop = el.scrollHeight;
+  }, [stream.log.length, tab]);
+
   const featureId = item?.featureId ?? null;
   const loadDetail = useCallback(async () => {
     if (!featureId) return;
@@ -129,6 +137,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
 
   useEffect(() => {
     setTab("log");
+    followRef.current = true;
     setPendingApproval(null);
     setRejectTo(null);
     setFeedback("");
@@ -293,7 +302,12 @@ export function TaskDrawer(props: TaskDrawerProps) {
             {stream.live && <span style={{ color: LANE_COLORS.implementing }}> · live</span>}
           </div>
           <pre
+            ref={logRef}
             data-testid="drawer-log"
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+            }}
             style={{
               margin: 0,
               padding: t.space3,

@@ -31,7 +31,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 . infra/deploy/staging-worker-set.sh
-set -a; . infra/deploy/staging-resources.env; set +a
+. infra/deploy/staging-slot.sh   # STAGING_SLOT=1|2 -> STAGING_SUFFIX (-staging|-staging2)
+set -a; . "$STAGING_RESOURCES_FILE"; set +a
+SFX="$STAGING_SUFFIX"
 
 # Real PROD resource ids (constants — the values committed in every wrangler.free.toml).
 PROD_DUBCORE_ID="d663f9c6-499f-4c67-910d-e08733d5278d"
@@ -46,19 +48,19 @@ for v in STAGING_DUB_CORE_D1_ID STAGING_AUTH_OUTBOX_D1_ID STAGING_AUTH_KV_ID \
   val="${!v:-}"
   case "$val" in
     ""|REPLACE_ME*)
-      echo "::error::${v} is a placeholder ('${val}'). Run infra/deploy/setup-staging-resources.sh once to create the staging D1/KV and fill infra/deploy/staging-resources.env." >&2
+      echo "::error::${v} is a placeholder ('${val}'). Run STAGING_SLOT=${STAGING_SLOT} infra/deploy/setup-staging-resources.sh once to create the staging D1/KV and fill ${STAGING_RESOURCES_FILE}." >&2
       exit 1;;
   esac
 done
 
-FE2_ORIGIN="https://dub-fe2-app-shell-staging.${STAGING_WORKERS_SUBDOMAIN}.workers.dev"
+FE2_ORIGIN="https://dub-fe2-app-shell${SFX}.${STAGING_WORKERS_SUBDOMAIN}.workers.dev"
 
 # The set of staging Worker names that actually get deployed (= each in-set dir's prod name
 # + "-staging"). Service bindings whose target is NOT in this set are dropped below.
 STAGING_WORKER_NAMES=""
 for _d in "${STAGING_WORKER_DIRS[@]}"; do
   _n="$(awk -F'"' '/^name = "/{print $2; exit}' "${_d}/wrangler.free.toml")"
-  STAGING_WORKER_NAMES="${STAGING_WORKER_NAMES} ${_n}-staging"
+  STAGING_WORKER_NAMES="${STAGING_WORKER_NAMES} ${_n}${SFX}"
 done
 
 # Remove any [[services]] block whose (already -staging-suffixed) target is not a deployed
@@ -98,7 +100,7 @@ gen_one() {
       -v AUTHKV_ID="$PROD_AUTHKV_ID"         -v AUTHKV_STG="$STAGING_AUTH_KV_ID" \
       -v DPKV_ID="$PROD_DPKV_ID"             -v DPKV_STG="$STAGING_DRIVE_PROXY_KV_ID" \
       -v GANTTKV_ID="$PROD_GANTTKV_ID"       -v GANTTKV_STG="$STAGING_GANTT_KV_ID" \
-      -v FE2ORIGIN="$FE2_ORIGIN" '
+      -v FE2ORIGIN="$FE2_ORIGIN"             -v SFX="$SFX" '
       BEGIN { seen_header=0; in_triggers=0 }
       # --- section headers: drop the whole [triggers] block, pass others through ---
       /^\[/ {
@@ -109,26 +111,26 @@ gen_one() {
       # --- top-level worker name (before any header) -> suffix -staging ---
       (!seen_header && /^name = "/) {
         match($0, /"[^"]*"/); v=substr($0,RSTART+1,RLENGTH-2)
-        print "name = \"" v "-staging\""; next
+        print "name = \"" v SFX "\""; next
       }
       # --- service binding targets -> suffix -staging (preserve trailing comment) ---
       /^service = "/ {
         match($0, /"[^"]*"/); v=substr($0,RSTART+1,RLENGTH-2); rest=substr($0,RSTART+RLENGTH)
-        print "service = \"" v "-staging\"" rest; next
+        print "service = \"" v SFX "\"" rest; next
       }
       # --- D1 logical names ---
-      /^database_name = "dub-core"/    { print "database_name = \"dub-core-staging\""; next }
-      /^database_name = "auth-outbox"/ { print "database_name = \"auth-outbox-staging\""; next }
+      /^database_name = "dub-core"/    { print "database_name = \"dub-core" SFX "\""; next }
+      /^database_name = "auth-outbox"/ { print "database_name = \"auth-outbox" SFX "\""; next }
       # --- R2 bucket names -> suffix -staging (preserve trailing comment) ---
       /^bucket_name = "/ {
         match($0, /"[^"]*"/); v=substr($0,RSTART+1,RLENGTH-2); rest=substr($0,RSTART+RLENGTH)
-        print "bucket_name = \"" v "-staging\"" rest; next
+        print "bucket_name = \"" v SFX "\"" rest; next
       }
       # --- gantt realtime vars: the DO-direct WS base + Origin allow-list must point at
       #     the STAGING gantt worker + staging fe2 origin, not prod (the generic id/CORS
       #     swaps below do not touch a worker hostname inside an arbitrary var value). ---
       /^GANTT_RT_DO_URL_BASE = "/ {
-        sub(/dub-gantt-service\./, "dub-gantt-service-staging."); print; next
+        sub(/dub-gantt-service\./, "dub-gantt-service" SFX "."); print; next
       }
       /^GANTT_RT_ALLOWED_ORIGINS = "/ {
         print "GANTT_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
@@ -138,7 +140,7 @@ gen_one() {
       #     staging fe2 opens the WS against the PROD chat worker and its staging-signed
       #     ticket is rejected (401) — chat realtime silently dead on staging. ---
       /^CHAT_RT_DO_URL_BASE = "/ {
-        sub(/dub-chat-service\./, "dub-chat-service-staging."); print; next
+        sub(/dub-chat-service\./, "dub-chat-service" SFX "."); print; next
       }
       /^CHAT_RT_ALLOWED_ORIGINS = "/ {
         print "CHAT_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
@@ -148,7 +150,7 @@ gen_one() {
       #     else staging fe2 opens the inbox WS against the PROD notification worker and its
       #     staging-signed ticket is rejected (401) / Origin mismatch — realtime badge dead. ---
       /^NOTIF_RT_DO_URL_BASE = "/ {
-        sub(/dub-notification-service\./, "dub-notification-service-staging."); print; next
+        sub(/dub-notification-service\./, "dub-notification-service" SFX "."); print; next
       }
       /^NOTIF_RT_ALLOWED_ORIGINS = "/ {
         print "NOTIF_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
@@ -179,7 +181,7 @@ gen_one() {
   echo "  generated $out"
 }
 
-echo "generating staging configs (subdomain=${STAGING_WORKERS_SUBDOMAIN}) ..."
+echo "generating staging configs (slot=${STAGING_SLOT} suffix=${SFX} subdomain=${STAGING_WORKERS_SUBDOMAIN}) ..."
 for dir in "${STAGING_WORKER_DIRS[@]}"; do
   gen_one "$dir"
 done

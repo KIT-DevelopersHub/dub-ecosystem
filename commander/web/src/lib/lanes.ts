@@ -37,6 +37,18 @@ export const LANE_LABELS: Record<Lane, string> = {
   done: "完了",
 };
 
+/** 列見出し下の一言説明（GitHub Project の column description 相当）。 */
+export const LANE_DESCRIPTIONS: Record<Lane, string> = {
+  queued: "まだ実行していない",
+  implementing: "AI が実装・demo 反映中",
+  review: "demo を見て承認 / 却下",
+  staging_deploying: "staging へ反映中",
+  staging_review: "staging を見て承認 / 却下",
+  prod_deploying: "本番へ反映中",
+  prod_review: "本番で確認して完了へ",
+  done: "アーカイブ済み",
+};
+
 const RUNNING = "var(--dub-color-info-500, #3b82f6)";
 const REVIEW = "var(--dub-color-warning-500, #d0870b)";
 

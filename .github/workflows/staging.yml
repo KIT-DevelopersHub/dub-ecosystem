@@ -1,6 +1,12 @@
 name: Deploy (staging)
 
-# STAGING deploy — two entry points into the SAME single shared staging environment:
+# STAGING deploy — two independent full-stack staging slots (infra/deploy/staging-slot.sh):
+#
+#   slot 1  `-staging`   label `stagingへ`   + every push to main (mirrors prod)
+#   slot 2  `-staging2`  label `staging2へ`  PR-only (a main merge never overwrites it)
+#
+# A PR carrying `staging2へ` deploys to slot 2; otherwise `stagingへ` deploys to slot 1.
+# Pick the free slot with `bash scripts/staging-slot.sh pick`. Slot 1's entry points:
 #
 #   1. push to `main`  -> redeploy staging from main's HEAD on every merge. This keeps
 #      staging a faithful mirror of production: whatever lands in main (and thus goes to
@@ -45,9 +51,9 @@ on:
 # contend for the single `deploy-staging` slot.
 concurrency:
   group: >-
-    ${{ (github.event_name == 'push' ||
-         contains(github.event.pull_request.labels.*.name, 'stagingへ'))
-        && 'deploy-staging'
+    ${{ github.event_name == 'push' && 'deploy-staging'
+        || contains(github.event.pull_request.labels.*.name, 'staging2へ') && 'deploy-staging2'
+        || contains(github.event.pull_request.labels.*.name, 'stagingへ') && 'deploy-staging'
         || format('staging-noop-{0}', github.run_id) }}
   cancel-in-progress: true
 
@@ -68,13 +74,16 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'stagingへ'))
+       (contains(github.event.pull_request.labels.*.name, 'stagingへ') ||
+        contains(github.event.pull_request.labels.*.name, 'staging2へ')))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: staging
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Slot 2 only for a PR labelled `staging2へ`; push:main and `stagingへ` use slot 1.
+      STAGING_SLOT: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'staging2へ') && '2' || '1' }}
     steps:
       # pull_request: build the PR head. push:main: pull_request is null, so the ||
       # falls back to github.sha (main's HEAD) — the exact tree that goes to prod.
@@ -115,10 +124,22 @@ jobs:
       - name: Resolve staging origins
         id: origins
         run: |
-          set -a; . infra/deploy/staging-resources.env; set +a
+          if [ -f infra/deploy/staging-slot.sh ]; then
+            . infra/deploy/staging-slot.sh
+          elif [ "$STAGING_SLOT" = 1 ]; then
+            # PR head predates the 2-slot split: its scripts only know slot 1.
+            STAGING_SUFFIX="-staging"; STAGING_LABEL="stagingへ"; STAGING_RESOURCES_FILE="infra/deploy/staging-resources.env"
+          else
+            echo "::error::この PR は staging2 対応前の main から分岐しています。main を取り込んでから staging2へ を付けてください（このままだと枠1を上書きします）。"
+            exit 1
+          fi
+          set -a; . "$STAGING_RESOURCES_FILE"; set +a
           SUB="${STAGING_WORKERS_SUBDOMAIN}"
-          echo "gateway=https://dub-api-gateway-staging.${SUB}.workers.dev" >> "$GITHUB_OUTPUT"
-          echo "fe2=https://dub-fe2-app-shell-staging.${SUB}.workers.dev"   >> "$GITHUB_OUTPUT"
+          echo "gateway=https://dub-api-gateway${STAGING_SUFFIX}.${SUB}.workers.dev" >> "$GITHUB_OUTPUT"
+          echo "fe2=https://dub-fe2-app-shell${STAGING_SUFFIX}.${SUB}.workers.dev"   >> "$GITHUB_OUTPUT"
+          echo "label=${STAGING_LABEL}" >> "$GITHUB_OUTPUT"
+          echo "d1=dub-core${STAGING_SUFFIX}" >> "$GITHUB_OUTPUT"
+          [ "$STAGING_SLOT" = 1 ] && echo "verify_env=staging" >> "$GITHUB_OUTPUT" || echo "verify_env=staging${STAGING_SLOT}" >> "$GITHUB_OUTPUT"
 
       # Build everything; fe2's Vite bundle bakes in the STAGING gateway base URL.
       # VITE_DEMO_AUTOLOGIN=1 compiles in the one-click demo-login button — STAGING ONLY.
@@ -134,7 +155,7 @@ jobs:
       - name: D1 schema gate
         env:
           D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'enforce' }}
-        run: bash infra/d1/scripts/schema-gate.sh dub-core-staging
+        run: bash infra/d1/scripts/schema-gate.sh "${{ steps.origins.outputs.d1 }}"
 
       - name: Deploy to staging
         run: bash infra/deploy/deploy-staging.sh
@@ -151,6 +172,7 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          VERIFY_ENV: ${{ steps.origins.outputs.verify_env }}
         run: |
           MARKERS="$(printf '%s\n' "${PR_BODY:-}" | grep -iE '^[[:space:]]*Liveness-Marker[[:space:]]*:' | head -n1 | sed -E 's/^[^:]*:[[:space:]]*//' || true)"
           if [ -z "${MARKERS// /}" ]; then
@@ -166,7 +188,7 @@ jobs:
           # --retries: the Worker version was uploaded seconds ago and needs a moment to
           # reach every edge. Without the wait this gate reads the PREVIOUS bundle and turns
           # a deploy that DID land red ("未反映" と出るのに実際は反映済み).
-          if bash scripts/verify-live.sh staging --retries 6 --retry-delay 10 "${ARGS[@]}"; then
+          if bash scripts/verify-live.sh "${VERIFY_ENV}" --retries 6 --retry-delay 10 "${ARGS[@]}"; then
             echo "status=live" >> "$GITHUB_OUTPUT"
             echo "detail=all marker(s) present in the served staging bundle: \`${MARKERS}\`" >> "$GITHUB_OUTPUT"
           else
@@ -186,6 +208,7 @@ jobs:
           GW_URL: ${{ steps.origins.outputs.gateway }}
           LIVENESS_STATUS: ${{ steps.liveness.outputs.status }}
           LIVENESS_DETAIL: ${{ steps.liveness.outputs.detail }}
+          SLOT_LABEL: ${{ steps.origins.outputs.label }}
         run: |
           MARKER="<!-- staging-deploy -->"
           case "${LIVENESS_STATUS}" in
@@ -197,7 +220,7 @@ jobs:
           # so no column-0 heredoc that would break the YAML block scalar).
           {
             echo "${MARKER}"
-            echo "### 🌐 staging デプロイ完了 (\`stagingへ\`)"
+            echo "### 🌐 staging デプロイ完了 (\`${SLOT_LABEL}\`)"
             echo ""
             echo "| 対象 | URL |"
             echo "|---|---|"
