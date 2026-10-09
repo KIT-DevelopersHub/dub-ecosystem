@@ -124,6 +124,7 @@ export function makeEnv(overrides: Partial<GatewayEnv> = {}): GatewayEnv {
     SVC_WEBHOOK_INGEST: inert(),
     SVC_USAGE_METER: inert(),
     SVC_MEMBER: inert(),
+    SVC_LP_ANALYTICS: inert(),
     GATEWAY_VERSION: "test-1",
     ALLOWED_ORIGINS: "https://app.developershub.jp,http://localhost:5173",
     DEFAULT_MAX_BODY_BYTES: "1048576",

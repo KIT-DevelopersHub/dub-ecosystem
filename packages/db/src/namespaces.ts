@@ -1,4 +1,4 @@
-// Schema namespace registry — the source of truth (D11, 19 entries).
+// Schema namespace registry — the source of truth (D11, 21 entries).
 // infra #28's NAMESPACE_REGISTRY imports the `Namespace` type from here (no dup list).
 
 export const NAMESPACES = [
@@ -22,6 +22,7 @@ export const NAMESPACES = [
   "member", // member-service (運営メンバー管理: invite status + team membership)
   "driveshare", // drive-share-service (role-based Google Drive grants + fan-out ledger)
   "commander", // commander (feature phase state machine: demo→staging→prod ledger)
+  "lp", // lp-analytics (LP管理: 流入URL + LP 訪問ログ)
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

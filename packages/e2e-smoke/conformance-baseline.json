@@ -8,6 +8,7 @@
       "POST /api/v1/me/participation",
       "POST /api/v1/me/password",
       "POST /api/v1/me/profile",
+      "POST /api/v1/public/lp-visits",
       "POST /api/v1/public/participation"
     ],
     "missingInCode": [

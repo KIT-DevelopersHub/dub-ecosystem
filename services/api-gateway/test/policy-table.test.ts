@@ -278,7 +278,12 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
     .sort();
 }
 
-const PUBLIC_ROUTES = ["GET /healthz", "POST /api/v1/public/inquiries", "POST /api/v1/public/participation"];
+const PUBLIC_ROUTES = [
+  "GET /healthz",
+  "POST /api/v1/public/inquiries",
+  "POST /api/v1/public/lp-visits",
+  "POST /api/v1/public/participation",
+];
 const SELF_ROUTES = [
   "GET /api/v1/bff/home",
   "GET /api/v1/me",
