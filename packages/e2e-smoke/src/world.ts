@@ -27,6 +27,12 @@ import { D1IdentityRepo } from "../../../services/identity-roster/src/repo/d1-re
 import { seedReferenceData } from "../../../services/identity-roster/src/seed";
 import { createApp as createMemberApp } from "../../../services/member-service/src/app";
 import { createD1MemberRepo } from "../../../services/member-service/src/d1-repo";
+import { createApp as createDriveShareApp } from "../../../services/drive-share-service/src/app";
+import { createDriveShareService } from "../../../services/drive-share-service/src/service";
+import { createMockDriveShareClient } from "../../../services/drive-share-service/src/mock-client";
+import { createRoleGrantsService } from "../../../services/drive-share-service/src/role-grants-service";
+import { createD1RoleGrantStore } from "../../../services/drive-share-service/src/role-grants-store";
+import { createIdentityRoleMembership } from "../../../services/drive-share-service/src/role-membership";
 
 import { makeSeededD1 } from "./d1";
 
@@ -186,12 +192,15 @@ export const OTHER_ORG_SECRETS = {
   teamName: "OtherOrgSecretTeam",
   personId: "member_otherorg0000000000",
   personName: "OtherOrgSecretPerson",
+  grantId: "dsg_otherorg00000000000000",
+  grantFileId: "file_otherorg_secret",
 } as const;
 
 export interface AuthzWorld {
   raw: ReturnType<typeof makeSeededD1>["raw"];
   identityApp: ReturnType<typeof createIdentityApp>;
   memberApp: ReturnType<typeof createMemberApp>;
+  driveShareApp: ReturnType<typeof createDriveShareApp>;
   /** Paths the services called on identity over the binding, in order. */
   identityCalls: string[];
 }
@@ -259,6 +268,24 @@ export async function createAuthzWorld(): Promise<AuthzWorld> {
     newParticipationId: () => mkId("part"),
   });
 
+  // ---- drive-share-service: REAL app + REAL D1 grant store + REAL identity role
+  //      membership over the same binding; only Google Drive is the in-repo mock ----
+  const drive = createMockDriveShareClient();
+  const driveShareApp = createDriveShareApp({
+    service: createDriveShareService({ client: drive, config: { listPageSize: 50 } }),
+    roleGrants: createRoleGrantsService({
+      drive,
+      // Built per request in production with the acting user's id; the boundary suite
+      // drives role-grants only as the admin, so it is bound to that principal here.
+      roster: createIdentityRoleMembership(identityBinding, { requestId: "req_smoke", userId: PRINCIPALS.admin }),
+      store: createD1RoleGrantStore(createDbClient(d1, { namespace: "driveshare" })),
+      orgId: ORG,
+      now,
+      newId: () => mkId("dsg"),
+    }),
+    authz: granter("drive-share-service"),
+  });
+
   // ---- org_other rows planted directly in the shared D1 (never via an API) ----
   const s = OTHER_ORG_SECRETS;
   raw.prepare(
@@ -268,9 +295,12 @@ export async function createAuthzWorld(): Promise<AuthzWorld> {
     `INSERT INTO member_people (id, org_id, name, status, identity_user_id, sort_order, version, created_by, created_at, updated_at)
      VALUES (?, ?, ?, 'added', ?, 1000, 1, ?, ?, ?)`,
   ).run(s.personId, OTHER_ORG, s.personName, PRINCIPALS.otherAdmin, PRINCIPALS.otherAdmin, now(), now());
+  raw.prepare(
+    `INSERT INTO driveshare_role_file_grants (id, org_id, file_id, role_id, drive_role, granted_by, granted_at, updated_at)
+     VALUES (?, ?, ?, ?, 'reader', ?, ?, ?)`,
+  ).run(s.grantId, OTHER_ORG, s.grantFileId, "role_other", PRINCIPALS.otherAdmin, now(), now());
 
-
-  return { raw, identityApp, memberApp, identityCalls };
+  return { raw, identityApp, memberApp, driveShareApp, identityCalls };
 }
 
 export interface CallResult {

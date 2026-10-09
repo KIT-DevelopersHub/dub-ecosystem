@@ -29,7 +29,7 @@ const physicalMigrations = (ns: string): string[] => {
 };
 
 /** The DDL for every namespace this smoke touches (event, task, notif, mail, and the
- *  identity / member namespaces the authz-boundary suite runs over). */
+ *  identity / member / driveshare namespaces the authz-boundary suite runs over). */
 export function allSchemas(): string[] {
   return [
     EVENT_SCHEMA_MIGRATION.up,
@@ -60,6 +60,7 @@ export function allSchemas(): string[] {
     // INSERTs it. Applied explicitly so the drift stays visible here.
     IDENTITY_MIGRATIONS.find((m) => m.id === "0003_user_source")!.up,
     ...physicalMigrations("member"),
+    ...physicalMigrations("driveshare"),
   ];
 }
 
