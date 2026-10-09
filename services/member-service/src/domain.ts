@@ -82,6 +82,7 @@ export function toMember(r: PersonRow, teamIds: string[]): member.Member {
     teamIds,
     department: r.department,
     grade: r.grade,
+    rosterNumber: r.rosterNumber,
     identityUserId: r.identityUserId,
     leaderId: r.leaderId,
     contact: r.contact,

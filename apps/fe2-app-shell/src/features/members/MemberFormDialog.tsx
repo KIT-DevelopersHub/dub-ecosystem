@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Modal, Button, Form, FormField, TextField, Textarea, Select, Checkbox } from "@dub/ui";
 import type { SelectOption } from "@dub/ui";
+import { member } from "@dub/types";
 import { type MemberStatus, type MemberTeam, type OrgMember } from "./contracts.ts";
 import { WRITE_STATUS_OPTIONS, toWriteStatus } from "./memberStatus.ts";
 import { orgChartOrder, tierOf } from "./orgChartOrder.ts";
@@ -34,6 +35,8 @@ export function MemberFormDialog({
   const [teamIds, setTeamIds] = useState<string[]>([]);
   const [department, setDepartment] = useState("");
   const [grade, setGrade] = useState("");
+  const [rosterNumber, setRosterNumber] = useState("");
+  const [rosterError, setRosterError] = useState<string | null>(null);
   const [contact, setContact] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +44,7 @@ export function MemberFormDialog({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setRosterError(null);
     setName(editing?.name ?? "");
     setRoleTitle(editing?.roleTitle ?? "");
     // 通常→"added"、打診系(invited/considering)→"invited" へ書き込み正準値を寄せる。
@@ -49,6 +53,7 @@ export function MemberFormDialog({
     setTeamIds(editing?.teamIds ?? []);
     setDepartment(editing?.department ?? "");
     setGrade(editing?.grade ?? "");
+    setRosterNumber(editing?.rosterNumber ?? "");
     setContact(editing?.contact ?? "");
     setNote(editing?.note ?? "");
   }, [open, editing]);
@@ -78,6 +83,11 @@ export function MemberFormDialog({
       setError("氏名を入力してください");
       return;
     }
+    const roster = member.normalizeRosterNumber(rosterNumber);
+    if (roster !== null && !member.ROSTER_NUMBER_PATTERN.test(roster)) {
+      setRosterError("名列番号は 3EP2-26 の形式で入力してください");
+      return;
+    }
     const payload = {
       name: name.trim(),
       roleTitle: roleTitle.trim() || null,
@@ -86,6 +96,7 @@ export function MemberFormDialog({
       teamIds,
       department: department.trim() || null,
       grade: grade.trim() || null,
+      rosterNumber: roster,
       contact: contact.trim() || null,
       note: note.trim() || null,
     };
@@ -127,6 +138,22 @@ export function MemberFormDialog({
           </FormField>
           <FormField label="学年" htmlFor="member-grade" help="任意 (例: 3年 / M1)">
             <TextField id="member-grade" value={grade} onChange={setGrade} testId="members-form-grade" />
+          </FormField>
+          <FormField
+            label="名列番号"
+            htmlFor="member-roster-number"
+            help="任意 (例: 3EP2-26)"
+            {...(rosterError ? { error: rosterError } : {})}
+          >
+            <TextField
+              id="member-roster-number"
+              value={rosterNumber}
+              onChange={(v) => {
+                setRosterNumber(v);
+                setRosterError(null);
+              }}
+              testId="members-form-roster-number"
+            />
           </FormField>
           <FormField label="ステータス" htmlFor="member-status" required help="通常メンバー（バッジなし）/ 打診中 / 休み中（一時離脱）/ 辞退。辞退にすると名簿一覧からは隠れます（データは残ります）。">
             <Select<MemberStatus>

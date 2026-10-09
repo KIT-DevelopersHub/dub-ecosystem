@@ -79,7 +79,8 @@ export function MemberRosterPage(): JSX.Element {
         `${m.lastNameKana ?? ""} ${m.firstNameKana ?? ""}`.toLowerCase().includes(q) ||
         (m.roleTitle ?? "").toLowerCase().includes(q) ||
         (m.department ?? "").toLowerCase().includes(q) ||
-        (m.grade ?? "").toLowerCase().includes(q),
+        (m.grade ?? "").toLowerCase().includes(q) ||
+        (m.rosterNumber ?? "").toLowerCase().includes(q),
     );
   }, [members, search, statusFilter]);
 

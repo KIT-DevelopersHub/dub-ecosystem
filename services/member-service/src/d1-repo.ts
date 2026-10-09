@@ -24,6 +24,7 @@ interface PersonDbRow {
   status: string;
   department: string | null;
   grade: string | null;
+  roster_number: string | null;
   identity_user_id: string | null;
   leader_id: string | null;
   contact: string | null;
@@ -137,6 +138,7 @@ function toPersonRow(r: PersonDbRow): PersonRow {
     status: r.status as MemberStatus,
     department: r.department,
     grade: r.grade,
+    rosterNumber: r.roster_number ?? null,
     identityUserId: r.identity_user_id,
     leaderId: r.leader_id,
     contact: r.contact,
@@ -219,9 +221,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async createPerson(row: PersonRow, teamIds: string[]): Promise<void> {
       await db.run(
         `INSERT INTO member_people
-          (id, org_id, name, role_title, status, department, grade, identity_user_id, leader_id, contact, school_email, gmail, last_name, first_name, last_name_kana, first_name_kana, last_name_romaji, first_name_romaji, phone, desired_activity, note, sort_order, version, archived_at, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        row.id, row.orgId, row.name, row.roleTitle, row.status, row.department, row.grade, row.identityUserId, row.leaderId, row.contact, row.schoolEmail, row.gmail,
+          (id, org_id, name, role_title, status, department, grade, roster_number, identity_user_id, leader_id, contact, school_email, gmail, last_name, first_name, last_name_kana, first_name_kana, last_name_romaji, first_name_romaji, phone, desired_activity, note, sort_order, version, archived_at, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        row.id, row.orgId, row.name, row.roleTitle, row.status, row.department, row.grade, row.rosterNumber, row.identityUserId, row.leaderId, row.contact, row.schoolEmail, row.gmail,
         row.lastName, row.firstName, row.lastNameKana, row.firstNameKana, row.lastNameRomaji, row.firstNameRomaji, row.phone, row.desiredActivity, row.note,
         row.sortOrder, row.version, row.archivedAt, row.createdBy, row.createdAt, row.updatedAt,
       );
@@ -251,9 +253,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async updatePerson(next: PersonRow, expectedVersion: number, teamIds?: string[]): Promise<boolean> {
       const res = await db.run(
         `UPDATE member_people SET
-           name = ?, role_title = ?, status = ?, department = ?, grade = ?, identity_user_id = ?, leader_id = ?, contact = ?, school_email = ?, gmail = ?, last_name = ?, first_name = ?, last_name_kana = ?, first_name_kana = ?, last_name_romaji = ?, first_name_romaji = ?, phone = ?, desired_activity = ?, note = ?, sort_order = ?, version = ?, updated_at = ?
+           name = ?, role_title = ?, status = ?, department = ?, grade = ?, roster_number = ?, identity_user_id = ?, leader_id = ?, contact = ?, school_email = ?, gmail = ?, last_name = ?, first_name = ?, last_name_kana = ?, first_name_kana = ?, last_name_romaji = ?, first_name_romaji = ?, phone = ?, desired_activity = ?, note = ?, sort_order = ?, version = ?, updated_at = ?
          WHERE id = ? AND version = ? AND archived_at IS NULL`,
-        next.name, next.roleTitle, next.status, next.department, next.grade, next.identityUserId, next.leaderId, next.contact, next.schoolEmail, next.gmail,
+        next.name, next.roleTitle, next.status, next.department, next.grade, next.rosterNumber, next.identityUserId, next.leaderId, next.contact, next.schoolEmail, next.gmail,
         next.lastName, next.firstName, next.lastNameKana, next.firstNameKana, next.lastNameRomaji, next.firstNameRomaji, next.phone, next.desiredActivity, next.note, next.sortOrder,
         next.version, next.updatedAt, next.id, expectedVersion,
       );

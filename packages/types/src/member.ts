@@ -41,6 +41,8 @@ export interface Member {
   department: string | null;
   /** 学年 (任意, 自由記述: 例 "3年" / "M1"). メモ欄から専用フィールドへ分離。 */
   grade: string | null;
+  /** 名列番号 (任意 / additive, 例 "3EP2-26"). 保存時に normalizeRosterNumber で正規化。 */
+  rosterNumber?: string | null;
   /**
    * The linked identity-roster login account (identity userId), or null when this
    * 運営メンバー is not yet tied to an account. The bridge between the 組織図 (this
@@ -116,6 +118,8 @@ export interface CreateMemberRequest {
   teamIds: string[];
   department?: string | null;
   grade?: string | null;
+  /** 名列番号 (任意, 例 "3EP2-26")。 */
+  rosterNumber?: string | null;
   /** 配下につくリーダーの member id（任意・additive）。 */
   leaderId?: string | null;
   contact?: string | null;
@@ -128,6 +132,8 @@ export interface UpdateMemberRequest {
   teamIds?: string[];
   department?: string | null;
   grade?: string | null;
+  /** 名列番号。null で解除。省略で変更なし。 */
+  rosterNumber?: string | null;
   /** Set (link) or null (unlink) the identity-roster account. Omit = leave unchanged. */
   identityUserId?: string | null;
   /** 配下につくリーダーの member id。null で解除。省略で変更なし（任意・additive）。 */
@@ -137,6 +143,20 @@ export interface UpdateMemberRequest {
   sortOrder?: number;
   /** Required: the version the edit was based on (409 on mismatch). */
   version: number;
+}
+
+// ---- 名列番号 ----
+/** 名列番号の形式: 学年(数字1) + 学科(英字1-4) + クラス(数字1-2) + "-" + 番号(数字1-3)。例 "3EP2-26"。 */
+export const ROSTER_NUMBER_PATTERN = /^[0-9][A-Z]{1,4}[0-9]{1,2}-[0-9]{1,3}$/;
+
+/** 全角→半角・小文字→大文字・ハイフン類の統一・空白除去。空なら null。形式検証は呼び出し側で。 */
+export function normalizeRosterNumber(raw: string): string | null {
+  const s = raw
+    .normalize("NFKC")
+    .replace(/[\u2010-\u2015\u2212\u30FC\uFF70]/g, "-")
+    .replace(/\s+/g, "")
+    .toUpperCase();
+  return s.length === 0 ? null : s;
 }
 
 // ---- 参加届 (participation submissions) --------------------------------------------

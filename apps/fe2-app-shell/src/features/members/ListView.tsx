@@ -73,6 +73,7 @@ export function ListView({
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
     { key: "nameKana", header: "フリガナ", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={kanaName(m)} max="12rem" /> },
+    { key: "rosterNumber", header: "名列番号", minWidth: "7rem", noWrap: true, cell: (m) => m.rosterNumber ?? "—" },
     { key: "nameRomaji", header: "氏名（ローマ字）", minWidth: "11rem", noWrap: true, defaultHidden: true, cell: (m) => <Truncate text={romajiName(m)} max="14rem" /> },
     { key: "department", header: "学科", minWidth: "7rem", noWrap: true, defaultHidden: true, cell: (m) => m.department ?? "—" },
     { key: "grade", header: "学年", minWidth: "5rem", noWrap: true, defaultHidden: true, cell: (m) => m.grade ?? "—" },

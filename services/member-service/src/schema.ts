@@ -199,6 +199,17 @@ CREATE INDEX IF NOT EXISTS idx_member_people_leader
 `.trim(),
 };
 
+// 0011: 名列番号 (roster_number, 例 "3EP2-26") を足す additive ALTER (non-destructive)。
+// 既存行は全て null。形式検証・正規化はアプリ層。Mirrors 0011_person_roster_number.sql
+// (schema-lockstep).
+export const MEMBER_PERSON_ROSTER_NUMBER_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0011_person_roster_number",
+  up: `
+ALTER TABLE member_people ADD COLUMN roster_number TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -211,4 +222,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PARTICIPATION_REVIEW_STATE_MIGRATION,
   MEMBER_PERSON_DESIRED_ACTIVITY_MIGRATION,
   MEMBER_PERSON_LEADER_MIGRATION,
+  MEMBER_PERSON_ROSTER_NUMBER_MIGRATION,
 ];

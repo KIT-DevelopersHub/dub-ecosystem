@@ -140,9 +140,28 @@ describe("MembersPage", () => {
     await userEvent.type(within(dialog).getByTestId("members-form-name"), "新規 太郎");
     await userEvent.type(within(dialog).getByTestId("members-form-department"), "情報工学科");
     await userEvent.type(within(dialog).getByTestId("members-form-grade"), "2年");
+    await userEvent.type(within(dialog).getByTestId("members-form-roster-number"), "3ep2-26");
     await userEvent.click(within(dialog).getByTestId("members-form-submit"));
     await waitFor(() => expect(api.createMember).toHaveBeenCalledTimes(1));
-    expect((api.createMember as any).mock.calls[0][0]).toMatchObject({ name: "新規 太郎", department: "情報工学科", grade: "2年" });
+    expect((api.createMember as any).mock.calls[0][0]).toMatchObject({
+      name: "新規 太郎",
+      department: "情報工学科",
+      grade: "2年",
+      rosterNumber: "3EP2-26",
+    });
+  });
+
+  it("blocks submit when the 名列番号 format is wrong", async () => {
+    const api = makeApi();
+    render(wrap(<MembersPage />, api));
+    await screen.findByText("山田太郎");
+    await userEvent.click(screen.getByTestId("members-add-member"));
+    const dialog = await screen.findByTestId("members-form-dialog");
+    await userEvent.type(within(dialog).getByTestId("members-form-name"), "新規 太郎");
+    await userEvent.type(within(dialog).getByTestId("members-form-roster-number"), "3EP2");
+    await userEvent.click(within(dialog).getByTestId("members-form-submit"));
+    expect(await within(dialog).findByText("名列番号は 3EP2-26 の形式で入力してください")).toBeInTheDocument();
+    expect(api.createMember).not.toHaveBeenCalled();
   });
 
   it("deletes a member via the confirm dialog", async () => {

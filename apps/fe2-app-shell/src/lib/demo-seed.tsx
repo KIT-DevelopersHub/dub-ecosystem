@@ -2073,6 +2073,7 @@ interface DemoMember {
   teamIds: string[];
   department: string | null;
   grade: string | null;
+  rosterNumber?: string | null;
   identityUserId: string | null;
   leaderId: string | null;
   contact: string | null;
@@ -2211,6 +2212,15 @@ function createMembersStore() {
       mem.firstNameKana = kana[1];
     }
   }
+  // 名列番号の seed (例 "3EP2-26")。学部生(N年)のみ、学科ごとの仮コード + 連番で付与。
+  const DEPT_CODE: Record<string, string> = {
+    情報工学科: "EP", 電気電子工学科: "EE", 機械工学科: "MM", 経営情報学科: "MI", 建築学科: "AA", メディア情報学科: "MD",
+  };
+  members.forEach((mem, i) => {
+    const year = /^([1-4])年$/.exec(mem.grade ?? "")?.[1];
+    const code = mem.department ? DEPT_CODE[mem.department] : undefined;
+    if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
+  });
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
   // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
@@ -2303,6 +2313,7 @@ function createMembersStore() {
         id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "added", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
         department: body?.department ?? null, grade: body?.grade ?? null,
+        rosterNumber: body?.rosterNumber ?? null,
         identityUserId: null,
         leaderId: body?.leaderId ?? null,
         contact: body?.contact ?? null, schoolEmail: null, gmail: null,
@@ -2354,6 +2365,7 @@ function createMembersStore() {
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
         if (body?.department !== undefined) mem.department = body.department ?? null;
         if (body?.grade !== undefined) mem.grade = body.grade ?? null;
+        if (body?.rosterNumber !== undefined) mem.rosterNumber = body.rosterNumber ?? null;
         if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
         if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;

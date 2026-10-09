@@ -28,6 +28,8 @@ export interface PersonRow {
   status: MemberStatus;
   department: string | null;
   grade: string | null;
+  /** 名列番号 (例 "3EP2-26")。正規化済み (0011 additive column)。 */
+  rosterNumber: string | null;
   /** Linked identity-roster account (identity userId), or null when unlinked. */
   identityUserId: string | null;
   /** 配下につくリーダーの member id（＝上長）。null は直属リーダー無し。組織図の親子関係

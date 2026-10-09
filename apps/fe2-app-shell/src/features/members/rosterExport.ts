@@ -20,12 +20,13 @@ export function buildRosterTable(
   ctx: { teamsById: Map<string, MemberTeam>; accountLabels: Map<string, string>; leaderNames: Map<string, string> },
 ): RosterTable {
   const headers = [
-    "氏名", "フリガナ", "氏名（ローマ字）", "学科", "学年", "担当・役割", "リーダー", "ステータス",
+    "氏名", "フリガナ", "名列番号", "氏名（ローマ字）", "学科", "学年", "担当・役割", "リーダー", "ステータス",
     "developershub.jpメール", "所属チーム", "連絡先", "学校メール", "Gmail",
   ];
   const rows = members.map((m) => [
     m.name,
     join([m.lastNameKana, m.firstNameKana], " "),
+    m.rosterNumber ?? "",
     join([m.lastNameRomaji, m.firstNameRomaji], " "),
     m.department ?? "",
     m.grade ?? "",

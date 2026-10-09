@@ -126,6 +126,28 @@ describe("member-service HTTP surface", () => {
     expect(ov2.json.members).toHaveLength(0);
   });
 
+  it("名列番号(rosterNumber) is normalized, validated, and editable", async () => {
+    const app = createApp(makeDeps());
+    const created = await call(app, "POST", "/members/people", {
+      body: { name: "田中", status: "added", teamIds: [], rosterNumber: " ３ep２ー２６ " },
+    });
+    expect(created.status).toBe(201);
+    expect(created.json.rosterNumber).toBe("3EP2-26");
+    const memberId = created.json.id as string;
+
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members[0].rosterNumber).toBe("3EP2-26");
+
+    const bad = await call(app, "POST", "/members/people", {
+      body: { name: "佐藤", status: "added", teamIds: [], rosterNumber: "3EP2" },
+    });
+    expect(bad.status).toBe(400);
+
+    const cleared = await call(app, "PATCH", `/members/people/${memberId}`, { body: { rosterNumber: "", version: 1 } });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.rosterNumber).toBeNull();
+  });
+
   it("学科(department)・学年(grade) round-trip as their own fields on create/edit", async () => {
     const app = createApp(makeDeps());
     const created = await call(app, "POST", "/members/people", {

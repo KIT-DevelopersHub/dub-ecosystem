@@ -27,9 +27,9 @@ const text = (b: Uint8Array): string => new TextDecoder("latin1").decode(b);
 describe("rosterExport", () => {
   it("builds one row per member with resolved team/account labels", () => {
     const t = buildRosterTable([member({})], ctx);
-    expect(t.headers).toHaveLength(13);
+    expect(t.headers).toHaveLength(14);
     expect(t.rows[0]).toEqual(expect.arrayContaining(["山田 太郎", "やまだ たろう", "広報", "yamada@developershub.jp"]));
-    expect(t.rows[0]).toHaveLength(13);
+    expect(t.rows[0]).toHaveLength(14);
   });
 
   it("CSV has a BOM, quotes special chars and neutralizes formulas but keeps phone numbers", () => {

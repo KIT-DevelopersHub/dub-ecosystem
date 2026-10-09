@@ -2,7 +2,7 @@
 // context, throws DubError, returns canonical @dub/types wire DTOs. The Hono app is a
 // thin adapter. member_teams is the source of truth for the shared Team entity.
 import { DubError, errors } from "@dub/errors";
-import type { common, member } from "@dub/types";
+import { type common, member } from "@dub/types";
 import type { AppDeps, ParticipationRow, PersonRow, TeamRow } from "./types";
 import {
   composeName,
@@ -48,6 +48,17 @@ function optText(value: unknown, field: string): string | null {
   if (typeof value !== "string") throw errors.validationFailed([{ field, reason: "invalid" }]);
   const t = value.trim();
   return t.length === 0 ? null : t;
+}
+
+/** 名列番号: 正規化して形式検証。空は null。 */
+function optRosterNumber(value: unknown): string | null {
+  const t = optText(value, "rosterNumber");
+  if (t === null) return null;
+  const n = member.normalizeRosterNumber(t);
+  if (n !== null && !member.ROSTER_NUMBER_PATTERN.test(n)) {
+    throw errors.validationFailed([{ field: "rosterNumber", reason: "invalid_format" }]);
+  }
+  return n;
 }
 
 /** Upper bound on teams expanded in one チーム単位メンション lookup (see listTeamIdentityUserIds). */
@@ -217,6 +228,7 @@ export class MemberService {
       status: body.status,
       department: optText(body.department, "department"),
       grade: optText(body.grade, "grade"),
+      rosterNumber: optRosterNumber(body.rosterNumber),
       identityUserId: null,
       leaderId,
       contact: optText(body.contact, "contact"),
@@ -263,6 +275,7 @@ export class MemberService {
       status: body.status ?? cur.status,
       department: body.department !== undefined ? optText(body.department, "department") : cur.department,
       grade: body.grade !== undefined ? optText(body.grade, "grade") : cur.grade,
+      rosterNumber: body.rosterNumber !== undefined ? optRosterNumber(body.rosterNumber) : cur.rosterNumber,
       identityUserId,
       leaderId,
       contact: body.contact !== undefined ? optText(body.contact, "contact") : cur.contact,
@@ -641,6 +654,7 @@ export class MemberService {
       status: "added",
       department: p.department,
       grade: p.grade,
+      rosterNumber: null,
       identityUserId: null,
       leaderId: null,
       contact: p.contact ?? p.schoolEmail,
@@ -798,6 +812,7 @@ export class MemberService {
       status: "added",
       department: null,
       grade: null,
+      rosterNumber: null,
       identityUserId,
       leaderId: null,
       contact: null,
