@@ -25,6 +25,12 @@ const expectAllFields = async (scope, prefix, where) => {
   ok(`${where}: 人物項目 ${PROFILE.length} 個がそろっている`);
 };
 
+// 編集ダイアログは開いた後に既存値を流し込むので、苗字が入るまで待ってから読む。
+const waitFilled = (page) =>
+  page.waitForFunction(() => (document.querySelector('[data-testid="members-form-last-name"]')?.value ?? "") !== "", null, {
+    timeout: 5000,
+  });
+
 const browser = await chromium.launch();
 try {
   const page = await (await browser.newContext({ viewport: { width: 1360, height: 1000 } })).newPage();
@@ -33,6 +39,8 @@ try {
 
   // 1. メンバー追加フォーム
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  // 画面下に固定の「デモモード」帯が行の操作ボタンに重なるので、操作の邪魔にならないよう隠す。
+  await page.addStyleTag({ content: 'div[role="note"]{display:none !important}' });
   await page.locator('a[href="/members"]').first().click();
   await page.getByTestId("member-roster-subnav-tab-member-roster").click();
   const table = page.getByTestId("members-table");
@@ -70,6 +78,7 @@ try {
 
   await row.getByRole("button", { name: "統一 一子 を編集" }).click();
   await dialog.waitFor();
+  await waitFilled(page);
   if ((await dialog.getByTestId("members-form-grade").inputValue()) !== "2") fail("編集で学年が残っていない");
   if ((await dialog.getByTestId("members-form-desired-activity").inputValue()) !== "dev") fail("編集で希望する活動が残っていない");
   if ((await dialog.getByTestId("members-form-gmail").inputValue()) !== "touitsu@gmail.com") fail("編集で Gmail が残っていない");
@@ -115,6 +124,7 @@ try {
   await mrow.waitFor({ timeout: 10000 });
   await mrow.getByRole("button", { name: "共通 二郎 を編集" }).click();
   await dialog.waitFor();
+  await waitFilled(page);
   const kana = await dialog.getByTestId("members-form-last-name-kana").inputValue();
   const activity = await dialog.getByTestId("members-form-desired-activity").inputValue();
   if (kana !== "きょうつう" || activity !== "event") fail(`名簿に引き継がれていない (kana=${kana}, activity=${activity})`);
