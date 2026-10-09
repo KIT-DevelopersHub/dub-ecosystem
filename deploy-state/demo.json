@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "f4bb53b0",
-  "branch": "feat/calendar-app",
-  "actor": "Kota",
-  "markers": ["fe2-calendar", "calendar-view-toggle"],
+  "deployedSha": "89d96072",
+  "branch": "feat/notif-popover-sticky",
+  "actor": "ko-tarou",
+  "markers": ["._dialog_1uz12_14 ._body_1uz12_22{min-height:0;overflow:auto}"],
   "live": true,
-  "verifiedAt": "2026-09-22T06:21:49Z",
-  "updatedAt": "2026-09-22T06:21:49Z",
-  "note": "カレンダーアプリ(共有タスクを月/週表示)"
+  "verifiedAt": "2026-10-09T18:51:11Z",
+  "updatedAt": "2026-10-09T18:51:11Z",
+  "note": "通知ダイアログのヘッダー/フッター固定"
 }
