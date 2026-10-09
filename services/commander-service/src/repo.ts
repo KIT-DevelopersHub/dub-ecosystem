@@ -12,7 +12,15 @@ import {
   PhaseTransitionError,
   type FeaturePhase,
 } from "@dub/commander-phases";
-import { extractArtifactUrls, eventText, mergeUrls } from "./urls";
+import {
+  authoredText,
+  eventText,
+  extractArtifactUrls,
+  extractPrUrls,
+  mergePrUrls,
+  mergeUrls,
+  parsePrUrls,
+} from "./urls";
 
 export interface FeatureRow {
   id: string;
@@ -43,6 +51,8 @@ export interface TaskRow {
   demoUrl: string | null;
   stagingUrl: string | null;
   prUrl: string | null;
+  /** Every PR the task's runs reported, first-seen order (pr_url is the latest only). */
+  prUrls: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +83,7 @@ interface TaskDb {
   demo_url: string | null;
   staging_url: string | null;
   pr_url: string | null;
+  pr_urls: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -108,6 +119,7 @@ function toTask(r: TaskDb): TaskRow {
     demoUrl: r.demo_url ?? null,
     stagingUrl: r.staging_url ?? null,
     prUrl: r.pr_url ?? null,
+    prUrls: parsePrUrls(r.pr_urls),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -259,6 +271,7 @@ export async function createTask(
     demoUrl: null,
     stagingUrl: null,
     prUrl: null,
+    prUrls: [],
     createdAt: at,
     updatedAt: at,
   };
@@ -306,6 +319,7 @@ export interface BoardItem {
   demoUrl: string | null;
   stagingUrl: string | null;
   prUrl: string | null;
+  prUrls: string[];
   latestRun: { id: string; status: RunStatus; cwd: string; createdAt: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -319,6 +333,7 @@ interface BoardItemDb {
   demo_url: string | null;
   staging_url: string | null;
   pr_url: string | null;
+  pr_urls: string | null;
   created_at: string;
   updated_at: string;
   feature_phase: string;
@@ -332,7 +347,7 @@ export async function listBoard(db: D1Database): Promise<BoardItem[]> {
   const res = await db
     .prepare(
       `SELECT t.id, t.feature_id, t.title, t.status,
-              t.demo_url, t.staging_url, t.pr_url, t.created_at, t.updated_at,
+              t.demo_url, t.staging_url, t.pr_url, t.pr_urls, t.created_at, t.updated_at,
               f.phase AS feature_phase,
               r.id AS run_id, r.status AS run_status, r.cwd AS run_cwd, r.created_at AS run_created_at
          FROM commander_tasks t
@@ -355,6 +370,7 @@ export async function listBoard(db: D1Database): Promise<BoardItem[]> {
     demoUrl: r.demo_url ?? null,
     stagingUrl: r.staging_url ?? null,
     prUrl: r.pr_url ?? null,
+    prUrls: parsePrUrls(r.pr_urls),
     latestRun: r.run_id
       ? {
           id: r.run_id,
@@ -379,7 +395,7 @@ export async function listBoard(db: D1Database): Promise<BoardItem[]> {
 export async function updateTaskUrls(
   db: D1Database,
   taskId: string,
-  urls: { demoUrl?: string; stagingUrl?: string; prUrl?: string },
+  urls: { demoUrl?: string; stagingUrl?: string; prUrl?: string; prUrls?: string[] },
 ): Promise<void> {
   const sets: string[] = [];
   const vals: string[] = [];
@@ -394,6 +410,10 @@ export async function updateTaskUrls(
   if (urls.prUrl) {
     sets.push("pr_url = ?");
     vals.push(urls.prUrl);
+  }
+  if (urls.prUrls && urls.prUrls.length > 0) {
+    sets.push("pr_urls = ?");
+    vals.push(JSON.stringify(urls.prUrls));
   }
   if (sets.length === 0) return;
   sets.push("updated_at = ?");
@@ -421,7 +441,10 @@ export async function backfillTaskUrls(db: D1Database): Promise<{ updated: numbe
     )
     .all<{ task_id: string; type: string; payload: string }>();
 
-  const perTask = new Map<string, { demoUrl?: string; stagingUrl?: string; prUrl?: string }>();
+  const perTask = new Map<
+    string,
+    { demoUrl?: string; stagingUrl?: string; prUrl?: string; prUrls?: string[] }
+  >();
   for (const row of res.results ?? []) {
     let payload: unknown = {};
     try {
@@ -430,8 +453,13 @@ export async function backfillTaskUrls(db: D1Database): Promise<{ updated: numbe
       payload = row.payload;
     }
     const found = extractArtifactUrls(eventText(payload));
-    if (!found.demoUrl && !found.stagingUrl && !found.prUrl) continue;
-    perTask.set(row.task_id, mergeUrls(perTask.get(row.task_id) ?? {}, found));
+    const prs = extractPrUrls(authoredText(payload));
+    if (!found.demoUrl && !found.stagingUrl && !found.prUrl && prs.length === 0) continue;
+    const prior = perTask.get(row.task_id) ?? {};
+    perTask.set(row.task_id, {
+      ...mergeUrls(prior, found),
+      prUrls: mergePrUrls(prior.prUrls ?? [], prs),
+    });
   }
 
   let updated = 0;
@@ -483,6 +511,7 @@ export async function createFeatureTask(
       demoUrl: null,
       stagingUrl: null,
       prUrl: null,
+      prUrls: [],
       createdAt: at,
       updatedAt: at,
     },
@@ -666,6 +695,19 @@ export async function appendRunEvent(
     if (found.prUrl) {
       urlSets.push("pr_url = ?");
       urlVals.push(found.prUrl);
+    }
+    const prs = extractPrUrls(authoredText(payload));
+    if (prs.length > 0) {
+      const cur = await db
+        .prepare("SELECT pr_urls FROM commander_tasks WHERE id = ?")
+        .bind(run.taskId)
+        .first<{ pr_urls: string | null }>();
+      const prior = parsePrUrls(cur?.pr_urls);
+      const merged = mergePrUrls(prior, prs);
+      if (merged.length > prior.length) {
+        urlSets.push("pr_urls = ?");
+        urlVals.push(JSON.stringify(merged));
+      }
     }
     if (urlSets.length > 0) {
       urlSets.push("updated_at = ?");

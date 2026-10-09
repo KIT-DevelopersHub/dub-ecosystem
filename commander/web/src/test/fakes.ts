@@ -28,6 +28,7 @@ export function makeBoardItem(over: Partial<BoardItem> & { runStatus?: RunStatus
     demoUrl: rest.demoUrl ?? null,
     stagingUrl: rest.stagingUrl ?? null,
     prUrl: rest.prUrl ?? null,
+    prUrls: rest.prUrls ?? [],
     latestRun:
       runStatus === null
         ? null
