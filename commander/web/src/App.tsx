@@ -30,7 +30,7 @@ const TABS: { id: CommanderTabId; label: string }[] = [
 const TAB_SUBTITLE: Record<CommanderTabId, string> = {
   board: "ローカル Claude Code を Web から並行駆動する司令ボード — 投入・走行・確認・判断を1画面で",
   ask: "dub-ecosystem のコードを Claude Code に聞ける Q&A チャット — 読み取り専用",
-  operate: "Dub の本番バックエンドを自然言語で操作 — 計画→確認→実行（書き込みは要確認）",
+  operate: "Dub のデータを自然言語で操作 — 許可された API だけを、内容を確認してから実行",
 };
 
 /** The whole Commander body (tabs + ボード/Dubに聞く/Dubを操作) without page chrome. SoT for
