@@ -58,12 +58,14 @@ jobs:
         run: pnpm --filter @dub/ui visual:update
 
       - name: Commit updated baselines
+        # The container's default shell is sh, which rejects `-o pipefail`.
+        shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           # git inside the container: mark the checkout dir safe.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add apps/fe1-design-system/visual/__screenshots__
           if git diff --cached --quiet; then
             echo "No baseline changes."
