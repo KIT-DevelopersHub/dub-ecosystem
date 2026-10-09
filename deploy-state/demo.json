@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "89d96072",
+  "deployedSha": "5215a9ac",
   "branch": "feat/notif-popover-sticky",
   "actor": "ko-tarou",
-  "markers": ["._dialog_1uz12_14 ._body_1uz12_22{min-height:0;overflow:auto}"],
+  "markers": ["受付ボランティアの集合時間", "._body_1uz12_22{min-height:0;overflow:auto}"],
   "live": true,
-  "verifiedAt": "2026-10-09T18:51:11Z",
-  "updatedAt": "2026-10-09T18:51:11Z",
-  "note": "通知ダイアログのヘッダー/フッター固定"
+  "verifiedAt": "2026-10-09T19:06:16Z",
+  "updatedAt": "2026-10-09T19:06:16Z",
+  "note": "通知ダイアログのヘッダー/フッター固定(通知 demo データ 20 件)"
 }
