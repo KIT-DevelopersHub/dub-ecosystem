@@ -1,6 +1,6 @@
 // Authorization boundaries ACROSS services, decided by the real identity-roster.
 //
-// identity-roster / member-service both mount @dub/policy-gate
+// identity-roster / member-service / drive-share-service all mount @dub/policy-gate
 // (POLICY_TABLE) — this suite was written against that state, it does not add the layer.
 // Unlike smoke.test.ts (allow-all granter), every request here goes:
 //   service policyGate -> createAuthzGranter -> identity POST /authz/check -> RBAC over D1
@@ -44,6 +44,10 @@ function expectForbidden(r: CallResult, label = ""): void {
   expect(r.json.error.code).toBe("FORBIDDEN");
   expectNoLeak(r);
 }
+
+const otherOrgRoleId = (name: string): string =>
+  (w.raw.prepare("SELECT id FROM identity_roles WHERE org_id = ? AND name = ?").get(OTHER_ORG, name) as { id: string })
+    .id;
 
 describe("member-service: org boundary through the real identity decision", () => {
   it("own org: admin creates and lists teams (200), the list carries no org_other team", async () => {
@@ -119,6 +123,78 @@ describe("member-service: org boundary through the real identity decision", () =
 
   it("a forged x-dub-internal marker buys no key on a key-gated route", async () => {
     expectForbidden(await call(w.memberApp, "GET", "/members/teams", { userId: PRINCIPALS.noKeys, internal: true }));
+  });
+});
+
+describe("drive-share-service: org boundary through the real identity decision", () => {
+  it("own org: admin lists files (200)", async () => {
+    const r = await call(w.driveShareApp, "GET", "/driveshare/files", { userId: PRINCIPALS.admin });
+    expect(r.status, r.text).toBe(200);
+    expect(r.json.files.length).toBeGreaterThan(0);
+  });
+
+  it("member role (no drive keys), key-less user and other org's admin are all 403", async () => {
+    for (const userId of [PRINCIPALS.member, PRINCIPALS.noKeys, PRINCIPALS.otherAdmin]) {
+      for (const path of ["/driveshare/files", "/driveshare/role-grants"]) {
+        expectForbidden(await call(w.driveShareApp, "GET", path, { userId }), `${userId} GET ${path}`);
+      }
+    }
+  });
+
+  it("role-grant list is org-scoped: org_other's grant row never appears", async () => {
+    const r = await call(w.driveShareApp, "GET", "/driveshare/role-grants", { userId: PRINCIPALS.admin });
+    expect(r.status, r.text).toBe(200);
+    expect(r.json.items).toEqual([]);
+    expectNoLeak(r);
+
+    const byFile = await call(w.driveShareApp, "GET", `/driveshare/files/${OTHER_ORG_SECRETS.grantFileId}/role-grants`, {
+      userId: PRINCIPALS.admin,
+    });
+    expect(byFile.status, byFile.text).toBe(200);
+    expect(byFile.json.items).toEqual([]);
+  });
+
+  it("org_other's grant cannot be revoked or reapplied by its file/role ids", async () => {
+    const { grantFileId, grantId } = OTHER_ORG_SECRETS;
+    const base = `/driveshare/files/${grantFileId}/role-grants/role_other`;
+    // revoke is idempotent by contract: an org-scoped miss is the same 204 no-op as an
+    // absent grant — what matters is that the row survives.
+    const del = await call(w.driveShareApp, "DELETE", base, { userId: PRINCIPALS.admin });
+    expect(del.status, del.text).toBe(204);
+    const re = await call(w.driveShareApp, "POST", `${base}/reapply`, { userId: PRINCIPALS.admin });
+    expect(re.status, re.text).toBe(404);
+    expectNoLeak(re, [grantFileId]);
+    expect(w.raw.prepare("SELECT id FROM driveshare_role_file_grants WHERE id = ?").get(grantId)).toBeTruthy();
+  });
+
+  it("granting a Drive file to org_other's role id shares it with nobody from org_other", async () => {
+    // Control: own org's admin role resolves to its one active member (the seeded admin).
+    const own = await call(w.driveShareApp, "POST", "/driveshare/files/fld_root/role-grants", {
+      userId: PRINCIPALS.admin,
+      body: { roleId: "role_sys_admin", driveRole: "reader" },
+    });
+    expect(own.status, own.text).toBe(201);
+    expect(own.json.memberCount).toBe(1);
+
+    // org_other's admin role: accepted (drive-share does not validate role ownership), but
+    // identity resolves it to zero members and does not even disclose its name.
+    const roleId = otherOrgRoleId("admin");
+    const r = await call(w.driveShareApp, "POST", "/driveshare/files/fld_root/role-grants", {
+      userId: PRINCIPALS.admin,
+      body: { roleId, driveRole: "reader" },
+    });
+    expect(r.status, r.text).toBe(201);
+    expect(r.json.memberCount).toBe(0);
+    expect(r.json.appliedCount).toBe(0);
+    expect(r.json.roleName).toBe(roleId);
+    expectNoLeak(r, [roleId]);
+    // identity's real role membership was asked (cross-service), scoped to org_devhub.
+    expect(w.identityCalls).toContain("GET /internal/users");
+    const perms = await call(w.driveShareApp, "GET", "/driveshare/files/fld_root/permissions", {
+      userId: PRINCIPALS.admin,
+    });
+    expect(perms.status).toBe(200);
+    expectNoLeak(perms);
   });
 });
 

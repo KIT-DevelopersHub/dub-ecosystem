@@ -45,7 +45,7 @@ migrations, so system-role grants match production). Only the Service Binding is
 (an in-process `Fetcher` onto identity's Hono app). identity-roster's own routes use its
 in-process granter, exactly as in production (it cannot call `/authz/check` on itself).
 
-Covers identity-roster / member-service (both already mount
+Covers identity-roster / member-service / drive-share-service (all three already mount
 `@dub/policy-gate`): own-org 200, other-org ids 404, other-org admin / key-less role 403
 (never 401), forged `x-dub-internal` buys no key, and every deny body is scanned for
 org_other data. Calls go straight to the service app — no gateway — so the service itself
