@@ -75,7 +75,9 @@ export function MotionRoot() {
       const target = document.querySelector(hash);
       if (!target) return;
       e.preventDefault();
-      lenis.scrollTo(target as HTMLElement, { offset: -72, duration: 1.2 });
+      // Offset by the live header height (it grows when the crowdfunding ribbon is shown).
+      const head = document.querySelector<HTMLElement>(".site-head");
+      lenis.scrollTo(target as HTMLElement, { offset: -(head?.offsetHeight ?? 72), duration: 1.2 });
     };
     document.addEventListener("click", onAnchorClick);
 
