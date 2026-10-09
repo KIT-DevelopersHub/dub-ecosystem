@@ -2,13 +2,14 @@
 // per-service test/d1.ts adapters already used across this repo, but loads EVERY
 // service namespace's schema into one database so a single seeded "local D1" can
 // back a cross-service smoke run. No miniflare / wrangler — plain node + vitest.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import type { D1Database } from "@cloudflare/workers-types";
 
 import { EVENT_SCHEMA_MIGRATION } from "../../../services/event-service/src/index";
 import { TASK_MIGRATIONS } from "../../../services/task-service/src/migrations";
+import { IDENTITY_MIGRATIONS } from "../../../services/identity-roster/src/schema";
 
 // Load node:sqlite through createRequire so Vitest's transform pipeline never tries
 // to bundle it (it would strip "node:" and 404). Same trick as the service adapters.
@@ -18,7 +19,17 @@ const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlit
 const sqlFile = (rel: string): string =>
   readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
-/** The DDL for every namespace this smoke touches (event, task, notif, mail). */
+/** Every physical migration of one infra/d1 namespace, in apply order — what production runs. */
+const physicalMigrations = (ns: string): string[] => {
+  const dir = new URL(`../../../infra/d1/migrations/${ns}/`, import.meta.url);
+  return readdirSync(fileURLToPath(dir))
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => readFileSync(fileURLToPath(new URL(f, dir)), "utf8"));
+};
+
+/** The DDL for every namespace this smoke touches (event, task, notif, mail, and the
+ *  identity / member namespaces the authz-boundary suite runs over). */
 export function allSchemas(): string[] {
   return [
     EVENT_SCHEMA_MIGRATION.up,
@@ -41,6 +52,14 @@ export function allSchemas(): string[] {
     sqlFile("../../../services/mail-gateway/db/0003_freeq_outbox.sql"),
     sqlFile("../../../services/mail-gateway/db/0004_send_body.sql"),
     sqlFile("../../../services/mail-gateway/db/0006_owner_scope.sql"),
+    // identity's physical migrations carry the system roles' real permission rows
+    // (incl. 0008 per-app access), so authz decisions match production's grants.
+    ...physicalMigrations("identity"),
+    // DRIFT: identity_users.source exists only in the code-side IDENTITY_MIGRATIONS
+    // (0003_user_source); no physical identity migration adds it, yet D1IdentityRepo
+    // INSERTs it. Applied explicitly so the drift stays visible here.
+    IDENTITY_MIGRATIONS.find((m) => m.id === "0003_user_source")!.up,
+    ...physicalMigrations("member"),
   ];
 }
 
