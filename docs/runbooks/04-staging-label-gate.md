@@ -76,8 +76,22 @@ webhook-ingest）で満杯のため、staging が cron を足すと CF がデプ
 
 | ラベル | 色 | 意味 / トリガ |
 |---|---|---|
-| `stagingへ` | （任意） | 付けると staging.yml が発火し、その PR を staging にデプロイ。以降その PR の push でも再デプロイ |
+| `stagingへ` | （任意） | 付けると staging.yml が発火し、その PR を staging（枠1）にデプロイ。以降その PR の push でも再デプロイ |
+| `staging2へ` | `#5319E7` | 同上で staging2（枠2・`-staging2`）にデプロイ。枠2は main マージで上書きされない PR 専用 |
 | `確認した` | `#0E8A16` | staging 確認済み。**本番マージの許可ゲート**。付いていない PR は（カットオーバー後）main にマージ不可 |
+
+### staging は 2 枠
+
+| 枠 | Worker / D1 | ラベル | main マージ時 | fe2 URL |
+|---|---|---|---|---|
+| 1 | `*-staging` / `dub-core-staging` | `stagingへ` | main HEAD で上書き | https://dub-fe2-app-shell-staging.developershub-site.workers.dev |
+| 2 | `*-staging2` / `dub-core-staging2` | `staging2へ` | 触らない | https://dub-fe2-app-shell-staging2.developershub-site.workers.dev |
+
+- 空き枠は `bash scripts/staging-pick-slot.sh --pr <n>` で選ぶ（枠2優先・同じ PR が既に持つ枠はそのまま・両方埋まっていれば exit 10）。Commander の staging 反映 run もこれを使う。
+- 枠の切替は `STAGING_SLOT=1|2`（`infra/deploy/staging-slot.sh`）。リソース id は枠1 `staging-resources.env`・枠2 `staging2-resources.env`。
+- 確認が終わったらラベルを外して枠を空ける（付いたままの PR は「使用中」と数える）。
+- 枠2の制約: mail-gateway の Email Routing / Resend secrets は未登録（メール送受信は枠1で確認）。cron は枠1と同じく無し。
+- Worker 枠: 1 枠 20 個。2 枠で 40 個（無料枠 100 個の内訳は §3）。
 
 `確認した` は作成済み。`stagingへ` が未作成なら:
 
