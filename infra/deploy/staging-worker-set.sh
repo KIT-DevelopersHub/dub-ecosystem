@@ -28,6 +28,7 @@ STAGING_WORKER_DIRS=(
   "services/github-sync"
   "services/audit-log"
   "services/usage-meter"
+  "services/commander-relay"
   # 4. api-gateway (binds all upstreams)
   "services/api-gateway"
   # 5. fe2 admin SPA (assets; built with the STAGING gateway base URL)

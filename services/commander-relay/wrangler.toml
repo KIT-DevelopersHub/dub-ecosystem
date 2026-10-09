@@ -1,0 +1,20 @@
+# commander-relay — local `wrangler dev` config (the deployed config is wrangler.free.toml).
+# Secrets come from .dev.vars (gitignored) or the dev defaults below; never real values here.
+name = "commander-relay"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "CommanderRelay"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CommanderRelay"]
+
+[vars]
+ENVIRONMENT = "development"
+RELAY_WS_URL = "ws://127.0.0.1:8799/ws/browser"
+RELAY_ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"

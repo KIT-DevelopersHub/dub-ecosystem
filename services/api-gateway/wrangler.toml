@@ -90,6 +90,10 @@ service = "usage-meter"
 binding = "SVC_MEMBER"
 service = "member-service"
 
+[[services]]
+binding = "SVC_COMMANDER_RELAY"
+service = "commander-relay"
+
 # ---- Queue producer (the single publish exception: public.inquiry.received) ----
 [[queues.producers]]
 binding = "EVT_NOTIFICATION"
