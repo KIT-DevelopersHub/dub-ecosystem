@@ -3,6 +3,7 @@
 // subject + inline snippet, label chips, and a timestamp that swaps to row
 // actions (archive / delete / mark-read) on hover. Bulk selection lifts a toolbar.
 import { useEffect, useRef, useState } from "react";
+import { NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
 import {
   avatarColor,
   displayName,
@@ -90,12 +91,15 @@ function ThreadRow({
   thread,
   labels,
   leaving,
+  narrow,
   onArchive,
   onTrash,
 }: {
   thread: MailThreadModel;
   labels: Label[];
   leaving: boolean;
+  /** Phones: sender and subject stack on two lines; no hover-only actions. */
+  narrow: boolean;
   onArchive: () => void;
   onTrash: () => void;
 }): JSX.Element {
@@ -121,7 +125,7 @@ function ThreadRow({
         display: "flex",
         alignItems: "center",
         gap: 8,
-        height: leaving ? 0 : 40,
+        height: leaving ? 0 : narrow ? 64 : 40,
         padding: "0 12px 0 8px",
         cursor: leaving ? "default" : "pointer",
         overflow: "hidden",
@@ -194,47 +198,50 @@ function ThreadRow({
         {initial(people)}
       </span>
 
-      <span
-        style={{
-          width: 168,
-          flexShrink: 0,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          fontSize: "var(--dub-font-size-sm)",
-          fontWeight: unread ? 700 : 400,
-          color: "var(--dub-color-text-primary)",
-        }}
-      >
-        {displayName(people)}
-        {thread.messages.length > 1 ? (
-          <span style={{ color: "var(--dub-color-text-muted)", fontWeight: 400 }}> {thread.messages.length}</span>
-        ) : null}
-      </span>
+      {/* Phones stack sender over subject so neither collapses to nothing. */}
+      <span style={narrow ? { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 } : { display: "contents" }}>
+        <span
+          style={{
+            width: narrow ? "auto" : 168,
+            flexShrink: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontSize: "var(--dub-font-size-sm)",
+            fontWeight: unread ? 700 : 400,
+            color: "var(--dub-color-text-primary)",
+          }}
+        >
+          {displayName(people)}
+          {thread.messages.length > 1 ? (
+            <span style={{ color: "var(--dub-color-text-muted)", fontWeight: 400 }}> {thread.messages.length}</span>
+          ) : null}
+        </span>
 
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          fontSize: "var(--dub-font-size-sm)",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
-        <LabelChips ids={thread.labels} labels={labels} />
-        <span style={{ fontWeight: unread ? 700 : 400, color: "var(--dub-color-text-primary)" }}>{thread.subject}</span>
-        <span style={{ color: "var(--dub-color-text-muted)", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis" }}>
-          {" — "}
-          {snippet(last.body, 80)}
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontSize: "var(--dub-font-size-sm)",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <LabelChips ids={thread.labels} labels={labels} />
+          <span style={{ fontWeight: unread ? 700 : 400, color: "var(--dub-color-text-primary)" }}>{thread.subject}</span>
+          <span style={{ color: "var(--dub-color-text-muted)", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {" — "}
+            {snippet(last.body, 80)}
+          </span>
         </span>
       </span>
 
-      <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", minWidth: 96 }}>
-        {hover ? (
+      <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", minWidth: narrow ? 0 : 96 }}>
+        {hover && !narrow ? (
           <span style={{ display: "inline-flex", gap: 2, color: "var(--dub-color-text-secondary)" }}>
             {state.folder === "trash" ? (
               <>
@@ -284,6 +291,7 @@ function ThreadRow({
 
 export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
+  const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
   const [leavingIds, setLeavingIds] = useState<Set<string>>(new Set());
   const leaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -452,6 +460,7 @@ export function ThreadList(): JSX.Element {
               thread={t}
               labels={state.labels}
               leaving={leavingIds.has(t.id)}
+              narrow={narrow}
               onArchive={() => beginLeave([t.id], "ARCHIVE")}
               onTrash={() => beginLeave([t.id], "TRASH")}
             />

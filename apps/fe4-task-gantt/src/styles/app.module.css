@@ -23,7 +23,7 @@
   flex-wrap: wrap;
 }
 .pageHeaderText { display: flex; flex-direction: column; gap: var(--dub-space-1); }
-.headerActions { display: flex; align-items: center; gap: var(--dub-space-3); }
+.headerActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--dub-space-3); }
 /* undo / redo controls (判断57). The keyboard shortcut is the primary path; these
    buttons make it discoverable and give touch users an affordance. */
 .undoRedo { display: inline-flex; align-items: center; gap: 4px; }
@@ -2015,3 +2015,11 @@ a.attachChipName:hover { text-decoration: underline; }
   padding: 0 2px;
 }
 .attachChipRemove:hover { color: var(--dub-color-danger-600, #b42318); }
+/* iOS zooms the page when focusing a control under 16px; lift the compact
+   filter select and number pad on touch devices only. */
+@media (pointer: coarse) {
+  .filterSelectInput,
+  .numPadInput {
+    font-size: var(--dub-font-size-md);
+  }
+}

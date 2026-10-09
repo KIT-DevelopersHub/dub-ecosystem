@@ -44,3 +44,28 @@
     transition: none;
   }
 }
+/* Phones: keep each label on one line and let the strip scroll sideways instead of
+   squeezing labels into 2-4 line columns (メンバー / 通知 tabs). The indicator sits
+   inside the scrollport, so it moves up 1px to avoid being clipped by overflow. */
+@media (max-width: 640px) {
+  .tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  /* The scrollport clips anything outside the strip, so an outward hit-slop can't
+     reach 44px here; size the tab itself instead. */
+  .tab {
+    flex-shrink: 0;
+    white-space: nowrap;
+    margin-bottom: 0;
+    min-height: 44px;
+  }
+  .indicator {
+    bottom: 0;
+  }
+}

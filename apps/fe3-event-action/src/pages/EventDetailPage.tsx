@@ -20,7 +20,7 @@ function EventDetailInner({ eventId }: { eventId: string }) {
             <PhaseBadge phase={ev.phase} testId="fe3-detail-phase-badge" />
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <Button
             iconLeft={<Icon name="check-square" />}
             variant="secondary"
