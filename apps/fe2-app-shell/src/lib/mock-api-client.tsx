@@ -333,7 +333,7 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
           {
             lastName: null, firstName: null, lastNameKana: null, firstNameKana: null,
             lastNameRomaji: null, firstNameRomaji: null, schoolEmail: null, gmail: null,
-            phone: null, grade: null, department: null, desiredActivity: null, note: null,
+            phone: null, grade: null, department: null, rosterNumber: null, desiredActivity: null, note: null,
           },
           200,
         );

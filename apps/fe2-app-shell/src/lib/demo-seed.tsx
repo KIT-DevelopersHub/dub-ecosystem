@@ -2240,7 +2240,7 @@ function createMembersStore() {
       id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
-      grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -2250,7 +2250,7 @@ function createMembersStore() {
       id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
       lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
       nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
-      grade: "1", department: "情報工学科", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
       schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -2403,7 +2403,7 @@ function createMembersStore() {
         id: existing?.id ?? nid("part"), orgId: ORG, memberId: existing?.memberId ?? null, name, normalizedName: target,
         lastName, firstName, nameKana, lastNameKana, firstNameKana,
         nameRomaji, lastNameRomaji, firstNameRomaji,
-        grade: body?.grade ?? null, department: body?.department ?? null,
+        grade: body?.grade ?? null, department: body?.department ?? null, rosterNumber: body?.rosterNumber ?? null,
         contact: body?.contact ?? null, phone: body?.phone ?? null,
         schoolEmail: String(body?.schoolEmail ?? ""), gmail: String(body?.gmail ?? ""),
         desiredTeamId: body?.desiredTeamId ?? null, desiredActivity: body?.desiredActivity ?? null, note: body?.note ?? null,
@@ -2487,6 +2487,7 @@ function createMembersStore() {
         if (mem.gmail === null && p.gmail) mem.gmail = p.gmail;
         if (mem.department === null && p.department) mem.department = p.department;
         if (mem.grade === null && p.grade) mem.grade = p.grade;
+        if (!mem.rosterNumber && p.rosterNumber) mem.rosterNumber = p.rosterNumber;
         mem.version += 1; mem.updatedAt = isoNow();
         p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
@@ -2494,7 +2495,7 @@ function createMembersStore() {
       if (action === "create") {
         const created: DemoMember = {
           id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null, leaderId: null,
-          department: p.department, grade: p.grade, teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
+          department: p.department, grade: p.grade, rosterNumber: p.rosterNumber ?? null, teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
           contact: p.contact ?? p.schoolEmail, schoolEmail: p.schoolEmail || null, gmail: p.gmail || null,
           lastName: p.lastName, firstName: p.firstName, lastNameKana: p.lastNameKana, firstNameKana: p.firstNameKana,
           lastNameRomaji: p.lastNameRomaji, firstNameRomaji: p.firstNameRomaji, phone: p.phone, note: p.note,

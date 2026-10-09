@@ -45,6 +45,7 @@ export const PARTICIPATION_PROFILE_FIELDS: ParticipationFieldDescriptor[] = [
   { key: "phone", label: "電話番号", kind: "text", half: true, help: "緊急連絡用（任意）", placeholder: "090-1234-5678" },
   { key: "grade", label: "学年", kind: "select", half: true, options: GRADE_OPTIONS },
   { key: "department", label: "学科", kind: "text", half: true, placeholder: "情報工学科" },
+  { key: "rosterNumber", label: "名列番号", kind: "text", half: true, help: "例: 3EP2-26（任意）", placeholder: "3EP2-26" },
   { key: "desiredActivity", label: "希望する活動", kind: "select", half: true, options: ACTIVITY_OPTIONS },
   { key: "note", label: "その他", kind: "textarea", help: "連絡事項など（任意）" },
 ];
@@ -63,6 +64,7 @@ export function emptySelfParticipation(): SelfParticipation {
     phone: null,
     grade: null,
     department: null,
+    rosterNumber: null,
     desiredActivity: null,
     note: null,
   };

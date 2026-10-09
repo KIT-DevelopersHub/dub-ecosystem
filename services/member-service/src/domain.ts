@@ -120,6 +120,7 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     firstNameRomaji: r.firstNameRomaji,
     grade: r.grade,
     department: r.department,
+    rosterNumber: r.rosterNumber,
     contact: r.contact,
     phone: r.phone,
     schoolEmail: r.schoolEmail,

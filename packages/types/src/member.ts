@@ -209,6 +209,8 @@ export interface Participation {
   firstNameRomaji: string | null;
   grade: Grade | null;
   department: string | null;
+  /** 名列番号 (任意 / additive, 例 "3EP2-26"). 正規化済み。 */
+  rosterNumber?: string | null;
   /** 連絡先 (email など). */
   contact: string | null;
   /** 電話番号 (任意). */
@@ -266,6 +268,8 @@ export interface SubmitParticipationRequest {
   phone?: string | null;
   grade?: Grade | null;
   department?: string | null;
+  /** 名列番号 (任意, 例 "3EP2-26"). サーバで正規化し形式検証。 */
+  rosterNumber?: string | null;
   contact?: string | null;
   desiredTeamId?: string | null;
   desiredActivity?: DesiredActivity | null;
@@ -290,6 +294,8 @@ export interface SelfParticipation {
   phone: string | null;
   grade: Grade | null;
   department: string | null;
+  /** 名列番号 (例 "3EP2-26"). */
+  rosterNumber: string | null;
   desiredActivity: DesiredActivity | null;
   note: string | null;
 }

@@ -138,6 +138,8 @@ export interface PublicParticipationRequest {
   phone?: string | null;
   grade?: string | null;
   department?: string | null;
+  /** 名列番号 (任意, 例 "3EP2-26"). 形式検証は member-service。 */
+  rosterNumber?: string | null;
   desiredTeamId?: string | null;
   desiredActivity?: string | null;
   note?: string | null;

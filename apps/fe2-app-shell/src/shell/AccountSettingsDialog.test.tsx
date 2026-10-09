@@ -18,7 +18,7 @@ const ME: gateway.MeResponse = {
 const PART: SelfParticipation = {
   lastName: "高岡", firstName: "己太朗", lastNameKana: null, firstNameKana: null,
   lastNameRomaji: null, firstNameRomaji: null, schoolEmail: "kota@school.ac.jp", gmail: "kota@gmail.com",
-  phone: "090-0000-0000", grade: "3", department: "情報工学科", desiredActivity: "both", note: null,
+  phone: "090-0000-0000", grade: "3", department: "情報工学科", rosterNumber: null, desiredActivity: "both", note: null,
 };
 
 function setup(

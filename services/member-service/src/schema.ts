@@ -210,6 +210,17 @@ ALTER TABLE member_people ADD COLUMN roster_number TEXT;
 `.trim(),
 };
 
+// 0012: 参加届にも名列番号 (roster_number) を足す additive ALTER (non-destructive)。
+// 管理者が確定すると member_people.roster_number へ引き継ぐ。Mirrors
+// 0012_participation_roster_number.sql (schema-lockstep).
+export const MEMBER_PARTICIPATION_ROSTER_NUMBER_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0012_participation_roster_number",
+  up: `
+ALTER TABLE member_participations ADD COLUMN roster_number TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -223,4 +234,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PERSON_DESIRED_ACTIVITY_MIGRATION,
   MEMBER_PERSON_LEADER_MIGRATION,
   MEMBER_PERSON_ROSTER_NUMBER_MIGRATION,
+  MEMBER_PARTICIPATION_ROSTER_NUMBER_MIGRATION,
 ];

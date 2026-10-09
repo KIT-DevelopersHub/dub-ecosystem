@@ -155,11 +155,22 @@ describe("ParticipationPage", () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
+  it("rejects a malformed 名列番号", async () => {
+    const api = makeApi();
+    render(wrap(<ParticipationPage />, api));
+    await fillRequired();
+    await userEvent.type(screen.getByTestId("participation-roster-number"), "3EP2");
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    expect(screen.getByText("名列番号は 3EP2-26 の形式で入力してください")).toBeInTheDocument();
+    expect(api.submit).not.toHaveBeenCalled();
+  });
+
   it("submits split 姓/名 + both emails and shows a neutral サンクス (no roster claim)", async () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
     await fillRequired("新規", "太郎");
     await userEvent.type(screen.getByTestId("participation-phone"), "090-1234-5678");
+    await userEvent.type(screen.getByTestId("participation-roster-number"), "3ep2-26");
     await userEvent.click(screen.getByTestId("participation-submit"));
     await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
     expect((api.submit as any).mock.calls[0][0]).toMatchObject({
@@ -167,6 +178,7 @@ describe("ParticipationPage", () => {
       firstName: "太郎",
       name: "新規 太郎",
       phone: "090-1234-5678",
+      rosterNumber: "3EP2-26",
       schoolEmail: "taro@school.ac.jp",
       gmail: "taro@gmail.com",
     });

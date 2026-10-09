@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { Button, Card, Form, FormField, TextField, Textarea, Select } from "@dub/ui";
 import type { SelectOption } from "@dub/ui";
+import { member } from "@dub/types";
 import { useSubmitParticipation } from "./hooks.ts";
 import {
   GRADE_LABEL,
@@ -30,6 +31,7 @@ type FormErrors = {
   schoolEmail?: string;
   gmail?: string;
   phone?: string;
+  rosterNumber?: string;
   lastNameRomaji?: string;
   firstNameRomaji?: string;
 };
@@ -51,6 +53,7 @@ export function ParticipationForm(): JSX.Element {
   const [schoolEmail, setSchoolEmail] = useState("");
   const [gmail, setGmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [rosterNumber, setRosterNumber] = useState("");
   const [grade, setGrade] = useState<Grade | null>(null);
   const [department, setDepartment] = useState("");
   const [note, setNote] = useState("");
@@ -84,6 +87,9 @@ export function ParticipationForm(): JSX.Element {
     if (gmail.trim().length === 0) next.gmail = "Gmail アドレスを入力してください";
     else if (!EMAIL_RE.test(gmail.trim())) next.gmail = "メールアドレスの形式が正しくありません";
     if (phone.trim().length > 0 && !PHONE_RE.test(phone.trim())) next.phone = "電話番号の形式が正しくありません";
+    const roster = member.normalizeRosterNumber(rosterNumber);
+    if (roster !== null && !member.ROSTER_NUMBER_PATTERN.test(roster))
+      next.rosterNumber = "名列番号は 3EP2-26 の形式で入力してください";
     if (lastNameRomaji.trim().length > 0 && !ROMAJI_RE.test(lastNameRomaji.trim()))
       next.lastNameRomaji = "英字（ローマ字）で入力してください";
     if (firstNameRomaji.trim().length > 0 && !ROMAJI_RE.test(firstNameRomaji.trim()))
@@ -108,6 +114,7 @@ export function ParticipationForm(): JSX.Element {
         phone: trimOrNull(phone),
         grade,
         department: trimOrNull(department),
+        rosterNumber: member.normalizeRosterNumber(rosterNumber),
         note: trimOrNull(note),
       },
       { onSuccess: (res) => setDone(res) },
@@ -188,14 +195,30 @@ export function ParticipationForm(): JSX.Element {
               />
             </FormField>
           </div>
-          <FormField
-            label="電話番号"
-            htmlFor="p-phone"
-            help="緊急連絡用 (任意)"
-            {...(errors.phone ? { error: errors.phone } : {})}
-          >
-            <TextField id="p-phone" type="text" value={phone} onChange={setPhone} testId="participation-phone" placeholder="090-1234-5678" />
-          </FormField>
+          <div className={styles.formRow}>
+            <FormField
+              label="電話番号"
+              htmlFor="p-phone"
+              help="緊急連絡用 (任意)"
+              {...(errors.phone ? { error: errors.phone } : {})}
+            >
+              <TextField id="p-phone" type="text" value={phone} onChange={setPhone} testId="participation-phone" placeholder="090-1234-5678" />
+            </FormField>
+            <FormField
+              label="名列番号"
+              htmlFor="p-roster-number"
+              help="任意 (例: 3EP2-26)"
+              {...(errors.rosterNumber ? { error: errors.rosterNumber } : {})}
+            >
+              <TextField
+                id="p-roster-number"
+                value={rosterNumber}
+                onChange={setRosterNumber}
+                testId="participation-roster-number"
+                placeholder="3EP2-26"
+              />
+            </FormField>
+          </div>
           <div className={styles.formRow}>
             <FormField label="学年" htmlFor="p-grade">
               <Select<Grade>

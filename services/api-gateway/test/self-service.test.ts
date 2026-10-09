@@ -37,6 +37,7 @@ const SELF_PART: member.SelfParticipation = {
   phone: "090-1111-2222",
   grade: "3",
   department: "情報工学科",
+  rosterNumber: "3EP2-26",
   desiredActivity: "dev",
   note: null,
 };

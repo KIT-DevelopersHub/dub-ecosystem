@@ -25,6 +25,7 @@ export function buildParticipationNotify(p: member.Participation): notification.
     `氏名: ${p.name}`,
     p.grade ? `学年: ${p.grade}` : null,
     p.department ? `所属: ${p.department}` : null,
+    p.rosterNumber ? `名列番号: ${p.rosterNumber}` : null,
     p.desiredActivity ? `希望する活動: ${p.desiredActivity}` : null,
     `学校メール: ${p.schoolEmail}`,
     `Gmail: ${p.gmail}`,

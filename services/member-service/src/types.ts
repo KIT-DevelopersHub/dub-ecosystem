@@ -75,6 +75,8 @@ export interface ParticipationRow {
   firstNameRomaji: string | null;
   grade: member.Grade | null;
   department: string | null;
+  /** 名列番号 (例 "3EP2-26")。正規化済み (0012 additive column)。 */
+  rosterNumber: string | null;
   contact: string | null;
   phone: string | null;
   schoolEmail: string;

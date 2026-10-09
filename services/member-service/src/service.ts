@@ -417,6 +417,7 @@ export class MemberService {
     const composedRomaji = composeName(lastNameRomaji, firstNameRomaji);
     const nameRomaji = composedRomaji.length > 0 ? composedRomaji : optText(body.nameRomaji, "nameRomaji");
     const department = optText(body.department, "department");
+    const rosterNumber = optRosterNumber(body.rosterNumber);
     const contact = optText(body.contact, "contact");
     const note = optText(body.note, "note");
     // 電話番号は任意。渡された時だけ緩い形式チェック。
@@ -450,6 +451,7 @@ export class MemberService {
       firstNameRomaji,
       grade,
       department,
+      rosterNumber,
       contact,
       phone,
       schoolEmail,
@@ -620,6 +622,7 @@ export class MemberService {
       // 非破壊: 空欄のみ補完。参加届の2アドレスは名簿にも保持 (contact 未設定は学校メール)。
       department: match.department ?? p.department,
       grade: match.grade ?? p.grade,
+      rosterNumber: match.rosterNumber ?? p.rosterNumber,
       contact: match.contact ?? p.schoolEmail,
       schoolEmail: match.schoolEmail ?? p.schoolEmail,
       gmail: match.gmail ?? p.gmail,
@@ -654,7 +657,7 @@ export class MemberService {
       status: "added",
       department: p.department,
       grade: p.grade,
-      rosterNumber: null,
+      rosterNumber: p.rosterNumber,
       identityUserId: null,
       leaderId: null,
       contact: p.contact ?? p.schoolEmail,
@@ -703,6 +706,7 @@ export class MemberService {
       phone: p.phone,
       grade: (p.grade as member.Grade | null) ?? null,
       department: p.department,
+      rosterNumber: p.rosterNumber,
       desiredActivity: p.desiredActivity,
       note: p.note,
     };
@@ -721,6 +725,7 @@ export class MemberService {
       phone: null,
       grade: null,
       department: null,
+      rosterNumber: null,
       desiredActivity: null,
       note: null,
     };
@@ -759,6 +764,7 @@ export class MemberService {
         next[k] = v;
       }
     }
+    if ("rosterNumber" in patch) next.rosterNumber = optRosterNumber(patch.rosterNumber);
     if ("grade" in patch) {
       // Value may arrive as "" from an empty <select> — treat blank as a clear.
       const g = patch.grade as unknown;
