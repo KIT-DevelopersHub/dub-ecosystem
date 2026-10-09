@@ -12,6 +12,8 @@ name: Visual Baselines (seed/update)
 #     visual-regression job will be red until baselines are refreshed here.
 #   - After bumping @playwright/test / the container image tag.
 on:
+  push:
+    branches: [ci/visual-linux-baselines]
   workflow_dispatch:
     inputs:
       ref:
@@ -20,7 +22,7 @@ on:
         default: ""
 
 concurrency:
-  group: visual-baselines-${{ github.event.inputs.ref }}
+  group: visual-baselines-${{ github.event.inputs.ref || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -37,7 +39,7 @@ jobs:
       - name: Checkout target branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref }}
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -70,4 +72,4 @@ jobs:
             exit 0
           fi
           git commit -m "chore(visual): regenerate Linux baselines [skip ci]"
-          git push origin "HEAD:${{ github.event.inputs.ref }}"
+          git push origin "HEAD:${{ github.event.inputs.ref || github.ref_name }}"
