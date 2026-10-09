@@ -46,6 +46,8 @@ export interface ChatStore {
   rename: (kind: ChatKind, id: string, title: string) => Promise<boolean>;
   /** Start a run in a session; streams into a persisted assistant message. */
   run: (kind: ChatKind, sessionId: string, spec: RunSpec) => Promise<ChatMessage | null>;
+  /** Persist a finished assistant message the console wrote itself (no run). */
+  note: (sessionId: string, text: string) => Promise<ChatMessage | null>;
 }
 
 const Ctx = createContext<ChatStore | null>(null);
@@ -325,6 +327,15 @@ export function ChatProvider({
     [api, client, appendMessage, applyTitle, patchMessage, setRunning, bumpSessionToTop],
   );
 
+  const note = useCallback(
+    async (sessionId: string, text: string): Promise<ChatMessage | null> => {
+      const msg = await api.addChatMessage(sessionId, { role: "assistant", text, tools: [], status: "done" }).catch(() => null);
+      if (msg) appendMessage(sessionId, msg);
+      return msg;
+    },
+    [api, appendMessage],
+  );
+
   const store: ChatStore = useMemo(
     () => ({
       ready,
@@ -337,8 +348,9 @@ export function ChatProvider({
       remove,
       rename,
       run,
+      note,
     }),
-    [ready, sessionsByKind, activeByKind, messagesBySession, runningSessions, select, create, remove, rename, run],
+    [ready, sessionsByKind, activeByKind, messagesBySession, runningSessions, select, create, remove, rename, run, note],
   );
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;

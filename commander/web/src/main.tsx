@@ -2,6 +2,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import cssText from "@dub/tokens/css";
+import "@dub/ui/style.css";
 import { App } from "./App.tsx";
 
 // Inject design tokens as CSS variables (light + dark), matching the FE apps.
