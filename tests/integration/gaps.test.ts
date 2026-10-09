@@ -6,17 +6,14 @@
 import { describe, it, expect } from "vitest";
 import { createHarness } from "../lib/harness";
 
-describe("GAP-1: gateway /me composition calls identity /users/:id, which identity mounts under /identity", () => {
-  it("GET /api/v1/me currently fails (identity has no top-level /users/:id route)", async () => {
+describe("GAP-1 (RESOLVED): gateway /me composition reaches the identity master user", () => {
+  it("GET /api/v1/me returns 200", async () => {
     const h = await createHarness();
     const token = await h.login("organizer");
     const me = await h.gw("GET", "/api/v1/me", { token });
-    // me.ts calls svc.identity.get("/users/:id"); identity.app mounts ext under
-    // "/identity", so the master-user fetch 404s and the gateway surfaces 502.
-    // FIX: gateway should call "/identity/users/:id" OR identity should expose an
-    // internal "/internal/users/:id" master read. When fixed, change to toBe(200).
-    expect(me.status).not.toBe(200);
-    expect([404, 502]).toContain(me.status);
+    // FIXED: identity now serves the master-user read the gateway's me.ts calls, so the
+    // former 404 -> 502 no longer happens. Kept as a regression guard for the wiring.
+    expect(me.status).toBe(200);
   });
 });
 
