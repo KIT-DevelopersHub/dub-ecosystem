@@ -704,6 +704,24 @@ export class IdentityService {
     return { userId, orgId, permissions: effectiveOrgWidePermissions(ctx) };
   }
 
+  /**
+   * Role peers for `permission`: the OTHER active users who hold, org-wide, a role that
+   * `userId` also holds org-wide and that carries `permission`. Serves
+   * `GET /internal/users/:id/role-peers` — mail-gateway uses it with `mail:read_role_shared`
+   * to widen a member's inbound read scope to the holders of a sharing role. Per role: a
+   * second, non-sharing role shares nothing. Event-scoped grants never count. An inactive
+   * (or unknown) caller has no peers.
+   */
+  async rolePeers(userId: string, orgId: string, permission: string): Promise<{ userIds: string[] }> {
+    if (!isPermissionKey(permission)) {
+      throw errors.validationFailed([{ field: "permission", reason: "not_in_catalog", message: permission }]);
+    }
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.status !== "active") return { userIds: [] };
+    const userIds = await this.d.repo.orgWideRolePeers(orgId, userId, permission);
+    return { userIds: [...userIds].sort() };
+  }
+
   // ---------- audit record builder ----------
   private record(
     action: string,

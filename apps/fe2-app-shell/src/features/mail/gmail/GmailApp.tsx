@@ -11,7 +11,7 @@ import { ScheduledList } from "./ScheduledList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
-import { inFolder, matchesQuery, threadUnread } from "./mailModel.ts";
+import { SHARED_FOLDERS, hasSharedMail, inFolder, matchesQuery, threadUnread } from "./mailModel.ts";
 import { MailStoreProvider, useMailStore } from "./useMailStore.tsx";
 import { useMailSync } from "./useMailSync.tsx";
 
@@ -194,13 +194,18 @@ function Shortcuts(): null {
 }
 
 function GmailBody(): JSX.Element {
-  const { state } = useMailStore();
+  const { state, dispatch } = useMailStore();
   useMailSync(); // hydrate inbox + Sent from the gateway; lazy-load bodies on open
   useRestoreComposeDraftsOnMount(); // re-open any compose window left dirty by a reload/crash
   // A purged (完全に削除) thread is never shown, even if it was the open one when a reload's
   // APPLY_FLAGS marked it purged — fall back to the list.
   const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId && !t.purged) : undefined;
   const unreadInbox = state.threads.filter((t) => inFolder(t, "inbox") && threadUnread(t)).length;
+  // The sidebar hides 自分宛て / 自分宛て以外 once no shared mail remains — don't strand the view on one.
+  const sharedHidden = state.labelFilter === null && SHARED_FOLDERS.has(state.folder) && !hasSharedMail(state.threads);
+  useEffect(() => {
+    if (sharedHidden) dispatch({ type: "SET_FOLDER", folder: "inbox" });
+  }, [sharedHidden, dispatch]);
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
   const [navOpen, setNavOpen] = useState(false);
   useEffect(() => {

@@ -1,7 +1,7 @@
 // Left navigation pane: compose button, primary folders with unread badges, and
 // user labels. Layout/behaviour follows Gmail; all visuals are @dub/tokens +
 // our own line icons (no Google assets).
-import { NAV_FOLDERS, inFolder, threadUnread, type FolderId } from "./mailModel.ts";
+import { NAV_FOLDERS, SHARED_FOLDERS, hasSharedMail, inFolder, threadUnread, type FolderId } from "./mailModel.ts";
 import { MailIcon, type MailIconName } from "./icons.tsx";
 import { useMailStore } from "./useMailStore.tsx";
 
@@ -14,6 +14,8 @@ function count(folder: FolderId, threads: ReturnType<typeof useMailStore>["state
 export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boolean; onNavigate?: () => void } = {}): JSX.Element {
   const { state, dispatch } = useMailStore();
   const rowHeight = inDrawer ? 44 : 32;
+  // 自分宛て / 自分宛て以外 only appear for viewers who can see someone else's mail.
+  const showShared = hasSharedMail(state.threads);
 
   return (
     <nav
@@ -57,7 +59,7 @@ export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boole
         作成
       </button>
 
-      {NAV_FOLDERS.map((f) => {
+      {NAV_FOLDERS.filter((f) => showShared || !SHARED_FOLDERS.has(f.id)).map((f) => {
         const active = state.labelFilter === null && state.folder === f.id;
         const unread =
           f.id === "scheduled"

@@ -839,3 +839,99 @@ describe("GET /internal/status (rate-limit visibility)", () => {
     expect(body.rateLimit.active).toBe(false);
   });
 });
+
+describe("role sharing — mail:read_role_shared widens the INBOUND scope to role peers", () => {
+  const asUser = (userId: string) => ({ "x-dub-request-id": "req_share", "x-dub-user-id": userId });
+  const READ = ["app:mail:view", "app:mail:edit", "mail:read", "mail:send"];
+  // alice and bob share a role carrying mail:read_role_shared; carol does not.
+  const PEERS = { usr_alice: ["usr_bob"], usr_bob: ["usr_alice"], usr_carol: [] };
+  const sharedEnv = (granted = READ, peers: Record<string, string[]> | "error" = PEERS) =>
+    makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, {}, granted, peers) });
+
+  const seedOwned = (raw: ReturnType<typeof makeEnv>["raw"], row: { id: string; ownerUserId: string | null; threadId?: string }) => {
+    raw
+      .prepare(
+        `INSERT INTO mail_inbound
+           (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
+         VALUES (?, ?, ?, 'info', ?, ?, 'Hi', 'snip', NULL, NULL, ?, ?, 'body', NULL, NULL, ?)`,
+      )
+      .run(
+        row.id,
+        `<${row.id}@x>`,
+        row.threadId ?? `thr_${row.id}`,
+        JSON.stringify({ email: "sender@x.com" }),
+        JSON.stringify([{ email: "info@developershub.jp" }]),
+        "2026-08-10T00:00:00.000Z",
+        "2026-08-10T00:00:00.000Z",
+        row.ownerUserId,
+      );
+  };
+  const seedAll = (raw: ReturnType<typeof makeEnv>["raw"]) => {
+    seedOwned(raw, { id: "in_alice", ownerUserId: "usr_alice", threadId: "thr_x" });
+    seedOwned(raw, { id: "in_bob", ownerUserId: "usr_bob", threadId: "thr_x" });
+    seedOwned(raw, { id: "in_carol", ownerUserId: "usr_carol" });
+    seedOwned(raw, { id: "in_orphan", ownerUserId: null });
+  };
+  const list = async (env: ReturnType<typeof makeEnv>["env"], userId: string) =>
+    ((await (await app.fetch(new Request("https://svc/mail/messages", { headers: asUser(userId) }), env)).json()) as { items: mail.MailMessageListItem[] }).items;
+
+  it("a peer sees the other peer's inbound mail, flagged mine=false", async () => {
+    const { env, raw } = sharedEnv();
+    seedAll(raw);
+    const items = await list(env, "usr_bob");
+    expect(items.map((m) => [m.id, m.mine]).sort()).toEqual([["in_alice", false], ["in_bob", true]]);
+
+    const detail = (await (await app.fetch(new Request("https://svc/mail/messages/in_alice", { headers: asUser("usr_bob") }), env)).json()) as mail.MailMessageDetail;
+    expect(detail.mine).toBe(false);
+    const thread = (await (await app.fetch(new Request("https://svc/mail/threads/thr_x", { headers: asUser("usr_bob") }), env)).json()) as mail.MailThread;
+    expect(thread.messages.map((m) => [m.id, m.mine])).toEqual([["in_alice", false], ["in_bob", true]]);
+    expect((await app.fetch(new Request("https://svc/mail/messages/in_alice/read", { method: "POST", headers: asUser("usr_bob") }), env)).status).toBe(200);
+    // Opening a peer's mail must not clear the owner's unread state; own mail still flips.
+    expect((await list(env, "usr_alice")).find((m) => m.id === "in_alice")?.read).toBe(false);
+    expect((await app.fetch(new Request("https://svc/mail/messages/in_bob/read", { method: "POST", headers: asUser("usr_bob") }), env)).status).toBe(200);
+    expect((await list(env, "usr_alice")).find((m) => m.id === "in_bob")?.read).toBe(true);
+  });
+
+  it("a non-peer does not see shared mail, and peers do not see the non-peer's", async () => {
+    const { env, raw } = sharedEnv();
+    seedAll(raw);
+    expect((await list(env, "usr_carol")).map((m) => [m.id, m.mine])).toEqual([["in_carol", true]]);
+    expect((await list(env, "usr_alice")).map((m) => m.id).sort()).toEqual(["in_alice", "in_bob"]);
+    expect((await app.fetch(new Request("https://svc/mail/messages/in_alice", { headers: asUser("usr_carol") }), env)).status).toBe(404);
+    expect((await app.fetch(new Request("https://svc/mail/messages/in_carol/read", { method: "POST", headers: asUser("usr_alice") }), env)).status).toBe(404);
+  });
+
+  it("sharing never extends to Sent", async () => {
+    const { env } = sharedEnv();
+    await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: { ...asUser("usr_alice"), "content-type": "application/json", "x-dub-idempotency-key": "share-1" },
+        body: JSON.stringify({ to: [{ email: "x@x.com" }], subject: "Alice-sent", textBody: "b" }),
+      }),
+      env,
+    );
+    const sent = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_bob") }), env)).json()) as { items: unknown[] };
+    expect(sent.items).toHaveLength(0);
+  });
+
+  it("read_all is unaffected (sees everything) and mine reflects ownership", async () => {
+    const { env, raw } = sharedEnv([...READ, "mail:read_all"]);
+    seedAll(raw);
+    const items = await list(env, "usr_alice");
+    expect(items.map((m) => [m.id, m.mine]).sort()).toEqual([
+      ["in_alice", true],
+      ["in_bob", false],
+      ["in_carol", false],
+      ["in_orphan", false],
+    ]);
+  });
+
+  it("identity failure on the peers call falls back to own mail only (fail-closed)", async () => {
+    const { env, raw } = sharedEnv(READ, "error");
+    seedAll(raw);
+    expect((await list(env, "usr_bob")).map((m) => m.id)).toEqual(["in_bob"]);
+    expect((await app.fetch(new Request("https://svc/mail/messages/in_alice", { headers: asUser("usr_bob") }), env)).status).toBe(404);
+  });
+});

@@ -4,6 +4,7 @@
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
 import { useEffect, useState, type CSSProperties } from "react";
+import { Badge } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { isImageType } from "../attach.ts";
 import {
@@ -11,7 +12,9 @@ import {
   displayName,
   fullDate,
   initial,
+  sharedRecipientLabel,
   snippet,
+  threadMine,
   threadUnread,
   type Label,
   type MailMsg,
@@ -385,6 +388,11 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           <h1 style={{ margin: 0, fontSize: "var(--dub-font-size-xl)", fontWeight: 500, color: "var(--dub-color-text-primary)", flex: 1 }}>
             {thread.subject || "(件名なし)"}
           </h1>
+          {threadMine(thread) ? null : (
+            <span title="ロール共有・監督権限で閲覧しているメールです" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+              <Badge tone="info" testId="fe2-mail-shared-chip-pane">{sharedRecipientLabel(thread)}</Badge>
+            </span>
+          )}
           <button
             type="button"
             aria-label={thread.starred ? "スターを外す" : "スターを付ける"}
