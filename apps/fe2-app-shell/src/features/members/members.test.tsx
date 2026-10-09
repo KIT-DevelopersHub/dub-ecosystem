@@ -14,6 +14,12 @@ import { createMembersApi, type MembersApi } from "./membersApi.tsx";
 import { MembersApiProvider } from "./MembersProvider.tsx";
 import { MembersPage } from "./MembersPage.tsx";
 import type { MembersOverview } from "./contracts.ts";
+import { member } from "@dub/types";
+import { ListView } from "./ListView.tsx";
+import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
+
+/** 人物プロフィール (参加届と共通) を全部未入力にした土台。 */
+const P0 = member.emptyPersonProfile();
 
 function fakeApiClient(result: unknown = undefined): { api: ApiClient; calls: RequestInput[] } {
   const calls: RequestInput[] = [];
@@ -30,8 +36,8 @@ const OVERVIEW: MembersOverview = {
     { id: "t2", key: "pr", name: "広報", color: null, description: null },
   ],
   members: [
-    { id: "m1", orgId: "o", name: "山田太郎", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: "情報工学科", grade: "3年", identityUserId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
-    { id: "m2", orgId: "o", name: "佐藤花子", roleTitle: null, status: "invited", teamIds: ["t2"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+    { ...P0, id: "m1", orgId: "o", name: "山田太郎", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: "情報工学科", grade: "3", identityUserId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+    { ...P0, id: "m2", orgId: "o", name: "佐藤花子", roleTitle: null, status: "invited", teamIds: ["t2"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
   ],
 };
 
@@ -137,12 +143,61 @@ describe("MembersPage", () => {
     await screen.findByText("山田太郎");
     await userEvent.click(screen.getByTestId("members-add-member"));
     const dialog = await screen.findByTestId("members-form-dialog");
-    await userEvent.type(within(dialog).getByTestId("members-form-name"), "新規 太郎");
+    // 参加届と同じ人物項目が並ぶ (PersonProfileFields 共通)。
+    for (const k of member.PERSON_PROFILE_KEYS) {
+      const kebab = k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+      expect(within(dialog).getByTestId(`members-form-${kebab}`)).toBeInTheDocument();
+    }
+    await userEvent.type(within(dialog).getByTestId("members-form-last-name"), "新規");
+    await userEvent.type(within(dialog).getByTestId("members-form-first-name"), "太郎");
+    await userEvent.type(within(dialog).getByTestId("members-form-last-name-kana"), "しんき");
     await userEvent.type(within(dialog).getByTestId("members-form-department"), "情報工学科");
-    await userEvent.type(within(dialog).getByTestId("members-form-grade"), "2年");
+    await userEvent.selectOptions(within(dialog).getByTestId("members-form-grade"), "2");
+    await userEvent.type(within(dialog).getByTestId("members-form-roster-number"), "3ep2-26");
+    await userEvent.type(within(dialog).getByTestId("members-form-gmail"), "shinki@gmail.com");
     await userEvent.click(within(dialog).getByTestId("members-form-submit"));
     await waitFor(() => expect(api.createMember).toHaveBeenCalledTimes(1));
-    expect((api.createMember as any).mock.calls[0][0]).toMatchObject({ name: "新規 太郎", department: "情報工学科", grade: "2年" });
+    expect((api.createMember as any).mock.calls[0][0]).toMatchObject({
+      name: "新規 太郎",
+      lastName: "新規",
+      firstName: "太郎",
+      lastNameKana: "しんき",
+      lastNameRomaji: "Shinki",
+      department: "情報工学科",
+      grade: "2",
+      rosterNumber: "3EP2-26",
+      gmail: "shinki@gmail.com",
+    });
+  });
+
+  it("編集では変えた項目だけ送る (旧データの推測した姓/名で上書きしない)", async () => {
+    const api = makeApi();
+    render(wrap(<MembersPage />, api));
+    await screen.findByText("山田太郎");
+    await userEvent.click(screen.getByRole("button", { name: "山田太郎 を編集" }));
+    const dialog = await screen.findByTestId("members-form-dialog");
+    // 姓/名 の無い旧データは表示名から姓に入る。
+    expect(within(dialog).getByTestId("members-form-last-name")).toHaveValue("山田太郎");
+    expect(within(dialog).getByTestId("members-form-grade")).toHaveValue("3");
+    await userEvent.type(within(dialog).getByTestId("members-form-roster-number"), "3EP2-01");
+    await userEvent.click(within(dialog).getByTestId("members-form-submit"));
+    await waitFor(() => expect(api.updateMember).toHaveBeenCalledTimes(1));
+    const patch = (api.updateMember as any).mock.calls[0][1];
+    expect(patch).toMatchObject({ rosterNumber: "3EP2-01", version: 1 });
+    for (const k of ["name", "lastName", "firstName", "grade", "department", "gmail"]) expect(patch).not.toHaveProperty(k);
+  });
+
+  it("blocks submit when the 名列番号 format is wrong", async () => {
+    const api = makeApi();
+    render(wrap(<MembersPage />, api));
+    await screen.findByText("山田太郎");
+    await userEvent.click(screen.getByTestId("members-add-member"));
+    const dialog = await screen.findByTestId("members-form-dialog");
+    await userEvent.type(within(dialog).getByTestId("members-form-last-name"), "新規");
+    await userEvent.type(within(dialog).getByTestId("members-form-roster-number"), "3EP2");
+    await userEvent.click(within(dialog).getByTestId("members-form-submit"));
+    expect(await within(dialog).findByText("名列番号は 3EP2-26 の形式で入力してください")).toBeInTheDocument();
+    expect(api.createMember).not.toHaveBeenCalled();
   });
 
   it("deletes a member via the confirm dialog", async () => {
@@ -163,10 +218,10 @@ describe("MembersPage", () => {
     const overview: MembersOverview = {
       teams: [{ id: "t1", key: "venue", name: "会場", color: "#16a34a", description: null }],
       members: [
-        { id: "p_team", orgId: "o", name: "所属アリ子", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_none", orgId: "o", name: "未所属無太郎", roleTitle: null, status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_orphan", orgId: "o", name: "幽霊参照子", roleTitle: null, status: "added", teamIds: ["deleted_team_999"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "p_gone", orgId: "o", name: "辞退済子", roleTitle: null, status: "declined", teamIds: ["t1"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
+        { ...P0, id: "p_team", orgId: "o", name: "所属アリ子", roleTitle: "会場リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+        { ...P0, id: "p_none", orgId: "o", name: "未所属無太郎", roleTitle: null, status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+        { ...P0, id: "p_orphan", orgId: "o", name: "幽霊参照子", roleTitle: null, status: "added", teamIds: ["deleted_team_999"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
+        { ...P0, id: "p_gone", orgId: "o", name: "辞退済子", roleTitle: null, status: "declined", teamIds: ["t1"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
       ],
     };
     render(wrap(<MembersPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
@@ -195,10 +250,10 @@ describe("MembersPage", () => {
     const overview: MembersOverview = {
       teams: [{ id: "t1", key: "dev", name: "開発", color: "#0d9488", description: null }],
       members: [
-        { id: "L1", orgId: "o", name: "リーダー甲", roleTitle: "開発リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "L2", orgId: "o", name: "リーダー乙", roleTitle: "開発リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "R1", orgId: "o", name: "配下A", roleTitle: "メンバー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: "L1", contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
-        { id: "R2", orgId: "o", name: "配下B", roleTitle: "メンバー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: "L2", contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
+        { ...P0, id: "L1", orgId: "o", name: "リーダー甲", roleTitle: "開発リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, sortOrder: 1, version: 1, createdAt: "t", updatedAt: "t" },
+        { ...P0, id: "L2", orgId: "o", name: "リーダー乙", roleTitle: "開発リーダー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, sortOrder: 2, version: 1, createdAt: "t", updatedAt: "t" },
+        { ...P0, id: "R1", orgId: "o", name: "配下A", roleTitle: "メンバー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: "L1", contact: null, note: null, sortOrder: 3, version: 1, createdAt: "t", updatedAt: "t" },
+        { ...P0, id: "R2", orgId: "o", name: "配下B", roleTitle: "メンバー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: "L2", contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
       ],
     };
     render(wrap(<MembersPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
@@ -215,5 +270,26 @@ describe("MembersPage", () => {
     expect(within(l1Item as HTMLElement).queryByTestId("members-orgchip-R2")).not.toBeInTheDocument();
     expect(within(l2Item as HTMLElement).getByTestId("members-orgchip-R2")).toBeInTheDocument();
     expect(within(l2Item as HTMLElement).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
+  });
+});
+
+describe("ListView (運営名簿の表)", () => {
+  it("参加届と共通の人物項目を既定で全列表示する (Gmail 等が隠れない)", () => {
+    window.localStorage.clear();
+    render(
+      <ListView
+        members={OVERVIEW.members}
+        teamsById={new Map()}
+        accountLabels={new Map()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onLink={vi.fn()}
+        onUnlink={vi.fn()}
+      />,
+    );
+    const headers = within(screen.getByTestId("members-table"))
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent ?? "");
+    for (const c of PROFILE_DISPLAY_COLUMNS) expect(headers.some((h) => h.includes(c.header))).toBe(true);
   });
 });
