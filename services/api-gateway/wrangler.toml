@@ -91,6 +91,10 @@ binding = "SVC_MEMBER"
 service = "member-service"
 
 [[services]]
+binding = "SVC_COMMANDER_RELAY"
+service = "commander-relay"
+
+[[services]]
 binding = "SVC_LP_ANALYTICS"
 service = "lp-analytics"
 

@@ -117,6 +117,40 @@ pnpm --filter @dub/commander-service exec wrangler dev --var COMMANDER_OPERATOR_
 # => http://127.0.0.1:8787
 ```
 
+## 別端末から使う（本番 Dub アプリの /commander）
+
+PC で動いている Commander を、本番 Dub アプリの `/commander` からスマホや別の PC で表示・操作
+できる。**トンネルもポート開放も不要**。PC 側の「中継エージェント」が Cloudflare 上の
+`commander-relay` Worker へ**外向きに** WebSocket を張り、ブラウザも同じ Worker に繋ぐ。
+
+```
+browser (Dub /commander) --wss--> commander-relay (Durable Object) <--wss-- relay agent (PC)
+                                                                         |-> daemon  127.0.0.1:4319
+                                                                         |-> service 127.0.0.1:8798
+```
+
+- ブラウザ側の認証はいつもの Dub ログイン + Commander の編集権限（`app:commander:edit`）。
+  gateway が 60 秒だけ有効なチケットを発行し、それで WebSocket を開く。ブラウザに操作トークンは置かない。
+- PC 側の認証は共有の秘密値 1 つ（`COMMANDER_RELAY_SECRET` = Worker の `RELAY_AGENT_SECRET`）。
+- ブラウザ側はさらに、Worker の `COMMANDER_OWNER_USER_IDS`（PC の持ち主の user id）に入っている人だけ。
+  未設定なら誰にもチケットを出さない。開いたままの接続も 15 分ごとに権限を確認し直す。
+- エージェントが中継するのは daemon と commander-service の 2 つだけ。宛先 URL と操作トークンは
+  PC 側が持ち、ブラウザはパスしか指定できない。daemon は UI が使う 5 ルートだけを通し、run の
+  追加フラグは権限を絞る `--disallowedTools` だけ、cwd は `COMMANDER_RELAY_CWD_ROOTS`
+  （既定: リポジトリの 1 つ上 = worktree 置き場）の中だけを許す。
+- $0: 無料プランの SQLite Durable Object + Hibernation API。待機中の keepalive は課金対象外の
+  自動応答で返す。
+
+有効化（初回だけ）: `commander/.commander.env.local` に 2 行足して `dev-up.sh` を起動し直す。
+
+```
+COMMANDER_RELAY_URL=wss://dub-commander-relay.developershub-site.workers.dev/ws/agent
+COMMANDER_RELAY_SECRET=<RELAY_AGENT_SECRET と同じ値>
+```
+
+単体で起動する場合: `node --experimental-strip-types commander/daemon/src/relay.ts`
+（`COMMANDER_OPERATOR_TOKEN` も同じ env に入れる）。
+
 ## HTTP API（daemon）
 
 | method | path | 説明 |

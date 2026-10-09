@@ -28,6 +28,7 @@ STAGING_WORKER_DIRS=(
   "services/github-sync"
   "services/audit-log"
   "services/usage-meter"
+  "services/commander-relay"
   # lp-analytics before api-gateway — the gateway binds it (SVC_LP_ANALYTICS).
   "services/lp-analytics"
   # 4. api-gateway (binds all upstreams)

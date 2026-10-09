@@ -211,6 +211,8 @@ export class HttpCommanderApi implements CommanderApi {
   constructor(
     private baseUrl: string = DEFAULT_BASE,
     private token: string | undefined = DEFAULT_TOKEN,
+    // Injected by the relay transport (WebSocket to the operator's PC); loopback by default.
+    private fetchImpl: typeof fetch = (...args) => fetch(...args),
   ) {}
 
   /** Headers for a request WITH a JSON body. */
@@ -228,7 +230,7 @@ export class HttpCommanderApi implements CommanderApi {
     try {
       // Deliberately unauthenticated: /health is the one OPEN route, so a failure here means
       // "service down" rather than "token wrong" — the two the operator must tell apart.
-      const res = await fetch(`${this.baseUrl}/health`);
+      const res = await this.fetchImpl(`${this.baseUrl}/health`);
       return res.ok;
     } catch {
       return false;
@@ -236,13 +238,13 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async listFeatures(): Promise<Feature[]> {
-    const res = await fetch(`${this.baseUrl}/features`, { headers: this.auth() });
+    const res = await this.fetchImpl(`${this.baseUrl}/features`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /features -> ${res.status}`);
     return ((await res.json()) as { features: Feature[] }).features;
   }
 
   async createFeature(input: { title: string; ledgerRef?: string }): Promise<Result<Feature>> {
-    const res = await fetch(`${this.baseUrl}/features`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/features`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(input),
@@ -255,7 +257,7 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async getFeature(id: string): Promise<FeatureDetail> {
-    const res = await fetch(`${this.baseUrl}/features/${id}`, { headers: this.auth() });
+    const res = await this.fetchImpl(`${this.baseUrl}/features/${id}`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /features/${id} -> ${res.status}`);
     return (await res.json()) as FeatureDetail;
   }
@@ -265,7 +267,7 @@ export class HttpCommanderApi implements CommanderApi {
     to: FeaturePhase,
     opts: { approvedByUser?: boolean; note?: string } = {},
   ): Promise<Result<{ feature: Feature; transition: PhaseTransition }>> {
-    const res = await fetch(`${this.baseUrl}/features/${id}/transition`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/features/${id}/transition`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ to, ...opts }),
@@ -291,20 +293,20 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async listRuns(): Promise<RunSummary[]> {
-    const res = await fetch(`${this.baseUrl}/runs`, { headers: this.auth() });
+    const res = await this.fetchImpl(`${this.baseUrl}/runs`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /runs -> ${res.status}`);
     return ((await res.json()) as { runs: RunSummary[] }).runs;
   }
 
   async getRun(id: string): Promise<RunDetail | null> {
-    const res = await fetch(`${this.baseUrl}/runs/${id}`, { headers: this.auth() });
+    const res = await this.fetchImpl(`${this.baseUrl}/runs/${id}`, { headers: this.auth() });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`GET /runs/${id} -> ${res.status}`);
     return (await res.json()) as RunDetail;
   }
 
   async listBoard(): Promise<BoardItem[]> {
-    const res = await fetch(`${this.baseUrl}/tasks`, { headers: this.auth() });
+    const res = await this.fetchImpl(`${this.baseUrl}/tasks`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /tasks -> ${res.status}`);
     return ((await res.json()) as { items: BoardItem[] }).items;
   }
@@ -312,7 +314,7 @@ export class HttpCommanderApi implements CommanderApi {
   async createTask(
     input: { title: string; ledgerRef?: string },
   ): Promise<Result<{ feature: Feature; task: Task }>> {
-    const res = await fetch(`${this.baseUrl}/tasks`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/tasks`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(input),
@@ -325,7 +327,7 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async backfillTaskUrls(): Promise<{ updated: number }> {
-    const res = await fetch(`${this.baseUrl}/tasks/backfill-urls`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/tasks/backfill-urls`, {
       method: "POST",
       headers: this.headers(),
     });
@@ -334,7 +336,7 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async updateTaskStatus(id: string, status: TaskStatus): Promise<Result<Task>> {
-    const res = await fetch(`${this.baseUrl}/tasks/${id}`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/tasks/${id}`, {
       method: "PATCH",
       headers: this.headers(),
       body: JSON.stringify({ status }),
@@ -349,13 +351,13 @@ export class HttpCommanderApi implements CommanderApi {
   // --- AI chat persistence -----------------------------------------------------
 
   async listChats(kind: ChatKind): Promise<ChatSession[]> {
-    const res = await fetch(`${this.baseUrl}/chats?kind=${encodeURIComponent(kind)}`, { headers: this.auth() });
+    const res = await this.fetchImpl(`${this.baseUrl}/chats?kind=${encodeURIComponent(kind)}`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /chats -> ${res.status}`);
     return ((await res.json()) as { sessions: ChatSession[] }).sessions;
   }
 
   async createChat(kind: ChatKind, title = ""): Promise<ChatSession> {
-    const res = await fetch(`${this.baseUrl}/chats`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/chats`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ kind, title }),
@@ -365,14 +367,14 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async getChat(id: string): Promise<{ session: ChatSession; messages: ChatMessage[] } | null> {
-    const res = await fetch(`${this.baseUrl}/chats/${id}`, { headers: this.auth() });
+    const res = await this.fetchImpl(`${this.baseUrl}/chats/${id}`, { headers: this.auth() });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`GET /chats/${id} -> ${res.status}`);
     return (await res.json()) as { session: ChatSession; messages: ChatMessage[] };
   }
 
   async renameChat(id: string, title: string): Promise<ChatSession | null> {
-    const res = await fetch(`${this.baseUrl}/chats/${id}`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/chats/${id}`, {
       method: "PATCH",
       headers: this.headers(),
       body: JSON.stringify({ title }),
@@ -383,7 +385,7 @@ export class HttpCommanderApi implements CommanderApi {
   }
 
   async deleteChat(id: string): Promise<boolean> {
-    const res = await fetch(`${this.baseUrl}/chats/${id}`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/chats/${id}`, {
       method: "DELETE",
       headers: this.headers(),
     });
@@ -394,7 +396,7 @@ export class HttpCommanderApi implements CommanderApi {
     sessionId: string,
     input: { role: ChatRole; text: string; tools?: string[]; status?: ChatMessageStatus },
   ): Promise<ChatMessage | null> {
-    const res = await fetch(`${this.baseUrl}/chats/${sessionId}/messages`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/chats/${sessionId}/messages`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(input),
@@ -408,7 +410,7 @@ export class HttpCommanderApi implements CommanderApi {
     messageId: string,
     input: { text?: string; tools?: string[]; status?: ChatMessageStatus },
   ): Promise<ChatMessage | null> {
-    const res = await fetch(`${this.baseUrl}/chats/${sessionId}/messages/${messageId}`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/chats/${sessionId}/messages/${messageId}`, {
       method: "PATCH",
       headers: this.headers(),
       body: JSON.stringify(input),

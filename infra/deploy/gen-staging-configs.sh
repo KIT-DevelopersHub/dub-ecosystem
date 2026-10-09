@@ -155,6 +155,15 @@ gen_one() {
       /^NOTIF_RT_ALLOWED_ORIGINS = "/ {
         print "NOTIF_RT_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
       }
+      # --- commander relay: the browser wss URL + Origin allow-list must point at the
+      #     STAGING relay worker + staging fe2 origin (staging-signed tickets are rejected
+      #     by the prod relay, and the prod origin list would refuse the staging page). ---
+      /^RELAY_WS_URL = "/ {
+        sub(/dub-commander-relay\./, "dub-commander-relay" SFX "."); print; next
+      }
+      /^RELAY_ALLOWED_ORIGINS = "/ {
+        print "RELAY_ALLOWED_ORIGINS = \"" FE2ORIGIN "\""; next
+      }
       # --- passkey (WebAuthn) relying party: rpId + origins are the fe2 page that runs
       #     navigator.credentials, so they must be the STAGING fe2 host. Left at prod values,
       #     every staging passkey ceremony fails the rpId/origin check (and a shared rpId
