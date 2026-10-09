@@ -1,153 +1,163 @@
-// "Dubを操作する" — planner side. A claude run turns an intent into a reviewable plan.
-// Plans are never executed from here: the direct `wrangler d1 execute --remote` / curl
-// path is gone, and execution moves to the daemon's API executor (/operate/*), which only
-// calls catalog routes as the commander bot user.
+// "Dubを操作する" — the planner. A claude run turns the operator's words into either a
+// plan over the API catalog or a plain Japanese answer. What makes it reliable:
+//   - every turn gets the WHOLE session (requests, plans, preview + execution results),
+//     so "さっきのイベント" and "失敗した分だけ" resolve against what really happened;
+//   - the run has NO tools (`--tools ""`) and runs outside the repo, so it cannot wander
+//     into files such as an unrelated migration;
+//   - the reply is fixed to Japanese + one fixed JSON schema; anything else is an answer.
+// Plans are executed only by the daemon (/operate/*), never from here.
 
-/** Where operate runs execute (the real dub-ecosystem checkout; wrangler resolves here). */
-export const DUB_OPERATE_CWD =
-  (import.meta.env?.VITE_DUB_ECOSYSTEM_PATH as string | undefined) ??
-  "/Users/kota/dev/dub-ecosystem";
+import type { ChatMessage } from "./commanderApi.ts";
+import type { CatalogEntry } from "./operateApi.ts";
 
-/** Block subagent fan-out on operate runs too (plan + execute stay lean & deterministic). */
-export const OPERATE_RUN_ARGS = ["--disallowedTools", "Task"];
+/** Neutral cwd for planner runs: no repo, no project CLAUDE.md. */
+export const OPERATE_PLANNER_CWD =
+  (import.meta.env?.VITE_OPERATE_PLANNER_CWD as string | undefined) ?? "/tmp";
 
-export type OperationKind = "d1_read" | "d1_write" | "api_call";
+/** No tools at all (no Bash/Read/Grep/Task/MCP) — the planner only writes text. */
+export const OPERATE_PLANNER_ARGS = ["--tools", "", "--strict-mcp-config"];
 
-/** One reviewable operation in a plan. */
-export interface Operation {
+/** Transcript budget: newest messages win when the session grows long. */
+const MESSAGE_CHARS = 3000;
+const TRANSCRIPT_CHARS = 40_000;
+
+/** Prefixes of the assistant messages the console writes itself (not the planner). */
+export const RESULT_PREFIX = { preview: "【確認結果】", execution: "【実行結果】" } as const;
+
+const KIND_LABEL: Record<CatalogEntry["kind"], string> = { read: "読み取り", write: "書き込み", delete: "削除" };
+const RISK_LABEL: Record<CatalogEntry["risk"], string> = { low: "低", mid: "中", high: "高" };
+
+export function describeCatalog(entries: CatalogEntry[]): string {
+  return entries
+    .map((e) => {
+      const tags = e.kind === "read" ? KIND_LABEL.read : `${KIND_LABEL[e.kind]}・リスク${RISK_LABEL[e.risk]}・${e.reversible ? "取り消し可" : "取り消し不可"}`;
+      const extra = [
+        e.hint ?? "",
+        e.query?.length ? `条件: ${e.query.join(", ")}` : "",
+        e.body ? `本文: ${e.body.allowed.join(", ")}（必須: ${e.body.required.join(", ")}）` : "",
+      ].filter(Boolean);
+      return `- ${e.id} [${tags}] ${e.method} ${e.path} — ${e.description}${extra.length ? ` / ${extra.join(" / ")}` : ""}`;
+    })
+    .join("\n");
+}
+
+function speaker(m: ChatMessage): string {
+  if (m.role === "user") return "ユーザー";
+  if (m.text.startsWith(RESULT_PREFIX.preview) || m.text.startsWith(RESULT_PREFIX.execution)) return "システム";
+  return "アシスタント";
+}
+
+/** The session so far, oldest first, trimmed from the oldest end to the budget. */
+export function buildTranscript(messages: ChatMessage[]): string {
+  const lines = messages
+    .filter((m) => m.text.trim() && m.status !== "streaming")
+    .map((m) => {
+      const text = m.text.length > MESSAGE_CHARS ? `${m.text.slice(0, MESSAGE_CHARS)}…（以下省略）` : m.text;
+      return `[${speaker(m)}]\n${text}`;
+    });
+  const out: string[] = [];
+  let used = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    used += lines[i]!.length;
+    if (used > TRANSCRIPT_CHARS) break;
+    out.unshift(lines[i]!);
+  }
+  return out.join("\n\n") || "（まだありません）";
+}
+
+const RULES = [
+  "あなたは Dub（DevelopersHub の業務アプリ）のデータ操作アシスタントです。",
+  "",
+  "# 守ること",
+  "- 返答は必ず日本語。英語の文や生の JSON をユーザー向けの文章に混ぜない。",
+  "- 使える操作は「操作カタログ」の op だけ。SQL・curl・ファイル・カタログに無い API は使わないし提案もしない。",
+  "- あなたはリポジトリもファイルも見られない。ID・version・メールアドレスを推測で書かない。必ず読み取り手順の結果を {{手順id.パス}} で参照する。<EVENT_ID> のような仮の値は禁止（残っていると実行されない）。",
+  "- 読み取り手順は承認前に自動で実行され、その結果が後の手順に入る。",
+  "- 物理削除と一括エンドポイントは無い。1回の書き込みは20件まで。超えるなら条件で絞る案を文章で返す。",
+  "- これまでの会話と［システム］の確認結果・実行結果を必ず踏まえる。「さっきの」「それ」は会話から特定する。直前の実行が一部失敗なら、失敗した対象だけをやり直す計画にする。",
+  "- 依頼が Dub のデータを読む・変える内容なら計画を返す。雑談・使い方の質問・相談には計画を作らず、普通の日本語の文章だけで答える（JSON もコードブロックも書かない）。",
+  "- 対象が会話からも読み取りからも特定できないときは、計画を作らずに確認の質問を文章で返す。",
+  "",
+  "# 計画の形式",
+  "冒頭に何をするかを日本語1〜2文で書き、続けて ```json のコードブロックを1つだけ書く。形式:",
+  '{"type":"plan","summary":"何を・何件・誰に を日本語1文で","steps":[{"id":"英字で始まるid","op":"カタログのid","params":{},"query":{},"body":{},"forEach":"前の手順id.配列のパス","where":[{"field":"項目","op":"eq|ne|contains|endsWith|in|notIn|empty|notEmpty","value":"値"}],"label":"{{item.title}}"}]}',
+  "- 参照: {{手順id.items[0].id}}、配列の全要素は {{手順id.items[*].address}}。forEach 中の各要素は {{item.項目}}。{{item.email|localPart}} で @ より前。",
+  "- 値が参照1つだけなら元の型（数値など）のまま入る。forEach を付けた読み取りの結果は配列になる。",
+  "- label には対象を人が見て分かる名前（イベント名・氏名など）を入れる。",
+  "",
+  "# 例",
+  "依頼「北陸ITカンファレンス2027 の概要を『…』に差し替えて」:",
+  '{"type":"plan","summary":"イベント「北陸ITカンファレンス2027」1件の概要を差し替えます","steps":[{"id":"list","op":"events.list","query":{"limit":"100"}},{"id":"ev","op":"events.get","forEach":"list.items","where":[{"field":"title","op":"contains","value":"北陸ITカンファレンス2027"}],"params":{"id":"{{item.id}}"}},{"id":"upd","op":"events.update","forEach":"ev","params":{"id":"{{item.id}}"},"body":{"description":"…","version":"{{item.version}}"},"label":"{{item.title}}"}]}',
+  "依頼「メールアドレスが無い人全員に発行して」:",
+  '{"type":"plan","summary":"受信アドレスが未発行の在籍メンバーにアドレスを発行します","steps":[{"id":"users","op":"users.list","query":{"status":"active","limit":"200"}},{"id":"issued","op":"mail.issued.list"},{"id":"issue","op":"mail.issued.create","forEach":"users.items","where":[{"field":"email","op":"endsWith","value":"@developershub.jp"},{"field":"email","op":"notIn","value":"{{issued.items[*].address}}"}],"body":{"localPart":"{{item.email|localPart}}"},"label":"{{item.displayName}}"}]}',
+  "依頼「通知『デプロイ完了』を削除して」:",
+  '{"type":"plan","summary":"通知「デプロイ完了」をメンバー全員の受信箱から取り下げます","steps":[{"id":"n","op":"notifications.manage.list","query":{"limit":"200"}},{"id":"del","op":"notifications.unpublish","forEach":"n.items","where":[{"field":"title","op":"contains","value":"デプロイ完了"},{"field":"publishedBroadcastId","op":"notEmpty"}],"params":{"id":"{{item.id}}"},"label":"{{item.title}}"}]}',
+].join("\n");
+
+export function buildPlannerPrompt(input: { catalog: CatalogEntry[]; history: ChatMessage[]; request: string }): string {
+  return [
+    RULES,
+    "",
+    "# 操作カタログ",
+    describeCatalog(input.catalog),
+    "",
+    "# これまでの会話",
+    buildTranscript(input.history),
+    "",
+    "# 今回の依頼",
+    input.request,
+  ].join("\n");
+}
+
+/** After a read-only preview: answer the question from the reads, in prose. */
+export function buildAnswerPrompt(input: { catalog: CatalogEntry[]; history: ChatMessage[] }): string {
+  return buildPlannerPrompt({
+    ...input,
+    request:
+      "直前の［システム］確認結果の読み取りデータを使って、ユーザーの最後の依頼に日本語の文章で答えてください。" +
+      "計画や JSON は書かないこと。データが足りなければ、何が分からなかったかを書くこと。",
+  });
+}
+
+// ---- reply parsing ------------------------------------------------------------------
+
+export interface PlanStep {
   id: string;
-  kind: OperationKind;
-  /** One-line human summary (何をするか). */
-  title: string;
-  /** SQL for d1_read / d1_write. */
-  sql?: string;
-  /** HTTP method / url / JSON body for api_call. */
-  method?: string;
-  url?: string;
-  body?: string;
-  /** True for delete/drop/truncate (and DELETE api calls) — needs a strong confirm. */
-  destructive: boolean;
-  /** Optional rationale from the planner. */
-  note?: string;
+  op: string;
+  [key: string]: unknown;
+}
+export interface PlannerPlan {
+  type: "plan";
+  summary: string;
+  steps: PlanStep[];
 }
 
-export interface OperationPlan {
-  summary?: string;
-  ops: Operation[];
-}
+export type PlannerReply =
+  | { kind: "plan"; plan: PlannerPlan; intro: string }
+  | { kind: "answer"; text: string }
+  | { kind: "invalid"; error: string };
 
-// --- classification safety net ---------------------------------------------------
-// We NEVER trust the planner to under-classify a write as a read: the SQL/method is the
-// source of truth. These re-derive kind + destructiveness from the operation itself.
+const FENCE_RE = /```(?:json)?\s*([\s\S]*?)```/gi;
 
-const D1_READ_RE = /^\s*(select|pragma|explain|with[\s\S]*\bselect\b)/i;
-const D1_DESTRUCTIVE_RE =
-  /\b(delete\s+from|drop\s+(table|index|column|database|view|trigger)|truncate)\b/i;
-
-/** SELECT/PRAGMA/EXPLAIN (incl. CTEs) are reads; anything else that writes is d1_write. */
-export function classifyD1Sql(sql: string): "d1_read" | "d1_write" {
-  return D1_READ_RE.test(sql) ? "d1_read" : "d1_write";
-}
-
-/** delete/drop/truncate = destructive (data loss), the strong-confirm tier. */
-export function isDestructiveSql(sql: string): boolean {
-  return D1_DESTRUCTIVE_RE.test(sql);
-}
-
-/** True when this op mutates prod state (needs at least an explicit confirm). */
-export function isWrite(op: Operation): boolean {
-  if (op.kind === "d1_read") return false;
-  if (op.kind === "d1_write") return true;
-  // api_call: GET/HEAD are reads; everything else mutates.
-  return !/^(get|head|options)$/i.test(op.method ?? "GET");
-}
-
-/** Re-derive kind + destructive from the operation's own SQL/method (defense in depth). */
-export function normalizeOperation(raw: Operation): Operation {
-  const op = { ...raw };
-  if ((op.kind === "d1_read" || op.kind === "d1_write") && op.sql) {
-    op.kind = classifyD1Sql(op.sql);
-    op.destructive = op.destructive || isDestructiveSql(op.sql);
-  }
-  if (op.kind === "api_call") {
-    op.destructive = op.destructive || /^delete$/i.test(op.method ?? "");
-  }
-  return op;
-}
-
-// --- prompts ----------------------------------------------------------------------
-
-/** Phase 1: turn an intent into a reviewable JSON plan WITHOUT touching prod. */
-export const PLAN_SYSTEM_PROMPT =
-  "あなたは Dub エコシステム(本番バックエンド)の操作プランナーです。" +
-  "ユーザーの要望を、レビュー可能な具体的操作の一覧に落とし込みます。" +
-  "厳守: この段階では本番に一切アクセスしない(SQL/APIを実行しない・書き込まない)。" +
-  "スキーマ確認が要る場合のみ、リポジトリ内の infra/d1 のマイグレーション等を読み取りで参照する。" +
-  "サブエージェントを立てない。" +
-  "出力は必ず1つの ```json コードブロックだけにする(前後に説明文を書かない)。形式:" +
-  ' {"summary": "全体の要約", "ops": [{"id":"op1","kind":"d1_read|d1_write|api_call",' +
-  '"title":"何をするか(日本語1行)","sql":"...","method":"POST","url":"...","body":"...",' +
-  '"destructive":false,"note":"補足"}]}。' +
-  "SQL は additive を原則とし(スキーマ削除をしない)、実データに合う正確な列名で書く。" +
-  "delete/drop/truncate を含む操作は destructive:true。d1_read=SELECT等の読み取り、" +
-  "それ以外の書き込みは d1_write。api_call は Dub の HTTP API を叩く操作。";
-
-// --- plan parsing -----------------------------------------------------------------
-
-export type ParsePlanResult =
-  | { ok: true; plan: OperationPlan }
-  | { ok: false; error: string; raw: string };
-
-/** Extract the LAST ```json fenced block (or a bare JSON object) from the planner text. */
-export function extractJsonBlock(text: string): string | null {
-  const fence = /```(?:json)?\s*([\s\S]*?)```/gi;
-  let m: RegExpExecArray | null;
-  let last: string | null = null;
-  while ((m = fence.exec(text)) !== null) {
-    if (m[1] && m[1].trim()) last = m[1].trim();
-  }
-  if (last) return last;
-  // Fallback: first {...} that spans an object.
-  const brace = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (brace >= 0 && end > brace) return text.slice(brace, end + 1);
-  return null;
-}
-
-/** Parse a planner answer into a normalized OperationPlan (kinds/destructive re-derived). */
-export function parsePlan(text: string): ParsePlanResult {
-  const block = extractJsonBlock(text);
-  if (!block) return { ok: false, error: "プランJSONが見つかりませんでした", raw: text };
+/** A fenced block wins; else the reply is prose (an answer / a clarifying question). */
+export function parsePlannerReply(text: string): PlannerReply {
+  const blocks = [...text.matchAll(FENCE_RE)];
+  const last = blocks.at(-1);
+  if (!last) return { kind: "answer", text: text.trim() };
   let data: unknown;
   try {
-    data = JSON.parse(block);
-  } catch (e) {
-    return { ok: false, error: `プランJSONの解析に失敗: ${(e as Error).message}`, raw: block };
+    data = JSON.parse(last[1]!.trim());
+  } catch {
+    return { kind: "invalid", error: "計画の形式が読み取れませんでした。言い方を変えてもう一度お願いします" };
   }
-  const obj = data as { summary?: unknown; ops?: unknown };
-  if (!Array.isArray(obj.ops)) {
-    return { ok: false, error: "プランに ops 配列がありません", raw: block };
+  const obj = data as Partial<PlannerPlan> | null;
+  if (!obj || !Array.isArray(obj.steps) || obj.steps.length === 0) {
+    return { kind: "invalid", error: "計画に手順が含まれていませんでした。もう一度お願いします" };
   }
-  const ops: Operation[] = obj.ops.map((rawOp, i) => {
-    const o = (rawOp ?? {}) as Partial<Operation>;
-    const kind: OperationKind =
-      o.kind === "d1_write" || o.kind === "api_call" || o.kind === "d1_read"
-        ? o.kind
-        : "d1_read";
-    return normalizeOperation({
-      id: typeof o.id === "string" && o.id ? o.id : `op${i + 1}`,
-      kind,
-      title: typeof o.title === "string" ? o.title : "(無題の操作)",
-      ...(typeof o.sql === "string" ? { sql: o.sql } : {}),
-      ...(typeof o.method === "string" ? { method: o.method } : {}),
-      ...(typeof o.url === "string" ? { url: o.url } : {}),
-      ...(typeof o.body === "string" ? { body: o.body } : {}),
-      destructive: o.destructive === true,
-      ...(typeof o.note === "string" ? { note: o.note } : {}),
-    });
-  });
+  const intro = text.slice(0, last.index).replace(FENCE_RE, "").trim();
   return {
-    ok: true,
-    plan: { ...(typeof obj.summary === "string" ? { summary: obj.summary } : {}), ops },
+    kind: "plan",
+    plan: { type: "plan", summary: typeof obj.summary === "string" ? obj.summary : "", steps: obj.steps as PlanStep[] },
+    intro,
   };
 }
