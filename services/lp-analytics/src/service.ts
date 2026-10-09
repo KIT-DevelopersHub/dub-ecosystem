@@ -15,6 +15,7 @@ import {
   sourceFromParam,
 } from "./domain";
 import { visitCursor } from "./d1-repo";
+import { referrerLabel } from "./site-traffic";
 import type {
   AppDeps,
   IngestVisitRequest,
@@ -23,6 +24,7 @@ import type {
   LpLinkStats,
   LpLinkSummary,
   LpStats,
+  LpSiteTraffic,
   LpVisitsPage,
   ReqCtx,
 } from "./types";
@@ -134,6 +136,44 @@ export class LpService {
       byDevice: byDevice
         .map((r) => ({ key: r.key, label: DEVICE_LABELS[r.key] ?? r.key, visits: r.visits, uniques: r.uniques }))
         .sort(byVisits),
+    };
+  }
+
+  /** Cloudflare Web Analytics for the LP site, per JST day + referrer (hosts merged by label).
+   *  The referrer split is sampled separately, so its sum can differ a little from the totals. */
+  async getSiteTraffic(q: RangeQuery): Promise<LpSiteTraffic> {
+    const range = parseRange(q.from, q.to);
+    const days = eachDay(range.from, range.to);
+    const empty = { range, totals: { pageViews: 0, visits: 0 }, byReferrer: [] };
+    const zeroDays = days.map((date) => ({ date, pageViews: 0, visits: 0 }));
+    if (!this.deps.siteTraffic) return { configured: false, ...empty, byDay: zeroDays };
+
+    const data = await this.deps.siteTraffic.fetchDays(days);
+    const lpHost = new URL(this.deps.lpBaseUrl).host;
+    const perDay = new Map(zeroDays.map((d) => [d.date, { ...d }]));
+    const totals = { pageViews: 0, visits: 0 };
+    for (const r of data.days) {
+      const day = perDay.get(r.date);
+      if (!day) continue;
+      day.pageViews += r.pageViews;
+      day.visits += r.visits;
+      totals.pageViews += r.pageViews;
+      totals.visits += r.visits;
+    }
+    const perLabel = new Map<string, { key: string; label: string; pageViews: number; visits: number }>();
+    for (const r of data.referrers) {
+      const label = referrerLabel(r.host, lpHost);
+      const bucket = perLabel.get(label) ?? { key: r.host || "direct", label, pageViews: 0, visits: 0 };
+      bucket.pageViews += r.pageViews;
+      bucket.visits += r.visits;
+      perLabel.set(label, bucket);
+    }
+    return {
+      configured: true,
+      range,
+      totals,
+      byDay: [...perDay.values()],
+      byReferrer: [...perLabel.values()].sort((a, b) => b.pageViews - a.pageViews),
     };
   }
 

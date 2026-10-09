@@ -10,6 +10,7 @@ import { applyAll } from "../../../infra/d1/src/apply";
 import { createApp } from "../src/app";
 import { createD1LpRepo } from "../src/d1-repo";
 import { InMemoryLpRepo } from "../src/memory-repo";
+import type { SiteTrafficSource } from "../src/site-traffic";
 import type { AppDeps, Authz, LpRepo } from "../src/types";
 
 export function fakeAuthz(granted: Set<identity.PermissionKey>): Authz {
@@ -47,7 +48,12 @@ export interface Clock {
   set(iso: string): void;
 }
 
-export async function makeApp(kind: RepoKind, level: policy.AppAccessLevel = "edit", dailyVisitCap = 5000) {
+export async function makeApp(
+  kind: RepoKind,
+  level: policy.AppAccessLevel = "edit",
+  dailyVisitCap = 5000,
+  siteTraffic: SiteTrafficSource | null = null,
+) {
   let now = "2026-10-07T03:00:00.000Z";
   let seq = 0;
   // ULID-like monotonic ids so "newest first by id" holds like production.
@@ -62,6 +68,7 @@ export async function makeApp(kind: RepoKind, level: policy.AppAccessLevel = "ed
     newLinkId: () => id("lnk"),
     newVisitId: () => id("lpv"),
     dailyVisitCap,
+    siteTraffic,
   };
   const app = createApp(deps);
   const clock: Clock = { set: (iso) => (now = iso) };
