@@ -7,12 +7,19 @@
 //      events on top of the replay.
 // Terminal runs never open a socket, so the board can mount many cards cheaply.
 import { useEffect, useRef, useState } from "react";
-import { formatEvent, type CommanderClient, type DaemonRunEvent } from "./client.ts";
+import {
+  eventEntries,
+  formatEvent,
+  type CommanderClient,
+  type DaemonRunEvent,
+  type LogEntry,
+} from "./client.ts";
 import type { RunHistoryApi, RunStatus } from "./commanderApi.ts";
 
 export interface RunStreamState {
   status: RunStatus | "idle";
-  log: string[];
+  /** Readable log entries (noise already dropped), oldest first. */
+  entries: LogEntry[];
   /** Last non-empty log line — for a card's compact "latest output" row. */
   lastLine: string;
   /** True while a live SSE socket is open. */
@@ -28,7 +35,7 @@ export function useRunStream(
   const { client, history } = deps;
   const [state, setState] = useState<RunStreamState>({
     status: "idle",
-    log: [],
+    entries: [],
     lastLine: "",
     live: false,
   });
@@ -40,16 +47,18 @@ export function useRunStream(
 
   useEffect(() => {
     if (!runId) {
-      setState({ status: "idle", log: [], lastLine: "", live: false });
+      setState({ status: "idle", entries: [], lastLine: "", live: false });
       return;
     }
     let cancelled = false;
     let unsub: (() => void) | null = null;
 
-    // formatEvent returns "" for unreadable events (thinking, rate limits) — skip them.
-    const push = (line: string) => {
-      if (!line.trim()) return;
-      setState((prev) => ({ ...prev, log: [...prev.log, line], lastLine: line }));
+    // Unreadable events (thinking, rate limits) yield no entries — skip them.
+    const push = (ev: DaemonRunEvent) => {
+      const added = eventEntries(ev);
+      if (added.length === 0) return;
+      const line = formatEvent(ev);
+      setState((prev) => ({ ...prev, entries: [...prev.entries, ...added], lastLine: line }));
     };
 
     void (async () => {
@@ -61,11 +70,11 @@ export function useRunStream(
         if (cancelled) return;
         if (detail) {
           seededStatus = detail.run.status;
-          const lines = detail.events
-            .map((e) => formatEvent({ type: e.type, ...e.payload } as DaemonRunEvent))
-            .filter((l) => l.trim());
+          const events = detail.events.map((e) => ({ type: e.type, ...e.payload }) as DaemonRunEvent);
+          const entries = events.flatMap(eventEntries);
+          const lines = events.map(formatEvent).filter((l) => l.trim());
           const last = lines[lines.length - 1] ?? "";
-          setState({ status: detail.run.status, log: lines, lastLine: last, live: false });
+          setState({ status: detail.run.status, entries, lastLine: last, live: false });
         }
       } catch {
         /* service down → fall through to a bare live attempt */
@@ -81,7 +90,7 @@ export function useRunStream(
             if (ev.type === "status" && ev.status) {
               setState((prev) => ({ ...prev, status: ev.status! }));
             }
-            push(formatEvent(ev));
+            push(ev);
           },
           () => setState((prev) => ({ ...prev, live: false })),
         );
