@@ -168,6 +168,7 @@ if [[ "$MODE" != "--check" && -n "${COMMANDER_RELAY_URL:-}" && -n "${COMMANDER_R
         COMMANDER_DAEMON_URL="http://127.0.0.1:$DAEMON_PORT" \
         COMMANDER_SERVICE_URL="http://127.0.0.1:$SERVICE_PORT" \
         COMMANDER_OPERATOR_TOKEN="$TOKEN" \
+        COMMANDER_RELAY_CWD_ROOTS="${COMMANDER_RELAY_CWD_ROOTS:-$(dirname "$REPO_ROOT")}" \
         node --experimental-strip-types commander/daemon/src/relay.ts ) >"$LOG_DIR/relay.log" 2>&1 &
   PIDS+=("$!")
   RELAY_ON="1"

@@ -132,8 +132,12 @@ browser (Dub /commander) --wss--> commander-relay (Durable Object) <--wss-- rela
 - ブラウザ側の認証はいつもの Dub ログイン + Commander の編集権限（`app:commander:edit`）。
   gateway が 60 秒だけ有効なチケットを発行し、それで WebSocket を開く。ブラウザに操作トークンは置かない。
 - PC 側の認証は共有の秘密値 1 つ（`COMMANDER_RELAY_SECRET` = Worker の `RELAY_AGENT_SECRET`）。
+- ブラウザ側はさらに、Worker の `COMMANDER_OWNER_USER_IDS`（PC の持ち主の user id）に入っている人だけ。
+  未設定なら誰にもチケットを出さない。開いたままの接続も 15 分ごとに権限を確認し直す。
 - エージェントが中継するのは daemon と commander-service の 2 つだけ。宛先 URL と操作トークンは
-  PC 側が持ち、ブラウザはパスしか指定できない。
+  PC 側が持ち、ブラウザはパスしか指定できない。daemon は UI が使う 5 ルートだけを通し、run の
+  追加フラグは権限を絞る `--disallowedTools` だけ、cwd は `COMMANDER_RELAY_CWD_ROOTS`
+  （既定: リポジトリの 1 つ上 = worktree 置き場）の中だけを許す。
 - $0: 無料プランの SQLite Durable Object + Hibernation API。待機中の keepalive は課金対象外の
   自動応答で返す。
 

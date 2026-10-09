@@ -5,7 +5,7 @@ import { checkRouteCoverage, type PermissionGranter } from "@dub/policy-gate";
 import { HDR_USER_ID } from "@dub/observability";
 import { createApp } from "../src/app";
 import { POLICY_TABLE } from "../src/policy-table";
-import { verifyTicket } from "../src/ticket";
+import { signTicket, verifyTicket } from "../src/ticket";
 import worker from "../src/index";
 import type { Env } from "../src/env";
 
@@ -19,6 +19,8 @@ const ENV: Env = {
   RELAY_TICKET_SECRET: "ticket-secret",
   RELAY_AGENT_SECRET: "agent-secret",
   RELAY_WS_URL: "wss://relay.example/ws/browser",
+  RELAY_ALLOWED_ORIGINS: "https://app.example",
+  COMMANDER_OWNER_USER_IDS: "user_owner",
 };
 
 function post(app: ReturnType<typeof createApp>, env: Env, headers: Record<string, string> = { [HDR_USER_ID]: "user_owner" }) {
@@ -49,6 +51,10 @@ describe("POST /commander/relay/ticket", () => {
     const env = { ...ENV, COMMANDER_OWNER_USER_IDS: "user_owner, user_alt" };
     expect((await post(createApp({ authz: allowAll }), env)).status).toBe(200);
     expect((await post(createApp({ authz: allowAll }), env, { [HDR_USER_ID]: "user_other_admin" })).status).toBe(403);
+  });
+
+  it("no owner configured means nobody, not every editor", async () => {
+    expect((await post(createApp({ authz: allowAll }), { ...ENV, COMMANDER_OWNER_USER_IDS: "" })).status).toBe(503);
   });
 
   it("fails closed when secrets are not configured", async () => {
@@ -89,6 +95,22 @@ describe("Worker entry", () => {
     expect((await worker.fetch(upgrade("Bearer agent-secret"), { ...env, RELAY_AGENT_SECRET: "" }, ctx)).status).toBe(401);
     expect(doCalls).toBe(0);
     expect((await worker.fetch(upgrade("Bearer agent-secret"), env, ctx)).status).toBe(200);
+    expect(doCalls).toBe(1);
+  });
+
+  it("rejects browser upgrades with a bad Origin or ticket before waking the DO", async () => {
+    let doCalls = 0;
+    const env: Env = {
+      ...ENV,
+      RELAY: { idFromName: () => ({}), get: () => ({ fetch: async () => (doCalls++, new Response("ok")) }) } as never,
+    };
+    const good = await signTicket("ticket-secret", "user_owner");
+    const upgrade = (ticket: string, origin: string) =>
+      new Request(`https://relay.example/ws/browser?ticket=${ticket}`, { headers: { Upgrade: "websocket", Origin: origin } });
+    expect((await worker.fetch(upgrade(good, "https://evil.example"), env, ctx)).status).toBe(403);
+    expect((await worker.fetch(upgrade("x.y", "https://app.example"), env, ctx)).status).toBe(401);
+    expect(doCalls).toBe(0);
+    expect((await worker.fetch(upgrade(good, "https://app.example"), env, ctx)).status).toBe(200);
     expect(doCalls).toBe(1);
   });
 });

@@ -17,9 +17,9 @@ export interface Env {
   /** Comma-separated exact browser origins allowed to open the browser socket. */
   RELAY_ALLOWED_ORIGINS?: string;
   /**
-   * Optional comma-separated user ids. When set, only these users get a ticket even if their
-   * role holds app:commander:edit — the relay drives the operator's own PC, so this narrows
-   * "any admin" down to the machine's owner.
+   * REQUIRED comma-separated user ids of the PC's owner(s). Only these users get a ticket even
+   * if their role holds app:commander:edit — the relay runs claude on the operator's own PC, so
+   * "any admin" is not enough. Unset = nobody (fail closed). Set with `wrangler secret put`.
    */
   COMMANDER_OWNER_USER_IDS?: string;
 

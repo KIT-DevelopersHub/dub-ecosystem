@@ -105,7 +105,9 @@ export function CommanderScreen(): JSX.Element {
       <div data-testid="fe2-commander-workspace">
         {/* Keyed by transport so switching never mixes loopback and relay state. */}
         {clients ? (
-          <CommanderWorkspace key="relay" client={clients.client} api={clients.api} />
+          // Slower board refresh over the relay: every poll wakes the relay's Durable Object
+          // (free-tier duration). Live run logs still stream in real time.
+          <CommanderWorkspace key="relay" client={clients.client} api={clients.api} boardPollMs={15_000} />
         ) : (
           <CommanderWorkspace key="loopback" />
         )}

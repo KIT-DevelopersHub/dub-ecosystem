@@ -9,7 +9,8 @@
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { createApp } from "./app";
 import type { Env } from "./env";
-import { secretEquals } from "./ticket";
+import { originAllowed } from "./protocol";
+import { secretEquals, verifyTicket } from "./ticket";
 
 export { CommanderRelay } from "./relay-do";
 
@@ -32,6 +33,16 @@ export default {
         const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
         // Fail closed when unset; never let an empty secret match an empty header.
         if (!expected || !presented || !secretEquals(presented, expected)) {
+          return new Response("unauthorized", { status: 401 });
+        }
+      } else {
+        // Stateless pre-check so anonymous upgrades never wake (or bill) the DO. The DO
+        // repeats both checks as the last hop.
+        const ticket = url.searchParams.get("ticket");
+        if (!originAllowed(request.headers.get("Origin"), env.RELAY_ALLOWED_ORIGINS)) {
+          return new Response("forbidden", { status: 403 });
+        }
+        if (!env.RELAY_TICKET_SECRET || !ticket || !(await verifyTicket(env.RELAY_TICKET_SECRET, ticket))) {
           return new Response("unauthorized", { status: 401 });
         }
       }

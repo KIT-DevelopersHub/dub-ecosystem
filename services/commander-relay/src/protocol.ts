@@ -26,7 +26,8 @@ export type BrowserFrame =
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const TARGETS = new Set<string>(["daemon", "service"]);
 const METHODS = new Set<string>(["GET", "POST", "PATCH", "DELETE"]);
-export const MAX_BODY_CHARS = 512 * 1024;
+// Characters, not bytes: 256K chars of 3-byte UTF-8 still fits the 1 MiB WebSocket frame cap.
+export const MAX_BODY_CHARS = 256 * 1024;
 const MAX_PATH_CHARS = 2048;
 /** Separator between a browser socket's tag and the browser's own request id. */
 const SEP = "~";

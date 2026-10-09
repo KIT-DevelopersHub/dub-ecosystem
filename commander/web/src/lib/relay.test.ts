@@ -94,3 +94,38 @@ describe("RelayConnection", () => {
     relay.close();
   });
 });
+
+describe("RelayConnection agent changes", () => {
+  it("ends streams and fails requests when the agent goes offline or is replaced", async () => {
+    FakeWs.last = null;
+    const { relay, ws } = await connected();
+    ws.push({ t: "agent", online: true, since: "A" });
+    let ended = 0;
+    relay.subscribe("/runs/r/events", () => {}, () => (ended += 1));
+    const p = relay.request("service", "GET", "/tasks");
+    await vi.waitFor(() => expect(ws.sent).toHaveLength(2));
+    ws.push({ t: "agent", online: true, since: "B" }); // reconnected agent: old work is gone
+    await expect(p).rejects.toThrow("agent changed");
+    expect(ended).toBe(1);
+    relay.close();
+  });
+
+  it("an abandoned connect() never leaves a second socket behind", async () => {
+    let resolveTicket: (t: { ticket: string; wsUrl: string }) => void = () => {};
+    const created: FakeWs[] = [];
+    class Counting extends FakeWs {
+      constructor(url: string) {
+        super(url);
+        created.push(this);
+      }
+    }
+    const relay = new RelayConnection(() => new Promise((r) => (resolveTicket = r)), { WebSocketCtor: Counting as never });
+    relay.connect();
+    relay.close(); // StrictMode-style unmount while the ticket is in flight
+    relay.connect();
+    resolveTicket({ ticket: "t", wsUrl: "wss://relay/ws/browser" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(created.length).toBeLessThanOrEqual(1);
+    relay.close();
+  });
+});

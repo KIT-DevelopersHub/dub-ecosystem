@@ -55,6 +55,10 @@ export class RelayConnection {
   private backoff = 1_000;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  /** Bumped by connect()/close(); an open() from an older generation abandons itself. */
+  private gen = 0;
+  /** Which agent connection we are talking to; a change means its streams are gone. */
+  private agentSince: string | null | undefined = undefined;
   status: RelayStatus = "connecting";
 
   constructor(
@@ -70,11 +74,13 @@ export class RelayConnection {
 
   connect(): void {
     this.closed = false;
-    void this.open();
+    this.gen += 1;
+    void this.open(this.gen);
   }
 
   close(): void {
     this.closed = true;
+    this.gen += 1;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.ws?.close(1000, "closed");
     this.ws = null;
@@ -153,11 +159,15 @@ export class RelayConnection {
   private whenOpen(): Promise<void> {
     if (this.ws && this.ws.readyState === 1) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("relay not connected")), 10_000);
-      this.openWaiters.push(() => {
+      const waiter = () => {
         clearTimeout(timer);
         resolve();
-      });
+      };
+      const timer = setTimeout(() => {
+        this.openWaiters = this.openWaiters.filter((w) => w !== waiter);
+        reject(new Error("relay not connected"));
+      }, 10_000);
+      this.openWaiters.push(waiter);
     });
   }
 
@@ -165,18 +175,19 @@ export class RelayConnection {
     if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(frame));
   }
 
-  private async open(): Promise<void> {
-    if (this.closed) return;
+  private async open(gen: number): Promise<void> {
+    if (this.closed || gen !== this.gen) return;
     this.setStatus(this.status === "online" ? "connecting" : this.status);
     let ticket: RelayTicket;
     try {
       ticket = await this.getTicket();
     } catch {
+      if (gen !== this.gen) return;
       this.setStatus("disconnected");
       this.scheduleRetry();
       return;
     }
-    if (this.closed) return;
+    if (this.closed || gen !== this.gen) return;
     const Ctor = this.opts.WebSocketCtor ?? WebSocket;
     const sep = ticket.wsUrl.includes("?") ? "&" : "?";
     const ws = new Ctor(`${ticket.wsUrl}${sep}ticket=${encodeURIComponent(ticket.ticket)}`);
@@ -188,11 +199,18 @@ export class RelayConnection {
       for (const w of waiters) w();
     };
     ws.onmessage = (m) => this.onFrame(String(m.data));
-    ws.onclose = () => {
+    ws.onclose = (ev: { code?: number }) => {
       if (this.ws !== ws) return;
       this.ws = null;
+      this.agentSince = undefined;
       this.failAll("relay disconnected");
       if (this.closed) return;
+      // 4401 = the relay's periodic re-authorization: reconnect at once with a fresh ticket.
+      if (ev?.code === 4401) {
+        this.backoff = 1_000;
+        void this.open(this.gen);
+        return;
+      }
       this.setStatus("disconnected");
       this.scheduleRetry();
     };
@@ -202,7 +220,8 @@ export class RelayConnection {
     if (this.closed) return;
     const wait = this.backoff;
     this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
-    this.retryTimer = setTimeout(() => void this.open(), wait);
+    const gen = this.gen;
+    this.retryTimer = setTimeout(() => void this.open(gen), wait);
   }
 
   private onFrame(raw: string): void {
@@ -213,6 +232,11 @@ export class RelayConnection {
       return;
     }
     if (f.t === "agent") {
+      const since = f.online && typeof f.since === "string" ? f.since : null;
+      // Agent gone or replaced: its in-flight requests and run streams will never finish, so
+      // end them now (the run view then falls back to the persisted log instead of freezing).
+      if (this.agentSince !== undefined && since !== this.agentSince) this.failAll("agent changed");
+      this.agentSince = since;
       this.setStatus(f.online ? "online" : "agent_offline");
       return;
     }

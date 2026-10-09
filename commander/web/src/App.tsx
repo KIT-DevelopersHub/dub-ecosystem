@@ -19,6 +19,8 @@ interface WorkspaceProps {
   /** Controlled tab (the standalone page needs it to size its container). */
   tab?: CommanderTabId;
   onTabChange?: (tab: CommanderTabId) => void;
+  /** Board refresh interval. The relay passes a slower one: every poll wakes its Durable Object. */
+  boardPollMs?: number;
 }
 
 const TABS: { id: CommanderTabId; label: string }[] = [
@@ -42,6 +44,7 @@ export function CommanderWorkspace({
   initialTab = "board",
   tab: controlledTab,
   onTabChange,
+  boardPollMs,
 }: WorkspaceProps) {
   const [ownTab, setOwnTab] = useState<CommanderTabId>(initialTab);
   const tab = controlledTab ?? ownTab;
@@ -83,7 +86,7 @@ export function CommanderWorkspace({
       {/* Keep the chat tabs MOUNTED across tab switches (hidden, not unmounted) so their
           live message view + composer draft persist without a reload. */}
       <div hidden={tab !== "board"} data-testid="panel-board">
-        <Board {...(client ? { client } : {})} {...(api ? { api } : {})} />
+        <Board {...(client ? { client } : {})} {...(api ? { api } : {})} {...(boardPollMs ? { pollMs: boardPollMs } : {})} />
       </div>
       <div hidden={tab !== "ask"} data-testid="panel-ask">
         <AskDub />

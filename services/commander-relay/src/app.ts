@@ -42,12 +42,11 @@ function relayPolicyGate(options: AppOptions): MiddlewareHandler<AppBindings> {
   };
 }
 
-function isOwner(env: Env, userId: string): boolean {
-  const owners = (env.COMMANDER_OWNER_USER_IDS ?? "")
+function owners(env: Env): string[] {
+  return (env.COMMANDER_OWNER_USER_IDS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s !== "");
-  return owners.length === 0 || owners.includes(userId);
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -60,10 +59,12 @@ export function createApp(options: AppOptions = {}) {
   app.post("/commander/relay/ticket", async (c) => {
     const userId = c.get("userId");
     if (!userId) return c.json({ error: "unauthenticated" }, 401);
-    if (!isOwner(c.env, userId)) return c.json({ error: "not_owner" }, 403);
     const secret = c.env.RELAY_TICKET_SECRET;
     const wsUrl = c.env.RELAY_WS_URL;
-    if (!secret || !wsUrl) return c.json({ error: "relay_not_configured" }, 503);
+    // Fail closed: with no owner configured, nobody gets a ticket (not "every editor").
+    const allowed = owners(c.env);
+    if (!secret || !wsUrl || allowed.length === 0) return c.json({ error: "relay_not_configured" }, 503);
+    if (!allowed.includes(userId)) return c.json({ error: "not_owner" }, 403);
     const ticket = await signTicket(secret, userId);
     return c.json({ ticket, wsUrl, expiresInSec: TICKET_TTL_SEC });
   });

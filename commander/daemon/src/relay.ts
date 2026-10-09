@@ -7,6 +7,9 @@
 //   COMMANDER_DAEMON_URL      default http://127.0.0.1:4319
 //   COMMANDER_SERVICE_URL     default http://127.0.0.1:8798
 //   COMMANDER_OPERATOR_TOKEN  the loopback operator token (dev-up.sh's .commander.env.local)
+//   COMMANDER_RELAY_CWD_ROOTS comma-separated dirs a relayed run may use as cwd
+//                             (default: the parent of the current directory, i.e. the worktrees)
+import { dirname } from "node:path";
 import { RelayAgent, type AgentSocket } from "./relay-agent.ts";
 
 const relayUrl = process.env.COMMANDER_RELAY_URL ?? "";
@@ -28,6 +31,10 @@ const agent = new RelayAgent(
     daemonUrl: process.env.COMMANDER_DAEMON_URL ?? "http://127.0.0.1:4319",
     serviceUrl: process.env.COMMANDER_SERVICE_URL ?? "http://127.0.0.1:8798",
     operatorToken: process.env.COMMANDER_OPERATOR_TOKEN ?? "",
+    cwdRoots: (process.env.COMMANDER_RELAY_CWD_ROOTS ?? dirname(process.cwd()))
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.startsWith("/")),
   },
   {
     // Node's WebSocket (undici) accepts a headers option on top of the browser API.

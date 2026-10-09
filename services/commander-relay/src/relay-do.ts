@@ -17,8 +17,17 @@ import { verifyTicket } from "./ticket";
 const AGENT_TAG = "agent";
 /** Generous for one operator with a few tabs/devices; bounds what a leaked ticket can open. */
 const MAX_BROWSERS = 20;
+/**
+ * A browser socket outlives its 60s ticket, so re-check authorization periodically: after this
+ * the socket is closed (4401) and the page reconnects with a fresh ticket, which re-runs the
+ * gateway's policy gate. Revoking app:commander:edit therefore takes effect within this window.
+ */
+export const BROWSER_SESSION_MS = 15 * 60 * 1000;
+const OPEN = 1;
 
-type SocketMeta = { role: "agent"; since: string } | { role: "browser"; tag: string; userId: string };
+type SocketMeta =
+  | { role: "agent"; since: string }
+  | { role: "browser"; tag: string; userId: string; openedAt: number };
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -45,13 +54,19 @@ export class CommanderRelay {
   }
 
   status(): { agentOnline: boolean; agentSince: string | null; browsers: number } {
-    const agent = this.state.getWebSockets(AGENT_TAG)[0];
-    const meta = agent ? (agent.deserializeAttachment() as SocketMeta | null) : null;
-    return {
-      agentOnline: Boolean(agent),
-      agentSince: meta && meta.role === "agent" ? meta.since : null,
-      browsers: this.browsers().length,
-    };
+    const agent = this.liveAgent();
+    return { agentOnline: Boolean(agent), agentSince: agent ? agentSince(agent) : null, browsers: this.browsers().length };
+  }
+
+  /**
+   * The agent socket that can actually carry traffic. A replaced agent whose peer died never
+   * finishes its close handshake and lingers in getWebSockets(), so filter on OPEN and prefer
+   * the newest connection instead of trusting index 0.
+   */
+  private liveAgent(except?: CfWebSocket): CfWebSocket | null {
+    const open = this.state.getWebSockets(AGENT_TAG).filter((s) => s !== except && s.readyState === OPEN);
+    open.sort((a, b) => (agentSince(b) ?? "").localeCompare(agentSince(a) ?? ""));
+    return open[0] ?? null;
   }
 
   private acceptAgent(): Response {
@@ -67,8 +82,10 @@ export class CommanderRelay {
     const pair = new WebSocketPair();
     const server = pair[1] as unknown as CfWebSocket;
     this.state.acceptWebSocket(server, [AGENT_TAG]);
-    server.serializeAttachment({ role: "agent", since: new Date().toISOString() } satisfies SocketMeta);
-    this.broadcast({ t: "agent", online: true });
+    const since = new Date().toISOString();
+    server.serializeAttachment({ role: "agent", since } satisfies SocketMeta);
+    // `since` changes on every (re)connect, so browsers can drop streams the old agent owned.
+    this.broadcast({ t: "agent", online: true, since });
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
@@ -87,8 +104,9 @@ export class CommanderRelay {
     const pair = new WebSocketPair();
     const server = pair[1] as unknown as CfWebSocket;
     this.state.acceptWebSocket(server, [tag]);
-    server.serializeAttachment({ role: "browser", tag, userId: claims.userId } satisfies SocketMeta);
-    server.send(JSON.stringify({ t: "agent", online: this.state.getWebSockets(AGENT_TAG).length > 0 }));
+    server.serializeAttachment({ role: "browser", tag, userId: claims.userId, openedAt: Date.now() } satisfies SocketMeta);
+    const agent = this.liveAgent();
+    server.send(JSON.stringify({ t: "agent", online: Boolean(agent), since: agent ? agentSince(agent) : null }));
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
@@ -109,6 +127,15 @@ export class CommanderRelay {
       return;
     }
 
+    if (Date.now() - meta.openedAt > BROWSER_SESSION_MS) {
+      this.sendToAgent({ t: "gone", tag: meta.tag });
+      try {
+        ws.close(4401, "session expired");
+      } catch {
+        /* already closing */
+      }
+      return;
+    }
     const frame = parseBrowserFrame(message);
     if (!frame) {
       safeSend(ws, JSON.stringify({ t: "error", message: "invalid frame" }));
@@ -150,8 +177,7 @@ export class CommanderRelay {
       return;
     }
     // Only report offline when no replacement agent is already connected.
-    const others = this.state.getWebSockets(AGENT_TAG).filter((s) => s !== ws);
-    if (others.length === 0) this.broadcast({ t: "agent", online: false });
+    if (!this.liveAgent(ws)) this.broadcast({ t: "agent", online: false, since: null });
   }
 
   private browsers(): CfWebSocket[] {
@@ -167,10 +193,15 @@ export class CommanderRelay {
   }
 
   private sendToAgent(frame: unknown): boolean {
-    const agent = this.state.getWebSockets(AGENT_TAG)[0];
+    const agent = this.liveAgent();
     if (!agent) return false;
     return safeSend(agent, JSON.stringify(frame));
   }
+}
+
+function agentSince(ws: CfWebSocket): string | null {
+  const m = ws.deserializeAttachment() as SocketMeta | null;
+  return m?.role === "agent" ? m.since : null;
 }
 
 function safeSend(ws: CfWebSocket, data: string): boolean {
