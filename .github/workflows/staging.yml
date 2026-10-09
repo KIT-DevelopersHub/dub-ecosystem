@@ -150,6 +150,12 @@ jobs:
           VITE_DEMO_AUTOLOGIN: "1"
         run: pnpm run build
 
+      # Read-only: staging D1 vs the repo's migrations (see infra/d1/scripts/schema-gate.sh).
+      - name: D1 schema gate
+        env:
+          D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'warn' }}
+        run: bash infra/d1/scripts/schema-gate.sh dub-core-staging
+
       - name: Deploy to staging
         run: bash infra/deploy/deploy-staging.sh
 
