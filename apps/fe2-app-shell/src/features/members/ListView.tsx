@@ -6,20 +6,15 @@
 // スクロールしない）、氏名やアカウント状態が 2〜3 行に折り返す崩れを防ぐ。長い値
 // （メール・連絡先・氏名）は <Truncate> で省略（…）＋ title ツールチップにして幅を暴走させない。
 //
-// さらに横スクロールを抑えるため DataTable の「表示列」ピッカー(columnHiding)を有効化する。
-// 既定 on = 主要列(氏名/担当・役割/ステータス/所属チーム/連絡先) と 操作列(hideable:false・常時表示)。
-// 人物プロフィール列(参加届と共通)は ふりがな/名列番号 以外を defaultHidden で初期 off にし、
-// 初期表示の横スクロールを最小化する。developershub.jpメール(紐付いたアカウント)は既定表示 ON。
-// 選択は localStorage にユーザー単位で保存され、全部 on にすれば従来どおり全列表示。
+// DataTable の「表示列」ピッカー(columnHiding)で列を隠せる。既定は全列 on。
+// 人物プロフィール列(参加届と共通)も既定で全部出し、参加届の回答一覧と同じ項目が並ぶようにする。
+// 選択は localStorage にユーザー単位で保存される。
 import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
 import { hasStatusBadge } from "./memberStatus.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
-
-// 初期表示する人物プロフィール列 (残りは「表示列」から出せる)。
-const DEFAULT_VISIBLE_PROFILE = new Set(["nameKana", "rosterNumber"]);
 
 /** 1 行に収めつつ長い値は省略（…）+ ホバーで全文（title）。max はセルの上限幅. */
 function Truncate({ text, max = "16rem" }: { text: string; max?: string }): JSX.Element {
@@ -71,7 +66,6 @@ export function ListView({
         header: c.header,
         minWidth: "7rem",
         noWrap: true,
-        ...(DEFAULT_VISIBLE_PROFILE.has(c.id) ? {} : { defaultHidden: true }),
         cell: (m) => <Truncate text={c.value(m) || "—"} max="14rem" />,
       }),
     ),
@@ -155,7 +149,7 @@ export function ListView({
       rows={members}
       rowKey={(m) => m.id}
       testId="members-table"
-      columnHiding={{ storageKey: "dub.members.roster.columns.v1" }}
+      columnHiding={{ storageKey: "dub.members.roster.columns.v2" }}
       emptyState={<EmptyState title="メンバーがいません" description="「メンバーを追加」から登録してください" icon="users" />}
     />
   );

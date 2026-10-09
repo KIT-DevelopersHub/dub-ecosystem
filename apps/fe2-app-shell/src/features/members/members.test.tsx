@@ -15,6 +15,8 @@ import { MembersApiProvider } from "./MembersProvider.tsx";
 import { MembersPage } from "./MembersPage.tsx";
 import type { MembersOverview } from "./contracts.ts";
 import { member } from "@dub/types";
+import { ListView } from "./ListView.tsx";
+import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 
 /** 人物プロフィール (参加届と共通) を全部未入力にした土台。 */
 const P0 = member.emptyPersonProfile();
@@ -268,5 +270,26 @@ describe("MembersPage", () => {
     expect(within(l1Item as HTMLElement).queryByTestId("members-orgchip-R2")).not.toBeInTheDocument();
     expect(within(l2Item as HTMLElement).getByTestId("members-orgchip-R2")).toBeInTheDocument();
     expect(within(l2Item as HTMLElement).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
+  });
+});
+
+describe("ListView (運営名簿の表)", () => {
+  it("参加届と共通の人物項目を既定で全列表示する (Gmail 等が隠れない)", () => {
+    window.localStorage.clear();
+    render(
+      <ListView
+        members={OVERVIEW.members}
+        teamsById={new Map()}
+        accountLabels={new Map()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onLink={vi.fn()}
+        onUnlink={vi.fn()}
+      />,
+    );
+    const headers = within(screen.getByTestId("members-table"))
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent ?? "");
+    for (const c of PROFILE_DISPLAY_COLUMNS) expect(headers.some((h) => h.includes(c.header))).toBe(true);
   });
 });
