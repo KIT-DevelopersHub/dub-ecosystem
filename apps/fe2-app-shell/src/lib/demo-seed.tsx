@@ -50,6 +50,10 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:admin",
   "chat:create",
   "audit:read",
+  // The real admin role holds these (identity migration 0005); Drive共有's Google-account
+  // switch requires drive:write alongside identity:admin, like the server.
+  "drive:read",
+  "drive:write",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
