@@ -8,5 +8,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
   }
 }

@@ -35,6 +35,22 @@ user → event create → task → assignment → notification inbox → mail se
   provider = `MockMailProvider`). All domain rules and every table write are real, so
   guardrails still bite (missing-event reject, stale-version 409, unauth 401).
 
+## 1b. Authz boundaries across services (`test/authz-boundary.test.ts`)
+
+The smoke world above grants every key, so it cannot see an authorization boundary.
+`createAuthzWorld()` (`src/world.ts`) replaces that seam with the production decision path:
+each service's `policyGate` → `createAuthzGranter` → identity-roster's REAL
+`POST /authz/check` → RBAC over `identity_*` rows in the same seeded D1 (physical
+migrations, so system-role grants match production). Only the Service Binding is faked
+(an in-process `Fetcher` onto identity's Hono app). identity-roster's own routes use its
+in-process granter, exactly as in production (it cannot call `/authz/check` on itself).
+
+Covers identity-roster / member-service / drive-share-service (all three already mount
+`@dub/policy-gate`): own-org 200, other-org ids 404, other-org admin / key-less role 403
+(never 401), forged `x-dub-internal` buys no key, and every deny body is scanned for
+org_other data. Calls go straight to the service app — no gateway — so the service itself
+must enforce each boundary.
+
 ## 2. Contract conformance (`test/conformance.test.ts`)
 
 Reconciles each service's implemented Hono routes (parsed from `src/app.ts`, incl.
@@ -53,3 +69,16 @@ any future divergence between code and contract turns the suite red. Current fin
 
 Regenerate the baseline by deleting `conformance-baseline.json` and re-running (it
 bootstraps on absence).
+
+## 3. Read-only live smoke (`src/live-contract.ts`, `scripts/smoke-readonly.ts`)
+
+```
+node scripts/smoke-readonly.ts staging            # or: prod  [--base-url <origin>]
+```
+
+GET only, no credentials, never writes. Each check is a status code plus the body
+validated against the response schema `docs/openapi/api-gateway.yaml` declares for that
+operation (schemas are read from the spec, not re-written). `/healthz` must be 200, and
+anonymous reads of `/api/v1/{me,identity,members,driveshare}` must be the documented 401
+envelope. Retries transport errors / 5xx only. `deploy.yml` runs it against prod as its
+last step; `test/live-contract.test.ts` covers it offline.
