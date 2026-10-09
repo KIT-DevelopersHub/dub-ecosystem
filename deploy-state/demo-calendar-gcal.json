@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "calendar-gcal",
+  "worker": "dub-demo-calendar-gcal",
+  "url": "https://dub-demo-calendar-gcal.developershub-site.workers.dev",
+  "deployedSha": "28d83781",
+  "branch": "feat/calendar-gcal-ui",
+  "actor": "ko-tarou",
+  "markers": ["calendar-create-panel","calendar-timegrid"],
+  "live": true,
+  "verifiedAt": "2026-10-09T19:06:56Z",
+  "updatedAt": "2026-10-09T19:06:56Z",
+  "note": "カレンダー Googleカレンダー風UI + 予定の追加"
+}
