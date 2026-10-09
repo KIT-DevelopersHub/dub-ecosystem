@@ -55,6 +55,47 @@ export function mergeUrls(prior: ExtractedUrls, next: ExtractedUrls): ExtractedU
   };
 }
 
+/** Every distinct PR URL in `text`, in first-seen order. */
+export function extractPrUrls(text: string): string[] {
+  if (!text) return [];
+  return [...new Set(Array.from(text.matchAll(PR_RE), (m) => clean(m[0])))];
+}
+
+/** Append unseen PR URLs to a prior list (order kept, nothing dropped). */
+export function mergePrUrls(prior: string[], next: string[]): string[] {
+  return [...new Set([...prior, ...next])];
+}
+
+/** Parse the stored pr_urls JSON column; anything malformed reads as empty. */
+export function parsePrUrls(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const v: unknown = JSON.parse(json);
+    return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Only what the agent itself said: assistant text blocks + the final result. Tool output
+ * (`gh pr list`, grep of test fixtures, ...) is excluded so unrelated PRs mentioned in
+ * passing don't get attached to the task.
+ */
+export function authoredText(payload: unknown): string {
+  if (payload == null || typeof payload !== "object") return "";
+  const data = (payload as { data?: unknown }).data as
+    | { type?: unknown; result?: unknown; message?: { content?: unknown } }
+    | undefined;
+  if (!data) return "";
+  if (data.type === "result" && typeof data.result === "string") return data.result;
+  if (data.type !== "assistant" || !Array.isArray(data.message?.content)) return "";
+  return data.message.content
+    .filter((b): b is { type: "text"; text: string } => b?.type === "text" && typeof b.text === "string")
+    .map((b) => b.text)
+    .join("\n");
+}
+
 /** Flatten a run event's payload to the text we scan for URLs (line/message/result/raw). */
 export function eventText(payload: unknown): string {
   if (payload == null) return "";

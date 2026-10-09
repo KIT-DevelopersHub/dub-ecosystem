@@ -12,8 +12,9 @@ import {
   type CommanderApi,
   type FeaturePhase,
 } from "./lib/commanderApi.ts";
-import { groupByLane, LANES, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import { groupByLane, isRunningLane, LANES, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
 import { TaskCard } from "./TaskCard.tsx";
+import { DoneList } from "./DoneList.tsx";
 import { TaskComposer, type ComposerSubmit } from "./TaskComposer.tsx";
 import { TaskDrawer } from "./TaskDrawer.tsx";
 import { btnGhost, btnPrimary, t } from "./lib/theme.ts";
@@ -53,13 +54,21 @@ export const STAGING_DEPLOY_PROMPT =
 // Instruction the本番反映 run carries when the user approves staging → prod. Mirrors the
 // staging反映 run so 本番承認 も同じ進行UI（本番反映中 → 完了/失敗）に繋がる: the daemon
 // spawns a real run that ships the staging-approved版そのもの to 本番, and its live progress
-// is what the board shows as 「本番反映中」 until it succeeds (→完了) or fails (→要修正).
+// is what the board shows as 「本番反映中」 until it settles (→本番確認中).
 export const PROD_DEPLOY_PROMPT =
   "[commander] このタスクの staging で承認された版そのものを本番に反映してください。" +
   "手順: (1) staging承認版を main にマージ (別物を混ぜない・diff照合)、" +
   "(2) `pnpm deploy` で本番に反映、" +
   "(3) `pnpm verify:live prod \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
   "(4) 完了したら本番 URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
+
+// Phases a 追加指示 must rewind to demo_building before the follow-up run starts
+// (却下済み =「直して再 demo」). Every other phase keeps its phase: the follow-up run is
+// just added to the same task. Moving back is the explicit 「フェーズを戻す」 action.
+const REWORK_RESET_PHASES: ReadonlySet<FeaturePhase> = new Set<FeaturePhase>([
+  "demo_rejected",
+  "staging_rejected",
+]);
 
 export function Board({
   client = defaultClient,
@@ -80,9 +89,9 @@ export function Board({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [drawerVersion, setDrawerVersion] = useState(0);
   const reconcilingRef = useRef(false);
-  // Feature ids whose staging反映 run was just kicked but whose new (pending) run may not
-  // be visible on the board yet. While a feature sits here, reconcilePhases must NOT
-  // auto-advance staging_deployed→staging_review off the *stale* (succeeded demo) run —
+  // Feature ids whose next run was just kicked (staging反映 / 追加指示の修正 run) but whose
+  // new (pending) run may not be visible on the board yet. While a feature sits here,
+  // reconcilePhases must NOT auto-advance off the *stale* (already succeeded) run —
   // otherwise 「反映中」 would be skipped and the card would jump straight to 確認待ち.
   const deployingRef = useRef<Set<string>>(new Set());
 
@@ -162,7 +171,7 @@ export function Board({
 
   const all = useMemo(() => [...optimistic, ...items], [optimistic, items]);
   const lanes = useMemo(() => groupByLane(all), [all]);
-  const runningCount = lanes.running.length;
+  const runningCount = LANES.filter(isRunningLane).reduce((n, l) => n + lanes[l].length, 0);
 
   const cwdSuggestions = useMemo(() => {
     const fromItems = items.map((i) => i.latestRun?.cwd).filter((c): c is string => !!c);
@@ -189,6 +198,7 @@ export function Board({
         demoUrl: null,
         stagingUrl: null,
         prUrl: null,
+        prUrls: [],
         latestRun: { id: "", status: "pending", cwd: v.cwd, createdAt: new Date().toISOString() },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -263,8 +273,8 @@ export function Board({
       } else if (to === "prod_shipped") {
         // staging承認→prod_shipped: 本番も staging と同じ進行UIに繋ぐ。実 run を先にキックして
         // から prod_shipped へ遷移する（順序が逆だと、遷移直後に古い staging run が残ったまま
-        // deriveLane が prod_shipped→done と判定し「完了」に一瞬飛ぶ done-flash が起きる）。
-        // これで prod_shipped + 走行中 run = 「本番反映中」→ 成功で完了 / 失敗で要修正 になる。
+        // deriveLane が古い run の結果で「本番確認中」に一瞬飛ぶ flash が起きる）。
+        // これで prod_shipped + 走行中 run = 「本番反映中」→ 終われば「本番確認中」(失敗は要修正表示)。
         try {
           await client.startRun(PROD_DEPLOY_PROMPT, { taskId: selected.taskId, ...cwdOpt });
         } catch {
@@ -295,14 +305,39 @@ export function Board({
   const handleRerun = useCallback(
     async (prompt: string) => {
       if (!selected) return;
-      // If the feature was rejected, reset to building so a success returns it to review.
-      if (selected.featurePhase === "demo_rejected" || selected.featurePhase === "staging_rejected") {
-        await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
+      // A rejected feature is reset to demo_building so a successful fix run returns it to
+      // 確認待ち. Any other phase (本番反映済 included) stays where it is.
+      const needsReset = REWORK_RESET_PHASES.has(selected.featurePhase);
+      // Shield the feature until the new run is visible — between the reset and the run
+      // kick the board still sees the *stale* succeeded run and would otherwise
+      // auto-advance demo_building→demo_review (card flashes 確認待ち with no work done).
+      if (needsReset) deployingRef.current.add(selected.featureId);
+      try {
+        if (needsReset) {
+          await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
+        }
+        await startFollowUpRun(selected, prompt);
+      } catch (e) {
+        deployingRef.current.delete(selected.featureId);
+        throw e;
       }
-      await startFollowUpRun(selected, prompt);
       await refreshAfterAction();
     },
     [api, selected, startFollowUpRun, refreshAfterAction],
+  );
+
+  // 「フェーズを戻す」: phase-only step back to a 確認待ち phase. No run is started and no
+  // deployed environment is rolled back.
+  const handleRewind = useCallback(
+    async (to: FeaturePhase) => {
+      if (!selected) return;
+      await api.transition(selected.featureId, to, {
+        approvedByUser: false,
+        note: "ユーザー操作: フェーズを戻す",
+      });
+      await refreshAfterAction();
+    },
+    [api, selected, refreshAfterAction],
   );
 
   const handleArchive = useCallback(async () => {
@@ -374,13 +409,16 @@ export function Board({
         data-testid="board-lanes"
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(${LANES.length}, minmax(200px, 1fr))`,
+          // 完了列は「タイトル / PR」の 1 行一覧なので、値が読めるよう他より広く取る。
+          gridTemplateColumns: LANES.map((l) =>
+            l === "done" ? "minmax(360px, 3fr)" : "minmax(160px, 1fr)",
+          ).join(" "),
           gap: t.space4,
           overflowX: "auto",
         }}
       >
         {LANES.map((lane) => (
-          <section key={lane} data-testid={`lane-${lane}`} style={{ minWidth: 200 }}>
+          <section key={lane} data-testid={`lane-${lane}`} style={{ minWidth: 0 }}>
             <div
               style={{
                 display: "flex",
@@ -398,6 +436,8 @@ export function Board({
             <div style={{ display: "flex", flexDirection: "column", gap: t.space3 }}>
               {!loaded ? (
                 <Skeleton />
+              ) : lane === "done" && lanes.done.length > 0 ? (
+                <DoneList items={lanes.done} onOpen={setSelectedTaskId} />
               ) : lanes[lane].length === 0 ? (
                 <div style={{ fontSize: 12, color: t.textMuted, padding: t.space2 }}>—</div>
               ) : (
@@ -442,6 +482,7 @@ export function Board({
         onApprove={handleApprove}
         onReject={handleReject}
         onRerun={handleRerun}
+        onRewind={handleRewind}
         onArchive={handleArchive}
         onCancelRun={handleCancelRun}
       />

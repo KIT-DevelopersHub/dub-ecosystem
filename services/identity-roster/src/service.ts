@@ -130,7 +130,7 @@ export class IdentityService {
 
   async getUserDetail(userId: string, orgId: string): Promise<IdentityUserDetailView> {
     const user = await this.d.repo.getUser(userId);
-    if (!user) throw errors.notFound("user", userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
     const ctx = await this.loadEvalContext(userId, orgId);
     const base = this.toIdentityUser(user, ctx.assignments);
     return { ...base, permissions: effectiveOrgWidePermissions(ctx) };

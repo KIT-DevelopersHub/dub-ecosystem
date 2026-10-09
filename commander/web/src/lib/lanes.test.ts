@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { deriveLane, groupByLane, type Lane } from "./lanes.ts";
+import {
+  deriveLane,
+  groupByLane,
+  isArchived,
+  isReviewLane,
+  isRunningLane,
+  LANES,
+  needsFix,
+  type Lane,
+} from "./lanes.ts";
 import type { BoardItem, FeaturePhase, RunStatus } from "./commanderApi.ts";
 
 function item(
@@ -15,6 +24,7 @@ function item(
     demoUrl: null,
     stagingUrl: null,
     prUrl: null,
+    prUrls: [],
     latestRun:
       run === null || run === undefined
         ? run === null
@@ -32,42 +42,75 @@ describe("deriveLane", () => {
     expect(deriveLane(item({ run: null }))).toBe<Lane>("queued");
   });
 
-  it("pending/running run → running", () => {
-    expect(deriveLane(item({ run: "pending" }))).toBe<Lane>("running");
-    expect(deriveLane(item({ run: "running" }))).toBe<Lane>("running");
+  it("running run は段ごとの〜中列: 実装中 / stg反映中 / 本番反映中", () => {
+    expect(deriveLane(item({ run: "pending" }))).toBe<Lane>("implementing");
+    expect(deriveLane(item({ run: "running" }))).toBe<Lane>("implementing");
+    expect(deriveLane(item({ phase: "staging_deployed", run: "running" }))).toBe<Lane>(
+      "staging_deploying",
+    );
+    expect(deriveLane(item({ phase: "staging_review", run: "pending" }))).toBe<Lane>(
+      "staging_deploying",
+    );
+    expect(deriveLane(item({ phase: "prod_shipped", run: "running" }))).toBe<Lane>("prod_deploying");
   });
 
-  it("succeeded run → review (awaiting operator judgment)", () => {
+  it("settled run は段ごとの確認列: 確認待ち / stg確認待ち / 本番確認中", () => {
     expect(deriveLane(item({ run: "succeeded", phase: "demo_building" }))).toBe<Lane>("review");
     expect(deriveLane(item({ run: "succeeded", phase: "demo_review" }))).toBe<Lane>("review");
+    expect(deriveLane(item({ run: "succeeded", phase: "staging_deployed" }))).toBe<Lane>(
+      "staging_review",
+    );
+    expect(deriveLane(item({ run: "succeeded", phase: "staging_review" }))).toBe<Lane>(
+      "staging_review",
+    );
+    expect(deriveLane(item({ run: "succeeded", phase: "prod_shipped" }))).toBe<Lane>("prod_review");
+    expect(deriveLane(item({ run: null, phase: "prod_shipped" }))).toBe<Lane>("prod_review");
   });
 
-  it("failed run → needs_fix", () => {
-    expect(deriveLane(item({ run: "failed" }))).toBe<Lane>("needs_fix");
+  it("失敗・却下はその段の確認列に置き needsFix で示す", () => {
+    const demoFail = item({ run: "failed" });
+    expect(deriveLane(demoFail)).toBe<Lane>("review");
+    expect(needsFix(demoFail)).toBe(true);
+    const demoRej = item({ phase: "demo_rejected", run: "succeeded" });
+    expect(deriveLane(demoRej)).toBe<Lane>("review");
+    expect(needsFix(demoRej)).toBe(true);
+    const stgFail = item({ phase: "staging_deployed", run: "failed" });
+    expect(deriveLane(stgFail)).toBe<Lane>("staging_review");
+    expect(needsFix(stgFail)).toBe(true);
+    expect(deriveLane(item({ phase: "staging_rejected", run: "succeeded" }))).toBe<Lane>(
+      "staging_review",
+    );
+    const prodFail = item({ phase: "prod_shipped", run: "failed" });
+    expect(deriveLane(prodFail)).toBe<Lane>("prod_review");
+    expect(needsFix(prodFail)).toBe(true);
+    expect(needsFix(item({ phase: "demo_review", run: "succeeded" }))).toBe(false);
   });
 
-  it("rejected phase → needs_fix even if the last run succeeded", () => {
-    expect(deriveLane(item({ phase: "demo_rejected", run: "succeeded" }))).toBe<Lane>("needs_fix");
-    expect(deriveLane(item({ phase: "staging_rejected", run: "succeeded" }))).toBe<Lane>("needs_fix");
+  it("本番確認中(生きている)とアーカイブ済(完了)を分ける", () => {
+    const shipped = item({ phase: "prod_shipped", run: "succeeded" });
+    expect(deriveLane(shipped)).toBe<Lane>("prod_review");
+    expect(isArchived(shipped)).toBe(false);
+    const archived = item({ phase: "prod_shipped", taskStatus: "done", run: "succeeded" });
+    expect(deriveLane(archived)).toBe<Lane>("done");
+    expect(isArchived(archived)).toBe(true);
   });
 
-  it("prod_shipped shows本番反映の進行: running→running(本番反映中), failed→needs_fix, else→done", () => {
-    // 本番承認も staging と同じ進行UIに繋ぐ: 反映 run が走行中なら done へ飛ばさず走行中に見せる。
-    expect(deriveLane(item({ phase: "prod_shipped", run: "running" }))).toBe<Lane>("running");
-    expect(deriveLane(item({ phase: "prod_shipped", run: "pending" }))).toBe<Lane>("running");
-    expect(deriveLane(item({ phase: "prod_shipped", run: "failed" }))).toBe<Lane>("needs_fix");
-    expect(deriveLane(item({ phase: "prod_shipped", run: "succeeded" }))).toBe<Lane>("done");
-    expect(deriveLane(item({ phase: "prod_shipped", run: null }))).toBe<Lane>("done");
-  });
-
-  it("archived prod task (taskStatus done) → done even while a run is in flight", () => {
+  it("archived task → done even while a run is in flight or failed", () => {
     expect(deriveLane(item({ phase: "prod_shipped", taskStatus: "done", run: "running" }))).toBe<Lane>(
       "done",
     );
+    const archivedFail = item({ taskStatus: "done", run: "failed" });
+    expect(deriveLane(archivedFail)).toBe<Lane>("done");
+    expect(needsFix(archivedFail)).toBe(false);
   });
+});
 
-  it("archived task (taskStatus done) → done", () => {
-    expect(deriveLane(item({ taskStatus: "done", run: "succeeded" }))).toBe<Lane>("done");
+describe("lane groups", () => {
+  it("running / review lanes", () => {
+    expect(["implementing", "staging_deploying", "prod_deploying"].every((l) => isRunningLane(l as Lane))).toBe(true);
+    expect(["review", "staging_review", "prod_review"].every((l) => isReviewLane(l as Lane))).toBe(true);
+    expect(isRunningLane("queued")).toBe(false);
+    expect(isReviewLane("done")).toBe(false);
   });
 });
 
@@ -77,7 +120,8 @@ describe("groupByLane", () => {
     const b = item({ taskId: "b", run: "running" });
     const c = item({ taskId: "c", run: null });
     const grouped = groupByLane([a, b, c]);
-    expect(grouped.running.map((i) => i.taskId)).toEqual(["a", "b"]);
+    expect(Object.keys(grouped)).toHaveLength(LANES.length);
+    expect(grouped.implementing.map((i) => i.taskId)).toEqual(["a", "b"]);
     expect(grouped.queued.map((i) => i.taskId)).toEqual(["c"]);
     expect(grouped.review).toEqual([]);
   });

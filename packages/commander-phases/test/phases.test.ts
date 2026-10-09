@@ -24,11 +24,30 @@ describe("commander feature phase state machine", () => {
     expect(isFeaturePhase(42)).toBe(false);
   });
 
-  it("prod_shipped is terminal; others are not", () => {
-    expect(isTerminal("prod_shipped")).toBe(true);
-    for (const p of PHASES.filter((p) => p !== "prod_shipped")) {
-      expect(isTerminal(p)).toBe(false);
+  it("has no terminal phase: 本番反映済でもフェーズを戻せる", () => {
+    for (const p of PHASES) expect(isTerminal(p)).toBe(false);
+  });
+
+  it("フェーズを戻す辺は確認待ちにだけ着地し、承認不要", () => {
+    expect(allowedTransitions("prod_shipped").map((t) => t.to)).toEqual([
+      "staging_review",
+      "demo_review",
+    ]);
+    for (const from of ["staging_deployed", "staging_review", "staging_rejected"] as const) {
+      expect(findTransition(from, "demo_review")?.rewind).toBe(true);
     }
+    expect(transition("prod_shipped", "staging_review")).toBe("staging_review");
+    expect(transition("prod_shipped", "demo_review")).toBe("demo_review");
+    for (const p of PHASES) {
+      for (const tr of allowedTransitions(p).filter((t) => t.rewind)) {
+        expect(["demo_review", "staging_review"]).toContain(tr.to);
+        expect(tr.requiresApproval).toBe(false);
+      }
+    }
+    // demo 段より前には戻す先が無い。本番反映済から反映済フェーズへ直接は動かない。
+    expect(allowedTransitions("demo_review").some((t) => t.rewind)).toBe(false);
+    expect(canTransition("prod_shipped", "staging_deployed")).toBe(false);
+    expect(canTransition("prod_shipped", "demo_building")).toBe(false);
   });
 
   it("allows the happy-path edges", () => {

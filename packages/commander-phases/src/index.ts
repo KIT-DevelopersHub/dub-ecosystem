@@ -39,7 +39,25 @@ export interface TransitionSpec {
   requiresApproval: boolean;
   /** Human label for the move, shown in the UI / audit log. */
   label: string;
+  /** true => a user-initiated step back to an earlier review phase (「フェーズを戻す」). */
+  rewind?: boolean;
 }
+
+// Rewind edges only ever land on a 確認待ち phase (never a deployed/shipped one), so
+// stepping back can't skip a phase or bypass an approval: going forward again still
+// needs the same approval-gated edge.
+const REWIND_TO_DEMO_REVIEW: TransitionSpec = {
+  to: "demo_review",
+  requiresApproval: false,
+  label: "フェーズを戻す→demo確認待ち",
+  rewind: true,
+};
+const REWIND_TO_STAGING_REVIEW: TransitionSpec = {
+  to: "staging_review",
+  requiresApproval: false,
+  label: "フェーズを戻す→staging確認待ち",
+  rewind: true,
+};
 
 // Allowed edges only. Anything not listed here is 段飛ばし and is rejected.
 const TRANSITIONS: Record<FeaturePhase, TransitionSpec[]> = {
@@ -55,15 +73,20 @@ const TRANSITIONS: Record<FeaturePhase, TransitionSpec[]> = {
   ],
   staging_deployed: [
     { to: "staging_review", requiresApproval: false, label: "staging反映完了→確認待ち" },
+    REWIND_TO_DEMO_REVIEW,
   ],
   staging_review: [
     { to: "prod_shipped", requiresApproval: true, label: "staging承認→本番反映" },
     { to: "staging_rejected", requiresApproval: false, label: "staging却下(要修正)" },
+    REWIND_TO_DEMO_REVIEW,
   ],
   staging_rejected: [
     { to: "demo_building", requiresApproval: false, label: "修正してdemoに戻す" },
+    REWIND_TO_DEMO_REVIEW,
   ],
-  prod_shipped: [], // terminal
+  // 本番反映後も「生きている」: 追加指示はフェーズを変えずに run を足すだけ。戻す辺は
+  // 確認待ちにしか着地しないので、本番へ戻るには承認ゲートを必ず再通過する。
+  prod_shipped: [REWIND_TO_STAGING_REVIEW, REWIND_TO_DEMO_REVIEW],
 };
 
 export const INITIAL_PHASE: FeaturePhase = "demo_building";
@@ -72,7 +95,10 @@ export function allowedTransitions(from: FeaturePhase): readonly TransitionSpec[
   return TRANSITIONS[from];
 }
 
-/** true iff the phase has no outgoing edges (prod_shipped). */
+/**
+ * true iff the phase has no outgoing edges. No phase is terminal today — 本番反映済でも
+ * 追加指示で demo に戻せる(タスクの終了はフェーズではなく taskStatus=done のアーカイブ)。
+ */
 export function isTerminal(phase: FeaturePhase): boolean {
   return TRANSITIONS[phase].length === 0;
 }
