@@ -7,12 +7,14 @@
 import { type ReactNode } from "react";
 import { Icon } from "@dub/ui";
 import { useUnreadCount } from "../hooks/useUnreadCount";
+import { useMentionBrowserNotify } from "../hooks/useMentionBrowserNotify";
 import { openNotificationDialog } from "../store/dialog-store";
 import { NotificationDialog } from "./NotificationDialog";
 import styles from "./NotificationBell.module.css";
 
 export function NotificationBell(): ReactNode {
   const { count } = useUnreadCount();
+  useMentionBrowserNotify();
 
   return (
     <div className={styles.bellRoot} data-testid="fe5-bell">

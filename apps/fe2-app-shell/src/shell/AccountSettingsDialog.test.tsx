@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -164,5 +164,57 @@ describe("AccountSettingsDialog", () => {
 
     // ...then closes shortly after (real timer, matches the 650ms flash window).
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
+});
+
+describe("AccountSettingsDialog — ブラウザ通知", () => {
+  afterEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  function stubNotification(initial: NotificationPermission, onRequest: NotificationPermission) {
+    const shown: string[] = [];
+    const Fake = vi.fn(function (this: { onclick: unknown; close: () => void }, title: string) {
+      shown.push(title);
+      this.onclick = null;
+      this.close = () => {};
+    }) as unknown as typeof Notification & { permission: NotificationPermission };
+    Object.assign(Fake, {
+      permission: initial,
+      requestPermission: vi.fn(async () => {
+        Fake.permission = onRequest;
+        return onRequest;
+      }),
+    });
+    vi.stubGlobal("Notification", Fake);
+    return { shown, Fake };
+  }
+
+  it("asks for permission, saves the setting and shows a sample notification", async () => {
+    const { shown, Fake } = stubNotification("default", "granted");
+    setup(vi.fn());
+    const toggle = screen.getByTestId("fe2-account-browser-notify-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    await userEvent.click(toggle);
+    await waitFor(() => expect(toggle.checked).toBe(true));
+    expect(Fake.requestPermission).toHaveBeenCalled();
+    expect(localStorage.getItem("dub.browserNotify.enabled")).toBe("1");
+    expect(shown).toEqual(["ブラウザ通知を有効にしました"]);
+
+    await userEvent.click(toggle);
+    expect(toggle.checked).toBe(false);
+    expect(localStorage.getItem("dub.browserNotify.enabled")).toBeNull();
+  });
+
+  it("stays off and explains when the browser blocks notifications", async () => {
+    stubNotification("default", "denied");
+    setup(vi.fn());
+    const toggle = screen.getByTestId("fe2-account-browser-notify-toggle") as HTMLInputElement;
+    await userEvent.click(toggle);
+    await waitFor(() => expect(toggle).toBeDisabled());
+    expect(toggle.checked).toBe(false);
+    expect(localStorage.getItem("dub.browserNotify.enabled")).toBeNull();
+    expect(screen.getByTestId("fe2-account-browser-notify-help")).toHaveTextContent("ブロックされています");
   });
 });
