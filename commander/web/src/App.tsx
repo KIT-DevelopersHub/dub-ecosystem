@@ -5,7 +5,7 @@ import { OperateDub } from "./OperateDub.tsx";
 import { ChatProvider } from "./lib/chatStore.tsx";
 import type { CommanderClient } from "./lib/client.ts";
 import type { CommanderApi } from "./lib/commanderApi.ts";
-import { btnGhost, t } from "./lib/theme.ts";
+import { t } from "./lib/theme.ts";
 
 export type CommanderTabId = "board" | "ask" | "operate";
 
@@ -53,9 +53,11 @@ export function CommanderWorkspace({
     // ChatProvider wraps the WHOLE tree (not just the chat tabs) so a background run
     // started in "Dubに聞く"/"Dubを操作" keeps streaming while the operator is on the board.
     <ChatProvider {...(client ? { client } : {})} {...(api ? { api } : {})}>
-      <p style={{ opacity: 0.7, marginTop: 0, fontSize: 13 }}>{TAB_SUBTITLE[tab]}</p>
-
-      <nav style={{ display: "flex", gap: t.space2, marginBottom: t.space5 }} role="tablist">
+      {/* GitHub Project のビュータブ同様、下線で選択中を示す */}
+      <nav
+        style={{ display: "flex", gap: t.space1, borderBottom: `1px solid ${t.border}`, marginBottom: t.space3 }}
+        role="tablist"
+      >
         {TABS.map((tb) => {
           const active = tab === tb.id;
           return (
@@ -67,11 +69,16 @@ export function CommanderWorkspace({
               data-testid={`tab-${tb.id}`}
               onClick={() => select(tb.id)}
               style={{
-                ...btnGhost,
-                borderColor: active ? t.primary : t.border,
-                color: active ? t.text : t.textMuted,
-                background: active ? t.overlay : "transparent",
+                background: "transparent",
+                border: 0,
+                borderBottom: `2px solid ${active ? t.primary : "transparent"}`,
+                marginBottom: -1,
+                padding: `${t.space2} ${t.space3}`,
+                font: "inherit",
+                fontSize: 14,
                 fontWeight: active ? 600 : 400,
+                color: active ? t.text : t.textMuted,
+                cursor: "pointer",
               }}
             >
               {tb.label}
@@ -79,6 +86,9 @@ export function CommanderWorkspace({
           );
         })}
       </nav>
+      <p style={{ color: t.textMuted, marginTop: 0, marginBottom: t.space4, fontSize: 13 }}>
+        {TAB_SUBTITLE[tab]}
+      </p>
 
       {/* Keep the chat tabs MOUNTED across tab switches (hidden, not unmounted) so their
           live message view + composer draft persist without a reload. */}

@@ -42,8 +42,8 @@ const BOARD_CSS = `
 
 /** 列の幅。GitHub Project 同様に固定幅寄りで並べ、最小幅を割るなら横スクロール。 */
 function columnSize(lane: Lane, count: number, loaded: boolean): { flex: string; minWidth: number } {
-  if (lane === "done") return { flex: "1.2 1 280px", minWidth: 260 };
   if (loaded && count === 0) return { flex: "0 0 164px", minWidth: 164 }; // 空の列は細く(見出しは切らない)
+  if (lane === "done") return { flex: "1.2 1 280px", minWidth: 260 };
   return { flex: "1 1 240px", minWidth: 220 };
 }
 
