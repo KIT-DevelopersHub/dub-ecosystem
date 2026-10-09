@@ -108,8 +108,7 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
     <section style={sectionStyle} data-testid={tid} aria-labelledby={`${tid}-heading`}>
       <h3 id={`${tid}-heading`} style={headingStyle}>Google アカウント</h3>
       <p style={hintStyle}>
-        Drive共有 がファイルの共有を操作するときに使う Google アカウントです。すべてのロールで共通の設定で、
-        「保存」とは別に、接続した時点で切り替わります。
+        {"Drive共有 がファイルの共有を操作するときに使う Google アカウントです。すべてのロールで共通の設定で、「保存」とは別に、接続した時点で切り替わります。"}
       </p>
 
       {returnError ? (
@@ -120,7 +119,7 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
         <Skeleton width="60%" testId={`${tid}-loading`} />
       ) : !isAdmin ? (
         <p style={hintStyle} data-testid={`${tid}-admin-only`}>
-          アカウントの確認・切り替えは、システム管理者（Drive共有 が「編集」）だけが行えます。
+          {"アカウントの確認・切り替えは、システム管理者（Drive共有 が「編集」）だけが行えます。"}
         </p>
       ) : status.isPending || complete.isPending ? (
         <div style={loadingStyle} data-testid={`${tid}-loading`} aria-busy="true">
@@ -140,8 +139,7 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
         <>
           {s.needsReconnect ? (
             <div style={noticeStyle} role="alert" data-testid={`${tid}-reconnect-warning`}>
-              Google アカウントの認証が切れています（取り消されたか、期限が切れました）。Drive共有 が動かないため、
-              「接続し直す」から再接続してください。
+              {"Google アカウントの認証が切れています（取り消されたか、期限が切れました）。Drive共有 が動かないため、「接続し直す」から再接続してください。"}
             </div>
           ) : null}
 
@@ -163,8 +161,7 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
           {confirming ? (
             <div style={noticeStyle} data-testid={`${tid}-confirm`}>
               <span>
-                Google の画面に移動します。Drive共有 に使うアカウントでログインし、アクセスを許可してください。
-                保存していないロールの変更は下書きとして残り、戻るとこのロールが開きます（確定は「保存」で）。
+                {"Google の画面に移動します。Drive共有 に使うアカウントでログインし、アクセスを許可してください。保存していないロールの変更は下書きとして残り、戻るとこのロールが開きます（確定は「保存」で）。"}
               </span>
               <div style={actionsStyle}>
                 <Button onClick={goToGoogle} loading={leaving} testId={`${tid}-confirm-go`}>
