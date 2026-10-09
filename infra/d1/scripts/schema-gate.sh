@@ -8,11 +8,12 @@
 # prod has no dub_migrations ledger, so every migration reads as drift there.
 #
 # Usage: schema-gate.sh <database_name>
-#   D1_SCHEMA_GATE=enforce  -> fail on missing schema (default: warn = annotate, pass)
+#   D1_SCHEMA_GATE=enforce  -> fail on missing schema (default)
+#   D1_SCHEMA_GATE=warn     -> annotate and pass (escape hatch)
 set -euo pipefail
 
 DB="${1:?usage: schema-gate.sh <database_name>}"
-MODE="${D1_SCHEMA_GATE:-warn}"
+MODE="${D1_SCHEMA_GATE:-enforce}"
 cd "$(dirname "$0")/.."
 
 export WRANGLER_BIN="${WRANGLER_BIN:-pnpm dlx wrangler@4.35.0}"
@@ -43,6 +44,6 @@ const detail = [
   tables.length ? `missing tables: ${tables.join(", ")}` : "",
   columns.length ? `missing columns: ${columns.join(", ")}` : "",
 ].filter(Boolean).join(" / ");
-console.log(`::${level} title=D1 schema gate (${db})::${detail} — apply the matching migration files before relying on this deploy.`);
+console.log(`::${level} title=D1 schema gate (${db})::${detail} — apply only the matching files: pnpm dlx wrangler@4.35.0 d1 execute ${db} --remote --yes --file infra/d1/migrations/<ns>/<file>.sql`);
 process.exit(mode === "enforce" ? 1 : 0);
 EOF

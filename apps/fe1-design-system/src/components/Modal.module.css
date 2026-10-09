@@ -171,9 +171,17 @@
 }
 .drawer[data-side="right"] {
   right: 0;
+  padding-right: env(safe-area-inset-right);
 }
 .drawer[data-side="left"] {
   left: 0;
+  padding-left: env(safe-area-inset-left);
+}
+/* Edge-to-edge WebView: keep the drawer header below the notch and its last row
+   above the home indicator (env() is 0 on desktop, so no visual change there). */
+.drawer {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 /* A drawer body is a flex child of the full-height column. Its default min-height
    is `auto` (= content height), so a tall panel (long memo / many attachments) makes
@@ -206,8 +214,10 @@
   .dialog[data-size="full"] {
     width: 100%;
     max-width: none;
-    height: 100dvh;
-    max-height: 100dvh;
+    /* --dub-app-height tracks the visual viewport (iOS keyboard), so the footer
+       actions stay above the keyboard instead of sliding under it. */
+    height: var(--dub-app-height, 100dvh);
+    max-height: var(--dub-app-height, 100dvh);
     border-radius: 0;
     overflow: hidden;
     animation: dub-modal-sheet-in 0.22s ease-out;
