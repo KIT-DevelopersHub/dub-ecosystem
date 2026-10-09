@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "commander-ux",
+  "worker": "dub-demo-commander-ux",
+  "url": "https://dub-demo-commander-ux.developershub-site.workers.dev",
+  "deployedSha": "43562da9",
+  "branch": "feat/commander-ux-polish",
+  "actor": "ko-tarou",
+  "markers": ["board-filter","lane-add-task","fe2-commander-daemon-note"],
+  "live": true,
+  "verifiedAt": "2026-10-09T17:48:28Z",
+  "updatedAt": "2026-10-09T17:48:28Z",
+  "note": "Commander board GitHub Project style"
+}
