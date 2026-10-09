@@ -46,5 +46,7 @@ jobs:
         run: bash scripts/cleanup-demos.sh --self-test
       - name: staging-queue self-test
         run: bash scripts/staging-queue.sh --self-test
+      - name: staging-pick-slot self-test
+        run: bash scripts/staging-pick-slot.sh --self-test
       - name: staging-queue seed ledger is valid JSON
         run: node -e 'JSON.parse(require("fs").readFileSync("deploy-state/staging-queue.json","utf8")); console.log("staging-queue.json OK")'

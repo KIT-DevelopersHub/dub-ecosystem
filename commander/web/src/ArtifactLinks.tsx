@@ -231,10 +231,11 @@ function CardChip({ link: l, primary }: { link: Link; primary?: boolean }) {
       data-testid={`artifact-chip-${l.key}`}
       data-primary={primary ? "true" : undefined}
       onClick={(e) => e.stopPropagation()}
-      title={l.href}
+      title={primary ? `今ここ: ${l.href}` : l.href}
       style={chipStyle(l.color, primary)}
     >
-      {l.icon} {primary ? (l.key === "pr" ? "PR" : `${l.key} ✓今ここ`) : l.key === "pr" ? "PR" : l.key}
+      {l.icon} {l.key === "pr" ? "PR" : l.key}
+      {primary && l.key !== "pr" ? " ✓" : ""}
     </a>
   );
 }
@@ -280,7 +281,7 @@ function chipStyle(color: string, primary?: boolean): CSSProperties {
     letterSpacing: 0.3,
     color: primary ? "#fff" : color,
     textDecoration: "none",
-    padding: primary ? `3px ${t.space3}` : `2px ${t.space2}`,
+    padding: `1px ${t.space2}`,
     borderRadius: "var(--dub-radius-sm, 8px)",
     border: `1px solid ${color}`,
     background: primary ? color : "transparent",

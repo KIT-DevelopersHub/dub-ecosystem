@@ -139,16 +139,84 @@ export class HttpCommanderClient implements CommanderClient {
   }
 }
 
-/** One-line human summary of an event for the log view. */
+interface ContentBlock {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  content?: unknown;
+  is_error?: boolean;
+}
+
+interface ClaudeStreamData {
+  type?: string;
+  subtype?: string;
+  result?: string;
+  is_error?: boolean;
+  message?: { content?: ContentBlock[] | string };
+}
+
+function oneLine(s: string, max = 160): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+// The most telling input field per tool, so a tool call reads as "Bash: pnpm test".
+const TOOL_INPUT_KEYS = ["command", "file_path", "pattern", "url", "query", "description", "prompt"];
+
+function toolSummary(b: ContentBlock): string {
+  const input = b.input ?? {};
+  const key = TOOL_INPUT_KEYS.find((k) => typeof input[k] === "string" && input[k] !== "");
+  return key ? `🔧 ${b.name}: ${oneLine(input[key] as string)}` : `🔧 ${b.name}`;
+}
+
+function toolResultText(c: unknown): string {
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) return c.map((x) => (x as ContentBlock)?.text ?? "").join(" ");
+  return "";
+}
+
+/** Human line(s) for one stream-json event; "" for noise (thinking, rate limits, init). */
+function formatClaude(d: ClaudeStreamData | undefined): string {
+  if (!d) return "";
+  if (d.type === "result") {
+    const mark = d.is_error || (d.subtype && d.subtype !== "success") ? "❌" : "✅";
+    return d.result ? `${mark} ${d.result}` : `${mark} ${d.subtype ?? "result"}`;
+  }
+  const content = d.message?.content;
+  if (!Array.isArray(content)) return "";
+  if (d.type === "assistant") {
+    return content
+      .map((b) =>
+        b.type === "text" && b.text?.trim()
+          ? `💬 ${b.text.trim()}`
+          : b.type === "tool_use" && b.name
+            ? toolSummary(b)
+            : "",
+      )
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (d.type === "user") {
+    // Tool output is too long to replay; only surface failures.
+    return content
+      .filter((b) => b.type === "tool_result" && b.is_error)
+      .map((b) => `⚠ ${oneLine(toolResultText(b.content))}`)
+      .join("\n");
+  }
+  return "";
+}
+
+/**
+ * Human summary of an event for the log view. Returns "" for events that carry nothing
+ * readable (thinking, rate limits, init) — callers drop empty lines.
+ */
 export function formatEvent(ev: DaemonRunEvent): string {
   switch (ev.type) {
     case "status":
       return `● status: ${ev.status}`;
-    case "claude": {
-      const d = ev.data as { type?: string; subtype?: string; result?: string } | undefined;
-      if (d?.result) return `claude> ${d.result}`;
-      return `claude> ${d?.type ?? "event"}${d?.subtype ? `/${d.subtype}` : ""}`;
-    }
+    case "claude":
+      return formatClaude(ev.data as ClaudeStreamData | undefined);
     case "stdout":
       return ev.line ?? "";
     case "stderr":

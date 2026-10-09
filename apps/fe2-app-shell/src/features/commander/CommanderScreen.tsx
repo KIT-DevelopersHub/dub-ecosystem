@@ -9,7 +9,7 @@
 //     chats and runs are the PC's real, live data — no tunnel and no token in the browser.
 // Admin-only (identity:admin + app:commander:view), member-hidden.
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Card, Icon, PageHeader, Stack } from "@dub/ui";
+import { Badge, Card, PageHeader, Stack } from "@dub/ui";
 import {
   CommanderWorkspace,
   HttpCommanderApi,
@@ -45,6 +45,10 @@ const STATUS_VIEW: Record<RelayStatus, { tone: "success" | "warning" | "danger" 
   },
 };
 
+// 停止時の案内はボード側(daemon-down-hint)が出すので、ここは1行の説明に留める。
+const NOTE =
+  "あなたのマシン上のローカル Commander（127.0.0.1 の daemon / service）に接続します。起動手順: commander/README.md";
+
 export function CommanderScreen(): JSX.Element {
   const shellApi = useCommanderShellApi();
   const relayMode = !isLoopbackHost(window.location.hostname) && shellApi !== null;
@@ -77,29 +81,21 @@ export function CommanderScreen(): JSX.Element {
   const view = STATUS_VIEW[status];
 
   return (
-    <Stack gap={5} testId="fe2-commander">
-      <PageHeader title="Commander" />
-
+    <Stack gap={4} testId="fe2-commander">
       {relayMode ? (
-        <Card testId="fe2-commander-relay-status">
-          <Stack direction="row" gap={3} align="center" wrap>
-            <Badge tone={view.tone} testId="fe2-commander-relay-badge">
-              {view.label}
-            </Badge>
-            <span style={{ opacity: 0.85, fontSize: 13 }}>{view.detail}</span>
-          </Stack>
-        </Card>
+        <>
+          <PageHeader title="Commander" />
+          <Card testId="fe2-commander-relay-status">
+            <Stack direction="row" gap={3} align="center" wrap>
+              <Badge tone={view.tone} testId="fe2-commander-relay-badge">
+                {view.label}
+              </Badge>
+              <span style={{ opacity: 0.85, fontSize: 13 }}>{view.detail}</span>
+            </Stack>
+          </Card>
+        </>
       ) : (
-        <Card testId="fe2-commander-daemon-note">
-          <Stack direction="row" gap={3} align="center" wrap>
-            <Icon name="info" aria-label="注意" />
-            <span style={{ opacity: 0.85, fontSize: 13 }}>
-              この画面は<strong>あなたのマシン上のローカル Commander</strong>（127.0.0.1 の daemon /
-              service）に直接接続します。起動していない場合は表示・操作が失敗します（起動手順:
-              commander/README.md）。
-            </span>
-          </Stack>
-        </Card>
+        <PageHeader title="Commander" description={NOTE} testId="fe2-commander-daemon-note" />
       )}
 
       <div data-testid="fe2-commander-workspace">

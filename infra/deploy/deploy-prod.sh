@@ -120,8 +120,14 @@ deploy usage-meter     services/usage-meter/wrangler.free.toml
 # commander-relay binds SVC_IDENTITY (step 1) and is bound by api-gateway (SVC_COMMANDER_RELAY).
 # SQLite-DO WebSocket relay (hibernation), no cron slot.
 deploy commander-relay services/commander-relay/wrangler.free.toml
+# lp-analytics (LP管理: 流入URL + LP 訪問ログ) binds only SVC_IDENTITY (step 1) and is bound by
+# api-gateway (SVC_LP_ANALYTICS, step 4) — so it lands before the gateway (CF 10143 otherwise).
+# PRECONDITION (manual, like every D1 change — this script never migrates): apply
+# infra/d1/migrations/lp/0001_init.sql to dub-core BEFORE the first deploy, else every LP
+# pageview beacon 5xx's at the gateway and the LP管理 screens error.
+deploy lp-analytics    services/lp-analytics/wrangler.free.toml
 
-# --- 4. api-gateway (binds all 16 upstreams — deploy only after they exist) ---
+# --- 4. api-gateway (binds all 18 upstreams — deploy only after they exist) ---
 deploy api-gateway services/api-gateway/wrangler.free.toml
 
 # --- 4b. gateway smoke — fail-fast BEFORE the public faces (fe2/mo3) go out ---

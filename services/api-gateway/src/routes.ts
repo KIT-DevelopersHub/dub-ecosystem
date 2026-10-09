@@ -116,6 +116,10 @@ export const ROUTES: readonly GatewayRoute[] = [
   // auth=required forwards x-dub-user-id; commander-relay's policy gate demands
   // app:commander:edit/view. The WebSocket itself is DO-direct (never through the gateway).
   { segment: "commander", binding: "SVC_COMMANDER_RELAY", auth: "required" },
+  // LP管理 (lp-analytics): 流入URL の発行と訪問ログの集計。lp-analytics re-checks the LP管理
+  // policy (app:lp:view / app:lp:edit). /lp/internal/* (the beacon landing) is s2s only —
+  // the public path reaches it via the gateway-owned POST /public/lp-visits.
+  { segment: "lp", binding: "SVC_LP_ANALYTICS", auth: "required", internalOnlyPaths: ["/lp/internal/"] },
 ] as const;
 
 const ROUTE_BY_SEGMENT = new Map<string, GatewayRoute>(ROUTES.map((r) => [r.segment, r]));

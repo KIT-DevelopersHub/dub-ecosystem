@@ -94,6 +94,10 @@ service = "member-service"
 binding = "SVC_COMMANDER_RELAY"
 service = "commander-relay"
 
+[[services]]
+binding = "SVC_LP_ANALYTICS"
+service = "lp-analytics"
+
 # ---- Queue producer (the single publish exception: public.inquiry.received) ----
 [[queues.producers]]
 binding = "EVT_NOTIFICATION"

@@ -3,6 +3,7 @@ import "./globals.css";
 import snapshot from "@/config/snapshot.json";
 import type { LpConfig } from "@/config/types";
 import { StructuredData } from "@/components/StructuredData";
+import { VisitBeacon } from "@/components/VisitBeacon";
 
 // Typography — Inter for latin/numerals (clean, high x-height) layered over
 // Zen Kaku Gothic New for Japanese (modern, highly readable geometric gothic).
@@ -20,7 +21,8 @@ const { seo } = config;
 
 // Light-fixed anonymous marketing LP. Metadata is derived from the read-only
 // publish snapshot; the page ships no admin design-system and calls no internal
-// services live.
+// services live. The only outbound call is the anonymous pageview beacon
+// (VisitBeacon → the gateway's PUBLIC /api/v1/public/lp-visits).
 export const metadata: Metadata = {
   metadataBase: new URL(seo.siteUrl),
   title: seo.title,
@@ -110,6 +112,7 @@ export default function RootLayout({
           本文へスキップ
         </a>
         <main id="main">{children}</main>
+        <VisitBeacon />
       </body>
     </html>
   );
