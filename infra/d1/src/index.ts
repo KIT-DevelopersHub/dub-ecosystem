@@ -6,8 +6,17 @@ export { NAMESPACE_REGISTRY, registryEntry, type NamespaceEntry } from "./regist
 export { collectMigrations, MIGRATIONS_DIR } from "./collect";
 export { lintAll, lintAllErrors, sanitizeForLint, type LintReport } from "./lint-all";
 export { applyAll, type ApplyResult } from "./apply";
-export { verifySchema, declaredTables, type VerifyResult } from "./verify-schema";
+export {
+  verifySchema,
+  declaredTables,
+  declaredColumns,
+  type VerifyResult,
+  type VerifySchemaOptions,
+} from "./verify-schema";
 export { type SeedErrorCode, PROD_DB_NAME } from "./errors";
+// NOTE: ./node-d1 and ./remote-d1 are intentionally NOT re-exported — they pull in
+// node:sqlite / node:child_process and must never reach a Worker bundle. Import them by
+// path from scripts and tests.
 
 export {
   seedScenario,
