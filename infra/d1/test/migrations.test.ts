@@ -54,7 +54,7 @@ describe("verify (#4)", () => {
   it("reports ok on a freshly migrated DB", async () => {
     const { db } = await migratedD1();
     const res = await verifySchema(db);
-    expect(res).toEqual({ ok: true, missingTables: [], drift: [] });
+    expect(res).toEqual({ ok: true, missingTables: [], missingColumns: [], drift: [], ledgerPresent: true });
   });
 
   it("#4 detects content drift when a migration file changes", async () => {
