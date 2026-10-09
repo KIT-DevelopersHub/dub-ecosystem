@@ -153,10 +153,10 @@ jobs:
 
       # --- D1 schema gate (read-only) ---
       # Compares prod dub-core against the repo's migrations so code never silently ships
-      # ahead of its schema. Warn-only until the owner sets D1_SCHEMA_GATE=enforce.
+      # ahead of its schema. Fails the deploy on drift (set D1_SCHEMA_GATE=warn to bypass).
       - name: D1 schema gate
         env:
-          D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'warn' }}
+          D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'enforce' }}
         run: bash infra/d1/scripts/schema-gate.sh dub-core
 
       # --- Deploy in dependency order with fail-fast health gating ---
