@@ -46,6 +46,16 @@ export interface LpStats {
   byDevice: LpStatsBucket[];
 }
 
+/** サイト全体のアクセス（Cloudflare Web Analytics・LP に元から入っている計測）。
+ *  configured=false はその環境でトークン/サイトタグが未設定。 */
+export interface LpSiteTraffic {
+  configured: boolean;
+  range: { from: string; to: string };
+  totals: { pageViews: number; visits: number };
+  byDay: { date: string; pageViews: number; visits: number }[];
+  byReferrer: { key: string; label: string; pageViews: number; visits: number }[];
+}
+
 /** `from`/`to` are inclusive calendar days (YYYY-MM-DD) — NOT timestamps, so the query
  *  key is stable across a session and the dashboard does not refetch on every render. */
 export interface LpStatsQuery {
@@ -109,6 +119,8 @@ export interface CreateLpLinkInput {
 export interface LpApi {
   /** Aggregated visit counters for a day range (app:lp:view). */
   getStats(query: LpStatsQuery): Promise<LpStats>;
+  /** Site-wide PV / visits / referrers from Cloudflare Web Analytics (app:lp:view). */
+  getSiteTraffic(query: LpLinksQuery): Promise<LpSiteTraffic>;
   /** One cursor page of raw visits, newest first (app:lp:view). */
   listVisits(query: LpVisitsQuery): Promise<LpVisitsPage>;
   /** Issued tracking links with their in-range counters (app:lp:view). */
@@ -128,6 +140,12 @@ export function createLpApi(api: ApiClient): LpApi {
       if (query.includeBots !== undefined) q.includeBots = query.includeBots;
       return api.request<LpStats>({ method: "GET", path: `${BASE}/stats`, query: q });
     },
+    getSiteTraffic: (query) =>
+      api.request<LpSiteTraffic>({
+        method: "GET",
+        path: `${BASE}/site-traffic`,
+        query: { from: query.from, to: query.to },
+      }),
     listVisits: (query) => {
       const q: Record<string, string | number | boolean | undefined> = { from: query.from, to: query.to };
       if (query.source !== undefined) q.source = query.source;

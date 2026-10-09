@@ -2560,6 +2560,32 @@ const DEMO_LP_SOURCES: { key: string; label: string; weight: number; referrer: s
 
 const DEMO_LP_DAYS = 90;
 
+/** サイト全体のアクセス（Cloudflare Web Analytics）の demo 値。本番の実測値（2026-09-28〜10-10）を
+ *  そのまま固定で持つ: 本番に出した時に見える数字と demo を一致させるため。 */
+const DEMO_LP_SITE_DAYS: Record<string, [pageViews: number, visits: number]> = {
+  "2026-09-28": [10, 10],
+  "2026-10-01": [82, 45],
+  "2026-10-02": [29, 18],
+  "2026-10-03": [10, 4],
+  "2026-10-04": [7, 1],
+  "2026-10-05": [2, 2],
+  "2026-10-06": [4, 2],
+  "2026-10-07": [12, 10],
+  "2026-10-08": [8, 8],
+  "2026-10-09": [1, 1],
+  "2026-10-10": [2, 1],
+};
+const DEMO_LP_SITE_REFERRERS: { key: string; label: string; pageViews: number; visits: number }[] = [
+  { key: "hokuriku-it-conf.com", label: "サイト内の移動", pageViews: 62, visits: 0 },
+  { key: "direct", label: "直接アクセス", pageViews: 27, visits: 27 },
+  { key: "t.co", label: "X (Twitter)", pageViews: 24, visits: 24 },
+  { key: "m.facebook.com", label: "Facebook", pageViews: 14, visits: 14 },
+  { key: "www.google.com", label: "Google 検索", pageViews: 10, visits: 10 },
+  { key: "camp-fire.jp", label: "CAMPFIRE", pageViews: 9, visits: 9 },
+  { key: "l.instagram.com", label: "Instagram", pageViews: 3, visits: 3 },
+  { key: "www.bing.com", label: "Bing 検索", pageViews: 3, visits: 3 },
+];
+
 /** 決定的な擬似乱数 (mulberry32)。Math.random を使うとリロードの度に数字が変わり、
  *  「さっき見た画面」と比較できなくなるので使わない。 */
 function demoLpRandom(seed: number): () => number {
@@ -2727,6 +2753,27 @@ function createLpStore() {
     }
 
     if (method !== "GET") return null;
+
+    if (pathname === "/api/v1/lp/site-traffic") {
+      const byDay: { date: string; pageViews: number; visits: number }[] = [];
+      const start = new Date(`${from}T00:00:00`);
+      const end = new Date(`${to}T00:00:00`);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const k = demoLpDayKey(d);
+        const [pageViews, visits] = DEMO_LP_SITE_DAYS[k] ?? [0, 0];
+        byDay.push({ date: k, pageViews, visits });
+      }
+      const pageViews = byDay.reduce((n, d) => n + d.pageViews, 0);
+      const visits = byDay.reduce((n, d) => n + d.visits, 0);
+      return json({
+        configured: true,
+        range: { from, to },
+        totals: { pageViews, visits },
+        byDay,
+        // 流入元の実測は 9/28〜10/10 の合計しか持たないので、山の 10/01 を含む期間だけ出す。
+        byReferrer: from <= "2026-10-01" && "2026-10-01" <= to ? DEMO_LP_SITE_REFERRERS : [],
+      });
+    }
 
     if (pathname === "/api/v1/lp/stats") {
       const includeBots = url.searchParams.get("includeBots") === "true";

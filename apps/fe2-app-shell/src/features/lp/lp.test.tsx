@@ -44,9 +44,18 @@ const linksStubs = {
   setLinkActive: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
 };
 
+const UNCONFIGURED_SITE = {
+  configured: false,
+  range: { from: "2026-09-01", to: "2026-09-28" },
+  totals: { pageViews: 0, visits: 0 },
+  byDay: [],
+  byReferrer: [],
+};
+
 function emptyApi(): LpApi {
   return {
     ...linksStubs,
+    getSiteTraffic: () => Promise.resolve(UNCONFIGURED_SITE),
     getStats: () =>
       Promise.resolve({
         range: { from: "2026-09-01", to: "2026-09-28" },
@@ -160,10 +169,50 @@ describe("LpVisitLogScreen", () => {
   it("shows a retryable error state when the api fails", async () => {
     const failing: LpApi = {
       ...linksStubs,
+      getSiteTraffic: () => Promise.reject(new Error("boom")),
       getStats: () => Promise.reject(new Error("boom")),
       listVisits: () => Promise.reject(new Error("boom")),
     };
     render(wrap(failing));
     await waitFor(() => expect(screen.getByTestId("fe2-lp-visits-error")).toBeInTheDocument());
+    expect(screen.getByTestId("fe2-lp-site-error")).toBeInTheDocument();
+  });
+});
+
+describe("サイト全体のアクセス (Cloudflare)", () => {
+  it("demo transport answers the real measured numbers", async () => {
+    const site = await demoLpApi().getSiteTraffic({ from: "2026-09-28", to: "2026-10-10" });
+    expect(site.configured).toBe(true);
+    expect(site.byDay).toHaveLength(13);
+    expect(site.byDay.find((d) => d.date === "2026-10-01")).toEqual({ date: "2026-10-01", pageViews: 82, visits: 45 });
+    expect(site.byReferrer.map((r) => r.label)).toContain("X (Twitter)");
+  });
+
+  it("renders PV / 訪問 / referrers / per-day even when the 流入URL log is empty", async () => {
+    const api: LpApi = {
+      ...emptyApi(),
+      getSiteTraffic: () =>
+        Promise.resolve({
+          configured: true,
+          range: { from: "2026-10-01", to: "2026-10-02" },
+          totals: { pageViews: 111, visits: 63 },
+          byDay: [
+            { date: "2026-10-01", pageViews: 82, visits: 45 },
+            { date: "2026-10-02", pageViews: 29, visits: 18 },
+          ],
+          byReferrer: [{ key: "t.co", label: "X (Twitter)", pageViews: 24, visits: 24 }],
+        }),
+    };
+    render(wrap(api));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-site-body")).toBeInTheDocument());
+    expect(within(screen.getByTestId("fe2-lp-site-kpi-pv")).getByText("111")).toBeInTheDocument();
+    expect(within(screen.getByTestId("fe2-lp-site-referrers")).getByText("X (Twitter)")).toBeInTheDocument();
+    expect(within(screen.getByTestId("fe2-lp-site-byday")).getByText("10/1")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-lp-visits-empty")).toBeInTheDocument();
+  });
+
+  it("says 未設定 instead of showing zeros when Cloudflare is not configured", async () => {
+    render(wrap(emptyApi()));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-site-unconfigured")).toBeInTheDocument());
   });
 });
