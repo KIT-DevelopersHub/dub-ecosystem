@@ -79,6 +79,7 @@ export function createApp(deps: AppDeps): Hono {
   const edit = deps.authz.requireAppAccess("lp", "edit");
 
   app.get("/lp/stats", view, async (c) => c.json(await svc.getStats(c.req.query())));
+  app.get("/lp/site-traffic", view, async (c) => c.json(await svc.getSiteTraffic(c.req.query())));
   app.get("/lp/visits", view, async (c) => c.json(await svc.listVisits(c.req.query())));
   app.get("/lp/links", view, async (c) => c.json(await svc.listLinks(c.req.query())));
   app.post("/lp/links", edit, async (c) => c.json(await svc.createLink(reqCtx(c), await readJson(c), c.req.query()), 201));

@@ -10,4 +10,9 @@ export interface Env {
   LP_BASE_URL?: string;
   /** 1 日に記録する訪問の上限（既定 5000）。 */
   LP_DAILY_VISIT_CAP?: string;
+  /** Cloudflare Web Analytics (サイト全体のアクセス). 3 つ揃わなければ画面は「未設定」表示。 */
+  CF_ACCOUNT_ID?: string;
+  LP_WEB_ANALYTICS_SITE_TAG?: string;
+  /** secret: Account Analytics:Read の API トークン。 */
+  CF_ANALYTICS_TOKEN?: string;
 }

@@ -3,6 +3,7 @@
 // that file and the demo transport answer exactly these, so keep them in lockstep.
 import type { MiddlewareHandler, Context } from "hono";
 import type { common, identity, policy } from "@dub/types";
+import type { SiteTrafficSource } from "./site-traffic";
 
 export type LpDevice = "mobile" | "desktop" | "bot" | "unknown";
 /** redirect = arrived through an issued 流入URL (linkId set); ingest = no matching link. */
@@ -35,6 +36,16 @@ export interface LpStats {
   bySource: LpStatsBucket[];
   byDay: { date: string; visits: number }[];
   byDevice: LpStatsBucket[];
+}
+
+/** Site-wide traffic from Cloudflare Web Analytics (exists from before lp-analytics).
+ *  configured=false: the token / site tag is not set in this environment. */
+export interface LpSiteTraffic {
+  configured: boolean;
+  range: { from: string; to: string };
+  totals: { pageViews: number; visits: number };
+  byDay: { date: string; pageViews: number; visits: number }[];
+  byReferrer: { key: string; label: string; pageViews: number; visits: number }[];
 }
 
 export interface LpVisitsPage {
@@ -151,4 +162,6 @@ export interface AppDeps {
   newVisitId: () => string;
   /** 1 日に記録する訪問の上限。匿名ビーコンが共有 D1 の書き込み枠を食い潰さないための天井。 */
   dailyVisitCap: number;
+  /** Cloudflare Web Analytics reader. null when not configured in this environment. */
+  siteTraffic: SiteTrafficSource | null;
 }

@@ -27,3 +27,7 @@ service = "dub-identity-roster"   # POST /authz/check (app:lp:view / app:lp:edit
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
 LP_BASE_URL = "https://hokuriku-it-conf.com"
+# Cloudflare Web Analytics (LP のサイト全体アクセス)。トークンは secret:
+#   npx wrangler secret put CF_ANALYTICS_TOKEN   (Account Analytics:Read)
+CF_ACCOUNT_ID = "b8f6ddbf8fa8cf4e421eae870bdb6dac"
+LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
