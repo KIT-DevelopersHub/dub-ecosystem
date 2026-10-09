@@ -106,3 +106,8 @@ environment = "production"
 binding = "SVC_MEMBER"
 service = "dub-member-service"
 environment = "production"
+
+[[services]]
+binding = "SVC_LP_ANALYTICS"
+service = "dub-lp-analytics"
+environment = "production"

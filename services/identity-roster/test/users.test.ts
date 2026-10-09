@@ -59,6 +59,18 @@ describe("users listing & detail", () => {
     const other = await h.app.request(`/identity/users/${h.adminId}`, asUser("user_bare"));
     expect(other.status).toBe(403);
   });
+
+  it("404s another org's user detail even for an admin, without leaking it", async () => {
+    const h = await makeHarness();
+    await h.repo.createUser({
+      id: "user_foreign", orgId: "org_other", email: "foreign@other.test", displayName: "Foreign",
+      furigana: null, githubLogin: null, avatarUrl: null, status: "active", source: "manual",
+      createdAt: "t", updatedAt: "t",
+    });
+    const res = await h.app.request("/identity/users/user_foreign", asUser(h.adminId));
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain("foreign@other.test");
+  });
 });
 
 describe("identity master (GET /users/:id, internal)", () => {

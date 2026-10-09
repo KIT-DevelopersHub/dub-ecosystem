@@ -46,12 +46,11 @@ export function useRunStream(
     let cancelled = false;
     let unsub: (() => void) | null = null;
 
-    const push = (line: string) =>
-      setState((prev) => ({
-        ...prev,
-        log: [...prev.log, line],
-        lastLine: line.trim() ? line : prev.lastLine,
-      }));
+    // formatEvent returns "" for unreadable events (thinking, rate limits) — skip them.
+    const push = (line: string) => {
+      if (!line.trim()) return;
+      setState((prev) => ({ ...prev, log: [...prev.log, line], lastLine: line }));
+    };
 
     void (async () => {
       // 1) Seed from the persisted run (survives restarts; also the source of truth for
@@ -62,10 +61,10 @@ export function useRunStream(
         if (cancelled) return;
         if (detail) {
           seededStatus = detail.run.status;
-          const lines = detail.events.map((e) =>
-            formatEvent({ type: e.type, ...e.payload } as DaemonRunEvent),
-          );
-          const last = [...lines].reverse().find((l) => l.trim()) ?? "";
+          const lines = detail.events
+            .map((e) => formatEvent({ type: e.type, ...e.payload } as DaemonRunEvent))
+            .filter((l) => l.trim());
+          const last = lines[lines.length - 1] ?? "";
           setState({ status: detail.run.status, log: lines, lastLine: last, live: false });
         }
       } catch {

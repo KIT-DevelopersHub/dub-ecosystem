@@ -3,8 +3,9 @@
 //   - フェーズ&監査: the feature's phase, allowed transitions and the immutable audit
 //                  log (migrated here from FeatureBoard; the server gate is unchanged).
 // Next actions close the judgment loop: 承認 (approval-gated), 却下 (feedback → new run),
-// 追加指示 (new run in the same task), 完了 (archive to the Done lane).
-import { useCallback, useEffect, useState } from "react";
+// 追加指示 (new run in the same task, phase unchanged), フェーズを戻す (phase-only step
+// back to a 確認待ち), 完了 (archive to the Done lane).
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Drawer } from "./Drawer.tsx";
 import type { CommanderClient } from "./lib/client.ts";
 import {
@@ -17,7 +18,16 @@ import {
   type RunHistoryApi,
 } from "./lib/commanderApi.ts";
 import { useRunStream } from "./lib/useRunStream.ts";
-import { deriveLane, LANE_COLORS, LANE_LABELS } from "./lib/lanes.ts";
+import {
+  deriveLane,
+  isArchived,
+  isReviewLane,
+  isRunningLane,
+  LANE_COLORS,
+  LANE_LABELS,
+  needsFix,
+  NEEDS_FIX_COLOR,
+} from "./lib/lanes.ts";
 import {
   reflectionOf,
   reflectionLabel,
@@ -32,22 +42,25 @@ import { btnDanger, btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
 function inFlightLabel(kind: InFlight, to: FeaturePhase | null): string {
   if (kind === "approve") {
     if (to === "staging_deployed") return "staging に反映中… 完了すると『確認待ち』に移ります";
-    if (to === "prod_shipped") return "本番に反映中… 完了すると『完了』に移ります";
+    if (to === "prod_shipped") return "本番に反映中… 完了すると『本番確認中』に移ります";
     return "反映中…";
   }
   if (kind === "reject") return "却下を記録し、修正 run を起動中…";
   if (kind === "rerun") return "指示を送って新しい run を起動中…";
+  if (kind === "rewind") return "フェーズを戻しています…";
   if (kind === "archive") return "アーカイブ中…";
   return "処理中…";
 }
 
-type InFlight = "approve" | "reject" | "rerun" | "archive" | null;
+type InFlight = "approve" | "reject" | "rerun" | "rewind" | "archive" | null;
 
 export interface TaskDrawerHandlers {
   onApprove: (to: FeaturePhase) => Promise<void>;
   onReject: (to: FeaturePhase, feedback: string) => Promise<void>;
   /** Additional instruction / fix re-run: a new run in the same task. */
   onRerun: (prompt: string) => Promise<void>;
+  /** Phase-only step back to an earlier 確認待ち phase (no run, no rollback). */
+  onRewind: (to: FeaturePhase) => Promise<void>;
   onArchive: () => Promise<void>;
   onCancelRun: (runId: string) => void;
 }
@@ -63,6 +76,12 @@ interface TaskDrawerProps extends TaskDrawerHandlers {
 }
 
 type Tab = "log" | "artifact" | "phase";
+
+/** "https://github.com/o/r/pull/564" -> "#564" (full URL stays in the tooltip). */
+export function prLabel(url: string): string {
+  const m = /\/pull\/(\d+)/.exec(url);
+  return m ? `#${m[1]}` : url;
+}
 
 function errorMessage(e: ApiError): string {
   switch (e.error) {
@@ -85,6 +104,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
   const [feedback, setFeedback] = useState("");
   const [rerunOpen, setRerunOpen] = useState(false);
   const [rerunPrompt, setRerunPrompt] = useState("");
+  const [rewindOpen, setRewindOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   // Which action is currently processing (drives the visible 「反映中…」 banner). `busy`
   // alone only disabled buttons — the operator saw nothing happen (「動いてる?」). This
@@ -93,6 +113,14 @@ export function TaskDrawer(props: TaskDrawerProps) {
   const [inFlightTo, setInFlightTo] = useState<FeaturePhase | null>(null);
 
   const stream = useRunStream(item?.latestRun ? item.latestRun.id : null, { client, history });
+
+  // Keep the log pinned to the newest line unless the operator scrolled up to read.
+  const logRef = useRef<HTMLPreElement>(null);
+  const followRef = useRef(true);
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    if (el && followRef.current) el.scrollTop = el.scrollHeight;
+  }, [stream.log.length, tab]);
 
   const featureId = item?.featureId ?? null;
   const loadDetail = useCallback(async () => {
@@ -109,22 +137,31 @@ export function TaskDrawer(props: TaskDrawerProps) {
 
   useEffect(() => {
     setTab("log");
+    followRef.current = true;
     setPendingApproval(null);
     setRejectTo(null);
     setFeedback("");
     setRerunOpen(false);
     setRerunPrompt("");
+    setRewindOpen(false);
     void loadDetail();
   }, [loadDetail, version]);
 
   if (!item) return null;
   const lane = deriveLane(item);
+  const running = isRunningLane(lane);
+  const fix = needsFix(item);
+  const reviewable = isReviewLane(lane) && !fix;
+  // 「もう触らない」の唯一の判定はユーザーの明示アーカイブ。本番反映済(prod_shipped)は
+  // まだ生きているタスクなので、不備が見つかったら追加指示で直せる状態に保つ。
+  const archived = isArchived(item);
   const reflection = reflectionOf(item);
   const approvalEdge = detail?.allowedTransitions.find((tr) => tr.requiresApproval) ?? null;
   const rejectEdge =
     detail?.allowedTransitions.find(
       (tr) => tr.to === "demo_rejected" || tr.to === "staging_rejected",
     ) ?? null;
+  const rewindEdges = detail?.allowedTransitions.filter((tr) => tr.rewind) ?? [];
 
   const wrap = async (
     fn: () => Promise<void>,
@@ -152,9 +189,10 @@ export function TaskDrawer(props: TaskDrawerProps) {
       headerExtra={
         <span
           data-testid="drawer-lane"
-          style={{ fontSize: 12, fontWeight: 700, color: LANE_COLORS[lane] }}
+          style={{ fontSize: 12, fontWeight: 700, color: fix ? NEEDS_FIX_COLOR : LANE_COLORS[lane] }}
         >
           {LANE_LABELS[lane]}
+          {fix && "（要修正）"}
         </span>
       }
     >
@@ -197,6 +235,44 @@ export function TaskDrawer(props: TaskDrawerProps) {
         </div>
       )}
 
+      {/* PR links: every PR this task produced, visible as soon as the drawer opens. */}
+      <div
+        data-testid="drawer-prs"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: t.space2,
+          marginBottom: t.space4,
+          fontSize: 13,
+        }}
+      >
+        <span style={{ fontWeight: 700, color: t.textMuted }}>PR</span>
+        {item.prUrls.length === 0 ? (
+          <span style={{ color: t.textMuted }}>まだありません</span>
+        ) : (
+          item.prUrls.map((url) => (
+            <a
+              key={url}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={url}
+              data-testid="drawer-pr-link"
+              style={{
+                padding: `2px ${t.space2}`,
+                borderRadius: t.radius,
+                border: `1px solid ${t.border}`,
+                color: t.text,
+                textDecoration: "none",
+              }}
+            >
+              {prLabel(url)} ↗
+            </a>
+          ))
+        )}
+      </div>
+
       {/* tabs */}
       <div role="tablist" style={{ display: "flex", gap: t.space2, marginBottom: t.space4 }}>
         {(["log", "artifact", "phase"] as Tab[]).map((tb) => (
@@ -223,10 +299,15 @@ export function TaskDrawer(props: TaskDrawerProps) {
           <div style={{ fontSize: 12, color: t.textMuted, marginBottom: t.space2 }}>
             対象: {item.latestRun?.cwd || "daemon 既定"} ·{" "}
             <span data-testid="drawer-run-status">{stream.status}</span>
-            {stream.live && <span style={{ color: LANE_COLORS.running }}> · live</span>}
+            {stream.live && <span style={{ color: LANE_COLORS.implementing }}> · live</span>}
           </div>
           <pre
+            ref={logRef}
             data-testid="drawer-log"
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+            }}
             style={{
               margin: 0,
               padding: t.space3,
@@ -251,10 +332,10 @@ export function TaskDrawer(props: TaskDrawerProps) {
             この実行の成果物。クリックして demo / staging / PR を確認できます。
           </div>
           <ArtifactLinks
-            urls={{ demoUrl: item.demoUrl, stagingUrl: item.stagingUrl, prUrl: item.prUrl }}
+            urls={{ demoUrl: item.demoUrl, stagingUrl: item.stagingUrl, prUrl: item.prUrls.at(-1) ?? item.prUrl }}
             variant="drawer"
             phase={item.featurePhase}
-            running={lane === "running"}
+            running={running}
           />
         </div>
       )}
@@ -305,7 +386,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
         }}
       >
         <div style={{ display: "flex", gap: t.space3, flexWrap: "wrap" }}>
-          {lane === "review" && approvalEdge && (
+          {reviewable && approvalEdge && (
             <button
               type="button"
               data-testid="action-approve"
@@ -316,7 +397,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               🔒 承認して次へ（{PHASE_LABELS[approvalEdge.to]}）
             </button>
           )}
-          {lane === "review" && rejectEdge && (
+          {reviewable && rejectEdge && (
             <button
               type="button"
               data-testid="action-reject"
@@ -327,7 +408,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               却下（要修正・再投げ）
             </button>
           )}
-          {lane !== "running" && lane !== "done" && (
+          {!running && !archived && (
             <button
               type="button"
               data-testid="action-rerun"
@@ -335,10 +416,21 @@ export function TaskDrawer(props: TaskDrawerProps) {
               onClick={() => setRerunOpen((v) => !v)}
               style={btnGhost}
             >
-              {lane === "needs_fix" ? "修正して再実行" : "追加指示"}
+              {fix ? "修正して再実行" : "追加指示"}
             </button>
           )}
-          {lane === "running" && item.latestRun && (
+          {!running && !archived && rewindEdges.length > 0 && (
+            <button
+              type="button"
+              data-testid="action-rewind"
+              disabled={busy}
+              onClick={() => setRewindOpen((v) => !v)}
+              style={btnGhost}
+            >
+              フェーズを戻す
+            </button>
+          )}
+          {running && item.latestRun && (
             <button
               type="button"
               data-testid="action-cancel"
@@ -348,7 +440,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               中止
             </button>
           )}
-          {lane !== "done" && (
+          {!archived && (
             <button
               type="button"
               data-testid="action-archive"
@@ -452,6 +544,52 @@ export function TaskDrawer(props: TaskDrawerProps) {
                 却下して再投げ
               </button>
               <button type="button" onClick={() => setRejectTo(null)} style={btnGhost}>
+                やめる
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* phase rewind: pick an earlier 確認待ち phase */}
+        {rewindOpen && rewindEdges.length > 0 && (
+          <div
+            data-testid="rewind-form"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: t.space3,
+              padding: t.space3,
+              borderRadius: t.radius,
+              border: `1px solid ${t.border}`,
+              background: t.surface,
+              fontSize: 13,
+            }}
+          >
+            <div style={{ lineHeight: 1.6 }}>
+              現在「<strong>{PHASE_LABELS[item.featurePhase]}</strong>」です。戻す先を選んでください。
+              <div style={{ fontSize: 12, color: t.textMuted }}>
+                フェーズ表示だけを戻します。反映済みの demo / staging / 本番は巻き戻りません。
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: t.space2, flexWrap: "wrap" }}>
+              {rewindEdges.map((tr) => (
+                <button
+                  key={tr.to}
+                  type="button"
+                  data-testid={`rewind-to-${tr.to}`}
+                  disabled={busy}
+                  onClick={() =>
+                    void wrap(async () => {
+                      await props.onRewind(tr.to);
+                      setRewindOpen(false);
+                    }, "rewind")
+                  }
+                  style={btnGhost}
+                >
+                  「{PHASE_LABELS[tr.to]}」に戻す
+                </button>
+              ))}
+              <button type="button" onClick={() => setRewindOpen(false)} style={btnGhost}>
                 やめる
               </button>
             </div>

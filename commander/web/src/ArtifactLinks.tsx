@@ -13,7 +13,7 @@
 import type { CSSProperties } from "react";
 import { t } from "./lib/theme.ts";
 import type { FeaturePhase } from "./lib/commanderApi.ts";
-import { DUB_STAGING_URL } from "./lib/reflection.ts";
+import { DUB_STAGING_URL, DUB_DEMO_URL } from "./lib/reflection.ts";
 
 export interface ArtifactUrls {
   demoUrl: string | null;
@@ -66,12 +66,18 @@ function reachedRank(phase: FeaturePhase | undefined, u: ArtifactUrls): number {
 
 /**
  * staging に到達済み（phase 由来）なのに run 出力から staging URL を拾えていない時、Dub の固定
- * staging ホストで補完する。これにより「stagingに反映済み」バッジ（phase 由来）と主 URL が常に一致し、
- * 「バッジは staging・URL は demo」の不整合が起きない。すでに staging URL が有れば何もしない。
+ * staging ホストで補完する。同様に、phase が分かっている（＝タスクが実在する）のに demo URL を
+ * 拾えていない時も、Dub の固定 demo ホスト（DUB_DEMO_URL）で補完する。
+ * これにより「◯◯に反映済み」バッジ（phase 由来）と主 URL が常に一致し、
+ * bugfix: 「✅ demoに反映済み」バッジは出るのにクリックできるリンクが無い、
+ * という不整合（stagingだけ直っていてdemoに残っていた回帰）が起きない。
+ * すでに URL が有ればそのまま・phase 不明（未指定）なら何もしない。
  */
-function withStagingFallback(u: ArtifactUrls, phase?: FeaturePhase): ArtifactUrls {
-  if (u.stagingUrl) return u;
-  return reachedRank(phase, u) >= 1 ? { ...u, stagingUrl: DUB_STAGING_URL } : u;
+function withFixedHostFallbacks(u: ArtifactUrls, phase?: FeaturePhase): ArtifactUrls {
+  let out = u;
+  if (!out.demoUrl && phase) out = { ...out, demoUrl: DUB_DEMO_URL };
+  if (!out.stagingUrl && reachedRank(phase, out) >= 1) out = { ...out, stagingUrl: DUB_STAGING_URL };
+  return out;
 }
 
 /**
@@ -80,7 +86,7 @@ function withStagingFallback(u: ArtifactUrls, phase?: FeaturePhase): ArtifactUrl
  * its shipped-record reference then staging (consistent with reflection.ts's prod url).
  */
 export function primaryKey(u: ArtifactUrls, phase?: FeaturePhase): LinkKey | null {
-  u = withStagingFallback(u, phase);
+  u = withFixedHostFallbacks(u, phase);
   const rank = reachedRank(phase, u);
   if (rank >= 2) {
     if (u.prUrl) return "pr";
@@ -106,7 +112,7 @@ function makeLink(u: ArtifactUrls, key: LinkKey): Link | null {
 
 /** Split captured links into the primary (reached env) and the rest (fixed demo→staging→pr order). */
 function splitLinks(u: ArtifactUrls, phase?: FeaturePhase): { primary: Link | null; secondary: Link[] } {
-  const eff = withStagingFallback(u, phase);
+  const eff = withFixedHostFallbacks(u, phase);
   const pk = primaryKey(u, phase);
   const primary = pk ? makeLink(eff, pk) : null;
   const order: LinkKey[] = ["demo", "staging", "pr"];
@@ -225,10 +231,11 @@ function CardChip({ link: l, primary }: { link: Link; primary?: boolean }) {
       data-testid={`artifact-chip-${l.key}`}
       data-primary={primary ? "true" : undefined}
       onClick={(e) => e.stopPropagation()}
-      title={l.href}
+      title={primary ? `今ここ: ${l.href}` : l.href}
       style={chipStyle(l.color, primary)}
     >
-      {l.icon} {primary ? (l.key === "pr" ? "PR" : `${l.key} ✓今ここ`) : l.key === "pr" ? "PR" : l.key}
+      {l.icon} {l.key === "pr" ? "PR" : l.key}
+      {primary && l.key !== "pr" ? " ✓" : ""}
     </a>
   );
 }
@@ -274,7 +281,7 @@ function chipStyle(color: string, primary?: boolean): CSSProperties {
     letterSpacing: 0.3,
     color: primary ? "#fff" : color,
     textDecoration: "none",
-    padding: primary ? `3px ${t.space3}` : `2px ${t.space2}`,
+    padding: `1px ${t.space2}`,
     borderRadius: "var(--dub-radius-sm, 8px)",
     border: `1px solid ${color}`,
     background: primary ? color : "transparent",

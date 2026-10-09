@@ -29,19 +29,9 @@ export type MemberTeam = member.Team;
 export const GRADES = member.GRADES;
 export const DESIRED_ACTIVITIES = member.DESIRED_ACTIVITIES;
 
-/** JP labels for the closed unions (form selects + サンクス copy). */
-export const GRADE_LABEL: Record<Grade, string> = {
-  "1": "1年",
-  "2": "2年",
-  "3": "3年",
-  "4": "4年",
-  graduate: "院生",
-};
-export const ACTIVITY_LABEL: Record<DesiredActivity, string> = {
-  event: "イベント運営",
-  dev: "チーム開発",
-  both: "両方",
-};
+/** JP labels for the closed unions (正典は @dub/types member)。 */
+export const GRADE_LABEL = member.GRADE_LABEL;
+export const ACTIVITY_LABEL = member.ACTIVITY_LABEL;
 
 /** 管理者レビュー状態の表示ラベル（一覧の「運営メンバー反映」列）。 */
 export const REVIEW_STATE_LABEL: Record<ParticipationReviewState, string> = {

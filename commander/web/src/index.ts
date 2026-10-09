@@ -2,7 +2,7 @@
 // standalone (main.tsx) and as a Dub app (apps/fe2-app-shell/src/features/commander).
 // SoT: the run console, phase board and their HTTP clients live here; the shell
 // feature only composes them into shell chrome (no logic duplication).
-export { App } from "./App.tsx";
+export { App, CommanderWorkspace, type CommanderTabId } from "./App.tsx";
 export { Board } from "./Board.tsx";
 export { AskDub } from "./AskDub.tsx";
 export { OperateDub } from "./OperateDub.tsx";
@@ -19,6 +19,8 @@ export { FeatureBoard } from "./FeatureBoard.tsx";
 export {
   deriveLane,
   groupByLane,
+  isReviewLane,
+  isRunningLane,
   LANES,
   LANE_LABELS,
   type Lane,

@@ -670,6 +670,10 @@ export async function createHarness(opts: HarnessOptions = {}): Promise<Harness>
     SVC_GITHUB_SYNC: inert,
     SVC_AUDIT_LOG: audit,
     SVC_WEBHOOK_INGEST: inert,
+    SVC_MAIL_GATEWAY: inert,
+    // bff-home aggregates these; an empty 200 projects to zero counts, not a partialError.
+    SVC_USAGE_METER: inert,
+    SVC_MEMBER: inert,
     GATEWAY_VERSION: "integration-test",
     ALLOWED_ORIGINS: "https://app.devhub.test,http://localhost:5173",
     DEFAULT_MAX_BODY_BYTES: "10485760",

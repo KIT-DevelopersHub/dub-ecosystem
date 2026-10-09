@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry } from "@dub/types";
+import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { mockUnfurl } from "../composition/featureEntries";
 
@@ -2064,33 +2064,10 @@ interface DemoTeam {
   color: string | null;
   description: string | null;
 }
-interface DemoMember {
-  id: string;
-  orgId: string;
-  name: string;
-  roleTitle: string | null;
+// 運営メンバー = 実 API と同じ Member (人物プロフィールは参加届と共通の PersonProfile)。
+type DemoMember = Omit<import("@dub/types").member.Member, "status"> & {
   status: "added" | "invited" | "considering" | "on_leave" | "declined";
-  teamIds: string[];
-  department: string | null;
-  grade: string | null;
-  identityUserId: string | null;
-  leaderId: string | null;
-  contact: string | null;
-  schoolEmail: string | null;
-  gmail: string | null;
-  lastName: string | null;
-  firstName: string | null;
-  lastNameKana: string | null;
-  firstNameKana: string | null;
-  lastNameRomaji: string | null;
-  firstNameRomaji: string | null;
-  phone: string | null;
-  note: string | null;
-  sortOrder: number;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
+};
 
 function createMembersStore() {
   let seq = 100;
@@ -2118,7 +2095,9 @@ function createMembersStore() {
     identityUserId: string | null = null,
     leaderId: string | null = null,
   ): DemoMember => ({
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade, identityUserId, leaderId, contact, schoolEmail: null, gmail: null, lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: null, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+    ...memberValues.emptyPersonProfile(),
+    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade: memberValues.normalizeGrade(grade ?? "") ?? null,
+    identityUserId, leaderId, contact, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   // leaderId で「配下」を明示し、組織図順ソートと「リーダー」列/フォームのリーダー選択を
   // 実データで確認できるようにする。各チームは オーガナイザー → 複数リーダー → 各リーダー
@@ -2211,6 +2190,15 @@ function createMembersStore() {
       mem.firstNameKana = kana[1];
     }
   }
+  // 名列番号の seed (例 "3EP2-26")。学部生(N年)のみ、学科ごとの仮コード + 連番で付与。
+  const DEPT_CODE: Record<string, string> = {
+    情報工学科: "EP", 電気電子工学科: "EE", 機械工学科: "MM", 経営情報学科: "MI", 建築学科: "AA", メディア情報学科: "MD",
+  };
+  members.forEach((mem, i) => {
+    const year = mem.grade && mem.grade !== "graduate" ? mem.grade : undefined;
+    const code = mem.department ? DEPT_CODE[mem.department] : undefined;
+    if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
+  });
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
   // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
@@ -2230,7 +2218,7 @@ function createMembersStore() {
       id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
-      grade: "2", department: "電気電子工学科", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -2240,7 +2228,7 @@ function createMembersStore() {
       id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
       lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
       nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
-      grade: "1", department: "情報工学科", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
       schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -2298,15 +2286,29 @@ function createMembersStore() {
     }
 
     // people
+    // 人物プロフィール項目は実サーバと同じ共通ルール (parsePersonProfilePatch) で検証する。
+    const parseProfile = (): Partial<import("@dub/types").member.PersonProfile> | null => {
+      const r = memberValues.parsePersonProfilePatch((body ?? {}) as Record<string, unknown>);
+      return r.errors.length > 0 ? null : r.value;
+    };
+    const invalidBody = (): Response =>
+      json({ error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } } satisfies ErrorResponse, 400);
+    const composeName = (a: string | null | undefined, b: string | null | undefined): string =>
+      [a, b].filter((x): x is string => !!x && x.length > 0).join(" ");
     if (method === "POST" && pathname === "/api/v1/members/people") {
+      const profile = parseProfile();
+      const newName = composeName(profile?.lastName, profile?.firstName) || String(body?.name ?? "").trim();
+      if (!profile || !newName) return invalidBody();
       const mem: DemoMember = {
-        id: nid("member"), orgId: ORG, name: String(body?.name ?? ""), roleTitle: body?.roleTitle ?? null,
+        ...memberValues.emptyPersonProfile(),
+        ...profile,
+        id: nid("member"), orgId: ORG,
+        name: newName,
+        roleTitle: body?.roleTitle ?? null,
         status: body?.status ?? "added", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
-        department: body?.department ?? null, grade: body?.grade ?? null,
         identityUserId: null,
         leaderId: body?.leaderId ?? null,
-        contact: body?.contact ?? null, schoolEmail: null, gmail: null,
-        lastName: null, firstName: null, lastNameKana: null, firstNameKana: null, lastNameRomaji: null, firstNameRomaji: null, phone: null, note: body?.note ?? null,
+        contact: body?.contact ?? null,
         sortOrder: (members.length + 1) * 1024, version: 1,
         createdAt: isoNow(), updatedAt: isoNow(),
       };
@@ -2348,16 +2350,17 @@ function createMembersStore() {
           const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
           return json(err, 409);
         }
+        const profile = parseProfile();
+        if (!profile) return invalidBody();
+        Object.assign(mem, profile);
         if (body?.name !== undefined) mem.name = String(body.name);
+        if ("lastName" in profile || "firstName" in profile) mem.name = composeName(mem.lastName, mem.firstName) || mem.name;
         if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
         if (body?.status !== undefined) mem.status = body.status;
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
-        if (body?.department !== undefined) mem.department = body.department ?? null;
-        if (body?.grade !== undefined) mem.grade = body.grade ?? null;
         if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
         if (body?.identityUserId !== undefined) mem.identityUserId = body.identityUserId ?? null;
         if (body?.contact !== undefined) mem.contact = body.contact ?? null;
-        if (body?.note !== undefined) mem.note = body.note ?? null;
         if (typeof body?.sortOrder === "number") mem.sortOrder = body.sortOrder;
         mem.version += 1;
         mem.updatedAt = isoNow();
@@ -2376,25 +2379,20 @@ function createMembersStore() {
     const recordParticipation = (): { participation: any } => {
       const compose = (a: unknown, b: unknown): string =>
         [a, b].map((x) => (typeof x === "string" ? x.trim() : "")).filter((x) => x.length > 0).join(" ");
-      const lastName: string | null = body?.lastName ?? null;
-      const firstName: string | null = body?.firstName ?? null;
-      const lastNameKana: string | null = body?.lastNameKana ?? null;
-      const firstNameKana: string | null = body?.firstNameKana ?? null;
-      const lastNameRomaji: string | null = body?.lastNameRomaji ?? null;
-      const firstNameRomaji: string | null = body?.firstNameRomaji ?? null;
+      const profile = { ...memberValues.emptyPersonProfile(), ...(parseProfile() ?? {}) };
+      const { lastName, firstName, lastNameKana, firstNameKana, lastNameRomaji, firstNameRomaji } = profile;
       const name = (compose(lastName, firstName) || String(body?.name ?? "")).trim();
       const nameKana: string | null = compose(lastNameKana, firstNameKana) || body?.nameKana || null;
       const nameRomaji: string | null = compose(lastNameRomaji, firstNameRomaji) || body?.nameRomaji || null;
       const target = norm(name);
       const existing = participations.find((p) => p.normalizedName === target);
       const participation = {
+        ...profile,
         id: existing?.id ?? nid("part"), orgId: ORG, memberId: existing?.memberId ?? null, name, normalizedName: target,
-        lastName, firstName, nameKana, lastNameKana, firstNameKana,
-        nameRomaji, lastNameRomaji, firstNameRomaji,
-        grade: body?.grade ?? null, department: body?.department ?? null,
-        contact: body?.contact ?? null, phone: body?.phone ?? null,
-        schoolEmail: String(body?.schoolEmail ?? ""), gmail: String(body?.gmail ?? ""),
-        desiredTeamId: body?.desiredTeamId ?? null, desiredActivity: body?.desiredActivity ?? null, note: body?.note ?? null,
+        nameKana, nameRomaji,
+        contact: body?.contact ?? null,
+        schoolEmail: profile.schoolEmail ?? "", gmail: profile.gmail ?? "",
+        desiredTeamId: body?.desiredTeamId ?? null,
         status: "submitted", matchKind: existing?.matchKind ?? "created_new", reviewState: existing?.reviewState ?? "pending",
         submittedBy: ME_ID, submittedAt: isoNow(), createdAt: existing?.createdAt ?? isoNow(), updatedAt: isoNow(),
       };
@@ -2413,7 +2411,7 @@ function createMembersStore() {
         .filter((x) => x.length > 0)
         .join(" ");
       const hasName = composedName.length > 0 || String(body?.name ?? "").trim().length > 0;
-      if (!hasName || !emailRe.test(school) || !emailRe.test(gm)) {
+      if (!hasName || !emailRe.test(school) || !emailRe.test(gm) || !parseProfile()) {
         const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
         return json(err, 400);
       }
@@ -2471,21 +2469,20 @@ function createMembersStore() {
         if (mem.status === "invited" || mem.status === "considering") mem.status = "added";
         if (p.desiredTeamId && !mem.teamIds.includes(p.desiredTeamId)) mem.teamIds.push(p.desiredTeamId);
         if (mem.contact === null) mem.contact = p.schoolEmail;
-        if (mem.schoolEmail === null && p.schoolEmail) mem.schoolEmail = p.schoolEmail;
-        if (mem.gmail === null && p.gmail) mem.gmail = p.gmail;
-        if (mem.department === null && p.department) mem.department = p.department;
-        if (mem.grade === null && p.grade) mem.grade = p.grade;
+        // 人物プロフィール項目は空欄だけ参加届で補完 (実サーバの fillEmptyProfile と同じ)。
+        for (const k of memberValues.PERSON_PROFILE_KEYS) {
+          if (mem[k] == null && p[k]) (mem as Record<string, unknown>)[k] = p[k];
+        }
         mem.version += 1; mem.updatedAt = isoNow();
         p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
       }
       if (action === "create") {
         const created: DemoMember = {
+          ...memberValues.pickPersonProfile(p),
           id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null, leaderId: null,
-          department: p.department, grade: p.grade, teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
-          contact: p.contact ?? p.schoolEmail, schoolEmail: p.schoolEmail || null, gmail: p.gmail || null,
-          lastName: p.lastName, firstName: p.firstName, lastNameKana: p.lastNameKana, firstNameKana: p.firstNameKana,
-          lastNameRomaji: p.lastNameRomaji, firstNameRomaji: p.firstNameRomaji, phone: p.phone, note: p.note,
+          teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
+          contact: p.contact ?? p.schoolEmail,
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
         };
         members.push(created);
@@ -2493,6 +2490,337 @@ function createMembersStore() {
         return json({ participation: { ...p }, member: { ...created, teamIds: [...created.teamIds] } });
       }
       return json({ error: { code: "VALIDATION_FAILED", message: "invalid action", retryable: false } }, 400);
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
+
+// ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
+// Answers the wire contract frozen in features/lp/lpApi.tsx:
+//   GET   /api/v1/lp/stats      ?from&to&includeBots
+//   GET   /api/v1/lp/visits     ?from&to&source&cursor&limit
+//   GET   /api/v1/lp/links      ?from&to
+//   POST  /api/v1/lp/links      ?from&to   { name, slug }   409 on duplicate slug
+//   PATCH /api/v1/lp/links/:id  ?from&to   { active }
+// The visit log is GENERATED (not hand-listed) so every range (7/30/90日) has
+// believable data, but from a FIXED seed — the same demo URL always shows the same
+// numbers, so a reviewer can compare two loads and screenshots stay meaningful.
+// Issued links are in-session mutable: a reviewer can really issue one and see it
+// appear (0 visits — the demo never fabricates hits for a brand-new link).
+
+/** 発行する URL の土台。features/lp/lpLinks.ts の LP_BASE_URL / LP_TRACKING_PARAM と一致させる
+ *  （import しないのは demo-seed を feature 非依存に保つため。ズレたら lp.test.tsx が落ちる）。 */
+const DEMO_LP_URL = "https://hokuriku-it-conf.com";
+const DEMO_LP_PARAM = "utm_source";
+
+type DemoLpLink = {
+  id: string;
+  name: string;
+  slug: string;
+  url: string;
+  active: boolean;
+  createdAt: string;
+};
+
+type DemoLpLinkStats = { visits: number; uniques: number; lastVisitAt: string | null };
+
+type DemoLpVisit = {
+  id: string;
+  linkId: string | null;
+  source: string;
+  lpVersion: string | null;
+  path: string | null;
+  referrerHost: string | null;
+  country: string | null;
+  device: "mobile" | "desktop" | "bot" | "unknown";
+  kind: "redirect" | "ingest";
+  occurredAt: string;
+  /** Demo-only: the pseudo visitor this hit belongs to, used to derive 一意訪問者. */
+  visitorId: string;
+};
+
+/** 流入元の配合。weight = 相対的な出やすさ。referrer は「その流入元なら普通こう来る」ホスト。 */
+const DEMO_LP_SOURCES: { key: string; label: string; weight: number; referrer: string | null; mobileBias: number }[] = [
+  { key: "instagram", label: "Instagram", weight: 32, referrer: "l.instagram.com", mobileBias: 0.92 },
+  { key: "x", label: "X(旧Twitter)", weight: 21, referrer: "t.co", mobileBias: 0.78 },
+  { key: "line", label: "LINE", weight: 12, referrer: null, mobileBias: 0.95 },
+  { key: "google", label: "Google検索", weight: 14, referrer: "www.google.com", mobileBias: 0.55 },
+  { key: "flyer", label: "チラシQR", weight: 8, referrer: null, mobileBias: 0.98 },
+  { key: "poster", label: "ポスターQR", weight: 5, referrer: null, mobileBias: 0.98 },
+  { key: "mail", label: "案内メール", weight: 4, referrer: null, mobileBias: 0.35 },
+  // 流入URLを経由しない素の到達。linkId が付かないのでこれだけ kind="ingest"。
+  { key: "direct", label: "直接アクセス", weight: 4, referrer: null, mobileBias: 0.5 },
+];
+
+const DEMO_LP_DAYS = 90;
+
+/** サイト全体のアクセス（Cloudflare Web Analytics）の demo 値。本番の実測値（2026-09-28〜10-10）を
+ *  そのまま固定で持つ: 本番に出した時に見える数字と demo を一致させるため。 */
+const DEMO_LP_SITE_DAYS: Record<string, [pageViews: number, visits: number]> = {
+  "2026-09-28": [10, 10],
+  "2026-10-01": [82, 45],
+  "2026-10-02": [29, 18],
+  "2026-10-03": [10, 4],
+  "2026-10-04": [7, 1],
+  "2026-10-05": [2, 2],
+  "2026-10-06": [4, 2],
+  "2026-10-07": [12, 10],
+  "2026-10-08": [8, 8],
+  "2026-10-09": [1, 1],
+  "2026-10-10": [2, 1],
+};
+const DEMO_LP_SITE_REFERRERS: { key: string; label: string; pageViews: number; visits: number }[] = [
+  { key: "hokuriku-it-conf.com", label: "サイト内の移動", pageViews: 62, visits: 0 },
+  { key: "direct", label: "直接アクセス", pageViews: 27, visits: 27 },
+  { key: "t.co", label: "X (Twitter)", pageViews: 24, visits: 24 },
+  { key: "m.facebook.com", label: "Facebook", pageViews: 14, visits: 14 },
+  { key: "www.google.com", label: "Google 検索", pageViews: 10, visits: 10 },
+  { key: "camp-fire.jp", label: "CAMPFIRE", pageViews: 9, visits: 9 },
+  { key: "l.instagram.com", label: "Instagram", pageViews: 3, visits: 3 },
+  { key: "www.bing.com", label: "Bing 検索", pageViews: 3, visits: 3 },
+];
+
+/** 決定的な擬似乱数 (mulberry32)。Math.random を使うとリロードの度に数字が変わり、
+ *  「さっき見た画面」と比較できなくなるので使わない。 */
+function demoLpRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function demoLpDayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function createLpStore() {
+  const rnd = demoLpRandom(20260928);
+  const pickSource = (): (typeof DEMO_LP_SOURCES)[number] => {
+    const total = DEMO_LP_SOURCES.reduce((s, x) => s + x.weight, 0);
+    let r = rnd() * total;
+    for (const s of DEMO_LP_SOURCES) {
+      r -= s.weight;
+      if (r <= 0) return s;
+    }
+    return DEMO_LP_SOURCES[0]!;
+  };
+
+  const visits: DemoLpVisit[] = [];
+  const today = new Date();
+  today.setHours(23, 59, 0, 0);
+  let seq = 0;
+
+  for (let back = DEMO_LP_DAYS - 1; back >= 0; back -= 1) {
+    const day = new Date(today.getTime() - back * 24 * 60 * 60 * 1000);
+    // 直近ほど多い（告知が進むほど伸びる）＋週末が跳ねる、という素直な形にする。
+    const recency = 1 + (DEMO_LP_DAYS - back) / DEMO_LP_DAYS; // 1.0 → 2.0
+    const weekend = day.getDay() === 0 || day.getDay() === 6 ? 1.35 : 1;
+    const count = Math.max(1, Math.round((6 + rnd() * 10) * recency * weekend));
+
+    for (let i = 0; i < count; i += 1) {
+      const src = pickSource();
+      const isBot = rnd() < 0.06;
+      const hour = 8 + Math.floor(rnd() * 15); // 8時〜22時台に寄せる
+      const at = new Date(day);
+      at.setHours(hour, Math.floor(rnd() * 60), 0, 0);
+      seq += 1;
+      visits.push({
+        id: `lpv_${String(seq).padStart(5, "0")}`,
+        linkId: src.key === "direct" ? null : `lnk_${src.key}`,
+        source: src.key,
+        lpVersion: "v3.4",
+        path: "/",
+        referrerHost: src.referrer,
+        country: rnd() < 0.96 ? "JP" : rnd() < 0.5 ? "TW" : "US",
+        device: isBot ? "bot" : rnd() < src.mobileBias ? "mobile" : "desktop",
+        kind: src.key === "direct" ? "ingest" : "redirect",
+        occurredAt: at.toISOString(),
+        // 3割は再訪（同じ visitorId を引き当てる）。のべ訪問 > 一意訪問者 になる。
+        visitorId: `vis_${Math.floor(rnd() * Math.max(40, seq * 0.7))}`,
+      });
+    }
+  }
+  // 生ログは新しい順。
+  visits.sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : a.occurredAt > b.occurredAt ? -1 : 0));
+
+  /** from/to は「日の閉区間」。occurredAt のローカル日キーで挟む（UTC に倒すと JST の
+   *  深夜帯が前日に落ちて、運営の見ている「今日」とズレるため）。 */
+  const inRange = (v: DemoLpVisit, from: string, to: string): boolean => {
+    const key = demoLpDayKey(new Date(v.occurredAt));
+    return key >= from && key <= to;
+  };
+
+  const bucket = (
+    rows: DemoLpVisit[],
+    keyOf: (v: DemoLpVisit) => string,
+    labelOf: (key: string) => string,
+  ): { key: string; label: string; visits: number; uniques: number }[] => {
+    const byKey = new Map<string, { visits: number; visitors: Set<string> }>();
+    for (const v of rows) {
+      const k = keyOf(v);
+      const cur = byKey.get(k) ?? { visits: 0, visitors: new Set<string>() };
+      cur.visits += 1;
+      cur.visitors.add(v.visitorId);
+      byKey.set(k, cur);
+    }
+    return [...byKey.entries()]
+      .map(([key, c]) => ({ key, label: labelOf(key), visits: c.visits, uniques: c.visitors.size }))
+      .sort((a, b) => b.visits - a.visits);
+  };
+
+  const sourceLabelOf = (key: string): string => DEMO_LP_SOURCES.find((s) => s.key === key)?.label ?? key;
+  const deviceLabelOf = (key: string): string =>
+    ({ mobile: "スマホ", desktop: "PC", bot: "bot", unknown: "不明" })[key] ?? key;
+
+  // ── 発行済みの流入URL ────────────────────────────────────────────────────
+  // 生成済みの訪問は linkId = `lnk_<source>` を持つので、流入元ごとに 1 本発行済みという
+  // 状態をそこから起こす（訪問だけあって発行元が無い、という矛盾を作らない）。
+  // direct は流入URL経由ではないので一覧に出さない。
+  const links: DemoLpLink[] = DEMO_LP_SOURCES.filter((s) => s.key !== "direct").map((s, i) => ({
+    id: `lnk_${s.key}`,
+    name: s.label,
+    slug: s.key,
+    url: `${DEMO_LP_URL}/?${DEMO_LP_PARAM}=${s.key}`,
+    // poster(ポスターQR) だけ停止中にして「停止しても集計は残る」状態を見せる。
+    active: s.key !== "poster",
+    createdAt: new Date(Date.now() - (DEMO_LP_DAYS - i) * 24 * 60 * 60 * 1000).toISOString(),
+  }));
+
+  const linkStats = (linkId: string, from: string, to: string): DemoLpLinkStats => {
+    const rows = visits.filter((v) => v.linkId === linkId && v.device !== "bot" && inRange(v, from, to));
+    return {
+      visits: rows.length,
+      uniques: new Set(rows.map((v) => v.visitorId)).size,
+      // visits は新しい順なので先頭が最終訪問。
+      lastVisitAt: rows[0]?.occurredAt ?? null,
+    };
+  };
+
+  const linkSummary = (l: DemoLpLink, from: string, to: string) => ({ ...l, stats: linkStats(l.id, from, to) });
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    const from = url.searchParams.get("from") ?? "";
+    const to = url.searchParams.get("to") ?? "";
+
+    if (method === "GET" && pathname === "/api/v1/lp/links") {
+      // 新しく発行したものを上に（画面の並びと一致させる）。
+      const items = [...links]
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+        .map((l) => linkSummary(l, from, to));
+      return json({ items });
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/links") {
+      const req = (body ?? {}) as { name?: string; slug?: string };
+      const name = (req.name ?? "").trim();
+      const slug = (req.slug ?? "").trim().toLowerCase();
+      if (name.length === 0 || !/^[a-z0-9][a-z0-9_-]*$/.test(slug)) {
+        return problem("VALIDATION", "名前とパラメータ値（半角英数字）を入力してください", 400);
+      }
+      if (links.some((l) => l.slug === slug)) {
+        return problem("CONFLICT", `「${slug}」は既に発行済みです`, 409);
+      }
+      const created: DemoLpLink = {
+        id: `lnk_${slug}`,
+        name,
+        slug,
+        url: `${DEMO_LP_URL}/?${DEMO_LP_PARAM}=${slug}`,
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
+      links.push(created);
+      // 発行直後は実績 0。デモでも訪問を捏造しない（0 のまま出すのが正しい挙動）。
+      return json(linkSummary(created, from, to), 201);
+    }
+
+    const patch = /^\/api\/v1\/lp\/links\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && patch) {
+      const id = decodeURIComponent(patch[1]!);
+      const link = links.find((l) => l.id === id);
+      if (!link) return problem("NOT_FOUND", "その流入URLは見つかりません", 404);
+      const req = (body ?? {}) as { active?: boolean };
+      if (typeof req.active === "boolean") link.active = req.active;
+      return json(linkSummary(link, from, to));
+    }
+
+    if (method !== "GET") return null;
+
+    if (pathname === "/api/v1/lp/site-traffic") {
+      const byDay: { date: string; pageViews: number; visits: number }[] = [];
+      const start = new Date(`${from}T00:00:00`);
+      const end = new Date(`${to}T00:00:00`);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const k = demoLpDayKey(d);
+        const [pageViews, visits] = DEMO_LP_SITE_DAYS[k] ?? [0, 0];
+        byDay.push({ date: k, pageViews, visits });
+      }
+      const pageViews = byDay.reduce((n, d) => n + d.pageViews, 0);
+      const visits = byDay.reduce((n, d) => n + d.visits, 0);
+      return json({
+        configured: true,
+        range: { from, to },
+        totals: { pageViews, visits },
+        byDay,
+        // 流入元の実測は 9/28〜10/10 の合計しか持たないので、山の 10/01 を含む期間だけ出す。
+        byReferrer: from <= "2026-10-01" && "2026-10-01" <= to ? DEMO_LP_SITE_REFERRERS : [],
+      });
+    }
+
+    if (pathname === "/api/v1/lp/stats") {
+      const includeBots = url.searchParams.get("includeBots") === "true";
+      const windowed = visits.filter((v) => inRange(v, from, to));
+      const bots = windowed.filter((v) => v.device === "bot");
+      const rows = includeBots ? windowed : windowed.filter((v) => v.device !== "bot");
+
+      // 日別は「0 件の日」も行として出す（抜け落ちると折れ線/表が嘘をつく）。
+      const byDayMap = new Map<string, number>();
+      for (const v of rows) {
+        const k = demoLpDayKey(new Date(v.occurredAt));
+        byDayMap.set(k, (byDayMap.get(k) ?? 0) + 1);
+      }
+      const byDay: { date: string; visits: number }[] = [];
+      const start = new Date(`${from}T00:00:00`);
+      const end = new Date(`${to}T00:00:00`);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const k = demoLpDayKey(d);
+        byDay.push({ date: k, visits: byDayMap.get(k) ?? 0 });
+      }
+
+      return json({
+        range: { from, to },
+        totals: {
+          visits: rows.length,
+          uniques: new Set(rows.map((v) => v.visitorId)).size,
+          botExcluded: includeBots ? 0 : bots.length,
+        },
+        bySource: bucket(rows, (v) => v.source, sourceLabelOf),
+        byDay,
+        byDevice: bucket(rows, (v) => v.device, deviceLabelOf),
+      });
+    }
+
+    if (pathname === "/api/v1/lp/visits") {
+      const source = url.searchParams.get("source");
+      const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
+      const cursor = url.searchParams.get("cursor");
+
+      const rows = visits
+        .filter((v) => v.device !== "bot" && inRange(v, from, to))
+        .filter((v) => (source ? v.source === source : true));
+      // カーソル = 直前ページの最後の id。見つからない場合は先頭から（壊れたカーソルで空にしない）。
+      const startIdx = cursor ? rows.findIndex((v) => v.id === cursor) + 1 : 0;
+      const page = rows.slice(startIdx, startIdx + limit);
+      const nextCursor = startIdx + limit < rows.length ? (page[page.length - 1]?.id ?? null) : null;
+      return json({
+        items: page.map(({ visitorId: _visitorId, ...v }) => v),
+        nextCursor,
+      });
     }
 
     return null;
@@ -2546,6 +2874,8 @@ export function createDemoFetch(): typeof fetch {
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
   const chatStore = createChatStore();
+  // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
+  const lpStore = createLpStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -2574,6 +2904,7 @@ export function createDemoFetch(): typeof fetch {
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??
+      lpStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.

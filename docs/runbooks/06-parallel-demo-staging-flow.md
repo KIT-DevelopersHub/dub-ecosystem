@@ -75,6 +75,11 @@ pnpm teardown:demo gantt-marquee --dry-run  # 計画だけ表示
 承認後は必ず teardown する。`deploy-demo-feature.sh` は既存 `demo-*.json` が `DEMO_SOFT_LIMIT`(既定20)以上に
 なると警告する。
 
+**自動片付け**: 手動 teardown を忘れても `.github/workflows/cleanup-demos.yml` が消す。
+PR がクローズ(マージ含む)した瞬間にその branch の demo を削除し、毎朝 05:30 JST にも全 `dub-demo-*` を
+掃除する(PR open=残す / merged・closed=削除 / PR 無し=14日再デプロイ無しで削除)。
+`refresh-demos.sh` も PR が終わった demo は作り直さない。手元で確認するなら `bash scripts/cleanup-demos.sh --dry-run`。
+
 ## 4. staging キューの状態確認とフラッシュ
 
 ```bash

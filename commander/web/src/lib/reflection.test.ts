@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reflectionOf, reflectionLabel, DUB_STAGING_URL } from "./reflection.ts";
+import { reflectionOf, reflectionLabel, DUB_STAGING_URL, DUB_DEMO_URL } from "./reflection.ts";
 import type { BoardItem, FeaturePhase, RunStatus } from "./commanderApi.ts";
 
 function item(
@@ -15,6 +15,7 @@ function item(
     demoUrl: null,
     stagingUrl: null,
     prUrl: null,
+    prUrls: [],
     latestRun:
       run === null || run === undefined
         ? null
@@ -78,5 +79,12 @@ describe("reflectionOf", () => {
   it("demo_review + succeeded → demoに反映済み with the demo URL", () => {
     const r = reflectionOf(item({ phase: "demo_review", run: "succeeded", demoUrl: "https://demo.example" }));
     expect(r).toEqual({ state: "reflected", env: "demo", url: "https://demo.example" });
+  });
+
+  it("demo_review with no captured demo URL → falls back to the fixed demo host", () => {
+    // Regression: badge said 「demoに反映済み」 but there was no click-through URL at all
+    // (staging already had this fallback; demo did not).
+    const r = reflectionOf(item({ phase: "demo_review", run: "succeeded", demoUrl: null }));
+    expect(r).toEqual({ state: "reflected", env: "demo", url: DUB_DEMO_URL });
   });
 });

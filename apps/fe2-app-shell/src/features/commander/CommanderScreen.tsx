@@ -1,39 +1,23 @@
-// Commander — the Dub app wrapper around @dub/commander-web's reusable console + phase
-// board (SoT: all logic lives in commander/web; this only supplies shell chrome). The
-// run console drives the operator's LOCAL Claude Code exec bridge (commander-daemon on
-// 127.0.0.1), so it only works on the operator's own machine; the phase board talks to
-// commander-service. Admin-only (identity:admin + app:commander:view), member-hidden.
-import { Card, Icon, PageHeader, Stack } from "@dub/ui";
-import { CommanderConsole, FeatureBoard } from "@dub/commander-web";
+// Commander — the Dub app wrapper around @dub/commander-web's CommanderWorkspace, the same
+// body (ボード / Dubに聞く / Dubを操作) the standalone page renders (SoT: all logic lives in
+// commander/web; this only supplies shell chrome). It drives the operator's LOCAL
+// commander-daemon / commander-service on 127.0.0.1, so it only works on the operator's own
+// machine. Admin-only (identity:admin + app:commander:view), member-hidden.
+import { PageHeader, Stack } from "@dub/ui";
+import { CommanderWorkspace } from "@dub/commander-web";
+
+// 停止時の案内はボード側(daemon-down-hint)が出すので、ここは1行の説明に留める。
+const NOTE =
+  "あなたのマシン上のローカル Commander（127.0.0.1 の daemon / service）に接続します。起動手順: commander/README.md";
 
 export function CommanderScreen(): JSX.Element {
   return (
-    <Stack gap={5} testId="fe2-commander">
-      <PageHeader
-        title="Commander"
-        description="ローカルの Claude Code を Web から駆動し、demo→staging→本番 のフェーズ遷移を段飛ばし/自己承認なしでゲートする司令コンソール（管理者用）。"
-      />
+    <Stack gap={4} testId="fe2-commander">
+      <PageHeader title="Commander" description={NOTE} testId="fe2-commander-daemon-note" />
 
-      <Card testId="fe2-commander-daemon-note">
-        <Stack direction="row" gap={3} align="center" wrap>
-          <Icon name="info" aria-label="注意" />
-          <span style={{ opacity: 0.85, fontSize: 13 }}>
-            実行コンソールは<strong>あなたのマシン上のローカル daemon</strong>（127.0.0.1）に接続します。
-            daemon を起動していない場合は Run が失敗します（起動手順: commander/README.md）。
-          </span>
-        </Stack>
-      </Card>
-
-      <Card testId="fe2-commander-console">
-        <Stack gap={3}>
-          <strong style={{ fontWeight: 700 }}>実行コンソール</strong>
-          <CommanderConsole />
-        </Stack>
-      </Card>
-
-      <Card testId="fe2-commander-board">
-        <FeatureBoard />
-      </Card>
+      <div data-testid="fe2-commander-workspace">
+        <CommanderWorkspace />
+      </div>
     </Stack>
   );
 }

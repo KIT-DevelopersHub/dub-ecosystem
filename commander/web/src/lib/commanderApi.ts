@@ -25,6 +25,7 @@ export interface TransitionSpec {
   to: FeaturePhase;
   requiresApproval: boolean;
   label: string;
+  rewind?: boolean;
 }
 
 export interface PhaseTransition {
@@ -111,6 +112,8 @@ export interface BoardItem {
   demoUrl: string | null;
   stagingUrl: string | null;
   prUrl: string | null;
+  /** Every PR the task's runs reported (first-seen order); prUrl is the latest only. */
+  prUrls: string[];
   latestRun: { id: string; status: RunStatus; cwd: string; createdAt: string } | null;
   createdAt: string;
   updatedAt: string;

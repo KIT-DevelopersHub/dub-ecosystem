@@ -1,0 +1,30 @@
+# lp-analytics Worker — PAID topology. account_id / database_id filled by infra at Apply.
+# LP管理: 流入URL の発行と LP 訪問ログの記録・集計。shared dub-core D1 (lp_* namespace) +
+# identity-roster (policy gate) が唯一の binding。公開ビーコンは api-gateway 経由でのみ届く。
+#
+# FREE-TIER deploy uses wrangler.free.toml (name = "dub-lp-analytics").
+name = "lp-analytics"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "REPLACE_AT_APPLY"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"
+
+[observability]
+enabled = true
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+LP_BASE_URL = "https://hokuriku-it-conf.com"
+# Cloudflare Web Analytics (LP のサイト全体アクセス)。トークンは secret:
+#   npx wrangler secret put CF_ANALYTICS_TOKEN   (Account Analytics:Read)
+CF_ACCOUNT_ID = "b8f6ddbf8fa8cf4e421eae870bdb6dac"
+LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"

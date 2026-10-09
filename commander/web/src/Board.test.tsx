@@ -5,26 +5,68 @@ import { Board } from "./Board.tsx";
 import { makeBoardItem, makeFakeApi, makeFakeClient } from "./test/fakes.ts";
 
 describe("<Board>", () => {
-  it("renders all five lanes and an empty state when there are no tasks", async () => {
+  it("renders all eight lanes in order and an empty state when there are no tasks", async () => {
     render(<Board client={makeFakeClient()} api={makeFakeApi([])} pollMs={0} />);
-    for (const lane of ["queued", "running", "review", "needs_fix", "done"]) {
-      expect(screen.getByTestId(`lane-${lane}`)).toBeInTheDocument();
-    }
+    const lanes = screen.getByTestId("board-lanes");
+    const ids = [
+      "queued",
+      "implementing",
+      "review",
+      "staging_deploying",
+      "staging_review",
+      "prod_deploying",
+      "prod_review",
+      "done",
+    ];
+    for (const lane of ids) expect(screen.getByTestId(`lane-${lane}`)).toBeInTheDocument();
+    expect(lanes).toHaveTextContent(
+      /投入待ち.*実装中.*確認待ち.*stg反映中.*stg確認待ち.*本番反映中.*本番確認中.*完了/,
+    );
     expect(await screen.findByTestId("board-empty")).toBeInTheDocument();
+  });
+
+  it("shows every PR link of a task as soon as its drawer opens", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({
+        taskId: "pr-t",
+        title: "複数PRカード",
+        runStatus: "succeeded",
+        prUrls: [
+          "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/564",
+          "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/565",
+        ],
+      }),
+      makeBoardItem({ taskId: "nopr-t", featureId: "feat-nopr", title: "PRなしカード", runStatus: "succeeded" }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+    await userEvent.click(await screen.findByText("複数PRカード"));
+    const links = await screen.findAllByTestId("drawer-pr-link");
+    expect(links.map((a) => a.textContent)).toEqual(["#564 ↗", "#565 ↗"]);
+    expect(links[1]).toHaveAttribute("href", "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/565");
+    expect(links[0]).toHaveAttribute("target", "_blank");
   });
 
   it("buckets tasks into the correct lanes", async () => {
     const api = makeFakeApi([
-      makeBoardItem({ taskId: "run-t", title: "走行カード", runStatus: "running" }),
+      makeBoardItem({ taskId: "run-t", title: "実装カード", runStatus: "running" }),
       makeBoardItem({ taskId: "rev-t", featureId: "feat-rev", title: "確認カード", featurePhase: "demo_review", runStatus: "succeeded" }),
       makeBoardItem({ taskId: "fix-t", featureId: "feat-fix", title: "修正カード", featurePhase: "demo_rejected", runStatus: "failed" }),
-      makeBoardItem({ taskId: "done-t", featureId: "feat-done", title: "完了カード", featurePhase: "prod_shipped", runStatus: "succeeded" }),
+      makeBoardItem({ taskId: "sd-t", featureId: "feat-sd", title: "stg反映カード", featurePhase: "staging_deployed", runStatus: "running" }),
+      makeBoardItem({ taskId: "sr-t", featureId: "feat-sr", title: "stg確認カード", featurePhase: "staging_review", runStatus: "succeeded" }),
+      makeBoardItem({ taskId: "shp-t", featureId: "feat-shp", title: "本番確認カード", featurePhase: "prod_shipped", runStatus: "succeeded" }),
+      makeBoardItem({ taskId: "done-t", featureId: "feat-done", title: "アーカイブ済カード", featurePhase: "prod_shipped", runStatus: "succeeded", taskStatus: "done" }),
     ]);
     render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
-    expect(await within(screen.getByTestId("lane-running")).findByText("走行カード")).toBeInTheDocument();
+    expect(await within(screen.getByTestId("lane-implementing")).findByText("実装カード")).toBeInTheDocument();
     expect(within(screen.getByTestId("lane-review")).getByText("確認カード")).toBeInTheDocument();
-    expect(within(screen.getByTestId("lane-needs_fix")).getByText("修正カード")).toBeInTheDocument();
-    expect(within(screen.getByTestId("lane-done")).getByText("完了カード")).toBeInTheDocument();
+    // 要修正は専用列を持たず、その段の確認列で「要修正」表示になる。
+    expect(within(screen.getByTestId("lane-review")).getByText("修正カード")).toBeInTheDocument();
+    expect(screen.getByTestId("task-lane-fix-t")).toHaveTextContent("要修正");
+    expect(within(screen.getByTestId("lane-staging_deploying")).getByText("stg反映カード")).toBeInTheDocument();
+    expect(within(screen.getByTestId("lane-staging_review")).getByText("stg確認カード")).toBeInTheDocument();
+    // 本番確認中(まだ触れる)と完了(明示アーカイブ)は別レーン。
+    expect(within(screen.getByTestId("lane-prod_review")).getByText("本番確認カード")).toBeInTheDocument();
+    expect(within(screen.getByTestId("lane-done")).getByText("アーカイブ済カード")).toBeInTheDocument();
   });
 
   it("composer creates a task then starts a run with its taskId + cwd", async () => {
@@ -162,12 +204,12 @@ describe("<Board>", () => {
     await waitFor(() => expect(screen.queryByTestId("action-inflight")).not.toBeInTheDocument());
   });
 
-  it("a本番反映 run in flight keeps the card in 走行中 as 「本番反映中」 (not jumping straight to 完了)", async () => {
+  it("a本番反映 run in flight keeps the card in 本番反映中 (not jumping straight to 完了)", async () => {
     const api = makeFakeApi([
       makeBoardItem({ taskId: "prd", featureId: "feat-1", title: "本番反映中カード", featurePhase: "prod_shipped", runStatus: "running" }),
     ]);
     render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
-    expect(await within(screen.getByTestId("lane-running")).findByText("本番反映中カード")).toBeInTheDocument();
+    expect(await within(screen.getByTestId("lane-prod_deploying")).findByText("本番反映中カード")).toBeInTheDocument();
     expect(screen.getByTestId("task-deploying-prd")).toHaveTextContent("本番反映中");
   });
 
@@ -228,6 +270,72 @@ describe("<Board>", () => {
     expect(opts.taskId).toBe("rev");
   });
 
+  it("本番反映済で追加指示を出してもフェーズは本番反映済のまま", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "shp", featureId: "feat-1", title: "本番後の不備", featurePhase: "prod_shipped", runStatus: "succeeded" }),
+    ]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-shp"));
+    await userEvent.click(await screen.findByTestId("action-rerun"));
+    await userEvent.type(screen.getByLabelText("rerun-prompt"), "本番で表示が崩れている");
+    await userEvent.click(screen.getByTestId("rerun-submit"));
+
+    await waitFor(() => expect(client.startRun).toHaveBeenCalled());
+    const [prompt, opts] = client.startRun.mock.calls.at(-1)!;
+    expect(prompt).toContain("本番で表示が崩れている");
+    expect(opts.taskId).toBe("shp");
+    expect(api.transition).not.toHaveBeenCalled();
+  });
+
+  it("フェーズを戻す: 本番反映済から staging確認待ちへ戻せる（run は起動しない）", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "shp", featureId: "feat-1", title: "戻す対象", featurePhase: "prod_shipped", runStatus: "succeeded" }),
+    ]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-shp"));
+    await userEvent.click(await screen.findByTestId("action-rewind"));
+    expect(screen.getByTestId("rewind-to-demo_review")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("rewind-to-staging_review"));
+
+    await waitFor(() =>
+      expect(api.transition).toHaveBeenCalledWith("feat-1", "staging_review", {
+        approvedByUser: false,
+        note: "ユーザー操作: フェーズを戻す",
+      }),
+    );
+    expect(client.startRun).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(within(screen.getByTestId("lane-staging_review")).getByText("戻す対象")).toBeInTheDocument(),
+    );
+  });
+
+  it("demo確認待ちには戻す先が無いのでボタンを出さない", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "demo段", featurePhase: "demo_review", runStatus: "succeeded" }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-rev"));
+    await screen.findByTestId("action-rerun");
+    expect(screen.queryByTestId("action-rewind")).not.toBeInTheDocument();
+  });
+
+  it("アーカイブ済タスクだけが追加指示・完了ボタンを失う", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "arc", featureId: "feat-1", title: "アーカイブ済", featurePhase: "prod_shipped", runStatus: "succeeded", taskStatus: "done" }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-arc"));
+    await screen.findByTestId("next-action-bar");
+    expect(screen.queryByTestId("action-rerun")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("action-archive")).not.toBeInTheDocument();
+  });
+
   it("完了 archives the task (updateTaskStatus done)", async () => {
     const api = makeFakeApi([
       makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "アーカイブ対象", featurePhase: "demo_review", runStatus: "succeeded" }),
@@ -244,5 +352,44 @@ describe("<Board>", () => {
     client.health = (async () => false) as typeof client.health;
     render(<Board client={client} api={makeFakeApi([])} pollMs={0} />);
     expect(await screen.findByTestId("daemon-down-hint")).toBeInTheDocument();
+  });
+
+  it("filters every lane by keyword while the summary counts stay unfiltered", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "f-run", title: "ログイン画面", runStatus: "running" }),
+      makeBoardItem({ taskId: "f-rev", featureId: "feat-f-rev", title: "チャット改善", featurePhase: "demo_review", runStatus: "succeeded" }),
+      makeBoardItem({ taskId: "f-done", featureId: "feat-f-done", title: "ログイン文言", taskStatus: "done", runStatus: "succeeded" }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+    await screen.findByText("チャット改善");
+
+    await userEvent.type(screen.getByTestId("board-filter"), "ログイン");
+    expect(screen.queryByText("チャット改善")).not.toBeInTheDocument();
+    expect(screen.getByText("ログイン画面")).toBeInTheDocument();
+    expect(screen.getByText("ログイン文言")).toBeInTheDocument();
+    expect(screen.getByTestId("lane-count-review")).toHaveTextContent("0");
+    expect(screen.getByTestId("filter-summary")).toHaveTextContent("2 / 3");
+    expect(screen.getByTestId("review-count")).toHaveTextContent("1");
+
+    await userEvent.click(screen.getByTestId("filter-clear"));
+    expect(screen.getByText("チャット改善")).toBeInTheDocument();
+  });
+
+  it("「/」でフィルターにフォーカスし、Esc で解除する", async () => {
+    render(<Board client={makeFakeClient()} api={makeFakeApi([])} pollMs={0} />);
+    await screen.findByTestId("board-empty");
+    const box = screen.getByTestId("board-filter");
+    await userEvent.keyboard("/");
+    expect(box).toHaveFocus();
+    await userEvent.type(box, "abc");
+    await userEvent.keyboard("{Escape}");
+    expect(box).toHaveValue("");
+  });
+
+  it("投入待ち列の「+ タスクを追加」で新規タスクを開ける", async () => {
+    render(<Board client={makeFakeClient()} api={makeFakeApi([])} pollMs={0} />);
+    await screen.findByTestId("board-empty");
+    await userEvent.click(screen.getByTestId("lane-add-task"));
+    expect(screen.getByLabelText("task-title")).toBeInTheDocument();
   });
 });
