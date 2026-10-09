@@ -25,7 +25,7 @@ import {
   type ColumnDef,
 } from "@dub/ui";
 import { useLpApi } from "./LpProvider.tsx";
-import type { LpVisit } from "./lpApi.tsx";
+import type { LpSiteTraffic, LpVisit } from "./lpApi.tsx";
 import {
   LP_DEFAULT_RANGE_DAYS,
   LP_RANGE_DAYS,
@@ -81,6 +81,123 @@ const DAY_COLUMNS: ColumnDef<{ date: string; visits: number }>[] = [
   },
 ];
 
+type SiteDay = LpSiteTraffic["byDay"][number];
+
+const SITE_DAY_COLUMNS: ColumnDef<SiteDay>[] = [
+  { key: "date", header: "日付", cell: (r) => formatDayLabel(r.date), width: "8rem", noWrap: true },
+  {
+    key: "pageViews",
+    header: "PV",
+    align: "right",
+    width: "8rem",
+    cell: (r) => <span className={styles.num}>{formatCount(r.pageViews)}</span>,
+  },
+  {
+    key: "visits",
+    header: "訪問",
+    align: "right",
+    width: "8rem",
+    cell: (r) => <span className={styles.num}>{formatCount(r.visits)}</span>,
+  },
+];
+
+/** サイト全体のアクセス（Cloudflare Web Analytics）。流入URLの計測とは独立に読み込み・失敗する
+ *  ので、片方が空/失敗でももう片方は見える。 */
+function SiteTrafficCard({ range }: { range: { from: string; to: string } }): JSX.Element {
+  const api = useLpApi();
+  const site = useQuery({
+    queryKey: ["lp", "site-traffic", range.from, range.to] as const,
+    queryFn: () => api.getSiteTraffic(range),
+    staleTime: STALE_MS,
+  });
+  const byDay = useMemo(() => (site.data?.byDay ?? []).slice().reverse(), [site.data]);
+
+  let content: JSX.Element;
+  if (site.isLoading) {
+    content = (
+      <Stack gap={5} testId="fe2-lp-site-loading">
+        <div className={styles.kpiGrid}>
+          {[0, 1].map((i) => (
+            <Card key={i}>
+              <SkeletonLoader lines={2} />
+            </Card>
+          ))}
+        </div>
+        <SkeletonLoader lines={5} />
+      </Stack>
+    );
+  } else if (site.isError) {
+    content = (
+      <ErrorState
+        testId="fe2-lp-site-error"
+        error={{ code: "INTERNAL", message: "サイト全体のアクセスを読み込めませんでした。" }}
+        onRetry={() => void site.refetch()}
+      />
+    );
+  } else if (!site.data?.configured) {
+    content = (
+      <span className={styles.note} data-testid="fe2-lp-site-unconfigured">
+        この環境では Cloudflare の計測が未設定のため表示できません。
+      </span>
+    );
+  } else {
+    const data = site.data;
+    content = (
+      <Stack gap={6} testId="fe2-lp-site-body">
+        <div className={styles.kpiGrid}>
+          <KpiCard
+            testId="fe2-lp-site-kpi-pv"
+            label="ページビュー(PV)"
+            value={data.totals.pageViews}
+            hint="ページが開かれた回数。再読み込みやサイト内の移動も数える"
+          />
+          <KpiCard
+            testId="fe2-lp-site-kpi-visits"
+            label="訪問"
+            value={data.totals.visits}
+            hint="サイトの外から来て開いた回数(サイト内の移動は数えない)"
+          />
+        </div>
+        <Stack gap={4}>
+          <span className={styles.sectionTitle}>どこから来たか(流入元)</span>
+          {data.byReferrer.length > 0 ? (
+            <SourceBars
+              testId="fe2-lp-site-referrers"
+              rowTestId="fe2-lp-site-referrer"
+              unit="PV"
+              buckets={data.byReferrer.map((r) => ({ key: r.key, label: r.label, visits: r.pageViews, uniques: r.visits }))}
+            />
+          ) : (
+            <span className={styles.note}>この期間のアクセスはありません。</span>
+          )}
+        </Stack>
+        <Stack gap={4}>
+          <span className={styles.sectionTitle}>日別</span>
+          <DataTable<SiteDay>
+            testId="fe2-lp-site-byday"
+            columns={SITE_DAY_COLUMNS}
+            rows={byDay}
+            rowKey={(r) => r.date}
+            emptyState={<EmptyState title="この期間の日別データがありません" icon="megaphone" />}
+          />
+        </Stack>
+        <span className={styles.note}>
+          Cloudflare Web Analytics の値です。Cloudflare 側の推定値のため、日が経つと数字が少し丸められることがあります。
+        </span>
+      </Stack>
+    );
+  }
+
+  return (
+    <Card
+      testId="fe2-lp-site"
+      header={<span className={styles.sectionTitle}>サイト全体のアクセス(LP を開いた全員)</span>}
+    >
+      {content}
+    </Card>
+  );
+}
+
 const VISIT_COLUMNS: ColumnDef<LpVisit>[] = [
   { key: "occurredAt", header: "時刻", cell: (v) => formatVisitTime(v.occurredAt), width: "9rem", noWrap: true },
   { key: "source", header: "流入元", cell: (v) => sourceLabel(v.source), width: "10rem" },
@@ -128,7 +245,7 @@ export function LpVisitLogScreen(): JSX.Element {
     <PageHeader
       testId="fe2-lp-visits-header"
       title="LP管理"
-      description="LP(ランディングページ)への流入ログを見ます。発行した流入URL経由の訪問と、LP のページビューを集計します。"
+      description="LP(ランディングページ)へのアクセスを見ます。上はサイト全体のアクセス、下は発行した流入URLごとの計測です。"
     />
   );
 
@@ -272,6 +389,8 @@ export function LpVisitLogScreen(): JSX.Element {
       {header}
       <LpTabs active="visits" />
       {rangePicker}
+      <SiteTrafficCard range={range} />
+      <span className={styles.sectionTitle}>流入URLの計測</span>
       {body}
     </Stack>
   );
