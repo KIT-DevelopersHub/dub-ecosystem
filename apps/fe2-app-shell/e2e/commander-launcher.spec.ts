@@ -42,3 +42,50 @@ test("Commander tile shows in the launcher and opens the /commander screen", asy
   await expect(ws.getByTestId("panel-board")).toBeVisible();
   await page.screenshot({ path: shot("02-commander-screen.png") });
 });
+
+test("a remote (tunnel) connection is checked, saved on this device, and can be reset", async ({ page }) => {
+  const API = "https://commander-api.example.jp";
+  // Stand-in for the operator's tunnel: only the right token unlocks the board.
+  await page.route(`${API}/**`, (route) => {
+    const ok = route.request().headers()["x-commander-token"] === "right-token";
+    return route.fulfill({
+      status: ok ? 200 : 401,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify(ok ? { items: [], features: [], runs: [], sessions: [] } : { error: "unauthorized" }),
+    });
+  });
+  await page.route("https://commander-daemon.example.jp/**", (route) =>
+    route.fulfill({ status: 200, headers: { "access-control-allow-origin": "*" }, body: "{}" }),
+  );
+
+  await page.goto("/commander");
+  const card = page.getByTestId("fe2-commander-connection");
+  await expect(card).toContainText("このPC（127.0.0.1）");
+  await card.getByTestId("fe2-commander-connection-edit").click();
+
+  // Plain http to a remote host is refused (the token would travel in clear).
+  await page.getByTestId("fe2-cmdr-daemon").fill("http://commander-daemon.example.jp");
+  await expect(card.getByRole("alert")).toBeVisible();
+  await expect(page.getByTestId("fe2-commander-connection-save")).toBeDisabled();
+
+  await page.getByTestId("fe2-cmdr-daemon").fill("https://commander-daemon.example.jp");
+  await page.getByTestId("fe2-cmdr-api").fill(API);
+  await page.getByTestId("fe2-cmdr-token").fill("wrong-token");
+  await page.getByTestId("fe2-commander-connection-save").click();
+  await expect(page.getByTestId("fe2-commander-connection-status")).toHaveText("トークンが違います");
+
+  await page.getByTestId("fe2-cmdr-token").fill("right-token");
+  await page.getByTestId("fe2-commander-connection-save").click();
+  await expect(page.getByTestId("fe2-commander-connection-mode")).toHaveText("commander-api.example.jp");
+  await expect(card).toContainText("リモート（トンネル経由）");
+  await page.screenshot({ path: shot("03-commander-remote-connected.png") });
+
+  // Persisted per device: survives a reload.
+  await page.reload();
+  await expect(page.getByTestId("fe2-commander-connection-mode")).toHaveText("commander-api.example.jp");
+
+  await page.getByTestId("fe2-commander-connection-edit").click();
+  await page.getByTestId("fe2-commander-connection-reset").click();
+  await expect(card).toContainText("このPC（127.0.0.1）");
+});

@@ -26,6 +26,14 @@ export {
   type Lane,
 } from "./lib/lanes.ts";
 export { useRunStream } from "./lib/useRunStream.ts";
+export {
+  clientsFor,
+  isAllowedUrl,
+  isValidConnection,
+  loadConnection,
+  saveConnection,
+  type CommanderConnection,
+} from "./lib/connection.ts";
 
 export {
   HttpCommanderClient,

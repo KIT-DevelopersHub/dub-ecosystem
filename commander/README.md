@@ -117,6 +117,24 @@ pnpm --filter @dub/commander-service exec wrangler dev --var COMMANDER_OPERATOR_
 # => http://127.0.0.1:8787
 ```
 
+## 本番の Dub アプリ（/commander）から別の端末で使う（Cloudflare Tunnel）
+
+PC の daemon / service を Cloudflare Tunnel で公開し、本番 `/commander` の「接続先を設定」に
+URL とトークンを入れると、スマホや別 PC からも同じボード・履歴をリアルタイムに使える。
+実行は常にこの PC のまま。PC が止まっている間は何も表示されない。
+
+```bash
+brew install cloudflared                 # 1回だけ
+bash commander/tunnel.sh setup           # 1回だけ: トンネル + DNS 作成（CF API）
+bash commander/dev-up.sh                 # いつも通り起動
+bash commander/tunnel.sh up              # 別ターミナルで常駐
+```
+
+- 既定のホスト名: `commander-daemon.developershub.jp`（daemon）/ `commander-api.developershub.jp`（service）
+- 鍵は `COMMANDER_OPERATOR_TOKEN`（`commander/.commander.env.local`）だけ。`up` は 32 文字未満なら起動を拒否する。
+  トークンは各端末のブラウザ（localStorage）にのみ保存され、バンドルには入らない。
+- このホスト名からはローカルの claude を動かせる。トークンを共有しないこと。漏れたら env を消して `dev-up.sh` で再生成する。
+
 ## HTTP API（daemon）
 
 | method | path | 説明 |

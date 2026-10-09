@@ -18,6 +18,7 @@
 import { describe, it, expect } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
 import { createApp } from "../src/app";
+import { DUB_APP_ORIGINS } from "../src/origins";
 import type { Env } from "../src/env";
 import {
   OPEN,
@@ -249,6 +250,15 @@ describe("CORS origin allowlist", () => {
       const res = await get("/health", { origin });
       expect(res.headers.get("access-control-allow-origin")).toBe(origin);
     }
+  });
+
+  it("grants the Dub app's own origins (fe2 /commander, prod + staging)", async () => {
+    for (const origin of DUB_APP_ORIGINS) {
+      const res = await get("/health", { origin });
+      expect(res.headers.get("access-control-allow-origin")).toBe(origin);
+    }
+    const lookalike = await get("/health", { origin: "https://dub-fe2-app-shell.evil.workers.dev" });
+    expect(lookalike.headers.get("access-control-allow-origin")).toBeNull();
   });
 
   it("grants NOTHING to an arbitrary site the operator has open (was `origin: *`)", async () => {

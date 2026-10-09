@@ -25,6 +25,17 @@ import type { Env } from "./env";
 const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d{1,5}$/;
 
 /**
+ * The Dub app's own origins (fe2 /commander screen), exact match. The page reaches this
+ * service either on loopback (same PC) or through the operator's Cloudflare Tunnel; either
+ * way it is cross-origin, and without this grant the board CORS-fails in the browser.
+ * The token gate still applies — this only lets the Dub app read what the token unlocks.
+ */
+export const DUB_APP_ORIGINS: readonly string[] = [
+  "https://dub-fe2-app-shell.developershub-site.workers.dev",
+  "https://dub-fe2-app-shell-staging.developershub-site.workers.dev",
+];
+
+/**
  * The value for `Access-Control-Allow-Origin`, or `null` to send no CORS header at all.
  *
  * `null` (not `"*"`) is the fallback for every unrecognised origin, and also for a request
@@ -43,5 +54,5 @@ export function allowedOrigin(origin: string, env: Env): string | null {
     .filter((o) => o !== "");
 
   if (configured.length > 0) return configured.includes(origin) ? origin : null;
-  return LOOPBACK_ORIGIN.test(origin) ? origin : null;
+  return LOOPBACK_ORIGIN.test(origin) || DUB_APP_ORIGINS.includes(origin) ? origin : null;
 }
