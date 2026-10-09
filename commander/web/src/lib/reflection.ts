@@ -19,6 +19,14 @@ export type ReflectionEnv = "demo" | "staging" | "prod";
 export const DUB_STAGING_URL =
   "https://dub-fe2-app-shell-staging.developershub-site.workers.dev";
 
+/**
+ * Dub の demo も単一の共有スロット（固定ホスト、scripts/deploy-demo.sh が書く
+ * deploy-state/demo.json の "url" と同じ）。run 出力から demo URL を拾えなくても、
+ * demo に反映済み＝この URL で必ず開ける。DUB_STAGING_URL と同じ理由の
+ * フォールバック先（bugfix: 「✅ demoに反映済み」バッジは出るのにクリック先が無かった）。
+ */
+export const DUB_DEMO_URL = "https://fe2-demo.developershub-site.workers.dev";
+
 export interface Reflection {
   state: ReflectionState;
   env: ReflectionEnv;
@@ -71,12 +79,12 @@ export function reflectionOf(item: BoardItem): Reflection | null {
     case "staging_rejected":
       return { state: "failed", env: "staging", url: item.stagingUrl ?? DUB_STAGING_URL };
     case "demo_review":
-      return { state: fromRun(status), env: "demo", url: item.demoUrl };
+      return { state: fromRun(status), env: "demo", url: item.demoUrl ?? DUB_DEMO_URL };
     case "demo_rejected":
-      return { state: "failed", env: "demo", url: item.demoUrl };
+      return { state: "failed", env: "demo", url: item.demoUrl ?? DUB_DEMO_URL };
     case "demo_building":
       if (!item.latestRun) return null; // queued — nothing reflected yet
-      return { state: fromRun(status), env: "demo", url: item.demoUrl };
+      return { state: fromRun(status), env: "demo", url: item.demoUrl ?? DUB_DEMO_URL };
     default:
       return null;
   }

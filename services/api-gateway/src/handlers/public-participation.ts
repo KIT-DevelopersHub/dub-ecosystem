@@ -8,7 +8,7 @@
 import type { Context } from "hono";
 import type { GatewayEnv } from "../env";
 import type { GatewayVariables } from "../context";
-import type { gateway, member } from "@dub/types";
+import { member, type gateway } from "@dub/types";
 import type { FieldError } from "@dub/errors";
 import { errors } from "@dub/errors";
 import type { RequestContext } from "@dub/http";
@@ -16,8 +16,6 @@ import { getRequestId, gatewayError, GATEWAY_TURNSTILE_FAILED } from "../context
 import { createServices } from "../services";
 import { createTurnstileVerifier, type TurnstileVerifier } from "../turnstile";
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const PHONE_RE = /^[0-9+\-()\s]{6,20}$/;
 // System principal stamped on public submissions (member-service also defaults to this).
 const SYSTEM_ACTOR = "system:public-participation";
 
@@ -29,51 +27,31 @@ function optStr(v: unknown): string | null {
 }
 
 function validate(body: unknown): { value: gateway.PublicParticipationRequest } | { errors: FieldError[] } {
-  const errs: FieldError[] = [];
   const b = (body ?? {}) as Record<string, unknown>;
+  // 人物プロフィール項目は名簿と共通のルール (member.parsePersonProfilePatch) で検証する。
+  const { value: profile, errors: bad } = member.parsePersonProfilePatch(b);
+  const errs: FieldError[] = bad.map((field) => ({ field, reason: "invalid" }));
 
   // 氏名: 姓/名 の分割入力を優先し "姓 名" を合成。旧単一 `name` も後方互換で受ける。
-  const lastName = optStr(b.lastName);
-  const firstName = optStr(b.firstName);
-  const composed = [lastName, firstName].filter((x): x is string => !!x).join(" ");
+  const composed = [profile.lastName, profile.firstName].filter((x): x is string => !!x).join(" ");
   const name = composed || (typeof b.name === "string" ? b.name.trim() : "");
   if (!name) errs.push({ field: "name", reason: "required" });
-
-  const schoolEmail = typeof b.schoolEmail === "string" ? b.schoolEmail.trim() : "";
-  if (!schoolEmail) errs.push({ field: "schoolEmail", reason: "required" });
-  else if (!EMAIL_RE.test(schoolEmail)) errs.push({ field: "schoolEmail", reason: "invalid" });
-
-  const gmail = typeof b.gmail === "string" ? b.gmail.trim() : "";
-  if (!gmail) errs.push({ field: "gmail", reason: "required" });
-  else if (!EMAIL_RE.test(gmail)) errs.push({ field: "gmail", reason: "invalid" });
-
-  // 電話番号は任意。渡された時だけ緩い形式チェック。
-  const phone = optStr(b.phone);
-  if (phone && !PHONE_RE.test(phone)) errs.push({ field: "phone", reason: "invalid" });
-
-  const turnstileToken = optStr(b.turnstileToken);
+  // 学校メール + Gmail は参加届では必須。
+  for (const k of ["schoolEmail", "gmail"] as const) {
+    if (profile[k] == null && !bad.includes(k)) errs.push({ field: k, reason: "required" });
+  }
 
   if (errs.length > 0) return { errors: errs };
   return {
     value: {
-      lastName,
-      firstName,
+      ...profile,
       name,
-      schoolEmail,
-      gmail,
+      schoolEmail: profile.schoolEmail ?? "",
+      gmail: profile.gmail ?? "",
       nameKana: optStr(b.nameKana),
-      lastNameKana: optStr(b.lastNameKana),
-      firstNameKana: optStr(b.firstNameKana),
       nameRomaji: optStr(b.nameRomaji),
-      lastNameRomaji: optStr(b.lastNameRomaji),
-      firstNameRomaji: optStr(b.firstNameRomaji),
-      phone,
-      grade: optStr(b.grade),
-      department: optStr(b.department),
       desiredTeamId: optStr(b.desiredTeamId),
-      desiredActivity: optStr(b.desiredActivity),
-      note: optStr(b.note),
-      turnstileToken,
+      turnstileToken: optStr(b.turnstileToken),
     },
   };
 }
@@ -112,26 +90,12 @@ export function createPublicParticipationHandler(override?: TurnstileVerifier) {
     // 一覧で確定する（B案）。よって公開応答は accepted のみ（解決結果は返さない）。
     const svc = createServices(c.env);
     const ctx: RequestContext = { requestId, userId: SYSTEM_ACTOR, caller: "api-gateway" };
-    const submit: member.SubmitParticipationRequest = {
-      lastName: p.lastName ?? null,
-      firstName: p.firstName ?? null,
-      name: p.name,
-      schoolEmail: p.schoolEmail,
-      gmail: p.gmail,
-      nameKana: p.nameKana ?? null,
-      lastNameKana: p.lastNameKana ?? null,
-      firstNameKana: p.firstNameKana ?? null,
-      nameRomaji: p.nameRomaji ?? null,
-      lastNameRomaji: p.lastNameRomaji ?? null,
-      firstNameRomaji: p.firstNameRomaji ?? null,
-      phone: p.phone ?? null,
-      grade: (p.grade as member.Grade | null) ?? null,
-      department: p.department ?? null,
-      desiredTeamId: p.desiredTeamId ?? null,
-      desiredActivity: (p.desiredActivity as member.DesiredActivity | null) ?? null,
-      note: p.note ?? null,
-    };
-    await svc.member.post<member.SubmitParticipationResponse>(ctx, "/members/internal/participation", submit);
+    const { turnstileToken: _token, ...submit } = p;
+    await svc.member.post<member.SubmitParticipationResponse, member.SubmitParticipationRequest>(
+      ctx,
+      "/members/internal/participation",
+      submit,
+    );
 
     const body: gateway.PublicParticipationResponse = { accepted: true };
     return c.json(body);

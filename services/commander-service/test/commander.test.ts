@@ -134,8 +134,11 @@ describe("commander-service phase gate", () => {
       "staging_review",
       "prod_shipped",
     ]);
-    // prod_shipped is terminal: no further edges offered.
-    expect(detail.json.allowedTransitions).toHaveLength(0);
+    // 本番反映済の出口は確認待ちへ戻す辺だけ（先へ進むには承認ゲートを再通過）。
+    expect(detail.json.allowedTransitions.map((t: { to: string }) => t.to)).toEqual([
+      "staging_review",
+      "demo_review",
+    ]);
   });
 
   it("rejects an unknown target phase with 400", async () => {
@@ -366,6 +369,29 @@ describe("commander-service run persistence", () => {
     expect(item.demoUrl).toBe("https://dub-demo-urlx.example.workers.dev");
     expect(item.prUrl).toBe("https://github.com/o/r/pull/99");
     expect(item.stagingUrl).toBeNull();
+  });
+
+  it("collects every PR the agent reported, ignoring PRs seen only in tool output", async () => {
+    const created = await call(app, env, "POST", "/tasks", { title: "複数PR" });
+    const taskId = created.json.task.id;
+    await call(app, env, "POST", "/runs", { id: "run_prs", prompt: "p", cwd: "/wt", taskId, status: "running" });
+    const ev = (data: unknown) =>
+      call(app, env, "POST", "/runs/run_prs/events", { type: "claude", payload: { data } });
+
+    await ev({ type: "assistant", message: { content: [{ type: "text", text: "PR1: https://github.com/o/r/pull/10" }] } });
+    // tool output (gh pr list etc.) must not attach unrelated PRs
+    await ev({ type: "user", message: { content: [{ type: "tool_result", content: "https://github.com/o/r/pull/555" }] } });
+    await ev({ type: "result", result: "https://github.com/o/r/pull/10 と https://github.com/o/r/pull/11 を作成" });
+
+    const board = await call(app, env, "GET", "/tasks");
+    const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item.prUrls).toEqual(["https://github.com/o/r/pull/10", "https://github.com/o/r/pull/11"]);
+
+    // backfill recomputes the same list from history
+    await call(app, env, "POST", "/tasks/backfill-urls");
+    const again = await call(app, env, "GET", "/tasks");
+    const item2 = again.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item2.prUrls).toEqual(["https://github.com/o/r/pull/10", "https://github.com/o/r/pull/11"]);
   });
 
   it("POST /tasks/backfill-urls recovers URLs from pre-existing run events", async () => {

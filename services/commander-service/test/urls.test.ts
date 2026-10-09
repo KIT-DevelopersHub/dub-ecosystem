@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { extractArtifactUrls, mergeUrls, eventText } from "../src/urls";
+import {
+  authoredText,
+  eventText,
+  extractArtifactUrls,
+  extractPrUrls,
+  mergePrUrls,
+  mergeUrls,
+  parsePrUrls,
+} from "../src/urls";
 
 describe("extractArtifactUrls", () => {
   it("pulls a demo workers.dev URL", () => {
@@ -67,5 +75,33 @@ describe("eventText", () => {
   it("reads url from a claude result payload", () => {
     const text = eventText({ data: { type: "result", result: "PR: https://github.com/o/r/pull/7" } });
     expect(extractArtifactUrls(text).prUrl).toBe("https://github.com/o/r/pull/7");
+  });
+});
+
+describe("PR list helpers", () => {
+  it("extracts every distinct PR in order", () => {
+    const text = "https://github.com/o/r/pull/2, https://github.com/o/r/pull/1. https://github.com/o/r/pull/2";
+    expect(extractPrUrls(text)).toEqual(["https://github.com/o/r/pull/2", "https://github.com/o/r/pull/1"]);
+  });
+
+  it("merges without duplicates and parses the stored column defensively", () => {
+    expect(mergePrUrls(["a"], ["b", "a"])).toEqual(["a", "b"]);
+    expect(parsePrUrls('["a",1]')).toEqual(["a"]);
+    expect(parsePrUrls("not json")).toEqual([]);
+    expect(parsePrUrls(null)).toEqual([]);
+  });
+
+  it("authoredText reads assistant text + result, not tool calls/results", () => {
+    expect(
+      authoredText({
+        data: {
+          type: "assistant",
+          message: { content: [{ type: "text", text: "hi" }, { type: "tool_use", input: { command: "x" } }] },
+        },
+      }),
+    ).toBe("hi");
+    expect(authoredText({ data: { type: "result", result: "done" } })).toBe("done");
+    expect(authoredText({ data: { type: "user", message: { content: [{ type: "tool_result" }] } } })).toBe("");
+    expect(authoredText({ line: "https://github.com/o/r/pull/1" })).toBe("");
   });
 });

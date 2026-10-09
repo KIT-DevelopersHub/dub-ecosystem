@@ -4,6 +4,7 @@
 import { Card, Badge, IconButton, EmptyState } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
+import { formatProfileValue } from "../../lib/personProfile.tsx";
 import styles from "./members.module.css";
 
 function MemberRow({
@@ -23,8 +24,10 @@ function MemberRow({
       <div className={styles.memberMain}>
         <span className={styles.memberName}>{m.name}</span>
         {m.roleTitle ? <span className={styles.memberRole}>{m.roleTitle}</span> : null}
-        {m.department || m.grade ? (
-          <span className={styles.memberRole}>{[m.department, m.grade].filter(Boolean).join(" ")}</span>
+        {m.rosterNumber || m.department || m.grade ? (
+          <span className={styles.memberRole}>
+            {[m.rosterNumber, m.department, formatProfileValue("grade", m)].filter(Boolean).join(" ")}
+          </span>
         ) : null}
       </div>
       <MemberStatusBadge status={m.status} />

@@ -28,6 +28,7 @@ import type { OrgMember } from "./contracts.ts";
 import { ROSTER_FILTER_OPTIONS, matchesRosterFilter, type RosterStatusFilter } from "./memberStatus.ts";
 import { orgChartOrder } from "./orgChartOrder.ts";
 import { buildRosterTable, exportRoster, type RosterExportFormat } from "./rosterExport.ts";
+import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import styles from "./members.module.css";
 
 export function MemberRosterPage(): JSX.Element {
@@ -72,14 +73,14 @@ export function MemberRosterPage(): JSX.Element {
     const ordered = orgChartOrder(byStatus);
     const q = search.trim().toLowerCase();
     if (!q) return ordered;
-    return ordered.filter(
-      (m) =>
-        m.name.toLowerCase().includes(q) ||
-        `${m.lastNameKana ?? ""}${m.firstNameKana ?? ""}`.toLowerCase().includes(q) ||
-        `${m.lastNameKana ?? ""} ${m.firstNameKana ?? ""}`.toLowerCase().includes(q) ||
-        (m.roleTitle ?? "").toLowerCase().includes(q) ||
-        (m.department ?? "").toLowerCase().includes(q) ||
-        (m.grade ?? "").toLowerCase().includes(q),
+    // 一覧に出る値 (人物プロフィール列は表示ラベル: 学年は「3年」) をそのまま検索対象にする。
+    return ordered.filter((m) =>
+      [
+        m.name,
+        m.roleTitle ?? "",
+        `${m.lastNameKana ?? ""}${m.firstNameKana ?? ""}`,
+        ...PROFILE_DISPLAY_COLUMNS.map((c) => c.value(m)),
+      ].some((v) => v.toLowerCase().includes(q)),
     );
   }, [members, search, statusFilter]);
 
@@ -144,7 +145,7 @@ export function MemberRosterPage(): JSX.Element {
             id="member-roster-search"
             value={search}
             onChange={setSearch}
-            placeholder="氏名・フリガナ・役割・学科・学年で検索"
+            placeholder="氏名・ふりがな・名列番号・役割・学科・学年などで検索"
             testId="member-roster-search"
           />
         </div>

@@ -151,6 +151,14 @@ jobs:
           fi
           echo "D1 migrations: skipped (applied out-of-band). dub-core schema is forward-only + idempotent."
 
+      # --- D1 schema gate (read-only) ---
+      # Compares prod dub-core against the repo's migrations so code never silently ships
+      # ahead of its schema. Warn-only until the owner sets D1_SCHEMA_GATE=enforce.
+      - name: D1 schema gate
+        env:
+          D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'warn' }}
+        run: bash infra/d1/scripts/schema-gate.sh dub-core
+
       # --- Deploy in dependency order with fail-fast health gating ---
       - name: Deploy to production
         run: bash infra/deploy/deploy-prod.sh

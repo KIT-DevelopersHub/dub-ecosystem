@@ -58,5 +58,10 @@ jobs:
       - name: Test
         run: pnpm run test
 
+      # Cross-service suite (tests/integration): real gateway/auth/identity/event apps over
+      # fake Service Bindings. Not a turbo task, so it bypasses the cache and always runs.
+      - name: Integration tests
+        run: pnpm run test:integration
+
       - name: Build
         run: pnpm run build

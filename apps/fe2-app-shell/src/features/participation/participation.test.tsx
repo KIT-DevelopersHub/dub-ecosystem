@@ -117,8 +117,8 @@ describe("ParticipationPage", () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
     await userEvent.click(screen.getByTestId("participation-submit"));
-    expect(screen.getByText("苗字を入力してください")).toBeInTheDocument();
-    expect(screen.getByText("名前を入力してください")).toBeInTheDocument();
+    expect(screen.getByText("氏名（苗字）を入力してください")).toBeInTheDocument();
+    expect(screen.getByText("氏名（名前）を入力してください")).toBeInTheDocument();
     expect(api.submit).not.toHaveBeenCalled();
   });
 
@@ -155,11 +155,22 @@ describe("ParticipationPage", () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
+  it("rejects a malformed 名列番号", async () => {
+    const api = makeApi();
+    render(wrap(<ParticipationPage />, api));
+    await fillRequired();
+    await userEvent.type(screen.getByTestId("participation-roster-number"), "3EP2");
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    expect(screen.getByText("名列番号は 3EP2-26 の形式で入力してください")).toBeInTheDocument();
+    expect(api.submit).not.toHaveBeenCalled();
+  });
+
   it("submits split 姓/名 + both emails and shows a neutral サンクス (no roster claim)", async () => {
     const api = makeApi();
     render(wrap(<ParticipationPage />, api));
     await fillRequired("新規", "太郎");
     await userEvent.type(screen.getByTestId("participation-phone"), "090-1234-5678");
+    await userEvent.type(screen.getByTestId("participation-roster-number"), "3ep2-26");
     await userEvent.click(screen.getByTestId("participation-submit"));
     await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
     expect((api.submit as any).mock.calls[0][0]).toMatchObject({
@@ -167,6 +178,7 @@ describe("ParticipationPage", () => {
       firstName: "太郎",
       name: "新規 太郎",
       phone: "090-1234-5678",
+      rosterNumber: "3EP2-26",
       schoolEmail: "taro@school.ac.jp",
       gmail: "taro@gmail.com",
     });
@@ -185,7 +197,7 @@ const SUBMISSION: Participation = {
   id: "p_1", orgId: "org", memberId: null, name: "黒川", lastName: "黒川", firstName: null,
   nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
   nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null, grade: "3",
-  department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
+  department: "情報工学科", rosterNumber: null, contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
   gmail: "kurokawa.dev@gmail.com", desiredTeamId: "t1", desiredActivity: "both", note: "よろしく",
   status: "submitted", matchKind: "created_new", reviewState: "pending", submittedBy: "u_1",
   submittedAt: "2026-08-15T10:00:00.000Z", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",

@@ -4,6 +4,7 @@ import type { UserSummary, PermissionKey } from "./identity";
 import type { AppAccessLevel } from "./policy";
 import type { EventSummary } from "./event";
 import type { TaskStatus } from "./task";
+import type { SubmitParticipationRequest } from "./member";
 
 export interface MeResponse {
   user: UserSummary;
@@ -112,35 +113,9 @@ export interface PublicInquiryResponse {
 // it to member-service's internal route with a system actor. The response is
 // deliberately minimal (no roster/member echo) so an unauthenticated caller learns
 // nothing about who is on the roster — only that their submission was accepted.
-export interface PublicParticipationRequest {
-  /** 苗字(姓) — 必須 (分割入力). */
-  lastName?: string | null;
-  /** 名前(名) — 必須 (分割入力). */
-  firstName?: string | null;
-  /** 氏名 (合成値・後方互換). 姓/名 が来た時はサーバが合成する。 */
-  name?: string;
-  /** 学校メールアドレス (必須・メール形式). */
-  schoolEmail: string;
-  /** Gmail アドレス (必須・メール形式). */
-  gmail: string;
-  nameKana?: string | null;
-  /** 振り仮名(せい) (任意). */
-  lastNameKana?: string | null;
-  /** 振り仮名(めい) (任意). */
-  firstNameKana?: string | null;
-  /** 氏名ローマ字 (合成値・後方互換). */
-  nameRomaji?: string | null;
-  /** 苗字(姓) ローマ字 (任意・英字). アルファベットのメール発行に使う。 */
-  lastNameRomaji?: string | null;
-  /** 名前(名) ローマ字 (任意・英字). アルファベットのメール発行に使う。 */
-  firstNameRomaji?: string | null;
-  /** 電話番号 (任意). */
-  phone?: string | null;
-  grade?: string | null;
-  department?: string | null;
-  desiredTeamId?: string | null;
-  desiredActivity?: string | null;
-  note?: string | null;
+/** 公開 参加届 の受付 body。項目は member の SubmitParticipationRequest (= 人物プロフィール
+ *  PersonProfile 共通) と同一で、Turnstile トークンだけが追加される。 */
+export interface PublicParticipationRequest extends Omit<SubmitParticipationRequest, "contact"> {
   /** Cloudflare Turnstile token — required only when the gateway has TURNSTILE_SECRET. */
   turnstileToken?: string | null;
 }
