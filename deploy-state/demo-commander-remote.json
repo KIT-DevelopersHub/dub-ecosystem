@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "commander-remote",
+  "worker": "dub-demo-commander-remote",
+  "url": "https://dub-demo-commander-remote.developershub-site.workers.dev",
+  "deployedSha": "af12fa32",
+  "branch": "feat/commander-remote-tunnel",
+  "actor": "ko-tarou",
+  "markers": ["fe2-commander-connection-save"],
+  "live": true,
+  "verifiedAt": "2026-10-09T17:31:43Z",
+  "updatedAt": "2026-10-09T17:31:43Z",
+  "note": "fe2 /commander remote (tunnel) connection"
+}
