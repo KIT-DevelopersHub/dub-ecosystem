@@ -133,6 +133,13 @@ for ddl in "${DUBCORE_SHARED_DDLS[@]}"; do
   fi
 done
 
+# The one-click /auth/demo-login signs in DEMO_AUTOLOGIN_EMAIL (default demo-admin@developershub.jp),
+# but the seed's admin is demo-admin@dev.developershub.jp -> 403 AUTH_NOT_ON_ALLOWLIST. Align it
+# (slot 1 was fixed the same way by hand).
+$WRANGLER d1 execute "dub-core${SFX}" --remote --yes --command \
+  "UPDATE identity_users SET email='demo-admin@developershub.jp' WHERE id='user_01SEED000000000000000ADMIN'" || \
+  echo "::warning::could not align the demo-login account email (apply manually)."
+
 # auth-outbox-staging holds only the freeq outbox table (auth's OUTBOX_DB). Apply its DDL.
 AUTH_OUTBOX_DDL="$(ls services/auth-service/db/*outbox*.sql 2>/dev/null | head -n1 || true)"
 if [ -n "$AUTH_OUTBOX_DDL" ]; then
