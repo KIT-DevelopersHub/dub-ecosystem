@@ -3,12 +3,12 @@
   "slug": "roster-number",
   "worker": "dub-demo-roster-number",
   "url": "https://dub-demo-roster-number.developershub-site.workers.dev",
-  "deployedSha": "45288e59",
+  "deployedSha": "6dd0e1c6",
   "branch": "feat/member-roster-number",
   "actor": "ko-tarou",
-  "markers": ["members-form-roster-number"],
+  "markers": ["members-form-roster-number","participation-roster-number"],
   "live": true,
-  "verifiedAt": "2026-10-09T07:35:25Z",
-  "updatedAt": "2026-10-09T07:35:25Z",
+  "verifiedAt": "2026-10-09T16:28:24Z",
+  "updatedAt": "2026-10-09T16:28:24Z",
   "note": ""
 }
