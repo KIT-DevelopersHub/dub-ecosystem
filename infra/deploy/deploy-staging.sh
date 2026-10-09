@@ -16,7 +16,8 @@ WRANGLER="pnpm dlx wrangler@4.35.0"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 . infra/deploy/staging-worker-set.sh
-set -a; . infra/deploy/staging-resources.env; set +a
+. infra/deploy/staging-slot.sh   # STAGING_SLOT=1|2 -> STAGING_SUFFIX (-staging|-staging2)
+set -a; . "$STAGING_RESOURCES_FILE"; set +a
 
 # Same CF-credential whitespace scrub as deploy-prod.sh (a trailing space in the account id
 # breaks the API URL path — see deploy-prod.sh for the full incident note).
@@ -36,7 +37,7 @@ for v in STAGING_DUB_CORE_D1_ID STAGING_AUTH_OUTBOX_D1_ID STAGING_AUTH_KV_ID \
          STAGING_DRIVE_PROXY_KV_ID STAGING_GANTT_KV_ID; do
   case "${!v:-}" in
     ""|REPLACE_ME*)
-      echo "::error::${v} is a placeholder. Bootstrap staging once: bash infra/deploy/setup-staging-resources.sh (see docs/runbooks/04-staging-label-gate.md)." >&2
+      echo "::error::${v} is a placeholder. Bootstrap staging once: STAGING_SLOT=${STAGING_SLOT} bash infra/deploy/setup-staging-resources.sh (see docs/runbooks/04-staging-label-gate.md)." >&2
       exit 1;;
   esac
 done
@@ -126,7 +127,7 @@ bootstrap_missing_workers
 # Deploy every Worker in dependency order (identity -> auth -> peripherals -> api-gateway
 # -> fe2 -> mo3 -> app-health-monitor). Gateway smoke runs right after the gateway, before
 # the public faces — same fail-fast placement as prod.
-GW="https://dub-api-gateway-staging.${STAGING_WORKERS_SUBDOMAIN}.workers.dev"
+GW="https://dub-api-gateway${STAGING_SUFFIX}.${STAGING_WORKERS_SUBDOMAIN}.workers.dev"
 for dir in "${STAGING_WORKER_DIRS[@]}"; do
   # STAGING ONLY: enable the one-click demo login on the auth-service. This --var is set
   # here (never in a committed wrangler config) so it can NEVER leak into a prod/free
@@ -140,6 +141,6 @@ for dir in "${STAGING_WORKER_DIRS[@]}"; do
   fi
 done
 
-echo "staging deploy complete."
-echo "  admin (fe2): https://dub-fe2-app-shell-staging.${STAGING_WORKERS_SUBDOMAIN}.workers.dev"
+echo "staging deploy complete (slot ${STAGING_SLOT})."
+echo "  admin (fe2): https://dub-fe2-app-shell${STAGING_SUFFIX}.${STAGING_WORKERS_SUBDOMAIN}.workers.dev"
 echo "  gateway:     ${GW}"

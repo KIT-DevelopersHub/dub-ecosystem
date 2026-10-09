@@ -27,7 +27,7 @@
 #                                                             #  (e.g. a freshly built dist)
 #   scripts/verify-live.sh --self-test                        # no network; fixture check
 #
-#   <env> = demo | staging | prod
+#   <env> = demo | staging | staging2 | prod   (staging2 = the PR-only 2nd staging slot)
 #   Every <marker> must be present (logical AND). Markers are fixed strings (grep -F).
 #
 # Options:
@@ -64,8 +64,9 @@ fe2_origin_for() {  # env -> the fe2 SPA origin actually served to users
   case "$env" in
     demo)    printf 'https://fe2-demo.%s.workers.dev' "$sub" ;;
     staging) printf 'https://dub-fe2-app-shell-staging.%s.workers.dev' "$sub" ;;
+    staging2) printf 'https://dub-fe2-app-shell-staging2.%s.workers.dev' "$sub" ;;
     prod)    printf 'https://dub-fe2-app-shell.%s.workers.dev' "$sub" ;;
-    *) echo "::error::unknown env '$env' (want demo|staging|prod)" >&2; exit 2 ;;
+    *) echo "::error::unknown env '$env' (want demo|staging|staging2|prod)" >&2; exit 2 ;;
   esac
 }
 
@@ -74,6 +75,7 @@ gateway_origin_for() {  # env -> the api-gateway origin (for --api checks)
   case "$env" in
     demo)    printf '' ;;  # demo is backend-free (mock transport) — no gateway
     staging) printf 'https://dub-api-gateway-staging.%s.workers.dev' "$sub" ;;
+    staging2) printf 'https://dub-api-gateway-staging2.%s.workers.dev' "$sub" ;;
     prod)    printf 'https://dub-api-gateway.%s.workers.dev' "$sub" ;;
   esac
 }
