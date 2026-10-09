@@ -316,6 +316,12 @@ export function formatRangeTitle(view: CalendarView, anchorDay: number): string 
   return `${s.getFullYear()}年 ${s.getMonth() + 1}月`;
 }
 
+/** Compact toolbar title for phones: "10月10日" (日) / "10月". */
+export function formatRangeTitleShort(view: CalendarView, anchorDay: number): string {
+  const a = dateOfDay(anchorDay);
+  return view === "day" ? `${a.getMonth() + 1}月${a.getDate()}日` : `${a.getMonth() + 1}月`;
+}
+
 /** Detail/schedule line: "10月10日（土曜日）⋅ 10:00～11:00" or a 終日 range. */
 export function formatItemWhen(it: CalendarItem): string {
   if (it.allDay) {

@@ -15,6 +15,7 @@ import {
   draftForSlot,
   draftToDates,
   formatRangeTitle,
+  formatRangeTitleShort,
   itemsOnDay,
   shiftAnchor,
   toCalendarItems,
@@ -298,7 +299,7 @@ export function CalendarScreen(): JSX.Element {
           <Icon name="chevron-right" />
         </button>
         <span className={styles.rangeTitle} data-testid="calendar-range-label">
-          {formatRangeTitle(view, anchorDay)}
+          {narrow ? formatRangeTitleShort(view, anchorDay) : formatRangeTitle(view, anchorDay)}
         </span>
         <span className={styles.spacer} />
         {narrow && canWrite && (

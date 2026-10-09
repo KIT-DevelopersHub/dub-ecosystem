@@ -4,10 +4,14 @@
    Google's blue and event palette are kept as local custom properties because the
    point is to look exactly like the calendar everyone already knows. */
 
-.app {
+/* .form also carries the palette: the edit dialog is portaled outside .app. */
+.app,
+.form {
   --gcal-blue: #1a73e8;
   --gcal-blue-soft: #e8f0fe;
   --gcal-red: #ea4335;
+}
+.app {
   --hour-px: 48px;
   --gutter-w: 64px;
   --row-h: 22px;
