@@ -4,19 +4,18 @@
 // runtime (authz, service bindings, Queues, mail provider). Every leg that has domain
 // substance runs the service's own code + SQL; only transport is faked. Owns only
 // packages/e2e-smoke.
-import type { MiddlewareHandler } from "hono";
 import type { Queue } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso, type DbClient } from "@dub/db";
-import { errors } from "@dub/errors";
 import { common } from "@dub/types";
 import type { DubEventEnvelope, AuditRecordEnvelopeV1 } from "@dub/events";
+import type { PermissionGranter } from "@dub/policy-gate";
 
 import {
   createApp as createEventApp,
   createD1EventRepo,
   type AppDeps as EventDeps,
 } from "../../../services/event-service/src/index";
-import type { Authz } from "../../../services/event-service/src/types";
+import type { ScopedAuthz } from "../../../services/event-service/src/types";
 import { buildApp as buildTaskApp } from "../../../services/task-service/src/app";
 import { createD1TaskRepo } from "../../../services/task-service/src/repo";
 import type { Deps as TaskDeps } from "../../../services/task-service/src/deps";
@@ -47,22 +46,25 @@ export function recordingQueue<T>(): { queue: Queue<T>; sends: T[] } {
   return { queue, sends };
 }
 
-/** Authz fake: enforces the x-dub-user-id presence contract, grants every permission. */
-function allowAuthz(): Authz {
-  return {
-    requireAuth(): MiddlewareHandler {
-      return async (c, next) => {
-        if (!c.req.header("x-dub-user-id")) throw errors.unauthenticated("x-dub-user-id absent");
-        await next();
-      };
-    },
-    requirePermission(): MiddlewareHandler {
-      return async (_c, next) => next();
-    },
-    async hasPermission(): Promise<boolean> {
-      return true;
-    },
-  };
+/**
+ * THE authz seam for every policy-gated service in this world (event-service and
+ * task-service today). Their authorization is POLICY_TABLE enforced by @dub/policy-gate, so
+ * the seam is the `PermissionGranter` port — a FUNCTION, not the old `Authorizer` object:
+ * grant every key asked for. The smoke world exercises cross-service domain flows, not RBAC
+ * (which each service's own test/policy-table.test.ts owns), and the gate still enforces the
+ * x-dub-user-id contract the old `requireAuth` middleware did.
+ *
+ * One granter for all of them on purpose: a per-service copy is how task-service's seam went
+ * stale (an `{ require }` object survived the migration and TypeError'd every write into a
+ * 500) while event-service's was updated.
+ */
+function allowGranter(): PermissionGranter {
+  return async (_userId, _orgId, keys) => [...keys];
+}
+
+/** Layer 2 seam: the body-dependent, event-scoped `event:admin` demand. Always allow. */
+function allowScopedAuthz(): ScopedAuthz {
+  return { hasPermission: async () => true };
 }
 
 export interface World {
@@ -89,7 +91,8 @@ export function createWorld(): World {
   const eventRepo = createD1EventRepo(eventDb);
   const eventDeps: EventDeps = {
     repo: eventRepo,
-    authz: allowAuthz(),
+    authz: allowGranter(),
+    scopedAuthz: allowScopedAuthz(),
     publisher: { publish: async () => {} },
     audit: { record: async () => {} },
     taskClient: { listAssigneeIds: async () => [] },
@@ -117,7 +120,7 @@ export function createWorld(): World {
       },
     },
     audit: { record: async () => {} },
-    authz: { require: async () => {} },
+    authz: allowGranter(),
     // Genuine cross-service ref: the event existence gate reads the REAL event row.
     eventClient: {
       getEvent: async (_ctx, id) => {

@@ -15,6 +15,14 @@ export interface GatewayRoute {
   internalOnlyPaths?: string[];
   /** override request body cap for this route (bytes) */
   maxBodyBytes?: number;
+  /**
+   * Forward the caller's raw credential (`cookie` / `authorization`) to the binding.
+   * Default (absent) = strip them: "the token stays at the edge" so a downstream
+   * service can never replay a user's session. Opt in ONLY for a service that is
+   * itself the token authority (auth-service). `host` and all `x-dub-*` stay
+   * stripped regardless, and the gateway still never sets x-dub-internal.
+   */
+  forwardCredentials?: boolean;
 }
 
 export const API_PREFIX = common.API_PREFIX; // "/api/v1"
@@ -23,7 +31,15 @@ export const API_PREFIX = common.API_PREFIX; // "/api/v1"
 export const GATEWAY_OWNED_SEGMENTS = new Set(["me", "bff", "public", "admin"]);
 
 export const ROUTES: readonly GatewayRoute[] = [
-  { segment: "auth", binding: "SVC_AUTH", auth: "public" },
+  // auth-service IS the session-token authority, so it is the one binding that must
+  // receive the caller's raw credential: POST /auth/refresh rotates the token and
+  // POST /auth/logout revokes it server-side, and the SPA carries it only in the
+  // dub_session cookie (docs/api-contracts/auth.md). Stripping it here made both
+  // endpoints see an empty token -> refresh 401'd hourly and logout was a silent
+  // no-op that left the session live in KV. Its internal surface (/verify,
+  // /internal/*, /mobile/exchange) is unreachable externally: the gateway only ever
+  // forwards paths under /auth/, and those handlers also require x-dub-internal.
+  { segment: "auth", binding: "SVC_AUTH", auth: "public", forwardCredentials: true },
   {
     segment: "identity",
     binding: "SVC_IDENTITY",
@@ -46,7 +62,22 @@ export const ROUTES: readonly GatewayRoute[] = [
   // so the frontend path stays simple (/api/v1/feedback).
   { segment: "feedback", binding: "SVC_NOTIFICATION", auth: "required" },
   { segment: "files", binding: "SVC_FILE_META", auth: "required" }, // body cap resolved from env at runtime
-  { segment: "drive", binding: "SVC_DRIVE_PROXY", auth: "required" },
+  // Google Drive read/write proxy. The three operational routes are internal-only in
+  // drive-proxy (`requireInternal`): GET /drive/health/quota (quota probe) and the
+  // POST /drive/watch pair (change-notification channel lifecycle, driven by a scheduled
+  // Worker). They were reachable at the edge with nothing but that single in-service guard
+  // between them and the internet — one regression in proxy.ts's x-dub-* stripping and they
+  // would have been open (inventory a-5). Now they 404 here as well, matching how
+  // identity / notifications / mail / audit / members already double-defend their internal
+  // trees. "/drive/watch" (no trailing slash) covers both the bare path and
+  // /drive/watch/:channelId/stop; "/drive/health/" is a prefix so future /drive/health/*
+  // probes are covered too. No external drive route lives under either.
+  {
+    segment: "drive",
+    binding: "SVC_DRIVE_PROXY",
+    auth: "required",
+    internalOnlyPaths: ["/drive/health/", "/drive/watch"],
+  },
   // Hackit Drive sharing manager (fe2 driveshare feature). Manages Google Drive
   // permissions for the shared Gmail via drive-share-service (drive:read / drive:write).
   { segment: "driveshare", binding: "SVC_DRIVE_SHARE", auth: "required" },

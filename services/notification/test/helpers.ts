@@ -40,6 +40,65 @@ export const inertFetcher = {
   },
 } as unknown as Fetcher;
 
+// ---- authorization (identity POST /authz/check) ----
+// Since the service moved to @dub/policy-gate, EVERY gated route costs one /authz/check
+// over SVC_IDENTITY, so a test env needs a fetcher that answers it. These helpers keep the
+// answers faithful to the identity role seeds, because the policy table now pairs the
+// ロール管理 3-tier with the fine-grained notif key and a fake that lies about either half
+// would make the gate's behaviour untestable.
+
+/** The 通知-app keys an ordinary signed-in member holds (identity migrations 0004 + 0008):
+ *  the 閲覧 tier plus the two self-service scopes. */
+export const NOTIF_MEMBER_KEYS = [
+  "app:notifications:view",
+  "notif:inbox:self",
+  "notif:prefs:self",
+] as const;
+
+/** Everything the 通知 surface can demand — the admin role's set (migrations 0002/0006/0008):
+ *  both tiers plus notif:admin and notif:broadcast_publish. */
+export const NOTIF_ADMIN_KEYS = [
+  ...NOTIF_MEMBER_KEYS,
+  "app:notifications:edit",
+  "notif:admin",
+  "notif:broadcast_publish",
+] as const;
+
+/**
+ * A SVC_IDENTITY stand-in that answers POST /authz/check from `keysFor(userId)`, deciding
+ * each requested permission independently (the real contract: one decision per check, in
+ * request order). Every other path keeps `inertFetcher`'s behaviour and throws, so a test
+ * that accidentally relies on role expansion or email lookup still fails loudly.
+ */
+export function fakeAuthzFetcher(keysFor: (userId: string) => readonly string[]): Fetcher {
+  return {
+    async fetch(req: Request): Promise<Response> {
+      const url = new URL(req.url);
+      if (!url.pathname.endsWith("/authz/check")) throw new Error(`unexpected downstream fetch: ${url.pathname}`);
+      const body = (await req.json().catch(() => ({}))) as {
+        subjectUserId?: string;
+        checks?: { permission: string }[];
+      };
+      const held = new Set(keysFor(body.subjectUserId ?? ""));
+      const decisions = (body.checks ?? []).map((q) => ({
+        allowed: held.has(q.permission),
+        evaluatedAt: new Date().toISOString(),
+        ttlSeconds: 0,
+      }));
+      return new Response(JSON.stringify({ decisions }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  } as unknown as Fetcher;
+}
+
+/** `makeTestEnv()`'s default caller: an ordinary member. Chosen so the inbox / preferences
+ *  / feedback-submit routes work in tests that are about behaviour rather than authz, while
+ *  notif:admin stays UNHELD — so `isAdminViewer` is false and the audience filtering tests
+ *  keep seeing a member's view unless they opt into an admin fetcher. */
+export const memberAuthzFetcher = (): Fetcher => fakeAuthzFetcher(() => NOTIF_MEMBER_KEYS);
+
 export interface TestEnvHandle {
   env: Env;
   db: DbClient;
@@ -53,7 +112,10 @@ export function makeTestEnv(overrides: Partial<Env> = {}): TestEnvHandle {
   const env: Env = {
     DB: d1,
     AUDIT_QUEUE: audit.AUDIT_QUEUE,
-    SVC_IDENTITY: inertFetcher,
+    // Answers /authz/check as an ordinary member and throws on every other identity path,
+    // so behaviour tests get past the policy gate without any test pretending to be an
+    // admin. Override it to assert an authz outcome (see fakeAuthzFetcher).
+    SVC_IDENTITY: memberAuthzFetcher(),
     SVC_EVENT: inertFetcher,
     ...overrides,
   };

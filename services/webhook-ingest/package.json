@@ -10,12 +10,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@dub/auth-client": "workspace:*",
     "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/events": "workspace:*",
     "@dub/http": "workspace:*",
     "@dub/observability": "workspace:*",
+    "@dub/policy-gate": "workspace:*",
     "@dub/types": "workspace:*"
   },
   "peerDependencies": {

@@ -5,6 +5,11 @@ main = "src/index.ts"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
+# No public workers.dev origin. Explicit because the default is PUBLISHED: without this line
+# one manual `wrangler deploy` would put the whole API on the internet. Commander is a local
+# single-operator app, reached over loopback by `commander/dev-up.sh`.
+workers_dev = false
+
 # Shared dub-core D1 (commander_ namespace only). database_id filled at infra Apply.
 [[d1_databases]]
 binding = "DB"

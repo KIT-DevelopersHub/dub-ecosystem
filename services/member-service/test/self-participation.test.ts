@@ -9,12 +9,17 @@ import { createApp, makeDeps, call } from "./harness";
 const IDU = "idu_self"; // the caller's identity userId (forwarded as x-dub-user-id)
 
 describe("member-service self 参加届 (/members/internal/me/participation)", () => {
-  it("404s without x-dub-internal (route never exposed externally)", async () => {
+  // INTERNAL in POLICY_TABLE: 403 internal_only (was a hand-rolled 404). api-gateway still
+  // 404s the /members/internal/ prefix at the edge, so reachability is unchanged.
+  it("403s without x-dub-internal (route never exposed externally)", async () => {
     const app = createApp(makeDeps());
     const res = await call(app, "GET", "/members/internal/me/participation", { userId: IDU });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(res.json.error.details.reason).toBe("internal_only");
   });
 
+  // INTERNAL does not guarantee an actor, so the 401 is the handler's own `reqCtx` check —
+  // this route acts on the caller's linked roster row and cannot run without one.
   it("401s without a user id even when internal", async () => {
     const app = createApp(makeDeps());
     const res = await call(app, "GET", "/members/internal/me/participation", { userId: null, internal: true });

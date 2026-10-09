@@ -17,7 +17,7 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
   {
     ns: "identity",
     ownerUnit: "identity-roster#3",
-    tables: ["identity_orgs", "identity_users", "identity_roles", "identity_role_permissions", "identity_role_assignments"],
+    tables: ["identity_orgs", "identity_users", "identity_roles", "identity_role_permissions", "identity_role_assignments", "identity_webauthn_credentials", "identity_webauthn_challenges"],
   },
   {
     ns: "event",

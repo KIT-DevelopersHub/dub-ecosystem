@@ -7,23 +7,22 @@ import { createApp } from "../src/app";
 import { buildFeedbackEmail, buildFeedbackNotifyInput, notifyAdminsOfFeedbackInApp } from "../src/feedback";
 import { buildIngestDeps } from "../src/deps";
 import { unreadCount, listInbox } from "../src/repo";
-import { makeTestEnv, fakeIdentity, ctx, type TestEnvHandle, type RecordingMail } from "./helpers";
+import {
+  makeTestEnv,
+  fakeIdentity,
+  ctx,
+  fakeAuthzFetcher,
+  NOTIF_ADMIN_KEYS,
+  NOTIF_MEMBER_KEYS,
+  type TestEnvHandle,
+  type RecordingMail,
+} from "./helpers";
 
-// A fake identity binding that answers POST /authz/check with a fixed allow/deny —
-// lets the real @dub/auth-client drive requirePermission("notif:admin") end to end.
+// A fake identity binding: `true` = the caller holds the whole 通知 key set (an admin),
+// `false` = only what an ordinary member holds, so notif:admin is missing. Lets the real
+// /authz/check contract drive the policy gate's notif:admin rule end to end.
 function fakeAuthzIdentity(allow: boolean): Fetcher {
-  return {
-    async fetch(req: Request): Promise<Response> {
-      const url = new URL(req.url);
-      if (url.pathname.endsWith("/authz/check")) {
-        const payload = {
-          decisions: [{ allowed: allow, evaluatedAt: new Date().toISOString(), ttlSeconds: 0 }],
-        };
-        return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
-      }
-      return new Response("not found", { status: 404 });
-    },
-  } as unknown as Fetcher;
+  return fakeAuthzFetcher(() => (allow ? NOTIF_ADMIN_KEYS : NOTIF_MEMBER_KEYS));
 }
 
 function recordingMail(behavior: "ok" | "throw" = "ok"): RecordingMail {

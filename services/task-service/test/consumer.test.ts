@@ -92,7 +92,11 @@ describe("dispatchEvent (free-tier single-envelope path)", () => {
 describe("POST /internal/events-async (free-tier landing route)", () => {
   const INIT = { "content-type": "application/json", "x-dub-internal": "1" };
 
-  it("404s without the x-dub-internal marker (never public)", async () => {
+  // The marker check is now POLICY_TABLE's `INTERNAL` rule rather than a hand-rolled
+  // middleware, so the refusal is the gate's 403 `internal_only` instead of the old 404.
+  // Both are non-2xx, which is all the caller's freeq drain reads (it keeps the row pending
+  // and retries), and the table now SHOWS that this route is internal-only.
+  it("403s internal_only without the x-dub-internal marker (never public)", async () => {
     const app = buildApp(makeHarness().deps);
     const res = await app.fetch(
       new Request("https://task/internal/events-async", {
@@ -101,7 +105,10 @@ describe("POST /internal/events-async (free-tier landing route)", () => {
         body: JSON.stringify(createEvent("event.archived", { eventId: "evt_1" }, { requestId: "r", actorId: null })),
       }),
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe(
+      "internal_only",
+    );
   });
 
   it("archives the event's tasks and returns 202", async () => {

@@ -1,25 +1,21 @@
 // DNS record routes (synchronous). Order is load-bearing:
 //   authz -> allowed-zone gate (403, no audit) -> write-ahead intent (502 fail-close)
 //   -> CF call -> local history + result audit + event.
+// The authz step is the policyGate mount in app.ts (infra:dns, per src/policy-table.ts), so
+// it still runs FIRST — before the allowed-zone gate below. That gate stays here on purpose:
+// "may this caller touch DNS at all" is the key check (the table's job), "is THIS zone in
+// the allow-list" needs the request body and is the domain layer's (gate.ts's header).
 import { Hono } from "hono";
 import type { FieldError } from "@dub/errors";
 import { errors, isDubError } from "@dub/errors";
 import type { deploy } from "@dub/types";
 import type { AppEnv } from "../http";
-import {
-  getDeps,
-  reqCtx,
-  requireAuth,
-  requirePermission,
-  readJson,
-  requireString,
-  assertValid,
-} from "../http";
+import { getDeps, reqCtx, readJson, requireString, assertValid } from "../http";
 
 const VALID_TYPES: readonly deploy.CreateDnsRecordRequest["type"][] = ["A", "AAAA", "CNAME", "TXT"];
 
 export function registerDnsRoutes(app: Hono<AppEnv>): void {
-  app.post("/deploy/dns/records", requireAuth, requirePermission("infra:dns", true), async (c) => {
+  app.post("/deploy/dns/records", async (c) => {
     const deps = getDeps(c);
     const body = await readJson(c);
     const fe: FieldError[] = [];

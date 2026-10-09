@@ -9,10 +9,17 @@
 //
 // The gate: `to` not on an allowed edge => 409 (段飛ばし禁止); an approval-required
 // edge without approvedByUser:true => 403 (自己承認禁止). See @dub/commander-phases.
+//
+// AUTHORIZATION: every route above is listed in `./protection-table`, and `operatorGate`
+// (mounted below, before any handler) denies anything the table does not mention. Nothing
+// else in this service checks a credential — do not add a per-route guard; add a table line.
+// That file also records why this service is excluded from @dub/policy-gate.
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { allowedTransitions } from "@dub/commander-phases";
 import type { AppBindings } from "./env";
+import { allowedOrigin } from "./origins";
+import { operatorGate } from "./protection-table";
 import {
   createFeature,
   listFeatures,
@@ -46,19 +53,24 @@ import {
 export function createApp() {
   const app = new Hono<AppBindings>();
 
-  // The Dub-hosted / local commander web SPA calls this API cross-origin.
-  app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
+  // The local commander web SPA calls this API cross-origin (loopback, chosen port).
+  // Registered FIRST so a preflight is answered here and every gate response (401/403/503)
+  // still carries the CORS headers the browser needs to surface the status to the SPA.
+  app.use(
+    "*",
+    cors({
+      origin: (origin, c) => allowedOrigin(origin, c.env as AppBindings["Bindings"]),
+      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      // Explicit, because every gated route now requires `x-commander-token` — including
+      // GETs, which therefore preflight. `maxAge` keeps that from costing a second round
+      // trip on every board poll.
+      allowHeaders: ["content-type", "x-commander-token"],
+      maxAge: 86400,
+    }),
+  );
 
-  // Optional operator-token guard on mutations (see env.ts). Off when unset.
-  app.use("*", async (c, next) => {
-    if (c.req.method === "POST" || c.req.method === "PATCH" || c.req.method === "DELETE") {
-      const expected = c.env.COMMANDER_OPERATOR_TOKEN;
-      if (expected && c.req.header("x-commander-token") !== expected) {
-        return c.json({ error: "unauthorized" }, 401);
-      }
-    }
-    await next();
-  });
+  // THE authorization layer: table-driven, fail-closed, GET included. See protection-table.ts.
+  app.use("*", operatorGate());
 
   app.get("/health", (c) =>
     c.json({ ok: true, service: "commander-service", version: "0.1.0" }),

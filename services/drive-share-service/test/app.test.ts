@@ -3,8 +3,7 @@ import { CommonErrorCodes } from "@dub/errors";
 import { createApp } from "../src/app";
 import { createDriveShareService } from "../src/service";
 import { createMockDriveShareClient } from "../src/mock-client";
-import { DRIVE_WRITE } from "../src/permissions";
-import { memAuthz, allowAll, AUTHED, fakeRoster, buildRoleGrants } from "./helpers";
+import { memAuthzHolding, allowAll, DRIVE_READER, AUTHED, fakeRoster, buildRoleGrants } from "./helpers";
 
 function app(authz = allowAll) {
   const client = createMockDriveShareClient();
@@ -28,13 +27,12 @@ describe("authn", () => {
 
 describe("authz", () => {
   it("403 when the permission check denies", async () => {
-    const res = await app(memAuthz(() => false)).request("/driveshare/files", { headers: AUTHED });
+    const res = await app(memAuthzHolding()).request("/driveshare/files", { headers: AUTHED });
     expect(res.status).toBe(403);
   });
 
   it("read-only caller is forbidden from granting", async () => {
-    const readOnly = memAuthz((_u, perm) => perm !== DRIVE_WRITE);
-    const res = await app(readOnly).request("/driveshare/files/fld_root/permissions", {
+    const res = await app(DRIVE_READER).request("/driveshare/files/fld_root/permissions", {
       method: "POST",
       headers: JSON_HDR,
       body: JSON.stringify({ emailAddress: "x@example.com", role: "reader" }),
@@ -151,8 +149,7 @@ describe("role-grants endpoints", () => {
   });
 
   it("read-only caller cannot grant a role (403)", async () => {
-    const readOnly = memAuthz((_u, perm) => perm !== DRIVE_WRITE);
-    const res = await app(readOnly).request("/driveshare/files/fil_budget/role-grants", {
+    const res = await app(DRIVE_READER).request("/driveshare/files/fil_budget/role-grants", {
       method: "POST",
       headers: JSON_HDR,
       body: JSON.stringify({ roleId: "role_sys_member", driveRole: "reader" }),

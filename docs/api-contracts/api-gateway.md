@@ -315,9 +315,14 @@ Masked post-strip paths (exact or prefix, `/`-terminated entries are prefix matc
 
 For every proxied request the gateway rebuilds the header set:
 
-- **Strips** all inbound `x-dub-*` (anti-spoof), plus `Host`, `Authorization`, `Cookie`
-  (the token stays at the edge — downstream services never see it), and `Content-Length`
+- **Strips** all inbound `x-dub-*` (anti-spoof), plus `Host` and `Content-Length`
   (recomputed by the runtime).
+- **Strips `Authorization` and `Cookie`** by default — the token stays at the edge, so a
+  downstream service can never replay a user's session. The single exception is the
+  **`auth` segment** (`forwardCredentials: true` on its routing rule): auth-service is the
+  token authority, and `POST /auth/refresh` / `POST /auth/logout` can only rotate or revoke
+  a session if they receive the actual token (the web client carries it solely in the
+  `dub_session` cookie — see auth §`POST /auth/refresh`). No other segment may opt in.
 - **Adds** the trusted context: `x-dub-request-id` (the minted/inherited id),
   `x-dub-caller: api-gateway`, and — only for `auth: required` routes after a successful
   verify — `x-dub-user-id: <verified user id>`.

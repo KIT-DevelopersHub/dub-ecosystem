@@ -1,9 +1,9 @@
 // Auth session + permission guards (design 2-3 / 6). Session comes from
 // GET /api/v1/me (MeResponse). Permission gate is display-control only (server is
 // authoritative); while /me is loading, can() is FALSE — fail-closed (design 6).
-import { createContext, useContext, useEffect, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { appRegistry, policy } from "@dub/types";
 import type { gateway, identity } from "@dub/types";
 import type { ApiClient } from "../lib/api-client.tsx";
@@ -27,6 +27,22 @@ interface AuthContextValue {
 
 const AuthCtx = createContext<AuthContextValue | null>(null);
 
+// ---- Proactive session refresh ---------------------------------------------
+// The access token has a fixed TTL (SESSION_ACCESS_TTL_SEC). Reacting to 401s alone means
+// the user is ALWAYS interrupted at the TTL boundary — every open request fails at once and
+// the shell flickers (or logs out) while the client recovers. So we rotate the cookie a few
+// minutes BEFORE sessionExpiresAt, and nothing ever 401s in normal use.
+/** Rotate this long before `sessionExpiresAt`. Wide enough to absorb clock skew + a retry. */
+const REFRESH_LEAD_MS = 5 * 60 * 1000;
+/** setTimeout stores its delay in an int32: anything past this fires IMMEDIATELY. Clamp. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+/** Floor so an already-past / bogus expiry can never schedule a 0ms self-feeding loop. */
+const MIN_TIMEOUT_MS = 1_000;
+
+function refreshDelayMs(sessionExpiresAt: number, now: number): number {
+  return Math.min(Math.max(sessionExpiresAt - REFRESH_LEAD_MS - now, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS);
+}
+
 export function AuthProvider({
   api,
   children,
@@ -48,6 +64,62 @@ export function AuthProvider({
     : query.data
       ? { status: "authenticated", me: query.data }
       : { status: "unauthenticated" };
+
+  const queryClient = useQueryClient();
+  // `api` is read through a ref so the rotation effect depends ONLY on the expiry. A caller
+  // that builds its client inline would otherwise re-arm (and so indefinitely postpone) the
+  // timer on every render.
+  const apiRef = useRef(api);
+  useEffect(() => {
+    apiRef.current = api; // in an effect, not during render (StrictMode / concurrent purity)
+  }, [api]);
+  // Primitive dep (not query.data): a refetch returning an equal expiry must NOT tear down
+  // and re-create the timer, and a new expiry must.
+  const sessionExpiresAt = query.data?.sessionExpiresAt ?? null;
+
+  useEffect(() => {
+    if (sessionExpiresAt === null || !Number.isFinite(sessionExpiresAt)) return undefined;
+
+    let disposed = false;
+    let inFlight = false;
+
+    const rotate = async (): Promise<void> => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        // Harness clients (test-support FakeAuthProvider) are partial casts of ApiClient and
+        // may not carry refresh; proactive rotation is then simply inactive.
+        const ok = await apiRef.current.auth.refresh?.();
+        // Re-read the session: the NEW sessionExpiresAt is what re-arms this effect. Without
+        // the invalidation the timer fires exactly once and never again.
+        if (ok && !disposed) await queryClient.invalidateQueries({ queryKey: queryKeys.me });
+      } catch {
+        // Swallow: a failed proactive rotation must not log anyone out (a transient blip
+        // would end a healthy session). The reactive 401 path owns teardown.
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const timer = setTimeout(() => void rotate(), refreshDelayMs(sessionExpiresAt, Date.now()));
+
+    // A backgrounded tab has its timers throttled — or, after sleep/suspend, never fires
+    // them at all. That is the "left it open overnight, came back logged out" case, so on
+    // becoming visible we rotate immediately when the expiry is already near or past.
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState !== "visible") return;
+      if (sessionExpiresAt - Date.now() > REFRESH_LEAD_MS) return;
+      void rotate();
+    };
+    const doc = typeof document === "undefined" ? null : document;
+    doc?.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      doc?.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [sessionExpiresAt, queryClient]);
 
   const value = useMemo<AuthContextValue>(() => {
     const perms = state.status === "authenticated" ? new Set<string>(state.me.permissions) : null;

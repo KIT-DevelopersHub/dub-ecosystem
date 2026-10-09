@@ -46,11 +46,11 @@ export const AUDIENCE_ADMIN = "admin" as const;
 export const AUDIENCE_MEMBERS = "members" as const;
 export const DEFAULT_AUDIENCE = AUDIENCE_MEMBERS;
 
-// Permission gate for the "publish to members" action (POST /manage/:id/publish) and the
-// admin notification list (GET /manage). Held by admin (all catalog keys) + maintainer.
-export const BROADCAST_PUBLISH_PERMISSION = "notif:broadcast_publish" as const;
-// "admin viewer" gate for inbox audience filtering: holders see BOTH audiences. Members
-// (who lack it) are filtered to audience='members' rows only.
+// "admin viewer" flag for inbox audience filtering: holders see BOTH audiences. Members
+// (who lack it) are filtered to audience='members' rows only. NOT an authorization gate
+// (src/policy-table.ts owns all of those) — it shapes the response. The per-route
+// permission keys that used to live here as constants are gone: they belong in the policy
+// table and nowhere else, so a second check can never drift from it.
 export const ADMIN_VIEWER_PERMISSION = "notif:admin" as const;
 
 // The type a member broadcast is published under. Reuses the existing broadcast machinery
@@ -75,8 +75,6 @@ export const FEEDBACK_CATEGORIES = ["bug", "idea", "question", "other"] as const
 export const FEEDBACK_MESSAGE_MAX = 4000;
 export const FEEDBACK_PAGE_URL_MAX = 2048;
 export const FEEDBACK_PAGE_NAME_MAX = 200;
-// Permission gate for the admin read surface (GET /feedback, PATCH …/read).
-export const FEEDBACK_ADMIN_PERMISSION = "notif:admin" as const;
 // Best-effort admin notification recipient. Deliverability depends on domain
 // verification; a send failure never blocks the feedback save.
 export const FEEDBACK_ADMIN_EMAIL = "admin@developershub.jp";
@@ -97,10 +95,9 @@ export const FEEDBACK_NOTIFY_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"
 // ---- release notes (new-feature announcements) ----
 // A release note is broadcast to EVERY active user's inbox as an in_app notification of
 // type `release`. FE5 badges it "🎉 新機能". Publishing is admin-gated (POST /release,
-// notif:admin); the curated back-catalog below is (re)published idempotently by the
-// internal seed route so demo + prod both show the recent releases.
+// notif:admin — the rule lives in src/policy-table.ts); the curated back-catalog below is
+// (re)published idempotently by the internal seed route so demo + prod show the releases.
 export const RELEASE_NOTIFY_TYPE = "release";
-export const RELEASE_ADMIN_PERMISSION = "notif:admin" as const;
 export const RELEASE_TITLE_MAX = 200;
 export const RELEASE_BODY_MAX = 2000;
 export const RELEASE_APP_MAX = 60;

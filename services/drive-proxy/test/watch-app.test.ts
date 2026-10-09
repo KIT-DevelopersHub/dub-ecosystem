@@ -2,9 +2,8 @@ import { describe, it, expect } from "vitest";
 import { createApp, type AppDeps } from "../src/app";
 import type { DriveService } from "../src/service";
 import type { WatchService } from "../src/watch/service";
-import { memAuthz } from "./helpers";
+import { allowAll } from "./helpers";
 
-const allowAll = memAuthz(() => true);
 const INTERNAL = { "x-dub-internal": "1", "content-type": "application/json" };
 
 function driveStub(): DriveService {

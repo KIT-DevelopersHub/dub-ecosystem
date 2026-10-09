@@ -337,6 +337,14 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
           },
           200,
         );
+      // Passkeys: a real WebAuthn ceremony needs the real auth-service (rpId/origin are
+      // checked server-side), so offline builds report "disabled" — the login screen then
+      // falls back to the password form — and list an empty set in アカウント設定.
+      case "GET /api/v1/auth/passkeys":
+        return json({ items: [] });
+      case "POST /api/v1/auth/passkey/login/options":
+      case "POST /api/v1/auth/passkey/register/options":
+        return errorEnvelope("AUTH_PASSKEY_DISABLED", "Passkey login is not configured", 404);
       // Feedback widget (shell chrome): acknowledge so the offline/demo build shows
       // the success state. No real feedback leaves the browser under the mock.
       case "POST /api/v1/feedback":
