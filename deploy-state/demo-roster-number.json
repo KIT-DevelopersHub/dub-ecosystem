@@ -3,14 +3,12 @@
   "slug": "roster-number",
   "worker": "dub-demo-roster-number",
   "url": "https://dub-demo-roster-number.developershub-site.workers.dev",
-  "deployedSha": "ceae2215",
+  "deployedSha": "b7477a0d",
   "branch": "feat/member-roster-number",
   "actor": "ko-tarou",
-  "markers": [
-    "members-form-profile-section"
-  ],
+  "markers": ["dub.members.roster.columns.v2"],
   "live": true,
-  "verifiedAt": "2026-10-09T17:02:06Z",
-  "updatedAt": "2026-10-09T17:02:06Z",
-  "note": "PersonProfile 統一 (verify:live retry PASS)"
+  "verifiedAt": "2026-10-09T17:10:19Z",
+  "updatedAt": "2026-10-09T17:10:19Z",
+  "note": "運営名簿の表で参加届の人物項目を既定全列表示"
 }
