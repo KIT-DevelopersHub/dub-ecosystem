@@ -21,7 +21,7 @@ import { createGoogleDriveShareClient } from "./google/client";
 import { createTokenProvider } from "./google/token";
 import type { DriveShareClient } from "./drive-client";
 import { createD1GoogleAccountStore } from "./google-account-store";
-import { createGoogleAccountService, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
+import { createGoogleAccountService, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
 import { importTokenKey } from "./google/crypto";
 import { mockForced, parseConfig, type Env } from "./env";
 
@@ -29,6 +29,12 @@ import { mockForced, parseConfig, type Env } from "./env";
  *  the secret token), mock otherwise or when DRIVESHARE_MOCK forces it. */
 function buildDriveClient(env: Env, resolved: ResolvedCredentials): DriveShareClient {
   if (mockForced(env) || resolved.source === "none") return createMockDriveShareClient();
+  if (resolved.source === "unusable") {
+    const fail = async (): Promise<never> => {
+      throw reconnectRequired();
+    };
+    return { listFiles: fail, listPermissions: fail, createPermission: fail, updatePermission: fail, deletePermission: fail };
+  }
   return createGoogleDriveShareClient({ token: createTokenProvider({ credentials: resolved.credentials }) });
 }
 

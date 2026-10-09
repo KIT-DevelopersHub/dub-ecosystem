@@ -4,6 +4,7 @@
 
 export const OAUTH_RETURN_PATH = "/admin/roles";
 const MARK_KEY = "fe7:oauth-return-app";
+const ROLE_KEY = "fe7:oauth-return-role";
 
 export interface OAuthReturn {
   code: string | null;
@@ -49,5 +50,24 @@ export function pendingOAuthReturnApp(fallback: string): string | null {
     return window.sessionStorage.getItem(MARK_KEY) ?? fallback;
   } catch {
     return fallback;
+  }
+}
+
+/** ロール管理で今開いているロール。戻ったときに同じロールを選び直す(下書きもそこにある)。 */
+export function rememberActiveRole(roleId: string | null): void {
+  try {
+    if (roleId) window.sessionStorage.setItem(ROLE_KEY, roleId);
+  } catch {
+    // ignore
+  }
+}
+
+/** Google から戻ってきた直後なら、移動前に開いていたロールの id。 */
+export function oauthReturnRole(): string | null {
+  if (!readOAuthReturn()) return null;
+  try {
+    return window.sessionStorage.getItem(ROLE_KEY);
+  } catch {
+    return null;
   }
 }

@@ -218,9 +218,9 @@ describe("status + credential precedence", () => {
     expect(await svc.status()).toMatchObject({ source: "connected", email: "new-owner@gmail.com", needsReconnect: true });
   });
 
-  it("a row sealed with a different key is ignored in favour of the secret", async () => {
+  it("a row that no longer opens (rotated key) fails closed and asks to reconnect — never the secret", async () => {
     const env = { ...SECRET_ENV, ...WEB_ENV } as Env;
-    const { store } = await setup({ env });
+    const { store, svc } = await setup({ env });
     const otherKey = (await importTokenKey(btoa(String.fromCharCode(...new Uint8Array(32).fill(9)))))!;
     const sealed = await sealToken(otherKey, ORG, "rt-x");
     await store.put({
@@ -229,23 +229,61 @@ describe("status + credential precedence", () => {
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key: await importTokenKey(KEY_B64) });
-    expect(resolved.source).toBe("secret");
+    expect(resolved.source).toBe("unusable");
     expect(warn.mock.calls.join(" ")).not.toContain("rt-x");
+    expect(await svc.status()).toMatchObject({ source: "connected", email: "x@gmail.com", needsReconnect: true });
     warn.mockRestore();
+  });
+
+  it("a row whose Web client secret was removed is unusable too", async () => {
+    const { store } = await setup();
+    await store.put({
+      orgId: ORG, email: "x@gmail.com", clientId: "web-cid", tokenCipher: "c", tokenIv: "i",
+      connectedBy: "u", connectedAt: "t", updatedAt: "t",
+    });
+    const env = { ...SECRET_ENV, DRIVESHARE_TOKEN_ENC_KEY: KEY_B64 } as Env;
+    const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key: await importTokenKey(KEY_B64) });
+    expect(resolved.source).toBe("unusable");
+  });
+
+  it("only the Web client can start a connect (the Desktop client cannot redirect to https)", async () => {
+    const env = { ...SECRET_ENV, DRIVESHARE_TOKEN_ENC_KEY: KEY_B64 } as Env;
+    const { svc } = await setup({ env });
+    expect((await svc.status()).canConnect).toBe(false);
+    await expect(svc.startConnect("usr_admin", REDIRECT)).rejects.toMatchObject({ code: CommonErrorCodes.CONFLICT });
   });
 });
 
 describe("missing migration", () => {
-  it("an unreadable account table falls back to the secret instead of failing Drive", async () => {
+  const noTable = () => new Error("D1 query failed", { cause: new Error("no such table: driveshare_google_account") });
+
+  it("a missing table falls back to the secret instead of failing Drive", async () => {
     const env = { ...SECRET_ENV, ...WEB_ENV } as Env;
     const store = createInMemoryGoogleAccountStore();
     store.get = async () => {
-      throw new Error("no such table: driveshare_google_account");
+      throw noTable();
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key: await importTokenKey(KEY_B64) });
     expect(resolved.source).toBe("secret");
     warn.mockRestore();
+  });
+
+  it("any other D1 failure propagates (no silent switch to the secret's account)", async () => {
+    const env = { ...SECRET_ENV, ...WEB_ENV } as Env;
+    const store = createInMemoryGoogleAccountStore();
+    store.get = async () => {
+      throw new Error("D1 query failed", { cause: new Error("network connection lost") });
+    };
+    await expect(resolveDriveCredentials({ env, store, orgId: ORG, key: null })).rejects.toThrow("D1 query failed");
+  });
+
+  it("starting a connect without the table is a clear 409, not a 500", async () => {
+    const { svc, store } = await setup();
+    store.purgeExpiredStates = async () => {
+      throw noTable();
+    };
+    await expect(svc.startConnect("usr_admin", REDIRECT)).rejects.toMatchObject({ code: CommonErrorCodes.CONFLICT, status: 409 });
   });
 });
 

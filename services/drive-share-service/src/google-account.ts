@@ -11,7 +11,7 @@
 //   3. POST /callback — the SPA relays code+state; the state must exist, be unexpired and
 //                       belong to the SAME admin; then code -> refresh token, seal, store.
 // The refresh token never appears in a response or a log line.
-import { errors } from "@dub/errors";
+import { CommonErrorCodes, DubError, errors } from "@dub/errors";
 import { clientById, connectClient, type Env } from "./env";
 import { newOAuthState, openToken, sealToken } from "./google/crypto";
 import { createTokenProvider, isInvalidGrant, TOKEN_ENDPOINT, type GoogleCredentials } from "./google/token";
@@ -27,8 +27,28 @@ export const OAUTH_RETURN_PATH = "/admin/roles";
 
 export type ResolvedCredentials =
   | { source: "connected"; credentials: GoogleCredentials; row: GoogleAccountRow }
+  /** A connected row that cannot be used (key/client secret gone, or the seal does not
+   *  open). Drive fails closed instead of silently acting as the secret's account. */
+  | { source: "unusable"; row: GoogleAccountRow }
   | { source: "secret"; credentials: GoogleCredentials }
   | { source: "none" };
+
+/** driveshare/0002 not applied yet (D1 "no such table"), anywhere in the cause chain. */
+export function isMissingTable(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e && depth < 5; e = (e as { cause?: unknown }).cause, depth++) {
+    if (e instanceof Error && /no such table/i.test(e.message)) return true;
+  }
+  return false;
+}
+
+/** Drive call while the connected account is unusable: ask an admin to reconnect. */
+export function reconnectRequired(): DubError {
+  return new DubError(CommonErrorCodes.UPSTREAM_UNAVAILABLE, "Google アカウントの再接続が必要です（ロール管理 > Drive共有 の詳細設定）。", {
+    details: { reason: "reconnect_required" },
+    retryable: false,
+    service: "google:auth",
+  });
+}
 
 export async function resolveDriveCredentials(deps: {
   env: Env;
@@ -40,19 +60,22 @@ export async function resolveDriveCredentials(deps: {
   let row: GoogleAccountRow | null = null;
   try {
     row = await deps.store.get(deps.orgId);
-  } catch {
-    // e.g. driveshare/0002 not applied yet: keep serving Drive from the secret.
-    console.warn(JSON.stringify({ service: "drive-share-service", event: "google_account_unreadable", orgId: deps.orgId }));
+  } catch (err) {
+    // Only a missing table (migration not applied yet) means "nothing connected". Any other
+    // D1 failure must not quietly switch Drive to the secret's account for this request.
+    if (!isMissingTable(err)) throw err;
+    console.warn(JSON.stringify({ service: "drive-share-service", event: "google_account_table_missing", orgId: deps.orgId }));
   }
-  const client = row ? clientById(env, row.clientId) : null;
-  if (row && client && deps.key) {
+  if (row) {
+    const client = clientById(env, row.clientId);
+    if (!client || !deps.key) return { source: "unusable", row };
     try {
       const refreshToken = await openToken(deps.key, deps.orgId, { cipher: row.tokenCipher, iv: row.tokenIv });
       return { source: "connected", credentials: { ...client, refreshToken }, row };
     } catch {
-      // Wrong/rotated key or tampered row: unusable. Fall through to the secret so Drive
-      // keeps working; the status shows source=secret and the admin can reconnect.
+      // Wrong/rotated key or tampered row.
       console.warn(JSON.stringify({ service: "drive-share-service", event: "google_account_unsealable", orgId: deps.orgId }));
+      return { source: "unusable", row };
     }
   }
   if (env.GOOGLE_HACKIT_OAUTH_CLIENT_ID && env.GOOGLE_HACKIT_OAUTH_CLIENT_SECRET && env.GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN) {
@@ -116,15 +139,16 @@ export function createGoogleAccountService(deps: {
   return {
     async status() {
       const resolved = await resolveDriveCredentials({ env: deps.env, store: deps.store, orgId: deps.orgId, key: deps.key });
+      const row = resolved.source === "connected" || resolved.source === "unusable" ? resolved.row : null;
       const base: GoogleAccountStatus = {
-        source: resolved.source,
-        email: resolved.source === "connected" ? resolved.row.email : null,
-        connectedAt: resolved.source === "connected" ? resolved.row.connectedAt : null,
-        connectedBy: resolved.source === "connected" ? resolved.row.connectedBy : null,
-        needsReconnect: false,
+        source: row ? "connected" : resolved.source === "secret" ? "secret" : "none",
+        email: row?.email ?? null,
+        connectedAt: row?.connectedAt ?? null,
+        connectedBy: row?.connectedBy ?? null,
+        needsReconnect: resolved.source === "unusable",
         canConnect,
       };
-      if (resolved.source === "none") return base;
+      if (resolved.source !== "connected" && resolved.source !== "secret") return base;
       // Probe the token so a revoked / expired grant shows up before anyone hits Drive.
       try {
         const accessToken = await createTokenProvider({ credentials: resolved.credentials, fetchImpl: doFetch, now }).getAccessToken();
@@ -141,19 +165,26 @@ export function createGoogleAccountService(deps: {
       }
       const client = connectClient(deps.env);
       if (!client || !deps.key) {
-        throw errors.conflict("Google アカウント接続の設定（OAuth クライアント / 暗号化キー）がサーバーにありません。");
+        throw errors.conflict("Google アカウント接続の設定（Web 用 OAuth クライアント / 暗号化キー）がサーバーにありません。");
       }
       const t = now();
-      await deps.store.purgeExpiredStates(iso(t));
       const state = newOAuthState();
-      await deps.store.putState({
-        state,
-        orgId: deps.orgId,
-        userId,
-        redirectUri,
-        createdAt: iso(t),
-        expiresAt: iso(t + STATE_TTL_MS),
-      });
+      try {
+        await deps.store.purgeExpiredStates(iso(t));
+        await deps.store.putState({
+          state,
+          orgId: deps.orgId,
+          userId,
+          redirectUri,
+          createdAt: iso(t),
+          expiresAt: iso(t + STATE_TTL_MS),
+        });
+      } catch (err) {
+        if (isMissingTable(err)) {
+          throw errors.conflict("接続に使う DB の設定（マイグレーション driveshare/0002）がまだ適用されていません。");
+        }
+        throw err;
+      }
       const url = new URL(AUTH_ENDPOINT);
       url.search = new URLSearchParams({
         client_id: client.clientId,
@@ -185,7 +216,7 @@ export function createGoogleAccountService(deps: {
       const client = connectClient(deps.env);
       const sealKey = deps.key;
       if (!client || !sealKey) {
-        throw errors.conflict("Google アカウント接続の設定（OAuth クライアント / 暗号化キー）がサーバーにありません。");
+        throw errors.conflict("Google アカウント接続の設定（Web 用 OAuth クライアント / 暗号化キー）がサーバーにありません。");
       }
 
       let res: Response;

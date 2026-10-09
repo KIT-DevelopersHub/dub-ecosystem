@@ -8,8 +8,9 @@ import { AppDetailDialog } from "../src/components/AppDetailDialog";
 import { createMockClient } from "../src/api/mockClient";
 import { makeMe, renderWithProviders } from "./renderWithProviders";
 
-const ADMIN = makeMe(["identity:read", "identity:admin"]);
 const DRIVE_ROLE: identity.PermissionKey[] = ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write"];
+// Same as the server rule: identity:admin AND Drive共有 編集 + drive:write.
+const ADMIN = makeMe(["identity:read", "identity:admin", ...DRIVE_ROLE]);
 
 function openDriveDialog(opts: Parameters<typeof renderWithProviders>[1] = {}) {
   return renderWithProviders(
@@ -70,13 +71,19 @@ describe("Drive共有 詳細ダイアログ > Google アカウント", () => {
     expect(get.mock.calls.some(([p]) => String(p).includes("google-account"))).toBe(false);
   });
 
+  it("Drive共有 が「閲覧」の管理者にも出さない (サーバーは 403 になるため)", () => {
+    const viewOnly = makeMe(["identity:read", "identity:admin", "app:driveshare:view", "drive:read"]);
+    openDriveDialog({ me: viewOnly, seed: { me: viewOnly } });
+    expect(screen.getByTestId("fe7-drive-google-admin-only")).toBeInTheDocument();
+  });
+
   it("接続し直す → 確認 → Google の URL へ移動する (戻り先は /admin/roles)", async () => {
     const user = userEvent.setup();
     const assign = vi.fn();
     vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, assign, origin: "https://fe2.example" } as Location);
     openDriveDialog();
     await user.click(await screen.findByTestId("fe7-drive-google-connect"));
-    expect(screen.getByTestId("fe7-drive-google-confirm")).toHaveTextContent("保存していない変更は失われます");
+    expect(screen.getByTestId("fe7-drive-google-confirm")).toHaveTextContent("下書きとして残り");
     await user.click(screen.getByTestId("fe7-drive-google-confirm-go"));
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
     expect(assign.mock.calls[0]![0]).toMatch(/^https:\/\/fe2\.example\/admin\/roles\?code=mock-code&state=mock_state_1$/);
@@ -103,7 +110,7 @@ describe("Drive共有 詳細ダイアログ > Google アカウント", () => {
     window.history.replaceState(null, "", "/admin/roles?error=access_denied&state=x");
     renderWithProviders(<RolePolicyEditor selected={DRIVE_ROLE} onChange={() => {}} />, { me: ADMIN });
     expect(await screen.findByTestId("fe7-drive-google-return-error")).toHaveTextContent("キャンセル");
-    expect(screen.getByTestId("fe7-drive-google-email")).toHaveTextContent("hackit@gmail.com");
+    expect(await screen.findByTestId("fe7-drive-google-email")).toHaveTextContent("hackit@gmail.com");
   });
 
   it("Drive共有 以外のアプリには出ない", () => {

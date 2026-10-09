@@ -29,9 +29,9 @@ export interface Env {
 
   // ---- Secrets for connecting the account from ロール管理 (optional) ----
   // OAuth "Web application" client used by the connect flow (the client above is a Desktop
-  // client, which cannot redirect back to the SPA). Absent => the connect flow falls back
-  // to the client above. A refresh token only works with the client that minted it, so the
-  // D1 row records which client id it belongs to.
+  // client, which cannot redirect back to the SPA). Absent => the connect flow is disabled.
+  // A refresh token only works with the client that minted it, so the D1 row records which
+  // client id it belongs to.
   GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID?: string;
   GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET?: string;
   // AES-GCM key (base64 of 32 bytes) sealing the connected refresh token in D1. Absent =>
@@ -65,13 +65,12 @@ export interface OAuthClient {
   clientSecret: string;
 }
 
-/** The OAuth client the connect flow uses: the Web client if set, else the base client. */
+/** The OAuth client the connect flow uses: the Web client only. The base client is a
+ *  Desktop client, which Google refuses to redirect to an https page (redirect_uri_mismatch),
+ *  so offering it would make a connect button that can never succeed. */
 export function connectClient(env: Env): OAuthClient | null {
   if (env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID && env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET) {
     return { clientId: env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID, clientSecret: env.GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET };
-  }
-  if (env.GOOGLE_HACKIT_OAUTH_CLIENT_ID && env.GOOGLE_HACKIT_OAUTH_CLIENT_SECRET) {
-    return { clientId: env.GOOGLE_HACKIT_OAUTH_CLIENT_ID, clientSecret: env.GOOGLE_HACKIT_OAUTH_CLIENT_SECRET };
   }
   return null;
 }

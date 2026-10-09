@@ -77,8 +77,13 @@ One-time setup per environment:
    Google expires refresh tokens after **7 days** (the dialog then asks to reconnect);
    publishing the app to production removes that limit.
 4. Secrets: `GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID`, `GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET`,
-   `DRIVESHARE_TOKEN_ENC_KEY` (`openssl rand -base64 32`). Rotating the key orphans the
-   stored token (the service falls back to the secret) — reconnect after rotating.
+   `DRIVESHARE_TOKEN_ENC_KEY` (`openssl rand -base64 32`). The connect flow needs the Web
+   client; the Desktop client cannot redirect to https.
+
+If the stored token can no longer be used (key rotated, Web client secret removed) Drive
+fails closed with "reconnect required" and the dialog says so — it never silently switches
+to the secret's account. Only a missing `driveshare_google_account` table (migration not
+applied) falls back to the secret.
 
 Switching accounts does **not** move ownership of existing files.
 

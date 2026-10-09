@@ -2,10 +2,11 @@
 // ときに使う Google アカウントを表示し、システム管理者が接続し直せるようにする。
 //
 //   - 全ロール共通の設定で、ロールの「保存」とは別に接続した時点で切り替わる(文言で明示)
-//   - 「接続し直す」は Google の画面へ移動する = 未保存のロール編集が消えるので、ページ内で
-//     一度確認してから進む(モーダルの中にモーダルを重ねない)
+//   - 「接続し直す」は Google の画面へ移動するので、ページ内で一度確認してから進む(モーダルの
+//     中にモーダルを重ねない)。未保存のロール編集は下書きとして残り、戻ると同じロールが開く
 //   - Google から戻ってきたとき (/admin/roles?code&state) はこのパネルが開かれ、接続を完了する
 import { useEffect, useRef, useState } from "react";
+import { policy } from "@dub/types";
 import { Badge, Button, Skeleton } from "@dub/ui";
 import type { BadgeTone } from "@dub/ui";
 import { usePermissions } from "../hooks/usePermissions";
@@ -37,9 +38,13 @@ const noticeStyle: React.CSSProperties = {
   fontSize: 13,
   lineHeight: 1.6,
 };
+const loadingStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)" };
+const notesStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-1, 4px)" };
 const ownerNoteStyle: React.CSSProperties = { ...hintStyle, fontWeight: 600 };
 
 const APP_ID = "driveshare";
+/** サーバーの POLICY_TABLE と同じ条件 (Drive共有 編集 + drive:write + identity:admin)。 */
+const REQUIRED_KEYS = [...policy.keysForAppLevel(APP_ID, policy.AppAccessLevel.Edit), "drive:write", "identity:admin"] as const;
 
 function formatConnectedAt(iso: string): string {
   const d = new Date(iso);
@@ -64,8 +69,8 @@ function returnErrorText(error: string): string {
 const handledStates = new Set<string>();
 
 export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: string }) {
-  const { can, ready } = usePermissions();
-  const isAdmin = ready && can("identity:admin");
+  const { canAll, ready } = usePermissions();
+  const isAdmin = ready && canAll(REQUIRED_KEYS);
   const status = useDriveGoogleAccount(isAdmin);
   const start = useStartDriveGoogleConnect();
   const complete = useCompleteDriveGoogleConnect();
@@ -75,11 +80,12 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
   const tid = `${idPrefix}-drive-google`;
 
   useEffect(() => {
-    if (!isAdmin || started.current) return;
+    if (!ready || started.current) return;
     const ret = readOAuthReturn();
     if (!ret) return;
     started.current = true;
     clearOAuthReturn();
+    if (!isAdmin) return;
     const key = ret.state ?? ret.error ?? "";
     if (handledStates.has(key)) return;
     handledStates.add(key);
@@ -88,7 +94,7 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
       return;
     }
     complete.mutate({ code: ret.code, state: ret.state }, { onError: (err) => setReturnError(errorMessage(err)) });
-  }, [isAdmin, complete]);
+  }, [ready, isAdmin, complete]);
 
   function goToGoogle() {
     markOAuthReturn(APP_ID);
@@ -106,12 +112,18 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
         「保存」とは別に、接続した時点で切り替わります。
       </p>
 
+      {returnError ? (
+        <div style={noticeStyle} role="alert" data-testid={`${tid}-return-error`}>{returnError}</div>
+      ) : null}
+
       {!ready ? (
         <Skeleton width="60%" testId={`${tid}-loading`} />
       ) : !isAdmin ? (
-        <p style={hintStyle} data-testid={`${tid}-admin-only`}>アカウントの確認・切り替えはシステム管理者だけが行えます。</p>
+        <p style={hintStyle} data-testid={`${tid}-admin-only`}>
+          アカウントの確認・切り替えは、システム管理者（Drive共有 が「編集」）だけが行えます。
+        </p>
       ) : status.isPending || complete.isPending ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid={`${tid}-loading`} aria-busy="true">
+        <div style={loadingStyle} data-testid={`${tid}-loading`} aria-busy="true">
           {complete.isPending ? <p style={hintStyle}>Google アカウントを接続しています…</p> : null}
           <Skeleton width="55%" height={18} />
           <Skeleton width="35%" />
@@ -131,9 +143,6 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
               Google アカウントの認証が切れています（取り消されたか、期限が切れました）。Drive共有 が動かないため、
               「接続し直す」から再接続してください。
             </div>
-          ) : null}
-          {returnError ? (
-            <div style={noticeStyle} role="alert" data-testid={`${tid}-return-error`}>{returnError}</div>
           ) : null}
 
           <div style={accountRowStyle} data-testid={`${tid}-account`}>
@@ -155,7 +164,7 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
             <div style={noticeStyle} data-testid={`${tid}-confirm`}>
               <span>
                 Google の画面に移動します。Drive共有 に使うアカウントでログインし、アクセスを許可してください。
-                このロールで保存していない変更は失われます。
+                保存していないロールの変更は下書きとして残り、戻るとこのロールが開きます（確定は「保存」で）。
               </span>
               <div style={actionsStyle}>
                 <Button onClick={goToGoogle} loading={leaving} testId={`${tid}-confirm-go`}>
@@ -186,7 +195,10 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
         </>
       )}
 
-      <p style={ownerNoteStyle} data-testid={`${tid}-owner-note`}>アカウントを切り替えても既存ファイルのオーナーは移りません。</p>
+      <div style={notesStyle}>
+        <p style={ownerNoteStyle} data-testid={`${tid}-owner-note`}>アカウントを切り替えても既存ファイルのオーナーは移りません。</p>
+        <p style={hintStyle}>新しいアカウントには、共有を管理したいファイルの編集権が必要です。</p>
+      </div>
     </section>
   );
 }
