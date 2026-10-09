@@ -6,7 +6,7 @@
 //       (REAL api-client 経由 = 実際のデモ配信と同じ経路)
 //   (3) LpVisitLogScreen がそのデータで KPI/内訳/生ログを実描画すること
 // の3層を押さえる。(2)(3) が緑なら、デモ URL で空にならないことの裏取りになる。
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ import { createDemoFetch } from "../../lib/demo-seed.tsx";
 import { createLpApi, type LpApi } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
 import { LpVisitLogScreen } from "./LpVisitLogScreen.tsx";
+import { niceScale } from "./TrafficLineChart.tsx";
 import { barPercent, formatDayLabel, rangeForDays, sharePercent, sourceLabel } from "./lpRange.ts";
 
 // LpTabs は router の useNavigate を使うだけなので、スクリーン単体では spy に差し替える。
@@ -209,6 +210,26 @@ describe("サイト全体のアクセス (Cloudflare)", () => {
     expect(within(screen.getByTestId("fe2-lp-site-referrers")).getByText("X (Twitter)")).toBeInTheDocument();
     expect(within(screen.getByTestId("fe2-lp-site-byday")).getByText("10/1")).toBeInTheDocument();
     expect(screen.getByTestId("fe2-lp-visits-empty")).toBeInTheDocument();
+
+    // 推移の折れ線: 2 系列を古い日→新しい日で描き、キーボードでその日の値を読める。
+    const chart = screen.getByTestId("fe2-lp-site-chart");
+    expect(within(chart).getByText("PV")).toBeInTheDocument();
+    expect(within(chart).getByText("訪問")).toBeInTheDocument();
+    const pv = screen.getByTestId("fe2-lp-site-chart-pv").getAttribute("d") ?? "";
+    expect(pv.match(/[ML]/g)).toHaveLength(2);
+    const plot = within(chart).getByRole("img");
+    plot.focus();
+    fireEvent.keyDown(plot, { key: "ArrowLeft" });
+    const tip = screen.getByTestId("fe2-lp-site-chart-tooltip");
+    expect(within(tip).getByText("10/1")).toBeInTheDocument();
+    expect(within(tip).getByText("82")).toBeInTheDocument();
+    expect(within(tip).getByText("45")).toBeInTheDocument();
+  });
+
+  it("rounds the chart's y axis to clean ticks", () => {
+    expect(niceScale(82)).toEqual({ top: 100, step: 20 });
+    expect(niceScale(0)).toEqual({ top: 5, step: 1 });
+    expect(niceScale(9)).toEqual({ top: 10, step: 2 });
   });
 
   it("says 未設定 instead of showing zeros when Cloudflare is not configured", async () => {
