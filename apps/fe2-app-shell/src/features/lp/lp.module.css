@@ -75,6 +75,136 @@
   font-size: var(--dub-font-size-xs);
 }
 
+/* ── 日別推移 折れ線 ────────────────────────────────────────────────────── */
+/* 系列色は brand-500(PV) / brand-300(訪問)。dataviz validator で CVD・識別性 PASS 済み。
+   brand-300 は面とのコントラストが 3:1 未満なので、凡例・ツールチップ・日別表で必ず補う。 */
+.chart {
+  --lp-series-pv: var(--dub-color-brand-500);
+  --lp-series-visits: var(--dub-color-brand-300);
+  display: grid;
+  gap: var(--dub-space-3);
+}
+
+.chartLegend {
+  display: flex;
+  gap: var(--dub-space-5);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+
+.legendItem,
+.tooltipRow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+.legendKey {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  border-radius: var(--dub-radius-full);
+}
+
+.keyPv {
+  background: var(--lp-series-pv);
+}
+
+.keyVisits {
+  background: var(--lp-series-visits);
+}
+
+.chartPlot {
+  position: relative;
+  width: 100%;
+  border-radius: var(--dub-radius-sm);
+}
+
+.chartPlot:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+
+.chartPlot svg {
+  display: block;
+  overflow: visible;
+}
+
+.grid {
+  stroke: var(--dub-color-border-default);
+  stroke-width: 1;
+}
+
+.axisText {
+  fill: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.linePv {
+  stroke: var(--lp-series-pv);
+}
+
+.lineVisits {
+  stroke: var(--lp-series-visits);
+}
+
+.areaPv {
+  fill: var(--lp-series-pv);
+  opacity: 0.1;
+}
+
+.crosshair {
+  stroke: var(--dub-color-border-strong);
+  stroke-width: 1;
+}
+
+.dotPv,
+.dotVisits {
+  stroke: var(--dub-color-surface-raised);
+  stroke-width: 2;
+}
+
+.dotPv {
+  fill: var(--lp-series-pv);
+}
+
+.dotVisits {
+  fill: var(--lp-series-visits);
+}
+
+.tooltip {
+  position: absolute;
+  top: var(--dub-space-2);
+  display: grid;
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  box-shadow: var(--dub-shadow-md);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.tooltipDate {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+
+.tooltip strong {
+  color: var(--dub-color-text-primary);
+}
+
 /* ── 補足テキスト ───────────────────────────────────────────────────────── */
 .note {
   color: var(--dub-color-text-muted);

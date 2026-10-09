@@ -41,6 +41,7 @@ import {
 } from "./lpRange.ts";
 import { LpTabs } from "./LpTabs.tsx";
 import { SourceBars } from "./SourceBars.tsx";
+import { TrafficLineChart } from "./TrafficLineChart.tsx";
 import styles from "./lp.module.css";
 
 /** 1 ページの生ログ件数。大きくしすぎると初回描画が重くなるので控えめに。 */
@@ -158,6 +159,14 @@ function SiteTrafficCard({ range }: { range: { from: string; to: string } }): JS
             hint="サイトの外から来て開いた回数(サイト内の移動は数えない)"
           />
         </div>
+        <Stack gap={4}>
+          <span className={styles.sectionTitle}>アクセス数の推移</span>
+          {data.byDay.length > 0 ? (
+            <TrafficLineChart points={data.byDay} />
+          ) : (
+            <span className={styles.note}>この期間のアクセスはありません。</span>
+          )}
+        </Stack>
         <Stack gap={4}>
           <span className={styles.sectionTitle}>どこから来たか(流入元)</span>
           {data.byReferrer.length > 0 ? (
