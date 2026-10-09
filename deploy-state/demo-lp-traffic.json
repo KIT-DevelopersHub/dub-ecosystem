@@ -3,12 +3,12 @@
   "slug": "lp-traffic",
   "worker": "dub-demo-lp-traffic",
   "url": "https://dub-demo-lp-traffic.developershub-site.workers.dev",
-  "deployedSha": "db93b01e",
+  "deployedSha": "b4ccc22d",
   "branch": "feat/lp-traffic-links",
   "actor": "ko-tarou",
-  "markers": ["fe2-lp-links-screen","fe2-lp-link-submit","流入URL"],
+  "markers": ["fe2-lp-site-referrers","fe2-lp-site-kpi-pv","サイト全体のアクセス"],
   "live": true,
-  "verifiedAt": "2026-10-01T11:30:07Z",
-  "updatedAt": "2026-10-01T11:30:07Z",
-  "note": "LP管理: 流入URL発行+流入元別集計+ログ管理(ホームにLP管理タイル)"
+  "verifiedAt": "2026-10-09T16:44:01Z",
+  "updatedAt": "2026-10-09T16:44:01Z",
+  "note": "LP管理: 流入URL+ログ管理+サイト全体のアクセス(Cloudflare 計測)"
 }
