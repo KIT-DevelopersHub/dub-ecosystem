@@ -32,7 +32,9 @@ export {
   formatEvent,
   type CommanderClient,
   type DaemonRunEvent,
+  type StreamOpener,
 } from "./lib/client.ts";
+export { RelayConnection, type RelayStatus, type RelayTicket, type RelayTarget } from "./lib/relay.ts";
 export {
   HttpCommanderApi,
   PHASE_LABELS,
