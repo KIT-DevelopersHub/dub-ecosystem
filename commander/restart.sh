@@ -58,6 +58,13 @@ case "$MODE" in
     ;;
 
   relaunch)
+    # Re-exec once in the background so this process is no longer a child of the
+    # daemon: dev-up's cleanup kills the daemon's whole child tree, which would
+    # otherwise take the relauncher down with it.
+    if [[ -z "${COMMANDER_RESTART_DETACHED:-}" ]]; then
+      COMMANDER_RESTART_DETACHED=1 nohup bash "$0" relaunch "$DAEMON_PID" >/dev/null 2>&1 &
+      exit 0
+    fi
     mkdir -p "$LOG_DIR"
     exec >>"$LOG_DIR/restart.log" 2>&1
     DEV_UP="$(find_dev_up "$DAEMON_PID")" || { log "dev-up.sh not found above daemon $DAEMON_PID - abort"; exit 1; }
@@ -68,13 +75,15 @@ case "$MODE" in
       kill -0 "$DEV_UP" 2>/dev/null || break
       sleep 1
     done
-    for port in "$DAEMON_PORT" "$SERVICE_PORT" "$WEB_PORT"; do
-      for pid in $(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null); do
-        log "kill leftover $pid on :$port"
-        kill "$pid" 2>/dev/null || true
+    for sig in TERM KILL; do
+      for port in "$DAEMON_PORT" "$SERVICE_PORT" "$WEB_PORT"; do
+        for pid in $(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null); do
+          log "kill -$sig leftover $pid on :$port"
+          kill "-$sig" "$pid" 2>/dev/null || true
+        done
       done
+      sleep 3
     done
-    sleep 2
     log "starting stack at $(git -C "$REPO_ROOT" rev-parse --short HEAD)"
     cd "$REPO_ROOT"
     nohup bash commander/dev-up.sh >>"$LOG_DIR/restart.log" 2>&1 &
