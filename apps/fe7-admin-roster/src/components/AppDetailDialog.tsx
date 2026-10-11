@@ -151,7 +151,10 @@ function scrollToSettings(id: string) {
 /** 最下段の設定。直リンク (?app=) で開いたときは最初からここを見せる。 */
 function SettingsSection({ id, focus, children }: { id: string; focus?: boolean; children: React.ReactNode }) {
   useEffect(() => {
-    if (focus) scrollToSettings(id);
+    if (!focus) return;
+    // Modal の開くアニメーション中はスクロールが効かないので、開ききってから送る。
+    const t = window.setTimeout(() => scrollToSettings(id), 350);
+    return () => window.clearTimeout(t);
   }, [id, focus]);
   return (
     <div id={id} style={{ scrollMarginTop: "var(--dub-space-4, 16px)" }}>
