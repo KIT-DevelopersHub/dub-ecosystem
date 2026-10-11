@@ -68,6 +68,17 @@ export type {
   SseUnreadConnectorConfig,
 } from "./lib/unread-live";
 
+// ---- Browser (OS) notifications for chat @mentions (setting lives in FE2 アカウント設定) ----
+export {
+  getBrowserNotifyEnabled,
+  setBrowserNotifyEnabled,
+  getBrowserNotifyPermission,
+  requestBrowserNotifyPermission,
+  isBrowserNotifySupported,
+  showBrowserNotice,
+} from "./lib/browser-notify";
+export type { BrowserNotifyPermission } from "./lib/browser-notify";
+
 // ---- Contracts + pure lib (for the shell / tests) ----
 export type {
   ApiClient,
