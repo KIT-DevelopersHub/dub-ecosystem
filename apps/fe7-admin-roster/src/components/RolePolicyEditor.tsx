@@ -16,8 +16,6 @@ import type { identity } from "@dub/types";
 import { AppAccessTable } from "./AppAccessTable";
 import { AppDetailDialog } from "./AppDetailDialog";
 import { OtherPermissionsSection } from "./OtherPermissionsSection";
-import { OAUTH_RETURN_APP } from "./appSettingsPanels";
-import { clearLinkedDetailApp, linkedDetailApp, pendingOAuthReturnApp } from "../lib/oauthReturn";
 
 export function RolePolicyEditor({
   selected,
@@ -32,21 +30,7 @@ export function RolePolicyEditor({
   lockedKeys?: readonly identity.PermissionKey[];
   idPrefix?: string;
 }) {
-  // Google の同意画面から戻った直後は、接続を始めたアプリの詳細ダイアログを開き直す。
-  // 直リンク (?app=driveshare) でも同じダイアログを開き、最下段の設定まで送る。
-  const [initialAppId] = useState(() => pendingOAuthReturnApp(OAUTH_RETURN_APP) ?? linkedDetailApp());
-  const [detailAppId, setDetailAppId] = useState<string | null>(initialAppId);
-  const [focusSettings, setFocusSettings] = useState(initialAppId !== null);
-
-  const openDetail = (appId: string) => {
-    setFocusSettings(false);
-    setDetailAppId(appId);
-  };
-  const closeDetail = () => {
-    setDetailAppId(null);
-    setFocusSettings(false);
-    clearLinkedDetailApp();
-  };
+  const [detailAppId, setDetailAppId] = useState<string | null>(null);
 
   return (
     <div data-testid={`${idPrefix}-role-policy-editor`}>
@@ -54,7 +38,7 @@ export function RolePolicyEditor({
         selected={selected}
         disabled={disabled}
         onChange={onChange}
-        onOpenDetail={openDetail}
+        onOpenDetail={setDetailAppId}
         lockedKeys={lockedKeys}
         idPrefix={idPrefix}
       />
@@ -70,10 +54,9 @@ export function RolePolicyEditor({
         selected={selected}
         disabled={disabled}
         onChange={onChange}
-        onClose={closeDetail}
+        onClose={() => setDetailAppId(null)}
         lockedKeys={lockedKeys}
         idPrefix={idPrefix}
-        focusSettings={focusSettings}
       />
     </div>
   );

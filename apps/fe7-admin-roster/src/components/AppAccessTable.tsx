@@ -12,7 +12,6 @@ import { policy } from "@dub/types";
 import { Badge, Button, DataTable, SegmentedControl } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import { levelLabel, levelTone } from "../lib/policyLabels";
-import { appSettingsPanel } from "./appSettingsPanels";
 
 type Level = policy.AppAccessLevel;
 type Row = policy.AppPolicyRow;
@@ -138,25 +137,16 @@ export function AppAccessTable({
       hideable: false,
       // 細かい権限を持つアプリだけ 設定 ボタンを出す。無効なアプリは配下の設定が効かないので
       // 件数を出さず「—」（ボタンは押せるまま = 中身は確認できる）。
-      // アプリ固有の設定 (Google アカウント等) があるアプリは、その名前も並べて入口を見せる。
       cell: (row) => {
-        const settings = appSettingsPanel(row.id);
-        if (row.detail.total === 0 && !settings) return <span style={openHintStyle}>なし</span>;
+        if (row.detail.total === 0) return <span style={openHintStyle}>なし</span>;
         return (
           <span style={detailCellStyle}>
             <Button variant="secondary" size="sm" onClick={() => onOpenDetail(row.id)} testId={`${idPrefix}-app-detail-${row.id}`}>
               設定
             </Button>
-            {row.detail.total > 0 ? (
-              <span style={openHintStyle} data-testid={`${idPrefix}-app-detail-count-${row.id}`}>
-                {row.level === policy.AppAccessLevel.None ? "—" : `${row.detail.granted} / ${row.detail.total}`}
-              </span>
-            ) : null}
-            {settings ? (
-              <Badge tone="info" testId={`${idPrefix}-app-settings-badge-${row.id}`}>
-                {settings.label}
-              </Badge>
-            ) : null}
+            <span style={openHintStyle} data-testid={`${idPrefix}-app-detail-count-${row.id}`}>
+              {row.level === policy.AppAccessLevel.None ? "—" : `${row.detail.granted} / ${row.detail.total}`}
+            </span>
           </span>
         );
       },

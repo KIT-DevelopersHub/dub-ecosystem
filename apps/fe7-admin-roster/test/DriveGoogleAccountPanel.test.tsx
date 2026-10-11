@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { identity } from "@dub/types";
 import { RolePolicyEditor } from "../src/components/RolePolicyEditor";
 import { AppDetailDialog } from "../src/components/AppDetailDialog";
+import { OrgSettingDialog } from "../src/components/OrgSettingDialog";
 import { createMockClient } from "../src/api/mockClient";
 import { makeMe, renderWithProviders } from "./renderWithProviders";
 
@@ -14,7 +15,7 @@ const ADMIN = makeMe(["identity:read", "identity:admin", ...DRIVE_ROLE]);
 
 function openDriveDialog(opts: Parameters<typeof renderWithProviders>[1] = {}) {
   return renderWithProviders(
-    <AppDetailDialog appId="driveshare" selected={DRIVE_ROLE} onChange={() => {}} onClose={() => {}} />,
+    <OrgSettingDialog settingId="google-account" onClose={() => {}} />,
     { me: ADMIN, ...opts },
   );
 }
@@ -25,8 +26,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Drive共有 詳細ダイアログ > Google アカウント", () => {
-  it("一番下のセクションに、接続中のアカウント・日時・注意書きを出す", async () => {
+describe("その他 > Google アカウント ダイアログ", () => {
+  it("接続中のアカウント・日時・注意書きを出す", async () => {
     openDriveDialog();
     const panel = screen.getByTestId("fe7-drive-google");
     expect(within(panel).getByTestId("fe7-drive-google-loading")).toBeInTheDocument();
@@ -38,10 +39,7 @@ describe("Drive共有 詳細ダイアログ > Google アカウント", () => {
     expect(within(panel).getByTestId("fe7-drive-google-owner-note")).toHaveTextContent(
       "アカウントを切り替えても既存ファイルのオーナーは移りません。",
     );
-    // the last block of the dialog
-    const dialog = screen.getByTestId("fe7-app-dialog");
-    const sections = dialog.querySelectorAll("section, div > h3");
-    expect(sections[sections.length - 1]?.closest("section")).toBe(panel);
+    expect(screen.getByTestId("fe7-setting-dialog")).toHaveTextContent("Google アカウント");
   });
 
   it("invalid_grant なら「再接続してください」の警告を出す", async () => {
@@ -85,21 +83,21 @@ describe("Drive共有 詳細ダイアログ > Google アカウント", () => {
     await user.click(await screen.findByTestId("fe7-drive-google-connect"));
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
     expect(assign.mock.calls[0]![0]).toMatch(/^https:\/\/fe2\.example\/admin\/roles\?code=mock-code&state=mock_state_1$/);
-    expect(window.sessionStorage.getItem("fe7:oauth-return-app")).toBe("driveshare");
+    expect(window.sessionStorage.getItem("fe7:oauth-return-setting")).toBe("google-account");
   });
 
-  it("Google から戻ると Drive共有 のダイアログが開き、接続を完了して URL から code を消す", async () => {
+  it("Google から戻ると その他 > Google アカウント のダイアログが開き、接続を完了して URL から code を消す", async () => {
     const client = createMockClient({ me: ADMIN });
     // issue a state the mock will accept, as the connect step would have
     const { authUrl } = await client.post<{ authUrl: string }>("/api/v1/driveshare/google-account/connect", {
       redirectUri: "http://localhost/admin/roles",
     });
     window.history.replaceState(null, "", `/admin/roles${new URL(authUrl).search}`);
-    window.sessionStorage.setItem("fe7:oauth-return-app", "driveshare");
+    window.sessionStorage.setItem("fe7:oauth-return-setting", "google-account");
 
     renderWithProviders(<RolePolicyEditor selected={DRIVE_ROLE} onChange={() => {}} />, { me: ADMIN, client });
-    const dialog = screen.getByTestId("fe7-app-dialog");
-    expect(dialog).toHaveTextContent("Drive");
+    const dialog = screen.getByTestId("fe7-setting-dialog");
+    expect(screen.queryByTestId("fe7-app-dialog")).not.toBeInTheDocument();
     expect(await within(dialog).findByText("hackit.new@gmail.com")).toBeInTheDocument();
     expect(window.location.search).toBe("");
   });
@@ -111,38 +109,31 @@ describe("Drive共有 詳細ダイアログ > Google アカウント", () => {
     expect(await screen.findByTestId("fe7-drive-google-email")).toHaveTextContent("hackit@gmail.com");
   });
 
-  it("Drive共有 以外のアプリには出ない", () => {
+  it("Drive共有 の詳細ダイアログには出さない (その他 に置く)", () => {
     renderWithProviders(
-      <AppDetailDialog appId="chat" selected={["app:chat:view"]} onChange={() => {}} onClose={() => {}} />,
+      <AppDetailDialog appId="driveshare" selected={DRIVE_ROLE} onChange={() => {}} onClose={() => {}} />,
       { me: ADMIN },
     );
     expect(screen.queryByTestId("fe7-drive-google")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("fe7-app-dialog-settings-hint")).not.toBeInTheDocument();
   });
 });
 
 describe("Google アカウント設定の入口", () => {
-  it("アプリ一覧の Drive共有 行に「Google アカウント」を出す (他のアプリには出さない)", () => {
+  it("その他 の表に「Google アカウント」の行があり、クリックでダイアログが開く", async () => {
     renderWithProviders(<RolePolicyEditor selected={DRIVE_ROLE} onChange={() => {}} />, { me: ADMIN });
-    expect(screen.getByTestId("fe7-app-settings-badge-driveshare")).toHaveTextContent("Google アカウント");
-    expect(screen.queryByTestId("fe7-app-settings-badge-chat")).not.toBeInTheDocument();
+    const other = screen.getByTestId("fe7-other-permissions");
+    expect(within(other).getByTestId("fe7-other-name-google-account")).toHaveTextContent("Google アカウント");
+    expect(screen.queryByTestId("fe7-setting-dialog")).not.toBeInTheDocument();
+    await userEvent.click(within(other).getByTestId("fe7-other-detail-google-account"));
+    expect(await screen.findByTestId("fe7-drive-google-email")).toHaveTextContent("hackit@gmail.com");
   });
 
-  it("ダイアログ冒頭に一番下の設定へのジャンプボタンを出す", async () => {
-    const scroll = vi.fn();
-    Element.prototype.scrollIntoView = scroll;
-    openDriveDialog();
-    expect(screen.getByTestId("fe7-app-dialog-settings-jump")).toHaveTextContent("Google アカウントの設定へ");
-    await userEvent.click(screen.getByTestId("fe7-app-dialog-settings-jump"));
-    expect(scroll).toHaveBeenCalled();
-  });
-
-  it("直リンク ?app=driveshare で Drive共有 のダイアログが開き、閉じると URL から消える", async () => {
-    window.history.replaceState(null, "", "/admin/roles?app=driveshare");
+  it("直リンク ?setting=google-account でダイアログが開き、閉じると URL から消える", async () => {
+    window.history.replaceState(null, "", "/admin/roles?setting=google-account");
     renderWithProviders(<RolePolicyEditor selected={DRIVE_ROLE} onChange={() => {}} />, { me: ADMIN });
     expect(await screen.findByTestId("fe7-drive-google-email")).toHaveTextContent("hackit@gmail.com");
-    await userEvent.click(screen.getByTestId("fe7-app-dialog-close"));
-    expect(screen.queryByTestId("fe7-app-dialog")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("fe7-setting-dialog-close"));
+    expect(screen.queryByTestId("fe7-setting-dialog")).not.toBeInTheDocument();
     expect(window.location.search).toBe("");
   });
 });

@@ -1774,7 +1774,7 @@ interface DemoDriveFile {
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 
-// ── driveshare: the Google account Drive is accessed as (ロール管理 > Drive共有 詳細) ──
+// ── driveshare: the Google account Drive is accessed as (ロール管理 > その他 > Google アカウント) ──
 // No real OAuth in the demo: "connect" returns the SPA's own /admin/roles?code&state, which
 // stands in for Google's redirect. The status lives in sessionStorage so it survives that
 // full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|

@@ -1,9 +1,11 @@
 // Google の同意画面から戻ってきた URL (/admin/roles?code&state / ?error&state) の読み書き。
-// 戻り先は 1 ページに固定(サーバー側の redirect URI 許可リストと一致させる)。どのアプリの
-// 設定パネルが始めたかは sessionStorage に印を付けておき、戻ったら同じ詳細ダイアログを開く。
+// 戻り先は 1 ページに固定(サーバー側の redirect URI 許可リストと一致させる)。どの設定が始めたかは
+// sessionStorage に印を付けておき、戻ったら「その他」の同じ設定ダイアログを開く。
 
 export const OAUTH_RETURN_PATH = "/admin/roles";
-const MARK_KEY = "fe7:oauth-return-app";
+/** OAuth を使う設定 (「その他」> Google アカウント). */
+export const OAUTH_RETURN_SETTING = "google-account";
+const MARK_KEY = "fe7:oauth-return-setting";
 const ROLE_KEY = "fe7:oauth-return-role";
 
 export interface OAuthReturn {
@@ -17,10 +19,10 @@ export function oauthRedirectUri(): string {
   return `${window.location.origin}${OAUTH_RETURN_PATH}`;
 }
 
-/** 同意画面へ移動する直前に、戻ったとき開くアプリを記録する。 */
-export function markOAuthReturn(appId: string): void {
+/** 同意画面へ移動する直前に、戻ったとき開く設定を記録する。 */
+export function markOAuthReturn(settingId: string): void {
   try {
-    window.sessionStorage.setItem(MARK_KEY, appId);
+    window.sessionStorage.setItem(MARK_KEY, settingId);
   } catch {
     // storage 不可 (プライベートモード等) でも戻りの処理自体は URL だけで成立する
   }
@@ -43,8 +45,8 @@ export function clearOAuthReturn(): void {
   window.history.replaceState(window.history.state, "", window.location.pathname);
 }
 
-/** 戻ってきた直後なら、開くべきアプリ (詳細ダイアログ) の id。 */
-export function pendingOAuthReturnApp(fallback: string): string | null {
+/** 戻ってきた直後なら、開くべき設定ダイアログの id。 */
+export function pendingOAuthReturnSetting(fallback: string): string | null {
   if (!readOAuthReturn()) return null;
   try {
     return window.sessionStorage.getItem(MARK_KEY) ?? fallback;
@@ -53,17 +55,17 @@ export function pendingOAuthReturnApp(fallback: string): string | null {
   }
 }
 
-/** 直リンク /admin/roles?app=<AppId> で開くアプリ (例: ?app=driveshare で Google アカウント設定)。 */
-export function linkedDetailApp(): string | null {
+/** 直リンク /admin/roles?setting=<id> で開く設定 (例: ?setting=google-account)。 */
+export function linkedSetting(): string | null {
   if (typeof window === "undefined" || window.location.pathname !== OAUTH_RETURN_PATH) return null;
-  return new URLSearchParams(window.location.search).get("app");
+  return new URLSearchParams(window.location.search).get("setting");
 }
 
-/** ダイアログを閉じたら ?app= を消す (ロールを切り替えても開き直さない)。 */
-export function clearLinkedDetailApp(): void {
-  if (typeof window === "undefined" || !linkedDetailApp()) return;
+/** ダイアログを閉じたら ?setting= を消す (ロールを切り替えても開き直さない)。 */
+export function clearLinkedSetting(): void {
+  if (typeof window === "undefined" || !linkedSetting()) return;
   const q = new URLSearchParams(window.location.search);
-  q.delete("app");
+  q.delete("setting");
   const rest = q.toString();
   window.history.replaceState(window.history.state, "", window.location.pathname + (rest ? `?${rest}` : ""));
 }

@@ -1,7 +1,7 @@
-// Drive共有 の詳細ダイアログ最下段「Google アカウント」。Drive共有 がファイルの共有を操作する
-// ときに使う Google アカウントを表示し、システム管理者が接続し直せるようにする。
+// ロール管理「その他」> Google アカウント のダイアログ本文。Hackit Drive の共有などで Google を
+// 操作するときに使うアカウントを表示し、システム管理者が接続し直せるようにする。
 //
-//   - 見た目は同じダイアログの「このアプリの権限」「細かい権限」に揃える(見出し + 1 行 + 枠付きの行)
+//   - 複数アプリに効きうる組織全体の設定なので、特定アプリのダイアログではなく「その他」に置く
 //   - 全ロール共通の設定で、ロールの「保存」とは別に接続した時点で切り替わる
 //   - 「接続し直す」は Google の画面へ移動する。未保存のロール編集は下書きとして残り、戻ると同じ
 //     ロールのこのダイアログが開く (/admin/roles?code&state で接続を完了する)
@@ -12,11 +12,10 @@ import type { BadgeTone } from "@dub/ui";
 import { usePermissions } from "../hooks/usePermissions";
 import { useCompleteDriveGoogleConnect, useDriveGoogleAccount, useStartDriveGoogleConnect } from "../hooks/useDriveGoogleAccount";
 import { errorMessage } from "../lib/errorDisplay";
-import { clearOAuthReturn, markOAuthReturn, oauthRedirectUri, readOAuthReturn } from "../lib/oauthReturn";
+import { OAUTH_RETURN_SETTING, clearOAuthReturn, markOAuthReturn, oauthRedirectUri, readOAuthReturn } from "../lib/oauthReturn";
 import type { DriveGoogleAccountStatus } from "../contracts/pending";
 
 const blockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)" };
-const headingStyle: React.CSSProperties = { fontWeight: 700, fontSize: 14, margin: 0 };
 const hintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12.5, lineHeight: 1.6, margin: 0 };
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -88,7 +87,7 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
   }, [ready, isAdmin, complete]);
 
   function goToGoogle() {
-    markOAuthReturn(APP_ID);
+    markOAuthReturn(OAUTH_RETURN_SETTING);
     start.mutate(oauthRedirectUri());
   }
 
@@ -96,9 +95,10 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
   const meta = s ? metaFor(s) : null;
 
   return (
-    <section style={blockStyle} data-testid={tid} aria-labelledby={`${tid}-heading`}>
-      <h3 id={`${tid}-heading`} style={headingStyle}>Google アカウント</h3>
-      <p style={hintStyle} data-testid={`${tid}-owner-note`}>アカウントを切り替えても既存ファイルのオーナーは移りません。</p>
+    <section style={blockStyle} data-testid={tid}>
+      <p style={hintStyle} data-testid={`${tid}-owner-note`}>
+        Hackit Drive の共有に使います。アカウントを切り替えても既存ファイルのオーナーは移りません。
+      </p>
 
       {returnError ? (
         <p style={alertStyle} role="alert" data-testid={`${tid}-return-error`}>{returnError}</p>
