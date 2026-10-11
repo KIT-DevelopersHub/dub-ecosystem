@@ -25,6 +25,9 @@ export interface GatewayEnv {
   SVC_WEBHOOK_INGEST: Fetcher;
   SVC_USAGE_METER: Fetcher;
   SVC_MEMBER: Fetcher;
+  // commander-relay (ticket/status for the /commander WebSocket relay). Optional so existing
+  // test env builders still satisfy the interface; missing -> upstreamUnavailable on /commander.
+  SVC_COMMANDER_RELAY?: Fetcher;
   SVC_LP_ANALYTICS: Fetcher; // lp-analytics (LP管理: 流入URL + LP 訪問ログ)
 
   // ---- Queue producer (the one publish exception) ----

@@ -45,10 +45,30 @@ const DEFAULT_BASE =
 
 const DEFAULT_TOKEN = import.meta.env?.VITE_COMMANDER_TOKEN as string | undefined;
 
+/** Opens an SSE-like stream; returns a close fn. Swapped out by the relay transport. */
+export type StreamOpener = (
+  url: string,
+  onData: (data: string) => void,
+  onEnd: () => void,
+) => () => void;
+
+const eventSourceOpener: StreamOpener = (url, onData, onEnd) => {
+  const es = new EventSource(url);
+  es.onmessage = (m) => onData(m.data as string);
+  es.onerror = () => {
+    es.close();
+    onEnd();
+  };
+  return () => es.close();
+};
+
 export class HttpCommanderClient implements CommanderClient {
   constructor(
     private baseUrl: string = DEFAULT_BASE,
     private token: string | undefined = DEFAULT_TOKEN,
+    // Injected by the relay transport (WebSocket to the operator's PC); loopback by default.
+    private fetchImpl: typeof fetch = (...args) => fetch(...args),
+    private openStream: StreamOpener = eventSourceOpener,
   ) {}
 
   private headers(base: Record<string, string> = {}): Record<string, string> {
@@ -60,7 +80,7 @@ export class HttpCommanderClient implements CommanderClient {
     if (opts.cwd) body.cwd = opts.cwd;
     if (opts.taskId) body.taskId = opts.taskId;
     if (opts.args && opts.args.length > 0) body.args = opts.args;
-    const res = await fetch(`${this.baseUrl}/runs`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/runs`, {
       method: "POST",
       headers: this.headers({ "content-type": "application/json" }),
       body: JSON.stringify(body),
@@ -71,7 +91,7 @@ export class HttpCommanderClient implements CommanderClient {
 
   async health(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/health`);
+      const res = await this.fetchImpl(`${this.baseUrl}/health`);
       return res.ok;
     } catch {
       return false;
@@ -79,7 +99,7 @@ export class HttpCommanderClient implements CommanderClient {
   }
 
   async cancelRun(runId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/runs/${runId}`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/runs/${runId}`, {
       method: "DELETE",
       headers: this.headers(),
     });
@@ -95,20 +115,27 @@ export class HttpCommanderClient implements CommanderClient {
     // EventSource cannot set an Authorization header, so the shared token rides a
     // query param for the SSE stream (loopback-only; the daemon accepts either).
     const q = this.token ? `?token=${encodeURIComponent(this.token)}` : "";
-    const es = new EventSource(`${this.baseUrl}/runs/${runId}/events${q}`);
-    es.onmessage = (m) => {
-      const ev = JSON.parse(m.data) as DaemonRunEvent;
-      onEvent(ev);
-      if (ev.type === "status" && (ev.status === "succeeded" || ev.status === "failed")) {
-        es.close();
-        onClose();
-      }
-    };
-    es.onerror = () => {
-      es.close();
+    let closed = false;
+    let close: () => void = () => {};
+    const finish = () => {
+      if (closed) return;
+      closed = true;
+      close();
       onClose();
     };
-    return () => es.close();
+    close = this.openStream(
+      `${this.baseUrl}/runs/${runId}/events${q}`,
+      (data) => {
+        const ev = JSON.parse(data) as DaemonRunEvent;
+        onEvent(ev);
+        if (ev.type === "status" && (ev.status === "succeeded" || ev.status === "failed")) finish();
+      },
+      finish,
+    );
+    return () => {
+      closed = true;
+      close();
+    };
   }
 }
 
