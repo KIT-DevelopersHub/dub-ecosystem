@@ -13,6 +13,7 @@ import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../au
 import { createMembersApi, type MembersApi } from "./membersApi.tsx";
 import { MembersApiProvider } from "./MembersProvider.tsx";
 import { MembersPage } from "./MembersPage.tsx";
+import { MembersOrgChartPage } from "./MembersOrgChartPage.tsx";
 import type { MembersOverview } from "./contracts.ts";
 import { member } from "@dub/types";
 import { ListView } from "./ListView.tsx";
@@ -128,13 +129,18 @@ describe("MembersPage", () => {
     expect(screen.queryByTestId("members-table")).not.toBeInTheDocument();
   });
 
-  it("switches between the team-grouped and org-chart views", async () => {
+  // 組織図 は共有サブナビの上タブ（/members/org-chart）へ昇格した。運営メンバー画面に内側タブは残さない。
+  it("has no inner チーム別/組織図 tabs (組織図 is its own top-level tab)", async () => {
     render(wrap(<MembersPage />, makeApi()));
     expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("tab", { name: "組織図" }));
+    expect(screen.queryByTestId("members-tabs")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("members-orgchart")).not.toBeInTheDocument();
+  });
+
+  it("組織図 page renders the org chart with the print action", async () => {
+    render(wrap(<MembersOrgChartPage />, makeApi()));
     expect(await screen.findByTestId("members-orgchart")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("tab", { name: "チーム別" }));
-    expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
+    expect(screen.getByTestId("members-print")).toBeInTheDocument();
   });
 
   it("opens the add-member dialog and creates a member", async () => {
@@ -224,9 +230,7 @@ describe("MembersPage", () => {
         { ...P0, id: "p_gone", orgId: "o", name: "辞退済子", roleTitle: null, status: "declined", teamIds: ["t1"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
       ],
     };
-    render(wrap(<MembersPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
-    await screen.findByText("所属アリ子");
-    await userEvent.click(screen.getByRole("tab", { name: "組織図" }));
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
     await screen.findByTestId("members-orgchart");
     // 3 non-declined members are ALL rendered as org chips; the declined one is not.
     expect(screen.getByTestId("members-orgchip-p_team")).toBeInTheDocument();
@@ -256,9 +260,7 @@ describe("MembersPage", () => {
         { ...P0, id: "R2", orgId: "o", name: "配下B", roleTitle: "メンバー", status: "added", teamIds: ["t1"], department: null, grade: null, identityUserId: null, leaderId: "L2", contact: null, note: null, sortOrder: 4, version: 1, createdAt: "t", updatedAt: "t" },
       ],
     };
-    render(wrap(<MembersPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
-    await screen.findByText("リーダー甲");
-    await userEvent.click(screen.getByRole("tab", { name: "組織図" }));
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
     await screen.findByTestId("members-orgchart");
 
     const l1Item = screen.getByTestId("members-orgchip-L1").closest("li");
