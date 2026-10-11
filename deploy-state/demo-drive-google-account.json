@@ -1,0 +1,17 @@
+{
+  "kind": "demo-feature",
+  "slug": "drive-google-account",
+  "worker": "dub-demo-drive-google-account",
+  "url": "https://dub-demo-drive-google-account.developershub-site.workers.dev",
+  "deployedSha": "2a62f187",
+  "branch": "feat/hackit-drive-google-account",
+  "actor": "ko-tarou",
+  "markers": [
+    "dub-demo:drive-google",
+    "app-dialog-settings-jump"
+  ],
+  "live": true,
+  "verifiedAt": "2026-10-11T11:43:20Z",
+  "updatedAt": "2026-10-11T11:43:20Z",
+  "note": "Hackit Drive の Google アカウント切替(ロール管理 > Drive共有)"
+}
