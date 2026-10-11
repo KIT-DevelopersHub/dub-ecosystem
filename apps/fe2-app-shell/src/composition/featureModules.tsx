@@ -40,6 +40,7 @@ import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.ts
 import { lpRoutes, lpNav } from "../features/lp/index.tsx";
 import { LpProvider } from "../features/lp/LpProvider.tsx";
 import { commanderRoutes, commanderNav } from "../features/commander/index.tsx";
+import { CommanderProvider } from "../features/commander/CommanderProvider.tsx";
 import { membersRoutes, membersNav } from "../features/members/index.tsx";
 import { MembersProvider } from "../features/members/MembersProvider.tsx";
 import { participationRoutes } from "../features/participation/index.tsx";
@@ -370,11 +371,12 @@ function adaptLp(api: ApiClient): FeatureModule {
 // prod phase moves. Admin/dev tooling: it can spawn arbitrary Claude Code locally, so the
 // route is gated on identity:admin (module-level) in addition to the per-app app:commander:view
 // key that withAppAccessGate ANDs on. It is intentionally NOT in releaseGate PUBLISHED_APPS,
-// so members see it greyed (member-hidden) until explicitly released. No runtime Provider —
-// the console/board carry their own loopback/commander-service HTTP clients (not the gateway).
-function adaptCommander(): FeatureModule {
-  const passthrough: ElementWrapper = (node) => createElement(Fragment, null, node);
-  const routes = (commanderRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, passthrough));
+// so members see it greyed (member-hidden) until explicitly released. The Provider only hands
+// over the api-client for the relay ticket; the console/board data itself comes from the
+// operator's PC (loopback directly, or over the commander-relay WebSocket when deployed).
+function adaptCommander(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(CommanderProvider, api);
+  const routes = (commanderRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
   const nav: NavEntry[] = commanderNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 51 }));
   const module: FeatureModule = { id: "commander", routes, nav };
   module.requiredPermissions = ["identity:admin"]; // admin-only (dangerous: spawns local Claude Code)
@@ -444,7 +446,7 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptDriveShare(api),
     adaptLp(api),
     adaptAdmin(api),
-    adaptCommander(),
+    adaptCommander(api),
   ].map(withNavAppId).map(withAppAccessGate);
 }
 
