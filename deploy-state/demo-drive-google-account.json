@@ -3,15 +3,12 @@
   "slug": "drive-google-account",
   "worker": "dub-demo-drive-google-account",
   "url": "https://dub-demo-drive-google-account.developershub-site.workers.dev",
-  "deployedSha": "2a62f187",
+  "deployedSha": "632a524f",
   "branch": "feat/hackit-drive-google-account",
   "actor": "ko-tarou",
-  "markers": [
-    "dub-demo:drive-google",
-    "app-dialog-settings-jump"
-  ],
+  "markers": ["サーバーの初期設定のアカウント","認証が切れています。再接続してください。"],
   "live": true,
-  "verifiedAt": "2026-10-11T11:43:20Z",
-  "updatedAt": "2026-10-11T11:43:20Z",
-  "note": "Hackit Drive の Google アカウント切替(ロール管理 > Drive共有)"
+  "verifiedAt": "2026-10-11T11:51:19Z",
+  "updatedAt": "2026-10-11T11:51:19Z",
+  "note": "Hackit Drive の Google アカウント切替(他の設定と同じ見た目に)"
 }
