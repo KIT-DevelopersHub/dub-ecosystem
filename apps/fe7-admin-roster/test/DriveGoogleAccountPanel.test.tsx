@@ -119,5 +119,32 @@ describe("Drive共有 詳細ダイアログ > Google アカウント", () => {
       { me: ADMIN },
     );
     expect(screen.queryByTestId("fe7-drive-google")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-app-dialog-settings-hint")).not.toBeInTheDocument();
+  });
+});
+
+describe("Google アカウント設定の入口", () => {
+  it("アプリ一覧の Drive共有 行に「Google アカウント」を出す (他のアプリには出さない)", () => {
+    renderWithProviders(<RolePolicyEditor selected={DRIVE_ROLE} onChange={() => {}} />, { me: ADMIN });
+    expect(screen.getByTestId("fe7-app-settings-badge-driveshare")).toHaveTextContent("Google アカウント");
+    expect(screen.queryByTestId("fe7-app-settings-badge-chat")).not.toBeInTheDocument();
+  });
+
+  it("ダイアログ冒頭に一番下の設定への案内とジャンプボタンを出す", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    openDriveDialog();
+    expect(screen.getByTestId("fe7-app-dialog-settings-hint")).toHaveTextContent("「Google アカウント」の設定もあります");
+    await userEvent.click(screen.getByTestId("fe7-app-dialog-settings-jump"));
+    expect(scroll).toHaveBeenCalled();
+  });
+
+  it("直リンク ?app=driveshare で Drive共有 のダイアログが開き、閉じると URL から消える", async () => {
+    window.history.replaceState(null, "", "/admin/roles?app=driveshare");
+    renderWithProviders(<RolePolicyEditor selected={DRIVE_ROLE} onChange={() => {}} />, { me: ADMIN });
+    expect(await screen.findByTestId("fe7-drive-google-email")).toHaveTextContent("hackit@gmail.com");
+    await userEvent.click(screen.getByTestId("fe7-app-dialog-close"));
+    expect(screen.queryByTestId("fe7-app-dialog")).not.toBeInTheDocument();
+    expect(window.location.search).toBe("");
   });
 });

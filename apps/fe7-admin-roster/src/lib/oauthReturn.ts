@@ -53,6 +53,21 @@ export function pendingOAuthReturnApp(fallback: string): string | null {
   }
 }
 
+/** 直リンク /admin/roles?app=<AppId> で開くアプリ (例: ?app=driveshare で Google アカウント設定)。 */
+export function linkedDetailApp(): string | null {
+  if (typeof window === "undefined" || window.location.pathname !== OAUTH_RETURN_PATH) return null;
+  return new URLSearchParams(window.location.search).get("app");
+}
+
+/** ダイアログを閉じたら ?app= を消す (ロールを切り替えても開き直さない)。 */
+export function clearLinkedDetailApp(): void {
+  if (typeof window === "undefined" || !linkedDetailApp()) return;
+  const q = new URLSearchParams(window.location.search);
+  q.delete("app");
+  const rest = q.toString();
+  window.history.replaceState(window.history.state, "", window.location.pathname + (rest ? `?${rest}` : ""));
+}
+
 /** ロール管理で今開いているロール。戻ったときに同じロールを選び直す(下書きもそこにある)。 */
 export function rememberActiveRole(roleId: string | null): void {
   try {
