@@ -149,56 +149,91 @@ function toolResultText(c: unknown): string {
   return "";
 }
 
-/** Human line(s) for one stream-json event; "" for noise (thinking, rate limits, init). */
-function formatClaude(d: ClaudeStreamData | undefined): string {
-  if (!d) return "";
+/**
+ * One readable piece of a run log. `text` (assistant prose) and `result` (the final
+ * report) are Markdown; the rest are one-line progress/diagnostic rows.
+ */
+export type LogEntry =
+  | { kind: "text" | "tool" | "warn" | "stdout" | "stderr" | "error"; text: string }
+  | { kind: "result"; text: string; ok: boolean }
+  | { kind: "status"; text: string; status?: DaemonRunEvent["status"] }
+  | { kind: "exit"; text: string; code?: number | null };
+
+/** Entries for one stream-json event; [] for noise (thinking, rate limits, init). */
+function claudeEntries(d: ClaudeStreamData | undefined): LogEntry[] {
+  if (!d) return [];
   if (d.type === "result") {
-    const mark = d.is_error || (d.subtype && d.subtype !== "success") ? "❌" : "✅";
-    return d.result ? `${mark} ${d.result}` : `${mark} ${d.subtype ?? "result"}`;
+    const ok = !(d.is_error || (d.subtype && d.subtype !== "success"));
+    return [{ kind: "result", ok, text: d.result || (d.subtype ?? "result") }];
   }
   const content = d.message?.content;
-  if (!Array.isArray(content)) return "";
+  if (!Array.isArray(content)) return [];
   if (d.type === "assistant") {
-    return content
-      .map((b) =>
-        b.type === "text" && b.text?.trim()
-          ? `💬 ${b.text.trim()}`
-          : b.type === "tool_use" && b.name
-            ? toolSummary(b)
-            : "",
-      )
-      .filter(Boolean)
-      .join("\n");
+    return content.flatMap((b): LogEntry[] =>
+      b.type === "text" && b.text?.trim()
+        ? [{ kind: "text", text: b.text.trim() }]
+        : b.type === "tool_use" && b.name
+          ? [{ kind: "tool", text: toolSummary(b) }]
+          : [],
+    );
   }
   if (d.type === "user") {
     // Tool output is too long to replay; only surface failures.
     return content
       .filter((b) => b.type === "tool_result" && b.is_error)
-      .map((b) => `⚠ ${oneLine(toolResultText(b.content))}`)
-      .join("\n");
+      .map((b) => ({ kind: "warn", text: oneLine(toolResultText(b.content)) }));
   }
-  return "";
+  return [];
+}
+
+/** Structured, readable entries for one event; [] for events with nothing to show. */
+export function eventEntries(ev: DaemonRunEvent): LogEntry[] {
+  switch (ev.type) {
+    case "status":
+      return [{ kind: "status", status: ev.status, text: `${ev.status}` }];
+    case "claude":
+      return claudeEntries(ev.data as ClaudeStreamData | undefined);
+    case "stdout":
+      return ev.line?.trim() ? [{ kind: "stdout", text: ev.line }] : [];
+    case "stderr":
+      return [{ kind: "stderr", text: ev.line ?? "" }];
+    case "exit":
+      return [{ kind: "exit", code: ev.code, text: `${ev.code}` }];
+    case "error":
+      return [{ kind: "error", text: `${ev.message}` }];
+    default:
+      return [{ kind: "stdout", text: JSON.stringify(ev) }];
+  }
+}
+
+function entryLine(e: LogEntry): string {
+  switch (e.kind) {
+    case "text":
+      return `💬 ${e.text}`;
+    case "tool":
+      return e.text;
+    case "warn":
+      return `⚠ ${e.text}`;
+    case "result":
+      return `${e.ok ? "✅" : "❌"} ${e.text}`;
+    case "status":
+      return `● status: ${e.text}`;
+    case "stderr":
+      return `stderr> ${e.text}`;
+    case "exit":
+      return `exit code: ${e.text}`;
+    case "error":
+      return `error: ${e.text}`;
+    default:
+      return e.text;
+  }
 }
 
 /**
- * Human summary of an event for the log view. Returns "" for events that carry nothing
- * readable (thinking, rate limits, init) — callers drop empty lines.
+ * Human summary of an event for plain-text views (console, card's last line). Returns ""
+ * for events that carry nothing readable (thinking, rate limits, init) — callers drop
+ * empty lines.
  */
 export function formatEvent(ev: DaemonRunEvent): string {
-  switch (ev.type) {
-    case "status":
-      return `● status: ${ev.status}`;
-    case "claude":
-      return formatClaude(ev.data as ClaudeStreamData | undefined);
-    case "stdout":
-      return ev.line ?? "";
-    case "stderr":
-      return `stderr> ${ev.line ?? ""}`;
-    case "exit":
-      return `exit code: ${ev.code}`;
-    case "error":
-      return `error: ${ev.message}`;
-    default:
-      return JSON.stringify(ev);
-  }
+  return eventEntries(ev).map(entryLine).join("\n");
 }
