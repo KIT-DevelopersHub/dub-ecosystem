@@ -441,3 +441,49 @@ describe("UsageDashboard", () => {
     await waitFor(() => expect(value.getSummary).toHaveBeenCalled());
   });
 });
+
+describe("UsageDashboard freshness (stale snapshot)", () => {
+  it("says the data is old, with the capture time, and recedes the numbers when stale", async () => {
+    const summary: UsageSummary = {
+      ...buildMockUsageSummary(new Date("2026-10-11T12:00:00Z")),
+      capturedAt: "2026-09-17T20:48:01.331Z",
+      stale: true,
+    };
+    const { value } = fakeUsageApi("live", summary);
+    render(wrap(<UsageDashboard />, value));
+
+    const notice = await screen.findByTestId("fe2-usage-stale-notice");
+    expect(notice).toHaveTextContent("データが古いです");
+    expect(notice).toHaveTextContent(`最終取得: ${new Date("2026-09-17T20:48:01.331Z").toLocaleString("ja-JP")}`);
+    expect(notice).toHaveTextContent("現在の使用量ではありません");
+    expect(screen.getByTestId("fe2-usage-groups").parentElement).toHaveAttribute("data-stale", "true");
+    // the footer shows when the numbers were measured, not the response time
+    expect(screen.getByTestId("fe2-usage-generated-at")).toHaveTextContent("最終取得:");
+  });
+
+  it("shows no stale notice for a fresh snapshot", async () => {
+    const summary = buildMockUsageSummary(new Date("2026-10-11T12:00:00Z"));
+    const { value } = fakeUsageApi("live", summary);
+    render(wrap(<UsageDashboard />, value));
+    await screen.findByTestId("fe2-usage-summary-banner");
+    expect(screen.queryByTestId("fe2-usage-stale-notice")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe2-usage-groups").parentElement).toHaveAttribute("data-stale", "false");
+  });
+
+  it("keeps the old footer for a backend that predates capturedAt", async () => {
+    const { capturedAt: _c, stale: _s, ...legacy } = buildMockUsageSummary(new Date("2026-10-11T12:00:00Z"));
+    const { value } = fakeUsageApi("live", legacy);
+    render(wrap(<UsageDashboard />, value));
+    await screen.findByTestId("fe2-usage-summary-banner");
+    expect(screen.queryByTestId("fe2-usage-stale-notice")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe2-usage-generated-at")).toHaveTextContent("最終更新:");
+  });
+
+  it("the demo mock can preview the stale state (3 days old)", () => {
+    const now = new Date("2026-10-11T12:00:00Z");
+    const s = buildMockUsageSummary(now, { stale: true });
+    expect(s.stale).toBe(true);
+    expect(s.capturedAt).toBe("2026-10-08T12:00:00.000Z");
+    expect(buildMockUsageSummary(now).stale).toBe(false);
+  });
+});
