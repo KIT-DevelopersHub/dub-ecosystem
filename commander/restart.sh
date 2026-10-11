@@ -23,15 +23,16 @@ WEB_PORT="${COMMANDER_WEB_PORT:-5609}"
 die() { echo "$*" >&2; exit 1; }
 log() { echo "[$(date '+%F %T')] $*"; }
 
-# Nearest ancestor of the daemon that is dev-up.sh (the daemon may sit under a subshell).
+# Outermost dev-up.sh above the daemon. The daemon's direct parent is a `( ... )`
+# subshell that also shows as dev-up.sh; only the top one owns the cleanup trap.
 find_dev_up() {
-  local pid="$1" cmd
+  local pid="$1" cmd found=""
   while [[ -n "$pid" && "$pid" -gt 1 ]]; do
     cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
-    if [[ "$cmd" == *"commander/dev-up.sh"* ]]; then echo "$pid"; return 0; fi
+    [[ "$cmd" == *"commander/dev-up.sh"* ]] && found="$pid"
     pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
   done
-  return 1
+  [[ -n "$found" ]] && echo "$found"
 }
 
 [[ "$DAEMON_PID" =~ ^[0-9]+$ ]] || die "usage: restart.sh update|relaunch <daemon-pid>"
