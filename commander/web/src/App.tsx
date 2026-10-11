@@ -127,7 +127,7 @@ export function App({ client, api, initialTab = "board" }: AppProps) {
         minHeight: "100vh",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: t.space4, marginBottom: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: t.space4, marginBottom: 4, minHeight: 40 }}>
         <h1 style={{ fontSize: 18, margin: 0 }}>Commander</h1>
         <RestartButton />
       </div>
