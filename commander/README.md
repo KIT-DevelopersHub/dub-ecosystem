@@ -67,6 +67,9 @@ node --experimental-strip-types commander/daemon/src/index.ts
 | `COMMANDER_SERVICE_TOKEN` | (空) | commander-service へ送る `x-commander-token` |
 | `COMMANDER_ISOLATE_ENV` | `1`（有効） | env 分離。`0`/`false` で無効化（親 env を丸ごと継承） |
 | `COMMANDER_CLAUDE_CONFIG_DIR` | `commander/.claude-home` | spawn する claude の `CLAUDE_CONFIG_DIR` |
+| `COMMANDER_DUB_API_BASE` | (空) | 「Dubを操作」の接続先 api-gateway origin。未設定なら実行系 `/operate/*` は 503 |
+| `COMMANDER_DUB_BOT_EMAIL` / `COMMANDER_DUB_BOT_PASSWORD` | (空) | 専用ボットユーザーの認証（401 で 1 回だけ再ログイン）。`COMMANDER_DUB_API_TOKEN` で直接トークン指定も可。`COMMANDER_DUB_*` は spawn する claude に渡さない |
+| `COMMANDER_OPERATE_AUDIT_LOG` | `~/.commander/operate-audit.jsonl` | 「Dubを操作」の実行監査ログ（JSONL） |
 
 ### env 分離（個人 `~/.claude` を読ませない）
 

@@ -15,10 +15,17 @@
 //   COMMANDER_ISOLATE_ENV       "0"/"false" to disable env isolation (default: on)
 //   COMMANDER_CLAUDE_CONFIG_DIR CLAUDE_CONFIG_DIR handed to spawned claude
 //                               (default: commander/.claude-home next to this daemon)
+//   COMMANDER_DUB_API_BASE      api-gateway origin for "Dubを操作" (e.g. the staging workers.dev
+//                               URL); unset disables /operate/preview|execute
+//   COMMANDER_DUB_API_TOKEN     bot session token, OR
+//   COMMANDER_DUB_BOT_EMAIL / COMMANDER_DUB_BOT_PASSWORD  bot login (re-login on 401)
+//   COMMANDER_OPERATE_AUDIT_LOG JSONL audit file (default ~/.commander/operate-audit.jsonl)
 //   COMMANDER_PERMISSION_MODE   --permission-mode for headless claude (default
 //                               "acceptEdits" so Edit/Write work non-interactively; "" omits)
 
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createDaemonServer, VERSION } from "./server.ts";
 import { resolveClaudeConfigDir } from "./env.ts";
 import type { DaemonConfig } from "./types.ts";
@@ -59,6 +66,17 @@ function loadConfig(): DaemonConfig {
   };
   if (process.env.COMMANDER_SERVICE_URL) config.serviceUrl = process.env.COMMANDER_SERVICE_URL;
   if (process.env.COMMANDER_SERVICE_TOKEN) config.serviceToken = process.env.COMMANDER_SERVICE_TOKEN;
+  const apiBase = process.env.COMMANDER_DUB_API_BASE?.replace(/\/+$/, "");
+  if (apiBase) {
+    config.operate = {
+      baseUrl: apiBase,
+      auditLogPath:
+        process.env.COMMANDER_OPERATE_AUDIT_LOG || join(homedir(), ".commander", "operate-audit.jsonl"),
+    };
+    if (process.env.COMMANDER_DUB_API_TOKEN) config.operate.token = process.env.COMMANDER_DUB_API_TOKEN;
+    if (process.env.COMMANDER_DUB_BOT_EMAIL) config.operate.email = process.env.COMMANDER_DUB_BOT_EMAIL;
+    if (process.env.COMMANDER_DUB_BOT_PASSWORD) config.operate.password = process.env.COMMANDER_DUB_BOT_PASSWORD;
+  }
   return config;
 }
 
@@ -73,6 +91,7 @@ server.listen(config.port, "127.0.0.1", () => {
       ` auth=${config.operatorToken ? "on" : "off"},` +
       ` idle=${config.idleTimeoutMs}ms, hardTimeout=${config.runTimeoutMs}ms,` +
       ` persist=${config.serviceUrl ? "on" : "off"},` +
+      ` operate=${config.operate?.baseUrl ?? "off"},` +
       ` isolateEnv=${config.isolateEnv}, claudeConfigDir=${config.claudeConfigDir})`,
   );
 });
