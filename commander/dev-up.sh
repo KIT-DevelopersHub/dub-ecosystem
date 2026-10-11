@@ -84,7 +84,8 @@ wait_http() { # url, name, tries
 }
 
 echo "[dev-up] building phase FSM + shared packages (idempotent)..."
-pnpm --dir "$REPO_ROOT" --filter @dub/commander-phases --filter @dub/db --filter @dub/types build >/dev/null 2>&1 || true
+# @dub/ui: the web imports @dub/ui/style.css, which only exists in its dist.
+pnpm --dir "$REPO_ROOT" --filter @dub/commander-phases --filter @dub/db --filter @dub/types --filter @dub/ui build >/dev/null 2>&1 || true
 
 # --- 1) commander-service local D1: apply the commander migrations --------------
 # Apply every migrations/commander/*.sql in order. 0001 is CREATE TABLE IF NOT EXISTS
