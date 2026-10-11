@@ -706,6 +706,9 @@ importers:
       '@dub/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
+      '@dub/ui':
+        specifier: workspace:*
+        version: link:../../apps/fe1-design-system
       react:
         specifier: ^18.3.1
         version: 18.3.1
