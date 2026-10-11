@@ -156,6 +156,24 @@ echo "[dev-up] starting web on port ${WEB_PORT} ..."
       pnpm --filter @dub/commander-web exec vite --host 127.0.0.1 --port "$WEB_PORT" --strictPort ) >"$LOG_DIR/web.log" 2>&1 &
 PIDS+=("$!")
 
+# --- 5) relay agent (optional): reach this PC from the deployed Dub /commander ------
+# Dials OUT to the commander-relay Worker, so no tunnel / inbound port is needed. Enabled
+# only when COMMANDER_RELAY_URL + COMMANDER_RELAY_SECRET are in $ENV_FILE (local secret).
+RELAY_ON=""
+if [[ "$MODE" != "--check" && -n "${COMMANDER_RELAY_URL:-}" && -n "${COMMANDER_RELAY_SECRET:-}" ]]; then
+  echo "[dev-up] starting relay agent -> ${COMMANDER_RELAY_URL}"
+  ( cd "$REPO_ROOT" && \
+    env COMMANDER_RELAY_URL="$COMMANDER_RELAY_URL" \
+        COMMANDER_RELAY_SECRET="$COMMANDER_RELAY_SECRET" \
+        COMMANDER_DAEMON_URL="http://127.0.0.1:$DAEMON_PORT" \
+        COMMANDER_SERVICE_URL="http://127.0.0.1:$SERVICE_PORT" \
+        COMMANDER_OPERATOR_TOKEN="$TOKEN" \
+        COMMANDER_RELAY_CWD_ROOTS="${COMMANDER_RELAY_CWD_ROOTS:-$(dirname "$REPO_ROOT")}" \
+        node --experimental-strip-types commander/daemon/src/relay.ts ) >"$LOG_DIR/relay.log" 2>&1 &
+  PIDS+=("$!")
+  RELAY_ON="1"
+fi
+
 # --- health checks --------------------------------------------------------------
 wait_http "http://127.0.0.1:$SERVICE_PORT/health" "commander-service"
 wait_http "http://127.0.0.1:$DAEMON_PORT/health" "daemon"
@@ -168,6 +186,11 @@ echo "   daemon   : http://127.0.0.1:$DAEMON_PORT   (exec bridge, spawns your lo
 echo "   service  : http://127.0.0.1:$SERVICE_PORT  (phase-gate API, local D1)"
 echo "   token    : $ENV_FILE (auto-passed to the web via VITE_COMMANDER_TOKEN)"
 echo "   logs     : $LOG_DIR/{daemon,service,web}.log"
+if [[ -n "$RELAY_ON" ]]; then
+  echo "   relay    : connected to ${COMMANDER_RELAY_URL} (open /commander on the Dub app from any device)"
+else
+  echo "   relay    : off (set COMMANDER_RELAY_URL / COMMANDER_RELAY_SECRET in $ENV_FILE to enable)"
+fi
 echo "--------------------------------------------------------------"
 
 if [[ "$MODE" == "--check" ]]; then
