@@ -28,9 +28,9 @@ export function CrowdfundingRibbon({ data }: { data: CrowdfundingBanner }) {
         <svg className="cf-sag-cloth" viewBox="0 0 100 10" preserveAspectRatio="none">
           <defs>
             <linearGradient id="cf-sag-fill" x1="0" x2="100" y1="0" y2="0" gradientUnits="userSpaceOnUse">
-              <stop offset="0" stopColor="#0f2f8f" />
-              <stop offset="0.46" stopColor="#1e3fa8" />
-              <stop offset="1" stopColor="#0e6f8f" />
+              <stop offset="0" stopColor="#d9160f" />
+              <stop offset="0.4" stopColor="#f23a14" />
+              <stop offset="1" stopColor="#ff8f00" />
             </linearGradient>
           </defs>
           <path d="M0 0 H100 Q50 20 0 0 Z" fill="url(#cf-sag-fill)" />
