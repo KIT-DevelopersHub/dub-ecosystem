@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Board } from "./Board.tsx";
 import { AskDub } from "./AskDub.tsx";
 import { OperateDub } from "./OperateDub.tsx";
+import { RestartButton } from "./RestartButton.tsx";
 import { ChatProvider } from "./lib/chatStore.tsx";
 import type { CommanderClient } from "./lib/client.ts";
 import type { CommanderApi } from "./lib/commanderApi.ts";
@@ -126,7 +127,10 @@ export function App({ client, api, initialTab = "board" }: AppProps) {
         minHeight: "100vh",
       }}
     >
-      <h1 style={{ fontSize: 18, marginBottom: 4 }}>Commander</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: t.space4, marginBottom: 4 }}>
+        <h1 style={{ fontSize: 18, margin: 0 }}>Commander</h1>
+        <RestartButton />
+      </div>
       <CommanderWorkspace
         {...(client ? { client } : {})}
         {...(api ? { api } : {})}
