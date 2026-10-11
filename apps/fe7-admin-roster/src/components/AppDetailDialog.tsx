@@ -19,17 +19,7 @@ import { appSettingsPanel } from "./appSettingsPanels";
 const blockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-5, 20px)" };
 const headingStyle: React.CSSProperties = { fontWeight: 700, fontSize: 14, margin: 0 };
 const hintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12.5, lineHeight: 1.6, margin: 0 };
-const jumpRowStyle: React.CSSProperties = {
-  ...hintStyle,
-  display: "flex",
-  alignItems: "center",
-  flexWrap: "wrap",
-  gap: "var(--dub-space-2, 8px)",
-  padding: "var(--dub-space-2, 8px) var(--dub-space-3, 12px)",
-  marginBottom: "var(--dub-space-5, 20px)",
-  borderRadius: "var(--dub-radius-md, 8px)",
-  background: "var(--dub-color-surface-subtle, #f5f7fa)",
-};
+const jumpRowStyle: React.CSSProperties = { display: "flex", justifyContent: "flex-end", marginBottom: "var(--dub-space-3, 12px)" };
 
 export function AppDetailDialog({
   appId,
@@ -78,12 +68,11 @@ export function AppDetailDialog({
       }
     >
       {settings ? (
-        <p style={jumpRowStyle} data-testid={`${idPrefix}-app-dialog-settings-hint`}>
-          このアプリには「{settings.label}」の設定もあります（全ロール共通・一番下）。
+        <div style={jumpRowStyle} data-testid={`${idPrefix}-app-dialog-settings-hint`}>
           <Button variant="ghost" size="sm" onClick={() => scrollToSettings(settingsId)} testId={`${idPrefix}-app-dialog-settings-jump`}>
-            {settings.label}へ移動
+            {settings.label}の設定へ
           </Button>
-        </p>
+        </div>
       ) : null}
 
       <div style={blockStyle}>
@@ -157,7 +146,7 @@ function SettingsSection({ id, focus, children }: { id: string; focus?: boolean;
     return () => window.clearTimeout(t);
   }, [id, focus]);
   return (
-    <div id={id} style={{ scrollMarginTop: "var(--dub-space-4, 16px)" }}>
+    <div id={id} style={{ marginTop: "var(--dub-space-5, 20px)", scrollMarginTop: "var(--dub-space-4, 16px)" }}>
       {children}
     </div>
   );

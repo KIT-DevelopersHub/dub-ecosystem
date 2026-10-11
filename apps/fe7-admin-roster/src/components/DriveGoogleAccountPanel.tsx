@@ -1,10 +1,10 @@
 // Drive共有 の詳細ダイアログ最下段「Google アカウント」。Drive共有 がファイルの共有を操作する
 // ときに使う Google アカウントを表示し、システム管理者が接続し直せるようにする。
 //
-//   - 全ロール共通の設定で、ロールの「保存」とは別に接続した時点で切り替わる(文言で明示)
-//   - 「接続し直す」は Google の画面へ移動するので、ページ内で一度確認してから進む(モーダルの
-//     中にモーダルを重ねない)。未保存のロール編集は下書きとして残り、戻ると同じロールが開く
-//   - Google から戻ってきたとき (/admin/roles?code&state) はこのパネルが開かれ、接続を完了する
+//   - 見た目は同じダイアログの「このアプリの権限」「細かい権限」に揃える(見出し + 1 行 + 枠付きの行)
+//   - 全ロール共通の設定で、ロールの「保存」とは別に接続した時点で切り替わる
+//   - 「接続し直す」は Google の画面へ移動する。未保存のロール編集は下書きとして残り、戻ると同じ
+//     ロールのこのダイアログが開く (/admin/roles?code&state で接続を完了する)
 import { useEffect, useRef, useState } from "react";
 import { policy } from "@dub/types";
 import { Badge, Button, Skeleton } from "@dub/ui";
@@ -15,32 +15,24 @@ import { errorMessage } from "../lib/errorDisplay";
 import { clearOAuthReturn, markOAuthReturn, oauthRedirectUri, readOAuthReturn } from "../lib/oauthReturn";
 import type { DriveGoogleAccountStatus } from "../contracts/pending";
 
-const sectionStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "var(--dub-space-3, 12px)",
-  paddingTop: "var(--dub-space-5, 20px)",
-  borderTop: "1px solid var(--dub-color-border-default, #d0d7de)",
-};
+const blockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)" };
 const headingStyle: React.CSSProperties = { fontWeight: 700, fontSize: 14, margin: 0 };
 const hintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12.5, lineHeight: 1.6, margin: 0 };
-const accountRowStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: "var(--dub-space-2, 8px)", flexWrap: "wrap" };
-const emailStyle: React.CSSProperties = { fontWeight: 600, fontSize: 14, wordBreak: "break-all" };
-const actionsStyle: React.CSSProperties = { display: "flex", gap: "var(--dub-space-2, 8px)", flexWrap: "wrap", alignItems: "center" };
-const noticeStyle: React.CSSProperties = {
+const rowStyle: React.CSSProperties = {
   display: "flex",
-  flexDirection: "column",
-  gap: "var(--dub-space-2, 8px)",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "var(--dub-space-3, 12px)",
+  flexWrap: "wrap",
   padding: "var(--dub-space-3, 12px)",
-  borderRadius: 8,
-  border: "1px solid var(--dub-color-border-warning, #d4a72c)",
-  background: "var(--dub-color-bg-warning-subtle, #fff8e1)",
-  fontSize: 13,
-  lineHeight: 1.6,
+  border: "1px solid var(--dub-color-border-default, #dde1e9)",
+  borderRadius: "var(--dub-radius-md, 6px)",
 };
-const loadingStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)" };
-const notesStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-1, 4px)" };
-const ownerNoteStyle: React.CSSProperties = { ...hintStyle, fontWeight: 600 };
+const accountStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 2, minWidth: 0 };
+const emailLineStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" };
+const emailStyle: React.CSSProperties = { fontWeight: 600, wordBreak: "break-all" };
+const metaStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12 };
+const alertStyle: React.CSSProperties = { ...hintStyle, color: "var(--dub-color-danger-700, #b42318)" };
 
 const APP_ID = "driveshare";
 /** サーバーの POLICY_TABLE と同じ条件 (Drive共有 編集 + drive:write + identity:admin)。 */
@@ -55,14 +47,14 @@ function formatConnectedAt(iso: string): string {
 function badgeFor(s: DriveGoogleAccountStatus): { tone: BadgeTone; label: string } {
   if (s.needsReconnect) return { tone: "danger", label: "要再接続" };
   if (s.source === "connected") return { tone: "success", label: "接続済み" };
-  if (s.source === "secret") return { tone: "neutral", label: "サーバー初期設定" };
+  if (s.source === "secret") return { tone: "neutral", label: "初期設定" };
   return { tone: "neutral", label: "未接続" };
 }
 
-function returnErrorText(error: string): string {
-  return error === "access_denied"
-    ? "Google の画面で接続がキャンセルされました。アカウントは切り替わっていません。"
-    : "Google から接続を拒否されました。アカウントは切り替わっていません。もう一度お試しください。";
+function metaFor(s: DriveGoogleAccountStatus): string | null {
+  if (s.source === "connected" && s.connectedAt) return `接続日時: ${formatConnectedAt(s.connectedAt)}`;
+  if (s.source === "secret") return "サーバーの初期設定のアカウント";
+  return null;
 }
 
 /** 戻り URL を 1 回だけ処理する (StrictMode の二重 effect・再マウントで二重送信しない)。 */
@@ -74,7 +66,6 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
   const status = useDriveGoogleAccount(isAdmin);
   const start = useStartDriveGoogleConnect();
   const complete = useCompleteDriveGoogleConnect();
-  const [confirming, setConfirming] = useState(false);
   const [returnError, setReturnError] = useState<string | null>(null);
   const started = useRef(false);
   const tid = `${idPrefix}-drive-google`;
@@ -90,7 +81,7 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
     if (handledStates.has(key)) return;
     handledStates.add(key);
     if (ret.error || !ret.code || !ret.state) {
-      setReturnError(returnErrorText(ret.error ?? "unknown"));
+      setReturnError(ret.error === "access_denied" ? "接続がキャンセルされました。" : "接続できませんでした。もう一度お試しください。");
       return;
     }
     complete.mutate({ code: ret.code, state: ret.state }, { onError: (err) => setReturnError(errorMessage(err)) });
@@ -102,100 +93,67 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
   }
 
   const s = status.data;
-  const leaving = start.isPending || start.isSuccess;
+  const meta = s ? metaFor(s) : null;
 
   return (
-    <section style={sectionStyle} data-testid={tid} aria-labelledby={`${tid}-heading`}>
+    <section style={blockStyle} data-testid={tid} aria-labelledby={`${tid}-heading`}>
       <h3 id={`${tid}-heading`} style={headingStyle}>Google アカウント</h3>
-      <p style={hintStyle}>
-        {"Drive共有 がファイルの共有を操作するときに使う Google アカウントです。すべてのロールで共通の設定で、「保存」とは別に、接続した時点で切り替わります。"}
-      </p>
+      <p style={hintStyle} data-testid={`${tid}-owner-note`}>アカウントを切り替えても既存ファイルのオーナーは移りません。</p>
 
       {returnError ? (
-        <div style={noticeStyle} role="alert" data-testid={`${tid}-return-error`}>{returnError}</div>
+        <p style={alertStyle} role="alert" data-testid={`${tid}-return-error`}>{returnError}</p>
       ) : null}
 
       {!ready ? (
-        <Skeleton width="60%" testId={`${tid}-loading`} />
+        <Skeleton variant="rect" height={58} testId={`${tid}-loading`} />
       ) : !isAdmin ? (
-        <p style={hintStyle} data-testid={`${tid}-admin-only`}>
-          {"アカウントの確認・切り替えは、システム管理者（Drive共有 が「編集」）だけが行えます。"}
-        </p>
+        <p style={hintStyle} data-testid={`${tid}-admin-only`}>システム管理者だけが変更できます。</p>
       ) : status.isPending || complete.isPending ? (
-        <div style={loadingStyle} data-testid={`${tid}-loading`} aria-busy="true">
-          {complete.isPending ? <p style={hintStyle}>Google アカウントを接続しています…</p> : null}
-          <Skeleton width="55%" height={18} />
-          <Skeleton width="35%" />
-          <Skeleton variant="rect" width={140} height={32} />
+        <div style={rowStyle} data-testid={`${tid}-loading`} aria-busy="true">
+          <div style={{ ...accountStyle, flex: 1 }}>
+            <Skeleton width="50%" height={18} />
+            <Skeleton width="30%" />
+          </div>
+          <Skeleton variant="rect" width={96} height={32} />
         </div>
       ) : status.isError || !s ? (
-        <div style={actionsStyle} data-testid={`${tid}-error`}>
-          <p style={hintStyle}>接続状態を読み込めませんでした（{errorMessage(status.error)}）。</p>
+        <div style={rowStyle} data-testid={`${tid}-error`}>
+          <span style={hintStyle}>読み込めませんでした（{errorMessage(status.error)}）</span>
           <Button variant="secondary" size="sm" onClick={() => void status.refetch()} testId={`${tid}-retry`}>
             再読み込み
           </Button>
         </div>
       ) : (
         <>
-          {s.needsReconnect ? (
-            <div style={noticeStyle} role="alert" data-testid={`${tid}-reconnect-warning`}>
-              {"Google アカウントの認証が切れています（取り消されたか、期限が切れました）。Drive共有 が動かないため、「接続し直す」から再接続してください。"}
-            </div>
-          ) : null}
-
-          <div style={accountRowStyle} data-testid={`${tid}-account`}>
-            <span style={hintStyle}>接続中:</span>
-            <span style={emailStyle} data-testid={`${tid}-email`}>
-              {s.source === "none" ? "なし" : (s.email ?? "（アカウント名を取得できませんでした）")}
-            </span>
-            <Badge tone={badgeFor(s).tone} testId={`${tid}-badge`}>{badgeFor(s).label}</Badge>
-          </div>
-          <p style={hintStyle} data-testid={`${tid}-meta`}>
-            {s.source === "connected" && s.connectedAt
-              ? `接続日時: ${formatConnectedAt(s.connectedAt)}`
-              : s.source === "secret"
-                ? "サーバーの初期設定のアカウントを使っています。ここで接続すると、そちらに切り替わります。"
-                : "Google アカウントが接続されていないため、Drive共有 は実際の Drive を操作できません。"}
-          </p>
-
-          {confirming ? (
-            <div style={noticeStyle} data-testid={`${tid}-confirm`}>
-              <span>
-                {"Google の画面に移動します。Drive共有 に使うアカウントでログインし、アクセスを許可してください。保存していないロールの変更は下書きとして残り、戻るとこのロールが開きます（確定は「保存」で）。"}
-              </span>
-              <div style={actionsStyle}>
-                <Button onClick={goToGoogle} loading={leaving} testId={`${tid}-confirm-go`}>
-                  Google へ進む
-                </Button>
-                <Button variant="secondary" onClick={() => setConfirming(false)} disabled={leaving} testId={`${tid}-confirm-cancel`}>
-                  やめる
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div style={actionsStyle}>
-              <Button
-                variant={s.needsReconnect || s.source === "none" ? "primary" : "secondary"}
-                onClick={() => setConfirming(true)}
-                disabled={!s.canConnect}
-                testId={`${tid}-connect`}
-              >
-                {s.source === "none" ? "Google アカウントを接続" : "接続し直す"}
-              </Button>
-              {!s.canConnect ? (
-                <span style={hintStyle} data-testid={`${tid}-unconfigured`}>
-                  サーバーに接続用の設定（OAuth クライアント・暗号化キー）がまだ無いため、接続できません。
+          <div style={rowStyle} data-testid={`${tid}-account`}>
+            <div style={accountStyle}>
+              <span style={emailLineStyle}>
+                <span style={emailStyle} data-testid={`${tid}-email`}>
+                  {s.source === "none" ? "なし" : (s.email ?? "（不明）")}
                 </span>
-              ) : null}
+                <Badge tone={badgeFor(s).tone} testId={`${tid}-badge`}>{badgeFor(s).label}</Badge>
+              </span>
+              {meta ? <span style={metaStyle} data-testid={`${tid}-meta`}>{meta}</span> : null}
             </div>
-          )}
+            <Button
+              variant={s.needsReconnect || s.source === "none" ? "primary" : "secondary"}
+              size="sm"
+              onClick={goToGoogle}
+              loading={start.isPending || start.isSuccess}
+              disabled={!s.canConnect}
+              testId={`${tid}-connect`}
+            >
+              {s.source === "none" ? "Google アカウントを接続" : "接続し直す"}
+            </Button>
+          </div>
+          {s.needsReconnect ? (
+            <p style={alertStyle} role="alert" data-testid={`${tid}-reconnect-warning`}>認証が切れています。再接続してください。</p>
+          ) : null}
+          {!s.canConnect ? (
+            <p style={hintStyle} data-testid={`${tid}-unconfigured`}>サーバーの接続設定が未完了のため接続できません。</p>
+          ) : null}
         </>
       )}
-
-      <div style={notesStyle}>
-        <p style={ownerNoteStyle} data-testid={`${tid}-owner-note`}>アカウントを切り替えても既存ファイルのオーナーは移りません。</p>
-        <p style={hintStyle}>新しいアカウントには、共有を管理したいファイルの編集権が必要です。</p>
-      </div>
     </section>
   );
 }

@@ -77,14 +77,12 @@ describe("Drive共有 詳細ダイアログ > Google アカウント", () => {
     expect(screen.getByTestId("fe7-drive-google-admin-only")).toBeInTheDocument();
   });
 
-  it("接続し直す → 確認 → Google の URL へ移動する (戻り先は /admin/roles)", async () => {
+  it("接続し直す → Google の URL へ移動する (戻り先は /admin/roles)", async () => {
     const user = userEvent.setup();
     const assign = vi.fn();
     vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, assign, origin: "https://fe2.example" } as Location);
     openDriveDialog();
     await user.click(await screen.findByTestId("fe7-drive-google-connect"));
-    expect(screen.getByTestId("fe7-drive-google-confirm")).toHaveTextContent("下書きとして残り");
-    await user.click(screen.getByTestId("fe7-drive-google-confirm-go"));
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
     expect(assign.mock.calls[0]![0]).toMatch(/^https:\/\/fe2\.example\/admin\/roles\?code=mock-code&state=mock_state_1$/);
     expect(window.sessionStorage.getItem("fe7:oauth-return-app")).toBe("driveshare");
@@ -130,11 +128,11 @@ describe("Google アカウント設定の入口", () => {
     expect(screen.queryByTestId("fe7-app-settings-badge-chat")).not.toBeInTheDocument();
   });
 
-  it("ダイアログ冒頭に一番下の設定への案内とジャンプボタンを出す", async () => {
+  it("ダイアログ冒頭に一番下の設定へのジャンプボタンを出す", async () => {
     const scroll = vi.fn();
     Element.prototype.scrollIntoView = scroll;
     openDriveDialog();
-    expect(screen.getByTestId("fe7-app-dialog-settings-hint")).toHaveTextContent("「Google アカウント」の設定もあります");
+    expect(screen.getByTestId("fe7-app-dialog-settings-jump")).toHaveTextContent("Google アカウントの設定へ");
     await userEvent.click(screen.getByTestId("fe7-app-dialog-settings-jump"));
     expect(scroll).toHaveBeenCalled();
   });
