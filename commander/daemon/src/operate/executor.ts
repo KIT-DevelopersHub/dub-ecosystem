@@ -395,10 +395,14 @@ export class OperateExecutor {
       const [field, source] = spec.findBy;
       const want = src(source);
       target = itemsOf(getPath(res.data, spec.findIn) ?? res.data)?.find((x) => getPath(x, field) === want);
+      if (spec.absent) return target ? "読み直した一覧にまだ対象が残っています" : null;
       if (!target) return "読み直した一覧に対象が見つかりません";
     }
     const expected: Record<string, VerifyValue | undefined> = {};
-    for (const [k, v] of Object.entries(spec.expect ?? {})) expected[k] = v === "$notNull" ? v : src(v);
+    for (const [k, v] of Object.entries(spec.expect ?? {})) {
+      if (typeof v === "string" && v.startsWith("$body.") && !(v.slice(6) in (c.body ?? {}))) continue;
+      expected[k] = v === "$notNull" ? v : src(v);
+    }
     if (spec.expectBody) {
       for (const [k, v] of Object.entries(c.body ?? {})) if (!spec.expectBody.except.includes(k)) expected[k] = v as VerifyValue;
     }

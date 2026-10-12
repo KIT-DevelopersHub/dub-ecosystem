@@ -21,8 +21,11 @@ export interface VerifySpec {
   findIn?: string;
   /** [field, source] that identifies the target inside `findIn`. */
   findBy?: [string, string];
+  /** The target must be gone from `findIn` (a removal). Only for complete, unpaginated lists. */
+  absent?: boolean;
   /** Every body key except these must read back unchanged. */
   expectBody?: { except: string[] };
+  /** A "$body.x" the call did not send is skipped (optional field, nothing to compare). */
   expect?: Record<string, VerifyValue>;
 }
 
