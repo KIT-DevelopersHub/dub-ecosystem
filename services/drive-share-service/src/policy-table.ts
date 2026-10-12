@@ -9,10 +9,12 @@
 // still write through the API as long as it carried the legacy `drive:write` key.
 import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate";
 
-// Switching the Google account Drive is accessed as moves every share the org manages, so it
-// is admin-only: the Drive共有 編集 tier AND identity:admin (system admin; maintainer lacks it).
-// The list read is gated the same — it names the accounts and who registered them.
-const GOOGLE_ACCOUNT_ADMIN = appLevel("driveshare", "edit", "drive:write", "identity:admin");
+// Drive共有 の「設定」 (the Google accounts Drive is accessed as) has its own toggles in
+// ロール管理 > Drive共有 > 詳細設定. Reading needs 閲覧 on the app + settings_view; changing (which
+// moves every share the org manages) needs 編集 on the app + settings_edit. Migration
+// identity/0017 gives both keys to the system admin role only; every other role starts off.
+const GOOGLE_ACCOUNT_VIEW = appLevel("driveshare", "view", "drive:settings_view");
+const GOOGLE_ACCOUNT_EDIT = appLevel("driveshare", "edit", "drive:settings_edit");
 
 export const POLICY_TABLE = definePolicyTable({
   // Liveness. INTERNAL, deliberately NOT PUBLIC.
@@ -44,10 +46,10 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /driveshare/files/:id/role-grants/:roleId/reapply": appLevel("driveshare", "edit", "drive:write"),
   "PUT /driveshare/files/:id/link": appLevel("driveshare", "edit", "drive:write"),
 
-  // ---- the Google accounts themselves: admin only ----
-  "GET /driveshare/google-account": GOOGLE_ACCOUNT_ADMIN,
-  "POST /driveshare/google-account/connect": GOOGLE_ACCOUNT_ADMIN,
-  "POST /driveshare/google-account/callback": GOOGLE_ACCOUNT_ADMIN,
-  "POST /driveshare/google-account/active": GOOGLE_ACCOUNT_ADMIN,
-  "DELETE /driveshare/google-account/accounts/:id": GOOGLE_ACCOUNT_ADMIN,
+  // ---- the Google accounts themselves: Drive共有 の「設定」 ----
+  "GET /driveshare/google-account": GOOGLE_ACCOUNT_VIEW,
+  "POST /driveshare/google-account/connect": GOOGLE_ACCOUNT_EDIT,
+  "POST /driveshare/google-account/callback": GOOGLE_ACCOUNT_EDIT,
+  "POST /driveshare/google-account/active": GOOGLE_ACCOUNT_EDIT,
+  "DELETE /driveshare/google-account/accounts/:id": GOOGLE_ACCOUNT_EDIT,
 });

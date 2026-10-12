@@ -14,8 +14,11 @@ export type {
   ListFilesResult,
   ListPermissionsResult,
   ListFilesQuery,
+  DriveGoogleAccount,
+  DriveGoogleAccountsStatus,
 } from "./driveShareApi.tsx";
 export { DriveShareProvider, DriveShareApiProvider, useDriveShareApi } from "./DriveShareProvider.tsx";
 export { DriveShareScreen } from "./DriveShareScreen.tsx";
+export { DriveShareSettingsDialog } from "./DriveShareSettings.tsx";
 export { driveShareRoutes, driveShareNav } from "./module.tsx";
 export type { DriveShareSourceRoute, DriveShareNavEntry } from "./module.tsx";

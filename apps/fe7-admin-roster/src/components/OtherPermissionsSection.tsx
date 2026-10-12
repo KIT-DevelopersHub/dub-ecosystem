@@ -8,9 +8,6 @@
 // 見せ方はアプリ一覧表と同じ「1 行 → クリックで詳細ダイアログ」に揃えてある。以前はここに 13 個の
 // トグルを全部展開していたので、アプリ一覧表よりこのエリアの方が長く、画面上部に項目が多すぎる
 // 状態だった。ロール管理の画面直下はアプリ表とこの表の 2 つだけ、細かい ON/OFF は必ずダイアログ。
-//
-// 表の末尾には組織全体の設定 (orgSettingsPanels.tsx・Google アカウント等) も同じ形で並ぶ。
-// こちらはロールの権限ではないので「許可」は —、変更は保存を待たず即時反映。
 import { useState } from "react";
 import type { identity } from "@dub/types";
 import { policy } from "@dub/types";
@@ -18,13 +15,8 @@ import { Badge, Button, DataTable } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import { domainLabel } from "../lib/permissionLabels";
 import { OtherDetailDialog } from "./OtherDetailDialog";
-import { OrgSettingDialog } from "./OrgSettingDialog";
-import { ORG_SETTINGS } from "./orgSettingsPanels";
-import { OAUTH_RETURN_SETTING, clearLinkedSetting, linkedSetting, pendingOAuthReturnSetting } from "../lib/oauthReturn";
 
 interface GroupRow {
-  /** permission = 権限の分類 (domain) / setting = 組織全体の設定 (ORG_SETTINGS の id). */
-  kind: "permission" | "setting";
   domain: string;
   label: string;
   granted: number;
@@ -73,35 +65,16 @@ export function OtherPermissionsSection({
   idPrefix?: string;
 }) {
   const [openDomain, setOpenDomain] = useState<string | null>(null);
-  // Google の同意画面から戻った直後 / 直リンク ?setting= のときは、その設定ダイアログを開いておく。
-  const [openSetting, setOpenSetting] = useState<string | null>(
-    () => pendingOAuthReturnSetting(OAUTH_RETURN_SETTING) ?? linkedSetting(),
-  );
-  const open = (row: GroupRow) => (row.kind === "setting" ? setOpenSetting(row.domain) : setOpenDomain(row.domain));
-  const closeSetting = () => {
-    setOpenSetting(null);
-    clearLinkedSetting();
-  };
 
   const all = policy.otherPermissions();
   const grantedCount = all.filter((e) => selected.includes(e.key as identity.PermissionKey)).length;
-  const permissionRows: GroupRow[] = policy.otherPermissionGroups().map((group) => ({
-    kind: "permission",
+  const rows: GroupRow[] = policy.otherPermissionGroups().map((group) => ({
     domain: group.domain,
     label: domainLabel(group.domain),
     granted: group.entries.filter((e) => selected.includes(e.key as identity.PermissionKey)).length,
     total: group.entries.length,
     dangerous: group.entries.some((e) => e.dangerous),
   }));
-  const settingRows: GroupRow[] = ORG_SETTINGS.map((setting) => ({
-    kind: "setting",
-    domain: setting.id,
-    label: setting.label,
-    granted: 0,
-    total: 0,
-    dangerous: false,
-  }));
-  const rows = [...permissionRows, ...settingRows];
 
   const columns: ColumnDef<GroupRow>[] = [
     {
@@ -113,9 +86,9 @@ export function OtherPermissionsSection({
         <button
           type="button"
           style={nameButtonStyle}
-          onClick={() => open(row)}
+          onClick={() => setOpenDomain(row.domain)}
           data-testid={`${idPrefix}-other-name-${row.domain}`}
-          aria-label={row.kind === "setting" ? `${row.label} の設定を開く` : `${row.label} の権限を開く`}
+          aria-label={`${row.label} の権限を開く`}
         >
           {row.label}
           {row.dangerous ? <span style={mutedStyle}>注意を含む</span> : null}
@@ -127,14 +100,11 @@ export function OtherPermissionsSection({
       header: "許可",
       minWidth: "7rem",
       noWrap: true,
-      cell: (row) =>
-        row.kind === "setting" ? (
-          <span style={mutedStyle}>—</span>
-        ) : (
-          <Badge tone={row.granted > 0 ? "success" : "neutral"} testId={`${idPrefix}-other-granted-${row.domain}`}>
-            {row.granted} / {row.total}
-          </Badge>
-        ),
+      cell: (row) => (
+        <Badge tone={row.granted > 0 ? "success" : "neutral"} testId={`${idPrefix}-other-granted-${row.domain}`}>
+          {row.granted} / {row.total}
+        </Badge>
+      ),
     },
     {
       key: "detail",
@@ -144,7 +114,7 @@ export function OtherPermissionsSection({
       hideable: false,
       cell: (row) => (
         <span style={detailCellStyle}>
-          <Button variant="secondary" size="sm" onClick={() => open(row)} testId={`${idPrefix}-other-detail-${row.domain}`}>
+          <Button variant="secondary" size="sm" onClick={() => setOpenDomain(row.domain)} testId={`${idPrefix}-other-detail-${row.domain}`}>
             設定
           </Button>
         </span>
@@ -155,13 +125,13 @@ export function OtherPermissionsSection({
   return (
     <section style={cardStyle} data-testid={`${idPrefix}-other-permissions`}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h3 style={titleStyle}>その他（どのアプリにも属さない権限・設定）</h3>
+        <h3 style={titleStyle}>その他（どのアプリにも属さない権限）</h3>
         <span style={countStyle} data-testid={`${idPrefix}-other-count`}>
           {grantedCount} / {all.length} 許可
         </span>
       </div>
       <p style={hintStyle}>
-        {permissionRows.map((row) => row.label).join(" / ")} のような、特定のアプリではなく組織全体に効く権限です。
+        {rows.map((row) => row.label).join(" / ")} のような、特定のアプリではなく組織全体に効く権限です。
         分類をクリックして個別に許可します。
       </p>
       <DataTable<GroupRow>
@@ -179,7 +149,6 @@ export function OtherPermissionsSection({
         lockedKeys={lockedKeys}
         idPrefix={idPrefix}
       />
-      <OrgSettingDialog settingId={openSetting} onClose={closeSetting} idPrefix={idPrefix} />
     </section>
   );
 }
