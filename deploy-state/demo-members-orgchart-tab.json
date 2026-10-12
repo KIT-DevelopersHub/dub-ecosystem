@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "members-orgchart-tab",
+  "worker": "dub-demo-members-orgchart-tab",
+  "url": "https://dub-demo-members-orgchart-tab.developershub-site.workers.dev",
+  "deployedSha": "1d07e242",
+  "branch": "feat/members-orgchart-top-tab",
+  "actor": "ko-tarou",
+  "markers": ["members-orgchart-page"],
+  "live": true,
+  "verifiedAt": "2026-10-11T11:12:59Z",
+  "updatedAt": "2026-10-11T11:12:59Z",
+  "note": "組織図を上タブへ"
+}
