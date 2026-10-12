@@ -1,4 +1,4 @@
-// Unit tests for the iOS/macOS (APNs) + Windows (WNS) remote-push controller.
+// Unit tests for the native remote-push controller (Apple APNs mint + Windows WNS).
 //
 // The native side (AppDelegate / the C++ runner) is stubbed via a mock
 // MethodChannel; the mo3 registration HTTP call is stubbed via a MockClient. We
@@ -79,29 +79,33 @@ void main() {
     expect(posted, isFalse);
   });
 
-  test('iOS: registers the APNs token with mo3 (platform ios)', () async {
-    mockNative('apns_hex_token');
-    http.Request? seen;
-    final np = NativePush(
-      platformOverride: 'ios',
-      channel: channel,
-      bearerProvider: () async => 'bearer_x',
-      httpClient: MockClient((req) async {
-        seen = req;
-        return http.Response('{"deviceId":"mdev_1"}', 201);
-      }),
-    );
+  for (final p in ['ios', 'macos']) {
+    test('$p: mints the APNs token but does NOT register it with mo3 '
+        '(mo3 sends $p via FCM; FcmPush registers the FCM token)', () async {
+      var invoked = false;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        invoked = call.method == 'registerForPush';
+        return 'apns_hex_token';
+      });
+      var posted = false;
+      final np = NativePush(
+        platformOverride: p,
+        channel: channel,
+        bearerProvider: () async => 'bearer_x',
+        httpClient: MockClient((_) async {
+          posted = true;
+          return http.Response('', 201);
+        }),
+      );
 
-    await np.init();
+      await np.init();
+      await fireNativeToken('refreshed_token');
 
-    expect(seen, isNotNull);
-    expect(seen!.method, 'POST');
-    expect(seen!.url.path, '/m/v1/devices');
-    expect(seen!.headers['authorization'], 'Bearer bearer_x');
-    final body = jsonDecode(seen!.body) as Map<String, dynamic>;
-    expect(body, {'platform': 'ios', 'pushToken': 'apns_hex_token'});
-    expect(np.hasPendingRegistration, isFalse);
-  });
+      expect(invoked, isTrue);
+      expect(posted, isFalse);
+      expect(np.hasPendingRegistration, isFalse);
+    });
+  }
 
   test('Windows: registers the WNS Channel URI with mo3 (platform windows)', () async {
     const uri = 'https://db5.notify.windows.com/?token=abc';
@@ -122,28 +126,12 @@ void main() {
     expect(body, {'platform': 'windows', 'pushToken': uri});
   });
 
-  test('macOS: sends platform macos', () async {
-    mockNative('mac_apns_token');
-    String? platform;
-    final np = NativePush(
-      platformOverride: 'macos',
-      channel: channel,
-      bearerProvider: () async => 'b',
-      httpClient: MockClient((req) async {
-        platform = (jsonDecode(req.body) as Map)['platform'] as String;
-        return http.Response('', 201);
-      }),
-    );
-    await np.init();
-    expect(platform, 'macos');
-  });
-
   test('defers when no bearer, then registers on retry once a bearer exists', () async {
     mockNative('tok_deferred');
     var calls = 0;
     String? bearer; // starts null (no mo3 session yet)
     final np = NativePush(
-      platformOverride: 'ios',
+      platformOverride: 'windows',
       channel: channel,
       bearerProvider: () async => bearer,
       httpClient: MockClient((_) async {
@@ -165,7 +153,7 @@ void main() {
   test('keeps the token pending when mo3 returns a non-201', () async {
     mockNative('tok');
     final np = NativePush(
-      platformOverride: 'ios',
+      platformOverride: 'windows',
       channel: channel,
       bearerProvider: () async => 'b',
       httpClient: MockClient((_) async => http.Response('nope', 500)),
@@ -178,7 +166,7 @@ void main() {
     mockNative(null); // no token from the initial registerForPush
     Map<String, dynamic>? body;
     final np = NativePush(
-      platformOverride: 'macos',
+      platformOverride: 'windows',
       channel: channel,
       bearerProvider: () async => 'b',
       httpClient: MockClient((req) async {
@@ -191,7 +179,7 @@ void main() {
     expect(body, isNull);
 
     await fireNativeToken('refreshed_token');
-    expect(body, {'platform': 'macos', 'pushToken': 'refreshed_token'});
+    expect(body, {'platform': 'windows', 'pushToken': 'refreshed_token'});
   });
 
   test('a MissingPluginException (native handler absent) is swallowed', () async {

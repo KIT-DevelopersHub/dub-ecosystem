@@ -1,11 +1,12 @@
+import FirebaseMessaging
 import Flutter
 import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   // Native<->Dart push channel (see lib/push/native_push.dart). iOS registers
-  // for APNs here and hands the raw device token back to Dart, which POSTs it to
-  // mo3-mobile-bff (platform "ios"); the server's APNs adapter sends to it.
+  // for APNs here and bridges the token into FirebaseMessaging so Dart's
+  // `getToken()` can mint the FCM token that mo3 actually sends to (#538).
   private var pushChannel: FlutterMethodChannel?
   private var pendingResult: FlutterResult?
 
@@ -41,6 +42,7 @@ import UIKit
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
+    Messaging.messaging().apnsToken = deviceToken
     let token = deviceToken.map { String(format: "%02x", $0) }.joined()
     pendingResult?(token)
     pendingResult = nil
