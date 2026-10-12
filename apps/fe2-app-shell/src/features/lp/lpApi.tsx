@@ -127,6 +127,72 @@ export interface LpPublishState {
   updatedBy: string | null;
 }
 
+// ── チケット販売（/tickets）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
+export type LpTicketFieldType = "text" | "textarea" | "select" | "checkbox";
+export interface LpTicketField {
+  id: string;
+  label: string;
+  type: LpTicketFieldType;
+  required: boolean;
+  options: string[];
+}
+export interface LpTicketType {
+  id: string;
+  name: string;
+  description: string;
+  priceJpy: number;
+  capacity: number | null;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface LpTicketTypeStats {
+  sold: number;
+  pending: number;
+  revenueJpy: number;
+  remaining: number | null;
+}
+export interface LpTicketTypeSummary extends LpTicketType {
+  stats: LpTicketTypeStats;
+}
+export interface LpTicketsState {
+  site: string;
+  enabled: boolean;
+  paymentReady: boolean;
+  /** LP_BASE_URL + "/tickets" */
+  publicUrl: string;
+  fields: LpTicketField[];
+  types: LpTicketTypeSummary[];
+  totals: { sold: number; revenueJpy: number };
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+export type LpTicketOrderStatus = "pending" | "paid" | "expired";
+export interface LpTicketOrder {
+  id: string;
+  ticketTypeId: string;
+  ticketTypeName: string;
+  amountJpy: number;
+  status: LpTicketOrderStatus;
+  buyerName: string;
+  buyerEmail: string;
+  answers: { fieldId: string; label: string; value: string }[];
+  createdAt: string;
+  paidAt: string | null;
+}
+export interface LpTicketOrdersPage {
+  items: LpTicketOrder[];
+  nextCursor: string | null;
+}
+export interface LpTicketTypeInput {
+  name: string;
+  description: string;
+  priceJpy: number;
+  capacity: number | null;
+  active: boolean;
+}
+
 export interface LpApi {
   /** Aggregated visit counters for a day range (app:lp:view). */
   getStats(query: LpStatsQuery): Promise<LpStats>;
@@ -144,6 +210,18 @@ export interface LpApi {
   getPublish(): Promise<LpPublishState>;
   /** Switch the live version (app:lp:edit + lp:publish). Unknown version → 400. */
   setPublish(input: { versionId: string }): Promise<LpPublishState>;
+  /** チケット販売の設定・券種・売れ行き (app:lp:view)。 */
+  getTickets(): Promise<LpTicketsState>;
+  /** 販売の公開/停止 (app:lp:edit + lp:publish)。 */
+  setTicketsEnabled(input: { enabled: boolean }): Promise<LpTicketsState>;
+  /** 入力項目を丸ごと置き換える (app:lp:edit)。 */
+  saveTicketFields(input: { fields: LpTicketField[] }): Promise<LpTicketsState>;
+  /** 券種を追加 (app:lp:edit)。 */
+  createTicketType(input: LpTicketTypeInput): Promise<LpTicketTypeSummary>;
+  /** 券種を部分更新 (app:lp:edit)。 */
+  updateTicketType(id: string, input: Partial<LpTicketTypeInput>): Promise<LpTicketTypeSummary>;
+  /** 購入者一覧・新しい順 (app:lp:edit = 個人情報)。 */
+  listTicketOrders(query: { cursor?: string; limit?: number }): Promise<LpTicketOrdersPage>;
 }
 
 const BASE = "/api/v1/lp";
@@ -189,5 +267,28 @@ export function createLpApi(api: ApiClient): LpApi {
     getPublish: () => api.request<LpPublishState>({ method: "GET", path: `${BASE}/publish` }),
     setPublish: (input) =>
       api.request<LpPublishState, { versionId: string }>({ method: "POST", path: `${BASE}/publish`, body: input }),
+    getTickets: () => api.request<LpTicketsState>({ method: "GET", path: `${BASE}/tickets` }),
+    setTicketsEnabled: (input) =>
+      api.request<LpTicketsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/tickets/enabled`, body: input }),
+    saveTicketFields: (input) =>
+      api.request<LpTicketsState, { fields: LpTicketField[] }>({
+        method: "POST",
+        path: `${BASE}/tickets/fields`,
+        body: input,
+      }),
+    createTicketType: (input) =>
+      api.request<LpTicketTypeSummary, LpTicketTypeInput>({ method: "POST", path: `${BASE}/tickets/types`, body: input }),
+    updateTicketType: (id, input) =>
+      api.request<LpTicketTypeSummary, Partial<LpTicketTypeInput>>({
+        method: "PATCH",
+        path: `${BASE}/tickets/types/${encodeURIComponent(id)}`,
+        body: input,
+      }),
+    listTicketOrders: (query) => {
+      const q: Record<string, string | number | boolean | undefined> = {};
+      if (query.cursor !== undefined) q.cursor = query.cursor;
+      if (query.limit !== undefined) q.limit = query.limit;
+      return api.request<LpTicketOrdersPage>({ method: "GET", path: `${BASE}/tickets/orders`, query: q });
+    },
   };
 }

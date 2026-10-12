@@ -4,6 +4,7 @@
 import type { MiddlewareHandler, Context } from "hono";
 import type { common, identity, policy } from "@dub/types";
 import type { SiteTrafficSource } from "./site-traffic";
+import type { StripeClient } from "./stripe";
 
 export type LpDevice = "mobile" | "desktop" | "bot" | "unknown";
 /** redirect = arrived through an issued 流入URL (linkId set); ingest = no matching link. */
@@ -125,7 +126,124 @@ export interface AggregateRow {
   lastVisitAt: string | null;
 }
 
-export interface LpRepo {
+// ---- tickets wire (lockstep with fe2 lpApi.tsx) ----
+export type LpTicketFieldType = "text" | "textarea" | "select" | "checkbox";
+export interface LpTicketField {
+  id: string;
+  label: string;
+  type: LpTicketFieldType;
+  required: boolean;
+  options: string[];
+}
+export interface LpTicketType {
+  id: string;
+  name: string;
+  description: string;
+  priceJpy: number;
+  capacity: number | null;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface LpTicketTypeStats {
+  sold: number;
+  pending: number;
+  revenueJpy: number;
+  remaining: number | null;
+}
+export interface LpTicketTypeSummary extends LpTicketType {
+  stats: LpTicketTypeStats;
+}
+export interface LpTicketsState {
+  site: string;
+  enabled: boolean;
+  paymentReady: boolean;
+  publicUrl: string;
+  fields: LpTicketField[];
+  types: LpTicketTypeSummary[];
+  totals: { sold: number; revenueJpy: number };
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+export type LpTicketOrderStatus = "pending" | "paid" | "expired";
+export interface LpTicketAnswer {
+  fieldId: string;
+  label: string;
+  value: string;
+}
+export interface LpTicketOrder {
+  id: string;
+  ticketTypeId: string;
+  ticketTypeName: string;
+  amountJpy: number;
+  status: LpTicketOrderStatus;
+  buyerName: string;
+  buyerEmail: string;
+  answers: LpTicketAnswer[];
+  createdAt: string;
+  paidAt: string | null;
+}
+export interface LpTicketOrdersPage {
+  items: LpTicketOrder[];
+  nextCursor: string | null;
+}
+export interface LpTicketTypeInput {
+  name: string;
+  description: string;
+  priceJpy: number;
+  capacity: number | null;
+  active: boolean;
+}
+
+// ---- tickets persistence ----
+export interface TicketSettingsRow {
+  site: string;
+  enabled: boolean;
+  fields: LpTicketField[];
+  updatedBy: string | null;
+  updatedAt: string;
+}
+export interface TicketTypeRow extends LpTicketType {
+  site: string;
+}
+export interface TicketOrderRow extends LpTicketOrder {
+  site: string;
+  stripeSessionId: string | null;
+}
+export interface TicketTypeAgg {
+  ticketTypeId: string;
+  sold: number;
+  pending: number;
+  revenueJpy: number;
+}
+
+export interface LpTicketRepo {
+  getTicketSettings(site: string): Promise<TicketSettingsRow | null>;
+  /** Upsert; only the given column changes. */
+  setTicketEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
+  setTicketFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string): Promise<void>;
+  listTicketTypes(site: string): Promise<TicketTypeRow[]>;
+  getTicketType(site: string, id: string): Promise<TicketTypeRow | null>;
+  insertTicketType(row: TicketTypeRow): Promise<void>;
+  updateTicketType(row: TicketTypeRow): Promise<void>;
+  /** Per type: paid count/revenue + pending created at/after `pendingSince`. */
+  ticketAggregates(site: string, pendingSince: string): Promise<TicketTypeAgg[]>;
+  /** Orders created at/after `since` (daily checkout cap). */
+  countOrdersSince(site: string, since: string): Promise<number>;
+  /** Atomic seat hold: inserts only while held (paid + fresh pending) < capacity. false = sold out. */
+  insertOrderIfAvailable(row: TicketOrderRow, capacity: number | null, pendingSince: string): Promise<boolean>;
+  getOrder(site: string, id: string): Promise<TicketOrderRow | null>;
+  getOrderBySession(sessionId: string): Promise<TicketOrderRow | null>;
+  setOrderSession(id: string, sessionId: string): Promise<void>;
+  /** WHERE status='pending'. true = this call made the transition. */
+  markOrderPaid(id: string, paidAt: string, sessionId: string | null): Promise<boolean>;
+  markOrderExpired(id: string): Promise<boolean>;
+  /** Newest first, keyset by (created_at, id). */
+  listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
+}
+
+export interface LpRepo extends LpTicketRepo {
   listLinks(orgId: string): Promise<LinkRow[]>;
   getLink(orgId: string, id: string): Promise<LinkRow | null>;
   getLinkBySlug(orgId: string, slug: string): Promise<LinkRow | null>;
@@ -176,4 +294,12 @@ export interface AppDeps {
   dailyVisitCap: number;
   /** Cloudflare Web Analytics reader. null when not configured in this environment. */
   siteTraffic: SiteTrafficSource | null;
+  newTicketTypeId: () => string;
+  newOrderId: () => string;
+  /** 1 日 (JST) に作れる checkout の上限。公開フォームからの書き込み濫用の天井。 */
+  dailyCheckoutCap: number;
+  /** null = STRIPE_SECRET_KEY 未設定（paymentReady=false）。 */
+  stripe: StripeClient | null;
+  /** STRIPE_WEBHOOK_SECRET。null なら webhook は常に 400。 */
+  stripeWebhookSecret: string | null;
 }

@@ -93,7 +93,16 @@ export const LP: AreaSpec = {
     },
   ],
   excluded: [],
-  pending: [],
+  // 公開版の切り替えとチケット販売は未開放（POST /lp/publish・/lp/tickets/enabled は
+  // lp:publish 付きのため抽出対象外）。
+  pending: [
+    { service: S, route: "GET /lp/publish" },
+    { service: S, route: "GET /lp/tickets" },
+    { service: S, route: "POST /lp/tickets/fields" },
+    { service: S, route: "POST /lp/tickets/types" },
+    { service: S, route: "PATCH /lp/tickets/types/:id" },
+    { service: S, route: "GET /lp/tickets/orders" },
+  ],
   ownerOpenedIrreversible: {
     "lp.links.create": "削除 API が無く発行した URL は一覧に残り同じ値も再発行できないが、停止はできる。オーナーが「流入 URL の発行」を名指しで開放",
   },

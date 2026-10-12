@@ -3080,6 +3080,232 @@ function createLpStore() {
   return { handle };
 }
 
+// ── LP管理 → チケット ──────────────────────────────────────────────────────────
+// Answers the ticket wire contract in features/lp/lpApi.tsx:
+//   GET   /api/v1/lp/tickets
+//   POST  /api/v1/lp/tickets/enabled     { enabled }
+//   POST  /api/v1/lp/tickets/fields      { fields }      400 on invalid list
+//   POST  /api/v1/lp/tickets/types       LpTicketTypeInput   201
+//   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
+//   GET   /api/v1/lp/tickets/orders      ?cursor&limit   newest first
+// Demo starts PUBLISHED but with paymentReady=false so the 「決済 未設定」 state is visible.
+// Orders are fixed (not random) so the stats a reviewer sees are the same every load.
+type DemoTicketField = { id: string; label: string; type: "text" | "textarea" | "select" | "checkbox"; required: boolean; options: string[] };
+type DemoTicketType = {
+  id: string;
+  name: string;
+  description: string;
+  priceJpy: number;
+  capacity: number | null;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+type DemoTicketOrder = {
+  id: string;
+  ticketTypeId: string;
+  ticketTypeName: string;
+  amountJpy: number;
+  status: "pending" | "paid" | "expired";
+  buyerName: string;
+  buyerEmail: string;
+  answers: { fieldId: string; label: string; value: string }[];
+  createdAt: string;
+  paidAt: string | null;
+};
+
+function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
+  const has = (k: string): boolean => input[k] !== undefined;
+  const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
+  if (!partial || has("name")) {
+    if (typeof input.name !== "string" || input.name.trim().length < 1 || input.name.trim().length > 60) return "name";
+  }
+  if (has("description") && (typeof input.description !== "string" || input.description.length > 300)) return "description";
+  if (!partial || has("priceJpy")) {
+    const p = input.priceJpy;
+    if (!isInt(p) || p < 0 || p > 1_000_000 || (p > 0 && p < 50)) return "priceJpy";
+  }
+  if (has("capacity") && input.capacity !== null && (!isInt(input.capacity) || input.capacity < 1 || input.capacity > 100_000))
+    return "capacity";
+  if (has("active") && typeof input.active !== "boolean") return "active";
+  return null;
+}
+
+function createLpTicketsStore() {
+  const t0 = "2026-09-20T09:00:00.000Z";
+  const settings = {
+    site: "hokuriku-it-conf.com",
+    enabled: true,
+    paymentReady: false,
+    // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
+    publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
+    fields: [
+      { id: "f_affiliation", label: "所属", type: "text", required: false, options: [] },
+      { id: "f_attendance", label: "参加区分", type: "select", required: true, options: ["現地", "オンライン"] },
+    ] as DemoTicketField[],
+    updatedAt: t0 as string | null,
+    updatedBy: "デモ 管理者" as string | null,
+  };
+  const types: DemoTicketType[] = [
+    { id: "tt_general", name: "一般", description: "社会人・一般の方", priceJpy: 3000, capacity: 200, active: true, sortOrder: 0, createdAt: t0, updatedAt: t0 },
+    { id: "tt_student", name: "学生", description: "学生証を当日ご提示ください", priceJpy: 1000, capacity: 100, active: true, sortOrder: 1, createdAt: t0, updatedAt: t0 },
+    { id: "tt_invite", name: "招待", description: "登壇者・スポンサー向け", priceJpy: 0, capacity: null, active: true, sortOrder: 2, createdAt: t0, updatedAt: t0 },
+  ];
+  const seedOrders: [string, string, string, "pending" | "paid" | "expired", string, string, string][] = [
+    // [id, typeId, buyer, status, createdAt, 所属, 参加区分]
+    ["ord_008", "tt_general", "山田 太郎", "pending", "2026-10-12T11:20:00.000Z", "北陸テック株式会社", "現地"],
+    ["ord_007", "tt_student", "佐藤 花子", "paid", "2026-10-11T08:05:00.000Z", "金沢工業大学", "現地"],
+    ["ord_006", "tt_general", "鈴木 一郎", "paid", "2026-10-10T13:40:00.000Z", "", "オンライン"],
+    ["ord_005", "tt_invite", "高橋 美咲", "paid", "2026-10-09T02:15:00.000Z", "スポンサー A 社", "現地"],
+    ["ord_004", "tt_general", "田中 健", "expired", "2026-10-07T10:00:00.000Z", "", "現地"],
+    ["ord_003", "tt_student", "伊藤 結衣", "paid", "2026-10-05T06:30:00.000Z", "富山大学", "オンライン"],
+    ["ord_002", "tt_general", "渡辺 翔", "paid", "2026-10-03T12:10:00.000Z", "石川システム", "現地"],
+    ["ord_001", "tt_general", "中村 葵", "paid", "2026-10-01T09:45:00.000Z", "福井 IT 協会", "現地"],
+  ];
+  const orders: DemoTicketOrder[] = seedOrders.map(([id, typeId, buyerName, status, createdAt, aff, att], i) => {
+    const t = types.find((x) => x.id === typeId)!;
+    return {
+      id,
+      ticketTypeId: t.id,
+      ticketTypeName: t.name,
+      amountJpy: t.priceJpy,
+      status,
+      buyerName,
+      buyerEmail: `buyer${8 - i}@example.com`,
+      answers: [
+        { fieldId: "f_affiliation", label: "所属", value: aff },
+        { fieldId: "f_attendance", label: "参加区分", value: att },
+      ],
+      createdAt,
+      paidAt: status === "paid" ? createdAt : null,
+    };
+  });
+
+  const summary = (t: DemoTicketType) => {
+    const mine = orders.filter((o) => o.ticketTypeId === t.id);
+    const paid = mine.filter((o) => o.status === "paid");
+    const pending = mine.filter((o) => o.status === "pending").length;
+    return {
+      ...t,
+      stats: {
+        sold: paid.length,
+        pending,
+        revenueJpy: paid.reduce((n, o) => n + o.amountJpy, 0),
+        remaining: t.capacity === null ? null : Math.max(0, t.capacity - paid.length - pending),
+      },
+    };
+  };
+  const state = () => {
+    const list = [...types].sort((a, b) => a.sortOrder - b.sortOrder).map(summary);
+    return {
+      ...settings,
+      fields: settings.fields.map((f) => ({ ...f, options: [...f.options] })),
+      types: list,
+      totals: {
+        sold: list.reduce((n, t) => n + t.stats.sold, 0),
+        revenueJpy: list.reduce((n, t) => n + t.stats.revenueJpy, 0),
+      },
+    };
+  };
+  const touch = (): void => {
+    settings.updatedAt = new Date().toISOString();
+    settings.updatedBy = "デモ 管理者";
+  };
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (!pathname.startsWith("/api/v1/lp/tickets")) return null;
+    const req = (body ?? {}) as Record<string, unknown>;
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets") return json(state());
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/enabled") {
+      if (typeof req.enabled !== "boolean") return problem("VALIDATION_FAILED", "enabled を指定してください", 400);
+      settings.enabled = req.enabled;
+      touch();
+      return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/fields") {
+      const fields = req.fields;
+      const ok =
+        Array.isArray(fields) &&
+        fields.length <= 20 &&
+        new Set(fields.map((f: DemoTicketField) => f?.id)).size === fields.length &&
+        fields.every(
+          (f: DemoTicketField) =>
+            typeof f?.id === "string" &&
+            /^[a-z0-9_-]{1,40}$/.test(f.id) &&
+            typeof f.label === "string" &&
+            f.label.trim().length >= 1 &&
+            f.label.length <= 60 &&
+            ["text", "textarea", "select", "checkbox"].includes(f.type) &&
+            typeof f.required === "boolean" &&
+            Array.isArray(f.options) &&
+            (f.type !== "select" || (f.options.length >= 1 && f.options.length <= 20)),
+        );
+      if (!ok) return problem("VALIDATION_FAILED", "入力項目の形式が正しくありません", 400);
+      settings.fields = (fields as DemoTicketField[]).map((f) => ({
+        id: f.id,
+        label: f.label.trim(),
+        type: f.type,
+        required: f.required,
+        options: f.type === "select" ? [...f.options] : [],
+      }));
+      touch();
+      return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/types") {
+      const bad = validDemoTicketType(req, false);
+      if (bad) return problem("VALIDATION_FAILED", `券種の入力が正しくありません（${bad}）`, 400);
+      const now = new Date().toISOString();
+      const created: DemoTicketType = {
+        id: `tt_${Math.random().toString(36).slice(2, 10)}`,
+        name: String(req.name).trim(),
+        description: typeof req.description === "string" ? req.description.trim() : "",
+        priceJpy: req.priceJpy as number,
+        capacity: (req.capacity as number | null | undefined) ?? null,
+        active: typeof req.active === "boolean" ? req.active : true,
+        sortOrder: types.length,
+        createdAt: now,
+        updatedAt: now,
+      };
+      types.push(created);
+      return json(summary(created), 201);
+    }
+
+    const typeMatch = /^\/api\/v1\/lp\/tickets\/types\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && typeMatch) {
+      const t = types.find((x) => x.id === decodeURIComponent(typeMatch[1]!));
+      if (!t) return problem("NOT_FOUND", "その券種は見つかりません", 404);
+      const bad = validDemoTicketType(req, true);
+      if (bad) return problem("VALIDATION_FAILED", `券種の入力が正しくありません（${bad}）`, 400);
+      if (typeof req.name === "string") t.name = req.name.trim();
+      if (typeof req.description === "string") t.description = req.description.trim();
+      if (typeof req.priceJpy === "number") t.priceJpy = req.priceJpy;
+      if (req.capacity !== undefined) t.capacity = req.capacity as number | null;
+      if (typeof req.active === "boolean") t.active = req.active;
+      t.updatedAt = new Date().toISOString();
+      return json(summary(t));
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
+      const cursor = url.searchParams.get("cursor");
+      const sorted = [...orders].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+      const startIdx = cursor ? sorted.findIndex((o) => o.id === cursor) + 1 : 0;
+      const items = sorted.slice(startIdx, startIdx + limit);
+      const nextCursor = startIdx + limit < sorted.length ? (items[items.length - 1]?.id ?? null) : null;
+      return json({ items, nextCursor });
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -3128,6 +3354,8 @@ export function createDemoFetch(): typeof fetch {
   const chatStore = createChatStore();
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
   const lpStore = createLpStore();
+  // LP チケット販売（券種・入力項目・購入者）— LP管理のチケットタブ。
+  const lpTicketsStore = createLpTicketsStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -3158,6 +3386,7 @@ export function createDemoFetch(): typeof fetch {
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??
       lpStore.handle(method, url.pathname, url, parsedBody) ??
+      lpTicketsStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.

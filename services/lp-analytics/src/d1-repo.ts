@@ -1,6 +1,252 @@
 // D1-backed LpRepo. Owns namespace `lp_*` only (enforced by @dub/db strict client).
 import type { DbClient } from "@dub/db";
-import type { AggregateBy, AggregateQuery, AggregateRow, LinkRow, LpDevice, LpRepo, LpVisitKind, VisitRow } from "./types";
+import type {
+  AggregateBy,
+  AggregateQuery,
+  AggregateRow,
+  LinkRow,
+  LpDevice,
+  LpRepo,
+  LpTicketAnswer,
+  LpTicketField,
+  LpTicketOrderStatus,
+  LpTicketRepo,
+  LpVisitKind,
+  TicketOrderRow,
+  TicketTypeRow,
+  VisitRow,
+} from "./types";
+
+interface TicketTypeDbRow {
+  id: string;
+  site: string;
+  name: string;
+  description: string;
+  price_jpy: number;
+  capacity: number | null;
+  active: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+interface TicketOrderDbRow {
+  id: string;
+  site: string;
+  ticket_type_id: string;
+  ticket_type_name: string;
+  amount_jpy: number;
+  status: string;
+  buyer_name: string;
+  buyer_email: string;
+  answers_json: string;
+  stripe_session_id: string | null;
+  created_at: string;
+  paid_at: string | null;
+}
+
+function parseJsonArray<T>(raw: string | null | undefined): T[] {
+  try {
+    const v = JSON.parse(raw ?? "[]") as unknown;
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+const toTicketType = (r: TicketTypeDbRow): TicketTypeRow => ({
+  id: r.id,
+  site: r.site,
+  name: r.name,
+  description: r.description,
+  priceJpy: r.price_jpy,
+  capacity: r.capacity,
+  active: r.active === 1,
+  sortOrder: r.sort_order,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+const toTicketOrder = (r: TicketOrderDbRow): TicketOrderRow => ({
+  id: r.id,
+  site: r.site,
+  ticketTypeId: r.ticket_type_id,
+  ticketTypeName: r.ticket_type_name,
+  amountJpy: r.amount_jpy,
+  status: r.status as LpTicketOrderStatus,
+  buyerName: r.buyer_name,
+  buyerEmail: r.buyer_email,
+  answers: parseJsonArray<LpTicketAnswer>(r.answers_json),
+  stripeSessionId: r.stripe_session_id,
+  createdAt: r.created_at,
+  paidAt: r.paid_at,
+});
+
+// Seats held = paid + pending still inside the hold window.
+const HELD = "(status = 'paid' OR (status = 'pending' AND created_at >= ?))";
+
+function ticketRepo(db: DbClient): LpTicketRepo {
+  return {
+    async getTicketSettings(site) {
+      const r = await db.first<{ site: string; enabled: number; fields_json: string; updated_by: string | null; updated_at: string }>(
+        "SELECT site, enabled, fields_json, updated_by, updated_at FROM lp_ticket_settings WHERE site = ?",
+        site,
+      );
+      return r
+        ? {
+            site: r.site,
+            enabled: r.enabled === 1,
+            fields: parseJsonArray<LpTicketField>(r.fields_json),
+            updatedBy: r.updated_by,
+            updatedAt: r.updated_at,
+          }
+        : null;
+    },
+    async setTicketEnabled(site, enabled, updatedBy, updatedAt) {
+      await db.run(
+        `INSERT INTO lp_ticket_settings (site, enabled, fields_json, updated_by, updated_at) VALUES (?, ?, '[]', ?, ?)
+         ON CONFLICT(site) DO UPDATE SET enabled = excluded.enabled, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+        site,
+        enabled ? 1 : 0,
+        updatedBy,
+        updatedAt,
+      );
+    },
+    async setTicketFields(site, fields, updatedBy, updatedAt) {
+      await db.run(
+        `INSERT INTO lp_ticket_settings (site, enabled, fields_json, updated_by, updated_at) VALUES (?, 0, ?, ?, ?)
+         ON CONFLICT(site) DO UPDATE SET fields_json = excluded.fields_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+        site,
+        JSON.stringify(fields),
+        updatedBy,
+        updatedAt,
+      );
+    },
+    async listTicketTypes(site) {
+      return (
+        await db.all<TicketTypeDbRow>("SELECT * FROM lp_ticket_types WHERE site = ? ORDER BY sort_order, created_at", site)
+      ).map(toTicketType);
+    },
+    async getTicketType(site, id) {
+      const r = await db.first<TicketTypeDbRow>("SELECT * FROM lp_ticket_types WHERE site = ? AND id = ?", site, id);
+      return r ? toTicketType(r) : null;
+    },
+    async insertTicketType(t) {
+      await db.run(
+        `INSERT INTO lp_ticket_types (id, site, name, description, price_jpy, capacity, active, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        t.id,
+        t.site,
+        t.name,
+        t.description,
+        t.priceJpy,
+        t.capacity,
+        t.active ? 1 : 0,
+        t.sortOrder,
+        t.createdAt,
+        t.updatedAt,
+      );
+    },
+    async updateTicketType(t) {
+      await db.run(
+        `UPDATE lp_ticket_types SET name = ?, description = ?, price_jpy = ?, capacity = ?, active = ?, sort_order = ?, updated_at = ?
+         WHERE site = ? AND id = ?`,
+        t.name,
+        t.description,
+        t.priceJpy,
+        t.capacity,
+        t.active ? 1 : 0,
+        t.sortOrder,
+        t.updatedAt,
+        t.site,
+        t.id,
+      );
+    },
+    async ticketAggregates(site, pendingSince) {
+      const rows = await db.all<{ k: string; sold: number | null; pending: number | null; revenue: number | null }>(
+        `SELECT ticket_type_id AS k,
+                SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END) AS sold,
+                SUM(CASE WHEN status = 'pending' AND created_at >= ? THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN status = 'paid' THEN amount_jpy ELSE 0 END) AS revenue
+         FROM lp_ticket_orders WHERE site = ? AND status != 'expired' GROUP BY ticket_type_id`,
+        pendingSince,
+        site,
+      );
+      return rows.map((r) => ({ ticketTypeId: r.k, sold: r.sold ?? 0, pending: r.pending ?? 0, revenueJpy: r.revenue ?? 0 }));
+    },
+    async countOrdersSince(site, since) {
+      const r = await db.first<{ c: number }>(
+        "SELECT COUNT(*) AS c FROM lp_ticket_orders WHERE site = ? AND created_at >= ?",
+        site,
+        since,
+      );
+      return r?.c ?? 0;
+    },
+    async insertOrderIfAvailable(o, capacity, pendingSince) {
+      // One statement = atomic check-and-insert (no oversell under concurrent checkouts).
+      const res = await db.run(
+        `INSERT INTO lp_ticket_orders (id, site, ticket_type_id, ticket_type_name, amount_jpy, status, buyer_name, buyer_email,
+                                       answers_json, stripe_session_id, created_at, paid_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE ? IS NULL OR (SELECT COUNT(*) FROM lp_ticket_orders WHERE site = ? AND ticket_type_id = ? AND ${HELD}) < ?`,
+        o.id,
+        o.site,
+        o.ticketTypeId,
+        o.ticketTypeName,
+        o.amountJpy,
+        o.status,
+        o.buyerName,
+        o.buyerEmail,
+        JSON.stringify(o.answers),
+        o.stripeSessionId,
+        o.createdAt,
+        o.paidAt,
+        capacity,
+        o.site,
+        o.ticketTypeId,
+        pendingSince,
+        capacity,
+      );
+      return res.meta.changes > 0;
+    },
+    async getOrder(site, id) {
+      const r = await db.first<TicketOrderDbRow>("SELECT * FROM lp_ticket_orders WHERE site = ? AND id = ?", site, id);
+      return r ? toTicketOrder(r) : null;
+    },
+    async getOrderBySession(sessionId) {
+      const r = await db.first<TicketOrderDbRow>("SELECT * FROM lp_ticket_orders WHERE stripe_session_id = ?", sessionId);
+      return r ? toTicketOrder(r) : null;
+    },
+    async setOrderSession(id, sessionId) {
+      await db.run("UPDATE lp_ticket_orders SET stripe_session_id = ? WHERE id = ?", sessionId, id);
+    },
+    async markOrderPaid(id, paidAt, sessionId) {
+      const res = await db.run(
+        `UPDATE lp_ticket_orders SET status = 'paid', paid_at = ?, stripe_session_id = COALESCE(stripe_session_id, ?)
+         WHERE id = ? AND status = 'pending'`,
+        paidAt,
+        sessionId,
+        id,
+      );
+      return res.meta.changes > 0;
+    },
+    async markOrderExpired(id) {
+      const res = await db.run("UPDATE lp_ticket_orders SET status = 'expired' WHERE id = ? AND status = 'pending'", id);
+      return res.meta.changes > 0;
+    },
+    async listOrders(site, cursor, limit) {
+      const binds: unknown[] = [site];
+      let sql = "SELECT * FROM lp_ticket_orders WHERE site = ?";
+      const c = cursor ? parseCursor(cursor) : null;
+      if (c) {
+        sql += " AND (created_at < ? OR (created_at = ? AND id < ?))";
+        binds.push(c.day, c.day, c.id);
+      }
+      sql += " ORDER BY created_at DESC, id DESC LIMIT ?";
+      binds.push(limit);
+      return (await db.all<TicketOrderDbRow>(sql, ...binds)).map(toTicketOrder);
+    },
+  };
+}
 
 interface LinkDbRow {
   id: string;
@@ -85,6 +331,7 @@ function parseCursor(raw: string): { day: string; id: string } | null {
 
 export function createD1LpRepo(db: DbClient): LpRepo {
   return {
+    ...ticketRepo(db),
     async listLinks(orgId) {
       return (await db.all<LinkDbRow>("SELECT * FROM lp_links WHERE org_id = ?", orgId)).map(toLink);
     },

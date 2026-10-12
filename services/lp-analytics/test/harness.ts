@@ -54,6 +54,7 @@ export async function makeApp(
   dailyVisitCap = 5000,
   siteTraffic: SiteTrafficSource | null = null,
   extraGrants: identity.PermissionKey[] = [],
+  overrides: Partial<AppDeps> = {},
 ) {
   let now = "2026-10-07T03:00:00.000Z";
   let seq = 0;
@@ -70,6 +71,12 @@ export async function makeApp(
     newVisitId: () => id("lpv"),
     dailyVisitCap,
     siteTraffic,
+    newTicketTypeId: () => id("tkt"),
+    newOrderId: () => id("tko"),
+    dailyCheckoutCap: 300,
+    stripe: null,
+    stripeWebhookSecret: null,
+    ...overrides,
   };
   const app = createApp(deps);
   const clock: Clock = { set: (iso) => (now = iso) };
