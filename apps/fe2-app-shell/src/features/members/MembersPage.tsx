@@ -1,6 +1,6 @@
-// 運営メンバー管理 top screen. Hosts the two views (チーム別 / 組織図) behind Tabs,
-// plus the toolbar (メンバー追加 / チーム追加 / 印刷) and the shared create/edit dialogs
-// + destructive ConfirmDialog. Read = identity:read (route gate).
+// 運営メンバー管理 top screen. Hosts the チーム別 view, the toolbar (メンバー追加 / チーム追加)
+// and the shared create/edit dialogs + destructive ConfirmDialog. Read = identity:read (route gate).
+// 組織図 lives in its own top-level subnav tab (/members/org-chart, MembersOrgChartPage).
 //
 // WRITE = the policy layer's 編集 tier on the 運営メンバー app (app:members:edit) AND
 // identity:admin — the SAME requirement member-service enforces (requireMembersEdit). When
@@ -8,11 +8,10 @@
 // reason banner is shown, so a 閲覧 user never presses a button that would 403.
 // NOTE: the flat 一覧 tab was removed — the per-person list (氏名/ロール/アドレス/ログイン
 // 紐付け) is owned by the ユーザー名簿 side, which the members app is being merged into.
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   PageHeader,
   Button,
-  Tabs,
   ConfirmDialog,
   SkeletonLoader,
   ErrorState,
@@ -22,13 +21,10 @@ import { useAppCapability } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
 import { TeamsView } from "./TeamsView.tsx";
-import { OrgChartView } from "./OrgChartView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { TeamFormDialog } from "./TeamFormDialog.tsx";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import styles from "./members.module.css";
-
-type TabId = "teams" | "org";
 
 export function MembersPage(): JSX.Element {
   const { canEdit } = useAppCapability("members");
@@ -36,7 +32,6 @@ export function MembersPage(): JSX.Element {
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
 
-  const [tab, setTab] = useState<TabId>("teams");
   const [memberDialog, setMemberDialog] = useState<{ open: boolean; editing: OrgMember | null }>({ open: false, editing: null });
   const [teamDialog, setTeamDialog] = useState<{ open: boolean; editing: MemberTeam | null }>({ open: false, editing: null });
   const [confirm, setConfirm] = useState<
@@ -47,9 +42,8 @@ export function MembersPage(): JSX.Element {
 
   const teams = overview.data?.teams ?? [];
   const members = overview.data?.members ?? [];
-  // 辞退(declined)はチーム別/組織図には出さない(データは保持・辞退者は運営名簿の
-  // 「辞退者」フィルタで参照)。OrgChartView も内部で declined を除外しているが、
-  // チーム別ビューと母集団を揃えるためここで先に落とす。
+  // 辞退(declined)はチーム別には出さない(データは保持・辞退者は運営名簿の
+  // 「辞退者」フィルタで参照)。
   const rosterMembers = members.filter((m) => m.status !== "declined");
 
   const openAddMember = () => setMemberDialog({ open: true, editing: null });
@@ -78,7 +72,7 @@ export function MembersPage(): JSX.Element {
         <AppReadOnlyNotice appId="members" testId="members-readonly-notice" />
         <PageHeader
           title="運営メンバー"
-          description="運営メンバーの招待状況と所属チームを管理します（組織図PDFの代替）"
+          description="運営メンバーの招待状況と所属チームを管理します"
           actions={
             <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "var(--dub-space-2)" }}>
               <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} disabled={!canEdit} onClick={openAddTeam} testId="members-add-team">
@@ -90,38 +84,17 @@ export function MembersPage(): JSX.Element {
             </span>
           }
         />
-
-        <div className={styles.toolbar}>
-          <Tabs
-            items={[
-              { id: "teams", label: "チーム別" },
-              { id: "org", label: "組織図" },
-            ]}
-            activeId={tab}
-            onChange={(id) => setTab(id as TabId)}
-            testId="members-tabs"
-          />
-          <div className={styles.toolbarSpacer} />
-          {tab === "org" ? (
-            <Button variant="secondary" onClick={() => window.print()} testId="members-print">
-              印刷 / PNG
-            </Button>
-          ) : null}
-        </div>
       </div>
 
-      {tab === "teams" ? (
-        <TeamsView
-          teams={teams}
-          members={rosterMembers}
-          readOnly={!canEdit}
-          onEditMember={openEditMember}
-          onDeleteMember={(m) => setConfirm({ kind: "member", target: m })}
-          onEditTeam={openEditTeam}
-          onDeleteTeam={(t) => setConfirm({ kind: "team", target: t })}
-        />
-      ) : null}
-      {tab === "org" ? <OrgChartView teams={teams} members={rosterMembers} /> : null}
+      <TeamsView
+        teams={teams}
+        members={rosterMembers}
+        readOnly={!canEdit}
+        onEditMember={openEditMember}
+        onDeleteMember={(m) => setConfirm({ kind: "member", target: m })}
+        onEditTeam={openEditTeam}
+        onDeleteTeam={(t) => setConfirm({ kind: "team", target: t })}
+      />
 
       <MemberFormDialog
         open={memberDialog.open}

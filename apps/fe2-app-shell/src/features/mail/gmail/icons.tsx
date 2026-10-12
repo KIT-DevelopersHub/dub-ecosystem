@@ -35,7 +35,9 @@ export type MailIconName =
   | "image"
   | "file"
   | "download"
-  | "clock";
+  | "clock"
+  | "person"
+  | "people";
 
 const PATHS: Record<MailIconName, JSX.Element> = {
   inbox: (
@@ -181,6 +183,20 @@ const PATHS: Record<MailIconName, JSX.Element> = {
     <>
       <circle cx="12" cy="12" r="8.5" />
       <path d="M12 7.5V12l3 2" />
+    </>
+  ),
+  person: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5" />
+    </>
+  ),
+  people: (
+    <>
+      <circle cx="9" cy="8.5" r="3" />
+      <path d="M3 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" />
+      <path d="M15.5 5.6a3 3 0 0 1 0 5.8" />
+      <path d="M17.5 14.3c2 .7 3.5 2.6 3.5 5.2" />
     </>
   ),
 };

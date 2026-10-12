@@ -360,4 +360,26 @@ export class D1IdentityRepo implements IdentityRepo {
     );
     return rows.map((r) => r.user_id);
   }
+
+  async orgWideRolePeers(orgId: string, userId: string, permission: identity.PermissionKey): Promise<string[]> {
+    // One query: the caller's org-wide roles carrying `permission`, joined back to every other
+    // org-wide holder of those roles.
+    const rows = await this.db.all<{ user_id: string }>(
+      `SELECT DISTINCT peer.user_id
+         FROM identity_role_assignments mine
+         JOIN identity_role_permissions rp ON rp.role_id = mine.role_id AND rp.permission_key = ?
+         JOIN identity_role_assignments peer ON peer.role_id = mine.role_id AND peer.org_id = mine.org_id
+         JOIN identity_users u ON u.id = peer.user_id
+        WHERE mine.user_id = ? AND mine.org_id = ?
+          AND mine.resource_type IS NULL AND mine.resource_id IS NULL
+          AND peer.resource_type IS NULL AND peer.resource_id IS NULL
+          AND peer.user_id <> ?
+          AND u.status = 'active'`,
+      permission,
+      userId,
+      orgId,
+      userId,
+    );
+    return rows.map((r) => r.user_id);
+  }
 }

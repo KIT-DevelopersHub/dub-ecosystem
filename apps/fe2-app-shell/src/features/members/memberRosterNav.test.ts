@@ -5,6 +5,7 @@ import { activeSectionId } from "./MemberRosterNav.tsx";
 describe("activeSectionId", () => {
   it("maps each section root path to its id", () => {
     expect(activeSectionId("/members")).toBe("members");
+    expect(activeSectionId("/members/org-chart")).toBe("org-chart");
     expect(activeSectionId("/members/roster")).toBe("member-roster");
     expect(activeSectionId("/admin/users")).toBe("roster");
     expect(activeSectionId("/participation")).toBe("participation");

@@ -8,19 +8,26 @@
 // (mailModel.fixtures.ts).
 import type { mail } from "@dub/types";
 
-export type FolderId = "inbox" | "starred" | "sent" | "scheduled" | "drafts" | "trash" | "archive";
+export type FolderId = "inbox" | "mine" | "others" | "starred" | "sent" | "scheduled" | "drafts" | "trash" | "archive";
 
 /** Folders that appear in the left nav (archive is Gmail's "All Mail"-ish sink).
  *  `scheduled` (予約済み) is NOT thread-backed — it lists parked future sends from a
- *  separate store slice (see ScheduledList), so it renders its own pane. */
+ *  separate store slice (see ScheduledList), so it renders its own pane.
+ *  `mine` / `others` are filter views over the inbox (自分宛て / ロール共有・監督で見えるもの);
+ *  the sidebar hides them unless the viewer actually has a non-mine thread (SHARED_FOLDERS). */
 export const NAV_FOLDERS: { id: FolderId; label: string; icon: string }[] = [
   { id: "inbox", label: "受信トレイ", icon: "inbox" },
+  { id: "mine", label: "自分宛て", icon: "person" },
+  { id: "others", label: "自分宛て以外", icon: "people" },
   { id: "starred", label: "スター付き", icon: "star" },
   { id: "sent", label: "送信済み", icon: "send" },
   { id: "scheduled", label: "予約済み", icon: "clock" },
   { id: "drafts", label: "下書き", icon: "draft" },
   { id: "trash", label: "ゴミ箱", icon: "trash" },
 ];
+
+/** Inbox filter views that only make sense when some mail is NOT addressed to the viewer. */
+export const SHARED_FOLDERS: ReadonlySet<FolderId> = new Set<FolderId>(["mine", "others"]);
 
 export interface Label {
   id: string;
@@ -57,6 +64,9 @@ export interface MailMsg {
    *  (too large / message truncated), surfaced as a disabled chip rather than silently
    *  dropped (改善#2). */
   attachments?: mail.MailAttachment[];
+  /** False when this received message reached the viewer only via oversight (mail:read_all)
+   *  or role sharing (mail:read_role_shared), not their own mailbox. Absent = mine. */
+  mine?: boolean;
 }
 
 export interface MailThreadModel {
@@ -88,6 +98,24 @@ export function initial(p: MailPerson): string {
 /** A thread is unread when any of its messages is unread. */
 export function threadUnread(t: MailThreadModel): boolean {
   return t.messages.some((m) => !m.read);
+}
+
+/** A thread is "mine" when any received message was delivered to the viewer (absent = mine).
+ *  Sent-only threads are always mine. */
+export function threadMine(t: MailThreadModel): boolean {
+  const inbound = t.messages.filter((m) => !m.outbound);
+  return inbound.length === 0 || inbound.some((m) => m.mine !== false);
+}
+
+/** Does the viewer see any mail not addressed to them? Gates the 自分宛て / 自分宛て以外 views. */
+export function hasSharedMail(threads: MailThreadModel[]): boolean {
+  return threads.some((t) => !t.purged && t.folder !== "sent" && !threadMine(t));
+}
+
+/** Whose mailbox a non-mine thread came from: the first `to` of its first received message. */
+export function sharedRecipientLabel(t: MailThreadModel): string {
+  const p = t.messages.find((m) => !m.outbound)?.to[0];
+  return p && (p.name?.trim() || p.email) ? `${displayName(p)} 宛て` : "共有メール";
 }
 
 /** Newest message drives the row's timestamp + preview. */
@@ -128,6 +156,8 @@ export function avatarColor(p: MailPerson): string {
 /** Does a thread belong to the given folder view? */
 export function inFolder(t: MailThreadModel, folder: FolderId): boolean {
   if (folder === "starred") return t.starred && t.folder !== "trash";
+  if (folder === "mine") return t.folder === "inbox" && threadMine(t);
+  if (folder === "others") return t.folder === "inbox" && !threadMine(t);
   return t.folder === folder;
 }
 
