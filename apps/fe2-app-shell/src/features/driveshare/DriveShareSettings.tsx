@@ -1,6 +1,7 @@
-// Drive共有 > 設定 (admin only). Holds the Google account drive-share-service acts as: several
-// accounts can be registered and the one in use switched. It is an org-wide setting of this app
-// (not per role), so it lives here rather than in ロール管理.
+// Drive共有 > 設定. Who sees it is set per role in ロール管理 > Drive共有 > 詳細設定 > 「設定」ボタン
+// (無効 = no button / 閲覧 = read-only list / 編集 = add・switch・remove).
+// Holds the Google account drive-share-service acts as: several accounts can be registered and
+// the one in use switched. The accounts are org-wide (not per role), so they live here.
 //
 //   - 「アカウントを追加」「再接続」 leave the SPA for Google; Google returns to /driveshare?code&state
 //     (the server only accepts that one path) and the dialog reopens to finish the add.
@@ -20,11 +21,12 @@ export const DRIVE_SETTINGS_PATH = "/driveshare";
 export const GOOGLE_ACCOUNT_SETTING = "google-account";
 const GOOGLE_KEY = queryKeys.feature("driveshare", "google-account");
 
-/** Same gate as the server's POLICY_TABLE: Drive共有 編集 + drive:write + identity:admin. */
-export function useCanManageDriveSettings(): boolean {
+/** Same gate as the server's POLICY_TABLE: view = app 閲覧 + settings_view, edit = app 編集 + settings_edit. */
+export function useDriveSettingsAccess(): { canView: boolean; canEdit: boolean } {
   const { can } = usePermissions();
-  const { canEdit } = useAppCapability("driveshare");
-  return canEdit && can("drive:write") && can("identity:admin");
+  const app = useAppCapability("driveshare");
+  const canEdit = app.canEdit && can("drive:settings_edit");
+  return { canView: canEdit || (app.canView && can("drive:settings_view")), canEdit };
 }
 
 interface OAuthReturn {
@@ -128,13 +130,13 @@ function GoogleAccountSection(): JSX.Element {
   const toast = useToast();
   // Permissions are all false while /me loads: wait before judging admin (or the return is lost).
   const ready = useAuth().status !== "loading";
-  const isAdmin = useCanManageDriveSettings();
+  const { canView, canEdit } = useDriveSettingsAccess();
   const tid = "fe2-driveshare-google";
 
   const status = useQuery({
     queryKey: GOOGLE_KEY,
     queryFn: () => driveApi.getGoogleAccounts(),
-    enabled: isAdmin,
+    enabled: canView,
     // The server probes Google; reopening the dialog within a minute reuses the answer.
     staleTime: 60_000,
   });
@@ -185,7 +187,7 @@ function GoogleAccountSection(): JSX.Element {
     if (!ret) return;
     started.current = true;
     clearSettingsParams();
-    if (!isAdmin) return;
+    if (!canEdit) return;
     const key = ret.state ?? ret.error ?? "";
     if (handledStates.has(key)) return;
     handledStates.add(key);
@@ -194,7 +196,7 @@ function GoogleAccountSection(): JSX.Element {
       return;
     }
     complete.mutate({ code: ret.code, state: ret.state }, { onError: (err) => setReturnError(errorText(err)) });
-  }, [ready, isAdmin, complete]);
+  }, [ready, canEdit, complete]);
 
   function goToGoogle(account?: DriveGoogleAccount) {
     setLeavingFor(account?.id ?? null);
@@ -221,8 +223,8 @@ function GoogleAccountSection(): JSX.Element {
 
       {!ready ? (
         <Skeleton variant="rect" height={58} testId={`${tid}-auth-loading`} />
-      ) : !isAdmin ? (
-        <p style={hintStyle} data-testid={`${tid}-admin-only`}>システム管理者だけが変更できます。</p>
+      ) : !canView ? (
+        <p style={hintStyle} data-testid={`${tid}-no-access`}>この設定を見る権限がありません。</p>
       ) : status.isPending || complete.isPending ? (
         <div style={listStyle} data-testid={`${tid}-loading`} aria-busy="true">
           {[0, 1].map((i) => (
@@ -244,6 +246,9 @@ function GoogleAccountSection(): JSX.Element {
         </div>
       ) : (
         <>
+          {!canEdit ? (
+            <p style={hintStyle} data-testid={`${tid}-read-only`}>閲覧のみの権限です。追加・切り替え・削除はできません。</p>
+          ) : null}
           {activeBroken ? (
             <p style={alertStyle} role="alert" data-testid={`${tid}-reconnect-warning`}>
               使用中のアカウントの認証が切れています。再接続してください。
@@ -273,7 +278,7 @@ function GoogleAccountSection(): JSX.Element {
                     {a.needsReconnect && a.kind === "secret" ? <span style={alertStyle}>サーバー設定の更新が必要です</span> : null}
                   </div>
                   <span style={actionsStyle}>
-                    {a.needsReconnect && a.kind === "connected" && s.canConnect ? (
+                    {canEdit && a.needsReconnect && a.kind === "connected" && s.canConnect ? (
                       <Button
                         variant="primary"
                         size="sm"
@@ -285,7 +290,7 @@ function GoogleAccountSection(): JSX.Element {
                         再接続
                       </Button>
                     ) : null}
-                    {!a.active ? (
+                    {canEdit && !a.active ? (
                       <Button
                         variant="secondary"
                         size="sm"
@@ -301,7 +306,7 @@ function GoogleAccountSection(): JSX.Element {
                         切り替える
                       </Button>
                     ) : null}
-                    {!a.active && a.kind === "connected" ? (
+                    {canEdit && !a.active && a.kind === "connected" ? (
                       <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(a)} disabled={busy} testId={`${tid}-remove-${a.id}`}>
                         削除
                       </Button>
@@ -312,19 +317,21 @@ function GoogleAccountSection(): JSX.Element {
             </ul>
           )}
 
-          <div>
-            <Button
-              variant={s.accounts.length === 0 ? "primary" : "secondary"}
-              size="sm"
-              onClick={() => goToGoogle()}
-              loading={leaving && leavingFor === null}
-              disabled={!s.canConnect || busy}
-              testId={`${tid}-add`}
-            >
-              アカウントを追加
-            </Button>
-          </div>
-          {!s.canConnect ? (
+          {canEdit ? (
+            <div>
+              <Button
+                variant={s.accounts.length === 0 ? "primary" : "secondary"}
+                size="sm"
+                onClick={() => goToGoogle()}
+                loading={leaving && leavingFor === null}
+                disabled={!s.canConnect || busy}
+                testId={`${tid}-add`}
+              >
+                アカウントを追加
+              </Button>
+            </div>
+          ) : null}
+          {canEdit && !s.canConnect ? (
             <p style={hintStyle} data-testid={`${tid}-unconfigured`}>サーバーの接続設定が未完了のため追加できません。</p>
           ) : null}
         </>

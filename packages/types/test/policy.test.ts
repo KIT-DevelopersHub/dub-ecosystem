@@ -264,3 +264,37 @@ describe("catalog partition — 詳細設定 vs その他", () => {
     expect(row.level).toBe("view");
   });
 });
+
+describe("graded 詳細 items — Drive共有 の「設定」ボタン", () => {
+  const item = policy.appDetailLevels("driveshare").find((d) => d.id === "settings")!;
+
+  it("every graded item's keys are claimed by the same app (so they never fall into その他)", () => {
+    for (const app of appRegistry.APP_MANIFEST) {
+      for (const d of policy.appDetailLevels(app.id)) {
+        expect(app.detailPermissions as readonly string[]).toContain(d.view);
+        expect(app.detailPermissions as readonly string[]).toContain(d.edit);
+      }
+    }
+    expect(policy.otherPermissions().map((e) => e.key)).not.toContain("drive:settings_edit");
+  });
+
+  it("graded keys render as the 3-way selector, not as toggles", () => {
+    const toggles = policy.appDetailPermissions("driveshare").map((e) => e.key);
+    expect(toggles).not.toContain("drive:settings_view");
+    expect(toggles).not.toContain("drive:settings_edit");
+    expect(toggles).toContain("drive:write");
+  });
+
+  it("set/read the level round-trips and leaves other keys alone", () => {
+    const base = ["drive:read", "drive:settings_edit", "drive:settings_view"] as const;
+    expect(policy.detailLevelOf(base, item)).toBe("edit");
+    const view = policy.setDetailLevel(base, item, "view");
+    expect(view).toEqual(["drive:read", "drive:settings_view"]);
+    expect(policy.detailLevelOf(view, item)).toBe("view");
+    expect(policy.setDetailLevel(view, item, "none")).toEqual(["drive:read"]);
+  });
+
+  it("edit implies view after normalisation", () => {
+    expect(policy.normalizeAppAccessKeys(["drive:settings_edit"])).toEqual(["drive:settings_edit", "drive:settings_view"]);
+  });
+});

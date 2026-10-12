@@ -20,7 +20,7 @@
 //     @dub/auth-client `requireAppAccess` (services) and the shell's `useAppCapability`
 //     flags (buttons) — both call in here so they can never disagree.
 import { PERMISSION_CATALOG, type PermissionCatalogEntry, type PermissionKey } from "./identity";
-import { APP_MANIFEST, getApp, type AppId, type AppManifestEntry } from "./app-registry";
+import { APP_MANIFEST, getApp, type AppDetailLevel, type AppId, type AppManifestEntry } from "./app-registry";
 
 // ── the level enum ────────────────────────────────────────────────────────────
 /**
@@ -136,9 +136,35 @@ export function normalizeAppAccessKeys(granted: readonly PermissionKey[]): Permi
   const set = new Set(granted);
   for (const app of APP_MANIFEST) {
     if (set.has(app.access.edit)) set.add(app.access.view);
+    for (const d of appDetailLevels(app.id)) if (set.has(d.edit)) set.add(d.view);
   }
   return [...set].sort();
 }
+
+// ── graded 詳細 items (無効/閲覧/編集 inside one app, e.g. Drive共有 の「設定」) ─────────────
+/** The app's graded 詳細設定 items (empty for most apps / unknown ids). */
+export function appDetailLevels(appId: string): readonly AppDetailLevel[] {
+  return getApp(appId)?.detailLevels ?? [];
+}
+
+/** The level one graded item confers (edit wins even without view, like appAccessLevelOf). */
+export function detailLevelOf(granted: Iterable<PermissionKey>, item: AppDetailLevel): AppAccessLevel {
+  const set = granted instanceof Set ? granted : new Set(granted);
+  if (set.has(item.edit)) return AppAccessLevel.Edit;
+  if (set.has(item.view)) return AppAccessLevel.View;
+  return AppAccessLevel.None;
+}
+
+/** A NEW sorted key set with the graded item moved to `level` (other keys untouched). */
+export function setDetailLevel(granted: readonly PermissionKey[], item: AppDetailLevel, level: AppAccessLevel): PermissionKey[] {
+  const set = new Set(granted);
+  set.delete(item.view);
+  set.delete(item.edit);
+  if (level !== AppAccessLevel.None) set.add(item.view);
+  if (level === AppAccessLevel.Edit) set.add(item.edit);
+  return [...set].sort();
+}
+
 
 /** Level for EVERY registered app (no gaps — a new app appears here automatically). */
 export function appAccessMap(granted: Iterable<PermissionKey>): Record<AppId, AppAccessLevel> {
@@ -296,9 +322,11 @@ export function appAccessCatalogKeys(): PermissionKey[] {
   return PERMISSION_CATALOG.filter((e) => e.domain === "app").map((e) => e.key);
 }
 
-/** The fine-grained keys one app owns — the content of its 詳細設定 dialog. */
+/** The fine-grained ON/OFF keys one app owns — the toggles of its 詳細設定 dialog. Keys that
+ *  belong to a graded item (appDetailLevels) are excluded: those render as a 3-way selector. */
 export function appDetailPermissions(appId: string): PermissionCatalogEntry[] {
-  return entriesOf(getApp(appId)?.detailPermissions ?? []);
+  const graded = new Set<string>(appDetailLevels(appId).flatMap((d) => [d.view, d.edit]));
+  return entriesOf((getApp(appId)?.detailPermissions ?? []).filter((k) => !graded.has(k)));
 }
 
 /** Every key claimed by SOME app's 詳細設定 (union over APP_MANIFEST). */

@@ -39,7 +39,7 @@ function fakeApi(result: unknown = undefined): { api: ApiClient; calls: RequestI
 }
 
 /** Drive共有 編集 + the keys the Google account setting needs (= the server's POLICY_TABLE). */
-const ADMIN: identity.PermissionKey[] = editorPermissions("driveshare", ["drive:read", "drive:write", "identity:admin"]);
+const ADMIN: identity.PermissionKey[] = editorPermissions("driveshare", ["drive:read", "drive:write", "drive:settings_view", "drive:settings_edit"]);
 
 function wrap(ui: ReactNode, api: DriveShareApi, permissions: readonly identity.PermissionKey[] = ADMIN): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -323,10 +323,28 @@ describe("Drive共有 > 設定 > Google アカウント", () => {
     expect(screen.getByTestId("fe2-driveshare-google-add")).toBeEnabled();
   });
 
-  it("a non-admin (Drive共有 閲覧 only) gets no settings entry", async () => {
-    render(wrap(<DriveShareScreen />, stubApi(), viewerPermissions("driveshare", ["drive:read"])));
+  it("「設定」= 無効 (no settings keys, even with identity:admin) gets no settings entry", async () => {
+    render(wrap(<DriveShareScreen />, stubApi(), editorPermissions("driveshare", ["drive:read", "drive:write", "identity:admin"])));
     await screen.findByText("Hackit 2026 共有");
     expect(screen.queryByTestId("fe2-driveshare-settings-open")).not.toBeInTheDocument();
+  });
+
+  it("「設定」= 閲覧 opens the list read-only: no add / switch / remove", async () => {
+    const perms = editorPermissions("driveshare", ["drive:read", "drive:write", "drive:settings_view"]);
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(CONNECTED) }), perms));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-email-dga_main")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-driveshare-google-read-only")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-driveshare-google-add")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-driveshare-google-switch-secret")).not.toBeInTheDocument();
+  });
+
+  it("「設定」= 編集 on a Drive共有 閲覧 role is capped at 閲覧", async () => {
+    const perms = viewerPermissions("driveshare", ["drive:read", "drive:settings_view", "drive:settings_edit"]);
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(CONNECTED) }), perms));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-read-only")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-driveshare-google-add")).not.toBeInTheDocument();
   });
 
   it("without the server OAuth setup, adding is disabled with the reason", async () => {

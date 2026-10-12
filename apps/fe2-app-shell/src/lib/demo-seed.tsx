@@ -50,10 +50,12 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:admin",
   "chat:create",
   "audit:read",
-  // The real admin role holds these (identity migration 0005); Drive共有's Google-account
-  // switch requires drive:write alongside identity:admin, like the server.
+  // The real admin role holds these (identity migrations 0005 / 0016). Drive共有 の「設定」 is
+  // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
   "drive:read",
   "drive:write",
+  "drive:settings_view",
+  "drive:settings_edit",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -607,13 +609,31 @@ function currentAccount(): DemoAccount {
   return DEMO_ACCOUNTS[0]!;
 }
 
+// ?driveSettings=edit|view|none on any demo URL sets the active account's level for Drive共有 の
+// 「設定」 (remembered for the tab), so each level can be previewed without editing a role.
+const DEMO_DRIVE_SETTINGS_KEY = "dub-demo:drive-settings";
+
+function driveSettingsOverride(perms: identity.PermissionKey[]): identity.PermissionKey[] {
+  if (typeof window === "undefined") return perms;
+  let mode: string | null = new URLSearchParams(window.location.search).get("driveSettings");
+  try {
+    if (mode && ["edit", "view", "none"].includes(mode)) window.sessionStorage.setItem(DEMO_DRIVE_SETTINGS_KEY, mode);
+    else mode = window.sessionStorage.getItem(DEMO_DRIVE_SETTINGS_KEY);
+  } catch {
+    // sessionStorage blocked: the URL value (if any) still applies to this load
+  }
+  if (mode !== "view" && mode !== "none") return perms;
+  const rest = perms.filter((k) => k !== "drive:settings_view" && k !== "drive:settings_edit");
+  return mode === "view" ? [...rest, "drive:settings_view"] : rest;
+}
+
 /** The /me session for the active account (drives RequireAuth + the shell header). */
 function currentMe(): gateway.MeResponse {
   const a = currentAccount();
   return {
     user: { id: a.id, displayName: a.displayName, avatarUrl: null, email: a.email },
     orgId: ORG,
-    permissions: a.permissions,
+    permissions: driveSettingsOverride(a.permissions),
     sessionExpiresAt: Date.now() + 60 * 60 * 1000,
   };
 }

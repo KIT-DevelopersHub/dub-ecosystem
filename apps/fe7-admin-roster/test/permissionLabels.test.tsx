@@ -197,8 +197,15 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     for (const app of appRegistry.APP_MANIFEST) {
       await user.click(screen.getByTestId(`fe7-app-name-${app.id}`));
       const dialog = screen.getByTestId("fe7-app-dialog");
+      // 3 段階の項目（Drive共有の「設定」ボタン等）はトグルではなくセレクタで出る
+      const graded = policy.appDetailLevels(app.id);
+      const gradedKeys = new Set<string>(graded.flatMap((d) => [d.view, d.edit]));
       for (const key of app.detailPermissions) {
+        if (gradedKeys.has(key)) continue;
         expect(within(dialog).getByTestId(`fe7-app-dialog-toggle-${key}`)).toBeInTheDocument();
+      }
+      for (const d of graded) {
+        expect(within(dialog).getByTestId(`fe7-app-dialog-graded-${d.id}`)).toBeInTheDocument();
       }
       if (app.detailPermissions.length === 0) {
         expect(within(dialog).getByTestId("fe7-app-dialog-no-detail")).toBeInTheDocument();
@@ -268,5 +275,18 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     setup(["app:admin:view", "app:admin:edit", "identity:admin"], { lockedKeys: ["app:admin:view", "app:admin:edit", "identity:admin"] });
     expect((screen.getByTestId("fe7-app-level-admin-none") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId("fe7-app-level-mail-none") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("Drive共有の「設定」ボタンは 無効 / 閲覧 / 編集 で選べ、キー集合をそのまま更新する", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup(["app:driveshare:view", "app:driveshare:edit", "drive:read"]);
+    await user.click(screen.getByTestId("fe7-app-name-driveshare"));
+    const dialog = screen.getByTestId("fe7-app-dialog");
+    expect(within(dialog).getByText("「設定」ボタン")).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("fe7-app-dialog-toggle-drive:settings_view")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByTestId("fe7-app-dialog-graded-settings-view"));
+    expect(onChange.mock.calls.at(-1)?.[0]).toEqual(["app:driveshare:edit", "app:driveshare:view", "drive:read", "drive:settings_view"]);
+    await user.click(within(dialog).getByTestId("fe7-app-dialog-graded-settings-edit"));
+    expect(onChange.mock.calls.at(-1)?.[0]).toEqual(["app:driveshare:edit", "app:driveshare:view", "drive:read", "drive:settings_edit", "drive:settings_view"]);
   });
 });

@@ -56,10 +56,11 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 
 // Drive-relevant grants of each system role, per the identity migrations that define them:
 //   0002 (domain keys: maintainer gets drive:read/write), 0005 (admin gets drive:read/write),
-//   0008 (per-app tier: admin/maintainer 編集, organizer/member 閲覧).
+//   0008 (per-app tier: admin/maintainer 編集, organizer/member 閲覧),
+//   0016 (Drive共有 の「設定」: every identity:admin role gets settings_view + settings_edit).
 // The last two rows are not roles but the two legacy shapes the table was written to fix.
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  admin: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin"],
+  admin: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin", "drive:settings_view", "drive:settings_edit"],
   maintainer: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write"],
   organizer: ["app:driveshare:view"],
   member: ["app:driveshare:view"],
@@ -68,6 +69,12 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "disabled-tier-with-legacy-drive-keys": ["drive:read", "drive:write"],
   // Drive共有 = 閲覧 holding a legacy drive:write. Reads only — the tier is authoritative.
   "view-tier-with-legacy-write-key": ["app:driveshare:view", "drive:read", "drive:write"],
+  // 「設定」 = 閲覧 in ロール管理 > Drive共有 > 詳細設定: reads the account list, changes nothing.
+  "settings-view": ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "drive:settings_view"],
+  // 「設定」 = 編集 on a 閲覧-only app: the app tier caps it at 閲覧.
+  "settings-edit-on-view-tier": ["app:driveshare:view", "drive:read", "drive:settings_view", "drive:settings_edit"],
+  // identity:admin alone no longer opens the settings (the 0016 backfill carries it over).
+  "identity-admin-without-settings-keys": ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin"],
 };
 
 /**
@@ -99,10 +106,10 @@ const WRITES = [
   "POST /driveshare/files/:id/role-grants/:roleId/reapply",
   "PUT /driveshare/files/:id/link",
 ];
-// Switching the Google account the service acts as: system admin only (identity:admin).
-const ADMIN_ONLY = [
+// Drive共有 の「設定」 (the Google accounts the service acts as): its own 閲覧 / 編集.
+const SETTINGS_READ = ["GET /driveshare/google-account"];
+const SETTINGS_WRITE = [
   "DELETE /driveshare/google-account/accounts/:id",
-  "GET /driveshare/google-account",
   "POST /driveshare/google-account/active",
   "POST /driveshare/google-account/callback",
   "POST /driveshare/google-account/connect",
@@ -110,7 +117,7 @@ const ADMIN_ONLY = [
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /internal/health"];
 // The whole external surface — what a caller can reach through api-gateway at most.
-const FULL = [...READS, ...WRITES, ...ADMIN_ONLY].sort();
+const FULL = [...READS, ...WRITES, ...SETTINGS_READ, ...SETTINGS_WRITE].sort();
 const OPERATOR = [...READS, ...WRITES].sort();
 const READ_ONLY = [...READS].sort();
 const NONE: string[] = [];
@@ -124,6 +131,9 @@ describe("role x endpoint matrix (frozen)", () => {
     member: NONE,
     "disabled-tier-with-legacy-drive-keys": NONE,
     "view-tier-with-legacy-write-key": READ_ONLY,
+    "settings-view": [...OPERATOR, ...SETTINGS_READ].sort(),
+    "settings-edit-on-view-tier": [...READS, ...SETTINGS_READ].sort(),
+    "identity-admin-without-settings-keys": OPERATOR,
   };
 
   it("matches the committed matrix for every role", () => {

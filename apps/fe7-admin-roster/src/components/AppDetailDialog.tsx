@@ -1,7 +1,8 @@
 // アプリ名クリックで開く「詳細設定」ダイアログ。そのアプリの話は全部ここに入る:
 //
 //   1. このアプリの権限        … 無効 / 閲覧 / 編集 の 3 段階
-//   2. 細かい権限              … APP_MANIFEST の detailPermissions（チャットの「他人の投稿を削除」等）
+//   2. 画面ごとの権限          … APP_MANIFEST の detailLevels（Drive共有の「設定」ボタン等）を 3 段階で
+//   3. 細かい権限              … APP_MANIFEST の detailPermissions（チャットの「他人の投稿を削除」等）
 //
 // どちらも policy / APP_MANIFEST 由来なので、アプリや権限を足せばこのダイアログに自動で現れる。
 // 細かい権限は「アプリが有効（閲覧以上）」のときだけ触れる = アプリを OFF にしたまま配下だけ
@@ -15,6 +16,12 @@ import { PermissionToggleList } from "./PermissionToggleList";
 const blockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-5, 20px)" };
 const headingStyle: React.CSSProperties = { fontWeight: 700, fontSize: 14, margin: 0 };
 const hintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 12.5, lineHeight: 1.6, margin: 0 };
+
+const GRADED_DESCRIPTIONS: Record<Level, string> = {
+  none: "この画面は使えません（入口のボタンが出ません）",
+  view: "開いて見られますが、変更はできません",
+  edit: "開いて、変更までできます",
+};
 
 export function AppDetailDialog({
   appId,
@@ -38,6 +45,7 @@ export function AppDetailDialog({
   if (!appId || !app) return null;
 
   const details = policy.appDetailPermissions(appId);
+  const graded = policy.appDetailLevels(appId);
   const locked = new Set(lockedKeys);
   const levelLocked = locked.has(app.app.access.view) || locked.has(app.app.access.edit);
   // アプリが「無効」なら配下の細かい設定は触れない（policy.decide も app_disabled で落とすので、
@@ -74,6 +82,40 @@ export function AppDetailDialog({
         />
         {levelLocked ? <p style={hintStyle}>このアプリは締め出し防止のため固定されています（変更できません）。</p> : null}
       </div>
+
+      {graded.length > 0 ? (
+        <div style={blockStyle} data-testid={`${idPrefix}-app-dialog-graded`}>
+          <h3 style={headingStyle}>画面ごとの権限</h3>
+          {appOff ? (
+            <p style={hintStyle}>このアプリは「無効」です。設定するには、上の権限を「閲覧」以上にしてください。</p>
+          ) : app.level === policy.AppAccessLevel.View ? (
+            <p style={hintStyle}>このアプリは「閲覧」なので、ここで「編集」を選んでも閲覧までになります。</p>
+          ) : null}
+          {graded.map((item) => {
+            const level = policy.detailLevelOf(selected, item);
+            const itemLocked = locked.has(item.view) || locked.has(item.edit);
+            return (
+              <div key={item.id} style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-1, 4px)" }}>
+                <span style={{ fontWeight: 600, fontSize: 13.5 }}>{item.label}</span>
+                <p style={hintStyle}>{item.description}</p>
+                <SegmentedControl<Level>
+                  aria-label={`${app.label} の${item.label}の権限`}
+                  value={level}
+                  onChange={(next) => onChange(policy.setDetailLevel(selected, item, next))}
+                  options={policy.APP_ACCESS_LEVELS.map((l) => ({
+                    value: l,
+                    label: levelLabel(l),
+                    disabled: disabled || appOff || itemLocked,
+                    testId: `${idPrefix}-app-dialog-graded-${item.id}-${l}`,
+                  }))}
+                  testId={`${idPrefix}-app-dialog-graded-${item.id}`}
+                />
+                <p style={hintStyle}>{GRADED_DESCRIPTIONS[level]}</p>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div style={blockStyle}>
         <h3 style={headingStyle}>細かい権限</h3>
