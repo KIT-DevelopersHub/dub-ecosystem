@@ -478,7 +478,8 @@ export class MemberService {
 
   // ---- 参加届: 反映確定 (管理者) --------------------------------------------------
   /** 管理者が 参加届 の名簿反映を確定する。link=既存の招待中/検討中を在籍へ昇格・結合、
-   *  create=新規メンバー作成、skip=対象外。link/create のみ roster を書き換える。 */
+   *  create=新規メンバー作成、skip=対象外、unlink=反映を取り消して未処理へ戻す。
+   *  link/create のみ roster を書き換える (unlink は名簿に触れない)。 */
   async resolveParticipation(
     ctx: ReqCtx,
     participationId: string,
@@ -491,6 +492,14 @@ export class MemberService {
 
     if (action === "skip") {
       const row: ParticipationRow = { ...p, memberId: null, reviewState: "skipped", updatedAt: now };
+      await this.deps.repo.upsertParticipation(row);
+      return { participation: toParticipation(row), member: null };
+    }
+
+    if (action === "unlink") {
+      // 紐付けの解除だけ。名簿メンバーの削除・状態の巻き戻しはしない (以後の編集を壊さない)。
+      // 解除後は二重紐付けガードからも外れるので、正しい相手へ link し直せる。
+      const row: ParticipationRow = { ...p, memberId: null, reviewState: "pending", updatedAt: now };
       await this.deps.repo.upsertParticipation(row);
       return { participation: toParticipation(row), member: null };
     }
