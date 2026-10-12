@@ -126,6 +126,11 @@ export function setAppAccessLevel(
   return [...set].sort();
 }
 
+/** Fine-grained toggle pairs where the change key is useless without the read key. */
+const IMPLIED_DETAIL_KEYS: readonly (readonly [PermissionKey, PermissionKey])[] = [
+  ["drive:settings_edit", "drive:settings_view"],
+];
+
 /**
  * Enforce the edit ⇒ view invariant across EVERY app (adds the missing view key rather
  * than dropping edit — dropping would silently downgrade a role). Idempotent; the
@@ -137,6 +142,7 @@ export function normalizeAppAccessKeys(granted: readonly PermissionKey[]): Permi
   for (const app of APP_MANIFEST) {
     if (set.has(app.access.edit)) set.add(app.access.view);
   }
+  for (const [edit, view] of IMPLIED_DETAIL_KEYS) if (set.has(edit)) set.add(view);
   return [...set].sort();
 }
 

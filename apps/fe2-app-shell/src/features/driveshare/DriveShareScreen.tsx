@@ -30,6 +30,7 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { createOptimisticMutation } from "../../lib/optimistic.tsx";
 import { useDriveShareApi } from "./DriveShareProvider.tsx";
 import { DriveTree } from "./DriveTree.tsx";
+import { DriveShareSettingsDialog, settingsOpenOnLoad, useDriveSettingsAccess } from "./DriveShareSettings.tsx";
 import {
   driveRoleLabel,
   driveRoleTone,
@@ -677,6 +678,8 @@ export function DriveShareScreen(): JSX.Element {
   // The selected node's full DriveFile (not just an id): a nested child lives in a
   // per-folder cache, not the root list, so the panel must hold the object itself.
   const [selected, setSelected] = useState<DriveFile | null>(null);
+  const canOpenSettings = useDriveSettingsAccess().canView;
+  const [settingsOpen, setSettingsOpen] = useState(settingsOpenOnLoad);
   const trimmed = search.trim();
   const searching = trimmed.length > 0;
   const filesKey = queryKeys.feature("driveshare", "files", search);
@@ -735,7 +738,18 @@ export function DriveShareScreen(): JSX.Element {
 
   return (
     <main data-testid="fe2-driveshare">
-      <PageHeader title="Drive 共有管理" description="Hackit 共有ドライブの閲覧・編集権限を管理します" />
+      <PageHeader
+        title="Drive 共有管理"
+        description="Hackit 共有ドライブの閲覧・編集権限を管理します"
+        actions={
+          canOpenSettings ? (
+            <Button variant="secondary" iconLeft={<Icon name="settings" />} onClick={() => setSettingsOpen(true)} testId="fe2-driveshare-settings-open">
+              設定
+            </Button>
+          ) : undefined
+        }
+      />
+      <DriveShareSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1fr) minmax(320px, 1.4fr)", gap: "24px", alignItems: "start" }}>
         <Stack gap={3}>
           <TextField

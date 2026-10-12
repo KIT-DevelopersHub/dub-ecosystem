@@ -1,6 +1,6 @@
 // Worker entrypoint / composition root. buildApp wires bindings -> deps -> Hono app.
 // The ONE auth seam lives here: resolveDriveCredentials picks the refresh token — the
-// account an admin connected from ロール管理 (D1, AES-GCM sealed) first, else the
+// account an admin connected from Drive共有 > 設定 (D1, AES-GCM sealed) first, else the
 // GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret — and buildDriveClient wires the REAL Google
 // Drive v3 client over it. With neither (or DRIVESHARE_MOCK=1) the in-memory MOCK client
 // runs, so this Worker builds, deploys, and is E2E-testable at $0 without any token. Authz is POLICY_TABLE (src/policy-table.ts) enforced by @dub/policy-gate,
@@ -25,7 +25,7 @@ import { createGoogleAccountService, reconnectRequired, resolveDriveCredentials,
 import { importTokenKey } from "./google/crypto";
 import { mockForced, parseConfig, type Env } from "./env";
 
-/** Pick the Drive client: real when an account is available (connected from ロール管理, or
+/** Pick the Drive client: real when an account is available (connected from Drive共有 > 設定, or
  *  the secret token), mock otherwise or when DRIVESHARE_MOCK forces it. */
 function buildDriveClient(env: Env, resolved: ResolvedCredentials): DriveShareClient {
   if (mockForced(env) || resolved.source === "none") return createMockDriveShareClient();

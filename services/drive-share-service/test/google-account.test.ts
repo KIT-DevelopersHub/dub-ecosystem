@@ -12,7 +12,7 @@ import { AUTHED, buildRoleGrants, fakeRoster, memAuthzHolding } from "./helpers"
 
 const ORG = "org_devhub";
 const KEY_B64 = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
-const REDIRECT = "https://dub-fe2-app-shell.example.workers.dev/admin/roles";
+const REDIRECT = "https://dub-fe2-app-shell.example.workers.dev/driveshare";
 const T0 = Date.parse("2026-10-10T00:00:00.000Z");
 
 const WEB_ENV: Env = {
@@ -87,8 +87,8 @@ describe("crypto", () => {
 describe("redirect URI allowlist", () => {
   it("accepts only the SPA return page on https (or localhost)", () => {
     expect(isAllowedRedirectUri(REDIRECT)).toBe(true);
-    expect(isAllowedRedirectUri("http://localhost:5173/admin/roles")).toBe(true);
-    expect(isAllowedRedirectUri("http://evil.example/admin/roles")).toBe(false);
+    expect(isAllowedRedirectUri("http://localhost:5173/driveshare")).toBe(true);
+    expect(isAllowedRedirectUri("http://evil.example/driveshare")).toBe(false);
     expect(isAllowedRedirectUri("https://x.example/admin/users")).toBe(false);
     expect(isAllowedRedirectUri(`${REDIRECT}?next=https://evil`)).toBe(false);
     expect(isAllowedRedirectUri(42)).toBe(false);
@@ -420,10 +420,10 @@ describe("routes (through policyGate)", () => {
     return createApp({ service, roleGrants, authz: memAuthzHolding(...keys), googleAccount: svc });
   }
   const HDR = { ...AUTHED, "content-type": "application/json" };
-  const ADMIN_KEYS = ["app:driveshare:view", "app:driveshare:edit", "drive:write", "identity:admin"] as Parameters<typeof memAuthzHolding>;
+  const ADMIN_KEYS = ["app:driveshare:view", "app:driveshare:edit", "drive:settings_view", "drive:settings_edit"] as Parameters<typeof memAuthzHolding>;
 
-  it("a Drive editor without identity:admin gets 403 (never 401) on every account route", async () => {
-    const app = await appWith(["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write"]);
+  it("a Drive editor without the 「設定」 keys gets 403 (never 401) on every account route", async () => {
+    const app = await appWith(["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin"]);
     for (const [method, path] of [
       ["GET", "/driveshare/google-account"],
       ["POST", "/driveshare/google-account/connect"],
@@ -434,6 +434,13 @@ describe("routes (through policyGate)", () => {
       const res = await app.request(path, { method, headers: HDR, ...(method === "POST" ? { body: "{}" } : {}) });
       expect(res.status).toBe(403);
     }
+  });
+
+  it("「設定」 = 閲覧 reads the list but every change is 403", async () => {
+    const app = await appWith(["app:driveshare:view", "app:driveshare:edit", "drive:settings_view"]);
+    expect((await app.request("/driveshare/google-account", { headers: HDR })).status).toBe(200);
+    const res = await app.request("/driveshare/google-account/connect", { method: "POST", headers: HDR, body: JSON.stringify({ redirectUri: REDIRECT }) });
+    expect(res.status).toBe(403);
   });
 
   it("an admin starts the round-trip as themselves", async () => {

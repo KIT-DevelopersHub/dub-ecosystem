@@ -9,6 +9,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { identity } from "@dub/types";
+import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import {
   createDriveShareApi,
@@ -36,13 +38,18 @@ function fakeApi(result: unknown = undefined): { api: ApiClient; calls: RequestI
   return { api: { request } as unknown as ApiClient, calls };
 }
 
-function wrap(ui: ReactNode, api: DriveShareApi): JSX.Element {
+/** Drive共有 編集 + the keys the Google account setting needs (= the server's POLICY_TABLE). */
+const ADMIN: identity.PermissionKey[] = editorPermissions("driveshare", ["drive:read", "drive:write", "drive:settings_view", "drive:settings_edit"]);
+
+function wrap(ui: ReactNode, api: DriveShareApi, permissions: readonly identity.PermissionKey[] = ADMIN): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <DriveShareApiProvider value={api}>{ui}</DriveShareApiProvider>
-      </ToastProvider>
+      <FakeAuthProvider permissions={permissions}>
+        <ToastProvider>
+          <DriveShareApiProvider value={api}>{ui}</DriveShareApiProvider>
+        </ToastProvider>
+      </FakeAuthProvider>
     </QueryClientProvider>
   );
 }
@@ -87,6 +94,11 @@ function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
     grantRole: (fileId, req) => Promise.resolve({ id: "rg_new", fileId, roleId: req.roleId, roleName: "会場", driveRole: req.driveRole, memberCount: 3, appliedCount: 3, grantedBy: "hackit@gmail.com", grantedAt: "2026-08-13T00:00:00Z" }),
     revokeRoleGrant: () => Promise.resolve(),
     reapplyRoleGrant: (fileId, roleId) => Promise.resolve({ ...DEV_GRANT, fileId, roleId }),
+    getGoogleAccounts: () => Promise.resolve({ accounts: [], canConnect: false }),
+    startGoogleConnect: () => Promise.resolve({ authUrl: "https://accounts.google.com/" }),
+    completeGoogleConnect: () => Promise.resolve({ accounts: [], canConnect: false }),
+    switchGoogleAccount: () => Promise.resolve({ accounts: [], canConnect: false }),
+    removeGoogleAccount: () => Promise.resolve(),
     ...over,
   };
 }
@@ -291,5 +303,88 @@ describe("DriveShareScreen", () => {
     await screen.findByTestId("fe2-driveshare-link-switch");
     await user.click(screen.getByTestId("fe2-driveshare-link-switch"));
     await waitFor(() => expect(setLinkSharing).toHaveBeenCalledWith("fil_budget", { enabled: true, role: "reader" }));
+  });
+});
+
+describe("Drive共有 > 設定 > Google アカウント", () => {
+  const CONNECTED = {
+    accounts: [
+      { id: "secret", kind: "secret" as const, email: "hackit@gmail.com", connectedAt: null, connectedBy: null, active: false, needsReconnect: false },
+      { id: "dga_main", kind: "connected" as const, email: "hackit.drive@gmail.com", connectedAt: "2026-10-01T09:00:00Z", connectedBy: "usr_1", active: true, needsReconnect: false },
+    ],
+    canConnect: true,
+  };
+
+  it("an admin opens the settings dialog from the header and sees the accounts", async () => {
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(CONNECTED) })));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-email-dga_main")).toHaveTextContent("hackit.drive@gmail.com");
+    expect(screen.getByTestId("fe2-driveshare-google-active-dga_main")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-driveshare-google-add")).toBeEnabled();
+  });
+
+  it("「設定」= 無効 (no settings keys, even with identity:admin) gets no settings entry", async () => {
+    render(wrap(<DriveShareScreen />, stubApi(), editorPermissions("driveshare", ["drive:read", "drive:write", "identity:admin"])));
+    await screen.findByText("Hackit 2026 共有");
+    expect(screen.queryByTestId("fe2-driveshare-settings-open")).not.toBeInTheDocument();
+  });
+
+  it("「設定」= 閲覧 opens the list read-only: no add / switch / remove", async () => {
+    const perms = editorPermissions("driveshare", ["drive:read", "drive:write", "drive:settings_view"]);
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(CONNECTED) }), perms));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-email-dga_main")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-driveshare-google-read-only")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-driveshare-google-add")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-driveshare-google-switch-secret")).not.toBeInTheDocument();
+  });
+
+  it("「設定」= 編集 on a Drive共有 閲覧 role is capped at 閲覧", async () => {
+    const perms = viewerPermissions("driveshare", ["drive:read", "drive:settings_view", "drive:settings_edit"]);
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(CONNECTED) }), perms));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-read-only")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-driveshare-google-add")).not.toBeInTheDocument();
+  });
+
+  it("without the server OAuth setup, adding is disabled with the reason", async () => {
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve({ ...CONNECTED, canConnect: false }) })));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-unconfigured")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-driveshare-google-add")).toBeDisabled();
+  });
+
+  it("adding sends Google back to /driveshare", async () => {
+    const startGoogleConnect = vi.fn(() => new Promise<{ authUrl: string }>(() => {}));
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(CONNECTED), startGoogleConnect })));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-google-add"));
+    expect(startGoogleConnect).toHaveBeenCalledWith(`${window.location.origin}/driveshare`, undefined);
+  });
+
+  it("returning from Google to /driveshare?code&state opens the dialog and completes the add", async () => {
+    window.history.replaceState(null, "", "/driveshare?code=c1&state=s1");
+    const completeGoogleConnect = vi.fn(() => Promise.resolve(CONNECTED));
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(CONNECTED), completeGoogleConnect })));
+    await waitFor(() => expect(completeGoogleConnect).toHaveBeenCalledWith("c1", "s1"));
+    expect(screen.getByTestId("fe2-driveshare-settings")).toBeInTheDocument();
+    expect(window.location.search).toBe("");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("the api adapter hits /api/v1/driveshare/google-account", async () => {
+    const { api, calls } = fakeApi();
+    const drive = createDriveShareApi(api);
+    await drive.getGoogleAccounts();
+    await drive.startGoogleConnect("https://x.example/driveshare", "a@example.com");
+    await drive.switchGoogleAccount("dga_1");
+    await drive.removeGoogleAccount("dga_1");
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GET /api/v1/driveshare/google-account",
+      "POST /api/v1/driveshare/google-account/connect",
+      "POST /api/v1/driveshare/google-account/active",
+      "DELETE /api/v1/driveshare/google-account/accounts/dga_1",
+    ]);
+    expect(calls[1]?.body).toEqual({ redirectUri: "https://x.example/driveshare", loginHint: "a@example.com" });
   });
 });
