@@ -7,8 +7,8 @@ export type OpRisk = "low" | "mid" | "high";
 export type OpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 /**
- * "$params.x" / "$body.x" pull from the executed call, "$result.x" from the write's response
- * (e.g. the id a create returned); "$notNull" asserts presence.
+ * "$params.x" / "$query.x" / "$body.x" pull from the executed call, "$result.x" from the
+ * write's response (e.g. the id a create returned); "$notNull" asserts presence.
  */
 export type VerifyValue = string | number | boolean | null;
 
@@ -21,8 +21,15 @@ export interface VerifySpec {
   findIn?: string;
   /** [field, source] that identifies the target inside `findIn`. */
   findBy?: [string, string];
+  /**
+   * Whether the target must be found by `findBy` (default true). false — or a source that
+   * resolves to false, e.g. "$body.enabled" — means it must be gone (revokes, removals,
+   * toggles off); `expect` is then skipped. Only for complete, unpaginated lists.
+   */
+  present?: VerifyValue;
   /** Every body key except these must read back unchanged. */
   expectBody?: { except: string[] };
+  /** A "$body.x" the call did not send is skipped (optional field, nothing to compare). */
   expect?: Record<string, VerifyValue>;
 }
 
