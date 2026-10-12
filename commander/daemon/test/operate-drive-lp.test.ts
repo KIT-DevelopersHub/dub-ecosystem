@@ -171,7 +171,7 @@ describe("drive / lp writes", () => {
     stuck.perms.push({ id: "anyoneWithLink", type: "anyone", role: "reader", emailAddress: null, inherited: false });
     const res = await run(stuck.exec, { op: "driveshare.link.set", params: { id: "f1" }, body: { enabled: false } });
     expect(res.result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
-    expect(JSON.stringify(res.result)).toContain("まだ残っています");
+    expect(JSON.stringify(res.result)).toContain("一覧に残っています");
   });
 
   it("re-reads an lp link with the same date range the write was given", async () => {

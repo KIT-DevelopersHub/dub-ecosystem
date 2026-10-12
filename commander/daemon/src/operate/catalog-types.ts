@@ -23,12 +23,13 @@ export interface VerifySpec {
   findBy?: [string, string];
   /**
    * Whether the target must be found by `findBy` (default true). false — or a source that
-   * resolves to false, e.g. "$body.enabled" — means it must be gone (revokes, toggles off);
-   * `expect` is then skipped.
+   * resolves to false, e.g. "$body.enabled" — means it must be gone (revokes, removals,
+   * toggles off); `expect` is then skipped. Only for complete, unpaginated lists.
    */
   present?: VerifyValue;
   /** Every body key except these must read back unchanged. */
   expectBody?: { except: string[] };
+  /** A "$body.x" the call did not send is skipped (optional field, nothing to compare). */
   expect?: Record<string, VerifyValue>;
 }
 
