@@ -111,7 +111,7 @@ export function ParticipationListPage(): JSX.Element {
           {reviewLabel(p)}
         </Badge>
         {p.reviewState === "added" ? (
-          <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setUnlinkTarget(p)} testId={`participation-unlink-${p.id}`}>
+          <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setUnlinkTarget(p)} testId={`participation-unlink-${p.id}`}>
             紐付けを解除
           </Button>
         ) : (
@@ -120,7 +120,7 @@ export function ParticipationListPage(): JSX.Element {
               追加する
             </Button>
             {p.reviewState === "pending" ? (
-              <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setSkipTarget(p)} testId={`participation-skip-${p.id}`}>
+              <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setSkipTarget(p)} testId={`participation-skip-${p.id}`}>
                 しない
               </Button>
             ) : null}
