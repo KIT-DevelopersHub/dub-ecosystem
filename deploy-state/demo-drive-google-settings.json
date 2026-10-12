@@ -3,15 +3,12 @@
   "slug": "drive-google-settings",
   "worker": "dub-demo-drive-google-settings",
   "url": "https://dub-demo-drive-google-settings.developershub-site.workers.dev",
-  "deployedSha": "f90d912f",
+  "deployedSha": "4c9477f7",
   "branch": "feat/driveshare-google-account-settings",
   "actor": "ko-tarou",
-  "markers": [
-    "画面ごとの権限",
-    "drive:settings_edit"
-  ],
+  "markers": ["保存すると閲覧も ON になります","drive:settings_edit"],
   "live": true,
-  "verifiedAt": "2026-10-12T15:03:29Z",
-  "updatedAt": "2026-10-12T15:03:29Z",
-  "note": "Drive共有の「設定」ボタンの権限(無効/閲覧/編集)を詳細設定で選べる"
+  "verifiedAt": "2026-10-12T15:19:08Z",
+  "updatedAt": "2026-10-12T15:19:08Z",
+  "note": "Drive共有の「設定」ボタンの閲覧/変更を細かい権限のトグルで設定"
 }
