@@ -282,7 +282,7 @@ export class OperateExecutor {
     }
     const skipped = new Set(skip);
     const results: CallResult[] = [];
-    const written: { entry: CatalogEntry; call: PreviewCall; result: CallResult; ambiguous: boolean }[] = [];
+    const written: { entry: CatalogEntry; call: PreviewCall; result: CallResult; ambiguous: boolean; data: unknown }[] = [];
 
     // Write everything first, then read back once per list (a list re-read after all
     // writes reflects every target, so it is fetched a single time).
@@ -307,12 +307,12 @@ export class OperateExecutor {
           ? { ...base, outcome: "ok", message: "反映を確認しました" }
           : { ...base, outcome: "failed", message: describeFailure(res) };
         results.push(result);
-        if (res.ok || ambiguous) written.push({ entry, call: c, result, ambiguous });
+        if (res.ok || ambiguous) written.push({ entry, call: c, result, ambiguous, data: res.ok ? res.data : undefined });
       }
     }
     const readCache = new Map<string, GatewayResponse>();
-    for (const { entry, call, result, ambiguous } of written) {
-      const mismatch = await this.verify(entry, call, readCache);
+    for (const { entry, call, result, ambiguous, data } of written) {
+      const mismatch = await this.verify(entry, call, data, readCache);
       if (ambiguous) {
         // A timeout/5xx says nothing about whether the write landed; the read-back decides.
         if (!mismatch) {
@@ -333,7 +333,8 @@ export class OperateExecutor {
     const ng = done.length - ok;
     const verdict: Verdict = done.length > 0 && ng === 0 ? "done" : ok > 0 ? "partial" : "failed";
     const headline =
-      verdict === "done" && accepted ? `反映できました（${ok - accepted}件は読み直して確認済み・${accepted}件は検証不能）`
+      verdict === "done" && accepted
+        ? `反映できました（${ok > accepted ? `${ok - accepted}件は読み直して確認済み・` : ""}${accepted}件は検証不能で受付のみ確認）`
       : verdict === "done" ? `反映できました（${ok}件すべて読み直して確認済み）`
       : verdict === "partial" ? `一部できませんでした（反映 ${ok}件／未反映 ${ng}件）`
       : `できませんでした（${done.length}件すべて未反映）`;
@@ -368,17 +369,21 @@ export class OperateExecutor {
   }
 
   /** Re-read the target; returns a Japanese mismatch reason, or null when it matches. */
-  private async verify(entry: CatalogEntry, c: PreviewCall, cache: Map<string, GatewayResponse>): Promise<string | null> {
+  private async verify(entry: CatalogEntry, c: PreviewCall, written: unknown, cache: Map<string, GatewayResponse>): Promise<string | null> {
     const spec = entry.verify;
     if (!spec) return null;
     const read = findEntry(spec.read)!;
     const src = (v: VerifyValue): VerifyValue | undefined =>
       typeof v === "string" && v.startsWith("$params.") ? c.params[v.slice(8)]
       : typeof v === "string" && v.startsWith("$body.") ? (c.body?.[v.slice(6)] as VerifyValue | undefined)
+      : typeof v === "string" && v.startsWith("$result.") ? (getPath(written, v.slice(8)) as VerifyValue | undefined)
       : v;
     const params = Object.fromEntries(Object.entries(spec.params ?? {}).map(([k, v]) => [k, String(src(v) ?? "")]));
-    const req = { method: "GET", path: buildPath(read, params), ...(spec.query ? { query: spec.query } : {}) };
-    const key = `${req.path}?${JSON.stringify(spec.query ?? {})}`;
+    // A timed-out create has no response to take its id from: nothing to re-read.
+    if (Object.values(params).some((v) => v === "")) return "読み直す対象の id が分かりません";
+    const query = spec.query ? Object.fromEntries(Object.entries(spec.query).map(([k, v]) => [k, String(src(v) ?? "")])) : undefined;
+    const req = { method: "GET", path: buildPath(read, params), ...(query ? { query } : {}) };
+    const key = `${req.path}?${JSON.stringify(query ?? {})}`;
     let res = cache.get(key);
     if (!res) {
       res = await this.call(req);

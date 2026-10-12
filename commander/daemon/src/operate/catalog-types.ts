@@ -6,7 +6,10 @@ export type OpKind = "read" | "write" | "delete";
 export type OpRisk = "low" | "mid" | "high";
 export type OpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
-/** "$params.x" / "$body.x" pull from the executed call; "$notNull" asserts presence. */
+/**
+ * "$params.x" / "$body.x" pull from the executed call, "$result.x" from the write's response
+ * (e.g. the id a create returned); "$notNull" asserts presence.
+ */
 export type VerifyValue = string | number | boolean | null;
 
 export interface VerifySpec {
