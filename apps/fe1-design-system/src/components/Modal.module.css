@@ -19,7 +19,8 @@
   box-shadow: var(--dub-shadow-overlay);
   width: 100%;
   max-height: 90vh;
-  overflow: auto;
+  /* Header + footer stay pinned; only .body scrolls (see .body). */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   animation: dub-modal-dialog-in 0.18s ease-out;
@@ -64,6 +65,7 @@
   height: 90vh;
 }
 .header {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -81,7 +83,14 @@
   padding: var(--dub-space-4);
   flex: 1;
 }
+/* Modal: min-height 0 lets the body shrink inside the 90vh-capped dialog and own the
+   scroll, so a long list (fe5 通知ダイアログ) keeps the title/× and footer actions visible. */
+.dialog .body {
+  min-height: 0;
+  overflow: auto;
+}
 .footer {
+  flex: none;
   padding: var(--dub-space-4);
   border-top: 1px solid var(--dub-color-border-default);
   display: flex;
@@ -188,7 +197,7 @@
    the body grow past the viewport and any height:100% scroll region inside it can
    never bound → nothing scrolls. min-height:0 lets the body settle to the free space
    so its children can own the scroll (fe4 TaskDetailPanel: scrollable body + fixed
-   footer, 判断75②). Scoped to .drawer so the modal .dialog (own overflow) is untouched. */
+   footer, 判断75②). The modal counterpart is .dialog .body above. */
 .drawer .body {
   min-height: 0;
 }
