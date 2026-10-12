@@ -126,6 +126,17 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(screen.getByTestId("fe7-app-detail-count-mail")).toBeInTheDocument(); // mail HAS details
   });
 
+  it("LP管理 の詳細に「公開サイトの切り替え」(lp:publish) が危険フラグ付きで出る", async () => {
+    const user = userEvent.setup();
+    setup(["app:lp:view", "app:lp:edit"]);
+    await user.click(screen.getByTestId("fe7-app-name-lp"));
+    const dialog = screen.getByTestId("fe7-app-dialog");
+    expect(within(dialog).getByText("公開サイトの切り替え")).toBeInTheDocument();
+    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-lp:publish") as HTMLInputElement).checked).toBe(false);
+    expect(within(dialog).getByTestId("fe7-app-dialog-danger-lp:publish")).toBeInTheDocument();
+    expect(screen.getByTestId("fe7-app-detail-count-lp").textContent).toBe("0 / 1");
+  });
+
   it("the dialog can also change the level (same policy helper as the table)", async () => {
     const user = userEvent.setup();
     const { onChange } = setup([]);
