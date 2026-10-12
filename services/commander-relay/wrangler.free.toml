@@ -1,0 +1,41 @@
+# Free-tier deploy of commander-relay as `dub-commander-relay`: the WebSocket relay that lets
+# the Dub-hosted /commander screen drive the operator's always-on LOCAL Commander.
+#
+# The local agent (commander/daemon/src/relay-agent.ts) dials OUT to wss://<this>/ws/agent,
+# so the PC needs no tunnel, no inbound port and no domain. Browsers get a 60s ticket over
+# the gateway (segment "commander") and open wss://<this>/ws/browser with it.
+#
+# $0: one SQLite-backed Durable Object (free plan) on the Hibernation API; keepalive pings
+# are runtime auto-responses that never wake the object.
+#
+# One-time secrets (never in this toml):
+#   npx wrangler secret put RELAY_TICKET_SECRET --config services/commander-relay/wrangler.free.toml
+#   npx wrangler secret put RELAY_AGENT_SECRET  --config services/commander-relay/wrangler.free.toml
+# The agent secret also goes into commander/.commander.env.local as COMMANDER_RELAY_SECRET.
+name = "dub-commander-relay"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+# Enabled for the two WebSocket endpoints only. src/index.ts serves the header-trusting HTTP
+# API to the gateway service binding (host "svc") alone; every other public path is 404.
+workers_dev = true
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "CommanderRelay"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CommanderRelay"]
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (policy gate)
+
+[vars]
+ENVIRONMENT = "production"
+RELAY_WS_URL = "wss://dub-commander-relay.developershub-site.workers.dev/ws/browser"
+RELAY_ALLOWED_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"

@@ -52,6 +52,11 @@ export class RunStore {
     return this.active.has(id);
   }
 
+  /** Number of runs with a live child process. */
+  activeCount(): number {
+    return this.active.size;
+  }
+
   /** Subscribe to a run's live events. Returns an unsubscribe fn. */
   subscribe(id: string, listener: Listener): () => void {
     let set = this.listeners.get(id);

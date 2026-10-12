@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Board } from "./Board.tsx";
 import { AskDub } from "./AskDub.tsx";
 import { OperateDub } from "./OperateDub.tsx";
+import { RestartButton } from "./RestartButton.tsx";
 import { ChatProvider } from "./lib/chatStore.tsx";
 import type { CommanderClient } from "./lib/client.ts";
 import type { CommanderApi } from "./lib/commanderApi.ts";
@@ -19,6 +20,8 @@ interface WorkspaceProps {
   /** Controlled tab (the standalone page needs it to size its container). */
   tab?: CommanderTabId;
   onTabChange?: (tab: CommanderTabId) => void;
+  /** Board refresh interval. The relay passes a slower one: every poll wakes its Durable Object. */
+  boardPollMs?: number;
 }
 
 const TABS: { id: CommanderTabId; label: string }[] = [
@@ -30,7 +33,7 @@ const TABS: { id: CommanderTabId; label: string }[] = [
 const TAB_SUBTITLE: Record<CommanderTabId, string> = {
   board: "ローカル Claude Code を Web から並行駆動する司令ボード — 投入・走行・確認・判断を1画面で",
   ask: "dub-ecosystem のコードを Claude Code に聞ける Q&A チャット — 読み取り専用",
-  operate: "Dub の本番バックエンドを自然言語で操作 — 計画→確認→実行（書き込みは要確認）",
+  operate: "Dub のデータを自然言語で操作 — 許可された API だけを、内容を確認してから実行",
 };
 
 /** The whole Commander body (tabs + ボード/Dubに聞く/Dubを操作) without page chrome. SoT for
@@ -42,6 +45,7 @@ export function CommanderWorkspace({
   initialTab = "board",
   tab: controlledTab,
   onTabChange,
+  boardPollMs,
 }: WorkspaceProps) {
   const [ownTab, setOwnTab] = useState<CommanderTabId>(initialTab);
   const tab = controlledTab ?? ownTab;
@@ -93,7 +97,7 @@ export function CommanderWorkspace({
       {/* Keep the chat tabs MOUNTED across tab switches (hidden, not unmounted) so their
           live message view + composer draft persist without a reload. */}
       <div hidden={tab !== "board"} data-testid="panel-board">
-        <Board {...(client ? { client } : {})} {...(api ? { api } : {})} />
+        <Board {...(client ? { client } : {})} {...(api ? { api } : {})} {...(boardPollMs ? { pollMs: boardPollMs } : {})} />
       </div>
       <div hidden={tab !== "ask"} data-testid="panel-ask">
         <AskDub />
@@ -123,7 +127,10 @@ export function App({ client, api, initialTab = "board" }: AppProps) {
         minHeight: "100vh",
       }}
     >
-      <h1 style={{ fontSize: 18, marginBottom: 4 }}>Commander</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: t.space4, marginBottom: 4, minHeight: 40 }}>
+        <h1 style={{ fontSize: 18, margin: 0 }}>Commander</h1>
+        <RestartButton />
+      </div>
       <CommanderWorkspace
         {...(client ? { client } : {})}
         {...(api ? { api } : {})}

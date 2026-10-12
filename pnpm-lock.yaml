@@ -706,6 +706,9 @@ importers:
       '@dub/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
+      '@dub/ui':
+        specifier: workspace:*
+        version: link:../../apps/fe1-design-system
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -1133,6 +1136,34 @@ importers:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.8.71
         version: 0.8.71(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@2.1.9)(@vitest/snapshot@2.1.9)(vitest@2.1.9(@types/node@22.20.1)(jsdom@25.0.1))
+      '@cloudflare/workers-types':
+        specifier: ^4.20241127.0
+        version: 4.20260702.1
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
+
+  services/commander-relay:
+    dependencies:
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
+      '@dub/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      hono:
+        specifier: ^4.6.14
+        version: 4.13.1
+    devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20241127.0
         version: 4.20260702.1
