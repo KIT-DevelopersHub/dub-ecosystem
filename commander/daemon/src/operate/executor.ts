@@ -375,6 +375,7 @@ export class OperateExecutor {
     const read = findEntry(spec.read)!;
     const src = (v: VerifyValue): VerifyValue | undefined =>
       typeof v === "string" && v.startsWith("$params.") ? c.params[v.slice(8)]
+      : typeof v === "string" && v.startsWith("$query.") ? c.query?.[v.slice(7)]
       : typeof v === "string" && v.startsWith("$body.") ? (c.body?.[v.slice(6)] as VerifyValue | undefined)
       : typeof v === "string" && v.startsWith("$result.") ? (getPath(written, v.slice(8)) as VerifyValue | undefined)
       : v;
@@ -395,6 +396,7 @@ export class OperateExecutor {
       const [field, source] = spec.findBy;
       const want = src(source);
       target = itemsOf(getPath(res.data, spec.findIn) ?? res.data)?.find((x) => getPath(x, field) === want);
+      if (spec.present !== undefined && src(spec.present) === false) return target ? "読み直すと対象がまだ残っています" : null;
       if (!target) return "読み直した一覧に対象が見つかりません";
     }
     const expected: Record<string, VerifyValue | undefined> = {};
