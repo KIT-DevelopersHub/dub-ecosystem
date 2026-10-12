@@ -1,7 +1,7 @@
 // Cross-role mail visibility: a role's holders also see the inbound mail of a target role's
 // holders (identity_role_mail_visibility). `mailVisibleUsers` (GET /internal/users/:id/
 // mail-visible-users) unions it with same-role sharing. Run against BOTH repos: Mem via the
-// service, and D1's real SQL over node:sqlite seeded with the 0001 + 0017 DDL.
+// service, and D1's real SQL over node:sqlite seeded with the 0001 + 0018 DDL.
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { createDbClient } from "@dub/db";
@@ -23,7 +23,7 @@ function d1Repo(): IdentityRepo {
   raw.exec(migration("0001_init.sql"));
   raw.exec("ALTER TABLE identity_users ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
   raw.exec("ALTER TABLE identity_users ADD COLUMN furigana TEXT");
-  raw.exec(migration("0017_role_mail_visibility.sql"));
+  raw.exec(migration("0018_role_mail_visibility.sql"));
   raw.exec(`INSERT INTO identity_orgs (id, name, created_at) VALUES ('${ORG}', 'DevHub', '${TS}')`);
   return new D1IdentityRepo(createDbClient(d1, { namespace: "identity" }));
 }

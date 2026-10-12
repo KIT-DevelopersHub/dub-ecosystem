@@ -128,7 +128,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await deps.service.setLinkSharing(c.req.param("id"), body));
   });
 
-  // ---- Google accounts the service acts as (ロール管理 > その他 > Google アカウント; admin only) ----
+  // ---- Google accounts the service acts as (Drive共有 > 設定 > Google アカウント; admin only) ----
   app.get("/driveshare/google-account", async (c) => c.json(await deps.googleAccount.status()));
 
   app.post("/driveshare/google-account/connect", async (c) => {

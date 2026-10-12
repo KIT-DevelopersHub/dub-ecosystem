@@ -5,18 +5,22 @@
 //   - only catalog routes are callable (parsePlan rejects anything else);
 //   - read results are bound into later steps; a value still looking like a placeholder
 //     blocks the preview, so `<EVENT_ID>` can never reach the API;
-//   - at most MAX_WRITE_CALLS writes per execution (bulk work must be narrowed first);
+//   - at most MAX_WRITE_CALLS writes per execution (bulk work must be narrowed first), and
+//     more than PHRASE_WRITE_CALLS of them need the confirmation phrase like a high risk;
 //   - a preview executes at most once and expires;
-//   - every write is verified by re-reading it, and the verdict is always one of
-//     反映できた / 一部できなかった / できなかった with per-target outcomes;
+//   - every write is verified by re-reading it (or, for the few no read can confirm, says
+//     so as 検証不能), and the verdict is always one of 反映できた / 一部できなかった /
+//     できなかった with per-target outcomes;
 //   - every execution is appended to the audit log.
 
 import { randomUUID } from "node:crypto";
 import { findEntry, pathParams, type CatalogEntry, type OpKind, type OpRisk, type VerifyValue } from "./catalog.ts";
-import { describeFailure, environmentLabel, type GatewayClient, type GatewayResponse } from "./gateway.ts";
+import { describeFailure, environmentLabel, type ApiClient, type GatewayResponse } from "./gateway.ts";
 import { findPlaceholders, getPath, matchesWhere, resolveValue, type Plan } from "./plan.ts";
 
 export const MAX_WRITE_CALLS = 20;
+/** More writes than this in one execution count as a bulk write (high risk). */
+export const PHRASE_WRITE_CALLS = 10;
 export const MAX_READ_CALLS = 30;
 export const PREVIEW_TTL_MS = 30 * 60_000;
 const SAMPLE_CHARS = 1500;
@@ -43,6 +47,10 @@ export interface PreviewWrite {
   description: string;
   impact: string;
   fieldLabels?: Record<string, string>;
+  /** Set when no read can confirm this write: the reason, shown as 検証不能. */
+  unverifiable?: string;
+  /** "commander" = calls go to the local commander-service (paths without API_PREFIX). */
+  api?: "commander";
   calls: PreviewCall[];
 }
 
@@ -64,10 +72,13 @@ export interface Preview {
   reads: ReadSummary[];
   writes: PreviewWrite[];
   blockers: string[];
+  /** A high-risk write or a bulk write: the operator must type the confirmation phrase. */
+  requiresPhrase: boolean;
   expiresAt: string;
 }
 
-export type CallOutcome = "ok" | "unverified" | "failed" | "skipped";
+/** accepted = the API took it, but the entry is 検証不能 so nothing re-read it. */
+export type CallOutcome = "ok" | "accepted" | "unverified" | "failed" | "skipped";
 export interface CallResult {
   callId: string;
   stepId: string;
@@ -85,6 +96,12 @@ export interface ExecutionResult {
   executedAt: string;
 }
 
+/** Ids no plan may target (DenyRule sets): the owner's / the bot's own roles and users. */
+export interface ProtectedIds {
+  roles: string[];
+  users: string[];
+}
+
 export interface AuditSink {
   append(record: Record<string, unknown>): void;
 }
@@ -94,6 +111,8 @@ const itemsOf = (data: unknown): unknown[] | undefined =>
 
 /** No answer, or a gateway/upstream failure: the write may or may not have been applied. */
 const isAmbiguous = (status: number): boolean => status === 0 || status >= 500;
+
+const NO_COMMANDER = "Commander の接続先が未設定です（daemon の COMMANDER_SERVICE_URL と COMMANDER_SERVICE_TOKEN を設定してください）";
 
 const stripBraces = (expr: string): string => expr.replace(/^\s*\{\{\s*|\s*\}\}\s*$/g, "");
 
@@ -115,17 +134,35 @@ function defaultTarget(entry: CatalogEntry, params: Record<string, string>, item
   return (name as string | undefined) ?? (Object.values(params)[0] || entry.description);
 }
 
+/** Arrays of scalars compare as sets: services dedupe/sort lists (teamIds, permissions). */
+function sameMembers(got: unknown, want: unknown): boolean {
+  if (!Array.isArray(got) || !Array.isArray(want)) return false;
+  const g = new Set(got);
+  return g.size === new Set(want).size && want.every((x) => g.has(x));
+}
+
 export class OperateExecutor {
   private readonly previews = new Map<string, { preview: Preview; expires: number }>();
   // Plain fields, not parameter properties: the daemon runs under node's strip-only TS.
-  private readonly gateway: GatewayClient;
+  private readonly gateway: ApiClient;
   private readonly audit: AuditSink;
   private readonly now: () => number;
+  private readonly protectedIds: ProtectedIds;
+  /** commander-service, for entries with target "commander"; unset = those are blocked. */
+  private readonly commander: ApiClient | undefined;
 
-  constructor(gateway: GatewayClient, audit: AuditSink, now: () => number = Date.now) {
+  constructor(
+    gateway: ApiClient,
+    audit: AuditSink,
+    now: () => number = Date.now,
+    protectedIds: ProtectedIds = { roles: [], users: [] },
+    commander?: ApiClient,
+  ) {
     this.gateway = gateway;
     this.audit = audit;
     this.now = now;
+    this.protectedIds = protectedIds;
+    this.commander = commander;
   }
 
   /** Run the reads, resolve every write into concrete calls, write nothing. */
@@ -139,6 +176,10 @@ export class OperateExecutor {
     for (const [i, step] of plan.steps.entries()) {
       const at = `手順${i + 1}`;
       const entry = findEntry(step.op)!;
+      if (entry.target === "commander" && !this.commander) {
+        blockers.push(`${at}: ${NO_COMMANDER}`);
+        break;
+      }
       let items: unknown[] = [undefined];
       if (step.forEach) {
         const list = getPath(scope, stripBraces(step.forEach));
@@ -161,6 +202,11 @@ export class OperateExecutor {
         for (const k of entry.body?.required ?? []) if (body?.[k] === undefined || body[k] === "") problems.push(`body.${k}`);
         if (problems.length) {
           blockers.push(`${at}: ${[...new Set(problems)].join("・")} が決まっていません（読み取り結果から埋められませんでした）`);
+          break;
+        }
+        const denied = (entry.deny ?? []).find((d) => this.protectedIds[d.set].includes(String(getPath({ params, body }, d.field) ?? "")));
+        if (denied) {
+          blockers.push(`${at}: ${denied.reason}`);
           break;
         }
         const before =
@@ -189,7 +235,7 @@ export class OperateExecutor {
         const results: unknown[] = [];
         let failure: string | undefined;
         for (const c of calls) {
-          const res = await this.call(c);
+          const res = await this.call(c, entry);
           if (!res.ok) {
             failure = describeFailure(res);
             break;
@@ -223,6 +269,8 @@ export class OperateExecutor {
         description: entry.description,
         impact: entry.impact.replace("{count}", String(calls.length)),
         ...(entry.fieldLabels ? { fieldLabels: entry.fieldLabels } : {}),
+        ...(entry.unverifiable ? { unverifiable: entry.unverifiable } : {}),
+        ...(entry.target ? { api: entry.target } : {}),
         calls,
       });
     }
@@ -239,10 +287,14 @@ export class OperateExecutor {
     const preview: Preview = {
       previewId: randomUUID(),
       summary: plan.summary,
-      environment: environmentLabel(this.gateway.baseUrl),
+      // Commander-only plans write to the local service, not to the Dub environment.
+      environment: environmentLabel(
+        writes.length > 0 && writes.every((w) => w.api === "commander") && this.commander ? this.commander.baseUrl : this.gateway.baseUrl,
+      ),
       reads,
       writes,
       blockers,
+      requiresPhrase: writes.some((w) => w.risk === "high") || writeCalls > PHRASE_WRITE_CALLS,
       expiresAt: new Date(expires).toISOString(),
     };
     if (writes.length && !blockers.length) this.previews.set(preview.previewId, { preview, expires });
@@ -258,7 +310,7 @@ export class OperateExecutor {
     }
     const skipped = new Set(skip);
     const results: CallResult[] = [];
-    const written: { entry: CatalogEntry; call: PreviewCall; result: CallResult; ambiguous: boolean }[] = [];
+    const written: { entry: CatalogEntry; call: PreviewCall; result: CallResult; ambiguous: boolean; data: unknown }[] = [];
 
     // Write everything first, then read back once per list (a list re-read after all
     // writes reflects every target, so it is fetched a single time).
@@ -270,18 +322,25 @@ export class OperateExecutor {
           results.push({ ...base, outcome: "skipped", message: "対象から外しました" });
           continue;
         }
-        const res = await this.call(c);
+        const res = await this.call(c, entry);
+        if (entry.unverifiable) {
+          results.push(
+            res.ok ? { ...base, outcome: "accepted", message: `受け付けられました（検証不能: ${entry.unverifiable}）` }
+            : { ...base, outcome: "failed", message: isAmbiguous(res.status) ? `${describeFailure(res)}。検証不能のため反映されたかは分かりません` : describeFailure(res) },
+          );
+          continue;
+        }
         const ambiguous = !res.ok && isAmbiguous(res.status);
         const result: CallResult = res.ok
           ? { ...base, outcome: "ok", message: "反映を確認しました" }
           : { ...base, outcome: "failed", message: describeFailure(res) };
         results.push(result);
-        if (res.ok || ambiguous) written.push({ entry, call: c, result, ambiguous });
+        if (res.ok || ambiguous) written.push({ entry, call: c, result, ambiguous, data: res.ok ? res.data : undefined });
       }
     }
     const readCache = new Map<string, GatewayResponse>();
-    for (const { entry, call, result, ambiguous } of written) {
-      const mismatch = await this.verify(entry, call, readCache);
+    for (const { entry, call, result, ambiguous, data } of written) {
+      const mismatch = await this.verify(entry, call, data, readCache);
       if (ambiguous) {
         // A timeout/5xx says nothing about whether the write landed; the read-back decides.
         if (!mismatch) {
@@ -297,11 +356,14 @@ export class OperateExecutor {
     }
 
     const done = results.filter((r) => r.outcome !== "skipped");
-    const ok = done.filter((r) => r.outcome === "ok").length;
+    const accepted = done.filter((r) => r.outcome === "accepted").length;
+    const ok = done.filter((r) => r.outcome === "ok").length + accepted;
     const ng = done.length - ok;
     const verdict: Verdict = done.length > 0 && ng === 0 ? "done" : ok > 0 ? "partial" : "failed";
     const headline =
-      verdict === "done" ? `反映できました（${ok}件すべて読み直して確認済み）`
+      verdict === "done" && accepted
+        ? `反映できました（${ok > accepted ? `${ok - accepted}件は読み直して確認済み・` : ""}${accepted}件は検証不能で受付のみ確認）`
+      : verdict === "done" ? `反映できました（${ok}件すべて読み直して確認済み）`
       : verdict === "partial" ? `一部できませんでした（反映 ${ok}件／未反映 ${ng}件）`
       : `できませんでした（${done.length}件すべて未反映）`;
     const result: ExecutionResult = { previewId, verdict, headline, results, executedAt: new Date(this.now()).toISOString() };
@@ -316,6 +378,7 @@ export class OperateExecutor {
       calls: stored.preview.writes.flatMap((w) =>
         w.calls.map((c) => ({
           entryId: w.entryId,
+          ...(w.api ? { api: w.api } : {}),
           method: c.method,
           path: c.path,
           body: c.body,
@@ -326,29 +389,39 @@ export class OperateExecutor {
     return result;
   }
 
-  private async call(c: { method: string; path: string; query?: Record<string, string>; body?: unknown }): Promise<GatewayResponse> {
+  private async call(
+    c: { method: string; path: string; query?: Record<string, string>; body?: unknown },
+    entry: CatalogEntry,
+  ): Promise<GatewayResponse> {
+    const client = entry.target === "commander" ? this.commander : this.gateway;
+    if (!client) return { status: 0, ok: false, data: { error: NO_COMMANDER } };
     try {
-      return await this.gateway.request(c);
+      return await client.request(c);
     } catch (e) {
       return { status: 0, ok: false, data: { error: (e as Error).message } };
     }
   }
 
   /** Re-read the target; returns a Japanese mismatch reason, or null when it matches. */
-  private async verify(entry: CatalogEntry, c: PreviewCall, cache: Map<string, GatewayResponse>): Promise<string | null> {
+  private async verify(entry: CatalogEntry, c: PreviewCall, written: unknown, cache: Map<string, GatewayResponse>): Promise<string | null> {
     const spec = entry.verify;
     if (!spec) return null;
     const read = findEntry(spec.read)!;
     const src = (v: VerifyValue): VerifyValue | undefined =>
       typeof v === "string" && v.startsWith("$params.") ? c.params[v.slice(8)]
+      : typeof v === "string" && v.startsWith("$query.") ? c.query?.[v.slice(7)]
       : typeof v === "string" && v.startsWith("$body.") ? (c.body?.[v.slice(6)] as VerifyValue | undefined)
+      : typeof v === "string" && v.startsWith("$result.") ? (getPath(written, v.slice(8)) as VerifyValue | undefined)
       : v;
     const params = Object.fromEntries(Object.entries(spec.params ?? {}).map(([k, v]) => [k, String(src(v) ?? "")]));
-    const req = { method: "GET", path: buildPath(read, params), ...(spec.query ? { query: spec.query } : {}) };
-    const key = `${req.path}?${JSON.stringify(spec.query ?? {})}`;
+    // A timed-out create has no response to take its id from: nothing to re-read.
+    if (Object.values(params).some((v) => v === "")) return "読み直す対象の id が分かりません";
+    const query = spec.query ? Object.fromEntries(Object.entries(spec.query).map(([k, v]) => [k, String(src(v) ?? "")])) : undefined;
+    const req = { method: "GET", path: buildPath(read, params), ...(query ? { query } : {}) };
+    const key = `${read.target ?? "dub"} ${req.path}?${JSON.stringify(query ?? {})}`;
     let res = cache.get(key);
     if (!res) {
-      res = await this.call(req);
+      res = await this.call(req, read);
       cache.set(key, res);
     }
     if (!res.ok) return `読み直しに失敗: ${describeFailure(res)}`;
@@ -357,10 +430,14 @@ export class OperateExecutor {
       const [field, source] = spec.findBy;
       const want = src(source);
       target = itemsOf(getPath(res.data, spec.findIn) ?? res.data)?.find((x) => getPath(x, field) === want);
+      if (spec.present !== undefined && src(spec.present) === false) return target ? "取り除いたはずの対象が読み直した一覧に残っています" : null;
       if (!target) return "読み直した一覧に対象が見つかりません";
     }
     const expected: Record<string, VerifyValue | undefined> = {};
-    for (const [k, v] of Object.entries(spec.expect ?? {})) expected[k] = v === "$notNull" ? v : src(v);
+    for (const [k, v] of Object.entries(spec.expect ?? {})) {
+      if (typeof v === "string" && v.startsWith("$body.") && !(v.slice(6) in (c.body ?? {}))) continue;
+      expected[k] = v === "$notNull" ? v : src(v);
+    }
     if (spec.expectBody) {
       for (const [k, v] of Object.entries(c.body ?? {})) if (!spec.expectBody.except.includes(k)) expected[k] = v as VerifyValue;
     }
@@ -368,7 +445,8 @@ export class OperateExecutor {
       const got = getPath(target, k);
       const same =
         want === "$notNull" ? got != null
-        : got === want || (typeof got === "string" && typeof want === "string" && !Number.isNaN(Date.parse(want)) && Date.parse(got) === Date.parse(want));
+        : sameMembers(got, want) ||
+          got === want || (typeof got === "string" && typeof want === "string" && !Number.isNaN(Date.parse(want)) && Date.parse(got) === Date.parse(want));
       if (!same) return `${entry.fieldLabels?.[k] ?? k} が期待した値になっていません`;
     }
     return null;
