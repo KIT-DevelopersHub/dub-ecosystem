@@ -112,7 +112,7 @@ export const ROLE: AreaSpec = {
       description: "メンバーからロールを外す",
       hint: "params.assignmentId は users.roles.list の [].id（割り当て id。ロール id ではない）。組織で最後の管理者権限は外せない（409）",
       impact: "{count}人からロールが外れ、その人が使える機能がすぐに減ります。roles.assign で同じロールを付け直せば戻せます。",
-      verify: { read: "users.roles.list", params: { id: "$params.id" }, findIn: ".", findBy: ["id", "$params.assignmentId"], absent: true },
+      verify: { read: "users.roles.list", params: { id: "$params.id" }, findIn: ".", findBy: ["id", "$params.assignmentId"], present: false },
       deny: [{ field: "params.id", set: "users", reason: PROTECTED_USER }],
     },
   ],
