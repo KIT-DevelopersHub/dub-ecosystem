@@ -1,0 +1,52 @@
+name: staging D1 schema sync
+
+# WHY: CI never applies D1 migrations, so every migration merged to main left the staging
+# D1s behind, and the D1 schema gate in staging.yml then failed the next staging deploy
+# (2026-10-12/13: staging2 missing commander_staging_bundles, then lp_publish).
+# Every morning this applies to BOTH staging slots only the main migration files that fill
+# a missing table/column (infra/d1/scripts/sync-staging-schema.ts). Production is untouched.
+on:
+  schedule:
+    # 21:00 UTC = 06:00 JST
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: staging-schema-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: sync ${{ matrix.slot == 1 && 'staging' || 'staging2' }} D1 to main
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: [1, 2]
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STAGING_SLOT: ${{ matrix.slot }}
+      WRANGLER_BIN: pnpm dlx wrangler@4.35.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply missing migrations
+        run: |
+          . infra/deploy/staging-slot.sh
+          cd infra/d1
+          node --import tsx scripts/sync-staging-schema.ts "dub-core${STAGING_SUFFIX}"
