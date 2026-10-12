@@ -4,7 +4,8 @@
 // ログイン/メールアドレス/表示名) と 参加届(member-service: 届出→名簿反映) を 1 アプリに
 // 統合する。ランチャーのタイルは 1 つ（運営メンバー・名簿）にまとめ、その中をこの共有
 // サブナビで横断する。各セクションは従来のルート/Provider をそのまま維持（additive・非破壊）:
-//   運営メンバー   → /members（内部に チーム別/組織図 タブ）
+//   運営メンバー   → /members（チーム別）
+//   組織図         → /members/org-chart（チームとリーダーの上下関係）
 //   運営名簿       → /members/roster（運営メンバー全員の情報をフラットな一覧で並べる）
 //   メール名簿     → /admin/users（Email Routing アドレス／メールアカウントの一覧・発行・同期）
 //   参加届         → /participation（提出フォーム）
@@ -37,12 +38,13 @@ interface SectionTab {
 // 各タブの requiredPermissions は、対応ルートが registry.flatten で AND される実効権限と
 // 一致させる = per-app view キー（app:members:view / app:admin:view / app:participation:view,
 // withAppAccessGate 由来）が AUTHORITATIVE な 有効化ゲート。運営メンバー/運営名簿タブは
-// app:members:view のみでガードする（ドメイン identity:read は要求しない）ので、統括ロールが
+// app:members:view のみでガードする（組織図タブも同じ）（ドメイン identity:read は要求しない）ので、統括ロールが
 // app:members:view だけで名簿を開ける。メール名簿(/admin/users)・参加届の回答は対応ルートが
 // なお identity:read を AND するためタブ側もそれに合わせる。これでタブの表示可否がルート
 // ガードと厳密に一致し、「見えるのに開くと 403」というデッドタブを作らない（fail-closed）。
 const SECTIONS: SectionTab[] = [
   { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["app:members:view"] },
+  { id: "org-chart", label: "組織図", path: "/members/org-chart", requiredPermissions: ["app:members:view"] },
   { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["app:members:view"] },
   { id: "roster", label: "メール名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
   { id: "participation", label: "参加届", path: "/participation", requiredPermissions: ["app:participation:view"] },

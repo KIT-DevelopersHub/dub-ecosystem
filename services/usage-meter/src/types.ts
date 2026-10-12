@@ -35,6 +35,11 @@ export interface UsageServiceSummary {
 /** The GET /usage/summary response (frozen contract). */
 export interface UsageSummary {
   generatedAt: string;
+  /** When the shown numbers were collected (latest usage_snapshot.captured_at); null when
+   *  nothing was ever collected. generatedAt is only the response time. */
+  capturedAt: string | null;
+  /** capturedAt is missing or older than 48h — the dashboard must say the data is old. */
+  stale: boolean;
   worstStatus: UsageStatus;
   services: UsageServiceSummary[];
 }

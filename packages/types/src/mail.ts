@@ -112,7 +112,12 @@ export interface MailMessageState {
   read: boolean;
 }
 /** List/row view: the frozen message plus its read flag (drives the unread badge). */
-export interface MailMessageListItem extends MailMessage, MailMessageState {}
+export interface MailMessageListItem extends MailMessage, MailMessageState {
+  // ADDITIVE: true when the message is delivered to the caller's own account; false when it
+  // is visible only through oversight (mail:read_all) or role sharing (mail:read_role_shared).
+  // Absent from older gateways — treat absent as true.
+  mine?: boolean;
+}
 /** Detail view: list item plus the full body. Inbound persists text; htmlBody is
  *  optional (present only when a message carried an HTML part) and MUST be sanitized
  *  before rendering. */

@@ -65,6 +65,12 @@ export async function upsertSnapshot(db: DbClient, rows: readonly SnapshotRow[],
   }
 }
 
+/** When the latest snapshot was collected (MAX captured_at), or null if none ever was. */
+export async function readLatestCapturedAt(db: DbClient): Promise<string | null> {
+  const row = await db.first<{ last: string | null }>(`SELECT MAX(captured_at) AS last FROM usage_snapshot`);
+  return row?.last ?? null;
+}
+
 /** How many days back a metric's last KNOWN value may be surfaced before it is allowed to
  *  go "unknown". Bounds how stale a carried-forward reading can be (see readLatestSnapshot). */
 const KNOWN_VALUE_LOOKBACK_DAYS = 7;
