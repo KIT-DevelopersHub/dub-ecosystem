@@ -109,17 +109,12 @@ export function AppDetailDialog({
 
       {appId === "mail" && mailVisibility ? (
         <div style={blockStyle}>
-          <h3 style={headingStyle}>別のロール宛てのメールも閲覧</h3>
-          {appOff ? (
-            <p style={hintStyle} data-testid={`${idPrefix}-mail-cross-role-locked`}>
-              このアプリは「無効」です。使うには、上の権限を「閲覧」以上にしてください。
-            </p>
-          ) : null}
           <MailCrossRoleSection
             roleId={mailVisibility.roleId}
             value={mailVisibility.value}
             onChange={mailVisibility.onChange}
             disabled={disabled || appOff}
+            locked={appOff}
             idPrefix={idPrefix}
           />
         </div>
