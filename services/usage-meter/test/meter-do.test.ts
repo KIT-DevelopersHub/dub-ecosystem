@@ -95,6 +95,32 @@ describe("MeterDO bootstrap (ensureAlarm / kick fetch)", () => {
     expect(second).toBe(first);
   });
 
+  it("replaces an overdue alarm (a past-due alarm that never fired left prod dead for weeks)", async () => {
+    const fs = fakeState();
+    const weeksAgo = Date.now() - 21 * DAILY_INTERVAL_MS;
+    await fs.state.storage.setAlarm(weeksAgo);
+    const before = Date.now();
+    const at = await new MeterDO(fs.state, {} as Env).ensureAlarm();
+    expect(at).toBeGreaterThan(before);
+    expect(at).toBeLessThanOrEqual(before + FIRST_RUN_DELAY_MS + 1000);
+    expect(fs.getAlarm()).toBe(at);
+  });
+
+  it("replaces an alarm scheduled beyond the daily interval", async () => {
+    const fs = fakeState();
+    await fs.state.storage.setAlarm(Date.now() + 10 * DAILY_INTERVAL_MS);
+    const before = Date.now();
+    const at = await new MeterDO(fs.state, {} as Env).ensureAlarm();
+    expect(at).toBeLessThanOrEqual(before + FIRST_RUN_DELAY_MS + 1000);
+  });
+
+  it("keeps a healthy pending alarm (next daily run)", async () => {
+    const fs = fakeState();
+    const next = Date.now() + DAILY_INTERVAL_MS - 60_000;
+    await fs.state.storage.setAlarm(next);
+    expect(await new MeterDO(fs.state, {} as Env).ensureAlarm()).toBe(next);
+  });
+
   it("fetch() bootstraps the alarm and returns ok", async () => {
     const fs = fakeState();
     const res = await new MeterDO(fs.state, {} as Env).fetch(new Request("https://usage-meter-do/x", { method: "POST" }));
