@@ -6,7 +6,8 @@
 //
 // Lifecycle: POST /internal/meter/kick (app.ts) bootstraps the loop once via ensureAlarm().
 // Thereafter alarm() reschedules itself each day. GET /usage/summary also calls ensureAlarm()
-// whenever the latest snapshot is stale, so a lost alarm is re-armed by the next dashboard view.
+// whenever the latest snapshot is stale, so a lost or overdue alarm is re-armed by the next
+// dashboard view (which also collects inline, so it does not depend on the alarm firing).
 //
 // alarm() MUST NOT throw. A throwing alarm is retried 6 times within minutes and then dropped
 // by the runtime — that is how the loop died in production on 2026-09-21 (7 x
@@ -52,12 +53,15 @@ export class MeterDO {
     });
   }
 
-  /** Schedule the first alarm if none is pending. Returns the pending alarm time. The first
-   *  run is near-immediate so a (re-)armed loop refreshes stale data now, not in 24h. */
+  /** Arm the loop unless a healthy alarm is pending. Returns the pending alarm time. The first
+   *  run is near-immediate so a (re-)armed loop refreshes stale data now, not in 24h.
+   *  An overdue alarm is NOT healthy: in production a weeks-old alarm sat past due and never
+   *  fired, and treating "not null" as "pending" left the loop dead after re-arm (2026-10-12). */
   async ensureAlarm(): Promise<number> {
     const existing = await this.state.storage.getAlarm();
-    if (existing !== null) return existing;
-    const at = Date.now() + FIRST_RUN_DELAY_MS;
+    const now = Date.now();
+    if (existing !== null && existing > now && existing <= now + DAILY_INTERVAL_MS) return existing;
+    const at = now + FIRST_RUN_DELAY_MS;
     await this.state.storage.setAlarm(at);
     return at;
   }

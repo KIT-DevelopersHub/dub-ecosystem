@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { identity } from "@dub/types";
 import { PageHeader, Badge, Button, ConfirmDialog, EmptyState, ErrorState, SegmentedControl, SkeletonList } from "@dub/ui";
 import type { SegmentedOption } from "@dub/ui";
@@ -7,6 +7,7 @@ import { useCanAdminEdit } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { RolePermissionsEditor } from "./RolePermissionsEditor";
 import { errorMessage, displayError } from "../lib/errorDisplay";
+import { oauthReturnRole, rememberActiveRole } from "../lib/oauthReturn";
 import styles from "./RoleListPage.module.css";
 
 // Single-screen role management. Roles are switched with the shared @dub/ui
@@ -45,7 +46,9 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
     const p = new URLSearchParams(globalThis.location?.search ?? "");
     return { role: p.get("role"), app: p.get("app") };
   });
-  const [activeId, setActiveId] = useState<string | null>(deepLink.role);
+  // Back from Google's consent screen (Drive共有 の Google アカウント): reselect the role
+  // the admin was on, so its dialog and autosaved draft come back where they left them.
+  const [activeId, setActiveId] = useState<string | null>(() => deepLink.role ?? oauthReturnRole());
   const canAdmin = canAdminEdit;
 
   function confirmDelete() {
@@ -61,6 +64,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
   // was deleted, it falls back to the first remaining role.
   const effectiveId = (activeId && items.some((r) => r.id === activeId) ? activeId : items[0]?.id) ?? null;
   const active = items.find((r) => r.id === effectiveId) ?? null;
+  useEffect(() => rememberActiveRole(effectiveId), [effectiveId]);
 
   // One segment per role. `controls` wires each tab to its permission panel
   // (aria-controls + aria-expanded); the count/badge live in the segment label.
