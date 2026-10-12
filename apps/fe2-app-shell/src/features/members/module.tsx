@@ -13,6 +13,7 @@ import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { MembersPage } from "./MembersPage.tsx";
 import { MemberRosterPage } from "./MemberRosterPage.tsx";
+import { MembersOrgChartPage } from "./MembersOrgChartPage.tsx";
 
 type PermissionKey = identity.PermissionKey;
 
@@ -42,6 +43,12 @@ export const membersRoutes: MembersSourceRoute[] = [
     // 共有サブナビ配下・同じゲート app:members:view）。
     path: "/members/roster",
     lazy: () => Promise.resolve({ Component: MemberRosterPage }),
+    auth: "required",
+  },
+  {
+    // 組織図: 共有サブナビの上タブ（旧 運営メンバー画面の内側タブ）。同じ Provider・同じゲート。
+    path: "/members/org-chart",
+    lazy: () => Promise.resolve({ Component: MembersOrgChartPage }),
     auth: "required",
   },
 ];
