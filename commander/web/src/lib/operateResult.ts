@@ -7,7 +7,7 @@ import { RESULT_PREFIX } from "./operateDub.ts";
 
 export const DATA_MARKER = "\n---読み取りデータ---\n";
 
-const OUTCOME_LABEL = { ok: "反映済み", unverified: "未反映（読み直しで確認できず）", failed: "失敗", skipped: "対象外にした" } as const;
+const OUTCOME_LABEL = { ok: "反映済み", accepted: "受付済み（検証不能）", unverified: "未反映（読み直しで確認できず）", failed: "失敗", skipped: "対象外にした" } as const;
 
 export function writeCount(preview: Preview): number {
   return preview.writes.reduce((n, w) => n + w.calls.length, 0);

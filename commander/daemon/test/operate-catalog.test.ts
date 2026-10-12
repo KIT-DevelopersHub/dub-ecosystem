@@ -1,14 +1,37 @@
 // Guards the operate allow-list against drift from the services it calls: every catalog
-// entry must still exist in the owning service's policy-table.ts with exactly the keys the
-// catalog claims, and the catalog must never grow a physical delete or a bulk endpoint.
+// entry must still exist in the owning service's policy table with exactly the keys the
+// catalog claims; every route in scope must be decided (catalog / excluded with a reason /
+// pending); and irreversible effects stay out unless the owner opened them by name.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CATALOG, findEntry, pathParams, requiredPermissionKeys } from "../src/operate/catalog.ts";
-import { extractPolicyRoutes } from "../src/operate/policy-extract.ts";
+import {
+  AREAS,
+  CATALOG,
+  EXCLUDED,
+  OWNER_OPENED_IRREVERSIBLE,
+  SCOPE,
+  findEntry,
+  pathParams,
+  requiredPermissionKeys,
+} from "../src/operate/catalog.ts";
+import { extractAppGuardRoutes, extractPolicyRoutes, type PolicyRoute } from "../src/operate/policy-extract.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const tableOf = (service: string) =>
-  extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/policy-table.ts`, "utf8"));
+const tables = new Map<string, PolicyRoute[]>();
+function tableOf(service: string): PolicyRoute[] {
+  let t = tables.get(service);
+  if (!t) {
+    // lp-analytics has no policy-table.ts yet; its gate is requireAppAccess in app.ts.
+    t =
+      service === "lp-analytics"
+        ? extractAppGuardRoutes(readFileSync(`${repoRoot}services/${service}/src/app.ts`, "utf8"))
+        : extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/policy-table.ts`, "utf8"));
+    tables.set(service, t);
+  }
+  return t;
+}
+const key = (r: { method: string; path: string }) => `${r.method} ${r.path}`;
+const PENDING = AREAS.flatMap((a) => a.pending);
 
 describe("extractPolicyRoutes", () => {
   it("resolves named constants, appLevel tiers and comments", () => {
@@ -22,26 +45,60 @@ describe("extractPolicyRoutes", () => {
         "GET /users": READ,
         "PATCH /events/:id": appLevel("events", "edit", "event:write"),
       });`);
-    expect(routes.map((r) => `${r.method} ${r.path}`)).toEqual([
-      "GET /health",
-      "POST /n/:id/unpublish",
-      "GET /users",
-      "PATCH /events/:id",
-    ]);
+    expect(routes.map(key)).toEqual(["GET /health", "POST /n/:id/unpublish", "GET /users", "PATCH /events/:id"]);
     expect(routes[0]!.kind).toBe("INTERNAL");
     expect(routes[1]).toMatchObject({ kind: "keys", keys: ["notif:broadcast_publish"], appLevel: { app: "notifications", level: "edit" } });
     expect(routes[2]).toMatchObject({ keys: ["identity:read"] });
     expect(routes[2]!.appLevel).toBeUndefined();
   });
+
+  it("reads requireAppAccess guards from an app.ts without a table", () => {
+    const routes = extractAppGuardRoutes(`
+      const view = deps.authz.requireAppAccess("lp", "view");
+      const edit = deps.authz.requireAppAccess("lp", "edit");
+      app.get("/health", (c) => c.json({}));
+      app.get("/lp/stats", view, async (c) => c.json({}));
+      app.patch("/lp/links/:id", edit, async (c) =>
+        c.json({}));`);
+    expect(routes.map((r) => [key(r), r.appLevel])).toEqual([
+      ["GET /lp/stats", { app: "lp", level: "view" }],
+      ["PATCH /lp/links/:id", { app: "lp", level: "edit" }],
+    ]);
+  });
 });
 
 describe("operate catalog", () => {
   it.each(CATALOG.map((e) => [e.id, e] as const))("%s matches its service policy table", (_id, entry) => {
-    const route = tableOf(entry.service).find((r) => r.method === entry.method && r.path === entry.path);
-    expect(route, `${entry.method} ${entry.path} missing from ${entry.service}`).toBeDefined();
-    expect(route!.kind).toBe("keys");
+    const route = tableOf(entry.service).find((r) => key(r) === key(entry));
+    expect(route, `${key(entry)} missing from ${entry.service}`).toBeDefined();
+    // AUTHENTICATED (no key) is acceptable only when the catalog claims no key either.
+    expect(route!.kind === "keys" || (route!.kind === "AUTHENTICATED" && entry.requires.keys.length === 0), entry.id).toBe(true);
     expect([...route!.keys].sort()).toEqual([...entry.requires.keys].sort());
     expect(route!.appLevel).toEqual(entry.requires.appLevel);
+  });
+
+  it("decides every in-scope route exactly once: catalog, excluded (with a reason) or pending", () => {
+    const decided = new Map<string, string>();
+    const mark = (service: string, route: string, as: string) => {
+      const k = `${service} ${route}`;
+      expect(decided.get(k), `${k} is both ${decided.get(k)} and ${as}`).toBeUndefined();
+      decided.set(k, as);
+    };
+    for (const e of CATALOG) mark(e.service, key(e), "catalog");
+    for (const x of EXCLUDED) mark(x.service, x.route, "excluded");
+    for (const p of PENDING) mark(p.service, p.route, "pending");
+
+    const inScope: string[] = [];
+    for (const [service, prefixes] of Object.entries(SCOPE)) {
+      for (const r of tableOf(service)) {
+        if (r.kind === "INTERNAL" || r.kind === "internalWithKeys" || r.kind === "PUBLIC") continue;
+        if (!prefixes.some((p) => r.path.startsWith(p))) continue;
+        inScope.push(`${service} ${key(r)}`);
+      }
+    }
+    expect(inScope.filter((k) => !decided.has(k)), "routes nobody decided on").toEqual([]);
+    expect([...decided.keys()].filter((k) => !inScope.includes(k)), "decisions on routes that do not exist").toEqual([]);
+    for (const x of EXCLUDED) expect(x.reason, x.route).toMatch(/[ぁ-んァ-ン一-龥]/);
   });
 
   it("has unique ids and declares body rules only for mutations", () => {
@@ -53,7 +110,8 @@ describe("operate catalog", () => {
         expect(e.risk, e.id).toBe("low");
       } else {
         expect(e.method, e.id).not.toBe("GET");
-        expect(e.verify, `${e.id} needs a read-back`).toBeDefined();
+        // Exactly one of: a read-back, or the stated reason it cannot be read back.
+        expect(Boolean(e.verify) !== Boolean(e.unverifiable), `${e.id} needs verify xor unverifiable`).toBe(true);
       }
       for (const req of e.body?.required ?? []) expect(e.body!.allowed).toContain(req);
     }
@@ -68,11 +126,10 @@ describe("operate catalog", () => {
     }
   });
 
-  it("excludes physical deletes and bulk endpoints", () => {
-    for (const e of CATALOG) {
-      expect(e.method as string, e.id).not.toBe("DELETE");
-      expect(e.path, e.id).not.toMatch(/batch|bulk/i);
-    }
+  it("keeps irreversible effects out unless the owner opened them by name", () => {
+    const irreversible = CATALOG.filter((e) => !e.reversible).map((e) => e.id).sort();
+    expect(irreversible).toEqual(Object.keys(OWNER_OPENED_IRREVERSIBLE).sort());
+    for (const e of CATALOG) expect(e.path, e.id).not.toMatch(/batch|bulk/i);
   });
 
   it("gives every entry Japanese copy and keeps deletes at high risk", () => {
@@ -85,13 +142,10 @@ describe("operate catalog", () => {
     }
   });
 
-  it("lists the permission keys a commander bot role needs", () => {
-    expect(requiredPermissionKeys()).toEqual([
-      "event:read",
-      "event:write",
-      "identity:read",
-      "mail:admin",
-      "notif:broadcast_publish",
-    ]);
+  it("lists the permission keys a commander bot role needs, never a delete/admin-only key", () => {
+    const keys = requiredPermissionKeys();
+    expect(keys).toContain("event:read");
+    expect(keys).toContain("app:events:edit");
+    for (const k of ["event:admin", "task:delete", "chat:delete", "chat:moderate", "file:admin"]) expect(keys).not.toContain(k);
   });
 });
