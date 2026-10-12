@@ -57,7 +57,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 // Drive-relevant grants of each system role, per the identity migrations that define them:
 //   0002 (domain keys: maintainer gets drive:read/write), 0005 (admin gets drive:read/write),
 //   0008 (per-app tier: admin/maintainer 編集, organizer/member 閲覧),
-//   0016 (Drive共有 の「設定」: every identity:admin role gets settings_view + settings_edit).
+//   0016 (Drive共有 の「設定」: only the system admin role gets settings_view + settings_edit).
 // The last two rows are not roles but the two legacy shapes the table was written to fix.
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   admin: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin", "drive:settings_view", "drive:settings_edit"],
@@ -73,7 +73,7 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "settings-view": ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "drive:settings_view"],
   // 「設定」 = 編集 on a 閲覧-only app: the app tier caps it at 閲覧.
   "settings-edit-on-view-tier": ["app:driveshare:view", "drive:read", "drive:settings_view", "drive:settings_edit"],
-  // identity:admin alone no longer opens the settings (the 0016 backfill carries it over).
+  // identity:admin alone does not open the settings (0016 grants the keys to role_sys_admin only).
   "identity-admin-without-settings-keys": ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin"],
 };
 
