@@ -4,7 +4,7 @@
 //   - GET  /                                Worker root
 //   - POST /internal/meter/kick             arm the DO daily-alarm loop
 //   - POST /internal/meter/refresh          on-demand re-collect + upsert, returns summary
-//   - GET  /usage/summary                   the frozen dashboard contract (re-arms the alarm when stale)
+//   - GET  /usage/summary                   the frozen dashboard contract (re-arms + collects inline when stale)
 //
 // AUTHZ: none in this file. `policyGate` is mounted first and derives both authn (the trusted
 // x-dub-user-id header) and authz from POLICY_TABLE (src/policy-table.ts), which lists every
@@ -22,6 +22,7 @@ import { collectSnapshot } from "./collect";
 import { POLICY_TABLE } from "./policy-table";
 import { mailReadDb, readLatestCapturedAt, readLatestSnapshot, upsertSnapshot, usageDb } from "./snapshot-repo";
 import { buildSummary } from "./summary";
+import type { UsageSummary } from "./types";
 
 const SERVICE_NAME = "usage-meter";
 
@@ -67,6 +68,23 @@ function usageMeterPolicyGate(options: AppOptions): MiddlewareHandler<AppBinding
   };
 }
 
+/** Collect -> upsert -> summary of what was just measured (no alerting). */
+async function collectNow(env: Env, d1: NonNullable<Env["DB"]>): Promise<UsageSummary> {
+  const now = new Date();
+  const rows = await collectSnapshot(env, mailReadDb(d1), now);
+  await upsertSnapshot(usageDb(d1), rows, now);
+  return buildSummary(rows, now, now.toISOString());
+}
+
+function logError(message: string, err: unknown): void {
+  consoleSink({
+    level: "error",
+    message,
+    service: SERVICE_NAME,
+    fields: { error: err instanceof Error ? err.message : String(err) },
+  });
+}
+
 /** Ask the singleton MeterDO to arm its daily alarm if none is pending. Returns its reply. */
 async function armMeter(ns: DurableObjectNamespace): Promise<unknown> {
   const stub = ns.get(ns.idFromName("singleton"));
@@ -93,10 +111,7 @@ export function createApp(options: AppOptions = {}) {
   // ---- on-demand re-collect + upsert (no alerting; alerts fire only in the DO alarm). ----
   app.post("/internal/meter/refresh", async (c) => {
     if (!c.env.DB) return c.json({ error: "DB not bound" }, 503);
-    const now = new Date();
-    const rows = await collectSnapshot(c.env, mailReadDb(c.env.DB), now);
-    await upsertSnapshot(usageDb(c.env.DB), rows, now);
-    return c.json(buildSummary(rows, now, now.toISOString()));
+    return c.json(await collectNow(c.env, c.env.DB));
   });
 
   // ---- the dashboard read. appLevel("usage","view") + usage:view in the table. ----
@@ -105,19 +120,20 @@ export function createApp(options: AppOptions = {}) {
     const db = usageDb(c.env.DB);
     const [rows, capturedAt] = await Promise.all([readLatestSnapshot(db), readLatestCapturedAt(db)]);
     const summary = buildSummary(rows, new Date(), capturedAt);
-    // Self-heal: stale data means the alarm loop may be gone, and nothing else re-arms it
-    // (kick is INTERNAL and unreachable from outside). Idempotent while the alarm exists.
-    if (summary.stale && c.env.METER_DO) {
-      await armMeter(c.env.METER_DO).catch((err: unknown) =>
-        consoleSink({
-          level: "error",
-          message: "usage alarm re-arm failed",
-          service: SERVICE_NAME,
-          fields: { error: err instanceof Error ? err.message : String(err) },
-        }),
-      );
+    if (!summary.stale) return c.json(summary);
+
+    // Self-heal: stale data means the alarm loop stopped. Re-arm it (kick is INTERNAL and
+    // unreachable from outside), and collect right here so this read shows today's numbers
+    // even if the alarm never fires. Both best-effort: on failure the old numbers are served.
+    if (c.env.METER_DO) {
+      await armMeter(c.env.METER_DO).catch((err: unknown) => logError("usage alarm re-arm failed", err));
     }
-    return c.json(summary);
+    try {
+      return c.json(await collectNow(c.env, c.env.DB));
+    } catch (err) {
+      logError("usage inline collection failed", err);
+      return c.json(summary);
+    }
   });
 
   return app;
