@@ -95,8 +95,8 @@ export function UsageDashboard(): JSX.Element {
           <strong>無料枠の上限に達して機能が止まる予兆を早く掴むこと</strong>にあります。
         </p>
         <p style={noteStyle} data-testid="fe2-usage-alert-threshold">
-          使用率が<strong>{WARN_PCT}% に達した項目</strong>は、管理者にメールとアプリ内通知でお知らせします
-          （{CRITICAL_PCT}% で危険として再度お知らせ・超えている間は 1 日 1 回）。
+          使用率が<strong>{WARN_PCT}% に達した項目</strong>は、管理者にメールとアプリ内通知でお知らせします（
+          {CRITICAL_PCT}% で危険として再度お知らせ・超えている間は 1 日 1 回）。
         </p>
       </Stack>
     </Card>

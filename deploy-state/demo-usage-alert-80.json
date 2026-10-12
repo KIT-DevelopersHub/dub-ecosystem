@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "usage-alert-80",
+  "worker": "dub-demo-usage-alert-80",
+  "url": "https://dub-demo-usage-alert-80.developershub-site.workers.dev",
+  "deployedSha": "0f5f6517",
+  "branch": "feat/usage-alert-80pct",
+  "actor": "ko-tarou",
+  "markers": ["fe2-usage-alert-threshold"],
+  "live": true,
+  "verifiedAt": "2026-10-12T15:00:16Z",
+  "updatedAt": "2026-10-12T15:00:16Z",
+  "note": "usage alert threshold 80%"
+}
