@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "chat-browser-notify",
+  "worker": "dub-demo-chat-browser-notify",
+  "url": "https://dub-demo-chat-browser-notify.developershub-site.workers.dev",
+  "deployedSha": "526cad87",
+  "branch": "feat/chat-browser-notify",
+  "actor": "ko-tarou",
+  "markers": ["fe2-account-browser-notify-toggle","dub.browserNotify.enabled"],
+  "live": true,
+  "verifiedAt": "2026-10-09T18:58:55Z",
+  "updatedAt": "2026-10-09T18:58:55Z",
+  "note": "chat mention browser notifications + account setting toggle"
+}
