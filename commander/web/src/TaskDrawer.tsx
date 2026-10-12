@@ -5,7 +5,7 @@
 // Next actions close the judgment loop: 承認 (approval-gated), 却下 (feedback → new run),
 // 追加指示 (new run in the same task, phase unchanged), フェーズを戻す (phase-only step
 // back to a 確認待ち), 完了 (archive to the Done lane).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Drawer } from "./Drawer.tsx";
 import type { CommanderClient } from "./lib/client.ts";
 import {
@@ -74,6 +74,8 @@ interface TaskDrawerProps extends TaskDrawerHandlers {
   onClose: () => void;
   /** Bumped by the board after an action to force a detail reload. */
   version: number;
+  /** Banner above everything else (e.g. 「合体に含まれています」). */
+  notice?: ReactNode;
 }
 
 type Tab = "log" | "artifact" | "phase";
@@ -188,7 +190,8 @@ export function TaskDrawer(props: TaskDrawerProps) {
         </span>
       }
     >
-      {/* reflection banner: 反映済み(✅+URL) / 反映中(🔄 spinner) / 反映失敗(⚠️) を最上部で明示。
+      {props.notice}
+      {/* reflection banner:反映済み(✅+URL) / 反映中(🔄 spinner) / 反映失敗(⚠️) を最上部で明示。
           確認待ちで「反映が終わったのか進行中か」を即判別でき、本番反映中の進行表示も兼ねる。 */}
       {reflection && (
         <div
