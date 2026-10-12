@@ -114,6 +114,9 @@ export const POLICY_TABLE = definePolicyTable({
   // mail-gateway's role-shared inbound scope (who else holds a mail:read_role_shared role
   // with me). INTERNAL: a membership oracle must not be reachable from outside.
   "GET /internal/users/:id/role-peers": INTERNAL,
+  // mail-gateway's full inbound scope (role-peers + cross-role mail visibility). INTERNAL for
+  // the same reason as role-peers.
+  "GET /internal/users/:id/mail-visible-users": INTERNAL,
 
   // Passkey credential store. Only auth-service calls these (it runs the WebAuthn ceremonies
   // and owns step-up / last-method policy); INTERNAL keeps the store off the internet.

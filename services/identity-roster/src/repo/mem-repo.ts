@@ -27,6 +27,7 @@ export class MemIdentityRepo implements IdentityRepo {
   private users = new Map<string, UserRow>();
   private roles = new Map<string, RoleRow>();
   private assignments = new Map<string, AssignmentRow>();
+  private mailVisibility = new Map<string, string[]>(); // roleId -> target role ids
 
   async getOrg(orgId: string): Promise<OrgRow | null> {
     return this.orgs.get(orgId) ?? null;
@@ -123,6 +124,8 @@ export class MemIdentityRepo implements IdentityRepo {
   async deleteRole(roleId: string): Promise<void> {
     this.roles.delete(roleId);
     for (const [id, a] of this.assignments) if (a.roleId === roleId) this.assignments.delete(id); // CASCADE
+    this.mailVisibility.delete(roleId);
+    for (const [id, targets] of this.mailVisibility) this.mailVisibility.set(id, targets.filter((t) => t !== roleId));
   }
   async roleMemberCounts(orgId: string): Promise<Map<string, number>> {
     const perRole = new Map<string, Set<string>>();
@@ -197,5 +200,32 @@ export class MemIdentityRepo implements IdentityRepo {
       if (this.users.get(a.userId)?.status === "active") peers.add(a.userId);
     }
     return [...peers];
+  }
+
+  async mailVisibilityByOrg(orgId: string): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    for (const [roleId, targets] of this.mailVisibility) {
+      if (this.roles.get(roleId)?.orgId === orgId && targets.length > 0) out.set(roleId, [...targets].sort());
+    }
+    return out;
+  }
+
+  async setMailVisibleRoles(roleId: string, targetRoleIds: string[]): Promise<void> {
+    this.mailVisibility.set(roleId, [...new Set(targetRoleIds)]);
+  }
+
+  async orgWideMailVisibleUsers(orgId: string, userId: string): Promise<string[]> {
+    const orgWide = (a: AssignmentRow): boolean => a.orgId === orgId && a.resourceType === null && a.resourceId === null;
+    const targets = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.userId !== userId || !orgWide(a)) continue;
+      for (const t of this.mailVisibility.get(a.roleId) ?? []) targets.add(t);
+    }
+    const users = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.userId === userId || !orgWide(a) || !targets.has(a.roleId)) continue;
+      if (this.users.get(a.userId)?.status === "active") users.add(a.userId);
+    }
+    return [...users];
   }
 }

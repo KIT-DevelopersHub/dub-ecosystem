@@ -275,6 +275,12 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.rolePeers(c.req.param("id"), orgId, c.req.query("permission") ?? ""));
   });
 
+  // Whose inbound mail :id may also read — same-role sharing + cross-role visibility.
+  // Internal S2S read for mail-gateway's inbound read scope. Returns { userIds } excluding :id.
+  app.get("/internal/users/:id/mail-visible-users", async (c) => {
+    return c.json(await svc.mailVisibleUsers(c.req.param("id"), orgId));
+  });
+
   // ---- passkey credential store (internal S2S: auth-service only) ----
   // identity holds the rows; auth-service runs the WebAuthn ceremonies and owns every
   // policy decision (step-up, last-method guard). Writes are scoped by userId in the path

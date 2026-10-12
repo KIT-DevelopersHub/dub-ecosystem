@@ -103,4 +103,14 @@ export interface IdentityRepo {
   /** Other ACTIVE users (excluding `userId`) holding, org-wide, a role that `userId` also holds
    *  org-wide AND that carries `permission` (mail role sharing). Distinct ids. */
   orgWideRolePeers(orgId: string, userId: string, permission: identity.PermissionKey): Promise<string[]>;
+
+  // cross-role mail visibility (identity_role_mail_visibility)
+  /** roleId -> target role ids whose holders' inbound mail the role's holders also see.
+   *  Roles with no targets are omitted. */
+  mailVisibilityByOrg(orgId: string): Promise<Map<string, string[]>>;
+  /** Replace `roleId`'s target set. */
+  setMailVisibleRoles(roleId: string, targetRoleIds: string[]): Promise<void>;
+  /** ACTIVE users (excluding `userId`) holding, org-wide, a target role of any role `userId`
+   *  holds org-wide. Distinct ids. */
+  orgWideMailVisibleUsers(orgId: string, userId: string): Promise<string[]>;
 }

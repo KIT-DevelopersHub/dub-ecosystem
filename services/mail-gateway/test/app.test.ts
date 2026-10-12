@@ -928,6 +928,26 @@ describe("role sharing — mail:read_role_shared widens the INBOUND scope to rol
     ]);
   });
 
+  it("cross-role visibility is one-way: a 統括 sees carol, carol does not see the 統括", async () => {
+    const { env, raw } = sharedEnv(READ, { usr_lead: ["usr_alice", "usr_bob", "usr_carol"], usr_carol: [] });
+    seedAll(raw);
+    seedOwned(raw, { id: "in_lead", ownerUserId: "usr_lead" });
+    expect((await list(env, "usr_lead")).map((m) => [m.id, m.mine]).sort()).toEqual([
+      ["in_alice", false],
+      ["in_bob", false],
+      ["in_carol", false],
+      ["in_lead", true],
+    ]);
+    expect((await list(env, "usr_carol")).map((m) => m.id)).toEqual(["in_carol"]);
+  });
+
+  it("a visible set larger than D1's 100-bind cap is not truncated", async () => {
+    const many = Array.from({ length: 150 }, (_, i) => `usr_m${String(i).padStart(3, "0")}`);
+    const { env, raw } = sharedEnv(READ, { usr_lead: many });
+    seedOwned(raw, { id: "in_last", ownerUserId: many[many.length - 1]! });
+    expect((await list(env, "usr_lead")).map((m) => m.id)).toEqual(["in_last"]);
+  });
+
   it("identity failure on the peers call falls back to own mail only (fail-closed)", async () => {
     const { env, raw } = sharedEnv(READ, "error");
     seedAll(raw);

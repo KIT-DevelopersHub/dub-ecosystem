@@ -218,24 +218,23 @@ function isReadAll(scope: MailScope): scope is { readAll: true } {
   return typeof scope === "object";
 }
 
-/** Read scope for INBOUND mail only. Adds the `mail:read_role_shared` variant: the caller
- *  plus the other holders of a sharing role (`{ userIds }`, resolved by the route). Kept a
+/** Read scope for INBOUND mail only. Adds the shared variant: the caller plus the users whose
+ *  inbound mail they may read — same-role sharing (`mail:read_role_shared`) and cross-role
+ *  visibility (`{ userIds }`, resolved by the route via identity-roster). Kept a
  *  separate type so Sent / Scheduled can never be handed a shared scope. `viewer` is the
  *  caller — it only drives the `mine` flag on the returned items, never the filter. */
 export type InboundScope = MailScope | { userIds: string[] };
 
-// D1 caps bound parameters per statement at 100; leave headroom for the other binds
-// (thread / cursor / limit). Truncation can only HIDE peers' mail, never widen access.
-const MAX_SCOPE_OWNERS = 90;
-
 /** `owner_user_id` predicate for an inbound scope, or null for the read_all bypass. An
- *  empty owner list matches nothing (fail-closed). */
+ *  empty owner list matches nothing (fail-closed). The owner list rides as ONE JSON bind:
+ *  D1 caps bound parameters per statement at 100, and cross-role visibility (e.g. a 統括
+ *  role seeing every role) can exceed that — a per-id `IN (?, ...)` would have to truncate. */
 function inboundOwnerClause(scope: InboundScope): { sql: string; binds: string[] } | null {
   if (typeof scope === "string") return { sql: "owner_user_id = ?", binds: [scope] };
   if ("readAll" in scope) return null;
-  const ids = [...new Set(scope.userIds)].slice(0, MAX_SCOPE_OWNERS);
+  const ids = [...new Set(scope.userIds)];
   if (ids.length === 0) return { sql: "1 = 0", binds: [] };
-  return { sql: `owner_user_id IN (${ids.map(() => "?").join(", ")})`, binds: ids };
+  return { sql: "owner_user_id IN (SELECT value FROM json_each(?))", binds: [JSON.stringify(ids)] };
 }
 
 /** List sent mail (status='sent'), newest first. id-based opaque cursor (like

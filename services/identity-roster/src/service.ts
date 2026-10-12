@@ -21,6 +21,7 @@ import type {
   OffboardStepResult,
   ProvisionUserResponse,
   RoleAssignmentView,
+  RoleView,
   RoleWithMemberCount,
   SyncEmailRoutingRequest,
   SyncEmailRoutingResult,
@@ -66,8 +67,27 @@ export class IdentityService {
     };
   }
 
-  private toRole(r: RoleRow): identity.Role {
-    return { id: r.id, orgId: r.orgId, name: r.name, permissions: r.permissions, isSystem: r.isSystem };
+  private toRole(r: RoleRow, mailVisibleRoleIds: common.RoleId[] = []): RoleView {
+    return { id: r.id, orgId: r.orgId, name: r.name, permissions: r.permissions, isSystem: r.isSystem, mailVisibleRoleIds };
+  }
+
+  private async mailVisibleRoleIdsOf(r: RoleRow): Promise<common.RoleId[]> {
+    return (await this.d.repo.mailVisibilityByOrg(r.orgId)).get(r.id) ?? [];
+  }
+
+  /** Validates a cross-role mail visibility set: distinct roles of the same org, never the role
+   *  itself (same-role sharing is the mail:read_role_shared key). */
+  private async normalizeMailVisibleRoleIds(orgId: string, roleId: string, ids: unknown): Promise<common.RoleId[]> {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
+      throw errors.validationFailed([{ field: "mailVisibleRoleIds", reason: "invalid" }]);
+    }
+    const unique = [...new Set(ids as string[])].sort();
+    for (const id of unique) {
+      if (id === roleId) throw errors.validationFailed([{ field: "mailVisibleRoleIds", reason: "self", message: id }]);
+      const target = await this.d.repo.getRole(id);
+      if (!target || target.orgId !== orgId) throw errors.validationFailed([{ field: "mailVisibleRoleIds", reason: "unknown_role", message: id }]);
+    }
+    return unique;
   }
 
   private toAssignmentView(a: AssignmentRow, roleName: string): RoleAssignmentView {
@@ -529,13 +549,14 @@ export class IdentityService {
   async listRoles(orgId: string, limit?: number, cursor?: string): Promise<common.Paginated<RoleWithMemberCount>> {
     const page = await this.d.repo.listRoles(orgId, clampLimit(limit), cursor);
     const counts = await this.d.repo.roleMemberCounts(orgId);
+    const visibility = await this.d.repo.mailVisibilityByOrg(orgId);
     return {
-      items: page.items.map((r) => ({ ...this.toRole(r), memberCount: counts.get(r.id) ?? 0 })),
+      items: page.items.map((r) => ({ ...this.toRole(r, visibility.get(r.id) ?? []), memberCount: counts.get(r.id) ?? 0 })),
       nextCursor: page.nextCursor,
     };
   }
 
-  async createRole(orgId: string, req: CreateRoleRequest, ctx: RequestCtx): Promise<identity.Role> {
+  async createRole(orgId: string, req: CreateRoleRequest, ctx: RequestCtx): Promise<RoleView> {
     const name = requireNonEmpty(req.name, "name");
     assertPermissionKeys(req.permissions);
     const org = await this.d.repo.getOrg(orgId);
@@ -544,12 +565,14 @@ export class IdentityService {
 
     const now = this.d.now();
     const role: RoleRow = { id: this.d.newId("role"), orgId, name, isSystem: false, permissions: normalizePerms(req.permissions), createdAt: now, updatedAt: now };
+    const mailVisible = req.mailVisibleRoleIds !== undefined ? await this.normalizeMailVisibleRoleIds(orgId, role.id, req.mailVisibleRoleIds) : [];
     await this.d.repo.createRole(role);
-    await this.d.audit.publish(this.record("identity.role.created", "success", ctx, orgId, "role", role.id, { name }));
-    return this.toRole(role);
+    if (mailVisible.length > 0) await this.d.repo.setMailVisibleRoles(role.id, mailVisible);
+    await this.d.audit.publish(this.record("identity.role.created", "success", ctx, orgId, "role", role.id, { name, mailVisibleRoleIds: mailVisible }));
+    return this.toRole(role, mailVisible);
   }
 
-  async updateRole(roleId: string, orgId: string, req: UpdateRoleRequest, ctx: RequestCtx): Promise<identity.Role> {
+  async updateRole(roleId: string, orgId: string, req: UpdateRoleRequest, ctx: RequestCtx): Promise<RoleView> {
     const role = await this.d.repo.getRole(roleId);
     if (!role || role.orgId !== orgId) throw errors.notFound("role", roleId);
     if (req.permissions !== undefined) assertPermissionKeys(req.permissions);
@@ -568,14 +591,22 @@ export class IdentityService {
       const clash = await this.d.repo.getRoleByName(orgId, req.name);
       if (clash) throw errors.conflict(`role name exists: ${req.name}`, { code: "ROLE_NAME_EXISTS" });
     }
+    const mailVisible = req.mailVisibleRoleIds !== undefined ? await this.normalizeMailVisibleRoleIds(orgId, roleId, req.mailVisibleRoleIds) : undefined;
     await this.d.repo.updateRolePermissions(
       roleId,
       req.name,
       req.permissions !== undefined ? normalizePerms(req.permissions) : undefined,
       this.d.now(),
     );
-    await this.d.audit.publish(this.record("identity.role.updated", "success", ctx, orgId, "role", roleId, { permissionChange: req.permissions !== undefined }));
-    return this.toRole((await this.d.repo.getRole(roleId))!);
+    if (mailVisible !== undefined) await this.d.repo.setMailVisibleRoles(roleId, mailVisible);
+    await this.d.audit.publish(
+      this.record("identity.role.updated", "success", ctx, orgId, "role", roleId, {
+        permissionChange: req.permissions !== undefined,
+        ...(mailVisible !== undefined ? { mailVisibleRoleIds: mailVisible } : {}),
+      }),
+    );
+    const updated = (await this.d.repo.getRole(roleId))!;
+    return this.toRole(updated, await this.mailVisibleRoleIdsOf(updated));
   }
 
   async deleteRole(roleId: string, orgId: string, ctx: RequestCtx): Promise<void> {
@@ -720,6 +751,23 @@ export class IdentityService {
     if (!user || user.status !== "active") return { userIds: [] };
     const userIds = await this.d.repo.orgWideRolePeers(orgId, userId, permission);
     return { userIds: [...userIds].sort() };
+  }
+
+  /**
+   * Whose INBOUND mail `userId` may read besides their own: the same-role peers
+   * (`mail:read_role_shared`) plus the org-wide holders of every role a role of theirs is
+   * granted cross-role visibility to (identity_role_mail_visibility). Serves
+   * `GET /internal/users/:id/mail-visible-users` for mail-gateway. Excludes `userId`; an
+   * inactive (or unknown) caller sees no one else.
+   */
+  async mailVisibleUsers(userId: string, orgId: string): Promise<{ userIds: string[] }> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.status !== "active") return { userIds: [] };
+    const [peers, crossRole] = await Promise.all([
+      this.d.repo.orgWideRolePeers(orgId, userId, "mail:read_role_shared"),
+      this.d.repo.orgWideMailVisibleUsers(orgId, userId),
+    ]);
+    return { userIds: [...new Set([...peers, ...crossRole])].sort() };
   }
 
   // ---------- audit record builder ----------
