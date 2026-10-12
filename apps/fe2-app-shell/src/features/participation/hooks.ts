@@ -59,7 +59,7 @@ export function useParticipationRosterMembers(enabled: boolean) {
   });
 }
 
-/** 反映確定 (link/create/skip)。楽観的に一覧の reviewState を更新し、確定後は 参加届
+/** 反映確定 (link/create/skip/unlink)。楽観的に一覧の reviewState を更新し、確定後は 参加届
  *  一覧＋組織図(members overview) を無効化して重複なく再描画する。失敗時はロールバック。 */
 export function useResolveParticipation() {
   const api = useParticipationApi();
@@ -75,14 +75,20 @@ export function useResolveParticipation() {
     onMutate: async ({ id, body }) => {
       await qc.cancelQueries({ queryKey: LIST_KEY });
       const prev = qc.getQueryData<ListParticipationsResponse>(LIST_KEY);
-      const nextReviewState = body.action === "skip" ? "skipped" : "added";
+      const roster = body.action === "link" || body.action === "create";
+      const nextReviewState = body.action === "skip" ? "skipped" : body.action === "unlink" ? "pending" : "added";
       const nextMatchKind = body.action === "link" ? "linked_existing" : "created_new";
       qc.setQueryData<ListParticipationsResponse>(LIST_KEY, (old) =>
         old
           ? {
               participations: old.participations.map((p) =>
                 p.id === id
-                  ? { ...p, reviewState: nextReviewState, matchKind: body.action === "skip" ? p.matchKind : nextMatchKind }
+                  ? {
+                      ...p,
+                      reviewState: nextReviewState,
+                      matchKind: roster ? nextMatchKind : p.matchKind,
+                      memberId: roster ? p.memberId : null,
+                    }
                   : p,
               ),
             }
@@ -99,9 +105,11 @@ export function useResolveParticipation() {
       const title =
         body.action === "skip"
           ? "対象外にしました"
-          : body.action === "link"
-            ? "招待中のメンバーに結びつけて追加しました"
-            : "新規メンバーとして追加しました";
+          : body.action === "unlink"
+            ? "紐付けを解除して未処理に戻しました"
+            : body.action === "link"
+              ? "招待中のメンバーに結びつけて追加しました"
+              : "新規メンバーとして追加しました";
       toast.show({ kind: "success", title });
     },
     onSettled: () => {
