@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "notif-sticky",
+  "worker": "dub-demo-notif-sticky",
+  "url": "https://dub-demo-notif-sticky.developershub-site.workers.dev",
+  "deployedSha": "c49ed476",
+  "branch": "feat/notif-popover-sticky",
+  "actor": "ko-tarou",
+  "markers": ["配信機材の手配","._body_1uz12_22{min-height:0;overflow:auto}"],
+  "live": true,
+  "verifiedAt": "2026-10-11T13:13:06Z",
+  "updatedAt": "2026-10-11T13:13:06Z",
+  "note": "通知ダイアログのヘッダー/フッター固定(通知 30 件・未読 29 件・デモ帯の重なり修正)"
+}

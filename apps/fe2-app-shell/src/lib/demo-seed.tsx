@@ -391,6 +391,33 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   // (NotificationCard.itemLinkUrl -> /chat/channels/:id).
   { id: "ntf_4", type: "chat.mention", title: "メンションされました", body: "#project-alpha でメンションされました。", readAt: null, createdAt: "2026-08-02T03:00:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_5", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんからダイレクトメッセージが届きました。", readAt: null, createdAt: "2026-08-02T02:45:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
+  // Enough unread rows to overflow the header bell dialog, so its pinned header/footer
+  // (only the list scrolls) is checkable in the demo.
+  { id: "ntf_6", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「会場レイアウト確定」の期限は明日です。", readAt: null, createdAt: "2026-08-02T00:50:00Z", resourceType: "task", resourceId: "tsk_2" },
+  { id: "ntf_7", type: "chat.mention", title: "メンションされました", body: "#project-alpha で受付ボランティアの集合時間についてメンションされました。", readAt: null, createdAt: "2026-08-02T00:40:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
+  { id: "ntf_8", type: "task.assigned", title: "タスクが割り当てられました", body: "「スポンサー資料の最終確認」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T00:30:00Z", resourceType: "task", resourceId: "tsk_3" },
+  { id: "ntf_9", type: "mail.received", title: "新着メール", body: "佐藤 太郎さんから登壇資料についてのメールが届いています。", readAt: null, createdAt: "2026-08-02T00:20:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_10", type: "event.reminder", title: "イベントのリマインダー", body: "「北陸ITカンファレンス 2026」の運営ミーティングは本日 19:00 からです。", readAt: null, createdAt: "2026-08-02T00:10:00Z", resourceType: "event", resourceId: "evt_1" },
+  { id: "ntf_11", type: "task.completed", title: "タスクが完了しました", body: "「受付名簿の作成」が完了になりました。", readAt: null, createdAt: "2026-08-02T00:00:00Z", resourceType: "task", resourceId: "tsk_4" },
+  { id: "ntf_12", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから懇親会の会場についてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T23:50:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
+  { id: "ntf_13", type: "event.invited", title: "イベントに招待されました", body: "「運営定例ミーティング」に招待されました。", readAt: null, createdAt: "2026-08-01T23:40:00Z", resourceType: "event", resourceId: "evt_2" },
+  { id: "ntf_14", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「当日タイムテーブル作成」の期限は 3 日後です。", readAt: null, createdAt: "2026-08-01T23:30:00Z", resourceType: "task", resourceId: "tsk_5" },
+  { id: "ntf_15", type: "mail.received", title: "新着メール", body: "会場担当者から搬入時間の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T23:20:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_16", type: "chat.mention", title: "メンションされました", body: "#project-alpha でノベルティの発注数についてメンションされました。", readAt: null, createdAt: "2026-08-01T23:10:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
+  { id: "ntf_17", type: "task.assigned", title: "タスクが割り当てられました", body: "「アンケートフォーム作成」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T23:00:00Z", resourceType: "task", resourceId: "tsk_10" },
+  { id: "ntf_18", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「運営定例ミーティング」が planning になりました。", readAt: null, createdAt: "2026-08-01T22:50:00Z", resourceType: "event", resourceId: "evt_2" },
+  { id: "ntf_19", type: "task.completed", title: "タスクが完了しました", body: "「告知ツイートの予約」が完了になりました。", readAt: null, createdAt: "2026-08-01T22:40:00Z", resourceType: "task", resourceId: "tsk_11" },
+  { id: "ntf_20", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから当日の集合場所についてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T22:30:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
+  { id: "ntf_21", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「司会台本の作成」の期限は明日です。", readAt: null, createdAt: "2026-08-01T22:20:00Z", resourceType: "task", resourceId: "tsk_6" },
+  { id: "ntf_22", type: "chat.mention", title: "メンションされました", body: "#project-alpha で懇親会の参加人数についてメンションされました。", readAt: null, createdAt: "2026-08-01T22:18:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
+  { id: "ntf_23", type: "mail.received", title: "新着メール", body: "スポンサー企業から協賛内容の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T22:16:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_24", type: "event.reminder", title: "イベントのリマインダー", body: "「北陸ITカンファレンス 2026」のリハーサルは明日 10:00 からです。", readAt: null, createdAt: "2026-08-01T22:14:00Z", resourceType: "event", resourceId: "evt_1" },
+  { id: "ntf_25", type: "task.assigned", title: "タスクが割り当てられました", body: "「名札の印刷」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T22:12:00Z", resourceType: "task", resourceId: "tsk_12" },
+  { id: "ntf_26", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから備品リストについてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T22:10:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
+  { id: "ntf_27", type: "task.completed", title: "タスクが完了しました", body: "「会場の下見」が完了になりました。", readAt: null, createdAt: "2026-08-01T22:08:00Z", resourceType: "task", resourceId: "tsk_13" },
+  { id: "ntf_28", type: "mail.received", title: "新着メール", body: "登壇者からスライド提出のメールが届いています。", readAt: null, createdAt: "2026-08-01T22:06:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_29", type: "chat.mention", title: "メンションされました", body: "#project-alpha で配信機材の手配についてメンションされました。", readAt: null, createdAt: "2026-08-01T22:04:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
+  { id: "ntf_30", type: "event.invited", title: "イベントに招待されました", body: "「スタッフ打ち上げ」に招待されました。", readAt: null, createdAt: "2026-08-01T22:02:00Z", resourceType: "event", resourceId: "evt_2" },
 ];
 
 // audience='admin' notifications powering the Notification管理 screen
