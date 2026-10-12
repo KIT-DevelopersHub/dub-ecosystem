@@ -6,6 +6,7 @@ import { read } from "./helpers.ts";
 const S = "notification";
 const MANAGE_VIEW = { keys: ["notif:broadcast_publish"], appLevel: { app: "notifications", level: "view" } } as const;
 const MANAGE_EDIT = { keys: ["notif:broadcast_publish"], appLevel: { app: "notifications", level: "edit" } } as const;
+const ADMIN_EDIT = { keys: ["notif:admin"], appLevel: { app: "notifications", level: "edit" } } as const;
 const ADMIN_VIEW = { keys: ["notif:admin"], appLevel: { app: "notifications", level: "view" } } as const;
 const INBOX = { keys: ["notif:inbox:self"], appLevel: { app: "notifications", level: "view" } } as const;
 const BULK = "一括エンドポイントは使わない（1件ずつ呼んで全件を読み直す）";
@@ -85,6 +86,33 @@ export const NOTIFICATION: AreaSpec = {
         expect: { publishedBroadcastId: "$notNull" },
       },
     },
+    {
+      id: "notifications.release",
+      area: "notification",
+      method: "POST",
+      path: "/notifications/release",
+      service: S,
+      requires: ADMIN_EDIT,
+      kind: "write",
+      reversible: false,
+      risk: "high",
+      description: "お知らせを新規に作り、メンバー全員の受信箱に送る",
+      hint:
+        "title(1..200)・body(1..2000) 必須、app（対象アプリ名）・publishedAt（ISO8601）任意。前後の空白は削られる。" +
+        "同じ title(+app) は二重送信防止で既存の通知が返り本文は更新されない（文言を変えて送り直すなら title も変える）。" +
+        "送った通知を編集・取り下げる API は無い。応答 { notificationId, deduplicated }",
+      impact: "{count}件のお知らせがメンバー全員の受信箱に届きます。送った後は編集も取り下げもできません。",
+      body: { allowed: ["title", "body", "app", "publishedAt"], required: ["title", "body"] },
+      fieldLabels: { title: "件名", body: "本文", app: "対象アプリ", publishedAt: "公開日時" },
+      // Delivered to every active member, the bot included: its own inbox is the read-back.
+      verify: {
+        read: "notifications.inbox.list",
+        query: { limit: "200" },
+        findIn: "items",
+        findBy: ["title", "$body.title"],
+        expect: { body: "$body.body", type: "release" },
+      },
+    },
   ],
   excluded: [
     { service: S, route: "POST /notifications/manage/publish-batch", reason: BULK },
@@ -97,9 +125,15 @@ export const NOTIFICATION: AreaSpec = {
     { service: S, route: "GET /notifications/preferences", reason: SELF },
     { service: S, route: "PATCH /notifications/preferences", reason: SELF },
     { service: S, route: "POST /feedback", reason: "フィードバックを送る側の操作で、ボットが送る用途が無い" },
+    {
+      service: S,
+      route: "PATCH /feedback/:id/read",
+      reason: "依頼範囲外。フィードバックを既読にする操作で、未読に戻す手段が無く取り消せない",
+    },
   ],
-  pending: [
-    { service: S, route: "POST /notifications/release" },
-    { service: S, route: "PATCH /feedback/:id/read" },
-  ],
+  pending: [],
+  ownerOpenedIrreversible: {
+    "notifications.release":
+      "オーナーが依頼表で「通知の新規送信」を名指しした。送った通知を取り下げる API は無いため、全員に届く前に承認画面で件名と本文を確かめる（確認フレーズ必須）",
+  },
 };
