@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "usage-ui-polish",
+  "worker": "dub-demo-usage-ui-polish",
+  "url": "https://dub-demo-usage-ui-polish.developershub-site.workers.dev",
+  "deployedSha": "32e74ce6",
+  "branch": "feat/usage-ui-polish",
+  "actor": "ko-tarou",
+  "markers": ["fe2-usage-threshold-legend"],
+  "live": true,
+  "verifiedAt": "2026-10-12T15:09:08Z",
+  "updatedAt": "2026-10-12T15:09:08Z",
+  "note": "無料枠画面の見やすさ改善"
+}
