@@ -1,7 +1,7 @@
 // Types of the operate allow-list. Kept apart from catalog.ts so the per-area files under
 // areas/ can import them without an import cycle.
 
-export type OpArea = "event" | "task" | "gantt" | "notification" | "chat" | "member" | "role" | "drive" | "lp";
+export type OpArea = "event" | "task" | "gantt" | "notification" | "chat" | "member" | "role" | "drive" | "lp" | "commander";
 export type OpKind = "read" | "write" | "delete";
 export type OpRisk = "low" | "mid" | "high";
 export type OpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -41,6 +41,12 @@ export interface CatalogEntry {
   path: string;
   /** Owning service directory (services/<service>/src/policy-table.ts). */
   service: string;
+  /**
+   * Where the call goes. Unset = the Dub api-gateway (bot session, API_PREFIX).
+   * "commander" = the local commander-service (operator token, no prefix; the path is the
+   * key of its protection-table.ts).
+   */
+  target?: "commander";
   /** What the policy table demands (fine keys + ロール管理 3-tier). */
   requires: { keys: readonly string[]; appLevel?: { app: string; level: "view" | "edit" } };
   kind: OpKind;

@@ -22,10 +22,13 @@ function tableOf(service: string): PolicyRoute[] {
   let t = tables.get(service);
   if (!t) {
     // lp-analytics has no policy-table.ts yet; its gate is requireAppAccess in app.ts.
+    // commander-service is gated by its own protection-table.ts (OPERATOR / OPEN).
     t =
       service === "lp-analytics"
         ? extractAppGuardRoutes(readFileSync(`${repoRoot}services/${service}/src/app.ts`, "utf8"))
-        : extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/policy-table.ts`, "utf8"));
+        : service === "commander-service"
+          ? extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/protection-table.ts`, "utf8"))
+          : extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/policy-table.ts`, "utf8"));
     tables.set(service, t);
   }
   return t;
@@ -52,6 +55,20 @@ describe("extractPolicyRoutes", () => {
     expect(routes[2]!.appLevel).toBeUndefined();
   });
 
+  it("reads commander-service's OPERATOR / OPEN protection markers", () => {
+    const routes = extractPolicyRoutes(`
+      export const OPERATOR = "operator" as const;
+      export const OPEN = "open" as const;
+      export const PROTECTION_TABLE = defineProtectionTable({
+        "GET /health": OPEN,
+        "POST /features/:id/transition": OPERATOR,
+      });`);
+    expect(routes.map((r) => [key(r), r.kind, r.keys])).toEqual([
+      ["GET /health", "OPEN", []],
+      ["POST /features/:id/transition", "OPERATOR", []],
+    ]);
+  });
+
   it("reads requireAppAccess guards from an app.ts without a table", () => {
     const routes = extractAppGuardRoutes(`
       const view = deps.authz.requireAppAccess("lp", "view");
@@ -71,8 +88,15 @@ describe("operate catalog", () => {
   it.each(CATALOG.map((e) => [e.id, e] as const))("%s matches its service policy table", (_id, entry) => {
     const route = tableOf(entry.service).find((r) => key(r) === key(entry));
     expect(route, `${key(entry)} missing from ${entry.service}`).toBeDefined();
-    // AUTHENTICATED (no key) is acceptable only when the catalog claims no key either.
-    expect(route!.kind === "keys" || (route!.kind === "AUTHENTICATED" && entry.requires.keys.length === 0), entry.id).toBe(true);
+    // AUTHENTICATED (no key) is acceptable only when the catalog claims no key either;
+    // OPERATOR (commander-service's operator token) only for entries that call that service.
+    expect(
+      route!.kind === "keys" ||
+        (route!.kind === "AUTHENTICATED" && entry.requires.keys.length === 0) ||
+        (route!.kind === "OPERATOR" && entry.target === "commander" && entry.requires.keys.length === 0),
+      entry.id,
+    ).toBe(true);
+    expect(entry.target === "commander", entry.id).toBe(entry.service === "commander-service");
     expect([...route!.keys].sort()).toEqual([...entry.requires.keys].sort());
     expect(route!.appLevel).toEqual(entry.requires.appLevel);
   });
@@ -91,7 +115,7 @@ describe("operate catalog", () => {
     const inScope: string[] = [];
     for (const [service, prefixes] of Object.entries(SCOPE)) {
       for (const r of tableOf(service)) {
-        if (r.kind === "INTERNAL" || r.kind === "internalWithKeys" || r.kind === "PUBLIC") continue;
+        if (r.kind === "INTERNAL" || r.kind === "internalWithKeys" || r.kind === "PUBLIC" || r.kind === "OPEN") continue;
         if (!prefixes.some((p) => r.path.startsWith(p))) continue;
         inScope.push(`${service} ${key(r)}`);
       }
@@ -123,6 +147,8 @@ describe("operate catalog", () => {
       expect(read?.kind, e.id).toBe("read");
       for (const p of pathParams(read!.path)) expect(e.verify!.params?.[p], `${e.id}:${p}`).toBeDefined();
       expect(Boolean(e.verify!.findIn) === Boolean(e.verify!.findBy), e.id).toBe(true);
+      // The read-back goes through the same API as the write.
+      expect(read!.target, e.id).toBe(e.target);
     }
   });
 

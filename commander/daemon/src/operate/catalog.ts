@@ -14,6 +14,7 @@
 
 import type { AreaSpec, CatalogEntry, ExcludedRoute } from "./catalog-types.ts";
 import { CHAT } from "./areas/chat.ts";
+import { COMMANDER } from "./areas/commander.ts";
 import { DRIVE } from "./areas/drive.ts";
 import { EVENT } from "./areas/event.ts";
 import { GANTT } from "./areas/gantt.ts";
@@ -27,7 +28,7 @@ export type * from "./catalog-types.ts";
 
 export const API_PREFIX = "/api/v1";
 
-export const AREAS: readonly AreaSpec[] = [EVENT, TASK, GANTT, NOTIFICATION, CHAT, MEMBER, ROLE, DRIVE, LP];
+export const AREAS: readonly AreaSpec[] = [EVENT, TASK, GANTT, NOTIFICATION, CHAT, MEMBER, ROLE, DRIVE, LP, COMMANDER];
 
 export const CATALOG: readonly CatalogEntry[] = AREAS.flatMap((a) => a.entries);
 export const EXCLUDED: readonly ExcludedRoute[] = AREAS.flatMap((a) => a.excluded);
@@ -53,6 +54,8 @@ export const SCOPE: Readonly<Record<string, readonly string[]>> = {
   "drive-proxy": ["/drive/"],
   "file-meta": ["/files"],
   "lp-analytics": ["/lp/"],
+  // Not behind the gateway: the local service, gated by its protection-table.ts.
+  "commander-service": ["/features", "/tasks", "/runs", "/chats"],
 };
 
 /** Irreversible effects the owner opened on purpose (entry id -> why it is acceptable). */

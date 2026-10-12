@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { Badge, Button, Checkbox, Skeleton, SkeletonList, TextField } from "@dub/ui";
 import type { ExecutionResult, Preview, PreviewCall, PreviewWrite } from "./lib/operateApi.ts";
-import { API_PATH_PREFIX, CONFIRM_PHRASE, RISK_LABEL, RISK_TONE, VERDICT_TONE } from "./lib/operateLabels.ts";
+import { apiPathPrefix, CONFIRM_PHRASE, RISK_LABEL, RISK_TONE, VERDICT_TONE } from "./lib/operateLabels.ts";
 import { writeCount } from "./lib/operateResult.ts";
 import { t } from "./lib/theme.ts";
 
@@ -117,7 +117,7 @@ function ApiDetails({ preview }: { preview: Preview }) {
         {preview.writes.flatMap((w) =>
           w.calls.map((c) => (
             <li key={c.callId}>
-              {c.method} {API_PATH_PREFIX}
+              {c.method} {apiPathPrefix(w.api)}
               {c.path}
               {Object.entries(c.body ?? {}).map(([k, v]) => (
                 <div key={k} style={{ paddingLeft: t.space4 }}>
