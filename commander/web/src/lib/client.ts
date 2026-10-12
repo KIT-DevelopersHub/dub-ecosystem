@@ -45,10 +45,30 @@ const DEFAULT_BASE =
 
 const DEFAULT_TOKEN = import.meta.env?.VITE_COMMANDER_TOKEN as string | undefined;
 
+/** Opens an SSE-like stream; returns a close fn. Swapped out by the relay transport. */
+export type StreamOpener = (
+  url: string,
+  onData: (data: string) => void,
+  onEnd: () => void,
+) => () => void;
+
+const eventSourceOpener: StreamOpener = (url, onData, onEnd) => {
+  const es = new EventSource(url);
+  es.onmessage = (m) => onData(m.data as string);
+  es.onerror = () => {
+    es.close();
+    onEnd();
+  };
+  return () => es.close();
+};
+
 export class HttpCommanderClient implements CommanderClient {
   constructor(
     private baseUrl: string = DEFAULT_BASE,
     private token: string | undefined = DEFAULT_TOKEN,
+    // Injected by the relay transport (WebSocket to the operator's PC); loopback by default.
+    private fetchImpl: typeof fetch = (...args) => fetch(...args),
+    private openStream: StreamOpener = eventSourceOpener,
   ) {}
 
   private headers(base: Record<string, string> = {}): Record<string, string> {
@@ -60,7 +80,7 @@ export class HttpCommanderClient implements CommanderClient {
     if (opts.cwd) body.cwd = opts.cwd;
     if (opts.taskId) body.taskId = opts.taskId;
     if (opts.args && opts.args.length > 0) body.args = opts.args;
-    const res = await fetch(`${this.baseUrl}/runs`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/runs`, {
       method: "POST",
       headers: this.headers({ "content-type": "application/json" }),
       body: JSON.stringify(body),
@@ -71,15 +91,50 @@ export class HttpCommanderClient implements CommanderClient {
 
   async health(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/health`);
+      const res = await this.fetchImpl(`${this.baseUrl}/health`);
       return res.ok;
     } catch {
       return false;
     }
   }
 
+  /** Daemon boot id from /health (changes on every daemon start); null when unreachable. */
+  async bootId(): Promise<string | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, { cache: "no-store" });
+      if (!res.ok) return null;
+      return ((await res.json()) as { bootId?: string }).bootId ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * "更新して再起動": the daemon pulls origin/main into its worktree, then restarts the
+   * whole stack. Throws with an operator-facing (Japanese) message when it refuses.
+   */
+  async restart(): Promise<{ from: string; to: string }> {
+    const res = await fetch(`${this.baseUrl}/admin/restart`, {
+      method: "POST",
+      headers: this.headers(),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      from?: string;
+      to?: string;
+      error?: string;
+      active?: number;
+      message?: string;
+    };
+    if (res.ok) return { from: body.from ?? "", to: body.to ?? "" };
+    if (body.error === "runs_active") {
+      throw new Error(`実行中のタスクが ${body.active ?? 1} 件あるため再起動できません`);
+    }
+    if (body.error === "restart_in_progress") throw new Error("すでに再起動中です");
+    throw new Error(body.message ?? `daemon returned ${res.status}`);
+  }
+
   async cancelRun(runId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/runs/${runId}`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/runs/${runId}`, {
       method: "DELETE",
       headers: this.headers(),
     });
@@ -95,20 +150,27 @@ export class HttpCommanderClient implements CommanderClient {
     // EventSource cannot set an Authorization header, so the shared token rides a
     // query param for the SSE stream (loopback-only; the daemon accepts either).
     const q = this.token ? `?token=${encodeURIComponent(this.token)}` : "";
-    const es = new EventSource(`${this.baseUrl}/runs/${runId}/events${q}`);
-    es.onmessage = (m) => {
-      const ev = JSON.parse(m.data) as DaemonRunEvent;
-      onEvent(ev);
-      if (ev.type === "status" && (ev.status === "succeeded" || ev.status === "failed")) {
-        es.close();
-        onClose();
-      }
-    };
-    es.onerror = () => {
-      es.close();
+    let closed = false;
+    let close: () => void = () => {};
+    const finish = () => {
+      if (closed) return;
+      closed = true;
+      close();
       onClose();
     };
-    return () => es.close();
+    close = this.openStream(
+      `${this.baseUrl}/runs/${runId}/events${q}`,
+      (data) => {
+        const ev = JSON.parse(data) as DaemonRunEvent;
+        onEvent(ev);
+        if (ev.type === "status" && (ev.status === "succeeded" || ev.status === "failed")) finish();
+      },
+      finish,
+    );
+    return () => {
+      closed = true;
+      close();
+    };
   }
 }
 
@@ -149,56 +211,91 @@ function toolResultText(c: unknown): string {
   return "";
 }
 
-/** Human line(s) for one stream-json event; "" for noise (thinking, rate limits, init). */
-function formatClaude(d: ClaudeStreamData | undefined): string {
-  if (!d) return "";
+/**
+ * One readable piece of a run log. `text` (assistant prose) and `result` (the final
+ * report) are Markdown; the rest are one-line progress/diagnostic rows.
+ */
+export type LogEntry =
+  | { kind: "text" | "tool" | "warn" | "stdout" | "stderr" | "error"; text: string }
+  | { kind: "result"; text: string; ok: boolean }
+  | { kind: "status"; text: string; status?: DaemonRunEvent["status"] }
+  | { kind: "exit"; text: string; code?: number | null };
+
+/** Entries for one stream-json event; [] for noise (thinking, rate limits, init). */
+function claudeEntries(d: ClaudeStreamData | undefined): LogEntry[] {
+  if (!d) return [];
   if (d.type === "result") {
-    const mark = d.is_error || (d.subtype && d.subtype !== "success") ? "❌" : "✅";
-    return d.result ? `${mark} ${d.result}` : `${mark} ${d.subtype ?? "result"}`;
+    const ok = !(d.is_error || (d.subtype && d.subtype !== "success"));
+    return [{ kind: "result", ok, text: d.result || (d.subtype ?? "result") }];
   }
   const content = d.message?.content;
-  if (!Array.isArray(content)) return "";
+  if (!Array.isArray(content)) return [];
   if (d.type === "assistant") {
-    return content
-      .map((b) =>
-        b.type === "text" && b.text?.trim()
-          ? `💬 ${b.text.trim()}`
-          : b.type === "tool_use" && b.name
-            ? toolSummary(b)
-            : "",
-      )
-      .filter(Boolean)
-      .join("\n");
+    return content.flatMap((b): LogEntry[] =>
+      b.type === "text" && b.text?.trim()
+        ? [{ kind: "text", text: b.text.trim() }]
+        : b.type === "tool_use" && b.name
+          ? [{ kind: "tool", text: toolSummary(b) }]
+          : [],
+    );
   }
   if (d.type === "user") {
     // Tool output is too long to replay; only surface failures.
     return content
       .filter((b) => b.type === "tool_result" && b.is_error)
-      .map((b) => `⚠ ${oneLine(toolResultText(b.content))}`)
-      .join("\n");
+      .map((b) => ({ kind: "warn", text: oneLine(toolResultText(b.content)) }));
   }
-  return "";
+  return [];
+}
+
+/** Structured, readable entries for one event; [] for events with nothing to show. */
+export function eventEntries(ev: DaemonRunEvent): LogEntry[] {
+  switch (ev.type) {
+    case "status":
+      return [{ kind: "status", status: ev.status, text: `${ev.status}` }];
+    case "claude":
+      return claudeEntries(ev.data as ClaudeStreamData | undefined);
+    case "stdout":
+      return ev.line?.trim() ? [{ kind: "stdout", text: ev.line }] : [];
+    case "stderr":
+      return [{ kind: "stderr", text: ev.line ?? "" }];
+    case "exit":
+      return [{ kind: "exit", code: ev.code, text: `${ev.code}` }];
+    case "error":
+      return [{ kind: "error", text: `${ev.message}` }];
+    default:
+      return [{ kind: "stdout", text: JSON.stringify(ev) }];
+  }
+}
+
+function entryLine(e: LogEntry): string {
+  switch (e.kind) {
+    case "text":
+      return `💬 ${e.text}`;
+    case "tool":
+      return e.text;
+    case "warn":
+      return `⚠ ${e.text}`;
+    case "result":
+      return `${e.ok ? "✅" : "❌"} ${e.text}`;
+    case "status":
+      return `● status: ${e.text}`;
+    case "stderr":
+      return `stderr> ${e.text}`;
+    case "exit":
+      return `exit code: ${e.text}`;
+    case "error":
+      return `error: ${e.text}`;
+    default:
+      return e.text;
+  }
 }
 
 /**
- * Human summary of an event for the log view. Returns "" for events that carry nothing
- * readable (thinking, rate limits, init) — callers drop empty lines.
+ * Human summary of an event for plain-text views (console, card's last line). Returns ""
+ * for events that carry nothing readable (thinking, rate limits, init) — callers drop
+ * empty lines.
  */
 export function formatEvent(ev: DaemonRunEvent): string {
-  switch (ev.type) {
-    case "status":
-      return `● status: ${ev.status}`;
-    case "claude":
-      return formatClaude(ev.data as ClaudeStreamData | undefined);
-    case "stdout":
-      return ev.line ?? "";
-    case "stderr":
-      return `stderr> ${ev.line ?? ""}`;
-    case "exit":
-      return `exit code: ${ev.code}`;
-    case "error":
-      return `error: ${ev.message}`;
-    default:
-      return JSON.stringify(ev);
-  }
+  return eventEntries(ev).map(entryLine).join("\n");
 }
