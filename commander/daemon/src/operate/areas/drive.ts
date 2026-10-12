@@ -10,6 +10,8 @@ const DRIVE_VIEW = { keys: ["drive:read"], appLevel: { app: "driveshare", level:
 const DRIVE_EDIT = { keys: ["drive:write"], appLevel: { app: "driveshare", level: "edit" } } as const;
 const FILE_VIEW = { keys: ["file:read"], appLevel: { app: "driveshare", level: "view" } } as const;
 const OUT = "依頼範囲外（ドライブは共有権限と移動だけを開放する）";
+const GOOGLE_ACCOUNT =
+  "ドライブを操作する Google アカウント（OAuth 接続）自体の管理。共有権限でも移動でもなく、接続はブラウザでの同意が要り、切り替え・削除はドライブ全体の接続を変える（identity:admin 必須）";
 const INVITE_NOTE = "Google アカウントの無いアドレスには Google から招待メールが届き、送ったメールは取り消せません。";
 
 export const DRIVE: AreaSpec = {
@@ -300,6 +302,11 @@ export const DRIVE: AreaSpec = {
     { service: META, route: "DELETE /files/meta/:id", reason: OUT },
     { service: META, route: "POST /files/meta/:id/links", reason: OUT },
     { service: META, route: "DELETE /files/meta/:id/links", reason: OUT },
+    { service: SHARE, route: "GET /driveshare/google-account", reason: GOOGLE_ACCOUNT },
+    { service: SHARE, route: "POST /driveshare/google-account/connect", reason: GOOGLE_ACCOUNT },
+    { service: SHARE, route: "POST /driveshare/google-account/callback", reason: GOOGLE_ACCOUNT },
+    { service: SHARE, route: "POST /driveshare/google-account/active", reason: GOOGLE_ACCOUNT },
+    { service: SHARE, route: "DELETE /driveshare/google-account/accounts/:id", reason: GOOGLE_ACCOUNT },
   ],
   pending: [],
   ownerOpenedIrreversible: {
