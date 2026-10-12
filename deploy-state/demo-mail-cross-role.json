@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mail-cross-role",
+  "worker": "dub-demo-mail-cross-role",
+  "url": "https://dub-demo-mail-cross-role.developershub-site.workers.dev",
+  "deployedSha": "018349d6",
+  "branch": "feat/mail-cross-role-visibility",
+  "actor": "ko-tarou",
+  "markers": ["別のロール宛てのメールも閲覧","統括 山本"],
+  "live": true,
+  "verifiedAt": "2026-10-12T14:20:01Z",
+  "updatedAt": "2026-10-12T14:20:01Z",
+  "note": "メール: 別のロール宛てのメールも閲覧(ロール単位・一方向)"
+}
