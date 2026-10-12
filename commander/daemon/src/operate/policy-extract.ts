@@ -9,8 +9,11 @@ export interface PolicyRoute {
   path: string;
   /** Rule source with named constants resolved, whitespace collapsed. */
   rule: string;
-  /** "keys" for permission-gated rules; otherwise the bare marker. */
-  kind: "keys" | "PUBLIC" | "AUTHENTICATED" | "INTERNAL" | "internalWithKeys";
+  /**
+   * "keys" for permission-gated rules; otherwise the bare marker. OPERATOR / OPEN are
+   * commander-service's protection-table.ts vocabulary (operator token / no credential).
+   */
+  kind: "keys" | "PUBLIC" | "AUTHENTICATED" | "INTERNAL" | "internalWithKeys" | "OPERATOR" | "OPEN";
   /** Fine-grained permission keys (e.g. "event:write"). */
   keys: string[];
   /** ロール管理 3-tier requirement when the rule uses appLevel(). */
@@ -49,7 +52,8 @@ export function extractPolicyRoutes(source: string): PolicyRoute[] {
     const raw = collapse(readExpr(src, m.index! + m[0].length));
     const rule = consts.get(raw) ?? raw;
     const appMatch = rule.match(APP_LEVEL_RE);
-    const marker = /^(PUBLIC|AUTHENTICATED|INTERNAL)$/.exec(rule)?.[1] as PolicyRoute["kind"] | undefined;
+    // OPERATOR / OPEN are string constants, so match the name before it is resolved.
+    const marker = (/^(PUBLIC|AUTHENTICATED|INTERNAL)$/.exec(rule) ?? /^(OPERATOR|OPEN)$/.exec(raw))?.[1] as PolicyRoute["kind"] | undefined;
     const kind: PolicyRoute["kind"] = marker ?? (rule.startsWith("internalWithKeys") ? "internalWithKeys" : "keys");
     routes.push({
       method: m[1]!,
@@ -59,6 +63,26 @@ export function extractPolicyRoutes(source: string): PolicyRoute[] {
       keys: [...rule.matchAll(KEY_RE)].map((k) => k[1]!),
       ...(appMatch ? { appLevel: { app: appMatch[1]!, level: appMatch[2]! } } : {}),
     });
+  }
+  return routes;
+}
+
+const GUARD_RE = /const\s+(\w+)\s*=\s*deps\.authz\.requireAppAccess\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)/g;
+const REGISTER_RE = /app\.(get|post|put|patch|delete)\(\s*"([^"]+)"\s*,\s*(\w+)\s*,/g;
+
+/**
+ * Same shape for a service that still gates in app.ts (`requireAppAccess(app, level)` bound
+ * to a const and passed as the route's first handler) instead of a policy-table.ts.
+ * Routes registered without such a guard are not returned.
+ */
+export function extractAppGuardRoutes(source: string): PolicyRoute[] {
+  const guards = new Map<string, { app: string; level: string }>();
+  for (const m of source.matchAll(GUARD_RE)) guards.set(m[1]!, { app: m[2]!, level: m[3]! });
+  const routes: PolicyRoute[] = [];
+  for (const m of source.matchAll(REGISTER_RE)) {
+    const guard = guards.get(m[3]!);
+    if (!guard) continue;
+    routes.push({ method: m[1]!.toUpperCase(), path: m[2]!, rule: `requireAppAccess(${guard.app}, ${guard.level})`, kind: "keys", keys: [], appLevel: guard });
   }
   return routes;
 }

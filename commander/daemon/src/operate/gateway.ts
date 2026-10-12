@@ -31,13 +31,30 @@ export interface GatewayRequest {
 
 export type Fetch = typeof fetch;
 
+/** What the executor needs from an API: the Dub gateway or the local commander-service. */
+export interface ApiClient {
+  readonly baseUrl: string;
+  request(req: GatewayRequest): Promise<GatewayResponse>;
+}
+
+async function toResponse(res: Response): Promise<GatewayResponse> {
+  const text = await res.text();
+  let data: unknown = text;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    /* non-JSON body: keep the text */
+  }
+  return { status: res.status, ok: res.ok, data };
+}
+
 /** "staging" | "本番" | "ローカル" — shown on the approval screen. */
 export function environmentLabel(baseUrl: string): string {
   if (/127\.0\.0\.1|localhost/.test(baseUrl)) return "ローカル";
   return /staging/.test(baseUrl) ? "staging" : "本番";
 }
 
-export class GatewayClient {
+export class GatewayClient implements ApiClient {
   private token: string | undefined;
   private readonly config: GatewayConfig;
   private readonly fetchImpl: Fetch;
@@ -88,14 +105,41 @@ export class GatewayClient {
       await this.login();
       res = await this.send(req);
     }
-    const text = await res.text();
-    let data: unknown = text;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      /* non-JSON body: keep the text */
-    }
-    return { status: res.status, ok: res.ok, data };
+    return toResponse(res);
+  }
+}
+
+export interface CommanderServiceConfig {
+  baseUrl: string;
+  /** Sent as x-commander-token (protection-table.ts OPERATOR). */
+  token?: string;
+}
+
+/** The local commander-service: operator token, paths as registered (no API_PREFIX). */
+export class CommanderServiceClient implements ApiClient {
+  private readonly config: CommanderServiceConfig;
+  private readonly fetchImpl: Fetch;
+
+  constructor(config: CommanderServiceConfig, fetchImpl: Fetch = fetch) {
+    this.config = config;
+    this.fetchImpl = fetchImpl;
+  }
+
+  get baseUrl(): string {
+    return this.config.baseUrl;
+  }
+
+  async request(req: GatewayRequest): Promise<GatewayResponse> {
+    const qs = new URLSearchParams(req.query ?? {}).toString();
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (this.config.token) headers["x-commander-token"] = this.config.token;
+    if (req.body !== undefined) headers["content-type"] = "application/json";
+    const res = await this.fetchImpl(`${this.config.baseUrl}${req.path}${qs ? `?${qs}` : ""}`, {
+      method: req.method,
+      headers,
+      ...(req.body !== undefined ? { body: JSON.stringify(req.body) } : {}),
+    });
+    return toResponse(res);
   }
 }
 
