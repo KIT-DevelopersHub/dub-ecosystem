@@ -106,6 +106,9 @@ export function fakeIdentityFetcher(
   // permission key is in this set. Lets a test grant mail:read but deny mail:read_all
   // (own-mail scope) vs grant both (oversight). When omitted, every check uses `allow`.
   grantedPermissions?: readonly string[],
+  // GET /internal/users/:id/role-peers (mail:read_role_shared): userId -> peer ids. "error"
+  // answers 500 (identity outage). When omitted the route 404s, i.e. no sharing.
+  rolePeers?: Record<string, string[]> | "error",
 ): Fetcher {
   const grantSet = grantedPermissions ? new Set(grantedPermissions) : null;
   const toIdentityUser = (id: string, email: string, displayName?: string): identity.IdentityUser => ({
@@ -143,6 +146,12 @@ export function fakeIdentityFetcher(
           })),
         };
         return new Response(JSON.stringify(res), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const peersMatch = /^\/internal\/users\/([^/]+)\/role-peers$/.exec(url.pathname);
+      if (peersMatch && req.method === "GET" && rolePeers !== undefined) {
+        if (rolePeers === "error") return new Response("boom", { status: 500 });
+        const userIds = rolePeers[decodeURIComponent(peersMatch[1]!)] ?? [];
+        return new Response(JSON.stringify({ userIds }), { status: 200, headers: { "content-type": "application/json" } });
       }
       const userMatch = /^\/users\/([^/]+)$/.exec(url.pathname);
       if (userMatch && req.method === "GET") {

@@ -21,7 +21,7 @@ function row(metricKey: string, used: number, pct: number, status: SnapshotRow["
 
 describe("buildSummary", () => {
   it("returns the full master set as unknown when there are no snapshot rows", () => {
-    const s = buildSummary([], NOW);
+    const s = buildSummary([], NOW, null);
     expect(s.services).toHaveLength(MASTER.length);
     expect(s.services.every((x) => x.status === "unknown" && x.used === null && x.pct === null)).toBe(true);
     expect(s.worstStatus).toBe("unknown");
@@ -29,7 +29,7 @@ describe("buildSummary", () => {
   });
 
   it("honors the frozen contract shape and computes resetsAt from the master cadence", () => {
-    const s = buildSummary([row("workers_requests_day", 90, 90, "critical")], NOW);
+    const s = buildSummary([row("workers_requests_day", 90, 90, "critical")], NOW, NOW.toISOString());
     const w = s.services.find((x) => x.metricKey === "workers_requests_day")!;
     expect(w).toMatchObject({
       provider: "cloudflare",
@@ -46,11 +46,31 @@ describe("buildSummary", () => {
   });
 });
 
+describe("buildSummary freshness (capturedAt / stale)", () => {
+  it("reports when the numbers were collected, separately from the response time", () => {
+    const s = buildSummary([], NOW, "2026-08-12T08:00:00.000Z");
+    expect(s.capturedAt).toBe("2026-08-12T08:00:00.000Z");
+    expect(s.generatedAt).toBe(NOW.toISOString());
+    expect(s.stale).toBe(false);
+  });
+
+  it("flags a snapshot older than 48h as stale (the 09-17 numbers shown for weeks)", () => {
+    expect(buildSummary([], NOW, "2026-08-10T09:00:00.000Z").stale).toBe(true);
+  });
+
+  it("flags 'never collected' as stale", () => {
+    const s = buildSummary([], NOW, null);
+    expect(s.capturedAt).toBeNull();
+    expect(s.stale).toBe(true);
+  });
+});
+
 describe("breachedServices", () => {
   it("returns only warn/critical entries", () => {
     const s = buildSummary(
       [row("workers_requests_day", 72, 72, "warn"), row("resend_emails_day", 95, 95, "critical")],
       NOW,
+      NOW.toISOString(),
     );
     const breaches = breachedServices(s).map((b) => b.metricKey);
     expect(breaches).toContain("workers_requests_day");

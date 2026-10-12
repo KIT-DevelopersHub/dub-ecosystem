@@ -48,8 +48,13 @@ export interface ServiceUsage {
 
 /** GET /usage/summary response. */
 export interface UsageSummary {
-  /** ISO-8601 instant the snapshot was produced. */
+  /** ISO-8601 instant the response was produced (NOT when the numbers were measured). */
   generatedAt: string;
+  /** ISO-8601 instant the numbers were collected; null = never collected. Absent from
+   *  backends that predate the field. */
+  capturedAt?: string | null;
+  /** The numbers are older than 48h (collection has stopped) — show them as old, not current. */
+  stale?: boolean;
   /** Worst status across all services — drives the page-level banner. */
   worstStatus: UsageStatus;
   services: ServiceUsage[];

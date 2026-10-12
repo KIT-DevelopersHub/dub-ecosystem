@@ -3,7 +3,7 @@
 // subject + inline snippet, label chips, and a timestamp that swaps to row
 // actions (archive / delete / mark-read) on hover. Bulk selection lifts a toolbar.
 import { useEffect, useRef, useState } from "react";
-import { NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
+import { Badge, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
 import {
   avatarColor,
   displayName,
@@ -12,7 +12,9 @@ import {
   latest,
   matchesQuery,
   relativeDate,
+  sharedRecipientLabel,
   snippet,
+  threadMine,
   threadUnread,
   type Label,
   type MailThreadModel,
@@ -231,6 +233,11 @@ function ThreadRow({
             gap: 6,
           }}
         >
+          {threadMine(thread) ? null : (
+            <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+              <Badge tone="info" testId="fe2-mail-shared-chip">{sharedRecipientLabel(thread)}</Badge>
+            </span>
+          )}
           <LabelChips ids={thread.labels} labels={labels} />
           <span style={{ fontWeight: unread ? 700 : 400, color: "var(--dub-color-text-primary)" }}>{thread.subject}</span>
           <span style={{ color: "var(--dub-color-text-muted)", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis" }}>

@@ -100,4 +100,7 @@ export interface IdentityRepo {
 
   // authz support: users in an org holding a given permission org-wide (last-admin guard)
   usersWithOrgWidePermission(orgId: string, permission: identity.PermissionKey): Promise<string[]>;
+  /** Other ACTIVE users (excluding `userId`) holding, org-wide, a role that `userId` also holds
+   *  org-wide AND that carries `permission` (mail role sharing). Distinct ids. */
+  orgWideRolePeers(orgId: string, userId: string, permission: identity.PermissionKey): Promise<string[]>;
 }
