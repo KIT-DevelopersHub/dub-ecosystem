@@ -55,5 +55,41 @@ grant these keys for real (non-mock) use — see below.
 7. Grant `drive:read` / `drive:write` to the operator roles in identity-roster (until the
    permission catalog adds them, they resolve as plain strings).
 
+## Switching the account from ロール管理 (no `wrangler secret put`)
+
+ロール管理 → 「その他」の表 → 「Google アカウント」 lets a system admin (`identity:admin` +
+Drive共有 編集) register several Google accounts and switch which one Drive is accessed as.
+The selected account (D1 `driveshare_google_accounts` + `driveshare_google_active_account`,
+refresh tokens AES-GCM sealed) takes precedence over `GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN`; the
+secret's account is listed as 「サーバーの初期設定」 and can be switched back to. With nothing
+selected the secret is used as before.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/driveshare/google-account` | `{ accounts[], canConnect }`: each with in use (`active`), registered at/by, `needsReconnect` (invalid_grant) |
+| POST | `/driveshare/google-account/connect` | `{ redirectUri }` -> Google consent URL (state stored in D1, 10 min, single use) |
+| POST | `/driveshare/google-account/callback` | `{ code, state }` relayed by the SPA from `/admin/roles?code&state`; registers (same address = token replaced) and switches to it |
+| POST | `/driveshare/google-account/active` | `{ accountId }` (or `"secret"`) switches the account in use |
+| DELETE | `/driveshare/google-account/accounts/:id` | removes a registered account (409 while in use) |
+
+One-time setup per environment:
+
+1. Apply `infra/d1/migrations/driveshare/0002_google_account.sql` to the environment's D1.
+2. GCP → Credentials → **Create OAuth client ID → Web application**. Authorized redirect URI =
+   `<fe2 origin>/admin/roles` (one per environment, e.g. staging and prod fe2 origins).
+3. OAuth consent screen → add the new Google account as a **Test user**. In testing mode
+   Google expires refresh tokens after **7 days** (the dialog then marks it 要再接続);
+   publishing the app to production removes that limit.
+4. Secrets: `GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID`, `GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET`,
+   `DRIVESHARE_TOKEN_ENC_KEY` (`openssl rand -base64 32`). The connect flow needs the Web
+   client; the Desktop client cannot redirect to https.
+
+If the stored token can no longer be used (key rotated, Web client secret removed) Drive
+fails closed with "reconnect required" and the dialog says so — it never silently switches
+to the secret's account. Only a missing `driveshare_google_*` table (migration not
+applied) falls back to the secret.
+
+Switching accounts does **not** move ownership of existing files.
+
 Local secrets template lives at `~/DubVault/secrets/hackit-drive-oauth.json` (git-ignored,
 machine-local only). Values are never logged.

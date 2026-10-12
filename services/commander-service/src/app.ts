@@ -6,6 +6,8 @@
 //   POST /features/:id/transition        -> phase gate ({ to, approvedByUser?, note? })
 //   GET  /features/:id/tasks             -> TaskRow[]
 //   POST /features/:id/tasks             -> create task ({ title, status? })
+//   GET|POST /bundles, PATCH|DELETE /bundles/:id, DELETE /bundles/:id/tasks/:taskId
+//                                        -> staging 合体 (see ./bundles)
 //
 // The gate: `to` not on an allowed edge => 409 (段飛ばし禁止); an approval-required
 // edge without approvedByUser:true => 403 (自己承認禁止). See @dub/commander-phases.
@@ -49,6 +51,15 @@ import {
   updateChatMessage,
   type ChatMessageStatus,
 } from "./repo";
+import {
+  applyBundleRunEvent,
+  createBundle,
+  deleteBundle,
+  listBundles,
+  parseBundlePatch,
+  removeBundleTask,
+  updateBundle,
+} from "./bundles";
 
 export function createApp() {
   const app = new Hono<AppBindings>();
@@ -242,7 +253,45 @@ export function createApp() {
       at: typeof body?.at === "string" ? body.at : undefined,
     });
     if (!event) return c.json({ error: "run_not_found" }, 404);
+    await applyBundleRunEvent(c.env.DB, id, body.type, body?.payload);
     return c.json({ event }, 201);
+  });
+
+  // ── staging 合体 (bundles) ───────────────────────────────────────────────────
+  // Several slot-waiting tasks share one staging slot via an integration branch. The web
+  // creates the bundle, starts its run, then PATCHes runId; the run reports via BUNDLE_RESULT.
+  app.get("/bundles", async (c) => {
+    return c.json({ bundles: await listBundles(c.env.DB) });
+  });
+
+  app.post("/bundles", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const taskIds = Array.isArray(body?.taskIds)
+      ? body.taskIds.filter((x: unknown): x is string => typeof x === "string")
+      : [];
+    const out = await createBundle(c.env.DB, taskIds);
+    if (out.ok) return c.json({ bundle: out.bundle }, 201);
+    const status = out.code === "task_not_found" ? 404 : out.code === "already_bundled" ? 409 : 400;
+    return c.json({ error: out.code, taskIds: out.taskIds ?? [] }, status);
+  });
+
+  app.patch("/bundles/:id", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const bundle = await updateBundle(c.env.DB, c.req.param("id"), parseBundlePatch(body));
+    if (!bundle) return c.json({ error: "bundle_not_found" }, 404);
+    return c.json({ bundle });
+  });
+
+  app.delete("/bundles/:id/tasks/:taskId", async (c) => {
+    const out = await removeBundleTask(c.env.DB, c.req.param("id"), c.req.param("taskId"));
+    if (!out) return c.json({ error: "bundle_not_found" }, 404);
+    return c.json(out);
+  });
+
+  app.delete("/bundles/:id", async (c) => {
+    const ok = await deleteBundle(c.env.DB, c.req.param("id"));
+    if (!ok) return c.json({ error: "bundle_not_found" }, 404);
+    return c.json({ ok: true });
   });
 
   // ── AI chat sessions + messages ("Dubに聞く"/"Dubを操作" history) ──────────────

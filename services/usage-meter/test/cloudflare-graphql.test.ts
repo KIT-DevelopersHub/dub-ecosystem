@@ -104,6 +104,26 @@ describe("extractMetrics", () => {
     expect(extractMetrics(body)).toEqual({ d1_storage: 4000 });
   });
 
+  it("meters D1 by rows (not query counts), summed across rows", () => {
+    // Real 2026-09-17 shape: 49,031 write queries but 102,066 rows written — the free tier
+    // caps rows, so reading writeQueries would have shown ~49% instead of over the limit.
+    const body = {
+      data: {
+        viewer: {
+          accounts: [
+            {
+              d1AnalyticsAdaptiveGroups: [
+                { sum: { rowsRead: 300_000, rowsWritten: 69_292, readQueries: 12_000, writeQueries: 33_000 } },
+                { sum: { rowsRead: 203_156, rowsWritten: 32_774, readQueries: 8_195, writeQueries: 16_031 } },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    expect(extractMetrics(body)).toEqual({ d1_rows_read_day: 503_156, d1_rows_written_day: 102_066 });
+  });
+
   it("omits datasets that are missing/misshaped (they become unknown downstream)", () => {
     const body = { data: { viewer: { accounts: [{ workersInvocationsAdaptive: [{ sum: { requests: 5 } }] }] } } };
     expect(extractMetrics(body)).toEqual({ workers_requests_day: 5 });

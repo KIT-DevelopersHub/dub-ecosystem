@@ -91,7 +91,7 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /identity/users/:id/roles/:assignmentId": ADMIN_EDIT,
 
   // ===================== internal (x-dub-internal) =====================
-  // All seven are s2s-only, exactly as the hand-rolled `requireInternal` made them — now
+  // All of these are s2s-only, exactly as the hand-rolled `requireInternal` made them — now
   // visible in the table instead of hiding in a middleware. INTERNAL rather than
   // internalWithKeys for each: the calling service acts on behalf of the SYSTEM, not of a
   // permitted user (auth-service provisioning a first login, notification-service expanding a
@@ -111,6 +111,9 @@ export const POLICY_TABLE = definePolicyTable({
   // X hold key K?" (a permission oracle), let alone reach the evaluator at all.
   "POST /authz/check": INTERNAL,
   "GET /internal/users/:id/permissions": INTERNAL,
+  // mail-gateway's role-shared inbound scope (who else holds a mail:read_role_shared role
+  // with me). INTERNAL: a membership oracle must not be reachable from outside.
+  "GET /internal/users/:id/role-peers": INTERNAL,
 
   // Passkey credential store. Only auth-service calls these (it runs the WebAuthn ceremonies
   // and owns step-up / last-method policy); INTERNAL keeps the store off the internet.

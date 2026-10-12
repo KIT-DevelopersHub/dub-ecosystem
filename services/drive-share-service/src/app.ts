@@ -14,13 +14,24 @@ import { errors, dubErrorHandler } from "@dub/errors";
 import { policyGate, type PermissionGranter, type PolicyGateVars } from "@dub/policy-gate";
 import type { DriveShareService } from "./service";
 import type { RoleGrantsService } from "./role-grants-service";
+import type { GoogleAccountService } from "./google-account";
 import { POLICY_TABLE } from "./policy-table";
-import type { CreateRoleGrantRequest, GrantPermissionRequest, SetLinkSharingRequest, UpdatePermissionRequest } from "./types";
+import type {
+  CompleteGoogleConnectRequest,
+  CreateRoleGrantRequest,
+  GrantPermissionRequest,
+  SetLinkSharingRequest,
+  StartGoogleConnectRequest,
+  SwitchGoogleAccountRequest,
+  UpdatePermissionRequest,
+} from "./types";
 
 export interface AppDeps {
   service: DriveShareService;
   /** Role-based sharing fan-out (built per request with the acting user's roster view). */
   roleGrants: RoleGrantsService;
+  /** The Google accounts the service can act as + the admin add/switch flow. */
+  googleAccount: GoogleAccountService;
   /** Which of the requested permission keys the caller holds (identity /authz/check). */
   authz: PermissionGranter;
 }
@@ -116,6 +127,28 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     const body = await parseBody<SetLinkSharingRequest>(c);
     return c.json(await deps.service.setLinkSharing(c.req.param("id"), body));
   });
+
+  // ---- Google accounts the service acts as (ロール管理 > その他 > Google アカウント; admin only) ----
+  app.get("/driveshare/google-account", async (c) => c.json(await deps.googleAccount.status()));
+
+  app.post("/driveshare/google-account/connect", async (c) => {
+    const body = await parseBody<Partial<StartGoogleConnectRequest>>(c);
+    return c.json(await deps.googleAccount.startConnect(c.get("userId"), body.redirectUri, body.loginHint));
+  });
+
+  app.post("/driveshare/google-account/callback", async (c) => {
+    const body = await parseBody<Partial<CompleteGoogleConnectRequest>>(c);
+    return c.json(await deps.googleAccount.completeConnect(c.get("userId"), body));
+  });
+
+  app.post("/driveshare/google-account/active", async (c) => {
+    const body = await parseBody<Partial<SwitchGoogleAccountRequest>>(c);
+    return c.json(await deps.googleAccount.switchTo(c.get("userId"), body.accountId));
+  });
+
+  app.delete("/driveshare/google-account/accounts/:id", async (c) =>
+    c.json(await deps.googleAccount.remove(c.req.param("id"))),
+  );
 
   return app;
 }

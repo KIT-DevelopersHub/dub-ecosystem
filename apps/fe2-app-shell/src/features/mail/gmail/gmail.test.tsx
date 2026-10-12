@@ -11,7 +11,7 @@ import type { MailApi } from "../mailApi.tsx";
 import { MailApiProvider } from "../MailProvider.tsx";
 import { GmailApp } from "./GmailApp.tsx";
 import { reducer, initialMailState, type MailState } from "./useMailStore.tsx";
-import { threadUnread } from "./mailModel.ts";
+import { hasSharedMail, inFolder, sharedRecipientLabel, threadMine, threadUnread, type MailThreadModel } from "./mailModel.ts";
 import {
   DEMO_INBOX_ITEMS,
   DEMO_INBOX_THREAD,
@@ -536,5 +536,67 @@ describe("GmailApp (hydrates from the gateway)", () => {
         window.matchMedia = originalMatchMedia;
       }
     });
+  });
+});
+
+describe("自分宛て / 自分宛て以外 (role-shared mail)", () => {
+  const msg = (over: Partial<MailThreadModel["messages"][number]> = {}): MailThreadModel["messages"][number] => ({
+    id: "m", from: { email: "a@x.jp" }, to: [{ email: "suzuki@developershub.jp", name: "鈴木 一郎" }], date: "2026-08-01T00:00:00Z", body: "b", read: false, ...over,
+  });
+  const thread = (id: string, messages: MailThreadModel["messages"], folder: MailThreadModel["folder"] = "inbox"): MailThreadModel => ({
+    id, subject: id, folder, starred: false, labels: [], messages,
+  });
+
+  it("threadMine: absent/true = mine, all-false = not mine, sent-only = mine", () => {
+    expect(threadMine(thread("a", [msg()]))).toBe(true);
+    expect(threadMine(thread("b", [msg({ mine: false })]))).toBe(false);
+    expect(threadMine(thread("c", [msg({ mine: false }), msg({ id: "m2", mine: true })]))).toBe(true);
+    // our own reply folded into a shared thread does not make it mine
+    expect(threadMine(thread("d", [msg({ mine: false }), msg({ id: "r", outbound: true })]))).toBe(false);
+    expect(threadMine(thread("e", [msg({ outbound: true })], "sent"))).toBe(true);
+  });
+
+  it("inFolder: mine/others split the inbox only", () => {
+    const own = thread("own", [msg()]);
+    const shared = thread("shared", [msg({ mine: false })]);
+    const archived = thread("arch", [msg({ mine: false })], "archive");
+    expect(inFolder(own, "mine")).toBe(true);
+    expect(inFolder(own, "others")).toBe(false);
+    expect(inFolder(shared, "others")).toBe(true);
+    expect(inFolder(shared, "mine")).toBe(false);
+    expect(inFolder(archived, "others")).toBe(false);
+    expect(hasSharedMail([own])).toBe(false);
+    expect(hasSharedMail([own, shared])).toBe(true);
+  });
+
+  it("labels a shared thread by its recipient, falling back to 共有メール", () => {
+    expect(sharedRecipientLabel(thread("s", [msg({ mine: false })]))).toBe("鈴木 一郎 宛て");
+    expect(sharedRecipientLabel(thread("s", [msg({ mine: false, to: [] })]))).toBe("共有メール");
+  });
+
+  it("hides the entries when every thread is mine (no change for ordinary users)", async () => {
+    render(wrap(<GmailApp />));
+    await screen.findAllByTestId("fe2-mail-inbox-item");
+    expect(screen.queryByTestId("fe2-mail-folder-mine")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-mail-folder-others")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-mail-shared-chip")).not.toBeInTheDocument();
+  });
+
+  it("shows the entries + a recipient chip when role-shared mail is visible", async () => {
+    const shared = { ...DEMO_INBOX_ITEMS[0]!, id: "shared_1", threadId: "thr_shared", subject: "協賛プランのお見積り依頼", to: [{ email: "suzuki@developershub.jp", name: "鈴木 一郎" }], mine: false };
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue({ items: [...DEMO_INBOX_ITEMS, shared], nextCursor: null }) });
+    render(wrap(<GmailApp />, api));
+    expect(await screen.findByTestId("fe2-mail-folder-others")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-mail-folder-mine")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-mail-shared-chip")).toHaveTextContent("鈴木 一郎 宛て");
+
+    await userEvent.click(screen.getByTestId("fe2-mail-folder-others"));
+    const list = screen.getByTestId("fe2-mail-inbox");
+    const rows = within(list).getAllByTestId("fe2-mail-inbox-item");
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]!).getByText("協賛プランのお見積り依頼")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("fe2-mail-folder-mine"));
+    expect(within(screen.getByTestId("fe2-mail-inbox")).getAllByTestId("fe2-mail-inbox-item")).toHaveLength(DEMO_INBOX_ITEMS.length);
   });
 });

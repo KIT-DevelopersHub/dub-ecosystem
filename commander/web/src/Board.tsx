@@ -11,6 +11,7 @@ import {
   type BoardItem,
   type CommanderApi,
   type FeaturePhase,
+  type StagingBundle,
 } from "./lib/commanderApi.ts";
 import {
   groupByLane,
@@ -23,11 +24,22 @@ import {
   type Lane,
 } from "./lib/lanes.ts";
 import { matchesFilter } from "./lib/filter.ts";
+import {
+  bundleChildren,
+  bundleLane,
+  bundleOfTask,
+  bundleBlocker,
+  bundleCleanupPrompt,
+  bundleDeployPrompt,
+  withoutBundled,
+} from "./lib/bundles.ts";
 import { TaskCard } from "./TaskCard.tsx";
+import { BundleCard, BUNDLE_COLOR } from "./BundleCard.tsx";
+import { BundleComposer } from "./BundleComposer.tsx";
 import { DoneList } from "./DoneList.tsx";
 import { TaskComposer, type ComposerSubmit } from "./TaskComposer.tsx";
 import { TaskDrawer } from "./TaskDrawer.tsx";
-import { btnPrimary, input, t } from "./lib/theme.ts";
+import { btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
 
 // ホバー表現はインラインstyleで書けないので、ボード内だけに効くクラスを1つの<style>で持つ。
 const BOARD_CSS = `
@@ -37,6 +49,10 @@ const BOARD_CSS = `
 .cmdr-card:hover .cmdr-card-title { text-decoration: underline; }
 .cmdr-row:hover { background: var(--dub-color-surface-raised, #1a1e27); }
 .cmdr-add:hover { background: var(--dub-color-surface-raised, #1a1e27); color: var(--dub-color-text-primary, #e6e6e6); }
+.cmdr-pick > .cmdr-card { flex: 1; min-width: 0; }
+.cmdr-pick[data-picked="true"] > .cmdr-card { border-color: var(--dub-color-accent-500, #8b5cf6); box-shadow: 0 0 0 1px var(--dub-color-accent-500, #8b5cf6); }
+.cmdr-pick[data-disabled="true"] { opacity: .4; }
+.cmdr-pick[data-disabled="true"] > .cmdr-card { cursor: not-allowed; }
 .cmdr-cancel:hover { color: var(--dub-color-danger-500, #e5484d); border-color: var(--dub-color-danger-500, #e5484d); }
 `;
 
@@ -107,6 +123,10 @@ export function Board({
   cwdPins = [],
 }: BoardProps) {
   const [items, setItems] = useState<BoardItem[]>([]);
+  const [bundles, setBundles] = useState<StagingBundle[]>([]);
+  // 合体の選択モード（null = 通常）。選んだ taskId を持つ。
+  const [picking, setPicking] = useState<Set<string> | null>(null);
+  const [bundleComposerOpen, setBundleComposerOpen] = useState(false);
   const [optimistic, setOptimistic] = useState<BoardItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [health, setHealth] = useState<{ daemon: boolean | null; service: boolean | null }>({
@@ -168,6 +188,7 @@ export function Board({
       const advanced = await reconcilePhases(list);
       const fresh = advanced ? await api.listBoard() : list;
       setItems(fresh);
+      if (api.bundles) setBundles(await api.bundles.listBundles().catch(() => []));
       // Drop optimistic placeholders that now exist for real (same title still building).
       setOptimistic((prev) => prev.filter((o) => !fresh.some((f) => f.title === o.title)));
     } catch {
@@ -202,7 +223,21 @@ export function Board({
   const [query, setQuery] = useState("");
   const filterRef = useRef<HTMLInputElement>(null);
   const shown = useMemo(() => all.filter((i) => matchesFilter(i, query)), [all, query]);
-  const lanes = useMemo(() => groupByLane(shown), [shown]);
+  const lanes = useMemo(() => groupByLane(withoutBundled(shown, bundles)), [shown, bundles]);
+  // 束は子のどれかが絞り込みに一致すれば出す。
+  const bundleLanes = useMemo(() => {
+    const out = Object.fromEntries(LANES.map((l) => [l, [] as StagingBundle[]])) as Record<Lane, StagingBundle[]>;
+    for (const b of bundles) {
+      if (bundleChildren(b, shown).length > 0) out[bundleLane(b)].push(b);
+    }
+    return out;
+  }, [bundles, shown]);
+  const bundleByTask = useMemo(() => bundleOfTask(bundles), [bundles]);
+  const candidates = useMemo(
+    () => (api.bundles ? withoutBundled(all, bundles).filter((i) => bundleBlocker(i) === null) : []),
+    [api.bundles, all, bundles],
+  );
+  const candidateIds = useMemo(() => new Set(candidates.map((i) => i.taskId)), [candidates]);
 
   // GitHub と同じく「/」でフィルターへ移動（入力中のキーは奪わない）。
   useEffect(() => {
@@ -218,10 +253,14 @@ export function Board({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   // 件数サマリーはフィルターに左右されない（絞り込み中でも全体の状況を見せる）。
-  const allLanes = useMemo(() => groupByLane(all), [all]);
-  const runningCount = LANES.filter(isRunningLane).reduce((n, l) => n + allLanes[l].length, 0);
+  const allLanes = useMemo(() => groupByLane(withoutBundled(all, bundles)), [all, bundles]);
+  const runningCount =
+    LANES.filter(isRunningLane).reduce((n, l) => n + allLanes[l].length, 0) +
+    bundles.filter((b) => b.status === "merging").length;
   // Ball is on the operator's side: every card in a 確認 column (要修正 included).
-  const reviewCount = LANES.filter(isReviewLane).reduce((n, l) => n + allLanes[l].length, 0);
+  const reviewCount =
+    LANES.filter(isReviewLane).reduce((n, l) => n + allLanes[l].length, 0) +
+    bundles.filter((b) => b.status !== "merging").reduce((n, b) => n + bundleChildren(b, all).length, 0);
   const filtering = query.trim() !== "";
 
   const cwdSuggestions = useMemo(() => {
@@ -274,6 +313,70 @@ export function Board({
       }
     },
     [api, client, load],
+  );
+
+  // ── staging 合体 ────────────────────────────────────────────────────────────
+  // 子は staging で承認・却下された時点で束を抜ける（本番 / demo へ個別に進む）。残りは束のまま。
+  // 束が消える時は統合 PR とブランチを run で片付ける（統合中なら先に止める）。
+  const cleanUpBundle = useCallback(
+    async (b: StagingBundle) => {
+      if (b.status === "merging" && b.runId) await client.cancelRun(b.runId).catch(() => {});
+      await client.startRun(bundleCleanupPrompt(b)).catch(() => {});
+    },
+    [client],
+  );
+
+  const leaveBundle = useCallback(
+    async (taskId: string) => {
+      const b = bundleByTask.get(taskId);
+      if (!b || !api.bundles) return;
+      const res = await api.bundles.removeFromBundle(b.id, taskId);
+      if (res.ok && res.value === null) await cleanUpBundle(b);
+    },
+    [api, bundleByTask, cleanUpBundle],
+  );
+
+  const togglePick = useCallback((taskId: string) => {
+    setPicking((prev) => {
+      if (!prev) return prev;
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }, []);
+
+  const pickedItems = useMemo(
+    () => (picking ? candidates.filter((i) => picking.has(i.taskId)) : []),
+    [picking, candidates],
+  );
+
+  const handleCreateBundle = useCallback(async () => {
+    if (!api.bundles || pickedItems.length < 2) return;
+    const res = await api.bundles.createBundle(pickedItems.map((i) => i.taskId));
+    if (!res.ok) return;
+    try {
+      const { runId } = await client.startRun(bundleDeployPrompt(res.value, pickedItems));
+      await api.bundles.attachRun(res.value.id, runId);
+    } catch {
+      // run を起動できない束は残さない（統合中のまま止まって見えるのを防ぐ）。
+      await api.bundles.dissolveBundle(res.value.id);
+      return;
+    }
+    setBundleComposerOpen(false);
+    setPicking(null);
+    await load();
+  }, [api, client, pickedItems, load]);
+
+  const handleDissolve = useCallback(
+    async (bundleId: string) => {
+      const b = bundles.find((x) => x.id === bundleId);
+      if (!api.bundles || !b) return;
+      const res = await api.bundles.dissolveBundle(bundleId);
+      if (res.ok) await cleanUpBundle(b);
+      await load();
+    },
+    [api, bundles, cleanUpBundle, load],
   );
 
   // ── Next-action orchestration (P0-6) ──────────────────────────────────────
@@ -336,9 +439,10 @@ export function Board({
       } else {
         await api.transition(selected.featureId, to, { approvedByUser: true });
       }
+      await leaveBundle(selected.taskId);
       await refreshAfterAction();
     },
-    [api, client, selected, refreshAfterAction],
+    [api, client, selected, refreshAfterAction, leaveBundle],
   );
 
   const handleReject = useCallback(
@@ -348,9 +452,10 @@ export function Board({
       // reject → back to building, then spawn the fix run (feedback carried into the prompt).
       await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
       await startFollowUpRun(selected, feedback);
+      await leaveBundle(selected.taskId);
       await refreshAfterAction();
     },
-    [api, selected, startFollowUpRun, refreshAfterAction],
+    [api, selected, startFollowUpRun, refreshAfterAction, leaveBundle],
   );
 
   const handleRerun = useCallback(
@@ -471,6 +576,19 @@ export function Board({
             <HealthDot label="daemon" ok={health.daemon} />
             <HealthDot label="service" ok={health.service} />
           </div>
+          {api.bundles && !picking && (candidates.length >= 2 || bundles.length > 0) && (
+            <button
+              type="button"
+              data-testid="start-bundle"
+              disabled={candidates.length < 2}
+              title={candidates.length < 2 ? "枠待ちのタスクが 2 件以上あると合体できます" : "枠待ちのタスクをまとめて 1 つの staging 枠に載せる"}
+              onClick={() => setPicking(new Set())}
+              style={{ ...btnGhost, opacity: candidates.length < 2 ? 0.5 : 1 }}
+            >
+              <span aria-hidden style={{ color: BUNDLE_COLOR }}>⧉</span> 合体
+              {candidates.length >= 2 && <span style={{ color: t.textMuted, fontWeight: 400 }}>（枠待ち {candidates.length}）</span>}
+            </button>
+          )}
           <button
             type="button"
             data-testid="open-composer"
@@ -517,6 +635,44 @@ export function Board({
         </div>
       )}
 
+      {picking && (
+        <div
+          data-testid="bundle-picker"
+          role="region"
+          aria-label="合体するタスクを選ぶ"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: t.space3,
+            flexWrap: "wrap",
+            marginBottom: t.space3,
+            padding: `${t.space2} ${t.space3}`,
+            borderRadius: t.radius,
+            border: `1px solid ${BUNDLE_COLOR}`,
+            fontSize: 13,
+          }}
+        >
+          <span aria-hidden style={{ color: BUNDLE_COLOR, fontWeight: 700 }}>⧉</span>
+          <span>
+            合体するタスクを 2 つ以上選んでください。選べるのは<strong>枠待ち</strong>（demo 承認済み・staging 未反映）のタスクだけです。
+          </span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: t.space2 }}>
+            <button type="button" data-testid="bundle-pick-cancel" onClick={() => setPicking(null)} style={btnGhost}>
+              やめる
+            </button>
+            <button
+              type="button"
+              data-testid="bundle-pick-next"
+              disabled={pickedItems.length < 2}
+              onClick={() => setBundleComposerOpen(true)}
+              style={{ ...btnPrimary, opacity: pickedItems.length < 2 ? 0.5 : 1, cursor: pickedItems.length < 2 ? "not-allowed" : "pointer" }}
+            >
+              {pickedItems.length} 件を合体…
+            </button>
+          </span>
+        </div>
+      )}
+
       {/* lanes */}
       <div
         data-testid="board-lanes"
@@ -534,7 +690,7 @@ export function Board({
             data-testid={`lane-${lane}`}
             aria-label={LANE_LABELS[lane]}
             style={{
-              ...columnSize(lane, lanes[lane].length, loaded),
+              ...columnSize(lane, lanes[lane].length + bundleLanes[lane].length, loaded),
               display: "flex",
               flexDirection: "column",
               background: t.sunken,
@@ -574,7 +730,7 @@ export function Board({
                     lineHeight: "18px",
                   }}
                 >
-                  {lanes[lane].length}
+                  {lanes[lane].length + bundleLanes[lane].length}
                 </span>
               </div>
               <div
@@ -604,22 +760,73 @@ export function Board({
                 <Skeleton />
               ) : lane === "done" && lanes.done.length > 0 ? (
                 <DoneList items={lanes.done} onOpen={setSelectedTaskId} />
-              ) : lanes[lane].length === 0 ? (
+              ) : lanes[lane].length + bundleLanes[lane].length === 0 ? (
                 <div style={{ fontSize: 12, color: t.textMuted, padding: t.space2, textAlign: "center" }}>
                   {filtering ? "一致なし" : "なし"}
                 </div>
               ) : (
-                lanes[lane].map((item) => (
-                  <TaskCard
-                    key={item.taskId}
-                    item={item}
-                    client={client}
-                    history={api}
-                    onOpen={setSelectedTaskId}
-                    onCancel={handleCancelRun}
-                    pending={item.taskId.startsWith("optimistic-")}
-                  />
-                ))
+                <>
+                  {bundleLanes[lane].map((b) => (
+                    <BundleCard
+                      key={b.id}
+                      bundle={b}
+                      items={bundleChildren(b, all)}
+                      onOpenChild={setSelectedTaskId}
+                      onDissolve={(id) => void handleDissolve(id)}
+                    />
+                  ))}
+                  {lanes[lane].map((item) => {
+                    const blocker = picking ? bundleBlocker(item) : null;
+                    const card = (
+                      <TaskCard
+                        key={item.taskId}
+                        item={item}
+                        client={client}
+                        history={api}
+                        onOpen={!picking ? setSelectedTaskId : blocker ? () => {} : togglePick}
+                        onCancel={handleCancelRun}
+                        pending={item.taskId.startsWith("optimistic-")}
+                        slotWaiting={candidateIds.has(item.taskId)}
+                      />
+                    );
+                    if (!picking) return card;
+                    const picked = picking.has(item.taskId);
+                    return (
+                      <div
+                        key={item.taskId}
+                        className="cmdr-pick"
+                        style={{ display: "flex", alignItems: "flex-start", gap: t.space2 }}
+                        data-testid={`bundle-pick-${item.taskId}`}
+                        data-picked={picked}
+                        data-disabled={!!blocker}
+                        title={blocker ? `合体できません: ${blocker}` : undefined}
+                      >
+                        {
+                          <span
+                            aria-hidden
+                            style={{
+                              marginTop: 12,
+                              flexShrink: 0,
+                              width: 16,
+                              height: 16,
+                              borderRadius: 4,
+                              border: `2px solid ${blocker ? t.border : BUNDLE_COLOR}`,
+                              background: picked ? BUNDLE_COLOR : "transparent",
+                              color: "#fff",
+                              fontSize: 11,
+                              lineHeight: "12px",
+                              textAlign: "center",
+                              boxSizing: "border-box",
+                            }}
+                          >
+                            {picked ? "✓" : ""}
+                          </span>
+                        }
+                        {card}
+                      </div>
+                    );
+                  })}
+                </>
               )}
             </div>
             {lane === "queued" && (
@@ -663,8 +870,23 @@ export function Board({
         cwdSuggestions={cwdSuggestions}
       />
 
+      {api.bundles && (
+        <BundleComposer
+          open={bundleComposerOpen}
+          items={pickedItems}
+          api={api.bundles}
+          onClose={() => setBundleComposerOpen(false)}
+          onConfirm={handleCreateBundle}
+        />
+      )}
+
       <TaskDrawer
         item={selected}
+        notice={selected && bundleByTask.has(selected.taskId) ? (
+          <BundleNotice
+            others={bundleChildren(bundleByTask.get(selected.taskId)!, all).filter((i) => i.taskId !== selected.taskId)}
+          />
+        ) : undefined}
         api={api}
         client={client}
         history={api}
@@ -677,6 +899,28 @@ export function Board({
         onArchive={handleArchive}
         onCancelRun={handleCancelRun}
       />
+    </div>
+  );
+}
+
+/** 合体に入っている子のドロワー冒頭に出す注記。 */
+function BundleNotice({ others }: { others: BoardItem[] }) {
+  return (
+    <div
+      data-testid="drawer-bundle-notice"
+      style={{
+        marginBottom: t.space4,
+        padding: t.space3,
+        borderRadius: t.radius,
+        border: `1px solid ${BUNDLE_COLOR}`,
+        fontSize: 13,
+        lineHeight: 1.6,
+      }}
+    >
+      <span aria-hidden style={{ color: BUNDLE_COLOR, fontWeight: 700 }}>⧉ </span>
+      合体して staging に載っています
+      {others.length > 0 && <>（一緒に: {others.map((o) => o.title).join(" / ")}）</>}。
+      承認・却下は<strong>このタスクだけ</strong>に効き、決まったタスクは合体から抜けます。
     </div>
   );
 }
