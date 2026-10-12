@@ -2,11 +2,13 @@
 // the metric set + display order are stable and always complete: a metric with no snapshot
 // row (never collected) renders as status="unknown" with null used/pct. resetsAt is computed
 // at read time from the metric's reset cadence relative to `now`.
+import { isStale } from "./freshness";
 import { MASTER, MASTER_BY_KEY, resetAt } from "./limits";
 import { worstStatus } from "./thresholds";
 import type { SnapshotRow, UsageServiceSummary, UsageStatus, UsageSummary } from "./types";
 
-export function buildSummary(rows: readonly SnapshotRow[], now: Date): UsageSummary {
+/** `capturedAt` = when `rows` were collected (null = never); it drives the stale flag. */
+export function buildSummary(rows: readonly SnapshotRow[], now: Date, capturedAt: string | null): UsageSummary {
   const byKey = new Map(rows.map((r) => [r.metric_key, r]));
 
   const services: UsageServiceSummary[] = MASTER.map((def) => {
@@ -28,6 +30,8 @@ export function buildSummary(rows: readonly SnapshotRow[], now: Date): UsageSumm
 
   return {
     generatedAt: now.toISOString(),
+    capturedAt,
+    stale: isStale(capturedAt, now),
     worstStatus: worstStatus(services.map((s) => s.status)),
     services,
   };

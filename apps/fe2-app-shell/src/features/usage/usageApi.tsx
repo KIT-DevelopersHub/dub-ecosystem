@@ -46,7 +46,11 @@ export function createUsageApi(
   }
 
   async function fetchLive(): Promise<UsageSummaryResult> {
-    if (demo) return { summary: buildMockUsageSummary(), source: "demo" };
+    if (demo) {
+      // ?usage-stale=1 previews the "collection stopped" state in a demo build.
+      const stale = new URLSearchParams(globalThis.location?.search ?? "").get("usage-stale") === "1";
+      return { summary: buildMockUsageSummary(new Date(), { stale }), source: "demo" };
+    }
     try {
       const summary = await api.request<UsageSummary>({ method: "GET", path: USAGE_SUMMARY_PATH });
       // A malformed/empty payload is treated like a failure → neutral, not mock.

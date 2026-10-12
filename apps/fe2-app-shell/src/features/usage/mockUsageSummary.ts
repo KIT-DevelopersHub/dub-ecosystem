@@ -11,14 +11,17 @@
 import type { UsageSummary } from "./types.ts";
 
 /** Build the mock relative to a fixed base instant so resets read sensibly.
- *  Accepts `now` for deterministic tests. */
-export function buildMockUsageSummary(now: Date = new Date()): UsageSummary {
+ *  Accepts `now` for deterministic tests; `stale` backdates the capture by 3 days so the
+ *  "データが古い" state can be shown in demo (?usage-stale=1). */
+export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: boolean } = {}): UsageSummary {
   const iso = (msFromNow: number): string => new Date(now.getTime() + msFromNow).toISOString();
   const HOUR = 3_600_000;
   const DAY = 24 * HOUR;
 
   return {
     generatedAt: now.toISOString(),
+    capturedAt: opts.stale ? iso(-3 * DAY) : now.toISOString(),
+    stale: opts.stale === true,
     // Roll-up = the worst leaf below (a critical metric is present).
     worstStatus: "critical",
     services: [
