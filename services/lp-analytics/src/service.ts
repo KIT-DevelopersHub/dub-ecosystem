@@ -1,6 +1,7 @@
 // LpService — business rules over LpRepo. Reads aggregate in SQL (GROUP BY) so a range
 // costs one indexed scan per bucket kind, never a row-by-row pull into the Worker.
 import { errors } from "@dub/errors";
+import { lp } from "@dub/types";
 import {
   DEVICE_LABELS,
   DIRECT_LABEL,
@@ -28,6 +29,16 @@ import type {
   LpVisitsPage,
   ReqCtx,
 } from "./types";
+
+const PUBLISHABLE: ReadonlySet<string> = new Set(lp.LP_PUBLISHABLE_VERSION_IDS);
+
+/** "3.1" / "v3.1" / " V3.1 " → "v3.1"; anything not publishable → null. */
+export function normalizeVersionId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim().toLowerCase();
+  const id = t.startsWith("v") ? t : `v${t}`;
+  return PUBLISHABLE.has(id) ? id : null;
+}
 
 const EMPTY_STATS: LpLinkStats = { visits: 0, uniques: 0, lastVisitAt: null };
 const DEFAULT_PAGE = 25;
@@ -194,6 +205,27 @@ export class LpService {
       items: page.map(({ orgId: _o, visitorKey: _v, dayJst: _d, ...v }) => v),
       nextCursor: rows.length > limit && page.length > 0 ? visitCursor(page[page.length - 1]!) : null,
     };
+  }
+
+  /** The version live on the public site. No row yet → the default version (never 404:
+   *  the LP Worker and LP管理 both need an answer from day one). */
+  async getPublish(): Promise<lp.LpPublishState> {
+    const row = await this.deps.repo.getPublish(lp.LP_PUBLISH_SITE);
+    return {
+      site: lp.LP_PUBLISH_SITE,
+      versionId: row?.versionId ?? lp.LP_DEFAULT_PUBLISHED_VERSION,
+      versions: [...lp.LP_PUBLISHABLE_VERSION_IDS],
+      updatedAt: row?.updatedAt ?? null,
+      updatedBy: row?.updatedBy ?? null,
+    };
+  }
+
+  /** Switch the live version (gated by lp:publish in app.ts). */
+  async setPublish(ctx: ReqCtx, body: unknown): Promise<lp.LpPublishState> {
+    const versionId = normalizeVersionId((body as { versionId?: unknown } | null)?.versionId);
+    if (!versionId) throw errors.validationFailed([{ field: "versionId", reason: "not_publishable" }]);
+    await this.deps.repo.setPublish(lp.LP_PUBLISH_SITE, versionId, ctx.userId, this.deps.now());
+    return this.getPublish();
   }
 
   /** Public beacon landing (s2s from the gateway). Matching is by slug at record time.

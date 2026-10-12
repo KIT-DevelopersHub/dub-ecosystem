@@ -13,6 +13,9 @@ const nextConfig = {
   // production build can run without clobbering a concurrently running
   // `next dev`. Defaults to the standard .next — no behavior change in CI.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  // Bundled multi-version build (scripts/build-bundle.mjs) serves each version's
+  // chunks from /_v/<id>/_next/... — unset for a normal build (no change).
+  ...(process.env.LP_ASSET_PREFIX ? { assetPrefix: process.env.LP_ASSET_PREFIX } : {}),
   images: {
     unoptimized: true,
   },

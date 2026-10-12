@@ -8,7 +8,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:bundle": "node scripts/build-bundle.mjs",
+    "test:worker": "node --test worker/route.test.ts"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
