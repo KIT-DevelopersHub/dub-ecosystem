@@ -3,6 +3,12 @@
 import type { CatalogEntry } from "../src/operate/catalog-types.ts";
 
 const EXTRA: CatalogEntry[] = [
+  { id: "things.list", area: "event", method: "GET", path: "/things", service: "x", requires: { keys: [] }, kind: "read", reversible: true, risk: "low", description: "一覧", impact: "読み取りのみ。", query: ["tag"] },
+  {
+    id: "things.remove", area: "event", method: "DELETE", path: "/things/:id", service: "x", requires: { keys: [] }, kind: "delete", reversible: true, risk: "high",
+    description: "削除", impact: "{count}件削除", query: ["tag"],
+    verify: { read: "things.list", query: { tag: "$query.tag" }, findIn: "items", findBy: ["id", "$params.id"], present: false },
+  },
   { id: "things.get", area: "event", method: "GET", path: "/things/:id", service: "x", requires: { keys: [] }, kind: "read", reversible: true, risk: "low", description: "取得", impact: "読み取りのみ。" },
   {
     id: "things.create", area: "event", method: "POST", path: "/things", service: "x", requires: { keys: [] }, kind: "write", reversible: true, risk: "mid",
@@ -26,8 +32,8 @@ const { OperateExecutor } = await import("../src/operate/executor.ts");
 const { GatewayClient } = await import("../src/operate/gateway.ts");
 const { parsePlan } = await import("../src/operate/plan.ts");
 
-function setup(opts: { createdName?: string; status?: number } = {}) {
-  const things = new Map<string, { id: string; name: string }>();
+function setup(opts: { createdName?: string; status?: number; keep?: boolean } = {}) {
+  const things = new Map<string, { id: string; name: string }>([["t0", { id: "t0", name: "既存" }]]);
   const fetchImpl = (async (input: string | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname.replace(/^\/api\/v1/, "");
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -37,9 +43,17 @@ function setup(opts: { createdName?: string; status?: number } = {}) {
       things.set(t.id, t);
       return reply(201, t);
     }
+    if (init?.method === "DELETE") {
+      if (!opts.keep) things.delete(path.split("/")[2]!);
+      return new Response(null, { status: 204 });
+    }
     const get = path.match(/^\/things\/(.+)$/);
     if (get) return things.has(get[1]!) ? reply(200, things.get(get[1]!)) : reply(404, {});
     if (init?.method === "PATCH") return reply(opts.status ?? 200, {});
+    if (path === "/things") {
+      const tag = new URL(String(input)).searchParams.get("tag");
+      return reply(200, { items: tag === "x" ? [...things.values()] : [] });
+    }
     return reply(404, {});
   }) as typeof fetch;
   return new OperateExecutor(
@@ -58,6 +72,12 @@ async function run(exec: InstanceType<typeof OperateExecutor>, steps: unknown[])
 }
 
 describe("executor hooks", () => {
+  it("verifies a removal by the target being gone, reading with the write's own query", async () => {
+    const steps = [{ id: "d", op: "things.remove", params: { id: "t0" }, query: { tag: "x" } }];
+    expect((await run(setup(), steps)).result).toMatchObject({ verdict: "done" });
+    expect((await run(setup({ keep: true }), steps)).result).toMatchObject({ results: [{ outcome: "unverified" }] });
+  });
+
   it("re-reads a create through the id its response returned", async () => {
     const ok = await run(setup(), [{ id: "c", op: "things.create", body: { name: "新規" } }]);
     expect(ok.result).toMatchObject({ verdict: "done" });
