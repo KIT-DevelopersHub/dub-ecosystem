@@ -105,6 +105,26 @@ export interface ListRoleGrantsResult {
   items: RoleFileGrant[];
 }
 
+// ---- Google accounts drive-share-service acts as (admin only, Drive共有 > 設定) ----
+export interface DriveGoogleAccount {
+  id: string;
+  /** connected = added from Drive共有 > 設定 / secret = the server's initial Secret */
+  kind: "connected" | "secret";
+  email: string | null;
+  connectedAt: string | null;
+  connectedBy: string | null;
+  /** The account Drive calls currently use (at most one). */
+  active: boolean;
+  /** Google answered invalid_grant (revoked / expired): reconnect needed. */
+  needsReconnect: boolean;
+}
+
+export interface DriveGoogleAccountsStatus {
+  accounts: DriveGoogleAccount[];
+  /** The OAuth client + token key for adding accounts are configured on the server. */
+  canConnect: boolean;
+}
+
 export interface DriveShareApi {
   /** List files/folders in the Hackit shared Drive (drive:read). */
   listFiles(query?: ListFilesQuery): Promise<ListFilesResult>;
@@ -130,11 +150,19 @@ export interface DriveShareApi {
   revokeRoleGrant(fileId: string, roleId: string): Promise<void>;
   /** Re-apply a role grant so every current member is (re)synced (drive:write). */
   reapplyRoleGrant(fileId: string, roleId: string): Promise<RoleFileGrant>;
+  getGoogleAccounts(): Promise<DriveGoogleAccountsStatus>;
+  /** Start the add-account consent round-trip; the browser is then sent to `authUrl`. */
+  startGoogleConnect(redirectUri: string, loginHint?: string): Promise<{ authUrl: string }>;
+  /** Relay Google's `code` + `state` from the return URL (registers + switches to it). */
+  completeGoogleConnect(code: string, state: string): Promise<DriveGoogleAccountsStatus>;
+  switchGoogleAccount(accountId: string): Promise<DriveGoogleAccountsStatus>;
+  removeGoogleAccount(accountId: string): Promise<void>;
 }
 
 const IDENTITY_BASE = "/api/v1/identity";
 
 const BASE = "/api/v1/driveshare";
+const GOOGLE = `${BASE}/google-account`;
 
 export function createDriveShareApi(api: ApiClient): DriveShareApi {
   return {
@@ -198,6 +226,19 @@ export function createDriveShareApi(api: ApiClient): DriveShareApi {
         method: "POST",
         path: `${BASE}/files/${encodeURIComponent(fileId)}/role-grants/${encodeURIComponent(roleId)}/reapply`,
       }),
+    getGoogleAccounts: () => api.request<DriveGoogleAccountsStatus>({ method: "GET", path: GOOGLE }),
+    startGoogleConnect: (redirectUri, loginHint) =>
+      api.request<{ authUrl: string }>({
+        method: "POST",
+        path: `${GOOGLE}/connect`,
+        body: { redirectUri, ...(loginHint ? { loginHint } : {}) },
+      }),
+    completeGoogleConnect: (code, state) =>
+      api.request<DriveGoogleAccountsStatus>({ method: "POST", path: `${GOOGLE}/callback`, body: { code, state } }),
+    switchGoogleAccount: (accountId) =>
+      api.request<DriveGoogleAccountsStatus>({ method: "POST", path: `${GOOGLE}/active`, body: { accountId } }),
+    removeGoogleAccount: (accountId) =>
+      api.request<void>({ method: "DELETE", path: `${GOOGLE}/accounts/${encodeURIComponent(accountId)}` }),
   };
 }
 

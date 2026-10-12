@@ -11,7 +11,6 @@ import type {
   RoleAssignment,
   EmailRoutingAddress,
   CreateEmailAddressRequest,
-  DriveGoogleAccountsStatus,
   EmailRoutingSyncPreview,
   OffboardUserResult,
   RosterUser,
@@ -32,8 +31,6 @@ const ADMIN = `${BASE}/admin`;
 const EMAIL_ROUTING = `${BASE}/mail/admin/email-routing`;
 // 運営メンバー管理 (member-service) — reverse lookup + 在籍更新 during offboarding.
 const MEMBERS = `${BASE}/members`;
-// Google アカウント (drive-share-service). 「その他」> Google アカウント のダイアログが使う。
-const DRIVE_GOOGLE = `${BASE}/driveshare/google-account`;
 
 export interface RosterApi {
   listUsers(filters: UserListFilters): Promise<common.Paginated<RosterUser>>;
@@ -86,14 +83,6 @@ export interface RosterApi {
   listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
   createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
   deleteEmailAddress(id: string): Promise<void>;
-  // ---- Google accounts drive-share-service can act as (admin only) ----
-  getDriveGoogleAccounts(): Promise<DriveGoogleAccountsStatus>;
-  /** Start the add-account consent round-trip; the browser is then sent to `authUrl`. */
-  startDriveGoogleConnect(redirectUri: string, loginHint?: string): Promise<{ authUrl: string }>;
-  /** Relay Google's `code` + `state` from the return URL (registers + switches to it). */
-  completeDriveGoogleConnect(code: string, state: string): Promise<DriveGoogleAccountsStatus>;
-  switchDriveGoogleAccount(accountId: string): Promise<DriveGoogleAccountsStatus>;
-  removeDriveGoogleAccount(accountId: string): Promise<void>;
 }
 
 export function createRosterApi(client: ResourceClient): RosterApi {
@@ -148,12 +137,5 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/issued-addresses`),
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/issued-addresses`, req),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/issued-addresses/${id}`),
-    getDriveGoogleAccounts: () => client.get<DriveGoogleAccountsStatus>(DRIVE_GOOGLE),
-    startDriveGoogleConnect: (redirectUri, loginHint) =>
-      client.post<{ authUrl: string }>(`${DRIVE_GOOGLE}/connect`, { redirectUri, ...(loginHint ? { loginHint } : {}) }),
-    completeDriveGoogleConnect: (code, state) =>
-      client.post<DriveGoogleAccountsStatus>(`${DRIVE_GOOGLE}/callback`, { code, state }),
-    switchDriveGoogleAccount: (accountId) => client.post<DriveGoogleAccountsStatus>(`${DRIVE_GOOGLE}/active`, { accountId }),
-    removeDriveGoogleAccount: (accountId) => client.delete(`${DRIVE_GOOGLE}/accounts/${encodeURIComponent(accountId)}`),
   };
 }

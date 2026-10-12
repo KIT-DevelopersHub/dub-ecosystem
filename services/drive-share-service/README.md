@@ -68,7 +68,7 @@ selected the secret is used as before.
 |---|---|---|
 | GET | `/driveshare/google-account` | `{ accounts[], canConnect }`: each with in use (`active`), registered at/by, `needsReconnect` (invalid_grant) |
 | POST | `/driveshare/google-account/connect` | `{ redirectUri }` -> Google consent URL (state stored in D1, 10 min, single use) |
-| POST | `/driveshare/google-account/callback` | `{ code, state }` relayed by the SPA from `/admin/roles?code&state`; registers (same address = token replaced) and switches to it |
+| POST | `/driveshare/google-account/callback` | `{ code, state }` relayed by the SPA from `/driveshare?code&state`; registers (same address = token replaced) and switches to it |
 | POST | `/driveshare/google-account/active` | `{ accountId }` (or `"secret"`) switches the account in use |
 | DELETE | `/driveshare/google-account/accounts/:id` | removes a registered account (409 while in use) |
 
@@ -76,7 +76,7 @@ One-time setup per environment:
 
 1. Apply `infra/d1/migrations/driveshare/0002_google_account.sql` to the environment's D1.
 2. GCP → Credentials → **Create OAuth client ID → Web application**. Authorized redirect URI =
-   `<fe2 origin>/admin/roles` (one per environment, e.g. staging and prod fe2 origins).
+   `<fe2 origin>/driveshare` (one per environment, e.g. staging and prod fe2 origins).
 3. OAuth consent screen → add the new Google account as a **Test user**. In testing mode
    Google expires refresh tokens after **7 days** (the dialog then marks it 要再接続);
    publishing the app to production removes that limit.

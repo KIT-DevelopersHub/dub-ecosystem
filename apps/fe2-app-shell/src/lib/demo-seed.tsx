@@ -1801,8 +1801,8 @@ interface DemoDriveFile {
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 
-// ── driveshare: the Google accounts Drive can act as (ロール管理 > その他 > Google アカウント) ──
-// No real OAuth in the demo: "add account" returns the SPA's own /admin/roles?code&state, which
+// ── driveshare: the Google accounts Drive can act as (Drive共有 > 設定 > Google アカウント) ──
+// No real OAuth in the demo: "add account" returns the SPA's own /driveshare?code&state, which
 // stands in for Google's redirect. The list lives in sessionStorage so it survives that
 // full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
 // unconfigured on any demo URL (remembered for the tab).

@@ -12,7 +12,7 @@ import { AUTHED, buildRoleGrants, fakeRoster, memAuthzHolding } from "./helpers"
 
 const ORG = "org_devhub";
 const KEY_B64 = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
-const REDIRECT = "https://dub-fe2-app-shell.example.workers.dev/admin/roles";
+const REDIRECT = "https://dub-fe2-app-shell.example.workers.dev/driveshare";
 const T0 = Date.parse("2026-10-10T00:00:00.000Z");
 
 const WEB_ENV: Env = {
@@ -87,8 +87,8 @@ describe("crypto", () => {
 describe("redirect URI allowlist", () => {
   it("accepts only the SPA return page on https (or localhost)", () => {
     expect(isAllowedRedirectUri(REDIRECT)).toBe(true);
-    expect(isAllowedRedirectUri("http://localhost:5173/admin/roles")).toBe(true);
-    expect(isAllowedRedirectUri("http://evil.example/admin/roles")).toBe(false);
+    expect(isAllowedRedirectUri("http://localhost:5173/driveshare")).toBe(true);
+    expect(isAllowedRedirectUri("http://evil.example/driveshare")).toBe(false);
     expect(isAllowedRedirectUri("https://x.example/admin/users")).toBe(false);
     expect(isAllowedRedirectUri(`${REDIRECT}?next=https://evil`)).toBe(false);
     expect(isAllowedRedirectUri(42)).toBe(false);
