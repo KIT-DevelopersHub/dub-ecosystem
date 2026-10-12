@@ -7,7 +7,7 @@ export type OpRisk = "low" | "mid" | "high";
 
 export interface CatalogEntry {
   id: string;
-  area: "event" | "task" | "gantt" | "notification" | "chat" | "member" | "role" | "drive" | "lp";
+  area: "event" | "task" | "gantt" | "notification" | "chat" | "member" | "role" | "drive" | "lp" | "commander";
   method: string;
   path: string;
   kind: OpKind;
@@ -50,6 +50,8 @@ export interface PreviewWrite {
   fieldLabels?: Record<string, string>;
   /** No read can confirm this write; the reason (検証不能). */
   unverifiable?: string;
+  /** "commander" = the local commander-service: its paths carry no API prefix. */
+  api?: "commander";
   calls: PreviewCall[];
 }
 

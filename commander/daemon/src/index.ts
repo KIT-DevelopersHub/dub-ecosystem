@@ -80,6 +80,10 @@ function loadConfig(): DaemonConfig {
         roles: idList(process.env.COMMANDER_OPERATE_PROTECTED_ROLE_IDS ?? "role_sys_admin"),
         users: idList(process.env.COMMANDER_OPERATE_PROTECTED_USER_IDS ?? ""),
       },
+      // "Dubを操作" reaches the Commander board through the same service the runs persist to.
+      ...(config.serviceUrl
+        ? { commander: { baseUrl: config.serviceUrl.replace(/\/+$/, ""), ...(config.serviceToken ? { token: config.serviceToken } : {}) } }
+        : {}),
     };
     if (process.env.COMMANDER_DUB_API_TOKEN) config.operate.token = process.env.COMMANDER_DUB_API_TOKEN;
     if (process.env.COMMANDER_DUB_BOT_EMAIL) config.operate.email = process.env.COMMANDER_DUB_BOT_EMAIL;

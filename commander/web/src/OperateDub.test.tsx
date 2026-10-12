@@ -155,6 +155,22 @@ describe("<OperateDub> approval screen", () => {
     expect(conclusion()).toMatch(/^結論: まだ何も変更していません/);
   });
 
+  it("shows the gateway prefix for Dub calls and none for commander-service calls", async () => {
+    const commanderWrite = {
+      ...EVENT_PREVIEW.writes[0]!,
+      stepId: "tr",
+      entryId: "commander.features.transition",
+      api: "commander" as const,
+      calls: [{ callId: "tr#1", method: "POST", path: "/features/feat_1/transition", params: { id: "feat_1" }, body: { to: "demo_rejected" }, target: "feat_1" }],
+    };
+    setup({ preview: { ...EVENT_PREVIEW, writes: [EVENT_PREVIEW.writes[0]!, commanderWrite] } });
+    await send("北陸の概要を差し替えて");
+    const details = within(await screen.findByTestId("operate-approval")).getByTestId("operate-details");
+    const lines = within(details).getAllByRole("listitem").map((li) => li.textContent!);
+    expect(lines[0]).toMatch(/^PATCH \/api\/v1\/events\/ev1/);
+    expect(lines[1]).toMatch(/^POST \/features\/feat_1\/transition/);
+  });
+
   it("executes the approved preview once and ends with the verdict", async () => {
     const { operateClient, api } = setup();
     await send("北陸の概要を差し替えて");

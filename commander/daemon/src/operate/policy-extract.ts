@@ -9,8 +9,11 @@ export interface PolicyRoute {
   path: string;
   /** Rule source with named constants resolved, whitespace collapsed. */
   rule: string;
-  /** "keys" for permission-gated rules; otherwise the bare marker. */
-  kind: "keys" | "PUBLIC" | "AUTHENTICATED" | "INTERNAL" | "internalWithKeys";
+  /**
+   * "keys" for permission-gated rules; otherwise the bare marker. OPERATOR / OPEN are
+   * commander-service's protection-table.ts vocabulary (operator token / no credential).
+   */
+  kind: "keys" | "PUBLIC" | "AUTHENTICATED" | "INTERNAL" | "internalWithKeys" | "OPERATOR" | "OPEN";
   /** Fine-grained permission keys (e.g. "event:write"). */
   keys: string[];
   /** ロール管理 3-tier requirement when the rule uses appLevel(). */
@@ -49,7 +52,8 @@ export function extractPolicyRoutes(source: string): PolicyRoute[] {
     const raw = collapse(readExpr(src, m.index! + m[0].length));
     const rule = consts.get(raw) ?? raw;
     const appMatch = rule.match(APP_LEVEL_RE);
-    const marker = /^(PUBLIC|AUTHENTICATED|INTERNAL)$/.exec(rule)?.[1] as PolicyRoute["kind"] | undefined;
+    // OPERATOR / OPEN are string constants, so match the name before it is resolved.
+    const marker = (/^(PUBLIC|AUTHENTICATED|INTERNAL)$/.exec(rule) ?? /^(OPERATOR|OPEN)$/.exec(raw))?.[1] as PolicyRoute["kind"] | undefined;
     const kind: PolicyRoute["kind"] = marker ?? (rule.startsWith("internalWithKeys") ? "internalWithKeys" : "keys");
     routes.push({
       method: m[1]!,

@@ -15,7 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import { findEntry, pathParams, type CatalogEntry, type OpKind, type OpRisk, type VerifyValue } from "./catalog.ts";
-import { describeFailure, environmentLabel, type GatewayClient, type GatewayResponse } from "./gateway.ts";
+import { describeFailure, environmentLabel, type ApiClient, type GatewayResponse } from "./gateway.ts";
 import { findPlaceholders, getPath, matchesWhere, resolveValue, type Plan } from "./plan.ts";
 
 export const MAX_WRITE_CALLS = 20;
@@ -49,6 +49,8 @@ export interface PreviewWrite {
   fieldLabels?: Record<string, string>;
   /** Set when no read can confirm this write: the reason, shown as 検証不能. */
   unverifiable?: string;
+  /** "commander" = calls go to the local commander-service (paths without API_PREFIX). */
+  api?: "commander";
   calls: PreviewCall[];
 }
 
@@ -110,6 +112,8 @@ const itemsOf = (data: unknown): unknown[] | undefined =>
 /** No answer, or a gateway/upstream failure: the write may or may not have been applied. */
 const isAmbiguous = (status: number): boolean => status === 0 || status >= 500;
 
+const NO_COMMANDER = "Commander の接続先が未設定です（daemon の COMMANDER_SERVICE_URL と COMMANDER_SERVICE_TOKEN を設定してください）";
+
 const stripBraces = (expr: string): string => expr.replace(/^\s*\{\{\s*|\s*\}\}\s*$/g, "");
 
 function buildPath(entry: CatalogEntry, params: Record<string, string>): string {
@@ -133,16 +137,25 @@ function defaultTarget(entry: CatalogEntry, params: Record<string, string>, item
 export class OperateExecutor {
   private readonly previews = new Map<string, { preview: Preview; expires: number }>();
   // Plain fields, not parameter properties: the daemon runs under node's strip-only TS.
-  private readonly gateway: GatewayClient;
+  private readonly gateway: ApiClient;
   private readonly audit: AuditSink;
   private readonly now: () => number;
   private readonly protectedIds: ProtectedIds;
+  /** commander-service, for entries with target "commander"; unset = those are blocked. */
+  private readonly commander: ApiClient | undefined;
 
-  constructor(gateway: GatewayClient, audit: AuditSink, now: () => number = Date.now, protectedIds: ProtectedIds = { roles: [], users: [] }) {
+  constructor(
+    gateway: ApiClient,
+    audit: AuditSink,
+    now: () => number = Date.now,
+    protectedIds: ProtectedIds = { roles: [], users: [] },
+    commander?: ApiClient,
+  ) {
     this.gateway = gateway;
     this.audit = audit;
     this.now = now;
     this.protectedIds = protectedIds;
+    this.commander = commander;
   }
 
   /** Run the reads, resolve every write into concrete calls, write nothing. */
@@ -156,6 +169,10 @@ export class OperateExecutor {
     for (const [i, step] of plan.steps.entries()) {
       const at = `手順${i + 1}`;
       const entry = findEntry(step.op)!;
+      if (entry.target === "commander" && !this.commander) {
+        blockers.push(`${at}: ${NO_COMMANDER}`);
+        break;
+      }
       let items: unknown[] = [undefined];
       if (step.forEach) {
         const list = getPath(scope, stripBraces(step.forEach));
@@ -211,7 +228,7 @@ export class OperateExecutor {
         const results: unknown[] = [];
         let failure: string | undefined;
         for (const c of calls) {
-          const res = await this.call(c);
+          const res = await this.call(c, entry);
           if (!res.ok) {
             failure = describeFailure(res);
             break;
@@ -246,6 +263,7 @@ export class OperateExecutor {
         impact: entry.impact.replace("{count}", String(calls.length)),
         ...(entry.fieldLabels ? { fieldLabels: entry.fieldLabels } : {}),
         ...(entry.unverifiable ? { unverifiable: entry.unverifiable } : {}),
+        ...(entry.target ? { api: entry.target } : {}),
         calls,
       });
     }
@@ -262,7 +280,10 @@ export class OperateExecutor {
     const preview: Preview = {
       previewId: randomUUID(),
       summary: plan.summary,
-      environment: environmentLabel(this.gateway.baseUrl),
+      // Commander-only plans write to the local service, not to the Dub environment.
+      environment: environmentLabel(
+        writes.length > 0 && writes.every((w) => w.api === "commander") && this.commander ? this.commander.baseUrl : this.gateway.baseUrl,
+      ),
       reads,
       writes,
       blockers,
@@ -294,7 +315,7 @@ export class OperateExecutor {
           results.push({ ...base, outcome: "skipped", message: "対象から外しました" });
           continue;
         }
-        const res = await this.call(c);
+        const res = await this.call(c, entry);
         if (entry.unverifiable) {
           results.push(
             res.ok ? { ...base, outcome: "accepted", message: `受け付けられました（検証不能: ${entry.unverifiable}）` }
@@ -350,6 +371,7 @@ export class OperateExecutor {
       calls: stored.preview.writes.flatMap((w) =>
         w.calls.map((c) => ({
           entryId: w.entryId,
+          ...(w.api ? { api: w.api } : {}),
           method: c.method,
           path: c.path,
           body: c.body,
@@ -360,9 +382,14 @@ export class OperateExecutor {
     return result;
   }
 
-  private async call(c: { method: string; path: string; query?: Record<string, string>; body?: unknown }): Promise<GatewayResponse> {
+  private async call(
+    c: { method: string; path: string; query?: Record<string, string>; body?: unknown },
+    entry: CatalogEntry,
+  ): Promise<GatewayResponse> {
+    const client = entry.target === "commander" ? this.commander : this.gateway;
+    if (!client) return { status: 0, ok: false, data: { error: NO_COMMANDER } };
     try {
-      return await this.gateway.request(c);
+      return await client.request(c);
     } catch (e) {
       return { status: 0, ok: false, data: { error: (e as Error).message } };
     }
@@ -383,10 +410,10 @@ export class OperateExecutor {
     if (Object.values(params).some((v) => v === "")) return "読み直す対象の id が分かりません";
     const query = spec.query ? Object.fromEntries(Object.entries(spec.query).map(([k, v]) => [k, String(src(v) ?? "")])) : undefined;
     const req = { method: "GET", path: buildPath(read, params), ...(query ? { query } : {}) };
-    const key = `${req.path}?${JSON.stringify(query ?? {})}`;
+    const key = `${read.target ?? "dub"} ${req.path}?${JSON.stringify(query ?? {})}`;
     let res = cache.get(key);
     if (!res) {
-      res = await this.call(req);
+      res = await this.call(req, read);
       cache.set(key, res);
     }
     if (!res.ok) return `読み直しに失敗: ${describeFailure(res)}`;
