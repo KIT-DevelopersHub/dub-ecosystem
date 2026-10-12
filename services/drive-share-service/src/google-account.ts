@@ -1,14 +1,14 @@
 // Which Google account drive-share-service acts as, and the admin flow that registers and
 // switches between accounts.
 //
-// Precedence (resolveDriveCredentials): the account selected in ロール管理 (D1, sealed refresh
+// Precedence (resolveDriveCredentials): the account selected in Drive共有 > 設定 (D1, sealed refresh
 // token) → the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret → none (mock Drive). So an environment
 // that never registers anything keeps behaving exactly as before.
 //
 // Add-account flow (authz: POLICY_TABLE, admin only):
 //   1. POST /connect  — store a single-use state in D1, return Google's consent URL
 //                       (access_type=offline + prompt=consent => a refresh token is always issued).
-//   2. Google redirects the browser to the SPA's /admin/roles?code&state.
+//   2. Google redirects the browser to the SPA's /driveshare?code&state.
 //   3. POST /callback — the SPA relays code+state; the state must exist, be unexpired and
 //                       belong to the SAME admin; then code -> refresh token, seal, register
 //                       (the same address replaces its token) and switch to it.
@@ -33,7 +33,7 @@ const ABOUT_ENDPOINT = "https://www.googleapis.com/drive/v3/about?fields=user(em
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 const STATE_TTL_MS = 10 * 60 * 1000;
 /** Google sends the admin back here; the SPA page that finishes the round-trip. */
-export const OAUTH_RETURN_PATH = "/admin/roles";
+export const OAUTH_RETURN_PATH = "/driveshare";
 
 export type ResolvedCredentials =
   | { source: "connected"; credentials: GoogleCredentials; row: GoogleAccountRow }
@@ -53,7 +53,7 @@ export function isMissingTable(err: unknown): boolean {
 
 /** Drive call while the selected account is unusable: ask an admin to reconnect it. */
 export function reconnectRequired(): DubError {
-  return new DubError(CommonErrorCodes.UPSTREAM_UNAVAILABLE, "Google アカウントの再接続が必要です（ロール管理 > その他 > Google アカウント）。", {
+  return new DubError(CommonErrorCodes.UPSTREAM_UNAVAILABLE, "Google アカウントの再接続が必要です（Drive共有 > 設定 > Google アカウント）。", {
     details: { reason: "reconnect_required" },
     retryable: false,
     service: "google:auth",
