@@ -95,8 +95,9 @@ if (useDemo && typeof document !== "undefined") {
   const banner = document.createElement("div");
   banner.textContent = "デモモード — 表示中のデータはすべてサンプルです（バックエンド未接続・メール等は実際には送信されません）";
   banner.setAttribute("role", "note");
+  // Just under Modal so it never covers a dialog footer (full-height sheet on mobile).
   banner.style.cssText =
-    "position:fixed;left:0;right:0;bottom:0;z-index:9999;padding:6px 12px;font-size:12px;text-align:center;background:#7c2d12;color:#fff;font-family:system-ui,sans-serif";
+    "position:fixed;left:0;right:0;bottom:0;z-index:calc(var(--dub-zIndex-modal, 1300) - 1);padding:6px 12px;font-size:12px;text-align:center;background:#7c2d12;color:#fff;font-family:system-ui,sans-serif";
   document.body.appendChild(banner);
 }
 
