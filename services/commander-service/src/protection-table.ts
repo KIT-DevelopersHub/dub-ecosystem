@@ -120,6 +120,13 @@ export const PROTECTION_TABLE = defineProtectionTable({
   "GET /runs/:id/events": OPERATOR,
   "POST /runs/:id/events": OPERATOR,
 
+  // ---- staging 合体 (bundles): which tasks share a staging slot ----
+  "GET /bundles": OPERATOR,
+  "POST /bundles": OPERATOR,
+  "PATCH /bundles/:id": OPERATOR,
+  "DELETE /bundles/:id/tasks/:taskId": OPERATOR,
+  "DELETE /bundles/:id": OPERATOR,
+
   // ---- AI chat sessions: the conversation bodies of 「Dubに聞く」/「Dubを操作」 ----
   "GET /chats": OPERATOR,
   "POST /chats": OPERATOR,
