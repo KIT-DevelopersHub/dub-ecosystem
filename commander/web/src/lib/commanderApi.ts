@@ -136,7 +136,47 @@ export type ApiError = {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
+// --- staging 合体 (bundle) ---------------------------------------------------
+// 枠待ちの demo 承認済みタスクを統合ブランチに束ねて 1 つの staging 枠に載せる。子タスクは
+// 履歴・PR・承認をそれぞれ持ち続け、束は統合ブランチ（マージしないビューア）と子への参照だけを持つ。
+export type BundleStatus = "merging" | "deployed" | "failed";
+
+export interface StagingBundle {
+  id: string;
+  /** 子タスク（追加順）。0 件になった束は消える。 */
+  taskIds: string[];
+  status: BundleStatus;
+  /** 載っている staging 枠。反映前は null。 */
+  slot: "staging" | "staging2" | null;
+  stagingUrl: string | null;
+  /** 統合ブランチ名（マージしない）。 */
+  branch: string;
+  /** 子ごとの verify:live 結果（子の Liveness-Marker で実測）。 */
+  markers: Record<string, "pending" | "pass" | "missing">;
+  createdAt: string;
+}
+
+/** 合体前チェックの指摘 1 件。block=true なら合体できない。 */
+export interface BundleIssue {
+  taskIds: string[];
+  message: string;
+  block: boolean;
+}
+
+export interface BundleApi {
+  listBundles(): Promise<StagingBundle[]>;
+  /** 衝突・D1 マイグレーション・メール系（枠1限定）などを合体前に調べる。 */
+  checkBundle(taskIds: string[]): Promise<BundleIssue[]>;
+  createBundle(taskIds: string[]): Promise<Result<StagingBundle>>;
+  /** 子を束から外す（承認・却下・手動）。残りで統合ブランチを作り直す。 */
+  removeFromBundle(bundleId: string, taskId: string): Promise<Result<StagingBundle | null>>;
+  /** 束を解除して子を枠待ちに戻す。 */
+  dissolveBundle(bundleId: string): Promise<Result<null>>;
+}
+
 export interface CommanderApi {
+  /** staging 合体。未対応のバックエンドでは undefined（ボードは合体 UI を出さない）。 */
+  bundles?: BundleApi;
   listFeatures(): Promise<Feature[]>;
   createFeature(input: { title: string; ledgerRef?: string }): Promise<Result<Feature>>;
   getFeature(id: string): Promise<FeatureDetail>;
