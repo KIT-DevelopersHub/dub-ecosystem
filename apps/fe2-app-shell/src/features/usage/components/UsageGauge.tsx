@@ -1,6 +1,6 @@
 // UsageGauge — the metric's visual focus: a tall token-driven progress bar whose
 // fill color follows status (ok=green / warn=yellow / critical=red / unknown=gray),
-// with thin markers at the 70% (warn) and 90% (critical) billing/halt thresholds so
+// with thin markers at the 80% (warn) and 90% (critical) billing/halt thresholds so
 // the reader can see how close the fill is to the wall. Reusable: takes only pct +
 // status. All colors come from @dub/tokens (no ad-hoc hex); width is the sole dynamic
 // value. Exposed as an ARIA progressbar for a11y.

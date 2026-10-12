@@ -17,7 +17,7 @@
 export type ServiceProvider = "cloudflare" | "resend" | (string & {});
 
 /** Per-metric health. Drives the status color and worst-status roll-up.
- *  ok = comfortable · warn ≥70% · critical ≥90% · unknown = could not be read. */
+ *  ok = comfortable · warn ≥80% · critical ≥90% · unknown = could not be read. */
 export type UsageStatus = "ok" | "warn" | "critical" | "unknown";
 
 /** What the upstream does when the quota is exceeded.

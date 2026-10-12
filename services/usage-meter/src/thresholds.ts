@@ -1,8 +1,8 @@
 // Percentage math + status/threshold logic. Pure and side-effect free (unit-tested).
 import type { UsageStatus } from "./types";
 
-/** warn at 70%, critical at 90% of the free-tier ceiling. */
-export const WARN_PCT = 70;
+/** warn at 80%, critical at 90% of the free-tier ceiling. */
+export const WARN_PCT = 80;
 export const CRITICAL_PCT = 90;
 
 /** used/limit as a 1-decimal percentage. null when usage is unknown or the limit is

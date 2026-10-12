@@ -12,7 +12,7 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useUsageApi } from "./UsageProvider.tsx";
 import { UsageSummaryBanner } from "./components/UsageSummaryBanner.tsx";
 import { ServiceGroup } from "./components/ServiceGroup.tsx";
-import { groupServicesByProvider } from "./usageStatus.ts";
+import { CRITICAL_PCT, WARN_PCT, groupServicesByProvider } from "./usageStatus.ts";
 
 function formatGeneratedAt(iso: string): string {
   const d = new Date(iso);
@@ -93,6 +93,10 @@ export function UsageDashboard(): JSX.Element {
           <strong>手動でアップグレードした時だけ</strong>です。
           このダッシュボードの本当の役割は「請求爆発の防止」よりも、
           <strong>無料枠の上限に達して機能が止まる予兆を早く掴むこと</strong>にあります。
+        </p>
+        <p style={noteStyle} data-testid="fe2-usage-alert-threshold">
+          使用率が<strong>{WARN_PCT}% に達した項目</strong>は、管理者にメールとアプリ内通知でお知らせします
+          （{CRITICAL_PCT}% で危険として再度お知らせ・超えている間は 1 日 1 回）。
         </p>
       </Stack>
     </Card>

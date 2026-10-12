@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "usage-meter — free-tier usage collector + billing-guard alerts. A DO-alarm-driven daily collector (no cron) that snapshots Cloudflare (GraphQL Analytics) and Resend (mail send-log COUNT) usage against the free-tier ceilings, serves GET /usage/summary, and alerts admins at warn(70%)/critical(90%).",
+  "description": "usage-meter — free-tier usage collector + billing-guard alerts. A DO-alarm-driven daily collector (no cron) that snapshots Cloudflare (GraphQL Analytics) and Resend (mail send-log COUNT) usage against the free-tier ceilings, serves GET /usage/summary, and alerts admins at warn(80%)/critical(90%).",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"

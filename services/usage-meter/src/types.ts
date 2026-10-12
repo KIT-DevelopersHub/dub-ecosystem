@@ -11,7 +11,7 @@ export type Provider = "cloudflare" | "resend" | "gcp";
  *  bill = metered/overage billing kicks in (only after a manual Paid upgrade). */
 export type OverflowBehavior = "halt" | "bill";
 
-/** ok < 70% ; warn >= 70% ; critical >= 90% ; unknown = usage could not be measured. */
+/** ok < 80% ; warn >= 80% ; critical >= 90% ; unknown = usage could not be measured. */
 export type UsageStatus = "ok" | "warn" | "critical" | "unknown";
 
 /** How the metric's usage window resets (drives resetsAt). none = cumulative (e.g. storage). */

@@ -6,8 +6,8 @@
 import type { BadgeTone, IconName } from "@dub/ui";
 import type { OverflowBehavior, ServiceProvider, ServiceUsage, UsageStatus } from "./types.ts";
 
-/** Warn/critical percentage thresholds (design: warn ≥70%, critical ≥90%). */
-export const WARN_PCT = 70;
+/** Warn/critical percentage thresholds (design: warn ≥80%, critical ≥90%). */
+export const WARN_PCT = 80;
 export const CRITICAL_PCT = 90;
 
 /** Clamp an arbitrary wire pct into a safe 0–100 bar width (NaN/neg → 0). */
@@ -20,7 +20,7 @@ export function clampPct(pct: number): number {
 
 /** Derive a status purely from a percentage. The backend already sends `status`;
  *  this is the fallback/threshold definition and the unit-tested source of truth
- *  for the ≥70 / ≥90 cutoffs. `unknown` is never derived — it is a wire signal. */
+ *  for the ≥80 / ≥90 cutoffs. `unknown` is never derived — it is a wire signal. */
 export function statusFromPct(pct: number): Exclude<UsageStatus, "unknown"> {
   if (!Number.isFinite(pct)) return "ok";
   if (pct >= CRITICAL_PCT) return "critical";

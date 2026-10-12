@@ -9,10 +9,10 @@ describe("toSnapshotRows", () => {
   });
 
   it("maps a measured value to used/pct/status", () => {
-    const rows = toSnapshotRows({ workers_requests_day: 70_000 });
+    const rows = toSnapshotRows({ workers_requests_day: 80_000 });
     const w = rows.find((r) => r.metric_key === "workers_requests_day")!;
-    expect(w.used).toBe(70_000);
-    expect(w.pct).toBe(70);
+    expect(w.used).toBe(80_000);
+    expect(w.pct).toBe(80);
     expect(w.status).toBe("warn");
     expect(w.overflow_behavior).toBe("halt");
   });

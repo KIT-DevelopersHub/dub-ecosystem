@@ -1,4 +1,4 @@
-// Billing-guard alerting (spec E). When a metric crosses warn(70%)/critical(90%) the daily
+// Billing-guard alerting (spec E). When a metric crosses warn(80%)/critical(90%) the daily
 // alarm fires an admin alert over TWO best-effort channels — never throwing, never blocking:
 //   1. In-app EVT_NOTIFICATION via notification-service POST /notify (when admin user ids
 //      are configured via USAGE_ALERT_ADMIN_USER_IDS).

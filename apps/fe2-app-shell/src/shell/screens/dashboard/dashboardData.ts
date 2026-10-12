@@ -15,9 +15,9 @@ import type { task } from "@dub/types";
  *  hue never drift apart (mirrors the usage dashboard's ok/warn/critical language). */
 export type MetricStatus = "good" | "warn" | "critical" | "info";
 
-/** Warn/critical percentage cutoffs (shared with the 無料枠 dashboard: warn ≥70%,
+/** Warn/critical percentage cutoffs (shared with the 無料枠 dashboard: warn ≥80%,
  *  critical ≥90%). Exposed for the unit tests that pin the boundaries. */
-export const WARN_PCT = 70;
+export const WARN_PCT = 80;
 export const CRITICAL_PCT = 90;
 
 /** Clamp an arbitrary percentage into a safe 0–100 bar width (NaN/neg → 0). */

@@ -44,7 +44,7 @@ describe("statusFromPct thresholds", () => {
     expect(statusFromPct(0)).toBe("ok");
     expect(statusFromPct(WARN_PCT - 0.1)).toBe("ok");
   });
-  it("is warn at ≥70% and below 90%", () => {
+  it("is warn at ≥80% and below 90%", () => {
     expect(statusFromPct(WARN_PCT)).toBe("warn");
     expect(statusFromPct(CRITICAL_PCT - 0.1)).toBe("warn");
   });
@@ -376,6 +376,7 @@ describe("UsageDashboard", () => {
     await waitFor(() => expect(screen.getByTestId("fe2-usage-summary-banner")).toBeInTheDocument());
     // reassurance copy makes the halt-not-bill point explicit
     expect(screen.getByTestId("fe2-usage-reassurance")).toHaveTextContent("勝手に課金されることはありません");
+    expect(screen.getByTestId("fe2-usage-alert-threshold")).toHaveTextContent("80% に達した項目");
     // grouped by provider (Cloudflare / Resend / GCP sections)
     expect(screen.getByTestId("fe2-usage-group-cloudflare")).toBeInTheDocument();
     expect(screen.getByTestId("fe2-usage-group-resend")).toBeInTheDocument();
