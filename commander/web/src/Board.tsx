@@ -29,6 +29,8 @@ import {
   bundleLane,
   bundleOfTask,
   bundleBlocker,
+  bundleCleanupPrompt,
+  bundleDeployPrompt,
   withoutBundled,
 } from "./lib/bundles.ts";
 import { TaskCard } from "./TaskCard.tsx";
@@ -315,12 +317,23 @@ export function Board({
 
   // ── staging 合体 ────────────────────────────────────────────────────────────
   // 子は staging で承認・却下された時点で束を抜ける（本番 / demo へ個別に進む）。残りは束のまま。
+  // 束が消える時は統合 PR とブランチを run で片付ける（統合中なら先に止める）。
+  const cleanUpBundle = useCallback(
+    async (b: StagingBundle) => {
+      if (b.status === "merging" && b.runId) await client.cancelRun(b.runId).catch(() => {});
+      await client.startRun(bundleCleanupPrompt(b)).catch(() => {});
+    },
+    [client],
+  );
+
   const leaveBundle = useCallback(
     async (taskId: string) => {
       const b = bundleByTask.get(taskId);
-      if (b && api.bundles) await api.bundles.removeFromBundle(b.id, taskId);
+      if (!b || !api.bundles) return;
+      const res = await api.bundles.removeFromBundle(b.id, taskId);
+      if (res.ok && res.value === null) await cleanUpBundle(b);
     },
-    [api, bundleByTask],
+    [api, bundleByTask, cleanUpBundle],
   );
 
   const togglePick = useCallback((taskId: string) => {
@@ -342,18 +355,28 @@ export function Board({
     if (!api.bundles || pickedItems.length < 2) return;
     const res = await api.bundles.createBundle(pickedItems.map((i) => i.taskId));
     if (!res.ok) return;
+    try {
+      const { runId } = await client.startRun(bundleDeployPrompt(res.value, pickedItems));
+      await api.bundles.attachRun(res.value.id, runId);
+    } catch {
+      // run を起動できない束は残さない（統合中のまま止まって見えるのを防ぐ）。
+      await api.bundles.dissolveBundle(res.value.id);
+      return;
+    }
     setBundleComposerOpen(false);
     setPicking(null);
     await load();
-  }, [api, pickedItems, load]);
+  }, [api, client, pickedItems, load]);
 
   const handleDissolve = useCallback(
     async (bundleId: string) => {
-      if (!api.bundles) return;
-      await api.bundles.dissolveBundle(bundleId);
+      const b = bundles.find((x) => x.id === bundleId);
+      if (!api.bundles || !b) return;
+      const res = await api.bundles.dissolveBundle(bundleId);
+      if (res.ok) await cleanUpBundle(b);
       await load();
     },
-    [api, load],
+    [api, bundles, cleanUpBundle, load],
   );
 
   // ── Next-action orchestration (P0-6) ──────────────────────────────────────

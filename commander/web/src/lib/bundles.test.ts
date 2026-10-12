@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { bundleBlocker, bundleChildren, bundleLane, withoutBundled } from "./bundles.ts";
+import { checkBundleLocally } from "./commanderApi.ts";
 import type { StagingBundle } from "./commanderApi.ts";
 import { makeBoardItem } from "../test/fakes.ts";
 
 const PR = "https://github.com/o/r/pull/1";
 
 function bundle(over: Partial<StagingBundle> = {}): StagingBundle {
-  return { id: "b1", taskIds: ["a", "b"], status: "merging", slot: "staging2", stagingUrl: null, branch: "staging/b1", markers: {}, createdAt: "t", ...over };
+  return { id: "b1", taskIds: ["a", "b"], status: "merging", slot: "staging2", stagingUrl: null, branch: "staging/b1", prUrl: null, runId: null, markers: {}, createdAt: "t", ...over };
 }
 
 describe("bundleBlocker", () => {
@@ -36,5 +37,24 @@ describe("bundle placement", () => {
     const b = bundle({ taskIds: ["b", "a", "gone"] });
     expect(withoutBundled(items, [b]).map((i) => i.taskId)).toEqual(["c"]);
     expect(bundleChildren(b, items).map((i) => i.taskId)).toEqual(["b", "a"]);
+  });
+});
+
+describe("checkBundleLocally", () => {
+  it("blocks a task without a PR and two tasks sharing one PR", () => {
+    const items = [
+      makeBoardItem({ taskId: "a", prUrl: PR }),
+      makeBoardItem({ taskId: "b", prUrl: PR }),
+      makeBoardItem({ taskId: "c", prUrl: null }),
+    ];
+    const issues = checkBundleLocally(["a", "b", "c"], items);
+    expect(issues.filter((i) => i.block).map((i) => i.taskIds)).toEqual([["c"], ["a", "b"]]);
+  });
+
+  it("only notes that conflicts are checked by the run when nothing blocks", () => {
+    const items = [makeBoardItem({ taskId: "a", prUrl: PR }), makeBoardItem({ taskId: "b", prUrl: `${PR}0` })];
+    const issues = checkBundleLocally(["a", "b"], items);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.block).toBe(false);
   });
 });

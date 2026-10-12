@@ -17,8 +17,13 @@ function makeBundleApi(): BundleApi & { _bundles: StagingBundle[] } {
     listBundles: vi.fn(async () => api._bundles.map((b) => ({ ...b }))),
     checkBundle: vi.fn(async () => []),
     createBundle: vi.fn(async (taskIds: string[]) => {
-      const b: StagingBundle = { id: "b1", taskIds, status: "merging", slot: "staging2", stagingUrl: null, branch: "staging/b1", markers: {}, createdAt: "t" };
+      const b: StagingBundle = { id: "b1", taskIds, status: "merging", slot: "staging2", stagingUrl: null, branch: "staging/b1", prUrl: null, runId: null, markers: {}, createdAt: "t" };
       api._bundles.push(b);
+      return { ok: true as const, value: b };
+    }),
+    attachRun: vi.fn(async (id: string, runId: string) => {
+      const b = api._bundles.find((x) => x.id === id)!;
+      b.runId = runId;
       return { ok: true as const, value: b };
     }),
     removeFromBundle: vi.fn(async (_id: string, taskId: string) => {
@@ -48,7 +53,8 @@ describe("<Board> staging 合体", () => {
     ]);
     const bundles = makeBundleApi();
     api.bundles = bundles;
-    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
 
     await userEvent.click(await screen.findByTestId("start-bundle"));
     // demo 承認前のタスクは選べない
@@ -64,6 +70,12 @@ describe("<Board> staging 合体", () => {
     await userEvent.click(confirm);
 
     expect(bundles.createBundle).toHaveBeenCalledWith(["a", "b"]);
+    // 統合〜反映の run を起動し、束に紐付ける（run の BUNDLE_RESULT が束に反映される）
+    const prompt = client.startRun.mock.calls[0]![0] as string;
+    expect(prompt).toContain(PR(1));
+    expect(prompt).toContain(PR(2));
+    expect(prompt).toContain("BUNDLE_RESULT");
+    expect(bundles.attachRun).toHaveBeenCalledWith("b1", "run-new");
     const lane = screen.getByTestId("lane-staging_deploying");
     const card = await within(lane).findByTestId("bundle-card-b1");
     expect(within(card).getByTestId("bundle-badge-b1")).toHaveTextContent("合体中 · 2 件");
@@ -87,7 +99,7 @@ describe("<Board> staging 合体", () => {
   it("opens a child's own drawer from the bundle and takes it out of the bundle on approval", async () => {
     const api = makeFakeApi([waiting("a", "A", 1), waiting("b", "B", 2)]);
     const bundles = makeBundleApi();
-    bundles._bundles.push({ id: "b1", taskIds: ["a", "b"], status: "deployed", slot: "staging2", stagingUrl: "https://s2", branch: "x", markers: { a: "pass", b: "pass" }, createdAt: "t" });
+    bundles._bundles.push({ id: "b1", taskIds: ["a", "b"], status: "deployed", slot: "staging2", stagingUrl: "https://s2", branch: "x", prUrl: null, runId: null, markers: { a: "pass", b: "pass" }, createdAt: "t" });
     api.bundles = bundles;
     render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
 
@@ -98,5 +110,19 @@ describe("<Board> staging 合体", () => {
     const confirm = await within(drawer).findByTestId("approval-confirm-yes");
     await userEvent.click(confirm);
     await waitFor(() => expect(bundles.removeFromBundle).toHaveBeenCalledWith("b1", "a"));
+  });
+
+  it("dissolving a bundle starts a cleanup run for its integration PR", async () => {
+    const api = makeFakeApi([waiting("a", "A", 1), waiting("b", "B", 2)]);
+    const bundles = makeBundleApi();
+    bundles._bundles.push({ id: "b1", taskIds: ["a", "b"], status: "deployed", slot: "staging2", stagingUrl: "https://s2", branch: "staging/b1", prUrl: PR(9), runId: "r1", markers: {}, createdAt: "t" });
+    api.bundles = bundles;
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+    await userEvent.click(await screen.findByTestId("bundle-dissolve-b1"));
+    await waitFor(() => expect(bundles.dissolveBundle).toHaveBeenCalledWith("b1"));
+    await waitFor(() => expect(client.startRun).toHaveBeenCalled());
+    expect(client.startRun.mock.calls[0]![0]).toContain("staging/b1");
+    expect(client.cancelRun).not.toHaveBeenCalled();
   });
 });
