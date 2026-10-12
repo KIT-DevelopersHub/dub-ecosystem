@@ -21,6 +21,8 @@ export interface VerifySpec {
   findIn?: string;
   /** [field, source] that identifies the target inside `findIn`. */
   findBy?: [string, string];
+  /** The write removed the target: it must be gone from `findIn` (deletes, revokes). */
+  absent?: boolean;
   /** Every body key except these must read back unchanged. */
   expectBody?: { except: string[] };
   expect?: Record<string, VerifyValue>;
