@@ -1,5 +1,6 @@
-// GET /usage/summary freshness: the dashboard must be told when the numbers are old, and a
-// stale read re-arms the collection alarm (nothing else can — kick is INTERNAL-only).
+// GET /usage/summary freshness: a stale read re-arms the collection alarm (nothing else can —
+// kick is INTERNAL-only) and collects inline, so the dashboard shows today's numbers even if
+// the alarm never fires. If that collection fails, the old numbers are served marked stale.
 import { describe, it, expect } from "vitest";
 import type { DurableObjectNamespace } from "@cloudflare/workers-types";
 import { HDR_USER_ID } from "@dub/observability";
@@ -45,14 +46,36 @@ async function getSummary(env: Env): Promise<UsageSummary> {
 }
 
 describe("GET /usage/summary freshness", () => {
-  it("marks the 09-17 snapshot stale, reports its capture time, and re-arms the alarm", async () => {
+  it("collects inline on a stale read (09-17 snapshot) and re-arms the alarm", async () => {
     const meter = fakeMeterDo();
+    const before = Date.now();
     const s = await getSummary({ DB: await seeded("2026-09-17T20:48:01.331Z"), METER_DO: meter.ns });
+    expect(s.stale).toBe(false);
+    expect(Date.parse(s.capturedAt!)).toBeGreaterThanOrEqual(before);
+    // no CF token in tests -> the re-measured Cloudflare metric is unknown, not the 09-17 value
+    expect(s.services.find((x) => x.metricKey === "workers_requests_day")!.used).toBeNull();
+    expect(meter.kicks).toBe(1);
+  });
+
+  it("serves the old numbers marked stale when the inline collection fails", async () => {
+    const meter = fakeMeterDo();
+    const db = await seeded("2026-09-17T20:48:01.331Z");
+    const failingWrites = new Proxy(db, {
+      get(t, k) {
+        if (k === "prepare") {
+          return (sql: string) => {
+            if (/^\s*(insert|update)/i.test(sql)) throw new Error("D1 write failed");
+            return t.prepare(sql);
+          };
+        }
+        const v = Reflect.get(t, k);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    });
+    const s = await getSummary({ DB: failingWrites, METER_DO: meter.ns });
     expect(s.stale).toBe(true);
     expect(s.capturedAt).toBe("2026-09-17T20:48:01.331Z");
-    // the old numbers are still shown (labelled old by the UI), not blanked
     expect(s.services.find((x) => x.metricKey === "workers_requests_day")!.used).toBe(10);
-    expect(meter.kicks).toBe(1);
   });
 
   it("serves a fresh snapshot without touching the alarm", async () => {
@@ -62,17 +85,17 @@ describe("GET /usage/summary freshness", () => {
     expect(meter.kicks).toBe(0);
   });
 
-  it("treats 'never collected' as stale with a null capture time", async () => {
+  it("collects inline when nothing was ever captured", async () => {
     const meter = fakeMeterDo();
     const s = await getSummary({ DB: await seeded(null), METER_DO: meter.ns });
-    expect(s.stale).toBe(true);
-    expect(s.capturedAt).toBeNull();
+    expect(s.stale).toBe(false);
+    expect(s.capturedAt).not.toBeNull();
     expect(meter.kicks).toBe(1);
   });
 
   it("still answers when the re-arm fails (best-effort self-heal)", async () => {
     const meter = fakeMeterDo({ fail: true });
     const s = await getSummary({ DB: await seeded("2026-09-17T20:48:01.331Z"), METER_DO: meter.ns });
-    expect(s.stale).toBe(true);
+    expect(s.stale).toBe(false); // the inline collection does not depend on the DO
   });
 });

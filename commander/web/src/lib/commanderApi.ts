@@ -136,7 +136,78 @@ export type ApiError = {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
+// --- staging 合体 (bundle) ---------------------------------------------------
+// 枠待ちの demo 承認済みタスクを統合ブランチに束ねて 1 つの staging 枠に載せる。子タスクは
+// 履歴・PR・承認をそれぞれ持ち続け、束は統合ブランチ（マージしないビューア）と子への参照だけを持つ。
+export type BundleStatus = "merging" | "deployed" | "failed";
+
+export interface StagingBundle {
+  id: string;
+  /** 子タスク（追加順）。0 件になった束は消える。 */
+  taskIds: string[];
+  status: BundleStatus;
+  /** 載っている staging 枠。反映前は null。 */
+  slot: "staging" | "staging2" | null;
+  stagingUrl: string | null;
+  /** 統合ブランチ名（マージしない）。 */
+  branch: string;
+  /** 統合ブランチの PR（マージ禁止のビューア）。run が作るまで null。 */
+  prUrl: string | null;
+  /** 統合〜反映を行う run。 */
+  runId: string | null;
+  /** 子ごとの verify:live 結果（子の Liveness-Marker で実測）。 */
+  markers: Record<string, "pending" | "pass" | "missing">;
+  createdAt: string;
+}
+
+/** 合体前チェックの指摘 1 件。block=true なら合体できない。 */
+export interface BundleIssue {
+  taskIds: string[];
+  message: string;
+  block: boolean;
+}
+
+export interface BundleApi {
+  listBundles(): Promise<StagingBundle[]>;
+  /** 衝突・D1 マイグレーション・メール系（枠1限定）などを合体前に調べる。 */
+  checkBundle(taskIds: string[]): Promise<BundleIssue[]>;
+  createBundle(taskIds: string[]): Promise<Result<StagingBundle>>;
+  /** 束を作った直後に、統合〜反映を行う run を紐付ける（run の報告が束に反映される）。 */
+  attachRun(bundleId: string, runId: string): Promise<Result<StagingBundle>>;
+  /** 子を束から外す（承認・却下）。最後の 1 件が抜けると束ごと消える（value=null）。 */
+  removeFromBundle(bundleId: string, taskId: string): Promise<Result<StagingBundle | null>>;
+  /** 束を解除して子を枠待ちに戻す。 */
+  dissolveBundle(bundleId: string): Promise<Result<null>>;
+}
+
+/**
+ * 合体前チェック（ボードの情報だけで分かるもの）。コードの衝突と D1 マイグレーションは
+ * 統合する run が実際にマージして調べ、見つかればそこで止める（ブラウザからは見えない）。
+ */
+export function checkBundleLocally(taskIds: string[], items: BoardItem[]): BundleIssue[] {
+  const out: BundleIssue[] = [];
+  const byPr = new Map<string, string[]>();
+  for (const id of taskIds) {
+    const pr = items.find((i) => i.taskId === id)?.prUrl;
+    if (!pr) out.push({ taskIds: [id], message: "PR が無いため合体できません", block: true });
+    else byPr.set(pr, [...(byPr.get(pr) ?? []), id]);
+  }
+  for (const ids of byPr.values()) {
+    if (ids.length > 1) out.push({ taskIds: ids, message: "同じ PR を指すタスクが重なっています", block: true });
+  }
+  if (out.length === 0) {
+    out.push({
+      taskIds: [],
+      message: "コードの衝突と D1 マイグレーションは、まとめる時に確かめます。見つかったらそこで止めて失敗として表示します",
+      block: false,
+    });
+  }
+  return out;
+}
+
 export interface CommanderApi {
+  /** staging 合体。未対応のバックエンドでは undefined（ボードは合体 UI を出さない）。 */
+  bundles?: BundleApi;
   listFeatures(): Promise<Feature[]>;
   createFeature(input: { title: string; ledgerRef?: string }): Promise<Result<Feature>>;
   getFeature(id: string): Promise<FeatureDetail>;
@@ -208,6 +279,44 @@ export const PHASE_LABELS: Record<FeaturePhase, string> = {
 };
 
 export class HttpCommanderApi implements CommanderApi {
+  readonly bundles: BundleApi = {
+    listBundles: async () => {
+      const res = await this.fetchImpl(`${this.baseUrl}/bundles`, { headers: this.auth() });
+      if (!res.ok) throw new Error(`GET /bundles -> ${res.status}`);
+      return ((await res.json()) as { bundles: StagingBundle[] }).bundles;
+    },
+    checkBundle: async (taskIds) => checkBundleLocally(taskIds, await this.listBoard()),
+    createBundle: (taskIds) => this.bundleCall("POST", "/bundles", { taskIds }),
+    attachRun: (bundleId, runId) => this.bundleCall("PATCH", `/bundles/${bundleId}`, { runId }),
+    removeFromBundle: async (bundleId, taskId) => {
+      const r = await this.send<{ bundle: StagingBundle | null }>(
+        "DELETE",
+        `/bundles/${bundleId}/tasks/${taskId}`,
+      );
+      return r.ok ? { ok: true, value: r.value.bundle } : r;
+    },
+    dissolveBundle: async (bundleId) => {
+      const r = await this.send("DELETE", `/bundles/${bundleId}`);
+      return r.ok ? { ok: true, value: null } : r;
+    },
+  };
+
+  private async bundleCall(method: string, path: string, body: unknown): Promise<Result<StagingBundle>> {
+    const r = await this.send<{ bundle: StagingBundle }>(method, path, body);
+    return r.ok ? { ok: true, value: r.value.bundle } : r;
+  }
+
+  private async send<T>(method: string, path: string, body?: unknown): Promise<Result<T>> {
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method,
+      headers: this.headers(),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: { status: res.status, error: String(json.error ?? "error") } };
+    return { ok: true, value: json as T };
+  }
+
   constructor(
     private baseUrl: string = DEFAULT_BASE,
     private token: string | undefined = DEFAULT_TOKEN,

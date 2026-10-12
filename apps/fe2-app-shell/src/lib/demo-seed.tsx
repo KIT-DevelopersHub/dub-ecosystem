@@ -50,6 +50,10 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:admin",
   "chat:create",
   "audit:read",
+  // The real admin role holds these (identity migration 0005); Drive共有's Google-account
+  // switch requires drive:write alongside identity:admin, like the server.
+  "drive:read",
+  "drive:write",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -1824,6 +1828,147 @@ interface DemoDriveFile {
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 
+// ── driveshare: the Google accounts Drive can act as (ロール管理 > その他 > Google アカウント) ──
+// No real OAuth in the demo: "add account" returns the SPA's own /admin/roles?code&state, which
+// stands in for Google's redirect. The list lives in sessionStorage so it survives that
+// full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
+// unconfigured on any demo URL (remembered for the tab).
+type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "unconfigured";
+interface DemoDriveGoogleAccount {
+  id: string;
+  kind: "connected" | "secret";
+  email: string | null;
+  connectedAt: string | null;
+  connectedBy: string | null;
+  active: boolean;
+  needsReconnect: boolean;
+}
+interface DemoDriveGoogleStatus {
+  accounts: DemoDriveGoogleAccount[];
+  canConnect: boolean;
+}
+const DEMO_DRIVE_GOOGLE_KEY = "dub-demo:drive-google-accounts";
+const DEMO_DRIVE_GOOGLE_STATE_KEY = "dub-demo:drive-google-state";
+const DEMO_DRIVE_GOOGLE_HINT_KEY = "dub-demo:drive-google-hint";
+
+function demoDriveGoogleStatus(mode: DemoDriveGoogleMode): DemoDriveGoogleStatus {
+  const secret: DemoDriveGoogleAccount = {
+    id: "secret",
+    kind: "secret",
+    email: "hackit@gmail.com",
+    connectedAt: null,
+    connectedBy: null,
+    active: false,
+    needsReconnect: false,
+  };
+  const main: DemoDriveGoogleAccount = {
+    id: "dga_demo_main",
+    kind: "connected",
+    email: "hackit.drive@gmail.com",
+    connectedAt: "2026-10-01T09:00:00.000Z",
+    connectedBy: "usr_demo_admin",
+    active: true,
+    needsReconnect: false,
+  };
+  const sub: DemoDriveGoogleAccount = {
+    ...main,
+    id: "dga_demo_sub",
+    email: "devhub.event@gmail.com",
+    connectedAt: "2026-10-05T09:00:00.000Z",
+    active: false,
+  };
+  if (mode === "none") return { accounts: [], canConnect: true };
+  if (mode === "invalid") return { accounts: [secret, sub, { ...main, needsReconnect: true }], canConnect: true };
+  if (mode === "unconfigured") return { accounts: [{ ...secret, active: true }], canConnect: false };
+  return { accounts: [secret, sub, main], canConnect: true };
+}
+
+function createDriveGoogleDemoStore() {
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  const fromUrl = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("driveGoogle");
+  if (fromUrl && ["connected", "none", "invalid", "unconfigured"].includes(fromUrl)) {
+    storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(demoDriveGoogleStatus(fromUrl as DemoDriveGoogleMode)));
+  }
+  const read = (): DemoDriveGoogleStatus => {
+    const raw = storage()?.getItem(DEMO_DRIVE_GOOGLE_KEY);
+    return raw ? (JSON.parse(raw) as DemoDriveGoogleStatus) : demoDriveGoogleStatus("connected");
+  };
+  const write = (next: DemoDriveGoogleStatus) => {
+    storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(next));
+    return json(next);
+  };
+  const BASE = "/api/v1/driveshare/google-account";
+
+  function handle(method: string, pathname: string, body: unknown): Response | null {
+    if (method === "GET" && pathname === BASE) return json(read());
+    if (method === "POST" && pathname === `${BASE}/connect`) {
+      const { redirectUri, loginHint } = (body ?? {}) as { redirectUri?: string; loginHint?: string };
+      if (!redirectUri) return problem("VALIDATION_FAILED", "redirectUri is required", 400);
+      const state = `demo_${Math.random().toString(36).slice(2)}`;
+      storage()?.setItem(DEMO_DRIVE_GOOGLE_STATE_KEY, state);
+      if (loginHint) storage()?.setItem(DEMO_DRIVE_GOOGLE_HINT_KEY, loginHint);
+      else storage()?.removeItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
+      return json({ authUrl: `${redirectUri}?code=demo-code&state=${state}` });
+    }
+    if (method === "POST" && pathname === `${BASE}/callback`) {
+      const { state } = (body ?? {}) as { state?: string };
+      const expected = storage()?.getItem(DEMO_DRIVE_GOOGLE_STATE_KEY);
+      storage()?.removeItem(DEMO_DRIVE_GOOGLE_STATE_KEY);
+      if (!state || state !== expected) {
+        return problem("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。もう一度「アカウントを追加」からやり直してください。", 400);
+      }
+      // Like the server: a reconnect (login hint = a registered address) refreshes that row and
+      // leaves the selection alone; any other address is a new account and becomes the one in use.
+      const hint = storage()?.getItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
+      storage()?.removeItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
+      const cur = read();
+      const known = cur.accounts.find((a) => a.kind === "connected" && a.email === hint);
+      if (known) {
+        return write({
+          ...cur,
+          accounts: cur.accounts.map((a) =>
+            a.id === known.id ? { ...a, needsReconnect: false, connectedAt: new Date().toISOString() } : a,
+          ),
+        });
+      }
+      const added: DemoDriveGoogleAccount = {
+        id: `dga_demo_${Date.now().toString(36)}`,
+        kind: "connected",
+        email: `hackit.new${cur.accounts.length}@gmail.com`,
+        connectedAt: new Date().toISOString(),
+        connectedBy: "usr_demo_admin",
+        active: true,
+        needsReconnect: false,
+      };
+      return write({ ...cur, accounts: [...cur.accounts.map((a) => ({ ...a, active: false })), added] });
+    }
+    if (method === "POST" && pathname === `${BASE}/active`) {
+      const { accountId } = (body ?? {}) as { accountId?: string };
+      const cur = read();
+      if (!cur.accounts.some((a) => a.id === accountId)) return problem("NOT_FOUND", "google account not found", 404);
+      return write({ ...cur, accounts: cur.accounts.map((a) => ({ ...a, active: a.id === accountId })) });
+    }
+    const del = method === "DELETE" ? pathname.match(/^\/api\/v1\/driveshare\/google-account\/accounts\/([^/]+)$/) : null;
+    if (del) {
+      const cur = read();
+      const target = cur.accounts.find((a) => a.id === decodeURIComponent(del[1]!));
+      if (!target || target.kind === "secret") return problem("NOT_FOUND", "google account not found", 404);
+      if (target.active) {
+        return problem("CONFLICT", "使用中のアカウントは削除できません。先に別のアカウントに切り替えてください。", 409);
+      }
+      return write({ ...cur, accounts: cur.accounts.filter((a) => a.id !== target.id) });
+    }
+    return null;
+  }
+  return { handle };
+}
+
 function createDriveShareStore() {
   const owner = (id: string): DemoDrivePermission => ({
     id,
@@ -2924,6 +3069,7 @@ export function createDemoFetch(): typeof fetch {
   const mailStore = createMailStore();
   // Mutable Hackit Drive sharing state (grant/change/revoke/link toggle persist).
   const driveShareStore = createDriveShareStore();
+  const driveGoogleStore = createDriveGoogleDemoStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
@@ -2955,6 +3101,7 @@ export function createDemoFetch(): typeof fetch {
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
+      driveGoogleStore.handle(method, url.pathname, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??

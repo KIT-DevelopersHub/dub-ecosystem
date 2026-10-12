@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "5215a9ac",
-  "branch": "feat/notif-popover-sticky",
+  "deployedSha": "0c61db3c",
+  "branch": "feat/hackit-drive-google-account",
   "actor": "ko-tarou",
-  "markers": ["受付ボランティアの集合時間", "._body_1uz12_22{min-height:0;overflow:auto}"],
+  "markers": ["fe7:oauth-return-app", "dub-demo:drive-google", "fe7:oauth-return-role"],
   "live": true,
-  "verifiedAt": "2026-10-09T19:06:16Z",
-  "updatedAt": "2026-10-09T19:06:16Z",
-  "note": "通知ダイアログのヘッダー/フッター固定(通知 demo データ 20 件)"
+  "verifiedAt": "2026-10-09T19:13:03Z",
+  "updatedAt": "2026-10-09T19:13:03Z",
+  "note": "Hackit Drive の Google アカウント切替(ロール管理 > Drive共有 詳細ダイアログ)"
 }
