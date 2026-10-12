@@ -32,7 +32,7 @@ interface RoleDraft {
   mailVisibleRoleIds?: string[];
 }
 
-export function RolePermissionsEditor({ role }: { role: RoleView }) {
+export function RolePermissionsEditor({ role, initialDetailAppId = null }: { role: RoleView; initialDetailAppId?: string | null }) {
   const update = useUpdateRole(role.id);
   const canAdminEdit = useCanAdminEdit();
   const { toast } = useToast();
@@ -117,6 +117,7 @@ export function RolePermissionsEditor({ role }: { role: RoleView }) {
         idPrefix={ns}
         lockedKeys={lockedKeys}
         mailVisibility={{ roleId: role.id, value: mailVisible, onChange: setMailVisible }}
+        initialDetailAppId={initialDetailAppId}
       />
       {readOnly ? (
         <p style={noteStyle}>編集権限がありません。</p>

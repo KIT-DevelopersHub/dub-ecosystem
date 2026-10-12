@@ -31,6 +31,7 @@ export function RolePolicyEditor({
   lockedKeys = [],
   idPrefix = "fe7",
   mailVisibility,
+  initialDetailAppId = null,
 }: {
   selected: readonly identity.PermissionKey[];
   disabled?: boolean;
@@ -38,8 +39,10 @@ export function RolePolicyEditor({
   lockedKeys?: readonly identity.PermissionKey[];
   idPrefix?: string;
   mailVisibility?: MailVisibilityProps;
+  /** 開いた直後に詳細設定ダイアログを出すアプリ（ロール管理の ?app= 直リンク）. */
+  initialDetailAppId?: string | null;
 }) {
-  const [detailAppId, setDetailAppId] = useState<string | null>(null);
+  const [detailAppId, setDetailAppId] = useState<string | null>(initialDetailAppId);
 
   return (
     <div data-testid={`${idPrefix}-role-policy-editor`}>

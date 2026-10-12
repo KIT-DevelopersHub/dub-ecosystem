@@ -92,3 +92,16 @@ describe("buildRoleUpdate — mailVisibleRoleIds", () => {
     expect(buildRoleUpdate({ ...base }, { ...base, mailVisibleRoleIds: ["b", "a"] })).toEqual({ mailVisibleRoleIds: ["a", "b"] });
   });
 });
+
+describe("ロール管理の直リンク ?role=&app=", () => {
+  it("opens that role's メール 詳細設定 dialog", async () => {
+    const { RoleListPage } = await import("../src/components/RoleListPage");
+    window.history.replaceState(null, "", "/admin/roles?role=role_organizer&app=mail");
+    try {
+      renderWithProviders(<RoleListPage />);
+      await waitFor(() => expect(screen.getByTestId(`${ns}-mail-cross-role`)).toBeInTheDocument());
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+});
