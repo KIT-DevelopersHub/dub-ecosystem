@@ -133,8 +133,11 @@ export function isAllowedRedirectUri(raw: unknown): raw is string {
 
 export interface GoogleAccountService {
   status(): Promise<GoogleAccountsStatus>;
-  startConnect(userId: string, redirectUri: unknown): Promise<StartGoogleConnectResponse>;
-  /** Register the account Google returned (or refresh its token) and switch to it. */
+  /** loginHint: the address being reconnected, so Google preselects it. */
+  startConnect(userId: string, redirectUri: unknown, loginHint?: unknown): Promise<StartGoogleConnectResponse>;
+  /** Register the account Google returned (or refresh its token). A new account becomes the one
+   *  in use; reconnecting an existing one never moves the selection (unless nothing is in use,
+   *  not even the secret). */
   completeConnect(userId: string, body: Partial<CompleteGoogleConnectRequest>): Promise<GoogleAccountsStatus>;
   switchTo(userId: string, accountId: unknown): Promise<GoogleAccountsStatus>;
   remove(accountId: string): Promise<GoogleAccountsStatus>;
@@ -216,7 +219,7 @@ export function createGoogleAccountService(deps: {
   return {
     status,
 
-    async startConnect(userId, redirectUri) {
+    async startConnect(userId, redirectUri, loginHint) {
       if (!isAllowedRedirectUri(redirectUri)) {
         throw errors.validationFailed([{ field: "redirectUri", reason: "not_allowed" }]);
       }
@@ -244,6 +247,7 @@ export function createGoogleAccountService(deps: {
         access_type: "offline",
         prompt: "consent",
         state,
+        ...(typeof loginHint === "string" && loginHint ? { login_hint: loginHint } : {}),
       }).toString();
       return { authUrl: url.toString() };
     },
@@ -308,6 +312,8 @@ export function createGoogleAccountService(deps: {
 
       const sealed = await sealToken(sealKey, sealBinding(orgId, email), json.refresh_token);
       const at = iso(t);
+      const [known, activeRow] = await Promise.all([store.list(orgId), store.getActive(orgId)]);
+      const isNew = !known.some((r) => r.email === email);
       const id = await store.upsert({
         id: makeId(),
         orgId,
@@ -319,7 +325,11 @@ export function createGoogleAccountService(deps: {
         connectedAt: at,
         updatedAt: at,
       });
-      await store.setActive(orgId, id, userId, at);
+      // Nothing in use at all (no selection and no secret) also takes the reconnected account.
+      const nothingInUse = !activeRow && !secretCredentials(env);
+      if ((isNew || nothingInUse) && !(await store.setActive(orgId, id, userId, at))) {
+        throw errors.conflict("追加したアカウントに切り替えられませんでした。もう一度お試しください。");
+      }
       return status();
     },
 

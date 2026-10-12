@@ -23,7 +23,8 @@ export function useStartDriveGoogleConnect() {
   const { api } = useRosterContext();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (redirectUri: string) => api.startDriveGoogleConnect(redirectUri),
+    mutationFn: ({ redirectUri, loginHint }: { redirectUri: string; loginHint?: string }) =>
+      api.startDriveGoogleConnect(redirectUri, loginHint),
     onSuccess: ({ authUrl }) => window.location.assign(authUrl),
     onError: (err) => toast({ kind: "error", title: "Google への接続を開始できませんでした", description: errorMessage(err) }),
   });
@@ -38,7 +39,7 @@ export function useCompleteDriveGoogleConnect() {
     onSuccess: (status) => {
       qc.setQueryData(queryKeys.driveGoogleAccounts(), status);
       const active = status.accounts.find((a) => a.active);
-      toast({ kind: "success", title: "Google アカウントを追加して切り替えました", description: active?.email ?? undefined });
+      toast({ kind: "success", title: "Google アカウントを接続しました", description: active ? `使用中: ${active.email ?? "（不明）"}` : undefined });
     },
   });
 }
@@ -70,6 +71,8 @@ function useOptimisticAccounts(opts: {
       if (ctx?.prev) qc.setQueryData(key, ctx.prev);
       toast({ kind: "error", title: opts.failure, description: errorMessage(err) });
     },
+    // 楽観表示を必ずサーバーの答えで確定させる (削除は本文を返さない・他の管理者の変更も拾う)
+    onSettled: () => qc.invalidateQueries({ queryKey: key }),
   });
 }
 

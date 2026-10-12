@@ -1795,6 +1795,7 @@ interface DemoDriveGoogleStatus {
 }
 const DEMO_DRIVE_GOOGLE_KEY = "dub-demo:drive-google-accounts";
 const DEMO_DRIVE_GOOGLE_STATE_KEY = "dub-demo:drive-google-state";
+const DEMO_DRIVE_GOOGLE_HINT_KEY = "dub-demo:drive-google-hint";
 
 function demoDriveGoogleStatus(mode: DemoDriveGoogleMode): DemoDriveGoogleStatus {
   const secret: DemoDriveGoogleAccount = {
@@ -1853,10 +1854,12 @@ function createDriveGoogleDemoStore() {
   function handle(method: string, pathname: string, body: unknown): Response | null {
     if (method === "GET" && pathname === BASE) return json(read());
     if (method === "POST" && pathname === `${BASE}/connect`) {
-      const { redirectUri } = (body ?? {}) as { redirectUri?: string };
+      const { redirectUri, loginHint } = (body ?? {}) as { redirectUri?: string; loginHint?: string };
       if (!redirectUri) return problem("VALIDATION_FAILED", "redirectUri is required", 400);
       const state = `demo_${Math.random().toString(36).slice(2)}`;
       storage()?.setItem(DEMO_DRIVE_GOOGLE_STATE_KEY, state);
+      if (loginHint) storage()?.setItem(DEMO_DRIVE_GOOGLE_HINT_KEY, loginHint);
+      else storage()?.removeItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
       return json({ authUrl: `${redirectUri}?code=demo-code&state=${state}` });
     }
     if (method === "POST" && pathname === `${BASE}/callback`) {
@@ -1866,22 +1869,30 @@ function createDriveGoogleDemoStore() {
       if (!state || state !== expected) {
         return problem("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。もう一度「アカウントを追加」からやり直してください。", 400);
       }
-      // Google "returns" a new address: register it and switch to it (like the server).
-      // A broken account comes back healthy, as a real reconnect would.
+      // Like the server: a reconnect (login hint = a registered address) refreshes that row and
+      // leaves the selection alone; any other address is a new account and becomes the one in use.
+      const hint = storage()?.getItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
+      storage()?.removeItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
       const cur = read();
-      const broken = cur.accounts.find((a) => a.kind === "connected" && a.needsReconnect);
-      const email = broken?.email ?? `hackit.new${cur.accounts.length}@gmail.com`;
+      const known = cur.accounts.find((a) => a.kind === "connected" && a.email === hint);
+      if (known) {
+        return write({
+          ...cur,
+          accounts: cur.accounts.map((a) =>
+            a.id === known.id ? { ...a, needsReconnect: false, connectedAt: new Date().toISOString() } : a,
+          ),
+        });
+      }
       const added: DemoDriveGoogleAccount = {
-        id: broken?.id ?? `dga_demo_${Date.now().toString(36)}`,
+        id: `dga_demo_${Date.now().toString(36)}`,
         kind: "connected",
-        email,
+        email: `hackit.new${cur.accounts.length}@gmail.com`,
         connectedAt: new Date().toISOString(),
         connectedBy: "usr_demo_admin",
         active: true,
         needsReconnect: false,
       };
-      const rest = cur.accounts.filter((a) => a.id !== added.id).map((a) => ({ ...a, active: false }));
-      return write({ ...cur, accounts: [...rest, added] });
+      return write({ ...cur, accounts: [...cur.accounts.map((a) => ({ ...a, active: false })), added] });
     }
     if (method === "POST" && pathname === `${BASE}/active`) {
       const { accountId } = (body ?? {}) as { accountId?: string };

@@ -133,7 +133,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
 
   app.post("/driveshare/google-account/connect", async (c) => {
     const body = await parseBody<Partial<StartGoogleConnectRequest>>(c);
-    return c.json(await deps.googleAccount.startConnect(c.get("userId"), body.redirectUri));
+    return c.json(await deps.googleAccount.startConnect(c.get("userId"), body.redirectUri, body.loginHint));
   });
 
   app.post("/driveshare/google-account/callback", async (c) => {

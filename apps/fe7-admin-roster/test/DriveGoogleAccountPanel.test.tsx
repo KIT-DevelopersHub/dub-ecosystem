@@ -98,6 +98,35 @@ describe("その他 > Google アカウント ダイアログ", () => {
     expect(screen.getByTestId("fe7-drive-google-reconnect-dga_main")).toHaveTextContent("再接続");
   });
 
+  it("再接続は Google の画面でその行のアドレスを選んだ状態にする", async () => {
+    const user = userEvent.setup();
+    const assign = vi.fn();
+    vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, assign, origin: "https://fe2.example" } as Location);
+    const client = createMockClient({ me: ADMIN, driveGoogle: { accounts: [MAIN, { ...SUB, needsReconnect: true }] } });
+    const post = vi.spyOn(client, "post");
+    openDriveDialog({ client });
+    await user.click(await screen.findByTestId("fe7-drive-google-reconnect-dga_sub"));
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]![1]).toMatchObject({ loginHint: "hackit.sub@gmail.com" });
+  });
+
+  it("認証が切れたアカウントには切り替えられない", async () => {
+    openDriveDialog({ seed: { me: ADMIN, driveGoogle: { accounts: [MAIN, { ...SUB, needsReconnect: true }] } } });
+    expect(await screen.findByTestId("fe7-drive-google-switch-dga_sub")).toBeDisabled();
+  });
+
+  it("サーバー初期設定のアカウントの認証が切れても「再接続」は出さない (画面からは直せない)", async () => {
+    const secret = { id: "secret", kind: "secret" as const, email: null, connectedAt: null, connectedBy: null, active: true, needsReconnect: true };
+    openDriveDialog({ seed: { me: ADMIN, driveGoogle: { accounts: [secret, SUB] } } });
+    expect(await screen.findByTestId("fe7-drive-google-account-secret")).toHaveTextContent("サーバー設定の更新が必要です");
+    expect(screen.queryByTestId("fe7-drive-google-reconnect-secret")).not.toBeInTheDocument();
+  });
+
+  it("使用中が 1 つも無ければ切り替えを促す", async () => {
+    openDriveDialog({ seed: { me: ADMIN, driveGoogle: { accounts: [{ ...MAIN, active: false }, SUB] } } });
+    expect(await screen.findByTestId("fe7-drive-google-none-active")).toHaveTextContent("切り替えてください");
+  });
+
   it("まだ 1 つも無ければその旨と「アカウントを追加」を出す", async () => {
     openDriveDialog({ seed: { me: ADMIN, driveGoogle: { accounts: [] } } });
     expect(await screen.findByTestId("fe7-drive-google-empty")).toBeInTheDocument();

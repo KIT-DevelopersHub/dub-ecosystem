@@ -41,6 +41,7 @@ interface MockState {
   driveGoogle: DriveGoogleAccountsStatus;
   /** Pending OAuth states issued by the mock connect (single use). */
   driveGoogleStates: Set<string>;
+  driveGoogleAdded: number;
 }
 
 const ORG = "org_devhub";
@@ -94,7 +95,7 @@ function seedState(seed?: MockSeed): MockState {
     canConnect: true,
     ...seed?.driveGoogle,
   };
-  return { users, roles, assignments, audits, emailAddresses, members, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords, driveGoogle, driveGoogleStates: new Set() };
+  return { users, roles, assignments, audits, emailAddresses, members, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords, driveGoogle, driveGoogleStates: new Set(), driveGoogleAdded: 0 };
 }
 
 function paginate<T>(items: T[]): common.Paginated<T> {
@@ -188,7 +189,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       if (!state || !s.driveGoogleStates.delete(state)) throw err("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。");
       // Google "returns" a new address: register it and switch to it (like the server).
       const added: DriveGoogleAccount = {
-        id: `dga_${s.driveGoogleStates.size + s.driveGoogle.accounts.length + 1}`,
+        id: `dga_added_${++s.driveGoogleAdded}`,
         kind: "connected",
         email: "hackit.new@gmail.com",
         connectedAt: now(),

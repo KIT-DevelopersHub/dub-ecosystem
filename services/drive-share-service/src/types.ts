@@ -182,6 +182,8 @@ export interface SwitchGoogleAccountRequest {
 export interface StartGoogleConnectRequest {
   /** Where Google sends the admin back: the SPA's /admin/roles on its own origin. */
   redirectUri: string;
+  /** Reconnecting a registered account: its address, so Google preselects it. */
+  loginHint?: string;
 }
 
 export interface StartGoogleConnectResponse {

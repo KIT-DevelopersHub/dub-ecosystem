@@ -219,14 +219,32 @@ describe("several accounts: register, switch, remove", () => {
     expect(resolved).toMatchObject({ source: "connected", credentials: { refreshToken: "rt-a" } });
   });
 
-  it("adding the same address again replaces its token in place (reconnect), no duplicate", async () => {
+  it("adding the address in use again replaces its token in place (reconnect), no duplicate", async () => {
+    const { svc, store, env, key, setRefresh } = await twoAccounts();
+    setRefresh("rt-b2");
+    const status = await addAccount(svc);
+    expect(brief(status)).toEqual(["dga_1:a@gmail.com:-", "dga_2:b@gmail.com:active"]);
+    const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key });
+    expect(resolved).toMatchObject({ credentials: { refreshToken: "rt-b2" } });
+  });
+
+  it("reconnecting an account that is not in use refreshes its token but does not switch to it", async () => {
     const { svc, store, env, key, setRefresh, setWho } = await twoAccounts();
     setWho("a@gmail.com");
-    setRefresh("rt-a2");
+    setRefresh("rt-a3");
     const status = await addAccount(svc);
-    expect(brief(status)).toEqual(["dga_1:a@gmail.com:active", "dga_2:b@gmail.com:-"]);
+    expect(brief(status)).toEqual(["dga_1:a@gmail.com:-", "dga_2:b@gmail.com:active"]);
     const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key });
-    expect(resolved).toMatchObject({ credentials: { refreshToken: "rt-a2" } });
+    expect(resolved).toMatchObject({ credentials: { refreshToken: "rt-b" } });
+    const row = (await store.list(ORG)).find((r) => r.id === "dga_1")!;
+    expect(await openToken(key!, `${ORG}/a@gmail.com`, { cipher: row.tokenCipher, iv: row.tokenIv })).toBe("rt-a3");
+  });
+
+  it("start: a reconnect preselects the account on Google's screen (login_hint)", async () => {
+    const { svc } = await setup();
+    const { authUrl } = await svc.startConnect("usr_admin", REDIRECT, "a@gmail.com");
+    expect(new URL(authUrl).searchParams.get("login_hint")).toBe("a@gmail.com");
+    expect(new URL((await svc.startConnect("usr_admin", REDIRECT)).authUrl).searchParams.has("login_hint")).toBe(false);
   });
 
   it("switching to an unknown account is 404 and changes nothing", async () => {
@@ -255,6 +273,15 @@ describe("several accounts: register, switch, remove", () => {
     // Now nothing registered is in use, so any of them may be removed.
     expect(brief(await svc.remove("dga_2"))).toEqual(["secret:b@gmail.com:active", "dga_1:a@gmail.com:-"]);
     await expect(svc.remove(SECRET_ACCOUNT_ID)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("while the secret is in use, reconnecting a registered account keeps the secret", async () => {
+    const env = { ...SECRET_ENV, ...WEB_ENV } as Env;
+    const { svc, setWho } = await twoAccounts(env);
+    await svc.switchTo("usr_admin", SECRET_ACCOUNT_ID);
+    setWho("a@gmail.com");
+    const status = await addAccount(svc);
+    expect(status.accounts.filter((a) => a.active).map((a) => a.id)).toEqual([SECRET_ACCOUNT_ID]);
   });
 
   it("switching to the secret when none is configured is 404", async () => {

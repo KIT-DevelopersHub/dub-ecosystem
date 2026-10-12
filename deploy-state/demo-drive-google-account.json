@@ -3,12 +3,12 @@
   "slug": "drive-google-account",
   "worker": "dub-demo-drive-google-account",
   "url": "https://dub-demo-drive-google-account.developershub-site.workers.dev",
-  "deployedSha": "0ce33078",
+  "deployedSha": "47134b10",
   "branch": "feat/hackit-drive-google-account",
   "actor": "ko-tarou",
-  "markers": ["どのアプリにも属さない権限・設定","サーバーの初期設定のアカウント"],
-  "live": true,
-  "verifiedAt": "2026-10-11T13:13:28Z",
-  "updatedAt": "2026-10-11T13:13:28Z",
-  "note": "Google アカウント設定を その他 に移動"
+  "markers": ["アプリ内の Google Drive 連携で使うアカウントです","devhub.event@gmail.com"],
+  "live": false,
+  "verifiedAt": "2026-10-12T13:31:56Z",
+  "updatedAt": "2026-10-12T13:31:56Z",
+  "note": "Google アカウントを複数登録して切り替える版"
 }

@@ -5,7 +5,8 @@
 //   - 全ロール共通の設定で、ロールの「保存」とは別に操作した時点で切り替わる
 //   - 「アカウントを追加」「再接続」は Google の画面へ移動する。未保存のロール編集は下書きとして
 //     残り、戻ると同じロールのこのダイアログが開く (/admin/roles?code&state で追加を完了する)
-//   - 追加したアカウントはそのまま使用中になる。サーバー初期設定 (Secret) のアカウントも 1 行で並ぶ
+//   - 新しく追加したアカウントはそのまま使用中になる。「再接続」はその行のトークンを入れ替えるだけで
+//     使用中は動かさない。サーバー初期設定 (Secret) のアカウントも 1 行で並ぶ (再接続はできない)
 import { useEffect, useRef, useState } from "react";
 import { policy } from "@dub/types";
 import { Badge, Button, ConfirmDialog, Skeleton } from "@dub/ui";
@@ -76,6 +77,8 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
   const remove = useRemoveDriveGoogleAccount();
   const [returnError, setReturnError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<DriveGoogleAccount | null>(null);
+  /** Google へ移動中の行 (null = 「アカウントを追加」)。押したボタンだけをローディングにする。 */
+  const [leavingFor, setLeavingFor] = useState<string | null>(null);
   const started = useRef(false);
   const tid = `${idPrefix}-drive-google`;
 
@@ -96,13 +99,18 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
     complete.mutate({ code: ret.code, state: ret.state }, { onError: (err) => setReturnError(errorMessage(err)) });
   }, [ready, isAdmin, complete]);
 
-  function goToGoogle() {
+  function goToGoogle(account?: DriveGoogleAccount) {
     markOAuthReturn(OAUTH_RETURN_SETTING);
-    start.mutate(oauthRedirectUri());
+    setLeavingFor(account?.id ?? null);
+    start.mutate({ redirectUri: oauthRedirectUri(), ...(account?.email ? { loginHint: account.email } : {}) });
   }
 
   const s = status.data;
+  const leaving = start.isPending || start.isSuccess;
+  // 切り替えと削除は同時に走らせない (楽観表示の巻き戻しが別の変更を上書きしないように)
+  const busy = switchTo.isPending || remove.isPending || leaving;
   const activeBroken = s?.accounts.some((a) => a.active && a.needsReconnect) ?? false;
+  const noneActive = s ? s.accounts.length > 0 && !s.accounts.some((a) => a.active) : false;
 
   return (
     <section style={blockStyle} data-testid={tid}>
@@ -144,6 +152,11 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
               使用中のアカウントの認証が切れています。再接続してください。
             </p>
           ) : null}
+          {noneActive ? (
+            <p style={alertStyle} role="alert" data-testid={`${tid}-none-active`}>
+              使用中のアカウントがありません。使うアカウントに切り替えてください。
+            </p>
+          ) : null}
 
           {s.accounts.length === 0 ? (
             <div style={rowStyle} data-testid={`${tid}-empty`}>
@@ -160,10 +173,20 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
                       {a.needsReconnect ? <Badge tone="danger" testId={`${tid}-broken-${a.id}`}>要再接続</Badge> : null}
                     </span>
                     {metaFor(a) ? <span style={metaStyle}>{metaFor(a)}</span> : null}
+                    {a.needsReconnect && a.kind === "secret" ? (
+                      <span style={alertStyle}>サーバー設定の更新が必要です</span>
+                    ) : null}
                   </div>
                   <span style={actionsStyle}>
-                    {a.needsReconnect && s.canConnect ? (
-                      <Button variant="primary" size="sm" onClick={goToGoogle} loading={start.isPending} testId={`${tid}-reconnect-${a.id}`}>
+                    {a.needsReconnect && a.kind === "connected" && s.canConnect ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => goToGoogle(a)}
+                        loading={leaving && leavingFor === a.id}
+                        disabled={busy}
+                        testId={`${tid}-reconnect-${a.id}`}
+                      >
                         再接続
                       </Button>
                     ) : null}
@@ -172,14 +195,15 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
                         variant="secondary"
                         size="sm"
                         onClick={() => switchTo.mutate(a.id)}
-                        disabled={switchTo.isPending}
+                        // 認証が切れたアカウントに切り替えると Drive の操作がすべて失敗する
+                        disabled={busy || a.needsReconnect}
                         testId={`${tid}-switch-${a.id}`}
                       >
                         切り替える
                       </Button>
                     ) : null}
                     {!a.active && a.kind === "connected" ? (
-                      <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(a)} testId={`${tid}-remove-${a.id}`}>
+                      <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(a)} disabled={busy} testId={`${tid}-remove-${a.id}`}>
                         削除
                       </Button>
                     ) : null}
@@ -193,9 +217,9 @@ export function DriveGoogleAccountPanel({ idPrefix = "fe7" }: { idPrefix?: strin
             <Button
               variant={s.accounts.length === 0 ? "primary" : "secondary"}
               size="sm"
-              onClick={goToGoogle}
-              loading={start.isPending || start.isSuccess}
-              disabled={!s.canConnect}
+              onClick={() => goToGoogle()}
+              loading={leaving && leavingFor === null}
+              disabled={!s.canConnect || busy}
               testId={`${tid}-add`}
             >
               アカウントを追加

@@ -89,7 +89,7 @@ export interface RosterApi {
   // ---- Google accounts drive-share-service can act as (admin only) ----
   getDriveGoogleAccounts(): Promise<DriveGoogleAccountsStatus>;
   /** Start the add-account consent round-trip; the browser is then sent to `authUrl`. */
-  startDriveGoogleConnect(redirectUri: string): Promise<{ authUrl: string }>;
+  startDriveGoogleConnect(redirectUri: string, loginHint?: string): Promise<{ authUrl: string }>;
   /** Relay Google's `code` + `state` from the return URL (registers + switches to it). */
   completeDriveGoogleConnect(code: string, state: string): Promise<DriveGoogleAccountsStatus>;
   switchDriveGoogleAccount(accountId: string): Promise<DriveGoogleAccountsStatus>;
@@ -149,7 +149,8 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/issued-addresses`, req),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/issued-addresses/${id}`),
     getDriveGoogleAccounts: () => client.get<DriveGoogleAccountsStatus>(DRIVE_GOOGLE),
-    startDriveGoogleConnect: (redirectUri) => client.post<{ authUrl: string }>(`${DRIVE_GOOGLE}/connect`, { redirectUri }),
+    startDriveGoogleConnect: (redirectUri, loginHint) =>
+      client.post<{ authUrl: string }>(`${DRIVE_GOOGLE}/connect`, { redirectUri, ...(loginHint ? { loginHint } : {}) }),
     completeDriveGoogleConnect: (code, state) =>
       client.post<DriveGoogleAccountsStatus>(`${DRIVE_GOOGLE}/callback`, { code, state }),
     switchDriveGoogleAccount: (accountId) => client.post<DriveGoogleAccountsStatus>(`${DRIVE_GOOGLE}/active`, { accountId }),
