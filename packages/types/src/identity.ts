@@ -62,8 +62,8 @@ export const PERMISSION_CATALOG = [
   { key: "github:admin", name: "Administer GitHub", description: "Manage the GitHub integration, tokens and webhooks", domain: "github", dangerous: true },
   { key: "drive:read", name: "Read Drive", description: "View/search Google Drive metadata and download content", domain: "drive", dangerous: false },
   { key: "drive:write", name: "Write Drive", description: "Upload/update Google Drive files", domain: "drive", dangerous: false },
-  // Drive共有 の「設定」(the Google accounts it acts as). A graded pair like app:<id>:*, but scoped
-  // to one screen of the app: settings_edit IMPLIES settings_view (policy.normalizeAppAccessKeys).
+  // Drive共有 の「設定」(the Google accounts it acts as). Two toggles in Drive共有's 詳細設定;
+  // settings_edit IMPLIES settings_view (policy.normalizeAppAccessKeys).
   { key: "drive:settings_view", name: "View Drive共有 settings", description: "Open Drive共有's settings and see its Google accounts (read-only)", domain: "drive", dangerous: false },
   { key: "drive:settings_edit", name: "Edit Drive共有 settings", description: "Add/switch/remove the Google accounts Drive共有 acts as (implies view)", domain: "drive", dangerous: true },
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },

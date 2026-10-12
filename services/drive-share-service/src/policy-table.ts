@@ -9,7 +9,7 @@
 // still write through the API as long as it carried the legacy `drive:write` key.
 import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate";
 
-// Drive共有 の「設定」 (the Google accounts Drive is accessed as) has its own 無効/閲覧/編集 in
+// Drive共有 の「設定」 (the Google accounts Drive is accessed as) has its own toggles in
 // ロール管理 > Drive共有 > 詳細設定. Reading needs 閲覧 on the app + settings_view; changing (which
 // moves every share the org manages) needs 編集 on the app + settings_edit. Migration
 // identity/0016 gave both keys to every role that held identity:admin (the previous gate).

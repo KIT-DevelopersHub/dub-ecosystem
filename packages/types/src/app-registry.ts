@@ -22,18 +22,6 @@
 // FE7. Forget any step and CI fails.
 import type { PermissionKey } from "./identity";
 
-/** One graded 詳細設定 item (see AppManifestEntry.detailLevels). */
-export interface AppDetailLevel {
-  /** Stable id within the app (testids / URLs). */
-  id: string;
-  /** Japanese label shown in the 詳細設定 dialog. */
-  label: string;
-  /** One-line explanation under the label. */
-  description: string;
-  view: PermissionKey;
-  edit: PermissionKey;
-}
-
 export interface AppManifestEntry {
   /** Canonical app id. MUST equal the shell FeatureModule.id (composition/featureModules). */
   id: string;
@@ -78,13 +66,6 @@ export interface AppManifestEntry {
    */
   detailPermissions: readonly PermissionKey[];
   /**
-   * 詳細設定 items that are a 無効/閲覧/編集 choice rather than an on/off toggle (e.g. Drive共有's
-   * 「設定」 button). Each pair MUST also be listed in `detailPermissions` (so the claim invariant
-   * and the 詳細 badge still see them); ロール管理 renders them as a 3-way selector instead of two
-   * checkboxes. `edit` implies `view`, like the app tier.
-   */
-  detailLevels?: readonly AppDetailLevel[];
-  /**
    * True when the launcher tile is shown to every authenticated user regardless of the
    * permission above (the permission still exists for matrix representation + future
    * enforcement). Documentation of intent; not an authz decision.
@@ -128,10 +109,7 @@ export const APP_MANIFEST = [
   // (upload/download/visibility) are both configured here — file:* previously belonged to no
   // app and fell into 「その他」, which hid ファイル settings from the app they act on.
   { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true,
-    detailPermissions: ["drive:read", "drive:write", "drive:settings_view", "drive:settings_edit", "file:read", "file:write", "file:admin"],
-    detailLevels: [
-      { id: "settings", label: "「設定」ボタン", description: "Drive共有の右上の「設定」（Drive を操作する Google アカウントの一覧・追加・切り替え・削除）", view: "drive:settings_view", edit: "drive:settings_edit" },
-    ] },
+    detailPermissions: ["drive:read", "drive:write", "drive:settings_view", "drive:settings_edit", "file:read", "file:write", "file:admin"] },
   // LP管理 reads infra:read, but infra:* governs the whole デプロイ/DNS surface (not just LP),
   // so those keys stay in 「その他」 instead of being scoped to this app's 詳細 dialog.
   { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" },
