@@ -193,5 +193,22 @@ export function createD1LpRepo(db: DbClient): LpRepo {
       binds.push(q.limit);
       return (await db.all<VisitDbRow>(sql, ...binds)).map(toVisit);
     },
+    async getPublish(site) {
+      const r = await db.first<{ site: string; version_id: string; updated_by: string | null; updated_at: string }>(
+        "SELECT site, version_id, updated_by, updated_at FROM lp_publish WHERE site = ?",
+        site,
+      );
+      return r ? { site: r.site, versionId: r.version_id, updatedBy: r.updated_by, updatedAt: r.updated_at } : null;
+    },
+    async setPublish(site, versionId, updatedBy, updatedAt) {
+      await db.run(
+        `INSERT INTO lp_publish (site, version_id, updated_by, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(site) DO UPDATE SET version_id = excluded.version_id, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+        site,
+        versionId,
+        updatedBy,
+        updatedAt,
+      );
+    },
   };
 }
