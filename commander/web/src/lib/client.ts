@@ -98,6 +98,41 @@ export class HttpCommanderClient implements CommanderClient {
     }
   }
 
+  /** Daemon boot id from /health (changes on every daemon start); null when unreachable. */
+  async bootId(): Promise<string | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, { cache: "no-store" });
+      if (!res.ok) return null;
+      return ((await res.json()) as { bootId?: string }).bootId ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * "更新して再起動": the daemon pulls origin/main into its worktree, then restarts the
+   * whole stack. Throws with an operator-facing (Japanese) message when it refuses.
+   */
+  async restart(): Promise<{ from: string; to: string }> {
+    const res = await fetch(`${this.baseUrl}/admin/restart`, {
+      method: "POST",
+      headers: this.headers(),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      from?: string;
+      to?: string;
+      error?: string;
+      active?: number;
+      message?: string;
+    };
+    if (res.ok) return { from: body.from ?? "", to: body.to ?? "" };
+    if (body.error === "runs_active") {
+      throw new Error(`実行中のタスクが ${body.active ?? 1} 件あるため再起動できません`);
+    }
+    if (body.error === "restart_in_progress") throw new Error("すでに再起動中です");
+    throw new Error(body.message ?? `daemon returned ${res.status}`);
+  }
+
   async cancelRun(runId: string): Promise<void> {
     const res = await this.fetchImpl(`${this.baseUrl}/runs/${runId}`, {
       method: "DELETE",
