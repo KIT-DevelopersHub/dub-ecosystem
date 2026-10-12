@@ -103,17 +103,20 @@ export class MemIdentityRepo implements IdentityRepo {
     const rows = [...this.roles.values()].filter((r) => r.orgId === orgId).map((r) => ({ ...r, permissions: [...r.permissions] }));
     return pageSlice(rows, limit, cursor);
   }
-  async createRole(row: RoleRow): Promise<void> {
+  async createRole(row: RoleRow, mailVisibleRoleIds: string[] = []): Promise<void> {
     this.roles.set(row.id, { ...row, permissions: [...row.permissions] });
+    if (mailVisibleRoleIds.length > 0) this.mailVisibility.set(row.id, [...new Set(mailVisibleRoleIds)]);
   }
   async updateRolePermissions(
     roleId: string,
     name: string | undefined,
     permissions: identity.PermissionKey[] | undefined,
     updatedAt: string,
+    mailVisibleRoleIds?: string[],
   ): Promise<void> {
     const r = this.roles.get(roleId);
     if (!r) return;
+    if (mailVisibleRoleIds !== undefined) this.mailVisibility.set(roleId, [...new Set(mailVisibleRoleIds)]);
     this.roles.set(roleId, {
       ...r,
       ...(name !== undefined ? { name } : {}),
@@ -208,10 +211,6 @@ export class MemIdentityRepo implements IdentityRepo {
       if (this.roles.get(roleId)?.orgId === orgId && targets.length > 0) out.set(roleId, [...targets].sort());
     }
     return out;
-  }
-
-  async setMailVisibleRoles(roleId: string, targetRoleIds: string[]): Promise<void> {
-    this.mailVisibility.set(roleId, [...new Set(targetRoleIds)]);
   }
 
   async orgWideMailVisibleUsers(orgId: string, userId: string): Promise<string[]> {

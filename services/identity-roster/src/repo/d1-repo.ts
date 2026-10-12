@@ -245,7 +245,7 @@ export class D1IdentityRepo implements IdentityRepo {
     for (const r of rows) items.push(this.toRole(r, await this.permissionsOf(r.id)));
     return { items, nextCursor: items.length === limit ? items[items.length - 1]!.id : null };
   }
-  async createRole(row: RoleRow): Promise<void> {
+  async createRole(row: RoleRow, mailVisibleRoleIds: string[] = []): Promise<void> {
     const stmts = [
       {
         sql: "INSERT INTO identity_roles (id, org_id, name, is_system, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -255,6 +255,7 @@ export class D1IdentityRepo implements IdentityRepo {
         sql: "INSERT INTO identity_role_permissions (role_id, permission_key) VALUES (?, ?)",
         binds: [row.id, p],
       })),
+      ...mailVisibilityStmts(row.id, mailVisibleRoleIds).slice(1), // new role: nothing to delete
     ];
     await this.db.batch(stmts);
   }
@@ -263,6 +264,7 @@ export class D1IdentityRepo implements IdentityRepo {
     name: string | undefined,
     permissions: identity.PermissionKey[] | undefined,
     updatedAt: string,
+    mailVisibleRoleIds?: string[],
   ): Promise<void> {
     const stmts: { sql: string; binds: readonly unknown[] }[] = [];
     if (name !== undefined) {
@@ -276,6 +278,7 @@ export class D1IdentityRepo implements IdentityRepo {
         stmts.push({ sql: "INSERT INTO identity_role_permissions (role_id, permission_key) VALUES (?, ?)", binds: [roleId, p] });
       }
     }
+    if (mailVisibleRoleIds !== undefined) stmts.push(...mailVisibilityStmts(roleId, mailVisibleRoleIds));
     await this.db.batch(stmts);
   }
   async deleteRole(roleId: string): Promise<void> {
@@ -398,16 +401,6 @@ export class D1IdentityRepo implements IdentityRepo {
     return out;
   }
 
-  async setMailVisibleRoles(roleId: string, targetRoleIds: string[]): Promise<void> {
-    await this.db.batch([
-      { sql: "DELETE FROM identity_role_mail_visibility WHERE role_id = ?", binds: [roleId] },
-      ...targetRoleIds.map((t) => ({
-        sql: "INSERT INTO identity_role_mail_visibility (role_id, target_role_id) VALUES (?, ?)",
-        binds: [roleId, t],
-      })),
-    ]);
-  }
-
   async orgWideMailVisibleUsers(orgId: string, userId: string): Promise<string[]> {
     // The caller's org-wide roles -> their visible target roles -> every org-wide holder.
     const rows = await this.db.all<{ user_id: string }>(
@@ -427,4 +420,15 @@ export class D1IdentityRepo implements IdentityRepo {
     );
     return rows.map((r) => r.user_id);
   }
+}
+
+/** Replace `roleId`'s cross-role mail visibility set: DELETE first, then one INSERT per target. */
+function mailVisibilityStmts(roleId: string, targetRoleIds: readonly string[]): { sql: string; binds: readonly unknown[] }[] {
+  return [
+    { sql: "DELETE FROM identity_role_mail_visibility WHERE role_id = ?", binds: [roleId] },
+    ...targetRoleIds.map((t) => ({
+      sql: "INSERT INTO identity_role_mail_visibility (role_id, target_role_id) VALUES (?, ?)",
+      binds: [roleId, t],
+    })),
+  ];
 }

@@ -17,18 +17,27 @@ import { AppAccessTable } from "./AppAccessTable";
 import { AppDetailDialog } from "./AppDetailDialog";
 import { OtherPermissionsSection } from "./OtherPermissionsSection";
 
+/** メール 詳細設定の「別のロール宛てのメールも閲覧」。権限キーではなくロール間の設定なので別口で持つ。 */
+export interface MailVisibilityProps {
+  roleId?: string;
+  value: readonly string[];
+  onChange: (next: string[]) => void;
+}
+
 export function RolePolicyEditor({
   selected,
   disabled,
   onChange,
   lockedKeys = [],
   idPrefix = "fe7",
+  mailVisibility,
 }: {
   selected: readonly identity.PermissionKey[];
   disabled?: boolean;
   onChange: (next: identity.PermissionKey[]) => void;
   lockedKeys?: readonly identity.PermissionKey[];
   idPrefix?: string;
+  mailVisibility?: MailVisibilityProps;
 }) {
   const [detailAppId, setDetailAppId] = useState<string | null>(null);
 
@@ -41,6 +50,7 @@ export function RolePolicyEditor({
         onOpenDetail={setDetailAppId}
         lockedKeys={lockedKeys}
         idPrefix={idPrefix}
+        extraDetailCount={mailVisibility ? { mail: mailVisibility.value.length } : undefined}
       />
       <OtherPermissionsSection
         selected={selected}
@@ -57,6 +67,7 @@ export function RolePolicyEditor({
         onClose={() => setDetailAppId(null)}
         lockedKeys={lockedKeys}
         idPrefix={idPrefix}
+        mailVisibility={mailVisibility}
       />
     </div>
   );

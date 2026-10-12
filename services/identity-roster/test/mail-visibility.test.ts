@@ -50,7 +50,7 @@ async function seed(repo: IdentityRepo) {
   await assign("u_pr", "r_pr");
   await assign("u_scoped", "r_pr", "event", "ev_1"); // event-scoped holder: not visible
   await assign("u_off", "r_pr"); // inactive holder: not visible
-  await repo.setMailVisibleRoles("r_lead", ["r_sponsor", "r_pr"]);
+  await repo.updateRolePermissions("r_lead", undefined, undefined, TS, ["r_sponsor", "r_pr"]);
 }
 
 function svcOver(repo: IdentityRepo) {
@@ -81,7 +81,7 @@ for (const [name, make] of [["mem", () => new MemIdentityRepo()], ["d1", d1Repo]
     it("an inactive caller sees no one else", async () => {
       const repo = make();
       await seed(repo);
-      await repo.setMailVisibleRoles("r_pr", ["r_sponsor"]);
+      await repo.updateRolePermissions("r_pr", undefined, undefined, TS, ["r_sponsor"]);
       expect(await svcOver(repo).mailVisibleUsers("u_off", ORG)).toEqual({ userIds: [] });
     });
 

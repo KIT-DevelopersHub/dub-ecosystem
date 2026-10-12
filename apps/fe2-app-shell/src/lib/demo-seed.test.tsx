@@ -145,8 +145,11 @@ describe("admin RBAC console (interactive roster surface)", () => {
   it("serves the 3 agreed tiers admin / maintainer / member and the 64-key catalog", async () => {
     const a = api();
     const list = await roles(a);
-    expect(list.items.map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
-    expect(list.items.every((r) => r.isSystem)).toBe(true);
+    expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
+    // Plus one custom 統括 role demoing cross-role mail visibility.
+    const lead = list.items.find((r) => !r.isSystem) as { name: string; mailVisibleRoleIds?: string[] } | undefined;
+    expect(lead?.name).toBe("統括");
+    expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
     expect(catalog).toHaveLength(64);
   });
@@ -274,5 +277,25 @@ describe("admin email routing (@developershub.jp address management)", () => {
     });
     expect(res.items.length).toBeGreaterThan(0);
     expect(res.items.every((x) => x.address.endsWith("@developershub.jp"))).toBe(true);
+  });
+});
+
+describe("統括 demo account (cross-role mail visibility)", () => {
+  const inbox = async (account: string) => {
+    globalThis.localStorage.setItem("dub_demo_account", account);
+    try {
+      const res = await api().request<{ items: { id: string; mine?: boolean }[] }>({ method: "GET", path: "/api/v1/mail/messages" });
+      return res.items.map((m) => [m.id, m.mine]);
+    } finally {
+      globalThis.localStorage.removeItem("dub_demo_account");
+    }
+  };
+
+  it("reads the maintainer + member inboxes as 自分宛て以外, one-way", async () => {
+    const lead = await inbox("usr_lead");
+    expect(lead).toContainEqual(["msg_l1", true]);
+    expect(lead).toContainEqual(["msg_b1", false]);
+    expect(lead).toContainEqual(["msg_s1", false]);
+    expect((await inbox("usr_bob")).map(([id]) => id)).not.toContain("msg_l1");
   });
 });

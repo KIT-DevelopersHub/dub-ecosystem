@@ -566,8 +566,7 @@ export class IdentityService {
     const now = this.d.now();
     const role: RoleRow = { id: this.d.newId("role"), orgId, name, isSystem: false, permissions: normalizePerms(req.permissions), createdAt: now, updatedAt: now };
     const mailVisible = req.mailVisibleRoleIds !== undefined ? await this.normalizeMailVisibleRoleIds(orgId, role.id, req.mailVisibleRoleIds) : [];
-    await this.d.repo.createRole(role);
-    if (mailVisible.length > 0) await this.d.repo.setMailVisibleRoles(role.id, mailVisible);
+    await this.d.repo.createRole(role, mailVisible);
     await this.d.audit.publish(this.record("identity.role.created", "success", ctx, orgId, "role", role.id, { name, mailVisibleRoleIds: mailVisible }));
     return this.toRole(role, mailVisible);
   }
@@ -597,8 +596,8 @@ export class IdentityService {
       req.name,
       req.permissions !== undefined ? normalizePerms(req.permissions) : undefined,
       this.d.now(),
+      mailVisible,
     );
-    if (mailVisible !== undefined) await this.d.repo.setMailVisibleRoles(roleId, mailVisible);
     await this.d.audit.publish(
       this.record("identity.role.updated", "success", ctx, orgId, "role", roleId, {
         permissionChange: req.permissions !== undefined,
@@ -737,9 +736,8 @@ export class IdentityService {
 
   /**
    * Role peers for `permission`: the OTHER active users who hold, org-wide, a role that
-   * `userId` also holds org-wide and that carries `permission`. Serves
-   * `GET /internal/users/:id/role-peers` — mail-gateway uses it with `mail:read_role_shared`
-   * to widen a member's inbound read scope to the holders of a sharing role. Per role: a
+   * `userId` also holds org-wide and that carries `permission`. `mailVisibleUsers` uses it
+   * with `mail:read_role_shared` (same-role mail sharing). Per role: a
    * second, non-sharing role shares nothing. Event-scoped grants never count. An inactive
    * (or unknown) caller has no peers.
    */
@@ -764,10 +762,10 @@ export class IdentityService {
     const user = await this.d.repo.getUser(userId);
     if (!user || user.status !== "active") return { userIds: [] };
     const [peers, crossRole] = await Promise.all([
-      this.d.repo.orgWideRolePeers(orgId, userId, "mail:read_role_shared"),
+      this.rolePeers(userId, orgId, "mail:read_role_shared"),
       this.d.repo.orgWideMailVisibleUsers(orgId, userId),
     ]);
-    return { userIds: [...new Set([...peers, ...crossRole])].sort() };
+    return { userIds: [...new Set([...peers.userIds, ...crossRole])].sort() };
   }
 
   // ---------- audit record builder ----------

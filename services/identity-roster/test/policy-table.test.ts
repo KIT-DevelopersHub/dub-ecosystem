@@ -36,10 +36,10 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
     expect(() => assertRouteCoverage(h.app, POLICY_TABLE)).not.toThrow();
   });
 
-  it("lists all 34 endpoints of this service", async () => {
+  it("lists all 33 endpoints of this service", async () => {
     const h = await makeHarness();
-    expect(protectableRouteKeys(h.app)).toHaveLength(34);
-    expect(Object.keys(POLICY_TABLE)).toHaveLength(34);
+    expect(protectableRouteKeys(h.app)).toHaveLength(33);
+    expect(Object.keys(POLICY_TABLE)).toHaveLength(33);
   });
 
   it("catches a new endpoint added without a table entry, and denies it at runtime", async () => {
@@ -123,7 +123,6 @@ const WRITES = [
 const INTERNAL_ROUTES = [
   "GET /internal/users",
   "GET /internal/users/:id/permissions",
-  "GET /internal/users/:id/role-peers",
   "GET /internal/users/:id/mail-visible-users",
   "GET /users/:id",
   "POST /authz/check",
@@ -242,7 +241,6 @@ describe("INTERNAL routes at runtime", () => {
       ["GET", "/internal/users"],
       ["POST", "/internal/users/lookup"],
       ["GET", `/internal/users/${h.memberId}/permissions`],
-      ["GET", `/internal/users/${h.memberId}/role-peers?permission=mail:read_role_shared`],
       ["GET", `/internal/users/${h.memberId}/mail-visible-users`],
     ];
     for (const [method, path] of routes) {
