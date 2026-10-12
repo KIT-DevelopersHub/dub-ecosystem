@@ -68,7 +68,7 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     const apps = screen.getByTestId("fe7-app-access-table");
     const other = screen.getByTestId("fe7-other-permissions");
     expect(within(apps).getByRole("heading", { name: "アプリのアクセス権" })).toBeInTheDocument();
-    expect(within(other).getByRole("heading", { name: "その他（どのアプリにも属さない権限）" })).toBeInTheDocument();
+    expect(within(other).getByRole("heading", { name: "その他（どのアプリにも属さない権限・設定）" })).toBeInTheDocument();
     // DOM 順で アプリのアクセス権 → その他（節の入れ替えを検知する）
     const sections = [...editor.children];
     expect(sections.indexOf(apps)).toBeLessThan(sections.indexOf(other));

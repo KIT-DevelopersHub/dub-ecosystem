@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "drive-google-account",
+  "worker": "dub-demo-drive-google-account",
+  "url": "https://dub-demo-drive-google-account.developershub-site.workers.dev",
+  "deployedSha": "0b2b6b0a",
+  "branch": "feat/hackit-drive-google-account",
+  "actor": "ko-tarou",
+  "markers": ["アプリ内の Google Drive 連携で使うアカウントです","devhub.event@gmail.com","サーバー設定の更新が必要です"],
+  "live": true,
+  "verifiedAt": "2026-10-12T13:35:25Z",
+  "updatedAt": "2026-10-12T13:35:25Z",
+  "note": "Google アカウントを複数登録して切り替える版"
+}

@@ -6,6 +6,9 @@ import { createRoleGrantsService, type RoleGrantsService } from "../src/role-gra
 import { createInMemoryRoleGrantStore, type RoleGrantStore } from "../src/role-grants-store";
 import type { DriveShareClient } from "../src/drive-client";
 import { common } from "@dub/types";
+import { createGoogleAccountService, type GoogleAccountService } from "../src/google-account";
+import { createInMemoryGoogleAccountStore } from "../src/google-account-store";
+import type { Env } from "../src/env";
 
 /** Fake PermissionGranter driven by a rule(userId, key) => holds. */
 export function memAuthz(rule: (userId: string, perm: identity.PermissionKey) => boolean): PermissionGranter {
@@ -63,4 +66,17 @@ export function buildRoleGrants(opts: {
     newId: () => `dsg_test_${++idSeq}`,
   });
   return { service, store };
+}
+
+/** Google-account service over an in-memory store with no secrets (status = none). */
+export function stubGoogleAccount(): GoogleAccountService {
+  return createGoogleAccountService({
+    env: {} as Env,
+    store: createInMemoryGoogleAccountStore(),
+    orgId: common.DUB_DEFAULT_ORG_ID,
+    key: null,
+    fetchImpl: (async () => {
+      throw new Error("no network in unit tests");
+    }) as unknown as typeof fetch,
+  });
 }

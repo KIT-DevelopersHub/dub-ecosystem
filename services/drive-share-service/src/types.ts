@@ -140,3 +140,58 @@ export interface CreateRoleGrantRequest {
   roleId: string;
   driveRole: AssignableDriveRole;
 }
+
+// ---- Hackit Google accounts (ロール管理 > その他 > Google アカウント) ----
+
+/** Id of the pseudo-entry for the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret (the server's
+ *  initial account). Switching to it clears the in-use selection. */
+export const SECRET_ACCOUNT_ID = "secret";
+
+/** One account the service can act as. Never carries the token itself.
+ *  kind: connected = registered from the UI (D1) / secret = the server's initial account. */
+export interface GoogleAccountEntry {
+  id: string;
+  kind: "connected" | "secret";
+  /** null when Google could not tell us (secret account whose token no longer works). */
+  email: string | null;
+  connectedAt: string | null;
+  /** Identity user id of the admin who registered it (kind=connected only). */
+  connectedBy: string | null;
+  /** Drive is accessed as this account right now. At most one entry is active. */
+  active: boolean;
+  /** Google answered invalid_grant (revoked / expired), or the stored token can no longer
+   *  be opened — add the same account again to reconnect. */
+  needsReconnect: boolean;
+}
+
+/** GET /driveshare/google-account (and the result of every change). No active entry =
+ *  nothing is connected and Drive runs on the mock. */
+export interface GoogleAccountsStatus {
+  accounts: GoogleAccountEntry[];
+  /** Whether adding an account is configured (OAuth web client + encryption key). */
+  canConnect: boolean;
+}
+
+/** POST /driveshare/google-account/active body. */
+export interface SwitchGoogleAccountRequest {
+  /** A registered account id, or SECRET_ACCOUNT_ID. */
+  accountId: string;
+}
+
+/** POST /driveshare/google-account/connect body. */
+export interface StartGoogleConnectRequest {
+  /** Where Google sends the admin back: the SPA's /admin/roles on its own origin. */
+  redirectUri: string;
+  /** Reconnecting a registered account: its address, so Google preselects it. */
+  loginHint?: string;
+}
+
+export interface StartGoogleConnectResponse {
+  authUrl: string;
+}
+
+/** POST /driveshare/google-account/callback body (relayed by the SPA from Google's redirect). */
+export interface CompleteGoogleConnectRequest {
+  code: string;
+  state: string;
+}
