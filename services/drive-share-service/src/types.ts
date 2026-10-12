@@ -141,7 +141,7 @@ export interface CreateRoleGrantRequest {
   driveRole: AssignableDriveRole;
 }
 
-// ---- Hackit Google accounts (ロール管理 > その他 > Google アカウント) ----
+// ---- Hackit Google accounts (Drive共有 > 設定 > Google アカウント) ----
 
 /** Id of the pseudo-entry for the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret (the server's
  *  initial account). Switching to it clears the in-use selection. */
@@ -180,7 +180,7 @@ export interface SwitchGoogleAccountRequest {
 
 /** POST /driveshare/google-account/connect body. */
 export interface StartGoogleConnectRequest {
-  /** Where Google sends the admin back: the SPA's /admin/roles on its own origin. */
+  /** Where Google sends the admin back: the SPA's /driveshare on its own origin. */
   redirectUri: string;
   /** Reconnecting a registered account: its address, so Google preselects it. */
   loginHint?: string;

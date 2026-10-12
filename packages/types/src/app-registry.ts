@@ -109,7 +109,7 @@ export const APP_MANIFEST = [
   // (upload/download/visibility) are both configured here — file:* previously belonged to no
   // app and fell into 「その他」, which hid ファイル settings from the app they act on.
   { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true,
-    detailPermissions: ["drive:read", "drive:write", "file:read", "file:write", "file:admin"] },
+    detailPermissions: ["drive:read", "drive:write", "drive:settings_view", "drive:settings_edit", "file:read", "file:write", "file:admin"] },
   // LP管理 reads infra:read, but infra:* governs the whole デプロイ/DNS surface (not just LP),
   // so those keys stay in 「その他」 instead of being scoped to this app's 詳細 dialog.
   // lp:publish (switch the version live on the public site) is LP管理's own 詳細 knob.

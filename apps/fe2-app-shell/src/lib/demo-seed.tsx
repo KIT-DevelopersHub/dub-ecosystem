@@ -50,10 +50,12 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:admin",
   "chat:create",
   "audit:read",
-  // The real admin role holds these (identity migration 0005); Drive共有's Google-account
-  // switch requires drive:write alongside identity:admin, like the server.
+  // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
+  // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
   "drive:read",
   "drive:write",
+  "drive:settings_view",
+  "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
@@ -636,13 +638,31 @@ function currentAccount(): DemoAccount {
   return DEMO_ACCOUNTS[0]!;
 }
 
+// ?driveSettings=edit|view|none on any demo URL sets the active account's level for Drive共有 の
+// 「設定」 (remembered for the tab), so each level can be previewed without editing a role.
+const DEMO_DRIVE_SETTINGS_KEY = "dub-demo:drive-settings";
+
+function driveSettingsOverride(perms: identity.PermissionKey[]): identity.PermissionKey[] {
+  if (typeof window === "undefined") return perms;
+  let mode: string | null = new URLSearchParams(window.location.search).get("driveSettings");
+  try {
+    if (mode && ["edit", "view", "none"].includes(mode)) window.sessionStorage.setItem(DEMO_DRIVE_SETTINGS_KEY, mode);
+    else mode = window.sessionStorage.getItem(DEMO_DRIVE_SETTINGS_KEY);
+  } catch {
+    // sessionStorage blocked: the URL value (if any) still applies to this load
+  }
+  if (mode !== "view" && mode !== "none") return perms;
+  const rest = perms.filter((k) => k !== "drive:settings_view" && k !== "drive:settings_edit");
+  return mode === "view" ? [...rest, "drive:settings_view"] : rest;
+}
+
 /** The /me session for the active account (drives RequireAuth + the shell header). */
 function currentMe(): gateway.MeResponse {
   const a = currentAccount();
   return {
     user: { id: a.id, displayName: a.displayName, avatarUrl: null, email: a.email },
     orgId: ORG,
-    permissions: a.permissions,
+    permissions: driveSettingsOverride(a.permissions),
     sessionExpiresAt: Date.now() + 60 * 60 * 1000,
   };
 }
@@ -1869,8 +1889,8 @@ interface DemoDriveFile {
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 
-// ── driveshare: the Google accounts Drive can act as (ロール管理 > その他 > Google アカウント) ──
-// No real OAuth in the demo: "add account" returns the SPA's own /admin/roles?code&state, which
+// ── driveshare: the Google accounts Drive can act as (Drive共有 > 設定 > Google アカウント) ──
+// No real OAuth in the demo: "add account" returns the SPA's own /driveshare?code&state, which
 // stands in for Google's redirect. The list lives in sessionStorage so it survives that
 // full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
 // unconfigured on any demo URL (remembered for the tab).
