@@ -44,7 +44,7 @@ export function ServiceGroup({ group, now, testId }: ServiceGroupProps): JSX.Ele
             </span>
           </Stack>
           <Badge tone={meta.tone} testId={`${root}-worst`}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", whiteSpace: "nowrap" }}>
               <Icon name={meta.icon} size="sm" />
               {meta.label}
             </span>

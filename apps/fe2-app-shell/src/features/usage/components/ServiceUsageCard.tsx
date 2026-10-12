@@ -11,6 +11,8 @@ import { formatPct, formatResetsIn, formatUsage, overflowMeta, statusMeta } from
 import { UsageGauge } from "./UsageGauge.tsx";
 
 const label: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
   fontWeight: toCssVarName("font.weight.medium"),
   fontSize: toCssVarName("font.size.md"),
   color: toCssVarName("color.text.primary"),
@@ -31,21 +33,28 @@ function pctStyle(colorPath: string, unknown: boolean): CSSProperties {
   };
 }
 
-/** The halt/bill row — a tinted strip tying the icon + label + one-line detail
- *  together so the overflow consequence is unmistakable at a glance. */
-function overflowRow(tone: "info" | "danger"): CSSProperties {
-  const softPath = tone === "danger" ? "color.danger.100" : "color.info.100";
-  const accentPath = tone === "danger" ? "color.danger.500" : "color.info.500";
-  return {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: toCssVarName("space.2"),
-    padding: `${toCssVarName("space.2")} ${toCssVarName("space.3")}`,
-    borderRadius: toCssVarName("radius.md"),
-    background: toCssVarName(softPath),
-    borderLeft: `3px solid ${toCssVarName(accentPath)}`,
-  };
-}
+/** bill is the exception that costs money, so only it gets the tinted strip. halt is
+ *  the common safe case: one quiet line, so the warning is not lost among repeats. */
+const billRow: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: toCssVarName("space.2"),
+  padding: `${toCssVarName("space.2")} ${toCssVarName("space.3")}`,
+  borderRadius: toCssVarName("radius.md"),
+  background: toCssVarName("color.danger.100"),
+  borderLeft: `3px solid ${toCssVarName("color.danger.500")}`,
+};
+const haltRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: toCssVarName("space.1"),
+  color: toCssVarName("color.text.secondary"),
+  fontSize: toCssVarName("font.size.sm"),
+};
+const noShrink: CSSProperties = { display: "inline-flex", flexShrink: 0 };
+const badgeInner: CSSProperties = { display: "inline-flex", alignItems: "center", gap: "4px", whiteSpace: "nowrap" };
+// Fills the grid row so cards in one row share a height.
+const cardWrap: CSSProperties = { display: "grid" };
 
 export interface ServiceUsageCardProps {
   service: ServiceUsage;
@@ -60,14 +69,14 @@ export function ServiceUsageCard({ service, now, testId }: ServiceUsageCardProps
   const testRoot = testId ?? `fe2-usage-card-${service.metricKey}`;
 
   return (
-    <div data-testid={testRoot} data-status={service.status}>
+    <div data-testid={testRoot} data-status={service.status} style={cardWrap}>
       <Card>
         <Stack gap={3}>
           {/* header: metric label + status badge */}
           <Stack direction="row" gap={2} align="start" justify="between">
             <span style={label}>{service.label}</span>
             <Badge tone={meta.tone} testId={`${testRoot}-status`}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+              <span style={badgeInner}>
                 <Icon name={meta.icon} size="sm" />
                 {meta.label}
               </span>
@@ -75,7 +84,7 @@ export function ServiceUsageCard({ service, now, testId }: ServiceUsageCardProps
           </Stack>
 
           {/* the number + the bar are the focus */}
-          <Stack direction="row" gap={2} align="end" justify="between" wrap>
+          <Stack gap={1}>
             <span style={pctStyle(meta.colorPath, unknown)} data-testid={`${testRoot}-pct`}>
               {unknown ? "取得不可" : formatPct(service.pct)}
             </span>
@@ -92,17 +101,28 @@ export function ServiceUsageCard({ service, now, testId }: ServiceUsageCardProps
           />
 
           {/* the halt/bill consequence — the key clarity signal */}
-          <div style={overflowRow(overflow.tone as "info" | "danger")} data-testid={`${testRoot}-overflow`} data-behavior={service.overflowBehavior}>
-            <Icon name={overflow.icon} size="sm" aria-label={overflow.label} />
-            <Stack gap={1}>
-              <span style={{ ...label, fontSize: toCssVarName("font.size.sm") }}>{overflow.label}</span>
-              <span style={muted}>{overflow.detail}</span>
-            </Stack>
-          </div>
+          {service.overflowBehavior === "bill" ? (
+            <div style={billRow} data-testid={`${testRoot}-overflow`} data-behavior="bill">
+              <span style={noShrink}>
+                <Icon name={overflow.icon} size="sm" aria-label={overflow.label} />
+              </span>
+              <Stack gap={1}>
+                <span style={{ ...label, fontSize: toCssVarName("font.size.sm") }}>{overflow.label}</span>
+                <span style={muted}>{overflow.detail}</span>
+              </Stack>
+            </div>
+          ) : (
+            <div style={haltRow} title={overflow.detail} data-testid={`${testRoot}-overflow`} data-behavior="halt">
+              <span style={noShrink}>
+                <Icon name={overflow.icon} size="sm" aria-hidden="true" />
+              </span>
+              {overflow.label}
+            </div>
+          )}
 
-          {/* footer: reset countdown */}
+          {/* footer: reset countdown (cumulative metrics like storage never reset) */}
           <span style={muted} data-testid={`${testRoot}-reset`}>
-            リセットまで: {formatResetsIn(service.resetsAt, now)}
+            {service.resetsAt === null ? "累積値（期間リセットなし）" : `リセットまで: ${formatResetsIn(service.resetsAt, now)}`}
           </span>
         </Stack>
       </Card>

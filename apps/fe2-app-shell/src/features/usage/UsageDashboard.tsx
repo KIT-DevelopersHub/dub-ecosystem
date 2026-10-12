@@ -1,8 +1,9 @@
 // UsageDashboard — the "無料枠 / 課金ガード" screen. Reads GET /usage/summary via
 // UsageApi (which falls back to a NEUTRAL summary when the gateway is absent), then
-// renders: a worst-status summary banner (with the billing-guard reassurance line), a
-// short reassurance card, and the metrics GROUPED by provider (Cloudflare / Resend /
-// [future GCP]) with worst-status-first ordering inside each group. "今すぐ更新"
+// renders: a worst-status summary banner (with the billing-guard reassurance line), the
+// metrics GROUPED by provider (Cloudflare / Resend / [future GCP]) with worst-status-first
+// ordering inside each group, then the reassurance card (reference copy, so it sits below
+// the numbers instead of pushing them off the first screen). "今すぐ更新"
 // re-fetches. No optimistic UI — a plain refetch is the whole interaction.
 import type { CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -12,7 +13,7 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useUsageApi } from "./UsageProvider.tsx";
 import { UsageSummaryBanner } from "./components/UsageSummaryBanner.tsx";
 import { ServiceGroup } from "./components/ServiceGroup.tsx";
-import { groupServicesByProvider } from "./usageStatus.ts";
+import { CRITICAL_PCT, WARN_PCT, groupServicesByProvider } from "./usageStatus.ts";
 
 function formatGeneratedAt(iso: string): string {
   const d = new Date(iso);
@@ -141,7 +142,9 @@ export function UsageDashboard(): JSX.Element {
         )}
         <UsageSummaryBanner worstStatus={summary.worstStatus} services={summary.services} />
         {notice}
-        {reassurance}
+        <span style={noteStyle} data-testid="fe2-usage-threshold-legend">
+          バーの目盛り: {WARN_PCT}% で警告 / {CRITICAL_PCT}% で危険
+        </span>
         <div data-stale={stale} style={stale ? staleGroupsStyle : undefined}>
           <Stack gap={6} testId="fe2-usage-groups">
             {groups.map((g) => (
@@ -149,6 +152,7 @@ export function UsageDashboard(): JSX.Element {
             ))}
           </Stack>
         </div>
+        {reassurance}
         <span style={noteStyle} data-testid="fe2-usage-generated-at">
           {summary.capturedAt === undefined
             ? `最終更新: ${formatGeneratedAt(summary.generatedAt)}`
