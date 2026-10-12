@@ -12,7 +12,7 @@ import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate";
 // Drive共有 の「設定」 (the Google accounts Drive is accessed as) has its own toggles in
 // ロール管理 > Drive共有 > 詳細設定. Reading needs 閲覧 on the app + settings_view; changing (which
 // moves every share the org manages) needs 編集 on the app + settings_edit. Migration
-// identity/0016 gives both keys to the system admin role only; every other role starts off.
+// identity/0017 gives both keys to the system admin role only; every other role starts off.
 const GOOGLE_ACCOUNT_VIEW = appLevel("driveshare", "view", "drive:settings_view");
 const GOOGLE_ACCOUNT_EDIT = appLevel("driveshare", "edit", "drive:settings_edit");
 

@@ -149,6 +149,8 @@ jobs:
         env:
           VITE_API_BASE_URL: ${{ steps.origins.outputs.gateway }}
           VITE_DEMO_AUTOLOGIN: "1"
+          # LP管理「見る」の行き先: 公開 LP ではなく staging の公開フラグを読むプレビュー Worker。
+          VITE_LP_PUBLIC_URL: https://lp-conference-next-preview.developershub-site.workers.dev
         run: pnpm run build
 
       # Read-only: staging D1 vs the repo's migrations (see infra/d1/scripts/schema-gate.sh).
