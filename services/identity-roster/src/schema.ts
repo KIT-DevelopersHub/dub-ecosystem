@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS identity_webauthn_challenges (
 );
 `;
 
-// Cross-role mail visibility (infra/d1/migrations/identity/0016): holders of role_id also
+// Cross-role mail visibility (infra/d1/migrations/identity/0017): holders of role_id also
 // see the inbound mail of target_role_id's holders. Directional; same-role sharing stays the
 // mail:read_role_shared key. Both FKs cascade.
 const ROLE_MAIL_VISIBILITY_UP = `
