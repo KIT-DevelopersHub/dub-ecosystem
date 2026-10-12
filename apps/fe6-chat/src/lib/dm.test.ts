@@ -36,5 +36,7 @@ describe("dm labels", () => {
     expect(channelLabel({ ...base, memberIds: ["me", "x"] }, "me", resolve)).toBeNull();
     expect(channelLabel({ ...base, type: "topic", name: "general" }, "me", resolve)).toBe("general");
     expect(channelLabel(base, "me", resolve)).toBe("DM"); // no memberIds -> stored name
+    // system notice DM: only me -> stored name, never my own name
+    expect(channelLabel({ ...base, name: "Direct messages", memberIds: ["me"] }, "me", resolve)).toBe("Direct messages");
   });
 });

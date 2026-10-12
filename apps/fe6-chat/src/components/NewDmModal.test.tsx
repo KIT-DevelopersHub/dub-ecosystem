@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import type { identity } from "@dub/types";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatRuntimeProvider } from "../context";
@@ -6,7 +7,7 @@ import { MockChatClient } from "../api/mock-client";
 import { demoSeed } from "../dev/seed";
 import { NewDmModal } from "./NewDmModal";
 
-function setup(onStart = vi.fn(async () => {})) {
+function setup(onStart = vi.fn(async (_peers: identity.UserSummary[]) => {})) {
   const seed = demoSeed();
   const api = new MockChatClient(seed);
   render(
@@ -30,7 +31,7 @@ describe("NewDmModal", () => {
     await userEvent.click(screen.getByRole("option", { name: /佐藤 花子/ }));
     await userEvent.click(screen.getByTestId("fe6-new-dm-start"));
     await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));
-    expect(onStart.mock.calls[0]![0]!.map((u: { displayName: string }) => u.displayName)).toEqual(["佐藤 花子"]);
+    expect(onStart.mock.calls[0]![0].map((u) => u.displayName)).toEqual(["佐藤 花子"]);
   });
 
   it("filters by name and labels a group DM by head count", async () => {
@@ -44,7 +45,7 @@ describe("NewDmModal", () => {
   });
 
   it("shows an error and keeps the dialog when starting fails", async () => {
-    setup(vi.fn(async () => Promise.reject(new Error("boom"))));
+    setup(vi.fn(async (_peers: identity.UserSummary[]) => Promise.reject(new Error("boom"))));
     await userEvent.click(await screen.findByRole("option", { name: /佐藤 花子/ }));
     await userEvent.click(screen.getByTestId("fe6-new-dm-start"));
     expect(await screen.findByRole("alert")).toHaveTextContent("DM を開始できませんでした");

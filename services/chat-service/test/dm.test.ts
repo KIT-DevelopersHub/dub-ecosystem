@@ -55,6 +55,26 @@ describe("direct messages", () => {
     expect(leave.status).toBe(409);
   });
 
+  it("a lost creation race returns the other side's DM instead of failing", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const winner = await call(app, "POST", "/chat/channels", { body: dm(["user_caller"]), userId: "user_b" });
+    // Simulate the loser's pre-check running before the winner committed.
+    const real = deps.repo.getChannelByDmKey.bind(deps.repo);
+    let first = true;
+    deps.repo.getChannelByDmKey = async (key: string) => (first ? ((first = false), null) : real(key));
+    const loser = await call(app, "POST", "/chat/channels", { body: dm(["user_b"]) });
+    expect(loser.json.id).toBe(winner.json.id);
+    const list = await call(app, "GET", "/chat/channels");
+    expect(list.json.items.filter((c: { type: string }) => c.type === "dm")).toHaveLength(1);
+  });
+
+  it("stores a neutral name so neither side sees their own name as the fallback", async () => {
+    const app = createApp(makeDeps());
+    const res = await call(app, "POST", "/chat/channels", { body: dm(["user_b"], { name: "佐藤 花子" }) });
+    expect(res.json.name).toBe("DM");
+  });
+
   it("both participants can post", async () => {
     const app = createApp(makeDeps());
     const c = await call(app, "POST", "/chat/channels", { body: dm(["user_b"]) });

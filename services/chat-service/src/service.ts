@@ -176,6 +176,17 @@ export class ChatService {
     return { ...channel, memberIds: members.map((m) => m.userId) };
   }
 
+  // The DM for exactly this participant set, if one exists. dm_key is a 32-bit hash, so the
+  // members are compared before the caller is handed an existing conversation — a collision
+  // must never expose someone else's DM.
+  private async findDm(dmKey: string, participants: common.UserId[]): Promise<Channel | null> {
+    const existing = await this.deps.repo.getChannelByDmKey(dmKey);
+    if (!existing) return null;
+    const current = (await this.deps.repo.listMembers(existing.id)).map((m) => m.userId);
+    if (!sameSet(current, participants)) throw new DubError("CHAT_DM_CONFLICT", "DM key collision", { status: 409 });
+    return { ...toChannel(existing), memberIds: current };
+  }
+
   // ---- channels ----
   async createChannel(ctx: ReqCtx, body: CreateChannelRequest): Promise<Channel> {
     const type = body.type;
@@ -186,8 +197,9 @@ export class ChatService {
     const visibility =
       type === "dm" ? "private" : body.visibility === "public" ? "public" : body.visibility === "private" ? "private" : null;
     if (!visibility) throw errors.validationFailed([{ field: "visibility", reason: "invalid" }]);
-    // A DM's display name is derived per viewer from memberIds; the stored name is only a fallback.
-    const name = type === "dm" && (typeof body.name !== "string" || !body.name.trim()) ? "DM" : nonEmptyString(body.name, "name");
+    // A DM is labelled per viewer from memberIds. The stored name is a neutral fallback: the
+    // creator's view of "the other side" would show the recipient their own name.
+    const name = type === "dm" ? "DM" : nonEmptyString(body.name, "name");
 
     let eventId: common.EventId | null = null;
     if (type === "event") {
@@ -209,16 +221,8 @@ export class ChatService {
       if (others < 1) throw errors.validationFailed([{ field: "memberIds", reason: "required" }]);
       if (others > DM_MAX_OTHERS) throw errors.validationFailed([{ field: "memberIds", reason: "too_many" }]);
       dmKey = deriveDmKey(initialMembers);
-      const existing = await this.deps.repo.getChannelByDmKey(dmKey);
-      if (existing) {
-        // dm_key is a 32-bit hash: confirm the participants really match before handing the
-        // caller an existing conversation, or a collision would expose someone else's DM.
-        const current = (await this.deps.repo.listMembers(existing.id)).map((m) => m.userId);
-        if (!sameSet(current, initialMembers)) {
-          throw new DubError("CHAT_DM_CONFLICT", "DM key collision", { status: 409 });
-        }
-        return this.withDmMembers(existing);
-      }
+      const existing = await this.findDm(dmKey, initialMembers);
+      if (existing) return existing;
     }
 
     const now = this.deps.now();
@@ -236,15 +240,19 @@ export class ChatService {
       createdAt: now,
       updatedAt: now,
     };
-    await this.deps.repo.createChannel(row);
-    for (const uid of initialMembers) {
-      await this.deps.repo.addMember({
-        channelId: row.id,
-        userId: uid,
-        // DM participants are peers: nobody gets channel-admin over a conversation.
-        role: uid === ctx.userId && type !== "dm" ? "admin" : "member",
-        joinedAt: now,
-      });
+    const members: MemberRow[] = initialMembers.map((uid) => ({
+      channelId: row.id,
+      userId: uid,
+      // DM participants are peers: nobody gets channel-admin over a conversation.
+      role: uid === ctx.userId && type !== "dm" ? "admin" : "member",
+      joinedAt: now,
+    }));
+    if (!(await this.deps.repo.createChannelWithMembers(row, members))) {
+      // Lost a race with the other participant starting the same DM: theirs was written
+      // atomically (row + members), so it is complete and is the conversation to return.
+      const winner = dmKey ? await this.findDm(dmKey, initialMembers) : null;
+      if (!winner) throw new DubError("CHAT_DM_CONFLICT", "DM create conflict", { status: 409 });
+      return winner;
     }
 
     await this.deps.publisher.publish("chat.channel.created", { channelId: row.id, name: row.name }, this.actor(ctx));
@@ -275,7 +283,8 @@ export class ChatService {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
-    const items = await Promise.all(page.map((r) => this.withDmMembers(r)));
+    const dmMembers = await this.deps.repo.memberIdsFor(page.filter((r) => r.type === "dm").map((r) => r.id));
+    const items = page.map((r) => (r.type === "dm" ? { ...toChannel(r), memberIds: dmMembers.get(r.id) ?? [] } : toChannel(r)));
     return { items, nextCursor: hasMore && last ? encodeCursor(last.id) : null };
   }
 

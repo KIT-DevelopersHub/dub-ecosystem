@@ -107,6 +107,7 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
       .resolveUsers(missing)
       .then((summaries) => {
         if (cancelled) return;
+        setDmUsersFailed(false);
         setDmUsers((prev) => {
           const next = { ...prev };
           for (const u of summaries) next[u.id] = u;
@@ -136,7 +137,7 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
       const created = await api.createChannel({
         type: "dm",
         visibility: "private",
-        name: peers.map((u) => u.displayName).join("、"),
+        name: "DM", // labelled per viewer from memberIds; the server stores a neutral name
         memberIds: peers.map((u) => u.id),
       });
       await reloadChannels();

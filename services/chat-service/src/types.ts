@@ -261,6 +261,12 @@ export interface MemberClient {
 export interface ChatRepo {
   // channels
   createChannel(row: ChannelRow): Promise<void>;
+  /**
+   * Channel row + its initial members in ONE transaction. Returns false (nothing written)
+   * when the row's dm_key is already taken, so a racing DM create can re-read the winner,
+   * which is then guaranteed to be complete.
+   */
+  createChannelWithMembers(row: ChannelRow, members: MemberRow[]): Promise<boolean>;
   getChannel(id: common.ChannelId): Promise<ChannelRow | null>;
   getChannelByDmKey(dmKey: string): Promise<ChannelRow | null>;
   listChannelsForUser(q: {
@@ -277,6 +283,8 @@ export interface ChatRepo {
   removeMember(channelId: common.ChannelId, userId: common.UserId): Promise<boolean>;
   getMember(channelId: common.ChannelId, userId: common.UserId): Promise<MemberRow | null>;
   listMembers(channelId: common.ChannelId): Promise<MemberRow[]>;
+  /** Member user ids per channel, one query for many channels (DM labels in the list). */
+  memberIdsFor(channelIds: common.ChannelId[]): Promise<Map<string, common.UserId[]>>;
   membershipsForUser(userId: common.UserId): Promise<MemberRow[]>;
 
   // messages
