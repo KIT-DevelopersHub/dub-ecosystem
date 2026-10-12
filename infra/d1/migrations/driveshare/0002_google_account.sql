@@ -1,21 +1,32 @@
--- namespace: driveshare | owner: drive-share-service (Hackit Drive Google account)
--- The Google account drive-share-service acts as, connected from ロール管理 (Drive共有 の詳細
--- ダイアログ). Replaces the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret when present; the secret
--- stays the fallback. The refresh token is AES-GCM encrypted with the
--- DRIVESHARE_TOKEN_ENC_KEY secret — plaintext never touches D1. All timestamps are written
--- by the service (nowIso), never via DDL DEFAULT (D2).
+-- namespace: driveshare | owner: drive-share-service (Hackit Drive Google accounts)
+-- The Google accounts drive-share-service can act as, registered from ロール管理 (その他 >
+-- Google アカウント). Admins register several and switch which one is in use; with none in use
+-- the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret stays the fallback. Refresh tokens are AES-GCM
+-- encrypted with the DRIVESHARE_TOKEN_ENC_KEY secret — plaintext never touches D1. All
+-- timestamps are written by the service (nowIso), never via DDL DEFAULT (D2).
 
--- One row per org: the currently connected account. client_id records which OAuth client
--- issued the token (a refresh token only works with the client that minted it).
-CREATE TABLE driveshare_google_account (
-  org_id         TEXT PRIMARY KEY,
+-- One row per registered account. Reconnecting the same address replaces its token in place.
+-- client_id records which OAuth client issued the token (a refresh token only works with the
+-- client that minted it).
+CREATE TABLE driveshare_google_accounts (
+  id             TEXT PRIMARY KEY,
+  org_id         TEXT NOT NULL,
   email          TEXT NOT NULL,
   client_id      TEXT NOT NULL,
   token_cipher   TEXT NOT NULL,
   token_iv       TEXT NOT NULL,
   connected_by   TEXT NOT NULL,
   connected_at   TEXT NOT NULL,
-  updated_at     TEXT NOT NULL
+  updated_at     TEXT NOT NULL,
+  UNIQUE (org_id, email)
+);
+
+-- Which registered account is in use (one per org). No row = the secret fallback.
+CREATE TABLE driveshare_google_active_account (
+  org_id       TEXT PRIMARY KEY,
+  account_id   TEXT NOT NULL REFERENCES driveshare_google_accounts(id),
+  switched_by  TEXT NOT NULL,
+  switched_at  TEXT NOT NULL
 );
 
 -- Pending OAuth consent round-trips (CSRF state). Single-use: the callback deletes the

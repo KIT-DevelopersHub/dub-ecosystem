@@ -1774,28 +1774,58 @@ interface DemoDriveFile {
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 
-// ── driveshare: the Google account Drive is accessed as (ロール管理 > その他 > Google アカウント) ──
-// No real OAuth in the demo: "connect" returns the SPA's own /admin/roles?code&state, which
-// stands in for Google's redirect. The status lives in sessionStorage so it survives that
+// ── driveshare: the Google accounts Drive can act as (ロール管理 > その他 > Google アカウント) ──
+// No real OAuth in the demo: "add account" returns the SPA's own /admin/roles?code&state, which
+// stands in for Google's redirect. The list lives in sessionStorage so it survives that
 // full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
 // unconfigured on any demo URL (remembered for the tab).
 type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "unconfigured";
-const DEMO_DRIVE_GOOGLE_KEY = "dub-demo:drive-google";
+interface DemoDriveGoogleAccount {
+  id: string;
+  kind: "connected" | "secret";
+  email: string | null;
+  connectedAt: string | null;
+  connectedBy: string | null;
+  active: boolean;
+  needsReconnect: boolean;
+}
+interface DemoDriveGoogleStatus {
+  accounts: DemoDriveGoogleAccount[];
+  canConnect: boolean;
+}
+const DEMO_DRIVE_GOOGLE_KEY = "dub-demo:drive-google-accounts";
 const DEMO_DRIVE_GOOGLE_STATE_KEY = "dub-demo:drive-google-state";
 
-function demoDriveGoogleStatus(mode: DemoDriveGoogleMode) {
-  const connected = {
-    source: "connected" as const,
+function demoDriveGoogleStatus(mode: DemoDriveGoogleMode): DemoDriveGoogleStatus {
+  const secret: DemoDriveGoogleAccount = {
+    id: "secret",
+    kind: "secret",
     email: "hackit@gmail.com",
+    connectedAt: null,
+    connectedBy: null,
+    active: false,
+    needsReconnect: false,
+  };
+  const main: DemoDriveGoogleAccount = {
+    id: "dga_demo_main",
+    kind: "connected",
+    email: "hackit.drive@gmail.com",
     connectedAt: "2026-10-01T09:00:00.000Z",
     connectedBy: "usr_demo_admin",
+    active: true,
     needsReconnect: false,
-    canConnect: true,
   };
-  if (mode === "none") return { ...connected, source: "none" as const, email: null, connectedAt: null, connectedBy: null };
-  if (mode === "invalid") return { ...connected, needsReconnect: true };
-  if (mode === "unconfigured") return { ...connected, source: "secret" as const, connectedAt: null, connectedBy: null, canConnect: false };
-  return connected;
+  const sub: DemoDriveGoogleAccount = {
+    ...main,
+    id: "dga_demo_sub",
+    email: "devhub.event@gmail.com",
+    connectedAt: "2026-10-05T09:00:00.000Z",
+    active: false,
+  };
+  if (mode === "none") return { accounts: [], canConnect: true };
+  if (mode === "invalid") return { accounts: [secret, sub, { ...main, needsReconnect: true }], canConnect: true };
+  if (mode === "unconfigured") return { accounts: [{ ...secret, active: true }], canConnect: false };
+  return { accounts: [secret, sub, main], canConnect: true };
 }
 
 function createDriveGoogleDemoStore() {
@@ -1810,34 +1840,64 @@ function createDriveGoogleDemoStore() {
   if (fromUrl && ["connected", "none", "invalid", "unconfigured"].includes(fromUrl)) {
     storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(demoDriveGoogleStatus(fromUrl as DemoDriveGoogleMode)));
   }
-  const read = () => {
+  const read = (): DemoDriveGoogleStatus => {
     const raw = storage()?.getItem(DEMO_DRIVE_GOOGLE_KEY);
-    return raw ? (JSON.parse(raw) as ReturnType<typeof demoDriveGoogleStatus>) : demoDriveGoogleStatus("connected");
+    return raw ? (JSON.parse(raw) as DemoDriveGoogleStatus) : demoDriveGoogleStatus("connected");
   };
+  const write = (next: DemoDriveGoogleStatus) => {
+    storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(next));
+    return json(next);
+  };
+  const BASE = "/api/v1/driveshare/google-account";
 
   function handle(method: string, pathname: string, body: unknown): Response | null {
-    if (method === "GET" && pathname === "/api/v1/driveshare/google-account") return json(read());
-    if (method === "POST" && pathname === "/api/v1/driveshare/google-account/connect") {
+    if (method === "GET" && pathname === BASE) return json(read());
+    if (method === "POST" && pathname === `${BASE}/connect`) {
       const { redirectUri } = (body ?? {}) as { redirectUri?: string };
       if (!redirectUri) return problem("VALIDATION_FAILED", "redirectUri is required", 400);
       const state = `demo_${Math.random().toString(36).slice(2)}`;
       storage()?.setItem(DEMO_DRIVE_GOOGLE_STATE_KEY, state);
       return json({ authUrl: `${redirectUri}?code=demo-code&state=${state}` });
     }
-    if (method === "POST" && pathname === "/api/v1/driveshare/google-account/callback") {
+    if (method === "POST" && pathname === `${BASE}/callback`) {
       const { state } = (body ?? {}) as { state?: string };
       const expected = storage()?.getItem(DEMO_DRIVE_GOOGLE_STATE_KEY);
       storage()?.removeItem(DEMO_DRIVE_GOOGLE_STATE_KEY);
       if (!state || state !== expected) {
-        return problem("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。もう一度「接続」からやり直してください。", 400);
+        return problem("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。もう一度「アカウントを追加」からやり直してください。", 400);
       }
-      const next = {
-        ...demoDriveGoogleStatus("connected"),
-        email: "hackit.new@gmail.com",
+      // Google "returns" a new address: register it and switch to it (like the server).
+      // A broken account comes back healthy, as a real reconnect would.
+      const cur = read();
+      const broken = cur.accounts.find((a) => a.kind === "connected" && a.needsReconnect);
+      const email = broken?.email ?? `hackit.new${cur.accounts.length}@gmail.com`;
+      const added: DemoDriveGoogleAccount = {
+        id: broken?.id ?? `dga_demo_${Date.now().toString(36)}`,
+        kind: "connected",
+        email,
         connectedAt: new Date().toISOString(),
+        connectedBy: "usr_demo_admin",
+        active: true,
+        needsReconnect: false,
       };
-      storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(next));
-      return json(next);
+      const rest = cur.accounts.filter((a) => a.id !== added.id).map((a) => ({ ...a, active: false }));
+      return write({ ...cur, accounts: [...rest, added] });
+    }
+    if (method === "POST" && pathname === `${BASE}/active`) {
+      const { accountId } = (body ?? {}) as { accountId?: string };
+      const cur = read();
+      if (!cur.accounts.some((a) => a.id === accountId)) return problem("NOT_FOUND", "google account not found", 404);
+      return write({ ...cur, accounts: cur.accounts.map((a) => ({ ...a, active: a.id === accountId })) });
+    }
+    const del = method === "DELETE" ? pathname.match(/^\/api\/v1\/driveshare\/google-account\/accounts\/([^/]+)$/) : null;
+    if (del) {
+      const cur = read();
+      const target = cur.accounts.find((a) => a.id === decodeURIComponent(del[1]!));
+      if (!target || target.kind === "secret") return problem("NOT_FOUND", "google account not found", 404);
+      if (target.active) {
+        return problem("CONFLICT", "使用中のアカウントは削除できません。先に別のアカウントに切り替えてください。", 409);
+      }
+      return write({ ...cur, accounts: cur.accounts.filter((a) => a.id !== target.id) });
     }
     return null;
   }

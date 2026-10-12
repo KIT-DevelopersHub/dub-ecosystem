@@ -5,8 +5,8 @@
 import { identity, member } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
 import type { common, auditLog, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
-import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview, DriveGoogleAccountStatus } from "../contracts/pending";
-import { EMAIL_ROUTING_DOMAIN, MAIL_WORKER_DESTINATION } from "../contracts/pending";
+import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview, DriveGoogleAccountsStatus, DriveGoogleAccount } from "../contracts/pending";
+import { DRIVE_GOOGLE_SECRET_ID, EMAIL_ROUTING_DOMAIN, MAIL_WORKER_DESTINATION } from "../contracts/pending";
 
 // Mock roster row: the frozen detail model plus provenance (identity-roster exposes it).
 type MockUser = identity.IdentityUserDetail & { source: UserSource };
@@ -22,8 +22,8 @@ export interface MockSeed {
   me?: gateway.MeResponse;
   /** Seed the /api/v1/mail/status rate-limit view (default: not limited). */
   mailRateLimit?: MailRateLimitStatus;
-  /** Seed the Drive共有 Google account (default: connected, healthy). */
-  driveGoogle?: Partial<DriveGoogleAccountStatus>;
+  /** Seed the Google accounts (default: two registered, the first in use, healthy). */
+  driveGoogle?: Partial<DriveGoogleAccountsStatus>;
 }
 
 interface MockState {
@@ -38,7 +38,7 @@ interface MockState {
   // userId -> current plaintext password (admin set/view surface, #5a/#5c). The real
   // backend stores an AES copy; the mock keeps the plaintext so the view flow works.
   passwords: Map<string, string>;
-  driveGoogle: DriveGoogleAccountStatus;
+  driveGoogle: DriveGoogleAccountsStatus;
   /** Pending OAuth states issued by the mock connect (single use). */
   driveGoogleStates: Set<string>;
 }
@@ -86,12 +86,11 @@ function seedState(seed?: MockSeed): MockState {
   // user_alice starts with a viewable credential (demo/E2E); others are unset until an
   // admin issues one (view then rejects with PASSWORD_NOT_VIEWABLE, like the backend).
   const passwords = new Map<string, string>([["user_alice", "Alice-Init-0001"]]);
-  const driveGoogle: DriveGoogleAccountStatus = {
-    source: "connected",
-    email: "hackit@gmail.com",
-    connectedAt: "2026-10-01T09:00:00.000Z",
-    connectedBy: "user_alice",
-    needsReconnect: false,
+  const driveGoogle: DriveGoogleAccountsStatus = {
+    accounts: [
+      { id: "dga_main", kind: "connected", email: "hackit@gmail.com", connectedAt: "2026-10-01T09:00:00.000Z", connectedBy: "user_alice", active: true, needsReconnect: false },
+      { id: "dga_sub", kind: "connected", email: "hackit.sub@gmail.com", connectedAt: "2026-10-05T09:00:00.000Z", connectedBy: "user_alice", active: false, needsReconnect: false },
+    ],
     canConnect: true,
     ...seed?.driveGoogle,
   };
@@ -167,7 +166,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       return { userId: u.id, email: u.email, password: pw } as unknown as T;
     }
     if (path.endsWith("/me")) return s.me as unknown as T;
-    if (path.endsWith("/driveshare/google-account")) return { ...s.driveGoogle } as unknown as T;
+    if (path.endsWith("/driveshare/google-account")) return structuredClone(s.driveGoogle) as unknown as T;
     if (path.endsWith("/mail/status")) {
       const body: MailStatusResponse = { service: "mail-gateway", provider: "resend", rateLimit: s.mailRateLimit };
       return body as unknown as T;
@@ -187,15 +186,25 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     if (path.endsWith("/driveshare/google-account/callback")) {
       const { state } = (body ?? {}) as { state?: string };
       if (!state || !s.driveGoogleStates.delete(state)) throw err("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。");
-      s.driveGoogle = {
-        source: "connected",
+      // Google "returns" a new address: register it and switch to it (like the server).
+      const added: DriveGoogleAccount = {
+        id: `dga_${s.driveGoogleStates.size + s.driveGoogle.accounts.length + 1}`,
+        kind: "connected",
         email: "hackit.new@gmail.com",
         connectedAt: now(),
         connectedBy: s.me.user.id,
+        active: true,
         needsReconnect: false,
-        canConnect: true,
       };
-      return { ...s.driveGoogle } as unknown as T;
+      const rest = s.driveGoogle.accounts.filter((a) => a.email !== added.email).map((a) => ({ ...a, active: false }));
+      s.driveGoogle = { ...s.driveGoogle, accounts: [...rest, added] };
+      return structuredClone(s.driveGoogle) as unknown as T;
+    }
+    if (path.endsWith("/driveshare/google-account/active")) {
+      const { accountId } = (body ?? {}) as { accountId?: string };
+      if (!s.driveGoogle.accounts.some((a) => a.id === accountId)) throw err("NOT_FOUND", "google account not found");
+      s.driveGoogle = { ...s.driveGoogle, accounts: s.driveGoogle.accounts.map((a) => ({ ...a, active: a.id === accountId })) };
+      return structuredClone(s.driveGoogle) as unknown as T;
     }
     if (path.endsWith("/users/invite")) {
       const req = body as identity.InviteUserRequest;
@@ -454,6 +463,14 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
   }
 
   async function del(path: string): Promise<void> {
+    const driveGoogleMatch = path.match(/\/driveshare\/google-account\/accounts\/([^/]+)$/);
+    if (driveGoogleMatch) {
+      const target = s.driveGoogle.accounts.find((a) => a.id === driveGoogleMatch[1]);
+      if (!target || target.id === DRIVE_GOOGLE_SECRET_ID) throw err("NOT_FOUND", "google account not found");
+      if (target.active) throw err("CONFLICT", "使用中のアカウントは削除できません。先に別のアカウントに切り替えてください。");
+      s.driveGoogle = { ...s.driveGoogle, accounts: s.driveGoogle.accounts.filter((a) => a.id !== target.id) };
+      return;
+    }
     const roleMatch = path.match(/\/identity\/roles\/([^/]+)$/);
     if (roleMatch) {
       const role = s.roles.get(roleMatch[1]!);

@@ -101,7 +101,9 @@ const WRITES = [
 ];
 // Switching the Google account the service acts as: system admin only (identity:admin).
 const ADMIN_ONLY = [
+  "DELETE /driveshare/google-account/accounts/:id",
   "GET /driveshare/google-account",
+  "POST /driveshare/google-account/active",
   "POST /driveshare/google-account/callback",
   "POST /driveshare/google-account/connect",
 ];

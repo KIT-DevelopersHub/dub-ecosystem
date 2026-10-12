@@ -58,7 +58,8 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
     tables: [
       "driveshare_role_file_grants",
       "driveshare_role_grant_members",
-      "driveshare_google_account",
+      "driveshare_google_accounts",
+      "driveshare_google_active_account",
       "driveshare_google_oauth_states",
     ],
   },

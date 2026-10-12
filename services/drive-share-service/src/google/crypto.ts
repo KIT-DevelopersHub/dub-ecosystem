@@ -1,7 +1,7 @@
 // AES-GCM sealing for the Google refresh token at rest in D1. The key is the
 // DRIVESHARE_TOKEN_ENC_KEY secret (base64 of 32 random bytes); a fresh 96-bit IV per
-// seal. The org id is bound as additional data so a ciphertext copied to another org's
-// row fails to open. Plaintext never leaves this module except to the token provider.
+// seal. The owning row (org + account address) is bound as additional data so a ciphertext
+// copied to another account's row fails to open. Plaintext never leaves this module except to the token provider.
 
 const AAD_PREFIX = "driveshare-google-refresh-token:";
 
@@ -37,17 +37,17 @@ export interface Sealed {
   iv: string;
 }
 
-export async function sealToken(key: CryptoKey, orgId: string, plaintext: string): Promise<Sealed> {
+export async function sealToken(key: CryptoKey, binding: string, plaintext: string): Promise<Sealed> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = new TextEncoder().encode(plaintext);
-  const additionalData = new TextEncoder().encode(AAD_PREFIX + orgId);
+  const additionalData = new TextEncoder().encode(AAD_PREFIX + binding);
   const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData }, key, data);
   return { cipher: toB64(new Uint8Array(cipher)), iv: toB64(iv) };
 }
 
-/** Throws on a wrong key / tampered row / other org's row (GCM auth failure). */
-export async function openToken(key: CryptoKey, orgId: string, sealed: Sealed): Promise<string> {
-  const additionalData = new TextEncoder().encode(AAD_PREFIX + orgId);
+/** Throws on a wrong key / tampered row / another account's row (GCM auth failure). */
+export async function openToken(key: CryptoKey, binding: string, sealed: Sealed): Promise<string> {
+  const additionalData = new TextEncoder().encode(AAD_PREFIX + binding);
   const plain = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: fromB64(sealed.iv), additionalData },
     key,

@@ -131,17 +131,24 @@ export interface OffboardUserResult {
   steps: OffboardStepResult[];
 }
 
-// ---- Hackit Drive の Google アカウント (drive-share-service /driveshare/google-account) ----
-// Mirrors services/drive-share-service/src/types.ts GoogleAccountStatus. Never carries a token.
-export type DriveGoogleAccountSource = "connected" | "secret" | "none";
-export interface DriveGoogleAccountStatus {
-  /** connected = ロール管理から接続 / secret = サーバー初期設定 / none = 未接続 */
-  source: DriveGoogleAccountSource;
+// ---- Google アカウント (drive-share-service /driveshare/google-account) ----
+// Mirrors services/drive-share-service/src/types.ts GoogleAccountsStatus. Never carries a token.
+/** サーバー初期設定 (Secret) のアカウントを表す id。これに切り替える = 登録アカウントを使わない。 */
+export const DRIVE_GOOGLE_SECRET_ID = "secret";
+export interface DriveGoogleAccount {
+  id: string;
+  /** connected = ロール管理から追加 / secret = サーバーの初期設定 */
+  kind: "connected" | "secret";
   email: string | null;
   connectedAt: string | null;
   connectedBy: string | null;
+  /** いま Drive の操作に使っているアカウント (最大 1 件) */
+  active: boolean;
   /** Google が invalid_grant を返した (取り消し / 期限切れ) = 再接続が必要 */
   needsReconnect: boolean;
-  /** 接続用の OAuth クライアントと暗号化キーがサーバーに設定済みか */
+}
+export interface DriveGoogleAccountsStatus {
+  accounts: DriveGoogleAccount[];
+  /** アカウント追加用の OAuth クライアントと暗号化キーがサーバーに設定済みか */
   canConnect: boolean;
 }

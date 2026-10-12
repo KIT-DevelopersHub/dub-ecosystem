@@ -141,25 +141,41 @@ export interface CreateRoleGrantRequest {
   driveRole: AssignableDriveRole;
 }
 
-// ---- Hackit Google account (ロール管理 > Drive共有 の詳細ダイアログ) ----
+// ---- Hackit Google accounts (ロール管理 > その他 > Google アカウント) ----
 
-/** Where the refresh token the service uses comes from:
- *  connected = connected from the UI (D1) / secret = the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN
- *  fallback / none = no real account (mock Drive). */
-export type GoogleAccountSource = "connected" | "secret" | "none";
+/** Id of the pseudo-entry for the GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN secret (the server's
+ *  initial account). Switching to it clears the in-use selection. */
+export const SECRET_ACCOUNT_ID = "secret";
 
-/** GET /driveshare/google-account. Never carries the token itself. */
-export interface GoogleAccountStatus {
-  source: GoogleAccountSource;
-  /** The Google account Drive is accessed as (null when unknown). */
+/** One account the service can act as. Never carries the token itself.
+ *  kind: connected = registered from the UI (D1) / secret = the server's initial account. */
+export interface GoogleAccountEntry {
+  id: string;
+  kind: "connected" | "secret";
+  /** null when Google could not tell us (secret account whose token no longer works). */
   email: string | null;
   connectedAt: string | null;
-  /** Identity user id of the admin who connected it (source=connected only). */
+  /** Identity user id of the admin who registered it (kind=connected only). */
   connectedBy: string | null;
-  /** Google answered invalid_grant: the token was revoked or expired — reconnect. */
+  /** Drive is accessed as this account right now. At most one entry is active. */
+  active: boolean;
+  /** Google answered invalid_grant (revoked / expired), or the stored token can no longer
+   *  be opened — add the same account again to reconnect. */
   needsReconnect: boolean;
-  /** Whether the connect flow is configured (OAuth web client + encryption key). */
+}
+
+/** GET /driveshare/google-account (and the result of every change). No active entry =
+ *  nothing is connected and Drive runs on the mock. */
+export interface GoogleAccountsStatus {
+  accounts: GoogleAccountEntry[];
+  /** Whether adding an account is configured (OAuth web client + encryption key). */
   canConnect: boolean;
+}
+
+/** POST /driveshare/google-account/active body. */
+export interface SwitchGoogleAccountRequest {
+  /** A registered account id, or SECRET_ACCOUNT_ID. */
+  accountId: string;
 }
 
 /** POST /driveshare/google-account/connect body. */

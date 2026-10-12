@@ -36,20 +36,29 @@ CREATE INDEX idx_driveshare_grant_members_grant ON driveshare_role_grant_members
 };
 
 // Physical twin: infra/d1/migrations/driveshare/0002_google_account.sql (lockstep test).
-// The Google account the service acts as (encrypted refresh token) + pending OAuth states.
+// The registered Google accounts (encrypted refresh tokens), which one is in use, and
+// pending OAuth states.
 export const DRIVESHARE_GOOGLE_ACCOUNT_MIGRATION: Migration = {
   namespace: "driveshare",
   id: "0002_google_account",
   up: `
-CREATE TABLE driveshare_google_account (
-  org_id         TEXT PRIMARY KEY,
+CREATE TABLE driveshare_google_accounts (
+  id             TEXT PRIMARY KEY,
+  org_id         TEXT NOT NULL,
   email          TEXT NOT NULL,
   client_id      TEXT NOT NULL,
   token_cipher   TEXT NOT NULL,
   token_iv       TEXT NOT NULL,
   connected_by   TEXT NOT NULL,
   connected_at   TEXT NOT NULL,
-  updated_at     TEXT NOT NULL
+  updated_at     TEXT NOT NULL,
+  UNIQUE (org_id, email)
+);
+CREATE TABLE driveshare_google_active_account (
+  org_id       TEXT PRIMARY KEY,
+  account_id   TEXT NOT NULL REFERENCES driveshare_google_accounts(id),
+  switched_by  TEXT NOT NULL,
+  switched_at  TEXT NOT NULL
 );
 CREATE TABLE driveshare_google_oauth_states (
   state        TEXT PRIMARY KEY,
