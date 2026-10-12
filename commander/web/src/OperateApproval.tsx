@@ -96,6 +96,10 @@ function WriteSection({
         <dd style={{ margin: 0 }} data-testid="operate-impact">{write.impact}</dd>
         <dt style={{ color: t.textMuted }}>取り消し</dt>
         <dd style={{ margin: 0 }} data-testid="operate-reversible">{write.reversible ? "できる" : "できない"}</dd>
+        <dt style={{ color: t.textMuted }}>読み直し</dt>
+        <dd style={{ margin: 0 }} data-testid="operate-verify">
+          {write.unverifiable ? <span style={{ color: t.warning }}>検証不能（{write.unverifiable}）</span> : "実行後に読み直して反映を確かめます"}
+        </dd>
         <dt style={{ color: t.textMuted }}>リスク</dt>
         <dd style={{ margin: 0 }}>
           <Badge tone={RISK_TONE[write.risk]} testId="operate-risk">{RISK_LABEL[write.risk]}</Badge>
@@ -188,7 +192,7 @@ export function ApprovalCard({
   const preview = state.preview;
   const total = writeCount(preview);
   const kept = total - skip.size;
-  const high = preview.writes.some((w) => w.risk === "high");
+  const high = preview.requiresPhrase ?? preview.writes.some((w) => w.risk === "high");
   const blocked = preview.blockers.length > 0;
   const canRun = state.status === "ready" && !blocked && kept > 0 && (!high || phrase.trim() === CONFIRM_PHRASE);
   const what = preview.writes.map((w) => w.description).join("／") || "読み取りのみ";
@@ -241,7 +245,7 @@ export function ApprovalCard({
         <>
           {high && (
             <label style={{ display: "flex", flexDirection: "column", gap: t.space1, fontSize: 13, color: t.danger }}>
-              リスクが高い操作です。確認のため「{CONFIRM_PHRASE}」と入力してください。
+              {preview.writes.some((w) => w.risk === "high") ? "リスクが高い操作です" : "一度に10件を超える書き込みです"}。確認のため「{CONFIRM_PHRASE}」と入力してください。
               <TextField id="operate-confirm" value={phrase} onChange={setPhrase} placeholder={CONFIRM_PHRASE} testId="operate-confirm-input" />
             </label>
           )}

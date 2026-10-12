@@ -148,6 +148,7 @@ describe("<OperateDub> approval screen", () => {
     expect(within(card).getByTestId("operate-impact").textContent).toContain("書き換わります");
     expect(within(card).getByTestId("operate-reversible").textContent).toBe("できる");
     expect(within(card).getByTestId("operate-risk").textContent).toBe("中");
+    expect(within(card).getByTestId("operate-verify").textContent).toBe("実行後に読み直して反映を確かめます");
     expect(within(card).getByTestId("operate-env").textContent).toBe("接続先: staging");
     expect((within(card).getByTestId("operate-details") as HTMLDetailsElement).open).toBe(false);
     expect(card.textContent).not.toMatch(/\{"|"\}/);
@@ -185,6 +186,25 @@ describe("<OperateDub> approval screen", () => {
     expect(run.disabled).toBe(false);
     fireEvent.click(run);
     await waitFor(() => expect(operateClient.execute).toHaveBeenCalledWith("pv2", ["del#2"]));
+  });
+
+  it("asks for the phrase on a bulk write and says when a write cannot be read back", async () => {
+    const write = EVENT_PREVIEW.writes[0]!;
+    setup({
+      preview: {
+        ...EVENT_PREVIEW,
+        requiresPhrase: true,
+        writes: [{ ...write, unverifiable: "書き込み後に読める API が無い", calls: Array.from({ length: 11 }, (_, i) => ({ ...write.calls[0]!, callId: `upd#${i + 1}` })) }],
+      },
+    });
+    await send("全部の概要を差し替えて");
+    const card = await screen.findByTestId("operate-approval");
+    expect(within(card).getByTestId("operate-verify").textContent).toBe("検証不能（書き込み後に読める API が無い）");
+    expect(card.textContent).toContain("一度に10件を超える書き込みです");
+    const run = within(card).getByTestId("operate-execute") as HTMLButtonElement;
+    expect(run.disabled).toBe(true);
+    fireEvent.change(within(card).getByTestId("operate-confirm-input"), { target: { value: "実行" } });
+    expect(run.disabled).toBe(false);
   });
 
   it("やめる changes nothing and says so", async () => {

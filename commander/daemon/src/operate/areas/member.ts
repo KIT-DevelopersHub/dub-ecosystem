@@ -1,0 +1,176 @@
+// メンバー管理: the roster (member-service), login accounts (identity-roster /identity/users)
+// and each member's @developershub.jp receiving address (mail-gateway issued-addresses).
+// The address entries used to be a separate "mail" area; they are merged here because their
+// subject is a member, and a "mail" area would suggest mail sending/reading is reachable
+// (it is out of scope).
+import type { AreaSpec } from "../catalog-types.ts";
+import { read } from "./helpers.ts";
+
+const M = "member-service";
+const I = "identity-roster";
+const MAIL = "mail-gateway";
+const MEMBERS_VIEW = { keys: [], appLevel: { app: "members", level: "view" } } as const;
+const ROSTER = { keys: ["identity:read"] } as const;
+const MAIL_ADMIN = { keys: ["mail:admin"] } as const;
+
+export const MEMBER: AreaSpec = {
+  area: "member",
+  entries: [
+    read({
+      id: "members.overview",
+      area: "member",
+      path: "/members/overview",
+      service: M,
+      requires: MEMBERS_VIEW,
+      description: "メンバー名簿（チームと所属メンバー）を取得する",
+      hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・version",
+    }),
+    read({
+      id: "members.teams.list",
+      area: "member",
+      path: "/members/teams",
+      service: M,
+      requires: MEMBERS_VIEW,
+      description: "チームの一覧を取得する",
+      hint: "{ teams[] }。teams[].id・key・name・color・description・sortOrder",
+    }),
+    read({
+      id: "members.byIdentity",
+      area: "member",
+      path: "/members/people/by-identity/:identityUserId",
+      service: M,
+      requires: MEMBERS_VIEW,
+      description: "ログインアカウントに紐づく名簿のメンバーを取得する",
+      hint: "{ member | null }。紐付けが無ければ null",
+    }),
+    read({
+      id: "members.participation.list",
+      area: "member",
+      path: "/members/participation",
+      service: M,
+      requires: { keys: ["identity:read"], appLevel: { app: "participation", level: "view" } },
+      description: "届いた参加届の一覧を取得する",
+      hint: "{ participations[] }。id・name・schoolEmail・desiredTeamId・reviewState",
+    }),
+    read({
+      id: "members.participation.candidates",
+      area: "member",
+      path: "/members/participation/:id/candidates",
+      service: M,
+      requires: { keys: ["identity:read"], appLevel: { app: "participation", level: "view" } },
+      description: "参加届に一致しそうな名簿のメンバー候補を取得する",
+      hint: "{ candidates[] }。memberId・name・status・matchedBy",
+    }),
+    read({
+      id: "users.list",
+      area: "member",
+      path: "/identity/users",
+      service: I,
+      requires: ROSTER,
+      description: "ログインアカウントの一覧を取得する",
+      hint: "items[].id・displayName・email・status・roleIds",
+      query: ["status", "q", "role", "ids", "limit", "cursor"],
+    }),
+    read({
+      id: "users.get",
+      area: "member",
+      path: "/identity/users/:id",
+      service: I,
+      requires: { keys: [] },
+      description: "ログインアカウント1件と実効権限を取得する",
+      hint: "id・displayName・furigana・email・status・githubLogin・permissions[]",
+    }),
+    read({
+      id: "orgs.list",
+      area: "member",
+      path: "/identity/orgs",
+      service: I,
+      requires: ROSTER,
+      description: "組織の一覧を取得する",
+      hint: "items[].id・name",
+      query: ["limit", "cursor"],
+    }),
+    read({
+      id: "mail.issued.list",
+      area: "member",
+      path: "/mail/admin/email-routing/issued-addresses",
+      service: MAIL,
+      requires: MAIL_ADMIN,
+      description: "発行済みの受信アドレス一覧を取得する",
+      hint: "items[].id・localPart・address（@developershub.jp）・enabled",
+    }),
+    read({
+      id: "mail.roster.list",
+      area: "member",
+      path: "/mail/admin/email-routing/roster-addresses",
+      service: MAIL,
+      requires: MAIL_ADMIN,
+      description: "受信アドレスと転送先の対応一覧を取得する",
+      hint: "items[].address・destination・enabled",
+    }),
+    {
+      id: "mail.issued.create",
+      area: "member",
+      method: "POST",
+      path: "/mail/admin/email-routing/issued-addresses",
+      service: MAIL,
+      requires: MAIL_ADMIN,
+      kind: "write",
+      reversible: false,
+      risk: "mid",
+      description: "受信アドレス（@developershub.jp）を発行する",
+      hint: "body.localPart は @ より前。1件ずつ。発行済みなら409",
+      impact: "{count}件のアドレスが受信できるようになり、各アドレスに確認メールが1通届きます。送った確認メールは取り消せません（受信は後から停止できます）。",
+      body: { allowed: ["localPart"], required: ["localPart"] },
+      fieldLabels: { localPart: "アドレス" },
+      verify: {
+        read: "mail.issued.list",
+        findIn: "items",
+        findBy: ["localPart", "$body.localPart"],
+        expect: { enabled: true },
+      },
+    },
+    {
+      id: "mail.issued.setEnabled",
+      area: "member",
+      method: "PATCH",
+      path: "/mail/admin/email-routing/issued-addresses/:id",
+      service: MAIL,
+      requires: MAIL_ADMIN,
+      kind: "write",
+      reversible: true,
+      risk: "mid",
+      description: "発行済みアドレスの受信を停止／再開する",
+      hint: "body.enabled=false で停止、true で再開。params.id は mail.issued.list の items[].id",
+      impact: "{count}件のアドレスの受信可否が切り替わります。もう一度切り替えれば元に戻せます。",
+      body: { allowed: ["enabled"], required: ["enabled"] },
+      fieldLabels: { enabled: "受信" },
+      verify: {
+        read: "mail.issued.list",
+        findIn: "items",
+        findBy: ["id", "$params.id"],
+        expect: { enabled: "$body.enabled" },
+      },
+    },
+  ],
+  excluded: [
+    { service: M, route: "DELETE /members/teams/:id", reason: "チームを物理削除し、所属の紐付けも消える（不可逆）" },
+    { service: M, route: "DELETE /members/people/:id", reason: "アーカイブ後は API から見えず戻せない。チーム所属も物理削除される（不可逆）" },
+    { service: M, route: "POST /members/participation/:id/resolve", reason: "参加届の紐付け。取り消す API が無い（不可逆）" },
+    { service: M, route: "POST /members/participation", reason: "参加届を出す側の操作で、ボットが出す用途が無い" },
+    { service: M, route: "GET /members/me/mention-teams", reason: "ボット自身のメンション候補で、Dub のデータではない" },
+    { service: I, route: "POST /identity/users/:id/offboard", reason: "ロール割り当てを物理削除し、セッションも失効させる（手作業でしか戻せない）" },
+    { service: I, route: "POST /identity/users/sync-email-routing/preview", reason: "メール転送からの一括同期の下見。同期本体を開放しないので不要" },
+    { service: I, route: "POST /identity/users/sync-email-routing", reason: "名簿全体を一括で作成・無効化する一括操作（件数上限と1件ずつの読み直しが効かない）" },
+    { service: MAIL, route: "DELETE /mail/admin/email-routing/issued-addresses/:id", reason: "転送ルールを物理削除する。再発行は別 id になり確認メールが再送される（不可逆）" },
+  ],
+  pending: [
+    { service: M, route: "POST /members/teams" },
+    { service: M, route: "PATCH /members/teams/:id" },
+    { service: M, route: "POST /members/people" },
+    { service: M, route: "PATCH /members/people/:id" },
+    { service: M, route: "POST /members/people/:id/identity-link" },
+    { service: I, route: "POST /identity/users/invite" },
+    { service: I, route: "PATCH /identity/users/:id" },
+  ],
+};

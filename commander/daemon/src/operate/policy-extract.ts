@@ -62,3 +62,23 @@ export function extractPolicyRoutes(source: string): PolicyRoute[] {
   }
   return routes;
 }
+
+const GUARD_RE = /const\s+(\w+)\s*=\s*deps\.authz\.requireAppAccess\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)/g;
+const REGISTER_RE = /app\.(get|post|put|patch|delete)\(\s*"([^"]+)"\s*,\s*(\w+)\s*,/g;
+
+/**
+ * Same shape for a service that still gates in app.ts (`requireAppAccess(app, level)` bound
+ * to a const and passed as the route's first handler) instead of a policy-table.ts.
+ * Routes registered without such a guard are not returned.
+ */
+export function extractAppGuardRoutes(source: string): PolicyRoute[] {
+  const guards = new Map<string, { app: string; level: string }>();
+  for (const m of source.matchAll(GUARD_RE)) guards.set(m[1]!, { app: m[2]!, level: m[3]! });
+  const routes: PolicyRoute[] = [];
+  for (const m of source.matchAll(REGISTER_RE)) {
+    const guard = guards.get(m[3]!);
+    if (!guard) continue;
+    routes.push({ method: m[1]!.toUpperCase(), path: m[2]!, rule: `requireAppAccess(${guard.app}, ${guard.level})`, kind: "keys", keys: [], appLevel: guard });
+  }
+  return routes;
+}

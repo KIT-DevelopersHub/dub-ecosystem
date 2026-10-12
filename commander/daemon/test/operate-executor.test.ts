@@ -1,7 +1,7 @@
 // Executor behaviour against an in-memory fake api-gateway: read->write binding, the
 // placeholder/allow-list/cap gates, per-target outcomes, read-back verification, the
 // single-use preview, and the audit trail.
-import { OperateExecutor, MAX_WRITE_CALLS, type ExecutionResult, type Preview } from "../src/operate/executor.ts";
+import { OperateExecutor, MAX_WRITE_CALLS, PHRASE_WRITE_CALLS, type ExecutionResult, type Preview } from "../src/operate/executor.ts";
 import { GatewayClient } from "../src/operate/gateway.ts";
 import { parsePlan, type Plan } from "../src/operate/plan.ts";
 import { createOperateHandler } from "../src/operate/routes.ts";
@@ -131,6 +131,14 @@ describe("OperateExecutor — preview", () => {
     const { exec } = setup({ users: MAX_WRITE_CALLS + 5 });
     const p = await exec.preview(plan({ summary: "", steps: [{ id: "users", op: "users.list" }, { id: "w", op: "mail.issued.create", forEach: "users.items", body: { localPart: "{{item.email|localPart}}" } }] }));
     expect(p.blockers.join()).toMatch(/上限/);
+  });
+
+  it("asks for the confirmation phrase on a high risk or more than 10 writes", async () => {
+    const issue = { summary: "", steps: [{ id: "users", op: "users.list" }, { id: "w", op: "mail.issued.create", forEach: "users.items", where: [{ field: "id", op: "ne", value: "uT" }], body: { localPart: "{{item.email|localPart}}" } }] };
+    expect((await setup({ users: PHRASE_WRITE_CALLS }).exec.preview(plan(issue))).requiresPhrase).toBe(false);
+    expect((await setup({ users: PHRASE_WRITE_CALLS + 1 }).exec.preview(plan(issue))).requiresPhrase).toBe(true);
+    const unpublish = { summary: "", steps: [{ id: "n", op: "notifications.manage.list" }, { id: "d", op: "notifications.unpublish", forEach: "n.items", params: { id: "{{item.id}}" } }] };
+    expect((await setup().exec.preview(plan(unpublish))).requiresPhrase).toBe(true);
   });
 
   it("reports zero matching targets instead of silently doing nothing", async () => {

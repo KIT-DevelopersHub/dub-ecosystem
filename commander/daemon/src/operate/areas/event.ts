@@ -1,0 +1,116 @@
+// イベント (event-service). `/actions/:id` belongs to an event, so it lives here too.
+import type { AreaSpec } from "../catalog-types.ts";
+import { read } from "./helpers.ts";
+
+const S = "event-service";
+const VIEW = { keys: ["event:read"], appLevel: { app: "events", level: "view" } } as const;
+const EDIT = { keys: ["event:write"], appLevel: { app: "events", level: "edit" } } as const;
+
+export const EVENT: AreaSpec = {
+  area: "event",
+  entries: [
+    read({
+      id: "events.list",
+      area: "event",
+      path: "/events",
+      service: S,
+      requires: VIEW,
+      description: "イベントの一覧を取得する",
+      hint: "items[].id・title・phase・startsAt のみ。詳細は events.get",
+      query: ["limit", "cursor", "phase", "sort", "startsAfter", "includeArchived"],
+    }),
+    read({
+      id: "events.get",
+      area: "event",
+      path: "/events/:id",
+      service: S,
+      requires: VIEW,
+      description: "イベント1件の詳細を取得する",
+      hint: "description・phase・startsAt・endsAt・version・actions[]。更新前に必ずこれで version を読む",
+    }),
+    read({
+      id: "events.participants",
+      area: "event",
+      path: "/events/:id/participants",
+      service: S,
+      requires: VIEW,
+      description: "イベントの関係者（作成者とタスク担当者）を取得する",
+      hint: "{ userIds: string[] }",
+    }),
+    read({
+      id: "events.details.get",
+      area: "event",
+      path: "/events/:id/details",
+      service: S,
+      requires: VIEW,
+      description: "イベントの詳細情報（会場・タイムテーブル・登壇者など）を取得する",
+      hint: "{ data: { overview, venue, access, capacity, belongings, budget, operations, memo, schedule[], speakers[], sponsors[], checklist[], links[], contacts[] }, version }。version 0 は未保存",
+    }),
+    read({
+      id: "events.sectionLayout.get",
+      area: "event",
+      path: "/events/:id/section-layout",
+      service: S,
+      requires: VIEW,
+      description: "イベント詳細の項目の並び順と非表示設定を取得する",
+      hint: "{ data: { order: string[], hidden: string[] }, version }",
+    }),
+    read({
+      id: "events.pageLayout.get",
+      area: "event",
+      path: "/events/:id/page-layout",
+      service: S,
+      requires: VIEW,
+      description: "イベントページのレイアウトを取得する",
+      hint: "{ data: { version, blocks[] }, version }。外側の version がロック用",
+    }),
+    read({
+      id: "events.actions.list",
+      area: "event",
+      path: "/events/:id/actions",
+      service: S,
+      requires: VIEW,
+      description: "イベントのアクション（やること）一覧を取得する",
+      hint: "items[].id・kind・title・sortOrder・version",
+      query: ["limit", "cursor", "kind", "includeArchived"],
+    }),
+    read({
+      id: "actions.get",
+      area: "event",
+      path: "/actions/:id",
+      service: S,
+      requires: VIEW,
+      description: "アクション1件を取得する",
+      hint: "id・eventId・kind・title・sortOrder・version",
+    }),
+    {
+      id: "events.update",
+      area: "event",
+      method: "PATCH",
+      path: "/events/:id",
+      service: S,
+      requires: EDIT,
+      kind: "write",
+      reversible: true,
+      risk: "mid",
+      description: "イベントのタイトル・概要・日時を更新する",
+      hint: "body.version は直前に events.get で読んだ値。description が概要",
+      impact: "{count}件のイベントの表示内容が書き換わり、メンバー全員の画面に反映されます。変更前の値で再更新すれば元に戻せます。",
+      body: { allowed: ["title", "description", "startsAt", "endsAt", "version"], required: ["version"] },
+      fieldLabels: { title: "タイトル", description: "概要", startsAt: "開始日時", endsAt: "終了日時" },
+      verify: { read: "events.get", params: { id: "$params.id" }, expectBody: { except: ["version"] } },
+    },
+  ],
+  excluded: [
+    { service: S, route: "DELETE /events/:id", reason: "アーカイブすると元に戻す API が無く、紐づくタスクも一括でアーカイブされる（不可逆）" },
+    { service: S, route: "DELETE /actions/:id", reason: "アーカイブすると元に戻す API が無い（不可逆）" },
+  ],
+  pending: [
+    { service: S, route: "POST /events" },
+    { service: S, route: "PUT /events/:id/details" },
+    { service: S, route: "PUT /events/:id/section-layout" },
+    { service: S, route: "PUT /events/:id/page-layout" },
+    { service: S, route: "POST /events/:id/actions" },
+    { service: S, route: "PATCH /actions/:id" },
+  ],
+};

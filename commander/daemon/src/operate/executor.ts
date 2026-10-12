@@ -5,10 +5,12 @@
 //   - only catalog routes are callable (parsePlan rejects anything else);
 //   - read results are bound into later steps; a value still looking like a placeholder
 //     blocks the preview, so `<EVENT_ID>` can never reach the API;
-//   - at most MAX_WRITE_CALLS writes per execution (bulk work must be narrowed first);
+//   - at most MAX_WRITE_CALLS writes per execution (bulk work must be narrowed first), and
+//     more than PHRASE_WRITE_CALLS of them need the confirmation phrase like a high risk;
 //   - a preview executes at most once and expires;
-//   - every write is verified by re-reading it, and the verdict is always one of
-//     反映できた / 一部できなかった / できなかった with per-target outcomes;
+//   - every write is verified by re-reading it (or, for the few no read can confirm, says
+//     so as 検証不能), and the verdict is always one of 反映できた / 一部できなかった /
+//     できなかった with per-target outcomes;
 //   - every execution is appended to the audit log.
 
 import { randomUUID } from "node:crypto";
@@ -17,6 +19,8 @@ import { describeFailure, environmentLabel, type GatewayClient, type GatewayResp
 import { findPlaceholders, getPath, matchesWhere, resolveValue, type Plan } from "./plan.ts";
 
 export const MAX_WRITE_CALLS = 20;
+/** More writes than this in one execution count as a bulk write (high risk). */
+export const PHRASE_WRITE_CALLS = 10;
 export const MAX_READ_CALLS = 30;
 export const PREVIEW_TTL_MS = 30 * 60_000;
 const SAMPLE_CHARS = 1500;
@@ -43,6 +47,8 @@ export interface PreviewWrite {
   description: string;
   impact: string;
   fieldLabels?: Record<string, string>;
+  /** Set when no read can confirm this write: the reason, shown as 検証不能. */
+  unverifiable?: string;
   calls: PreviewCall[];
 }
 
@@ -64,10 +70,13 @@ export interface Preview {
   reads: ReadSummary[];
   writes: PreviewWrite[];
   blockers: string[];
+  /** A high-risk write or a bulk write: the operator must type the confirmation phrase. */
+  requiresPhrase: boolean;
   expiresAt: string;
 }
 
-export type CallOutcome = "ok" | "unverified" | "failed" | "skipped";
+/** accepted = the API took it, but the entry is 検証不能 so nothing re-read it. */
+export type CallOutcome = "ok" | "accepted" | "unverified" | "failed" | "skipped";
 export interface CallResult {
   callId: string;
   stepId: string;
@@ -223,6 +232,7 @@ export class OperateExecutor {
         description: entry.description,
         impact: entry.impact.replace("{count}", String(calls.length)),
         ...(entry.fieldLabels ? { fieldLabels: entry.fieldLabels } : {}),
+        ...(entry.unverifiable ? { unverifiable: entry.unverifiable } : {}),
         calls,
       });
     }
@@ -243,6 +253,7 @@ export class OperateExecutor {
       reads,
       writes,
       blockers,
+      requiresPhrase: writes.some((w) => w.risk === "high") || writeCalls > PHRASE_WRITE_CALLS,
       expiresAt: new Date(expires).toISOString(),
     };
     if (writes.length && !blockers.length) this.previews.set(preview.previewId, { preview, expires });
@@ -271,6 +282,13 @@ export class OperateExecutor {
           continue;
         }
         const res = await this.call(c);
+        if (entry.unverifiable) {
+          results.push(
+            res.ok ? { ...base, outcome: "accepted", message: `受け付けられました（検証不能: ${entry.unverifiable}）` }
+            : { ...base, outcome: "failed", message: isAmbiguous(res.status) ? `${describeFailure(res)}。検証不能のため反映されたかは分かりません` : describeFailure(res) },
+          );
+          continue;
+        }
         const ambiguous = !res.ok && isAmbiguous(res.status);
         const result: CallResult = res.ok
           ? { ...base, outcome: "ok", message: "反映を確認しました" }
@@ -297,11 +315,13 @@ export class OperateExecutor {
     }
 
     const done = results.filter((r) => r.outcome !== "skipped");
-    const ok = done.filter((r) => r.outcome === "ok").length;
+    const accepted = done.filter((r) => r.outcome === "accepted").length;
+    const ok = done.filter((r) => r.outcome === "ok").length + accepted;
     const ng = done.length - ok;
     const verdict: Verdict = done.length > 0 && ng === 0 ? "done" : ok > 0 ? "partial" : "failed";
     const headline =
-      verdict === "done" ? `反映できました（${ok}件すべて読み直して確認済み）`
+      verdict === "done" && accepted ? `反映できました（${ok - accepted}件は読み直して確認済み・${accepted}件は検証不能）`
+      : verdict === "done" ? `反映できました（${ok}件すべて読み直して確認済み）`
       : verdict === "partial" ? `一部できませんでした（反映 ${ok}件／未反映 ${ng}件）`
       : `できませんでした（${done.length}件すべて未反映）`;
     const result: ExecutionResult = { previewId, verdict, headline, results, executedAt: new Date(this.now()).toISOString() };
