@@ -3,12 +3,12 @@
   "slug": "participation-unlink",
   "worker": "dub-demo-participation-unlink",
   "url": "https://dub-demo-participation-unlink.developershub-site.workers.dev",
-  "deployedSha": "300b3c2f",
+  "deployedSha": "1d93ebfb",
   "branch": "feat/participation-unlink",
   "actor": "ko-tarou",
   "markers": ["participation-unlink-confirm"],
   "live": true,
-  "verifiedAt": "2026-10-12T13:49:24Z",
-  "updatedAt": "2026-10-12T13:49:24Z",
-  "note": "参加届 紐付け解除 (feat/participation-unlink)"
+  "verifiedAt": "2026-10-12T13:57:52Z",
+  "updatedAt": "2026-10-12T13:57:52Z",
+  "note": "参加届 紐付け解除 (ボタン secondary 化)"
 }
