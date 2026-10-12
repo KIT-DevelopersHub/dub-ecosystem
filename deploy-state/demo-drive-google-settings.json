@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "drive-google-settings",
+  "worker": "dub-demo-drive-google-settings",
+  "url": "https://dub-demo-drive-google-settings.developershub-site.workers.dev",
+  "deployedSha": "56307358",
+  "branch": "feat/driveshare-google-account-settings",
+  "actor": "ko-tarou",
+  "markers": ["Drive共有の設定"],
+  "live": true,
+  "verifiedAt": "2026-10-12T14:43:31Z",
+  "updatedAt": "2026-10-12T14:43:31Z",
+  "note": "Google アカウント設定を Drive共有へ移動"
+}
