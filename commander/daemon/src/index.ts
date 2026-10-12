@@ -20,6 +20,8 @@
 //   COMMANDER_DUB_API_TOKEN     bot session token, OR
 //   COMMANDER_DUB_BOT_EMAIL / COMMANDER_DUB_BOT_PASSWORD  bot login (re-login on 401)
 //   COMMANDER_OPERATE_AUDIT_LOG JSONL audit file (default ~/.commander/operate-audit.jsonl)
+//   COMMANDER_OPERATE_PROTECTED_ROLE_IDS / _USER_IDS  comma lists no plan may target (the
+//                               owner's and the bot's own); roles default to role_sys_admin
 //   COMMANDER_PERMISSION_MODE   --permission-mode for headless claude (default
 //                               "acceptEdits" so Edit/Write work non-interactively; "" omits)
 
@@ -34,6 +36,8 @@ import type { DaemonConfig } from "./types.ts";
 const DEFAULT_CLAUDE_CONFIG_DIR = fileURLToPath(
   new URL("../../.claude-home", import.meta.url),
 );
+
+const idList = (v: string): string[] => v.split(",").map((x) => x.trim()).filter(Boolean);
 
 function loadConfig(): DaemonConfig {
   const isolateEnv = !/^(0|false|no)$/i.test(
@@ -72,6 +76,14 @@ function loadConfig(): DaemonConfig {
       baseUrl: apiBase,
       auditLogPath:
         process.env.COMMANDER_OPERATE_AUDIT_LOG || join(homedir(), ".commander", "operate-audit.jsonl"),
+      protectedIds: {
+        roles: idList(process.env.COMMANDER_OPERATE_PROTECTED_ROLE_IDS ?? "role_sys_admin"),
+        users: idList(process.env.COMMANDER_OPERATE_PROTECTED_USER_IDS ?? ""),
+      },
+      // "Dubを操作" reaches the Commander board through the same service the runs persist to.
+      ...(config.serviceUrl
+        ? { commander: { baseUrl: config.serviceUrl.replace(/\/+$/, ""), ...(config.serviceToken ? { token: config.serviceToken } : {}) } }
+        : {}),
     };
     if (process.env.COMMANDER_DUB_API_TOKEN) config.operate.token = process.env.COMMANDER_DUB_API_TOKEN;
     if (process.env.COMMANDER_DUB_BOT_EMAIL) config.operate.email = process.env.COMMANDER_DUB_BOT_EMAIL;

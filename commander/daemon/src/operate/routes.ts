@@ -8,13 +8,17 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { CATALOG } from "./catalog.ts";
-import { OperateExecutor, type AuditSink } from "./executor.ts";
-import { environmentLabel, GatewayClient, type Fetch, type GatewayConfig } from "./gateway.ts";
+import { OperateExecutor, type AuditSink, type ProtectedIds } from "./executor.ts";
+import { CommanderServiceClient, environmentLabel, GatewayClient, type CommanderServiceConfig, type Fetch, type GatewayConfig } from "./gateway.ts";
 import { parsePlan } from "./plan.ts";
 
 export interface OperateConfig extends GatewayConfig {
   /** JSONL file every execution is appended to. */
   auditLogPath: string;
+  /** Roles / users no plan may touch (the owner's and the bot's own). */
+  protectedIds?: ProtectedIds;
+  /** The local commander-service (catalog area "commander"); unset = those steps are blocked. */
+  commander?: CommanderServiceConfig;
 }
 
 export interface OperateReply {
@@ -35,7 +39,13 @@ const NOT_CONFIGURED = "Dub API の接続先が未設定です（daemon の COMM
 
 export function createOperateHandler(config: OperateConfig | undefined, deps: { fetch?: Fetch; audit?: AuditSink } = {}) {
   const executor = config
-    ? new OperateExecutor(new GatewayClient(config, deps.fetch), deps.audit ?? fileAuditSink(config.auditLogPath))
+    ? new OperateExecutor(
+        new GatewayClient(config, deps.fetch),
+        deps.audit ?? fileAuditSink(config.auditLogPath),
+        Date.now,
+        config.protectedIds,
+        config.commander ? new CommanderServiceClient(config.commander, deps.fetch) : undefined,
+      )
     : null;
 
   return async function handle(method: string, pathname: string, rawBody: string): Promise<OperateReply> {

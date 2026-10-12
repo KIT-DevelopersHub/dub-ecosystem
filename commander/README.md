@@ -70,6 +70,8 @@ node --experimental-strip-types commander/daemon/src/index.ts
 | `COMMANDER_DUB_API_BASE` | (空) | 「Dubを操作」の接続先 api-gateway origin。未設定なら実行系 `/operate/*` は 503 |
 | `COMMANDER_DUB_BOT_EMAIL` / `COMMANDER_DUB_BOT_PASSWORD` | (空) | 専用ボットユーザーの認証（401 で 1 回だけ再ログイン）。`COMMANDER_DUB_API_TOKEN` で直接トークン指定も可。`COMMANDER_DUB_*` は spawn する claude に渡さない |
 | `COMMANDER_OPERATE_AUDIT_LOG` | `~/.commander/operate-audit.jsonl` | 「Dubを操作」の実行監査ログ（JSONL） |
+| `COMMANDER_OPERATE_PROTECTED_ROLE_IDS` | `role_sys_admin` | 「Dubを操作」が編集・付与できないロール id（カンマ区切り）。設定すると既定を置き換えるので `role_sys_admin` とボット自身のロール id を両方入れる |
+| `COMMANDER_OPERATE_PROTECTED_USER_IDS` | (空) | 「Dubを操作」がロールの付け外し・アカウント変更をできないユーザー id（カンマ区切り）。オーナーとボット自身の id を入れる |
 
 ### env 分離（個人 `~/.claude` を読ませない）
 
