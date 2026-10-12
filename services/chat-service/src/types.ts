@@ -30,6 +30,7 @@ export interface Channel {
   version: number;
   createdAt: common.ISODateTime;
   updatedAt: common.ISODateTime;
+  memberIds?: common.UserId[]; // type='dm' only: participants, so the FE can label a DM by the other side
 }
 
 export interface ChannelMember {

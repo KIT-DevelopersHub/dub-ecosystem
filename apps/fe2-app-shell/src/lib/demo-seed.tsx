@@ -1309,6 +1309,7 @@ interface DemoChatChannel {
   topic: string | null;
   eventId: string | null;
   memberCount: number;
+  memberIds?: string[]; // dm only: participants (the FE labels a DM by the other side)
 }
 
 function createChatStore() {
@@ -1341,7 +1342,11 @@ function createChatStore() {
   const eventChannels: DemoChatChannel[] = [
     { id: "chn_evt_conf", type: "event", name: "北陸itカンファレンス", topic: "北陸ITカンファレンス2026 運営チャネル", eventId: "evt_1", memberCount: 18 },
   ];
-  const all = [...overall, ...teamChannels, ...roleChannels, ...eventChannels];
+  // ダイレクト: one seeded 1:1 DM so the section and a DM timeline are visible at once.
+  const dmChannels: DemoChatChannel[] = [
+    { id: "chn_dm_bob", type: "dm", name: "DM", topic: null, eventId: null, memberCount: 2, memberIds: [ME_ID, "usr_bob"] },
+  ];
+  const all = [...overall, ...teamChannels, ...roleChannels, ...eventChannels, ...dmChannels];
 
   const toWire = (c: DemoChatChannel) => ({
     id: c.id,
@@ -1350,8 +1355,10 @@ function createChatStore() {
     name: c.name,
     topic: c.topic,
     eventId: c.eventId,
+    visibility: c.type === "dm" ? "private" : "public",
     archived: false,
     memberCount: c.memberCount,
+    ...(c.memberIds ? { memberIds: c.memberIds } : {}),
     version: 1,
     createdAt: CH_TS,
     updatedAt: CH_TS,
@@ -1403,8 +1410,13 @@ function createChatStore() {
   // its card in place; ids are minted ascending so they sort after the seed.
   const posted = new Map<string, ReturnType<typeof msg>[]>();
   let postSeq = 0;
+  const dmMessages = [
+    msg({ id: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", body: "LP の文言、確認してもらえますか？急ぎではないです 🙏", createdAt: "2026-08-01T01:00:00.000Z" }),
+    msg({ id: "msg_01SEEDDMB0000000000000002", channelId: "chn_dm_bob", authorId: ME_ID, body: "了解です、今日中に見ます！", createdAt: "2026-08-01T01:03:00.000Z" }),
+  ];
   const messagesOf = (channelId: string | null) => [
     ...(channelId === "chn_general" ? generalMessages : []),
+    ...(channelId === "chn_dm_bob" ? dmMessages : []),
     ...(channelId ? (posted.get(channelId) ?? []) : []),
   ];
 
@@ -1428,10 +1440,34 @@ function createChatStore() {
       const target = url.searchParams.get("url") ?? "";
       return json({ url: target, preview: mockUnfurl(target) });
     }
+    if (method === "POST" && pathname === "/api/v1/chat/channels") {
+      // DM only (channel creation is otherwise not demoed). Same participant set ->
+      // the existing DM, mirroring chat-service's dm_key dedup.
+      const req = (body ?? {}) as { type?: string; name?: string; memberIds?: string[] };
+      if (req.type !== "dm") return notFound(`POST ${pathname} (type=${String(req.type)})`);
+      const memberIds = [...new Set([currentAccount().id, ...(req.memberIds ?? [])])];
+      const key = [...memberIds].sort().join(",");
+      const existing = all.find((c) => c.type === "dm" && [...(c.memberIds ?? [])].sort().join(",") === key);
+      if (existing) return json(toWire(existing));
+      const created: DemoChatChannel = {
+        id: `chn_dm_${Date.now().toString(36)}`,
+        type: "dm",
+        name: req.name || "DM",
+        topic: null,
+        eventId: null,
+        memberCount: memberIds.length,
+        memberIds,
+      };
+      all.push(created);
+      byId.set(created.id, created);
+      return json(toWire(created), 201);
+    }
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
       const eventId = url.searchParams.get("eventId");
-      const list = eventId ? all.filter((c) => c.eventId === eventId) : all;
+      const me = currentAccount().id;
+      const visible = all.filter((c) => c.type !== "dm" || (c.memberIds ?? []).includes(me)); // DMs: participants only
+      const list = eventId ? visible.filter((c) => c.eventId === eventId) : visible;
       return json(list.map(toWire)); // raw array (not Paginated) per fe6 contract
     }
     if (method === "GET" && pathname === "/api/v1/chat/unread") {
@@ -1460,7 +1496,10 @@ function createChatStore() {
       // fe6 contract) so opening a channel does not 404 those companion fetches.
       const mem = /^\/api\/v1\/chat\/channels\/([^/]+)\/members$/.exec(pathname);
       if (mem && method === "GET") {
-        return json([{ channelId: decodeURIComponent(mem[1]!), userId: ME_ID, role: "admin", joinedAt: CH_TS }]);
+        const channelId = decodeURIComponent(mem[1]!);
+        const dmMembers = byId.get(channelId)?.memberIds;
+        if (dmMembers) return json(dmMembers.map((userId) => ({ channelId, userId, role: "member", joinedAt: CH_TS })));
+        return json([{ channelId, userId: ME_ID, role: "admin", joinedAt: CH_TS }]);
       }
       const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
       if (pin && method === "GET") return json([]);

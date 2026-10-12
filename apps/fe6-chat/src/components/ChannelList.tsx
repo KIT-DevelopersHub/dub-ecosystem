@@ -3,10 +3,10 @@
 // badge. "New channel" (+) is gated by can("chat:create") upstream via canCreate.
 // Slack-style information design — built from @dub/ui + own glyphs, no Slack assets.
 import { useState } from "react";
-import { Icon } from "@dub/ui";
+import { Icon, Skeleton } from "@dub/ui";
 import type { common } from "@dub/types";
 import type { Channel, ChannelType } from "../api/contract";
-import { groupChannels } from "../lib/channel-group";
+import { groupChannels, type ChannelGroup } from "../lib/channel-group";
 import { getPresence, type Presence } from "../lib/presence";
 import type { UnreadMap } from "../store/unread";
 import styles from "../styles/chat.module.css";
@@ -19,6 +19,11 @@ export interface ChannelListProps {
   workspaceName?: string;
   onSelect: (channelId: common.ChannelId) => void;
   onCreate?: () => void;
+  // DM row label ("the other side"); null = still resolving -> skeleton. Defaults to name.
+  labelOf?: (channel: Channel) => string | null;
+  // New-DM (+) on the ダイレクト section. Shown even with no DMs yet, so the first
+  // conversation can be started from the sidebar.
+  onNewDm?: () => void;
   // Set only when rendered inside the mobile nav drawer (P21) — adds a close (X)
   // affordance next to the workspace name so the drawer can be dismissed without
   // picking a channel first (backdrop-tap / Esc already close it too).
@@ -37,9 +42,13 @@ export function ChannelList({
   workspaceName = "DevHub",
   onSelect,
   onCreate,
+  labelOf = (c) => c.name,
+  onNewDm,
   onCloseMobile,
 }: ChannelListProps) {
-  const groups = groupChannels(channels);
+  const grouped = groupChannels(channels);
+  const groups: ChannelGroup[] =
+    onNewDm && !grouped.some((g) => g.type === "dm") ? [...grouped, { type: "dm", label: "ダイレクト", channels: [] }] : grouped;
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggle = (t: ChannelType) => setCollapsed((c) => ({ ...c, [t]: !c[t] }));
 
@@ -98,6 +107,18 @@ export function ChannelList({
                     ＋
                   </button>
                 )}
+                {isDm && onNewDm && (
+                  <button
+                    type="button"
+                    className={styles.sectionAdd}
+                    onClick={onNewDm}
+                    aria-label="ダイレクトメッセージを開始"
+                    title="ダイレクトメッセージを開始"
+                    data-testid="fe6-dm-new"
+                  >
+                    ＋
+                  </button>
+                )}
               </div>
 
               {!isCollapsed &&
@@ -107,6 +128,7 @@ export function ChannelList({
                   const hasUnread = count > 0;
                   const mentioned = !!u?.mentioned;
                   const isActive = c.id === activeChannelId;
+                  const label = labelOf(c);
                   return (
                     <button
                       key={c.id}
@@ -128,7 +150,9 @@ export function ChannelList({
                           "#"
                         )}
                       </span>
-                      <span className={styles.channelName}>{c.name}</span>
+                      <span className={styles.channelName}>
+                        {label ?? <Skeleton variant="text" width="6em" testId="fe6-channel-label-loading" />}
+                      </span>
                       {mentioned ? (
                         <span className={styles.mentionBadge} data-testid="fe6-channel-unread-badge">
                           {count}
