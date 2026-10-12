@@ -264,3 +264,16 @@ describe("catalog partition — 詳細設定 vs その他", () => {
     expect(row.level).toBe("view");
   });
 });
+
+describe("Drive共有 の「設定」ボタン — 細かい権限のトグル", () => {
+  it("both keys are plain toggles in Drive共有's 詳細設定 (never in その他)", () => {
+    const toggles = policy.appDetailPermissions("driveshare").map((e) => e.key);
+    expect(toggles).toContain("drive:settings_view");
+    expect(toggles).toContain("drive:settings_edit");
+    expect(policy.otherPermissions().map((e) => e.key)).not.toContain("drive:settings_edit");
+  });
+
+  it("settings_edit implies settings_view after normalisation", () => {
+    expect(policy.normalizeAppAccessKeys(["drive:settings_edit"])).toEqual(["drive:settings_edit", "drive:settings_view"]);
+  });
+});

@@ -116,6 +116,17 @@ export interface CreateLpLinkInput {
   slug: string;
 }
 
+/** hokuriku-it-conf.com でいま公開している版（リモートフラグ・デプロイ不要で切り替わる）。 */
+export interface LpPublishState {
+  site: string;
+  /** 公開中の版 id（例 "v3.4"）。 */
+  versionId: string;
+  /** 公開に切り替えられる版 id の一覧。 */
+  versions: string[];
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
 export interface LpApi {
   /** Aggregated visit counters for a day range (app:lp:view). */
   getStats(query: LpStatsQuery): Promise<LpStats>;
@@ -129,6 +140,10 @@ export interface LpApi {
   createLink(input: CreateLpLinkInput, query: LpLinksQuery): Promise<LpLinkSummary>;
   /** Pause / resume an issued link (app:lp:edit). Counters are never deleted. */
   setLinkActive(input: { id: string; active: boolean }, query: LpLinksQuery): Promise<LpLinkSummary>;
+  /** Which version is live on the public site (app:lp:view). */
+  getPublish(): Promise<LpPublishState>;
+  /** Switch the live version (app:lp:edit + lp:publish). Unknown version → 400. */
+  setPublish(input: { versionId: string }): Promise<LpPublishState>;
 }
 
 const BASE = "/api/v1/lp";
@@ -171,5 +186,8 @@ export function createLpApi(api: ApiClient): LpApi {
         query: { from: query.from, to: query.to },
         body: { active },
       }),
+    getPublish: () => api.request<LpPublishState>({ method: "GET", path: `${BASE}/publish` }),
+    setPublish: (input) =>
+      api.request<LpPublishState, { versionId: string }>({ method: "POST", path: `${BASE}/publish`, body: input }),
   };
 }

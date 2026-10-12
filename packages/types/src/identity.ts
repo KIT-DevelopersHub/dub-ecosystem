@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (63 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (67 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -62,6 +62,10 @@ export const PERMISSION_CATALOG = [
   { key: "github:admin", name: "Administer GitHub", description: "Manage the GitHub integration, tokens and webhooks", domain: "github", dangerous: true },
   { key: "drive:read", name: "Read Drive", description: "View/search Google Drive metadata and download content", domain: "drive", dangerous: false },
   { key: "drive:write", name: "Write Drive", description: "Upload/update Google Drive files", domain: "drive", dangerous: false },
+  // Drive共有 の「設定」(the Google accounts it acts as). Two toggles in Drive共有's 詳細設定;
+  // settings_edit IMPLIES settings_view (policy.normalizeAppAccessKeys).
+  { key: "drive:settings_view", name: "View Drive共有 settings", description: "Open Drive共有's settings and see its Google accounts (read-only)", domain: "drive", dangerous: false },
+  { key: "drive:settings_edit", name: "Edit Drive共有 settings", description: "Add/switch/remove the Google accounts Drive共有 acts as (implies view)", domain: "drive", dangerous: true },
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
   // ── per-app access tier (domain "app") — one graded pair per launcher app ──────
   { key: "app:events:view", name: "Open イベント app", description: "Open and view the イベント app", domain: "app", dangerous: false },
@@ -88,13 +92,14 @@ export const PERMISSION_CATALOG = [
   { key: "app:driveshare:edit", name: "Edit in Drive共有 app", description: "Manage sharing inside the Drive共有 app (implies view)", domain: "app", dangerous: false },
   { key: "app:admin:view", name: "Open 管理 app", description: "Open and view the 管理 app", domain: "app", dangerous: false },
   { key: "app:admin:edit", name: "Edit in 管理 app", description: "Act inside the 管理 app (implies view)", domain: "app", dangerous: false },
+  { key: "lp:publish", name: "Publish LP version", description: "Switch which LP version is live on the public conference site", domain: "lp", dangerous: true },
   { key: "app:lp:view", name: "Open LP管理 app", description: "Open and view the LP管理 app", domain: "app", dangerous: false },
   { key: "app:lp:edit", name: "Edit in LP管理 app", description: "Manage LP versions inside the LP管理 app (implies view)", domain: "app", dangerous: false },
   { key: "app:commander:view", name: "Open Commander app", description: "Open and view the Commander app (drives the local Claude Code exec bridge)", domain: "app", dangerous: true },
   { key: "app:commander:edit", name: "Edit in Commander app", description: "Run commands / advance phases inside the Commander app (implies view)", domain: "app", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 63 keys (open `${string}:${string}` template retired).
+// Closed union of the 65 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

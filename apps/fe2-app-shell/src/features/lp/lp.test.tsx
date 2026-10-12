@@ -43,6 +43,8 @@ const linksStubs = {
   listLinks: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   createLink: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   setLinkActive: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  getPublish: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  setPublish: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
 };
 
 const UNCONFIGURED_SITE = {

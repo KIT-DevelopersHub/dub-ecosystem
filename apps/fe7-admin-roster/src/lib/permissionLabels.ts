@@ -20,6 +20,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   chat: "チャット",
   usage: "使用量・課金ガード",
   infra: "インフラ・デプロイ",
+  lp: "LP管理",
   audit: "監査ログ",
   github: "GitHub 連携",
   drive: "Google Drive",
@@ -81,6 +82,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "infra:deploy": { label: "デプロイの実行", description: "サイトのデプロイ（公開・反映）を実行できるようになります。" },
   "infra:dns": { label: "DNS の変更", description: "ドメインの DNS レコードを変更できるようになります。" },
   "infra:admin": { label: "インフラの管理", description: "サイトの新規登録や、操作を許可するドメインの管理ができるようになります。" },
+  "lp:publish": { label: "公開サイトの切り替え", description: "オンにすると、LP管理から hokuriku-it-conf.com に公開する版を切り替えられます。" },
   "audit:read": { label: "監査ログの閲覧", description: "誰が何をしたかの監査ログを検索・確認できるようになります。" },
   "github:read": { label: "GitHub の閲覧", description: "GitHub の同期状態・リポジトリ・プルリクエストを閲覧できるようになります。" },
   "github:write": { label: "GitHub の更新", description: "同期を通じて GitHub 側のリソースを作成・更新できるようになります。" },
@@ -88,6 +90,8 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "github:admin": { label: "GitHub 連携の管理", description: "GitHub 連携の設定・トークン・Webhook を管理できるようになります。" },
   "drive:read": { label: "Drive の閲覧", description: "Google Drive のファイル情報の閲覧・検索とダウンロードができるようになります。" },
   "drive:write": { label: "Drive の更新", description: "Google Drive へのファイルのアップロード・更新ができるようになります。" },
+  "drive:settings_view": { label: "Drive共有の設定の閲覧", description: "Drive共有の「設定」を開き、使っている Google アカウントを確認できるようになります。" },
+  "drive:settings_edit": { label: "Drive共有の設定の変更", description: "Drive共有が使う Google アカウントの追加・切り替え・削除ができるようになります（保存すると閲覧も ON になります）。" },
   "webhook:read": { label: "Webhook の閲覧", description: "Webhook の配信履歴を検索・確認できるようになります。" },
   ...Object.fromEntries(
     APP_LABELS.flatMap((a) => [

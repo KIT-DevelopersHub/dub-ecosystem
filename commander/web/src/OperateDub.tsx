@@ -205,7 +205,7 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
     <div style={{ display: "flex", flexDirection: "column", gap: t.space4 }}>
       <div style={{ ...card, background: t.sunken, borderColor: t.borderStrong }}>
         <p style={{ margin: 0, fontSize: 13, color: t.textMuted, lineHeight: 1.7 }}>
-          Dub のデータを自然言語で操作します。使えるのは<b>イベント編集・メール発行・通知</b>の許可された API だけです。
+          Dub のデータを自然言語で操作します。使えるのは<b>許可された API だけ</b>です（物理削除は含みません。取り消せない操作は確認画面に「取り消し: できない」と出ます）。
           書き込みは必ず変更内容を確認してから実行し、実行後に読み直して結果をお知らせします。
         </p>
         {catalogError && (

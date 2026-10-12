@@ -68,7 +68,7 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     const apps = screen.getByTestId("fe7-app-access-table");
     const other = screen.getByTestId("fe7-other-permissions");
     expect(within(apps).getByRole("heading", { name: "アプリのアクセス権" })).toBeInTheDocument();
-    expect(within(other).getByRole("heading", { name: "その他（どのアプリにも属さない権限・設定）" })).toBeInTheDocument();
+    expect(within(other).getByRole("heading", { name: "その他（どのアプリにも属さない権限）" })).toBeInTheDocument();
     // DOM 順で アプリのアクセス権 → その他（節の入れ替えを検知する）
     const sections = [...editor.children];
     expect(sections.indexOf(apps)).toBeLessThan(sections.indexOf(other));
@@ -124,6 +124,17 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     await user.click(screen.getByTestId("fe7-app-name-gantt"));
     expect(screen.getByTestId("fe7-app-dialog-no-detail")).toBeInTheDocument();
     expect(screen.getByTestId("fe7-app-detail-count-mail")).toBeInTheDocument(); // mail HAS details
+  });
+
+  it("LP管理 の詳細に「公開サイトの切り替え」(lp:publish) が危険フラグ付きで出る", async () => {
+    const user = userEvent.setup();
+    setup(["app:lp:view", "app:lp:edit"]);
+    await user.click(screen.getByTestId("fe7-app-name-lp"));
+    const dialog = screen.getByTestId("fe7-app-dialog");
+    expect(within(dialog).getByText("公開サイトの切り替え")).toBeInTheDocument();
+    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-lp:publish") as HTMLInputElement).checked).toBe(false);
+    expect(within(dialog).getByTestId("fe7-app-dialog-danger-lp:publish")).toBeInTheDocument();
+    expect(screen.getByTestId("fe7-app-detail-count-lp").textContent).toBe("0 / 1");
   });
 
   it("the dialog can also change the level (same policy helper as the table)", async () => {
@@ -268,5 +279,15 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     setup(["app:admin:view", "app:admin:edit", "identity:admin"], { lockedKeys: ["app:admin:view", "app:admin:edit", "identity:admin"] });
     expect((screen.getByTestId("fe7-app-level-admin-none") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId("fe7-app-level-mail-none") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("Drive共有の「設定」ボタンの閲覧・変更は、細かい権限のトグルとして他と並ぶ", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup(["app:driveshare:view", "app:driveshare:edit", "drive:read"]);
+    await user.click(screen.getByTestId("fe7-app-name-driveshare"));
+    const dialog = screen.getByTestId("fe7-app-dialog");
+    expect(within(dialog).getByText("Drive共有の設定の閲覧")).toBeInTheDocument();
+    await user.click(within(dialog).getByTestId("fe7-app-dialog-toggle-drive:settings_edit"));
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain("drive:settings_edit");
   });
 });

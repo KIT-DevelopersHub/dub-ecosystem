@@ -7,7 +7,7 @@ export type OpRisk = "low" | "mid" | "high";
 
 export interface CatalogEntry {
   id: string;
-  area: "event" | "mail" | "notification";
+  area: "event" | "task" | "gantt" | "notification" | "chat" | "member" | "role" | "drive" | "lp" | "commander";
   method: string;
   path: string;
   kind: OpKind;
@@ -48,6 +48,10 @@ export interface PreviewWrite {
   description: string;
   impact: string;
   fieldLabels?: Record<string, string>;
+  /** No read can confirm this write; the reason (検証不能). */
+  unverifiable?: string;
+  /** "commander" = the local commander-service: its paths carry no API prefix. */
+  api?: "commander";
   calls: PreviewCall[];
 }
 
@@ -68,6 +72,8 @@ export interface Preview {
   reads: ReadSummary[];
   writes: PreviewWrite[];
   blockers: string[];
+  /** High risk or a bulk write: the confirmation phrase is required. */
+  requiresPhrase?: boolean;
   expiresAt: string;
 }
 
@@ -76,7 +82,7 @@ export interface CallResult {
   callId: string;
   stepId: string;
   target: string;
-  outcome: "ok" | "unverified" | "failed" | "skipped";
+  outcome: "ok" | "accepted" | "unverified" | "failed" | "skipped";
   message: string;
 }
 export interface ExecutionResult {

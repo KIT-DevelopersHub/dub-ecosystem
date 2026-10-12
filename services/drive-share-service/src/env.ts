@@ -27,7 +27,7 @@ export interface Env {
   GOOGLE_HACKIT_OAUTH_CLIENT_SECRET?: string;
   GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN?: string;
 
-  // ---- Secrets for connecting the account from ロール管理 (optional) ----
+  // ---- Secrets for connecting the account from Drive共有 > 設定 (optional) ----
   // OAuth "Web application" client used by the connect flow (the client above is a Desktop
   // client, which cannot redirect back to the SPA). Absent => the connect flow is disabled.
   // A refresh token only works with the client that minted it, so the D1 row records which

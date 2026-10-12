@@ -55,7 +55,7 @@ export interface AppManifestEntry {
    * The FINE-GRAINED (non per-app) catalog keys this app owns — what ロール管理 shows in the
    * app's 詳細設定 dialog once the 3-tier level is set. REQUIRED (not optional) so adding an
    * app forces the author to declare its detailed scope; `[]` is a legitimate, explicit
-   * answer for an app that has no knob beyond 無効/閲覧/編集 (gantt, 参加届, LP管理).
+   * answer for an app that has no knob beyond 無効/閲覧/編集 (gantt, 参加届).
    *
    * INVARIANT (CI: app-registry.test.ts): a non-`app` catalog key is claimed by AT MOST one
    * app — so 詳細 dialogs never double-show a key, and gantt/参加届 (which SHARE another app's
@@ -109,11 +109,12 @@ export const APP_MANIFEST = [
   // (upload/download/visibility) are both configured here — file:* previously belonged to no
   // app and fell into 「その他」, which hid ファイル settings from the app they act on.
   { id: "driveshare", label: "Drive共有", navPath: "/driveshare", domain: "drive", permissions: ["drive:read"], access: { view: "app:driveshare:view", edit: "app:driveshare:edit" }, openToAllAuthenticated: true,
-    detailPermissions: ["drive:read", "drive:write", "file:read", "file:write", "file:admin"] },
+    detailPermissions: ["drive:read", "drive:write", "drive:settings_view", "drive:settings_edit", "file:read", "file:write", "file:admin"] },
   // LP管理 reads infra:read, but infra:* governs the whole デプロイ/DNS surface (not just LP),
   // so those keys stay in 「その他」 instead of being scoped to this app's 詳細 dialog.
+  // lp:publish (switch the version live on the public site) is LP管理's own 詳細 knob.
   { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" },
-    detailPermissions: [] },
+    detailPermissions: ["lp:publish"] },
   // identity:admin is claimed by 運営メンバー's 詳細設定 (名簿・ロールの話は名簿アプリの中)。
   // ロール管理 itself has no knob beyond 無効/閲覧/編集 — that 3 段階 is its whole settings surface.
   { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" },
