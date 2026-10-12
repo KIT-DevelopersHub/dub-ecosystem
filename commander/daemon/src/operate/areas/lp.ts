@@ -7,7 +7,10 @@ import { read } from "./helpers.ts";
 
 const S = "lp-analytics";
 const VIEW = { keys: [], appLevel: { app: "lp", level: "view" } } as const;
+const EDIT = { keys: [], appLevel: { app: "lp", level: "edit" } } as const;
 const RANGE = "query.from・to 必須（YYYY-MM-DD・最大92日）";
+// The write's own from/to: lp.links.list cannot be read without a range.
+const LINKS_READ = { read: "lp.links.list", query: { from: "$query.from", to: "$query.to" }, findIn: "items" } as const;
 
 export const LP: AreaSpec = {
   area: "lp",
@@ -52,10 +55,46 @@ export const LP: AreaSpec = {
       hint: `${RANGE}。items[].id・name・slug・url・active・stats.visits`,
       query: ["from", "to"],
     }),
+    {
+      id: "lp.links.create",
+      area: "lp",
+      method: "POST",
+      path: "/lp/links",
+      service: S,
+      requires: EDIT,
+      kind: "write",
+      reversible: false,
+      risk: "mid",
+      description: "LP の流入 URL を新しく発行する",
+      hint: `${RANGE}（応答の訪問数の集計範囲）。body.name（40字以内・前後の空白は除かれる）・slug（小文字英数と _ - だけ・32字以内・direct は予約・発行済みは409）。正規化された値で渡す。応答 id・url（utm_source=slug 付きの LP の URL）`,
+      impact: "{count}件の流入 URL が発行され、LP管理の一覧に載ります。削除はできず、同じ値は二度と発行できません（停止にはできます）。",
+      query: ["from", "to"],
+      body: { allowed: ["name", "slug"], required: ["name", "slug"] },
+      fieldLabels: { name: "名前", slug: "URL に付く値" },
+      verify: { ...LINKS_READ, findBy: ["id", "$result.id"], expect: { name: "$body.name", slug: "$body.slug", active: true } },
+    },
+    {
+      id: "lp.links.setActive",
+      area: "lp",
+      method: "PATCH",
+      path: "/lp/links/:id",
+      service: S,
+      requires: EDIT,
+      kind: "write",
+      reversible: true,
+      risk: "mid",
+      description: "流入 URL を停止／再開する",
+      hint: `${RANGE}。body.active=false で停止、true で再開。名前や値は変えられない。params.id は lp.links.list の items[].id`,
+      impact: "{count}件の流入 URL の停止・再開が切り替わります（LP管理の一覧の表示が変わります）。もう一度切り替えれば元に戻せます。",
+      query: ["from", "to"],
+      body: { allowed: ["active"], required: ["active"] },
+      fieldLabels: { active: "有効" },
+      verify: { ...LINKS_READ, findBy: ["id", "$params.id"], expect: { active: "$body.active" } },
+    },
   ],
   excluded: [],
-  pending: [
-    { service: S, route: "POST /lp/links" },
-    { service: S, route: "PATCH /lp/links/:id" },
-  ],
+  pending: [],
+  ownerOpenedIrreversible: {
+    "lp.links.create": "削除 API が無く発行した URL は一覧に残り同じ値も再発行できないが、停止はできる。オーナーが「流入 URL の発行」を名指しで開放",
+  },
 };
