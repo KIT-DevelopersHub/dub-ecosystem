@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-publish",
+  "worker": "dub-demo-lp-publish",
+  "url": "https://dub-demo-lp-publish.developershub-site.workers.dev",
+  "deployedSha": "ac19d841",
+  "branch": "feat/lp-publish-flag",
+  "actor": "ko-tarou",
+  "markers": ["公開中の版を切り替えました"],
+  "live": true,
+  "verifiedAt": "2026-10-12T14:32:07Z",
+  "updatedAt": "2026-10-12T14:32:07Z",
+  "note": ""
+}

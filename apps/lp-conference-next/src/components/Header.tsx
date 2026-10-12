@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { NavLink } from "@/config/types";
+import type { CrowdfundingBanner, NavLink } from "@/config/types";
+import { CrowdfundingRibbon } from "@/components/CrowdfundingRibbon";
 
 // Sticky site header — reproduces goodpatch's header skeleton (functional layout
 // only, no copied assets): brand wordmark left · centered anchor nav · right-side
@@ -13,10 +14,12 @@ export function Header({
   nav,
   cta,
   contactHref = "#contact",
+  banner,
 }: {
   nav: NavLink[];
   cta?: { label: string; href: string };
   contactHref?: string;
+  banner?: CrowdfundingBanner;
 }) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -43,6 +46,7 @@ export function Header({
 
   return (
     <header className={`site-head${scrolled ? " is-scrolled" : ""}${open ? " is-open" : ""}`}>
+      {banner && <CrowdfundingRibbon data={banner} />}
       <div className="site-head-inner">
         <a className="brand" href="#top" aria-label="北陸ITカンファレンス トップへ">
           <span className="brand-mark" aria-hidden="true" />

@@ -1,0 +1,12 @@
+{
+  "default": "v3.4",
+  "versions": [
+    {"id": "v3.5", "ref": "HEAD", "label": "v3.5 クラファン告知帯版 (PR #602)"},
+    {"id": "v3.4", "ref": "7fd5cf3d8bf8dc093878597ea4f2c143b4138cb1", "label": "v3.4 SEO対策版 (PR #556 + 計測タグ)"},
+    {"id": "v3.3", "ref": "543af8d61e4d4253ad2158a97e49955cf53f1469", "label": "v3.3 表示崩れ修正版 (PR #555)"},
+    {"id": "v3.2", "ref": "fba7e50ea59050cf9dcbd1339e655c8ed97998b8", "label": "v3.2 コンテンツ確定版 (PR #553)"},
+    {"id": "v3.1", "ref": "f4a84e45f12527af4cf7a0f8ccea8626c3df2a3e", "label": "v3.1 ヒーロー立体強化版 (PR #550)"},
+    {"id": "v3.0", "ref": "ef3b3b941d37f9910c014c94a80f9cb6b7aa9f93", "label": "v3.0 ダイナミック刷新版 (PR #541)"},
+    {"id": "v2.0", "ref": "0aaa43b487125ce2a09d732c40401a4d948ec21c", "label": "v2.0 リニューアル版 (wrangler.v2.toml)"}
+  ]
+}

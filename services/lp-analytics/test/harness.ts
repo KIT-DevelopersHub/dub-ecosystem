@@ -22,9 +22,9 @@ export function fakeAuthz(granted: Set<identity.PermissionKey>): Authz {
       };
     },
     // Decide with the REAL policy module so tests share production semantics.
-    requireAppAccess(app, level): MiddlewareHandler {
+    requireAppAccess(app, level, extra): MiddlewareHandler {
       return async (_c, next) => {
-        const decision = policy.decide(granted, { app, level });
+        const decision = policy.decide(granted, { app, level, ...(extra?.permission ? { permission: extra.permission } : {}) });
         if (!decision.allowed) throw new DubError(CommonErrorCodes.FORBIDDEN, policy.denyMessage(decision), { status: 403 });
         await next();
       };
@@ -53,6 +53,7 @@ export async function makeApp(
   level: policy.AppAccessLevel = "edit",
   dailyVisitCap = 5000,
   siteTraffic: SiteTrafficSource | null = null,
+  extraGrants: identity.PermissionKey[] = [],
 ) {
   let now = "2026-10-07T03:00:00.000Z";
   let seq = 0;
@@ -61,7 +62,7 @@ export async function makeApp(
   const repo = await makeRepo(kind);
   const deps: AppDeps = {
     repo,
-    authz: fakeAuthz(grants(level)),
+    authz: fakeAuthz(new Set([...grants(level), ...extraGrants])),
     orgId: "org_devhub",
     lpBaseUrl: "https://hokuriku-it-conf.com",
     now: () => now,

@@ -49,10 +49,20 @@ export interface ProgramConfig {
   items: ProgramItem[];
 }
 
+/** Top-of-page "now running" ribbon. Remove from the snapshot to hide it. */
+export interface CrowdfundingBanner {
+  text: string;
+  /** Narrow-screen variant of `text`. */
+  shortText?: string;
+  ctaLabel: string;
+  href: string;
+}
+
 export interface CrowdfundingConfig {
   heading: string;
   body: string;
   cta?: CtaLink;
+  banner?: CrowdfundingBanner;
 }
 
 export interface ApplySide {
