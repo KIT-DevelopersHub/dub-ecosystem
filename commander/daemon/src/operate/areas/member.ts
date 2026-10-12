@@ -173,4 +173,7 @@ export const MEMBER: AreaSpec = {
     { service: I, route: "POST /identity/users/invite" },
     { service: I, route: "PATCH /identity/users/:id" },
   ],
+  ownerOpenedIrreversible: {
+    "mail.issued.create": "確認メールの送信は取り消せないが、受信は mail.issued.setEnabled で停止できる",
+  },
 };

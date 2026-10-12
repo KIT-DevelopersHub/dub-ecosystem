@@ -7,7 +7,8 @@
 // Policy (the only user is the owner): every read in scope is open; a write is open unless
 // it cannot be taken back, and such routes are left OUT of the catalog (listed with the
 // reason in each area's `excluded`) rather than kept behind a high risk. The few
-// irreversible effects the owner asked for explicitly are named in OWNER_OPENED_IRREVERSIBLE.
+// irreversible effects the owner asked for explicitly are named in the area's
+// `ownerOpenedIrreversible`.
 // Bulk endpoints stay out: fan-out is one call per target, so every target is listed and
 // verified.
 
@@ -55,9 +56,10 @@ export const SCOPE: Readonly<Record<string, readonly string[]>> = {
 };
 
 /** Irreversible effects the owner opened on purpose (entry id -> why it is acceptable). */
-export const OWNER_OPENED_IRREVERSIBLE: Readonly<Record<string, string>> = {
-  "mail.issued.create": "確認メールの送信は取り消せないが、受信は mail.issued.setEnabled で停止できる",
-};
+export const OWNER_OPENED_IRREVERSIBLE: Readonly<Record<string, string>> = Object.assign(
+  {},
+  ...AREAS.map((a) => a.ownerOpenedIrreversible ?? {}),
+);
 
 export function findEntry(id: string): CatalogEntry | undefined {
   return CATALOG.find((e) => e.id === id);

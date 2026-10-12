@@ -94,6 +94,12 @@ export interface ExecutionResult {
   executedAt: string;
 }
 
+/** Ids no plan may target (DenyRule sets): the owner's / the bot's own roles and users. */
+export interface ProtectedIds {
+  roles: string[];
+  users: string[];
+}
+
 export interface AuditSink {
   append(record: Record<string, unknown>): void;
 }
@@ -130,11 +136,13 @@ export class OperateExecutor {
   private readonly gateway: GatewayClient;
   private readonly audit: AuditSink;
   private readonly now: () => number;
+  private readonly protectedIds: ProtectedIds;
 
-  constructor(gateway: GatewayClient, audit: AuditSink, now: () => number = Date.now) {
+  constructor(gateway: GatewayClient, audit: AuditSink, now: () => number = Date.now, protectedIds: ProtectedIds = { roles: [], users: [] }) {
     this.gateway = gateway;
     this.audit = audit;
     this.now = now;
+    this.protectedIds = protectedIds;
   }
 
   /** Run the reads, resolve every write into concrete calls, write nothing. */
@@ -170,6 +178,11 @@ export class OperateExecutor {
         for (const k of entry.body?.required ?? []) if (body?.[k] === undefined || body[k] === "") problems.push(`body.${k}`);
         if (problems.length) {
           blockers.push(`${at}: ${[...new Set(problems)].join("・")} が決まっていません（読み取り結果から埋められませんでした）`);
+          break;
+        }
+        const denied = (entry.deny ?? []).find((d) => this.protectedIds[d.set].includes(String(getPath({ params, body }, d.field) ?? "")));
+        if (denied) {
+          blockers.push(`${at}: ${denied.reason}`);
           break;
         }
         const before =

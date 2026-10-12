@@ -51,6 +51,16 @@ export interface CatalogEntry {
   verify?: VerifySpec;
   /** Why no catalog read can confirm this write (Japanese; shown on the approval screen). */
   unverifiable?: string;
+  /** Values that must never be targeted (e.g. the owner's role): checked before approval. */
+  deny?: DenyRule[];
+}
+
+/** Blocks a call whose resolved `field` ("params.id" / "body.roleId") is in a protected set. */
+export interface DenyRule {
+  field: string;
+  set: "roles" | "users";
+  /** Japanese reason shown as the blocker. */
+  reason: string;
 }
 
 /** A route in scope that is deliberately NOT callable, with the reason. */
@@ -67,4 +77,6 @@ export interface AreaSpec {
   excluded: ExcludedRoute[];
   /** In-scope writes not opened yet (the area's follow-up PR moves them). */
   pending: { service: string; route: string }[];
+  /** Irreversible entries the owner opened on purpose: entry id -> why it is acceptable. */
+  ownerOpenedIrreversible?: Record<string, string>;
 }
