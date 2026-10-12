@@ -437,13 +437,16 @@ export interface ListParticipationCandidatesResponse {
  *  - `link`   : 既存の招待中/検討中メンバー(`memberId`)を在籍(added)へ昇格し結合（重複を作らない）。
  *               `expectedVersion` は対象メンバーの楽観ロック。
  *  - `create` : 参加届の内容から新規メンバー(added)を作成する。
- *  - `skip`   : 名簿に反映しない（対象外）。 */
+ *  - `skip`   : 名簿に反映しない（対象外）。
+ *  - `unlink` : 反映(紐付け)を取り消して未処理(pending)に戻す。名簿のメンバー自体は
+ *               消さない・状態も戻さない（他の編集を巻き戻さないため。直すなら名簿側で）。 */
 export type ResolveParticipationRequest =
   | { action: "link"; memberId: string; expectedVersion: number }
   | { action: "create" }
-  | { action: "skip" };
+  | { action: "skip" }
+  | { action: "unlink" };
 
-/** Response of a resolve: 更新後の 参加届 + 反映先メンバー (skip 時は null)。 */
+/** Response of a resolve: 更新後の 参加届 + 反映先メンバー (skip/unlink 時は null)。 */
 export interface ResolveParticipationResponse {
   participation: Participation;
   member: Member | null;

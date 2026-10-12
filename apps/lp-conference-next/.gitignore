@@ -9,3 +9,9 @@
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+
+# multi-version bundle (scripts/build-bundle.mjs)
+/dist-bundle/
+/.bundle-cache/
+/.bundle-out/
+/.wrangler/

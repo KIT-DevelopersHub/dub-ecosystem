@@ -26,7 +26,7 @@ export interface ParticipationApi {
   candidates(id: string): Promise<ListParticipationCandidatesResponse>;
   /** 名簿全体（手動紐付けの検索対象）を取得 (identity:read)。既存の overview を流用。 */
   overview(): Promise<MembersOverview>;
-  /** 反映確定 (link/create/skip)。roster を書き換えるので identity:admin。 */
+  /** 反映確定 (link/create/skip/unlink)。roster を書き換えるので identity:admin。 */
   resolve(id: string, body: ResolveParticipationRequest): Promise<ResolveParticipationResponse>;
 }
 

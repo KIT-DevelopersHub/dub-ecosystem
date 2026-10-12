@@ -4,6 +4,7 @@
 // 提出者を運営メンバーに「追加する / しない」を選べる。「追加する」時は招待中/検討中の
 // 突合候補を提示し、同一人物なら結合(link=在籍へ昇格・重複なし)、候補が無ければ新規
 // (create) を確認ダイアログで確定する。反映は組織図(体制図)にも重複なく反映される。
+// 追加済の行は「紐付けを解除」で未処理に戻せる (名簿メンバー自体はそのまま残る)。
 // Route gate = identity:read; 反映確定(resolve)はサーバで identity:admin (fail-close)。
 import { useMemo, useState } from "react";
 import { PageHeader, DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, TextField, EmptyState, SkeletonLoader, ErrorState } from "@dub/ui";
@@ -78,6 +79,12 @@ export function ParticipationListPage(): JSX.Element {
   // 「追加する」フロー対象 (候補ダイアログを開く) / 「対象外」確認対象。
   const [addTarget, setAddTarget] = useState<Participation | null>(null);
   const [skipTarget, setSkipTarget] = useState<Participation | null>(null);
+  const [unlinkTarget, setUnlinkTarget] = useState<Participation | null>(null);
+  // 解除確認に「誰との紐付けか」を出すため、確認を開いた時だけ名簿を引く。
+  const rosterQuery = useParticipationRosterMembers(unlinkTarget !== null);
+  const unlinkMemberName = unlinkTarget?.memberId
+    ? rosterQuery.data?.members.find((m) => m.id === unlinkTarget.memberId)?.name
+    : undefined;
 
   const teamName = useMemo(() => {
     const map = new Map((teamsQuery.data?.teams ?? []).map((t) => [t.id, t.name]));
@@ -88,6 +95,7 @@ export function ParticipationListPage(): JSX.Element {
     resolveMut.mutate({ id, body });
     setAddTarget(null);
     setSkipTarget(null);
+    setUnlinkTarget(null);
   };
 
   // 左端「運営メンバー反映」列。行クリック(Drawer)とは独立させるため stopPropagation。
@@ -102,13 +110,17 @@ export function ParticipationListPage(): JSX.Element {
         <Badge tone={REVIEW_TONE[p.reviewState]} testId={`participation-reviewstate-${p.id}`}>
           {reviewLabel(p)}
         </Badge>
-        {p.reviewState === "added" ? null : (
+        {p.reviewState === "added" ? (
+          <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setUnlinkTarget(p)} testId={`participation-unlink-${p.id}`}>
+            紐付けを解除
+          </Button>
+        ) : (
           <>
             <Button size="sm" variant="primary" disabled={!canEdit} onClick={() => setAddTarget(p)} testId={`participation-add-${p.id}`}>
               追加する
             </Button>
             {p.reviewState === "pending" ? (
-              <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setSkipTarget(p)} testId={`participation-skip-${p.id}`}>
+              <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setSkipTarget(p)} testId={`participation-skip-${p.id}`}>
                 しない
               </Button>
             ) : null}
@@ -190,6 +202,23 @@ export function ParticipationListPage(): JSX.Element {
         }}
         onCancel={() => setSkipTarget(null)}
         testId="participation-skip-confirm"
+      />
+
+      <ConfirmDialog
+        open={unlinkTarget !== null}
+        title="紐付けを解除する"
+        message={
+          unlinkTarget
+            ? `「${unlinkTarget.name}」の参加届と${unlinkMemberName ? `運営メンバー「${unlinkMemberName}」` : "運営メンバー"}の紐付けを解除し、未処理に戻します。名簿のメンバーは削除されず、在籍などの状態もそのまま残ります（必要なら運営メンバー画面で直してください）。解除後は改めて正しい相手に追加できます。`
+            : ""
+        }
+        confirmLabel="解除して未処理に戻す"
+        cancelLabel="キャンセル"
+        onConfirm={() => {
+          if (unlinkTarget) doResolve(unlinkTarget.id, { action: "unlink" });
+        }}
+        onCancel={() => setUnlinkTarget(null)}
+        testId="participation-unlink-confirm"
       />
     </div>
   );

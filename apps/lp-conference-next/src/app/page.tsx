@@ -38,7 +38,7 @@ export default function Page() {
     <>
       <MotionRoot />
       <ScrollProgress />
-      <Header nav={config.nav} cta={config.hero.primaryCta} />
+      <Header nav={config.nav} cta={config.hero.primaryCta} banner={config.crowdfunding.banner} />
       <Hero data={config.hero} subheading={config.catch.lead} />
       <Apply data={config.apply} />
       <Program data={config.program} />

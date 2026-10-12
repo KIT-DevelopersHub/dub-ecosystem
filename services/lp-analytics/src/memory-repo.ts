@@ -1,10 +1,11 @@
 // In-memory LpRepo for tests — same semantics as the D1 repo (bots excluded unless asked,
 // link aggregation skips untagged visits, visits newest-first by id).
-import type { AggregateBy, AggregateQuery, AggregateRow, LinkRow, LpRepo, VisitRow } from "./types";
+import type { AggregateBy, AggregateQuery, AggregateRow, LinkRow, LpRepo, PublishRow, VisitRow } from "./types";
 
 export class InMemoryLpRepo implements LpRepo {
   links: LinkRow[] = [];
   visits: VisitRow[] = [];
+  publish = new Map<string, PublishRow>();
 
   private inRange(v: VisitRow, q: Omit<AggregateQuery, "includeBots"> & { includeBots?: boolean }): boolean {
     return v.orgId === q.orgId && v.dayJst >= q.from && v.dayJst <= q.to && (q.includeBots === true || v.device !== "bot");
@@ -73,5 +74,12 @@ export class InMemoryLpRepo implements LpRepo {
       .filter((v) => (q.cursor ? `${v.dayJst}~${v.id}` < q.cursor : true))
       .sort((a, b) => (`${a.dayJst}~${a.id}` < `${b.dayJst}~${b.id}` ? 1 : -1))
       .slice(0, q.limit);
+  }
+  async getPublish(site: string) {
+    const r = this.publish.get(site);
+    return r ? { ...r } : null;
+  }
+  async setPublish(site: string, versionId: string, updatedBy: string, updatedAt: string) {
+    this.publish.set(site, { site, versionId, updatedBy, updatedAt });
   }
 }

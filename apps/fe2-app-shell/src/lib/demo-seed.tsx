@@ -54,6 +54,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   // switch requires drive:write alongside identity:admin, like the server.
   "drive:read",
   "drive:write",
+  // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
+  "lp:publish",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -2655,7 +2657,7 @@ function createMembersStore() {
       return json({ candidates });
     }
 
-    // 反映確定 (link/create/skip) — roster を書き換え、組織図に重複なく反映する。
+    // 反映確定 (link/create/skip/unlink) — roster を書き換え、組織図に重複なく反映する。
     const resMatch = pathname.match(/^\/api\/v1\/members\/participation\/([^/]+)\/resolve$/);
     if (method === "POST" && resMatch) {
       const p = participations.find((x) => x.id === decodeURIComponent(resMatch[1]!));
@@ -2663,6 +2665,11 @@ function createMembersStore() {
       const action = body?.action;
       if (action === "skip") {
         p.reviewState = "skipped"; p.memberId = null; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: null });
+      }
+      if (action === "unlink") {
+        // 実サーバと同じく紐付けだけ解除し、名簿メンバーには触れない。
+        p.reviewState = "pending"; p.memberId = null; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: null });
       }
       if (action === "link") {
@@ -2710,6 +2717,8 @@ function createMembersStore() {
 //   GET   /api/v1/lp/links      ?from&to
 //   POST  /api/v1/lp/links      ?from&to   { name, slug }   409 on duplicate slug
 //   PATCH /api/v1/lp/links/:id  ?from&to   { active }
+//   GET   /api/v1/lp/publish
+//   POST  /api/v1/lp/publish  { versionId }   400 on unknown version
 // The visit log is GENERATED (not hand-listed) so every range (7/30/90日) has
 // believable data, but from a FIXED seed — the same demo URL always shows the same
 // numbers, so a reviewer can compare two loads and screenshots stay meaningful.
@@ -2909,7 +2918,30 @@ function createLpStore() {
 
   const linkSummary = (l: DemoLpLink, from: string, to: string) => ({ ...l, stats: linkStats(l.id, from, to) });
 
+  // 公開中の版（リモートフラグ）。features/lp/lpApi.tsx の LpPublishState と同じ形。
+  const publish = {
+    site: "hokuriku-it-conf.com",
+    versionId: "v3.4",
+    versions: ["v3.5", "v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"],
+    updatedAt: null as string | null,
+    updatedBy: null as string | null,
+  };
+
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (pathname === "/api/v1/lp/publish") {
+      if (method === "GET") return json({ ...publish, versions: [...publish.versions] });
+      if (method === "POST") {
+        const versionId = (body as { versionId?: unknown } | undefined)?.versionId;
+        if (typeof versionId !== "string" || !publish.versions.includes(versionId)) {
+          return problem("VALIDATION", "公開できない版です", 400);
+        }
+        publish.versionId = versionId;
+        publish.updatedAt = new Date().toISOString();
+        publish.updatedBy = "デモ 管理者";
+        return json({ ...publish, versions: [...publish.versions] });
+      }
+    }
+
     const from = url.searchParams.get("from") ?? "";
     const to = url.searchParams.get("to") ?? "";
 

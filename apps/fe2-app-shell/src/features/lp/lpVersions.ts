@@ -35,6 +35,15 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
+    id: "v3.5",
+    name: "v3.5 クラファン告知帯版",
+    description:
+      "v3.4 をベースに、ページ最上部へ「現在クラウドファンディング開催中」の帯を追加(CAMPFIRE の支援ページへ新規タブで遷移)。帯の下端は布のようにたるんだ曲線で、ガーランド状の三角旗が揺れ、ゆっくり呼吸するように動く。表示時に上から吊り下がるように登場し、光が流れるシマー演出と LIVE ドットの点滅付き。スクロールでヘッダーが縮むと旗はしまわれる。スマホは短縮文言「クラファン開催中！」。動きを減らす設定(prefers-reduced-motion)では全アニメーションを停止。帯は snapshot.json の crowdfunding.banner を消せば非表示にできる。未公開のプレビュー(workers.dev)で確認中で、本番(hokuriku-it-conf.com)には未反映。",
+    url: "https://lp-conference-next-v3-5.developershub-site.workers.dev",
+    updatedAt: "2026-10-10",
+    status: "draft",
+  },
+  {
     id: "v3.4",
     name: "v3.4 SEO対策版",
     description:

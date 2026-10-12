@@ -267,6 +267,45 @@ describe("member-service 参加届 (participation)", () => {
     expect(ov.json.members).toHaveLength(0);
   });
 
+  it("resolve unlink -> back to 未処理, roster untouched, and can be re-linked to the right person", async () => {
+    const app = createApp(makeDeps());
+    const wrong = await call(app, "POST", "/members/people", { body: { name: "別人 太郎", status: "invited", teamIds: [] } });
+    const right = await call(app, "POST", "/members/people", { body: { name: "本人 太郎", status: "invited", teamIds: [] } });
+    const sub = await call(app, "POST", "/members/participation", { body: { name: "本人太郎", ...EMAILS } });
+    const pid = sub.json.participation.id as string;
+
+    // 誤って別人に link。
+    const linked = await call(app, "POST", `/members/participation/${pid}/resolve`, {
+      body: { action: "link", memberId: wrong.json.id, expectedVersion: wrong.json.version },
+    });
+    expect(linked.json.participation.reviewState).toBe("added");
+
+    // unlink -> 未処理・memberId なし。名簿のメンバーは残る (削除も状態の巻き戻しもしない)。
+    const res = await call(app, "POST", `/members/participation/${pid}/resolve`, { body: { action: "unlink" } });
+    expect(res.status).toBe(200);
+    expect(res.json.participation.reviewState).toBe("pending");
+    expect(res.json.participation.memberId).toBeNull();
+    expect(res.json.member).toBeNull();
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members).toHaveLength(2);
+    expect(ov.json.members.find((m: { id: string }) => m.id === wrong.json.id).status).toBe("added");
+
+    // 正しい相手に link し直せる。
+    const relinked = await call(app, "POST", `/members/participation/${pid}/resolve`, {
+      body: { action: "link", memberId: right.json.id, expectedVersion: right.json.version },
+    });
+    expect(relinked.status).toBe(200);
+    expect(relinked.json.participation.memberId).toBe(right.json.id);
+
+    // 解除した相手は他の 参加届 から再び link できる (二重紐付けガードから外れている)。
+    const other = await call(app, "POST", "/members/participation", { body: { name: "別人太郎", schoolEmail: "x@school.ac.jp", gmail: "x@gmail.com" } });
+    const cur = (await call(app, "GET", "/members/overview")).json.members.find((m: { id: string }) => m.id === wrong.json.id);
+    const again = await call(app, "POST", `/members/participation/${other.json.participation.id}/resolve`, {
+      body: { action: "link", memberId: wrong.json.id, expectedVersion: cur.version },
+    });
+    expect(again.status).toBe(200);
+  });
+
   it("resolve requires 参加届=編集 (閲覧 + the domain read key is not enough)", async () => {
     const app = createApp(
       makeDeps({
