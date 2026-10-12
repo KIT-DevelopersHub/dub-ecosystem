@@ -8,8 +8,9 @@ import { useToast } from "@dub/ui";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useLpApi } from "./LpProvider.tsx";
-import type { CreateLpLinkInput, LpLinkSummary, LpLinksPage, LpLinksQuery } from "./lpApi.tsx";
+import type { CreateLpLinkInput, LpLinkSummary, LpLinksPage, LpLinksQuery, LpPublishState } from "./lpApi.tsx";
 import { buildTrackingUrl } from "./lpLinks.ts";
+import { publishSuccessMessage } from "./lpPublish.ts";
 
 /** 同じ期間を見ている間の再取得を抑える（Cloudflare 無料枠の読み取り削減）。 */
 const STALE_MS = 60 * 1000;
@@ -72,6 +73,48 @@ export function useCreateLpLink(range: LpLinksQuery) {
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.feature("lp", "links") });
+    },
+  });
+}
+
+export function lpPublishKey() {
+  return queryKeys.feature("lp", "publish");
+}
+
+/** 公開中の版（app:lp:view）。 */
+export function useLpPublish() {
+  const api = useLpApi();
+  return useQuery({ queryKey: lpPublishKey(), queryFn: () => api.getPublish(), staleTime: STALE_MS });
+}
+
+/**
+ * 公開版の切り替え。楽観的 UI: 先に「公開中」バッジを移し、失敗したら元へ戻してエラートースト。
+ * `name` は成功トーストの表示名（版 id ではなく「v3.1 ヒーロー立体強化版」等）。
+ */
+export function useSetLpPublish() {
+  const api = useLpApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = lpPublishKey();
+
+  return useMutation<LpPublishState, unknown, { versionId: string; name: string }, { prev: LpPublishState | undefined }>({
+    mutationFn: ({ versionId }) => api.setPublish({ versionId }),
+    onMutate: async ({ versionId }) => {
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<LpPublishState>(key);
+      if (prev) qc.setQueryData<LpPublishState>(key, { ...prev, versionId });
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, "公開する版を切り替えられませんでした") });
+    },
+    onSuccess: (next, { name }) => {
+      qc.setQueryData(key, next);
+      toast.show({ kind: "success", title: publishSuccessMessage(name) });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: key });
     },
   });
 }

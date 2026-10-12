@@ -84,6 +84,14 @@ export interface IngestVisitRequest {
 }
 
 // ---- persistence ----
+/** lp_publish row: the version live on a public site (公開版切り替え). */
+export interface PublishRow {
+  site: string;
+  versionId: string;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
 export interface LinkRow {
   id: string;
   orgId: string;
@@ -135,6 +143,10 @@ export interface LpRepo {
   aggregate(q: AggregateQuery, by: AggregateBy): Promise<AggregateRow[]>;
   /** Non-bot visits, newest first, keyset-paged by (day_jst, id) — see visitCursor. */
   listVisits(q: { orgId: string; from: string; to: string; source?: string; cursor?: string; limit: number }): Promise<VisitRow[]>;
+  /** null when the site has no row yet (callers fall back to the default version). */
+  getPublish(site: string): Promise<PublishRow | null>;
+  /** Upsert the live version for a site. */
+  setPublish(site: string, versionId: string, updatedBy: string, updatedAt: string): Promise<void>;
 }
 
 export interface ReqCtx {

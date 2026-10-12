@@ -1,0 +1,30 @@
+# lp-conference-next-preview — the multi-version LP Worker (same code/bundle as
+# wrangler.toml) on *.workers.dev only, for verifying the publish-flag switch
+# before production. NO routes / custom domain: it must never take the apex.
+# Flag source = the staging lp-analytics Worker.
+#
+#   https://lp-conference-next-preview.developershub-site.workers.dev
+#
+# Deploy:
+#   pnpm --filter @dub/lp-conference-next build:bundle
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/DubVault/secrets/cf-token.txt)
+#   npx wrangler deploy --config apps/lp-conference-next/wrangler.preview.toml
+name = "lp-conference-next-preview"
+main = "worker/index.ts"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+[assets]
+directory = "./dist-bundle"
+binding = "ASSETS"
+run_worker_first = ["/*", "!/_v/*"]
+
+[[services]]
+binding = "LP_FLAG"
+service = "dub-lp-analytics-staging"
+
+[vars]
+DEFAULT_VERSION = "v3.4"
+
+[observability]
+enabled = true
