@@ -40,3 +40,8 @@ DRIVESHARE_LIST_PAGE_SIZE = "50"
 # GOOGLE_HACKIT_OAUTH_CLIENT_ID
 # GOOGLE_HACKIT_OAUTH_CLIENT_SECRET
 # GOOGLE_HACKIT_OAUTH_REFRESH_TOKEN
+# Connecting the account from ロール管理 (Drive共有 の詳細ダイアログ). Without these the
+# connect button is disabled and only the refresh-token secret above is used:
+# GOOGLE_HACKIT_OAUTH_WEB_CLIENT_ID      OAuth "Web application" client (redirect back to fe2)
+# GOOGLE_HACKIT_OAUTH_WEB_CLIENT_SECRET
+# DRIVESHARE_TOKEN_ENC_KEY               base64 of 32 random bytes (AES-GCM key for the D1 token)

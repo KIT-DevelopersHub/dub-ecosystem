@@ -119,6 +119,12 @@ describe("route x protection (frozen)", () => {
     "GET /runs/:id/events": OPERATOR,
     "POST /runs/:id/events": OPERATOR,
 
+    "GET /bundles": OPERATOR,
+    "POST /bundles": OPERATOR,
+    "PATCH /bundles/:id": OPERATOR,
+    "DELETE /bundles/:id/tasks/:taskId": OPERATOR,
+    "DELETE /bundles/:id": OPERATOR,
+
     "GET /chats": OPERATOR,
     "POST /chats": OPERATOR,
     "GET /chats/:id": OPERATOR,
@@ -142,7 +148,7 @@ describe("route x protection (frozen)", () => {
     ]);
   });
 
-  it("protects all 11 GETs — run prompts, cwd, execution logs and chat bodies included", () => {
+  it("protects every GET — run prompts, cwd, execution logs, bundles and chat bodies included", () => {
     // The hole this layer closed (inventory a-1): these were ALL unauthenticated.
     expect(PROTECTED_KEYS.filter((k) => k.startsWith("GET "))).toEqual([
       "GET /features",
@@ -152,11 +158,12 @@ describe("route x protection (frozen)", () => {
       "GET /runs",
       "GET /runs/:id",
       "GET /runs/:id/events",
+      "GET /bundles",
       "GET /chats",
       "GET /chats/:id",
     ]);
-    // 9 protected + GET /health = the 10 GET routes the router registers.
-    expect(protectableRouteKeys(createApp()).filter((k) => k.startsWith("GET "))).toHaveLength(10);
+    // 10 protected + GET /health = the 11 GET routes the router registers.
+    expect(protectableRouteKeys(createApp()).filter((k) => k.startsWith("GET "))).toHaveLength(11);
   });
 });
 

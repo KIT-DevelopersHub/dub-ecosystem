@@ -31,6 +31,8 @@ interface TaskCardProps {
   onCancel: (runId: string) => void;
   /** True for an optimistic card whose run hasn't been confirmed by the server yet. */
   pending?: boolean;
+  /** demo 承認済みだが staging 枠が空かず未反映（合体の候補）。 */
+  slotWaiting?: boolean;
 }
 
 function basename(p: string): string {
@@ -49,7 +51,7 @@ function relTime(iso: string): string {
   return `${Math.round(m / 60)}時間前`;
 }
 
-export function TaskCard({ item, client, history, onOpen, onCancel, pending }: TaskCardProps) {
+export function TaskCard({ item, client, history, onOpen, onCancel, pending, slotWaiting }: TaskCardProps) {
   const lane = deriveLane(item);
   const isRunning = isRunningLane(lane) && !!item.latestRun;
   // A running deploy phase reads as 「反映中」 rather than a generic run, so the operator can
@@ -68,7 +70,8 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
   // Reflection cue (requirement #2): on a settled card — especially in 確認待ち — show at a
   // glance whether the deploy is 反映済み / 反映失敗 (with time + URL). A running card keeps
   // its live spinner (deployingLabel/lastLine) instead, so we skip the badge there.
-  const reflection = !isRunning ? reflectionOf(item) : null;
+  // 枠待ちは staging に載っていないので「反映済み」バッジは出さない（枠待ちラベルに置き換える）。
+  const reflection = !isRunning && !slotWaiting ? reflectionOf(item) : null;
 
   const open = () => onOpen(item.taskId);
   return (
@@ -123,7 +126,7 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
       </div>
 
       {/* labels: 要修正 / 反映状況（GitHub のラベル行）。列見出しが状態名を持つので要修正だけ足す。 */}
-      {(fix || reflection) && (
+      {(fix || reflection || slotWaiting) && (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: t.space1 }}>
           {fix && (
             <span
@@ -143,6 +146,25 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
               要修正
             </span>
           )}
+          {slotWaiting && (
+            <span
+              data-testid={`task-slot-waiting-${item.taskId}`}
+              title="staging の枠が空くのを待っています。「合体」でほかの枠待ちとまとめて載せられます"
+              style={{
+                marginTop: t.space2,
+                fontSize: 11,
+                fontWeight: 600,
+                color: t.textMuted,
+                border: `1px dashed ${t.borderStrong}`,
+                borderRadius: 999,
+                padding: "0 8px",
+                lineHeight: "18px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ⏳ staging 枠待ち
+            </span>
+          )}
           {reflection && (
             <ReflectionBadge taskId={item.taskId} reflection={reflection} when={relTime(item.updatedAt)} />
           )}
@@ -153,7 +175,8 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending }: T
       <ArtifactLinks
         urls={{ demoUrl: item.demoUrl, stagingUrl: item.stagingUrl, prUrl: item.prUrl }}
         variant="card"
-        phase={item.featurePhase}
+        // 枠待ちは staging 未到達なので、固定 staging ホストの補完リンクを出さない。
+        phase={slotWaiting ? "demo_review" : item.featurePhase}
       />
 
       {/* deploy-in-progress banner: makes 「反映中」 explicit on the card */}

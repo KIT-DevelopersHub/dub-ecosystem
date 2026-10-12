@@ -9,6 +9,7 @@
 //   DELETE /runs/:id           -> 202 (cancel) | 404   (cancel a running run)
 //   GET    /runs/:id/events    -> text/event-stream    (replays history, then live)
 //   *      /operate/*          -> catalog / preview / execute (see operate/routes.ts)
+//   POST   /admin/restart      -> 202 { from, to } | 409 (runs active) | 500 (update failed)
 //
 // Auth (ADR 0003): when config.operatorToken is set, every route EXCEPT GET /health
 // and GET / requires the shared token — `Authorization: Bearer <token>` or, for the
@@ -22,9 +23,12 @@ import { RunStore } from "./runner.ts";
 import { nullSink, HttpRunSink, type RunSink } from "./sink.ts";
 import { INDEX_HTML } from "./index-html.ts";
 import { createOperateHandler } from "./operate/routes.ts";
+import { scriptRestarter, type Restarter } from "./restart.ts";
 
 export const VERSION = "0.1.0";
 const SERVICE = "commander-daemon";
+/** Changes on every daemon start; the web polls /health for it to see a restart finish. */
+const BOOT_ID = new Date().toISOString();
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -61,12 +65,16 @@ function tokenMatches(expected: string, req: IncomingMessage, url: URL): boolean
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createDaemonServer(config: DaemonConfig) {
+export function createDaemonServer(
+  config: DaemonConfig,
+  restarter: Restarter = scriptRestarter,
+) {
   const sink: RunSink = config.serviceUrl
     ? new HttpRunSink(config.serviceUrl, config.serviceToken)
     : nullSink;
   const store = new RunStore(config, sink);
   const operate = createOperateHandler(config.operate);
+  let restarting = false;
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${config.port}`);
@@ -86,7 +94,7 @@ export function createDaemonServer(config: DaemonConfig) {
 
     // Always-open routes (liveness + zero-build smoke UI).
     if (method === "GET" && pathname === "/health") {
-      return json(res, 200, { ok: true, service: SERVICE, version: VERSION });
+      return json(res, 200, { ok: true, service: SERVICE, version: VERSION, bootId: BOOT_ID });
     }
     if (method === "GET" && pathname === "/") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -113,6 +121,8 @@ export function createDaemonServer(config: DaemonConfig) {
     }
 
     if (method === "POST" && pathname === "/runs") {
+      // A run started now would be killed by the pending relaunch.
+      if (restarting) return json(res, 503, { error: "restarting" });
       let parsed: { prompt?: unknown; cwd?: unknown; taskId?: unknown; args?: unknown };
       try {
         parsed = JSON.parse((await readBody(req)) || "{}");
@@ -130,6 +140,23 @@ export function createDaemonServer(config: DaemonConfig) {
         : undefined;
       const run = store.start({ prompt: parsed.prompt, cwd, taskId, args });
       return json(res, 201, { runId: run.id, status: run.status });
+    }
+
+    // Update to origin/main + restart the stack. Refused while any run is live, because
+    // stopping dev-up kills every claude child of this daemon.
+    if (method === "POST" && pathname === "/admin/restart") {
+      if (restarting) return json(res, 409, { error: "restart_in_progress" });
+      const active = store.activeCount();
+      if (active > 0) return json(res, 409, { error: "runs_active", active });
+      restarting = true;
+      try {
+        const result = await restarter.update();
+        restarter.relaunch();
+        return json(res, 202, result);
+      } catch (e) {
+        restarting = false;
+        return json(res, 500, { error: "update_failed", message: (e as Error).message });
+      }
     }
 
     if (method === "GET" && pathname === "/runs") {

@@ -68,7 +68,7 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     const apps = screen.getByTestId("fe7-app-access-table");
     const other = screen.getByTestId("fe7-other-permissions");
     expect(within(apps).getByRole("heading", { name: "アプリのアクセス権" })).toBeInTheDocument();
-    expect(within(other).getByRole("heading", { name: "その他（どのアプリにも属さない権限）" })).toBeInTheDocument();
+    expect(within(other).getByRole("heading", { name: "その他（どのアプリにも属さない権限・設定）" })).toBeInTheDocument();
     // DOM 順で アプリのアクセス権 → その他（節の入れ替えを検知する）
     const sections = [...editor.children];
     expect(sections.indexOf(apps)).toBeLessThan(sections.indexOf(other));
@@ -104,13 +104,16 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
 
     await user.click(screen.getByTestId("fe7-app-name-mail"));
     const dialog = screen.getByTestId("fe7-app-dialog");
-    // mail owns 4 fine-grained keys; the label + raw key are both shown
+    // mail owns 5 fine-grained keys; the label + raw key are both shown
     expect(within(dialog).getByText("メールの閲覧")).toBeInTheDocument();
     expect(within(dialog).getByText("mail:read")).toBeInTheDocument();
     expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement).checked).toBe(true);
     expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:send") as HTMLInputElement).checked).toBe(false);
     // dangerous keys are flagged
     expect(within(dialog).getByTestId("fe7-app-dialog-danger-mail:read_all")).toBeInTheDocument();
+    // role-shared mail visibility is a mail detail key with a Japanese label
+    expect(within(dialog).getByText("同じロールの人宛てのメールを閲覧")).toBeInTheDocument();
+    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read_role_shared") as HTMLInputElement).checked).toBe(false);
     // a key from ANOTHER app is not in this dialog
     expect(within(dialog).queryByTestId("fe7-app-dialog-toggle-task:read")).not.toBeInTheDocument();
   });
@@ -183,7 +186,7 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(toggle.disabled).toBe(false);
     await user.click(toggle);
     expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByTestId("fe7-app-detail-count-mail").textContent).toBe("1 / 4");
+    expect(screen.getByTestId("fe7-app-detail-count-mail").textContent).toBe("1 / 5");
   });
 
   // その他側と対称の到達性テスト: アプリが宣言した細かい権限は必ずそのダイアログに出る

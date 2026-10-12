@@ -45,6 +45,22 @@ const neutralNoticeStyle: CSSProperties = {
   background: toCssVarName("color.gray.100"),
   border: `1px dashed ${toCssVarName("color.border.strong")}`,
 };
+// Stale = collection has stopped, so the numbers below are NOT today's usage. Warning-
+// tinted and placed first: it changes how everything under it must be read.
+const staleNoticeStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: toCssVarName("space.2"),
+  fontSize: toCssVarName("font.size.sm"),
+  color: toCssVarName("color.text.primary"),
+  lineHeight: 1.6,
+  padding: `${toCssVarName("space.3")} ${toCssVarName("space.4")}`,
+  borderRadius: toCssVarName("radius.md"),
+  background: toCssVarName("color.warning.100"),
+  borderLeft: `${toCssVarName("space.1")} solid ${toCssVarName("color.warning.500")}`,
+};
+// Old numbers stay readable but visibly receded, so they never pass for current values.
+const staleGroupsStyle: CSSProperties = { opacity: 0.55 };
 
 export function UsageDashboard(): JSX.Element {
   const usageApi = useUsageApi();
@@ -107,19 +123,36 @@ export function UsageDashboard(): JSX.Element {
       ) : null;
 
     const groups = groupServicesByProvider(summary.services);
+    // Only a real (or demo) reading can be stale; the unavailable state has its own notice.
+    const stale = source !== "unavailable" && summary.stale === true;
+    const capturedLabel = summary.capturedAt ? formatGeneratedAt(summary.capturedAt) : "未取得";
 
     body = (
       <Stack gap={5}>
+        {stale && (
+          <div role="status" data-testid="fe2-usage-stale-notice" style={staleNoticeStyle}>
+            <Icon name="warning" size="sm" aria-hidden="true" />
+            <span>
+              <strong>データが古いです（最終取得: {capturedLabel}）</strong>
+              <br />
+              使用量の収集が止まっているため、下の数値は現在の使用量ではありません。管理者には収集失敗の通知が届きます。
+            </span>
+          </div>
+        )}
         <UsageSummaryBanner worstStatus={summary.worstStatus} services={summary.services} />
         {notice}
         {reassurance}
-        <Stack gap={6} testId="fe2-usage-groups">
-          {groups.map((g) => (
-            <ServiceGroup key={g.provider} group={g} />
-          ))}
-        </Stack>
+        <div data-stale={stale} style={stale ? staleGroupsStyle : undefined}>
+          <Stack gap={6} testId="fe2-usage-groups">
+            {groups.map((g) => (
+              <ServiceGroup key={g.provider} group={g} />
+            ))}
+          </Stack>
+        </div>
         <span style={noteStyle} data-testid="fe2-usage-generated-at">
-          最終更新: {formatGeneratedAt(summary.generatedAt)}
+          {summary.capturedAt === undefined
+            ? `最終更新: ${formatGeneratedAt(summary.generatedAt)}`
+            : `最終取得: ${capturedLabel}`}
         </span>
       </Stack>
     );

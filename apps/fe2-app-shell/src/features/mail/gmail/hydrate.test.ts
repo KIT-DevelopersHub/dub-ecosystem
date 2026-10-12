@@ -101,3 +101,14 @@ describe("full-body mappers", () => {
     expect(sentDetailToMessage(detail, SELF).attachments).toEqual(att);
   });
 });
+
+describe("mine (role-shared / oversight visibility)", () => {
+  it("carries mine=false onto the message; absent or true stays absent (= mine)", () => {
+    const items: mail.MailMessageListItem[] = [{ ...inbox[0]!, mine: false }, { ...inbox[2]!, mine: true }];
+    const [shared, own] = inboxItemsToThreads(items);
+    expect(shared!.messages[0]!.mine).toBe(false);
+    expect("mine" in own!.messages[0]!).toBe(false);
+    const detail: mail.MailThread = { id: "T", messages: [{ ...inbox[0]!, mine: false, textBody: "b" }] };
+    expect(threadDetailToMessages(detail)[0]!.mine).toBe(false);
+  });
+});

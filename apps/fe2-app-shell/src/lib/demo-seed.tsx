@@ -50,6 +50,10 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:admin",
   "chat:create",
   "audit:read",
+  // The real admin role holds these (identity migration 0005); Drive共有's Google-account
+  // switch requires drive:write alongside identity:admin, like the server.
+  "drive:read",
+  "drive:write",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -500,17 +504,17 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_1", messageId: "<m1@demo>", threadId: "thr_1", from: { email: "hanako@example.com", name: "山田 花子" },
     to: [{ email: "demo@developershub.jp" }], subject: "登壇のご相談", snippet: "カンファレンスでの登壇について相談させてください。",
-    receivedAt: "2026-08-02T01:30:00Z", read: false,
+    receivedAt: "2026-08-02T01:30:00Z", read: false, mine: true,
   },
   {
     id: "msg_2", messageId: "<m2@demo>", threadId: "thr_2", from: { email: "sponsor@acme.co.jp", name: "ACME株式会社" },
     to: [{ email: "demo@developershub.jp" }], subject: "スポンサー契約書の送付", snippet: "契約書を添付いたします。ご確認ください。",
-    receivedAt: "2026-08-01T05:00:00Z", read: false,
+    receivedAt: "2026-08-01T05:00:00Z", read: false, mine: true,
   },
   {
     id: "msg_3", messageId: "<m3@demo>", threadId: "thr_3", from: { email: "staff@developershub.jp", name: "運営スタッフ" },
     to: [{ email: "demo@developershub.jp" }], subject: "会場下見の日程", snippet: "来週の下見日程を共有します。",
-    receivedAt: "2026-07-30T08:00:00Z", read: true,
+    receivedAt: "2026-07-30T08:00:00Z", read: true, mine: true,
   },
 ];
 
@@ -551,6 +555,8 @@ export interface DemoAccount {
   email: string;
   permissions: identity.PermissionKey[];
   inbox: mail.MailMessageDetail[];
+  /** Role sharing (mail:read_role_shared): account ids whose inbox this account also reads. */
+  roleShareWith?: string[];
 }
 
 // Account B's inbox is a DISTINCT set (different sender/subject) so a screenshot makes
@@ -562,6 +568,26 @@ const B_INBOX: mail.MailMessageDetail[] = [
     to: [{ email: "taro@developershub.jp" }], subject: "委員会の議事録共有",
     snippet: "本日の運営委員会の議事録を共有します。", receivedAt: "2026-08-03T02:00:00Z", read: false,
     textBody: "佐藤さん\n\n本日の運営委員会の議事録を共有します。ご確認ください。",
+  },
+];
+
+// スポンサー担当 colleague's inbox. The admin shares a role carrying mail:read_role_shared with
+// this account, so these show up for the admin under 自分宛て以外 (mine=false) — the demo of
+// role-shared mail visibility. Account B (佐藤) is NOT in the role, so isolation still holds.
+const SPONSOR_INBOX: mail.MailMessageDetail[] = [
+  {
+    id: "msg_s1", messageId: "<s1@demo>", threadId: "thr_s1",
+    from: { email: "pr@globex.co.jp", name: "Globex 広報部" },
+    to: [{ email: "suzuki@developershub.jp", name: "鈴木 一郎" }], subject: "協賛プランのお見積り依頼",
+    snippet: "ゴールドプランの協賛費用についてお見積りをお願いできますか。", receivedAt: "2026-08-02T03:00:00Z", read: false,
+    textBody: "鈴木様\n\nGlobex 広報部です。ゴールドプランの協賛費用についてお見積りをお願いできますか。\n\nよろしくお願いいたします。",
+  },
+  {
+    id: "msg_s2", messageId: "<s2@demo>", threadId: "thr_s2",
+    from: { email: "events@initech.jp", name: "Initech イベント担当" },
+    to: [{ email: "suzuki@developershub.jp", name: "鈴木 一郎" }], subject: "ブース出展の搬入時間について",
+    snippet: "当日のブース搬入は何時から可能でしょうか。", receivedAt: "2026-07-31T06:30:00Z", read: true,
+    textBody: "鈴木様\n\n当日のブース搬入は何時から可能でしょうか。台車の貸し出し有無も教えてください。",
   },
 ];
 
@@ -590,9 +616,10 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
 ];
 
 const DEMO_ACCOUNTS: DemoAccount[] = [
-  { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })) },
+  { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
+  { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
 ];
 
@@ -752,8 +779,12 @@ function createMailStore() {
     // Oversight (mail:read_all): the read views aggregate EVERY account's mail; personal
     // accounts stay scoped to their own. `readInbox` / `readSent` are the visible sets for
     // the current viewer. Writes (send / mark-read) still target the account they belong to.
+    // Role sharing (mail:read_role_shared) adds the role-mates' inboxes. Every row carries
+    // `mine` (true only for the viewer's own mail), re-stamped in place per request so the
+    // same stored row (mark-read below) stays the one returned.
     const oversight = isOversight(me);
-    const readInbox: mail.MailMessageDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)) : inboxOf(me.id);
+    const readable = oversight ? DEMO_ACCOUNTS : DEMO_ACCOUNTS.filter((a) => a.id === me.id || (me.roleShareWith ?? []).includes(a.id));
+    const readInbox: mail.MailMessageDetail[] = readable.flatMap((a) => inboxOf(a.id).map((m) => Object.assign(m, { mine: a.id === me.id })));
     const readSent: mail.MailSentDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)) : outbox;
 
     // received: list / detail / mark-read (read state persists in-session). Scoped to the
@@ -1836,6 +1867,147 @@ interface DemoDriveFile {
 }
 const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 
+// ── driveshare: the Google accounts Drive can act as (ロール管理 > その他 > Google アカウント) ──
+// No real OAuth in the demo: "add account" returns the SPA's own /admin/roles?code&state, which
+// stands in for Google's redirect. The list lives in sessionStorage so it survives that
+// full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
+// unconfigured on any demo URL (remembered for the tab).
+type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "unconfigured";
+interface DemoDriveGoogleAccount {
+  id: string;
+  kind: "connected" | "secret";
+  email: string | null;
+  connectedAt: string | null;
+  connectedBy: string | null;
+  active: boolean;
+  needsReconnect: boolean;
+}
+interface DemoDriveGoogleStatus {
+  accounts: DemoDriveGoogleAccount[];
+  canConnect: boolean;
+}
+const DEMO_DRIVE_GOOGLE_KEY = "dub-demo:drive-google-accounts";
+const DEMO_DRIVE_GOOGLE_STATE_KEY = "dub-demo:drive-google-state";
+const DEMO_DRIVE_GOOGLE_HINT_KEY = "dub-demo:drive-google-hint";
+
+function demoDriveGoogleStatus(mode: DemoDriveGoogleMode): DemoDriveGoogleStatus {
+  const secret: DemoDriveGoogleAccount = {
+    id: "secret",
+    kind: "secret",
+    email: "hackit@gmail.com",
+    connectedAt: null,
+    connectedBy: null,
+    active: false,
+    needsReconnect: false,
+  };
+  const main: DemoDriveGoogleAccount = {
+    id: "dga_demo_main",
+    kind: "connected",
+    email: "hackit.drive@gmail.com",
+    connectedAt: "2026-10-01T09:00:00.000Z",
+    connectedBy: "usr_demo_admin",
+    active: true,
+    needsReconnect: false,
+  };
+  const sub: DemoDriveGoogleAccount = {
+    ...main,
+    id: "dga_demo_sub",
+    email: "devhub.event@gmail.com",
+    connectedAt: "2026-10-05T09:00:00.000Z",
+    active: false,
+  };
+  if (mode === "none") return { accounts: [], canConnect: true };
+  if (mode === "invalid") return { accounts: [secret, sub, { ...main, needsReconnect: true }], canConnect: true };
+  if (mode === "unconfigured") return { accounts: [{ ...secret, active: true }], canConnect: false };
+  return { accounts: [secret, sub, main], canConnect: true };
+}
+
+function createDriveGoogleDemoStore() {
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  const fromUrl = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("driveGoogle");
+  if (fromUrl && ["connected", "none", "invalid", "unconfigured"].includes(fromUrl)) {
+    storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(demoDriveGoogleStatus(fromUrl as DemoDriveGoogleMode)));
+  }
+  const read = (): DemoDriveGoogleStatus => {
+    const raw = storage()?.getItem(DEMO_DRIVE_GOOGLE_KEY);
+    return raw ? (JSON.parse(raw) as DemoDriveGoogleStatus) : demoDriveGoogleStatus("connected");
+  };
+  const write = (next: DemoDriveGoogleStatus) => {
+    storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(next));
+    return json(next);
+  };
+  const BASE = "/api/v1/driveshare/google-account";
+
+  function handle(method: string, pathname: string, body: unknown): Response | null {
+    if (method === "GET" && pathname === BASE) return json(read());
+    if (method === "POST" && pathname === `${BASE}/connect`) {
+      const { redirectUri, loginHint } = (body ?? {}) as { redirectUri?: string; loginHint?: string };
+      if (!redirectUri) return problem("VALIDATION_FAILED", "redirectUri is required", 400);
+      const state = `demo_${Math.random().toString(36).slice(2)}`;
+      storage()?.setItem(DEMO_DRIVE_GOOGLE_STATE_KEY, state);
+      if (loginHint) storage()?.setItem(DEMO_DRIVE_GOOGLE_HINT_KEY, loginHint);
+      else storage()?.removeItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
+      return json({ authUrl: `${redirectUri}?code=demo-code&state=${state}` });
+    }
+    if (method === "POST" && pathname === `${BASE}/callback`) {
+      const { state } = (body ?? {}) as { state?: string };
+      const expected = storage()?.getItem(DEMO_DRIVE_GOOGLE_STATE_KEY);
+      storage()?.removeItem(DEMO_DRIVE_GOOGLE_STATE_KEY);
+      if (!state || state !== expected) {
+        return problem("VALIDATION_FAILED", "接続の有効期限が切れたか、無効なリクエストです。もう一度「アカウントを追加」からやり直してください。", 400);
+      }
+      // Like the server: a reconnect (login hint = a registered address) refreshes that row and
+      // leaves the selection alone; any other address is a new account and becomes the one in use.
+      const hint = storage()?.getItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
+      storage()?.removeItem(DEMO_DRIVE_GOOGLE_HINT_KEY);
+      const cur = read();
+      const known = cur.accounts.find((a) => a.kind === "connected" && a.email === hint);
+      if (known) {
+        return write({
+          ...cur,
+          accounts: cur.accounts.map((a) =>
+            a.id === known.id ? { ...a, needsReconnect: false, connectedAt: new Date().toISOString() } : a,
+          ),
+        });
+      }
+      const added: DemoDriveGoogleAccount = {
+        id: `dga_demo_${Date.now().toString(36)}`,
+        kind: "connected",
+        email: `hackit.new${cur.accounts.length}@gmail.com`,
+        connectedAt: new Date().toISOString(),
+        connectedBy: "usr_demo_admin",
+        active: true,
+        needsReconnect: false,
+      };
+      return write({ ...cur, accounts: [...cur.accounts.map((a) => ({ ...a, active: false })), added] });
+    }
+    if (method === "POST" && pathname === `${BASE}/active`) {
+      const { accountId } = (body ?? {}) as { accountId?: string };
+      const cur = read();
+      if (!cur.accounts.some((a) => a.id === accountId)) return problem("NOT_FOUND", "google account not found", 404);
+      return write({ ...cur, accounts: cur.accounts.map((a) => ({ ...a, active: a.id === accountId })) });
+    }
+    const del = method === "DELETE" ? pathname.match(/^\/api\/v1\/driveshare\/google-account\/accounts\/([^/]+)$/) : null;
+    if (del) {
+      const cur = read();
+      const target = cur.accounts.find((a) => a.id === decodeURIComponent(del[1]!));
+      if (!target || target.kind === "secret") return problem("NOT_FOUND", "google account not found", 404);
+      if (target.active) {
+        return problem("CONFLICT", "使用中のアカウントは削除できません。先に別のアカウントに切り替えてください。", 409);
+      }
+      return write({ ...cur, accounts: cur.accounts.filter((a) => a.id !== target.id) });
+    }
+    return null;
+  }
+  return { handle };
+}
+
 function createDriveShareStore() {
   const owner = (id: string): DemoDrivePermission => ({
     id,
@@ -2516,7 +2688,7 @@ function createMembersStore() {
       return json({ candidates });
     }
 
-    // 反映確定 (link/create/skip) — roster を書き換え、組織図に重複なく反映する。
+    // 反映確定 (link/create/skip/unlink) — roster を書き換え、組織図に重複なく反映する。
     const resMatch = pathname.match(/^\/api\/v1\/members\/participation\/([^/]+)\/resolve$/);
     if (method === "POST" && resMatch) {
       const p = participations.find((x) => x.id === decodeURIComponent(resMatch[1]!));
@@ -2524,6 +2696,11 @@ function createMembersStore() {
       const action = body?.action;
       if (action === "skip") {
         p.reviewState = "skipped"; p.memberId = null; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: null });
+      }
+      if (action === "unlink") {
+        // 実サーバと同じく紐付けだけ解除し、名簿メンバーには触れない。
+        p.reviewState = "pending"; p.memberId = null; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: null });
       }
       if (action === "link") {
@@ -2936,6 +3113,7 @@ export function createDemoFetch(): typeof fetch {
   const mailStore = createMailStore();
   // Mutable Hackit Drive sharing state (grant/change/revoke/link toggle persist).
   const driveShareStore = createDriveShareStore();
+  const driveGoogleStore = createDriveGoogleDemoStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
@@ -2967,6 +3145,7 @@ export function createDemoFetch(): typeof fetch {
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
+      driveGoogleStore.handle(method, url.pathname, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??

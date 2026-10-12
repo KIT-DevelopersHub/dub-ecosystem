@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { DurableObjectState } from "@cloudflare/workers-types";
-import { MeterDO, DAILY_INTERVAL_MS } from "../src/meter-do";
+import { MeterDO, DAILY_INTERVAL_MS, FIRST_RUN_DELAY_MS, collectionProblem } from "../src/meter-do";
 import type { Env } from "../src/env";
 import { MASTER } from "../src/limits";
 import { makeD1, seedSend, readSnapshot, countSnapshot } from "./d1";
@@ -86,10 +86,39 @@ describe("MeterDO bootstrap (ensureAlarm / kick fetch)", () => {
   it("ensureAlarm arms exactly one alarm; a second call is a no-op", async () => {
     const fs = fakeState();
     const doo = new MeterDO(fs.state, {} as Env);
+    const before = Date.now();
     const first = await doo.ensureAlarm();
     expect(first).toBe(fs.getAlarm());
+    // first run is soon (a re-armed loop must refresh stale data now, not tomorrow)
+    expect(first).toBeLessThanOrEqual(before + FIRST_RUN_DELAY_MS + 1000);
     const second = await doo.ensureAlarm();
     expect(second).toBe(first);
+  });
+
+  it("replaces an overdue alarm (a past-due alarm that never fired left prod dead for weeks)", async () => {
+    const fs = fakeState();
+    const weeksAgo = Date.now() - 21 * DAILY_INTERVAL_MS;
+    await fs.state.storage.setAlarm(weeksAgo);
+    const before = Date.now();
+    const at = await new MeterDO(fs.state, {} as Env).ensureAlarm();
+    expect(at).toBeGreaterThan(before);
+    expect(at).toBeLessThanOrEqual(before + FIRST_RUN_DELAY_MS + 1000);
+    expect(fs.getAlarm()).toBe(at);
+  });
+
+  it("replaces an alarm scheduled beyond the daily interval", async () => {
+    const fs = fakeState();
+    await fs.state.storage.setAlarm(Date.now() + 10 * DAILY_INTERVAL_MS);
+    const before = Date.now();
+    const at = await new MeterDO(fs.state, {} as Env).ensureAlarm();
+    expect(at).toBeLessThanOrEqual(before + FIRST_RUN_DELAY_MS + 1000);
+  });
+
+  it("keeps a healthy pending alarm (next daily run)", async () => {
+    const fs = fakeState();
+    const next = Date.now() + DAILY_INTERVAL_MS - 60_000;
+    await fs.state.storage.setAlarm(next);
+    expect(await new MeterDO(fs.state, {} as Env).ensureAlarm()).toBe(next);
   });
 
   it("fetch() bootstraps the alarm and returns ok", async () => {
@@ -98,5 +127,86 @@ describe("MeterDO bootstrap (ensureAlarm / kick fetch)", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, service: "usage-meter-do" });
     expect(fs.getAlarm()).not.toBeNull();
+  });
+});
+
+describe("MeterDO.alarm never throws (a throwing alarm is retried 6x, then dropped for good)", () => {
+  it("still collects and does not throw when rescheduling itself fails", async () => {
+    const { d1, raw } = makeD1();
+    const fs = fakeState();
+    (fs.state.storage as unknown as { setAlarm: () => Promise<void> }).setAlarm = async () => {
+      throw new Error("storage unavailable");
+    };
+    await expect(new MeterDO(fs.state, { DB: d1 } as unknown as Env).alarm()).resolves.toBeUndefined();
+    expect(countSnapshot(raw)).toBe(MASTER.length);
+  });
+
+  it("does not throw when the collection itself throws", async () => {
+    const fs = fakeState();
+    const broken = {
+      prepare() {
+        throw new Error("D1_ERROR: daily write limit exceeded");
+      },
+    };
+    await expect(new MeterDO(fs.state, { DB: broken } as unknown as Env).alarm()).resolves.toBeUndefined();
+    expect(fs.getAlarm()).not.toBeNull();
+    expect(fs.store.get("collect:consecutiveFailures")).toBe(1);
+  });
+});
+
+describe("MeterDO collection health (consecutive failures -> admin alert)", () => {
+  function mailRecorder(): { svc: unknown; sent: unknown[] } {
+    const sent: unknown[] = [];
+    const svc = {
+      async fetch(req: Request) {
+        sent.push(JSON.parse(await req.text()));
+        return new Response(JSON.stringify({ messageId: "m", provider: "resend", acceptedAt: "t" }), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    };
+    return { svc, sent };
+  }
+
+  it("counts a run with every Cloudflare metric unknown as a failure and alerts on the 2nd in a row", async () => {
+    const { d1 } = makeD1();
+    const mail = mailRecorder();
+    // no CF token -> every Cloudflare metric unknown (what a revoked token looks like)
+    const env = { DB: d1, SVC_MAIL_GATEWAY: mail.svc } as unknown as Env;
+    const fs = fakeState();
+
+    await new MeterDO(fs.state, env).alarm();
+    expect(fs.store.get("collect:consecutiveFailures")).toBe(1);
+    expect(mail.sent).toHaveLength(0);
+
+    await new MeterDO(fs.state, env).alarm();
+    expect(fs.store.get("collect:consecutiveFailures")).toBe(2);
+    expect(mail.sent).toHaveLength(1);
+    expect((mail.sent[0] as { textBody: string }).textBody).toContain("Cloudflare");
+  });
+
+  it("a healthy run resets the counter and records the last success", async () => {
+    const fs = fakeState();
+    fs.store.set("collect:consecutiveFailures", 3);
+    const { d1 } = makeD1();
+    const doo = new MeterDO(fs.state, { DB: d1 } as unknown as Env);
+    // stub a healthy collection
+    doo.runCollection = async () => ({ metrics: 12, worstStatus: "ok", newlyAlerted: 0, problem: null });
+    await doo.alarm();
+    expect(fs.store.get("collect:consecutiveFailures")).toBe(0);
+    expect(typeof fs.store.get("collect:lastSuccessAt")).toBe("string");
+  });
+});
+
+describe("collectionProblem", () => {
+  const r = (provider: "cloudflare" | "resend", status: "ok" | "unknown") =>
+    ({ provider, metric_key: `${provider}_${status}`, label: "x", used: null, limit_value: 1, pct: null, unit: "u", overflow_behavior: "halt", status }) as const;
+
+  it("flags a run where no Cloudflare metric could be read", () => {
+    expect(collectionProblem([r("cloudflare", "unknown"), r("cloudflare", "unknown"), r("resend", "ok")])).toMatch(/Cloudflare/);
+  });
+
+  it("accepts a run with at least one Cloudflare reading", () => {
+    expect(collectionProblem([r("cloudflare", "ok"), r("cloudflare", "unknown")])).toBeNull();
   });
 });

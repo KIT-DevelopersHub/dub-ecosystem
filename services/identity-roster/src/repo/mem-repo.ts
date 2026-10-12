@@ -183,4 +183,19 @@ export class MemIdentityRepo implements IdentityRepo {
     }
     return [...users];
   }
+
+  async orgWideRolePeers(orgId: string, userId: string, permission: identity.PermissionKey): Promise<string[]> {
+    const orgWide = (a: AssignmentRow): boolean => a.orgId === orgId && a.resourceType === null && a.resourceId === null;
+    const shared = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.userId !== userId || !orgWide(a)) continue;
+      if (this.roles.get(a.roleId)?.permissions.includes(permission)) shared.add(a.roleId);
+    }
+    const peers = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.userId === userId || !orgWide(a) || !shared.has(a.roleId)) continue;
+      if (this.users.get(a.userId)?.status === "active") peers.add(a.userId);
+    }
+    return [...peers];
+  }
 }
