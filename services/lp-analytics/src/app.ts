@@ -1,6 +1,7 @@
 // Hono app — thin HTTP adapter over LpService. The gateway strips API_PREFIX and forwards
 // /lp/* here. Every user route goes through the policy gate for the LP管理 app
-// (view = read the numbers, edit = issue / pause 流入URL). /lp/internal/visits is the
+// (view = read the numbers, edit = issue / pause 流入URL, edit + lp:publish = switch the
+// version live on the public site). /lp/internal/visits is the
 // public beacon landing: s2s only (x-dub-internal), reached via the gateway's
 // POST /api/v1/public/lp-visits which sanitizes + classifies before forwarding.
 import { Hono } from "hono";
@@ -69,6 +70,9 @@ export function createApp(deps: AppDeps): Hono {
     await svc.ingestVisit(parseIngest(await readJson(c)));
     return c.body(null, 204);
   });
+  // The public LP Worker asks which version to serve (service binding, x-dub-internal only;
+  // no user / request id needed). Read-only, one row.
+  app.get("/lp/internal/publish", async (c) => c.json({ versionId: (await svc.getPublish()).versionId }));
 
   // ---- user routes (signed-in + LP管理 policy gate) ----
   app.use("/lp/*", async (c, next) => {
@@ -77,6 +81,8 @@ export function createApp(deps: AppDeps): Hono {
   });
   const view = deps.authz.requireAppAccess("lp", "view");
   const edit = deps.authz.requireAppAccess("lp", "edit");
+  // 公開版切り替え: LP管理 編集 + the lp:publish 詳細 key (dangerous, opt-in per role).
+  const publish = deps.authz.requireAppAccess("lp", "edit", { permission: "lp:publish" });
 
   app.get("/lp/stats", view, async (c) => c.json(await svc.getStats(c.req.query())));
   app.get("/lp/site-traffic", view, async (c) => c.json(await svc.getSiteTraffic(c.req.query())));
@@ -86,6 +92,8 @@ export function createApp(deps: AppDeps): Hono {
   app.patch("/lp/links/:id", edit, async (c) =>
     c.json(await svc.setLinkActive(c.req.param("id"), await readJson(c), c.req.query())),
   );
+  app.get("/lp/publish", view, async (c) => c.json(await svc.getPublish()));
+  app.post("/lp/publish", publish, async (c) => c.json(await svc.setPublish(reqCtx(c), await readJson(c))));
 
   return app;
 }
