@@ -10,6 +10,8 @@ on:
     # 21:00 UTC = 06:00 JST
     - cron: '0 21 * * *'
   workflow_dispatch:
+  push:
+    branches: [chore/staging-daily-main-sync] # TEMP: verify before merge
 
 concurrency:
   group: staging-schema-sync
