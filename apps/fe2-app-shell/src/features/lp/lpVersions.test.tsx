@@ -17,7 +17,7 @@ import { LP_VERSIONS } from "./lpVersions.ts";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
 
-const PUBLISHABLE = ["v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"];
+const PUBLISHABLE = ["v3.5", "v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"];
 const PUBLISHER = editorPermissions("lp", ["lp:publish"]);
 
 function state(versionId: string): LpPublishState {

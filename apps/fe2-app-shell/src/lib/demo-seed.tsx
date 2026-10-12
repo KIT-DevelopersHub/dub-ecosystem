@@ -2884,7 +2884,7 @@ function createLpStore() {
   const publish = {
     site: "hokuriku-it-conf.com",
     versionId: "v3.4",
-    versions: ["v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"],
+    versions: ["v3.5", "v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"],
     updatedAt: null as string | null,
     updatedBy: null as string | null,
   };

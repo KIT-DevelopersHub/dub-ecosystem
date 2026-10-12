@@ -7,7 +7,7 @@ export const LP_PUBLISH_SITE = "hokuriku-it-conf.com";
 
 /** Versions that can be published (newest first). Must match apps/lp-conference-next/versions.json
  *  (v2.1 is not bundled: its deployed build came from an uncommitted tree). */
-export const LP_PUBLISHABLE_VERSION_IDS = ["v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"] as const;
+export const LP_PUBLISHABLE_VERSION_IDS = ["v3.5", "v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"] as const;
 
 export type LpPublishableVersionId = (typeof LP_PUBLISHABLE_VERSION_IDS)[number];
 
