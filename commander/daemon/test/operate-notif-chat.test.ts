@@ -146,7 +146,7 @@ describe("チャットの書き込み", () => {
     const { exec } = setup({ dropWrites: true });
     const { result } = await run(exec, { op: "chat.members.remove", params: { id: "c1", userId: "u1" } });
     expect(result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
-    expect(JSON.stringify(result)).toContain("まだ対象が残っています");
+    expect(JSON.stringify(result)).toContain("一覧に残っています");
   });
 
   it("メッセージ送信と編集はチャンネルの一覧で本文を読み直す", async () => {

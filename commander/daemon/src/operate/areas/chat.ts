@@ -176,7 +176,7 @@ export const CHAT: AreaSpec = {
         params: { id: "$params.id" },
         findIn: "[*]",
         findBy: ["userId", "$params.userId"],
-        absent: true,
+        present: false,
       },
     },
     {

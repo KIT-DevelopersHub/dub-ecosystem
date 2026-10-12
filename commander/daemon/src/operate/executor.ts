@@ -130,6 +130,13 @@ function defaultTarget(entry: CatalogEntry, params: Record<string, string>, item
   return (name as string | undefined) ?? (Object.values(params)[0] || entry.description);
 }
 
+/** Arrays of scalars compare as sets: services dedupe/sort lists (teamIds, permissions). */
+function sameMembers(got: unknown, want: unknown): boolean {
+  if (!Array.isArray(got) || !Array.isArray(want)) return false;
+  const g = new Set(got);
+  return g.size === new Set(want).size && want.every((x) => g.has(x));
+}
+
 export class OperateExecutor {
   private readonly previews = new Map<string, { preview: Preview; expires: number }>();
   // Plain fields, not parameter properties: the daemon runs under node's strip-only TS.
@@ -375,6 +382,7 @@ export class OperateExecutor {
     const read = findEntry(spec.read)!;
     const src = (v: VerifyValue): VerifyValue | undefined =>
       typeof v === "string" && v.startsWith("$params.") ? c.params[v.slice(8)]
+      : typeof v === "string" && v.startsWith("$query.") ? c.query?.[v.slice(7)]
       : typeof v === "string" && v.startsWith("$body.") ? (c.body?.[v.slice(6)] as VerifyValue | undefined)
       : typeof v === "string" && v.startsWith("$result.") ? (getPath(written, v.slice(8)) as VerifyValue | undefined)
       : v;
@@ -395,7 +403,7 @@ export class OperateExecutor {
       const [field, source] = spec.findBy;
       const want = src(source);
       target = itemsOf(getPath(res.data, spec.findIn) ?? res.data)?.find((x) => getPath(x, field) === want);
-      if (spec.absent) return target ? "読み直した一覧にまだ対象が残っています" : null;
+      if (spec.present !== undefined && src(spec.present) === false) return target ? "取り除いたはずの対象が読み直した一覧に残っています" : null;
       if (!target) return "読み直した一覧に対象が見つかりません";
     }
     const expected: Record<string, VerifyValue | undefined> = {};
@@ -410,7 +418,8 @@ export class OperateExecutor {
       const got = getPath(target, k);
       const same =
         want === "$notNull" ? got != null
-        : got === want || (typeof got === "string" && typeof want === "string" && !Number.isNaN(Date.parse(want)) && Date.parse(got) === Date.parse(want));
+        : sameMembers(got, want) ||
+          got === want || (typeof got === "string" && typeof want === "string" && !Number.isNaN(Date.parse(want)) && Date.parse(got) === Date.parse(want));
       if (!same) return `${entry.fieldLabels?.[k] ?? k} が期待した値になっていません`;
     }
     return null;
