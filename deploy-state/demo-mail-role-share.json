@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mail-role-share",
+  "worker": "dub-demo-mail-role-share",
+  "url": "https://dub-demo-mail-role-share.developershub-site.workers.dev",
+  "deployedSha": "f647ee6b",
+  "branch": "feat/mail-role-shared-visibility",
+  "actor": "ko-tarou",
+  "markers": ["自分宛て以外","同じロールの人宛てのメールを閲覧"],
+  "live": true,
+  "verifiedAt": "2026-10-09T19:07:39Z",
+  "updatedAt": "2026-10-09T19:07:39Z",
+  "note": "メール: ロール共有閲覧 + 自分宛て/自分宛て以外タブ"
+}
