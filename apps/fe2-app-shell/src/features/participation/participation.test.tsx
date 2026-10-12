@@ -212,6 +212,14 @@ describe("ParticipationListPage — 3 段階 (policy) の 閲覧 tier", () => {
     expect((screen.getByTestId("participation-add-p_1") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId("participation-skip-p_1") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("閲覧のみのとき 紐付けを解除 も押せない", async () => {
+    const linked: Participation = { ...SUBMISSION, memberId: "m_link", reviewState: "added", matchKind: "linked_existing" };
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [linked] })) });
+    render(wrap(<ParticipationListPage />, api, viewerPermissions("participation", ["identity:read"])));
+    await waitFor(() => expect(screen.getByTestId("participation-readonly-notice")).toBeInTheDocument());
+    expect((screen.getByTestId("participation-unlink-p_1") as HTMLButtonElement).disabled).toBe(true);
+  });
 });
 
 describe("ParticipationListPage", () => {
@@ -316,5 +324,30 @@ describe("ParticipationListPage", () => {
     const dialog = await screen.findByTestId("participation-skip-confirm");
     await userEvent.click(within(dialog).getByRole("button", { name: "対象外にする" }));
     await waitFor(() => expect(resolve).toHaveBeenCalledWith("p_1", { action: "skip" }));
+  });
+
+  it("追加済 →「紐付けを解除」→ 確認 → 未処理に戻す (unlink)", async () => {
+    const linked: Participation = { ...SUBMISSION, memberId: "m_link", reviewState: "added", matchKind: "linked_existing" };
+    let current = linked;
+    const resolve = vi.fn((id: string) => {
+      current = { ...linked, id, memberId: null, reviewState: "pending" };
+      return Promise.resolve({ participation: current, member: null });
+    });
+    const api = makeApi({
+      list: vi.fn(() => Promise.resolve({ participations: [current] })),
+      overview: vi.fn(() => Promise.resolve({ teams: [], members: [rosterMember({ id: "m_link", name: "黒川 先輩", status: "added" })] })),
+      resolve,
+    });
+    render(wrap(<ParticipationListPage />, api));
+    // 追加済の行には「追加する」ではなく「紐付けを解除」が出る。
+    await userEvent.click(await screen.findByTestId("participation-unlink-p_1"));
+    expect(screen.queryByTestId("participation-add-p_1")).toBeNull();
+    const dialog = await screen.findByTestId("participation-unlink-confirm");
+    // 確認文に紐付け先のメンバー名が出る (誤解除の防止)。
+    expect(await within(dialog).findByText(/黒川 先輩/)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "解除して未処理に戻す" }));
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("p_1", { action: "unlink" }));
+    // 解除後は再び「追加する」で付け直せる。
+    expect(await screen.findByTestId("participation-add-p_1")).toBeInTheDocument();
   });
 });

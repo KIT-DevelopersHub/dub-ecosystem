@@ -2622,7 +2622,7 @@ function createMembersStore() {
       return json({ candidates });
     }
 
-    // 反映確定 (link/create/skip) — roster を書き換え、組織図に重複なく反映する。
+    // 反映確定 (link/create/skip/unlink) — roster を書き換え、組織図に重複なく反映する。
     const resMatch = pathname.match(/^\/api\/v1\/members\/participation\/([^/]+)\/resolve$/);
     if (method === "POST" && resMatch) {
       const p = participations.find((x) => x.id === decodeURIComponent(resMatch[1]!));
@@ -2630,6 +2630,11 @@ function createMembersStore() {
       const action = body?.action;
       if (action === "skip") {
         p.reviewState = "skipped"; p.memberId = null; p.updatedAt = isoNow();
+        return json({ participation: { ...p }, member: null });
+      }
+      if (action === "unlink") {
+        // 実サーバと同じく紐付けだけ解除し、名簿メンバーには触れない。
+        p.reviewState = "pending"; p.memberId = null; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: null });
       }
       if (action === "link") {
