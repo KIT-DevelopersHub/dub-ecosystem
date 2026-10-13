@@ -1,5 +1,5 @@
-// Google Calendar-style floating panels: the anchored popover shell, the quick
-// create/edit form, the event detail card and the 他N件 day list.
+// Calendar panels: the create/edit dialog (@dub/ui Modal), plus Google-style
+// anchored popovers for the event detail card and the 他N件 day list.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Button,
@@ -7,8 +7,10 @@ import {
   DatePicker,
   Icon,
   IconButton,
+  Modal,
   SegmentedControl,
   Select,
+  TextField,
   Textarea,
   isSubmitEnter,
   type SegmentedOption,
@@ -154,8 +156,6 @@ export function EventForm({
   onCancel,
   saving,
   submitLabel = "保存",
-  autoFocus = true,
-  secondaryAction,
 }: {
   draft: EventDraft;
   onChange: (d: EventDraft) => void;
@@ -163,9 +163,6 @@ export function EventForm({
   onCancel?: () => void;
   saving: boolean;
   submitLabel?: string;
-  autoFocus?: boolean;
-  /** Left-aligned footer action (e.g. その他のオプション). */
-  secondaryAction?: ReactNode;
 }): JSX.Element {
   const id = useId();
   const error = validateDraft(draft);
@@ -186,21 +183,26 @@ export function EventForm({
       }}
       data-testid="calendar-event-form"
     >
-      <input
-        className={styles.titleInput}
-        placeholder={vacation ? VACATION_TITLE : "タイトルを追加"}
-        aria-label="タイトル"
-        value={draft.title}
-        autoFocus={autoFocus}
-        onChange={(e) => set({ title: e.target.value })}
+      <label htmlFor={`${id}-title`} className={styles.srOnly}>
+        タイトル
+      </label>
+      <span
+        // Own Enter handling so an IME 確定 Enter never submits the form.
         onKeyDown={(e) => {
-          // Own Enter handling so an IME 確定 Enter never submits the form.
           if (e.key !== "Enter") return;
           e.preventDefault();
           if (isSubmitEnter(e)) submit();
         }}
-        data-testid="calendar-form-title"
-      />
+      >
+        <TextField
+          id={`${id}-title`}
+          size="lg"
+          placeholder={vacation ? VACATION_TITLE : "タイトルを追加"}
+          value={draft.title}
+          onChange={(title) => set({ title })}
+          testId="calendar-form-title"
+        />
+      </span>
       <SegmentedControl
         options={KIND_OPTIONS}
         value={draft.kind}
@@ -308,7 +310,6 @@ export function EventForm({
       )}
 
       <div className={styles.formFooter}>
-        {secondaryAction}
         <span className={styles.spacer} />
         {onCancel && (
           <Button variant="ghost" onClick={onCancel}>
@@ -323,43 +324,32 @@ export function EventForm({
   );
 }
 
-/** Quick-create popover — Google's panel from a slot click or the 作成 button. */
-export function CreatePanel({
-  anchor,
+/** Create / edit dialog — the standard @dub/ui Modal (slot click, 作成, 編集). */
+export function EventDialog({
+  editing,
   draft,
   onChange,
   onSave,
   onClose,
-  onMoreOptions,
   saving,
 }: {
-  anchor: AnchorRect | null;
+  editing: boolean;
   draft: EventDraft;
   onChange: (d: EventDraft) => void;
   onSave: () => void;
   onClose: () => void;
-  onMoreOptions: () => void;
   saving: boolean;
 }): JSX.Element {
   return (
-    <Floating anchor={anchor} width={448} onClose={onClose} label="予定を作成" testId="calendar-create-panel">
-      <div className={styles.panelBar}>
-        <PanelButton icon="x" label="閉じる" onClick={onClose} />
-      </div>
-      <div className={styles.panelBody}>
-        <EventForm
-          draft={draft}
-          onChange={onChange}
-          onSubmit={onSave}
-          saving={saving}
-          secondaryAction={
-            <Button variant="ghost" onClick={onMoreOptions} testId="calendar-more-options">
-              その他のオプション
-            </Button>
-          }
-        />
-      </div>
-    </Floating>
+    <Modal
+      open
+      onClose={onClose}
+      title={editing ? "予定を編集" : "予定を作成"}
+      size="md"
+      testId={editing ? "calendar-edit-dialog" : "calendar-create-panel"}
+    >
+      <EventForm draft={draft} onChange={onChange} onSubmit={onSave} onCancel={onClose} saving={saving} />
+    </Modal>
   );
 }
 

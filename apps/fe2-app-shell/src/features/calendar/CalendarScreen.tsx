@@ -3,7 +3,7 @@
 // through the canonical task-service API, so they also show up in マイタスク/ガント.
 // No new backend: reads GET /api/v1/tasks (self-scoped), writes POST/PATCH/DELETE.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Icon, Menu, Modal, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
+import { Button, Icon, IconButton, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { common, task } from "@dub/types";
@@ -27,7 +27,7 @@ import {
   type CalendarView,
   type EventDraft,
 } from "./calendar-model";
-import { CreatePanel, DayListPanel, DetailPanel, EventForm, type AnchorRect } from "./CalendarPanels.tsx";
+import { DayListPanel, DetailPanel, EventDialog, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
 import { STATUS_ORDER, VACATION_VISUAL, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
@@ -40,8 +40,8 @@ const VACATION_KEY = "vacation" as const;
 type CalendarKey = task.TaskStatus | typeof VACATION_KEY;
 
 type Panel =
-  | { kind: "create"; draft: EventDraft; anchor: AnchorRect | null; ghost: SlotGhost | null }
-  | { kind: "edit"; item: CalendarItem | null; draft: EventDraft }
+  | { kind: "create"; draft: EventDraft; ghost: SlotGhost | null }
+  | { kind: "edit"; item: CalendarItem; draft: EventDraft }
   | { kind: "detail"; item: CalendarItem; anchor: AnchorRect | null }
   | { kind: "day"; day: number; anchor: AnchorRect | null };
 
@@ -184,11 +184,10 @@ export function CalendarScreen(): JSX.Element {
     setAnchorDay(day);
     setView("day");
   };
-  const openCreate = (draft: EventDraft, anchor: AnchorRect | null, ghost: SlotGhost | null = null) => {
-    if (canWrite) setPanel({ kind: "create", draft, anchor, ghost });
+  const openCreate = (draft: EventDraft, ghost: SlotGhost | null = null) => {
+    if (canWrite) setPanel({ kind: "create", draft, ghost });
   };
-  // Google's 作成 opens the same quick-create panel, centered.
-  const openCreateDialog = () => openCreate(nextHourDraft(anchorDay), null);
+  const openCreateDialog = () => openCreate(nextHourDraft(anchorDay));
   const selectItem = (item: CalendarItem, anchor: AnchorRect) => setPanel({ kind: "detail", item, anchor });
 
   // Google's single-key shortcuts: t 今日 / j,n 次 / k,p 前 / d w m a 表示 / c 作成.
@@ -202,7 +201,7 @@ export function CalendarScreen(): JSX.Element {
       else if (VIEW_KEYS[k]) setView(VIEW_KEYS[k]!);
       else if (k === "c" && canWrite) {
         e.preventDefault();
-        setPanel({ kind: "create", draft: nextHourDraft(anchorDay), anchor: null, ghost: null });
+        openCreate(nextHourDraft(anchorDay));
       }
     };
     document.addEventListener("keydown", onKey);
@@ -236,7 +235,7 @@ export function CalendarScreen(): JSX.Element {
         today={today}
         items={items}
         canCreate={canWrite}
-        onCreateAllDay={(d, a) => openCreate(draftForAllDay(d), a)}
+        onCreateAllDay={(d) => openCreate(draftForAllDay(d))}
         onSelectItem={selectItem}
         onMore={(day, anchor) => setPanel({ kind: "day", day, anchor })}
         onOpenDay={openDay}
@@ -252,8 +251,8 @@ export function CalendarScreen(): JSX.Element {
         items={items}
         ghost={panel?.kind === "create" ? panel.ghost : null}
         canCreate={canWrite}
-        onCreateTimed={(d, s, e, a) => openCreate(draftForSlot(d, s, e), a, { day: d, startMin: s, endMin: e })}
-        onCreateAllDay={(d, a) => openCreate(draftForAllDay(d), a)}
+        onCreateTimed={(d, s, e) => openCreate(draftForSlot(d, s, e), { day: d, startMin: s, endMin: e })}
+        onCreateAllDay={(d) => openCreate(draftForAllDay(d))}
         onSelectItem={selectItem}
         onOpenDay={openDay}
       />
@@ -263,59 +262,47 @@ export function CalendarScreen(): JSX.Element {
   return (
     <div className={styles.app} data-app-bleed data-testid="fe2-calendar">
       <header className={styles.topbar}>
-        <button
-          type="button"
-          className={styles.roundBtn}
+        <IconButton
+          name="menu"
           aria-label="メインメニュー"
-          aria-expanded={sidebarOpen}
           onClick={() => setSidebarOpen((o) => !o)}
-          data-testid="calendar-menu"
-        >
-          <Icon name="menu" />
-        </button>
+          testId="calendar-menu"
+        />
         <h1 className={styles.brand}>
           <span className={styles.brandIcon} aria-hidden="true">
             <Icon name="calendar" />
           </span>
           <span className={styles.brandText}>カレンダー</span>
         </h1>
-        <button type="button" className={styles.todayBtn} onClick={() => setAnchorDay(today)} data-testid="calendar-today">
+        <Button variant="secondary" size="sm" onClick={() => setAnchorDay(today)} testId="calendar-today">
           今日
-        </button>
-        <button
-          type="button"
-          className={styles.roundBtn}
-          aria-label={`前の${VIEW_LABEL[view]}`}
-          onClick={() => setAnchorDay((a) => shiftAnchor(view, a, -1))}
-          data-testid="calendar-prev"
-        >
-          <span className={styles.flip}>
-            <Icon name="chevron-right" />
-          </span>
-        </button>
-        <button
-          type="button"
-          className={styles.roundBtn}
+        </Button>
+        <span className={styles.flip}>
+          <IconButton
+            name="chevron-right"
+            aria-label={`前の${VIEW_LABEL[view]}`}
+            onClick={() => setAnchorDay((a) => shiftAnchor(view, a, -1))}
+            testId="calendar-prev"
+          />
+        </span>
+        <IconButton
+          name="chevron-right"
           aria-label={`次の${VIEW_LABEL[view]}`}
           onClick={() => setAnchorDay((a) => shiftAnchor(view, a, 1))}
-          data-testid="calendar-next"
-        >
-          <Icon name="chevron-right" />
-        </button>
+          testId="calendar-next"
+        />
         <span className={styles.rangeTitle} data-testid="calendar-range-label">
           {narrow ? formatRangeTitleShort(view, anchorDay) : formatRangeTitle(view, anchorDay)}
         </span>
         <span className={styles.spacer} />
         {narrow && canWrite && (
-          <button
-            type="button"
-            className={styles.createMini}
+          <IconButton
+            name="plus"
+            variant="primary"
             aria-label="予定を作成"
             onClick={openCreateDialog}
-            data-testid="calendar-create-mini"
-          >
-            +
-          </button>
+            testId="calendar-create-mini"
+          />
         )}
         <Menu
           label={VIEW_LABEL[view]}
@@ -334,19 +321,16 @@ export function CalendarScreen(): JSX.Element {
       <div className={styles.body}>
         {sidebarOpen && (
           <aside className={styles.sidebar} data-testid="calendar-sidebar">
-            <button
-              type="button"
-              className={styles.createBtn}
-              onClick={openCreateDialog}
-              disabled={!canWrite}
-              title={canWrite ? "予定を作成" : "予定を作成する権限がありません"}
-              data-testid="calendar-create"
-            >
-              <span className={styles.createPlus} aria-hidden="true">
-                +
-              </span>
-              作成
-            </button>
+            <div className={styles.createRow} data-testid="calendar-create-row">
+              <Button
+                iconLeft={<Icon name="plus" />}
+                onClick={openCreateDialog}
+                disabled={!canWrite}
+                testId="calendar-create"
+              >
+                作成
+              </Button>
+            </div>
 
             <MiniCalendar
               selectedDay={anchorDay}
@@ -409,8 +393,8 @@ export function CalendarScreen(): JSX.Element {
       </div>
 
       {panel?.kind === "create" && (
-        <CreatePanel
-          anchor={panel.anchor}
+        <EventDialog
+          editing={false}
           draft={panel.draft}
           onChange={(draft) => setPanel({ ...panel, draft })}
           onSave={() => {
@@ -418,7 +402,6 @@ export function CalendarScreen(): JSX.Element {
             createMut.mutate(panel.draft);
           }}
           onClose={close}
-          onMoreOptions={() => setPanel({ kind: "edit", item: null, draft: panel.draft })}
           saving={createMut.isPending}
         />
       )}
@@ -455,19 +438,17 @@ export function CalendarScreen(): JSX.Element {
       )}
 
       {panel?.kind === "edit" && (
-        <Modal open onClose={close} title={panel.item ? "予定を編集" : "予定を作成"} size="md" testId="calendar-edit-dialog">
-          <EventForm
-            draft={panel.draft}
-            onChange={(draft) => setPanel({ ...panel, draft })}
-            onCancel={close}
-            saving={createMut.isPending || updateMut.isPending}
-            onSubmit={() => {
-              setPanel(null);
-              if (panel.item) updateMut.mutate({ item: panel.item, draft: panel.draft });
-              else createMut.mutate(panel.draft);
-            }}
-          />
-        </Modal>
+        <EventDialog
+          editing
+          draft={panel.draft}
+          onChange={(draft) => setPanel({ ...panel, draft })}
+          onSave={() => {
+            setPanel(null);
+            updateMut.mutate({ item: panel.item, draft: panel.draft });
+          }}
+          onClose={close}
+          saving={updateMut.isPending}
+        />
       )}
     </div>
   );

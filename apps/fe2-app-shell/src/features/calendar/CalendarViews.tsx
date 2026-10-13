@@ -2,7 +2,7 @@
 // mini calendar. Presentation only: layout math lives in calendar-model.ts and all
 // state/mutations in CalendarScreen.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Icon } from "@dub/ui";
+import { IconButton } from "@dub/ui";
 import {
   WEEKDAYS_JA,
   addMonthsDay,
@@ -34,14 +34,6 @@ function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
 }
 
-function ChevronLeft(): JSX.Element {
-  return (
-    <span className={styles.flip}>
-      <Icon name="chevron-right" />
-    </span>
-  );
-}
-
 // ── mini calendar ───────────────────────────────────────────────────────────
 
 export function MiniCalendar({
@@ -65,12 +57,10 @@ export function MiniCalendar({
           {m.getFullYear()}年 {m.getMonth() + 1}月
         </span>
         <span className={styles.miniNav}>
-          <button type="button" className={styles.roundBtn} aria-label="前月" onClick={() => setMonth((x) => addMonthsDay(x, -1))}>
-            <ChevronLeft />
-          </button>
-          <button type="button" className={styles.roundBtn} aria-label="翌月" onClick={() => setMonth((x) => addMonthsDay(x, 1))}>
-            <Icon name="chevron-right" />
-          </button>
+          <span className={styles.flip}>
+            <IconButton name="chevron-right" size="sm" aria-label="前月" onClick={() => setMonth((x) => addMonthsDay(x, -1))} />
+          </span>
+          <IconButton name="chevron-right" size="sm" aria-label="翌月" onClick={() => setMonth((x) => addMonthsDay(x, 1))} />
         </span>
       </div>
       <div className={styles.miniGrid}>
