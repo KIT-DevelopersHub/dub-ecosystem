@@ -474,15 +474,5 @@ export function draftToDates(d: EventDraft): { startAt: string; dueAt: string } 
   return { startAt: localIso(d.startDate, d.startTime), dueAt: localIso(d.endDate, d.endTime) };
 }
 
-/** Collapsed "when" line of the quick-create panel: "10月14日（水曜日） 9:00～10:00". */
-export function formatDraftWhen(d: EventDraft): string {
-  const s = formatDayLong(dayFromKey(d.startDate));
-  const e = formatDayLong(dayFromKey(d.endDate));
-  const t = (hhmm: string) => formatTime(new Date(2000, 0, 1, ...(hhmm.split(":").map(Number) as [number, number])));
-  if (d.allDay) return d.startDate === d.endDate ? s : `${s}～${e}`;
-  if (d.startDate === d.endDate) return `${s}  ${t(d.startTime)}～${t(d.endTime)}`;
-  return `${s} ${t(d.startTime)}～${e} ${t(d.endTime)}`;
-}
-
 /** Every 15 minutes, for the time pickers. */
 export const TIME_OPTIONS: string[] = Array.from({ length: 96 }, (_, i) => minutesToHHMM(i * 15));

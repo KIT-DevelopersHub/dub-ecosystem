@@ -3,7 +3,7 @@
 // through the canonical task-service API, so they also show up in マイタスク/ガント.
 // No new backend: reads GET /api/v1/tasks (self-scoped), writes POST/PATCH/DELETE.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Icon, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
+import { Button, Icon, Menu, Modal, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { common, task } from "@dub/types";
@@ -27,7 +27,7 @@ import {
   type CalendarView,
   type EventDraft,
 } from "./calendar-model";
-import { CreatePanel, DayListPanel, DetailPanel, EventEditor, type AnchorRect } from "./CalendarPanels.tsx";
+import { CreatePanel, DayListPanel, DetailPanel, EventForm, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
 import { STATUS_ORDER, VACATION_VISUAL, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
@@ -420,7 +420,6 @@ export function CalendarScreen(): JSX.Element {
           onClose={close}
           onMoreOptions={() => setPanel({ kind: "edit", item: null, draft: panel.draft })}
           saving={createMut.isPending}
-          calendarName="マイカレンダー"
         />
       )}
 
@@ -456,18 +455,19 @@ export function CalendarScreen(): JSX.Element {
       )}
 
       {panel?.kind === "edit" && (
-        <EventEditor
-          draft={panel.draft}
-          editing={panel.item != null}
-          onChange={(draft) => setPanel({ ...panel, draft })}
-          onClose={close}
-          saving={createMut.isPending || updateMut.isPending}
-          onSave={() => {
-            setPanel(null);
-            if (panel.item) updateMut.mutate({ item: panel.item, draft: panel.draft });
-            else createMut.mutate(panel.draft);
-          }}
-        />
+        <Modal open onClose={close} title={panel.item ? "予定を編集" : "予定を作成"} size="md" testId="calendar-edit-dialog">
+          <EventForm
+            draft={panel.draft}
+            onChange={(draft) => setPanel({ ...panel, draft })}
+            onCancel={close}
+            saving={createMut.isPending || updateMut.isPending}
+            onSubmit={() => {
+              setPanel(null);
+              if (panel.item) updateMut.mutate({ item: panel.item, draft: panel.draft });
+              else createMut.mutate(panel.draft);
+            }}
+          />
+        </Modal>
       )}
     </div>
   );

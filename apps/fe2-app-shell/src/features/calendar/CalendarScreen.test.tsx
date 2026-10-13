@@ -116,7 +116,6 @@ describe("CalendarScreen", () => {
     // Like Google, 作成 opens the quick-create panel (not a separate form).
     await user.click(screen.getByTestId("calendar-create"));
     const dialog = await screen.findByTestId("calendar-create-panel");
-    expect(within(dialog).getByTestId("calendar-form-when")).toHaveTextContent(/10月10日（土曜日）\s+9:00～10:00/);
     await user.type(within(dialog).getByTestId("calendar-form-title"), "スポンサー打ち合わせ");
     await user.click(within(dialog).getByTestId("calendar-form-save"));
 
@@ -142,7 +141,6 @@ describe("CalendarScreen", () => {
     fireEvent.pointerUp(col, { clientY: y, button: 0, pointerId: 1 });
 
     const panel = await screen.findByTestId("calendar-create-panel");
-    await user.click(within(panel).getByTestId("calendar-form-when"));
     expect(within(panel).getByTestId("calendar-form-start-time")).toHaveValue("14:00");
     expect(within(panel).getByTestId("calendar-form-end-time")).toHaveValue("15:00");
     expect(screen.getByTestId("calendar-ghost")).toBeInTheDocument();
@@ -239,7 +237,7 @@ describe("CalendarScreen", () => {
     expect(within(screen.getByTestId("calendar-allday")).queryByText("休暇")).not.toBeInTheDocument();
   });
 
-  it("opens 休暇 detail without the tag and edits it in the full-page editor", async () => {
+  it("opens 休暇 detail without the tag and edits it in the edit dialog", async () => {
     const user = userEvent.setup();
     renderScreen(
       memoryApi([

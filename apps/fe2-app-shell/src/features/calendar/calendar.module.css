@@ -6,8 +6,7 @@
 
 /* .form also carries the palette: the edit dialog is portaled outside .app. */
 .app,
-.form,
-.editor {
+.form {
   --gcal-blue: #1a73e8;
   --gcal-blue-soft: #e8f0fe;
   --gcal-red: #ea4335;
@@ -523,25 +522,6 @@
   min-height: 36px;
 }
 .panelBarPlain { background: transparent; }
-.panelBar { position: relative; }
-.panelGrip {
-  position: absolute;
-  left: 50%;
-  top: 16px;
-  width: 20px;
-  height: 6px;
-  transform: translateX(-50%);
-  border-top: 2px solid var(--dub-color-text-secondary);
-  border-bottom: 2px solid var(--dub-color-text-secondary);
-  box-sizing: border-box;
-  opacity: 0.6;
-}
-.quickIndent {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-3);
-  padding-left: calc(24px + var(--dub-space-4));
-}
 .panelBody { padding: var(--dub-space-2) var(--dub-space-6) var(--dub-space-4); }
 
 .form { display: flex; flex-direction: column; gap: var(--dub-space-3); }
@@ -705,64 +685,10 @@
 .kindChip:hover { background: var(--dub-color-surface-sunken); }
 .kindChipOn, .kindChipOn:hover { background: var(--gcal-blue-soft); color: var(--gcal-blue); }
 
-/* collapsed rows of the quick-create panel (click to expand, like Google) */
-.rowBtn,
-.rowStatic {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-height: 36px;
-  padding: 6px 8px;
-  margin-left: -8px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--dub-color-text-primary);
-  font: inherit;
-  text-align: left;
-}
-.rowBtn { cursor: pointer; }
-.rowBtn:hover { background: var(--dub-color-surface-sunken); }
-.rowBtnMain { display: inline-flex; align-items: center; gap: var(--dub-space-2); font-size: var(--dub-font-size-sm); }
-.rowBtnSub { font-size: var(--dub-font-size-xs); color: var(--dub-color-text-secondary); }
-.rowBtnPlaceholder { font-size: var(--dub-font-size-sm); color: var(--dub-color-text-secondary); }
+/* vacation note row in the form */
 .rowNote { margin: 0; padding-top: 8px; font-size: var(--dub-font-size-sm); color: var(--dub-color-text-primary); }
 
 /* 休暇 blocks/bars: the calendar color with Google's out-of-office stripes */
 .vacation {
   background-image: repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.22) 0 6px, transparent 6px 12px);
-}
-
-/* full-page editor (その他のオプション / 予定を編集) */
-.editor {
-  position: fixed;
-  inset: 0;
-  z-index: var(--dub-zIndex-modal);
-  overflow-y: auto;
-  background: var(--dub-color-surface-raised);
-  color: var(--dub-color-text-primary);
-}
-.editorForm { max-width: 960px; margin: 0 auto; padding: var(--dub-space-3) var(--dub-space-4) var(--dub-space-8); }
-.editorTop { display: flex; align-items: center; gap: var(--dub-space-4); }
-.editorTitle { flex: 1; min-width: 0; }
-.titleInputBig { font-size: 22px; padding-top: 10px; background: var(--dub-color-surface-sunken); padding-left: 12px; border-radius: 4px 4px 0 0; }
-.editorBody {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-4);
-  padding-left: calc(36px + var(--dub-space-4));
-  padding-top: var(--dub-space-3);
-}
-.editorTabs { display: flex; gap: var(--dub-space-4); border-bottom: 1px solid var(--dub-color-border); margin-top: var(--dub-space-2); }
-.editorTabOn {
-  padding: var(--dub-space-2) var(--dub-space-1);
-  border-bottom: 3px solid var(--gcal-blue);
-  color: var(--gcal-blue);
-  font-size: var(--dub-font-size-sm);
-  font-weight: var(--dub-font-weight-medium);
-}
-.editorDesc { max-width: 640px; }
-@media (max-width: 600px) {
-  .editorBody { padding-left: 0; }
 }
