@@ -235,7 +235,7 @@ export function CalendarScreen(): JSX.Element {
       <PageHeader
         testId="fe2-calendar-header"
         title="カレンダー"
-        description="マイタスク・ガントと同じタスクを、期限や期間でカレンダーに表示します"
+        description="マイタスク・ガントと同じタスクと、共有アカウントで発行したミーティングをカレンダーに表示します"
         actions={
           access.canEdit ? (
             <div className={styles.headerActions} data-feature={MEETINGS_FEATURE_MARKER} data-testid="calendar-meetings-toolbar">
