@@ -61,7 +61,13 @@ export interface ReadSummary {
   description: string;
   ok: boolean;
   count?: number;
-  sample?: string;
+  /** Every row, cut to the entry's main fields (the daemon's compact.ts). */
+  table?: string;
+  rows?: number;
+  /** UTF-8 size of `table`: what the read budget is measured in. */
+  bytes?: number;
+  /** forEach + where: how many of the list matched. */
+  filtered?: { from: number; matched: number };
   error?: string;
 }
 
@@ -74,6 +80,8 @@ export interface Preview {
   blockers: string[];
   /** High risk or a bulk write: the confirmation phrase is required. */
   requiresPhrase?: boolean;
+  /** The reads hit the daemon's per-preview call cap (the only blocker then). */
+  readLimit?: { calls: number; max: number };
   expiresAt: string;
 }
 
