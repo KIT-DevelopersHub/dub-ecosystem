@@ -284,8 +284,8 @@ describe("MembersPage", () => {
         { id: "dev", key: "dev", name: "開発チーム", color: "#0d9488", description: null },
       ],
       members: [
-        { ...base, id: "K", name: "高岡 航太郎", roleTitle: "実行委員長", status: "added", teamIds: ["hq"], sortOrder: 1 },
-        { ...base, id: "Y", name: "金井ユラ", roleTitle: null, status: "added", teamIds: ["hq"], sortOrder: 2 },
+        { ...base, id: "K", name: "高岡 己太朗", roleTitle: "実行委員長", status: "added", teamIds: ["hq"], sortOrder: 1 },
+        { ...base, id: "Y", name: "金井友楽", roleTitle: null, status: "added", teamIds: ["hq"], sortOrder: 2 },
         { ...base, id: "H", name: "統括三郎", roleTitle: null, status: "added", teamIds: ["hq"], sortOrder: 3 },
         { ...base, id: "D", name: "開発花子", roleTitle: null, status: "added", teamIds: ["dev"], sortOrder: 4 },
       ],

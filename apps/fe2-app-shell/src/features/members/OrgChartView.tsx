@@ -19,7 +19,7 @@ function isHqTeam(t: MemberTeam): boolean {
 }
 
 /** 上部「代表」箱に出す人（この順で表示）。統括チームの列と重複して載るのは意図どおり。 */
-export const REPRESENTATIVE_NAMES = ["金井ユラ", "高岡航太郎"] as const;
+export const REPRESENTATIVE_NAMES = ["金井友楽", "高岡己太朗"] as const;
 const normName = (s: string): string => s.replace(/[\s　]+/g, "");
 
 const TIER_RANK: Record<Tier, number> = { organizer: 0, leader: 1, member: 2 };

@@ -2466,9 +2466,9 @@ function createMembersStore() {
   // 「休み中」、declined＝「辞退」(名簿一覧では既定非表示・辞退者フィルタで参照)。
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
-    mk("member_1", "高岡 航太郎", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
+    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
     mk("member_h2", "黒川 誠", "統括リーダー", "added", ["team_hq"], 1, null, "情報工学科", "3年", null, "member_1"),
-    mk("member_h3", "金井 ユラ", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null, "member_h2"),
+    mk("member_h3", "金井 友楽", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null, "member_h2"),
     // 開発 — リーダー2人、各リーダーに配下2人。
     mk("member_d1", "荒木 大地", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
     mk("member_d2", "阿閉 健", "開発リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年", null, "member_d1"),
