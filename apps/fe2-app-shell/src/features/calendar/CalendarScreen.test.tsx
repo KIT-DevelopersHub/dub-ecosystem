@@ -61,6 +61,9 @@ function memoryApi(seed: task.Task[]) {
       { id: "role_lead", orgId: "org_devhub", name: "統括", permissions: [], isSystem: false },
       { id: "role_pr", orgId: "org_devhub", name: "広報", permissions: [], isSystem: false },
     ]),
+    getUsers: vi.fn(async (ids: readonly common.UserId[]) =>
+      ids.map((id) => ({ id, displayName: id === ME ? "山田" : "佐藤", avatarUrl: null })),
+    ),
   };
   return api;
 }
@@ -130,7 +133,7 @@ describe("CalendarScreen", () => {
     expect(Date.parse(req.startAt!)).toBe(local(9).getTime());
     expect(Date.parse(req.dueAt!)).toBe(local(10).getTime());
     expect(req.startAt).not.toMatch(/T00:00:00(\.0+)?Z$/);
-    expect(await screen.findByText("スポンサー打ち合わせ")).toBeInTheDocument();
+    expect(await screen.findByText("山田：スポンサー打ち合わせ")).toBeInTheDocument();
   });
 
   it("clicking an empty time slot opens the quick-create popover for that hour", async () => {
@@ -170,7 +173,7 @@ describe("CalendarScreen", () => {
     await user.type(title, "新タイトル");
     await user.click(within(dialog).getByTestId("calendar-form-save"));
     await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith("ev", expect.objectContaining({ version: 3, title: "新タイトル" })));
-    expect(await screen.findByText("新タイトル")).toBeInTheDocument();
+    expect(await screen.findByText("山田：新タイトル")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("calendar-item-ev"));
     await user.click(within(await screen.findByTestId("calendar-event-detail")).getByTestId("calendar-detail-delete"));
@@ -191,7 +194,7 @@ describe("CalendarScreen", () => {
     await user.click(within(dialog).getByTestId("calendar-form-save"));
 
     expect(await screen.findByText("予定を保存できませんでした")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText("失敗する予定")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("山田：失敗する予定")).not.toBeInTheDocument());
   });
 
   it("shows month view and hides a status via マイカレンダー", async () => {
@@ -235,10 +238,10 @@ describe("CalendarScreen", () => {
     expect(await screen.findByText("休暇を登録しました")).toBeInTheDocument();
 
     // Hidden/shown on its own via マイカレンダー, independent of status.
-    const bar = await within(screen.getByTestId("calendar-allday")).findByText("休暇");
+    const bar = await within(screen.getByTestId("calendar-allday")).findByText("山田：休暇");
     expect(bar).toBeInTheDocument();
     await user.click(screen.getByTestId("calendar-filter-vacation"));
-    expect(within(screen.getByTestId("calendar-allday")).queryByText("休暇")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("calendar-allday")).queryByText("山田：休暇")).not.toBeInTheDocument();
   });
 
   it("opens 休暇 detail without the tag and edits it in the edit dialog", async () => {
@@ -285,7 +288,7 @@ describe("CalendarScreen", () => {
     await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.createTask).mock.calls[0]![0].description).toBe("#ラベル:role_lead");
 
-    const created = await screen.findByText("統括定例");
+    const created = await screen.findByText("統括：統括定例");
     await user.click(created);
     const detail = await screen.findByTestId("calendar-event-detail");
     expect(within(detail).getByTestId("calendar-detail-label")).toHaveTextContent("統括");
@@ -294,8 +297,28 @@ describe("CalendarScreen", () => {
 
     // Hiding 統括 hides only the labelled 予定.
     await user.click(screen.getByTestId("calendar-label-filter-role_lead"));
-    expect(screen.queryByText("統括定例")).not.toBeInTheDocument();
+    expect(screen.queryByText("統括：統括定例")).not.toBeInTheDocument();
     expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
+  });
+
+  it("leads each 予定 with its owner: the person for 個人, the role for a label", async () => {
+    const user = userEvent.setup();
+    renderScreen(
+      memoryApi([
+        mk("off", { title: "休暇", description: "#休暇", dueAt: "2026-10-12T00:00:00.000Z" }),
+        mk("other", { title: "面談", assigneeId: "usr_sato" as common.UserId, dueAt: "2026-10-13T00:00:00.000Z" }),
+        mk("lead", { title: "定例", description: "#ラベル:role_lead", dueAt: "2026-10-14T00:00:00.000Z" }),
+      ]),
+    );
+    await screen.findByTestId("calendar-timegrid");
+    await user.keyboard("m");
+    expect(await screen.findByText("山田：休暇")).toBeInTheDocument();
+    expect(await screen.findByText("佐藤：面談")).toBeInTheDocument();
+    expect(await screen.findByText("統括：定例")).toBeInTheDocument();
+
+    await user.click(screen.getByText("山田：休暇"));
+    const detail = await screen.findByTestId("calendar-event-detail");
+    expect(within(detail).getByTestId("calendar-detail-label")).toHaveTextContent("個人（山田）");
   });
 
   it("disables 作成 without write permission", async () => {

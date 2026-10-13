@@ -4,10 +4,10 @@
 // No new backend: reads GET /api/v1/tasks (self-scoped), writes POST/PATCH/DELETE.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Icon, IconButton, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { common, task } from "@dub/types";
-import { useCalendarApi, useCalendarCaps, useCalendarCurrentUserId } from "./CalendarProvider.tsx";
+import { useCalendarApi, useCalendarCaps, useCalendarCurrentUserId, useCalendarCurrentUserName } from "./CalendarProvider.tsx";
 import {
   dayIndexOf,
   draftFromItem,
@@ -20,6 +20,7 @@ import {
   formatRangeTitleShort,
   itemsOnDay,
   labelOf,
+  PERSONAL_LABEL,
   shiftAnchor,
   toCalendarItems,
   VACATION_TITLE,
@@ -28,9 +29,17 @@ import {
   type CalendarView,
   type EventDraft,
 } from "./calendar-model";
-import { DayListPanel, DetailPanel, EventDialog, type AnchorRect } from "./CalendarPanels.tsx";
+import { DayListPanel, DetailPanel, EventDialog, ItemTitleProvider, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
-import { STATUS_ORDER, VACATION_VISUAL, buildLabels, resolveLabel, statusVisual } from "./taskVisuals";
+import {
+  STATUS_ORDER,
+  VACATION_VISUAL,
+  buildLabels,
+  ownedTitle,
+  ownerOf,
+  resolveLabel,
+  statusVisual,
+} from "./taskVisuals";
 import styles from "./calendar.module.css";
 
 const VIEW_LABEL: Record<CalendarView, string> = { day: "日", week: "週", month: "月", schedule: "スケジュール" };
@@ -66,6 +75,7 @@ function taskPath(t: task.Task): string {
 export function CalendarScreen(): JSX.Element {
   const api = useCalendarApi();
   const currentUserId = useCalendarCurrentUserId();
+  const currentUserName = useCalendarCurrentUserName();
   const { canWrite, canDelete } = useCalendarCaps();
   const navigate = useNavigate();
   const toast = useToast();
@@ -96,6 +106,36 @@ export function CalendarScreen(): JSX.Element {
   const rolesQuery = useQuery({ queryKey: ["calendar", "roles"], queryFn: () => api.listRoles(), staleTime: 5 * 60_000 });
   const labels = useMemo(() => buildLabels(rolesQuery.data ?? []), [rolesQuery.data]);
   const labelKeyOf = useCallback((t: task.Task) => resolveLabel(labels, labelOf(t)).key, [labels]);
+
+  // 個人 予定 lead with the person's name ("山田：休暇"), labelled ones with the role.
+  // Names need identity:read; without it only the signed-in user's own name is known.
+  const personIds = useMemo(() => {
+    const ids = new Set<common.UserId>();
+    for (const t of data ?? []) {
+      const p = t.assigneeId ?? t.createdBy;
+      if (p) ids.add(p);
+    }
+    return [...ids].sort();
+  }, [data]);
+  const usersQuery = useQuery({
+    queryKey: ["calendar", "users", personIds],
+    queryFn: () => api.getUsers(personIds),
+    enabled: personIds.length > 0,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
+  });
+  const names = useMemo(() => {
+    const m = new Map<string, string>();
+    if (currentUserId && currentUserName) m.set(currentUserId, currentUserName);
+    for (const u of usersQuery.data ?? []) m.set(u.id, u.displayName);
+    return m;
+  }, [currentUserId, currentUserName, usersQuery.data]);
+  const itemTitle = useCallback((t: task.Task) => ownedTitle(t, ownerOf(t, labels, names)), [labels, names]);
+  const detailLabelName = (t: task.Task) => {
+    const label = resolveLabel(labels, labelOf(t));
+    const owner = ownerOf(t, labels, names);
+    return label.key === PERSONAL_LABEL && owner ? `${label.name}（${owner}）` : label.name;
+  };
 
   const { items, undated } = useMemo(() => {
     // 休暇 is its own calendar in the sidebar; everything else toggles by status.
@@ -271,227 +311,229 @@ export function CalendarScreen(): JSX.Element {
   }
 
   return (
-    <div className={styles.app} data-app-bleed data-testid="fe2-calendar">
-      <header className={styles.topbar}>
-        <IconButton
-          name="menu"
-          aria-label="メインメニュー"
-          onClick={() => setSidebarOpen((o) => !o)}
-          testId="calendar-menu"
-        />
-        <h1 className={styles.brand}>
-          <span className={styles.brandIcon} aria-hidden="true">
-            <Icon name="calendar" />
+    <ItemTitleProvider value={itemTitle}>
+      <div className={styles.app} data-app-bleed data-testid="fe2-calendar">
+        <header className={styles.topbar}>
+          <IconButton
+            name="menu"
+            aria-label="メインメニュー"
+            onClick={() => setSidebarOpen((o) => !o)}
+            testId="calendar-menu"
+          />
+          <h1 className={styles.brand}>
+            <span className={styles.brandIcon} aria-hidden="true">
+              <Icon name="calendar" />
+            </span>
+            <span className={styles.brandText}>カレンダー</span>
+          </h1>
+          <Button variant="secondary" size="sm" onClick={() => setAnchorDay(today)} testId="calendar-today">
+            今日
+          </Button>
+          <span className={styles.flip}>
+            <IconButton
+              name="chevron-right"
+              aria-label={`前の${VIEW_LABEL[view]}`}
+              onClick={() => setAnchorDay((a) => shiftAnchor(view, a, -1))}
+              testId="calendar-prev"
+            />
           </span>
-          <span className={styles.brandText}>カレンダー</span>
-        </h1>
-        <Button variant="secondary" size="sm" onClick={() => setAnchorDay(today)} testId="calendar-today">
-          今日
-        </Button>
-        <span className={styles.flip}>
           <IconButton
             name="chevron-right"
-            aria-label={`前の${VIEW_LABEL[view]}`}
-            onClick={() => setAnchorDay((a) => shiftAnchor(view, a, -1))}
-            testId="calendar-prev"
+            aria-label={`次の${VIEW_LABEL[view]}`}
+            onClick={() => setAnchorDay((a) => shiftAnchor(view, a, 1))}
+            testId="calendar-next"
           />
-        </span>
-        <IconButton
-          name="chevron-right"
-          aria-label={`次の${VIEW_LABEL[view]}`}
-          onClick={() => setAnchorDay((a) => shiftAnchor(view, a, 1))}
-          testId="calendar-next"
-        />
-        <span className={styles.rangeTitle} data-testid="calendar-range-label">
-          {narrow ? formatRangeTitleShort(view, anchorDay) : formatRangeTitle(view, anchorDay)}
-        </span>
-        <span className={styles.spacer} />
-        {narrow && canWrite && (
-          <IconButton
-            name="plus"
-            variant="primary"
-            aria-label="予定を作成"
-            onClick={openCreateDialog}
-            testId="calendar-create-mini"
-          />
-        )}
-        <Menu
-          label={VIEW_LABEL[view]}
-          variant="secondary"
-          menuLabel="表示切替"
-          testId="calendar-view-menu"
-          items={(Object.keys(VIEW_LABEL) as CalendarView[]).map((v) => ({
-            id: v,
-            label: VIEW_LABEL[v],
-            onSelect: () => setView(v),
-            testId: `calendar-view-${v}`,
-          }))}
-        />
-      </header>
-
-      <div className={styles.body}>
-        {sidebarOpen && (
-          <aside className={styles.sidebar} data-testid="calendar-sidebar">
-            <div className={styles.createRow} data-testid="calendar-create-row">
-              <Button
-                iconLeft={<Icon name="plus" />}
-                onClick={openCreateDialog}
-                disabled={!canWrite}
-                testId="calendar-create"
-              >
-                作成
-              </Button>
-            </div>
-
-            <MiniCalendar
-              selectedDay={anchorDay}
-              today={today}
-              onSelect={(d) => {
-                setAnchorDay(d);
-                if (narrow) setSidebarOpen(false);
-              }}
+          <span className={styles.rangeTitle} data-testid="calendar-range-label">
+            {narrow ? formatRangeTitleShort(view, anchorDay) : formatRangeTitle(view, anchorDay)}
+          </span>
+          <span className={styles.spacer} />
+          {narrow && canWrite && (
+            <IconButton
+              name="plus"
+              variant="primary"
+              aria-label="予定を作成"
+              onClick={openCreateDialog}
+              testId="calendar-create-mini"
             />
+          )}
+          <Menu
+            label={VIEW_LABEL[view]}
+            variant="secondary"
+            menuLabel="表示切替"
+            testId="calendar-view-menu"
+            items={(Object.keys(VIEW_LABEL) as CalendarView[]).map((v) => ({
+              id: v,
+              label: VIEW_LABEL[v],
+              onSelect: () => setView(v),
+              testId: `calendar-view-${v}`,
+            }))}
+          />
+        </header>
 
-            <div data-testid="calendar-list">
-              <div className={styles.calListHead}>マイカレンダー</div>
-              {[...STATUS_ORDER, VACATION_KEY as CalendarKey].map((s) => {
-                const v = s === VACATION_KEY ? VACATION_VISUAL : statusVisual(s);
-                return (
-                  <label key={s} className={styles.calItem}>
-                    <input
-                      type="checkbox"
-                      className={styles.calCheck}
-                      style={{ ["--cal-color" as string]: v.color }}
-                      checked={!hidden.has(s)}
-                      onChange={() =>
-                        setHidden((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(s)) next.delete(s);
-                          else next.add(s);
-                          return next;
-                        })
-                      }
-                      data-testid={`calendar-filter-${s}`}
-                    />
-                    {v.label}
-                  </label>
-                );
-              })}
-            </div>
-
-            <div data-testid="calendar-label-list">
-              <div className={styles.calListHead}>ラベル</div>
-              {rolesQuery.isPending ? (
-                <SkeletonLoader lines={3} />
-              ) : (
-                labels.map((l) => (
-                  <label key={l.key} className={styles.calItem}>
-                    <input
-                      type="checkbox"
-                      className={styles.calCheck}
-                      style={{ ["--cal-color" as string]: LABEL_COLOR }}
-                      checked={!hiddenLabels.has(l.key)}
-                      onChange={() =>
-                        setHiddenLabels((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(l.key)) next.delete(l.key);
-                          else next.add(l.key);
-                          return next;
-                        })
-                      }
-                      data-testid={`calendar-label-filter-${l.key}`}
-                    />
-                    {l.name}
-                  </label>
-                ))
-              )}
-            </div>
-
-            {undated.length > 0 && (
-              <div className={styles.undated} data-testid="calendar-undated">
-                <div className={styles.calListHead}>日付未設定（{undated.length}件）</div>
-                {undated.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className={styles.undatedItem}
-                    onClick={() => void navigate({ to: taskPath(t) })}
-                    data-testid={`calendar-undated-${t.id}`}
-                  >
-                    <span className={styles.dot} style={{ background: statusVisual(t.status).color }} />
-                    {t.title}
-                  </button>
-                ))}
+        <div className={styles.body}>
+          {sidebarOpen && (
+            <aside className={styles.sidebar} data-testid="calendar-sidebar">
+              <div className={styles.createRow} data-testid="calendar-create-row">
+                <Button
+                  iconLeft={<Icon name="plus" />}
+                  onClick={openCreateDialog}
+                  disabled={!canWrite}
+                  testId="calendar-create"
+                >
+                  作成
+                </Button>
               </div>
-            )}
 
-            <p className={styles.sideNote}>予定はマイタスクのタスクとして保存され、マイタスク・ガントにも表示されます。</p>
-          </aside>
+              <MiniCalendar
+                selectedDay={anchorDay}
+                today={today}
+                onSelect={(d) => {
+                  setAnchorDay(d);
+                  if (narrow) setSidebarOpen(false);
+                }}
+              />
+
+              <div data-testid="calendar-list">
+                <div className={styles.calListHead}>マイカレンダー</div>
+                {[...STATUS_ORDER, VACATION_KEY as CalendarKey].map((s) => {
+                  const v = s === VACATION_KEY ? VACATION_VISUAL : statusVisual(s);
+                  return (
+                    <label key={s} className={styles.calItem}>
+                      <input
+                        type="checkbox"
+                        className={styles.calCheck}
+                        style={{ ["--cal-color" as string]: v.color }}
+                        checked={!hidden.has(s)}
+                        onChange={() =>
+                          setHidden((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(s)) next.delete(s);
+                            else next.add(s);
+                            return next;
+                          })
+                        }
+                        data-testid={`calendar-filter-${s}`}
+                      />
+                      {v.label}
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div data-testid="calendar-label-list">
+                <div className={styles.calListHead}>ラベル</div>
+                {rolesQuery.isPending ? (
+                  <SkeletonLoader lines={3} />
+                ) : (
+                  labels.map((l) => (
+                    <label key={l.key} className={styles.calItem}>
+                      <input
+                        type="checkbox"
+                        className={styles.calCheck}
+                        style={{ ["--cal-color" as string]: LABEL_COLOR }}
+                        checked={!hiddenLabels.has(l.key)}
+                        onChange={() =>
+                          setHiddenLabels((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(l.key)) next.delete(l.key);
+                            else next.add(l.key);
+                            return next;
+                          })
+                        }
+                        data-testid={`calendar-label-filter-${l.key}`}
+                      />
+                      {l.name}
+                    </label>
+                  ))
+                )}
+              </div>
+
+              {undated.length > 0 && (
+                <div className={styles.undated} data-testid="calendar-undated">
+                  <div className={styles.calListHead}>日付未設定（{undated.length}件）</div>
+                  {undated.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={styles.undatedItem}
+                      onClick={() => void navigate({ to: taskPath(t) })}
+                      data-testid={`calendar-undated-${t.id}`}
+                    >
+                      <span className={styles.dot} style={{ background: statusVisual(t.status).color }} />
+                      {t.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <p className={styles.sideNote}>予定はマイタスクのタスクとして保存され、マイタスク・ガントにも表示されます。</p>
+            </aside>
+          )}
+          {body}
+        </div>
+
+        {panel?.kind === "create" && (
+          <EventDialog
+            editing={false}
+            draft={panel.draft}
+            labels={labels}
+            onChange={(draft) => setPanel({ ...panel, draft })}
+            onSave={() => {
+              setPanel(null);
+              createMut.mutate(panel.draft);
+            }}
+            onClose={close}
+            saving={createMut.isPending}
+          />
         )}
-        {body}
+
+        {panel?.kind === "detail" && (
+          <DetailPanel
+            anchor={panel.anchor}
+            item={panel.item}
+            labelName={detailLabelName(panel.item.task)}
+            // An optimistic row has no server id yet — nothing to edit/delete until it lands.
+            canWrite={canWrite && !panel.item.task.id.startsWith("tmp_")}
+            canDelete={canDelete && !panel.item.task.id.startsWith("tmp_")}
+            onClose={close}
+            onEdit={() => setPanel({ kind: "edit", item: panel.item, draft: draftFromItem(panel.item) })}
+            onDelete={() => {
+              setPanel(null);
+              deleteMut.mutate(panel.item);
+            }}
+            onOpenInTasks={() => {
+              setPanel(null);
+              void navigate({ to: taskPath(panel.item.task) });
+            }}
+          />
+        )}
+
+        {panel?.kind === "day" && (
+          <DayListPanel
+            anchor={panel.anchor}
+            day={panel.day}
+            items={itemsOnDay(items, panel.day)}
+            onClose={close}
+            onSelect={selectItem}
+            onOpenDay={() => openDay(panel.day)}
+          />
+        )}
+
+        {panel?.kind === "edit" && (
+          <EventDialog
+            editing
+            draft={panel.draft}
+            labels={labels}
+            onChange={(draft) => setPanel({ ...panel, draft })}
+            onSave={() => {
+              setPanel(null);
+              updateMut.mutate({ item: panel.item, draft: panel.draft });
+            }}
+            onClose={close}
+            saving={updateMut.isPending}
+          />
+        )}
       </div>
-
-      {panel?.kind === "create" && (
-        <EventDialog
-          editing={false}
-          draft={panel.draft}
-          labels={labels}
-          onChange={(draft) => setPanel({ ...panel, draft })}
-          onSave={() => {
-            setPanel(null);
-            createMut.mutate(panel.draft);
-          }}
-          onClose={close}
-          saving={createMut.isPending}
-        />
-      )}
-
-      {panel?.kind === "detail" && (
-        <DetailPanel
-          anchor={panel.anchor}
-          item={panel.item}
-          labelName={resolveLabel(labels, labelOf(panel.item.task)).name}
-          // An optimistic row has no server id yet — nothing to edit/delete until it lands.
-          canWrite={canWrite && !panel.item.task.id.startsWith("tmp_")}
-          canDelete={canDelete && !panel.item.task.id.startsWith("tmp_")}
-          onClose={close}
-          onEdit={() => setPanel({ kind: "edit", item: panel.item, draft: draftFromItem(panel.item) })}
-          onDelete={() => {
-            setPanel(null);
-            deleteMut.mutate(panel.item);
-          }}
-          onOpenInTasks={() => {
-            setPanel(null);
-            void navigate({ to: taskPath(panel.item.task) });
-          }}
-        />
-      )}
-
-      {panel?.kind === "day" && (
-        <DayListPanel
-          anchor={panel.anchor}
-          day={panel.day}
-          items={itemsOnDay(items, panel.day)}
-          onClose={close}
-          onSelect={selectItem}
-          onOpenDay={() => openDay(panel.day)}
-        />
-      )}
-
-      {panel?.kind === "edit" && (
-        <EventDialog
-          editing
-          draft={panel.draft}
-          labels={labels}
-          onChange={(draft) => setPanel({ ...panel, draft })}
-          onSave={() => {
-            setPanel(null);
-            updateMut.mutate({ item: panel.item, draft: panel.draft });
-          }}
-          onClose={close}
-          saving={updateMut.isPending}
-        />
-      )}
-    </div>
+    </ItemTitleProvider>
   );
 }

@@ -1,6 +1,17 @@
 // Calendar panels: the create/edit dialog (@dub/ui Modal), plus Google-style
 // anchored popovers for the event detail card and the 他N件 day list.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import type { task } from "@dub/types";
 import {
   Button,
   Checkbox,
@@ -30,8 +41,15 @@ import {
   type EventDraft,
   type ItemKind,
 } from "./calendar-model";
-import { PRIORITY_LABEL, itemVisual, type CalendarLabel } from "./taskVisuals";
+import { PRIORITY_LABEL, UNTITLED_TITLE, itemVisual, type CalendarLabel } from "./taskVisuals";
 import styles from "./calendar.module.css";
+
+/** How an item's title reads on the grids ("<owner>：<title>"); the screen provides it. */
+const ItemTitleCtx = createContext<(t: task.Task) => string>((t) => t.title || UNTITLED_TITLE);
+export const ItemTitleProvider = ItemTitleCtx.Provider;
+export function useItemTitle(): (t: task.Task) => string {
+  return useContext(ItemTitleCtx);
+}
 
 export interface AnchorRect {
   left: number;
@@ -517,7 +535,7 @@ export function ItemButton({
   style?: CSSProperties;
 }): JSX.Element {
   const v = itemVisual(item.task);
-  const title = item.task.title || "（タイトルなし）";
+  const title = useItemTitle()(item.task);
   const cancelled = item.task.status === "cancelled" ? styles.cancelled : "";
   const banner = item.allDay || item.startDay !== item.endDay;
   const vacation = banner && isVacationTask(item.task) ? styles.vacation : "";

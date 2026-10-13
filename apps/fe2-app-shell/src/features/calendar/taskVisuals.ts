@@ -3,7 +3,9 @@
 // event palette (ピーコック/ブルーベリー/ミカン/セージ/グラファイト) so blocks read the
 // way users already know; text on them is always white, as in Google.
 import type { identity, task } from "@dub/types";
-import { PERSONAL_LABEL, isVacationTask } from "./calendar-model";
+import { PERSONAL_LABEL, isVacationTask, labelOf } from "./calendar-model";
+
+export const UNTITLED_TITLE = "（タイトルなし）";
 
 export interface StatusVisual {
   label: string;
@@ -60,4 +62,22 @@ export function buildLabels(roles: readonly Pick<identity.Role, "id" | "name">[]
 /** The label for a key; an unknown key (deleted role) falls back to 個人. */
 export function resolveLabel(labels: readonly CalendarLabel[], key: string): CalendarLabel {
   return labels.find((l) => l.key === key) ?? PERSONAL_LABEL_ENTRY;
+}
+
+/** Who a 予定 belongs to: the role for a labelled one, else the person (担当, or 依頼者). */
+export function ownerOf(
+  t: task.Task,
+  labels: readonly CalendarLabel[],
+  names: ReadonlyMap<string, string>,
+): string | null {
+  const label = resolveLabel(labels, labelOf(t));
+  if (label.key !== PERSONAL_LABEL) return label.name;
+  const person = t.assigneeId ?? t.createdBy;
+  return (person && names.get(person)) || null;
+}
+
+/** "<owner>：<title>" so a month grid shows whose 予定/休暇 it is at a glance. */
+export function ownedTitle(t: task.Task, owner: string | null): string {
+  const title = t.title || UNTITLED_TITLE;
+  return owner ? `${owner}：${title}` : title;
 }

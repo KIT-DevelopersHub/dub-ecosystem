@@ -15,6 +15,8 @@ import { createCalendarApi, type CalendarApi } from "./calendarApi.tsx";
 
 const CalendarApiCtx = createContext<CalendarApi | null>(null);
 const CalendarUserCtx = createContext<common.UserId | null>(null);
+/** The signed-in user's display name: names 個人 予定 even without identity:read. */
+const CalendarUserNameCtx = createContext<string | null>(null);
 
 /** Which write affordances (予定の追加/編集/削除) are live. 予定 are tasks, so the
  *  server gate is マイタスク's (task-service POLICY_TABLE: app:tasks:edit + task:write,
@@ -30,6 +32,7 @@ export function CalendarProvider({ api, children }: { api: ApiClient; children: 
   const calendarApi = useMemo(() => createCalendarApi(api), [api]);
   const auth = useAuth();
   const currentUserId = auth.status === "authenticated" ? auth.me.user.id : null;
+  const currentUserName = auth.status === "authenticated" ? auth.me.user.displayName : null;
   const { can } = usePermissions();
   const calendarCap = useAppCapability("calendar");
   const tasksCap = useAppCapability("tasks");
@@ -39,7 +42,9 @@ export function CalendarProvider({ api, children }: { api: ApiClient; children: 
   return (
     <CalendarApiCtx.Provider value={calendarApi}>
       <CalendarUserCtx.Provider value={currentUserId}>
-        <CalendarCapsCtx.Provider value={caps}>{children}</CalendarCapsCtx.Provider>
+        <CalendarUserNameCtx.Provider value={currentUserName}>
+          <CalendarCapsCtx.Provider value={caps}>{children}</CalendarCapsCtx.Provider>
+        </CalendarUserNameCtx.Provider>
       </CalendarUserCtx.Provider>
     </CalendarApiCtx.Provider>
   );
@@ -50,18 +55,22 @@ export function CalendarProvider({ api, children }: { api: ApiClient; children: 
 export function CalendarApiProvider({
   value,
   currentUserId = null,
+  currentUserName = null,
   caps = ALL_CAPS,
   children,
 }: {
   value: CalendarApi;
   currentUserId?: common.UserId | null;
+  currentUserName?: string | null;
   caps?: CalendarCaps;
   children: ReactNode;
 }): JSX.Element {
   return (
     <CalendarApiCtx.Provider value={value}>
       <CalendarUserCtx.Provider value={currentUserId}>
-        <CalendarCapsCtx.Provider value={caps}>{children}</CalendarCapsCtx.Provider>
+        <CalendarUserNameCtx.Provider value={currentUserName}>
+          <CalendarCapsCtx.Provider value={caps}>{children}</CalendarCapsCtx.Provider>
+        </CalendarUserNameCtx.Provider>
       </CalendarUserCtx.Provider>
     </CalendarApiCtx.Provider>
   );
@@ -76,6 +85,10 @@ export function useCalendarApi(): CalendarApi {
 /** The signed-in user's id (null while auth is loading / unauthenticated). */
 export function useCalendarCurrentUserId(): common.UserId | null {
   return useContext(CalendarUserCtx);
+}
+
+export function useCalendarCurrentUserName(): string | null {
+  return useContext(CalendarUserNameCtx);
 }
 
 export function useCalendarCaps(): CalendarCaps {

@@ -22,7 +22,7 @@ import {
   timedItemsOn,
   type CalendarItem,
 } from "./calendar-model";
-import { ItemButton, rectOf, type AnchorRect } from "./CalendarPanels.tsx";
+import { ItemButton, rectOf, useItemTitle, type AnchorRect } from "./CalendarPanels.tsx";
 import { itemVisual, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
@@ -326,7 +326,7 @@ function TimedBlock({
   const v = itemVisual(it.task);
   const heightPx = (p.height / 60) * HOUR_PX - 2;
   const compact = heightPx < 36;
-  const title = it.task.title || "（タイトルなし）";
+  const title = useItemTitle()(it.task);
   const time = `${formatTime(it.start!)}～${formatTime(it.end!)}`;
   const widthPct = 100 / p.columns;
   return (
@@ -576,6 +576,7 @@ export function ScheduleList({
   onSelectItem: (it: CalendarItem, anchor: AnchorRect) => void;
   onOpenDay: (day: number) => void;
 }): JSX.Element {
+  const titleOf = useItemTitle();
   const rows = days.map((d) => ({ d, list: itemsOnDay(items, d) })).filter((r) => r.list.length > 0);
   return (
     <div className={cx(styles.main, styles.schedule)} data-testid="calendar-schedule">
@@ -608,7 +609,7 @@ export function ScheduleList({
                       {it.allDay || it.startDay !== it.endDay ? "終日" : `${formatTime(it.start!)}～${formatTime(it.end!)}`}
                     </span>
                     <span className={it.task.status === "cancelled" ? styles.cancelled : undefined}>
-                      {it.task.title || "（タイトルなし）"}
+                      {titleOf(it.task)}
                     </span>
                   </button>
                 );

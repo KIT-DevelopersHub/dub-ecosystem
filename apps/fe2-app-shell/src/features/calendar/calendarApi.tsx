@@ -48,6 +48,8 @@ export interface CalendarApi {
   deleteTask(id: common.TaskId): Promise<void>;
   /** Every org role (GET /identity/roles, identity:read) — the 予定 label choices. */
   listRoles(): Promise<identity.Role[]>;
+  /** Display names for the given users (GET /identity/users?ids=, identity:read). */
+  getUsers(ids: readonly common.UserId[]): Promise<identity.UserSummary[]>;
 }
 
 export function createCalendarApi(api: ApiClient): CalendarApi {
@@ -117,5 +119,14 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     return all;
   };
 
-  return { listTasks, listAllTasks, listMyTasks, createTask, updateTask, deleteTask, listRoles };
+  const getUsers: CalendarApi["getUsers"] = async (ids) => {
+    const page = await api.request<common.Paginated<identity.UserSummary>>({
+      method: "GET",
+      path: `${P}/identity/users`,
+      query: { ids: ids.join(","), limit: PAGE_LIMIT },
+    });
+    return page.items;
+  };
+
+  return { listTasks, listAllTasks, listMyTasks, createTask, updateTask, deleteTask, listRoles, getUsers };
 }
