@@ -101,9 +101,13 @@ if (typeof window.PointerEvent === "undefined") {
   window.PointerEvent = PointerEventShim as unknown as typeof PointerEvent;
 }
 
+const ALL_SECTIONS = ["group:schedule/kind", "group:schedule/label", "group:task/scope", "group:task/status"];
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(local(8));
+  // Sections start folded; most tests drive the checkboxes, so start them unfolded.
+  localStorage.setItem("dub.calendar.openFilterSections", JSON.stringify(ALL_SECTIONS));
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -111,6 +115,33 @@ afterEach(() => {
 });
 
 describe("CalendarScreen", () => {
+  it("folds the filter sections, remembers it, and tells what a folded section hides", async () => {
+    localStorage.removeItem("dub.calendar.openFilterSections");
+    const user = userEvent.setup();
+    const { unmount } = renderScreen(memoryApi([]));
+    await screen.findByTestId("calendar-timegrid");
+
+    const kind = screen.getByTestId("calendar-section-kind");
+    expect(kind).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("calendar-filter-kind:meeting")).not.toBeInTheDocument();
+    // The 予定 / タスク master checkboxes stay reachable while folded.
+    expect(screen.getByTestId("calendar-filter-group:task")).toBeInTheDocument();
+
+    await user.click(kind);
+    expect(kind).toHaveAttribute("aria-expanded", "true");
+    await user.click(screen.getByTestId("calendar-filter-kind:vacation"));
+    await user.click(kind);
+    expect(kind).toHaveTextContent("1件オフ");
+    expect(screen.queryByTestId("calendar-filter-kind:vacation")).not.toBeInTheDocument();
+
+    await user.click(kind);
+    unmount();
+    renderScreen(memoryApi([]));
+    await screen.findByTestId("calendar-timegrid");
+    expect(screen.getByTestId("calendar-section-kind")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("calendar-section-status")).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("opens on the week view with today's header and the week's 予定", async () => {
     renderScreen(
       memoryApi([

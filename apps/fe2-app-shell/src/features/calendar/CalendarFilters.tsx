@@ -1,8 +1,8 @@
 // Sidebar filters, split the way people think about the calendar: 予定 (種類 + ラベル)
 // and タスク (個人 / チーム + 状態). Each section has its own master checkbox, so
 // "タスクだけ消す" is one click and the rows underneath keep their own state.
-import { useId, type ReactNode } from "react";
-import { IconButton, Select, SkeletonLoader } from "@dub/ui";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { Icon, IconButton, Select, SkeletonLoader } from "@dub/ui";
 import styles from "./calendar.module.css";
 
 export interface FilterRow {
@@ -15,6 +15,8 @@ export interface FilterRow {
 }
 
 export interface FilterSection {
+  /** stable id for the open/closed state and test ids */
+  key: string;
   title: string;
   rows: FilterRow[];
   loading?: boolean;
@@ -60,12 +62,17 @@ export function FilterGroup({
   sections,
   hidden,
   onToggle,
+  open,
+  onToggleOpen: toggleOpen,
 }: {
   groupKey: string;
   title: string;
   sections: FilterSection[];
   hidden: ReadonlySet<string>;
   onToggle: (key: string) => void;
+  /** unfolded sections, ids `${groupKey}/${section.key}` (see useOpenSections) */
+  open: ReadonlySet<string>;
+  onToggleOpen: (id: string) => void;
 }): JSX.Element {
   const off = hidden.has(groupKey);
   return (
@@ -76,28 +83,79 @@ export function FilterGroup({
         onToggle={() => onToggle(groupKey)}
       />
       <div className={styles.calGroupBody}>
-        {sections.map((s) => (
-          <div key={s.title}>
-            <div className={styles.calSubHead}>{s.title}</div>
-            {s.loading ? (
-              <SkeletonLoader lines={2} />
-            ) : (
-              s.rows.map((r) => (
-                <FilterCheck
-                  key={r.key}
-                  row={r}
-                  checked={!hidden.has(r.key)}
-                  disabled={off}
-                  onToggle={() => onToggle(r.key)}
-                />
-              ))
-            )}
-            {s.footer}
-          </div>
-        ))}
+        {sections.map((s) => {
+          const id = `${groupKey}/${s.key}`;
+          const isOpen = open.has(id);
+          const offCount = s.rows.filter((r) => hidden.has(r.key)).length;
+          return (
+            <div key={s.key}>
+              <button
+                type="button"
+                className={styles.calSubHead}
+                aria-expanded={isOpen}
+                onClick={() => toggleOpen(id)}
+                data-testid={`calendar-section-${s.key}`}
+              >
+                <span className={isOpen ? styles.calChevronOpen : styles.calChevron}>
+                  <Icon name="chevron-right" size="sm" />
+                </span>
+                <span className={styles.calSubHeadTitle}>{s.title}</span>
+                {!isOpen && offCount > 0 && <span className={styles.calSubHeadNote}>{offCount}件オフ</span>}
+              </button>
+              {isOpen && (
+                <>
+                  {s.loading ? (
+                    <SkeletonLoader lines={2} />
+                  ) : (
+                    s.rows.map((r) => (
+                      <FilterCheck
+                        key={r.key}
+                        row={r}
+                        checked={!hidden.has(r.key)}
+                        disabled={off}
+                        onToggle={() => onToggle(r.key)}
+                      />
+                    ))
+                  )}
+                  {s.footer}
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+const OPEN_SECTIONS_STORAGE = "dub.calendar.openFilterSections";
+
+function readOpenSections(): Set<string> {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(OPEN_SECTIONS_STORAGE) ?? "[]");
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Which filter sections are unfolded. Folded by default so the sidebar stays short; remembered per browser. */
+export function useOpenSections(): [ReadonlySet<string>, (id: string) => void] {
+  const [open, setOpen] = useState<ReadonlySet<string>>(readOpenSections);
+  useEffect(() => {
+    try {
+      localStorage.setItem(OPEN_SECTIONS_STORAGE, JSON.stringify([...open]));
+    } catch {
+      // storage full / disabled: folding still works for this session
+    }
+  }, [open]);
+  const toggle = (id: string): void =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  return [open, toggle];
 }
 
 /** 他のチームのタスクを表示: pick a team to add every task of it, whoever owns it. */

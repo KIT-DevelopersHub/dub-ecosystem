@@ -31,7 +31,7 @@ import {
   type CalendarView,
   type EventDraft,
 } from "./calendar-model";
-import { AddTeamPicker, FilterGroup, RemoveTeamButton, type FilterRow } from "./CalendarFilters.tsx";
+import { AddTeamPicker, FilterGroup, RemoveTeamButton, useOpenSections, type FilterRow } from "./CalendarFilters.tsx";
 import { DayListPanel, DetailPanel, EventDialog, ItemTitleProvider, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
 import {
@@ -114,6 +114,7 @@ export function CalendarScreen(): JSX.Element {
       }),
     [],
   );
+  const [openSections, toggleSection] = useOpenSections();
   // 他のチーム: teams whose every task is shown, not only the caller's own (kept per browser).
   const [watchedTeams, setWatchedTeams] = useState<string[]>(loadWatchedTeams);
   useEffect(() => {
@@ -489,12 +490,16 @@ export function CalendarScreen(): JSX.Element {
                 title="予定"
                 hidden={hidden}
                 onToggle={toggleFilter}
+                open={openSections}
+                onToggleOpen={toggleSection}
                 sections={[
                   {
+                    key: "kind",
                     title: "種類",
                     rows: ITEM_KINDS.map((k) => ({ key: kindKey(k), label: KIND_VISUALS[k].label, color: KIND_VISUALS[k].color })),
                   },
                   {
+                    key: "label",
                     title: "ラベル",
                     loading: rolesQuery.isPending,
                     rows: labels.map((l) => ({
@@ -511,8 +516,11 @@ export function CalendarScreen(): JSX.Element {
                 title="タスク"
                 hidden={hidden}
                 onToggle={toggleFilter}
+                open={openSections}
+                onToggleOpen={toggleSection}
                 sections={[
                   {
+                    key: "scope",
                     title: "個人・チーム",
                     rows: scopeRows,
                     footer: (
@@ -523,6 +531,7 @@ export function CalendarScreen(): JSX.Element {
                     ),
                   },
                   {
+                    key: "status",
                     title: "状態",
                     rows: STATUS_ORDER.map((st) => ({ key: statusKey(st), label: statusVisual(st).label, color: statusVisual(st).color })),
                   },
