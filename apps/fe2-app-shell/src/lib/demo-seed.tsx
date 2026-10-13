@@ -587,7 +587,8 @@ export interface DemoAccount {
   email: string;
   permissions: identity.PermissionKey[];
   inbox: mail.MailMessageDetail[];
-  /** Role sharing (mail:read_role_shared): account ids whose inbox this account also reads. */
+  /** Account ids whose inbox this account also reads: same-role sharing (mail:read_role_shared)
+   *  and cross-role visibility (ロール管理 > メール > 別のロール宛てのメールも閲覧). */
   roleShareWith?: string[];
 }
 
@@ -623,6 +624,19 @@ const SPONSOR_INBOX: mail.MailMessageDetail[] = [
   },
 ];
 
+// 統括 (cross-role mail visibility): the 統括 role is set to also see the maintainer + member
+// roles' inbound mail, so this account reads 佐藤 (maintainer) and 鈴木 (member) under
+// 自分宛て以外 — one-way: neither of them sees the 統括 inbox. Open with ?demo_account=usr_lead.
+const LEAD_INBOX: mail.MailMessageDetail[] = [
+  {
+    id: "msg_l1", messageId: "<l1@demo>", threadId: "thr_l1",
+    from: { email: "office@kit.ac.jp", name: "大学 事務局" },
+    to: [{ email: "lead@developershub.jp", name: "統括 山本" }], subject: "年度末の活動報告書の提出について",
+    snippet: "活動報告書の提出期限は 3 月 10 日です。", receivedAt: "2026-08-04T01:00:00Z", read: false,
+    textBody: "山本様\n\n活動報告書の提出期限は 3 月 10 日です。様式は添付のとおりです。",
+  },
+];
+
 // Fixed archive address auto-CC'd on every send (mirrors the mail-gateway MAIL_ARCHIVE_CC
 // behavior so the demo/E2E shows the archive copy in the Sent detail's Cc).
 const DEMO_ARCHIVE_CC = "archive@developershub.jp";
@@ -653,6 +667,7 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
+  { id: "usr_lead", displayName: "統括 山本", email: "lead@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: LEAD_INBOX.map((m) => ({ ...m })), roleShareWith: ["usr_bob", "usr_sponsor"] },
 ];
 
 /** True when the account holds the mail:read_all oversight permission. */
@@ -666,6 +681,10 @@ const DEMO_ACCOUNT_STORAGE_KEY = "dub_demo_account";
 function currentAccount(): DemoAccount {
   let key: string | null = null;
   try {
+    // ?demo_account=<id|email> switches (and remembers) the account so a confirm link can
+    // open the demo as a specific account without devtools.
+    const fromUrl = new URLSearchParams(globalThis.location?.search ?? "").get("demo_account");
+    if (fromUrl) globalThis.localStorage?.setItem(DEMO_ACCOUNT_STORAGE_KEY, fromUrl);
     key = globalThis.localStorage?.getItem(DEMO_ACCOUNT_STORAGE_KEY) ?? null;
   } catch {
     key = null;
@@ -1106,14 +1125,20 @@ const SEED_USERS: DemoRosterUser[] = [
   { id: "usr_hana", orgId: ORG, displayName: "渡辺 花", email: "hana@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_ken", orgId: ORG, displayName: "中村 健", email: "ken@developershub.jp", githubLogin: "ken-n", avatarUrl: null, status: "disabled", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_lily", orgId: ORG, displayName: "小林 里", email: "ri@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_lead", orgId: ORG, displayName: "統括 山本", email: "lead@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "manual", roleIds: ["role_lead"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_mana", orgId: ORG, displayName: "加藤 真名", email: "mana@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_noa", orgId: ORG, displayName: "吉田 乃愛", email: "noa@developershub.jp", githubLogin: "noa-y", avatarUrl: null, status: "disabled", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
 ];
 
-const SEED_ROLES: identity.Role[] = [
-  { id: "role_admin", orgId: ORG, name: "admin", permissions: DEMO_PERMISSIONS, isSystem: true },
-  { id: "role_maintainer", orgId: ORG, name: "maintainer", permissions: MAINTAINER_PERMISSIONS, isSystem: true },
-  { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true },
+// identity-roster's role DTO carries the cross-role mail visibility set (fe7 RoleView).
+type DemoRole = identity.Role & { mailVisibleRoleIds: string[] };
+
+const SEED_ROLES: DemoRole[] = [
+  { id: "role_admin", orgId: ORG, name: "admin", permissions: DEMO_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
+  { id: "role_maintainer", orgId: ORG, name: "maintainer", permissions: MAINTAINER_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
+  { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
+  // 統括: also reads the maintainer + member roles' inbound mail (メール > 詳細設定).
+  { id: "role_lead", orgId: ORG, name: "統括", permissions: [...MEMBER_PERMISSIONS, "app:mail:view", "mail:read"], isSystem: false, mailVisibleRoleIds: ["role_maintainer", "role_member"] },
 ];
 
 // FE7's RoleAssignment (contracts/pending) — org-wide (resource fields null) here.
@@ -1132,6 +1157,7 @@ const SEED_USER_ROLES: Record<string, DemoRoleAssignment[]> = {
   [ME_ID]: [{ id: "asg_1", userId: ME_ID, roleId: "role_admin", roleName: "admin", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
   usr_bob: [{ id: "asg_2", userId: "usr_bob", roleId: "role_maintainer", roleName: "maintainer", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
   usr_carol: [{ id: "asg_3", userId: "usr_carol", roleId: "role_member", roleName: "member", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
+  usr_lead: [{ id: "asg_lead", userId: "usr_lead", roleId: "role_lead", roleName: "統括", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
 };
 
 // Change-history seed (FE7 変更履歴 tab shows identity.* actions).
@@ -1174,7 +1200,7 @@ function problem(code: string, message: string, status: number, details?: unknow
  *  page reload resets the demo. Mirrors the identity-roster contract surface
  *  (GET/POST/PATCH/DELETE identity/roles + users + assignments, audit, mail). */
 function createRosterStore() {
-  const roles: identity.Role[] = SEED_ROLES.map((r) => ({ ...r, permissions: [...r.permissions] }));
+  const roles: DemoRole[] = SEED_ROLES.map((r) => ({ ...r, permissions: [...r.permissions], mailVisibleRoleIds: [...r.mailVisibleRoleIds] }));
   const users: DemoRosterUser[] = SEED_USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] }));
   const assignments: Record<string, DemoRoleAssignment[]> = {};
   for (const [k, v] of Object.entries(SEED_USER_ROLES)) assignments[k] = v.map((a) => ({ ...a }));
@@ -1245,10 +1271,10 @@ function createRosterStore() {
 
     if (method === "POST") {
       if (pathname === "/api/v1/identity/roles") {
-        const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+        const req = body as { name?: string; permissions?: identity.PermissionKey[]; mailVisibleRoleIds?: string[] };
         if (!req?.name?.trim()) return problem("VALIDATION_FAILED", "ロール名を入力してください", 400, [{ field: "name", reason: "required" }]);
         if (roles.some((r) => r.name === req.name)) return problem("CONFLICT", "同名のロールが既に存在します", 409);
-        const role: identity.Role = { id: rid("role"), orgId: ORG, name: req.name.trim(), permissions: req.permissions ?? [], isSystem: false };
+        const role: DemoRole = { id: rid("role"), orgId: ORG, name: req.name.trim(), permissions: req.permissions ?? [], isSystem: false, mailVisibleRoleIds: req.mailVisibleRoleIds ?? [] };
         roles.push(role);
         audit("identity.role.created", "role", role.id, { name: role.name, permissions: role.permissions.length });
         return json(role);
@@ -1300,9 +1326,15 @@ function createRosterStore() {
           const role = roles.find((r) => r.id === id);
           if (!role) return problem("NOT_FOUND", "role not found", 404);
           if (role.isSystem) return problem("CONFLICT", "システムロールは編集できません", 409);
-          const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+          const req = body as { name?: string; permissions?: identity.PermissionKey[]; mailVisibleRoleIds?: string[] };
           if (req?.name !== undefined) role.name = req.name;
           if (req?.permissions !== undefined) role.permissions = req.permissions;
+          if (req?.mailVisibleRoleIds !== undefined) {
+            if (req.mailVisibleRoleIds.some((t) => t === role.id || !roles.some((r) => r.id === t))) {
+              return problem("VALIDATION_FAILED", "閲覧対象のロールが不正です", 400, [{ field: "mailVisibleRoleIds", reason: "invalid" }]);
+            }
+            role.mailVisibleRoleIds = [...req.mailVisibleRoleIds].sort();
+          }
           audit("identity.role.updated", "role", role.id, { permissions: role.permissions.length });
           return json(role);
         }
@@ -1343,6 +1375,7 @@ function createRosterStore() {
           if (!role) return problem("NOT_FOUND", "role not found", 404);
           if (role.isSystem) return problem("CONFLICT", "システムロールは削除できません", 409);
           roles.splice(roles.indexOf(role), 1);
+          for (const r of roles) r.mailVisibleRoleIds = r.mailVisibleRoleIds.filter((t) => t !== role.id);
           audit("identity.role.deleted", "role", role.id, { name: role.name });
           return json(null, 204);
         }
@@ -1397,6 +1430,7 @@ interface DemoChatChannel {
   topic: string | null;
   eventId: string | null;
   memberCount: number;
+  memberIds?: string[]; // dm only: participants (the FE labels a DM by the other side)
 }
 
 function createChatStore() {
@@ -1429,7 +1463,11 @@ function createChatStore() {
   const eventChannels: DemoChatChannel[] = [
     { id: "chn_evt_conf", type: "event", name: "北陸itカンファレンス", topic: "北陸ITカンファレンス2026 運営チャネル", eventId: "evt_1", memberCount: 18 },
   ];
-  const all = [...overall, ...teamChannels, ...roleChannels, ...eventChannels];
+  // ダイレクト: one seeded 1:1 DM so the section and a DM timeline are visible at once.
+  const dmChannels: DemoChatChannel[] = [
+    { id: "chn_dm_bob", type: "dm", name: "DM", topic: null, eventId: null, memberCount: 2, memberIds: [ME_ID, "usr_bob"] },
+  ];
+  const all = [...overall, ...teamChannels, ...roleChannels, ...eventChannels, ...dmChannels];
 
   const toWire = (c: DemoChatChannel) => ({
     id: c.id,
@@ -1438,8 +1476,10 @@ function createChatStore() {
     name: c.name,
     topic: c.topic,
     eventId: c.eventId,
+    visibility: c.type === "dm" ? "private" : "public",
     archived: false,
     memberCount: c.memberCount,
+    ...(c.memberIds ? { memberIds: c.memberIds } : {}),
     version: 1,
     createdAt: CH_TS,
     updatedAt: CH_TS,
@@ -1491,8 +1531,13 @@ function createChatStore() {
   // its card in place; ids are minted ascending so they sort after the seed.
   const posted = new Map<string, ReturnType<typeof msg>[]>();
   let postSeq = 0;
+  const dmMessages = [
+    msg({ id: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", body: "LP の文言、確認してもらえますか？急ぎではないです 🙏", createdAt: "2026-08-01T01:00:00.000Z" }),
+    msg({ id: "msg_01SEEDDMB0000000000000002", channelId: "chn_dm_bob", authorId: ME_ID, body: "了解です、今日中に見ます！", createdAt: "2026-08-01T01:03:00.000Z" }),
+  ];
   const messagesOf = (channelId: string | null) => [
     ...(channelId === "chn_general" ? generalMessages : []),
+    ...(channelId === "chn_dm_bob" ? dmMessages : []),
     ...(channelId ? (posted.get(channelId) ?? []) : []),
   ];
 
@@ -1516,10 +1561,34 @@ function createChatStore() {
       const target = url.searchParams.get("url") ?? "";
       return json({ url: target, preview: mockUnfurl(target) });
     }
+    if (method === "POST" && pathname === "/api/v1/chat/channels") {
+      // DM only (channel creation is otherwise not demoed). Same participant set ->
+      // the existing DM, mirroring chat-service's dm_key dedup.
+      const req = (body ?? {}) as { type?: string; name?: string; memberIds?: string[] };
+      if (req.type !== "dm") return notFound(`POST ${pathname} (type=${String(req.type)})`);
+      const memberIds = [...new Set([currentAccount().id, ...(req.memberIds ?? [])])];
+      const key = [...memberIds].sort().join(",");
+      const existing = all.find((c) => c.type === "dm" && [...(c.memberIds ?? [])].sort().join(",") === key);
+      if (existing) return json(toWire(existing));
+      const created: DemoChatChannel = {
+        id: `chn_dm_${Date.now().toString(36)}`,
+        type: "dm",
+        name: req.name || "DM",
+        topic: null,
+        eventId: null,
+        memberCount: memberIds.length,
+        memberIds,
+      };
+      all.push(created);
+      byId.set(created.id, created);
+      return json(toWire(created), 201);
+    }
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
       const eventId = url.searchParams.get("eventId");
-      const list = eventId ? all.filter((c) => c.eventId === eventId) : all;
+      const me = currentAccount().id;
+      const visible = all.filter((c) => c.type !== "dm" || (c.memberIds ?? []).includes(me)); // DMs: participants only
+      const list = eventId ? visible.filter((c) => c.eventId === eventId) : visible;
       return json(list.map(toWire)); // raw array (not Paginated) per fe6 contract
     }
     if (method === "GET" && pathname === "/api/v1/chat/unread") {
@@ -1548,7 +1617,10 @@ function createChatStore() {
       // fe6 contract) so opening a channel does not 404 those companion fetches.
       const mem = /^\/api\/v1\/chat\/channels\/([^/]+)\/members$/.exec(pathname);
       if (mem && method === "GET") {
-        return json([{ channelId: decodeURIComponent(mem[1]!), userId: ME_ID, role: "admin", joinedAt: CH_TS }]);
+        const channelId = decodeURIComponent(mem[1]!);
+        const dmMembers = byId.get(channelId)?.memberIds;
+        if (dmMembers) return json(dmMembers.map((userId) => ({ channelId, userId, role: "member", joinedAt: CH_TS })));
+        return json([{ channelId, userId: ME_ID, role: "admin", joinedAt: CH_TS }]);
       }
       const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
       if (pin && method === "GET") return json([]);

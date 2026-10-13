@@ -93,6 +93,28 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
         row.createdBy, row.archivedAt, row.version, row.createdAt, row.updatedAt,
       );
     },
+    async createChannelWithMembers(row: ChannelRow, members: MemberRow[]): Promise<boolean> {
+      // D1 batch = one transaction. OR IGNORE turns a dm_key clash into "0 changes" instead of
+      // an error; the member inserts are guarded on the channel row existing, so a lost race
+      // writes nothing at all.
+      const results = await db.batch([
+        {
+          sql: `INSERT OR IGNORE INTO chat_channels
+            (id, type, visibility, name, topic, event_id, dm_key, created_by, archived_at, version, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          binds: [
+            row.id, row.type, row.visibility, row.name, row.topic, row.eventId, row.dmKey,
+            row.createdBy, row.archivedAt, row.version, row.createdAt, row.updatedAt,
+          ],
+        },
+        ...members.map((m) => ({
+          sql: `INSERT OR IGNORE INTO chat_channel_members (channel_id, user_id, role, joined_at)
+           SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM chat_channels WHERE id = ?)`,
+          binds: [m.channelId, m.userId, m.role, m.joinedAt, row.id],
+        })),
+      ]);
+      return (results[0]?.meta.changes ?? 0) > 0;
+    },
     async getChannel(id: common.ChannelId): Promise<ChannelRow | null> {
       const r = await db.first<ChannelDbRow>(`SELECT * FROM chat_channels WHERE id = ?`, id);
       return r ? toChannelRow(r) : null;
@@ -159,6 +181,19 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
     async listMembers(channelId: common.ChannelId): Promise<MemberRow[]> {
       const rows = await db.all<MemberDbRow>(`SELECT * FROM chat_channel_members WHERE channel_id = ? ORDER BY user_id ASC`, channelId);
       return rows.map(toMemberRow);
+    },
+    async memberIdsFor(channelIds: common.ChannelId[]): Promise<Map<string, common.UserId[]>> {
+      const out = new Map<string, common.UserId[]>();
+      // D1 caps bound parameters at 100 per statement; a list page holds up to 200 channels.
+      for (let i = 0; i < channelIds.length; i += 90) {
+        const chunk = channelIds.slice(i, i + 90);
+        const rows = await db.all<{ channel_id: string; user_id: string }>(
+          `SELECT channel_id, user_id FROM chat_channel_members WHERE channel_id IN (${chunk.map(() => "?").join(",")}) ORDER BY user_id ASC`,
+          ...chunk,
+        );
+        for (const r of rows) out.set(r.channel_id, [...(out.get(r.channel_id) ?? []), r.user_id]);
+      }
+      return out;
     },
     async membershipsForUser(userId: common.UserId): Promise<MemberRow[]> {
       const rows = await db.all<MemberDbRow>(`SELECT * FROM chat_channel_members WHERE user_id = ? ORDER BY channel_id ASC`, userId);

@@ -123,7 +123,7 @@ const WRITES = [
 const INTERNAL_ROUTES = [
   "GET /internal/users",
   "GET /internal/users/:id/permissions",
-  "GET /internal/users/:id/role-peers",
+  "GET /internal/users/:id/mail-visible-users",
   "GET /users/:id",
   "POST /authz/check",
   "POST /internal/users/:id/profile",
@@ -241,7 +241,7 @@ describe("INTERNAL routes at runtime", () => {
       ["GET", "/internal/users"],
       ["POST", "/internal/users/lookup"],
       ["GET", `/internal/users/${h.memberId}/permissions`],
-      ["GET", `/internal/users/${h.memberId}/role-peers?permission=mail:read_role_shared`],
+      ["GET", `/internal/users/${h.memberId}/mail-visible-users`],
     ];
     for (const [method, path] of routes) {
       const init = method === "GET" ? asUser(h.adminId) : jsonBody(asUser(h.adminId), method, {});

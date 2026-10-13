@@ -74,10 +74,14 @@ export interface OffboardUserResult {
 export interface CreateRoleRequest {
   name: string;
   permissions: identity.PermissionKey[];
+  /** Roles whose holders' inbound mail this role's holders also see (cross-role). */
+  mailVisibleRoleIds?: common.RoleId[];
 }
 export interface UpdateRoleRequest {
   name?: string;
   permissions?: identity.PermissionKey[];
+  /** Replaces the cross-role mail visibility set when present. */
+  mailVisibleRoleIds?: common.RoleId[];
 }
 export interface AssignRoleRequest {
   roleId: common.RoleId;
@@ -89,7 +93,10 @@ export interface AssignRoleRequest {
 // role at any scope). Superset of the frozen identity.Role — FE7's RoleListPage
 // types identity.Role and ignores the extra field; the RBAC admin console reads
 // memberCount. Added here (not in @dub/types) so the frozen contract stays frozen.
-export type RoleWithMemberCount = identity.Role & { memberCount: number };
+// mailVisibleRoleIds (cross-role mail visibility) rides the same way: a DTO superset of the
+// frozen identity.Role, always present (empty = none).
+export type RoleView = identity.Role & { mailVisibleRoleIds: common.RoleId[] };
+export type RoleWithMemberCount = RoleView & { memberCount: number };
 
 // Assignment as the FE renders it (fe7 contracts/pending RoleAssignment): the raw
 // AssignmentRow plus the denormalized roleName. This is the wire shape returned by

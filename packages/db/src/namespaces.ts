@@ -58,7 +58,9 @@ const TABLE_REGEX =
 // between them, and `namespaceOf("SET")` is null, which used to raise a spurious
 // DB_NAMESPACE_VIOLATION for every upsert. None of these are ever a real (namespaced)
 // table name in this codebase, so dropping them can't hide a genuine violation.
-const NON_TABLE_TOKENS: ReadonlySet<string> = new Set(["set", "select", "values", "where"]);
+// `json_each` is SQLite's built-in table-valued function (`IN (SELECT value FROM
+// json_each(?))` passes a whole id list as one bind, sidestepping D1's 100-bind cap).
+const NON_TABLE_TOKENS: ReadonlySet<string> = new Set(["set", "select", "values", "where", "json_each"]);
 
 /** Best-effort parse of tables touched by a SQL string (JOINs, subqueries, quoted ids). */
 export function tablesOf(sql: string): string[] {

@@ -1,4 +1,4 @@
-// GET /internal/users/:id/role-peers — mail-gateway's role-shared inbound scope. Semantics
+// rolePeers — the same-role half of mail-gateway's inbound scope (mail-visible-users). Semantics
 // are run against BOTH repos: MemIdentityRepo via the service, and D1IdentityRepo's real SQL
 // over node:sqlite seeded with the identity 0001 DDL.
 import { readFileSync } from "node:fs";
@@ -11,7 +11,7 @@ import { MemIdentityRepo } from "../src/repo/mem-repo";
 import { D1IdentityRepo } from "../src/repo/d1-repo";
 import type { IdentityRepo } from "../src/repo/types";
 import { makeOutboxD1 } from "./outbox-d1";
-import { FakeAudit, FakeRevoker, makeHarness, internal } from "./harness";
+import { FakeAudit, FakeRevoker } from "./harness";
 
 const ORG = "org_devhub";
 const TS = "2026-08-09T00:00:00.000Z";
@@ -84,19 +84,8 @@ for (const [name, make] of [["mem", () => new MemIdentityRepo()], ["d1", d1Repo]
   });
 }
 
-describe("GET /internal/users/:id/role-peers", () => {
-  it("rejects a permission outside the catalog with 400", async () => {
-    const h = await makeHarness();
-    const res = await h.app.request(`/internal/users/${h.memberId}/role-peers?permission=mail:nope`, internal());
-    expect(res.status).toBe(400);
-    const svc = svcOver(new MemIdentityRepo());
-    await expect(svc.rolePeers("u", ORG, "")).rejects.toSatisfy(isDubError);
-  });
-
-  it("serves { userIds } over the internal marker", async () => {
-    const h = await makeHarness();
-    const res = await h.app.request(`/internal/users/${h.memberId}/role-peers?permission=${SHARE}`, internal());
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ userIds: [] }); // no system role carries the key for member
+describe("rolePeers validation", () => {
+  it("rejects a permission outside the catalog", async () => {
+    await expect(svcOver(new MemIdentityRepo()).rolePeers("u", ORG, "mail:nope")).rejects.toSatisfy(isDubError);
   });
 });
