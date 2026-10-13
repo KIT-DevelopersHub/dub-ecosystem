@@ -9,6 +9,7 @@ import type {
   LpTicketField,
   PublishRow,
   TicketOrderRow,
+  TicketPreviewRow,
   TicketSettingsRow,
   TicketTypeAgg,
   TicketTypeRow,
@@ -24,6 +25,15 @@ export class InMemoryLpRepo implements LpRepo {
   ticketSettings = new Map<string, TicketSettingsRow>();
   ticketTypes: TicketTypeRow[] = [];
   orders: TicketOrderRow[] = [];
+  previews: TicketPreviewRow[] = [];
+
+  async insertTicketPreview(row: TicketPreviewRow) {
+    this.previews = this.previews.filter((p) => p.expiresAt > row.createdAt);
+    this.previews.push(clone(row));
+  }
+  async isTicketPreviewValid(site: string, tokenHash: string, now: string) {
+    return this.previews.some((p) => p.site === site && p.tokenHash === tokenHash && p.expiresAt > now);
+  }
 
   async getTicketSettings(site: string) {
     const r = this.ticketSettings.get(site);

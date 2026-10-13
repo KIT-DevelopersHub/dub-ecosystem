@@ -5,7 +5,7 @@ import { useToast } from "@dub/ui";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useLpApi } from "./LpProvider.tsx";
-import type { LpTicketField, LpTicketTypeInput, LpTicketTypeSummary, LpTicketsState } from "./lpApi.tsx";
+import type { LpTicketField, LpTicketPreview, LpTicketTypeInput, LpTicketTypeSummary, LpTicketsState } from "./lpApi.tsx";
 
 const STALE_MS = 30 * 1000;
 export const TICKET_ORDERS_PAGE_SIZE = 25;
@@ -93,6 +93,18 @@ export function useSetTicketsCta() {
             : "参加登録ボタンの切り替えを予約しました（販売を公開すると有効になります）"
           : "LP の参加登録ボタンを元に戻しました",
       });
+    },
+  });
+}
+
+/** 公開前プレビューのリンク発行。サーバー状態を変えないので楽観更新は無し。 */
+export function useCreateTicketsPreview() {
+  const api = useLpApi();
+  const toast = useToast();
+  return useMutation<LpTicketPreview, unknown, void>({
+    mutationFn: () => api.createTicketsPreview(),
+    onError: (err) => {
+      toast.show({ kind: "error", title: messageFor(err, "プレビューのリンクを発行できませんでした") });
     },
   });
 }

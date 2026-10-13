@@ -77,7 +77,8 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/lp/internal/publish", async (c) => c.json({ versionId: (await svc.getPublish()).versionId }));
   // チケット購入 (public LP Worker → service binding). Webhook reads the raw body first:
   // the Stripe signature covers the exact bytes.
-  app.get("/lp/internal/tickets", async (c) => c.json(await tickets.getPublic()));
+  // ?preview=<token>: 公開前プレビュー（LP管理で発行した期限付きリンク）。
+  app.get("/lp/internal/tickets", async (c) => c.json(await tickets.getPublic(c.req.query("preview"))));
   app.post("/lp/internal/tickets/checkout", async (c) => c.json(await tickets.checkout(await readJson(c))));
   app.post("/lp/internal/tickets/confirm", async (c) => c.json(await tickets.confirm(await readJson(c))));
   app.post("/lp/internal/tickets/stripe-webhook", async (c) => {
@@ -110,6 +111,8 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/lp/tickets", view, async (c) => c.json(await tickets.getState()));
   app.post("/lp/tickets/enabled", publish, async (c) => c.json(await tickets.setEnabled(reqCtx(c), await readJson(c))));
   app.post("/lp/tickets/cta", publish, async (c) => c.json(await tickets.setCta(reqCtx(c), await readJson(c))));
+  // 公開前プレビュー: LP には何も出さず、リンクを知っている人だけが /tickets を見られる（申し込み不可）。
+  app.post("/lp/tickets/preview", edit, async (c) => c.json(await tickets.createPreview(reqCtx(c)), 201));
   app.post("/lp/tickets/fields", edit, async (c) => c.json(await tickets.setFields(reqCtx(c), await readJson(c))));
   app.post("/lp/tickets/types", edit, async (c) => c.json(await tickets.createType(await readJson(c)), 201));
   app.patch("/lp/tickets/types/:id", edit, async (c) =>

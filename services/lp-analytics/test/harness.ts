@@ -73,6 +73,7 @@ export async function makeApp(
     siteTraffic,
     newTicketTypeId: () => id("tkt"),
     newOrderId: () => id("tko"),
+    newPreviewToken: () => `preview-token-${String(seq++).padStart(24, "0")}`,
     dailyCheckoutCap: 300,
     stripe: null,
     stripeWebhookSecret: null,

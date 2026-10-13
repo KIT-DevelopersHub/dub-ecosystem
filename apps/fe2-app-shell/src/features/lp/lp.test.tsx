@@ -48,6 +48,7 @@ const linksStubs = {
   getTickets: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   setTicketsEnabled: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   setTicketsCta: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  createTicketsPreview: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   saveTicketFields: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   createTicketType: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   updateTicketType: () => Promise.reject(new Error("not used by LpVisitLogScreen")),

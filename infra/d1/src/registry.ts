@@ -86,6 +86,7 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
       "lp_ticket_types",
       "lp_ticket_orders",
       "lp_ticket_order_items",
+      "lp_ticket_previews",
     ],
   },
 ];

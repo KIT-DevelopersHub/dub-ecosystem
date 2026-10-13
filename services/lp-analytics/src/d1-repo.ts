@@ -161,6 +161,26 @@ function ticketRepo(db: DbClient): LpTicketRepo {
     async setTicketCta(site, ctaEnabled, updatedBy, updatedAt) {
       await upsertSetting(site, "cta_enabled", ctaEnabled ? 1 : 0, updatedBy, updatedAt);
     },
+    async insertTicketPreview(row) {
+      await db.run("DELETE FROM lp_ticket_previews WHERE expires_at <= ?", row.createdAt);
+      await db.run(
+        "INSERT INTO lp_ticket_previews (token_hash, site, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+        row.tokenHash,
+        row.site,
+        row.createdBy,
+        row.createdAt,
+        row.expiresAt,
+      );
+    },
+    async isTicketPreviewValid(site, tokenHash, now) {
+      const r = await db.first<{ n: number }>(
+        "SELECT 1 AS n FROM lp_ticket_previews WHERE token_hash = ? AND site = ? AND expires_at > ?",
+        tokenHash,
+        site,
+        now,
+      );
+      return r !== null;
+    },
     async setTicketFields(site, fields, updatedBy, updatedAt) {
       await upsertSetting(site, "fields_json", JSON.stringify(fields), updatedBy, updatedAt);
     },

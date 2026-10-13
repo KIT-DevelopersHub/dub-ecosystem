@@ -1,7 +1,7 @@
 // LP チケット購入: LP管理 API (/lp/tickets*) + 公開 LP Worker 向け内部 API (/lp/internal/tickets*).
 import { describe, it, expect } from "vitest";
 import { createStripeClient, signStripePayload } from "../src/stripe";
-import type { LpTicketOrdersPage, LpTicketsState, LpTicketTypeSummary } from "../src/types";
+import type { LpTicketOrdersPage, LpTicketPreview, LpTicketsState, LpTicketTypeSummary } from "../src/types";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
 const body = async <T>(res: Response): Promise<T> => (await res.json()) as T;
@@ -245,6 +245,40 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       { id: a.id, name: "A", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: 0, soldOut: true },
       expect.objectContaining({ name: "C", soldOut: false }),
     ]);
+  });
+
+  it("preview link shows the page while sales are off, expires, and cannot buy", async () => {
+    const h = await setup(kind);
+    const { app } = h;
+    const a = await addType(app, { name: "A", priceJpy: 0 });
+    const res = await app.fetch(send("POST", "/lp/tickets/preview", {}));
+    expect(res.status).toBe(201);
+    const p = await body<LpTicketPreview>(res);
+    expect(p.expiresAt).toBe("2026-10-08T03:00:00.000Z");
+    const token = new URL(p.url).searchParams.get("preview")!;
+    expect(p.url).toBe(`https://hokuriku-it-conf.com/tickets?preview=${token}`);
+
+    const pub = async (q = "") =>
+      body<{ enabled: boolean; preview: boolean; types: unknown[] }>(await app.fetch(get(`/lp/internal/tickets${q}`, INTERNAL)));
+    expect(await pub()).toMatchObject({ enabled: false, preview: false });
+    expect(await pub("?preview=wrong-token-wrong-token-wrong-token")).toMatchObject({ enabled: false, preview: false });
+    expect(await pub(`?preview=${token}`)).toMatchObject({ enabled: true, preview: true, types: [expect.objectContaining({ id: a.id })] });
+    // Preview never allows a purchase (checkout still requires the real flag).
+    expect((await app.fetch(checkout({ ticketTypeId: a.id }))).status).toBe(404);
+    // State shown in LP管理 stays off.
+    expect((await body<LpTicketsState>(await app.fetch(get("/lp/tickets")))).enabled).toBe(false);
+
+    h.clock.set("2026-10-08T03:00:00.000Z");
+    expect(await pub(`?preview=${token}`)).toMatchObject({ enabled: false, preview: false });
+  });
+
+  it("preview flag is false once sales are public", async () => {
+    const { app } = await setup(kind);
+    const p = await body<LpTicketPreview>(await app.fetch(send("POST", "/lp/tickets/preview", {})));
+    await enable(app);
+    const token = new URL(p.url).searchParams.get("preview")!;
+    const r = await body<{ enabled: boolean; preview: boolean }>(await app.fetch(get(`/lp/internal/tickets?preview=${token}`, INTERNAL)));
+    expect(r).toMatchObject({ enabled: true, preview: false });
   });
 
   it("checkout of a free ticket → paid immediately, answers snapshot, stats + orders", async () => {
@@ -595,6 +629,7 @@ describe("tickets gate", () => {
     expect((await view.app.fetch(send("POST", "/lp/tickets/types", { name: "a", priceJpy: 0 }))).status).toBe(403);
     expect((await view.app.fetch(send("POST", "/lp/tickets/fields", { fields: [] }))).status).toBe(403);
     expect((await view.app.fetch(send("POST", "/lp/tickets/cta", { enabled: true }))).status).toBe(403);
+    expect((await view.app.fetch(send("POST", "/lp/tickets/preview", {}))).status).toBe(403);
     const none = await makeApp("memory", "none");
     expect((await none.app.fetch(get("/lp/tickets"))).status).toBe(403);
   });

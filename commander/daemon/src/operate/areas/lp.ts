@@ -121,6 +121,7 @@ export const LP: AreaSpec = {
   // チケットの設定・購入者一覧は未開放。
   pending: [
     { service: S, route: "GET /lp/tickets" },
+    { service: S, route: "POST /lp/tickets/preview" },
     { service: S, route: "POST /lp/tickets/fields" },
     { service: S, route: "POST /lp/tickets/types" },
     { service: S, route: "PATCH /lp/tickets/types/:id" },

@@ -3,6 +3,8 @@
 //
 // 設計メモ:
 //  - 販売の公開/停止は LP 全体に効くので lp:publish 必須 + 確認ダイアログ（版の公開と同じ扱い）。
+//    公開は誰でも見られる状態になるので、「全員に公開される」ことへの同意チェックを押すまで実行できない。
+//  - 公開前の見た目は期限付きのプレビューリンク（LP管理 編集で発行・申し込み不可）で確かめる。
 //  - 決済（Stripe）の鍵が未登録でも画面は動く。未設定の間は有料券は買えず、無料券だけ申し込める。
 //  - LP の「参加登録」ボタン差し替え（ctaEnabled）は販売公開に従属する 2 段目のスイッチ。
 //    効くのは enabled && ctaEnabled のときだけ。販売停止中でも予約として保存はできる。
@@ -13,6 +15,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   EmptyState,
   ErrorState,
   Icon,
@@ -25,7 +28,13 @@ import {
 } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import type { LpTicketOrder, LpTicketsState } from "./lpApi.tsx";
-import { useLpTicketOrders, useLpTickets, useSetTicketsCta, useSetTicketsEnabled } from "./lpTicketsHooks.ts";
+import {
+  useCreateTicketsPreview,
+  useLpTicketOrders,
+  useLpTickets,
+  useSetTicketsCta,
+  useSetTicketsEnabled,
+} from "./lpTicketsHooks.ts";
 import { ORDER_STATUS, formatDateTime, formatPrice, formatYen, orderItemLabel } from "./lpTickets.ts";
 import { LpTicketTypesCard } from "./LpTicketTypes.tsx";
 import { LpTicketFieldsCard } from "./LpTicketFields.tsx";
@@ -61,7 +70,7 @@ export function LpTicketsScreen(): JSX.Element {
     const state = tickets.data;
     body = (
       <Stack gap={6}>
-        <SalesStatusCard state={state} canToggle={canToggle} />
+        <SalesStatusCard state={state} canToggle={canToggle} canEdit={canEdit} />
         <div className={styles.kpiGrid}>
           <SummaryTile testId="fe2-lp-tickets-sold" label="販売数" value={`${state.totals.sold.toLocaleString("ja-JP")} 枚`} hint="支払い済みの枚数（無料券を含む・1 回で複数枚の購入あり）" />
           <SummaryTile testId="fe2-lp-tickets-revenue" label="売上" value={formatYen(state.totals.revenueJpy)} hint="支払い済みの合計（税込）" />
@@ -98,9 +107,22 @@ function SummaryTile({ testId, label, value, hint }: { testId: string; label: st
   );
 }
 
-function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggle: boolean }): JSX.Element {
+function SalesStatusCard({
+  state,
+  canToggle,
+  canEdit,
+}: {
+  state: LpTicketsState;
+  canToggle: boolean;
+  canEdit: boolean;
+}): JSX.Element {
   const setEnabled = useSetTicketsEnabled();
   const [confirming, setConfirming] = useState<boolean | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const openConfirm = (next: boolean): void => {
+    setAcknowledged(false);
+    setConfirming(next);
+  };
 
   return (
     <Card testId="fe2-lp-tickets-status" header={<span className={styles.sectionTitle}>チケット販売</span>}>
@@ -112,7 +134,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             checked={state.enabled}
             disabled={!canToggle || setEnabled.isPending}
             label="チケット販売を公開"
-            onChange={(next) => setConfirming(next)}
+            onChange={openConfirm}
           />
           <Badge tone={state.enabled ? "success" : "neutral"} testId="fe2-lp-tickets-enabled-state">
             {state.enabled ? "公開中" : "停止中"}
@@ -137,6 +159,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
           </a>
           <Icon name="external-link" />
         </div>
+        {!state.enabled && canEdit ? <PreviewSetting /> : null}
         <div className={styles.statusRow}>
           <span className={styles.kpiLabel}>決済</span>
           <Badge tone={state.paymentReady ? "success" : "warning"} testId="fe2-lp-tickets-payment">
@@ -153,7 +176,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
         <Modal
           open
           onClose={() => setConfirming(null)}
-          title={confirming ? "チケット販売を公開します" : "チケット販売を停止します"}
+          title={confirming ? "チケット販売を全員に公開しますか？" : "チケット販売を停止します"}
           size="sm"
           testId="fe2-lp-tickets-enabled-dialog"
           footer={
@@ -163,6 +186,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
               </Button>
               <Button
                 variant={confirming ? "primary" : "danger"}
+                disabled={confirming && !acknowledged}
                 onClick={() => {
                   const next = confirming;
                   setConfirming(null);
@@ -175,10 +199,16 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             </div>
           }
         >
+          {confirming ? (
+            <p className={styles.publishWarning} role="alert" data-testid="fe2-lp-tickets-enabled-warning">
+              {"本当に全ユーザーに公開されますがよろしいですか？公開すると、ログインしていない一般の方を含むインターネット上の誰でも、購入ページを開いて申し込めるようになります。"}
+            </p>
+          ) : null}
           <ul style={{ margin: 0, paddingLeft: "var(--dub-space-5)", display: "grid", gap: "var(--dub-space-2)" }}>
             {confirming ? (
               <>
                 <li>公開すると LP に「チケットを購入」ボタンと /tickets ページが出ます。</li>
+                <li>公開前の見た目は、この画面の「プレビューのリンクを発行」で確かめられます。</li>
                 {state.ctaEnabled ? <li>LP の「参加登録」ボタンも「参加チケットを購入」に切り替わります。</li> : null}
                 {!state.paymentReady ? <li>決済が未設定のため、有料のチケットは「準備中」と表示されます。</li> : null}
               </>
@@ -191,9 +221,62 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             )}
             <li>反映まで最大 1 分ほどかかります。</li>
           </ul>
+          {confirming ? (
+            <div className={styles.publishAck}>
+              <Checkbox
+                id="fe2-lp-tickets-enabled-ack"
+                testId="fe2-lp-tickets-enabled-ack"
+                checked={acknowledged}
+                label="全ユーザーに公開されることを理解しました"
+                onChange={setAcknowledged}
+              />
+            </div>
+          ) : null}
         </Modal>
       ) : null}
     </Card>
+  );
+}
+
+/** 販売停止中に、公開後と同じ購入ページを確かめる期限付きリンク（申し込みは不可）。 */
+function PreviewSetting(): JSX.Element {
+  const create = useCreateTicketsPreview();
+  const preview = create.data;
+  return (
+    <div className={styles.ctaSetting} data-testid="fe2-lp-tickets-preview">
+      <div className={styles.statusRow}>
+        <span className={styles.kpiLabel}>公開前の確認</span>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={create.isPending}
+          onClick={() => create.mutate()}
+          testId="fe2-lp-tickets-preview-create"
+        >
+          {preview ? "リンクを発行し直す" : "プレビューのリンクを発行"}
+        </Button>
+      </div>
+      {preview ? (
+        <div className={styles.statusRow}>
+          <a
+            className={styles.urlOpen}
+            href={preview.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="fe2-lp-tickets-preview-url"
+          >
+            プレビューを開く
+          </a>
+          <Icon name="external-link" />
+          <span className={styles.note} data-testid="fe2-lp-tickets-preview-expires">
+            {formatDateTime(preview.expiresAt)} まで有効
+          </span>
+        </div>
+      ) : null}
+      <span className={styles.note}>
+        {"販売を公開しないまま、公開後と同じ購入ページと LP のボタンを確認できます。見られるのはこのリンクを開いた人だけで（24 時間有効）、お申し込みはできません。"}
+      </span>
+    </div>
   );
 }
 

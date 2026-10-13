@@ -19,6 +19,11 @@ const DEFAULT_LP_BASE_URL = "https://hokuriku-it-conf.com";
 const DEFAULT_DAILY_VISIT_CAP = 5000;
 const DEFAULT_DAILY_CHECKOUT_CAP = 300;
 
+function newPreviewToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 function siteTrafficFrom(env: Env): AppDeps["siteTraffic"] {
   const { CF_ANALYTICS_TOKEN: token, CF_ACCOUNT_ID: accountId, LP_WEB_ANALYTICS_SITE_TAG: siteTag } = env;
   return token && accountId && siteTag ? createCfSiteTrafficSource({ token, accountId, siteTag }) : null;
@@ -43,6 +48,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     siteTraffic: siteTrafficFrom(env),
     newTicketTypeId: () => newId("tkt"),
     newOrderId: () => newId("tko"),
+    newPreviewToken,
     dailyCheckoutCap:
       Number(env.LP_DAILY_CHECKOUT_CAP) > 0 ? Number(env.LP_DAILY_CHECKOUT_CAP) : DEFAULT_DAILY_CHECKOUT_CAP,
     stripe: env.STRIPE_SECRET_KEY ? createStripeClient(env.STRIPE_SECRET_KEY) : null,

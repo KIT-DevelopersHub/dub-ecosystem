@@ -3314,6 +3314,7 @@ function createLpStore() {
 //   GET   /api/v1/lp/tickets
 //   POST  /api/v1/lp/tickets/enabled     { enabled }
 //   POST  /api/v1/lp/tickets/cta         { enabled }      ctaEnabled (saved even while sales are off)
+//   POST  /api/v1/lp/tickets/preview                     201 { url, expiresAt } (24h; state unchanged)
 //   POST  /api/v1/lp/tickets/fields      { fields }      400 on invalid list
 //   POST  /api/v1/lp/tickets/types       LpTicketTypeInput   201
 //   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
@@ -3489,6 +3490,12 @@ function createLpTicketsStore() {
       settings.ctaEnabled = req.enabled;
       touch();
       return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/preview") {
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const token = `demo-preview-${Date.now().toString(36).padStart(24, "0")}`;
+      return json({ url: `${settings.publicUrl}?preview=${token}`, expiresAt }, 201);
     }
 
     if (method === "POST" && pathname === "/api/v1/lp/tickets/fields") {
