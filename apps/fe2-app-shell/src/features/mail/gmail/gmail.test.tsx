@@ -377,6 +377,37 @@ describe("GmailApp (hydrates from the gateway)", () => {
     await waitFor(() => expect(screen.queryByTestId("fe2-mail-reply-nudge-banner")).not.toBeInTheDocument());
   });
 
+  it("pins unreplied mail above newer arrivals so it can't get buried; the group collapses", async () => {
+    const day = 86_400_000;
+    const api = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({
+        items: [
+          { ...DEMO_INBOX_ITEMS[0]!, read: false, receivedAt: new Date(Date.now() - 3_600_000).toISOString() },
+          { ...DEMO_INBOX_ITEMS[1]!, read: true, receivedAt: new Date(Date.now() - 5 * day).toISOString() },
+        ],
+        nextCursor: null,
+      }),
+    });
+    render(wrap(<GmailApp />, api));
+    await screen.findAllByTestId("fe2-mail-inbox-item");
+    expect(screen.getByTestId("fe2-mail-nudge-section")).toHaveTextContent("返信待ち 1件");
+    expect(screen.getByTestId("fe2-mail-rest-section")).toHaveTextContent("その他");
+    const rows = screen.getAllByTestId("fe2-mail-inbox-item");
+    expect(within(rows[0]!).getByText("会場下見の日程")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("登壇のご相談")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("fe2-mail-nudge-section-toggle"));
+    expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(1);
+    expect(screen.queryByText("会場下見の日程")).not.toBeInTheDocument();
+    // Select-all only reaches rows on screen, never the collapsed group.
+    await userEvent.click(screen.getByTestId("fe2-mail-select-all"));
+    expect(screen.getByText("1件を選択中")).toBeInTheDocument();
+
+    // Other folders are never split.
+    await userEvent.click(screen.getByTestId("fe2-mail-folder-sent"));
+    expect(screen.queryByTestId("fe2-mail-nudge-section")).not.toBeInTheDocument();
+  });
+
   it("toggles a star from a list row", async () => {
     render(wrap(<GmailApp />));
     const firstStar = (await screen.findAllByTestId("fe2-mail-star"))[0]!;

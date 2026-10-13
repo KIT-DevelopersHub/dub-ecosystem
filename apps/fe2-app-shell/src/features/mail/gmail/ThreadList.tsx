@@ -11,6 +11,7 @@ import {
   inFolder,
   latest,
   matchesQuery,
+  partitionNudged,
   pendingReplyIds,
   relativeDate,
   replyNudge,
@@ -88,6 +89,58 @@ function StopClick({ children, onClick, label, testId }: { children: JSX.Element
     >
       {children}
     </button>
+  );
+}
+
+/** Divider row above a group of threads. Passing `onToggle` makes it a collapse button. */
+function SectionHeader({
+  title,
+  count,
+  accent,
+  open,
+  onToggle,
+  testId,
+}: {
+  title: string;
+  count?: number;
+  accent?: boolean;
+  open?: boolean;
+  onToggle?: () => void;
+  testId: string;
+}): JSX.Element {
+  const label = count === undefined ? title : `${title} ${count}件`;
+  return (
+    <div
+      role="row"
+      data-testid={testId}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        height: 32,
+        padding: "0 12px",
+        borderBottom: "1px solid var(--dub-color-border-default)",
+        borderLeft: `4px solid ${accent ? "var(--dub-color-warning-500)" : "transparent"}`,
+        background: "var(--dub-color-surface-raised)",
+        fontSize: "var(--dub-font-size-xs)",
+        fontWeight: 600,
+        color: "var(--dub-color-text-secondary)",
+      }}
+    >
+      {onToggle ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          data-testid={`${testId}-toggle`}
+          onClick={onToggle}
+          style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          <MailIcon name={open ? "chevron-down" : "chevron-right"} size={16} />
+          {label}
+        </button>
+      ) : (
+        label
+      )}
+    </div>
   );
 }
 
@@ -330,6 +383,7 @@ export function ThreadList(): JSX.Element {
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
   const now = new Date();
   const pendingReplies = pendingReplyIds(state.scheduled);
+  const [nudgeOpen, setNudgeOpen] = useState(true);
   const [leavingIds, setLeavingIds] = useState<Set<string>>(new Set());
   const leaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -377,9 +431,30 @@ export function ThreadList(): JSX.Element {
     return scope && matchesQuery(t, state.search);
   });
 
-  const allChecked = visible.length > 0 && visible.every((t) => state.checked.has(t.id));
+  // Inbox only: unanswered mail is pinned on top so it can't sink under newer arrivals.
+  const { nudged, rest } =
+    state.folder === "inbox" && !state.labelFilter
+      ? partitionNudged(visible, now, pendingReplies)
+      : { nudged: [], rest: visible };
+  const renderRow = (t: MailThreadModel): JSX.Element => (
+    <ThreadRow
+      key={t.id}
+      thread={t}
+      labels={state.labels}
+      leaving={leavingIds.has(t.id)}
+      narrow={narrow}
+      now={now}
+      pendingReplies={pendingReplies}
+      onArchive={() => beginLeave([t.id], "ARCHIVE")}
+      onTrash={() => beginLeave([t.id], "TRASH")}
+    />
+  );
+
+  // Bulk actions only reach rows on screen (a collapsed 返信待ち group is off-limits).
+  const shown = nudgeOpen ? [...nudged, ...rest] : rest;
+  const allChecked = shown.length > 0 && shown.every((t) => state.checked.has(t.id));
   const someChecked = state.checked.size > 0;
-  const checkedInView = visible.filter((t) => state.checked.has(t.id)).map((t) => t.id);
+  const checkedInView = shown.filter((t) => state.checked.has(t.id)).map((t) => t.id);
 
   return (
     <section
@@ -409,7 +484,7 @@ export function ThreadList(): JSX.Element {
           label={allChecked ? "全選択を解除" : "すべて選択"}
           testId="fe2-mail-select-all"
           onClick={() =>
-            allChecked || someChecked ? dispatch({ type: "CLEAR_CHECKS" }) : dispatch({ type: "CHECK_ALL", ids: visible.map((t) => t.id) })
+            allChecked || someChecked ? dispatch({ type: "CLEAR_CHECKS" }) : dispatch({ type: "CHECK_ALL", ids: shown.map((t) => t.id) })
           }
         >
           <span
@@ -492,19 +567,22 @@ export function ThreadList(): JSX.Element {
         </div>
       ) : (
         <div role="rowgroup" style={{ flex: 1, overflowY: "auto" }}>
-          {visible.map((t) => (
-            <ThreadRow
-              key={t.id}
-              thread={t}
-              labels={state.labels}
-              leaving={leavingIds.has(t.id)}
-              narrow={narrow}
-              now={now}
-              pendingReplies={pendingReplies}
-              onArchive={() => beginLeave([t.id], "ARCHIVE")}
-              onTrash={() => beginLeave([t.id], "TRASH")}
-            />
-          ))}
+          {nudged.length > 0 ? (
+            // Literal marker survives minification so verify:live can grep the bundle.
+            <div data-reply-nudge-pinned="fe2-mail-reply-nudge-pinned" style={{ display: "contents" }}>
+              <SectionHeader
+                title="返信待ち"
+                count={nudged.length}
+                accent
+                open={nudgeOpen}
+                onToggle={() => setNudgeOpen((o) => !o)}
+                testId="fe2-mail-nudge-section"
+              />
+              {nudgeOpen ? nudged.map(renderRow) : null}
+              {rest.length > 0 ? <SectionHeader title="その他" testId="fe2-mail-rest-section" /> : null}
+            </div>
+          ) : null}
+          {rest.map(renderRow)}
         </div>
       )}
     </section>

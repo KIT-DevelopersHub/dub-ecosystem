@@ -216,3 +216,16 @@ export function replyNudge(
   const elapsed = Math.floor((now.getTime() - at) / DAY_MS);
   return elapsed >= days && elapsed <= maxDays ? { days: elapsed } : null;
 }
+
+/** Splits a list into nudged threads (pinned above the inbox so they don't sink under new
+ *  mail, like Gmail bumping a nudge to the top) and the rest; both keep their input order. */
+export function partitionNudged(
+  threads: readonly MailThreadModel[],
+  now: Date,
+  pendingReplies: ReadonlySet<string> = new Set(),
+): { nudged: MailThreadModel[]; rest: MailThreadModel[] } {
+  const nudged: MailThreadModel[] = [];
+  const rest: MailThreadModel[] = [];
+  for (const t of threads) (replyNudge(t, now, pendingReplies) ? nudged : rest).push(t);
+  return { nudged, rest };
+}

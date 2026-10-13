@@ -1,6 +1,6 @@
 // Unit tests for the derived reply nudge (返信していないメール).
 import { describe, expect, it } from "vitest";
-import { pendingReplyIds, replyNudge, SELF, type MailMsg, type MailThreadModel } from "./mailModel.ts";
+import { partitionNudged, pendingReplyIds, replyNudge, SELF, type MailMsg, type MailThreadModel } from "./mailModel.ts";
 import { initialMailState, reducer } from "./useMailStore.tsx";
 
 const NOW = new Date("2026-10-13T12:00:00.000Z");
@@ -75,5 +75,17 @@ describe("replyNudge", () => {
 
   it("accepts a custom threshold", () => {
     expect(replyNudge(thread([msg({ date: daysAgo(1) })]), NOW, undefined, 1)).toEqual({ days: 1 });
+  });
+});
+
+describe("partitionNudged", () => {
+  it("lifts nudged threads out of the list, keeping each side's order", () => {
+    const fresh = thread([msg({ date: daysAgo(0) })], { id: "new" });
+    const a = thread([msg({ date: daysAgo(4) })], { id: "a" });
+    const unread = thread([msg({ date: daysAgo(5), read: false })], { id: "unread" });
+    const b = thread([msg({ date: daysAgo(9) })], { id: "b" });
+    const { nudged, rest } = partitionNudged([fresh, a, unread, b], NOW);
+    expect(nudged.map((t) => t.id)).toEqual(["a", "b"]);
+    expect(rest.map((t) => t.id)).toEqual(["new", "unread"]);
   });
 });
