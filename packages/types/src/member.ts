@@ -459,6 +459,82 @@ export interface LinkIdentityRequest {
   version: number;
 }
 
+// ---- オンボーディング (新メンバーへの「やってほしいこと」案内) ------------------------
+// 管理者が 運営メンバー・名簿 → オンボーディング タブで項目を並べ、ログイン不要の公開ページ
+// (/onboarding) がそれをそのまま表示する。項目は公開前提の案内文なので全フィールドを
+// 公開応答に載せてよい（個人情報は持たない）。
+
+/** 案内項目 1 件。sortOrder 昇順が表示順。 */
+export interface OnboardingItem {
+  id: string;
+  title: string;
+  /** 補足説明（改行可）。 */
+  description: string | null;
+  /** 案内先リンク（http/https のみ）。 */
+  url: string | null;
+  sortOrder: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export interface ListOnboardingItemsResponse {
+  items: OnboardingItem[];
+}
+
+/** 作成/更新の入力。更新は部分更新（未指定は据え置き・null で消去）。 */
+export interface OnboardingItemInput {
+  title: string;
+  description?: string | null;
+  url?: string | null;
+}
+export type UpdateOnboardingItemRequest = Partial<OnboardingItemInput>;
+
+/** 並び替え: 全項目 id を新しい表示順で渡す。 */
+export interface ReorderOnboardingItemsRequest {
+  ids: string[];
+}
+
+export const ONBOARDING_TITLE_MAX = 100;
+export const ONBOARDING_DESCRIPTION_MAX = 2000;
+export const ONBOARDING_URL_MAX = 2000;
+
+/** http(s)://<host>... の形。このパッケージは DOM/Node の URL に依存しないので正規表現で見る。 */
+const ONBOARDING_URL_PATTERN = /^https?:\/\/[^\s/?#]+[^\s]*$/i;
+
+/** 案内リンクとして許すのは http/https だけ（公開ページで javascript: 等を描かない）。 */
+export function isOnboardingUrl(raw: string): boolean {
+  return raw.length <= ONBOARDING_URL_MAX && ONBOARDING_URL_PATTERN.test(raw);
+}
+
+/** 入力を検証・正規化する（前後空白を除去し、空文字は null）。`partial` は PATCH 用で、
+ *  未指定キーは結果にも含めない。errors はフィールド名の配列。FE/BE 共通。 */
+export function parseOnboardingItemInput(
+  raw: Record<string, unknown>,
+  partial = false,
+): { value: UpdateOnboardingItemRequest; errors: string[] } {
+  const value: UpdateOnboardingItemRequest = {};
+  const errors: string[] = [];
+  const text = (v: unknown): string | null | undefined =>
+    v === undefined ? undefined : v === null ? null : typeof v === "string" ? v.trim() : undefined;
+
+  if (!partial || raw.title !== undefined) {
+    const t = text(raw.title);
+    if (!t || t.length > ONBOARDING_TITLE_MAX) errors.push("title");
+    else value.title = t;
+  }
+  if (raw.description !== undefined) {
+    const d = text(raw.description);
+    if (d === undefined || (d && d.length > ONBOARDING_DESCRIPTION_MAX)) errors.push("description");
+    else value.description = d || null;
+  }
+  if (raw.url !== undefined) {
+    const u = text(raw.url);
+    if (u === undefined || (u && !isOnboardingUrl(u))) errors.push("url");
+    else value.url = u || null;
+  }
+  return { value, errors };
+}
+
 /** Internal id alias (plain string, like the other common ids). */
 export type MemberId = string;
 export type TeamId = string;

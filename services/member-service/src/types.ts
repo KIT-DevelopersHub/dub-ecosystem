@@ -95,6 +95,19 @@ export interface ParticipationRow extends member.PersonProfile {
   updatedAt: common.ISODateTime;
 }
 
+/** オンボーディング案内項目の永続化行 (wire `OnboardingItem` + org/作成者)。 */
+export interface OnboardingItemRow {
+  id: string;
+  orgId: common.OrgId;
+  title: string;
+  description: string | null;
+  url: string | null;
+  sortOrder: number;
+  createdBy: common.UserId;
+  createdAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
+}
+
 // ---- injected dependencies (enables full HTTP-level tests with fakes) ----
 export interface MemberRepo {
   // teams
@@ -124,6 +137,15 @@ export interface MemberRepo {
   getParticipation(id: string): Promise<ParticipationRow | null>;
   getParticipationByNormalizedName(orgId: common.OrgId, normalizedName: string): Promise<ParticipationRow | null>;
   listParticipations(orgId: common.OrgId): Promise<ParticipationRow[]>;
+
+  // onboarding items (オンボーディング案内), sort_order 昇順
+  createOnboardingItem(row: OnboardingItemRow): Promise<void>;
+  getOnboardingItem(id: string): Promise<OnboardingItemRow | null>;
+  listOnboardingItems(orgId: common.OrgId): Promise<OnboardingItemRow[]>;
+  updateOnboardingItem(row: OnboardingItemRow): Promise<boolean>;
+  deleteOnboardingItem(id: string): Promise<void>;
+  /** 指定 id 群の sort_order を一括で書き換える (並び替え)。 */
+  setOnboardingSortOrders(orders: Array<{ id: string; sortOrder: number }>, updatedAt: common.ISODateTime): Promise<void>;
 }
 
 export interface AppDeps {
@@ -137,6 +159,7 @@ export interface AppDeps {
   newTeamId: () => string;
   newMemberId: () => string;
   newParticipationId: () => string;
+  newOnboardingItemId: () => string;
   /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
    *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
    *  without the binding, in which case the submission simply skips the notify. Must

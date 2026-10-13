@@ -1,7 +1,7 @@
 // In-memory MemberRepo: backs unit/HTTP tests without D1. Team membership is a
 // nested Map (personId -> Set<teamId>) so there is no fragile string-join key.
 import type { common } from "@dub/types";
-import type { MemberRepo, ParticipationRow, PersonRow, TeamRow } from "./types";
+import type { MemberRepo, OnboardingItemRow, ParticipationRow, PersonRow, TeamRow } from "./types";
 
 function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -12,6 +12,7 @@ export class InMemoryMemberRepo implements MemberRepo {
   private people = new Map<string, PersonRow>();
   private links = new Map<string, Set<string>>(); // personId -> Set<teamId>
   private participations = new Map<string, ParticipationRow>(); // id -> row
+  private onboarding = new Map<string, OnboardingItemRow>(); // id -> row
 
   private setLinks(personId: string, teamIds: string[]): void {
     this.links.set(personId, new Set(teamIds));
@@ -118,5 +119,34 @@ export class InMemoryMemberRepo implements MemberRepo {
       .filter((p) => p.orgId === orgId)
       .sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : a.submittedAt > b.submittedAt ? -1 : cmp(a.id, b.id)))
       .map((p) => ({ ...p }));
+  }
+
+  // ---- onboarding items ----
+  async createOnboardingItem(row: OnboardingItemRow): Promise<void> {
+    this.onboarding.set(row.id, { ...row });
+  }
+  async getOnboardingItem(id: string): Promise<OnboardingItemRow | null> {
+    const r = this.onboarding.get(id);
+    return r ? { ...r } : null;
+  }
+  async listOnboardingItems(orgId: common.OrgId): Promise<OnboardingItemRow[]> {
+    return [...this.onboarding.values()]
+      .filter((r) => r.orgId === orgId)
+      .sort((a, b) => a.sortOrder - b.sortOrder || cmp(a.id, b.id))
+      .map((r) => ({ ...r }));
+  }
+  async updateOnboardingItem(row: OnboardingItemRow): Promise<boolean> {
+    if (!this.onboarding.has(row.id)) return false;
+    this.onboarding.set(row.id, { ...row });
+    return true;
+  }
+  async deleteOnboardingItem(id: string): Promise<void> {
+    this.onboarding.delete(id);
+  }
+  async setOnboardingSortOrders(orders: Array<{ id: string; sortOrder: number }>, updatedAt: string): Promise<void> {
+    for (const o of orders) {
+      const cur = this.onboarding.get(o.id);
+      if (cur) this.onboarding.set(o.id, { ...cur, sortOrder: o.sortOrder, updatedAt });
+    }
   }
 }

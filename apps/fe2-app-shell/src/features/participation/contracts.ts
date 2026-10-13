@@ -23,6 +23,15 @@ export type MembersOverview = member.MembersOverview;
 /** Minimal response from the PUBLIC (unauthenticated) submit endpoint — no member echo. */
 export type PublicParticipationResponse = gateway.PublicParticipationResponse;
 
+/** オンボーディング案内 (公開ページ /onboarding に並ぶ「やってほしいこと」)。 */
+export type OnboardingItem = member.OnboardingItem;
+export type OnboardingItemInput = member.OnboardingItemInput;
+export type UpdateOnboardingItemRequest = member.UpdateOnboardingItemRequest;
+export type ListOnboardingItemsResponse = member.ListOnboardingItemsResponse;
+export const ONBOARDING_TITLE_MAX = member.ONBOARDING_TITLE_MAX;
+export const ONBOARDING_DESCRIPTION_MAX = member.ONBOARDING_DESCRIPTION_MAX;
+export const parseOnboardingItemInput = member.parseOnboardingItemInput;
+
 /** Canonical shared team entity read from GET /api/v1/members/teams. */
 export type MemberTeam = member.Team;
 

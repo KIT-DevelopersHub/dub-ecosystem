@@ -2493,6 +2493,32 @@ function createMembersStore() {
     if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
   });
 
+  // オンボーディング案内の初期項目 (公開ページ /onboarding に並ぶ)。
+  const onboarding: Array<{
+    id: string; title: string; description: string | null; url: string | null;
+    sortOrder: number; createdAt: string; updatedAt: string;
+  }> = [
+    {
+      id: "onb_demo_1", title: "参加届を出す",
+      description: "名前・学校のメールアドレス・Gmail を入力して送信してください。運営が確認して名簿に追加します。",
+      // 公開フォームは同じオリジンの /participate (demo はどの Worker でも同じ SPA)。
+      url: `${typeof window !== "undefined" ? window.location.origin : "https://example.com"}/participate`, sortOrder: 1024,
+      createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+    },
+    {
+      id: "onb_demo_2", title: "Discord サーバーに参加する",
+      description: "運営の連絡はすべて Discord で行います。参加したら #自己紹介 に一言どうぞ。",
+      url: "https://discord.com/invite/example", sortOrder: 2048,
+      createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+    },
+    {
+      id: "onb_demo_3", title: "次回の全体ミーティングに出る",
+      description: "毎週木曜 18:30〜。初回は顔合わせだけなので気軽に来てください。",
+      url: null, sortOrder: 3072,
+      createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
+    },
+  ];
+
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
   // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
   const participations: any[] = [
@@ -2788,6 +2814,52 @@ function createMembersStore() {
         return json({ participation: { ...p }, member: { ...created, teamIds: [...created.teamIds] } });
       }
       return json({ error: { code: "VALIDATION_FAILED", message: "invalid action", retryable: false } }, 400);
+    }
+
+    // オンボーディング案内 (管理タブ + 公開ページ)。検証は member-service と同じ共通関数。
+    const onboardingList = () => ({ items: onboarding.map((o) => ({ ...o })) });
+    if (method === "GET" && (pathname === "/api/v1/members/onboarding" || pathname === "/api/v1/public/onboarding")) {
+      return json(onboardingList());
+    }
+    const invalid = (fields: string[]) =>
+      json({ error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false, details: { fields } } }, 400);
+    if (method === "POST" && pathname === "/api/v1/members/onboarding") {
+      const { value, errors } = memberValues.parseOnboardingItemInput(body ?? {});
+      if (errors.length > 0) return invalid(errors);
+      const now = isoNow();
+      const last = onboarding[onboarding.length - 1];
+      const item = {
+        id: nid("onb"), title: value.title as string, description: value.description ?? null, url: value.url ?? null,
+        sortOrder: (last?.sortOrder ?? 0) + 1024, createdAt: now, updatedAt: now,
+      };
+      onboarding.push(item);
+      return json({ ...item }, 201);
+    }
+    if (method === "POST" && pathname === "/api/v1/members/onboarding/reorder") {
+      const ids: unknown = body?.ids;
+      const known = new Set(onboarding.map((o) => o.id));
+      if (!Array.isArray(ids) || ids.length !== onboarding.length || new Set(ids).size !== ids.length || !ids.every((x) => known.has(x))) {
+        return invalid(["ids"]);
+      }
+      const byId = new Map(onboarding.map((o) => [o.id, o]));
+      const next = ids.map((id: string, i: number) => ({ ...byId.get(id)!, sortOrder: (i + 1) * 1024, updatedAt: isoNow() }));
+      onboarding.splice(0, onboarding.length, ...next);
+      return json(onboardingList());
+    }
+    const onbMatch = pathname.match(/^\/api\/v1\/members\/onboarding\/([^/]+)$/);
+    if (onbMatch) {
+      const item = onboarding.find((o) => o.id === decodeURIComponent(onbMatch[1]!));
+      if (!item) return json({ error: { code: "MEMBER_ONBOARDING_ITEM_NOT_FOUND", message: "not found", retryable: false } }, 404);
+      if (method === "PATCH") {
+        const { value, errors } = memberValues.parseOnboardingItemInput(body ?? {}, true);
+        if (errors.length > 0) return invalid(errors);
+        Object.assign(item, value, { updatedAt: isoNow() });
+        return json({ ...item });
+      }
+      if (method === "DELETE") {
+        onboarding.splice(onboarding.indexOf(item), 1);
+        return json({ ok: true });
+      }
     }
 
     return null;

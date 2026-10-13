@@ -164,9 +164,152 @@
   padding: var(--dub-space-4) 0;
 }
 
-/* アプリ内フォームから公開フォームへの導線 (共有用 URL の案内). */
-.shareHint {
-  margin: 0 0 var(--dub-space-4);
-  color: var(--dub-color-text-secondary, var(--dub-color-text-primary));
-  font-size: var(--dub-font-size-sm, var(--dub-font-size-md));
+/* 回答一覧の上に置く「参加届フォームの URL」カード. */
+.listShare {
+  margin-bottom: var(--dub-space-5);
+}
+
+/* オンボーディング (管理タブ + 公開ページ) — @dub/tokens のみ. */
+.onboardingPage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-5);
+}
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+  width: 100%;
+}
+.sectionHint {
+  margin: 0 0 var(--dub-space-3);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+.shareRow {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  flex-wrap: wrap;
+}
+.shareUrl {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.shareActions {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+.shareOpen {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  color: var(--dub-color-text-link);
+}
+.onboardingList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.onboardingRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+}
+.onboardingRow[data-dragging] {
+  visibility: hidden;
+}
+.dragHandle {
+  display: inline-flex;
+  align-items: center;
+  padding-top: var(--dub-space-1);
+  color: var(--dub-color-text-secondary);
+  cursor: grab;
+  touch-action: none;
+}
+.stepNumber {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-brand-100);
+  color: var(--dub-color-brand-700);
+  font-weight: var(--dub-font-weight-bold);
+  font-size: var(--dub-font-size-sm);
+}
+.onboardingBody {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.onboardingTitle {
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.onboardingDescription {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--dub-color-text-secondary);
+}
+.onboardingLink {
+  overflow-wrap: anywhere;
+  font-size: var(--dub-font-size-sm);
+}
+.onboardingActions {
+  flex: none;
+  display: flex;
+  gap: var(--dub-space-1);
+}
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--dub-space-2);
+}
+.publicSteps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+.publicStep {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-4) var(--dub-space-5);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-raised);
+}
+.publicStepTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.publicStepLink {
+  align-self: flex-start;
+  margin-top: var(--dub-space-2);
+  font-weight: var(--dub-font-weight-medium);
 }

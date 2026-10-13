@@ -55,6 +55,11 @@ export const POLICY_TABLE = definePolicyTable({
   // identity:read of the poster would break @team mentions for ordinary members.
   "GET /members/internal/team-members": INTERNAL,
 
+  // 公開オンボーディング案内. api-gateway's PUBLIC GET /api/v1/public/onboarding forwards here
+  // for a visitor who has no account yet (that is the whole point of the page), so there is
+  // no actor and no key to demand. Read-only, and the content is authored to be public.
+  "GET /members/internal/onboarding": INTERNAL,
+
   // Self 参加届 (アカウント設定 -> 参加情報), reached through api-gateway's GET|POST
   // /api/v1/me/participation, which authenticates the session and forwards the caller's
   // identity id alongside the marker. Self-scoped by construction: no target id is accepted
@@ -125,4 +130,14 @@ export const POLICY_TABLE = definePolicyTable({
   // adding the domain key would revoke a delegation the code deliberately granted). Holding
   // 編集 on 運営メンバー does not reach this route — a different app's row.
   "POST /members/participation/:id/resolve": appLevel("participation", "edit"),
+
+  // ---- オンボーディング案内 (参加届アプリの管理タブ) ----
+  // 新メンバー向けの案内は参加届と同じ「入ってくる人の受け入れ」なので、参加届アプリの行で
+  // 出し分ける。読むのは 閲覧（中身は公開ページと同じで、他人の名簿行を含まない）、
+  // 項目の追加・編集・削除・並び替えは公開ページを書き換えるので 編集。
+  "GET /members/onboarding": appLevel("participation", "view"),
+  "POST /members/onboarding": appLevel("participation", "edit"),
+  "POST /members/onboarding/reorder": appLevel("participation", "edit"),
+  "PATCH /members/onboarding/:id": appLevel("participation", "edit"),
+  "DELETE /members/onboarding/:id": appLevel("participation", "edit"),
 });

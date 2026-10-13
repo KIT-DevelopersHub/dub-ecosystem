@@ -13,9 +13,10 @@ import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { createParticipationApi, type ParticipationApi } from "./participationApi.tsx";
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
-import { ParticipationPage } from "./ParticipationPage.tsx";
+import { ParticipationForm } from "./ParticipationForm.tsx";
+import { OnboardingAdminPage } from "./OnboardingAdminPage.tsx";
 import { ParticipationListPage } from "./ParticipationListPage.tsx";
-import type { Participation, ParticipationCandidate, PublicParticipationResponse, RosterMember } from "./contracts.ts";
+import type { OnboardingItem, Participation, ParticipationCandidate, PublicParticipationResponse, RosterMember } from "./contracts.ts";
 
 /** Minimal roster member fixture for the manual-link search. */
 function rosterMember(over: Partial<RosterMember> & Pick<RosterMember, "id" | "name">): RosterMember {
@@ -39,6 +40,14 @@ function fakeApiClient(result: unknown = undefined): { api: ApiClient; calls: Re
 
 const ACCEPTED: PublicParticipationResponse = { accepted: true };
 
+function onboardingItem(over: Partial<OnboardingItem> & Pick<OnboardingItem, "id">): OnboardingItem {
+  return {
+    title: "項目", description: null, url: null, sortOrder: 1024,
+    createdAt: "2026-10-13T00:00:00.000Z", updatedAt: "2026-10-13T00:00:00.000Z",
+    ...over,
+  };
+}
+
 function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
   return {
     listTeams: () => Promise.resolve({ teams: [{ id: "t1", key: "venue", name: "会場", color: null, description: null }] }),
@@ -49,6 +58,12 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
     resolve: vi.fn((id: string) =>
       Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const }, member: null }),
     ),
+    listOnboarding: vi.fn(() => Promise.resolve({ items: [] })),
+    createOnboarding: vi.fn((input) => Promise.resolve(onboardingItem({ id: "onb_new", ...input }))),
+    updateOnboarding: vi.fn((id, patch) => Promise.resolve(onboardingItem({ id, ...patch }))),
+    deleteOnboarding: vi.fn(() => Promise.resolve()),
+    reorderOnboarding: vi.fn((ids: string[]) => Promise.resolve({ items: ids.map((id) => onboardingItem({ id })) })),
+    publicOnboarding: vi.fn(() => Promise.resolve({ items: [] })),
     ...overrides,
   } as ParticipationApi;
 }
@@ -112,10 +127,10 @@ describe("createParticipationApi", () => {
   });
 });
 
-describe("ParticipationPage", () => {
+describe("ParticipationForm", () => {
   it("blocks submit with an empty 姓/名", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await userEvent.click(screen.getByTestId("participation-submit"));
     expect(screen.getByText("氏名（苗字）を入力してください")).toBeInTheDocument();
     expect(screen.getByText("氏名（名前）を入力してください")).toBeInTheDocument();
@@ -124,7 +139,7 @@ describe("ParticipationPage", () => {
 
   it("requires both the school email and the Gmail address", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await userEvent.type(screen.getByTestId("participation-last-name"), "山田");
     await userEvent.type(screen.getByTestId("participation-first-name"), "太郎");
     await userEvent.click(screen.getByTestId("participation-submit"));
@@ -135,7 +150,7 @@ describe("ParticipationPage", () => {
 
   it("rejects a malformed email", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await userEvent.type(screen.getByTestId("participation-last-name"), "山田");
     await userEvent.type(screen.getByTestId("participation-first-name"), "太郎");
     await userEvent.type(screen.getByTestId("participation-school-email"), "not-an-email");
@@ -147,7 +162,7 @@ describe("ParticipationPage", () => {
 
   it("rejects a malformed phone number", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await fillRequired();
     await userEvent.type(screen.getByTestId("participation-phone"), "not-a-phone");
     await userEvent.click(screen.getByTestId("participation-submit"));
@@ -157,7 +172,7 @@ describe("ParticipationPage", () => {
 
   it("rejects a malformed 名列番号", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await fillRequired();
     await userEvent.type(screen.getByTestId("participation-roster-number"), "3EP2");
     await userEvent.click(screen.getByTestId("participation-submit"));
@@ -167,7 +182,7 @@ describe("ParticipationPage", () => {
 
   it("submits split 姓/名 + both emails and shows a neutral サンクス (no roster claim)", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await fillRequired("新規", "太郎");
     await userEvent.type(screen.getByTestId("participation-phone"), "090-1234-5678");
     await userEvent.type(screen.getByTestId("participation-roster-number"), "3ep2-26");
@@ -186,11 +201,6 @@ describe("ParticipationPage", () => {
     expect(screen.getByText(/運営が内容を確認します/)).toBeInTheDocument();
   });
 
-  it("links to the public form for sharing", () => {
-    render(wrap(<ParticipationPage />, makeApi()));
-    const link = screen.getByTestId("participation-public-link").querySelector("a");
-    expect(link?.getAttribute("href")).toBe("/participate");
-  });
 });
 
 const SUBMISSION: Participation = {
@@ -349,5 +359,66 @@ describe("ParticipationListPage", () => {
     await waitFor(() => expect(resolve).toHaveBeenCalledWith("p_1", { action: "unlink" }));
     // 解除後は再び「追加する」で付け直せる。
     expect(await screen.findByTestId("participation-add-p_1")).toBeInTheDocument();
+  });
+});
+
+describe("OnboardingAdminPage", () => {
+  const ITEMS = [
+    onboardingItem({ id: "onb_1", title: "Discord に参加", url: "https://discord.gg/x", sortOrder: 1024 }),
+    onboardingItem({ id: "onb_2", title: "参加届を出す", description: "名前とメールを送る", sortOrder: 2048 }),
+  ];
+
+  it("shows the public URL and the items in order", async () => {
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve({ items: ITEMS })) });
+    render(wrap(<OnboardingAdminPage />, api));
+    expect(screen.getByTestId("onboarding-share-url").textContent).toMatch(/\/onboarding$/);
+    expect(await screen.findByText("Discord に参加")).toBeInTheDocument();
+    const rows = screen.getAllByTestId(/^onboarding-admin-item-/);
+    expect(rows.map((r) => r.dataset.testid)).toEqual(["onboarding-admin-item-onb_1", "onboarding-admin-item-onb_2"]);
+  });
+
+  it("adds an item through the dialog and rejects a non-http link", async () => {
+    const stored: OnboardingItem[] = [];
+    const api = makeApi({
+      listOnboarding: vi.fn(() => Promise.resolve({ items: [...stored] })),
+      createOnboarding: vi.fn((input) => {
+        const item = onboardingItem({ id: "onb_new", ...input });
+        stored.push(item);
+        return Promise.resolve(item);
+      }),
+    });
+    render(wrap(<OnboardingAdminPage />, api));
+    await screen.findByTestId("onboarding-admin-empty");
+    await userEvent.click(screen.getByTestId("onboarding-admin-add"));
+    await userEvent.type(screen.getByTestId("onboarding-item-title"), "Slack に参加");
+    await userEvent.type(screen.getByTestId("onboarding-item-url"), "javascript:alert(1)");
+    await userEvent.click(screen.getByTestId("onboarding-item-save"));
+    expect(screen.getByText("http:// または https:// で始まる URL を入力してください")).toBeInTheDocument();
+    expect(api.createOnboarding).not.toHaveBeenCalled();
+
+    await userEvent.clear(screen.getByTestId("onboarding-item-url"));
+    await userEvent.type(screen.getByTestId("onboarding-item-url"), "https://slack.com/x");
+    await userEvent.click(screen.getByTestId("onboarding-item-save"));
+    await waitFor(() => expect(api.createOnboarding).toHaveBeenCalledTimes(1));
+    expect((api.createOnboarding as any).mock.calls[0][0]).toEqual({ title: "Slack に参加", description: null, url: "https://slack.com/x" });
+    expect(await screen.findByText("Slack に参加")).toBeInTheDocument();
+  });
+
+  it("deletes after confirmation", async () => {
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve({ items: ITEMS })) });
+    render(wrap(<OnboardingAdminPage />, api));
+    await userEvent.click(await screen.findByTestId("onboarding-admin-delete-onb_1"));
+    const dialog = screen.getByTestId("onboarding-admin-delete-confirm");
+    await userEvent.click(within(dialog).getByText("削除する"));
+    await waitFor(() => expect(api.deleteOnboarding).toHaveBeenCalledWith("onb_1"));
+  });
+
+  it("is read-only for a 閲覧 subject (no add / edit / delete)", async () => {
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve({ items: ITEMS })) });
+    render(wrap(<OnboardingAdminPage />, api, viewerPermissions("participation")));
+    expect(await screen.findByText("Discord に参加")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-admin-add")).toBeNull();
+    expect(screen.queryByTestId("onboarding-admin-edit-onb_1")).toBeNull();
+    expect(screen.getByTestId("onboarding-readonly-notice")).toBeInTheDocument();
   });
 });

@@ -2,8 +2,8 @@
 // design the 社長 asked for:
 //   (a) the PUBLIC form at /participate (no login) accepts the two required emails and
 //       shows the サンクス — this is the one form participants use;
-//   (b) the in-shell /participation renders the SAME form component and links out to the
-//       public /participate URL (運営 share that link, no second form to maintain);
+//   (b) the in-shell /participation is the オンボーディング tab (items + the public
+//       /onboarding URL), and 回答一覧 carries the public /participate URL instead;
 //   (c) the 運営専用 回答一覧 at /participation/list shows submitted 参加届 (氏名 / 学校メール /
 //       Gmail / 所属 / 希望) and opens a detail drawer on row click.
 // The list is seeded with two submitted records so it has content on first load; a real
@@ -42,16 +42,41 @@ test("(a) public /participate accepts split 姓/名 + emails + phone and confirm
   await page.screenshot({ path: shot("02-public-thanks.png"), fullPage: true });
 });
 
-test("(b) in-shell /participation reuses the same form and links to the public URL", async ({ page }) => {
+test("(b) オンボーディング tab manages the items and shares the public /onboarding page", async ({ page }) => {
   await page.goto("/participation");
-  await expect(page.getByTestId("participation-page")).toBeVisible();
-  // Same form component (両メール必須) as the public page.
-  await expect(page.getByTestId("participation-school-email")).toBeVisible();
-  await expect(page.getByTestId("participation-gmail")).toBeVisible();
-  // 導線: link out to the public /participate form (no second implementation).
-  const link = page.getByTestId("participation-public-link").locator("a");
-  await expect(link).toHaveAttribute("href", "/participate");
-  await page.screenshot({ path: shot("03-inshell-form-with-link.png"), fullPage: true });
+  await expect(page.getByTestId("onboarding-admin-page")).toBeVisible();
+  await expect(page.getByTestId("member-roster-subnav")).toContainText("オンボーディング");
+  await expect(page.getByTestId("onboarding-share-url")).toHaveText(/\/onboarding$/);
+  await expect(page.getByTestId("onboarding-admin-item-onb_demo_2")).toContainText("Discord サーバーに参加する");
+  await page.screenshot({ path: shot("03-onboarding-admin.png"), fullPage: true });
+
+  await page.getByTestId("onboarding-admin-add").click();
+  await page.getByTestId("onboarding-item-title").fill("Slack に参加する");
+  await page.getByTestId("onboarding-item-url").fill("https://slack.com/example");
+  await page.getByTestId("onboarding-item-save").click();
+  await expect(page.getByTestId("onboarding-admin-list")).toContainText("Slack に参加する");
+
+  // 公開ページはログイン不要で、seed 済みの項目が番号付きで並ぶ（goto で demo は再 seed される）。
+  await page.goto("/onboarding");
+  await expect(page.getByTestId("onboarding-public-page")).toBeVisible();
+  await expect(page.getByTestId("onboarding-public-steps")).toContainText("参加届を出す");
+  await page.screenshot({ path: shot("03b-onboarding-public.png"), fullPage: true });
+
+  // 新メンバーはスマホで開くことが多いので狭幅でも横スクロールしないこと。
+  await page.setViewportSize({ width: 375, height: 812 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: shot("03c-onboarding-public-narrow.png"), fullPage: true });
+  await page.goto("/participation");
+  await expect(page.getByTestId("onboarding-admin-item-onb_demo_1")).toBeVisible();
+  await page.waitForTimeout(400); // let the app fade-in settle before the shot
+  await page.screenshot({ path: shot("03d-onboarding-admin-narrow.png"), fullPage: true });
+});
+
+test("(b2) 回答一覧 shows the public 参加届 form URL", async ({ page }) => {
+  await page.goto("/participation/list");
+  await expect(page.getByTestId("participation-public-link-url")).toHaveText(/\/participate$/);
+  await expect(page.getByTestId("participation-public-link-open")).toHaveAttribute("href", "/participate");
 });
 
 test("(c) 運営 回答一覧 lists submitted 参加届 and opens a detail drawer", async ({ page }) => {

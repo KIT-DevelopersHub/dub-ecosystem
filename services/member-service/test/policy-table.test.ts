@@ -113,12 +113,21 @@ const PARTICIPATION_ADMIN_READS = [
   "GET /members/participation/:id/candidates",
 ];
 const PARTICIPATION_RESOLVE = ["POST /members/participation/:id/resolve"];
+// オンボーディング案内 (参加届アプリ): 読むのは 閲覧 / 公開ページを書き換える操作は 編集.
+const ONBOARDING_READ = ["GET /members/onboarding"];
+const ONBOARDING_WRITES = [
+  "DELETE /members/onboarding/:id",
+  "PATCH /members/onboarding/:id",
+  "POST /members/onboarding",
+  "POST /members/onboarding/reorder",
+];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
 const SELF = ["GET /members/me/mention-teams"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = [
   "GET /health",
   "GET /members/internal/me/participation",
+  "GET /members/internal/onboarding",
   "GET /members/internal/team-members",
   "POST /members/internal/me/participation",
   "POST /members/internal/participation",
@@ -130,6 +139,8 @@ const FULL = [
   ...PARTICIPATION_SUBMIT,
   ...PARTICIPATION_ADMIN_READS,
   ...PARTICIPATION_RESOLVE,
+  ...ONBOARDING_READ,
+  ...ONBOARDING_WRITES,
   ...SELF,
 ].sort();
 
@@ -138,9 +149,9 @@ describe("role x endpoint matrix (frozen)", () => {
   const EXPECTED: Record<keyof typeof ROLE_KEYS, string[]> = {
     admin: FULL,
     // 名簿は読めるが書けない / 参加届は出せて一覧も見られるが反映確定はできない。
-    maintainer: [...ROSTER_READS, ...PARTICIPATION_SUBMIT, ...PARTICIPATION_ADMIN_READS, ...SELF].sort(),
-    organizer: [...ROSTER_READS, ...PARTICIPATION_SUBMIT, ...PARTICIPATION_ADMIN_READS, ...SELF].sort(),
-    member: [...ROSTER_READS, ...PARTICIPATION_SUBMIT, ...PARTICIPATION_ADMIN_READS, ...SELF].sort(),
+    maintainer: [...ROSTER_READS, ...PARTICIPATION_SUBMIT, ...PARTICIPATION_ADMIN_READS, ...ONBOARDING_READ, ...SELF].sort(),
+    organizer: [...ROSTER_READS, ...PARTICIPATION_SUBMIT, ...PARTICIPATION_ADMIN_READS, ...ONBOARDING_READ, ...SELF].sort(),
+    member: [...ROSTER_READS, ...PARTICIPATION_SUBMIT, ...PARTICIPATION_ADMIN_READS, ...ONBOARDING_READ, ...SELF].sort(),
     // #526: 名簿の委譲は identity:* を一切持たずに成立する。参加届 は別アプリなので届かない。
     "delegated-roster-editor": [...ROSTER_READS, ...ROSTER_WRITES, ...SELF].sort(),
     // 逆向きの非対称: 参加届の審査者は名簿 CRUD に届かない。
@@ -148,6 +159,8 @@ describe("role x endpoint matrix (frozen)", () => {
       ...PARTICIPATION_SUBMIT,
       ...PARTICIPATION_ADMIN_READS,
       ...PARTICIPATION_RESOLVE,
+      ...ONBOARDING_READ,
+      ...ONBOARDING_WRITES,
       ...SELF,
     ].sort(),
     // 両アプリ 無効 + レガシーなドメインキー: 表以前は identity:admin で書けていた形。
@@ -178,7 +191,13 @@ describe("role x endpoint matrix (frozen)", () => {
 
   it("the two apps do not leak into each other (no cross-app escalation)", () => {
     const roster = allowedRoutes(ROLE_KEYS["delegated-roster-editor"]!);
-    for (const route of [...PARTICIPATION_SUBMIT, ...PARTICIPATION_ADMIN_READS, ...PARTICIPATION_RESOLVE]) {
+    for (const route of [
+      ...PARTICIPATION_SUBMIT,
+      ...PARTICIPATION_ADMIN_READS,
+      ...PARTICIPATION_RESOLVE,
+      ...ONBOARDING_READ,
+      ...ONBOARDING_WRITES,
+    ]) {
       expect(roster).not.toContain(route);
     }
     const reviewer = allowedRoutes(ROLE_KEYS["participation-reviewer"]!);

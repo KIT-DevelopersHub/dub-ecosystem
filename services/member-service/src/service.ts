@@ -3,7 +3,7 @@
 // thin adapter. member_teams is the source of truth for the shared Team entity.
 import { DubError, errors } from "@dub/errors";
 import { type common, member } from "@dub/types";
-import type { AppDeps, ParticipationRow, PersonRow, TeamRow } from "./types";
+import type { AppDeps, OnboardingItemRow, ParticipationRow, PersonRow, TeamRow } from "./types";
 import {
   composeName,
   isMemberStatus,
@@ -12,6 +12,7 @@ import {
   SORT_ORDER_GAP,
   slugify,
   toMember,
+  toOnboardingItem,
   toParticipation,
   toTeam,
 } from "./domain";
@@ -29,6 +30,19 @@ const errPersonNotFound = (id: string): DubError =>
   new DubError("MEMBER_NOT_FOUND", `Member not found: ${id}`, { status: 404 });
 const errParticipationNotFound = (id: string): DubError =>
   new DubError("MEMBER_PARTICIPATION_NOT_FOUND", `Participation not found: ${id}`, { status: 404 });
+
+const errOnboardingItemNotFound = (id: string): DubError =>
+  new DubError("MEMBER_ONBOARDING_ITEM_NOT_FOUND", `Onboarding item not found: ${id}`, { status: 404 });
+
+/** 案内項目の上限。公開ページ 1 枚に並べる量なので、増え過ぎは誤操作とみなす。 */
+const MAX_ONBOARDING_ITEMS = 50;
+
+function onboardingInput(body: unknown, partial: boolean): member.UpdateOnboardingItemRequest {
+  const raw = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const { value, errors: bad } = member.parseOnboardingItemInput(raw, partial);
+  if (bad.length > 0) throw errors.validationFailed(bad.map((field) => ({ field, reason: "invalid" })));
+  return value;
+}
 
 function name(value: unknown, field = "name"): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -691,6 +705,78 @@ export class MemberService {
     const row: PersonRow = { ...seed, name: (composed || fallbackLocal || "メンバー").slice(0, MAX_NAME_LEN) };
     await this.deps.repo.createPerson(row, []);
     return this.toSelfParticipation(row);
+  }
+
+  // ---- オンボーディング案内 -------------------------------------------------------
+  // 管理者が編集し、公開ページ (gateway GET /public/onboarding → internal) がそのまま表示する。
+  // 公開前提の案内文なので、読み取りは管理画面と公開ページで同じ応答を返す。
+
+  async listOnboardingItems(): Promise<member.ListOnboardingItemsResponse> {
+    const rows = await this.deps.repo.listOnboardingItems(this.deps.orgId);
+    return { items: rows.map(toOnboardingItem) };
+  }
+
+  async createOnboardingItem(ctx: ReqCtx, body: unknown): Promise<member.OnboardingItem> {
+    const input = onboardingInput(body, false);
+    const orgId = this.deps.orgId;
+    const existing = await this.deps.repo.listOnboardingItems(orgId);
+    if (existing.length >= MAX_ONBOARDING_ITEMS) {
+      throw errors.validationFailed([{ field: "items", reason: "too_many" }]);
+    }
+    const now = this.deps.now();
+    const last = existing[existing.length - 1];
+    const row: OnboardingItemRow = {
+      id: this.deps.newOnboardingItemId(),
+      orgId,
+      title: input.title as string,
+      description: input.description ?? null,
+      url: input.url ?? null,
+      sortOrder: (last?.sortOrder ?? 0) + SORT_ORDER_GAP,
+      createdBy: ctx.userId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.deps.repo.createOnboardingItem(row);
+    return toOnboardingItem(row);
+  }
+
+  async updateOnboardingItem(_ctx: ReqCtx, id: string, body: unknown): Promise<member.OnboardingItem> {
+    const cur = await this.deps.repo.getOnboardingItem(id);
+    if (!cur || cur.orgId !== this.deps.orgId) throw errOnboardingItemNotFound(id);
+    const input = onboardingInput(body, true);
+    const next: OnboardingItemRow = {
+      ...cur,
+      title: input.title ?? cur.title,
+      description: input.description !== undefined ? input.description : cur.description,
+      url: input.url !== undefined ? input.url : cur.url,
+      updatedAt: this.deps.now(),
+    };
+    const ok = await this.deps.repo.updateOnboardingItem(next);
+    if (!ok) throw errOnboardingItemNotFound(id);
+    return toOnboardingItem(next);
+  }
+
+  async deleteOnboardingItem(_ctx: ReqCtx, id: string): Promise<void> {
+    const cur = await this.deps.repo.getOnboardingItem(id);
+    if (!cur || cur.orgId !== this.deps.orgId) throw errOnboardingItemNotFound(id);
+    await this.deps.repo.deleteOnboardingItem(id);
+  }
+
+  /** 並び替え。ids は現在の全項目の並べ替え（過不足・重複は 400）。途中で他の管理者が
+   *  追加/削除していた場合も 400 になり、クライアントは再取得してやり直す。 */
+  async reorderOnboardingItems(_ctx: ReqCtx, body: unknown): Promise<member.ListOnboardingItemsResponse> {
+    const ids = (body as { ids?: unknown } | null)?.ids;
+    const current = await this.deps.repo.listOnboardingItems(this.deps.orgId);
+    const known = new Set(current.map((r) => r.id));
+    const valid =
+      Array.isArray(ids) &&
+      ids.length === current.length &&
+      new Set(ids).size === ids.length &&
+      ids.every((x) => typeof x === "string" && known.has(x));
+    if (!valid) throw errors.validationFailed([{ field: "ids", reason: "invalid" }]);
+    const orders = (ids as string[]).map((id, i) => ({ id, sortOrder: (i + 1) * SORT_ORDER_GAP }));
+    await this.deps.repo.setOnboardingSortOrders(orders, this.deps.now());
+    return this.listOnboardingItems();
   }
 }
 
