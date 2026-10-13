@@ -5,7 +5,7 @@
 // canonical task-service endpoint GET /api/v1/tasks, typed against @dub/types
 // `task` (the API-contract SoT). No schema is added or changed. Writes (予定の追加/編集/削除) use the same
 // task-service create/update/archive endpoints マイタスク uses.
-import type { common, task } from "@dub/types";
+import type { common, identity, task } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 const P = "/api/v1";
@@ -46,6 +46,8 @@ export interface CalendarApi {
   updateTask(id: common.TaskId, req: task.UpdateTaskRequest): Promise<task.Task>;
   /** Archives the task (task-service DELETE is a soft delete). */
   deleteTask(id: common.TaskId): Promise<void>;
+  /** Every org role (GET /identity/roles, identity:read) — the 予定 label choices. */
+  listRoles(): Promise<identity.Role[]>;
 }
 
 export function createCalendarApi(api: ApiClient): CalendarApi {
@@ -99,5 +101,21 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     await api.request<unknown>({ method: "DELETE", path: `${P}/tasks/${encodeURIComponent(id)}` });
   };
 
-  return { listTasks, listAllTasks, listMyTasks, createTask, updateTask, deleteTask };
+  const listRoles: CalendarApi["listRoles"] = async () => {
+    const all: identity.Role[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < MAX_PAGES; i++) {
+      const page = await api.request<common.Paginated<identity.Role>>({
+        method: "GET",
+        path: `${P}/identity/roles`,
+        query: { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+      });
+      all.push(...page.items);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return all;
+  };
+
+  return { listTasks, listAllTasks, listMyTasks, createTask, updateTask, deleteTask, listRoles };
 }

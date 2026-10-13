@@ -57,6 +57,10 @@ function memoryApi(seed: task.Task[]) {
         1,
       );
     }),
+    listRoles: vi.fn(async () => [
+      { id: "role_lead", orgId: "org_devhub", name: "統括", permissions: [], isSystem: false },
+      { id: "role_pr", orgId: "org_devhub", name: "広報", permissions: [], isSystem: false },
+    ]),
   };
   return api;
 }
@@ -254,6 +258,44 @@ describe("CalendarScreen", () => {
     const editor = await screen.findByTestId("calendar-edit-dialog");
     expect(within(editor).getByTestId("calendar-kind-vacation")).toHaveAttribute("aria-selected", "true");
     expect(within(editor).getByTestId("calendar-form-description")).toHaveValue("連絡はチャットへ");
+  });
+
+  it("labels a 予定 with a role (個人 + every org role) and filters by ラベル", async () => {
+    const user = userEvent.setup();
+    const api = memoryApi([
+      mk("mine", { title: "個人の予定", startAt: local(10).toISOString(), dueAt: local(11).toISOString() }),
+    ]);
+    renderScreen(api);
+    await screen.findByTestId("calendar-item-mine");
+
+    // Sidebar ラベル list is 個人 + the roles, with no manual management.
+    const list = screen.getByTestId("calendar-label-list");
+    expect(await within(list).findByText("統括")).toBeInTheDocument();
+    expect(within(list).getByText("個人")).toBeInTheDocument();
+    expect(within(list).getByText("広報")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("calendar-create"));
+    const dialog = await screen.findByTestId("calendar-create-panel");
+    const select = within(dialog).getByTestId("calendar-form-label");
+    expect(select).toHaveValue("personal");
+    await user.type(within(dialog).getByTestId("calendar-form-title"), "統括定例");
+    await user.selectOptions(select, "role_lead");
+    await user.click(within(dialog).getByTestId("calendar-form-save"));
+
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.createTask).mock.calls[0]![0].description).toBe("#ラベル:role_lead");
+
+    const created = await screen.findByText("統括定例");
+    await user.click(created);
+    const detail = await screen.findByTestId("calendar-event-detail");
+    expect(within(detail).getByTestId("calendar-detail-label")).toHaveTextContent("統括");
+    expect(within(detail).queryByText(/#ラベル/)).not.toBeInTheDocument();
+    await user.click(within(detail).getByLabelText("閉じる"));
+
+    // Hiding 統括 hides only the labelled 予定.
+    await user.click(screen.getByTestId("calendar-label-filter-role_lead"));
+    expect(screen.queryByText("統括定例")).not.toBeInTheDocument();
+    expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
   });
 
   it("disables 作成 without write permission", async () => {

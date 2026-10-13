@@ -335,30 +335,64 @@ export function formatItemWhen(it: CalendarItem): string {
   return `${formatDayLong(it.startDay)} ${formatTime(it.start!)}～${formatDayLong(it.endDay)} ${formatTime(it.end!)}`;
 }
 
-// ── 休暇 ────────────────────────────────────────────────────────────────────
-// task-service has no item-type column, so a 休暇 is a task whose description
-// starts with this tag line. Every read/write of the tag goes through the helpers
-// below, so moving it to a real column later is a change to this block only.
+// ── 休暇 / ラベル ───────────────────────────────────────────────────────────
+// task-service has no item-type or label column, so both ride as tag lines at the
+// top of the description ("#休暇", "#ラベル:<roleId>"). Every read/write of the tags
+// goes through the helpers below, so moving them to real columns later is a change
+// to this block only.
 export const VACATION_TAG = "#休暇";
 export const VACATION_TITLE = "休暇";
+export const LABEL_TAG_PREFIX = "#ラベル:";
+/** The label of an untagged item. Every other label key is an identity role id. */
+export const PERSONAL_LABEL = "personal";
 
 export type ItemKind = "event" | "vacation";
 
+interface ParsedDescription {
+  vacation: boolean;
+  /** PERSONAL_LABEL or a role id */
+  label: string;
+  body: string;
+}
+
+function parseDescription(description: string | null): ParsedDescription {
+  const lines = (description ?? "").split("\n");
+  let vacation = false;
+  let label = PERSONAL_LABEL;
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (line === VACATION_TAG) vacation = true;
+    else if (line.startsWith(LABEL_TAG_PREFIX) && line.length > LABEL_TAG_PREFIX.length) {
+      label = line.slice(LABEL_TAG_PREFIX.length);
+    } else break;
+  }
+  const body = i === 0 ? (description ?? "") : lines.slice(i).join("\n").trim();
+  return { vacation, label, body };
+}
+
 export function isVacationTask(t: Pick<task.Task, "description">): boolean {
-  return (t.description ?? "").split("\n", 1)[0]!.trim() === VACATION_TAG;
+  return parseDescription(t.description).vacation;
 }
 
-/** The description the user wrote (the 休暇 tag line removed). */
+/** The item's label key (PERSONAL_LABEL when untagged). */
+export function labelOf(t: Pick<task.Task, "description">): string {
+  return parseDescription(t.description).label;
+}
+
+/** The description the user wrote (the tag lines removed). */
 export function userDescription(t: Pick<task.Task, "description">): string {
-  const d = t.description ?? "";
-  return isVacationTask(t) ? d.slice(d.indexOf("\n") + 1 || d.length).trim() : d;
+  return parseDescription(t.description).body;
 }
 
-/** Stored description for a draft (tag line first for 休暇), null when empty. */
-export function encodeDescription(d: Pick<EventDraft, "kind" | "description">): string | null {
+/** Stored description for a draft (tag lines first), null when empty. */
+export function encodeDescription(d: Pick<EventDraft, "kind" | "label" | "description">): string | null {
+  const lines: string[] = [];
+  if (d.kind === "vacation") lines.push(VACATION_TAG);
+  if (d.label !== PERSONAL_LABEL) lines.push(`${LABEL_TAG_PREFIX}${d.label}`);
   const body = d.description.trim();
-  if (d.kind === "vacation") return body ? `${VACATION_TAG}\n${body}` : VACATION_TAG;
-  return body || null;
+  if (body) lines.push(body);
+  return lines.length ? lines.join("\n") : null;
 }
 
 /** Switch a draft's kind the way Google's 予定/不在 tabs do: 休暇 defaults to 終日. */
@@ -371,6 +405,8 @@ export function withKind(d: EventDraft, kind: ItemKind): EventDraft {
 
 export interface EventDraft {
   kind: ItemKind;
+  /** PERSONAL_LABEL or a role id */
+  label: string;
   title: string;
   description: string;
   allDay: boolean;
@@ -411,6 +447,7 @@ export function draftForSlot(day: number, startMin: number, endMin: number): Eve
   const key = dayKeyOf(day);
   return {
     kind: "event",
+    label: PERSONAL_LABEL,
     title: "",
     description: "",
     allDay: false,
@@ -424,6 +461,7 @@ export function draftForSlot(day: number, startMin: number, endMin: number): Eve
 export function draftForAllDay(startDay: number, endDay: number = startDay): EventDraft {
   return {
     kind: "event",
+    label: PERSONAL_LABEL,
     title: "",
     description: "",
     allDay: true,
@@ -437,11 +475,13 @@ export function draftForAllDay(startDay: number, endDay: number = startDay): Eve
 export function draftFromItem(it: CalendarItem): EventDraft {
   const kind: ItemKind = isVacationTask(it.task) ? "vacation" : "event";
   const description = userDescription(it.task);
+  const label = labelOf(it.task);
   if (it.allDay) {
-    return { ...draftForAllDay(it.startDay, it.endDay), kind, title: it.task.title, description };
+    return { ...draftForAllDay(it.startDay, it.endDay), kind, label, title: it.task.title, description };
   }
   return {
     kind,
+    label,
     title: it.task.title,
     description,
     allDay: false,

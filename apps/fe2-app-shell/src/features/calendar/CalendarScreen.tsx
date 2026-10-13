@@ -19,6 +19,7 @@ import {
   isVacationTask,
   formatRangeTitleShort,
   itemsOnDay,
+  labelOf,
   shiftAnchor,
   toCalendarItems,
   VACATION_TITLE,
@@ -29,7 +30,7 @@ import {
 } from "./calendar-model";
 import { DayListPanel, DetailPanel, EventDialog, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
-import { STATUS_ORDER, VACATION_VISUAL, statusVisual } from "./taskVisuals";
+import { STATUS_ORDER, VACATION_VISUAL, buildLabels, resolveLabel, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
 const VIEW_LABEL: Record<CalendarView, string> = { day: "日", week: "週", month: "月", schedule: "スケジュール" };
@@ -38,6 +39,8 @@ const UNTITLED = "（タイトルなし）";
 /** Sidebar toggle key for 休暇 (the others are task statuses). */
 const VACATION_KEY = "vacation" as const;
 type CalendarKey = task.TaskStatus | typeof VACATION_KEY;
+/** Sidebar checkbox color for ラベル (they filter; event colors stay per status). */
+const LABEL_COLOR = "#616161";
 
 type Panel =
   | { kind: "create"; draft: EventDraft; ghost: SlotGhost | null }
@@ -74,6 +77,7 @@ export function CalendarScreen(): JSX.Element {
   const [view, setView] = useState<CalendarView>(() => (narrow ? "day" : "week"));
   const [anchorDay, setAnchorDay] = useState(today);
   const [hidden, setHidden] = useState<ReadonlySet<CalendarKey>>(() => new Set());
+  const [hiddenLabels, setHiddenLabels] = useState<ReadonlySet<string>>(() => new Set());
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
   const [panel, setPanel] = useState<Panel | null>(null);
   useEffect(() => setSidebarOpen(!narrow), [narrow]);
@@ -87,12 +91,19 @@ export function CalendarScreen(): JSX.Element {
     enabled: currentUserId != null,
   });
 
+  // ラベル = 個人 + every org role, so a role added in ロール管理 appears here by itself.
+  // Without identity:read (or on failure) only 個人 is offered.
+  const rolesQuery = useQuery({ queryKey: ["calendar", "roles"], queryFn: () => api.listRoles(), staleTime: 5 * 60_000 });
+  const labels = useMemo(() => buildLabels(rolesQuery.data ?? []), [rolesQuery.data]);
+  const labelKeyOf = useCallback((t: task.Task) => resolveLabel(labels, labelOf(t)).key, [labels]);
+
   const { items, undated } = useMemo(() => {
     // 休暇 is its own calendar in the sidebar; everything else toggles by status.
-    const shown = (t: task.Task) => !hidden.has(isVacationTask(t) ? VACATION_KEY : t.status);
+    const shown = (t: task.Task) =>
+      !hidden.has(isVacationTask(t) ? VACATION_KEY : t.status) && !hiddenLabels.has(labelKeyOf(t));
     const all = toCalendarItems(data ?? []);
     return { items: all.items.filter((it) => shown(it.task)), undated: all.undated.filter(shown) };
-  }, [data, hidden]);
+  }, [data, hidden, hiddenLabels, labelKeyOf]);
 
   // ── mutations (optimistic: reflect first, roll back on failure) ──────────
   const snapshot = async () => {
@@ -368,6 +379,34 @@ export function CalendarScreen(): JSX.Element {
               })}
             </div>
 
+            <div data-testid="calendar-label-list">
+              <div className={styles.calListHead}>ラベル</div>
+              {rolesQuery.isPending ? (
+                <SkeletonLoader lines={3} />
+              ) : (
+                labels.map((l) => (
+                  <label key={l.key} className={styles.calItem}>
+                    <input
+                      type="checkbox"
+                      className={styles.calCheck}
+                      style={{ ["--cal-color" as string]: LABEL_COLOR }}
+                      checked={!hiddenLabels.has(l.key)}
+                      onChange={() =>
+                        setHiddenLabels((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(l.key)) next.delete(l.key);
+                          else next.add(l.key);
+                          return next;
+                        })
+                      }
+                      data-testid={`calendar-label-filter-${l.key}`}
+                    />
+                    {l.name}
+                  </label>
+                ))
+              )}
+            </div>
+
             {undated.length > 0 && (
               <div className={styles.undated} data-testid="calendar-undated">
                 <div className={styles.calListHead}>日付未設定（{undated.length}件）</div>
@@ -396,6 +435,7 @@ export function CalendarScreen(): JSX.Element {
         <EventDialog
           editing={false}
           draft={panel.draft}
+          labels={labels}
           onChange={(draft) => setPanel({ ...panel, draft })}
           onSave={() => {
             setPanel(null);
@@ -410,6 +450,7 @@ export function CalendarScreen(): JSX.Element {
         <DetailPanel
           anchor={panel.anchor}
           item={panel.item}
+          labelName={resolveLabel(labels, labelOf(panel.item.task)).name}
           // An optimistic row has no server id yet — nothing to edit/delete until it lands.
           canWrite={canWrite && !panel.item.task.id.startsWith("tmp_")}
           canDelete={canDelete && !panel.item.task.id.startsWith("tmp_")}
@@ -441,6 +482,7 @@ export function CalendarScreen(): JSX.Element {
         <EventDialog
           editing
           draft={panel.draft}
+          labels={labels}
           onChange={(draft) => setPanel({ ...panel, draft })}
           onSave={() => {
             setPanel(null);

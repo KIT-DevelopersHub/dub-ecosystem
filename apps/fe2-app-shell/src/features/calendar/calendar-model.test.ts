@@ -11,6 +11,7 @@ import {
   draftFromItem,
   encodeDescription,
   isVacationTask,
+  labelOf,
   userDescription,
   withKind,
   draftToDates,
@@ -208,5 +209,19 @@ describe("休暇", () => {
     const d = withKind(draftForSlot(dayFromKey("2026-10-10"), 9 * 60, 10 * 60), "vacation");
     expect(d).toMatchObject({ kind: "vacation", allDay: true, startDate: "2026-10-10" });
     expect(withKind(d, "event")).toMatchObject({ kind: "event", allDay: true });
+  });
+
+  it("ラベル rides as a tag line alongside 休暇 and defaults to 個人", () => {
+    expect(labelOf({ description: null })).toBe("personal");
+    expect(labelOf({ description: "#ラベル:role_lead\nメモ" })).toBe("role_lead");
+    const both = { description: "#休暇\n#ラベル:role_lead\n連絡はチャットへ" };
+    expect(isVacationTask(both)).toBe(true);
+    expect(labelOf(both)).toBe("role_lead");
+    expect(userDescription(both)).toBe("連絡はチャットへ");
+    expect(encodeDescription({ kind: "vacation", label: "role_lead", description: "連絡はチャットへ" })).toBe(both.description);
+    expect(encodeDescription({ kind: "event", label: "role_lead", description: "" })).toBe("#ラベル:role_lead");
+    expect(encodeDescription({ kind: "event", label: "personal", description: "  " })).toBeNull();
+    // Plain descriptions are untouched (no tag parsing past the first non-tag line).
+    expect(userDescription({ description: "メモ\n#ラベル:role_lead" })).toBe("メモ\n#ラベル:role_lead");
   });
 });

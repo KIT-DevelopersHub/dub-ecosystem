@@ -273,12 +273,12 @@ function calendarDemoTasks(): task.Task[] {
     teamId: null, startAt, dueAt, origin: "internal", archivedAt: null, createdAt: isoNowSeed(), updatedAt: isoNowSeed(),
   });
   return [
-    mk("cal_1", "運営定例ミーティング", "in_progress", at(0, "10:00"), at(0, "11:00"), "進捗共有と次アクションの確認"),
+    mk("cal_1", "運営定例ミーティング", "in_progress", at(0, "10:00"), at(0, "11:00"), "#ラベル:role_lead\n進捗共有と次アクションの確認"),
     mk("cal_2", "スポンサー打ち合わせ", "todo", at(0, "13:00"), at(0, "14:30")),
     mk("cal_3", "会場への連絡", "todo", at(0, "13:30"), at(0, "14:00")),
     mk("cal_4", "ふりかえり会", "done", at(-1, "15:00"), at(-1, "16:00")),
     mk("cal_5", "登壇資料 提出締切", "blocked", allDay(1), allDay(1)),
-    mk("cal_6", "北陸ITカンファレンス 準備週間", "todo", allDay(2), allDay(4)),
+    mk("cal_6", "北陸ITカンファレンス 準備週間", "todo", allDay(2), allDay(4), "#ラベル:role_member"),
     mk("cal_7", "デザインレビュー", "todo", at(2, "16:00"), at(2, "17:00")),
     mk("cal_8", "休暇", "todo", allDay(5), allDay(6), "#休暇\n急ぎの連絡はチャットへ"),
   ];

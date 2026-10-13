@@ -2,8 +2,8 @@
 // "マイカレンダー" (its own color, toggled from the sidebar). Colors are Google's
 // event palette (ピーコック/ブルーベリー/ミカン/セージ/グラファイト) so blocks read the
 // way users already know; text on them is always white, as in Google.
-import type { task } from "@dub/types";
-import { isVacationTask } from "./calendar-model";
+import type { identity, task } from "@dub/types";
+import { PERSONAL_LABEL, isVacationTask } from "./calendar-model";
 
 export interface StatusVisual {
   label: string;
@@ -39,4 +39,25 @@ export const VACATION_VISUAL: StatusVisual = { label: "休暇", color: "#8e24aa"
 /** Color/label for a drawn item: 休暇 first, else its status. */
 export function itemVisual(t: task.Task): StatusVisual {
   return isVacationTask(t) ? VACATION_VISUAL : statusVisual(t.status);
+}
+
+// ── ラベル ──────────────────────────────────────────────────────────────────
+// 予定のラベル = 「個人」+ the org's roles. Not managed by hand: a role added in
+// ロール管理 shows up here on the next load.
+
+export interface CalendarLabel {
+  /** PERSONAL_LABEL or a role id */
+  key: string;
+  name: string;
+}
+
+export const PERSONAL_LABEL_ENTRY: CalendarLabel = { key: PERSONAL_LABEL, name: "個人" };
+
+export function buildLabels(roles: readonly Pick<identity.Role, "id" | "name">[]): CalendarLabel[] {
+  return [PERSONAL_LABEL_ENTRY, ...roles.map((r) => ({ key: r.id, name: r.name }))];
+}
+
+/** The label for a key; an unknown key (deleted role) falls back to 個人. */
+export function resolveLabel(labels: readonly CalendarLabel[], key: string): CalendarLabel {
+  return labels.find((l) => l.key === key) ?? PERSONAL_LABEL_ENTRY;
 }

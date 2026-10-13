@@ -30,7 +30,7 @@ import {
   type EventDraft,
   type ItemKind,
 } from "./calendar-model";
-import { PRIORITY_LABEL, itemVisual } from "./taskVisuals";
+import { PRIORITY_LABEL, itemVisual, type CalendarLabel } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
 export interface AnchorRect {
@@ -149,8 +149,15 @@ const KIND_OPTIONS: SegmentedOption<ItemKind>[] = [
   { value: "vacation", label: "休暇", icon: "sun", testId: "calendar-kind-vacation" },
 ];
 
+/** Label choices; keeps a label whose role is gone (or not loaded yet) selectable. */
+function labelOptions(labels: readonly CalendarLabel[], current: string): { value: string; label: string }[] {
+  const opts = labels.map((l) => ({ value: l.key, label: l.name }));
+  return opts.some((o) => o.value === current) ? opts : [...opts, { value: current, label: "（不明なロール）" }];
+}
+
 export function EventForm({
   draft,
+  labels,
   onChange,
   onSubmit,
   onCancel,
@@ -158,6 +165,7 @@ export function EventForm({
   submitLabel = "保存",
 }: {
   draft: EventDraft;
+  labels: readonly CalendarLabel[];
   onChange: (d: EventDraft) => void;
   onSubmit: () => void;
   onCancel?: () => void;
@@ -303,6 +311,24 @@ export function EventForm({
         />
       </div>
 
+      <div className={styles.formRow}>
+        <span className={styles.formRowIcon}>
+          <Icon name="users" />
+        </span>
+        <span className={styles.labelField}>
+          <label htmlFor={`${id}-label`} className={styles.srOnly}>
+            ラベル
+          </label>
+          <Select
+            id={`${id}-label`}
+            value={draft.label}
+            onChange={(label) => set({ label })}
+            options={labelOptions(labels, draft.label)}
+            testId="calendar-form-label"
+          />
+        </span>
+      </div>
+
       {touched && error && (
         <p role="alert" className={styles.formError} data-testid="calendar-form-error">
           {error}
@@ -328,6 +354,7 @@ export function EventForm({
 export function EventDialog({
   editing,
   draft,
+  labels,
   onChange,
   onSave,
   onClose,
@@ -335,6 +362,7 @@ export function EventDialog({
 }: {
   editing: boolean;
   draft: EventDraft;
+  labels: readonly CalendarLabel[];
   onChange: (d: EventDraft) => void;
   onSave: () => void;
   onClose: () => void;
@@ -348,7 +376,7 @@ export function EventDialog({
       size="md"
       testId={editing ? "calendar-edit-dialog" : "calendar-create-panel"}
     >
-      <EventForm draft={draft} onChange={onChange} onSubmit={onSave} onCancel={onClose} saving={saving} />
+      <EventForm draft={draft} labels={labels} onChange={onChange} onSubmit={onSave} onCancel={onClose} saving={saving} />
     </Modal>
   );
 }
@@ -358,6 +386,7 @@ export function EventDialog({
 export function DetailPanel({
   anchor,
   item,
+  labelName,
   onClose,
   onEdit,
   onDelete,
@@ -367,6 +396,7 @@ export function DetailPanel({
 }: {
   anchor: AnchorRect | null;
   item: CalendarItem;
+  labelName: string;
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -404,6 +434,12 @@ export function DetailPanel({
           <span data-testid="calendar-detail-kind">
             {vacation ? "休暇" : `${v.label}・優先度 ${PRIORITY_LABEL[t.priority]}`}
           </span>
+        </div>
+        <div className={styles.detailRow}>
+          <span className={styles.detailRowIcon}>
+            <Icon name="users" />
+          </span>
+          <span data-testid="calendar-detail-label">{labelName}</span>
         </div>
         {desc && (
           <div className={styles.detailRow} style={{ alignItems: "start" }}>
