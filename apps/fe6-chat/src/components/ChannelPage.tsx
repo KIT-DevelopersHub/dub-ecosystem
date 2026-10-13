@@ -23,6 +23,7 @@ import { MessageComposer } from "./MessageComposer";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { SearchResults } from "./SearchResults";
 import { ThreadPane } from "./ThreadPane";
+import { channelHandle, channelLabel } from "../lib/dm";
 import styles from "../styles/chat.module.css";
 
 const MAX_MENTION_CANDIDATES = 8;
@@ -280,14 +281,19 @@ export function ChannelPage({
   );
 
   const archived = channel?.archived ?? false;
+  // A DM shows "the other side" (resolved from its members), not its stored name.
+  const shownChannel = useMemo(
+    () => (channel ? { ...channel, name: channelLabel(channel, currentUserId, (id) => users[id]) ?? channel.name } : null),
+    [channel, currentUserId, users],
+  );
   const searchOpen = searchQuery.trim().length >= 2;
 
   return (
     <>
       <section className={styles.main}>
-        {channel && (
+        {shownChannel && (
           <ChannelHeader
-            channel={channel}
+            channel={shownChannel}
             canModerate={canModerate}
             members={members}
             pinned={pinned}
@@ -342,7 +348,7 @@ export function ChannelPage({
           channelId={channelId}
           disabled={archived}
           disabledReason="アーカイブ済みチャネルには投稿できません"
-          placeholder={channel ? `#${channel.name} へメッセージ` : "メッセージを入力"}
+          placeholder={shownChannel ? `${channelHandle(shownChannel, shownChannel.name)} へメッセージ` : "メッセージを入力"}
           error={composerError}
           resolveMentionCandidates={resolveMentionCandidates}
           onSend={onSend}

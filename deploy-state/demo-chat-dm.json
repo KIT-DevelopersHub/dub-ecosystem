@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "chat-dm",
+  "worker": "dub-demo-chat-dm",
+  "url": "https://dub-demo-chat-dm.developershub-site.workers.dev",
+  "deployedSha": "03823771",
+  "branch": "feat/chat-dm",
+  "actor": "ko-tarou",
+  "markers": ["fe6-dm-new","fe6-new-dm-modal"],
+  "live": true,
+  "verifiedAt": "2026-10-12T15:19:36Z",
+  "updatedAt": "2026-10-12T15:19:36Z",
+  "note": "chat DM start (feat/chat-dm)"
+}

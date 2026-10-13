@@ -4,7 +4,7 @@
 // keep selection in local state and persist the last channel (design §3).
 import { useCallback, useEffect, useState } from "react";
 import { Drawer, Icon, ToastProvider } from "@dub/ui";
-import type { common } from "@dub/types";
+import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -14,10 +14,12 @@ import type { CreateChannelRequest } from "../api/contract";
 import { ChannelList } from "./ChannelList";
 import { ChannelPage } from "./ChannelPage";
 import { CreateChannelModal } from "./CreateChannelModal";
+import { NewDmModal } from "./NewDmModal";
+import { channelLabel } from "../lib/dm";
 import styles from "../styles/chat.module.css";
 
 export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: common.ChannelId; eventId?: common.EventId }) {
-  const { api, can } = useChatRuntime();
+  const { api, can, currentUserId } = useChatRuntime();
   const unread = useChatStore((s) => s.unread);
   const setUnread = useChatStore((s) => s.setUnread);
   const setTeams = useChatStore((s) => s.setTeams);
@@ -25,6 +27,10 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
   const [active, setActive] = useState<common.ChannelId | null>(initialChannelId ?? null);
   const [threadOpen, setThreadOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [newDmOpen, setNewDmOpen] = useState(false);
+  // DM peers' display names (a DM is labelled by "the other side").
+  const [dmUsers, setDmUsers] = useState<Record<common.UserId, identity.UserSummary>>({});
+  const [dmUsersFailed, setDmUsersFailed] = useState(false);
   // P21: below the mobile breakpoint the rail+channel-list column becomes a
   // slide-in drawer instead of always-visible grid columns, so the message
   // timeline can use the full width. Desktop is unaffected (isMobile stays
@@ -91,6 +97,55 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
     setMobileNavOpen(false);
   }, []);
 
+  useEffect(() => {
+    const ids = new Set<common.UserId>();
+    for (const c of channels) if (c.type === "dm") for (const id of c.memberIds ?? []) ids.add(id);
+    const missing = [...ids].filter((id) => !(id in dmUsers));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void api
+      .resolveUsers(missing)
+      .then((summaries) => {
+        if (cancelled) return;
+        setDmUsersFailed(false);
+        setDmUsers((prev) => {
+          const next = { ...prev };
+          for (const u of summaries) next[u.id] = u;
+          // Unknown ids still settle (as themselves) so a row never skeletons forever.
+          for (const id of missing) next[id] ??= { id, displayName: id, avatarUrl: null };
+          return next;
+        });
+      })
+      .catch(() => !cancelled && setDmUsersFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [api, channels, dmUsers]);
+
+  const labelOf = useCallback(
+    (c: Channel) => channelLabel(c, currentUserId, (id) => dmUsers[id]) ?? (dmUsersFailed ? c.name : null),
+    [currentUserId, dmUsers, dmUsersFailed],
+  );
+
+  const onStartDm = useCallback(
+    async (peers: identity.UserSummary[]) => {
+      setDmUsers((prev) => {
+        const next = { ...prev };
+        for (const u of peers) next[u.id] = u;
+        return next;
+      });
+      const created = await api.createChannel({
+        type: "dm",
+        visibility: "private",
+        name: "DM", // labelled per viewer from memberIds; the server stores a neutral name
+        memberIds: peers.map((u) => u.id),
+      });
+      await reloadChannels();
+      onSelect(created.id);
+    },
+    [api, reloadChannels, onSelect],
+  );
+
   const onCreateChannel = useCallback(
     async (req: CreateChannelRequest) => {
       const created = await api.createChannel(req);
@@ -124,6 +179,8 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
         canCreate={can("chat:create")}
         onSelect={onSelect}
         onCreate={() => setCreateOpen(true)}
+        labelOf={labelOf}
+        onNewDm={can("chat:create") ? () => setNewDmOpen(true) : undefined}
         onCloseMobile={isMobile ? () => setMobileNavOpen(false) : undefined}
       />
     </>
@@ -175,6 +232,7 @@ export function ChatApp({ initialChannelId, eventId }: { initialChannelId?: comm
       )}
 
       <CreateChannelModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={onCreateChannel} />
+      <NewDmModal open={newDmOpen} onClose={() => setNewDmOpen(false)} onStart={onStartDm} />
     </div>
     </ToastProvider>
   );

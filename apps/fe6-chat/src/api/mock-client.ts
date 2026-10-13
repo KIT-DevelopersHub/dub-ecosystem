@@ -97,23 +97,36 @@ export class MockChatClient implements ChatApiClient {
   }
 
   async createChannel(req: CreateChannelRequest): Promise<Channel> {
+    const isDm = req.type === "dm";
+    const memberIds = [...new Set([this.me, ...(req.memberIds ?? [])])];
+    if (isDm) {
+      // Mirrors chat-service: same participant set -> the existing DM (idempotent).
+      const key = [...memberIds].sort().join(",");
+      const existing = [...this.channels.values()].find(
+        (c) => c.type === "dm" && [...(c.memberIds ?? [])].sort().join(",") === key,
+      );
+      if (existing) return this.settle(existing);
+    }
     const id = newChannelId();
     const channel: Channel = {
       id,
       orgId: "org_devhub",
       type: req.type,
-      visibility: req.visibility ?? "public",
+      visibility: isDm ? "private" : (req.visibility ?? "public"),
       name: req.name,
       topic: req.topic ?? null,
       eventId: req.eventId ?? null,
       archived: false,
-      memberCount: 1,
+      memberCount: memberIds.length,
       version: 1,
       createdAt: now(),
       updatedAt: now(),
+      ...(isDm ? { memberIds } : {}),
     };
     this.channels.set(id, channel);
-    this.members.push({ channelId: id, userId: this.me, role: "admin", joinedAt: now() });
+    for (const userId of memberIds) {
+      this.members.push({ channelId: id, userId, role: userId === this.me && !isDm ? "admin" : "member", joinedAt: now() });
+    }
     return this.settle(channel);
   }
 
@@ -350,6 +363,12 @@ export class MockChatClient implements ChatApiClient {
       out.push(u ?? { id, displayName: id, avatarUrl: null });
     }
     return this.settle(out);
+  }
+
+  async searchUsers(q: string): Promise<identity.UserSummary[]> {
+    const needle = q.trim();
+    const all = [...this.users.values()];
+    return this.settle((needle ? all.filter((u) => u.displayName.includes(needle)) : all).slice(0, 20));
   }
 
   async listMentionTeams(): Promise<MentionTeams> {
