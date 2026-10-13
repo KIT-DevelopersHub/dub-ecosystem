@@ -230,6 +230,10 @@ export interface MailThreadFlags {
   archived: boolean;
   trashed: boolean;
   purged: boolean;
+  /** 返信不要: when the user dismissed the reply nudge (ISO), null = not dismissed. Covers only
+   *  mail received up to this moment — a newer received message brings the nudge back.
+   *  ADDITIVE: an older gateway omits it (clients treat absent as null). */
+  noReplyAt: ISODateTime | null;
 }
 /** Partial flag update (PATCH-style): only the provided flags change. */
 export interface MailThreadFlagsPatch {
@@ -237,6 +241,9 @@ export interface MailThreadFlagsPatch {
   archived?: boolean;
   trashed?: boolean;
   purged?: boolean;
+  /** true = dismiss the reply nudge now (server stamps noReplyAt = now, every press);
+   *  false = clear it (undo). Absent = leave noReplyAt unchanged. */
+  noReply?: boolean;
 }
 
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----

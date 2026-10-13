@@ -299,3 +299,41 @@ describe("統括 demo account (cross-role mail visibility)", () => {
     expect((await inbox("usr_bob")).map(([id]) => id)).not.toContain("msg_l1");
   });
 });
+
+describe("demo outbox reply threading", () => {
+  it("stamps a reply's sent row with the replied conversation's threadId (like GET /sent on the gateway)", async () => {
+    globalThis.localStorage.removeItem("dub_demo_sent_usr_demo");
+    const client = api();
+    const send = (body: Record<string, unknown>) => client.request({ method: "POST", path: "/api/v1/mail/outbox", body });
+    await send({ to: [{ email: "hanako@example.com" }], subject: "Re: 登壇のご相談", textBody: "ありがとうございます", inReplyTo: "<m1@demo>" });
+    await send({ to: [{ email: "x@example.com" }], subject: "新規", textBody: "hi" });
+    const sent = await client.request<{ items: { subject: string; threadId?: string }[] }>({ method: "GET", path: "/api/v1/mail/sent" });
+    expect(sent.items.find((s) => s.subject === "Re: 登壇のご相談")?.threadId).toBe("thr_1");
+    expect(sent.items.find((s) => s.subject === "新規")?.threadId).toBeUndefined();
+  });
+});
+
+describe("demo inbox showcases the reply nudge", () => {
+  it("has one read human mail in the 3..14 day window and one recent one", async () => {
+    const res = await api().request<{ items: { id: string; receivedAt: string; read: boolean }[] }>({ method: "GET", path: "/api/v1/mail/messages" });
+    const age = (id: string) => Math.floor((Date.now() - Date.parse(res.items.find((m) => m.id === id)!.receivedAt)) / 86_400_000);
+    expect(age("msg_3")).toBe(4);
+    expect(res.items.find((m) => m.id === "msg_3")!.read).toBe(true);
+    expect(age("msg_2")).toBeLessThan(3);
+  });
+});
+
+describe("demo flags mock persists 返信不要 (noReplyAt)", () => {
+  it("noReply:true stamps, unrelated patches keep it, noReply:false clears; GET reads it back", async () => {
+    globalThis.localStorage.removeItem("dub-demo-mail-flags:usr_demo");
+    const client = api();
+    const post = (body: Record<string, unknown>) =>
+      client.request<{ noReplyAt: string | null; starred: boolean }>({ method: "POST", path: "/api/v1/mail/flags/thr_3", body });
+    const set = await post({ noReply: true });
+    expect(set.noReplyAt).toMatch(/^\d{4}-/);
+    expect((await post({ starred: true })).noReplyAt).toBe(set.noReplyAt);
+    const list = await client.request<{ items: { threadId: string; noReplyAt: string | null }[] }>({ method: "GET", path: "/api/v1/mail/flags" });
+    expect(list.items.find((f) => f.threadId === "thr_3")?.noReplyAt).toBe(set.noReplyAt);
+    expect(await post({ noReply: false })).toMatchObject({ noReplyAt: null, starred: true });
+  });
+});
