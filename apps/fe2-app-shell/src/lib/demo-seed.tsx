@@ -493,6 +493,10 @@ function seedMailImageBlob(id: string, filename: string, contentType: string, ba
 const DEMO_PNG_8x8 =
   "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR4nGNkYPhfz0AEYBpVSF+FAP7pAv4prsMnAAAAAElFTkSuQmCC";
 
+// Relative to page load so the reply nudge (3..14 days unanswered, read) is demoable:
+// msg_3 sits in the window, msg_2 is too recent; msg_1 keeps its fixed (stale) date.
+const daysAgoIso = (d: number): string => new Date(Date.now() - d * 86_400_000).toISOString();
+
 const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_1", messageId: "<m1@demo>", threadId: "thr_1", from: { email: "hanako@example.com", name: "山田 花子" },
@@ -502,12 +506,12 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_2", messageId: "<m2@demo>", threadId: "thr_2", from: { email: "sponsor@acme.co.jp", name: "ACME株式会社" },
     to: [{ email: "demo@developershub.jp" }], subject: "スポンサー契約書の送付", snippet: "契約書を添付いたします。ご確認ください。",
-    receivedAt: "2026-08-01T05:00:00Z", read: false, mine: true,
+    receivedAt: daysAgoIso(1), read: false, mine: true,
   },
   {
     id: "msg_3", messageId: "<m3@demo>", threadId: "thr_3", from: { email: "staff@developershub.jp", name: "運営スタッフ" },
     to: [{ email: "demo@developershub.jp" }], subject: "会場下見の日程", snippet: "来週の下見日程を共有します。",
-    receivedAt: "2026-07-30T08:00:00Z", read: true, mine: true,
+    receivedAt: daysAgoIso(4), read: true, mine: true,
   },
 ];
 

@@ -11,6 +11,7 @@ import {
   inFolder,
   latest,
   matchesQuery,
+  pendingReplyIds,
   relativeDate,
   replyNudge,
   sharedRecipientLabel,
@@ -96,6 +97,7 @@ function ThreadRow({
   leaving,
   narrow,
   now,
+  pendingReplies,
   onArchive,
   onTrash,
 }: {
@@ -106,6 +108,8 @@ function ThreadRow({
   narrow: boolean;
   /** Render-time clock for the reply nudge (one per list render). */
   now: Date;
+  /** Message-Ids with a scheduled reply pending (suppresses the nudge). */
+  pendingReplies: ReadonlySet<string>;
   onArchive: () => void;
   onTrash: () => void;
 }): JSX.Element {
@@ -114,7 +118,7 @@ function ThreadRow({
   const unread = threadUnread(thread);
   const last = latest(thread);
   const checked = state.checked.has(thread.id);
-  const nudge = replyNudge(thread, now);
+  const nudge = replyNudge(thread, now, pendingReplies);
   const people = thread.folder === "sent" || thread.folder === "drafts" ? last.to[0] ?? state.me : last.from;
 
   // P25: `data-thread-row` is a static marker (literal string, survives minification) so a
@@ -244,12 +248,24 @@ function ThreadRow({
             </span>
           )}
           <LabelChips ids={thread.labels} labels={labels} />
-          <span style={{ fontWeight: unread ? 700 : 400, color: "var(--dub-color-text-primary)" }}>{thread.subject}</span>
+          {/* Subject yields width (ellipsis) so the nudge badge after it never gets clipped. */}
+          <span
+            style={{
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontWeight: unread ? 700 : 400,
+              color: "var(--dub-color-text-primary)",
+            }}
+          >
+            {thread.subject}
+          </span>
           {nudge ? (
             // Literal marker survives minification so verify:live can grep the bundle.
             <span data-reply-nudge="fe2-mail-reply-nudge" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
               <Badge tone="warning" testId="fe2-mail-reply-nudge">
-                {narrow ? `${nudge.days}日前・未返信` : `${nudge.days}日前に受信しました。返信しますか？`}
+                {`${nudge.days}日前・未返信`}
               </Badge>
             </span>
           ) : null}
@@ -313,6 +329,7 @@ export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
   const now = new Date();
+  const pendingReplies = pendingReplyIds(state.scheduled);
   const [leavingIds, setLeavingIds] = useState<Set<string>>(new Set());
   const leaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -483,6 +500,7 @@ export function ThreadList(): JSX.Element {
               leaving={leavingIds.has(t.id)}
               narrow={narrow}
               now={now}
+              pendingReplies={pendingReplies}
               onArchive={() => beginLeave([t.id], "ARCHIVE")}
               onTrash={() => beginLeave([t.id], "TRASH")}
             />

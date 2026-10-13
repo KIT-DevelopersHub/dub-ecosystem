@@ -183,19 +183,36 @@ export const SELF: MailPerson = { email: "", name: "自分" };
 
 /** Whole days a received message may sit unanswered before the nudge appears. */
 export const NUDGE_DAYS = 3;
+/** Past this the mail is stale; nagging about it is clutter, not help. */
+export const NUDGE_MAX_DAYS = 14;
 const DAY_MS = 86_400_000;
 const AUTOMATED_SENDER = /^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?|bounce)/i;
+const bareId = (id: string): string => id.trim().replace(/^<|>$/g, "").trim();
 
-/** Derived (no state): non-null when an inbox thread addressed to the viewer ends with a
- *  received message from a human that has gone unanswered for >= `days` whole days. A
- *  reply appends an outbound message, so the latest is no longer inbound and it clears. */
-export function replyNudge(t: MailThreadModel, now: Date, days: number = NUDGE_DAYS): { days: number } | null {
-  if (t.purged || t.folder !== "inbox" || t.messages.length === 0) return null;
+/** Message-Ids (brackets stripped) that a still-pending scheduled send replies to. */
+export function pendingReplyIds(scheduled: readonly mail.ScheduledSendListItem[]): Set<string> {
+  const ids = new Set<string>();
+  for (const s of scheduled) if (s.status === "scheduled" && s.inReplyTo) ids.add(bareId(s.inReplyTo));
+  return ids;
+}
+
+/** Derived (no state): non-null when a read inbox thread addressed to the viewer ends with a
+ *  received message from a human, unanswered for days..maxDays whole days, and no scheduled
+ *  reply is pending for it. A reply appends an outbound message, so the nudge clears itself. */
+export function replyNudge(
+  t: MailThreadModel,
+  now: Date,
+  pendingReplies: ReadonlySet<string> = new Set(),
+  days: number = NUDGE_DAYS,
+  maxDays: number = NUDGE_MAX_DAYS,
+): { days: number } | null {
+  if (t.purged || t.folder !== "inbox" || t.messages.length === 0 || threadUnread(t)) return null;
   const last = latest(t);
   if (last.outbound || last.mine === false) return null;
   if (AUTOMATED_SENDER.test(last.from.email.split("@")[0] ?? "")) return null;
+  if (t.messages.some((m) => m.messageId && pendingReplies.has(bareId(m.messageId)))) return null;
   const at = new Date(last.date).getTime();
   if (Number.isNaN(at)) return null;
   const elapsed = Math.floor((now.getTime() - at) / DAY_MS);
-  return elapsed >= days ? { days: elapsed } : null;
+  return elapsed >= days && elapsed <= maxDays ? { days: elapsed } : null;
 }

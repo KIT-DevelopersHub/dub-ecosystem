@@ -1,6 +1,6 @@
 // Unit tests for the derived reply nudge (返信していないメール).
 import { describe, expect, it } from "vitest";
-import { replyNudge, SELF, type MailMsg, type MailThreadModel } from "./mailModel.ts";
+import { pendingReplyIds, replyNudge, SELF, type MailMsg, type MailThreadModel } from "./mailModel.ts";
 import { initialMailState, reducer } from "./useMailStore.tsx";
 
 const NOW = new Date("2026-10-13T12:00:00.000Z");
@@ -18,6 +18,27 @@ describe("replyNudge", () => {
     expect(replyNudge(thread([msg({ date: daysAgo(2, 86_399_000) })]), NOW)).toBeNull();
     expect(replyNudge(thread([msg({ date: daysAgo(3) })]), NOW)).toEqual({ days: 3 });
     expect(replyNudge(thread([msg({ date: daysAgo(5, 3_600_000) })]), NOW)).toEqual({ days: 5 });
+  });
+
+  it("stops after 14 days (stale mail is clutter)", () => {
+    expect(replyNudge(thread([msg({ date: daysAgo(14) })]), NOW)).toEqual({ days: 14 });
+    expect(replyNudge(thread([msg({ date: daysAgo(15) })]), NOW)).toBeNull();
+  });
+
+  it("skips unread threads (not even opened yet)", () => {
+    expect(replyNudge(thread([msg({ read: false })]), NOW)).toBeNull();
+  });
+
+  it("skips a thread whose reply is already scheduled", () => {
+    const t = thread([msg({ messageId: "<in1@x.jp>" })]);
+    const base = { to: [], subject: "Re", snippet: "", scheduledAt: "2099-01-01T00:00:00.000Z", createdAt: NOW.toISOString() };
+    expect(replyNudge(t, NOW, pendingReplyIds([{ ...base, id: "s1", status: "scheduled", inReplyTo: "in1@x.jp" }]))).toBeNull();
+    // Canceled / unrelated scheduled sends don't suppress it.
+    const others = pendingReplyIds([
+      { ...base, id: "s2", status: "canceled", inReplyTo: "<in1@x.jp>" },
+      { ...base, id: "s3", status: "scheduled", inReplyTo: "<other@x.jp>" },
+    ]);
+    expect(replyNudge(t, NOW, others)).toEqual({ days: 3 });
   });
 
   it("clears once we replied after the latest received message", () => {
@@ -53,6 +74,6 @@ describe("replyNudge", () => {
   });
 
   it("accepts a custom threshold", () => {
-    expect(replyNudge(thread([msg({ date: daysAgo(1) })]), NOW, 1)).toEqual({ days: 1 });
+    expect(replyNudge(thread([msg({ date: daysAgo(1) })]), NOW, undefined, 1)).toEqual({ days: 1 });
   });
 });

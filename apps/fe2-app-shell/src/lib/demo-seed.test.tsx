@@ -312,3 +312,13 @@ describe("demo outbox reply threading", () => {
     expect(sent.items.find((s) => s.subject === "新規")?.threadId).toBeUndefined();
   });
 });
+
+describe("demo inbox showcases the reply nudge", () => {
+  it("has one read human mail in the 3..14 day window and one recent one", async () => {
+    const res = await api().request<{ items: { id: string; receivedAt: string; read: boolean }[] }>({ method: "GET", path: "/api/v1/mail/messages" });
+    const age = (id: string) => Math.floor((Date.now() - Date.parse(res.items.find((m) => m.id === id)!.receivedAt)) / 86_400_000);
+    expect(age("msg_3")).toBe(4);
+    expect(res.items.find((m) => m.id === "msg_3")!.read).toBe(true);
+    expect(age("msg_2")).toBeLessThan(3);
+  });
+});

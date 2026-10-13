@@ -346,12 +346,18 @@ describe("GmailApp (hydrates from the gateway)", () => {
   it("nudges an unreplied received thread; the banner reply reuses compose and the reply clears it", async () => {
     // Gateway echo: once we send, GET /sent returns the reply threaded into thr_in_1.
     let replied = false;
+    const fourDaysAgo = new Date(Date.now() - 4 * 86_400_000).toISOString();
     const reply: mail.MailSentListItem = {
       id: "sent_r", to: [{ email: "hanako@example.com" }], subject: "Re: 登壇のご相談", snippet: "了解しました。",
       sentAt: new Date().toISOString(), provider: "resend", status: "sent", threadId: "thr_in_1",
     };
     const api = fakeApi({
-      listInbox: vi.fn().mockResolvedValue({ items: [DEMO_INBOX_ITEMS[0]!], nextCursor: null }),
+      // Read, received 4 days ago → inside the 3..14 day window (list + opened detail agree).
+      listInbox: vi.fn().mockResolvedValue({ items: [{ ...DEMO_INBOX_ITEMS[0]!, read: true, receivedAt: fourDaysAgo }], nextCursor: null }),
+      getThread: vi.fn().mockResolvedValue({
+        ...DEMO_INBOX_THREAD,
+        messages: DEMO_INBOX_THREAD.messages.map((m) => ({ ...m, read: true, receivedAt: fourDaysAgo })),
+      }),
       send: vi.fn().mockImplementation(() => {
         replied = true;
         return Promise.resolve({ messageId: "m", provider: "resend", acceptedAt: "t" });
@@ -360,11 +366,10 @@ describe("GmailApp (hydrates from the gateway)", () => {
     });
     render(wrap(<GmailApp />, api));
     const row = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
-    // Fixture was received 2026-08-10 → well past the 3-day threshold.
-    expect(within(row).getByTestId("fe2-mail-reply-nudge")).toHaveTextContent(/日前に受信しました。返信しますか？/);
+    expect(within(row).getByTestId("fe2-mail-reply-nudge")).toHaveTextContent("4日前・未返信");
     await userEvent.click(row);
     await waitFor(() => expect(screen.getByText(/相談させてください/)).toBeInTheDocument());
-    expect(screen.getByTestId("fe2-mail-reply-nudge-banner")).toHaveTextContent(/日前に受信したメールにまだ返信していません/);
+    expect(screen.getByTestId("fe2-mail-reply-nudge-banner")).toHaveTextContent("4日前に受信したメールにまだ返信していません");
     await userEvent.click(screen.getByTestId("fe2-mail-reply-nudge-reply"));
     expect(screen.getByTestId("fe2-mail-compose-window")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));

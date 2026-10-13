@@ -12,6 +12,7 @@ import {
   displayName,
   fullDate,
   initial,
+  pendingReplyIds,
   replyNudge,
   sharedRecipientLabel,
   snippet,
@@ -292,7 +293,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const [reply, setReply] = useState("");
   const lastIdx = thread.messages.length - 1;
   const last = thread.messages[lastIdx]!;
-  const nudge = replyNudge(thread, new Date());
+  const nudge = replyNudge(thread, new Date(), pendingReplyIds(state.scheduled));
   const chips = thread.labels.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => Boolean(l));
 
   // Reply targets the last message that ISN'T ours — the external correspondent — never
