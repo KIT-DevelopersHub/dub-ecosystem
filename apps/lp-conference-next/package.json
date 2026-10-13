@@ -10,7 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:bundle": "node scripts/build-bundle.mjs",
-    "test:worker": "node --test worker/route.test.ts"
+    "test:worker": "node --test worker/*.test.ts"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
