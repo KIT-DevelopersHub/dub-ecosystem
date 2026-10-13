@@ -7,6 +7,7 @@ import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1LpRepo } from "./d1-repo";
 import { createCfSiteTrafficSource } from "./site-traffic";
+import { createStripeClient } from "./stripe";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -16,6 +17,7 @@ export type { Env } from "./env";
 // so a non-handler export (e.g. a string) makes the Worker fail to boot.
 const DEFAULT_LP_BASE_URL = "https://hokuriku-it-conf.com";
 const DEFAULT_DAILY_VISIT_CAP = 5000;
+const DEFAULT_DAILY_CHECKOUT_CAP = 300;
 
 function siteTrafficFrom(env: Env): AppDeps["siteTraffic"] {
   const { CF_ANALYTICS_TOKEN: token, CF_ACCOUNT_ID: accountId, LP_WEB_ANALYTICS_SITE_TAG: siteTag } = env;
@@ -39,6 +41,12 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newVisitId: () => newId("lpv"),
     dailyVisitCap: Number(env.LP_DAILY_VISIT_CAP) > 0 ? Number(env.LP_DAILY_VISIT_CAP) : DEFAULT_DAILY_VISIT_CAP,
     siteTraffic: siteTrafficFrom(env),
+    newTicketTypeId: () => newId("tkt"),
+    newOrderId: () => newId("tko"),
+    dailyCheckoutCap:
+      Number(env.LP_DAILY_CHECKOUT_CAP) > 0 ? Number(env.LP_DAILY_CHECKOUT_CAP) : DEFAULT_DAILY_CHECKOUT_CAP,
+    stripe: env.STRIPE_SECRET_KEY ? createStripeClient(env.STRIPE_SECRET_KEY) : null,
+    stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
   };
 }
 

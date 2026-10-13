@@ -8,17 +8,26 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useParticipationApi } from "./ParticipationProvider.tsx";
 import type {
+  ListOnboardingItemsResponse,
   ListParticipationsResponse,
+  OnboardingGuide,
+  OnboardingItem,
+  OnboardingItemInput,
   PublicParticipationResponse,
   ResolveParticipationRequest,
   ResolveParticipationResponse,
+  SaveOnboardingMeetingRequest,
+  SaveOnboardingMeetingResponse,
   SubmitParticipationRequest,
+  UpdateOnboardingItemRequest,
 } from "./contracts.ts";
 
 export const TEAMS_KEY: QueryKey = queryKeys.feature("participation", "teams");
 export const LIST_KEY: QueryKey = queryKeys.feature("participation", "list");
 /** 組織図(体制図)/名簿を描く members overview のキー。反映確定後に無効化して再描画する。 */
 export const MEMBERS_OVERVIEW_KEY: QueryKey = queryKeys.feature("members", "overview");
+export const ONBOARDING_KEY: QueryKey = queryKeys.feature("participation", "onboarding");
+export const PUBLIC_ONBOARDING_KEY: QueryKey = queryKeys.feature("participation", "onboarding", "public");
 export const CANDIDATES_KEY = (id: string): QueryKey => queryKeys.feature("participation", "candidates", id);
 
 export function useParticipationTeams() {
@@ -131,6 +140,148 @@ export function useSubmitParticipation() {
     onError: (err) => {
       const msg = ApiError.isApiError(err) ? toDisplayableError(err).message : "参加届を送信できませんでした";
       toast.show({ kind: "error", title: msg });
+    },
+  });
+}
+
+// ---- オンボーディング案内 -----------------------------------------------------------
+
+/** 管理タブの項目一覧。 */
+export function useOnboardingItems() {
+  const api = useParticipationApi();
+  return useQuery({ queryKey: ONBOARDING_KEY, queryFn: () => api.listOnboarding() });
+}
+
+/** 公開ページの項目一覧 (未ログイン)。 */
+export function usePublicOnboardingItems() {
+  const api = useParticipationApi();
+  return useQuery({ queryKey: PUBLIC_ONBOARDING_KEY, queryFn: () => api.publicOnboarding() });
+}
+
+type OnboardingSnapshot = { prev: OnboardingGuide | undefined };
+
+/** 楽観更新の共通部: 一覧を先に書き換え、失敗したら戻してトースト、最後にサーバ値へ同期。 */
+function useOnboardingMutation<TVars, TRes>(
+  mutationFn: (vars: TVars) => Promise<TRes>,
+  patch: (items: OnboardingItem[], vars: TVars) => OnboardingItem[],
+  messages: { success?: string; error: string },
+) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<TRes, unknown, TVars, OnboardingSnapshot>({
+    mutationFn,
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ONBOARDING_KEY });
+      const prev = qc.getQueryData<OnboardingGuide>(ONBOARDING_KEY);
+      qc.setQueryData<OnboardingGuide>(ONBOARDING_KEY, (old) => (old ? { ...old, items: patch(old.items, vars) } : old));
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ONBOARDING_KEY, ctx.prev);
+      const msg = ApiError.isApiError(err) ? toDisplayableError(err).message : messages.error;
+      toast.show({ kind: "error", title: msg });
+    },
+    onSuccess: () => {
+      if (messages.success) toast.show({ kind: "success", title: messages.success });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ONBOARDING_KEY });
+    },
+  });
+}
+
+const PENDING_ID_PREFIX = "pending-";
+
+/** 追加中の仮行か (サーバ id 未確定。編集・並び替えの対象にしない)。 */
+export function isPendingOnboardingItem(item: OnboardingItem): boolean {
+  return item.id.startsWith(PENDING_ID_PREFIX);
+}
+
+export function useCreateOnboardingItem() {
+  const api = useParticipationApi();
+  return useOnboardingMutation<OnboardingItemInput, OnboardingItem>(
+    (input) => api.createOnboarding(input),
+    (items, input) => {
+      const now = new Date().toISOString();
+      const last = items[items.length - 1];
+      return [
+        ...items,
+        {
+          id: `${PENDING_ID_PREFIX}${now}`,
+          title: input.title,
+          description: input.description ?? null,
+          url: input.url ?? null,
+          sortOrder: (last?.sortOrder ?? 0) + 1,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ];
+    },
+    { success: "項目を追加しました", error: "項目を追加できませんでした" },
+  );
+}
+
+export function useUpdateOnboardingItem() {
+  const api = useParticipationApi();
+  return useOnboardingMutation<{ id: string; patch: UpdateOnboardingItemRequest }, OnboardingItem>(
+    ({ id, patch }) => api.updateOnboarding(id, patch),
+    (items, { id, patch }) => items.map((i) => (i.id === id ? { ...i, ...patch } : i)),
+    { success: "項目を更新しました", error: "項目を更新できませんでした" },
+  );
+}
+
+export function useDeleteOnboardingItem() {
+  const api = useParticipationApi();
+  return useOnboardingMutation<string, void>(
+    (id) => api.deleteOnboarding(id),
+    (items, id) => items.filter((i) => i.id !== id),
+    { success: "項目を削除しました", error: "項目を削除できませんでした" },
+  );
+}
+
+export function useReorderOnboardingItems() {
+  const api = useParticipationApi();
+  return useOnboardingMutation<string[], ListOnboardingItemsResponse>(
+    (ids) => api.reorderOnboarding(ids),
+    (items, ids) => {
+      const byId = new Map(items.map((i) => [i.id, i]));
+      return ids.map((id) => byId.get(id)).filter((i): i is OnboardingItem => i !== undefined);
+    },
+    // 並び替えは頻繁なので成功トーストは出さない（見た目がそのまま結果）。
+    { error: "並び順を保存できませんでした" },
+  );
+}
+
+/** ミーティング案内の保存 (全体 / チーム)。楽観的に差し替え、失敗したら戻す。 */
+export function useSaveOnboardingMeeting() {
+  const api = useParticipationApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<SaveOnboardingMeetingResponse, unknown, SaveOnboardingMeetingRequest, OnboardingSnapshot>({
+    mutationFn: (input) => api.saveOnboardingMeeting(input),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: ONBOARDING_KEY });
+      const prev = qc.getQueryData<OnboardingGuide>(ONBOARDING_KEY);
+      qc.setQueryData<OnboardingGuide>(ONBOARDING_KEY, (old) => {
+        if (!old) return old;
+        const rest = old.meetings.filter((m) => m.teamId !== input.teamId);
+        const meetings = input.schedule
+          ? [...rest, { teamId: input.teamId, schedule: input.schedule, url: input.url ?? null, updatedAt: new Date().toISOString() }]
+          : rest;
+        return { ...old, meetings };
+      });
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ONBOARDING_KEY, ctx.prev);
+      const msg = ApiError.isApiError(err) ? toDisplayableError(err).message : "ミーティングを保存できませんでした";
+      toast.show({ kind: "error", title: msg });
+    },
+    onSuccess: (_res, input) => {
+      toast.show({ kind: "success", title: input.schedule ? "ミーティングを保存しました" : "ミーティングの案内を消しました" });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ONBOARDING_KEY });
     },
   });
 }
