@@ -27,6 +27,7 @@ export class MemIdentityRepo implements IdentityRepo {
   private users = new Map<string, UserRow>();
   private roles = new Map<string, RoleRow>();
   private assignments = new Map<string, AssignmentRow>();
+  private mailVisibility = new Map<string, string[]>(); // roleId -> target role ids
 
   async getOrg(orgId: string): Promise<OrgRow | null> {
     return this.orgs.get(orgId) ?? null;
@@ -102,17 +103,20 @@ export class MemIdentityRepo implements IdentityRepo {
     const rows = [...this.roles.values()].filter((r) => r.orgId === orgId).map((r) => ({ ...r, permissions: [...r.permissions] }));
     return pageSlice(rows, limit, cursor);
   }
-  async createRole(row: RoleRow): Promise<void> {
+  async createRole(row: RoleRow, mailVisibleRoleIds: string[] = []): Promise<void> {
     this.roles.set(row.id, { ...row, permissions: [...row.permissions] });
+    if (mailVisibleRoleIds.length > 0) this.mailVisibility.set(row.id, [...new Set(mailVisibleRoleIds)]);
   }
   async updateRolePermissions(
     roleId: string,
     name: string | undefined,
     permissions: identity.PermissionKey[] | undefined,
     updatedAt: string,
+    mailVisibleRoleIds?: string[],
   ): Promise<void> {
     const r = this.roles.get(roleId);
     if (!r) return;
+    if (mailVisibleRoleIds !== undefined) this.mailVisibility.set(roleId, [...new Set(mailVisibleRoleIds)]);
     this.roles.set(roleId, {
       ...r,
       ...(name !== undefined ? { name } : {}),
@@ -123,6 +127,8 @@ export class MemIdentityRepo implements IdentityRepo {
   async deleteRole(roleId: string): Promise<void> {
     this.roles.delete(roleId);
     for (const [id, a] of this.assignments) if (a.roleId === roleId) this.assignments.delete(id); // CASCADE
+    this.mailVisibility.delete(roleId);
+    for (const [id, targets] of this.mailVisibility) this.mailVisibility.set(id, targets.filter((t) => t !== roleId));
   }
   async roleMemberCounts(orgId: string): Promise<Map<string, number>> {
     const perRole = new Map<string, Set<string>>();
@@ -197,5 +203,28 @@ export class MemIdentityRepo implements IdentityRepo {
       if (this.users.get(a.userId)?.status === "active") peers.add(a.userId);
     }
     return [...peers];
+  }
+
+  async mailVisibilityByOrg(orgId: string): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    for (const [roleId, targets] of this.mailVisibility) {
+      if (this.roles.get(roleId)?.orgId === orgId && targets.length > 0) out.set(roleId, [...targets].sort());
+    }
+    return out;
+  }
+
+  async orgWideMailVisibleUsers(orgId: string, userId: string): Promise<string[]> {
+    const orgWide = (a: AssignmentRow): boolean => a.orgId === orgId && a.resourceType === null && a.resourceId === null;
+    const targets = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.userId !== userId || !orgWide(a)) continue;
+      for (const t of this.mailVisibility.get(a.roleId) ?? []) targets.add(t);
+    }
+    const users = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.userId === userId || !orgWide(a) || !targets.has(a.roleId)) continue;
+      if (this.users.get(a.userId)?.status === "active") users.add(a.userId);
+    }
+    return [...users];
   }
 }

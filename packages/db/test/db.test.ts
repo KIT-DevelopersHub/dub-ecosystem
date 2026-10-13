@@ -80,6 +80,10 @@ describe("@dub/db namespaces + ids", () => {
     expect(t).toContain("task_archive");
   });
 
+  it("does not treat the json_each table-valued function as a table", () => {
+    expect(tablesOf("SELECT * FROM mail_inbound WHERE owner_user_id IN (SELECT value FROM json_each(?))")).toEqual(["mail_inbound"]);
+  });
+
   it("does not mis-parse the ON CONFLICT DO UPDATE SET keyword as a table (regression)", () => {
     // `... DO UPDATE SET` (upsert) trails "SET" after "UPDATE"; it must NOT be captured
     // as a table, or every upsert raises a spurious DB_NAMESPACE_VIOLATION.

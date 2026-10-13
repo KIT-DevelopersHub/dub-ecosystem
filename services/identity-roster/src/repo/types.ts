@@ -85,8 +85,15 @@ export interface IdentityRepo {
   getRole(roleId: string): Promise<RoleRow | null>;
   getRoleByName(orgId: string, name: string): Promise<RoleRow | null>;
   listRoles(orgId: string, limit: number, cursor?: string): Promise<{ items: RoleRow[]; nextCursor: string | null }>;
-  createRole(row: RoleRow): Promise<void>;
-  updateRolePermissions(roleId: string, name: string | undefined, permissions: identity.PermissionKey[] | undefined, updatedAt: string): Promise<void>;
+  createRole(row: RoleRow, mailVisibleRoleIds?: string[]): Promise<void>;
+  /** `mailVisibleRoleIds` (when given) replaces the cross-role mail visibility set in the same write. */
+  updateRolePermissions(
+    roleId: string,
+    name: string | undefined,
+    permissions: identity.PermissionKey[] | undefined,
+    updatedAt: string,
+    mailVisibleRoleIds?: string[],
+  ): Promise<void>;
   deleteRole(roleId: string): Promise<void>; // cascades assignments + role_permissions
   /** roleId -> distinct users holding it (any scope) in the org. Roles with zero members are omitted. */
   roleMemberCounts(orgId: string): Promise<Map<string, number>>;
@@ -103,4 +110,12 @@ export interface IdentityRepo {
   /** Other ACTIVE users (excluding `userId`) holding, org-wide, a role that `userId` also holds
    *  org-wide AND that carries `permission` (mail role sharing). Distinct ids. */
   orgWideRolePeers(orgId: string, userId: string, permission: identity.PermissionKey): Promise<string[]>;
+
+  // cross-role mail visibility (identity_role_mail_visibility)
+  /** roleId -> target role ids whose holders' inbound mail the role's holders also see.
+   *  Roles with no targets are omitted. */
+  mailVisibilityByOrg(orgId: string): Promise<Map<string, string[]>>;
+  /** ACTIVE users (excluding `userId`) holding, org-wide, a target role of any role `userId`
+   *  holds org-wide. Distinct ids. */
+  orgWideMailVisibleUsers(orgId: string, userId: string): Promise<string[]>;
 }

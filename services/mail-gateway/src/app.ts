@@ -108,8 +108,9 @@ export function createApp() {
   };
   // INBOUND read scope: `scopeOf` widened by role sharing. A caller whose org-wide role
   // carries `mail:read_role_shared` also sees inbound mail owned by the other holders of
-  // THAT role (identity-roster resolves the peers per role). Inbound only — Sent /
-  // Scheduled / flags keep `scopeOf` / `ownerOf`. Fail-closed: if the peers call fails the
+  // THAT role, and a role granted cross-role visibility in ロール管理 also sees the holders
+  // of its target roles (identity-roster resolves both). Inbound only — Sent /
+  // Scheduled / flags keep `scopeOf` / `ownerOf`. Fail-closed: if the identity call fails the
   // caller falls back to their own mail. Skipped entirely under read_all.
   const inboundScopeOf = async (c: Context<AppBindings>): Promise<InboundScope> => {
     const scope = await scopeOf(c);
@@ -118,7 +119,7 @@ export function createApp() {
       const client = createServiceClient(c.env.SVC_IDENTITY, { service: "identity-roster", caller: SERVICE_NAME });
       const res = await client.get<{ userIds?: unknown }>(
         ctxOf(c),
-        `/internal/users/${encodeURIComponent(scope)}/role-peers?permission=mail:read_role_shared`,
+        `/internal/users/${encodeURIComponent(scope)}/mail-visible-users`,
       );
       const peers = Array.isArray(res?.userIds) ? res.userIds.filter((id): id is string => typeof id === "string" && id !== scope) : [];
       return peers.length > 0 ? { userIds: [scope, ...peers] } : scope;

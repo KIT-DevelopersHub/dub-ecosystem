@@ -485,6 +485,34 @@ paths:
                 items:
                   $ref: '#/components/schemas/PermissionKey'
       security: []
+  /internal/users/{id}/mail-visible-users:
+    get:
+      operationId: mailVisibleUsers
+      summary: Users whose inbound mail this user may also read
+      tags:
+        - identity
+      description: 'Internal-only (mail-gateway): same-role sharing (mail:read_role_shared) plus cross-role mail visibility (Role.mailVisibleRoleIds). Excludes :id. Requires x-dub-internal; the api-gateway 404s this path for external clients.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Visible user ids
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - userIds
+                properties:
+                  userIds:
+                    type: array
+                    items:
+                      type: string
+      security: []
 components:
   schemas:
     Error:
@@ -648,6 +676,11 @@ components:
             $ref: '#/components/schemas/PermissionKey'
         isSystem:
           type: boolean
+        mailVisibleRoleIds:
+          type: array
+          description: Roles whose holders' inbound mail this role's holders also see (one-way).
+          items:
+            type: string
         memberCount:
           type: integer
           description: >-
@@ -743,6 +776,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PermissionKey'
+        mailVisibleRoleIds:
+          type: array
+          items:
+            type: string
     UpdateRoleRequest:
       type: object
       properties:
@@ -752,6 +789,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PermissionKey'
+        mailVisibleRoleIds:
+          type: array
+          description: Replaces the cross-role mail visibility set when present.
+          items:
+            type: string
     AssignRoleRequest:
       type: object
       required:

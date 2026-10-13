@@ -111,9 +111,9 @@ export const POLICY_TABLE = definePolicyTable({
   // X hold key K?" (a permission oracle), let alone reach the evaluator at all.
   "POST /authz/check": INTERNAL,
   "GET /internal/users/:id/permissions": INTERNAL,
-  // mail-gateway's role-shared inbound scope (who else holds a mail:read_role_shared role
-  // with me). INTERNAL: a membership oracle must not be reachable from outside.
-  "GET /internal/users/:id/role-peers": INTERNAL,
+  // mail-gateway's inbound read scope (same-role sharing + cross-role mail visibility).
+  // INTERNAL: a membership oracle must not be reachable from outside.
+  "GET /internal/users/:id/mail-visible-users": INTERNAL,
 
   // Passkey credential store. Only auth-service calls these (it runs the WebAuthn ceremonies
   // and owns step-up / last-method policy); INTERNAL keeps the store off the internet.

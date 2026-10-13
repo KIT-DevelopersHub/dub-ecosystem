@@ -5,7 +5,7 @@
 import { identity, member } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
 import type { common, auditLog, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
-import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview } from "../contracts/pending";
+import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview, RoleView } from "../contracts/pending";
 import { EMAIL_ROUTING_DOMAIN, MAIL_WORKER_DESTINATION } from "../contracts/pending";
 
 // Mock roster row: the frozen detail model plus provenance (identity-roster exposes it).
@@ -26,7 +26,7 @@ export interface MockSeed {
 
 interface MockState {
   users: Map<string, MockUser>;
-  roles: Map<string, identity.Role>;
+  roles: Map<string, RoleView>;
   assignments: Map<string, RoleAssignment[]>; // userId -> assignments
   audits: auditLog.AuditRecord[];
   emailAddresses: EmailRoutingAddress[];
@@ -41,7 +41,7 @@ interface MockState {
 const ORG = "org_devhub";
 
 function seedState(seed?: MockSeed): MockState {
-  const roles = new Map<string, identity.Role>([
+  const roles = new Map<string, RoleView>([
     ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin", "app:admin:view", "app:admin:edit"], isSystem: true }],
     ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read"], isSystem: true }],
     ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
@@ -179,11 +179,11 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       return stripDetail(user) as unknown as T;
     }
     if (path.endsWith("/identity/roles")) {
-      const req = body as { name: string; permissions: identity.PermissionKey[] };
+      const req = body as { name: string; permissions: identity.PermissionKey[]; mailVisibleRoleIds?: string[] };
       if (!req.name?.trim()) throw err("VALIDATION_FAILED", "name required", [{ field: "name", reason: "required" }]);
       if ([...s.roles.values()].some((r) => r.name === req.name)) throw err("CONFLICT", "role name exists");
       const id = `role_${Math.random().toString(36).slice(2, 8)}`;
-      const role: identity.Role = { id, orgId: ORG, name: req.name, permissions: req.permissions, isSystem: false };
+      const role: RoleView = { id, orgId: ORG, name: req.name, permissions: req.permissions, isSystem: false, mailVisibleRoleIds: req.mailVisibleRoleIds ?? [] };
       s.roles.set(id, role);
       return role as unknown as T;
     }
@@ -385,12 +385,20 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     if (roleMatch) {
       const role = s.roles.get(roleMatch[1]!);
       if (!role) throw err("NOT_FOUND", "role not found");
-      const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+      const req = body as { name?: string; permissions?: identity.PermissionKey[]; mailVisibleRoleIds?: string[] };
+      if (req.mailVisibleRoleIds?.some((id) => id === role.id || !s.roles.has(id))) {
+        throw err("VALIDATION_FAILED", "invalid mailVisibleRoleIds", [{ field: "mailVisibleRoleIds", reason: "invalid" }]);
+      }
       // Self-lockout guard (mirrors identity-roster): the admin role must keep identity:admin.
       if (role.isSystem && role.name === "admin" && req.permissions !== undefined && !req.permissions.includes("identity:admin")) {
         throw err("CONFLICT", "cannot remove identity:admin from the admin role");
       }
-      const updated: identity.Role = { ...role, ...(req.name !== undefined ? { name: req.name } : {}), ...(req.permissions !== undefined ? { permissions: req.permissions } : {}) };
+      const updated: RoleView = {
+        ...role,
+        ...(req.name !== undefined ? { name: req.name } : {}),
+        ...(req.permissions !== undefined ? { permissions: req.permissions } : {}),
+        ...(req.mailVisibleRoleIds !== undefined ? { mailVisibleRoleIds: [...req.mailVisibleRoleIds].sort() } : {}),
+      };
       s.roles.set(role.id, updated);
       return updated as unknown as T;
     }
@@ -424,6 +432,9 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       if (!role) throw err("NOT_FOUND", "role not found");
       if (role.isSystem) throw err("CONFLICT", "system role cannot be deleted");
       s.roles.delete(role.id);
+      for (const r of s.roles.values()) {
+        if (r.mailVisibleRoleIds?.includes(role.id)) s.roles.set(r.id, { ...r, mailVisibleRoleIds: r.mailVisibleRoleIds.filter((t) => t !== role.id) });
+      }
       return;
     }
     const asgMatch = path.match(/\/identity\/users\/([^/]+)\/roles\/([^/]+)$/);

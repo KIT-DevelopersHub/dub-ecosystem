@@ -58,10 +58,13 @@ export function AppAccessTable({
   onOpenDetail,
   lockedKeys = [],
   idPrefix = "fe7",
+  extraDetailCount,
 }: {
   selected: readonly identity.PermissionKey[];
   disabled?: boolean;
   onChange: (next: identity.PermissionKey[]) => void;
+  /** appId -> 権限キー以外の詳細設定の件数（メールの「別のロール宛て」）。0 は出さない. */
+  extraDetailCount?: Record<string, number>;
   /** アプリ名クリック → 詳細設定ダイアログ. */
   onOpenDetail: (appId: string) => void;
   /** 締め出し防止で固定されているキー（admin ロールの app:admin:*）. */
@@ -147,6 +150,11 @@ export function AppAccessTable({
             <span style={openHintStyle} data-testid={`${idPrefix}-app-detail-count-${row.id}`}>
               {row.level === policy.AppAccessLevel.None ? "—" : `${row.detail.granted} / ${row.detail.total}`}
             </span>
+            {row.level !== policy.AppAccessLevel.None && (extraDetailCount?.[row.id] ?? 0) > 0 ? (
+              <Badge tone="info" testId={`${idPrefix}-app-detail-extra-${row.id}`}>
+                別ロール {extraDetailCount![row.id]}
+              </Badge>
+            ) : null}
           </span>
         );
       },
