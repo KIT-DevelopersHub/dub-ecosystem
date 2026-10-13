@@ -105,8 +105,8 @@ export const MEMBER: AreaSpec = {
       path: "/members/onboarding",
       service: M,
       requires: { keys: [], appLevel: { app: "participation", level: "view" } },
-      description: "新メンバー向けオンボーディング案内の項目一覧を取得する",
-      hint: "{ items[] }。id・title・description・url・sortOrder（昇順が表示順）",
+      description: "新メンバー向けオンボーディング案内（やること・チーム・ミーティング日時）を取得する",
+      hint: "{ items[], teams[], meetings[] }。items は sortOrder 昇順。meetings の teamId=null が全体ミーティング",
     }),
     read({
       id: "users.list",
@@ -313,6 +313,7 @@ export const MEMBER: AreaSpec = {
     { service: M, route: "PATCH /members/onboarding/:id", reason: "依頼範囲外。公開ページの案内文は管理画面で人が書く" },
     { service: M, route: "POST /members/onboarding/reorder", reason: "依頼範囲外。公開ページの案内文は管理画面で人が書く" },
     { service: M, route: "DELETE /members/onboarding/:id", reason: "案内項目を物理削除する（不可逆）" },
+    { service: M, route: "PUT /members/onboarding/meetings", reason: "依頼範囲外。公開ページの案内文は管理画面で人が書く" },
     { service: M, route: "GET /members/me/mention-teams", reason: "ボット自身のメンション候補で、Dub のデータではない" },
     { service: I, route: "POST /identity/users/:id/offboard", reason: "ロール割り当てを物理削除し、セッションも失効させる（手作業でしか戻せない）" },
     { service: I, route: "POST /identity/users/sync-email-routing/preview", reason: "メール転送からの一括同期の下見。同期本体を開放しないので不要" },

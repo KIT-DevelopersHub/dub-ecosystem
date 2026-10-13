@@ -256,6 +256,24 @@ CREATE INDEX idx_member_onboarding_items_org ON member_onboarding_items(org_id, 
 `.trim(),
 };
 
+// 0015: オンボーディング案内のミーティング (新規テーブルのみ・additive)。team_id = '' が
+// 全体ミーティング。Mirrors 0015_onboarding_meetings.sql (schema-lockstep).
+export const MEMBER_ONBOARDING_MEETINGS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0015_onboarding_meetings",
+  up: `
+CREATE TABLE member_onboarding_meetings (
+  org_id      TEXT NOT NULL,
+  team_id     TEXT NOT NULL,
+  schedule    TEXT NOT NULL,
+  url         TEXT,
+  updated_by  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (org_id, team_id)
+);
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -272,4 +290,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PARTICIPATION_ROSTER_NUMBER_MIGRATION,
   MEMBER_PERSON_GRADE_NORMALIZE_MIGRATION,
   MEMBER_ONBOARDING_ITEMS_MIGRATION,
+  MEMBER_ONBOARDING_MEETINGS_MIGRATION,
 ];

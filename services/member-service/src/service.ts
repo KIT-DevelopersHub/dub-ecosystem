@@ -3,7 +3,7 @@
 // thin adapter. member_teams is the source of truth for the shared Team entity.
 import { DubError, errors } from "@dub/errors";
 import { type common, member } from "@dub/types";
-import type { AppDeps, OnboardingItemRow, ParticipationRow, PersonRow, TeamRow } from "./types";
+import type { AppDeps, OnboardingItemRow, OnboardingMeetingRow, ParticipationRow, PersonRow, TeamRow } from "./types";
 import {
   composeName,
   isMemberStatus,
@@ -714,6 +714,60 @@ export class MemberService {
   async listOnboardingItems(): Promise<member.ListOnboardingItemsResponse> {
     const rows = await this.deps.repo.listOnboardingItems(this.deps.orgId);
     return { items: rows.map(toOnboardingItem) };
+  }
+
+  /** 案内一式 (項目 + チームの選択肢 + ミーティング)。削除済みチームの案内は落とす。 */
+  async getOnboardingGuide(): Promise<member.OnboardingGuide> {
+    const orgId = this.deps.orgId;
+    const [{ items }, teams, meetings] = await Promise.all([
+      this.listOnboardingItems(),
+      this.deps.repo.listTeams(orgId),
+      this.listOnboardingMeetings(),
+    ]);
+    return {
+      items,
+      teams: teams.map((t) => ({ id: t.id, name: t.name, color: t.color })),
+      meetings,
+    };
+  }
+
+  private async listOnboardingMeetings(): Promise<member.OnboardingMeeting[]> {
+    const orgId = this.deps.orgId;
+    const [rows, teams] = await Promise.all([
+      this.deps.repo.listOnboardingMeetings(orgId),
+      this.deps.repo.listTeams(orgId),
+    ]);
+    const order = new Map(teams.map((t, i) => [t.id, i]));
+    return rows
+      .filter((r) => r.teamId === null || order.has(r.teamId))
+      .sort((a, b) => (a.teamId === null ? -1 : b.teamId === null ? 1 : order.get(a.teamId)! - order.get(b.teamId)!))
+      .map((r) => ({ teamId: r.teamId, schedule: r.schedule, url: r.url, updatedAt: r.updatedAt }));
+  }
+
+  /** ミーティング案内を保存 (teamId ごとに上書き)。schedule が空なら削除。 */
+  async saveOnboardingMeeting(ctx: ReqCtx, body: unknown): Promise<member.SaveOnboardingMeetingResponse> {
+    const raw = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const { value, errors: bad } = member.parseOnboardingMeetingInput(raw);
+    if (bad.length > 0) throw errors.validationFailed(bad.map((field) => ({ field, reason: "invalid" })));
+    const orgId = this.deps.orgId;
+    if (value.teamId !== null) {
+      const team = await this.deps.repo.getTeam(value.teamId);
+      if (!team || team.orgId !== orgId) throw errTeamNotFound(value.teamId);
+    }
+    if (value.schedule === null) {
+      await this.deps.repo.deleteOnboardingMeeting(orgId, value.teamId);
+    } else {
+      const row: OnboardingMeetingRow = {
+        orgId,
+        teamId: value.teamId,
+        schedule: value.schedule,
+        url: value.url,
+        updatedBy: ctx.userId,
+        updatedAt: this.deps.now(),
+      };
+      await this.deps.repo.upsertOnboardingMeeting(row);
+    }
+    return { meetings: await this.listOnboardingMeetings() };
   }
 
   async createOnboardingItem(ctx: ReqCtx, body: unknown): Promise<member.OnboardingItem> {

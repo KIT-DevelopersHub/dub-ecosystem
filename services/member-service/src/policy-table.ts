@@ -140,4 +140,5 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /members/onboarding/reorder": appLevel("participation", "edit"),
   "PATCH /members/onboarding/:id": appLevel("participation", "edit"),
   "DELETE /members/onboarding/:id": appLevel("participation", "edit"),
+  "PUT /members/onboarding/meetings": appLevel("participation", "edit"),
 });

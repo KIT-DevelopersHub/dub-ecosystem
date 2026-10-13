@@ -108,6 +108,16 @@ export interface OnboardingItemRow {
   updatedAt: common.ISODateTime;
 }
 
+/** ミーティング案内の永続化行。teamId = null が全体 (DB では '')。 */
+export interface OnboardingMeetingRow {
+  orgId: common.OrgId;
+  teamId: string | null;
+  schedule: string;
+  url: string | null;
+  updatedBy: common.UserId;
+  updatedAt: common.ISODateTime;
+}
+
 // ---- injected dependencies (enables full HTTP-level tests with fakes) ----
 export interface MemberRepo {
   // teams
@@ -146,6 +156,11 @@ export interface MemberRepo {
   deleteOnboardingItem(id: string): Promise<void>;
   /** 指定 id 群の sort_order を一括で書き換える (並び替え)。 */
   setOnboardingSortOrders(orders: Array<{ id: string; sortOrder: number }>, updatedAt: common.ISODateTime): Promise<void>;
+
+  // onboarding meetings (全体 / チームごと 1 件)
+  listOnboardingMeetings(orgId: common.OrgId): Promise<OnboardingMeetingRow[]>;
+  upsertOnboardingMeeting(row: OnboardingMeetingRow): Promise<void>;
+  deleteOnboardingMeeting(orgId: common.OrgId, teamId: string | null): Promise<void>;
 }
 
 export interface AppDeps {

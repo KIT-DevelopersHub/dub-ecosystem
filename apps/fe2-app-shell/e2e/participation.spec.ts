@@ -2,8 +2,9 @@
 // design the 社長 asked for:
 //   (a) the PUBLIC form at /participate (no login) accepts the two required emails and
 //       shows the サンクス — this is the one form participants use;
-//   (b) the in-shell /participation is the オンボーディング tab (items + the public
-//       /onboarding URL), and 回答一覧 carries the public /participate URL instead;
+//   (b) the in-shell /participation is the オンボーディング tab (items + team meetings + the
+//       public /onboarding URL, which asks for the team first), and 回答一覧 carries the
+//       public /participate URL instead;
 //   (c) the 運営専用 回答一覧 at /participation/list shows submitted 参加届 (氏名 / 学校メール /
 //       Gmail / 所属 / 希望) and opens a detail drawer on row click.
 // The list is seeded with two submitted records so it has content on first load; a real
@@ -42,31 +43,65 @@ test("(a) public /participate accepts split 姓/名 + emails + phone and confirm
   await page.screenshot({ path: shot("02-public-thanks.png"), fullPage: true });
 });
 
-test("(b) オンボーディング tab manages the items and shares the public /onboarding page", async ({ page }) => {
+test("(b) オンボーディング tab manages the items, team meetings and shares the public /onboarding page", async ({ page }) => {
   await page.goto("/participation");
   await expect(page.getByTestId("onboarding-admin-page")).toBeVisible();
   await expect(page.getByTestId("member-roster-subnav")).toContainText("オンボーディング");
   await expect(page.getByTestId("onboarding-share-url")).toHaveText(/\/onboarding$/);
-  await expect(page.getByTestId("onboarding-admin-item-onb_demo_2")).toContainText("Discord サーバーに参加する");
+  await expect(page.getByTestId("onboarding-admin-item-onb_demo_2")).toContainText("Slack に参加する");
+  // ミーティング: 全体 + 名簿の各チーム。設定済みは日時、未設定は「未設定」。
+  await expect(page.getByTestId("onboarding-meeting-all")).toContainText("10/20(火) 19:00〜20:00");
+  await expect(page.getByTestId("onboarding-meeting-team_ops")).toContainText("未設定");
   await page.screenshot({ path: shot("03-onboarding-admin.png"), fullPage: true });
 
   await page.getByTestId("onboarding-admin-add").click();
-  await page.getByTestId("onboarding-item-title").fill("Slack に参加する");
+  await page.getByTestId("onboarding-item-title").fill("自己紹介を投稿する");
   await page.getByTestId("onboarding-item-url").fill("https://slack.com/example");
   await page.getByTestId("onboarding-item-save").click();
-  await expect(page.getByTestId("onboarding-admin-list")).toContainText("Slack に参加する");
+  await expect(page.getByTestId("onboarding-admin-list")).toContainText("自己紹介を投稿する");
 
-  // 公開ページはログイン不要で、seed 済みの項目が番号付きで並ぶ（goto で demo は再 seed される）。
+  await page.getByTestId("onboarding-meeting-edit-team_ops").click();
+  await page.getByTestId("onboarding-meeting-schedule").fill("毎週金曜 21:00〜");
+  await page.getByTestId("onboarding-meeting-url").fill("https://meet.google.com/ops-team");
+  await page.screenshot({ path: shot("03a-onboarding-meeting-dialog.png") });
+  await page.getByTestId("onboarding-meeting-save").click();
+  await expect(page.getByTestId("onboarding-meeting-team_ops")).toContainText("毎週金曜 21:00〜");
+  await expect(page.getByTestId("onboarding-meeting-team_ops")).toContainText("https://meet.google.com/ops-team");
+  await page.getByTestId("onboarding-admin-meetings").scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400); // let the toast / scroll settle before the shot
+  await page.getByTestId("onboarding-admin-meetings").screenshot({ path: shot("03e-onboarding-admin-meetings.png") });
+
+  // 公開ページはログイン不要。まずチームを選ぶと、やること → 全体 → チームのミーティングが並ぶ
+  // （goto で demo は再 seed される）。
   await page.goto("/onboarding");
-  await expect(page.getByTestId("onboarding-public-page")).toBeVisible();
-  await expect(page.getByTestId("onboarding-public-steps")).toContainText("参加届を出す");
+  await expect(page.getByTestId("onboarding-public-team-picker")).toBeVisible();
+  await expect(page.getByTestId("onboarding-public-steps")).toHaveCount(0);
+  await page.screenshot({ path: shot("03b-onboarding-public-pick.png"), fullPage: true });
+  await page.getByTestId("onboarding-public-team-team_dev").click();
+  const steps = page.getByTestId("onboarding-public-steps");
+  await expect(steps).toContainText("参加届を出す");
+  await expect(steps).toContainText("Slack の表示名を変更する");
+  await expect(page.getByTestId("onboarding-public-when-all")).toHaveText("10/20(火) 19:00〜20:00");
+  await expect(page.getByTestId("onboarding-public-when-team_dev")).toHaveText("毎週水曜 20:00〜");
+  await expect(page.getByTestId("onboarding-public-step-team_dev").getByRole("link", { name: "参加リンクを開く" }))
+    .toHaveAttribute("href", "https://meet.google.com/dev-team-mtg");
+  await expect(page).toHaveURL(/\?team=team_dev$/);
   await page.screenshot({ path: shot("03b-onboarding-public.png"), fullPage: true });
+
+  // 再読み込みしても選んだチームのまま。
+  await page.reload();
+  await expect(page.getByTestId("onboarding-public-picked")).toContainText("開発チーム");
 
   // 新メンバーはスマホで開くことが多いので狭幅でも横スクロールしないこと。
   await page.setViewportSize({ width: 375, height: 812 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
   await page.screenshot({ path: shot("03c-onboarding-public-narrow.png"), fullPage: true });
+  await page.getByTestId("onboarding-public-change-team").click();
+  await expect(page.getByTestId("onboarding-public-team-picker")).toBeVisible();
+  const pickOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(pickOverflow).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: shot("03c2-onboarding-public-pick-narrow.png"), fullPage: true });
   await page.goto("/participation");
   await expect(page.getByTestId("onboarding-admin-item-onb_demo_1")).toBeVisible();
   await page.waitForTimeout(400); // let the app fade-in settle before the shot

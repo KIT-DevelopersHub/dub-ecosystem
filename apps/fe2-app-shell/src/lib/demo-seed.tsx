@@ -2493,30 +2493,25 @@ function createMembersStore() {
     if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
   });
 
-  // オンボーディング案内の初期項目 (公開ページ /onboarding に並ぶ)。
-  const onboarding: Array<{
-    id: string; title: string; description: string | null; url: string | null;
-    sortOrder: number; createdAt: string; updatedAt: string;
-  }> = [
-    {
-      id: "onb_demo_1", title: "参加届を出す",
-      description: "名前・学校のメールアドレス・Gmail を入力して送信してください。運営が確認して名簿に追加します。",
+  // オンボーディング案内の初期項目 (公開ページ /onboarding に並ぶ)。実際の受け入れの流れ:
+  // 参加届 → Slack 参加 → 表示名 → アイコン → ミーティング (日時とリンクは meetings 側)。
+  const onbAt = "2026-10-01T09:00:00.000Z";
+  const onbItem = (n: number, title: string, description: string | null, url: string | null) => ({
+    id: `onb_demo_${n}`, title, description, url, sortOrder: n * 1024, createdAt: onbAt, updatedAt: onbAt,
+  });
+  const onboarding: Array<ReturnType<typeof onbItem>> = [
+    onbItem(1, "参加届を出す", "名前・学校のメールアドレス・Gmail を入力して送信してください。運営が確認して名簿に追加します。",
       // 公開フォームは同じオリジンの /participate (demo はどの Worker でも同じ SPA)。
-      url: `${typeof window !== "undefined" ? window.location.origin : "https://example.com"}/participate`, sortOrder: 1024,
-      createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
-    },
-    {
-      id: "onb_demo_2", title: "Discord サーバーに参加する",
-      description: "運営の連絡はすべて Discord で行います。参加したら #自己紹介 に一言どうぞ。",
-      url: "https://discord.com/invite/example", sortOrder: 2048,
-      createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
-    },
-    {
-      id: "onb_demo_3", title: "次回の全体ミーティングに出る",
-      description: "毎週木曜 18:30〜。初回は顔合わせだけなので気軽に来てください。",
-      url: null, sortOrder: 3072,
-      createdAt: "2026-10-01T09:00:00.000Z", updatedAt: "2026-10-01T09:00:00.000Z",
-    },
+      `${typeof window !== "undefined" ? window.location.origin : "https://example.com"}/participate`),
+    onbItem(2, "Slack に参加する", "運営の連絡はすべて Slack で行います。招待リンクから参加してください。", "https://join.slack.com/t/example/shared_invite/demo"),
+    onbItem(3, "Slack の表示名を変更する", "「名前（チーム名）」の形にしてください。例: 山田太郎（開発チーム）", null),
+    onbItem(4, "Slack のアイコンを設定する", "顔写真でなくても大丈夫です。誰か見分けられる画像にしてください。", null),
+  ];
+  // ミーティング案内 (teamId null = 全体)。カレンダー招待は送らず、時刻とリンクを見せるだけ。
+  const onboardingMeetings: Array<{ teamId: string | null; schedule: string; url: string | null; updatedAt: string }> = [
+    { teamId: null, schedule: "10/20(火) 19:00〜20:00", url: "https://meet.google.com/abc-defg-hij", updatedAt: onbAt },
+    { teamId: "team_dev", schedule: "毎週水曜 20:00〜", url: "https://meet.google.com/dev-team-mtg", updatedAt: onbAt },
+    { teamId: "team_pr", schedule: "毎週木曜 18:30〜", url: "https://meet.google.com/pr-team-mtg", updatedAt: onbAt },
   ];
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
@@ -2818,11 +2813,34 @@ function createMembersStore() {
 
     // オンボーディング案内 (管理タブ + 公開ページ)。検証は member-service と同じ共通関数。
     const onboardingList = () => ({ items: onboarding.map((o) => ({ ...o })) });
+    const teamOrder = new Map(teams.map((t, i) => [t.id, i]));
+    const meetingList = () =>
+      onboardingMeetings
+        .filter((m) => m.teamId === null || teamOrder.has(m.teamId))
+        .sort((a, b) => (a.teamId === null ? -1 : b.teamId === null ? 1 : teamOrder.get(a.teamId)! - teamOrder.get(b.teamId)!))
+        .map((m) => ({ ...m }));
     if (method === "GET" && (pathname === "/api/v1/members/onboarding" || pathname === "/api/v1/public/onboarding")) {
-      return json(onboardingList());
+      return json({
+        ...onboardingList(),
+        teams: teams.map((t) => ({ id: t.id, name: t.name, color: t.color })),
+        meetings: meetingList(),
+      });
     }
     const invalid = (fields: string[]) =>
       json({ error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false, details: { fields } } }, 400);
+    if (method === "PUT" && pathname === "/api/v1/members/onboarding/meetings") {
+      const { value, errors } = memberValues.parseOnboardingMeetingInput(body ?? {});
+      if (errors.length > 0) return invalid(errors);
+      if (value.teamId !== null && !teamOrder.has(value.teamId)) {
+        return json({ error: { code: "MEMBER_TEAM_NOT_FOUND", message: "not found", retryable: false } }, 404);
+      }
+      const at = onboardingMeetings.findIndex((m) => m.teamId === value.teamId);
+      if (at >= 0) onboardingMeetings.splice(at, 1);
+      if (value.schedule !== null) {
+        onboardingMeetings.push({ teamId: value.teamId, schedule: value.schedule, url: value.url, updatedAt: isoNow() });
+      }
+      return json({ meetings: meetingList() });
+    }
     if (method === "POST" && pathname === "/api/v1/members/onboarding") {
       const { value, errors } = memberValues.parseOnboardingItemInput(body ?? {});
       if (errors.length > 0) return invalid(errors);

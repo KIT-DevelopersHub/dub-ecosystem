@@ -2,6 +2,7 @@
 // やってほしいことを並べ、ログイン不要の公開ページ (/onboarding) で共有する。項目の追加・
 // 編集・削除・ドラッグ並び替えは 参加届アプリの「編集」、閲覧だけなら一覧と共有 URL のみ。
 // 編集系は楽観的 UI (hooks.ts の useOnboardingMutation が失敗時にロールバック)。
+// ミーティング (全体 / チームごと) は日時とリンクを登録し、案内ページの最後に表示する。
 import { useState } from "react";
 import {
   Button,
@@ -28,14 +29,20 @@ import {
   useDeleteOnboardingItem,
   useOnboardingItems,
   useReorderOnboardingItems,
+  useSaveOnboardingMeeting,
   useUpdateOnboardingItem,
 } from "./hooks.ts";
 import {
   ONBOARDING_DESCRIPTION_MAX,
+  ONBOARDING_SCHEDULE_MAX,
   ONBOARDING_TITLE_MAX,
   parseOnboardingItemInput,
+  parseOnboardingMeetingInput,
+  type OnboardingGuide,
   type OnboardingItem,
   type OnboardingItemInput,
+  type OnboardingMeeting,
+  type SaveOnboardingMeetingRequest,
 } from "./contracts.ts";
 import { PUBLIC_ONBOARDING_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
@@ -175,6 +182,8 @@ export function OnboardingAdminPage(): JSX.Element {
         {body}
       </Card>
 
+      {list.data ? <MeetingsCard guide={list.data} canEdit={canEdit} /> : null}
+
       {editing !== null ? (
         <ItemDialog item={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSave={onSave} />
       ) : null}
@@ -194,6 +203,174 @@ export function OnboardingAdminPage(): JSX.Element {
         testId="onboarding-admin-delete-confirm"
       />
     </div>
+  );
+}
+
+/** ミーティングの行 (全体 + 名簿の各チーム)。teamId null が全体。 */
+interface MeetingTarget {
+  teamId: string | null;
+  label: string;
+  color: string | null;
+}
+
+/** 全体 / チームのミーティング案内。カレンダー招待は送らず、日時とリンクを案内ページに出す。 */
+function MeetingsCard({ guide, canEdit }: { guide: OnboardingGuide; canEdit: boolean }): JSX.Element {
+  const saveMut = useSaveOnboardingMeeting();
+  const [editing, setEditing] = useState<MeetingTarget | null>(null);
+  const targets: MeetingTarget[] = [
+    { teamId: null, label: "全体ミーティング", color: null },
+    ...guide.teams.map((t) => ({ teamId: t.id, label: `${t.name}のミーティング`, color: t.color })),
+  ];
+  const byTeam = new Map(guide.meetings.map((m) => [m.teamId ?? "", m]));
+  const current = editing ? (byTeam.get(editing.teamId ?? "") ?? null) : null;
+
+  return (
+    <Card header={<span>ミーティング</span>} testId="onboarding-admin-meetings">
+      <p className={styles.sectionHint}>
+        カレンダーの招待は送りません。ここに入れた日時と参加リンクが、案内ページの最後に「何時にどのリンクへ入るか」として表示されます。チームのミーティングは、案内ページで選ばれたチームの分だけ表示されます。
+      </p>
+      <ul className={styles.meetingList}>
+        {targets.map((t) => {
+          const m = byTeam.get(t.teamId ?? "");
+          const key = t.teamId ?? "all";
+          return (
+            <li key={key} className={styles.meetingRow} data-testid={`onboarding-meeting-${key}`}>
+              <span className={styles.teamDot} style={t.color ? { background: t.color } : undefined} aria-hidden />
+              <div className={styles.onboardingBody}>
+                <div className={styles.onboardingTitle}>{t.label}</div>
+                {m ? (
+                  <>
+                    <div className={styles.meetingWhen}>{m.schedule}</div>
+                    {m.url ? (
+                      <a className={styles.onboardingLink} href={m.url} target="_blank" rel="noreferrer noopener">
+                        {m.url}
+                      </a>
+                    ) : (
+                      <span className={styles.meetingUnset}>参加リンク未設定</span>
+                    )}
+                  </>
+                ) : (
+                  <span className={styles.meetingUnset}>未設定（案内ページには「追って連絡します」と表示）</span>
+                )}
+              </div>
+              {canEdit ? (
+                <div className={styles.onboardingActions}>
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(t)} testId={`onboarding-meeting-edit-${key}`}>
+                    {m ? "編集" : "設定"}
+                  </Button>
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {editing ? (
+        <MeetingDialog
+          target={editing}
+          meeting={current}
+          onCancel={() => setEditing(null)}
+          onSave={(input) => {
+            saveMut.mutate(input);
+            setEditing(null);
+          }}
+        />
+      ) : null}
+    </Card>
+  );
+}
+
+function MeetingDialog({
+  target,
+  meeting,
+  onCancel,
+  onSave,
+}: {
+  target: MeetingTarget;
+  meeting: OnboardingMeeting | null;
+  onCancel: () => void;
+  onSave: (input: SaveOnboardingMeetingRequest) => void;
+}): JSX.Element {
+  const [schedule, setSchedule] = useState(meeting?.schedule ?? "");
+  const [url, setUrl] = useState(meeting?.url ?? "");
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const submit = (): void => {
+    const parsed = parseOnboardingMeetingInput({ teamId: target.teamId, schedule, url });
+    // 保存は日時必須 (空にして消すのは「案内を消す」ボタン)。
+    const errs = parsed.value.schedule === null ? [...new Set([...parsed.errors, "schedule"])] : parsed.errors;
+    if (errs.length > 0) {
+      setErrors(errs);
+      return;
+    }
+    onSave({ teamId: target.teamId, schedule: parsed.value.schedule, url: parsed.value.url });
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      title={target.label}
+      testId="onboarding-meeting-dialog"
+      footer={
+        <div className={styles.dialogActions}>
+          {meeting ? (
+            <Button
+              variant="secondary"
+              onClick={() => onSave({ teamId: target.teamId, schedule: null, url: null })}
+              testId="onboarding-meeting-clear"
+            >
+              案内を消す
+            </Button>
+          ) : null}
+          <Button variant="secondary" onClick={onCancel} testId="onboarding-meeting-cancel">
+            キャンセル
+          </Button>
+          <Button onClick={submit} testId="onboarding-meeting-save">
+            保存
+          </Button>
+        </div>
+      }
+    >
+      <form
+        className={styles.formStack}
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <FormField
+          label="日時"
+          htmlFor="onboarding-meeting-schedule"
+          required
+          help={`例: 10/20(火) 19:00〜 / 毎週水曜 20:00〜（${ONBOARDING_SCHEDULE_MAX} 文字まで）`}
+          {...(errors.includes("schedule") ? { error: "日時を入力してください" } : {})}
+        >
+          <TextField
+            id="onboarding-meeting-schedule"
+            value={schedule}
+            onChange={setSchedule}
+            invalid={errors.includes("schedule")}
+            testId="onboarding-meeting-schedule"
+          />
+        </FormField>
+        <FormField
+          label="参加リンク"
+          htmlFor="onboarding-meeting-url"
+          help="Google Meet などのリンク（任意）"
+          {...(errors.includes("url") ? { error: "http:// または https:// で始まる URL を入力してください" } : {})}
+        >
+          <TextField
+            id="onboarding-meeting-url"
+            type="url"
+            value={url}
+            onChange={setUrl}
+            placeholder="https://"
+            invalid={errors.includes("url")}
+            testId="onboarding-meeting-url"
+          />
+        </FormField>
+      </form>
+    </Modal>
   );
 }
 

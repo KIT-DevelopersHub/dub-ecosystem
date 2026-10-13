@@ -104,7 +104,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   // 公開オンボーディング案内 (gateway GET /api/v1/public/onboarding → ここ, s2s のみ)。
   // 未ログインの新メンバーが見るページの中身。案内項目は公開前提なので応答は管理画面と同じ。
   app.get("/members/internal/onboarding", async (c) => {
-    return c.json(await svc.listOnboardingItems());
+    return c.json(await svc.getOnboardingGuide());
   });
 
   // Self 参加届 (アカウント設定 → 参加情報). The gateway's GET/POST /api/v1/me/participation
@@ -206,7 +206,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   // ---- オンボーディング案内 (参加届アプリの管理タブ) ----
   // 閲覧 = 参加届の閲覧、編集系 = 参加届の編集 (table)。
   app.get("/members/onboarding", async (c) => {
-    return c.json(await svc.listOnboardingItems());
+    return c.json(await svc.getOnboardingGuide());
+  });
+  // 全体 / チームのミーティング案内 (teamId ごとに上書き・schedule 空で削除)。
+  app.put("/members/onboarding/meetings", async (c) => {
+    const body = await readJson<member.SaveOnboardingMeetingRequest>(c);
+    return c.json(await svc.saveOnboardingMeeting(reqCtx(c), body));
   });
   app.post("/members/onboarding", async (c) => {
     const body = await readJson<member.OnboardingItemInput>(c);

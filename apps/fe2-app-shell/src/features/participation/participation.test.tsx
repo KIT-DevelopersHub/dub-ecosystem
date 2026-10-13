@@ -16,7 +16,8 @@ import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
 import { ParticipationForm } from "./ParticipationForm.tsx";
 import { OnboardingAdminPage } from "./OnboardingAdminPage.tsx";
 import { ParticipationListPage } from "./ParticipationListPage.tsx";
-import type { OnboardingItem, Participation, ParticipationCandidate, PublicParticipationResponse, RosterMember } from "./contracts.ts";
+import { PublicOnboardingPage } from "./PublicOnboardingPage.tsx";
+import type { OnboardingGuide, OnboardingItem, OnboardingTeam, Participation, ParticipationCandidate, PublicParticipationResponse, RosterMember } from "./contracts.ts";
 
 /** Minimal roster member fixture for the manual-link search. */
 function rosterMember(over: Partial<RosterMember> & Pick<RosterMember, "id" | "name">): RosterMember {
@@ -48,6 +49,16 @@ function onboardingItem(over: Partial<OnboardingItem> & Pick<OnboardingItem, "id
   };
 }
 
+const TEAMS: OnboardingTeam[] = [
+  { id: "team_dev", name: "開発チーム", color: "#0d9488" },
+  { id: "team_pr", name: "広報チーム", color: null },
+];
+const AT = "2026-10-13T00:00:00.000Z";
+
+function guide(items: OnboardingItem[], over: Partial<OnboardingGuide> = {}): OnboardingGuide {
+  return { items, teams: [], meetings: [], ...over };
+}
+
 function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
   return {
     listTeams: () => Promise.resolve({ teams: [{ id: "t1", key: "venue", name: "会場", color: null, description: null }] }),
@@ -58,12 +69,13 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
     resolve: vi.fn((id: string) =>
       Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const }, member: null }),
     ),
-    listOnboarding: vi.fn(() => Promise.resolve({ items: [] })),
+    listOnboarding: vi.fn(() => Promise.resolve(guide([]))),
     createOnboarding: vi.fn((input) => Promise.resolve(onboardingItem({ id: "onb_new", ...input }))),
     updateOnboarding: vi.fn((id, patch) => Promise.resolve(onboardingItem({ id, ...patch }))),
     deleteOnboarding: vi.fn(() => Promise.resolve()),
     reorderOnboarding: vi.fn((ids: string[]) => Promise.resolve({ items: ids.map((id) => onboardingItem({ id })) })),
-    publicOnboarding: vi.fn(() => Promise.resolve({ items: [] })),
+    saveOnboardingMeeting: vi.fn(() => Promise.resolve({ meetings: [] })),
+    publicOnboarding: vi.fn(() => Promise.resolve(guide([]))),
     ...overrides,
   } as ParticipationApi;
 }
@@ -369,7 +381,7 @@ describe("OnboardingAdminPage", () => {
   ];
 
   it("shows the public URL and the items in order", async () => {
-    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve({ items: ITEMS })) });
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide(ITEMS))) });
     render(wrap(<OnboardingAdminPage />, api));
     expect(screen.getByTestId("onboarding-share-url").textContent).toMatch(/\/onboarding$/);
     expect(await screen.findByText("Discord に参加")).toBeInTheDocument();
@@ -380,7 +392,7 @@ describe("OnboardingAdminPage", () => {
   it("adds an item through the dialog and rejects a non-http link", async () => {
     const stored: OnboardingItem[] = [];
     const api = makeApi({
-      listOnboarding: vi.fn(() => Promise.resolve({ items: [...stored] })),
+      listOnboarding: vi.fn(() => Promise.resolve(guide([...stored]))),
       createOnboarding: vi.fn((input) => {
         const item = onboardingItem({ id: "onb_new", ...input });
         stored.push(item);
@@ -405,7 +417,7 @@ describe("OnboardingAdminPage", () => {
   });
 
   it("deletes after confirmation", async () => {
-    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve({ items: ITEMS })) });
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide(ITEMS))) });
     render(wrap(<OnboardingAdminPage />, api));
     await userEvent.click(await screen.findByTestId("onboarding-admin-delete-onb_1"));
     const dialog = screen.getByTestId("onboarding-admin-delete-confirm");
@@ -414,11 +426,115 @@ describe("OnboardingAdminPage", () => {
   });
 
   it("is read-only for a 閲覧 subject (no add / edit / delete)", async () => {
-    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve({ items: ITEMS })) });
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide(ITEMS))) });
     render(wrap(<OnboardingAdminPage />, api, viewerPermissions("participation")));
     expect(await screen.findByText("Discord に参加")).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-admin-add")).toBeNull();
     expect(screen.queryByTestId("onboarding-admin-edit-onb_1")).toBeNull();
     expect(screen.getByTestId("onboarding-readonly-notice")).toBeInTheDocument();
+  });
+});
+
+describe("OnboardingAdminPage meetings", () => {
+  it("lists 全体 + each team and saves a team meeting (schedule required, link optional)", async () => {
+    const api = makeApi({
+      listOnboarding: vi.fn(() =>
+        Promise.resolve(
+          guide([], { teams: TEAMS, meetings: [{ teamId: null, schedule: "10/20(火) 19:00〜", url: "https://meet.google.com/a", updatedAt: AT }] }),
+        ),
+      ),
+    });
+    render(wrap(<OnboardingAdminPage />, api));
+    expect(await screen.findByText("10/20(火) 19:00〜")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-meeting-team_pr").textContent).toContain("未設定");
+
+    await userEvent.click(screen.getByTestId("onboarding-meeting-edit-team_dev"));
+    await userEvent.click(screen.getByTestId("onboarding-meeting-save"));
+    expect(screen.getByText("日時を入力してください")).toBeInTheDocument();
+    await userEvent.type(screen.getByTestId("onboarding-meeting-schedule"), "毎週水曜 20:00〜");
+    await userEvent.type(screen.getByTestId("onboarding-meeting-url"), "https://meet.google.com/dev");
+    await userEvent.click(screen.getByTestId("onboarding-meeting-save"));
+    await waitFor(() =>
+      expect(api.saveOnboardingMeeting).toHaveBeenCalledWith({
+        teamId: "team_dev",
+        schedule: "毎週水曜 20:00〜",
+        url: "https://meet.google.com/dev",
+      }),
+    );
+  });
+
+  it("clears an existing meeting", async () => {
+    const api = makeApi({
+      listOnboarding: vi.fn(() =>
+        Promise.resolve(guide([], { meetings: [{ teamId: null, schedule: "毎週木曜", url: null, updatedAt: AT }] })),
+      ),
+    });
+    render(wrap(<OnboardingAdminPage />, api));
+    await userEvent.click(await screen.findByTestId("onboarding-meeting-edit-all"));
+    await userEvent.click(screen.getByTestId("onboarding-meeting-clear"));
+    await waitFor(() => expect(api.saveOnboardingMeeting).toHaveBeenCalledWith({ teamId: null, schedule: null, url: null }));
+  });
+
+  it("hides meeting editing for a 閲覧 subject", async () => {
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide([], { teams: TEAMS }))) });
+    render(wrap(<OnboardingAdminPage />, api, viewerPermissions("participation")));
+    expect(await screen.findByTestId("onboarding-meeting-team_dev")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-meeting-edit-team_dev")).toBeNull();
+  });
+});
+
+describe("PublicOnboardingPage", () => {
+  const PUBLIC = guide([onboardingItem({ id: "onb_1", title: "Slack に参加する", url: "https://join.slack.com/x" })], {
+    teams: TEAMS,
+    meetings: [
+      { teamId: null, schedule: "10/20(火) 19:00〜", url: "https://meet.google.com/all", updatedAt: AT },
+      { teamId: "team_dev", schedule: "毎週水曜 20:00〜", url: "https://meet.google.com/dev", updatedAt: AT },
+    ],
+  });
+
+  function renderPublic(data: OnboardingGuide): void {
+    const { api } = fakeApiClient(data);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <PublicOnboardingPage api={api} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("asks for the team first, then shows the steps followed by 全体 and the team's meeting time + link", async () => {
+    window.history.replaceState(null, "", "/onboarding");
+    renderPublic(PUBLIC);
+    await screen.findByTestId("onboarding-public-team-picker");
+    expect(screen.queryByTestId("onboarding-public-steps")).toBeNull();
+
+    await userEvent.click(screen.getByTestId("onboarding-public-team-team_dev"));
+    const steps = screen.getAllByTestId(/^onboarding-public-step-/).map((el) => el.dataset.testid);
+    expect(steps).toEqual(["onboarding-public-step-onb_1", "onboarding-public-step-all", "onboarding-public-step-team_dev"]);
+    expect(screen.getByTestId("onboarding-public-when-all").textContent).toBe("10/20(火) 19:00〜");
+    expect(screen.getByTestId("onboarding-public-when-team_dev").textContent).toBe("毎週水曜 20:00〜");
+    expect(screen.getByText("開発チームのチームミーティングに出る")).toBeInTheDocument();
+    expect(window.location.search).toBe("?team=team_dev");
+
+    await userEvent.click(screen.getByTestId("onboarding-public-change-team"));
+    expect(await screen.findByTestId("onboarding-public-team-picker")).toBeInTheDocument();
+    expect(window.location.search).toBe("");
+  });
+
+  it("restores the team from ?team= and says the team meeting is TBD when not set", async () => {
+    window.history.replaceState(null, "", "/onboarding?team=team_pr");
+    renderPublic(PUBLIC);
+    expect(await screen.findByText("広報チームのチームミーティングに出る")).toBeInTheDocument();
+    expect(screen.getByText("日時は運営から追って連絡します。")).toBeInTheDocument();
+  });
+
+  it("「まだ決まっていない」shows only the 全体 meeting", async () => {
+    window.history.replaceState(null, "", "/onboarding");
+    renderPublic(PUBLIC);
+    await userEvent.click(await screen.findByTestId("onboarding-public-team-none"));
+    const steps = screen.getAllByTestId(/^onboarding-public-step-/).map((el) => el.dataset.testid);
+    expect(steps).toEqual(["onboarding-public-step-onb_1", "onboarding-public-step-all"]);
   });
 });

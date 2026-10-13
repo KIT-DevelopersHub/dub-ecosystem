@@ -31,6 +31,13 @@ export type ListOnboardingItemsResponse = member.ListOnboardingItemsResponse;
 export const ONBOARDING_TITLE_MAX = member.ONBOARDING_TITLE_MAX;
 export const ONBOARDING_DESCRIPTION_MAX = member.ONBOARDING_DESCRIPTION_MAX;
 export const parseOnboardingItemInput = member.parseOnboardingItemInput;
+export type OnboardingGuide = member.OnboardingGuide;
+export type OnboardingTeam = member.OnboardingTeam;
+export type OnboardingMeeting = member.OnboardingMeeting;
+export type SaveOnboardingMeetingRequest = member.SaveOnboardingMeetingRequest;
+export type SaveOnboardingMeetingResponse = member.SaveOnboardingMeetingResponse;
+export const ONBOARDING_SCHEDULE_MAX = member.ONBOARDING_SCHEDULE_MAX;
+export const parseOnboardingMeetingInput = member.parseOnboardingMeetingInput;
 
 /** Canonical shared team entity read from GET /api/v1/members/teams. */
 export type MemberTeam = member.Team;

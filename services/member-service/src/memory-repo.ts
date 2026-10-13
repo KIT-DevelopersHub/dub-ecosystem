@@ -1,7 +1,7 @@
 // In-memory MemberRepo: backs unit/HTTP tests without D1. Team membership is a
 // nested Map (personId -> Set<teamId>) so there is no fragile string-join key.
 import type { common } from "@dub/types";
-import type { MemberRepo, OnboardingItemRow, ParticipationRow, PersonRow, TeamRow } from "./types";
+import type { MemberRepo, OnboardingItemRow, OnboardingMeetingRow, ParticipationRow, PersonRow, TeamRow } from "./types";
 
 function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -13,6 +13,7 @@ export class InMemoryMemberRepo implements MemberRepo {
   private links = new Map<string, Set<string>>(); // personId -> Set<teamId>
   private participations = new Map<string, ParticipationRow>(); // id -> row
   private onboarding = new Map<string, OnboardingItemRow>(); // id -> row
+  private meetings = new Map<string, OnboardingMeetingRow>(); // orgId|teamId -> row
 
   private setLinks(personId: string, teamIds: string[]): void {
     this.links.set(personId, new Set(teamIds));
@@ -148,5 +149,16 @@ export class InMemoryMemberRepo implements MemberRepo {
       const cur = this.onboarding.get(o.id);
       if (cur) this.onboarding.set(o.id, { ...cur, sortOrder: o.sortOrder, updatedAt });
     }
+  }
+
+  // ---- onboarding meetings ----
+  async listOnboardingMeetings(orgId: common.OrgId): Promise<OnboardingMeetingRow[]> {
+    return [...this.meetings.values()].filter((r) => r.orgId === orgId).map((r) => ({ ...r }));
+  }
+  async upsertOnboardingMeeting(row: OnboardingMeetingRow): Promise<void> {
+    this.meetings.set(`${row.orgId}|${row.teamId ?? ""}`, { ...row });
+  }
+  async deleteOnboardingMeeting(orgId: common.OrgId, teamId: string | null): Promise<void> {
+    this.meetings.delete(`${orgId}|${teamId ?? ""}`);
   }
 }

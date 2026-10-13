@@ -98,3 +98,63 @@ describe("onboarding items", () => {
     expect((await call(app, "POST", "/members/onboarding", { body: { title: "x" } })).status).toBe(403);
   });
 });
+
+describe("onboarding meetings", () => {
+  async function team(app: ReturnType<typeof createApp>, name: string, key: string): Promise<string> {
+    const res = await call(app, "POST", "/members/teams", { body: { name, key } });
+    expect(res.status).toBe(201);
+    return res.json.id;
+  }
+
+  it("saves the 全体 and per-team meetings, lists teams, and clears with an empty schedule", async () => {
+    const app = createApp(makeDeps());
+    const pr = await team(app, "広報チーム", "pr");
+    const dev = await team(app, "開発チーム", "dev");
+
+    const all = await call(app, "PUT", "/members/onboarding/meetings", {
+      body: { teamId: null, schedule: " 10/20(火) 19:00〜 ", url: "https://meet.google.com/abc-defg-hij" },
+    });
+    expect(all.status).toBe(200);
+    await call(app, "PUT", "/members/onboarding/meetings", { body: { teamId: dev, schedule: "毎週水曜 20:00〜" } });
+    // overwrite, not append
+    await call(app, "PUT", "/members/onboarding/meetings", { body: { teamId: dev, schedule: "毎週木曜 20:00〜", url: null } });
+
+    const guide = await call(app, "GET", "/members/onboarding");
+    expect(guide.json.teams.map((t: { name: string }) => t.name)).toEqual(["広報チーム", "開発チーム"]);
+    expect(guide.json.meetings).toEqual([
+      expect.objectContaining({ teamId: null, schedule: "10/20(火) 19:00〜", url: "https://meet.google.com/abc-defg-hij" }),
+      expect.objectContaining({ teamId: dev, schedule: "毎週木曜 20:00〜", url: null }),
+    ]);
+
+    const cleared = await call(app, "PUT", "/members/onboarding/meetings", { body: { teamId: dev, schedule: "" } });
+    expect(cleared.json.meetings.map((m: { teamId: string | null }) => m.teamId)).toEqual([null]);
+    expect(pr).toBeTruthy();
+  });
+
+  it("rejects unknown teams, non-http links and a link without a schedule", async () => {
+    const app = createApp(makeDeps());
+    expect((await call(app, "PUT", "/members/onboarding/meetings", { body: { teamId: "team_x", schedule: "x" } })).status).toBe(404);
+    expect(
+      (await call(app, "PUT", "/members/onboarding/meetings", { body: { teamId: null, schedule: "x", url: "javascript:alert(1)" } })).status,
+    ).toBe(400);
+    expect(
+      (await call(app, "PUT", "/members/onboarding/meetings", { body: { teamId: null, schedule: "", url: "https://x.example" } })).status,
+    ).toBe(400);
+  });
+
+  it("drops a deleted team's meeting and serves the guide on the internal route", async () => {
+    const app = createApp(makeDeps());
+    const dev = await team(app, "開発チーム", "dev");
+    await call(app, "PUT", "/members/onboarding/meetings", { body: { teamId: dev, schedule: "毎週水曜" } });
+    expect((await call(app, "DELETE", `/members/teams/${dev}`)).status).toBeLessThan(300);
+    const res = await call(app, "GET", "/members/internal/onboarding", { userId: null, internal: true });
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ items: [], teams: [], meetings: [] });
+  });
+
+  it("参加届 閲覧 cannot change meetings", async () => {
+    const deps = makeDeps();
+    const app = createApp({ ...deps, authz: fakeAuthz(viewOnly()) });
+    expect((await call(app, "PUT", "/members/onboarding/meetings", { body: { teamId: null, schedule: "x" } })).status).toBe(403);
+  });
+});

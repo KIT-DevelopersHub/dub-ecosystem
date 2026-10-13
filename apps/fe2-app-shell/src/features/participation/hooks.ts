@@ -10,11 +10,14 @@ import { useParticipationApi } from "./ParticipationProvider.tsx";
 import type {
   ListOnboardingItemsResponse,
   ListParticipationsResponse,
+  OnboardingGuide,
   OnboardingItem,
   OnboardingItemInput,
   PublicParticipationResponse,
   ResolveParticipationRequest,
   ResolveParticipationResponse,
+  SaveOnboardingMeetingRequest,
+  SaveOnboardingMeetingResponse,
   SubmitParticipationRequest,
   UpdateOnboardingItemRequest,
 } from "./contracts.ts";
@@ -155,7 +158,7 @@ export function usePublicOnboardingItems() {
   return useQuery({ queryKey: PUBLIC_ONBOARDING_KEY, queryFn: () => api.publicOnboarding() });
 }
 
-type OnboardingSnapshot = { prev: ListOnboardingItemsResponse | undefined };
+type OnboardingSnapshot = { prev: OnboardingGuide | undefined };
 
 /** 楽観更新の共通部: 一覧を先に書き換え、失敗したら戻してトースト、最後にサーバ値へ同期。 */
 function useOnboardingMutation<TVars, TRes>(
@@ -169,10 +172,8 @@ function useOnboardingMutation<TVars, TRes>(
     mutationFn,
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: ONBOARDING_KEY });
-      const prev = qc.getQueryData<ListOnboardingItemsResponse>(ONBOARDING_KEY);
-      qc.setQueryData<ListOnboardingItemsResponse>(ONBOARDING_KEY, (old) =>
-        old ? { items: patch(old.items, vars) } : old,
-      );
+      const prev = qc.getQueryData<OnboardingGuide>(ONBOARDING_KEY);
+      qc.setQueryData<OnboardingGuide>(ONBOARDING_KEY, (old) => (old ? { ...old, items: patch(old.items, vars) } : old));
       return { prev };
     },
     onError: (err, _vars, ctx) => {
@@ -249,4 +250,38 @@ export function useReorderOnboardingItems() {
     // 並び替えは頻繁なので成功トーストは出さない（見た目がそのまま結果）。
     { error: "並び順を保存できませんでした" },
   );
+}
+
+/** ミーティング案内の保存 (全体 / チーム)。楽観的に差し替え、失敗したら戻す。 */
+export function useSaveOnboardingMeeting() {
+  const api = useParticipationApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<SaveOnboardingMeetingResponse, unknown, SaveOnboardingMeetingRequest, OnboardingSnapshot>({
+    mutationFn: (input) => api.saveOnboardingMeeting(input),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: ONBOARDING_KEY });
+      const prev = qc.getQueryData<OnboardingGuide>(ONBOARDING_KEY);
+      qc.setQueryData<OnboardingGuide>(ONBOARDING_KEY, (old) => {
+        if (!old) return old;
+        const rest = old.meetings.filter((m) => m.teamId !== input.teamId);
+        const meetings = input.schedule
+          ? [...rest, { teamId: input.teamId, schedule: input.schedule, url: input.url ?? null, updatedAt: new Date().toISOString() }]
+          : rest;
+        return { ...old, meetings };
+      });
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ONBOARDING_KEY, ctx.prev);
+      const msg = ApiError.isApiError(err) ? toDisplayableError(err).message : "ミーティングを保存できませんでした";
+      toast.show({ kind: "error", title: msg });
+    },
+    onSuccess: (_res, input) => {
+      toast.show({ kind: "success", title: input.schedule ? "ミーティングを保存しました" : "ミーティングの案内を消しました" });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ONBOARDING_KEY });
+    },
+  });
 }

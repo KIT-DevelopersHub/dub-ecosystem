@@ -9,9 +9,12 @@ import type {
   ListParticipationsResponse,
   MembersOverview,
   MemberTeam,
+  OnboardingGuide,
   OnboardingItem,
   OnboardingItemInput,
   PublicParticipationResponse,
+  SaveOnboardingMeetingRequest,
+  SaveOnboardingMeetingResponse,
   ResolveParticipationRequest,
   ResolveParticipationResponse,
   SubmitParticipationRequest,
@@ -33,14 +36,16 @@ export interface ParticipationApi {
   /** 反映確定 (link/create/skip/unlink)。roster を書き換えるので identity:admin。 */
   resolve(id: string, body: ResolveParticipationRequest): Promise<ResolveParticipationResponse>;
   /** オンボーディング案内 (管理タブ)。閲覧 = 参加届の閲覧、書き込み = 参加届の編集。 */
-  listOnboarding(): Promise<ListOnboardingItemsResponse>;
+  listOnboarding(): Promise<OnboardingGuide>;
   createOnboarding(input: OnboardingItemInput): Promise<OnboardingItem>;
   updateOnboarding(id: string, patch: UpdateOnboardingItemRequest): Promise<OnboardingItem>;
   deleteOnboarding(id: string): Promise<void>;
   /** 全項目 id を新しい表示順で渡す。 */
   reorderOnboarding(ids: string[]): Promise<ListOnboardingItemsResponse>;
+  /** 全体 / チームのミーティング案内を保存 (schedule null で削除)。 */
+  saveOnboardingMeeting(input: SaveOnboardingMeetingRequest): Promise<SaveOnboardingMeetingResponse>;
   /** 公開ページ用 (未ログインで読める)。 */
-  publicOnboarding(): Promise<ListOnboardingItemsResponse>;
+  publicOnboarding(): Promise<OnboardingGuide>;
 }
 
 const BASE = "/api/v1/members";
@@ -70,7 +75,7 @@ export function createParticipationApi(api: ApiClient): ParticipationApi {
         path: `${BASE}/participation/${encodeURIComponent(id)}/resolve`,
         body,
       }),
-    listOnboarding: () => api.request<ListOnboardingItemsResponse>({ method: "GET", path: ONBOARDING }),
+    listOnboarding: () => api.request<OnboardingGuide>({ method: "GET", path: ONBOARDING }),
     createOnboarding: (input) =>
       api.request<OnboardingItem, OnboardingItemInput>({ method: "POST", path: ONBOARDING, body: input }),
     updateOnboarding: (id, patch) =>
@@ -88,7 +93,12 @@ export function createParticipationApi(api: ApiClient): ParticipationApi {
         path: `${ONBOARDING}/reorder`,
         body: { ids },
       }),
-    publicOnboarding: () =>
-      api.request<ListOnboardingItemsResponse>({ method: "GET", path: "/api/v1/public/onboarding" }),
+    saveOnboardingMeeting: (input) =>
+      api.request<SaveOnboardingMeetingResponse, SaveOnboardingMeetingRequest>({
+        method: "PUT",
+        path: `${ONBOARDING}/meetings`,
+        body: input,
+      }),
+    publicOnboarding: () => api.request<OnboardingGuide>({ method: "GET", path: "/api/v1/public/onboarding" }),
   };
 }

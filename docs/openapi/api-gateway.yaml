@@ -112,10 +112,10 @@ paths:
   /api/v1/public/onboarding:
     get:
       operationId: getPublicOnboarding
-      summary: List the public onboarding items for new members
+      summary: Get the public onboarding guide for new members
       tags:
         - gateway
-      description: Unauthenticated, read-only. Returns the onboarding items admins manage in the 運営メンバー・名簿 オンボーディング tab (sortOrder ascending). IP rate limited; cacheable for 60 seconds.
+      description: Unauthenticated, read-only. Returns the onboarding items admins manage in the 運営メンバー・名簿 オンボーディング tab (sortOrder ascending), the team choices, and the meeting guide (teamId null = 全体ミーティング). IP rate limited; cacheable for 60 seconds.
       responses:
         '200':
           description: OK
@@ -123,8 +123,27 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, teams, meetings]
                 properties:
+                  teams:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, color]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        color: { type: string, nullable: true }
+                  meetings:
+                    type: array
+                    items:
+                      type: object
+                      required: [teamId, schedule, url, updatedAt]
+                      properties:
+                        teamId: { type: string, nullable: true }
+                        schedule: { type: string }
+                        url: { type: string, nullable: true }
+                        updatedAt: { type: string, format: date-time }
                   items:
                     type: array
                     items:

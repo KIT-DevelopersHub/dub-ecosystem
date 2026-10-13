@@ -120,6 +120,7 @@ const ONBOARDING_WRITES = [
   "PATCH /members/onboarding/:id",
   "POST /members/onboarding",
   "POST /members/onboarding/reorder",
+  "PUT /members/onboarding/meetings",
 ];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
 const SELF = ["GET /members/me/mention-teams"];

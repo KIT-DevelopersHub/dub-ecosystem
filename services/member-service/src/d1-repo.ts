@@ -3,7 +3,7 @@
 import type { DbClient } from "@dub/db";
 import { member } from "@dub/types";
 import { composeName } from "./domain";
-import type { MemberRepo, OnboardingItemRow, ParticipationRow, PersonRow, TeamRow, MemberStatus } from "./types";
+import type { MemberRepo, OnboardingItemRow, OnboardingMeetingRow, ParticipationRow, PersonRow, TeamRow, MemberStatus } from "./types";
 
 interface TeamDbRow {
   id: string;
@@ -82,6 +82,26 @@ function toOnboardingItemRow(r: OnboardingItemDbRow): OnboardingItemRow {
     sortOrder: r.sort_order,
     createdBy: r.created_by,
     createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+interface OnboardingMeetingDbRow {
+  org_id: string;
+  team_id: string;
+  schedule: string;
+  url: string | null;
+  updated_by: string;
+  updated_at: string;
+}
+
+function toOnboardingMeetingRow(r: OnboardingMeetingDbRow): OnboardingMeetingRow {
+  return {
+    orgId: r.org_id,
+    teamId: r.team_id === "" ? null : r.team_id,
+    schedule: r.schedule,
+    url: r.url,
+    updatedBy: r.updated_by,
     updatedAt: r.updated_at,
   };
 }
@@ -431,6 +451,28 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
           binds: [o.sortOrder, updatedAt, o.id],
         })),
       );
+    },
+
+    // ---- onboarding meetings ('' = 全体) ----
+    async listOnboardingMeetings(orgId): Promise<OnboardingMeetingRow[]> {
+      const rows = await db.all<OnboardingMeetingDbRow>(
+        `SELECT * FROM member_onboarding_meetings WHERE org_id = ?`,
+        orgId,
+      );
+      return rows.map(toOnboardingMeetingRow);
+    },
+    async upsertOnboardingMeeting(row: OnboardingMeetingRow): Promise<void> {
+      await db.run(
+        `INSERT INTO member_onboarding_meetings (org_id, team_id, schedule, url, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (org_id, team_id) DO UPDATE SET
+           schedule = excluded.schedule, url = excluded.url,
+           updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+        row.orgId, row.teamId ?? "", row.schedule, row.url, row.updatedBy, row.updatedAt,
+      );
+    },
+    async deleteOnboardingMeeting(orgId, teamId): Promise<void> {
+      await db.run(`DELETE FROM member_onboarding_meetings WHERE org_id = ? AND team_id = ?`, orgId, teamId ?? "");
     },
   } satisfies MemberRepo;
 }
