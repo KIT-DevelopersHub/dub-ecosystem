@@ -59,6 +59,9 @@ export interface Channel extends common.Versioned {
   memberCount: number;
   createdAt: common.ISODateTime;
   updatedAt: common.ISODateTime;
+  // type === "dm" only: participants. A DM is labelled by "the other side", which
+  // differs per viewer, so the stored `name` is just a fallback.
+  memberIds?: common.UserId[];
 }
 
 export interface ChannelMember {
@@ -99,6 +102,7 @@ export interface CreateChannelRequest {
   name: string;
   topic?: string;
   eventId?: common.EventId; // required when type === "event"
+  memberIds?: common.UserId[]; // initial members; for a DM, the other participant(s)
 }
 
 export interface UpdateChannelRequest {

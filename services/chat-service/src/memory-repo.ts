@@ -43,6 +43,12 @@ export class InMemoryChatRepo implements ChatRepo {
     }
     this.channels.set(row.id, { ...row });
   }
+  async createChannelWithMembers(row: ChannelRow, members: MemberRow[]): Promise<boolean> {
+    if (row.dmKey && [...this.channels.values()].some((c) => c.dmKey === row.dmKey)) return false;
+    this.channels.set(row.id, { ...row });
+    for (const m of members) this.members.set(this.mkey(m.channelId, m.userId), { ...m });
+    return true;
+  }
   async getChannel(id: common.ChannelId): Promise<ChannelRow | null> {
     const r = this.channels.get(id);
     return r ? { ...r } : null;
@@ -90,6 +96,13 @@ export class InMemoryChatRepo implements ChatRepo {
   }
   async listMembers(channelId: common.ChannelId): Promise<MemberRow[]> {
     return [...this.members.values()].filter((m) => m.channelId === channelId).map((m) => ({ ...m }));
+  }
+  async memberIdsFor(channelIds: common.ChannelId[]): Promise<Map<string, common.UserId[]>> {
+    const out = new Map<string, common.UserId[]>();
+    for (const m of this.members.values()) {
+      if (channelIds.includes(m.channelId)) out.set(m.channelId, [...(out.get(m.channelId) ?? []), m.userId]);
+    }
+    return out;
   }
   async membershipsForUser(userId: common.UserId): Promise<MemberRow[]> {
     return [...this.members.values()].filter((m) => m.userId === userId).map((m) => ({ ...m }));

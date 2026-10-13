@@ -107,6 +107,35 @@ describe("d1-repo: channels", () => {
     await expect(repo.createChannel(dup)).rejects.toThrow();
   });
 
+  it("createChannelWithMembers writes row + members together, and nothing on a dm_key clash", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const key = `dm_${id.evt}`;
+    const a = channel({ id: id.chan(1), type: "dm", visibility: "private", dmKey: key, createdBy: id.user(1) });
+    expect(await repo.createChannelWithMembers(a, [member(a.id, id.user(1)), member(a.id, id.user(2))])).toBe(true);
+    expect((await repo.listMembers(a.id)).map((m) => m.userId)).toEqual([id.user(1), id.user(2)]);
+
+    // The racing loser: same dm_key, different channel id -> no row, no orphan members.
+    const b = channel({ id: id.chan(2), type: "dm", visibility: "private", dmKey: key, createdBy: id.user(2) });
+    expect(await repo.createChannelWithMembers(b, [member(b.id, id.user(2)), member(b.id, id.user(1))])).toBe(false);
+    expect(await repo.getChannel(b.id)).toBeNull();
+    expect(await repo.listMembers(b.id)).toEqual([]);
+  });
+
+  it("memberIdsFor groups members of many channels in one call", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    for (const n of [1, 2]) await repo.createChannel(channel({ id: id.chan(n), createdBy: id.user(1) }));
+    await repo.addMember(member(id.chan(1), id.user(1)));
+    await repo.addMember(member(id.chan(1), id.user(2)));
+    await repo.addMember(member(id.chan(2), id.user(3)));
+    const got = await repo.memberIdsFor([id.chan(1), id.chan(2), id.chan(3)]);
+    expect(got.get(id.chan(1))).toEqual([id.user(1), id.user(2)]);
+    expect(got.get(id.chan(2))).toEqual([id.user(3)]);
+    expect(got.has(id.chan(3))).toBe(false);
+    expect((await repo.memberIdsFor([])).size).toBe(0);
+  });
+
   it("listChannelsForUser: public visible to non-members, private only to members", async () => {
     const repo = makeRepo();
     const id = ns();

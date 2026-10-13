@@ -55,6 +55,8 @@ export interface ChatApiClient {
   listUnread(): Promise<UnreadSummary[]>; // subject from auth header — no ?userId= (chat review #10/#13)
   getWsTicket(id: common.ChannelId): Promise<WsTicketResponse>;
   resolveUsers(ids: common.UserId[]): Promise<identity.UserSummary[]>; // batch ≤50 (theme2 B1)
+  /** Active members matching `q` (name / email) for the new-DM picker. Empty q = first page. */
+  searchUsers(q: string): Promise<identity.UserSummary[]>;
   /**
    * チーム単位メンションに必要なチーム情報 (member-service が単一の真実源):
    * 候補 + チップの表示名に使う `teams` と、自分宛メンション判定に使う `myTeamIds`。
@@ -97,6 +99,7 @@ const IDENTITY = `${API}/identity`;
 // chat 側にチームを複製しない。
 const MEMBERS = `${API}/members`;
 const IDENTITY_BATCH_MAX = 50;
+const USER_SEARCH_LIMIT = 20;
 
 function qs(params: Record<string, string | number | undefined>): string {
   const sp = new URLSearchParams();
@@ -246,6 +249,13 @@ export class HttpChatClient implements ChatApiClient {
     const batch = ids.slice(0, IDENTITY_BATCH_MAX);
     // identity /users returns common.Paginated<UserSummary> ({ items, nextCursor }); unwrap to array.
     const res = await this.request<unknown>("GET", `${IDENTITY}/users${qs({ ids: batch.join(",") })}`);
+    return unwrapItems<identity.UserSummary>(res);
+  }
+  async searchUsers(q: string): Promise<identity.UserSummary[]> {
+    const res = await this.request<unknown>(
+      "GET",
+      `${IDENTITY}/users${qs({ status: "active", q: q.trim() || undefined, limit: USER_SEARCH_LIMIT })}`,
+    );
     return unwrapItems<identity.UserSummary>(res);
   }
   async listMentionTeams(): Promise<MentionTeams> {
