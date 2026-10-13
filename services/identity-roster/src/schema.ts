@@ -159,12 +159,28 @@ CREATE TABLE IF NOT EXISTS identity_webauthn_challenges (
 );
 `;
 
+// Cross-role mail visibility (infra/d1/migrations/identity/0018): holders of role_id also
+// see the inbound mail of target_role_id's holders. Directional; same-role sharing stays the
+// mail:read_role_shared key. Both FKs cascade.
+const ROLE_MAIL_VISIBILITY_UP = `
+CREATE TABLE IF NOT EXISTS identity_role_mail_visibility (
+  role_id        TEXT NOT NULL REFERENCES identity_roles(id) ON DELETE CASCADE,
+  target_role_id TEXT NOT NULL REFERENCES identity_roles(id) ON DELETE CASCADE,
+  PRIMARY KEY (role_id, target_role_id),
+  CHECK (role_id <> target_role_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_identity_role_mail_visibility_target
+  ON identity_role_mail_visibility (target_role_id);
+`;
+
 export const IDENTITY_MIGRATIONS: Migration[] = [
   { id: "0001_init", namespace: "identity", up: SCHEMA_UP },
   { id: "0002_system_roles", namespace: "identity", up: SEED_UP },
   { id: "0003_user_source", namespace: "identity", up: SOURCE_UP },
   { id: "0004_user_furigana", namespace: "identity", up: FURIGANA_UP },
   { id: "0005_webauthn_credentials", namespace: "identity", up: WEBAUTHN_UP },
+  { id: "0006_role_mail_visibility", namespace: "identity", up: ROLE_MAIL_VISIBILITY_UP },
 ];
 
 export const IDENTITY_SCHEMA_SQL = SCHEMA_UP;

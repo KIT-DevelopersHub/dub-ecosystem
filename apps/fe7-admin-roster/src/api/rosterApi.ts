@@ -14,6 +14,7 @@ import type {
   EmailRoutingSyncPreview,
   OffboardUserResult,
   RosterUser,
+  RoleView,
   SyncEmailRoutingAddress,
   SyncEmailRoutingResult,
 } from "../contracts/pending";
@@ -62,9 +63,9 @@ export interface RosterApi {
   previewEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<EmailRoutingSyncPreview>;
   /** Reconcile the roster with the @developershub.jp Email Routing addresses. */
   syncEmailRouting(addresses: SyncEmailRoutingAddress[]): Promise<SyncEmailRoutingResult>;
-  listRoles(): Promise<common.Paginated<identity.Role>>;
-  createRole(req: CreateRoleRequest): Promise<identity.Role>;
-  updateRole(id: common.RoleId, req: UpdateRoleRequest): Promise<identity.Role>;
+  listRoles(): Promise<common.Paginated<RoleView>>;
+  createRole(req: CreateRoleRequest): Promise<RoleView>;
+  updateRole(id: common.RoleId, req: UpdateRoleRequest): Promise<RoleView>;
   deleteRole(id: common.RoleId): Promise<void>;
   listUserRoles(userId: common.UserId): Promise<RoleAssignment[]>;
   assignRole(userId: common.UserId, req: AssignRoleRequest): Promise<RoleAssignment>;
@@ -112,9 +113,9 @@ export function createRosterApi(client: ResourceClient): RosterApi {
       client.post<EmailRoutingSyncPreview>(`${IDENTITY}/users/sync-email-routing/preview`, { addresses }),
     syncEmailRouting: (addresses) =>
       client.post<SyncEmailRoutingResult>(`${IDENTITY}/users/sync-email-routing`, { addresses }),
-    listRoles: () => client.get<common.Paginated<identity.Role>>(`${IDENTITY}/roles`),
-    createRole: (req) => client.post<identity.Role>(`${IDENTITY}/roles`, req),
-    updateRole: (id, req) => client.patch<identity.Role>(`${IDENTITY}/roles/${id}`, req),
+    listRoles: () => client.get<common.Paginated<RoleView>>(`${IDENTITY}/roles`),
+    createRole: (req) => client.post<RoleView>(`${IDENTITY}/roles`, req),
+    updateRole: (id, req) => client.patch<RoleView>(`${IDENTITY}/roles/${id}`, req),
     deleteRole: (id) => client.delete(`${IDENTITY}/roles/${id}`),
     listUserRoles: (userId) => client.get<RoleAssignment[]>(`${IDENTITY}/users/${userId}/roles`),
     assignRole: (userId, req) =>

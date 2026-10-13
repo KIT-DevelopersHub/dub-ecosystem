@@ -18,6 +18,7 @@ import type {
   UpdateRoleRequest,
   AssignRoleRequest,
   RoleAssignment,
+  RoleView,
   RosterUser,
   SyncEmailRoutingResult,
   EmailRoutingSyncPreview,
@@ -51,7 +52,7 @@ export function useUserRoles(userId: common.UserId): UseQueryResult<RoleAssignme
   return useQuery({ queryKey: queryKeys.userRoles(userId), queryFn: () => api.listUserRoles(userId), enabled: !!userId });
 }
 
-export function useRoles(): UseQueryResult<common.Paginated<identity.Role>> {
+export function useRoles(): UseQueryResult<common.Paginated<RoleView>> {
   const { api } = useRosterContext();
   return useQuery({ queryKey: queryKeys.roles(), queryFn: () => api.listRoles() });
 }
