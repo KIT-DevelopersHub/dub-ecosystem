@@ -82,6 +82,17 @@ describe("extractPolicyRoutes", () => {
       ["PATCH /lp/links/:id", { app: "lp", level: "edit" }],
     ]);
   });
+
+  it("reads the { permission } option as a key and throws on a guard it cannot read", () => {
+    const routes = extractAppGuardRoutes(`
+      const publish = deps.authz.requireAppAccess("lp", "edit", { permission: "lp:publish" });
+      app.post("/lp/publish", publish, async (c) => c.json({}));`);
+    expect(routes).toMatchObject([{ method: "POST", path: "/lp/publish", keys: ["lp:publish"], appLevel: { app: "lp", level: "edit" } }]);
+    expect(() =>
+      extractAppGuardRoutes(`const owner = deps.authz.requireOwner();
+      app.post("/lp/x", owner, async (c) => c.json({}));`),
+    ).toThrow(/owner/);
+  });
 });
 
 describe("operate catalog", () => {
