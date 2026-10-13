@@ -83,7 +83,7 @@ export function OnboardingAdminPage(): JSX.Element {
       <SortableList<OnboardingItem>
         items={items}
         getItemId={(i) => i.id}
-        disabled={!canEdit || hasPending || reorderMut.isPending}
+        disabled={!canEdit || hasPending || reorderMut.isPending || deleteMut.isPending}
         aria-label="案内する項目（ドラッグで並び替え）"
         testId="onboarding-admin-list"
         className={styles.onboardingList}

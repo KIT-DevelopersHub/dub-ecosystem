@@ -19,5 +19,7 @@ export async function publicOnboardingHandler(
   const ctx: RequestContext = { requestId: getRequestId(c), userId: SYSTEM_ACTOR, caller: "api-gateway" };
   const res = await svc.member.get<member.ListOnboardingItemsResponse>(ctx, "/members/internal/onboarding");
   const body: member.ListOnboardingItemsResponse = { items: res.items };
+  // 管理者が書く静的な案内なので短くキャッシュし、閲覧のたびの D1 読み取りを抑える。
+  c.header("Cache-Control", "public, max-age=60");
   return c.json(body);
 }

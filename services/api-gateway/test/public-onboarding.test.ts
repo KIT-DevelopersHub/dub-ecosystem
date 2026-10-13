@@ -28,6 +28,7 @@ describe("GET /api/v1/public/onboarding", () => {
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ items: [ITEM] });
+    expect(res.headers.get("cache-control")).toBe("public, max-age=60");
     expect(member.requests).toHaveLength(1);
     expect(member.requests[0]!.headers.get("x-dub-internal")).toBeTruthy();
   });
