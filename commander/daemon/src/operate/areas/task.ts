@@ -29,7 +29,7 @@ export const TASK: AreaSpec = {
       service: S,
       requires: VIEW,
       description: "タスクの一覧を取得する",
-      hint: "query.eventId が実質必須（無いと400）。items[].id・title・status・priority・assigneeId・startAt・dueAt・version",
+      hint: "query.eventId が実質必須（無いと400）。teamId・assigneeId・status で API 側で絞れる。items[].id・title・status・priority・assigneeId・teamId・startAt・dueAt・version",
       query: ["eventId", "assigneeId", "teamId", "createdById", "status", "limit", "cursor"],
     }),
     read({

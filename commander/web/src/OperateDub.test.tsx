@@ -21,7 +21,7 @@ const EVENT_PREVIEW: Preview = {
   previewId: "pv1",
   summary: "概要を差し替え",
   environment: "staging",
-  reads: [{ stepId: "list", entryId: "events.list", description: "イベントの一覧を取得する", ok: true, count: 2, sample: '{"items":[]}' }],
+  reads: [{ stepId: "list", entryId: "events.list", description: "イベントの一覧を取得する", ok: true, count: 2, rows: 2, bytes: 60, table: "items（2件）\n| id | title |\n|---|---|\n| ev1 | 北陸 |\n| ev2 | LT会 |" }],
   writes: [
     {
       stepId: "upd",
@@ -81,9 +81,9 @@ function sequencedClient(results: string[]): CommanderClient & { startRun: Retur
   };
 }
 
-function setup(opts: { results?: string[]; preview?: Preview; execute?: ExecutionResult; previewError?: Error } = {}) {
+function setup(opts: { results?: string[]; preview?: Preview; previews?: Preview[]; execute?: ExecutionResult; previewError?: Error } = {}) {
   const client = sequencedClient(opts.results ?? [planText("概要を差し替えます")]);
-  const operateClient = makeFakeOperateClient({ preview: opts.preview ?? EVENT_PREVIEW, execute: opts.execute ?? DONE, previewError: opts.previewError });
+  const operateClient = makeFakeOperateClient({ preview: opts.preview ?? EVENT_PREVIEW, previews: opts.previews, execute: opts.execute ?? DONE, previewError: opts.previewError });
   const api: FakeApi = makeFakeApi();
   render(
     <ChatProvider api={api} client={client}>
@@ -125,11 +125,95 @@ describe("<OperateDub> planner", () => {
     const readOnly: Preview = { ...EVENT_PREVIEW, writes: [] };
     const { client, api } = setup({ results: [planText("イベントを数えます"), "イベントは2件です。"], preview: readOnly });
     await send("イベントは何件？");
-    await screen.findByText("イベントは2件です。");
+    await screen.findByText(/イベントは2件です/);
     expect(client.startRun).toHaveBeenCalledTimes(2);
     expect(client.startRun.mock.calls[1]![0]).toContain("[システム]\n【確認結果】読み取り1件を実行");
     expect(persisted(api, "【確認結果】")).toHaveLength(1);
     expect(screen.getAllByTestId("operate-conclusion").map((c) => c.textContent)).toContain("結論: 読み取りだけを行いました。データは変更していません");
+  });
+});
+
+describe("<OperateDub> read budget", () => {
+  beforeEach(() => localStorage.clear());
+
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => `| task_${i} | タスク${i} | member_team_corp |`).join("\n");
+  const readOnly = (n: number, bytes: number): Preview => ({
+    ...EVENT_PREVIEW,
+    writes: [],
+    reads: [{ stepId: "tasks", entryId: "tasks.list", description: "タスクの一覧を取得する", ok: true, count: 2, rows: n, bytes, table: `items（${n}件）\n${rows(n)}` }],
+  });
+  const needsFull =
+    '```json\n{"type":"needsFull","reason":"全員分の情報が要ります","options":[{"label":"法人チームだけ","plan":{"summary":"法人だけ","steps":[{"id":"t","op":"events.list"}]}}]}\n```';
+
+  it("hands every row of a large list to the answerer, led by the environment", async () => {
+    const { client, api } = setup({ results: [planText("タスクを読みます"), "法人チームのタスクは400件です。"], preview: readOnly(400, 20_000) });
+    await send("法人メンバーのタスクって今何かある？");
+    await screen.findByText(/法人チームのタスクは400件です/);
+    const prompt = client.startRun.mock.calls[1]![0] as string;
+    expect(prompt).toContain("| task_0 | タスク0 |");
+    expect(prompt).toContain("| task_399 | タスク399 | member_team_corp |");
+    const answer = api._messages.at(-1)!;
+    expect(answer.text.startsWith("**接続先: staging**（テスト用の seed データです")).toBe(true);
+  });
+
+  it("renders the answer's Markdown tables as tables", async () => {
+    setup({ results: [planText("数えます"), "**結論**: 2件です。\n\n| タスク | 状態 |\n|---|---|\n| A | todo |\n| B | done |"], preview: readOnly(2, 100) });
+    await send("タスクは？");
+    const answer = await screen.findByTestId("operate-answer");
+    expect(within(answer).getAllByRole("row")).toHaveLength(3);
+    expect(answer.textContent).not.toContain("|---|");
+  });
+
+  it("over budget: back to the planner; needsFull asks the operator and answers only after 全部読む", async () => {
+    const { client, operateClient } = setup({ results: [planText("全員の全情報を読みます"), needsFull, "全員分を読みました。"], preview: readOnly(900, 40_000) });
+    await send("全メンバーの全情報を見せて");
+    const card = await screen.findByTestId("operate-budget");
+    expect(within(card).getByTestId("operate-budget-size").textContent).toContain("900行・約 39.1 KB");
+    expect(within(card).getByTestId("operate-narrow-option").textContent).toBe("絞り込む: 法人チームだけ");
+    expect(client.startRun).toHaveBeenCalledTimes(2);
+    expect(client.startRun.mock.calls[1]![0]).toContain("使える絞り込み");
+    expect(operateClient.preview).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(card).getByTestId("operate-read-all"));
+    await screen.findByText(/全員分を読みました/);
+    expect(client.startRun).toHaveBeenCalledTimes(3);
+    expect(client.startRun.mock.calls[2]![0]).toContain("| task_899 |");
+  });
+
+  it("絞り込む previews the chosen narrowing and answers from it", async () => {
+    const { client, operateClient } = setup({
+      results: [planText("全員の全情報を読みます"), needsFull, "法人チームは2人です。"],
+      previews: [readOnly(900, 40_000), readOnly(2, 100)],
+    });
+    await send("全メンバーの全情報を見せて");
+    fireEvent.click(await screen.findByTestId("operate-narrow-option"));
+    await screen.findByText(/法人チームは2人です/);
+    expect(operateClient.preview).toHaveBeenLastCalledWith({ type: "plan", summary: "法人だけ", steps: [{ id: "t", op: "events.list" }] });
+    expect(client.startRun).toHaveBeenCalledTimes(3);
+  });
+
+  it("a plan with writes is never sent back to the planner, however big its reads", async () => {
+    const big = { ...EVENT_PREVIEW, reads: [{ ...EVENT_PREVIEW.reads[0]!, bytes: 90_000 }] };
+    const { client, api } = setup({ preview: big });
+    await send("北陸の概要を差し替えて");
+    await screen.findByTestId("operate-approval");
+    expect(client.startRun).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("operate-budget")).toBeNull();
+    await waitFor(() => expect(persisted(api, "【確認結果】")).toHaveLength(1));
+    expect(persisted(api, "【確認結果】")[0]).not.toContain("---読み取りデータ---");
+  });
+
+  it("keeps plan JSON and read data out of the chat body (folded under 詳細)", async () => {
+    setup({ results: [planText("イベントを数えます"), "イベントは2件です。"], preview: { ...EVENT_PREVIEW, writes: [] } });
+    await send("イベントは何件？");
+    await screen.findByText(/イベントは2件です/);
+    for (const d of document.querySelectorAll("details")) expect((d as HTMLDetailsElement).open).toBe(false);
+    const visible = [...document.querySelectorAll("[data-testid^=chat-msg-] *")]
+      .filter((el) => !el.closest("details") && el.children.length === 0)
+      .map((el) => el.textContent ?? "")
+      .join("\n");
+    expect(visible).not.toMatch(/"steps"|\{"|```|---読み取りデータ---/);
+    expect(screen.getByTestId("operate-plan-details").textContent).toContain('"op": "events.list"');
   });
 });
 
