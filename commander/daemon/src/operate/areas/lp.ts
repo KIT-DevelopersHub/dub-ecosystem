@@ -93,7 +93,7 @@ export const LP: AreaSpec = {
     },
   ],
   excluded: [],
-  // 公開版の切り替えとチケット販売は未開放（POST /lp/publish・/lp/tickets/enabled は
+  // 公開版の切り替えとチケット販売は未開放（POST /lp/publish・/lp/tickets/enabled・/lp/tickets/cta は
   // lp:publish 付きのため抽出対象外）。
   pending: [
     { service: S, route: "GET /lp/publish" },

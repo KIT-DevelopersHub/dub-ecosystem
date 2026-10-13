@@ -30,11 +30,14 @@ export class InMemoryLpRepo implements LpRepo {
     return r ? clone(r) : null;
   }
   private upsertSettings(site: string, patch: Partial<TicketSettingsRow>, updatedBy: string, updatedAt: string) {
-    const cur = this.ticketSettings.get(site) ?? { site, enabled: false, fields: [], updatedBy: null, updatedAt };
+    const cur = this.ticketSettings.get(site) ?? { site, enabled: false, ctaEnabled: false, fields: [], updatedBy: null, updatedAt };
     this.ticketSettings.set(site, { ...cur, ...clone(patch), updatedBy, updatedAt });
   }
   async setTicketEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string) {
     this.upsertSettings(site, { enabled }, updatedBy, updatedAt);
+  }
+  async setTicketCta(site: string, ctaEnabled: boolean, updatedBy: string, updatedAt: string) {
+    this.upsertSettings(site, { ctaEnabled }, updatedBy, updatedAt);
   }
   async setTicketFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string) {
     this.upsertSettings(site, { fields }, updatedBy, updatedAt);
@@ -53,31 +56,38 @@ export class InMemoryLpRepo implements LpRepo {
     const i = this.ticketTypes.findIndex((x) => x.site === row.site && x.id === row.id);
     if (i >= 0) this.ticketTypes[i] = clone(row);
   }
+  private held(site: string, ticketTypeId: string, pendingSince: string): number {
+    return this.orders
+      .filter((o) => o.site === site && (o.status === "paid" || (o.status === "pending" && o.createdAt >= pendingSince)))
+      .flatMap((o) => o.items)
+      .filter((i) => i.ticketTypeId === ticketTypeId)
+      .reduce((n, i) => n + i.quantity, 0);
+  }
   async ticketAggregates(site: string, pendingSince: string) {
     const m = new Map<string, TicketTypeAgg>();
     for (const o of this.orders.filter((x) => x.site === site && x.status !== "expired")) {
-      const a = m.get(o.ticketTypeId) ?? { ticketTypeId: o.ticketTypeId, sold: 0, pending: 0, revenueJpy: 0 };
-      if (o.status === "paid") {
-        a.sold += 1;
-        a.revenueJpy += o.amountJpy;
-      } else if (o.createdAt >= pendingSince) a.pending += 1;
-      m.set(o.ticketTypeId, a);
+      for (const i of o.items) {
+        const a = m.get(i.ticketTypeId) ?? { ticketTypeId: i.ticketTypeId, sold: 0, pending: 0, revenueJpy: 0 };
+        if (o.status === "paid") {
+          a.sold += i.quantity;
+          a.revenueJpy += i.quantity * i.unitPriceJpy;
+        } else if (o.createdAt >= pendingSince) a.pending += i.quantity;
+        m.set(i.ticketTypeId, a);
+      }
     }
     return [...m.values()];
   }
   async countOrdersSince(site: string, since: string) {
     return this.orders.filter((o) => o.site === site && o.createdAt >= since).length;
   }
-  async insertOrderIfAvailable(row: TicketOrderRow, capacity: number | null, pendingSince: string) {
-    const held = this.orders.filter(
-      (o) =>
-        o.site === row.site &&
-        o.ticketTypeId === row.ticketTypeId &&
-        (o.status === "paid" || (o.status === "pending" && o.createdAt >= pendingSince)),
-    ).length;
-    if (capacity !== null && held >= capacity) return false;
+  async insertOrderIfAvailable(row: TicketOrderRow, capacities: ReadonlyMap<string, number | null>, pendingSince: string) {
+    const short = row.items.find((i) => {
+      const capacity = capacities.get(i.ticketTypeId) ?? null;
+      return capacity !== null && this.held(row.site, i.ticketTypeId, pendingSince) + i.quantity > capacity;
+    });
+    if (short) return { ok: false as const, ticketTypeId: short.ticketTypeId };
     this.orders.push(clone(row));
-    return true;
+    return { ok: true as const };
   }
   async getOrder(site: string, id: string) {
     const o = this.orders.find((x) => x.site === site && x.id === id);

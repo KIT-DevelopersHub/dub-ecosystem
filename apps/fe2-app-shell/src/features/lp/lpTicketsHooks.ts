@@ -65,6 +65,38 @@ export function useSetTicketsEnabled() {
   });
 }
 
+/** LP の「参加登録」ボタン差し替え（ctaEnabled）。販売の公開と同じ楽観更新 + ロールバック。 */
+export function useSetTicketsCta() {
+  const api = useLpApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = lpTicketsKey();
+  return useMutation<LpTicketsState, unknown, { enabled: boolean }, Ctx>({
+    mutationFn: (vars) => api.setTicketsCta(vars),
+    onMutate: async ({ enabled }) => {
+      await qc.cancelQueries({ queryKey: key, exact: true });
+      const prev = qc.getQueryData<LpTicketsState>(key);
+      if (prev) qc.setQueryData<LpTicketsState>(key, { ...prev, ctaEnabled: enabled });
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, "参加登録ボタンの設定を切り替えられませんでした") });
+    },
+    onSuccess: (next) => {
+      qc.setQueryData(key, next);
+      toast.show({
+        kind: "success",
+        title: next.ctaEnabled
+          ? next.enabled
+            ? "LP の参加登録ボタンを「参加チケットを購入」に切り替えました"
+            : "参加登録ボタンの切り替えを予約しました（販売を公開すると有効になります）"
+          : "LP の参加登録ボタンを元に戻しました",
+      });
+    },
+  });
+}
+
 export function useSaveTicketFields() {
   const api = useLpApi();
   const qc = useQueryClient();

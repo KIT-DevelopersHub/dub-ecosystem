@@ -1,6 +1,13 @@
 // LP管理 → チケット の純粋関数。検証ルールは契約（lp-analytics 側の 400 判定）と同じ値で持つ:
 // サーバーで弾かれる入力を先に画面で止め、楽観更新が即ロールバックされる体験を作らない。
-import type { LpTicketField, LpTicketFieldType, LpTicketOrderStatus, LpTicketTypeInput } from "./lpApi.tsx";
+import type {
+  LpTicketField,
+  LpTicketFieldType,
+  LpTicketOrderItem,
+  LpTicketOrderStatus,
+  LpTicketTypeInput,
+  LpTicketTypeSummary,
+} from "./lpApi.tsx";
 
 export const TICKET_NAME_MAX = 60;
 export const TICKET_DESCRIPTION_MAX = 300;
@@ -8,6 +15,9 @@ export const TICKET_PRICE_MAX = 1_000_000;
 /** Stripe の JPY 最低決済額。1..49 円は作れない（0 円 = 無料は可）。 */
 export const TICKET_PRICE_MIN_PAID = 50;
 export const TICKET_CAPACITY_MAX = 100_000;
+export const TICKET_DAY_LABEL_MAX = 30;
+export const TICKET_MAX_PER_ORDER_MAX = 20;
+export const TICKET_MAX_PER_ORDER_DEFAULT = 10;
 export const TICKET_FIELDS_MAX = 20;
 export const TICKET_FIELD_LABEL_MAX = 60;
 export const TICKET_FIELD_OPTIONS_MAX = 20;
@@ -47,10 +57,15 @@ export interface TicketTypeDraft {
   price: string;
   /** 空 = 無制限 */
   capacity: string;
+  /** 空 = 通し/共通（日付なし） */
+  dayLabel: string;
+  maxPerOrder: string;
   active: boolean;
 }
 
-export type TicketTypeDraftErrors = Partial<Record<"name" | "description" | "price" | "capacity", string>>;
+export type TicketTypeDraftErrors = Partial<
+  Record<"name" | "description" | "price" | "capacity" | "dayLabel" | "maxPerOrder", string>
+>;
 
 const INT_RE = /^\d+$/;
 
@@ -84,8 +99,52 @@ export function validateTicketType(draft: TicketTypeDraft): {
     }
   }
 
+  const dayLabel = draft.dayLabel.trim();
+  if (dayLabel.length > TICKET_DAY_LABEL_MAX) errors.dayLabel = `対象日は${TICKET_DAY_LABEL_MAX}文字以内にしてください`;
+
+  const maxText = draft.maxPerOrder.trim();
+  const maxPerOrder = Number(maxText);
+  if (!INT_RE.test(maxText) || maxPerOrder < 1 || maxPerOrder > TICKET_MAX_PER_ORDER_MAX) {
+    errors.maxPerOrder = `1 回の購入上限は 1〜${TICKET_MAX_PER_ORDER_MAX} の整数（枚）で入力してください`;
+  }
+
   if (Object.keys(errors).length > 0) return { errors, input: null };
-  return { errors, input: { name, description, priceJpy: price, capacity, active: draft.active } };
+  return {
+    errors,
+    input: { name, description, priceJpy: price, capacity, dayLabel, maxPerOrder, active: draft.active },
+  };
+}
+
+export const NO_DAY_LABEL = "通し・共通";
+
+export interface TicketTypeGroup {
+  /** "" = 日付なし */
+  dayLabel: string;
+  types: LpTicketTypeSummary[];
+  sold: number;
+  revenueJpy: number;
+}
+
+/** 券種を対象日でまとめる。グループの並びは各日の最初の券種の並び順（sortOrder 順の入力を前提）。 */
+export function groupTicketTypesByDay(types: LpTicketTypeSummary[]): TicketTypeGroup[] {
+  const groups = new Map<string, TicketTypeGroup>();
+  for (const t of types) {
+    const key = t.dayLabel.trim();
+    let g = groups.get(key);
+    if (!g) {
+      g = { dayLabel: key, types: [], sold: 0, revenueJpy: 0 };
+      groups.set(key, g);
+    }
+    g.types.push(t);
+    g.sold += t.stats.sold;
+    g.revenueJpy += t.stats.revenueJpy;
+  }
+  return [...groups.values()];
+}
+
+/** 注文明細 1 行の表示名（例「一般 · Day 1」）。 */
+export function orderItemLabel(item: LpTicketOrderItem): string {
+  return item.dayLabel ? `${item.ticketTypeName} · ${item.dayLabel}` : item.ticketTypeName;
 }
 
 /** 項目ごとのエラー（id → 文言）。空なら保存できる。 */

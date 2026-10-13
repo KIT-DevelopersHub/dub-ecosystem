@@ -5,7 +5,7 @@
 // NOTE: only `export default` here — workerd treats named exports as entrypoints.
 import manifest from "../versions.json";
 import { previewBanner, resolveRequest, rewriteLocation } from "./route.ts";
-import { DEMO_CONFIG, handleTickets, isTicketsPath, parseConfig, ticketsCta, type TicketConfig } from "./tickets.ts";
+import { DEMO_CONFIG, handleTickets, isTicketsPath, parseConfig, ticketsInjection, type TicketConfig } from "./tickets.ts";
 
 interface Fetcher {
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
@@ -134,7 +134,7 @@ export default {
 
     const isHtml = (headers.get("content-type") ?? "").includes("text/html");
     const cfg = isHtml && res.status === 200 && tickets ? await tickets : null;
-    const inject = (r.preview ? previewBanner(r.version, published) : "") + (cfg?.enabled ? ticketsCta() : "");
+    const inject = (r.preview ? previewBanner(r.version, published) : "") + ticketsInjection(cfg);
     if (inject) headers.delete("etag");
     const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     if (!inject || !isHtml) return out;

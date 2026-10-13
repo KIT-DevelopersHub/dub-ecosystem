@@ -10,6 +10,7 @@ import type {
   LpTicketField,
   LpTicketFieldType,
   LpTicketOrder,
+  LpTicketOrderItem,
   LpTicketOrderStatus,
   LpTicketOrdersPage,
   LpTicketsState,
@@ -30,6 +31,11 @@ export const TICKET_PRICE_MAX = 1_000_000;
 /** Stripe JPY minimum charge. 1..49 is rejected; 0 = free. */
 export const STRIPE_JPY_MIN = 50;
 export const TICKET_CAPACITY_MAX = 100_000;
+export const DAY_LABEL_MAX = 30;
+export const MAX_PER_ORDER_MAX = 20;
+export const DEFAULT_MAX_PER_ORDER = 10;
+/** 1 回の購入の合計枚数上限（券種をまたいで）。 */
+export const ORDER_QTY_MAX = 20;
 export const FIELDS_MAX = 20;
 export const FIELD_LABEL_MAX = 60;
 export const FIELD_OPTIONS_MAX = 20;
@@ -97,6 +103,17 @@ export function parseTicketTypeInput(body: unknown, partial: boolean): Partial<L
     if (c !== null && (!isInt(c) || c < 1 || c > TICKET_CAPACITY_MAX)) bad.push({ field: "capacity", reason: "invalid" });
     else out.capacity = c;
   }
+  if (has("dayLabel") || !partial) {
+    const d = b.dayLabel === undefined || b.dayLabel === null ? "" : b.dayLabel;
+    if (typeof d !== "string") bad.push({ field: "dayLabel", reason: "invalid" });
+    else if (d.trim().length > DAY_LABEL_MAX) bad.push({ field: "dayLabel", reason: "too_long" });
+    else out.dayLabel = d.trim();
+  }
+  if (has("maxPerOrder") || !partial) {
+    const m = b.maxPerOrder === undefined ? DEFAULT_MAX_PER_ORDER : b.maxPerOrder;
+    if (!isInt(m) || m < 1 || m > MAX_PER_ORDER_MAX) bad.push({ field: "maxPerOrder", reason: "invalid" });
+    else out.maxPerOrder = m;
+  }
   if (has("active") || !partial) {
     const a = b.active === undefined ? true : b.active;
     if (typeof a !== "boolean") bad.push({ field: "active", reason: "invalid" });
@@ -141,8 +158,13 @@ export function parseFields(body: unknown): LpTicketField[] {
   return out;
 }
 
-export interface CheckoutInput {
+export interface CheckoutItemInput {
   ticketTypeId: string;
+  quantity: number;
+}
+
+export interface CheckoutInput {
+  items: CheckoutItemInput[];
   name: string;
   email: string;
   answers: LpTicketAnswer[];
@@ -153,8 +175,19 @@ export interface CheckoutInput {
 export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutInput {
   const b = (body ?? {}) as Record<string, unknown>;
   const bad: FieldError[] = [];
-  const ticketTypeId = typeof b.ticketTypeId === "string" ? b.ticketTypeId.trim() : "";
-  if (!ticketTypeId) bad.push({ field: "ticketTypeId", reason: "required" });
+  const items: CheckoutItemInput[] = [];
+  const rawItems = Array.isArray(b.items) ? b.items : [];
+  if (rawItems.length === 0) bad.push({ field: "items", reason: "required" });
+  for (const r0 of rawItems) {
+    const r = (r0 ?? {}) as Record<string, unknown>;
+    const ticketTypeId = typeof r.ticketTypeId === "string" ? r.ticketTypeId.trim() : "";
+    const key = `items.${ticketTypeId}`;
+    if (!ticketTypeId) bad.push({ field: "items", reason: "invalid" });
+    else if (items.some((i) => i.ticketTypeId === ticketTypeId)) bad.push({ field: key, reason: "duplicate" });
+    else if (!isInt(r.quantity) || r.quantity < 1 || r.quantity > ORDER_QTY_MAX) bad.push({ field: key, reason: "invalid" });
+    else items.push({ ticketTypeId, quantity: r.quantity });
+  }
+  if (items.reduce((n, i) => n + i.quantity, 0) > ORDER_QTY_MAX) bad.push({ field: "items", reason: "too_many" });
   const name = typeof b.name === "string" ? b.name.trim() : "";
   if (!name) bad.push({ field: "name", reason: "required" });
   else if (name.length > BUYER_NAME_MAX) bad.push({ field: "name", reason: "too_long" });
@@ -184,7 +217,7 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
     answers.push({ fieldId: f.id, label: f.label, value });
   }
   if (bad.length > 0) throw errors.validationFailed(bad);
-  return { ticketTypeId, name, email, answers, origin };
+  return { items, name, email, answers, origin };
 }
 
 export function statsFor(t: Pick<LpTicketType, "capacity">, agg: TicketTypeAgg | undefined): LpTicketTypeStats {
@@ -213,9 +246,17 @@ const sortTypes = (a: TicketTypeRow, b: TicketTypeRow): number =>
 const toType = ({ site: _s, ...t }: TicketTypeRow): LpTicketType => t;
 const toOrder = ({ site: _s, stripeSessionId: _ss, ...o }: TicketOrderRow): LpTicketOrder => o;
 
-/** 409: no seat left (contract: sold_out). */
-export const soldOut = (): DubError =>
-  new DubError("LP_TICKET_SOLD_OUT", "このチケットは売り切れました", { status: 409, details: { reason: "sold_out" } });
+/** 409: not enough seats left for one of the items (contract: sold_out). */
+export const soldOut = (ticketTypeId: string): DubError =>
+  new DubError("LP_TICKET_SOLD_OUT", "このチケットは残りが足りません", {
+    status: 409,
+    details: { reason: "sold_out", ticketTypeId },
+  });
+
+/** "一般 Day 1 ×2、学生 Day 2 ×1" — the thanks page line. */
+export function orderSummary(items: readonly LpTicketOrderItem[]): string {
+  return items.map((i) => `${i.dayLabel ? `${i.ticketTypeName} ${i.dayLabel}` : i.ticketTypeName} ×${i.quantity}`).join("、");
+}
 /** 503: STRIPE_SECRET_KEY not configured (contract: payment_not_configured). */
 export const paymentNotConfigured = (): DubError =>
   new DubError("LP_PAYMENT_NOT_CONFIGURED", "決済は準備中です", {
@@ -229,12 +270,16 @@ export interface PublicTicketType {
   name: string;
   description: string;
   priceJpy: number;
+  dayLabel: string;
+  maxPerOrder: number;
+  /** Left after paid + held. null = no capacity. */
+  remaining: number | null;
   soldOut: boolean;
 }
 
 export interface ConfirmResult {
   status: LpTicketOrderStatus | "unknown";
-  ticketTypeName?: string;
+  summary?: string;
 }
 
 export class TicketService {
@@ -267,6 +312,7 @@ export class TicketService {
     return {
       site: TICKET_SITE,
       enabled: settings?.enabled ?? false,
+      ctaEnabled: settings?.ctaEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
       publicUrl: `${this.deps.lpBaseUrl.replace(/\/+$/, "")}/tickets`,
       fields: settings?.fields ?? [],
@@ -284,6 +330,13 @@ export class TicketService {
     const enabled = (body as { enabled?: unknown } | null)?.enabled;
     if (typeof enabled !== "boolean") throw errors.validationFailed([{ field: "enabled", reason: "required" }]);
     await this.repo.setTicketEnabled(TICKET_SITE, enabled, ctx.userId, this.deps.now());
+    return this.getState();
+  }
+
+  async setCta(ctx: ReqCtx, body: unknown): Promise<LpTicketsState> {
+    const enabled = (body as { enabled?: unknown } | null)?.enabled;
+    if (typeof enabled !== "boolean") throw errors.validationFailed([{ field: "enabled", reason: "required" }]);
+    await this.repo.setTicketCta(TICKET_SITE, enabled, ctx.userId, this.deps.now());
     return this.getState();
   }
 
@@ -332,6 +385,7 @@ export class TicketService {
 
   async getPublic(): Promise<{
     enabled: boolean;
+    ctaEnabled: boolean;
     paymentReady: boolean;
     fields: LpTicketField[];
     types: PublicTicketType[];
@@ -339,6 +393,7 @@ export class TicketService {
     const [settings, types] = await Promise.all([this.repo.getTicketSettings(TICKET_SITE), this.summaries()]);
     return {
       enabled: settings?.enabled ?? false,
+      ctaEnabled: settings?.ctaEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
       fields: settings?.fields ?? [],
       types: types
@@ -348,6 +403,9 @@ export class TicketService {
           name: t.name,
           description: t.description,
           priceJpy: t.priceJpy,
+          dayLabel: t.dayLabel,
+          maxPerOrder: t.maxPerOrder,
+          remaining: t.stats.remaining,
           soldOut: t.stats.remaining === 0,
         })),
     };
@@ -357,23 +415,39 @@ export class TicketService {
     const settings = await this.repo.getTicketSettings(TICKET_SITE);
     if (!settings?.enabled) throw errors.notFound("lp_tickets");
     const input = parseCheckout(body, settings.fields);
-    const type = await this.repo.getTicketType(TICKET_SITE, input.ticketTypeId);
-    if (!type || !type.active) throw errors.validationFailed([{ field: "ticketTypeId", reason: "unavailable" }]);
+    const types = new Map((await this.repo.listTicketTypes(TICKET_SITE)).map((t) => [t.id, t]));
+    const bad: FieldError[] = [];
+    const items: LpTicketOrderItem[] = [];
+    for (const i of input.items) {
+      const t = types.get(i.ticketTypeId);
+      if (!t || !t.active) bad.push({ field: `items.${i.ticketTypeId}`, reason: "unavailable" });
+      else if (i.quantity > t.maxPerOrder) bad.push({ field: `items.${i.ticketTypeId}`, reason: "too_many" });
+      else
+        items.push({
+          ticketTypeId: t.id,
+          ticketTypeName: t.name,
+          dayLabel: t.dayLabel,
+          unitPriceJpy: t.priceJpy,
+          quantity: i.quantity,
+        });
+    }
+    if (bad.length > 0) throw errors.validationFailed(bad);
+    const amountJpy = items.reduce((n, i) => n + i.unitPriceJpy * i.quantity, 0);
+    const free = amountJpy === 0;
     const stripe = this.deps.stripe;
-    if (type.priceJpy > 0 && !stripe) throw paymentNotConfigured();
+    if (!free && !stripe) throw paymentNotConfigured();
 
     const now = this.deps.now();
     if ((await this.repo.countOrdersSince(TICKET_SITE, jstDayStartIso(now))) >= this.deps.dailyCheckoutCap) {
       throw errors.rateLimited(60);
     }
 
-    const free = type.priceJpy === 0;
     const row: TicketOrderRow = {
       id: this.deps.newOrderId(),
       site: TICKET_SITE,
-      ticketTypeId: type.id,
-      ticketTypeName: type.name,
-      amountJpy: type.priceJpy,
+      items,
+      quantity: items.reduce((n, i) => n + i.quantity, 0),
+      amountJpy,
       status: free ? "paid" : "pending",
       buyerName: input.name,
       buyerEmail: input.email,
@@ -382,15 +456,22 @@ export class TicketService {
       createdAt: now,
       paidAt: free ? now : null,
     };
-    if (!(await this.repo.insertOrderIfAvailable(row, type.capacity, this.pendingSince()))) throw soldOut();
+    const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
+    const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
+    if (!held.ok) throw soldOut(held.ticketTypeId);
     if (free || !stripe) return { redirectUrl: `${input.origin}/tickets/thanks?order=${encodeURIComponent(row.id)}` };
 
     let session: CheckoutSession;
     try {
       session = await stripe.createCheckoutSession({
         orderId: row.id,
-        productName: type.name,
-        amountJpy: type.priceJpy,
+        lineItems: items
+          .filter((i) => i.unitPriceJpy > 0)
+          .map((i) => ({
+            name: i.dayLabel ? `${i.ticketTypeName}（${i.dayLabel}）` : i.ticketTypeName,
+            unitAmountJpy: i.unitPriceJpy,
+            quantity: i.quantity,
+          })),
         customerEmail: input.email,
         successUrl: `${input.origin}/tickets/thanks?session_id={CHECKOUT_SESSION_ID}`,
         cancelUrl: `${input.origin}/tickets?canceled=1`,
@@ -426,7 +507,7 @@ export class TicketService {
         // Stripe unreachable: answer the stored state; the webhook will settle it.
       }
     }
-    return { status: order.status, ticketTypeName: order.ticketTypeName };
+    return { status: order.status, summary: orderSummary(order.items) };
   }
 
   private async applySession(orderId: string, s: CheckoutSession): Promise<void> {

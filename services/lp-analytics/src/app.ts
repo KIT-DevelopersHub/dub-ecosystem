@@ -109,6 +109,7 @@ export function createApp(deps: AppDeps): Hono {
   // チケット: 販売 on/off は公開切り替えと同じ lp:publish。購入者一覧は個人情報なので edit。
   app.get("/lp/tickets", view, async (c) => c.json(await tickets.getState()));
   app.post("/lp/tickets/enabled", publish, async (c) => c.json(await tickets.setEnabled(reqCtx(c), await readJson(c))));
+  app.post("/lp/tickets/cta", publish, async (c) => c.json(await tickets.setCta(reqCtx(c), await readJson(c))));
   app.post("/lp/tickets/fields", edit, async (c) => c.json(await tickets.setFields(reqCtx(c), await readJson(c))));
   app.post("/lp/tickets/types", edit, async (c) => c.json(await tickets.createType(await readJson(c)), 201));
   app.patch("/lp/tickets/types/:id", edit, async (c) =>

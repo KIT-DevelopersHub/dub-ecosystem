@@ -142,11 +142,16 @@ export interface LpTicketType {
   description: string;
   priceJpy: number;
   capacity: number | null;
+  /** "" = 日付なし（通し/共通）。例 "Day 1 · 9/13(月)"。0..30 字 */
+  dayLabel: string;
+  /** 1 回の購入で買える上限枚数 1..20（既定 10） */
+  maxPerOrder: number;
   active: boolean;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
 }
+/** sold / pending は「枚数」（注文数ではない）。 */
 export interface LpTicketTypeStats {
   sold: number;
   pending: number;
@@ -159,6 +164,8 @@ export interface LpTicketTypeSummary extends LpTicketType {
 export interface LpTicketsState {
   site: string;
   enabled: boolean;
+  /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える。効くのは enabled && ctaEnabled のとき。 */
+  ctaEnabled: boolean;
   paymentReady: boolean;
   /** LP_BASE_URL + "/tickets" */
   publicUrl: string;
@@ -169,15 +176,29 @@ export interface LpTicketsState {
   updatedBy: string | null;
 }
 export type LpTicketOrderStatus = "pending" | "paid" | "expired";
-export interface LpTicketOrder {
-  id: string;
+export interface LpTicketAnswer {
+  fieldId: string;
+  label: string;
+  value: string;
+}
+export interface LpTicketOrderItem {
   ticketTypeId: string;
   ticketTypeName: string;
+  dayLabel: string;
+  unitPriceJpy: number;
+  quantity: number;
+}
+export interface LpTicketOrder {
+  id: string;
+  items: LpTicketOrderItem[];
+  /** 合計枚数 */
+  quantity: number;
+  /** 合計金額 */
   amountJpy: number;
   status: LpTicketOrderStatus;
   buyerName: string;
   buyerEmail: string;
-  answers: { fieldId: string; label: string; value: string }[];
+  answers: LpTicketAnswer[];
   createdAt: string;
   paidAt: string | null;
 }
@@ -190,6 +211,8 @@ export interface LpTicketTypeInput {
   description: string;
   priceJpy: number;
   capacity: number | null;
+  dayLabel: string;
+  maxPerOrder: number;
   active: boolean;
 }
 
@@ -214,6 +237,8 @@ export interface LpApi {
   getTickets(): Promise<LpTicketsState>;
   /** 販売の公開/停止 (app:lp:edit + lp:publish)。 */
   setTicketsEnabled(input: { enabled: boolean }): Promise<LpTicketsState>;
+  /** LP の参加登録ボタン差し替えの on/off (app:lp:edit + lp:publish)。販売停止中でも保存できる。 */
+  setTicketsCta(input: { enabled: boolean }): Promise<LpTicketsState>;
   /** 入力項目を丸ごと置き換える (app:lp:edit)。 */
   saveTicketFields(input: { fields: LpTicketField[] }): Promise<LpTicketsState>;
   /** 券種を追加 (app:lp:edit)。 */
@@ -270,6 +295,8 @@ export function createLpApi(api: ApiClient): LpApi {
     getTickets: () => api.request<LpTicketsState>({ method: "GET", path: `${BASE}/tickets` }),
     setTicketsEnabled: (input) =>
       api.request<LpTicketsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/tickets/enabled`, body: input }),
+    setTicketsCta: (input) =>
+      api.request<LpTicketsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/tickets/cta`, body: input }),
     saveTicketFields: (input) =>
       api.request<LpTicketsState, { fields: LpTicketField[] }>({
         method: "POST",

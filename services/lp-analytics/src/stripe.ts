@@ -6,10 +6,16 @@ const API = "https://api.stripe.com/v1";
 /** Stripe's default replay window. */
 export const STRIPE_TOLERANCE_SEC = 300;
 
+export interface CheckoutLineItem {
+  name: string;
+  /** > 0 (free lines are not sent to Stripe). */
+  unitAmountJpy: number;
+  quantity: number;
+}
+
 export interface CheckoutSessionInput {
   orderId: string;
-  productName: string;
-  amountJpy: number;
+  lineItems: CheckoutLineItem[];
   customerEmail: string;
   successUrl: string;
   cancelUrl: string;
@@ -72,10 +78,12 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
       // Card only: delayed methods (e.g. konbini) complete with payment_status=unpaid and pay
       // after the 35-min seat hold, which would oversell and leave the order pending.
       f.set("payment_method_types[0]", "card");
-      f.set("line_items[0][price_data][currency]", "jpy");
-      f.set("line_items[0][price_data][unit_amount]", String(i.amountJpy));
-      f.set("line_items[0][price_data][product_data][name]", i.productName);
-      f.set("line_items[0][quantity]", "1");
+      i.lineItems.forEach((l, n) => {
+        f.set(`line_items[${n}][price_data][currency]`, "jpy");
+        f.set(`line_items[${n}][price_data][unit_amount]`, String(l.unitAmountJpy));
+        f.set(`line_items[${n}][price_data][product_data][name]`, l.name);
+        f.set(`line_items[${n}][quantity]`, String(l.quantity));
+      });
       f.set("customer_email", i.customerEmail);
       f.set("client_reference_id", i.orderId);
       f.set("metadata[order_id]", i.orderId);

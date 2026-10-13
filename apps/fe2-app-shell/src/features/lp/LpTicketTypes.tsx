@@ -20,18 +20,31 @@ import {
 import type { LpTicketTypeSummary } from "./lpApi.tsx";
 import { useSaveTicketType } from "./lpTicketsHooks.ts";
 import {
+  NO_DAY_LABEL,
+  TICKET_DAY_LABEL_MAX,
   TICKET_DESCRIPTION_MAX,
+  TICKET_MAX_PER_ORDER_DEFAULT,
+  TICKET_MAX_PER_ORDER_MAX,
   TICKET_NAME_MAX,
   TICKET_PRICE_MIN_PAID,
   formatPrice,
   formatYen,
+  groupTicketTypesByDay,
   validateTicketType,
   type TicketTypeDraft,
   type TicketTypeDraftErrors,
 } from "./lpTickets.ts";
 import styles from "./lp.module.css";
 
-const EMPTY_DRAFT: TicketTypeDraft = { name: "", description: "", price: "", capacity: "", active: true };
+const EMPTY_DRAFT: TicketTypeDraft = {
+  name: "",
+  description: "",
+  price: "",
+  capacity: "",
+  dayLabel: "",
+  maxPerOrder: String(TICKET_MAX_PER_ORDER_DEFAULT),
+  active: true,
+};
 
 function draftOf(t: LpTicketTypeSummary): TicketTypeDraft {
   return {
@@ -39,11 +52,14 @@ function draftOf(t: LpTicketTypeSummary): TicketTypeDraft {
     description: t.description,
     price: String(t.priceJpy),
     capacity: t.capacity === null ? "" : String(t.capacity),
+    dayLabel: t.dayLabel,
+    maxPerOrder: String(t.maxPerOrder),
     active: t.active,
   };
 }
 
 const isOptimistic = (t: LpTicketTypeSummary): boolean => t.id.startsWith("optimistic:");
+const n = (v: number): string => v.toLocaleString("ja-JP");
 
 export function LpTicketTypesCard({
   types,
@@ -55,6 +71,10 @@ export function LpTicketTypesCard({
   const save = useSaveTicketType();
   // undefined = 閉じている / null = 新規 / 券種 = その券種を編集
   const [editing, setEditing] = useState<LpTicketTypeSummary | null | undefined>(undefined);
+  const groups = useMemo(() => groupTicketTypesByDay(types), [types]);
+  // 全券種が日付なしなら見出しは出さない（v1 と同じ 1 枚の表）。
+  const showGroups = groups.some((g) => g.dayLabel !== "");
+  const dayLabels = useMemo(() => groups.map((g) => g.dayLabel).filter((d) => d !== ""), [groups]);
 
   const columns: ColumnDef<LpTicketTypeSummary>[] = useMemo(
     () => [
@@ -66,35 +86,45 @@ export function LpTicketTypesCard({
           <Stack gap={1}>
             <span className={styles.linkName}>{t.name}</span>
             {t.description ? <span className={styles.kpiHint}>{t.description}</span> : null}
+            <span className={styles.kpiHint} data-testid={`fe2-lp-ticket-type-max-${t.id}`}>
+              1 回の購入で最大 {n(t.maxPerOrder)} 枚
+            </span>
           </Stack>
         ),
       },
       {
         key: "price",
-        header: "価格",
+        header: "価格（1 枚）",
         align: "right",
-        width: "7rem",
+        width: "8rem",
         noWrap: true,
         cell: (t) => <span className={styles.num}>{formatPrice(t.priceJpy)}</span>,
       },
       {
         key: "capacity",
-        header: "定員",
+        header: "定員（枚）",
         align: "right",
         width: "6rem",
         noWrap: true,
-        cell: (t) => <span className={styles.num}>{t.capacity === null ? "—" : t.capacity.toLocaleString("ja-JP")}</span>,
+        cell: (t) => <span className={styles.num}>{t.capacity === null ? "—" : n(t.capacity)}</span>,
       },
       {
         key: "sold",
-        header: "販売数 / 残り",
+        header: "販売 / 残り（枚）",
         align: "right",
-        width: "9rem",
+        width: "10rem",
         noWrap: true,
         cell: (t) => (
-          <span className={styles.num} data-testid={`fe2-lp-ticket-type-sold-${t.id}`}>
-            {t.stats.sold.toLocaleString("ja-JP")} / {t.stats.remaining === null ? "無制限" : t.stats.remaining.toLocaleString("ja-JP")}
-          </span>
+          <Stack gap={1}>
+            <span className={styles.num} data-testid={`fe2-lp-ticket-type-sold-${t.id}`}>
+              {n(t.stats.sold)} / {t.stats.remaining === null ? "無制限" : n(t.stats.remaining)}
+            </span>
+            {t.stats.pending > 0 ? (
+              <span className={styles.kpiHint} data-testid={`fe2-lp-ticket-type-pending-${t.id}`}>
+                決済待ち {n(t.stats.pending)} 枚
+              </span>
+            ) : null}
+          </Stack>
         ),
       },
       {
@@ -183,16 +213,31 @@ export function LpTicketTypesCard({
           description={canEdit ? "「券種を追加」から一般・学生などの券種を作ると、購入ページに並びます。" : "編集権限を持つ人が券種を追加すると、ここに並びます。"}
         />
       ) : (
-        <DataTable<LpTicketTypeSummary>
-          testId="fe2-lp-ticket-types-table"
-          columns={columns}
-          rows={types}
-          rowKey={(t) => t.id}
-        />
+        <Stack gap={5} testId="fe2-lp-ticket-types-table">
+          <span className={styles.note}>
+            販売数・残り・定員はすべて「枚数」です（1 回の購入で複数枚・複数の券種を買えます）。対象日が同じ券種は購入ページでもまとめて表示されます。
+          </span>
+          {showGroups ? (
+            groups.map((g, i) => (
+              <section key={g.dayLabel || "__none__"} className={styles.ticketDayGroup} data-testid={`fe2-lp-ticket-day-group-${i}`}>
+                <div className={styles.ticketDayHeader}>
+                  <Badge tone={g.dayLabel ? "brand" : "neutral"}>{g.dayLabel || NO_DAY_LABEL}</Badge>
+                  <span className={styles.kpiHint} data-testid={`fe2-lp-ticket-day-group-total-${i}`}>
+                    販売 {n(g.sold)} 枚 · 売上 {formatYen(g.revenueJpy)}
+                  </span>
+                </div>
+                <DataTable<LpTicketTypeSummary> columns={columns} rows={g.types} rowKey={(t) => t.id} />
+              </section>
+            ))
+          ) : (
+            <DataTable<LpTicketTypeSummary> columns={columns} rows={types} rowKey={(t) => t.id} />
+          )}
+        </Stack>
       )}
       {editing !== undefined ? (
         <TicketTypeDialog
           target={editing}
+          dayLabels={dayLabels}
           onCancel={() => setEditing(undefined)}
           onSubmit={(input) => {
             setEditing(undefined);
@@ -206,10 +251,13 @@ export function LpTicketTypesCard({
 
 function TicketTypeDialog({
   target,
+  dayLabels,
   onCancel,
   onSubmit,
 }: {
   target: LpTicketTypeSummary | null;
+  /** 既存の対象日（表記ゆれで別グループに割れないよう、選んで入れられるようにする）。 */
+  dayLabels: string[];
   onCancel: () => void;
   onSubmit: (input: NonNullable<ReturnType<typeof validateTicketType>["input"]>) => void;
 }): JSX.Element {
@@ -248,6 +296,38 @@ function TicketTypeDialog({
         <FormField label="券種名" htmlFor="fe2-lp-ticket-type-name" required help={`購入ページに出る名前です（${TICKET_NAME_MAX}文字以内）`} {...err("name")}>
           <TextField id="fe2-lp-ticket-type-name" testId="fe2-lp-ticket-type-name" value={draft.name} placeholder="一般" onChange={(v) => set({ name: v })} />
         </FormField>
+        <FormField
+          label="対象日"
+          htmlFor="fe2-lp-ticket-type-day"
+          help={`空欄 = 通し・共通（日付なし）。同じ対象日の券種は購入ページでまとめて並びます（${TICKET_DAY_LABEL_MAX}文字以内）`}
+          {...err("dayLabel")}
+        >
+          <div style={{ display: "grid", gap: "var(--dub-space-2)" }}>
+            <TextField
+              id="fe2-lp-ticket-type-day"
+              testId="fe2-lp-ticket-type-day"
+              value={draft.dayLabel}
+              placeholder="Day 1 · 9/13(月)"
+              onChange={(v) => set({ dayLabel: v })}
+            />
+            {dayLabels.length > 0 ? (
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "var(--dub-space-2)" }}>
+                <span style={{ color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-xs)" }}>既存の対象日:</span>
+                {dayLabels.map((d, i) => (
+                  <Button
+                    key={d}
+                    variant={draft.dayLabel.trim() === d ? "primary" : "secondary"}
+                    size="sm"
+                    onClick={() => set({ dayLabel: d })}
+                    testId={`fe2-lp-ticket-type-day-pick-${i}`}
+                  >
+                    {d}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </FormField>
         <FormField label="説明" htmlFor="fe2-lp-ticket-type-description" help={`任意・${TICKET_DESCRIPTION_MAX}文字以内`} {...err("description")}>
           <Textarea
             id="fe2-lp-ticket-type-description"
@@ -266,8 +346,24 @@ function TicketTypeDialog({
         >
           <TextField id="fe2-lp-ticket-type-price" testId="fe2-lp-ticket-type-price" type="number" value={draft.price} placeholder="3000" onChange={(v) => set({ price: v })} />
         </FormField>
-        <FormField label="定員" htmlFor="fe2-lp-ticket-type-capacity" help="空欄 = 無制限" {...err("capacity")}>
+        <FormField label="定員（枚）" htmlFor="fe2-lp-ticket-type-capacity" help="この券種で売る合計枚数。空欄 = 無制限" {...err("capacity")}>
           <TextField id="fe2-lp-ticket-type-capacity" testId="fe2-lp-ticket-type-capacity" type="number" value={draft.capacity} placeholder="無制限" onChange={(v) => set({ capacity: v })} />
+        </FormField>
+        <FormField
+          label="1 回の購入上限（枚）"
+          htmlFor="fe2-lp-ticket-type-max"
+          required
+          help={`1 人が 1 回の購入でこの券種を何枚まで買えるか（1〜${TICKET_MAX_PER_ORDER_MAX}）。1 回の購入の合計は全券種で最大 ${TICKET_MAX_PER_ORDER_MAX} 枚`}
+          {...err("maxPerOrder")}
+        >
+          <TextField
+            id="fe2-lp-ticket-type-max"
+            testId="fe2-lp-ticket-type-max"
+            type="number"
+            value={draft.maxPerOrder}
+            placeholder={String(TICKET_MAX_PER_ORDER_DEFAULT)}
+            onChange={(v) => set({ maxPerOrder: v })}
+          />
         </FormField>
         <Switch
           id="fe2-lp-ticket-type-active"

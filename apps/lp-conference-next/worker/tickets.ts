@@ -16,25 +16,37 @@ export interface PublicTicketType {
   name: string;
   description: string;
   priceJpy: number;
+  /** "" = not tied to a day (通し/共通). e.g. "Day 1 - 9/13(月)". */
+  dayLabel: string;
+  /** Max tickets of this type per order (1..20). */
+  maxPerOrder: number;
+  /** Seats left after holds; null = no capacity. */
+  remaining: number | null;
   soldOut: boolean;
 }
 export interface TicketConfig {
   enabled: boolean;
+  /** Swap the LP's 参加登録 buttons for 参加チケットを購入 (effective only with enabled). */
+  ctaEnabled: boolean;
   paymentReady: boolean;
   fields: TicketField[];
   types: PublicTicketType[];
 }
 
-export interface CheckoutInput {
+export interface CheckoutItem {
   ticketTypeId: string;
+  quantity: number;
+}
+export interface CheckoutInput {
+  items: CheckoutItem[];
   name: string;
   email: string;
   answers: Record<string, string>;
 }
 
-/** Form values keyed by input name (ticketType / name / email / f_<fieldId>). */
+/** Form values keyed by input name (qty_<typeId> / name / email / f_<fieldId>). */
 export type FormValues = Record<string, string>;
-/** Inline errors keyed by input name; "_form" = message above the form. */
+/** Inline errors keyed by input name; "items" = cart-level, "_form" = message above the form. */
 export type FormErrors = Record<string, string>;
 
 export const HONEYPOT = "website";
@@ -44,19 +56,26 @@ const EMAIL_MAX = 254;
 const TEXT_MAX = 200;
 const TEXTAREA_MAX = 2000;
 const BODY_MAX = 32 * 1024;
+/** Total tickets per order (all types). Mirrors lp-analytics. */
+export const ORDER_MAX = 20;
+const DEFAULT_MAX_PER_ORDER = 10;
+const LOW_STOCK = 10;
 
+const DAY1 = "Day 1 - 9/13(月)";
+const DAY2 = "Day 2 - 9/14(火)";
 export const DEMO_CONFIG: TicketConfig = {
   enabled: true,
+  ctaEnabled: true,
   paymentReady: true,
   fields: [
     { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
     { id: "attendance", label: "参加区分", type: "select", required: true, options: ["現地", "オンライン"] },
   ],
   types: [
-    { id: "demo-general", name: "一般", description: "一般参加チケット（全セッション参加可）", priceJpy: 3000, soldOut: false },
-    { id: "demo-student", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, soldOut: false },
-    { id: "demo-invite", name: "招待", description: "招待コードをお持ちの方", priceJpy: 0, soldOut: false },
-    { id: "demo-early", name: "早割", description: "早期購入割引（数量限定）", priceJpy: 2000, soldOut: true },
+    { id: "demo-general-d1", name: "一般", description: "Day 1 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY1, maxPerOrder: 10, remaining: null, soldOut: false },
+    { id: "demo-student-d1", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY1, maxPerOrder: 10, remaining: 3, soldOut: false },
+    { id: "demo-general-d2", name: "一般", description: "Day 2 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY2, maxPerOrder: 10, remaining: null, soldOut: false },
+    { id: "demo-student-d2", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY2, maxPerOrder: 10, remaining: 0, soldOut: true },
   ],
 };
 
@@ -80,8 +99,58 @@ export function fieldInputName(fieldId: string): string {
   return `f_${fieldId}`;
 }
 
+export function qtyInputName(typeId: string): string {
+  return `qty_${typeId}`;
+}
+
 export function isSelectable(t: PublicTicketType, paymentReady: boolean): boolean {
-  return !t.soldOut && (t.priceJpy <= 0 || paymentReady);
+  return !t.soldOut && t.remaining !== 0 && (t.priceJpy <= 0 || paymentReady);
+}
+
+/** Largest quantity selectable for a type in one order (0 = not purchasable). */
+export function maxQuantity(t: PublicTicketType, paymentReady: boolean): number {
+  if (!isSelectable(t, paymentReady)) return 0;
+  const cap = t.remaining === null ? t.maxPerOrder : Math.min(t.maxPerOrder, t.remaining);
+  return Math.max(0, Math.min(cap, ORDER_MAX));
+}
+
+/** Splits "Day 1 - 9/13(月)" into { main: "Day 1", sub: "9/13(月)" }. */
+export function splitDayLabel(label: string): { main: string; sub: string } {
+  const m = /^(.+?)\s+[-–—·・|｜]\s+(.+)$/.exec(label.trim());
+  return m ? { main: m[1], sub: m[2] } : { main: label.trim(), sub: "" };
+}
+
+export interface DayGroup {
+  dayLabel: string;
+  types: PublicTicketType[];
+}
+
+/** Groups types by dayLabel, keeping first-appearance order of both groups and types. */
+export function groupByDay(types: PublicTicketType[]): DayGroup[] {
+  const groups: DayGroup[] = [];
+  for (const t of types) {
+    const key = t.dayLabel.trim();
+    let g = groups.find((x) => x.dayLabel === key);
+    if (!g) {
+      g = { dayLabel: key, types: [] };
+      groups.push(g);
+    }
+    g.types.push(t);
+  }
+  return groups;
+}
+
+/** "一般 Day 1 x2、学生 Day 2 x1" — same wording as lp-analytics' confirm summary. */
+export function itemsSummary(items: CheckoutItem[], types: PublicTicketType[]): string {
+  return items
+    .map((i) => {
+      const t = types.find((x) => x.id === i.ticketTypeId);
+      if (!t) return "";
+      const day = t.dayLabel ? ` ${splitDayLabel(t.dayLabel).main}` : "";
+      return `${t.name}${day} x${i.quantity}`;
+    })
+    .filter(Boolean)
+    .join("、");
 }
 
 /** Maps a request path to a tickets route, or null when it is not a tickets path. */
@@ -112,7 +181,21 @@ export function parseConfig(raw: unknown): TicketConfig | null {
     if (!t || typeof t !== "object") continue;
     const r = t as Record<string, unknown>;
     if (typeof r.id !== "string" || typeof r.name !== "string" || typeof r.priceJpy !== "number") continue;
-    types.push({ id: r.id, name: r.name, description: str(r.description), priceJpy: r.priceJpy, soldOut: r.soldOut === true });
+    const mpo = r.maxPerOrder;
+    const maxPerOrder =
+      typeof mpo === "number" && Number.isInteger(mpo) && mpo >= 1 ? Math.min(mpo, ORDER_MAX) : DEFAULT_MAX_PER_ORDER;
+    const remaining =
+      typeof r.remaining === "number" && Number.isFinite(r.remaining) ? Math.max(0, Math.trunc(r.remaining)) : null;
+    types.push({
+      id: r.id,
+      name: r.name,
+      description: str(r.description),
+      priceJpy: r.priceJpy,
+      dayLabel: str(r.dayLabel).trim(),
+      maxPerOrder,
+      remaining,
+      soldOut: r.soldOut === true || remaining === 0,
+    });
   }
   const fields: TicketField[] = [];
   for (const f of o.fields) {
@@ -123,7 +206,7 @@ export function parseConfig(raw: unknown): TicketConfig | null {
     const options = Array.isArray(r.options) ? r.options.filter((x): x is string => typeof x === "string") : [];
     fields.push({ id: r.id, label: r.label, type, required: r.required === true, options });
   }
-  return { enabled: o.enabled, paymentReady: o.paymentReady === true, fields, types };
+  return { enabled: o.enabled, ctaEnabled: o.ctaEnabled === true, paymentReady: o.paymentReady === true, fields, types };
 }
 
 // ---------- form parsing / validation ----------
@@ -136,10 +219,13 @@ export type ParseResult =
 
 export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig): ParseResult {
   const values: FormValues = {
-    ticketType: (form.get("ticketType") ?? "").trim(),
     name: (form.get("name") ?? "").trim(),
     email: (form.get("email") ?? "").trim(),
   };
+  for (const t of config.types) {
+    const key = qtyInputName(t.id);
+    values[key] = (form.get(key) ?? "").trim();
+  }
   for (const f of config.fields) {
     const key = fieldInputName(f.id);
     values[key] = (form.get(key) ?? "").trim();
@@ -147,10 +233,35 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig): 
   if ((form.get(HONEYPOT) ?? "") !== "") return { ok: false, spam: true, values, errors: {} };
 
   const errors: FormErrors = {};
-  const type = config.types.find((t) => t.id === values.ticketType);
-  if (!type) errors.ticketType = "券種を選択してください";
-  else if (type.soldOut) errors.ticketType = "この券種は売り切れました";
-  else if (!isSelectable(type, config.paymentReady)) errors.ticketType = "この券種は現在お申し込みいただけません";
+  const items: CheckoutItem[] = [];
+  let total = 0;
+  for (const t of config.types) {
+    const key = qtyInputName(t.id);
+    const raw = values[key];
+    if (raw === "" || raw === "0") continue;
+    if (!/^\d{1,3}$/.test(raw)) {
+      errors[key] = "枚数を選び直してください";
+      continue;
+    }
+    const q = Number(raw);
+    if (q === 0) continue;
+    const max = maxQuantity(t, config.paymentReady);
+    if (t.soldOut || t.remaining === 0) errors[key] = "この券種は売り切れました";
+    else if (max === 0) errors[key] = "この券種は現在お申し込みいただけません";
+    else if (q > max) {
+      errors[key] =
+        t.remaining !== null && t.remaining < Math.min(t.maxPerOrder, ORDER_MAX)
+          ? `残り${t.remaining}枚です。${t.remaining}枚以下でお選びください`
+          : `この券種は1回のお申し込みで${max}枚までです`;
+    }
+    items.push({ ticketTypeId: t.id, quantity: q });
+    total += q;
+  }
+  if (items.length === 0 && !Object.keys(errors).some((k) => k.startsWith("qty_"))) {
+    errors.items = "チケットを 1 枚以上選んでください";
+  } else if (total > ORDER_MAX) {
+    errors.items = `1 回のお申し込みは合計${ORDER_MAX}枚までです（現在 ${total} 枚）`;
+  }
 
   if (!values.name) errors.name = "氏名を入力してください";
   else if (values.name.length > NAME_MAX) errors.name = `氏名は${NAME_MAX}文字以内で入力してください`;
@@ -175,7 +286,7 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig): 
     answers[f.id] = v;
   }
   if (Object.keys(errors).length > 0) return { ok: false, spam: false, values, errors };
-  return { ok: true, values, input: { ticketTypeId: values.ticketType, name: values.name, email: values.email, answers } };
+  return { ok: true, values, input: { items, name: values.name, email: values.email, answers } };
 }
 
 /** Maps a lp-analytics checkout error to inline errors / a form-level message. */
@@ -187,16 +298,20 @@ export function mapCheckoutError(status: number, body: unknown, config: TicketCo
     const details = err && typeof err === "object" ? (err as { details?: unknown }).details : undefined;
     if (Array.isArray(details)) {
       const ids = new Set(config.fields.map((f) => f.id));
+      const typeIds = new Set(config.types.map((t) => t.id));
       for (const d of details) {
         const field = d && typeof d === "object" ? str((d as { field?: unknown }).field) : "";
-        const key = detailKey(field, ids);
-        if (key) errors[key] = errors[key] ?? "入力内容を確認してください";
+        const reason = d && typeof d === "object" ? str((d as { reason?: unknown }).reason) : "";
+        const key = detailKey(field, ids, typeIds);
+        if (key) errors[key] = errors[key] ?? itemReasonMessage(key, reason);
       }
     }
     errors._form = "入力内容に誤りがあります。各項目をご確認ください。";
   } else if (status === 409) {
-    errors.ticketType = "この券種は売り切れました";
-    errors._form = "選択された券種は売り切れました。別の券種をお選びください。";
+    const id = soldOutTypeId(body);
+    if (id && config.types.some((t) => t.id === id)) errors[qtyInputName(id)] = "残数が足りません（売り切れ）";
+    else errors.items = "選択された券種の残数が足りません";
+    errors._form = "選択されたチケットの残数が足りなくなりました。枚数を減らすか、別の券種をお選びください。";
   } else if (status === 429) {
     errors._form = "ただいまお申し込みが集中しています。しばらく時間をおいて再度お試しください。";
   } else if (status === 503) {
@@ -207,8 +322,34 @@ export function mapCheckoutError(status: number, body: unknown, config: TicketCo
   return errors;
 }
 
-function detailKey(field: string, ids: Set<string>): string | null {
-  if (field === "ticketTypeId" || field === "ticketType") return "ticketType";
+function itemReasonMessage(key: string, reason: string): string {
+  if (key === "items" && reason === "too_many") return `1 回のお申し込みは合計${ORDER_MAX}枚までです`;
+  if (key === "items") return "チケットを 1 枚以上選んでください";
+  if (!key.startsWith("qty_")) return "入力内容を確認してください";
+  if (reason === "unavailable") return "この券種は現在お申し込みいただけません";
+  if (reason === "too_many") return "選べる枚数を超えています";
+  return "枚数を選び直してください";
+}
+
+/** 409 body: { error: { details: { reason: "sold_out", ticketTypeId } } } (array form tolerated). */
+function soldOutTypeId(body: unknown): string | null {
+  const err = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
+  const details = err && typeof err === "object" ? (err as { details?: unknown }).details : undefined;
+  const list = Array.isArray(details) ? details : [details];
+  for (const d of list) {
+    if (d && typeof d === "object" && typeof (d as { ticketTypeId?: unknown }).ticketTypeId === "string") {
+      return (d as { ticketTypeId: string }).ticketTypeId;
+    }
+  }
+  return null;
+}
+
+function detailKey(field: string, ids: Set<string>, typeIds: Set<string>): string | null {
+  if (field === "items" || field === "ticketTypeId") return "items";
+  if (field.startsWith("items.")) {
+    const id = field.slice("items.".length);
+    return typeIds.has(id) ? qtyInputName(id) : "items";
+  }
   if (field === "name" || field === "email") return field;
   const id = field.startsWith("answers.") ? field.slice("answers.".length) : field;
   return ids.has(id) ? fieldInputName(id) : null;
@@ -305,36 +446,58 @@ legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)
 .req{display:inline-block;color:#fff;background:var(--err);font-size:11px;font-weight:800;border-radius:6px;padding:1px 7px;margin-left:8px;vertical-align:2px}
 .opt{display:inline-block;color:var(--mute);background:#eef0f4;font-size:11px;font-weight:700;border-radius:6px;padding:1px 7px;margin-left:8px;vertical-align:2px}
 
-/* ticket cards (ticket-stub shape) */
+/* day groups */
+.days{display:grid;gap:34px}
+.day-h{display:flex;align-items:center;gap:12px;margin:0 0 16px}
+.day-k{display:inline-flex;align-items:center;gap:8px;font:900 13px/1 "Inter",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#fff;background:var(--grad);border-radius:999px;padding:9px 15px;box-shadow:0 10px 20px -10px rgba(23,184,146,.7)}
+.day-k.plain{background:#eef1f7;color:var(--soft);box-shadow:none}
+.day-d{font-family:var(--disp);font-weight:900;font-size:20px;color:var(--h);letter-spacing:.02em;white-space:nowrap}
+.day-h::after{content:"";flex:1;min-width:24px;height:1.5px;background:linear-gradient(90deg,rgba(16,28,168,.18),transparent)}
+
+/* ticket cards (ticket-stub shape) with a quantity stepper on the stub */
 .types{display:grid;gap:16px}
-.tk{--nb:var(--bd);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 150px;border-radius:18px;background:#fff;border:1.5px solid var(--nb);cursor:pointer;
-transition:transform .25s cubic-bezier(.2,.7,.2,1),box-shadow .25s,border-color .2s;box-shadow:var(--sh-md)}
-.tk:hover{transform:translateY(-3px);box-shadow:var(--sh-lg);--nb:rgba(47,97,214,.45)}
-.tk:has(input:checked){--nb:var(--blue);box-shadow:0 0 0 4px rgba(47,97,214,.14),var(--sh-lg);background:linear-gradient(180deg,#fff 0%,#f4f8ff 100%)}
-.tk:has(input:focus-visible){outline:3px solid rgba(47,97,214,.5);outline-offset:3px}
-.tk input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+.tk{--nb:var(--bd);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 196px;border-radius:18px;background:#fff;border:1.5px solid var(--nb);
+transition:transform .25s cubic-bezier(.2,.7,.2,1),box-shadow .25s,border-color .2s,background .2s;box-shadow:var(--sh-md)}
+.tk:hover{transform:translateY(-2px);box-shadow:var(--sh-lg);--nb:rgba(47,97,214,.35)}
+.tk.on{--nb:var(--blue);box-shadow:0 0 0 4px rgba(47,97,214,.14),var(--sh-lg);background:linear-gradient(180deg,#fff 0%,#f4f8ff 100%)}
+.tk:focus-within{--nb:var(--blue)}
 .tk-main{padding:22px 24px 22px 26px;min-width:0;position:relative}
 .tk-main::before{content:"";position:absolute;left:0;top:18px;bottom:18px;width:4px;border-radius:0 4px 4px 0;background:var(--grad);opacity:0;transition:opacity .2s}
-.tk:has(input:checked) .tk-main::before{opacity:1}
+.tk.on .tk-main::before{opacity:1}
 .tk-name{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-family:var(--disp);font-weight:900;font-size:20px;color:var(--h);letter-spacing:.02em}
 .tk-desc{display:block;color:var(--soft);font-size:14px;margin-top:6px}
+.tk-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.tk-day{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:var(--deep);background:#eef4fd;border:1px solid rgba(47,97,214,.16);border-radius:999px;padding:4px 11px}
+.tk-day svg{flex:none}
 .tk-stub{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:18px 12px;border-left:2px dashed rgba(16,28,168,.14)}
 .tk-stub::before,.tk-stub::after{content:"";position:absolute;left:-12px;width:22px;height:22px;border-radius:50%;background:#fff;border:1.5px solid var(--nb);transition:border-color .2s}
 .tk-stub::before{top:-12px;clip-path:inset(50% 0 0 0)}
 .tk-stub::after{bottom:-12px;clip-path:inset(0 0 50% 0)}
 .tk-price{font:900 26px/1 "Inter",var(--disp);letter-spacing:-.01em;color:var(--h)}
+.tk-price small{font:700 12px/1 var(--font);color:var(--mute);margin-left:3px;letter-spacing:0}
 .tk-price.free{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;font-family:var(--disp);font-size:22px}
-.tk-check{width:26px;height:26px;border-radius:50%;border:2px solid #cfd6e4;display:grid;place-items:center;transition:all .2s}
-.tk-check::after{content:"";width:10px;height:6px;border:2.5px solid #fff;border-top:0;border-right:0;transform:rotate(-45deg) translate(1px,-1px) scale(.4);opacity:0;transition:all .2s}
-.tk:has(input:checked) .tk-check{background:var(--grad);border-color:transparent;box-shadow:0 6px 14px -4px rgba(23,184,146,.6)}
-.tk:has(input:checked) .tk-check::after{opacity:1;transform:rotate(-45deg) translate(1px,-1px) scale(1)}
-.tk.off{cursor:not-allowed;box-shadow:none;background:#f8f9fb}
+.qty{display:inline-flex;align-items:center;gap:4px;background:#f3f6fc;border:1.5px solid #d5dbe8;border-radius:999px;padding:4px;transition:border-color .2s,box-shadow .2s}
+.qty:focus-within{border-color:var(--blue);box-shadow:0 0 0 4px rgba(47,97,214,.14)}
+.tk.on .qty{background:#fff;border-color:rgba(47,97,214,.45)}
+.qty select{width:auto;min-width:64px;border:0;border-radius:999px;background-color:transparent;box-shadow:none;text-align:center;text-align-last:center;font:800 18px/1.2 "Inter",var(--font);color:var(--h);padding:7px 30px 7px 14px;cursor:pointer;background-position:calc(100% - 16px) 52%,calc(100% - 10px) 52%}
+.qty select:focus{box-shadow:none;background-color:transparent}
+.js .qty select{min-width:46px;padding:7px 4px;background-image:none}
+.qb{display:none;width:36px;height:36px;border-radius:50%;border:0;padding:0;background:#fff;color:var(--h);font:800 20px/1 "Inter",sans-serif;cursor:pointer;box-shadow:0 2px 6px -2px rgba(16,42,100,.2);place-items:center;transition:background .2s,color .2s,transform .15s,opacity .2s}
+.js .qb{display:grid}
+.qb:hover:not(:disabled){background:var(--grad);color:#fff;transform:scale(1.06)}
+.qb:active:not(:disabled){transform:scale(.94)}
+.qb:disabled{opacity:.35;cursor:not-allowed;box-shadow:none}
+.tk-cap{font-size:11px;font-weight:700;color:var(--mute);letter-spacing:.02em}
+.tk.off{box-shadow:none;background:#f8f9fb}
 .tk.off:hover{transform:none;--nb:var(--bd)}
 .tk.off .tk-name,.tk.off .tk-price{color:#8a93a6}.tk.off .tk-price.free{-webkit-text-fill-color:#8a93a6}
-.tk.off .tk-check{opacity:.35}
+.tk.off .qty{opacity:.45}
+.tk.bad{--nb:rgba(180,35,24,.45)}
 .badge{display:inline-block;font:800 11px/1 var(--font);border-radius:999px;padding:5px 10px;background:#eceef2;color:var(--soft);letter-spacing:.04em}
 .badge.so{background:#fde8e7;color:var(--err)}
-.bad .types .tk{--nb:rgba(180,35,24,.35)}
+.badge.low{background:#fff1d1;color:#8a5a00}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.items-err{margin-top:16px}
 
 /* form fields */
 .field{margin:0 0 22px}
@@ -362,10 +525,18 @@ background:radial-gradient(120% 80% at 100% 0%,rgba(23,184,146,.32) 0%,transpare
 .sum-card::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.09) 45%,transparent 60%);transform:translateX(-100%);animation:sheen 6s ease-in-out infinite}
 @keyframes sheen{0%,55%{transform:translateX(-100%)}80%,100%{transform:translateX(100%)}}
 .sum-k{font:800 11px/1 "Inter",sans-serif;letter-spacing:.18em;color:#8fb4ff;margin:0 0 14px}
-.sum-name{font-family:var(--disp);font-weight:900;font-size:22px;color:#fff;margin:0;line-height:1.35}
-.sum-ev{font-size:13px;color:#b9c8ea;margin:6px 0 0}
-.sum-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:22px 0 0;padding:18px 0 0;border-top:1.5px dashed rgba(255,255,255,.2)}
+.sum-ev{font-size:13px;color:#b9c8ea;margin:0 0 18px;padding:0 0 16px;border-bottom:1px solid rgba(255,255,255,.12)}
+.sum-list{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.sum-list li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;align-items:center;animation:rise .35s cubic-bezier(.2,.7,.2,1) both}
+.sum-list .n{font-family:var(--disp);font-weight:900;font-size:16px;color:#fff;line-height:1.35}
+.sum-list .q{grid-column:1;font-size:12px;color:#b9c8ea}
+.sum-list .s{grid-column:2;grid-row:1/3;font:800 16px/1 "Inter",var(--disp);color:#fff}
+.sum-empty{margin:0;font-size:14px;color:#b9c8ea;padding:10px 0}
+.sum-cnt{display:flex;justify-content:space-between;align-items:baseline;margin:18px 0 0;padding:16px 0 0;border-top:1.5px dashed rgba(255,255,255,.2);font-size:13px;font-weight:700;color:#b9c8ea}
+.sum-cnt b{font:800 16px/1 "Inter",var(--disp);color:#fff}
+.sum-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:12px 0 0}
 .sum-row span{font-size:13px;font-weight:700;color:#b9c8ea}
+.sum-warn{margin:12px 0 0;font-size:12px;font-weight:700;color:#ffd7a8}
 .sum-price{font:900 34px/1 "Inter",var(--disp);color:#fff;letter-spacing:-.01em}
 .submit{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:22px;border:0;border-radius:999px;padding:17px 24px;font:inherit;font-size:17px;font-weight:900;letter-spacing:.04em;color:#fff;cursor:pointer;
 background:linear-gradient(120deg,#2a5fd0 0%,#1f9bd6 55%,#17b892 100%);background-size:160% 100%;box-shadow:0 14px 30px -8px rgba(23,184,146,.55);transition:background-position .4s,transform .2s,box-shadow .2s}
@@ -394,7 +565,7 @@ background:linear-gradient(120deg,#2a5fd0 0%,#1f9bd6 55%,#17b892 100%);backgroun
 .pass{display:grid;grid-template-columns:1fr auto;align-items:center;gap:16px;margin:26px auto 0;max-width:420px;text-align:left;border-radius:18px;padding:18px 22px;color:#fff;
 background:radial-gradient(120% 90% at 100% 0%,rgba(23,184,146,.35) 0%,transparent 55%),linear-gradient(160deg,#071235 0%,#0b1d55 100%);box-shadow:var(--sh-lg)}
 .pass small{display:block;font:800 10px/1 "Inter",sans-serif;letter-spacing:.18em;color:#8fb4ff;margin-bottom:6px}
-.pass b{font-family:var(--disp);font-size:20px;font-weight:900}
+.pass b{display:block;font-family:var(--disp);font-size:18px;font-weight:900;line-height:1.5}
 .pass i{font-style:normal;font:800 11px/1 "Inter",sans-serif;letter-spacing:.12em;color:#5fe0c0;border:1px solid rgba(95,224,192,.5);border-radius:999px;padding:6px 10px}
 .acts{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:30px}
 .btn1,.btn2{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:13px 26px;font-weight:800;text-decoration:none;transition:transform .2s,box-shadow .2s}
@@ -416,7 +587,10 @@ footer a.fl:hover{color:#fff;text-decoration:underline}
 @media (max-width:600px){
 .wrap{padding:0 16px}.hero{padding:110px 0 128px}.hero.sm{padding:104px 0 150px}
 .card{padding:22px 18px;border-radius:20px}.done{padding:36px 20px}
-.tk{grid-template-columns:minmax(0,1fr) 104px}.tk-main{padding:18px 14px 18px 18px}.tk-name{font-size:17px}.tk-price{font-size:20px}.tk-price.free{font-size:18px}
+.tk{grid-template-columns:1fr}.tk-main{padding:18px 18px 14px 20px}.tk-name{font-size:17px}.tk-price{font-size:20px}.tk-price.free{font-size:18px}
+.tk-stub{flex-direction:row;flex-wrap:wrap;justify-content:space-between;padding:12px 16px 14px 20px;border-left:0;border-top:2px dashed rgba(16,28,168,.14)}
+.tk-stub::before,.tk-stub::after{display:none}.tk-cap{width:100%;order:3}
+.day-d{font-size:17px}.days{gap:28px}
 .two{grid-template-columns:1fr}.ey2{display:none}.shead p{display:none}.bname{display:none}.steps li span{display:none}.steps li+li::before{width:14px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -552,8 +726,14 @@ d.addEventListener("visibilitychange",go);c.addEventListener("webglcontextlost",
 draw();sec.classList.add("gl");go()}
 try{scene(HV,HF)}catch(e){}
 var rv=[].slice.call(d.querySelectorAll(".rv"));if("IntersectionObserver"in window){var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}})},{rootMargin:"0px 0px -8% 0px"});rv.forEach(function(el){io.observe(el)})}else rv.forEach(function(el){el.classList.add("in")});
-var f=d.querySelector("form.buy");if(!f)return;var n=f.querySelector("[data-sum-name]"),p=f.querySelector("[data-sum-price]");
-function up(){var r=f.querySelector("input[name=ticketType]:checked");if(!r)return;var c=r.closest(".tk");if(n)n.textContent=c.getAttribute("data-name");if(p)p.textContent=c.getAttribute("data-price")}
+var f=d.querySelector("form.buy");if(!f)return;var L=f.querySelector("[data-sum-lines]"),E=f.querySelector("[data-sum-empty]"),C=f.querySelector("[data-sum-count]"),T=f.querySelector("[data-sum-total]"),W=f.querySelector("[data-sum-warn]"),MX=+f.getAttribute("data-max")||20;
+function yen(v){return v<=0?"無料":"¥"+v.toLocaleString("ja-JP")}
+function mk(c,x){var e=d.createElement("span");e.className=c;e.textContent=x;return e}
+function up(){var c=0,t=0;if(L)L.textContent="";[].forEach.call(f.querySelectorAll(".tk[data-id]"),function(k){var s=k.querySelector("select"),on=s&&!s.disabled,q=on?+s.value||0:0,p=+k.getAttribute("data-price")||0,m=k.querySelector(".qb[data-step='-1']"),P=k.querySelector(".qb[data-step='1']");
+k.classList.toggle("on",q>0);if(m)m.disabled=!on||s.selectedIndex<=0;if(P)P.disabled=!on||s.selectedIndex>=s.options.length-1;
+if(q>0&&L){c+=q;t+=p*q;var li=d.createElement("li"),dy=k.getAttribute("data-day");li.appendChild(mk("n",k.getAttribute("data-name")));li.appendChild(mk("s",yen(p*q)));li.appendChild(mk("q",(dy?dy+" · ":"")+yen(p)+" × "+q+"枚"));L.appendChild(li)}});
+if(E)E.hidden=c>0;if(C)C.textContent=c+"枚";if(T)T.textContent=c>0?yen(t):"¥0";if(W)W.hidden=c<=MX}
+f.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".qb"):null;if(!b||b.disabled)return;var s=b.closest(".tk").querySelector("select");if(!s||s.disabled)return;var i=s.selectedIndex+(+b.getAttribute("data-step"));if(i<0||i>=s.options.length)return;s.selectedIndex=i;up()});
 f.addEventListener("change",up);up();f.addEventListener("submit",function(){var b=f.querySelector(".submit");if(b){b.classList.add("is-busy");b.setAttribute("aria-busy","true")}})})();`;
 
 const CONF_NAME = "北陸ITカンファレンス 2027";
@@ -581,7 +761,7 @@ function hero(o: { title: string; sub?: string; ghost: string; step?: number; sm
     o.step === undefined
       ? ""
       : '<ol class="steps rise d4" aria-label="お申し込みの流れ">' +
-        ["券種を選ぶ", "参加者情報", "お支払い・完了"]
+        ["券種と枚数", "参加者情報", "お支払い・完了"]
           .map((s, i) => `<li${i + 1 <= o.step! ? ' class="on"' : ""}><b>${i + 1}</b><span>${s}</span></li>`)
           .join("") +
         "</ol>";
@@ -635,18 +815,111 @@ function reqMark(required: boolean): string {
   return required ? '<span class="req">必須</span>' : '<span class="opt">任意</span>';
 }
 
-function renderType(t: PublicTicketType, paymentReady: boolean, checked: boolean): string {
-  const selectable = isSelectable(t, paymentReady);
-  const badge = t.soldOut ? '<span class="badge so">売り切れ</span>' : !selectable ? '<span class="badge">決済準備中</span>' : "";
+const CAL =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>';
+
+/** Quantity currently chosen for a type, clamped to what can be selected. */
+function chosenQty(t: PublicTicketType, paymentReady: boolean, values: FormValues): number {
+  const raw = values[qtyInputName(t.id)] ?? "";
+  const q = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
+  return Math.min(q, maxQuantity(t, paymentReady));
+}
+
+function typeLabel(t: PublicTicketType): string {
+  return t.dayLabel ? `${t.name}（${t.dayLabel}）` : t.name;
+}
+
+function renderType(t: PublicTicketType, paymentReady: boolean, values: FormValues, errors: FormErrors): string {
+  const max = maxQuantity(t, paymentReady);
+  const q = chosenQty(t, paymentReady, values);
+  const key = qtyInputName(t.id);
+  const k = escapeHtml(key);
+  const soldOut = t.soldOut || t.remaining === 0;
+  const badge = soldOut
+    ? '<span class="badge so">売り切れ</span>'
+    : max === 0
+      ? '<span class="badge">決済準備中</span>'
+      : t.remaining !== null && t.remaining <= LOW_STOCK
+        ? `<span class="badge low">残りわずか ${t.remaining}枚</span>`
+        : "";
   const price = formatPrice(t.priceJpy);
+  const label = typeLabel(t);
+  const aria = errors[key] ? ` aria-invalid="true" aria-describedby="${k}-err"` : "";
+  const opts: string[] = [];
+  for (let i = 0; i <= max; i++) opts.push(`<option value="${i}"${i === q ? " selected" : ""}>${i}</option>`);
+  const select =
+    `<label class="vh" for="${k}">${escapeHtml(label)} の枚数</label>` +
+    `<select id="${k}" name="${k}"${max === 0 ? " disabled" : ""}${aria}>${opts.join("")}</select>`;
+  const stepper =
+    `<span class="qty">` +
+    `<button type="button" class="qb" data-step="-1" aria-label="${escapeHtml(label)} を1枚減らす"${q <= 0 ? " disabled" : ""}>−</button>` +
+    select +
+    `<button type="button" class="qb" data-step="1" aria-label="${escapeHtml(label)} を1枚増やす"${q >= max ? " disabled" : ""}>＋</button>` +
+    "</span>";
+  const day = t.dayLabel ? splitDayLabel(t.dayLabel) : null;
+  const cls = `tk${max === 0 ? " off" : ""}${q > 0 ? " on" : ""}${errors[key] ? " bad" : ""}`;
   return (
-    `<label class="tk${selectable ? "" : " off"}" data-name="${escapeHtml(t.name)}" data-price="${escapeHtml(price)}">` +
-    `<input type="radio" name="ticketType" value="${escapeHtml(t.id)}"${checked && selectable ? " checked" : ""}${selectable ? "" : " disabled"} required>` +
-    `<span class="tk-main"><span class="tk-name">${escapeHtml(t.name)}${badge}</span>` +
+    `<div class="${cls}" data-id="${escapeHtml(t.id)}" data-name="${escapeHtml(t.name)}" data-day="${escapeHtml(day ? day.main : "")}" data-price="${Math.max(0, Math.trunc(t.priceJpy))}">` +
+    `<div class="tk-main"><div class="tk-name">${escapeHtml(t.name)}${badge}</div>` +
     (t.description ? `<span class="tk-desc">${escapeHtml(t.description)}</span>` : "") +
-    "</span>" +
-    `<span class="tk-stub"><span class="tk-price${t.priceJpy <= 0 ? " free" : ""}">${escapeHtml(price)}</span><span class="tk-check" aria-hidden="true"></span></span>` +
-    "</label>"
+    (day ? `<div class="tk-meta"><span class="tk-day">${CAL}対象日 ${escapeHtml(t.dayLabel)}</span></div>` : "") +
+    errMsg(errors, key) +
+    "</div>" +
+    `<div class="tk-stub"><span class="tk-price${t.priceJpy <= 0 ? " free" : ""}">${escapeHtml(price)}${t.priceJpy > 0 ? "<small>/枚</small>" : ""}</span>` +
+    stepper +
+    (max > 0 ? `<span class="tk-cap">1 回 ${max} 枚まで</span>` : "") +
+    "</div></div>"
+  );
+}
+
+function renderDayGroups(config: TicketConfig, values: FormValues, errors: FormErrors): string {
+  const groups = groupByDay(config.types);
+  const onlyUndated = groups.length === 1 && groups[0].dayLabel === "";
+  return (
+    '<div class="days">' +
+    groups
+      .map((g) => {
+        let head = "";
+        if (g.dayLabel) {
+          const d = splitDayLabel(g.dayLabel);
+          head =
+            `<h3 class="day-h"><span class="day-k">${escapeHtml(d.main)}</span>` +
+            (d.sub ? `<span class="day-d">${escapeHtml(d.sub)}</span>` : "") +
+            "</h3>";
+        } else if (!onlyUndated) {
+          head = '<h3 class="day-h"><span class="day-k plain">共通</span><span class="day-d">全日程</span></h3>';
+        }
+        const types = g.types.map((t) => renderType(t, config.paymentReady, values, errors)).join("");
+        return `<section class="day" aria-label="${escapeHtml(g.dayLabel || "共通")}">${head}<div class="types">${types}</div></section>`;
+      })
+      .join("") +
+    "</div>"
+  );
+}
+
+/** Server-side order summary (same markup the inline script rebuilds live). */
+function renderSummary(config: TicketConfig, values: FormValues): string {
+  let count = 0;
+  let total = 0;
+  const lines: string[] = [];
+  for (const t of config.types) {
+    const q = chosenQty(t, config.paymentReady, values);
+    if (q <= 0) continue;
+    const p = Math.max(0, Math.trunc(t.priceJpy));
+    count += q;
+    total += p * q;
+    const day = t.dayLabel ? splitDayLabel(t.dayLabel).main + " · " : "";
+    lines.push(
+      `<li><span class="n">${escapeHtml(t.name)}</span><span class="s">${escapeHtml(formatPrice(p * q))}</span>` +
+        `<span class="q">${escapeHtml(day)}${escapeHtml(formatPrice(p))} × ${q}枚</span></li>`,
+    );
+  }
+  return (
+    `<ul class="sum-list" data-sum-lines>${lines.join("")}</ul>` +
+    `<p class="sum-empty" data-sum-empty${count > 0 ? " hidden" : ""}>券種と枚数を選んでください</p>` +
+    `<div class="sum-cnt" aria-live="polite"><span>合計枚数</span><b data-sum-count>${count}枚</b></div>` +
+    `<div class="sum-row" aria-live="polite"><span>お支払い金額</span><b class="sum-price" data-sum-total>${count > 0 ? escapeHtml(formatPrice(total)) : "¥0"}</b></div>` +
+    `<p class="sum-warn" data-sum-warn${count > ORDER_MAX ? "" : " hidden"}>1 回のお申し込みは合計${ORDER_MAX}枚までです</p>`
   );
 }
 
@@ -707,7 +980,7 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
   const selectable = config.types.filter((t) => isSelectable(t, config.paymentReady));
   const top = hero({
     title: 'チケット<span class="g">購入</span>',
-    sub: "券種を選び、必要事項を入力してお申し込みください。",
+    sub: "日程ごとに券種と枚数を選び、必要事項を入力してお申し込みください。",
     ghost: "TICKETS",
     step: selectable.length === 0 ? undefined : 1,
   });
@@ -727,28 +1000,25 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
     );
   }
 
-  const chosen = selectable.some((t) => t.id === values.ticketType) ? values.ticketType : selectable[0].id;
-  const chosenType = selectable.find((t) => t.id === chosen)!;
   const hasPaid = config.types.some((t) => t.priceJpy > 0);
   const extra = config.fields.map((f) => renderField(f, values, errors)).join("");
   const form =
-    '<form class="buy grid" method="post" action="/tickets/checkout" novalidate><div>' +
+    `<form class="buy grid" method="post" action="/tickets/checkout" novalidate data-max="${ORDER_MAX}"><div>` +
     alerts +
-    `<section class="card rv"><fieldset class="${errors.ticketType ? "bad" : ""}"><legend>券種（必須）</legend>` +
-    '<div class="shead"><span class="no">01</span><h2>券種を選ぶ</h2><p>1 回のお申し込みで 1 枚</p></div>' +
-    '<div class="types">' +
-    config.types.map((t) => renderType(t, config.paymentReady, t.id === chosen)).join("") +
-    `</div>${errMsg(errors, "ticketType")}</fieldset></section>` +
+    `<section class="card rv"><fieldset class="${errors.items ? "bad" : ""}"><legend>券種と枚数（必須）</legend>` +
+    `<div class="shead"><span class="no">01</span><h2>券種と枚数を選ぶ</h2><p>1 回のお申し込みで合計 ${ORDER_MAX} 枚まで</p></div>` +
+    renderDayGroups(config, values, errors) +
+    (errors.items ? `<div class="items-err">${errMsg(errors, "items")}</div>` : "") +
+    "</fieldset></section>" +
     '<section class="card rv"><div class="shead"><span class="no">02</span><h2>参加者情報</h2><p>確認メールをお送りします</p></div>' +
     `<div class="two">${fixedField("name", "氏名", values, errors)}${fixedField("email", "メールアドレス", values, errors)}</div>` +
     extra +
     `<div class="hp" aria-hidden="true"><label>空欄のままにしてください<input type="text" name="${HONEYPOT}" tabindex="-1" autocomplete="off"></label></div>` +
     "</section></div>" +
     '<aside class="sum rv" aria-label="お申し込み内容"><div class="sum-card">' +
-    '<p class="sum-k">YOUR TICKET</p>' +
-    `<p class="sum-name" data-sum-name>${escapeHtml(chosenType.name)}</p>` +
+    '<p class="sum-k">YOUR ORDER</p>' +
     `<p class="sum-ev">${CONF_NAME}<br>${EVENT_DATE}</p>` +
-    `<div class="sum-row"><span>お支払い金額</span><b class="sum-price" data-sum-price>${escapeHtml(formatPrice(chosenType.priceJpy))}</b></div>` +
+    renderSummary(config, values) +
     '<button class="submit" type="submit">購入手続きへ<span class="ar" aria-hidden="true">→</span></button>' +
     (hasPaid ? `<p class="secure">${LOCK}カード決済は Stripe で安全に処理されます</p>` : "") +
     "</div>" +
@@ -765,7 +1035,7 @@ const ICON_OK = '<div class="ico pop"><svg viewBox="0 0 24 24" aria-hidden="true
 const ICON_WAIT = '<div class="ico wait pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>';
 const ICON_WARN = '<div class="ico warn pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6M12 17h.01"/></svg></div>';
 
-export function renderThanksPage(o: { status: ThanksStatus; ticketTypeName?: string; demo?: boolean }): string {
+export function renderThanksPage(o: { status: ThanksStatus; summary?: string; demo?: boolean }): string {
   let inner: string;
   let acts = '<a class="btn1" href="/">トップへ戻る</a>';
   let step = 3;
@@ -774,8 +1044,14 @@ export function renderThanksPage(o: { status: ThanksStatus; ticketTypeName?: str
       ICON_OK +
       "<h2>お申し込みが完了しました</h2>" +
       '<p class="lead">ご登録のメールアドレスに確認メールをお送りします。当日お会いできるのを楽しみにしています。</p>' +
-      (o.ticketTypeName
-        ? `<div class="pass"><div><small>YOUR TICKET</small><b>${escapeHtml(o.ticketTypeName)}</b></div><i>CONFIRMED</i></div>`
+      (o.summary
+        ? '<div class="pass"><div><small>YOUR TICKETS</small>' +
+          o.summary
+            .split("、")
+            .filter(Boolean)
+            .map((x) => `<b>${escapeHtml(x)}</b>`)
+            .join("") +
+          "</div><i>CONFIRMED</i></div>"
         : "");
   } else if (o.status === "pending") {
     inner = ICON_WAIT + '<h2>決済を確認中です</h2><p class="lead">決済を確認中です（数分後にメールをご確認ください）。</p>';
@@ -808,6 +1084,57 @@ export function ticketsCta(): string {
     '<path d="M3 8a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg>' +
     "チケットを購入</a>"
   );
+}
+
+export const CTA_SWAP_LABEL = "参加チケットを購入";
+/** LP 参加登録 buttons (same markup in v3.4 / v3.5). */
+export const CTA_SWAP_SELECTOR =
+  ".site-head-cta,.hero-cta--participant,.svc-card--participant .svc-card-link,.git-btn--primary";
+
+// Everything is keyed on [data-lp-tk], which only the script sets: with JS off nothing changes.
+const CTA_SWAP_CSS =
+  "[data-lp-tk]{cursor:pointer!important}" +
+  "[data-lp-tk] .site-head-cta-badge,[data-lp-tk] .hero-cta-badge,[data-lp-tk] .git-btn-badge," +
+  "[data-lp-tk] .svc-card-badge,[data-lp-tk] .svc-card-soon{display:none!important}" +
+  ".svc-card-link[data-lp-tk] .svc-card-cta--disabled{color:var(--lp-blue-deep,#1e3fa8)!important;gap:.5rem}" +
+  `.svc-card-link[data-lp-tk] .svc-card-cta--disabled::before{content:"${CTA_SWAP_LABEL}"}` +
+  '.svc-card-link[data-lp-tk] .svc-card-cta--disabled::after,.git-btn--primary[data-lp-tk]::after{content:"\\2192";display:inline-grid;place-items:center;' +
+  "width:2em;height:2em;border-radius:50%;font-size:.82em;line-height:1;transition:transform .24s cubic-bezier(.22,1,.36,1)}" +
+  ".svc-card-link[data-lp-tk] .svc-card-cta--disabled::after{background:var(--lp-blue,#2f61d6);color:#fff}" +
+  ".svc-card-link[data-lp-tk]:hover .svc-card-cta--disabled::after{transform:translateX(5px)}" +
+  ".git-btn--primary[data-lp-tk]::after{position:absolute;right:1.1rem;top:50%;margin-top:-1em;background:#fff;color:var(--lp-blue-deep,#1e3fa8)}" +
+  ".git-btn--primary[data-lp-tk]:hover::after{transform:translateX(3px)}" +
+  "@media (prefers-reduced-motion:reduce){[data-lp-tk],[data-lp-tk]::after,[data-lp-tk] *::after{transition:none!important}}";
+
+// Runs after React hydration (a __reactFiber$ key on the element) and edits the existing nodes in
+// place: replacing/removing React-owned nodes, or rewriting server-side, would be undone by
+// hydration. Gives up waiting after ~5s and swaps anyway.
+const CTA_SWAP_SCRIPT =
+  "(function(){var d=document,LB=" +
+  JSON.stringify(CTA_SWAP_LABEL) +
+  ',HREF="/tickets",SEL=' +
+  JSON.stringify(CTA_SWAP_SELECTOR) +
+  ",n=0;" +
+  'function hyd(el){return Object.keys(el).some(function(k){return k.indexOf("__reactFiber$")===0})}' +
+  "function txt(el){for(var c=el.firstChild;c;c=c.nextSibling){if(c.nodeType===3&&c.nodeValue.trim()){c.nodeValue=LB;return}}}" +
+  "function go(e){if(e)e.preventDefault();location.href=HREF}" +
+  'function swap(el){el.setAttribute("data-lp-tk","");el.classList.remove("is-disabled");el.removeAttribute("disabled");el.removeAttribute("aria-disabled");' +
+  'if(el.tagName==="A")el.setAttribute("href",HREF);else{el.setAttribute("role","link");el.tabIndex=0}' +
+  'if(el.hasAttribute("aria-label"))el.setAttribute("aria-label",LB);' +
+  'var jp=el.querySelector(".git-btn-jp");if(jp)txt(jp);else if(!el.classList.contains("svc-card-link"))txt(el);' +
+  'el.addEventListener("click",go);el.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "||e.key==="Spacebar")go(e)})}' +
+  'function run(force){var all=d.querySelectorAll(SEL),left=0;[].forEach.call(all,function(el){if(el.hasAttribute("data-lp-tk"))return;if(force||hyd(el))swap(el);else left++});return all.length>0&&left===0}' +
+  "(function tick(){n++;if(run(n>=50)||n>=50)return;setTimeout(tick,100)})()})();";
+
+/** In-place swap of the LP's 参加登録 buttons to 参加チケットを購入 (-> /tickets). */
+export function ticketsCtaSwap(): string {
+  return `<style id="lp-tickets-cta-css">${CTA_SWAP_CSS}</style><script id="lp-tickets-cta-swap">${CTA_SWAP_SCRIPT}</script>`;
+}
+
+/** HTML appended to LP pages: floating CTA when enabled, plus the button swap when ctaEnabled too. */
+export function ticketsInjection(cfg: TicketConfig | null): string {
+  if (!cfg || !cfg.enabled) return "";
+  return ticketsCta() + (cfg.ctaEnabled ? ticketsCtaSwap() : "");
 }
 
 // ---------- handler ----------
@@ -877,11 +1204,15 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     const sessionId = url.searchParams.get("session_id");
     const order = url.searchParams.get("order");
     if (deps.demo || !deps.internal || (!sessionId && !order)) {
-      return htmlResponse(renderThanksPage({ status: deps.demo && order ? "free" : "unknown", demo: deps.demo }));
+      // Demo only (no real orders): the mock checkout passes its summary along in the URL.
+      const summary = deps.demo && order ? (url.searchParams.get("summary") ?? "").slice(0, 300) : "";
+      return htmlResponse(
+        renderThanksPage({ status: deps.demo && order ? "free" : "unknown", summary: summary || undefined, demo: deps.demo }),
+      );
     }
     // Never trust the query string: both paid (session_id) and free (order) are confirmed server-side.
     let status: ThanksStatus = "unknown";
-    let ticketTypeName: string | undefined;
+    let summary: string | undefined;
     try {
       const res = await deps.internal("/lp/internal/tickets/confirm", {
         method: "POST",
@@ -889,14 +1220,14 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
         body: JSON.stringify(sessionId ? { sessionId } : { orderId: order }),
       });
       if (res.ok) {
-        const b = (await res.json()) as { status?: unknown; ticketTypeName?: unknown };
+        const b = (await res.json()) as { status?: unknown; summary?: unknown };
         if (b.status === "paid" || b.status === "pending" || b.status === "expired") status = b.status;
-        if (typeof b.ticketTypeName === "string") ticketTypeName = b.ticketTypeName;
+        if (typeof b.summary === "string" && b.summary.trim()) summary = b.summary.trim();
       }
     } catch {
       // fall through to the generic message
     }
-    return htmlResponse(renderThanksPage({ status, ticketTypeName: status === "paid" ? ticketTypeName : undefined, demo: deps.demo }));
+    return htmlResponse(renderThanksPage({ status, summary: status === "paid" ? summary : undefined, demo: deps.demo }));
   }
 
   // route === "checkout"
@@ -910,7 +1241,10 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     if (parsed.spam) return redirect("/tickets/thanks");
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: parsed.errors, demo: deps.demo }), 400);
   }
-  if (deps.demo) return redirect("/tickets/thanks?order=demo");
+  if (deps.demo) {
+    const summary = itemsSummary(parsed.input.items, config.types);
+    return redirect(`/tickets/thanks?order=demo&summary=${encodeURIComponent(summary)}`);
+  }
   if (!deps.internal) {
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(503, null, config) }), 503);
   }

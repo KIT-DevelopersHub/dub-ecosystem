@@ -141,11 +141,16 @@ export interface LpTicketType {
   description: string;
   priceJpy: number;
   capacity: number | null;
+  /** 対象日（例 "Day 1"）。"" = 通し/共通。 */
+  dayLabel: string;
+  /** 1 回の購入で買える上限枚数。 */
+  maxPerOrder: number;
   active: boolean;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
 }
+/** sold / pending are ticket counts (sum of quantities), not orders. */
 export interface LpTicketTypeStats {
   sold: number;
   pending: number;
@@ -158,6 +163,8 @@ export interface LpTicketTypeSummary extends LpTicketType {
 export interface LpTicketsState {
   site: string;
   enabled: boolean;
+  /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える（enabled の間だけ効く）。 */
+  ctaEnabled: boolean;
   paymentReady: boolean;
   publicUrl: string;
   fields: LpTicketField[];
@@ -172,10 +179,19 @@ export interface LpTicketAnswer {
   label: string;
   value: string;
 }
-export interface LpTicketOrder {
-  id: string;
+export interface LpTicketOrderItem {
   ticketTypeId: string;
   ticketTypeName: string;
+  dayLabel: string;
+  unitPriceJpy: number;
+  quantity: number;
+}
+export interface LpTicketOrder {
+  id: string;
+  items: LpTicketOrderItem[];
+  /** 合計枚数 */
+  quantity: number;
+  /** 合計金額 */
   amountJpy: number;
   status: LpTicketOrderStatus;
   buyerName: string;
@@ -193,6 +209,8 @@ export interface LpTicketTypeInput {
   description: string;
   priceJpy: number;
   capacity: number | null;
+  dayLabel: string;
+  maxPerOrder: number;
   active: boolean;
 }
 
@@ -200,6 +218,7 @@ export interface LpTicketTypeInput {
 export interface TicketSettingsRow {
   site: string;
   enabled: boolean;
+  ctaEnabled: boolean;
   fields: LpTicketField[];
   updatedBy: string | null;
   updatedAt: string;
@@ -222,17 +241,26 @@ export interface LpTicketRepo {
   getTicketSettings(site: string): Promise<TicketSettingsRow | null>;
   /** Upsert; only the given column changes. */
   setTicketEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
+  setTicketCta(site: string, ctaEnabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
   setTicketFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string): Promise<void>;
   listTicketTypes(site: string): Promise<TicketTypeRow[]>;
   getTicketType(site: string, id: string): Promise<TicketTypeRow | null>;
   insertTicketType(row: TicketTypeRow): Promise<void>;
   updateTicketType(row: TicketTypeRow): Promise<void>;
-  /** Per type: paid count/revenue + pending created at/after `pendingSince`. */
+  /** Per type: paid tickets/revenue + pending tickets of orders created at/after `pendingSince`. */
   ticketAggregates(site: string, pendingSince: string): Promise<TicketTypeAgg[]>;
   /** Orders created at/after `since` (daily checkout cap). */
   countOrdersSince(site: string, since: string): Promise<number>;
-  /** Atomic seat hold: inserts only while held (paid + fresh pending) < capacity. false = sold out. */
-  insertOrderIfAvailable(row: TicketOrderRow, capacity: number | null, pendingSince: string): Promise<boolean>;
+  /**
+   * Seat hold for every item: held (paid + fresh pending) + quantity <= capacity per type
+   * (capacity null = unlimited). All-or-nothing: on a short item nothing stays held and that
+   * item's ticketTypeId is returned.
+   */
+  insertOrderIfAvailable(
+    row: TicketOrderRow,
+    capacities: ReadonlyMap<string, number | null>,
+    pendingSince: string,
+  ): Promise<{ ok: true } | { ok: false; ticketTypeId: string }>;
   getOrder(site: string, id: string): Promise<TicketOrderRow | null>;
   getOrderBySession(sessionId: string): Promise<TicketOrderRow | null>;
   setOrderSession(id: string, sessionId: string): Promise<void>;

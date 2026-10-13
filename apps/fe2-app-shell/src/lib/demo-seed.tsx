@@ -3081,14 +3081,16 @@ function createLpStore() {
 }
 
 // ── LP管理 → チケット ──────────────────────────────────────────────────────────
-// Answers the ticket wire contract in features/lp/lpApi.tsx:
+// Answers the ticket wire contract (v2) in features/lp/lpApi.tsx:
 //   GET   /api/v1/lp/tickets
 //   POST  /api/v1/lp/tickets/enabled     { enabled }
+//   POST  /api/v1/lp/tickets/cta         { enabled }      ctaEnabled (saved even while sales are off)
 //   POST  /api/v1/lp/tickets/fields      { fields }      400 on invalid list
 //   POST  /api/v1/lp/tickets/types       LpTicketTypeInput   201
 //   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
 //   GET   /api/v1/lp/tickets/orders      ?cursor&limit   newest first
 // Demo starts PUBLISHED but with paymentReady=false so the 「決済 未設定」 state is visible.
+// Event = 2027-09-13(月) / 14(火): 一般・学生は Day 別の券種。sold/pending are TICKET counts.
 // Orders are fixed (not random) so the stats a reviewer sees are the same every load.
 type DemoTicketField = { id: string; label: string; type: "text" | "textarea" | "select" | "checkbox"; required: boolean; options: string[] };
 type DemoTicketType = {
@@ -3097,15 +3099,18 @@ type DemoTicketType = {
   description: string;
   priceJpy: number;
   capacity: number | null;
+  dayLabel: string;
+  maxPerOrder: number;
   active: boolean;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };
+type DemoTicketOrderItem = { ticketTypeId: string; ticketTypeName: string; dayLabel: string; unitPriceJpy: number; quantity: number };
 type DemoTicketOrder = {
   id: string;
-  ticketTypeId: string;
-  ticketTypeName: string;
+  items: DemoTicketOrderItem[];
+  quantity: number;
   amountJpy: number;
   status: "pending" | "paid" | "expired";
   buyerName: string;
@@ -3128,6 +3133,8 @@ function validDemoTicketType(input: Record<string, unknown>, partial: boolean): 
   }
   if (has("capacity") && input.capacity !== null && (!isInt(input.capacity) || input.capacity < 1 || input.capacity > 100_000))
     return "capacity";
+  if (has("dayLabel") && (typeof input.dayLabel !== "string" || input.dayLabel.trim().length > 30)) return "dayLabel";
+  if (has("maxPerOrder") && (!isInt(input.maxPerOrder) || input.maxPerOrder < 1 || input.maxPerOrder > 20)) return "maxPerOrder";
   if (has("active") && typeof input.active !== "boolean") return "active";
   return null;
 }
@@ -3137,6 +3144,7 @@ function createLpTicketsStore() {
   const settings = {
     site: "hokuriku-it-conf.com",
     enabled: true,
+    ctaEnabled: false,
     paymentReady: false,
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
@@ -3147,29 +3155,46 @@ function createLpTicketsStore() {
     updatedAt: t0 as string | null,
     updatedBy: "デモ 管理者" as string | null,
   };
+  const D1 = "Day 1 · 9/13(月)";
+  const D2 = "Day 2 · 9/14(火)";
+  const tt = (
+    id: string,
+    name: string,
+    description: string,
+    priceJpy: number,
+    capacity: number | null,
+    dayLabel: string,
+    maxPerOrder: number,
+    sortOrder: number,
+  ): DemoTicketType => ({ id, name, description, priceJpy, capacity, dayLabel, maxPerOrder, active: true, sortOrder, createdAt: t0, updatedAt: t0 });
   const types: DemoTicketType[] = [
-    { id: "tt_general", name: "一般", description: "社会人・一般の方", priceJpy: 3000, capacity: 200, active: true, sortOrder: 0, createdAt: t0, updatedAt: t0 },
-    { id: "tt_student", name: "学生", description: "学生証を当日ご提示ください", priceJpy: 1000, capacity: 100, active: true, sortOrder: 1, createdAt: t0, updatedAt: t0 },
-    { id: "tt_invite", name: "招待", description: "登壇者・スポンサー向け", priceJpy: 0, capacity: null, active: true, sortOrder: 2, createdAt: t0, updatedAt: t0 },
+    tt("tt_general_d1", "一般", "社会人・一般の方", 3000, 200, D1, 10, 0),
+    tt("tt_student_d1", "学生", "学生証を当日ご提示ください", 1000, 100, D1, 10, 1),
+    tt("tt_general_d2", "一般", "社会人・一般の方", 3000, 200, D2, 10, 2),
+    tt("tt_student_d2", "学生", "学生証を当日ご提示ください", 1000, 100, D2, 10, 3),
+    tt("tt_invite", "招待", "登壇者・スポンサー向け（両日）", 0, null, "", 5, 4),
   ];
-  const seedOrders: [string, string, string, "pending" | "paid" | "expired", string, string, string][] = [
-    // [id, typeId, buyer, status, createdAt, 所属, 参加区分]
-    ["ord_008", "tt_general", "山田 太郎", "pending", "2026-10-12T11:20:00.000Z", "北陸テック株式会社", "現地"],
-    ["ord_007", "tt_student", "佐藤 花子", "paid", "2026-10-11T08:05:00.000Z", "金沢工業大学", "現地"],
-    ["ord_006", "tt_general", "鈴木 一郎", "paid", "2026-10-10T13:40:00.000Z", "", "オンライン"],
-    ["ord_005", "tt_invite", "高橋 美咲", "paid", "2026-10-09T02:15:00.000Z", "スポンサー A 社", "現地"],
-    ["ord_004", "tt_general", "田中 健", "expired", "2026-10-07T10:00:00.000Z", "", "現地"],
-    ["ord_003", "tt_student", "伊藤 結衣", "paid", "2026-10-05T06:30:00.000Z", "富山大学", "オンライン"],
-    ["ord_002", "tt_general", "渡辺 翔", "paid", "2026-10-03T12:10:00.000Z", "石川システム", "現地"],
-    ["ord_001", "tt_general", "中村 葵", "paid", "2026-10-01T09:45:00.000Z", "福井 IT 協会", "現地"],
+  const seedOrders: [string, [string, number][], string, "pending" | "paid" | "expired", string, string, string][] = [
+    // [id, [[typeId, 枚数]...], buyer, status, createdAt, 所属, 参加区分]
+    ["ord_008", [["tt_general_d1", 2], ["tt_general_d2", 2]], "山田 太郎", "pending", "2026-10-12T11:20:00.000Z", "北陸テック株式会社", "現地"],
+    ["ord_007", [["tt_student_d1", 1], ["tt_student_d2", 1]], "佐藤 花子", "paid", "2026-10-11T08:05:00.000Z", "金沢工業大学", "現地"],
+    ["ord_006", [["tt_general_d2", 1]], "鈴木 一郎", "paid", "2026-10-10T13:40:00.000Z", "", "オンライン"],
+    ["ord_005", [["tt_invite", 3]], "高橋 美咲", "paid", "2026-10-09T02:15:00.000Z", "スポンサー A 社", "現地"],
+    ["ord_004", [["tt_general_d1", 1]], "田中 健", "expired", "2026-10-07T10:00:00.000Z", "", "現地"],
+    ["ord_003", [["tt_general_d1", 1], ["tt_student_d1", 3]], "伊藤 結衣", "paid", "2026-10-05T06:30:00.000Z", "富山大学", "オンライン"],
+    ["ord_002", [["tt_general_d1", 5]], "渡辺 翔", "paid", "2026-10-03T12:10:00.000Z", "石川システム", "現地"],
+    ["ord_001", [["tt_general_d1", 1], ["tt_general_d2", 1]], "中村 葵", "paid", "2026-10-01T09:45:00.000Z", "福井 IT 協会", "現地"],
   ];
-  const orders: DemoTicketOrder[] = seedOrders.map(([id, typeId, buyerName, status, createdAt, aff, att], i) => {
-    const t = types.find((x) => x.id === typeId)!;
+  const orders: DemoTicketOrder[] = seedOrders.map(([id, lines, buyerName, status, createdAt, aff, att], i) => {
+    const items = lines.map(([typeId, quantity]) => {
+      const t = types.find((x) => x.id === typeId)!;
+      return { ticketTypeId: t.id, ticketTypeName: t.name, dayLabel: t.dayLabel, unitPriceJpy: t.priceJpy, quantity };
+    });
     return {
       id,
-      ticketTypeId: t.id,
-      ticketTypeName: t.name,
-      amountJpy: t.priceJpy,
+      items,
+      quantity: items.reduce((n, it) => n + it.quantity, 0),
+      amountJpy: items.reduce((n, it) => n + it.unitPriceJpy * it.quantity, 0),
       status,
       buyerName,
       buyerEmail: `buyer${8 - i}@example.com`,
@@ -3183,17 +3208,21 @@ function createLpTicketsStore() {
   });
 
   const summary = (t: DemoTicketType) => {
-    const mine = orders.filter((o) => o.ticketTypeId === t.id);
-    const paid = mine.filter((o) => o.status === "paid");
-    const pending = mine.filter((o) => o.status === "pending").length;
+    let sold = 0;
+    let pending = 0;
+    let revenueJpy = 0;
+    for (const o of orders) {
+      for (const it of o.items) {
+        if (it.ticketTypeId !== t.id) continue;
+        if (o.status === "paid") {
+          sold += it.quantity;
+          revenueJpy += it.unitPriceJpy * it.quantity;
+        } else if (o.status === "pending") pending += it.quantity;
+      }
+    }
     return {
       ...t,
-      stats: {
-        sold: paid.length,
-        pending,
-        revenueJpy: paid.reduce((n, o) => n + o.amountJpy, 0),
-        remaining: t.capacity === null ? null : Math.max(0, t.capacity - paid.length - pending),
-      },
+      stats: { sold, pending, revenueJpy, remaining: t.capacity === null ? null : Math.max(0, t.capacity - sold - pending) },
     };
   };
   const state = () => {
@@ -3222,6 +3251,13 @@ function createLpTicketsStore() {
     if (method === "POST" && pathname === "/api/v1/lp/tickets/enabled") {
       if (typeof req.enabled !== "boolean") return problem("VALIDATION_FAILED", "enabled を指定してください", 400);
       settings.enabled = req.enabled;
+      touch();
+      return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/cta") {
+      if (typeof req.enabled !== "boolean") return problem("VALIDATION_FAILED", "enabled を指定してください", 400);
+      settings.ctaEnabled = req.enabled;
       touch();
       return json(state());
     }
@@ -3266,6 +3302,8 @@ function createLpTicketsStore() {
         description: typeof req.description === "string" ? req.description.trim() : "",
         priceJpy: req.priceJpy as number,
         capacity: (req.capacity as number | null | undefined) ?? null,
+        dayLabel: typeof req.dayLabel === "string" ? req.dayLabel.trim() : "",
+        maxPerOrder: typeof req.maxPerOrder === "number" ? req.maxPerOrder : 10,
         active: typeof req.active === "boolean" ? req.active : true,
         sortOrder: types.length,
         createdAt: now,
@@ -3285,6 +3323,8 @@ function createLpTicketsStore() {
       if (typeof req.description === "string") t.description = req.description.trim();
       if (typeof req.priceJpy === "number") t.priceJpy = req.priceJpy;
       if (req.capacity !== undefined) t.capacity = req.capacity as number | null;
+      if (typeof req.dayLabel === "string") t.dayLabel = req.dayLabel.trim();
+      if (typeof req.maxPerOrder === "number") t.maxPerOrder = req.maxPerOrder;
       if (typeof req.active === "boolean") t.active = req.active;
       t.updatedAt = new Date().toISOString();
       return json(summary(t));

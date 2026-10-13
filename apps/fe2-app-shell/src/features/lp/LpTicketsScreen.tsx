@@ -4,6 +4,8 @@
 // 設計メモ:
 //  - 販売の公開/停止は LP 全体に効くので lp:publish 必須 + 確認ダイアログ（版の公開と同じ扱い）。
 //  - 決済（Stripe）の鍵が未登録でも画面は動く。未設定の間は有料券は買えず、無料券だけ申し込める。
+//  - LP の「参加登録」ボタン差し替え（ctaEnabled）は販売公開に従属する 2 段目のスイッチ。
+//    効くのは enabled && ctaEnabled のときだけ。販売停止中でも予約として保存はできる。
 //  - 購入者一覧は個人情報なので app:lp:edit のときだけ取得・表示する（閲覧者には出さない）。
 //  - 読み込み中はセクションごとのスケルトン、失敗は再試行つき ErrorState、書き込みは楽観的 UI。
 import { useMemo, useState } from "react";
@@ -23,8 +25,8 @@ import {
 } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import type { LpTicketOrder, LpTicketsState } from "./lpApi.tsx";
-import { useLpTicketOrders, useLpTickets, useSetTicketsEnabled } from "./lpTicketsHooks.ts";
-import { ORDER_STATUS, formatDateTime, formatPrice, formatYen } from "./lpTickets.ts";
+import { useLpTicketOrders, useLpTickets, useSetTicketsCta, useSetTicketsEnabled } from "./lpTicketsHooks.ts";
+import { ORDER_STATUS, formatDateTime, formatPrice, formatYen, orderItemLabel } from "./lpTickets.ts";
 import { LpTicketTypesCard } from "./LpTicketTypes.tsx";
 import { LpTicketFieldsCard } from "./LpTicketFields.tsx";
 import { LpTabs } from "./LpTabs.tsx";
@@ -61,7 +63,7 @@ export function LpTicketsScreen(): JSX.Element {
       <Stack gap={6}>
         <SalesStatusCard state={state} canToggle={canToggle} />
         <div className={styles.kpiGrid}>
-          <SummaryTile testId="fe2-lp-tickets-sold" label="販売数" value={`${state.totals.sold.toLocaleString("ja-JP")} 枚`} hint="支払い済み（無料券を含む）" />
+          <SummaryTile testId="fe2-lp-tickets-sold" label="販売数" value={`${state.totals.sold.toLocaleString("ja-JP")} 枚`} hint="支払い済みの枚数（無料券を含む・1 回で複数枚の購入あり）" />
           <SummaryTile testId="fe2-lp-tickets-revenue" label="売上" value={formatYen(state.totals.revenueJpy)} hint="支払い済みの合計（税込）" />
         </div>
         <LpTicketTypesCard types={state.types} canEdit={canEdit} />
@@ -121,6 +123,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             切り替えには lp:publish 権限が必要です
           </span>
         ) : null}
+        <CtaSetting state={state} canToggle={canToggle} />
         <div className={styles.statusRow}>
           <span className={styles.kpiLabel}>購入ページ</span>
           <a
@@ -176,11 +179,13 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             {confirming ? (
               <>
                 <li>公開すると LP に「チケットを購入」ボタンと /tickets ページが出ます。</li>
+                {state.ctaEnabled ? <li>LP の「参加登録」ボタンも「参加チケットを購入」に切り替わります。</li> : null}
                 {!state.paymentReady ? <li>決済が未設定のため、有料のチケットは「準備中」と表示されます。</li> : null}
               </>
             ) : (
               <>
                 <li>停止すると LP から「チケットを購入」ボタンが消え、/tickets ページは表示されなくなります。</li>
+                {state.ctaEnabled ? <li>LP の「参加登録」ボタンは元の表示に戻ります。</li> : null}
                 <li>これまでの購入記録は消えません。</li>
               </>
             )}
@@ -189,6 +194,82 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
         </Modal>
       ) : null}
     </Card>
+  );
+}
+
+function CtaSetting({ state, canToggle }: { state: LpTicketsState; canToggle: boolean }): JSX.Element {
+  const setCta = useSetTicketsCta();
+  const [confirming, setConfirming] = useState<boolean | null>(null);
+  const effective = state.enabled && state.ctaEnabled;
+  const badge = effective
+    ? { tone: "success" as const, label: "LP に反映中" }
+    : state.ctaEnabled
+      ? { tone: "warning" as const, label: "販売の公開待ち" }
+      : { tone: "neutral" as const, label: "元の表示" };
+
+  // 販売が公開中なら LP の見た目がすぐ変わるので確認を挟む。停止中は効果が無いので即保存。
+  const onChange = (next: boolean): void => {
+    if (state.enabled) setConfirming(next);
+    else setCta.mutate({ enabled: next });
+  };
+
+  return (
+    <div className={styles.ctaSetting} data-testid="fe2-lp-tickets-cta-setting">
+      <div className={styles.statusRow}>
+        <Switch
+          id="fe2-lp-tickets-cta"
+          testId="fe2-lp-tickets-cta"
+          checked={state.ctaEnabled}
+          disabled={!canToggle || setCta.isPending}
+          label="LP の「参加登録」ボタンを「参加チケットを購入」に切り替える"
+          onChange={onChange}
+        />
+        <Badge tone={badge.tone} testId="fe2-lp-tickets-cta-state">
+          {badge.label}
+        </Badge>
+      </div>
+      <span className={styles.note} data-testid="fe2-lp-tickets-cta-hint">
+        {state.enabled
+          ? "ヘッダー・ヒーロー・参加カード・お問い合わせ欄の「参加登録」ボタンが、購入ページ（/tickets）へのボタンに変わります。"
+          : "販売を公開すると有効になります。いまオンにしても、販売を公開するまで LP のボタンは変わりません。"}
+      </span>
+      {confirming !== null ? (
+        <Modal
+          open
+          onClose={() => setConfirming(null)}
+          title={confirming ? "参加登録ボタンを切り替えます" : "参加登録ボタンを元に戻します"}
+          size="sm"
+          testId="fe2-lp-tickets-cta-dialog"
+          footer={
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--dub-space-3)" }}>
+              <Button variant="secondary" onClick={() => setConfirming(null)} testId="fe2-lp-tickets-cta-cancel">
+                キャンセル
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const next = confirming;
+                  setConfirming(null);
+                  setCta.mutate({ enabled: next });
+                }}
+                testId="fe2-lp-tickets-cta-confirm"
+              >
+                {confirming ? "切り替える" : "元に戻す"}
+              </Button>
+            </div>
+          }
+        >
+          <ul style={{ margin: 0, paddingLeft: "var(--dub-space-5)", display: "grid", gap: "var(--dub-space-2)" }}>
+            {confirming ? (
+              <li>LP の「参加登録」ボタンが「参加チケットを購入」になり、押すと購入ページ（/tickets）に移ります。</li>
+            ) : (
+              <li>LP の「参加登録」ボタンを元の表示に戻します。右下の「チケットを購入」ボタンと購入ページはそのまま残ります。</li>
+            )}
+            <li>反映まで最大 1 分ほどかかります。</li>
+          </ul>
+        </Modal>
+      ) : null}
+    </div>
   );
 }
 
@@ -249,8 +330,18 @@ function OrderRow({ order: o }: { order: LpTicketOrder }): JSX.Element {
       <div className={styles.orderLine}>
         <strong className={styles.linkName}>{o.buyerName}</strong>
         <span className={styles.orderEmail}>{o.buyerEmail}</span>
-        <span>{o.ticketTypeName}</span>
-        <span className={styles.num}>{formatPrice(o.amountJpy)}</span>
+        <ul className={styles.orderItems} data-testid={`fe2-lp-ticket-order-items-${o.id}`}>
+          {o.items.map((it) => (
+            <li key={it.ticketTypeId}>
+              <span>{orderItemLabel(it)}</span>
+              <span className={styles.num}>× {it.quantity}</span>
+            </li>
+          ))}
+        </ul>
+        <span className={styles.orderTotal} data-testid={`fe2-lp-ticket-order-total-${o.id}`}>
+          <span className={styles.num}>{formatPrice(o.amountJpy)}</span>
+          <small className={styles.kpiHint}>計 {o.quantity.toLocaleString("ja-JP")} 枚</small>
+        </span>
         <Badge tone={status.tone}>{status.label}</Badge>
         <small className={styles.versionDate}>{formatDateTime(o.createdAt)}</small>
         <Button
@@ -265,6 +356,14 @@ function OrderRow({ order: o }: { order: LpTicketOrder }): JSX.Element {
       </div>
       {open ? (
         <dl className={styles.orderAnswers} data-testid={`fe2-lp-ticket-order-answers-${o.id}`}>
+          {o.items.map((it) => (
+            <div key={`item-${it.ticketTypeId}`} className={styles.orderAnswer}>
+              <dt>{orderItemLabel(it)}</dt>
+              <dd className={styles.num}>
+                {formatPrice(it.unitPriceJpy)} × {it.quantity} 枚 = {formatYen(it.unitPriceJpy * it.quantity)}
+              </dd>
+            </div>
+          ))}
           {o.answers.length === 0 ? (
             <dd>追加の回答はありません。</dd>
           ) : (

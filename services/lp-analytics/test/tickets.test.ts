@@ -72,11 +72,19 @@ async function enable(app: App) {
   expect((await app.fetch(send("POST", "/lp/tickets/enabled", { enabled: true }))).status).toBe(200);
 }
 
-const checkout = (b: Record<string, unknown>) =>
+/** `ticketTypeId` (+ `quantity`) is shorthand for a one-line `items`. */
+const checkout = ({ ticketTypeId, quantity, ...b }: Record<string, unknown>) =>
   send(
     "POST",
     "/lp/internal/tickets/checkout",
-    { name: "山田 太郎", email: "taro@example.com", answers: {}, origin: "https://hokuriku-it-conf.com", ...b },
+    {
+      name: "山田 太郎",
+      email: "taro@example.com",
+      answers: {},
+      origin: "https://hokuriku-it-conf.com",
+      ...(ticketTypeId !== undefined ? { items: [{ ticketTypeId, quantity: quantity ?? 1 }] } : {}),
+      ...b,
+    },
     INTERNAL,
   );
 
@@ -99,6 +107,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(s).toEqual({
       site: "hokuriku-it-conf.com",
       enabled: false,
+      ctaEnabled: false,
       paymentReady: false,
       publicUrl: "https://hokuriku-it-conf.com/tickets",
       fields: [],
@@ -119,6 +128,31 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const res = await app.fetch(send("POST", "/lp/tickets/enabled", { enabled: true }));
     expect(res.status).toBe(200);
     expect(await body<LpTicketsState>(res)).toMatchObject({ enabled: true, updatedBy: "usr_admin", updatedAt: NOW });
+  });
+
+  it("cta toggle needs lp:publish and is independent of enabled", async () => {
+    const noPublish = await setup(kind, { publish: false });
+    expect((await noPublish.app.fetch(send("POST", "/lp/tickets/cta", { enabled: true }))).status).toBe(403);
+    const { app } = await setup(kind);
+    expect((await app.fetch(send("POST", "/lp/tickets/cta", {}))).status).toBe(400);
+    const res = await app.fetch(send("POST", "/lp/tickets/cta", { enabled: true }));
+    expect(await body<LpTicketsState>(res)).toMatchObject({ enabled: false, ctaEnabled: true });
+    await enable(app);
+    const internal = await body<{ enabled: boolean; ctaEnabled: boolean }>(await app.fetch(get("/lp/internal/tickets", INTERNAL)));
+    expect(internal).toMatchObject({ enabled: true, ctaEnabled: true });
+  });
+
+  it("dayLabel / maxPerOrder: defaults, trims, validates", async () => {
+    const { app } = await setup(kind);
+    const a = await addType(app, { name: "一般", priceJpy: 3000, dayLabel: " Day 1 " });
+    expect(a).toMatchObject({ dayLabel: "Day 1", maxPerOrder: 10 });
+    const b = await addType(app, { name: "学生", priceJpy: 1000, maxPerOrder: 2 });
+    expect(b).toMatchObject({ dayLabel: "", maxPerOrder: 2 });
+    for (const input of [{ dayLabel: "x".repeat(31) }, { maxPerOrder: 0 }, { maxPerOrder: 21 }, { maxPerOrder: 1.5 }]) {
+      expect((await app.fetch(send("POST", "/lp/tickets/types", { name: "a", priceJpy: 100, ...input }))).status).toBe(400);
+    }
+    const patched = await app.fetch(send("PATCH", `/lp/tickets/types/${a.id}`, { dayLabel: "Day 2", maxPerOrder: 4 }));
+    expect(await body<LpTicketTypeSummary>(patched)).toMatchObject({ name: "一般", dayLabel: "Day 2", maxPerOrder: 4 });
   });
 
   it("create / patch ticket type with validation; sortOrder appends", async () => {
@@ -208,7 +242,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(res.enabled).toBe(true);
     expect(res.paymentReady).toBe(false);
     expect(res.types).toEqual([
-      { id: a.id, name: "A", description: "", priceJpy: 0, soldOut: true },
+      { id: a.id, name: "A", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: 0, soldOut: true },
       expect.objectContaining({ name: "C", soldOut: false }),
     ]);
   });
@@ -245,7 +279,8 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
     expect(orders.items).toHaveLength(1);
     expect(orders.items[0]).toMatchObject({
-      ticketTypeName: "招待",
+      items: [{ ticketTypeId: t.id, ticketTypeName: "招待", dayLabel: "", unitPriceJpy: 0, quantity: 1 }],
+      quantity: 1,
       amountJpy: 0,
       status: "paid",
       buyerName: "山田 太郎",
@@ -258,7 +293,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     });
     const orderId = new URL(redirectUrl).searchParams.get("order");
     const confirmed = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId }, INTERNAL));
-    expect(await confirmed.json()).toEqual({ status: "paid", ticketTypeName: "招待" });
+    expect(await confirmed.json()).toEqual({ status: "paid", summary: "招待 ×1" });
   });
 
   it("checkout disabled → 404; paid ticket without Stripe → 503; free still works", async () => {
@@ -307,8 +342,92 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
 
     const again = await app.fetch(checkout({ ticketTypeId: t.id }));
     expect(again.status).toBe(409);
-    expect(await again.json()).toMatchObject({ error: { code: "LP_TICKET_SOLD_OUT" } });
+    expect(await again.json()).toMatchObject({ error: { code: "LP_TICKET_SOLD_OUT", details: { ticketTypeId: t.id } } });
     expect(stripe.calls).toHaveLength(1);
+  });
+
+  it("one order buys several types x quantity: Stripe line items, stats count tickets, summary", async () => {
+    const stripe = fakeStripe({ payment_status: "paid" });
+    const { app } = await setup(kind, { stripe });
+    await enable(app);
+    const d1 = await addType(app, { name: "一般", priceJpy: 3000, dayLabel: "Day 1", capacity: 10 });
+    const d2 = await addType(app, { name: "一般", priceJpy: 3000, dayLabel: "Day 2" });
+    const inv = await addType(app, { name: "招待", priceJpy: 0 });
+    const res = await app.fetch(
+      checkout({
+        items: [
+          { ticketTypeId: d1.id, quantity: 2 },
+          { ticketTypeId: d2.id, quantity: 1 },
+          { ticketTypeId: inv.id, quantity: 1 },
+        ],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const form = Object.fromEntries(stripe.calls[0]!.form!);
+    expect(form).toMatchObject({
+      "line_items[0][price_data][unit_amount]": "3000",
+      "line_items[0][price_data][product_data][name]": "一般（Day 1）",
+      "line_items[0][quantity]": "2",
+      "line_items[1][price_data][product_data][name]": "一般（Day 2）",
+      "line_items[1][quantity]": "1",
+    });
+    expect(form["line_items[2][quantity]"]).toBeUndefined(); // free line is not sent to Stripe
+
+    let s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
+    expect(s.types.map((t) => t.stats.pending)).toEqual([2, 1, 1]);
+    expect(s.types[0]!.stats.remaining).toBe(8);
+
+    const confirmed = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
+    expect(await confirmed.json()).toEqual({ status: "paid", summary: "一般 Day 1 ×2、一般 Day 2 ×1、招待 ×1" });
+    s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
+    expect(s.totals).toEqual({ sold: 4, revenueJpy: 9000 });
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items[0]).toMatchObject({ quantity: 4, amountJpy: 9000, status: "paid" });
+    expect(orders.items[0]!.items.map((i) => [i.dayLabel, i.quantity])).toEqual([
+      ["Day 1", 2],
+      ["Day 2", 1],
+      ["", 1],
+    ]);
+  });
+
+  it("items validation: empty, duplicate, over maxPerOrder, over 20 total, inactive", async () => {
+    const { app } = await setup(kind);
+    await enable(app);
+    const a = await addType(app, { name: "A", priceJpy: 0, maxPerOrder: 2 });
+    const b = await addType(app, { name: "B", priceJpy: 0, maxPerOrder: 20 });
+    const off = await addType(app, { name: "C", priceJpy: 0 });
+    await app.fetch(send("PATCH", `/lp/tickets/types/${off.id}`, { active: false }));
+    const cases: [Record<string, unknown>, string][] = [
+      [{ items: [] }, "items"],
+      [{ items: [{ ticketTypeId: a.id, quantity: 1 }, { ticketTypeId: a.id, quantity: 1 }] }, `items.${a.id}`],
+      [{ ticketTypeId: a.id, quantity: 0 }, `items.${a.id}`],
+      [{ ticketTypeId: a.id, quantity: 3 }, `items.${a.id}`],
+      [{ items: [{ ticketTypeId: a.id, quantity: 2 }, { ticketTypeId: b.id, quantity: 19 }] }, "items"],
+      [{ ticketTypeId: off.id }, `items.${off.id}`],
+    ];
+    for (const [input, field] of cases) {
+      const res = await app.fetch(checkout(input));
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain(field);
+    }
+    expect((await app.fetch(checkout({ ticketTypeId: a.id, quantity: 2 }))).status).toBe(200);
+  });
+
+  it("short on one type → 409 for that type and nothing stays held", async () => {
+    const { app } = await setup(kind);
+    await enable(app);
+    const a = await addType(app, { name: "A", priceJpy: 0, capacity: 5 });
+    const b = await addType(app, { name: "B", priceJpy: 0, capacity: 2 });
+    expect((await app.fetch(checkout({ ticketTypeId: b.id, quantity: 1 }))).status).toBe(200);
+    const res = await app.fetch(
+      checkout({ items: [{ ticketTypeId: a.id, quantity: 3 }, { ticketTypeId: b.id, quantity: 2 }] }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { details: { reason: "sold_out", ticketTypeId: b.id } } });
+    const s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
+    expect(s.types.map((t) => t.stats.remaining)).toEqual([5, 1]);
+    expect((await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")))).items).toHaveLength(1);
+    expect((await app.fetch(checkout({ ticketTypeId: a.id, quantity: 5 }))).status).toBe(200);
   });
 
   it("stale pending (> 35 min) frees the seat", async () => {
@@ -417,7 +536,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const { redirectUrl } = await body<{ redirectUrl: string }>(await app.fetch(checkout({ ticketTypeId: t.id })));
     const orderId = new URL(redirectUrl).searchParams.get("order");
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "paid", ticketTypeName: "招待" });
+    expect(await res.json()).toEqual({ status: "paid", summary: "招待 ×1" });
     const unknown = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId: "tko_nope" }, INTERNAL));
     expect(await unknown.json()).toEqual({ status: "unknown" });
   });
@@ -429,7 +548,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const t = await addType(app, { name: "一般", priceJpy: 3000 });
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "paid", ticketTypeName: "一般" });
+    expect(await res.json()).toEqual({ status: "paid", summary: "一般 ×1" });
     expect(stripe.calls[1]).toMatchObject({ method: "GET", url: "https://api.stripe.com/v1/checkout/sessions/cs_test_0" });
     // already paid: no second Stripe call
     await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
@@ -446,7 +565,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const t = await addType(app, { name: "一般", priceJpy: 3000 });
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "pending", ticketTypeName: "一般" });
+    expect(await res.json()).toEqual({ status: "pending", summary: "一般 ×1" });
   });
 
   it("orders: newest first with cursor paging", async () => {
@@ -475,6 +594,7 @@ describe("tickets gate", () => {
     expect((await view.app.fetch(get("/lp/tickets/orders"))).status).toBe(403);
     expect((await view.app.fetch(send("POST", "/lp/tickets/types", { name: "a", priceJpy: 0 }))).status).toBe(403);
     expect((await view.app.fetch(send("POST", "/lp/tickets/fields", { fields: [] }))).status).toBe(403);
+    expect((await view.app.fetch(send("POST", "/lp/tickets/cta", { enabled: true }))).status).toBe(403);
     const none = await makeApp("memory", "none");
     expect((await none.app.fetch(get("/lp/tickets"))).status).toBe(403);
   });
