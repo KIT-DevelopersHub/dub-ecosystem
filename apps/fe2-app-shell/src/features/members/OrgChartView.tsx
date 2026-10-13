@@ -18,9 +18,14 @@ function isHqTeam(t: MemberTeam): boolean {
   return /統括/.test(t.name) || t.key === "soukatsu" || t.key === "hq";
 }
 
-/** 上部「代表」箱に出す人（この順で表示）。統括チームの列と重複して載るのは意図どおり。 */
-export const REPRESENTATIVE_NAMES = ["金井友楽", "高岡己太朗"] as const;
-const normName = (s: string): string => s.replace(/[\s　]+/g, "");
+/**
+ * 上部「代表」箱に出す人 = 統括チームのうち役割に「代表」を含む人（副代表も含む）。
+ * 代表 → 副代表 → 並び順。統括チームの列と重複して載るのは意図どおり。
+ */
+function representativesOf(hqMembers: OrgMember[]): OrgMember[] {
+  const rank = (m: OrgMember): number => (/副代表/.test(m.roleTitle ?? "") ? 1 : 0);
+  return hqMembers.filter((m) => /代表/.test(m.roleTitle ?? "")).sort((a, b) => rank(a) - rank(b) || bySortOrder(a, b));
+}
 
 const TIER_RANK: Record<Tier, number> = { organizer: 0, leader: 1, member: 2 };
 function bySortOrder(a: OrgMember, b: OrgMember): number {
@@ -148,7 +153,7 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
   // 統括チームは他チームと同じ列として右端に並べる。
   const columnTeams = [...teams.filter((t) => !isHqTeam(t)), ...teams.filter(isHqTeam)];
   const inTeam = (teamId: string): OrgMember[] => active.filter((m) => m.teamIds.includes(teamId));
-  const reps = REPRESENTATIVE_NAMES.flatMap((n) => active.filter((m) => normName(m.name) === n));
+  const reps = representativesOf(active.filter((m) => teams.some((t) => isHqTeam(t) && m.teamIds.includes(t.id))));
 
   // 各 active メンバーをチーム列に配置しつつ、どこに描画したかを記録する（代表箱は列の外の重複表示なので数えない）。
   const placed = new Set<string>();
@@ -206,6 +211,7 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
                   return (
                     <div key={m.id} className={`${styles.namechip} ${styles.lead}`} data-testid={`members-orgrep-${m.id}`}>
                       {m.name}
+                      {m.roleTitle ? <span className={styles.namechipRole}>{m.roleTitle}</span> : null}
                       {badge ? <span className={styles.miniBadge}>{badge}</span> : null}
                     </div>
                   );

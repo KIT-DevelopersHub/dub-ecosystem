@@ -274,8 +274,8 @@ describe("MembersPage", () => {
     expect(within(l2Item as HTMLElement).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
   });
 
-  // 統括チームは他チームと並ぶ1列になり、上部には「代表」として金井・高岡の2名だけを出す
-  // (2名は統括チームの列にも重複して載る)。
+  // 統括チームは他チームと並ぶ1列になり、上部「代表」には統括チームで役割に代表/副代表を含む人だけを
+  // 代表→副代表の順で出す(統括チームの列にも重複して載る)。統括外の「代表」は上に出さない。
   it("組織図 shows 代表 on top and 統括チーム as a regular column", async () => {
     const base = { ...P0, orgId: "o", department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t" };
     const overview: MembersOverview = {
@@ -284,17 +284,18 @@ describe("MembersPage", () => {
         { id: "dev", key: "dev", name: "開発チーム", color: "#0d9488", description: null },
       ],
       members: [
-        { ...base, id: "K", name: "高岡 己太朗", roleTitle: "実行委員長", status: "added", teamIds: ["hq"], sortOrder: 1 },
-        { ...base, id: "Y", name: "金井友楽", roleTitle: null, status: "added", teamIds: ["hq"], sortOrder: 2 },
-        { ...base, id: "H", name: "統括三郎", roleTitle: null, status: "added", teamIds: ["hq"], sortOrder: 3 },
-        { ...base, id: "D", name: "開発花子", roleTitle: null, status: "added", teamIds: ["dev"], sortOrder: 4 },
+        { ...base, id: "K", name: "高岡 己太朗", roleTitle: "副代表", status: "added", teamIds: ["hq"], sortOrder: 1 },
+        { ...base, id: "Y", name: "金井友楽", roleTitle: "代表", status: "added", teamIds: ["hq"], sortOrder: 2 },
+        { ...base, id: "H", name: "統括三郎", roleTitle: "統括リーダー", status: "added", teamIds: ["hq"], sortOrder: 3 },
+        { ...base, id: "D", name: "開発花子", roleTitle: "開発チーム代表", status: "added", teamIds: ["dev"], sortOrder: 4 },
       ],
     };
     render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
     await screen.findByTestId("members-orgchart");
 
     const reps = screen.getByTestId("members-orgchart-reps");
-    expect(within(reps).getByText("代表")).toBeInTheDocument();
+    expect(reps.textContent).toMatch(/^代表/);
+    expect(within(reps).queryByText("開発花子")).not.toBeInTheDocument();
     const repIds = [...reps.querySelectorAll("[data-testid^='members-orgrep-']")].map((e) => e.getAttribute("data-testid"));
     expect(repIds).toEqual(["members-orgrep-Y", "members-orgrep-K"]);
     const hqCol = screen.getByTestId("members-orgcol-hq");
