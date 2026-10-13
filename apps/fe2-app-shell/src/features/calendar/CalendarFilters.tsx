@@ -118,7 +118,7 @@ export function AddTeamPicker({
       <Select
         id={id}
         value={null}
-        placeholder="＋ チーム全員の分を表示"
+        placeholder="＋ チーム全員分を表示"
         options={teams.map((t) => ({ value: t.id, label: t.name }))}
         onChange={(v) => v && onAdd(v)}
         testId="calendar-add-team"
