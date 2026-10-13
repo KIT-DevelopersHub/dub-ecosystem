@@ -3,6 +3,7 @@
 // event palette (ピーコック/ブルーベリー/ミカン/セージ/グラファイト) so blocks read the
 // way users already know; text on them is always white, as in Google.
 import type { task } from "@dub/types";
+import { isVacationTask } from "./calendar-model";
 
 export interface StatusVisual {
   label: string;
@@ -31,3 +32,11 @@ export const PRIORITY_LABEL: Record<task.TaskPriority, string> = {
   high: "高",
   urgent: "緊急",
 };
+
+/** 休暇 gets its own calendar color (Google's グレープ), whatever its status. */
+export const VACATION_VISUAL: StatusVisual = { label: "休暇", color: "#8e24aa" };
+
+/** Color/label for a drawn item: 休暇 first, else its status. */
+export function itemVisual(t: task.Task): StatusVisual {
+  return isVacationTask(t) ? VACATION_VISUAL : statusVisual(t.status);
+}

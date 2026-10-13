@@ -113,8 +113,10 @@ describe("CalendarScreen", () => {
     renderScreen(api);
     await screen.findByTestId("calendar-timegrid");
 
+    // Like Google, 作成 opens the quick-create panel (not a separate form).
     await user.click(screen.getByTestId("calendar-create"));
-    const dialog = await screen.findByTestId("calendar-edit-dialog");
+    const dialog = await screen.findByTestId("calendar-create-panel");
+    expect(within(dialog).getByTestId("calendar-form-when")).toHaveTextContent(/10月10日（土曜日）\s+9:00～10:00/);
     await user.type(within(dialog).getByTestId("calendar-form-title"), "スポンサー打ち合わせ");
     await user.click(within(dialog).getByTestId("calendar-form-save"));
 
@@ -140,6 +142,7 @@ describe("CalendarScreen", () => {
     fireEvent.pointerUp(col, { clientY: y, button: 0, pointerId: 1 });
 
     const panel = await screen.findByTestId("calendar-create-panel");
+    await user.click(within(panel).getByTestId("calendar-form-when"));
     expect(within(panel).getByTestId("calendar-form-start-time")).toHaveValue("14:00");
     expect(within(panel).getByTestId("calendar-form-end-time")).toHaveValue("15:00");
     expect(screen.getByTestId("calendar-ghost")).toBeInTheDocument();
@@ -181,7 +184,7 @@ describe("CalendarScreen", () => {
     await screen.findByTestId("calendar-timegrid");
 
     await user.click(screen.getByTestId("calendar-create"));
-    const dialog = await screen.findByTestId("calendar-edit-dialog");
+    const dialog = await screen.findByTestId("calendar-create-panel");
     await user.type(within(dialog).getByTestId("calendar-form-title"), "失敗する予定");
     await user.click(within(dialog).getByTestId("calendar-form-save"));
 
@@ -205,6 +208,54 @@ describe("CalendarScreen", () => {
     await user.click(screen.getByTestId("calendar-filter-done"));
     expect(screen.queryByTestId("calendar-item-a")).not.toBeInTheDocument();
     expect(screen.getByTestId("calendar-item-b")).toBeInTheDocument();
+  });
+
+  it("registers a 休暇 (終日, tagged) and draws it in the 休暇 calendar", async () => {
+    const user = userEvent.setup();
+    const api = memoryApi([]);
+    renderScreen(api);
+    await screen.findByTestId("calendar-timegrid");
+
+    await user.click(screen.getByTestId("calendar-create"));
+    const panel = await screen.findByTestId("calendar-create-panel");
+    await user.click(within(panel).getByTestId("calendar-kind-vacation"));
+    expect(within(panel).getByTestId("calendar-vacation-note")).toBeInTheDocument();
+    await user.click(within(panel).getByTestId("calendar-form-save"));
+
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(1));
+    const req = vi.mocked(api.createTask).mock.calls[0]![0];
+    expect(req).toMatchObject({
+      title: "休暇",
+      description: "#休暇",
+      startAt: "2026-10-10T00:00:00.000Z",
+      dueAt: "2026-10-10T00:00:00.000Z",
+    });
+    expect(await screen.findByText("休暇を登録しました")).toBeInTheDocument();
+
+    // Hidden/shown on its own via マイカレンダー, independent of status.
+    const bar = await within(screen.getByTestId("calendar-allday")).findByText("休暇");
+    expect(bar).toBeInTheDocument();
+    await user.click(screen.getByTestId("calendar-filter-vacation"));
+    expect(within(screen.getByTestId("calendar-allday")).queryByText("休暇")).not.toBeInTheDocument();
+  });
+
+  it("opens 休暇 detail without the tag and edits it in the full-page editor", async () => {
+    const user = userEvent.setup();
+    renderScreen(
+      memoryApi([
+        mk("off", { title: "夏休み", description: "#休暇\n連絡はチャットへ", startAt: "2026-10-08T00:00:00.000Z", dueAt: "2026-10-09T00:00:00.000Z" }),
+      ]),
+    );
+    await user.click(await screen.findByTestId("calendar-item-off"));
+    const detail = await screen.findByTestId("calendar-event-detail");
+    expect(within(detail).getByTestId("calendar-detail-kind")).toHaveTextContent("休暇");
+    expect(within(detail).getByText("連絡はチャットへ")).toBeInTheDocument();
+    expect(within(detail).queryByText(/#休暇/)).not.toBeInTheDocument();
+
+    await user.click(within(detail).getByTestId("calendar-detail-edit"));
+    const editor = await screen.findByTestId("calendar-edit-dialog");
+    expect(within(editor).getByTestId("calendar-kind-vacation")).toHaveAttribute("aria-checked", "true");
+    expect(within(editor).getByTestId("calendar-form-description")).toHaveValue("連絡はチャットへ");
   });
 
   it("disables 作成 without write permission", async () => {

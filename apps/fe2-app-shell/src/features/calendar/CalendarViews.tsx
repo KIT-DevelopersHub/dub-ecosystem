@@ -12,6 +12,7 @@ import {
   formatHourLabel,
   formatTime,
   isBannerItem,
+  isVacationTask,
   itemsOnDay,
   layoutSpans,
   layoutTimedDay,
@@ -22,7 +23,7 @@ import {
   type CalendarItem,
 } from "./calendar-model";
 import { ItemButton, rectOf, type AnchorRect } from "./CalendarPanels.tsx";
-import { statusVisual } from "./taskVisuals";
+import { itemVisual, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
 const HOUR_PX = 48;
@@ -332,7 +333,7 @@ function TimedBlock({
   onSelect: (it: CalendarItem, anchor: AnchorRect) => void;
 }): JSX.Element {
   const it = p.item;
-  const v = statusVisual(it.task.status);
+  const v = itemVisual(it.task);
   const heightPx = (p.height / 60) * HOUR_PX - 2;
   const compact = heightPx < 36;
   const title = it.task.title || "（タイトルなし）";
@@ -341,13 +342,18 @@ function TimedBlock({
   return (
     <button
       type="button"
-      className={cx(styles.tgEvent, it.task.status === "cancelled" && styles.cancelled, past && styles.past)}
+      className={cx(
+        styles.tgEvent,
+        it.task.status === "cancelled" && styles.cancelled,
+        past && styles.past,
+        isVacationTask(it.task) && styles.vacation,
+      )}
       style={{
         top: (p.top / 60) * HOUR_PX,
         height: heightPx,
         left: `${p.column * widthPct}%`,
         width: `calc(${widthPct}% - ${p.column === p.columns - 1 ? 8 : 0}px)`,
-        background: v.color,
+        backgroundColor: v.color,
       }}
       title={`${title}（${time}）`}
       onPointerDown={(e) => e.stopPropagation()}
@@ -598,7 +604,7 @@ export function ScheduleList({
             </div>
             <div className={styles.schedItems}>
               {list.map((it) => {
-                const v = statusVisual(it.task.status);
+                const v = itemVisual(it.task);
                 return (
                   <button
                     key={it.task.id}

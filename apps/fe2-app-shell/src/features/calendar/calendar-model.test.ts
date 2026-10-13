@@ -9,6 +9,10 @@ import {
   draftForAllDay,
   draftForSlot,
   draftFromItem,
+  encodeDescription,
+  isVacationTask,
+  userDescription,
+  withKind,
   draftToDates,
   formatHourLabel,
   formatRangeTitle,
@@ -183,5 +187,26 @@ describe("formatting", () => {
     expect(formatRangeTitle("month", day(2026, 10, 10))).toBe("2026年 10月");
     expect(formatRangeTitle("week", day(2026, 10, 1))).toBe("2026年 9月～10月");
     expect(formatRangeTitle("day", day(2026, 10, 10))).toBe("2026年 10月 10日");
+  });
+});
+
+describe("休暇", () => {
+  it("round-trips the tag through the draft without exposing it", () => {
+    const t = mk("v", { startAt: "2026-10-12T00:00:00.000Z", dueAt: "2026-10-13T00:00:00.000Z" });
+    const tagged = { ...t, description: "#休暇\n連絡はチャットへ" };
+    expect(isVacationTask(tagged)).toBe(true);
+    expect(userDescription(tagged)).toBe("連絡はチャットへ");
+    const d = draftFromItem(toCalendarItem(tagged)!);
+    expect(d).toMatchObject({ kind: "vacation", description: "連絡はチャットへ", allDay: true });
+    expect(encodeDescription(d)).toBe("#休暇\n連絡はチャットへ");
+    expect(encodeDescription({ ...d, description: "" })).toBe("#休暇");
+    expect(isVacationTask({ description: "#休暇の相談" })).toBe(false);
+    expect(isVacationTask({ description: null })).toBe(false);
+  });
+
+  it("switching to 休暇 makes the draft 終日", () => {
+    const d = withKind(draftForSlot(dayFromKey("2026-10-10"), 9 * 60, 10 * 60), "vacation");
+    expect(d).toMatchObject({ kind: "vacation", allDay: true, startDate: "2026-10-10" });
+    expect(withKind(d, "event")).toMatchObject({ kind: "event", allDay: true });
   });
 });

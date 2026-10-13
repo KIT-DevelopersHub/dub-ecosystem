@@ -3,7 +3,7 @@
 // through the canonical task-service API, so they also show up in マイタスク/ガント.
 // No new backend: reads GET /api/v1/tasks (self-scoped), writes POST/PATCH/DELETE.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Icon, Menu, Modal, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
+import { Button, Icon, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { common, task } from "@dub/types";
@@ -14,24 +14,30 @@ import {
   draftForAllDay,
   draftForSlot,
   draftToDates,
+  encodeDescription,
   formatRangeTitle,
+  isVacationTask,
   formatRangeTitleShort,
   itemsOnDay,
   shiftAnchor,
   toCalendarItems,
+  VACATION_TITLE,
   visibleDays,
   type CalendarItem,
   type CalendarView,
   type EventDraft,
 } from "./calendar-model";
-import { CreatePanel, DayListPanel, DetailPanel, EventForm, type AnchorRect } from "./CalendarPanels.tsx";
+import { CreatePanel, DayListPanel, DetailPanel, EventEditor, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
-import { STATUS_ORDER, statusVisual } from "./taskVisuals";
+import { STATUS_ORDER, VACATION_VISUAL, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
 const VIEW_LABEL: Record<CalendarView, string> = { day: "日", week: "週", month: "月", schedule: "スケジュール" };
 const VIEW_KEYS: Record<string, CalendarView> = { d: "day", w: "week", m: "month", a: "schedule" };
 const UNTITLED = "（タイトルなし）";
+/** Sidebar toggle key for 休暇 (the others are task statuses). */
+const VACATION_KEY = "vacation" as const;
+type CalendarKey = task.TaskStatus | typeof VACATION_KEY;
 
 type Panel =
   | { kind: "create"; draft: EventDraft; anchor: AnchorRect | null; ghost: SlotGhost | null }
@@ -67,7 +73,7 @@ export function CalendarScreen(): JSX.Element {
   // Phones open on 日 (seven columns don't fit), desktop on 週 — Google's defaults.
   const [view, setView] = useState<CalendarView>(() => (narrow ? "day" : "week"));
   const [anchorDay, setAnchorDay] = useState(today);
-  const [hidden, setHidden] = useState<ReadonlySet<task.TaskStatus>>(() => new Set());
+  const [hidden, setHidden] = useState<ReadonlySet<CalendarKey>>(() => new Set());
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
   const [panel, setPanel] = useState<Panel | null>(null);
   useEffect(() => setSidebarOpen(!narrow), [narrow]);
@@ -82,11 +88,10 @@ export function CalendarScreen(): JSX.Element {
   });
 
   const { items, undated } = useMemo(() => {
+    // 休暇 is its own calendar in the sidebar; everything else toggles by status.
+    const shown = (t: task.Task) => !hidden.has(isVacationTask(t) ? VACATION_KEY : t.status);
     const all = toCalendarItems(data ?? []);
-    return {
-      items: all.items.filter((it) => !hidden.has(it.task.status)),
-      undated: all.undated.filter((t) => !hidden.has(t.status)),
-    };
+    return { items: all.items.filter((it) => shown(it.task)), undated: all.undated.filter(shown) };
   }, [data, hidden]);
 
   // ── mutations (optimistic: reflect first, roll back on failure) ──────────
@@ -100,8 +105,8 @@ export function CalendarScreen(): JSX.Element {
   };
   const settle = () => void qc.invalidateQueries({ queryKey });
   const fields = (draft: EventDraft) => ({
-    title: draft.title.trim() || UNTITLED,
-    description: draft.description.trim() || null,
+    title: draft.title.trim() || (draft.kind === "vacation" ? VACATION_TITLE : UNTITLED),
+    description: encodeDescription(draft),
     ...draftToDates(draft),
   });
 
@@ -135,9 +140,9 @@ export function CalendarScreen(): JSX.Element {
       return { prev, tempId: temp.id };
     },
     onError: (_e, _d, ctx) => rollback(ctx?.prev, "予定を保存できませんでした"),
-    onSuccess: (created, _d, ctx) => {
+    onSuccess: (created, draft, ctx) => {
       qc.setQueryData<task.Task[]>(queryKey, (old) => (old ?? []).map((t) => (t.id === ctx?.tempId ? created : t)));
-      toast.show({ kind: "success", title: "予定を保存しました" });
+      toast.show({ kind: "success", title: draft.kind === "vacation" ? "休暇を登録しました" : "予定を保存しました" });
     },
     onSettled: settle,
   });
@@ -182,9 +187,8 @@ export function CalendarScreen(): JSX.Element {
   const openCreate = (draft: EventDraft, anchor: AnchorRect | null, ghost: SlotGhost | null = null) => {
     if (canWrite) setPanel({ kind: "create", draft, anchor, ghost });
   };
-  const openCreateDialog = () => {
-    if (canWrite) setPanel({ kind: "edit", item: null, draft: nextHourDraft(anchorDay) });
-  };
+  // Google's 作成 opens the same quick-create panel, centered.
+  const openCreateDialog = () => openCreate(nextHourDraft(anchorDay), null);
   const selectItem = (item: CalendarItem, anchor: AnchorRect) => setPanel({ kind: "detail", item, anchor });
 
   // Google's single-key shortcuts: t 今日 / j,n 次 / k,p 前 / d w m a 表示 / c 作成.
@@ -198,7 +202,7 @@ export function CalendarScreen(): JSX.Element {
       else if (VIEW_KEYS[k]) setView(VIEW_KEYS[k]!);
       else if (k === "c" && canWrite) {
         e.preventDefault();
-        setPanel({ kind: "edit", item: null, draft: nextHourDraft(anchorDay) });
+        setPanel({ kind: "create", draft: nextHourDraft(anchorDay), anchor: null, ghost: null });
       }
     };
     document.addEventListener("keydown", onKey);
@@ -355,8 +359,8 @@ export function CalendarScreen(): JSX.Element {
 
             <div data-testid="calendar-list">
               <div className={styles.calListHead}>マイカレンダー</div>
-              {STATUS_ORDER.map((s) => {
-                const v = statusVisual(s);
+              {[...STATUS_ORDER, VACATION_KEY as CalendarKey].map((s) => {
+                const v = s === VACATION_KEY ? VACATION_VISUAL : statusVisual(s);
                 return (
                   <label key={s} className={styles.calItem}>
                     <input
@@ -416,6 +420,7 @@ export function CalendarScreen(): JSX.Element {
           onClose={close}
           onMoreOptions={() => setPanel({ kind: "edit", item: null, draft: panel.draft })}
           saving={createMut.isPending}
+          calendarName="マイカレンダー"
         />
       )}
 
@@ -451,19 +456,18 @@ export function CalendarScreen(): JSX.Element {
       )}
 
       {panel?.kind === "edit" && (
-        <Modal open onClose={close} title={panel.item ? "予定を編集" : "予定を作成"} size="md" testId="calendar-edit-dialog">
-          <EventForm
-            draft={panel.draft}
-            onChange={(draft) => setPanel({ ...panel, draft })}
-            onCancel={close}
-            saving={createMut.isPending || updateMut.isPending}
-            onSubmit={() => {
-              setPanel(null);
-              if (panel.item) updateMut.mutate({ item: panel.item, draft: panel.draft });
-              else createMut.mutate(panel.draft);
-            }}
-          />
-        </Modal>
+        <EventEditor
+          draft={panel.draft}
+          editing={panel.item != null}
+          onChange={(draft) => setPanel({ ...panel, draft })}
+          onClose={close}
+          saving={createMut.isPending || updateMut.isPending}
+          onSave={() => {
+            setPanel(null);
+            if (panel.item) updateMut.mutate({ item: panel.item, draft: panel.draft });
+            else createMut.mutate(panel.draft);
+          }}
+        />
       )}
     </div>
   );

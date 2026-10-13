@@ -280,6 +280,7 @@ function calendarDemoTasks(): task.Task[] {
     mk("cal_5", "登壇資料 提出締切", "blocked", allDay(1), allDay(1)),
     mk("cal_6", "北陸ITカンファレンス 準備週間", "todo", allDay(2), allDay(4)),
     mk("cal_7", "デザインレビュー", "todo", at(2, "16:00"), at(2, "17:00")),
+    mk("cal_8", "休暇", "todo", allDay(5), allDay(6), "#休暇\n急ぎの連絡はチャットへ"),
   ];
 }
 

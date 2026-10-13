@@ -4,15 +4,21 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { Icon, isSubmitEnter } from "@dub/ui";
 import {
   TIME_OPTIONS,
+  VACATION_TITLE,
   WEEKDAYS_JA,
   dateOfDay,
+  formatDraftWhen,
   formatItemWhen,
   formatTime,
+  isVacationTask,
+  userDescription,
   validateDraft,
+  withKind,
   type CalendarItem,
   type EventDraft,
+  type ItemKind,
 } from "./calendar-model";
-import { PRIORITY_LABEL, statusVisual } from "./taskVisuals";
+import { PRIORITY_LABEL, VACATION_VISUAL, itemVisual, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
 export interface AnchorRect {
@@ -129,26 +135,138 @@ function timeOptions(current: string): string[] {
   return TIME_OPTIONS.includes(current) ? TIME_OPTIONS : [...TIME_OPTIONS, current].sort();
 }
 
-export function EventForm({
+const KIND_LABEL: Record<ItemKind, string> = { event: "予定", vacation: "休暇" };
+
+/** Google's 予定 / 不在 type chips under the title. */
+function KindChips({ draft, onChange }: { draft: EventDraft; onChange: (d: EventDraft) => void }): JSX.Element {
+  return (
+    <div className={styles.kindChips} role="radiogroup" aria-label="種類">
+      {(Object.keys(KIND_LABEL) as ItemKind[]).map((k) => (
+        <button
+          key={k}
+          type="button"
+          role="radio"
+          aria-checked={draft.kind === k}
+          className={`${styles.kindChip} ${draft.kind === k ? styles.kindChipOn : ""}`}
+          onClick={() => onChange(withKind(draft, k))}
+          data-testid={`calendar-kind-${k}`}
+        >
+          {KIND_LABEL[k]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TitleInput({
   draft,
-  onChange,
-  onSubmit,
-  onCancel,
-  saving,
-  submitLabel = "保存",
-  autoFocus = true,
-  secondaryAction,
+  set,
+  submit,
+  autoFocus,
+  big,
 }: {
   draft: EventDraft;
-  onChange: (d: EventDraft) => void;
-  onSubmit: () => void;
-  onCancel?: () => void;
-  saving: boolean;
-  submitLabel?: string;
-  autoFocus?: boolean;
-  /** Left-aligned footer action (e.g. その他のオプション). */
-  secondaryAction?: ReactNode;
+  set: (patch: Partial<EventDraft>) => void;
+  submit: () => void;
+  autoFocus: boolean;
+  big?: boolean;
 }): JSX.Element {
+  return (
+    <input
+      className={`${styles.titleInput} ${big ? styles.titleInputBig : ""}`}
+      placeholder={draft.kind === "vacation" ? VACATION_TITLE : "タイトルを追加"}
+      aria-label="タイトル"
+      value={draft.title}
+      autoFocus={autoFocus}
+      onChange={(e) => set({ title: e.target.value })}
+      onKeyDown={(e) => {
+        // Own Enter handling so an IME 確定 Enter never submits the form.
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        if (isSubmitEnter(e)) submit();
+      }}
+      data-testid="calendar-form-title"
+    />
+  );
+}
+
+/** Date/time pickers + 終日 (Google's expanded "when" row). */
+function WhenFields({ draft, set }: { draft: EventDraft; set: (patch: Partial<EventDraft>) => void }): JSX.Element {
+  return (
+    <div className={styles.form} style={{ gap: "var(--dub-space-2)" }}>
+      <div className={styles.whenFields}>
+        <input
+          type="date"
+          className={styles.field}
+          aria-label="開始日"
+          value={draft.startDate}
+          onChange={(e) => {
+            const v = e.target.value;
+            // Keep a single-day item single-day when its date moves, like Google.
+            set(draft.endDate === draft.startDate || draft.endDate < v ? { startDate: v, endDate: v } : { startDate: v });
+          }}
+          data-testid="calendar-form-start-date"
+        />
+        {!draft.allDay && (
+          <>
+            <select
+              className={styles.field}
+              aria-label="開始時刻"
+              value={draft.startTime}
+              onChange={(e) => set({ startTime: e.target.value })}
+              data-testid="calendar-form-start-time"
+            >
+              {timeOptions(draft.startTime).map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <span>–</span>
+            <select
+              className={styles.field}
+              aria-label="終了時刻"
+              value={draft.endTime}
+              onChange={(e) => set({ endTime: e.target.value })}
+              data-testid="calendar-form-end-time"
+            >
+              {timeOptions(draft.endTime).map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        {(draft.allDay || draft.endDate !== draft.startDate) && (
+          <>
+            <span>–</span>
+            <input
+              type="date"
+              className={styles.field}
+              aria-label="終了日"
+              value={draft.endDate}
+              min={draft.startDate}
+              onChange={(e) => set({ endDate: e.target.value })}
+              data-testid="calendar-form-end-date"
+            />
+          </>
+        )}
+      </div>
+      <label className={styles.allDayLabel}>
+        <input
+          type="checkbox"
+          checked={draft.allDay}
+          onChange={(e) => set({ allDay: e.target.checked })}
+          data-testid="calendar-form-allday"
+        />
+        終日
+      </label>
+    </div>
+  );
+}
+
+function useDraftForm(draft: EventDraft, onChange: (d: EventDraft) => void, onSubmit: () => void, saving: boolean) {
   const error = validateDraft(draft);
   const [touched, setTouched] = useState(false);
   const set = (patch: Partial<EventDraft>) => onChange({ ...draft, ...patch });
@@ -156,146 +274,19 @@ export function EventForm({
     setTouched(true);
     if (!error && !saving) onSubmit();
   };
+  return { set, submit, shownError: touched ? error : null };
+}
 
+function FormError({ error }: { error: string | null }): JSX.Element | null {
+  if (!error) return null;
   return (
-    <form
-      className={styles.form}
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit();
-      }}
-      data-testid="calendar-event-form"
-    >
-      <input
-        className={styles.titleInput}
-        placeholder="タイトルを追加"
-        aria-label="タイトル"
-        value={draft.title}
-        autoFocus={autoFocus}
-        onChange={(e) => set({ title: e.target.value })}
-        onKeyDown={(e) => {
-          // Own Enter handling so an IME 確定 Enter never submits the form.
-          if (e.key !== "Enter") return;
-          e.preventDefault();
-          if (isSubmitEnter(e)) submit();
-        }}
-        data-testid="calendar-form-title"
-      />
-
-      <div className={styles.formRow}>
-        <span className={styles.formRowIcon}>
-          <Icon name="clock" />
-        </span>
-        <div className={styles.form} style={{ gap: "var(--dub-space-2)" }}>
-          <div className={styles.whenFields}>
-            <input
-              type="date"
-              className={styles.field}
-              aria-label="開始日"
-              value={draft.startDate}
-              onChange={(e) => {
-                const v = e.target.value;
-                // Keep a single-day item single-day when its date moves, like Google.
-                set(draft.endDate === draft.startDate || draft.endDate < v ? { startDate: v, endDate: v } : { startDate: v });
-              }}
-              data-testid="calendar-form-start-date"
-            />
-            {!draft.allDay && (
-              <>
-                <select
-                  className={styles.field}
-                  aria-label="開始時刻"
-                  value={draft.startTime}
-                  onChange={(e) => set({ startTime: e.target.value })}
-                  data-testid="calendar-form-start-time"
-                >
-                  {timeOptions(draft.startTime).map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-                <span>–</span>
-                <select
-                  className={styles.field}
-                  aria-label="終了時刻"
-                  value={draft.endTime}
-                  onChange={(e) => set({ endTime: e.target.value })}
-                  data-testid="calendar-form-end-time"
-                >
-                  {timeOptions(draft.endTime).map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-            {(draft.allDay || draft.endDate !== draft.startDate) && (
-              <>
-                <span>–</span>
-                <input
-                  type="date"
-                  className={styles.field}
-                  aria-label="終了日"
-                  value={draft.endDate}
-                  min={draft.startDate}
-                  onChange={(e) => set({ endDate: e.target.value })}
-                  data-testid="calendar-form-end-date"
-                />
-              </>
-            )}
-          </div>
-          <label className={styles.allDayLabel}>
-            <input
-              type="checkbox"
-              checked={draft.allDay}
-              onChange={(e) => set({ allDay: e.target.checked })}
-              data-testid="calendar-form-allday"
-            />
-            終日
-          </label>
-        </div>
-      </div>
-
-      <div className={styles.formRow}>
-        <span className={styles.formRowIcon}>
-          <Icon name="list" />
-        </span>
-        <textarea
-          className={styles.descInput}
-          placeholder="説明を追加"
-          aria-label="説明"
-          rows={2}
-          value={draft.description}
-          onChange={(e) => set({ description: e.target.value })}
-          data-testid="calendar-form-description"
-        />
-      </div>
-
-      {touched && error && (
-        <p role="alert" className={styles.formError} data-testid="calendar-form-error">
-          {error}
-        </p>
-      )}
-
-      <div className={styles.formFooter}>
-        {secondaryAction}
-        <span className={styles.spacer} />
-        {onCancel && (
-          <button type="button" className={styles.textBtn} onClick={onCancel}>
-            キャンセル
-          </button>
-        )}
-        <button type="submit" className={styles.saveBtn} disabled={saving} data-testid="calendar-form-save">
-          {saving ? "保存中…" : submitLabel}
-        </button>
-      </div>
-    </form>
+    <p role="alert" className={styles.formError} data-testid="calendar-form-error">
+      {error}
+    </p>
   );
 }
 
-/** Quick-create popover (the panel Google opens on a slot click). */
+/** Quick-create popover — Google's panel from a slot click or the 作成 button. */
 export function CreatePanel({
   anchor,
   draft,
@@ -304,6 +295,7 @@ export function CreatePanel({
   onClose,
   onMoreOptions,
   saving,
+  calendarName,
 }: {
   anchor: AnchorRect | null;
   draft: EventDraft;
@@ -312,26 +304,191 @@ export function CreatePanel({
   onClose: () => void;
   onMoreOptions: () => void;
   saving: boolean;
+  /** Owner line ("自分の名前"), like Google's calendar row. */
+  calendarName: string;
 }): JSX.Element {
+  const { set, submit, shownError } = useDraftForm(draft, onChange, onSave, saving);
+  const [whenOpen, setWhenOpen] = useState(false);
+  const [descOpen, setDescOpen] = useState(draft.description !== "");
+  const vacation = draft.kind === "vacation";
   return (
     <Floating anchor={anchor} width={448} onClose={onClose} label="予定を作成" testId="calendar-create-panel">
       <div className={styles.panelBar}>
+        <span className={styles.panelGrip} aria-hidden="true" />
         <PanelButton icon="x" label="閉じる" onClick={onClose} />
       </div>
-      <div className={styles.panelBody}>
-        <EventForm
-          draft={draft}
-          onChange={onChange}
-          onSubmit={onSave}
-          saving={saving}
-          secondaryAction={
-            <button type="button" className={styles.textBtn} onClick={onMoreOptions} data-testid="calendar-more-options">
-              その他のオプション
+      <form
+        className={`${styles.panelBody} ${styles.form}`}
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        data-testid="calendar-event-form"
+      >
+        <div className={styles.quickIndent}>
+          <TitleInput draft={draft} set={set} submit={submit} autoFocus />
+          <KindChips draft={draft} onChange={onChange} />
+        </div>
+
+        <div className={styles.formRow}>
+          <span className={styles.formRowIcon}>
+            <Icon name="clock" />
+          </span>
+          {whenOpen ? (
+            <WhenFields draft={draft} set={set} />
+          ) : (
+            <button type="button" className={styles.rowBtn} onClick={() => setWhenOpen(true)} data-testid="calendar-form-when">
+              <span className={styles.rowBtnMain}>{formatDraftWhen(draft)}</span>
+              <span className={styles.rowBtnSub}>{draft.allDay ? "終日" : "繰り返さない"}</span>
             </button>
-          }
-        />
-      </div>
+          )}
+        </div>
+
+        {vacation && (
+          <div className={styles.formRow}>
+            <span className={styles.formRowIcon}>
+              <Icon name="sun" />
+            </span>
+            <p className={styles.rowNote} data-testid="calendar-vacation-note">
+              休暇中であることがカレンダーに表示されます
+            </p>
+          </div>
+        )}
+
+        <div className={styles.formRow}>
+          <span className={styles.formRowIcon}>
+            <Icon name="list" />
+          </span>
+          {descOpen ? (
+            <textarea
+              className={styles.descInput}
+              placeholder={vacation ? "メッセージを追加" : "説明を追加"}
+              aria-label="説明"
+              rows={3}
+              autoFocus={draft.description === ""}
+              value={draft.description}
+              onChange={(e) => set({ description: e.target.value })}
+              data-testid="calendar-form-description"
+            />
+          ) : (
+            <button type="button" className={styles.rowBtn} onClick={() => setDescOpen(true)} data-testid="calendar-form-add-description">
+              <span className={styles.rowBtnPlaceholder}>{vacation ? "メッセージを追加" : "説明を追加"}</span>
+            </button>
+          )}
+        </div>
+
+        <div className={styles.formRow}>
+          <span className={styles.formRowIcon}>
+            <Icon name="calendar" />
+          </span>
+          <div className={styles.rowStatic}>
+            <span className={styles.rowBtnMain}>
+              {calendarName}
+              <span className={styles.dot} style={{ background: vacation ? VACATION_VISUAL.color : statusVisual("todo").color }} />
+            </span>
+            <span className={styles.rowBtnSub}>マイタスクに保存されます</span>
+          </div>
+        </div>
+
+        <FormError error={shownError} />
+
+        <div className={styles.formFooter}>
+          <span className={styles.spacer} />
+          <button type="button" className={styles.textBtn} onClick={onMoreOptions} data-testid="calendar-more-options">
+            その他のオプション
+          </button>
+          <button type="submit" className={styles.saveBtn} disabled={saving} data-testid="calendar-form-save">
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </div>
+      </form>
     </Floating>
+  );
+}
+
+/** Google's full-page editor (その他のオプション / 予定を編集). */
+export function EventEditor({
+  draft,
+  onChange,
+  onSave,
+  onClose,
+  saving,
+  editing,
+}: {
+  draft: EventDraft;
+  onChange: (d: EventDraft) => void;
+  onSave: () => void;
+  onClose: () => void;
+  saving: boolean;
+  editing: boolean;
+}): JSX.Element {
+  const { set, submit, shownError } = useDraftForm(draft, onChange, onSave, saving);
+  const vacation = draft.kind === "vacation";
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label={editing ? "予定を編集" : "予定を作成"} className={styles.editor} data-testid="calendar-edit-dialog">
+      <form
+        className={`${styles.form} ${styles.editorForm}`}
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        data-testid="calendar-event-form"
+      >
+        <div className={styles.editorTop}>
+          <PanelButton icon="x" label="閉じる" onClick={onClose} testId="calendar-editor-close" />
+          <div className={styles.editorTitle}>
+            <TitleInput draft={draft} set={set} submit={submit} autoFocus={!editing} big />
+          </div>
+          <button type="submit" className={styles.saveBtn} disabled={saving} data-testid="calendar-form-save">
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </div>
+
+        <div className={styles.editorBody}>
+          <KindChips draft={draft} onChange={onChange} />
+          <WhenFields draft={draft} set={set} />
+          <FormError error={shownError} />
+
+          <div className={styles.editorTabs} role="tablist">
+            <span role="tab" aria-selected="true" className={styles.editorTabOn}>
+              {vacation ? "休暇の詳細" : "予定の詳細"}
+            </span>
+          </div>
+
+          {vacation && (
+            <div className={styles.formRow}>
+              <span className={styles.formRowIcon}>
+                <Icon name="sun" />
+              </span>
+              <p className={styles.rowNote}>休暇中であることがカレンダーに表示されます</p>
+            </div>
+          )}
+
+          <div className={styles.formRow}>
+            <span className={styles.formRowIcon}>
+              <Icon name="list" />
+            </span>
+            <textarea
+              className={`${styles.descInput} ${styles.editorDesc}`}
+              placeholder={vacation ? "メッセージを追加" : "説明を追加"}
+              aria-label="説明"
+              rows={8}
+              value={draft.description}
+              onChange={(e) => set({ description: e.target.value })}
+              data-testid="calendar-form-description"
+            />
+          </div>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -357,7 +514,9 @@ export function DetailPanel({
   canDelete: boolean;
 }): JSX.Element {
   const t = item.task;
-  const v = statusVisual(t.status);
+  const v = itemVisual(t);
+  const vacation = isVacationTask(t);
+  const desc = userDescription(t);
   return (
     <Floating anchor={anchor} width={448} onClose={onClose} label={t.title} testId="calendar-event-detail">
       <div className={`${styles.panelBar} ${styles.panelBarPlain}`}>
@@ -379,18 +538,18 @@ export function DetailPanel({
         </div>
         <div className={styles.detailRow}>
           <span className={styles.detailRowIcon}>
-            <Icon name="calendar" />
+            <Icon name={vacation ? "sun" : "calendar"} />
           </span>
-          <span>
-            {v.label}・優先度 {PRIORITY_LABEL[t.priority]}
+          <span data-testid="calendar-detail-kind">
+            {vacation ? "休暇" : `${v.label}・優先度 ${PRIORITY_LABEL[t.priority]}`}
           </span>
         </div>
-        {t.description && (
+        {desc && (
           <div className={styles.detailRow} style={{ alignItems: "start" }}>
             <span className={styles.detailRowIcon}>
               <Icon name="list" />
             </span>
-            <span className={styles.detailDesc}>{t.description}</span>
+            <span className={styles.detailDesc}>{desc}</span>
           </div>
         )}
         <div className={styles.detailLink}>
@@ -460,15 +619,16 @@ export function ItemButton({
   className?: string;
   style?: CSSProperties;
 }): JSX.Element {
-  const v = statusVisual(item.task.status);
+  const v = itemVisual(item.task);
   const title = item.task.title || "（タイトルなし）";
   const cancelled = item.task.status === "cancelled" ? styles.cancelled : "";
   const banner = item.allDay || item.startDay !== item.endDay;
+  const vacation = banner && isVacationTask(item.task) ? styles.vacation : "";
   return (
     <button
       type="button"
-      className={`${banner ? styles.bar : styles.monthItem} ${cancelled} ${className ?? ""}`}
-      style={banner ? { background: v.color, ...style } : style}
+      className={`${banner ? styles.bar : styles.monthItem} ${cancelled} ${vacation} ${className ?? ""}`}
+      style={banner ? { backgroundColor: v.color, ...style } : style}
       title={`${title}（${formatItemWhen(item)}）`}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
