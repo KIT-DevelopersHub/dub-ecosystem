@@ -10,7 +10,7 @@ import { mapGoogleError, mapPermission } from "../src/drive-client";
 import { createGoogleDriveShareClient } from "../src/google/client";
 import type { TokenProvider } from "../src/google/token";
 
-const staticToken: TokenProvider = { async getAccessToken(): Promise<string> { return "tok_test"; } };
+const staticToken: TokenProvider = { async getAccessToken(): Promise<string> { return "tok_test"; }, async grantedScopes() { return null; } };
 
 describe("mapPermission — inherited derivation", () => {
   it("is inherited when every permissionDetails source is inherited", () => {

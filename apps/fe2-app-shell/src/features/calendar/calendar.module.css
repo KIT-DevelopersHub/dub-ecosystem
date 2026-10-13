@@ -174,3 +174,115 @@
 }
 
 .undatedList { display: flex; flex-wrap: wrap; gap: var(--dub-space-2); }
+
+/* ── meetings (カレンダー > ミーティング) ─────────────────────────────── */
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  flex-wrap: wrap;
+}
+
+/* Filter pane on the left of the grid; stacks above it on narrow screens. */
+.layout {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  gap: var(--dub-space-5);
+  align-items: start;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised, #fff);
+}
+
+.filterHead {
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+
+.filterList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+
+.filterLabel {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--dub-space-2);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+
+.filterCount {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+
+.filterNote {
+  margin: 0;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+  flex-wrap: wrap;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-warning-200, #fedf89);
+  background: var(--dub-color-warning-50, #fffaeb);
+  color: var(--dub-color-warning-800, #93370d);
+  font-size: var(--dub-font-size-sm);
+}
+
+/* Meeting chip: info-blue with a camera glyph + start time (task chips are status-colored). */
+.chipMeeting {
+  background: var(--dub-color-info-50, #eff8ff);
+  color: var(--dub-color-info-700, #175cd3);
+  border-color: var(--dub-color-info-200, #b2ddff);
+}
+
+.chipMeetingPending { opacity: 0.6; }
+
+.chipTime {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--dub-font-weight-medium);
+}
+
+.chipGlyph { flex: 0 0 auto; }
+
+/* Dialog form: up to three fields per row, wraps on narrow dialogs. */
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--dub-space-4);
+}
+
+/* @dub/ui DatePicker draws its own icon; hide Chromium's native one (kept clickable). */
+.dateField { display: block; }
+.dateField input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }

@@ -101,6 +101,15 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.listTeamIdentityUserIds(teamIds));
   });
 
+  // 名簿の Gmail 逆引き (drive-share-service → member-service, s2s のみ). カレンダー > ミーティングの
+  // 招待先を「名簿の Gmail、無ければ Dub のログインメール」で決めるため。body { userIds } ->
+  // { items: [{ userId, gmail, name }] } (リンク済みの行だけ)。
+  app.post("/members/internal/google-emails", async (c) => {
+    const body = await readJson<{ userIds?: unknown }>(c);
+    const userIds = Array.isArray(body.userIds) ? body.userIds.filter((v): v is string => typeof v === "string") : [];
+    return c.json(await svc.listGoogleEmails(userIds));
+  });
+
   // Self 参加届 (アカウント設定 → 参加情報). The gateway's GET/POST /api/v1/me/participation
   // authenticates the session, then forwards here as a genuine s2s call (x-dub-internal +
   // the caller's identity x-dub-user-id). Session-scoped to THAT user — no target id, and

@@ -55,6 +55,11 @@ export const POLICY_TABLE = definePolicyTable({
   // identity:read of the poster would break @team mentions for ordinary members.
   "GET /members/internal/team-members": INTERNAL,
 
+  // 名簿の Gmail 逆引き, drive-share-service -> member-service. カレンダー > ミーティングの招待先
+  // (and the shared calendar ACL) are each member's 名簿 Gmail. Key-free like team-members: the
+  // reconcile runs hourly as a system actor (no user), and the edge 404s /members/internal/.
+  "POST /members/internal/google-emails": INTERNAL,
+
   // Self 参加届 (アカウント設定 -> 参加情報), reached through api-gateway's GET|POST
   // /api/v1/me/participation, which authenticates the session and forwards the caller's
   // identity id alongside the marker. Self-scoped by construction: no target id is accepted

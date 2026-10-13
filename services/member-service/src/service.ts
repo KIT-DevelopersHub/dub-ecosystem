@@ -54,6 +54,8 @@ function profilePatch(body: object): Partial<member.PersonProfile> {
 
 /** Upper bound on teams expanded in one チーム単位メンション lookup (see listTeamIdentityUserIds). */
 const MAX_TEAM_MENTION_EXPANSION = 20;
+/** Upper bound on identity ids resolved in one Google-address lookup (the whole org fits). */
+const MAX_GOOGLE_EMAIL_LOOKUP = 2000;
 
 export class MemberService {
   constructor(private readonly deps: AppDeps) {}
@@ -130,6 +132,25 @@ export class MemberService {
       userIds.push(uid);
     }
     return { userIds };
+  }
+
+  /** Google addresses of linked 名簿 rows (カレンダー > ミーティング invitations, drive-share-service
+   *  -> member-service). Only rows linked to one of `userIds` are returned; gmail is null when the
+   *  row has none (the caller falls back to the Dub login address). */
+  async listGoogleEmails(userIds: readonly string[]): Promise<{ items: Array<{ userId: string; gmail: string | null; name: string }> }> {
+    const wanted = new Set(userIds.filter((id) => typeof id === "string" && id.length > 0).slice(0, MAX_GOOGLE_EMAIL_LOOKUP));
+    if (wanted.size === 0) return { items: [] };
+    const people = await this.deps.repo.listPeople(this.deps.orgId);
+    const items: Array<{ userId: string; gmail: string | null; name: string }> = [];
+    const seen = new Set<string>();
+    for (const p of people) {
+      const uid = p.identityUserId;
+      if (!uid || !wanted.has(uid) || seen.has(uid)) continue;
+      seen.add(uid);
+      const gmail = p.gmail?.trim().toLowerCase() || null;
+      items.push({ userId: uid, gmail, name: p.name });
+    }
+    return { items };
   }
 
   /** Resolve a unique, URL-safe key within the org (auto-suffix on collision). */

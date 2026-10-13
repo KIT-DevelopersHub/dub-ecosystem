@@ -4,7 +4,7 @@
 // session cookie, 401→refresh, requestId, error normalization) and calls the
 // canonical task-service endpoint GET /api/v1/tasks, typed against @dub/types
 // `task` (the API-contract SoT). No schema is added or changed — additive, read-only.
-import type { common, task } from "@dub/types";
+import type { common, meeting, task } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 const P = "/api/v1";
@@ -40,6 +40,14 @@ export interface CalendarApi {
    * `listAllTasks()` with no scope failed in production ("タスクを取得できませんでした。").
    */
   listMyTasks(currentUserId: common.UserId): Promise<task.Task[]>;
+
+  // カレンダー > ミーティング (drive-share-service /meetings, @dub/types meeting).
+  listMeetings(): Promise<meeting.ListMeetingsResponse>;
+  listMeetingTargets(): Promise<meeting.ListMeetingTargetsResponse>;
+  createMeeting(body: meeting.CreateMeetingRequest): Promise<meeting.Meeting>;
+  updateMeeting(id: string, body: meeting.UpdateMeetingRequest): Promise<meeting.Meeting>;
+  deleteMeeting(id: string): Promise<void>;
+  syncMeetings(): Promise<meeting.SyncMeetingsResponse>;
 }
 
 export function createCalendarApi(api: ApiClient): CalendarApi {
@@ -83,5 +91,18 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     return [...byId.values()];
   };
 
-  return { listTasks, listAllTasks, listMyTasks };
+  const m = (id: string): `/api/v1/${string}` => `${P}/meetings/${encodeURIComponent(id)}`;
+  return {
+    listTasks,
+    listAllTasks,
+    listMyTasks,
+    listMeetings: () => api.request<meeting.ListMeetingsResponse>({ method: "GET", path: `${P}/meetings` }),
+    listMeetingTargets: () => api.request<meeting.ListMeetingTargetsResponse>({ method: "GET", path: `${P}/meetings/targets` }),
+    createMeeting: (body) => api.request<meeting.Meeting>({ method: "POST", path: `${P}/meetings`, body }),
+    updateMeeting: (id, body) => api.request<meeting.Meeting>({ method: "PATCH", path: m(id), body }),
+    deleteMeeting: async (id) => {
+      await api.request<unknown>({ method: "DELETE", path: m(id) });
+    },
+    syncMeetings: () => api.request<meeting.SyncMeetingsResponse>({ method: "POST", path: `${P}/meetings/sync` }),
+  };
 }

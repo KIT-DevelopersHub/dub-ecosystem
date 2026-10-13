@@ -291,3 +291,11 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(onChange.mock.calls.at(-1)?.[0]).toContain("drive:settings_edit");
   });
 });
+
+describe("カレンダー > ミーティング labels", () => {
+  it("labels the two meeting keys in Japanese", () => {
+    expect(permissionLabel("calendar:meetings_view", "EN")).toBe("ミーティングを見る");
+    expect(permissionLabel("calendar:meetings_edit", "EN")).toBe("ミーティングを設定");
+    expect(domainLabel("calendar")).toBe("カレンダー");
+  });
+});
