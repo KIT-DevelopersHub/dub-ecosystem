@@ -1145,12 +1145,13 @@ export function ticketsCtaSwap(): string {
   return `<style id="lp-tickets-cta-css">${CTA_SWAP_CSS}</style><script id="lp-tickets-cta-swap">${CTA_SWAP_SCRIPT}</script>`;
 }
 
-/** Fixed bar on LP pages while browsing with a preview link. */
+/** Bottom bar on LP pages while browsing with a preview link (keeps the LP header visible). */
 export function ticketsPreviewBar(): string {
   return (
-    '<div id="lp-tickets-preview" role="note" style="position:fixed;left:0;right:0;top:0;z-index:2147483647;' +
-    "padding:6px 16px;background:#fff4d6;color:#7a4b00;text-align:center;" +
-    "font:700 13px/1.5 'Zen Kaku Gothic New',system-ui,-apple-system,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.12)\">" +
+    "<style>#lp-tickets-cta{bottom:56px!important}</style>" +
+    '<div id="lp-tickets-preview" role="note" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;' +
+    "padding:8px 16px;background:#fff4d6;color:#7a4b00;text-align:center;" +
+    "font:700 13px/1.5 'Zen Kaku Gothic New',system-ui,-apple-system,sans-serif;box-shadow:0 -2px 8px rgba(0,0,0,.12)\">" +
     "チケット販売のプレビュー表示中です（一般には公開されていません）</div>"
   );
 }
