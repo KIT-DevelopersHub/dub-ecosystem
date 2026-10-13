@@ -134,6 +134,20 @@ else
   echo "[dev-up] no Cloudflare token at $CF_TOKEN_FILE - 'Dubを操作' --remote writes will not auth (safe default)"
 fi
 
+# "Dubを操作" target + bot login (COMMANDER_DUB_API_BASE / _BOT_EMAIL / _BOT_PASSWORD).
+# Read from the local secret file on every start so the target survives the restart
+# button and a switch (staging <-> prod) is one file edit. File values win over any
+# inherited env. Only COMMANDER_DUB_* lines are taken; values are never printed.
+OPERATE_ENV=()
+OPERATE_ENV_FILE="${DUB_OPERATE_ENV_FILE:-$HOME/DubVault/secrets/commander-dub-operate.env}"
+if [[ "$MODE" != "--check" && -f "$OPERATE_ENV_FILE" ]]; then
+  while IFS= read -r line; do
+    OPERATE_ENV+=("$line")
+  done < <(grep -E '^COMMANDER_DUB_[A-Z_]+=' "$OPERATE_ENV_FILE")
+  OPERATE_BASE="$(grep -E '^COMMANDER_DUB_API_BASE=' "$OPERATE_ENV_FILE" | tail -1 | cut -d= -f2-)"
+  echo "[dev-up] 'Dubを操作' target: ${OPERATE_BASE:-<unset>} (from $OPERATE_ENV_FILE)"
+fi
+
 echo "[dev-up] starting daemon on port ${DAEMON_PORT} ..."
 ( cd "$REPO_ROOT" && \
   env COMMANDER_PORT="$DAEMON_PORT" \
@@ -142,6 +156,7 @@ echo "[dev-up] starting daemon on port ${DAEMON_PORT} ..."
       COMMANDER_SERVICE_URL="http://127.0.0.1:$SERVICE_PORT" \
       COMMANDER_SERVICE_TOKEN="$TOKEN" \
       ${CF_ENV[@]+"${CF_ENV[@]}"} \
+      ${OPERATE_ENV[@]+"${OPERATE_ENV[@]}"} \
       ${DAEMON_CLAUDE_ENV[@]+"${DAEMON_CLAUDE_ENV[@]}"} \
       node --experimental-strip-types commander/daemon/src/index.ts ) >"$LOG_DIR/daemon.log" 2>&1 &
 PIDS+=("$!")
