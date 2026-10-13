@@ -38,8 +38,8 @@ export const PRIORITY_LABEL: Record<task.TaskPriority, string> = {
 /** 休暇 gets its own calendar color (Google's グレープ), whatever its status. */
 export const VACATION_VISUAL: StatusVisual = { label: "休暇", color: "#8e24aa" };
 
-/** ミーティング (shared-account Google Calendar events) — Google's ピーコック. */
-export const MEETING_VISUAL: StatusVisual = { label: "ミーティング", color: "#039be5" };
+/** ミーティング (shared-account Google Calendar events) — Google の バジル (no status uses it). */
+export const MEETING_VISUAL: StatusVisual = { label: "ミーティング", color: "#0b8043" };
 
 /** Color/label for a drawn item: ミーティング, 休暇, else its status. */
 export function itemVisual(t: task.Task): StatusVisual {
