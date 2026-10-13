@@ -299,3 +299,16 @@ describe("統括 demo account (cross-role mail visibility)", () => {
     expect((await inbox("usr_bob")).map(([id]) => id)).not.toContain("msg_l1");
   });
 });
+
+describe("demo outbox reply threading", () => {
+  it("stamps a reply's sent row with the replied conversation's threadId (like GET /sent on the gateway)", async () => {
+    globalThis.localStorage.removeItem("dub_demo_sent_usr_demo");
+    const client = api();
+    const send = (body: Record<string, unknown>) => client.request({ method: "POST", path: "/api/v1/mail/outbox", body });
+    await send({ to: [{ email: "hanako@example.com" }], subject: "Re: 登壇のご相談", textBody: "ありがとうございます", inReplyTo: "<m1@demo>" });
+    await send({ to: [{ email: "x@example.com" }], subject: "新規", textBody: "hi" });
+    const sent = await client.request<{ items: { subject: string; threadId?: string }[] }>({ method: "GET", path: "/api/v1/mail/sent" });
+    expect(sent.items.find((s) => s.subject === "Re: 登壇のご相談")?.threadId).toBe("thr_1");
+    expect(sent.items.find((s) => s.subject === "新規")?.threadId).toBeUndefined();
+  });
+});

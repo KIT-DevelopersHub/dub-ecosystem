@@ -720,6 +720,15 @@ function createMailStore() {
     }
     return received[id]!;
   }
+  // Mirrors the gateway's send-time resolveThreadId: a reply's In-Reply-To is matched
+  // (angle brackets ignored) against received Message-Ids so the sent row carries the
+  // conversation's threadId and folds into it; unknown refs fall back to the ref itself.
+  const bare = (ref: string): string => ref.trim().replace(/^<|>$/g, "").trim();
+  function replyThreadId(inReplyTo: string): string {
+    const ref = bare(inReplyTo);
+    const parent = DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)).find((m) => m.messageId && bare(m.messageId) === ref);
+    return parent?.threadId ?? inReplyTo;
+  }
   // Sent is PERSISTED per account (localStorage) so it survives a reload and stays
   // strictly account-scoped: a mail account A sent lives under A's key and is therefore
   // invisible when the shell reloads as account B. Read fresh on every request.
@@ -783,6 +792,7 @@ function createMailStore() {
         status: "sent",
         textBody: s.textBody,
         ...(s.htmlBody ? { htmlBody: s.htmlBody } : {}),
+        ...(s.inReplyTo ? { threadId: replyThreadId(s.inReplyTo) } : {}),
       } as mail.MailSentDetail);
     }
     saveSent(accountId, sent);
@@ -879,6 +889,7 @@ function createMailStore() {
         provider: "resend",
         providerMessageId,
         status: "sent",
+        ...(req.inReplyTo ? { threadId: replyThreadId(req.inReplyTo) } : {}),
         textBody: req.textBody ?? "",
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
         ...(attachments.length > 0 ? { attachments } : {}),
