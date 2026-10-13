@@ -3,12 +3,12 @@
   "slug": "calendar-gcal",
   "worker": "dub-demo-calendar-gcal",
   "url": "https://dub-demo-calendar-gcal.developershub-site.workers.dev",
-  "deployedSha": "230c896f",
+  "deployedSha": "20e97dcf",
   "branch": "feat/calendar-gcal-ui",
   "actor": "ko-tarou",
-  "markers": ["calendar-vacation-note","calendar-editor-close"],
+  "markers": ["calendar-vacation-note","calendar-detail-kind"],
   "live": true,
-  "verifiedAt": "2026-10-13T08:15:38Z",
-  "updatedAt": "2026-10-13T08:15:38Z",
-  "note": "カレンダー Google風UI + 作成パネル/全画面編集 + 休暇登録"
+  "verifiedAt": "2026-10-13T08:22:23Z",
+  "updatedAt": "2026-10-13T08:22:23Z",
+  "note": "カレンダー Google風UI(承認版の見た目) + 休暇登録"
 }
