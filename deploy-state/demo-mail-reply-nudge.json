@@ -3,12 +3,12 @@
   "slug": "mail-reply-nudge",
   "worker": "dub-demo-mail-reply-nudge",
   "url": "https://dub-demo-mail-reply-nudge.developershub-site.workers.dev",
-  "deployedSha": "6f6ad478",
+  "deployedSha": "a7910961",
   "branch": "feat/mail-reply-nudge",
   "actor": "ko-tarou",
-  "markers": ["fe2-mail-reply-nudge","fe2-mail-reply-nudge-pinned"],
+  "markers": ["fe2-mail-reply-nudge","fe2-mail-reply-nudge-pinned","fe2-mail-reply-nudge-dismiss"],
   "live": true,
-  "verifiedAt": "2026-10-13T09:41:31Z",
-  "updatedAt": "2026-10-13T09:41:31Z",
-  "note": "Gmail風 未返信ナッジ + 返信待ちを受信トレイ上部に固定 (feat/mail-reply-nudge)"
+  "verifiedAt": "2026-10-13T09:59:29Z",
+  "updatedAt": "2026-10-13T09:59:29Z",
+  "note": "Gmail風 未返信ナッジ + 返信待ち固定 + 返信不要 (feat/mail-reply-nudge)"
 }
