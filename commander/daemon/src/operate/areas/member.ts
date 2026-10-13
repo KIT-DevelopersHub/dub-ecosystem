@@ -61,7 +61,7 @@ export const MEMBER: AreaSpec = {
       service: M,
       requires: MEMBERS_VIEW,
       description: "メンバー名簿（チームと所属メンバー）を取得する",
-      hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・version",
+      hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・version。identityUserId = ログインアカウントの id（tasks の assigneeId・users の id と同じ。null はアカウント未紐付けで担当を照合できない）",
     }),
     read({
       id: "members.teams.list",

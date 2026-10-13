@@ -15,6 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import { findEntry, pathParams, type CatalogEntry, type OpKind, type OpRisk, type VerifyValue } from "./catalog.ts";
+import { compactRead } from "./compact.ts";
 import { describeFailure, environmentLabel, type ApiClient, type GatewayResponse } from "./gateway.ts";
 import { findPlaceholders, getPath, matchesWhere, resolveValue, type Plan } from "./plan.ts";
 
@@ -23,7 +24,6 @@ export const MAX_WRITE_CALLS = 20;
 export const PHRASE_WRITE_CALLS = 10;
 export const MAX_READ_CALLS = 30;
 export const PREVIEW_TTL_MS = 30 * 60_000;
-const SAMPLE_CHARS = 1500;
 
 export interface PreviewCall {
   callId: string;
@@ -60,8 +60,14 @@ export interface ReadSummary {
   description: string;
   ok: boolean;
   count?: number;
-  /** Truncated JSON for the planner's context; the UI keeps it under 詳細. */
-  sample?: string;
+  /** Every row, cut to the hint's fields (compact.ts); the UI keeps it under 詳細. */
+  table?: string;
+  /** Rows across the tables in `table`. */
+  rows?: number;
+  /** UTF-8 size of `table`: what the console's read budget is measured in. */
+  bytes?: number;
+  /** forEach + where: how many of the list matched (0 of N usually means a misspelt name). */
+  filtered?: { from: number; matched: number };
   error?: string;
 }
 
@@ -74,6 +80,8 @@ export interface Preview {
   blockers: string[];
   /** A high-risk write or a bulk write: the operator must type the confirmation phrase. */
   requiresPhrase: boolean;
+  /** Set when the reads hit MAX_READ_CALLS (a read-only plan can then be narrowed). */
+  readLimit?: { calls: number; max: number };
   expiresAt: string;
 }
 
@@ -172,6 +180,7 @@ export class OperateExecutor {
     const writes: PreviewWrite[] = [];
     const blockers: string[] = [];
     let readCalls = 0;
+    let readLimit: Preview["readLimit"];
 
     for (const [i, step] of plan.steps.entries()) {
       const at = `手順${i + 1}`;
@@ -181,6 +190,7 @@ export class OperateExecutor {
         break;
       }
       let items: unknown[] = [undefined];
+      let filtered: ReadSummary["filtered"];
       if (step.forEach) {
         const list = getPath(scope, stripBraces(step.forEach));
         const arr = itemsOf(list);
@@ -189,6 +199,7 @@ export class OperateExecutor {
           continue;
         }
         items = arr.filter((item) => matchesWhere(item, step.where ?? [], scope));
+        if (step.where?.length) filtered = { from: arr.length, matched: items.length };
       }
 
       const calls: PreviewCall[] = [];
@@ -229,6 +240,7 @@ export class OperateExecutor {
       if (entry.kind === "read") {
         readCalls += calls.length;
         if (readCalls > MAX_READ_CALLS) {
+          readLimit = { calls: readCalls, max: MAX_READ_CALLS };
           blockers.push(`${at}: 読み取りが上限（${MAX_READ_CALLS}回）を超えます。対象を絞ってください`);
           break;
         }
@@ -245,13 +257,15 @@ export class OperateExecutor {
         const data = step.forEach ? results : results[0];
         scope[step.id] = data;
         const count = step.forEach ? results.length : itemsOf(data)?.length;
+        const compact = failure ? undefined : compactRead(data, entry.hint, step.forEach ? calls.map((c) => c.target) : undefined);
         reads.push({
           stepId: step.id,
           entryId: entry.id,
           description: entry.description,
           ok: !failure,
           ...(count !== undefined ? { count } : {}),
-          ...(failure ? { error: failure } : { sample: JSON.stringify(data).slice(0, SAMPLE_CHARS) }),
+          ...(filtered ? { filtered } : {}),
+          ...(compact ? { table: compact.text, rows: compact.rows, bytes: compact.bytes } : { error: failure }),
         });
         if (failure) {
           blockers.push(`${at}: 読み取りに失敗しました — ${failure}`);
@@ -295,6 +309,7 @@ export class OperateExecutor {
       writes,
       blockers,
       requiresPhrase: writes.some((w) => w.risk === "high") || writeCalls > PHRASE_WRITE_CALLS,
+      ...(readLimit ? { readLimit } : {}),
       expiresAt: new Date(expires).toISOString(),
     };
     if (writes.length && !blockers.length) this.previews.set(preview.previewId, { preview, expires });
