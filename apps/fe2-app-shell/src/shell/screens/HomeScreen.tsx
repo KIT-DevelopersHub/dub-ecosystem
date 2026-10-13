@@ -56,6 +56,8 @@ const APP_TILES: AppTile[] = [
   { id: "events", label: "イベント", desc: "運営中のイベントと進行", icon: "calendar", path: "/events" },
   { id: "tasks", label: "マイタスク", desc: "自分の担当タスク", icon: "check-square", path: "/me/tasks" },
   { id: "gantt", label: "ガントチャート", desc: "全体スケジュール", icon: "clock", path: "/gantt" },
+  // カレンダーもランチャーシート経由でしか開けなかったのでタイルを出す。
+  { id: "calendar", label: "カレンダー", desc: "予定の確認と追加", icon: "calendar", path: "/calendar" },
   { id: "notifications", label: "通知", desc: "お知らせ一覧", icon: "bell", path: "/notifications" },
   { id: "chat", label: "チャット", desc: "チームのやりとり", icon: "message-square", path: "/chat" },
   { id: "mail", label: "メール", desc: "運営メールの送受信", icon: "inbox", path: "/mail" },
