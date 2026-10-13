@@ -545,59 +545,13 @@
   color: var(--dub-color-text-secondary);
 }
 .formRowIcon { padding-top: 8px; display: inline-flex; }
+.whenBlock { display: flex; flex-direction: column; align-items: flex-start; gap: var(--dub-space-2); min-width: 0; }
 .whenFields { display: flex; flex-wrap: wrap; align-items: center; gap: var(--dub-space-2); }
-.field {
-  height: 36px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 4px;
-  background: var(--dub-color-surface-sunken);
-  color: var(--dub-color-text-primary);
-  font-size: var(--dub-font-size-sm);
-  font-family: inherit;
-}
-.field:focus { outline: 2px solid var(--gcal-blue); }
-.allDayLabel { display: inline-flex; align-items: center; gap: var(--dub-space-2); font-size: var(--dub-font-size-sm); color: var(--dub-color-text-primary); cursor: pointer; }
-.descInput {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 36px;
-  padding: 8px;
-  border: 0;
-  border-radius: 4px;
-  background: var(--dub-color-surface-sunken);
-  color: var(--dub-color-text-primary);
-  font-size: var(--dub-font-size-sm);
-  font-family: inherit;
-  resize: vertical;
-}
+.dateField { width: 160px; }
+.timeField { width: 96px; }
+.whenDash { color: var(--dub-color-text-secondary); }
 .formError { color: var(--dub-color-danger-600); font-size: var(--dub-font-size-xs); }
 .formFooter { display: flex; justify-content: flex-end; align-items: center; gap: var(--dub-space-2); padding-top: var(--dub-space-2); }
-.textBtn {
-  height: 36px;
-  padding: 0 var(--dub-space-4);
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--gcal-blue);
-  font-size: var(--dub-font-size-sm);
-  font-weight: var(--dub-font-weight-medium);
-  cursor: pointer;
-}
-.textBtn:hover { background: var(--gcal-blue-soft); }
-.saveBtn {
-  height: 36px;
-  padding: 0 var(--dub-space-6);
-  border: 0;
-  border-radius: 4px;
-  background: var(--gcal-blue);
-  color: #fff;
-  font-size: var(--dub-font-size-sm);
-  font-weight: var(--dub-font-weight-medium);
-  cursor: pointer;
-}
-.saveBtn:hover { box-shadow: 0 1px 2px rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15); }
-.saveBtn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* event detail */
 .detailHead { display: grid; grid-template-columns: 24px 1fr; gap: var(--dub-space-4); align-items: start; }
@@ -670,20 +624,6 @@
 }
 
 /* 予定 / 休暇 type chips (Google's 予定 / 不在 tabs) */
-.kindChips { display: flex; flex-wrap: wrap; gap: var(--dub-space-2); }
-.kindChip {
-  height: 36px;
-  padding: 0 var(--dub-space-3);
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-sm);
-  font-weight: var(--dub-font-weight-medium);
-  cursor: pointer;
-}
-.kindChip:hover { background: var(--dub-color-surface-sunken); }
-.kindChipOn, .kindChipOn:hover { background: var(--gcal-blue-soft); color: var(--gcal-blue); }
 
 /* vacation note row in the form */
 .rowNote { margin: 0; padding-top: 8px; font-size: var(--dub-font-size-sm); color: var(--dub-color-text-primary); }

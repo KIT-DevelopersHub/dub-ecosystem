@@ -1,7 +1,18 @@
 // Google Calendar-style floating panels: the anchored popover shell, the quick
 // create/edit form, the event detail card and the 他N件 day list.
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Icon, isSubmitEnter } from "@dub/ui";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  Button,
+  Checkbox,
+  DatePicker,
+  Icon,
+  IconButton,
+  SegmentedControl,
+  Select,
+  Textarea,
+  isSubmitEnter,
+  type SegmentedOption,
+} from "@dub/ui";
 import {
   TIME_OPTIONS,
   VACATION_TITLE,
@@ -121,41 +132,20 @@ function PanelButton({
   onClick: () => void;
   testId?: string;
 }): JSX.Element {
-  return (
-    <button type="button" className={styles.roundBtn} aria-label={label} title={label} onClick={onClick} data-testid={testId}>
-      <Icon name={icon} />
-    </button>
-  );
+  return <IconButton name={icon} aria-label={label} onClick={onClick} testId={testId} />;
 }
 
 // ── create / edit form ──────────────────────────────────────────────────────
 
-function timeOptions(current: string): string[] {
-  return TIME_OPTIONS.includes(current) ? TIME_OPTIONS : [...TIME_OPTIONS, current].sort();
+function timeOptions(current: string): { value: string; label: string }[] {
+  const all = TIME_OPTIONS.includes(current) ? TIME_OPTIONS : [...TIME_OPTIONS, current].sort();
+  return all.map((t) => ({ value: t, label: t }));
 }
 
-const KIND_LABEL: Record<ItemKind, string> = { event: "予定", vacation: "休暇" };
-
-/** Google's 予定 / 不在 type chips under the title. */
-function KindChips({ draft, onChange }: { draft: EventDraft; onChange: (d: EventDraft) => void }): JSX.Element {
-  return (
-    <div className={styles.kindChips} role="radiogroup" aria-label="種類">
-      {(Object.keys(KIND_LABEL) as ItemKind[]).map((k) => (
-        <button
-          key={k}
-          type="button"
-          role="radio"
-          aria-checked={draft.kind === k}
-          className={`${styles.kindChip} ${draft.kind === k ? styles.kindChipOn : ""}`}
-          onClick={() => onChange(withKind(draft, k))}
-          data-testid={`calendar-kind-${k}`}
-        >
-          {KIND_LABEL[k]}
-        </button>
-      ))}
-    </div>
-  );
-}
+const KIND_OPTIONS: SegmentedOption<ItemKind>[] = [
+  { value: "event", label: "予定", icon: "calendar", testId: "calendar-kind-event" },
+  { value: "vacation", label: "休暇", icon: "sun", testId: "calendar-kind-vacation" },
+];
 
 export function EventForm({
   draft,
@@ -177,6 +167,7 @@ export function EventForm({
   /** Left-aligned footer action (e.g. その他のオプション). */
   secondaryAction?: ReactNode;
 }): JSX.Element {
+  const id = useId();
   const error = validateDraft(draft);
   const [touched, setTouched] = useState(false);
   const set = (patch: Partial<EventDraft>) => onChange({ ...draft, ...patch });
@@ -210,81 +201,78 @@ export function EventForm({
         }}
         data-testid="calendar-form-title"
       />
-      <KindChips draft={draft} onChange={onChange} />
+      <SegmentedControl
+        options={KIND_OPTIONS}
+        value={draft.kind}
+        onChange={(k) => onChange(withKind(draft, k))}
+        size="sm"
+        aria-label="種類"
+        testId="calendar-kind-switch"
+      />
 
       <div className={styles.formRow}>
         <span className={styles.formRowIcon}>
           <Icon name="clock" />
         </span>
-        <div className={styles.form} style={{ gap: "var(--dub-space-2)" }}>
+        <div className={styles.whenBlock}>
           <div className={styles.whenFields}>
-            <input
-              type="date"
-              className={styles.field}
-              aria-label="開始日"
-              value={draft.startDate}
-              onChange={(e) => {
-                const v = e.target.value;
-                // Keep a single-day item single-day when its date moves, like Google.
-                set(draft.endDate === draft.startDate || draft.endDate < v ? { startDate: v, endDate: v } : { startDate: v });
-              }}
-              data-testid="calendar-form-start-date"
-            />
+            <span className={styles.dateField}>
+              <DatePicker
+                id={`${id}-start-date`}
+                value={draft.startDate}
+                onChange={(v) => {
+                  if (!v) return;
+                  // Keep a single-day item single-day when its date moves, like Google.
+                  set(draft.endDate === draft.startDate || draft.endDate < v ? { startDate: v, endDate: v } : { startDate: v });
+                }}
+                testId="calendar-form-start-date"
+              />
+            </span>
             {!draft.allDay && (
               <>
-                <select
-                  className={styles.field}
-                  aria-label="開始時刻"
-                  value={draft.startTime}
-                  onChange={(e) => set({ startTime: e.target.value })}
-                  data-testid="calendar-form-start-time"
-                >
-                  {timeOptions(draft.startTime).map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-                <span>–</span>
-                <select
-                  className={styles.field}
-                  aria-label="終了時刻"
-                  value={draft.endTime}
-                  onChange={(e) => set({ endTime: e.target.value })}
-                  data-testid="calendar-form-end-time"
-                >
-                  {timeOptions(draft.endTime).map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                <span className={styles.timeField}>
+                  <Select
+                    id={`${id}-start-time`}
+                    value={draft.startTime}
+                    onChange={(v) => set({ startTime: v })}
+                    options={timeOptions(draft.startTime)}
+                    testId="calendar-form-start-time"
+                  />
+                </span>
+                <span className={styles.whenDash}>–</span>
+                <span className={styles.timeField}>
+                  <Select
+                    id={`${id}-end-time`}
+                    value={draft.endTime}
+                    onChange={(v) => set({ endTime: v })}
+                    options={timeOptions(draft.endTime)}
+                    testId="calendar-form-end-time"
+                  />
+                </span>
               </>
             )}
             {(draft.allDay || draft.endDate !== draft.startDate) && (
               <>
-                <span>–</span>
-                <input
-                  type="date"
-                  className={styles.field}
-                  aria-label="終了日"
-                  value={draft.endDate}
-                  min={draft.startDate}
-                  onChange={(e) => set({ endDate: e.target.value })}
-                  data-testid="calendar-form-end-date"
-                />
+                <span className={styles.whenDash}>–</span>
+                <span className={styles.dateField}>
+                  <DatePicker
+                    id={`${id}-end-date`}
+                    value={draft.endDate}
+                    min={draft.startDate}
+                    onChange={(v) => v && set({ endDate: v })}
+                    testId="calendar-form-end-date"
+                  />
+                </span>
               </>
             )}
           </div>
-          <label className={styles.allDayLabel}>
-            <input
-              type="checkbox"
-              checked={draft.allDay}
-              onChange={(e) => set({ allDay: e.target.checked })}
-              data-testid="calendar-form-allday"
-            />
-            終日
-          </label>
+          <Checkbox
+            id={`${id}-allday`}
+            checked={draft.allDay}
+            onChange={(allDay) => set({ allDay })}
+            label="終日"
+            testId="calendar-form-allday"
+          />
         </div>
       </div>
 
@@ -303,14 +291,13 @@ export function EventForm({
         <span className={styles.formRowIcon}>
           <Icon name="list" />
         </span>
-        <textarea
-          className={styles.descInput}
+        <Textarea
+          id={`${id}-description`}
           placeholder={vacation ? "メッセージを追加" : "説明を追加"}
-          aria-label="説明"
           rows={2}
           value={draft.description}
-          onChange={(e) => set({ description: e.target.value })}
-          data-testid="calendar-form-description"
+          onChange={(description) => set({ description })}
+          testId="calendar-form-description"
         />
       </div>
 
@@ -324,13 +311,13 @@ export function EventForm({
         {secondaryAction}
         <span className={styles.spacer} />
         {onCancel && (
-          <button type="button" className={styles.textBtn} onClick={onCancel}>
+          <Button variant="ghost" onClick={onCancel}>
             キャンセル
-          </button>
+          </Button>
         )}
-        <button type="submit" className={styles.saveBtn} disabled={saving} data-testid="calendar-form-save">
-          {saving ? "保存中…" : submitLabel}
-        </button>
+        <Button type="submit" loading={saving} testId="calendar-form-save">
+          {submitLabel}
+        </Button>
       </div>
     </form>
   );
@@ -366,9 +353,9 @@ export function CreatePanel({
           onSubmit={onSave}
           saving={saving}
           secondaryAction={
-            <button type="button" className={styles.textBtn} onClick={onMoreOptions} data-testid="calendar-more-options">
+            <Button variant="ghost" onClick={onMoreOptions} testId="calendar-more-options">
               その他のオプション
-            </button>
+            </Button>
           }
         />
       </div>
@@ -437,9 +424,9 @@ export function DetailPanel({
           </div>
         )}
         <div className={styles.detailLink}>
-          <button type="button" className={styles.textBtn} onClick={onOpenInTasks} data-testid="calendar-open-in-tasks">
+          <Button variant="ghost" size="sm" onClick={onOpenInTasks} testId="calendar-open-in-tasks">
             マイタスクで開く
-          </button>
+          </Button>
         </div>
       </div>
     </Floating>

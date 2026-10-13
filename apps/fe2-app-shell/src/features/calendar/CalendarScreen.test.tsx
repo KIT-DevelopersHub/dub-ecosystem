@@ -252,7 +252,7 @@ describe("CalendarScreen", () => {
 
     await user.click(within(detail).getByTestId("calendar-detail-edit"));
     const editor = await screen.findByTestId("calendar-edit-dialog");
-    expect(within(editor).getByTestId("calendar-kind-vacation")).toHaveAttribute("aria-checked", "true");
+    expect(within(editor).getByTestId("calendar-kind-vacation")).toHaveAttribute("aria-selected", "true");
     expect(within(editor).getByTestId("calendar-form-description")).toHaveValue("連絡はチャットへ");
   });
 
