@@ -15,6 +15,8 @@ import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
 import { REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
+import { PUBLIC_PARTICIPATION_PATH } from "./module.tsx";
+import { PublicUrlCard } from "./PublicUrlCard.tsx";
 import styles from "./participation.module.css";
 
 /** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
@@ -158,6 +160,14 @@ export function ParticipationListPage(): JSX.Element {
         title="参加届の回答一覧"
         description="送信された参加届を確認できます（運営のみ）。左端で運営メンバーに追加するか選べます。行をクリックすると詳細が開きます。"
       />
+      <div className={styles.listShare}>
+        <PublicUrlCard
+          title="参加届フォームの URL"
+          hint="ログイン不要の公開フォームです。参加してほしい人に送ると、回答がこの一覧に届きます。"
+          path={PUBLIC_PARTICIPATION_PATH}
+          testId="participation-public-link"
+        />
+      </div>
       <DataTable<Participation>
         columns={columns}
         rows={rows}

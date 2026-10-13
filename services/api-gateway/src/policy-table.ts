@@ -67,6 +67,10 @@ export const POLICY_TABLE = definePolicyTable({
   // breaking the live LP form. See the report / a-2 for the recommended fix.
   "POST /api/v1/public/inquiries": PUBLIC,
   "POST /api/v1/public/participation": PUBLIC,
+  // オンボーディング案内 (新メンバー向けの「やってほしいこと」)。読む人はまだアカウントを
+  // 持っていないのがこのページの前提なので PUBLIC。読み取り専用で、返すのは管理者が公開前提で
+  // 書いた案内項目だけ（名簿・個人情報は含まない）。
+  "GET /api/v1/public/onboarding": PUBLIC,
   // LP visit beacon. The handler drops non-LP origins and forwards only a sanitized row to
   // lp-analytics s2s; there is no session to check and nothing readable comes back (204).
   "POST /api/v1/public/lp-visits": PUBLIC,

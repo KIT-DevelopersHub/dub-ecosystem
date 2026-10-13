@@ -8,7 +8,7 @@
 //   組織図         → /members/org-chart（チームとリーダーの上下関係）
 //   運営名簿       → /members/roster（運営メンバー全員の情報をフラットな一覧で並べる）
 //   メール名簿     → /admin/users（Email Routing アドレス／メールアカウントの一覧・発行・同期）
-//   参加届         → /participation（提出フォーム）
+//   オンボーディング → /participation（新メンバー向け案内ページ /onboarding の項目管理）
 //   参加届の回答   → /participation/list（回答管理）
 // データ源は member-service / identity-roster のままで、突合キーは member.identityUserId
 // （＝メール一致で紐付く既存の仕組み）。表示の一貫性はこの共有サブナビ + 各セクション見出しで担保する。
@@ -47,7 +47,7 @@ const SECTIONS: SectionTab[] = [
   { id: "org-chart", label: "組織図", path: "/members/org-chart", requiredPermissions: ["app:members:view"] },
   { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["app:members:view"] },
   { id: "roster", label: "メール名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
-  { id: "participation", label: "参加届", path: "/participation", requiredPermissions: ["app:participation:view"] },
+  { id: "onboarding", label: "オンボーディング", path: "/participation", requiredPermissions: ["app:participation:view"] },
   { id: "participation-list", label: "参加届の回答", path: "/participation/list", requiredPermissions: ["identity:read", "app:participation:view"] },
 ];
 

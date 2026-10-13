@@ -78,7 +78,20 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
       "commander_run_events",
     ],
   },
-  { ns: "lp", ownerUnit: "lp-analytics", tables: ["lp_links", "lp_visits", "lp_ingest_days", "lp_publish"] },
+  {
+    ns: "lp",
+    ownerUnit: "lp-analytics",
+    tables: [
+      "lp_links",
+      "lp_visits",
+      "lp_ingest_days",
+      "lp_publish",
+      "lp_ticket_settings",
+      "lp_ticket_types",
+      "lp_ticket_orders",
+      "lp_ticket_order_items",
+    ],
+  },
 ];
 
 // Compile-time guard: every NAMESPACES entry appears exactly once in the registry.

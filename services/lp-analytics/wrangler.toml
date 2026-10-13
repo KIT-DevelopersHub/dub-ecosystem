@@ -28,3 +28,7 @@ LP_BASE_URL = "https://hokuriku-it-conf.com"
 #   npx wrangler secret put CF_ANALYTICS_TOKEN   (Account Analytics:Read)
 CF_ACCOUNT_ID = "b8f6ddbf8fa8cf4e421eae870bdb6dac"
 LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
+# チケット購入 (Stripe Checkout)。secret が無ければ「決済準備中」(有料券 503・無料券は動く):
+#   npx wrangler secret put STRIPE_SECRET_KEY
+#   npx wrangler secret put STRIPE_WEBHOOK_SECRET
+# LP_DAILY_CHECKOUT_CAP = "300"   # 1 日 (JST) の checkout 作成上限（既定 300）
