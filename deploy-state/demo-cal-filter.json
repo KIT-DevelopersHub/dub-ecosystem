@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "cal-filter",
+  "worker": "dub-demo-cal-filter",
+  "url": "https://dub-demo-cal-filter.developershub-site.workers.dev",
+  "deployedSha": "97e9417c",
+  "branch": "feat/calendar-filter-split",
+  "actor": "ko-tarou",
+  "markers": ["calendar-add-team","チーム全員分を表示"],
+  "live": true,
+  "verifiedAt": "2026-10-13T16:37:47Z",
+  "updatedAt": "2026-10-13T16:37:47Z",
+  "note": "calendar: 予定/タスク分離フィルタ"
+}
