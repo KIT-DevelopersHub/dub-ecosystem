@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { common, task } from "@dub/types";
+import { FakeAuthProvider, editorPermissions } from "../../auth/test-support.tsx";
 import { CalendarApiProvider, type CalendarCaps } from "./CalendarProvider.tsx";
 import { CalendarScreen } from "./CalendarScreen.tsx";
 import type { CalendarApi } from "./calendarApi.tsx";
@@ -64,6 +65,12 @@ function memoryApi(seed: task.Task[]) {
     getUsers: vi.fn(async (ids: readonly common.UserId[]) =>
       ids.map((id) => ({ id, displayName: id === ME ? "山田" : "佐藤", avatarUrl: null })),
     ),
+    listMeetings: vi.fn(async () => ({ items: [], account: { email: null, calendarReady: false } })),
+    listMeetingTargets: vi.fn(async () => ({ items: [] })),
+    createMeeting: vi.fn(),
+    updateMeeting: vi.fn(),
+    deleteMeeting: vi.fn(),
+    syncMeetings: vi.fn(),
   };
   return api;
 }
@@ -72,11 +79,14 @@ function renderScreen(api: CalendarApi, caps?: CalendarCaps) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <CalendarApiProvider value={api} currentUserId={ME} {...(caps ? { caps } : {})}>
-          <CalendarScreen />
-        </CalendarApiProvider>
-      </ToastProvider>
+      {/* No meetings keys: ミーティング stays hidden (covered by meetings.test.tsx). */}
+      <FakeAuthProvider permissions={editorPermissions("calendar", ["task:read"])}>
+        <ToastProvider>
+          <CalendarApiProvider value={api} currentUserId={ME} {...(caps ? { caps } : {})}>
+            <CalendarScreen />
+          </CalendarApiProvider>
+        </ToastProvider>
+      </FakeAuthProvider>
     </QueryClientProvider>,
   );
 }

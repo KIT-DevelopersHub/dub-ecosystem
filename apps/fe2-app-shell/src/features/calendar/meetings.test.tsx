@@ -1,5 +1,5 @@
 // カレンダー > ミーティング screen tests: permission gating (無効/閲覧/編集), the create
-// dialog's submit payload, account banners and the 表示するカレンダー filter. Faked CalendarApi.
+// dialog's submit payload, account notices and the sidebar ミーティング filter. Faked CalendarApi.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -54,6 +54,11 @@ function fakeApi(over: Partial<CalendarApi> = {}, account: meeting.MeetingAccoun
     listTasks: vi.fn(),
     listAllTasks: vi.fn(),
     listMyTasks: vi.fn(() => Promise.resolve([])),
+    createTask: vi.fn(),
+    updateTask: vi.fn(),
+    deleteTask: vi.fn(),
+    listRoles: vi.fn(() => Promise.resolve([])),
+    getUsers: vi.fn(() => Promise.resolve([])),
     listMeetings: vi.fn(() => Promise.resolve({ items, account })),
     listMeetingTargets: vi.fn(() => Promise.resolve({ items: TARGETS })),
     createMeeting: vi.fn((b: meeting.CreateMeetingRequest) => Promise.resolve(mtg({ ...b, id: "mtg_new", description: b.description ?? null, until: b.until ?? null }))),
@@ -80,7 +85,8 @@ function wrap(ui: ReactNode, api: CalendarApi, permissions: readonly identity.Pe
   );
 }
 
-const chipsOf = (id: string) => screen.queryAllByTestId(new RegExp(`^calendar-meeting-${id}-`));
+// Meetings are drawn by the shared views as items with a "meet:<id>:<day>" id.
+const chipsOf = (id: string) => screen.queryAllByTestId(new RegExp(`^calendar-item-meet:${id}:`));
 
 beforeEach(() => localStorage.clear());
 
@@ -88,7 +94,7 @@ describe("カレンダー > ミーティング permissions", () => {
   it("無効 (no meetings keys): no filter, no buttons, meetings never fetched", async () => {
     const api = fakeApi();
     render(wrap(<CalendarScreen />, api, NONE));
-    await screen.findByTestId("calendar-legend");
+    await screen.findByTestId("calendar-sidebar");
     expect(screen.queryByTestId("calendar-meeting-filter")).not.toBeInTheDocument();
     expect(screen.queryByTestId("calendar-meetings-create")).not.toBeInTheDocument();
     expect(api.listMeetings).not.toHaveBeenCalled();
@@ -134,10 +140,11 @@ describe("定例ミーティングを設定", () => {
 
     await userEvent.type(within(dialog).getByTestId("calendar-meeting-form-title"), "統括定例");
     await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-target"), "role_lead");
-    // A date inside the visible month, so the optimistic chip lands on the grid.
-    const date = `${new Date().toISOString().slice(0, 8)}15`;
+    // Today at 12:00 JST — same calendar day in any test TZ, so it lands in the visible week.
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     fireEvent.change(within(dialog).getByTestId("calendar-meeting-form-date"), { target: { value: date } });
-    await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-time"), "08:00");
+    await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-time"), "12:00");
     await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-duration"), "30");
     await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-recurrence"), "none");
     expect(within(dialog).queryByTestId("calendar-meeting-form-until")).not.toBeInTheDocument();
@@ -148,7 +155,7 @@ describe("定例ミーティングを設定", () => {
       title: "統括定例",
       description: null,
       targetId: "role_lead",
-      startsAt: new Date(Date.UTC(y, m - 1, d, 8 - 9, 0)).toISOString(),
+      startsAt: new Date(Date.UTC(y, m - 1, d, 12 - 9, 0)).toISOString(),
       durationMinutes: 30,
       recurrence: "none",
       until: null,
@@ -182,7 +189,7 @@ describe("定例ミーティングを設定", () => {
   });
 });
 
-describe("表示するカレンダー", () => {
+describe("サイドバー ミーティング", () => {
   it("defaults to 全体 + own targets, toggling shows other roles and is remembered", async () => {
     render(wrap(<CalendarScreen />, fakeApi(), VIEW));
     await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
