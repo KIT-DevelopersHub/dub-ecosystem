@@ -884,29 +884,150 @@
   background: var(--dub-color-border-default);
   margin: 0 var(--dub-space-1);
 }
-.composer textarea {
-  width: 100%;
-  box-sizing: border-box;
-  resize: none;
+/* WYSIWYG input (contentEditable). Lines are root > div; list / quote / code lines
+   carry data-block and are drawn here so the draft looks like the sent message. */
+.composerInput {
+  position: relative;
   min-height: 44px;
   max-height: 240px;
+  overflow-y: auto;
+  box-sizing: border-box;
   padding: var(--dub-space-2) var(--dub-space-3);
-  border: none;
-  background: transparent;
   color: var(--dub-color-text-primary);
-  font: inherit;
   font-size: var(--dub-font-size-sm);
   line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   outline: none;
 }
-.composer textarea:disabled {
+.composerInput[aria-disabled="true"] {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+.composerInput[data-empty]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  top: var(--dub-space-2);
+  left: var(--dub-space-3);
+  color: var(--dub-color-text-muted);
+  pointer-events: none;
 }
 /* Touch: 16px so focusing the composer never triggers iOS auto-zoom. */
 @media (pointer: coarse) {
-  .composer textarea {
+  .composerInput {
     font-size: var(--dub-font-size-md);
   }
+}
+.composerInput code {
+  font-family: var(--dub-font-family-mono);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-danger-600);
+  padding: 1px 4px;
+  border-radius: var(--dub-radius-sm);
+  border: 1px solid var(--dub-color-border-default);
+  font-size: 0.85em;
+}
+.composerInput a {
+  color: var(--dub-color-text-link, var(--dub-color-brand-600));
+}
+.composerInput u {
+  text-underline-offset: 2px;
+}
+.composerInput [data-md] {
+  color: var(--dub-color-brand-700);
+  background: var(--dub-color-brand-100);
+  border-radius: var(--dub-radius-sm);
+  padding: 0 2px;
+  font-weight: var(--dub-font-weight-medium);
+}
+.composerInput > div:not([data-block="ordered"]) {
+  counter-reset: dub-composer-ol;
+}
+.composerInput > div[data-block="quote"] {
+  padding-left: var(--dub-space-3);
+  border-left: 3px solid var(--dub-color-border-strong);
+  color: var(--dub-color-text-secondary);
+}
+.composerInput > div[data-block="bullet"],
+.composerInput > div[data-block="ordered"] {
+  position: relative;
+  padding-left: var(--dub-space-5);
+}
+.composerInput > div[data-block="bullet"]::before,
+.composerInput > div[data-block="ordered"]::before {
+  position: absolute;
+  left: var(--dub-space-1);
+  color: var(--dub-color-text-secondary);
+}
+.composerInput > div[data-block="bullet"]::before {
+  content: "\2022";
+}
+.composerInput > div[data-block="ordered"] {
+  counter-increment: dub-composer-ol;
+}
+.composerInput > div[data-block="ordered"]::before {
+  content: counter(dub-composer-ol) ".";
+}
+.composerInput > div[data-block="code"] {
+  font-family: var(--dub-font-family-mono);
+  background: var(--dub-color-surface-sunken);
+  border-left: 1px solid var(--dub-color-border-default);
+  border-right: 1px solid var(--dub-color-border-default);
+  padding: 0 var(--dub-space-2);
+}
+.composerInput > div:not([data-block="code"]) + div[data-block="code"],
+.composerInput > div[data-block="code"]:first-child {
+  border-top: 1px solid var(--dub-color-border-default);
+  border-top-left-radius: var(--dub-radius-md);
+  border-top-right-radius: var(--dub-radius-md);
+  padding-top: var(--dub-space-1);
+}
+.composerInput > div[data-block="code"]:has(+ div:not([data-block="code"])),
+.composerInput > div[data-block="code"]:last-child {
+  border-bottom: 1px solid var(--dub-color-border-default);
+  border-bottom-left-radius: var(--dub-radius-md);
+  border-bottom-right-radius: var(--dub-radius-md);
+  padding-bottom: var(--dub-space-1);
+}
+/* Link URL entry (toolbar → リンク): small inline form above the box. */
+.linkPopover {
+  position: absolute;
+  bottom: 100%;
+  left: var(--dub-space-4);
+  display: flex;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2);
+  margin-bottom: var(--dub-space-1);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-md, 0 4px 12px rgb(0 0 0 / 12%));
+  z-index: 5;
+}
+.linkPopover input {
+  width: 260px;
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-strong, var(--dub-color-border-default));
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-base, transparent);
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+}
+.linkPopover button {
+  padding: var(--dub-space-1) var(--dub-space-3);
+  border: none;
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-brand-500);
+  color: var(--dub-color-text-inverse);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+  cursor: pointer;
+}
+.linkPopover button:disabled {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-muted);
+  cursor: not-allowed;
 }
 .composerBottom {
   display: flex;
