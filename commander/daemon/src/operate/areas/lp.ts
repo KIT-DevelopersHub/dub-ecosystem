@@ -91,12 +91,25 @@ export const LP: AreaSpec = {
       fieldLabels: { active: "有効" },
       verify: { ...LINKS_READ, findBy: ["id", "$params.id"], expect: { active: "$body.active" } },
     },
+    read({
+      id: "lp.publish.get",
+      area: "lp",
+      path: "/lp/publish",
+      service: S,
+      requires: VIEW,
+      description: "本番 LP でいま公開中の版を取得する",
+      hint: "versionId（公開中の版）。期間指定は不要",
+    }),
   ],
-  excluded: [],
-  // 公開版の切り替えとチケット販売は未開放（POST /lp/publish・/lp/tickets/enabled・/lp/tickets/cta は
-  // lp:publish 付きのため抽出対象外）。
+  excluded: [
+    {
+      service: S,
+      route: "POST /lp/publish",
+      reason: "本番 LP の公開版を即座に切り替える操作（lp:publish 詳細キー）。依頼範囲（アクセスログ・流入 URL）の外で、入れ替えはオーナーが手で行う",
+    },
+  ],
+  // チケット販売は未開放（POST /lp/tickets/enabled・/lp/tickets/cta は lp:publish 付きのため抽出対象外）。
   pending: [
-    { service: S, route: "GET /lp/publish" },
     { service: S, route: "GET /lp/tickets" },
     { service: S, route: "POST /lp/tickets/fields" },
     { service: S, route: "POST /lp/tickets/types" },
