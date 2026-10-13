@@ -253,6 +253,15 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
         })
         .then((r) => unwrapItems<identity.UserSummary>(r));
     },
+    // New-DM picker: active members by name (mirrors HttpChatClient.searchUsers).
+    searchUsers: (q: string) =>
+      api
+        .request<unknown>({
+          method: "GET",
+          path: `${IDENTITY}/users`,
+          query: { status: "active", limit: "20", ...(q.trim() ? { q: q.trim() } : {}) },
+        })
+        .then((r) => unwrapItems<identity.UserSummary>(r)),
     // チーム単位メンション (@統括チーム 等) の候補 + 自分の所属チーム。名簿権限を持たない
     // 一般メンバーでも読める self-scoped エンドポイントを使う (roster-gated な
     // /members/teams だと一般メンバーには候補もチーム名も出ない)。
