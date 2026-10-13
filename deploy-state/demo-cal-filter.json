@@ -3,12 +3,12 @@
   "slug": "cal-filter",
   "worker": "dub-demo-cal-filter",
   "url": "https://dub-demo-cal-filter.developershub-site.workers.dev",
-  "deployedSha": "97e9417c",
+  "deployedSha": "0e6aa8e6",
   "branch": "feat/calendar-filter-split",
   "actor": "ko-tarou",
-  "markers": ["calendar-add-team","チーム全員分を表示"],
+  "markers": ["dub.calendar.openFilterSections"],
   "live": true,
-  "verifiedAt": "2026-10-13T16:37:47Z",
-  "updatedAt": "2026-10-13T16:37:47Z",
-  "note": "calendar: 予定/タスク分離フィルタ"
+  "verifiedAt": "2026-10-13T16:58:26Z",
+  "updatedAt": "2026-10-13T16:58:26Z",
+  "note": ""
 }
