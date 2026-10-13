@@ -3,12 +3,12 @@
   "slug": "lp-tickets",
   "worker": "dub-demo-lp-tickets",
   "url": "https://dub-demo-lp-tickets.developershub-site.workers.dev",
-  "deployedSha": "b7645627",
+  "deployedSha": "6ca5eb9f",
   "branch": "feat/lp-tickets",
   "actor": "ko-tarou",
-  "markers": ["チケット販売を公開"],
+  "markers": ["1 回の購入上限"],
   "live": true,
-  "verifiedAt": "2026-10-12T16:05:12Z",
-  "updatedAt": "2026-10-12T16:05:12Z",
-  "note": "LP チケット購入 (LP管理 チケットタブ)"
+  "verifiedAt": "2026-10-13T08:50:40Z",
+  "updatedAt": "2026-10-13T08:50:40Z",
+  "note": "LP チケット購入 v2 (複数枚・Day 別・参加登録ボタン差し替え)"
 }
