@@ -3,12 +3,12 @@
   "slug": "chat-composer-wysiwyg",
   "worker": "dub-demo-chat-composer-wysiwyg",
   "url": "https://dub-demo-chat-composer-wysiwyg.developershub-site.workers.dev",
-  "deployedSha": "4fdc8b73",
+  "deployedSha": "7b13389a",
   "branch": "feat/chat-composer-live-markdown",
   "actor": "ko-tarou",
-  "markers": ["リンク先 URL","fe6-composer-link-form"],
+  "markers": ["リンク先 URL","fe6-composer-link-form","文字を超えています"],
   "live": true,
-  "verifiedAt": "2026-10-13T09:14:19Z",
-  "updatedAt": "2026-10-13T09:14:19Z",
-  "note": "chat composer WYSIWYG draft"
+  "verifiedAt": "2026-10-13T09:19:31Z",
+  "updatedAt": "2026-10-13T09:19:31Z",
+  "note": "chat composer WYSIWYG draft (review fixes)"
 }
