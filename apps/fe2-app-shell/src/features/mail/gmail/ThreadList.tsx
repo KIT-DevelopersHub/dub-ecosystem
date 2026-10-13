@@ -177,6 +177,30 @@ function ThreadRow({
   const nudge = replyNudge(thread, now, pendingReplies);
   const people = thread.folder === "sent" || thread.folder === "drafts" ? last.to[0] ?? state.me : last.from;
 
+  // 返信不要 inside the pinned group: always visible (phones have no hover); on phones it sits
+  // under the date so the subject keeps its width. Literal marker survives minification.
+  const dismissNudge =
+    nudge && onDismissNudge ? (
+      <span data-reply-nudge-dismiss="fe2-mail-reply-nudge-dismiss" style={{ display: "contents" }}>
+        <StopClick label="返信不要にする" testId="fe2-mail-reply-nudge-dismiss-row" onClick={onDismissNudge}>
+          <span
+            style={{
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              padding: "var(--dub-space-1) var(--dub-space-3)",
+              border: "1px solid var(--dub-color-border-default)",
+              borderRadius: "var(--dub-radius-full)",
+              fontSize: "var(--dub-font-size-xs)",
+              color: "var(--dub-color-text-secondary)",
+              background: "var(--dub-color-surface-base)",
+            }}
+          >
+            返信不要
+          </span>
+        </StopClick>
+      </span>
+    ) : null;
+
   // P25: `data-thread-row` is a static marker (literal string, survives minification) so a
   // live-deploy check can grep the built bundle for this row without depending on RTL testids.
   return (
@@ -332,29 +356,19 @@ function ThreadRow({
         </span>
       </span>
 
-      {nudge && onDismissNudge ? (
-        // Always visible (phones have no hover). Literal marker survives minification.
-        <span data-reply-nudge-dismiss="fe2-mail-reply-nudge-dismiss" style={{ display: "contents" }}>
-          <StopClick label="返信不要にする" testId="fe2-mail-reply-nudge-dismiss-row" onClick={onDismissNudge}>
-            <span
-              style={{
-                flexShrink: 0,
-                whiteSpace: "nowrap",
-                padding: "var(--dub-space-1) var(--dub-space-3)",
-                border: "1px solid var(--dub-color-border-default)",
-                borderRadius: "var(--dub-radius-full)",
-                fontSize: "var(--dub-font-size-xs)",
-                color: "var(--dub-color-text-secondary)",
-                background: "var(--dub-color-surface-base)",
-              }}
-            >
-              返信不要
-            </span>
-          </StopClick>
-        </span>
-      ) : null}
+      {narrow ? null : dismissNudge}
 
-      <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", minWidth: narrow ? 0 : 96 }}>
+      <span
+        style={{
+          flexShrink: 0,
+          display: "inline-flex",
+          flexDirection: narrow ? "column" : "row",
+          alignItems: narrow ? "flex-end" : "center",
+          justifyContent: "flex-end",
+          gap: "var(--dub-space-1)",
+          minWidth: narrow ? 0 : 96,
+        }}
+      >
         {hover && !narrow ? (
           <span style={{ display: "inline-flex", gap: 2, color: "var(--dub-color-text-secondary)" }}>
             {state.folder === "trash" ? (
@@ -398,6 +412,7 @@ function ThreadRow({
             {relativeDate(last.date)}
           </span>
         )}
+        {narrow ? dismissNudge : null}
       </span>
     </div>
   );
