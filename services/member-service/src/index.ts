@@ -37,6 +37,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newTeamId: () => newId("team"),
     newMemberId: () => newId("member"),
     newParticipationId: () => newId("part"),
+    newOnboardingItemId: () => newId("onb"),
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
     notifyParticipationSubmitted: (ctx, participation) =>
       notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),

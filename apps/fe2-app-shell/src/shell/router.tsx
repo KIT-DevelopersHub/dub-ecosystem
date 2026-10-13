@@ -23,7 +23,12 @@ import { RosterContentSkeleton } from "../features/members/RosterContentSkeleton
 import { useVisitTracker } from "./useVisitTracker.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { HomeScreen } from "./screens/HomeScreen.tsx";
-import { PublicParticipationPage, PUBLIC_PARTICIPATION_PATH } from "../features/participation/index.tsx";
+import {
+  PublicOnboardingPage,
+  PublicParticipationPage,
+  PUBLIC_ONBOARDING_PATH,
+  PUBLIC_PARTICIPATION_PATH,
+} from "../features/participation/index.tsx";
 import { openNotificationDialog } from "@dub/fe5-notification-inbox";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
 import { PermissionDeniedScreen } from "./screens/PermissionDeniedScreen.tsx";
@@ -151,6 +156,14 @@ export function createShellRouter(
     component: () => <PublicParticipationPage api={api} />,
   });
 
+  // PUBLIC オンボーディング案内 — same placement as /participate: new members have no
+  // account yet, so it must render without RequireAuth. Read-only.
+  const publicOnboardingRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: PUBLIC_ONBOARDING_PATH,
+    component: () => <PublicOnboardingPage api={api} />,
+  });
+
   // Authenticated shell layout wraps the home screen and all feature routes.
   const shellRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -197,6 +210,7 @@ export function createShellRouter(
   const routeTree = rootRoute.addChildren([
     loginRoute,
     publicParticipationRoute,
+    publicOnboardingRoute,
     shellRoute.addChildren([homeRoute, ...featureRoutes]),
   ]);
 

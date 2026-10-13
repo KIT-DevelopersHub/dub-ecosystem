@@ -41,6 +41,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     newTeamId: () => `team_${String(seq++).padStart(6, "0")}`,
     newMemberId: () => `member_${String(seq++).padStart(6, "0")}`,
     newParticipationId: () => `part_${String(seq++).padStart(6, "0")}`,
+    newOnboardingItemId: () => `onb_${String(seq++).padStart(6, "0")}`,
     ...overrides,
   };
   return Object.assign(deps, { repo });

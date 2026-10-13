@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "member-onboarding",
+  "worker": "dub-demo-member-onboarding",
+  "url": "https://dub-demo-member-onboarding.developershub-site.workers.dev",
+  "deployedSha": "6668b5ad",
+  "branch": "feat/member-onboarding",
+  "actor": "ko-tarou",
+  "markers": ["onboarding-public-team-picker","onboarding-admin-meetings"],
+  "live": true,
+  "verifiedAt": "2026-10-13T09:49:45Z",
+  "updatedAt": "2026-10-13T09:49:45Z",
+  "note": "オンボーディング: チーム選択+ミーティング日時/リンク"
+}

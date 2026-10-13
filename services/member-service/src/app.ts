@@ -101,6 +101,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.listTeamIdentityUserIds(teamIds));
   });
 
+  // 公開オンボーディング案内 (gateway GET /api/v1/public/onboarding → ここ, s2s のみ)。
+  // 未ログインの新メンバーが見るページの中身。案内項目は公開前提なので応答は管理画面と同じ。
+  app.get("/members/internal/onboarding", async (c) => {
+    return c.json(await svc.getOnboardingGuide());
+  });
+
   // Self 参加届 (アカウント設定 → 参加情報). The gateway's GET/POST /api/v1/me/participation
   // authenticates the session, then forwards here as a genuine s2s call (x-dub-internal +
   // the caller's identity x-dub-user-id). Session-scoped to THAT user — no target id, and
@@ -195,6 +201,34 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.post("/members/participation/:id/resolve", async (c) => {
     const body = await readJson<member.ResolveParticipationRequest>(c);
     return c.json(await svc.resolveParticipation(reqCtx(c), c.req.param("id"), body));
+  });
+
+  // ---- オンボーディング案内 (参加届アプリの管理タブ) ----
+  // 閲覧 = 参加届の閲覧、編集系 = 参加届の編集 (table)。
+  app.get("/members/onboarding", async (c) => {
+    return c.json(await svc.getOnboardingGuide());
+  });
+  // 全体 / チームのミーティング案内 (teamId ごとに上書き・schedule 空で削除)。
+  app.put("/members/onboarding/meetings", async (c) => {
+    const body = await readJson<member.SaveOnboardingMeetingRequest>(c);
+    return c.json(await svc.saveOnboardingMeeting(reqCtx(c), body));
+  });
+  app.post("/members/onboarding", async (c) => {
+    const body = await readJson<member.OnboardingItemInput>(c);
+    return c.json(await svc.createOnboardingItem(reqCtx(c), body), 201);
+  });
+  // Literal segment before /:id so it is never captured as an id.
+  app.post("/members/onboarding/reorder", async (c) => {
+    const body = await readJson<member.ReorderOnboardingItemsRequest>(c);
+    return c.json(await svc.reorderOnboardingItems(reqCtx(c), body));
+  });
+  app.patch("/members/onboarding/:id", async (c) => {
+    const body = await readJson<member.UpdateOnboardingItemRequest>(c);
+    return c.json(await svc.updateOnboardingItem(reqCtx(c), c.req.param("id"), body));
+  });
+  app.delete("/members/onboarding/:id", async (c) => {
+    await svc.deleteOnboardingItem(reqCtx(c), c.req.param("id"));
+    return c.json({ ok: true });
   });
 
   return app;
