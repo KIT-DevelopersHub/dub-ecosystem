@@ -9,7 +9,7 @@
 import type { ComponentType } from "react";
 import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
-import { ParticipationPage } from "./ParticipationPage.tsx";
+import { OnboardingAdminPage } from "./OnboardingAdminPage.tsx";
 import { ParticipationListPage } from "./ParticipationListPage.tsx";
 
 type PermissionKey = identity.PermissionKey;
@@ -29,8 +29,11 @@ export interface ParticipationNavEntry {
 
 export const participationRoutes: ParticipationSourceRoute[] = [
   {
+    // オンボーディング管理タブ。旧・アプリ内の参加届フォームは廃止（新メンバーはまだアカウントが
+    // 無いので公開フォーム /participate を使う。その URL は回答一覧に出す）。項目の読み取りは
+    // 参加届の閲覧で足り、書き込みは member-service が参加届の編集を要求する。
     path: "/participation",
-    lazy: () => Promise.resolve({ Component: ParticipationPage }),
+    lazy: () => Promise.resolve({ Component: OnboardingAdminPage }),
     auth: "required",
   },
   {
@@ -43,7 +46,7 @@ export const participationRoutes: ParticipationSourceRoute[] = [
 ];
 
 export const participationNav: ParticipationNavEntry[] = [
-  { label: "参加届", path: "/participation", icon: "check-square" },
+  { label: "オンボーディング", path: "/participation", icon: "check-square" },
   { label: "参加届の回答一覧", path: "/participation/list", icon: "users", requiredPermissions: ["identity:read"] },
 ];
 
@@ -51,3 +54,6 @@ export const participationNav: ParticipationNavEntry[] = [
 // authenticated shell (sibling of /login) so participants can submit without signing in.
 // Kept distinct from the in-shell "/participation" tile (which 運営 use while signed in).
 export const PUBLIC_PARTICIPATION_PATH = "/participate";
+
+// PUBLIC オンボーディング案内 (unauthenticated, read-only)。/participate と同じくシェルの外。
+export const PUBLIC_ONBOARDING_PATH = "/onboarding";
