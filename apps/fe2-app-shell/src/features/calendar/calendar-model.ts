@@ -335,7 +335,7 @@ export function formatItemWhen(it: CalendarItem): string {
   return `${formatDayLong(it.startDay)} ${formatTime(it.start!)}～${formatDayLong(it.endDay)} ${formatTime(it.end!)}`;
 }
 
-// ── 休暇 / ラベル ───────────────────────────────────────────────────────────
+// ── 予定の種類 / ラベル ─────────────────────────────────────────────────────
 // task-service has no item-type or label column, so both ride as tag lines at the
 // top of the description ("#休暇", "#ラベル:<roleId>"). Every read/write of the tags
 // goes through the helpers below, so moving them to real columns later is a change
@@ -346,33 +346,63 @@ export const LABEL_TAG_PREFIX = "#ラベル:";
 /** The label of an untagged item. Every other label key is an identity role id. */
 export const PERSONAL_LABEL = "personal";
 
-export type ItemKind = "event" | "vacation";
+/** 予定の種類. ミーティング・休暇・予行練習 are kinds of 予定, not separate things. */
+export type ItemKind = "event" | "meeting" | "vacation" | "rehearsal";
+export const ITEM_KINDS: readonly ItemKind[] = ["event", "meeting", "vacation", "rehearsal"];
+export const KIND_TAG: Record<ItemKind, string> = {
+  event: "#予定",
+  meeting: "#ミーティング",
+  vacation: VACATION_TAG,
+  rehearsal: "#予行練習",
+};
 
 interface ParsedDescription {
-  vacation: boolean;
+  /** null = no kind tag (a マイタスク task, or a 予定 saved before kinds existed) */
+  kind: ItemKind | null;
   /** PERSONAL_LABEL or a role id */
   label: string;
+  /** a ラベル tag line was present */
+  labelled: boolean;
   body: string;
 }
 
 function parseDescription(description: string | null): ParsedDescription {
   const lines = (description ?? "").split("\n");
-  let vacation = false;
+  let kind: ItemKind | null = null;
   let label = PERSONAL_LABEL;
+  let labelled = false;
   let i = 0;
   for (; i < lines.length; i++) {
     const line = lines[i]!.trim();
-    if (line === VACATION_TAG) vacation = true;
+    const k = ITEM_KINDS.find((x) => KIND_TAG[x] === line);
+    if (k) kind = k;
     else if (line.startsWith(LABEL_TAG_PREFIX) && line.length > LABEL_TAG_PREFIX.length) {
       label = line.slice(LABEL_TAG_PREFIX.length);
+      labelled = true;
     } else break;
   }
   const body = i === 0 ? (description ?? "") : lines.slice(i).join("\n").trim();
-  return { vacation, label, body };
+  return { kind, label, labelled, body };
 }
 
 export function isVacationTask(t: Pick<task.Task, "description">): boolean {
-  return parseDescription(t.description).vacation;
+  return parseDescription(t.description).kind === "vacation";
+}
+
+/**
+ * 予定 vs タスク. A 予定 is anything the calendar wrote: a kind or ラベル tag, or (for
+ * 予定 saved before the kind tag existed) a timed value — マイタスク only stores dates.
+ * Everything else is a タスク from マイタスク/ガント.
+ */
+export function isScheduleTask(t: Pick<task.Task, "description" | "startAt" | "dueAt">): boolean {
+  const p = parseDescription(t.description);
+  if (p.kind || p.labelled) return true;
+  return !(isAllDayValue(t.startAt) && isAllDayValue(t.dueAt));
+}
+
+/** The 予定の種類 of a 予定 (untagged 予定 are plain 予定). */
+export function kindOf(t: Pick<task.Task, "description">): ItemKind {
+  return parseDescription(t.description).kind ?? "event";
 }
 
 /** The item's label key (PERSONAL_LABEL when untagged). */
@@ -385,14 +415,14 @@ export function userDescription(t: Pick<task.Task, "description">): string {
   return parseDescription(t.description).body;
 }
 
-/** Stored description for a draft (tag lines first), null when empty. */
-export function encodeDescription(d: Pick<EventDraft, "kind" | "label" | "description">): string | null {
-  const lines: string[] = [];
-  if (d.kind === "vacation") lines.push(VACATION_TAG);
+/** Stored description for a draft (tag lines first). */
+export function encodeDescription(d: Pick<EventDraft, "kind" | "label" | "description">): string {
+  // The kind tag is always written so a 終日 予定 is never mistaken for a タスク.
+  const lines: string[] = [KIND_TAG[d.kind]];
   if (d.label !== PERSONAL_LABEL) lines.push(`${LABEL_TAG_PREFIX}${d.label}`);
   const body = d.description.trim();
   if (body) lines.push(body);
-  return lines.length ? lines.join("\n") : null;
+  return lines.join("\n");
 }
 
 /** Switch a draft's kind the way Google's 予定/不在 tabs do: 休暇 defaults to 終日. */
@@ -473,7 +503,7 @@ export function draftForAllDay(startDay: number, endDay: number = startDay): Eve
 }
 
 export function draftFromItem(it: CalendarItem): EventDraft {
-  const kind: ItemKind = isVacationTask(it.task) ? "vacation" : "event";
+  const kind = kindOf(it.task);
   const description = userDescription(it.task);
   const label = labelOf(it.task);
   if (it.allDay) {

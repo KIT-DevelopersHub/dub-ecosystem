@@ -33,7 +33,10 @@ import {
   dateOfDay,
   formatItemWhen,
   formatTime,
+  ITEM_KINDS,
+  isScheduleTask,
   isVacationTask,
+  kindOf,
   userDescription,
   validateDraft,
   withKind,
@@ -41,7 +44,7 @@ import {
   type EventDraft,
   type ItemKind,
 } from "./calendar-model";
-import { PRIORITY_LABEL, UNTITLED_TITLE, itemVisual, type CalendarLabel } from "./taskVisuals";
+import { KIND_ICON, KIND_VISUALS, PRIORITY_LABEL, UNTITLED_TITLE, itemVisual, type CalendarLabel } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
 /** How an item's title reads on the grids ("<owner>：<title>"); the screen provides it. */
@@ -162,10 +165,12 @@ function timeOptions(current: string): { value: string; label: string }[] {
   return all.map((t) => ({ value: t, label: t }));
 }
 
-const KIND_OPTIONS: SegmentedOption<ItemKind>[] = [
-  { value: "event", label: "予定", icon: "calendar", testId: "calendar-kind-event" },
-  { value: "vacation", label: "休暇", icon: "sun", testId: "calendar-kind-vacation" },
-];
+const KIND_OPTIONS: SegmentedOption<ItemKind>[] = ITEM_KINDS.map((k) => ({
+  value: k,
+  label: KIND_VISUALS[k].label,
+  icon: KIND_ICON[k],
+  testId: `calendar-kind-${k}`,
+}));
 
 /** Label choices; keeps a label whose role is gone (or not loaded yet) selectable. */
 function labelOptions(labels: readonly CalendarLabel[], current: string): { value: string; label: string }[] {
@@ -424,7 +429,7 @@ export function DetailPanel({
 }): JSX.Element {
   const t = item.task;
   const v = itemVisual(t);
-  const vacation = isVacationTask(t);
+  const kind = isScheduleTask(t) ? kindOf(t) : null;
   const desc = userDescription(t);
   return (
     <Floating anchor={anchor} width={448} onClose={onClose} label={t.title} testId="calendar-event-detail">
@@ -447,10 +452,10 @@ export function DetailPanel({
         </div>
         <div className={styles.detailRow}>
           <span className={styles.detailRowIcon}>
-            <Icon name={vacation ? "sun" : "calendar"} />
+            <Icon name={kind ? KIND_ICON[kind] : "task"} />
           </span>
           <span data-testid="calendar-detail-kind">
-            {vacation ? "休暇" : `${v.label}・優先度 ${PRIORITY_LABEL[t.priority]}`}
+            {kind ? `予定・${KIND_VISUALS[kind].label}` : `タスク・${v.label}・優先度 ${PRIORITY_LABEL[t.priority]}`}
           </span>
         </div>
         <div className={styles.detailRow}>

@@ -16,9 +16,11 @@ import {
   draftToDates,
   encodeDescription,
   formatRangeTitle,
-  isVacationTask,
   formatRangeTitleShort,
+  isScheduleTask,
   itemsOnDay,
+  ITEM_KINDS,
+  kindOf,
   labelOf,
   PERSONAL_LABEL,
   shiftAnchor,
@@ -29,11 +31,12 @@ import {
   type CalendarView,
   type EventDraft,
 } from "./calendar-model";
+import { AddTeamPicker, FilterGroup, RemoveTeamButton, type FilterRow } from "./CalendarFilters.tsx";
 import { DayListPanel, DetailPanel, EventDialog, ItemTitleProvider, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
 import {
+  KIND_VISUALS,
   STATUS_ORDER,
-  VACATION_VISUAL,
   buildLabels,
   ownedTitle,
   ownerOf,
@@ -45,11 +48,25 @@ import styles from "./calendar.module.css";
 const VIEW_LABEL: Record<CalendarView, string> = { day: "日", week: "週", month: "月", schedule: "スケジュール" };
 const VIEW_KEYS: Record<string, CalendarView> = { d: "day", w: "week", m: "month", a: "schedule" };
 const UNTITLED = "（タイトルなし）";
-/** Sidebar toggle key for 休暇 (the others are task statuses). */
-const VACATION_KEY = "vacation" as const;
-type CalendarKey = task.TaskStatus | typeof VACATION_KEY;
-/** Sidebar checkbox color for ラベル (they filter; event colors stay per status). */
+/** Sidebar checkbox color for ラベル / チーム without a color (they filter, not paint). */
 const LABEL_COLOR = "#616161";
+// Sidebar filter keys. Each names one checkbox; a key in `hidden` hides what it covers.
+const SCHEDULE_GROUP = "group:schedule";
+const TASK_GROUP = "group:task";
+const kindKey = (k: string) => `kind:${k}`;
+const labelKey = (k: string) => `label:${k}`;
+const statusKey = (s: string) => `status:${s}`;
+const scopeKey = (teamId: string | null | undefined) => `scope:${teamId ?? PERSONAL_LABEL}`;
+const WATCHED_TEAMS_STORAGE = "dub.calendar.watchedTeams";
+
+function loadWatchedTeams(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(WATCHED_TEAMS_STORAGE) ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 type Panel =
   | { kind: "create"; draft: EventDraft; ghost: SlotGhost | null }
@@ -86,20 +103,50 @@ export function CalendarScreen(): JSX.Element {
   // Phones open on 日 (seven columns don't fit), desktop on 週 — Google's defaults.
   const [view, setView] = useState<CalendarView>(() => (narrow ? "day" : "week"));
   const [anchorDay, setAnchorDay] = useState(today);
-  const [hidden, setHidden] = useState<ReadonlySet<CalendarKey>>(() => new Set());
-  const [hiddenLabels, setHiddenLabels] = useState<ReadonlySet<string>>(() => new Set());
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleFilter = useCallback(
+    (key: string) =>
+      setHidden((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      }),
+    [],
+  );
+  // 他のチーム: teams whose every task is shown, not only the caller's own (kept per browser).
+  const [watchedTeams, setWatchedTeams] = useState<string[]>(loadWatchedTeams);
+  useEffect(() => {
+    try {
+      localStorage.setItem(WATCHED_TEAMS_STORAGE, JSON.stringify(watchedTeams));
+    } catch {
+      /* private mode etc. — the choice just doesn't persist */
+    }
+  }, [watchedTeams]);
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
   const [panel, setPanel] = useState<Panel | null>(null);
   useEffect(() => setSidebarOpen(!narrow), [narrow]);
 
   // Scope to the caller's own tasks (担当/依頼) — task-service's "/me rule" rejects a
-  // bare list. `enabled` waits for the session so no unscoped request is fired.
-  const queryKey = useMemo(() => ["calendar", "tasks", currentUserId] as const, [currentUserId]);
+  // bare list — plus every task of the 他のチーム the caller added. One query, so the
+  // optimistic writes below touch a single cache entry. `enabled` waits for the session
+  // so no unscoped request is fired.
+  const queryKey = useMemo(() => ["calendar", "tasks", currentUserId, watchedTeams] as const, [currentUserId, watchedTeams]);
   const { data, isPending, isError, refetch } = useQuery({
     queryKey,
-    queryFn: () => api.listMyTasks(currentUserId as common.UserId),
+    queryFn: async () => {
+      const [mine, ...teams] = await Promise.all([
+        api.listMyTasks(currentUserId as common.UserId),
+        ...watchedTeams.map((id) => api.listTeamTasks(id as common.TeamId)),
+      ]);
+      const byId = new Map<common.TaskId, task.Task>();
+      for (const t of [...mine!, ...teams.flat()]) byId.set(t.id, t);
+      return [...byId.values()];
+    },
     enabled: currentUserId != null,
+    placeholderData: keepPreviousData,
   });
+  const teamsQuery = useQuery({ queryKey: ["calendar", "teams"], queryFn: () => api.listTeams(), staleTime: 5 * 60_000 });
 
   // ラベル = 個人 + every org role, so a role added in ロール管理 appears here by itself.
   // Without identity:read (or on failure) only 個人 is offered.
@@ -138,12 +185,47 @@ export function CalendarScreen(): JSX.Element {
   };
 
   const { items, undated } = useMemo(() => {
-    // 休暇 is its own calendar in the sidebar; everything else toggles by status.
+    // 予定 filter by 種類 + ラベル, タスク by 個人/チーム + 状態; each side has a master switch.
     const shown = (t: task.Task) =>
-      !hidden.has(isVacationTask(t) ? VACATION_KEY : t.status) && !hiddenLabels.has(labelKeyOf(t));
+      isScheduleTask(t)
+        ? !hidden.has(SCHEDULE_GROUP) && !hidden.has(kindKey(kindOf(t))) && !hidden.has(labelKey(labelKeyOf(t)))
+        : !hidden.has(TASK_GROUP) && !hidden.has(scopeKey(t.teamId)) && !hidden.has(statusKey(t.status));
     const all = toCalendarItems(data ?? []);
     return { items: all.items.filter((it) => shown(it.task)), undated: all.undated.filter(shown) };
-  }, [data, hidden, hiddenLabels, labelKeyOf]);
+  }, [data, hidden, labelKeyOf]);
+
+  // タスク rows: 個人, then every team the caller has tasks in or added, named from 運営チーム.
+  const teamById = useMemo(() => new Map((teamsQuery.data?.teams ?? []).map((t) => [t.id as string, t])), [teamsQuery.data]);
+  const taskTeamIds = useMemo(() => {
+    const ids = new Set<string>(teamsQuery.data?.myTeamIds ?? []);
+    for (const t of data ?? []) if (t.teamId && !isScheduleTask(t)) ids.add(t.teamId);
+    for (const id of watchedTeams) ids.add(id);
+    return [...ids].sort((a, b) => (teamById.get(a)?.name ?? a).localeCompare(teamById.get(b)?.name ?? b, "ja"));
+  }, [data, teamsQuery.data, watchedTeams, teamById]);
+  const teamName = (id: string) => teamById.get(id)?.name ?? "チーム";
+  const scopeRows: FilterRow[] = [
+    { key: scopeKey(null), label: "個人のタスク", color: LABEL_COLOR },
+    ...taskTeamIds.map((id) => {
+      const watched = watchedTeams.includes(id);
+      return {
+        key: scopeKey(id),
+        label: teamName(id),
+        color: teamById.get(id)?.color ?? LABEL_COLOR,
+        note: watched ? "全員のタスク" : "自分の担当・依頼",
+        ...(watched
+          ? {
+              trailing: (
+                <RemoveTeamButton
+                  name={teamName(id)}
+                  onRemove={() => setWatchedTeams((w) => w.filter((x) => x !== id))}
+                />
+              ),
+            }
+          : {}),
+      };
+    }),
+  ];
+  const addableTeams = (teamsQuery.data?.teams ?? []).filter((t) => !watchedTeams.includes(t.id));
 
   // ── mutations (optimistic: reflect first, roll back on failure) ──────────
   const snapshot = async () => {
@@ -393,60 +475,47 @@ export function CalendarScreen(): JSX.Element {
                 }}
               />
 
-              <div data-testid="calendar-list">
-                <div className={styles.calListHead}>マイカレンダー</div>
-                {[...STATUS_ORDER, VACATION_KEY as CalendarKey].map((s) => {
-                  const v = s === VACATION_KEY ? VACATION_VISUAL : statusVisual(s);
-                  return (
-                    <label key={s} className={styles.calItem}>
-                      <input
-                        type="checkbox"
-                        className={styles.calCheck}
-                        style={{ ["--cal-color" as string]: v.color }}
-                        checked={!hidden.has(s)}
-                        onChange={() =>
-                          setHidden((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(s)) next.delete(s);
-                            else next.add(s);
-                            return next;
-                          })
-                        }
-                        data-testid={`calendar-filter-${s}`}
-                      />
-                      {v.label}
-                    </label>
-                  );
-                })}
-              </div>
+              <FilterGroup
+                groupKey={SCHEDULE_GROUP}
+                title="予定"
+                hidden={hidden}
+                onToggle={toggleFilter}
+                sections={[
+                  {
+                    title: "種類",
+                    rows: ITEM_KINDS.map((k) => ({ key: kindKey(k), label: KIND_VISUALS[k].label, color: KIND_VISUALS[k].color })),
+                  },
+                  {
+                    title: "ラベル",
+                    loading: rolesQuery.isPending,
+                    rows: labels.map((l) => ({
+                      key: labelKey(l.key),
+                      label: l.key === PERSONAL_LABEL ? "個人の予定" : l.name,
+                      color: LABEL_COLOR,
+                    })),
+                  },
+                ]}
+              />
 
-              <div data-testid="calendar-label-list">
-                <div className={styles.calListHead}>ラベル</div>
-                {rolesQuery.isPending ? (
-                  <SkeletonLoader lines={3} />
-                ) : (
-                  labels.map((l) => (
-                    <label key={l.key} className={styles.calItem}>
-                      <input
-                        type="checkbox"
-                        className={styles.calCheck}
-                        style={{ ["--cal-color" as string]: LABEL_COLOR }}
-                        checked={!hiddenLabels.has(l.key)}
-                        onChange={() =>
-                          setHiddenLabels((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(l.key)) next.delete(l.key);
-                            else next.add(l.key);
-                            return next;
-                          })
-                        }
-                        data-testid={`calendar-label-filter-${l.key}`}
-                      />
-                      {l.name}
-                    </label>
-                  ))
-                )}
-              </div>
+              <FilterGroup
+                groupKey={TASK_GROUP}
+                title="タスク"
+                hidden={hidden}
+                onToggle={toggleFilter}
+                sections={[
+                  { title: "個人・チーム", rows: scopeRows },
+                  {
+                    title: "状態",
+                    rows: STATUS_ORDER.map((st) => ({ key: statusKey(st), label: statusVisual(st).label, color: statusVisual(st).color })),
+                  },
+                ]}
+                footer={
+                  <AddTeamPicker
+                    teams={addableTeams}
+                    onAdd={(id) => setWatchedTeams((w) => (w.includes(id) ? w : [...w, id]))}
+                  />
+                }
+              />
 
               {undated.length > 0 && (
                 <div className={styles.undated} data-testid="calendar-undated">

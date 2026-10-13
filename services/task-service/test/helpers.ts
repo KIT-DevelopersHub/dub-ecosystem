@@ -66,6 +66,7 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (filter.eventId) recs = recs.filter((r) => r.eventId === filter.eventId);
     if (filter.assigneeId) recs = recs.filter((r) => r.assigneeId === filter.assigneeId);
     if (filter.createdById) recs = recs.filter((r) => r.createdBy === filter.createdById);
+    if (filter.teamId) recs = recs.filter((r) => r.teamId === filter.teamId);
     if (filter.statuses && filter.statuses.length > 0) {
       const set = new Set(filter.statuses);
       recs = recs.filter((r) => set.has(r.status));

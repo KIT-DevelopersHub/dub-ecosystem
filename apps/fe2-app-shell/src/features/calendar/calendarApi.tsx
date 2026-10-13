@@ -5,7 +5,7 @@
 // canonical task-service endpoint GET /api/v1/tasks, typed against @dub/types
 // `task` (the API-contract SoT). No schema is added or changed. Writes (予定の追加/編集/削除) use the same
 // task-service create/update/archive endpoints マイタスク uses.
-import type { common, identity, task } from "@dub/types";
+import type { common, identity, member, task } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 const P = "/api/v1";
@@ -50,6 +50,10 @@ export interface CalendarApi {
   listRoles(): Promise<identity.Role[]>;
   /** Display names for the given users (GET /identity/users?ids=, identity:read). */
   getUsers(ids: readonly common.UserId[]): Promise<identity.UserSummary[]>;
+  /** Every 運営チーム + the caller's own (GET /members/me/mention-teams, any signed-in user). */
+  listTeams(): Promise<{ teams: member.Team[]; myTeamIds: string[] }>;
+  /** Every task of one team, whoever owns it (チームのタスクを表示). */
+  listTeamTasks(teamId: common.TeamId): Promise<task.Task[]>;
 }
 
 export function createCalendarApi(api: ApiClient): CalendarApi {
@@ -128,5 +132,21 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     return page.items;
   };
 
-  return { listTasks, listAllTasks, listMyTasks, createTask, updateTask, deleteTask, listRoles, getUsers };
+  const listTeams: CalendarApi["listTeams"] = () =>
+    api.request<{ teams: member.Team[]; myTeamIds: string[] }>({ method: "GET", path: `${P}/members/me/mention-teams` });
+
+  const listTeamTasks: CalendarApi["listTeamTasks"] = (teamId) => listAllTasks({ teamId });
+
+  return {
+    listTasks,
+    listAllTasks,
+    listMyTasks,
+    createTask,
+    updateTask,
+    deleteTask,
+    listRoles,
+    getUsers,
+    listTeams,
+    listTeamTasks,
+  };
 }
