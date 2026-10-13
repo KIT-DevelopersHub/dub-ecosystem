@@ -10,6 +10,17 @@ import { useMailApi } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
 import { useMailStore } from "./useMailStore.tsx";
 
+/** What the server last knew per thread. noReplyAt is compared as-is; the POST sends only the
+ *  boolean `noReply` (the server stamps its own time). */
+interface FlagState {
+  starred: boolean;
+  archived: boolean;
+  trashed: boolean;
+  purged: boolean;
+  noReplyAt: string | null;
+}
+const NO_FLAGS: FlagState = { starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
+
 export function useMailSync(): void {
   const api = useMailApi();
   const { state, dispatch } = useMailStore();
@@ -26,7 +37,7 @@ export function useMailSync(): void {
   // seeded from GET /mail/flags right after a hydrate, and `flagsReady` gates persistence so
   // the reload itself (which momentarily shows un-flagged threads) never POSTs a spurious
   // "unstar" back to the server.
-  const flagBaseline = useRef<Map<string, { starred: boolean; archived: boolean; trashed: boolean; purged: boolean }>>(new Map());
+  const flagBaseline = useRef<Map<string, FlagState>>(new Map());
   const flagsReady = useRef(false);
 
   // Load inbox + sent on mount and on every requested sync (post-send). A failure leaves
@@ -53,8 +64,9 @@ export function useMailSync(): void {
         const flags = await api.listFlags().catch(() => []);
         if (!alive) return;
         dispatch({ type: "APPLY_FLAGS", flags });
-        const base = new Map<string, { starred: boolean; archived: boolean; trashed: boolean; purged: boolean }>();
-        for (const f of flags) base.set(f.threadId, { starred: f.starred, archived: f.archived, trashed: f.trashed, purged: f.purged });
+        const base = new Map<string, FlagState>();
+        for (const f of flags)
+          base.set(f.threadId, { starred: f.starred, archived: f.archived, trashed: f.trashed, purged: f.purged, noReplyAt: f.noReplyAt ?? null });
         flagBaseline.current = base;
         flagsReady.current = true;
       } catch {
@@ -73,11 +85,24 @@ export function useMailSync(): void {
   useEffect(() => {
     if (!flagsReady.current) return;
     for (const t of threads) {
-      const cur = { starred: t.starred, archived: t.folder === "archive", trashed: t.folder === "trash", purged: t.purged === true };
-      const prev = flagBaseline.current.get(t.id) ?? { starred: false, archived: false, trashed: false, purged: false };
-      if (cur.starred !== prev.starred || cur.archived !== prev.archived || cur.trashed !== prev.trashed || cur.purged !== prev.purged) {
+      const cur: FlagState = {
+        starred: t.starred,
+        archived: t.folder === "archive",
+        trashed: t.folder === "trash",
+        purged: t.purged === true,
+        noReplyAt: t.noReplyAt ?? null,
+      };
+      const prev = flagBaseline.current.get(t.id) ?? NO_FLAGS;
+      const noReplyChanged = cur.noReplyAt !== prev.noReplyAt;
+      if (noReplyChanged || cur.starred !== prev.starred || cur.archived !== prev.archived || cur.trashed !== prev.trashed || cur.purged !== prev.purged) {
         flagBaseline.current.set(t.id, cur);
-        void api.setFlags(t.id, cur).catch(() => undefined);
+        const { noReplyAt, ...flags } = cur;
+        // noReply only when it changed, so an unrelated star never re-stamps the dismissal. A
+        // stamp moving BACKWARDS is an undo to an older dismissal that no longer covers the
+        // newest mail (else the nudge could not have shown), so clearing it is equivalent —
+        // re-stamping now would wrongly cover that newer mail after a reload.
+        const noReply = noReplyAt !== null && (prev.noReplyAt === null || noReplyAt > prev.noReplyAt);
+        void api.setFlags(t.id, noReplyChanged ? { ...flags, noReply } : flags).catch(() => undefined);
       }
     }
   }, [threads, api]);

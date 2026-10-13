@@ -73,6 +73,41 @@ describe("replyNudge", () => {
     }
   });
 
+  it("返信不要: dismissed after the latest received message -> null", () => {
+    expect(replyNudge(thread([msg({ date: daysAgo(4) })], { noReplyAt: daysAgo(1) }), NOW)).toBeNull();
+    // Same instant counts as covered.
+    expect(replyNudge(thread([msg({ date: daysAgo(4) })], { noReplyAt: daysAgo(4) }), NOW)).toBeNull();
+  });
+
+  it("返信不要: a received message newer than the dismissal brings the nudge back", () => {
+    const t = thread([msg({ id: "in1", date: daysAgo(9) }), msg({ id: "in2", date: daysAgo(4) })], { noReplyAt: daysAgo(6) });
+    expect(replyNudge(t, NOW)).toEqual({ days: 4 });
+  });
+
+  it("返信不要: unset / null / unparseable behaves as before", () => {
+    expect(replyNudge(thread([msg()], { noReplyAt: null }), NOW)).toEqual({ days: 3 });
+    expect(replyNudge(thread([msg()], { noReplyAt: "not-a-date" }), NOW)).toEqual({ days: 3 });
+  });
+
+  it("DISMISS_NUDGE hides it optimistically and UNDO brings it back", () => {
+    const t = thread([msg({ date: new Date(Date.now() - 4 * 86_400_000).toISOString() })]);
+    const state = { ...initialMailState, threads: [t] };
+    const dismissed = reducer(state, { type: "DISMISS_NUDGE", ids: ["T"] });
+    expect(dismissed.threads[0]!.noReplyAt).toBeTruthy();
+    expect(replyNudge(dismissed.threads[0]!, new Date())).toBeNull();
+    expect(dismissed.undo?.label).toBe("返信不要にしました");
+    const undone = reducer(dismissed, { type: "UNDO" });
+    expect(undone.threads[0]!.noReplyAt ?? null).toBeNull();
+    expect(replyNudge(undone.threads[0]!, new Date())).toEqual({ days: 4 });
+  });
+
+  it("APPLY_FLAGS restores noReplyAt (absent from an older gateway = null)", () => {
+    const state = { ...initialMailState, threads: [thread([msg()])] };
+    const base = { threadId: "T", starred: false, archived: false, trashed: false, purged: false };
+    expect(reducer(state, { type: "APPLY_FLAGS", flags: [{ ...base, noReplyAt: daysAgo(1) }] }).threads[0]!.noReplyAt).toBe(daysAgo(1));
+    expect(reducer(state, { type: "APPLY_FLAGS", flags: [base] }).threads[0]!.noReplyAt).toBeNull();
+  });
+
   it("accepts a custom threshold", () => {
     expect(replyNudge(thread([msg({ date: daysAgo(1) })]), NOW, undefined, 1)).toEqual({ days: 1 });
   });

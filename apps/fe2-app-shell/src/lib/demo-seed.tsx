@@ -1006,7 +1006,7 @@ function createMailStore() {
         const threadId = decodeURIComponent(m[1]!);
         const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
         const flags = loadFlags();
-        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false, purged: false };
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
         const next: mail.MailThreadFlags = {
           threadId,
           starred: patch.starred ?? prev.starred,
@@ -1015,6 +1015,8 @@ function createMailStore() {
           // purged (完全に削除): per-user permanent hide. Mirrors the gateway — the mail row is
           // never removed; only THIS account's flag flips, so an admin/other account still sees it.
           purged: patch.purged ?? prev.purged ?? false,
+          // 返信不要: true re-stamps now (like the gateway), false clears, absent keeps.
+          noReplyAt: patch.noReply === undefined ? (prev.noReplyAt ?? null) : patch.noReply ? new Date().toISOString() : null,
         };
         saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
         return json(next);

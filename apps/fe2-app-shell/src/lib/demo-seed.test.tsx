@@ -322,3 +322,18 @@ describe("demo inbox showcases the reply nudge", () => {
     expect(age("msg_2")).toBeLessThan(3);
   });
 });
+
+describe("demo flags mock persists 返信不要 (noReplyAt)", () => {
+  it("noReply:true stamps, unrelated patches keep it, noReply:false clears; GET reads it back", async () => {
+    globalThis.localStorage.removeItem("dub-demo-mail-flags:usr_demo");
+    const client = api();
+    const post = (body: Record<string, unknown>) =>
+      client.request<{ noReplyAt: string | null; starred: boolean }>({ method: "POST", path: "/api/v1/mail/flags/thr_3", body });
+    const set = await post({ noReply: true });
+    expect(set.noReplyAt).toMatch(/^\d{4}-/);
+    expect((await post({ starred: true })).noReplyAt).toBe(set.noReplyAt);
+    const list = await client.request<{ items: { threadId: string; noReplyAt: string | null }[] }>({ method: "GET", path: "/api/v1/mail/flags" });
+    expect(list.items.find((f) => f.threadId === "thr_3")?.noReplyAt).toBe(set.noReplyAt);
+    expect(await post({ noReply: false })).toMatchObject({ noReplyAt: null, starred: true });
+  });
+});

@@ -408,6 +408,65 @@ describe("GmailApp (hydrates from the gateway)", () => {
     expect(screen.queryByTestId("fe2-mail-nudge-section")).not.toBeInTheDocument();
   });
 
+  it("返信不要 from the banner drops the thread out of 返信待ち; 元に戻す brings it back (persisted both ways)", async () => {
+    const fourDaysAgo = new Date(Date.now() - 4 * 86_400_000).toISOString();
+    const api = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({ items: [{ ...DEMO_INBOX_ITEMS[0]!, read: true, receivedAt: fourDaysAgo }], nextCursor: null }),
+      getThread: vi.fn().mockResolvedValue({
+        ...DEMO_INBOX_THREAD,
+        messages: DEMO_INBOX_THREAD.messages.map((m) => ({ ...m, read: true, receivedAt: fourDaysAgo })),
+      }),
+    });
+    render(wrap(<GmailApp />, api));
+    await waitFor(() => expect(api.listFlags).toHaveBeenCalled());
+    const row = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    expect(screen.getByTestId("fe2-mail-nudge-section")).toHaveTextContent("返信待ち 1件");
+    await userEvent.click(row);
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-reply-nudge-banner")).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId("fe2-mail-reply-nudge-dismiss"));
+    // Optimistic: the banner vanishes at once (the list's group is covered by the row test).
+    expect(screen.queryByTestId("fe2-mail-reply-nudge-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe2-mail-undo")).toHaveTextContent("返信不要にしました");
+    await waitFor(() =>
+      expect((api.setFlags as ReturnType<typeof vi.fn>).mock.calls.some((c) => (c[1] as { noReply?: boolean }).noReply === true)).toBe(true),
+    );
+    await userEvent.click(within(screen.getByTestId("fe2-mail-undo")).getByText("元に戻す"));
+    expect(screen.getByTestId("fe2-mail-reply-nudge-banner")).toBeInTheDocument();
+    await waitFor(() =>
+      expect((api.setFlags as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1]).toMatchObject({ noReply: false }),
+    );
+  });
+
+  it("返信不要 from a 返信待ち row does not open the thread and survives a reload via listFlags", async () => {
+    const fiveDaysAgo = new Date(Date.now() - 5 * 86_400_000).toISOString();
+    const items = [{ ...DEMO_INBOX_ITEMS[0]!, read: true, receivedAt: fiveDaysAgo }];
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue({ items, nextCursor: null }) });
+    const { unmount } = render(wrap(<GmailApp />, api));
+    await waitFor(() => expect(api.listFlags).toHaveBeenCalled());
+    const btn = await screen.findByTestId("fe2-mail-reply-nudge-dismiss-row");
+    expect(btn).toHaveAttribute("aria-label", "返信不要にする");
+    await userEvent.click(btn);
+    expect(screen.queryByTestId("fe2-mail-thread")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-mail-nudge-section")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(1);
+    expect(screen.queryByTestId("fe2-mail-reply-nudge")).not.toBeInTheDocument();
+    // 元に戻す from the toast puts it back in 返信待ち.
+    await userEvent.click(within(screen.getByTestId("fe2-mail-undo")).getByText("元に戻す"));
+    expect(screen.getByTestId("fe2-mail-nudge-section")).toHaveTextContent("返信待ち 1件");
+    unmount();
+
+    // Reload: the server returns the stamp → still no nudge.
+    const threadId = items[0]!.threadId;
+    const reloaded = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({ items, nextCursor: null }),
+      listFlags: vi.fn().mockResolvedValue([{ threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: new Date().toISOString() }]),
+    });
+    render(wrap(<GmailApp />, reloaded));
+    await waitFor(() => expect(reloaded.listFlags).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("fe2-mail-nudge-section")).not.toBeInTheDocument());
+    expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(1);
+  });
+
   it("toggles a star from a list row", async () => {
     render(wrap(<GmailApp />));
     const firstStar = (await screen.findAllByTestId("fe2-mail-star"))[0]!;

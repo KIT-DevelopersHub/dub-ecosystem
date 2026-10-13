@@ -81,6 +81,9 @@ export interface MailThreadModel {
    *  stays in the store but is filtered out of every folder for this viewer. Never a physical
    *  delete: other accounts/admins still see it. Absent/false = normal. */
   purged?: boolean;
+  /** 返信不要: when the viewer dismissed the reply nudge (ISO). Covers only mail received up
+   *  to then — a newer received message brings the nudge back. Absent/null = not dismissed. */
+  noReplyAt?: string | null;
 }
 
 // ---- pure helpers ----
@@ -196,9 +199,18 @@ export function pendingReplyIds(scheduled: readonly mail.ScheduledSendListItem[]
   return ids;
 }
 
+/** True when 返信不要 was pressed after the given (latest received) message arrived. */
+export function nudgeDismissed(t: MailThreadModel, last: MailMsg): boolean {
+  if (!t.noReplyAt) return false;
+  const at = new Date(t.noReplyAt).getTime();
+  const got = new Date(last.date).getTime();
+  return !Number.isNaN(at) && !Number.isNaN(got) && got <= at;
+}
+
 /** Derived (no state): non-null when a read inbox thread addressed to the viewer ends with a
- *  received message from a human, unanswered for days..maxDays whole days, and no scheduled
- *  reply is pending for it. A reply appends an outbound message, so the nudge clears itself. */
+ *  received message from a human, unanswered for days..maxDays whole days, no scheduled
+ *  reply is pending for it, and the viewer has not marked it 返信不要 since it arrived.
+ *  A reply appends an outbound message, so the nudge clears itself. */
 export function replyNudge(
   t: MailThreadModel,
   now: Date,
@@ -210,6 +222,7 @@ export function replyNudge(
   const last = latest(t);
   if (last.outbound || last.mine === false) return null;
   if (AUTOMATED_SENDER.test(last.from.email.split("@")[0] ?? "")) return null;
+  if (nudgeDismissed(t, last)) return null;
   if (t.messages.some((m) => m.messageId && pendingReplies.has(bareId(m.messageId)))) return null;
   const at = new Date(last.date).getTime();
   if (Number.isNaN(at)) return null;

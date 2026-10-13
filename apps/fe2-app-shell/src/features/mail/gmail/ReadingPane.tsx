@@ -422,9 +422,22 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
         {nudge ? (
           <div className={styles.banner} data-reply-nudge="fe2-mail-reply-nudge" data-testid="fe2-mail-reply-nudge-banner">
             <span className={styles.text}>{nudge.days}日前に受信したメールにまだ返信していません</span>
-            <Button variant="secondary" size="sm" onClick={() => openCompose("reply")} testId="fe2-mail-reply-nudge-reply">
-              返信
-            </Button>
+            <span className={styles.actions}>
+              <Button variant="secondary" size="sm" onClick={() => openCompose("reply")} testId="fe2-mail-reply-nudge-reply">
+                返信
+              </Button>
+              {/* Literal marker survives minification so verify:live can grep the bundle. */}
+              <span data-reply-nudge-dismiss="fe2-mail-reply-nudge-dismiss" style={{ display: "contents" }}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => dispatch({ type: "DISMISS_NUDGE", ids: [thread.id] })}
+                  testId="fe2-mail-reply-nudge-dismiss"
+                >
+                  返信不要
+                </Button>
+              </span>
+            </span>
           </div>
         ) : null}
 
