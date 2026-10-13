@@ -3,8 +3,9 @@
 // contract of its own. It rides the ONE shell api-client (src/lib/api-client.tsx:
 // session cookie, 401→refresh, requestId, error normalization) and calls the
 // canonical task-service endpoint GET /api/v1/tasks, typed against @dub/types
-// `task` (the API-contract SoT). No schema is added or changed — additive, read-only.
-import type { common, meeting, task } from "@dub/types";
+// `task` (the API-contract SoT). No schema is added or changed. Writes (予定の追加/編集/削除) use the same
+// task-service create/update/archive endpoints マイタスク uses.
+import type { common, identity, meeting, task } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 const P = "/api/v1";
@@ -40,6 +41,15 @@ export interface CalendarApi {
    * `listAllTasks()` with no scope failed in production ("タスクを取得できませんでした。").
    */
   listMyTasks(currentUserId: common.UserId): Promise<task.Task[]>;
+  /** 予定の追加 — a calendar 予定 is a task with startAt/dueAt (POST /api/v1/tasks). */
+  createTask(req: task.CreateTaskRequest): Promise<task.Task>;
+  updateTask(id: common.TaskId, req: task.UpdateTaskRequest): Promise<task.Task>;
+  /** Archives the task (task-service DELETE is a soft delete). */
+  deleteTask(id: common.TaskId): Promise<void>;
+  /** Every org role (GET /identity/roles, identity:read) — the 予定 label choices. */
+  listRoles(): Promise<identity.Role[]>;
+  /** Display names for the given users (GET /identity/users?ids=, identity:read). */
+  getUsers(ids: readonly common.UserId[]): Promise<identity.UserSummary[]>;
 
   // カレンダー > ミーティング (drive-share-service /meetings, @dub/types meeting).
   listMeetings(): Promise<meeting.ListMeetingsResponse>;
@@ -91,11 +101,51 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     return [...byId.values()];
   };
 
+  const createTask: CalendarApi["createTask"] = (req) =>
+    api.request<task.Task>({ method: "POST", path: `${P}/tasks`, body: req });
+
+  const updateTask: CalendarApi["updateTask"] = (id, req) =>
+    api.request<task.Task>({ method: "PATCH", path: `${P}/tasks/${encodeURIComponent(id)}`, body: req });
+
+  const deleteTask: CalendarApi["deleteTask"] = async (id) => {
+    await api.request<unknown>({ method: "DELETE", path: `${P}/tasks/${encodeURIComponent(id)}` });
+  };
+
+  const listRoles: CalendarApi["listRoles"] = async () => {
+    const all: identity.Role[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < MAX_PAGES; i++) {
+      const page = await api.request<common.Paginated<identity.Role>>({
+        method: "GET",
+        path: `${P}/identity/roles`,
+        query: { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+      });
+      all.push(...page.items);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return all;
+  };
+
+  const getUsers: CalendarApi["getUsers"] = async (ids) => {
+    const page = await api.request<common.Paginated<identity.UserSummary>>({
+      method: "GET",
+      path: `${P}/identity/users`,
+      query: { ids: ids.join(","), limit: PAGE_LIMIT },
+    });
+    return page.items;
+  };
+
   const m = (id: string): `/api/v1/${string}` => `${P}/meetings/${encodeURIComponent(id)}`;
   return {
     listTasks,
     listAllTasks,
     listMyTasks,
+    createTask,
+    updateTask,
+    deleteTask,
+    listRoles,
+    getUsers,
     listMeetings: () => api.request<meeting.ListMeetingsResponse>({ method: "GET", path: `${P}/meetings` }),
     listMeetingTargets: () => api.request<meeting.ListMeetingTargetsResponse>({ method: "GET", path: `${P}/meetings/targets` }),
     createMeeting: (body) => api.request<meeting.Meeting>({ method: "POST", path: `${P}/meetings`, body }),

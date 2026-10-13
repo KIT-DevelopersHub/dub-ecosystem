@@ -1,54 +1,59 @@
-// 「表示するカレンダー」: one checkbox per meeting target (全体 + roles), like Google
-// Calendar's left pane. Only filters meetings; tasks are always shown.
-import { Checkbox, Skeleton } from "@dub/ui";
+// Sidebar「ミーティング」: one checkbox per meeting calendar (全体 + roles), like Google
+// Calendar's 他のカレンダー. Only filters meetings; tasks keep their own toggles.
+import { SkeletonLoader } from "@dub/ui";
 import type { meeting } from "@dub/types";
+import { MEETING_VISUAL } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
 export function MeetingFilter({
   targets,
   visible,
   loading,
+  headAction,
+  notice,
   onChange,
 }: {
   targets: readonly meeting.MeetingTarget[];
   visible: ReadonlySet<string>;
   loading: boolean;
+  /** Small control beside the heading (招待を同期). */
+  headAction?: JSX.Element | null;
+  /** Shown above the list (shared account not connected, …). */
+  notice?: JSX.Element | null;
   onChange: (next: string[]) => void;
 }): JSX.Element {
   return (
-    <section className={styles.filter} aria-label="表示するカレンダー" data-testid="calendar-meeting-filter">
-      <h2 className={styles.filterHead}>表示するカレンダー</h2>
+    <section aria-label="ミーティング" data-testid="calendar-meeting-filter">
+      <div className={styles.calListHeadRow}>
+        <div className={styles.calListHead}>ミーティング</div>
+        {headAction}
+      </div>
+      {notice}
       {loading ? (
-        <div className={styles.filterList} data-testid="calendar-meeting-filter-loading" aria-busy="true">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} variant="text" width="80%" />
-          ))}
+        <div data-testid="calendar-meeting-filter-loading" aria-busy="true">
+          <SkeletonLoader lines={3} />
         </div>
       ) : (
-        <div className={styles.filterList}>
-          {targets.map((t) => (
-            <Checkbox
-              key={t.id}
-              id={`calendar-meeting-filter-${t.id}`}
-              testId={`calendar-meeting-filter-${t.id}`}
+        targets.map((t) => (
+          <label key={t.id} className={styles.calItem}>
+            <input
+              type="checkbox"
+              className={styles.calCheck}
+              style={{ ["--cal-color" as string]: MEETING_VISUAL.color }}
               checked={visible.has(t.id)}
-              onChange={(on) => {
+              onChange={(e) => {
                 const next = new Set(visible);
-                if (on) next.add(t.id);
+                if (e.target.checked) next.add(t.id);
                 else next.delete(t.id);
                 onChange(targets.map((x) => x.id).filter((id) => next.has(id)));
               }}
-              label={
-                <span className={styles.filterLabel}>
-                  {t.name}
-                  <span className={styles.filterCount}>{t.memberCount}人</span>
-                </span>
-              }
+              data-testid={`calendar-meeting-filter-${t.id}`}
             />
-          ))}
-        </div>
+            {t.name}
+            <span className={styles.calCount}>{t.memberCount}人</span>
+          </label>
+        ))
       )}
-      <p className={styles.filterNote}>タスクは常に表示されます</p>
     </section>
   );
 }

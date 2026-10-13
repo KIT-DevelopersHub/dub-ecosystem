@@ -4,7 +4,8 @@
 //
 // Day keys are "YYYY-MM-DD" JST dates, which line up with the grid's day keys
 // (calendar-grid.ts builds cells from plain calendar dates).
-import type { meeting } from "@dub/types";
+import type { common, meeting, task } from "@dub/types";
+import { MEETING_ITEM_PREFIX } from "./calendar-model";
 
 const JST_OFFSET_MS = 9 * 3_600_000;
 const MS_PER_DAY = 86_400_000;
@@ -192,4 +193,39 @@ export function formatOccurrence(startsAt: string, durationMinutes: number): str
   if (!p) return "—";
   const [y, m, d] = p.date.split("-").map(Number) as [number, number, number];
   return `${y}年${m}月${d}日(${WEEKDAY_JA[p.weekday]}) ${p.time}〜${endTime(p.time, durationMinutes)}`;
+}
+
+/**
+ * Occurrences in [fromKey, toKey] as synthetic tasks the calendar views can draw
+ * (timed, id = MEETING_ITEM_PREFIX + meeting id + day), plus a lookup back to the occurrence.
+ */
+export function meetingTasks(
+  meetings: readonly meeting.Meeting[],
+  fromKey: string,
+  toKey: string,
+): { tasks: task.Task[]; byId: Map<string, MeetingOccurrence> } {
+  const tasks: task.Task[] = [];
+  const byId = new Map<string, MeetingOccurrence>();
+  for (const m of meetings) {
+    for (const occ of expandOccurrences(m, fromKey, toKey)) {
+      const id = `${MEETING_ITEM_PREFIX}${m.id}:${occ.dateKey}`;
+      byId.set(id, occ);
+      tasks.push({
+        id: id as common.TaskId,
+        version: 0,
+        title: m.title,
+        description: null,
+        status: "todo",
+        priority: "medium",
+        assigneeId: null,
+        origin: "internal",
+        startAt: occ.startsAt,
+        dueAt: new Date(Date.parse(occ.startsAt) + m.durationMinutes * 60_000).toISOString(),
+        archivedAt: null,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+      });
+    }
+  }
+  return { tasks, byId };
 }
