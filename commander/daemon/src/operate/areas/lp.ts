@@ -107,8 +107,25 @@ export const LP: AreaSpec = {
       route: "POST /lp/publish",
       reason: "本番 LP の公開版を即座に切り替える操作（lp:publish 詳細キー）。依頼範囲（アクセスログ・流入 URL）の外で、入れ替えはオーナーが手で行う",
     },
+    {
+      service: S,
+      route: "POST /lp/tickets/enabled",
+      reason: "本番 LP のチケット販売ページを即座に公開/停止する操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
+    },
+    {
+      service: S,
+      route: "POST /lp/tickets/cta",
+      reason: "本番 LP の参加登録ボタンを即座にチケット購入へ差し替える操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
+    },
   ],
-  pending: [],
+  // チケットの設定・購入者一覧は未開放。
+  pending: [
+    { service: S, route: "GET /lp/tickets" },
+    { service: S, route: "POST /lp/tickets/fields" },
+    { service: S, route: "POST /lp/tickets/types" },
+    { service: S, route: "PATCH /lp/tickets/types/:id" },
+    { service: S, route: "GET /lp/tickets/orders" },
+  ],
   ownerOpenedIrreversible: {
     "lp.links.create": "削除 API が無く発行した URL は一覧に残り同じ値も再発行できないが、停止はできる。オーナーが「流入 URL の発行」を名指しで開放",
   },
