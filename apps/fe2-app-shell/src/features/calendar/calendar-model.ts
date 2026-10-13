@@ -391,12 +391,14 @@ export function isVacationTask(t: Pick<task.Task, "description">): boolean {
 
 /**
  * 予定 vs タスク. A 予定 is anything the calendar wrote: a kind or ラベル tag, or (for
- * 予定 saved before the kind tag existed) a timed value — マイタスク only stores dates.
- * Everything else is a タスク from マイタスク/ガント.
+ * 予定 saved before the kind tag existed) a timed value outside any event/team — the
+ * calendar never sets those, マイタスク only stores dates. Everything else is a タスク.
+ * (A タスク whose description starts with a tag line like "#予定" reads as a 予定.)
  */
-export function isScheduleTask(t: Pick<task.Task, "description" | "startAt" | "dueAt">): boolean {
+export function isScheduleTask(t: Pick<task.Task, "description" | "startAt" | "dueAt" | "eventId" | "teamId">): boolean {
   const p = parseDescription(t.description);
   if (p.kind || p.labelled) return true;
+  if (t.eventId || t.teamId) return false;
   return !(isAllDayValue(t.startAt) && isAllDayValue(t.dueAt));
 }
 

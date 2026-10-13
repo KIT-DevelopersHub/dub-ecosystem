@@ -348,6 +348,13 @@ describe("CalendarScreen", () => {
     expect(screen.getByTestId("calendar-item-plan")).toHaveTextContent("山田：面談");
     expect(screen.getByTestId("calendar-item-plan")).not.toHaveTextContent("○");
 
+    // A タスク opens read-only here (edited in マイタスク, so it never turns into a 予定).
+    await user.click(screen.getByTestId("calendar-item-todo"));
+    const detail = await screen.findByTestId("calendar-event-detail");
+    expect(within(detail).getByTestId("calendar-detail-kind")).toHaveTextContent("タスク");
+    expect(within(detail).queryByTestId("calendar-detail-edit")).not.toBeInTheDocument();
+    await user.click(within(detail).getByLabelText("閉じる"));
+
     // タスクだけ消す: one click, 予定 stay.
     await user.click(screen.getByTestId("calendar-filter-group:task"));
     expect(screen.queryByTestId("calendar-item-todo")).not.toBeInTheDocument();
@@ -399,7 +406,20 @@ describe("CalendarScreen", () => {
     expect(screen.queryByTestId("calendar-item-bobs")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("calendar-filter-scope:team_dev"));
     await user.click(screen.getByLabelText("開発チームの表示をやめる"));
+    expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId("calendar-item-bobs")).not.toBeInTheDocument());
+  });
+
+  it("keeps the caller's own items when a team fails to load", async () => {
+    const user = userEvent.setup();
+    const api = memoryApi([mk("mine", { title: "受付準備", dueAt: "2026-10-10T00:00:00.000Z" })]);
+    vi.mocked(api.listTeamTasks).mockRejectedValue(new Error("400"));
+    renderScreen(api);
+    await screen.findByTestId("calendar-item-mine");
+    await user.selectOptions(await screen.findByTestId("calendar-add-team"), "team_dev");
+    expect(await screen.findByText("一部のチームのタスクを取得できませんでした")).toBeInTheDocument();
+    expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
+    expect(screen.queryByTestId("calendar-error")).not.toBeInTheDocument();
   });
 
   it("disables 作成 without write permission", async () => {

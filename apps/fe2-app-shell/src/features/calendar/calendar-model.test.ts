@@ -229,7 +229,8 @@ describe("休暇", () => {
 });
 
 describe("予定 vs タスク", () => {
-  const at = (description: string | null, startAt: string | null, dueAt: string | null) => ({ description, startAt, dueAt });
+  const at = (description: string | null, startAt: string | null, dueAt: string | null, eventId: string | null = null) =>
+    ({ description, startAt, dueAt, eventId: eventId as common.EventId | null });
   it("a kind or ラベル tag makes a 予定, whatever its dates", () => {
     expect(isScheduleTask(at("#ミーティング", null, "2026-10-10T00:00:00.000Z"))).toBe(true);
     expect(kindOf({ description: "#ミーティング\n#ラベル:role_lead" })).toBe("meeting");
@@ -241,5 +242,7 @@ describe("予定 vs タスク", () => {
     expect(kindOf({ description: null })).toBe("event");
     expect(isScheduleTask(at(null, null, "2026-10-10T00:00:00.000Z"))).toBe(false);
     expect(isScheduleTask(at("メモ", "2026-10-09T00:00:00.000Z", "2026-10-10T00:00:00.000Z"))).toBe(false);
+    // An event task with a time is still a タスク.
+    expect(isScheduleTask(at(null, null, "2026-10-10T09:00:00Z", "evt_1"))).toBe(false);
   });
 });

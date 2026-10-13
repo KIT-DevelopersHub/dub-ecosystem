@@ -171,7 +171,7 @@
 .calItemOff .calItem { cursor: default; }
 .calItemLabel { display: flex; flex-direction: column; min-width: 0; }
 .calItemNote { font-size: var(--dub-font-size-xs); color: var(--dub-color-text-muted); }
-.calAddTeam { padding: 0 var(--dub-space-2); }
+.calAddTeam { padding: var(--dub-space-1) var(--dub-space-2) 0; }
 .sideNote { font-size: var(--dub-font-size-xs); color: var(--dub-color-text-muted); line-height: 1.6; padding: 0 var(--dub-space-2); }
 
 .main {

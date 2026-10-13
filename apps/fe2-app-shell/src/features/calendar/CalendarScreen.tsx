@@ -135,12 +135,17 @@ export function CalendarScreen(): JSX.Element {
   const { data, isPending, isError, refetch } = useQuery({
     queryKey,
     queryFn: async () => {
-      const [mine, ...teams] = await Promise.all([
+      // A failing team only drops that team; the caller's own 予定 still show.
+      const [mine, teams] = await Promise.all([
         api.listMyTasks(currentUserId as common.UserId),
-        ...watchedTeams.map((id) => api.listTeamTasks(id as common.TeamId)),
+        Promise.allSettled(watchedTeams.map((id) => api.listTeamTasks(id as common.TeamId))),
       ]);
+      if (teams.some((r) => r.status === "rejected")) {
+        toast.show({ kind: "error", title: "一部のチームのタスクを取得できませんでした" });
+      }
       const byId = new Map<common.TaskId, task.Task>();
-      for (const t of [...mine!, ...teams.flat()]) byId.set(t.id, t);
+      for (const t of mine) byId.set(t.id, t);
+      for (const r of teams) if (r.status === "fulfilled") for (const t of r.value) byId.set(t.id, t);
       return [...byId.values()];
     },
     enabled: currentUserId != null,
@@ -211,7 +216,7 @@ export function CalendarScreen(): JSX.Element {
         key: scopeKey(id),
         label: teamName(id),
         color: teamById.get(id)?.color ?? LABEL_COLOR,
-        note: watched ? "全員のタスク" : "自分の担当・依頼",
+        note: watched ? "メンバー全員の分" : "自分の分のみ",
         ...(watched
           ? {
               trailing: (
@@ -228,15 +233,17 @@ export function CalendarScreen(): JSX.Element {
   const addableTeams = (teamsQuery.data?.teams ?? []).filter((t) => !watchedTeams.includes(t.id));
 
   // ── mutations (optimistic: reflect first, roll back on failure) ──────────
+  // The key is captured per mutation: adding/removing a team mid-flight changes it.
   const snapshot = async () => {
-    await qc.cancelQueries({ queryKey });
-    return qc.getQueryData<task.Task[]>(queryKey);
+    const key = queryKey;
+    await qc.cancelQueries({ queryKey: key });
+    return { key, prev: qc.getQueryData<task.Task[]>(key) };
   };
-  const rollback = (prev: task.Task[] | undefined, title: string) => {
-    qc.setQueryData(queryKey, prev);
+  const rollback = (ctx: { key: typeof queryKey; prev: task.Task[] | undefined } | undefined, title: string) => {
+    if (ctx) qc.setQueryData(ctx.key, ctx.prev);
     toast.show({ kind: "error", title });
   };
-  const settle = () => void qc.invalidateQueries({ queryKey });
+  const settle = () => void qc.invalidateQueries({ queryKey: ["calendar", "tasks", currentUserId] });
   const fields = (draft: EventDraft) => ({
     title: draft.title.trim() || (draft.kind === "vacation" ? VACATION_TITLE : UNTITLED),
     description: encodeDescription(draft),
@@ -255,7 +262,7 @@ export function CalendarScreen(): JSX.Element {
       });
     },
     onMutate: async (draft) => {
-      const prev = await snapshot();
+      const snap = await snapshot();
       const now = new Date().toISOString();
       const temp: task.Task = {
         id: `tmp_${Date.now()}` as common.TaskId,
@@ -269,12 +276,13 @@ export function CalendarScreen(): JSX.Element {
         updatedAt: now,
         ...fields(draft),
       };
-      qc.setQueryData<task.Task[]>(queryKey, (old) => [...(old ?? []), temp]);
-      return { prev, tempId: temp.id };
+      qc.setQueryData<task.Task[]>(snap.key, (old) => [...(old ?? []), temp]);
+      return { ...snap, tempId: temp.id };
     },
-    onError: (_e, _d, ctx) => rollback(ctx?.prev, "予定を保存できませんでした"),
+    onError: (_e, _d, ctx) => rollback(ctx, "予定を保存できませんでした"),
     onSuccess: (created, draft, ctx) => {
-      qc.setQueryData<task.Task[]>(queryKey, (old) => (old ?? []).map((t) => (t.id === ctx?.tempId ? created : t)));
+      if (!ctx) return;
+      qc.setQueryData<task.Task[]>(ctx.key, (old) => (old ?? []).map((t) => (t.id === ctx?.tempId ? created : t)));
       toast.show({ kind: "success", title: draft.kind === "vacation" ? "休暇を登録しました" : "予定を保存しました" });
     },
     onSettled: settle,
@@ -284,15 +292,16 @@ export function CalendarScreen(): JSX.Element {
     mutationFn: ({ item, draft }: { item: CalendarItem; draft: EventDraft }) =>
       api.updateTask(item.task.id, { version: item.task.version, ...fields(draft) }),
     onMutate: async ({ item, draft }) => {
-      const prev = await snapshot();
-      qc.setQueryData<task.Task[]>(queryKey, (old) =>
+      const snap = await snapshot();
+      qc.setQueryData<task.Task[]>(snap.key, (old) =>
         (old ?? []).map((t) => (t.id === item.task.id ? { ...t, ...fields(draft) } : t)),
       );
-      return { prev };
+      return snap;
     },
-    onError: (_e, _v, ctx) => rollback(ctx?.prev, "予定を更新できませんでした"),
-    onSuccess: (updated) => {
-      qc.setQueryData<task.Task[]>(queryKey, (old) => (old ?? []).map((t) => (t.id === updated.id ? updated : t)));
+    onError: (_e, _v, ctx) => rollback(ctx, "予定を更新できませんでした"),
+    onSuccess: (updated, _v, ctx) => {
+      if (!ctx) return;
+      qc.setQueryData<task.Task[]>(ctx.key, (old) => (old ?? []).map((t) => (t.id === updated.id ? updated : t)));
       toast.show({ kind: "success", title: "予定を更新しました" });
     },
     onSettled: settle,
@@ -301,11 +310,11 @@ export function CalendarScreen(): JSX.Element {
   const deleteMut = useMutation({
     mutationFn: (item: CalendarItem) => api.deleteTask(item.task.id),
     onMutate: async (item) => {
-      const prev = await snapshot();
-      qc.setQueryData<task.Task[]>(queryKey, (old) => (old ?? []).filter((t) => t.id !== item.task.id));
-      return { prev };
+      const snap = await snapshot();
+      qc.setQueryData<task.Task[]>(snap.key, (old) => (old ?? []).filter((t) => t.id !== item.task.id));
+      return snap;
     },
-    onError: (_e, _v, ctx) => rollback(ctx?.prev, "予定を削除できませんでした"),
+    onError: (_e, _v, ctx) => rollback(ctx, "予定を削除できませんでした"),
     onSuccess: () => toast.show({ kind: "success", title: "予定を削除しました" }),
     onSettled: settle,
   });
@@ -503,18 +512,21 @@ export function CalendarScreen(): JSX.Element {
                 hidden={hidden}
                 onToggle={toggleFilter}
                 sections={[
-                  { title: "個人・チーム", rows: scopeRows },
+                  {
+                    title: "個人・チーム",
+                    rows: scopeRows,
+                    footer: (
+                      <AddTeamPicker
+                        teams={addableTeams}
+                        onAdd={(id) => setWatchedTeams((w) => (w.includes(id) ? w : [...w, id]))}
+                      />
+                    ),
+                  },
                   {
                     title: "状態",
                     rows: STATUS_ORDER.map((st) => ({ key: statusKey(st), label: statusVisual(st).label, color: statusVisual(st).color })),
                   },
                 ]}
-                footer={
-                  <AddTeamPicker
-                    teams={addableTeams}
-                    onAdd={(id) => setWatchedTeams((w) => (w.includes(id) ? w : [...w, id]))}
-                  />
-                }
               />
 
               {undated.length > 0 && (
@@ -562,8 +574,9 @@ export function CalendarScreen(): JSX.Element {
             item={panel.item}
             labelName={detailLabelName(panel.item.task)}
             // An optimistic row has no server id yet — nothing to edit/delete until it lands.
-            canWrite={canWrite && !panel.item.task.id.startsWith("tmp_")}
-            canDelete={canDelete && !panel.item.task.id.startsWith("tmp_")}
+            // タスク are edited in マイタスク: saving one here would turn it into a 予定.
+            canWrite={canWrite && !panel.item.task.id.startsWith("tmp_") && isScheduleTask(panel.item.task)}
+            canDelete={canDelete && !panel.item.task.id.startsWith("tmp_") && isScheduleTask(panel.item.task)}
             onClose={close}
             onEdit={() => setPanel({ kind: "edit", item: panel.item, draft: draftFromItem(panel.item) })}
             onDelete={() => {

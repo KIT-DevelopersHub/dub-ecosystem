@@ -18,6 +18,7 @@ export interface FilterSection {
   title: string;
   rows: FilterRow[];
   loading?: boolean;
+  footer?: ReactNode;
 }
 
 function FilterCheck({
@@ -59,20 +60,18 @@ export function FilterGroup({
   sections,
   hidden,
   onToggle,
-  footer,
 }: {
   groupKey: string;
   title: string;
   sections: FilterSection[];
   hidden: ReadonlySet<string>;
   onToggle: (key: string) => void;
-  footer?: ReactNode;
 }): JSX.Element {
   const off = hidden.has(groupKey);
   return (
     <div className={styles.calGroup} data-testid={`calendar-group-${groupKey}`}>
       <FilterCheck
-        row={{ key: groupKey, label: title, color: "var(--dub-color-text-default)" }}
+        row={{ key: groupKey, label: title, color: "var(--dub-color-text-primary)" }}
         checked={!off}
         onToggle={() => onToggle(groupKey)}
       />
@@ -93,9 +92,9 @@ export function FilterGroup({
                 />
               ))
             )}
+            {s.footer}
           </div>
         ))}
-        {footer}
       </div>
     </div>
   );
@@ -114,12 +113,12 @@ export function AddTeamPicker({
   return (
     <div className={styles.calAddTeam}>
       <label htmlFor={id} className={styles.srOnly}>
-        チームのタスクを表示
+        チーム全員の分を表示
       </label>
       <Select
         id={id}
         value={null}
-        placeholder="＋ チームのタスクを表示"
+        placeholder="＋ チーム全員の分を表示"
         options={teams.map((t) => ({ value: t.id, label: t.name }))}
         onChange={(v) => v && onAdd(v)}
         testId="calendar-add-team"

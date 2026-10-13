@@ -1755,7 +1755,8 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const rows = TASKS.filter(
         (t) =>
           (!q.get("assigneeId") || t.assigneeId === q.get("assigneeId")) &&
-          (!q.get("createdById") || t.createdBy === q.get("createdById")) &&
+          // Older seed rows carry no createdBy; treat them as issued by the demo user.
+          (!q.get("createdById") || (t.createdBy ?? ME_ID) === q.get("createdById")) &&
           (!q.get("teamId") || t.teamId === q.get("teamId")),
       );
       return json(page(rows));
