@@ -1104,6 +1104,13 @@ const CTA_SWAP_CSS =
   ".svc-card-link[data-lp-tk]:hover .svc-card-cta--disabled::after{transform:translateX(5px)}" +
   ".git-btn--primary[data-lp-tk]::after{position:absolute;right:1.1rem;top:50%;margin-top:-1em;background:#fff;color:var(--lp-blue-deep,#1e3fa8)}" +
   ".git-btn--primary[data-lp-tk]:hover::after{transform:translateX(3px)}" +
+  // Dark hero: glass pill in the hero's cyan/teal (same family as 登壇に応募する), not the solid blue.
+  ".hero--v31 .hero-cta--participant[data-lp-tk]{color:#fff;background:rgba(255,255,255,.14);" +
+  "border:1.5px solid rgba(127,208,255,.62);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);" +
+  "box-shadow:0 0 26px rgba(53,224,176,.18),inset 0 0 0 1px rgba(255,255,255,.06)}" +
+  ".hero--v31 .hero-cta--participant[data-lp-tk]:hover,.hero--v31 .hero-cta--participant[data-lp-tk]:focus-visible{" +
+  "color:#04102b;background:linear-gradient(120deg,#7fd0ff 0%,#35e0b0 100%);border-color:transparent;" +
+  "box-shadow:0 16px 30px -6px rgba(53,224,176,.45)}" +
   "@media (prefers-reduced-motion:reduce){[data-lp-tk],[data-lp-tk]::after,[data-lp-tk] *::after{transition:none!important}}";
 
 // Runs after React hydration (a __reactFiber$ key on the element) and edits the existing nodes in
