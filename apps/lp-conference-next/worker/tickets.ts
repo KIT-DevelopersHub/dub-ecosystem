@@ -255,6 +255,9 @@ a{color:var(--link)}
 .hero{position:relative;isolation:isolate;overflow:hidden;color:#eaf1ff;padding:132px 0 150px;
 background:radial-gradient(120% 90% at 50% 42%,rgba(24,70,165,.55) 0%,transparent 60%),linear-gradient(160deg,#04081e 0%,#071235 55%,#05244a 100%)}
 .hero.sm{padding:120px 0 170px}
+.hero-canvas{position:absolute;inset:0;z-index:-3;width:100%;height:100%;display:block;opacity:0;transition:opacity 1.2s ease}
+.hero.gl .hero-canvas{opacity:1}.hero.gl .blob,.hero.gl .net{display:none}
+.hero::after{content:"";position:absolute;inset:0;z-index:-2;pointer-events:none;background:linear-gradient(90deg,rgba(4,8,30,.62) 0%,rgba(4,8,30,.25) 55%,transparent 80%),linear-gradient(180deg,transparent 60%,rgba(4,8,30,.45) 100%)}
 .blob{position:absolute;z-index:-1;border-radius:50%;filter:blur(60px);opacity:.55;will-change:transform;animation:drift 22s ease-in-out infinite alternate}
 .b1{width:560px;height:560px;left:-160px;top:-200px;background:radial-gradient(circle at 35% 35%,#2f61d6 0%,rgba(47,97,214,0) 68%)}
 .b2{width:480px;height:480px;right:-140px;top:-60px;background:radial-gradient(circle at 50% 50%,#17b892 0%,rgba(23,184,146,0) 66%);animation-duration:26s;animation-delay:-8s;opacity:.42}
@@ -268,7 +271,7 @@ background:radial-gradient(120% 90% at 50% 42%,rgba(24,70,165,.55) 0%,transparen
 .ghost{position:absolute;z-index:-1;right:-2vw;bottom:-.18em;font:900 clamp(96px,17vw,240px)/1 "Inter",sans-serif;letter-spacing:-.04em;color:transparent;-webkit-text-stroke:1px rgba(255,255,255,.09);white-space:nowrap;pointer-events:none;user-select:none}
 .eyebrow{display:inline-flex;align-items:center;gap:10px;font:800 12px/1 "Inter",sans-serif;letter-spacing:.18em;color:#c6dbff;padding:9px 14px;border-radius:999px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.22);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .eyebrow::before{content:"";width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--teal));box-shadow:0 0 0 3px rgba(120,170,255,.28)}
-.hero h1{font-family:var(--disp);font-weight:900;font-size:clamp(40px,7.4vw,84px);line-height:1.08;letter-spacing:.01em;margin:22px 0 18px;color:#fff}
+.hero h1{font-family:var(--disp);font-weight:900;font-size:clamp(40px,7.4vw,84px);line-height:1.08;letter-spacing:.01em;margin:22px 0 18px;color:#fff;text-shadow:0 0 28px rgba(120,170,255,.35),0 4px 24px rgba(4,8,30,.5)}
 .hero h1 .g{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero .sub{font-size:clamp(15px,1.8vw,18px);color:#c9d6f2;margin:0;max-width:640px}
 .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:28px}
@@ -422,8 +425,132 @@ html{scroll-behavior:auto}.ico .ck{stroke-dashoffset:0}.js .rv{opacity:1;transfo
 }
 `;
 
+// Same raymarched blob field as the LP v3.1 hero (src/components/HeroScene.tsx), copied
+// verbatim so this version-independent page matches the LP; keep the two in sync by hand.
+const HERO_VERT = `attribute vec2 aPos;void main(){gl_Position=vec4(aPos,0.0,1.0);}`;
+const HERO_FRAG = `
+precision highp float;
+uniform float uTime;
+uniform float uScroll;
+uniform vec2  uRes;
+uniform vec3  uBlob[11]; // CPU-computed blob centers (hoisted, per-frame)
+
+const int STEPS = 48;
+const int NB = 11;
+
+float smin(float a, float b, float k){
+  float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
+  return mix(b, a, h) - k*h*(1.0-h);
+}
+mat3 rotY(float a){ float c=cos(a), s=sin(a); return mat3(c,0.,-s, 0.,1.,0., s,0.,c); }
+mat3 rotX(float a){ float c=cos(a), s=sin(a); return mat3(1.,0.,0., 0.,c,-s, 0.,s,c); }
+float hash(float n){ return fract(sin(n)*43758.5453123); }
+
+float map(vec3 p, float t, float morph){
+  // organic domain warp → shapes are non-spherical and slowly morph (脈動)
+  p += 0.18*morph*vec3(sin(p.y*1.3+t), sin(p.z*1.1+t*1.1), sin(p.x*1.2+t*0.9));
+  float d = 1e5;
+  for(int i=0;i<NB;i++){
+    float fi = float(i);
+    float r = 0.55 + 0.35*hash(fi+1.0) + 0.12*sin(t*0.9 + fi*2.0);
+    d = smin(d, length(p - uBlob[i]) - r, 0.85);
+  }
+  return d;
+}
+// 4-tap tetrahedron gradient (was 6-tap central difference): visually identical
+// normals for two fewer map() evaluations per lit pixel.
+vec3 calcNormal(vec3 p, float t, float m){
+  const vec2 k = vec2(1.0, -1.0);
+  const float e = 0.0016;
+  return normalize(
+    k.xyy*map(p + k.xyy*e, t, m) +
+    k.yyx*map(p + k.yyx*e, t, m) +
+    k.yxy*map(p + k.yxy*e, t, m) +
+    k.xxx*map(p + k.xxx*e, t, m));
+}
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy - 0.5*uRes.xy)/uRes.y;
+  float t = uTime;
+  float scroll = uScroll;
+
+  // NON-LINEAR scroll drivers
+  float ease  = scroll*scroll*(3.0-2.0*scroll);   // smoothstep-ish
+  float morph = 0.25 + ease*0.85;
+  float rot   = t*0.05 + ease*2.2;                 // field rotation grows w/ scroll
+  float dolly = ease*6.0;                           // camera pushes INTO the field
+  float fov   = 1.0 + ease*0.35;
+
+  vec3 ro = vec3(0.0, 0.0, 7.5 - dolly);
+  vec3 rd = normalize(vec3(uv*fov, -1.3));
+  mat3 rm = rotY(rot) * rotX(sin(t*0.07)*0.15 + ease*0.5);
+  ro = rm*ro; rd = rm*rd;
+
+  float dO = 0.0; bool hit=false; vec3 p = ro;
+  for(int i=0;i<STEPS;i++){
+    p = ro + rd*dO;
+    float ds = map(p, t, morph);
+    if(ds < 0.002){ hit=true; break; }
+    dO += ds*0.9; // slightly larger stride keeps the same reach with fewer steps
+    if(dO > 22.0) break;
+  }
+
+  vec3 bg = mix(vec3(0.02,0.05,0.16), vec3(0.05,0.11,0.32), uv.y*0.5+0.5);
+  vec3 col = bg;
+
+  if(hit){
+    vec3 n = calcNormal(p, t, morph);
+    vec3 L1 = normalize(vec3(0.6, 0.8, 0.4));
+    vec3 L2 = normalize(vec3(-0.5, -0.3, 0.7));
+    float dif  = max(dot(n, L1), 0.0);
+    float dif2 = max(dot(n, L2), 0.0);
+    float rim  = pow(1.0 - max(dot(n, -rd), 0.0), 2.5);
+
+    vec3 blue = vec3(0.18, 0.38, 0.84);
+    vec3 teal = vec3(0.09, 0.72, 0.57);
+    vec3 base = mix(blue, teal, 0.5+0.5*sin(p.x*0.4 + p.y*0.3 + t*0.2));
+    col  = base*(0.25 + 0.9*dif) + teal*dif2*0.35;
+    col += rim*vec3(0.5, 0.75, 1.0)*0.9;
+
+    float fog = 1.0 - exp(-0.055*dO*dO);          // depth fade (DOF/fog)
+    col = mix(col, bg, fog*0.75);
+  }
+
+  // abstract warm focal glow (pulses) — evokes the reference's central light,
+  // NOT a heart/mascot. Brightens a touch as you scroll in.
+  float cd = length(uv);
+  float glow = exp(-cd*cd*3.2) * (0.5 + 0.5*sin(t*0.8));
+  col += vec3(0.95, 0.55, 0.28) * glow * 0.45 * (0.6 + 0.4*ease);
+
+  col *= 1.0 - 0.24*dot(uv, uv);                   // vignette
+  col = pow(max(col, 0.0), vec3(0.85));            // gamma
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
 // Small, dependency-free progressive enhancement: live summary + submit spinner + reveal.
-const SCRIPT = `(function(){var d=document;d.documentElement.classList.add("js");
+const SCRIPT = `(function(){var d=document;d.documentElement.classList.add("js");var HV=${JSON.stringify(HERO_VERT)},HF=${JSON.stringify(HERO_FRAG)};
+function scene(V,F){var c=d.querySelector(".hero-canvas");if(!c)return;var sec=c.parentNode;
+var red=matchMedia("(prefers-reduced-motion: reduce)").matches,mob=matchMedia("(max-width: 820px)").matches;
+var gl=c.getContext("webgl",{antialias:false,alpha:false,depth:false})||c.getContext("experimental-webgl");if(!gl)return;
+function sh(t,s){var x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);return gl.getShaderParameter(x,gl.COMPILE_STATUS)?x:null}
+var vs=sh(gl.VERTEX_SHADER,V),fs=sh(gl.FRAGMENT_SHADER,F),pr=gl.createProgram();if(!vs||!fs)return;
+gl.attachShader(pr,vs);gl.attachShader(pr,fs);gl.bindAttribLocation(pr,0,"aPos");gl.linkProgram(pr);if(!gl.getProgramParameter(pr,gl.LINK_STATUS))return;gl.useProgram(pr);
+var b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+var uT=gl.getUniformLocation(pr,"uTime"),uS=gl.getUniformLocation(pr,"uScroll"),uR=gl.getUniformLocation(pr,"uRes"),uB=gl.getUniformLocation(pr,"uBlob[0]"),bd=new Float32Array(33);
+function rs(){var k=Math.min(window.devicePixelRatio||1,mob?1:1.25)*(mob?.6:.8);c.width=Math.max(1,Math.round(c.clientWidth*k));c.height=Math.max(1,Math.round(c.clientHeight*k));gl.viewport(0,0,c.width,c.height);gl.uniform2f(uR,c.width,c.height);if(!raf)draw()}
+var st=0,se=0,t=0,lr=0,raf=0,on=true,iv=1000/(mob?30:40);
+function rd(){st=Math.min(Math.max(window.scrollY/(sec.offsetHeight||1),0),1)*.6;if(red){se=st;draw()}}
+function draw(){for(var i=0;i<11;i++){bd[i*3]=Math.sin(t*.35+i*1.7)*2.4+Math.cos(i*2.1)*1.2;bd[i*3+1]=Math.cos(t*.3+i*2.3)*1.8+Math.sin(i*1.3);bd[i*3+2]=Math.sin(t*.25+i*.9)*2.2-1+Math.cos(i*.7)*1.4}
+gl.uniform3fv(uB,bd);gl.uniform1f(uT,t);gl.uniform1f(uS,se);gl.drawArrays(gl.TRIANGLES,0,3)}
+function run(){return on&&!d.hidden&&!red}
+function loop(n){raf=run()?requestAnimationFrame(loop):0;if(n-lr<iv-1)return;var dt=Math.min((n-lr)/1000,.1);lr=n;t+=dt;se+=(st-se)*(1-Math.pow(.92,Math.min(dt*60,4)));draw()}
+function go(){if(run()&&!raf){lr=performance.now();raf=requestAnimationFrame(loop)}}
+rs();rd();window.addEventListener("resize",rs);window.addEventListener("scroll",rd,{passive:true});
+if("IntersectionObserver"in window)new IntersectionObserver(function(e){on=e[0].isIntersecting;go()}).observe(sec);
+d.addEventListener("visibilitychange",go);c.addEventListener("webglcontextlost",function(e){e.preventDefault();on=false});
+draw();sec.classList.add("gl");go()}
+try{scene(HV,HF)}catch(e){}
 var rv=[].slice.call(d.querySelectorAll(".rv"));if("IntersectionObserver"in window){var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}})},{rootMargin:"0px 0px -8% 0px"});rv.forEach(function(el){io.observe(el)})}else rv.forEach(function(el){el.classList.add("in")});
 var f=d.querySelector("form.buy");if(!f)return;var n=f.querySelector("[data-sum-name]"),p=f.querySelector("[data-sum-price]");
 function up(){var r=f.querySelector("input[name=ticketType]:checked");if(!r)return;var c=r.closest(".tk");if(n)n.textContent=c.getAttribute("data-name");if(p)p.textContent=c.getAttribute("data-price")}
@@ -460,6 +587,7 @@ function hero(o: { title: string; sub?: string; ghost: string; step?: number; sm
         "</ol>";
   return (
     `<section class="hero${o.small ? " sm" : ""}">` +
+    '<canvas class="hero-canvas" aria-hidden="true"></canvas>' +
     '<span class="blob b1" aria-hidden="true"></span><span class="blob b2" aria-hidden="true"></span><span class="blob b3" aria-hidden="true"></span>' +
     NET +
     `<span class="ghost" aria-hidden="true">${o.ghost}</span>` +
