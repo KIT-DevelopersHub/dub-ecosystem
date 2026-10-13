@@ -461,7 +461,7 @@ describe("scope regression: a key holder still cannot touch another account's ma
     );
     const alice = await app.fetch(new Request("https://svc/mail/flags", { headers: asUser("usr_alice") }), env);
     expect(await alice.json()).toEqual({
-      items: [{ threadId: "thr_shared", starred: true, archived: false, trashed: false, purged: false }],
+      items: [{ threadId: "thr_shared", starred: true, archived: false, trashed: false, purged: false, noReplyAt: null }],
     });
   });
 });
