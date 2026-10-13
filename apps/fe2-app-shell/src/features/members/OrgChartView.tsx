@@ -1,5 +1,5 @@
 // 組織図ビュー — 「誰がどのリーダーの配下か」が一目で分かる階層ツリー。
-//   統括チーム(横長ダークネイビー箱) → コネクタ線 → チーム色の縦カラム。
+//   代表(横長ダークネイビー箱) → コネクタ線 → チーム色の縦カラム(統括チームも1列として並ぶ)。
 //   各カラムの中は roleTitle の段ではなく leaderId の親子関係でネストして描く:
 //     オーガナイザー → その配下のリーダー → 各リーダーの配下メンバー、を接続線＋
 //     インデントでぶら下げる。これで「複数リーダーが居るチームでも、どのメンバーが
@@ -17,6 +17,10 @@ const HQ_NAVY = "#1e3a5f";
 function isHqTeam(t: MemberTeam): boolean {
   return /統括/.test(t.name) || t.key === "soukatsu" || t.key === "hq";
 }
+
+/** 上部「代表」箱に出す人（この順で表示）。統括チームの列と重複して載るのは意図どおり。 */
+export const REPRESENTATIVE_NAMES = ["金井ユラ", "高岡航太郎"] as const;
+const normName = (s: string): string => s.replace(/[\s　]+/g, "");
 
 const TIER_RANK: Record<Tier, number> = { organizer: 0, leader: 1, member: 2 };
 function bySortOrder(a: OrgMember, b: OrgMember): number {
@@ -141,13 +145,13 @@ function Connector({ n }: { n: number }): JSX.Element {
 export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members: OrgMember[] }): JSX.Element {
   // 辞退(declined)は体制図に出さない。
   const active = members.filter((m) => m.status !== "declined");
-  const hq = teams.find(isHqTeam) ?? null;
-  const columnTeams = teams.filter((t) => !isHqTeam(t));
+  // 統括チームは他チームと同じ列として右端に並べる。
+  const columnTeams = [...teams.filter((t) => !isHqTeam(t)), ...teams.filter(isHqTeam)];
   const inTeam = (teamId: string): OrgMember[] => active.filter((m) => m.teamIds.includes(teamId));
-  const hqMembers = hq ? inTeam(hq.id) : [];
+  const reps = REPRESENTATIVE_NAMES.flatMap((n) => active.filter((m) => normName(m.name) === n));
 
-  // 各 active メンバーを HQ箱 または チーム列 に配置しつつ、どこに描画したかを記録する。
-  const placed = new Set<string>(hqMembers.map((m) => m.id));
+  // 各 active メンバーをチーム列に配置しつつ、どこに描画したかを記録する（代表箱は列の外の重複表示なので数えない）。
+  const placed = new Set<string>();
   const columns: Array<{ team: MemberTeam; members: OrgMember[] }> = columnTeams.map((t) => {
     const cm = inTeam(t.id);
     for (const m of cm) placed.add(m.id);
@@ -159,7 +163,6 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
 
   const totalConfirmed = active.filter((m) => m.status === "added").length;
   const totalTent = active.length - totalConfirmed;
-  const hqColor = hq?.color ?? HQ_NAVY;
 
   return (
     <div className={styles.orgChart} data-testid="members-orgchart">
@@ -194,22 +197,15 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
 
       <div className={styles.orgScroll}>
         <div className={styles.orgCanvas}>
-          {hq ? (
-            <div className={styles.topbox} style={{ ["--hq" as string]: hqColor } as CSSProperties} data-testid="members-orgchart-hq">
-              <div className={styles.topTitle}>{hq.name}</div>
-              {hq.description ? <div className={styles.topRole}>{hq.description}</div> : null}
+          {reps.length > 0 ? (
+            <div className={styles.topbox} style={{ ["--hq" as string]: HQ_NAVY } as CSSProperties} data-testid="members-orgchart-reps">
+              <div className={styles.topTitle}>代表</div>
               <div className={styles.topNames}>
-                {hqMembers.map((m) => {
-                  const lead = tierOf(m) === "organizer";
+                {reps.map((m) => {
                   const badge = statusLabel(m.status);
                   return (
-                    <div
-                      key={m.id}
-                      className={`${styles.namechip} ${lead ? styles.lead : ""}`}
-                      data-testid={`members-orgchip-${m.id}`}
-                    >
+                    <div key={m.id} className={`${styles.namechip} ${styles.lead}`} data-testid={`members-orgrep-${m.id}`}>
                       {m.name}
-                      {m.roleTitle ? <span className={styles.namechipRole}>{m.roleTitle}</span> : null}
                       {badge ? <span className={styles.miniBadge}>{badge}</span> : null}
                     </div>
                   );
@@ -218,7 +214,7 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
             </div>
           ) : null}
 
-          {hq && columns.length > 0 ? <Connector n={columns.length} /> : null}
+          {reps.length > 0 && columns.length > 0 ? <Connector n={columns.length} /> : null}
 
           <div className={styles.teamsRow}>
             {columns.map(({ team, members: cm }) => (
@@ -247,7 +243,6 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
 
       <div className={styles.orgFoot}>
         現メンバー計{totalConfirmed}名{totalTent > 0 ? `＋打診中${totalTent}名` : ""} ／ {columnTeams.length}チーム
-        {hq ? `＋統括${hqMembers.length}名` : ""}
       </div>
     </div>
   );

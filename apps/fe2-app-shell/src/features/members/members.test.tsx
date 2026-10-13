@@ -273,6 +273,35 @@ describe("MembersPage", () => {
     expect(within(l2Item as HTMLElement).getByTestId("members-orgchip-R2")).toBeInTheDocument();
     expect(within(l2Item as HTMLElement).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
   });
+
+  // 統括チームは他チームと並ぶ1列になり、上部には「代表」として金井・高岡の2名だけを出す
+  // (2名は統括チームの列にも重複して載る)。
+  it("組織図 shows 代表 on top and 統括チーム as a regular column", async () => {
+    const base = { ...P0, orgId: "o", department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t" };
+    const overview: MembersOverview = {
+      teams: [
+        { id: "hq", key: "soukatsu", name: "統括チーム", color: "#1e3a5f", description: null },
+        { id: "dev", key: "dev", name: "開発チーム", color: "#0d9488", description: null },
+      ],
+      members: [
+        { ...base, id: "K", name: "高岡 航太郎", roleTitle: "実行委員長", status: "added", teamIds: ["hq"], sortOrder: 1 },
+        { ...base, id: "Y", name: "金井ユラ", roleTitle: null, status: "added", teamIds: ["hq"], sortOrder: 2 },
+        { ...base, id: "H", name: "統括三郎", roleTitle: null, status: "added", teamIds: ["hq"], sortOrder: 3 },
+        { ...base, id: "D", name: "開発花子", roleTitle: null, status: "added", teamIds: ["dev"], sortOrder: 4 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+
+    const reps = screen.getByTestId("members-orgchart-reps");
+    expect(within(reps).getByText("代表")).toBeInTheDocument();
+    const repIds = [...reps.querySelectorAll("[data-testid^='members-orgrep-']")].map((e) => e.getAttribute("data-testid"));
+    expect(repIds).toEqual(["members-orgrep-Y", "members-orgrep-K"]);
+    const hqCol = screen.getByTestId("members-orgcol-hq");
+    for (const id of ["K", "Y", "H"]) expect(within(hqCol).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    const cols = [...screen.getByTestId("members-orgchart").querySelectorAll("[data-testid^='members-orgcol-']")];
+    expect(cols.map((c) => c.getAttribute("data-testid"))).toEqual(["members-orgcol-dev", "members-orgcol-hq"]);
+  });
 });
 
 describe("ListView (運営名簿の表)", () => {
