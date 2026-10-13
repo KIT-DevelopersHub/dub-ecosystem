@@ -174,6 +174,30 @@ export function declaredColumns(
   return byTable;
 }
 
+export interface SchemaOps {
+  creates: { table: string; ifNotExists: boolean }[];
+  adds: { table: string; column: string }[];
+  /** DROP / RENAME COLUMN statements: not safe to re-run against a drifted DB. */
+  destructive: number;
+}
+
+/** Table/column DDL of ONE migration file (the staging schema sync decides per file). */
+export function schemaOps(m: Migration): SchemaOps {
+  const ops: SchemaOps = { creates: [], adds: [], destructive: 0 };
+  for (const stmt of sqlStatementList(m.up)) {
+    const created = matchCreateTable(stmt);
+    if (created) {
+      ops.creates.push({ table: created.table, ifNotExists: created.ifNotExists });
+      continue;
+    }
+    const altered = matchAlterTable(stmt);
+    if (!altered) continue;
+    if (altered.kind === "add") ops.adds.push({ table: altered.table, column: altered.column });
+    else ops.destructive += 1;
+  }
+  return ops;
+}
+
 async function liveTables(db: D1Database): Promise<Set<string>> {
   const rows = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all<{ name: string }>();
   return new Set((rows.results ?? []).map((r) => r.name));
