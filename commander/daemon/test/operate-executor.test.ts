@@ -113,6 +113,31 @@ describe("OperateExecutor — preview", () => {
     expect(writes(gw.calls)).toEqual([]);
   });
 
+  it("hands back every read as a compact table (no JSON cut), with its size", async () => {
+    const { exec } = setup();
+    const p = await exec.preview(plan({ summary: "", steps: [{ id: "list", op: "events.list" }] }));
+    expect(p.reads[0]).toMatchObject({ rows: 2, table: expect.stringContaining("| ev2 | LT会 |") });
+    expect(p.reads[0]!.bytes).toBe(Buffer.byteLength(p.reads[0]!.table!));
+  });
+
+  it("reports how many of a forEach list its where matched", async () => {
+    const { exec } = setup();
+    const step = (value: string) => ({ id: "ev", op: "events.get", forEach: "list.items", where: [{ field: "title", op: "contains" as const, value }], params: { id: "{{item.id}}" } });
+    const miss = await exec.preview(plan({ summary: "", steps: [{ id: "list", op: "events.list" }, step("北陸ITカンファレンス2026")] }));
+    expect(miss.reads[1]!.filtered).toEqual({ from: 2, matched: 0 });
+    const hit = await exec.preview(plan({ summary: "", steps: [{ id: "list", op: "events.list" }, step("北陸IT")] }));
+    expect(hit.reads[1]!.filtered).toEqual({ from: 2, matched: 1 });
+    expect(hit.reads[0]!.filtered).toBeUndefined();
+  });
+
+  it("flags a read-call cap so the console can narrow instead of refusing", async () => {
+    const { exec, gw } = setup({ users: 40 });
+    const p = await exec.preview(plan({ summary: "", steps: [{ id: "users", op: "users.list" }, { id: "r", op: "users.roles.list", forEach: "users.items", params: { id: "{{item.id}}" } }] }));
+    expect(p.readLimit).toEqual({ calls: 42, max: 30 });
+    expect(p.blockers).toHaveLength(1);
+    expect(gw.calls.filter((c) => c.includes("/roles"))).toEqual([]);
+  });
+
   it("blocks a literal placeholder before any write could be sent", async () => {
     const { exec, gw } = setup();
     const p = await exec.preview(plan({ summary: "", steps: [{ id: "u", op: "events.update", params: { id: "<EVENT_ID>" }, body: { description: "x", version: 1 } }] }));

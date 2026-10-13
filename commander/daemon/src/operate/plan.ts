@@ -91,9 +91,15 @@ export function parsePlan(raw: unknown): ParseResult {
 const TEMPLATE_RE = /\{\{\s*([^}]+?)\s*\}\}/g;
 const WHOLE_TEMPLATE_RE = /^\{\{\s*([^}]+?)\s*\}\}$/;
 
-/** `a.b[0].c` / `items[*].id` lookup; `[*]` maps over an array. */
+const SELECT_RE = /^\[([A-Za-z_][\w.]*)(=|~)([^\]]+)\]$/;
+
+/**
+ * `a.b[0].c` / `items[*].id` lookup; `[*]` maps over an array. `[name=法人チーム]` picks the
+ * first element whose field equals the value (case-insensitive), `[name~法人]` the first
+ * whose field contains it — so a plan can turn a name into an id without guessing.
+ */
 export function getPath(root: unknown, path: string): unknown {
-  const tokens = path.match(/[^.[\]]+|\[\*\]|\[\d+\]/g) ?? [];
+  const tokens = path.match(/[^.[\]]+|\[\*\]|\[\d+\]|\[[A-Za-z_][\w.]*[=~][^\]]+\]/g) ?? [];
   let cur: unknown = root;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
@@ -101,6 +107,19 @@ export function getPath(root: unknown, path: string): unknown {
       if (!Array.isArray(cur)) return undefined;
       const rest = tokens.slice(i + 1).join(".").replace(/\.\[/g, "[");
       return rest ? cur.map((el) => getPath(el, rest)) : cur;
+    }
+    const sel = t.match(SELECT_RE);
+    if (sel) {
+      if (!Array.isArray(cur)) return undefined;
+      const [, field, op, want] = sel;
+      const w = want!.trim().toLowerCase();
+      cur = cur.find((el) => {
+        const v = getPath(el, field!);
+        if (typeof v !== "string" && typeof v !== "number") return false;
+        const s = String(v).toLowerCase();
+        return op === "=" ? s === w : s.includes(w);
+      });
+      continue;
     }
     const key = t.startsWith("[") ? Number(t.slice(1, -1)) : t;
     if (cur == null || typeof cur !== "object") return undefined;
