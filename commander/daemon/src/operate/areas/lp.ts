@@ -91,8 +91,23 @@ export const LP: AreaSpec = {
       fieldLabels: { active: "有効" },
       verify: { ...LINKS_READ, findBy: ["id", "$params.id"], expect: { active: "$body.active" } },
     },
+    read({
+      id: "lp.publish.get",
+      area: "lp",
+      path: "/lp/publish",
+      service: S,
+      requires: VIEW,
+      description: "本番 LP でいま公開中の版を取得する",
+      hint: "versionId（公開中の版）。期間指定は不要",
+    }),
   ],
-  excluded: [],
+  excluded: [
+    {
+      service: S,
+      route: "POST /lp/publish",
+      reason: "本番 LP の公開版を即座に切り替える操作（lp:publish 詳細キー）。依頼範囲（アクセスログ・流入 URL）の外で、入れ替えはオーナーが手で行う",
+    },
+  ],
   pending: [],
   ownerOpenedIrreversible: {
     "lp.links.create": "削除 API が無く発行した URL は一覧に残り同じ値も再発行できないが、停止はできる。オーナーが「流入 URL の発行」を名指しで開放",
