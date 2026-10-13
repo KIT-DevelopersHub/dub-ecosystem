@@ -279,6 +279,7 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 }
 
 const PUBLIC_ROUTES = [
+  "GET /api/v1/public/onboarding",
   "GET /healthz",
   "POST /api/v1/public/inquiries",
   "POST /api/v1/public/lp-visits",

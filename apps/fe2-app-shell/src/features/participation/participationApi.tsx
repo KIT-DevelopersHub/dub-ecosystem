@@ -4,14 +4,21 @@
 // next to 運営メンバー管理, so submitting can reflect onto the roster in one hop).
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type {
+  ListOnboardingItemsResponse,
   ListParticipationCandidatesResponse,
   ListParticipationsResponse,
   MembersOverview,
   MemberTeam,
+  OnboardingGuide,
+  OnboardingItem,
+  OnboardingItemInput,
   PublicParticipationResponse,
+  SaveOnboardingMeetingRequest,
+  SaveOnboardingMeetingResponse,
   ResolveParticipationRequest,
   ResolveParticipationResponse,
   SubmitParticipationRequest,
+  UpdateOnboardingItemRequest,
 } from "./contracts.ts";
 
 export interface ParticipationApi {
@@ -28,11 +35,23 @@ export interface ParticipationApi {
   overview(): Promise<MembersOverview>;
   /** 反映確定 (link/create/skip/unlink)。roster を書き換えるので identity:admin。 */
   resolve(id: string, body: ResolveParticipationRequest): Promise<ResolveParticipationResponse>;
+  /** オンボーディング案内 (管理タブ)。閲覧 = 参加届の閲覧、書き込み = 参加届の編集。 */
+  listOnboarding(): Promise<OnboardingGuide>;
+  createOnboarding(input: OnboardingItemInput): Promise<OnboardingItem>;
+  updateOnboarding(id: string, patch: UpdateOnboardingItemRequest): Promise<OnboardingItem>;
+  deleteOnboarding(id: string): Promise<void>;
+  /** 全項目 id を新しい表示順で渡す。 */
+  reorderOnboarding(ids: string[]): Promise<ListOnboardingItemsResponse>;
+  /** 全体 / チームのミーティング案内を保存 (schedule null で削除)。 */
+  saveOnboardingMeeting(input: SaveOnboardingMeetingRequest): Promise<SaveOnboardingMeetingResponse>;
+  /** 公開ページ用 (未ログインで読める)。 */
+  publicOnboarding(): Promise<OnboardingGuide>;
 }
 
 const BASE = "/api/v1/members";
 // 参加届の送信だけは未認証で開放された公開エンドポイント (gateway-owned)。
 const PUBLIC_SUBMIT = "/api/v1/public/participation";
+const ONBOARDING = `${BASE}/onboarding`;
 
 export function createParticipationApi(api: ApiClient): ParticipationApi {
   return {
@@ -56,5 +75,30 @@ export function createParticipationApi(api: ApiClient): ParticipationApi {
         path: `${BASE}/participation/${encodeURIComponent(id)}/resolve`,
         body,
       }),
+    listOnboarding: () => api.request<OnboardingGuide>({ method: "GET", path: ONBOARDING }),
+    createOnboarding: (input) =>
+      api.request<OnboardingItem, OnboardingItemInput>({ method: "POST", path: ONBOARDING, body: input }),
+    updateOnboarding: (id, patch) =>
+      api.request<OnboardingItem, UpdateOnboardingItemRequest>({
+        method: "PATCH",
+        path: `${ONBOARDING}/${encodeURIComponent(id)}`,
+        body: patch,
+      }),
+    deleteOnboarding: async (id) => {
+      await api.request<{ ok: true }>({ method: "DELETE", path: `${ONBOARDING}/${encodeURIComponent(id)}` });
+    },
+    reorderOnboarding: (ids) =>
+      api.request<ListOnboardingItemsResponse, { ids: string[] }>({
+        method: "POST",
+        path: `${ONBOARDING}/reorder`,
+        body: { ids },
+      }),
+    saveOnboardingMeeting: (input) =>
+      api.request<SaveOnboardingMeetingResponse, SaveOnboardingMeetingRequest>({
+        method: "PUT",
+        path: `${ONBOARDING}/meetings`,
+        body: input,
+      }),
+    publicOnboarding: () => api.request<OnboardingGuide>({ method: "GET", path: "/api/v1/public/onboarding" }),
   };
 }
