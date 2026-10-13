@@ -15,9 +15,11 @@ import { detectMentionTrigger, mentionToken, type MentionCandidate } from "../li
 import {
   applyInputRules,
   caretToEnd,
+  dropPadBeforeCaret,
   ensureLines,
   insertLink,
   insertText,
+  isEditorEmpty,
   mentionChip,
   placeCaret,
   rangeIn,
@@ -86,6 +88,7 @@ export function MessageComposer({
   // itself is uncontrolled — React never renders its children.
   const [text, setText] = useState<string>(() => loadDraft(channelId));
   const [before, setBefore] = useState("");
+  const [empty, setEmpty] = useState(true);
   const [selected, setSelected] = useState(0);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -148,6 +151,7 @@ export function MessageComposer({
     setBefore("");
     savedRange.current = null;
     if (ref.current) renderEditor(ref.current, md, labelsRef.current);
+    setEmpty(md === "");
   }, [channelId]);
 
   // Names resolve after a draft is restored — relabel chips in place (no re-render).
@@ -167,7 +171,10 @@ export function MessageComposer({
     if (!root) return;
     const md = serializeEditor(root);
     setText(md);
-    saveDraft(channelId, md);
+    setEmpty(isEditorEmpty(root));
+    // Over the cap the draft is not re-saved: a truncated save would cut a token or
+    // fence in half. The user sees the over-limit error and trims instead.
+    if (md.length <= DRAFT_MAX_LEN) saveDraft(channelId, md);
     setBefore(textBeforeCaret(root));
   }, [channelId]);
 
@@ -208,7 +215,8 @@ export function MessageComposer({
     [trigger, resolveMentionCandidates],
   );
 
-  const canSend = (text.trim().length > 0 || attachments.length > 0) && !disabled;
+  const overLimit = text.length > DRAFT_MAX_LEN;
+  const canSend = (text.trim().length > 0 || attachments.length > 0) && !disabled && !overLimit;
 
   const pickMention = useCallback(
     (candidate: MentionCandidate) => {
@@ -259,6 +267,7 @@ export function MessageComposer({
     const files = attachments;
     if (root) renderEditor(root, "");
     setText("");
+    setEmpty(true);
     setBefore("");
     setAttachments([]);
     setAttachError(null);
@@ -336,10 +345,13 @@ export function MessageComposer({
         return;
       }
     }
-    if (e.key === "Backspace" && ref.current && unblockAtLineStart(ref.current)) {
-      e.preventDefault();
-      sync();
-      return;
+    if (e.key === "Backspace" && ref.current) {
+      if (unblockAtLineStart(ref.current)) {
+        e.preventDefault();
+        sync();
+        return;
+      }
+      dropPadBeforeCaret(ref.current);
     }
     if (e.key === "Enter") {
       e.preventDefault();
@@ -527,7 +539,7 @@ export function MessageComposer({
           suppressContentEditableWarning
           className={styles.composerInput}
           data-testid="fe6-composer-input"
-          data-empty={text === "" || undefined}
+          data-empty={empty || undefined}
           data-placeholder={disabled ? disabledReason ?? "投稿できません" : placeholder ?? "メッセージを入力"}
           onInput={(e) => {
             const root = e.currentTarget;
@@ -547,12 +559,19 @@ export function MessageComposer({
             // Plain text only — pasted HTML would bring styles the subset can't send.
             e.preventDefault();
             if (e.clipboardData.files.length > 0) void onFilesPicked(e.clipboardData.files);
-            const pasted = e.clipboardData.getData("text/plain");
-            if (pasted) {
-              insertText(e.currentTarget, pasted);
-              ensureLines(e.currentTarget);
-              sync();
+            const root = e.currentTarget;
+            const room = DRAFT_MAX_LEN - serializeEditor(root).length;
+            const pasted = e.clipboardData.getData("text/plain").slice(0, Math.max(0, room));
+            if (!pasted) return;
+            insertText(root, pasted);
+            ensureLines(root);
+            // Pasted Markdown / mention tokens would send formatted — show them formatted
+            // now (re-render from the body), caret at the end.
+            if (/[*_~`<>\[]|^\s*([-*]|\d+\.)\s/m.test(pasted)) {
+              renderEditor(root, serializeEditor(root), labelsRef.current);
+              caretToEnd(root);
             }
+            sync();
           }}
           onDrop={(e) => {
             e.preventDefault();
@@ -563,7 +582,15 @@ export function MessageComposer({
           }}
           onCompositionEnd={() => {
             composingRef.current = false;
-            sync();
+            // IME-typed "*太字*" converts too. Deferred a tick: Safari fires compositionend
+            // before the final input lands in the DOM.
+            setTimeout(() => {
+              const root = ref.current;
+              if (!root || composingRef.current) return;
+              ensureLines(root);
+              applyInputRules(root);
+              sync();
+            }, 0);
           }}
         />
 
@@ -582,9 +609,9 @@ export function MessageComposer({
         </div>
       </div>
 
-      {(error || attachError) && (
+      {(error || attachError || overLimit) && (
         <div className={styles.composerError} role="alert" data-testid="fe6-composer-error">
-          {error ?? attachError}
+          {error ?? attachError ?? `${DRAFT_MAX_LEN.toLocaleString()} 文字を超えています (${text.length.toLocaleString()} 文字)`}
         </div>
       )}
       <div className={styles.composerHelp}>Enter で送信 · Shift+Enter で改行 · @ でメンション(個人 / チーム)</div>

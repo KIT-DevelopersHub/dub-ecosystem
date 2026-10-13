@@ -68,3 +68,40 @@ test("下書きの書式はその場で反映され、記号のまま表示さ�
   await expect(posted).toHaveJSProperty("tagName", "STRONG");
   await page.screenshot({ path: shot("03-sent.png") });
 });
+
+test("IME で打った記法も変換・重ね書式はそのまま送信・変換直後の Backspace は空振りしない", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/chat");
+  await page.getByTestId("fe6-channel-list-item").filter({ hasText: "dev" }).first().click();
+  const input = page.getByTestId("fe6-composer-input");
+  await input.click();
+  const cdp = await page.context().newCDPSession(page);
+  // IME: compose "*たいじ*" then commit
+  for (const t of ["*", "*た", "*たい", "*たいじ", "*太字", "*太字*"]) {
+    await cdp.send("Input.imeSetComposition", { text: t, selectionStart: t.length, selectionEnd: t.length });
+  }
+  await cdp.send("Input.insertText", { text: "*太字*" });
+  await page.waitForTimeout(100);
+  await expect(input.locator("b")).toHaveText("太字");
+  // backspace right after conversion deletes a real char
+  await page.keyboard.type(" ab");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await expect(input.locator("b")).toHaveText("太");
+  // nested
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.press("ControlOrMeta+b");
+  await page.keyboard.press("ControlOrMeta+i");
+  await page.keyboard.type("両方");
+  await input.press("Enter");
+  const tl = page.getByTestId("fe6-channel-timeline");
+  await expect(tl.locator("strong em, em strong").filter({ hasText: "両方" }).last()).toBeVisible();
+  await expect(tl).not.toContainText("_両方_");
+  await expect(input).toHaveAttribute("data-empty", "true");
+  // placeholder hidden on empty bullet line
+  await input.click();
+  await page.keyboard.type("- ");
+  await expect(input).not.toHaveAttribute("data-empty", "true");
+});

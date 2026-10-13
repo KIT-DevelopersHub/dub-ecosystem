@@ -61,6 +61,7 @@ describe("renderEditor", () => {
       "```\ncode *raw*\n```",
       "see [docs](https://x.dev) and https://y.dev",
       "hi <@usr_rin> and <!team:team_hq>",
+      "*_both_* and *ab**_c_*",
     ]) {
       expect(roundTrip(md)).toBe(md);
     }
@@ -70,6 +71,18 @@ describe("renderEditor", () => {
     const root = editorFrom("");
     renderEditor(root, "hi <@usr_rin>", { user: () => "Rin" });
     expect(root.textContent).toBe("hi @Rin");
+  });
+});
+
+describe("nested styles", () => {
+  it("stacked toolbar styles serialize so the renderer shows them stacked, not as markers", () => {
+    const root = editorFrom("<div><b><i>x</i></b></div>");
+    const md = serializeEditor(root);
+    expect(md).toBe("*_x_*");
+    const back = editorFrom("");
+    renderEditor(back, md);
+    expect(back.querySelector("b > i")?.textContent).toBe("x");
+    expect(back.textContent).toBe("x");
   });
 });
 

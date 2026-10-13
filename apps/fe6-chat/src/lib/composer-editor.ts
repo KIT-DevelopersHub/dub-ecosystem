@@ -202,23 +202,24 @@ export function mentionChip(doc: Document, token: string, label: string, kind: "
 
 function appendInline(doc: Document, parent: Element, segs: BodySegment[], labels: MentionLabels): void {
   for (const seg of segs) {
-    const wrap = (tag: string, text: string) => {
+    const wrap = (tag: string, text: string, children?: BodySegment[]) => {
       const el = doc.createElement(tag);
-      el.textContent = text;
+      if (children) appendInline(doc, el, children, labels);
+      else el.textContent = text;
       parent.appendChild(el);
     };
     switch (seg.type) {
       case "bold":
-        wrap("b", seg.value);
+        wrap("b", seg.value, seg.children);
         break;
       case "italic":
-        wrap("i", seg.value);
+        wrap("i", seg.value, seg.children);
         break;
       case "underline":
-        wrap("u", seg.value);
+        wrap("u", seg.value, seg.children);
         break;
       case "strike":
-        wrap("s", seg.value);
+        wrap("s", seg.value, seg.children);
         break;
       case "code":
         wrap("code", seg.value);
@@ -559,7 +560,7 @@ const INLINE_RULES: { re: RegExp; tag: string }[] = [
 ];
 const LINE_RULES: { re: RegExp; block: LineBlock }[] = [
   { re: /^[-*] $/, block: "bullet" },
-  { re: /^1\. $/, block: "ordered" },
+  { re: /^\d+\. $/, block: "ordered" },
   { re: /^> $/, block: "quote" },
   { re: /^```$/, block: "code" },
 ];
@@ -596,4 +597,19 @@ export function applyInputRules(root: Element): boolean {
     return replaceBeforeCaret(root, m[0].length, [el]);
   }
   return false;
+}
+
+/** Backspace right after a zero-width caret pad: drop the pad so the key deletes a real char. */
+export function dropPadBeforeCaret(root: Element): void {
+  const r = rangeIn(root);
+  if (!r?.collapsed || !(r.startContainer instanceof Text)) return;
+  const t = r.startContainer;
+  let off = r.startOffset;
+  while (off > 0 && t.data[off - 1] === "\u200B") t.deleteData(--off, 1);
+  if (off !== r.startOffset) placeCaret(t, off);
+}
+
+/** True when the editor shows nothing at all (placeholder may show). */
+export function isEditorEmpty(root: Element): boolean {
+  return root.children.length <= 1 && !root.querySelector("[data-block]") && isLineEmpty(root);
 }

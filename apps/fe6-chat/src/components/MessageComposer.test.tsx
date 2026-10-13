@@ -201,6 +201,24 @@ describe("MessageComposer", () => {
     expect(draft()).toBe("hi @ri");
   });
 
+  it("pasted Markdown / mention tokens show formatted, as they will send", async () => {
+    render(<MessageComposer channelId="chn_a" onSend={vi.fn()} resolveUser={() => ({ id: "usr_rin", displayName: "Rin" }) as never} />);
+    const el = editor();
+    el.focus();
+    caretToEnd(el);
+    fireEvent.paste(el, { clipboardData: { files: [], getData: () => "*重要* <@usr_rin>" } });
+    expect(el.querySelector("b")).toHaveTextContent("重要");
+    expect(el.textContent).toBe("重要 @Rin");
+    expect(draft()).toBe("*重要* <@usr_rin>");
+  });
+
+  it("over the length cap: send disabled, error shown, draft not truncated", () => {
+    sessionStorage.setItem("fe6.chat.draft.chn_a", "a".repeat(4001));
+    render(<MessageComposer channelId="chn_a" onSend={vi.fn()} />);
+    expect(screen.getByTestId("fe6-composer-send")).toBeDisabled();
+    expect(screen.getByTestId("fe6-composer-error")).toHaveTextContent("4,000 文字を超えています");
+  });
+
   it("P13: pulses the send button (data-sent) briefly after sending, then clears it", async () => {
     const user = userEvent.setup();
     render(<MessageComposer channelId="chn_a" onSend={vi.fn()} />);
