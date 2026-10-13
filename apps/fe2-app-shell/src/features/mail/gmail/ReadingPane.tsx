@@ -4,7 +4,7 @@
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
 import { useEffect, useState, type CSSProperties } from "react";
-import { Badge } from "@dub/ui";
+import { Badge, Button } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { isImageType } from "../attach.ts";
 import {
@@ -12,6 +12,7 @@ import {
   displayName,
   fullDate,
   initial,
+  replyNudge,
   sharedRecipientLabel,
   snippet,
   threadMine,
@@ -24,6 +25,7 @@ import {
 import { MailIcon } from "./icons.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
 import { useMailStore } from "./useMailStore.tsx";
+import styles from "./replyNudge.module.css";
 import { useMailApi } from "../MailProvider.tsx";
 import { formatBytes, saveBlob } from "../mailApi.tsx";
 
@@ -290,6 +292,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const [reply, setReply] = useState("");
   const lastIdx = thread.messages.length - 1;
   const last = thread.messages[lastIdx]!;
+  const nudge = replyNudge(thread, new Date());
   const chips = thread.labels.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => Boolean(l));
 
   // Reply targets the last message that ISN'T ours — the external correspondent — never
@@ -412,6 +415,15 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                 {l.name}
               </span>
             ))}
+          </div>
+        ) : null}
+
+        {nudge ? (
+          <div className={styles.banner} data-reply-nudge="fe2-mail-reply-nudge" data-testid="fe2-mail-reply-nudge-banner">
+            <span className={styles.text}>{nudge.days}日前に受信したメールにまだ返信していません</span>
+            <Button variant="secondary" size="sm" onClick={() => openCompose("reply")} testId="fe2-mail-reply-nudge-reply">
+              返信
+            </Button>
           </div>
         ) : null}
 

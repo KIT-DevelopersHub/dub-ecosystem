@@ -12,6 +12,7 @@ import {
   latest,
   matchesQuery,
   relativeDate,
+  replyNudge,
   sharedRecipientLabel,
   snippet,
   threadMine,
@@ -94,6 +95,7 @@ function ThreadRow({
   labels,
   leaving,
   narrow,
+  now,
   onArchive,
   onTrash,
 }: {
@@ -102,6 +104,8 @@ function ThreadRow({
   leaving: boolean;
   /** Phones: sender and subject stack on two lines; no hover-only actions. */
   narrow: boolean;
+  /** Render-time clock for the reply nudge (one per list render). */
+  now: Date;
   onArchive: () => void;
   onTrash: () => void;
 }): JSX.Element {
@@ -110,6 +114,7 @@ function ThreadRow({
   const unread = threadUnread(thread);
   const last = latest(thread);
   const checked = state.checked.has(thread.id);
+  const nudge = replyNudge(thread, now);
   const people = thread.folder === "sent" || thread.folder === "drafts" ? last.to[0] ?? state.me : last.from;
 
   // P25: `data-thread-row` is a static marker (literal string, survives minification) so a
@@ -240,6 +245,14 @@ function ThreadRow({
           )}
           <LabelChips ids={thread.labels} labels={labels} />
           <span style={{ fontWeight: unread ? 700 : 400, color: "var(--dub-color-text-primary)" }}>{thread.subject}</span>
+          {nudge ? (
+            // Literal marker survives minification so verify:live can grep the bundle.
+            <span data-reply-nudge="fe2-mail-reply-nudge" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+              <Badge tone="warning" testId="fe2-mail-reply-nudge">
+                {narrow ? `${nudge.days}日前・未返信` : `${nudge.days}日前に受信しました。返信しますか？`}
+              </Badge>
+            </span>
+          ) : null}
           <span style={{ color: "var(--dub-color-text-muted)", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis" }}>
             {" — "}
             {snippet(last.body, 80)}
@@ -299,6 +312,7 @@ function ThreadRow({
 export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
+  const now = new Date();
   const [leavingIds, setLeavingIds] = useState<Set<string>>(new Set());
   const leaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -468,6 +482,7 @@ export function ThreadList(): JSX.Element {
               labels={state.labels}
               leaving={leavingIds.has(t.id)}
               narrow={narrow}
+              now={now}
               onArchive={() => beginLeave([t.id], "ARCHIVE")}
               onTrash={() => beginLeave([t.id], "TRASH")}
             />

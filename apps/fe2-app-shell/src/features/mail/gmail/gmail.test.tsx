@@ -7,6 +7,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { mail } from "@dub/types";
 import type { MailApi } from "../mailApi.tsx";
 import { MailApiProvider } from "../MailProvider.tsx";
 import { GmailApp } from "./GmailApp.tsx";
@@ -340,6 +341,35 @@ describe("GmailApp (hydrates from the gateway)", () => {
     const sent = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sent.inReplyTo).toBe("<in1@developershub.jp>");
     expect(sent.subject).toBe("Re: 登壇のご相談");
+  });
+
+  it("nudges an unreplied received thread; the banner reply reuses compose and the reply clears it", async () => {
+    // Gateway echo: once we send, GET /sent returns the reply threaded into thr_in_1.
+    let replied = false;
+    const reply: mail.MailSentListItem = {
+      id: "sent_r", to: [{ email: "hanako@example.com" }], subject: "Re: 登壇のご相談", snippet: "了解しました。",
+      sentAt: new Date().toISOString(), provider: "resend", status: "sent", threadId: "thr_in_1",
+    };
+    const api = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({ items: [DEMO_INBOX_ITEMS[0]!], nextCursor: null }),
+      send: vi.fn().mockImplementation(() => {
+        replied = true;
+        return Promise.resolve({ messageId: "m", provider: "resend", acceptedAt: "t" });
+      }),
+      listSent: vi.fn().mockImplementation(() => Promise.resolve({ items: replied ? [reply] : [], nextCursor: null })),
+    });
+    render(wrap(<GmailApp />, api));
+    const row = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    // Fixture was received 2026-08-10 → well past the 3-day threshold.
+    expect(within(row).getByTestId("fe2-mail-reply-nudge")).toHaveTextContent(/日前に受信しました。返信しますか？/);
+    await userEvent.click(row);
+    await waitFor(() => expect(screen.getByText(/相談させてください/)).toBeInTheDocument());
+    expect(screen.getByTestId("fe2-mail-reply-nudge-banner")).toHaveTextContent(/日前に受信したメールにまだ返信していません/);
+    await userEvent.click(screen.getByTestId("fe2-mail-reply-nudge-reply"));
+    expect(screen.getByTestId("fe2-mail-compose-window")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    expect((api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0].inReplyTo).toBe("<in1@developershub.jp>");
+    await waitFor(() => expect(screen.queryByTestId("fe2-mail-reply-nudge-banner")).not.toBeInTheDocument());
   });
 
   it("toggles a star from a list row", async () => {

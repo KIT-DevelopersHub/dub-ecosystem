@@ -178,3 +178,24 @@ export function matchesQuery(t: MailThreadModel, q: string): boolean {
  *  them with the server's real From. The client never learns its own @developershub.jp
  *  address (/me omits email); the gateway resolves the real From server-side. */
 export const SELF: MailPerson = { email: "", name: "自分" };
+
+// ---- reply nudge (Gmail's "N日前に受信しました。返信しますか？") ----
+
+/** Whole days a received message may sit unanswered before the nudge appears. */
+export const NUDGE_DAYS = 3;
+const DAY_MS = 86_400_000;
+const AUTOMATED_SENDER = /^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?|bounce)/i;
+
+/** Derived (no state): non-null when an inbox thread addressed to the viewer ends with a
+ *  received message from a human that has gone unanswered for >= `days` whole days. A
+ *  reply appends an outbound message, so the latest is no longer inbound and it clears. */
+export function replyNudge(t: MailThreadModel, now: Date, days: number = NUDGE_DAYS): { days: number } | null {
+  if (t.purged || t.folder !== "inbox" || t.messages.length === 0) return null;
+  const last = latest(t);
+  if (last.outbound || last.mine === false) return null;
+  if (AUTOMATED_SENDER.test(last.from.email.split("@")[0] ?? "")) return null;
+  const at = new Date(last.date).getTime();
+  if (Number.isNaN(at)) return null;
+  const elapsed = Math.floor((now.getTime() - at) / DAY_MS);
+  return elapsed >= days ? { days: elapsed } : null;
+}
