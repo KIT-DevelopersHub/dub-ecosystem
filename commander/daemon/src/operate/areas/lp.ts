@@ -107,8 +107,18 @@ export const LP: AreaSpec = {
       route: "POST /lp/publish",
       reason: "本番 LP の公開版を即座に切り替える操作（lp:publish 詳細キー）。依頼範囲（アクセスログ・流入 URL）の外で、入れ替えはオーナーが手で行う",
     },
+    {
+      service: S,
+      route: "POST /lp/tickets/enabled",
+      reason: "本番 LP のチケット販売ページを即座に公開/停止する操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
+    },
+    {
+      service: S,
+      route: "POST /lp/tickets/cta",
+      reason: "本番 LP の参加登録ボタンを即座にチケット購入へ差し替える操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
+    },
   ],
-  // チケット販売は未開放（POST /lp/tickets/enabled・/lp/tickets/cta は lp:publish 付きのため抽出対象外）。
+  // チケットの設定・購入者一覧は未開放。
   pending: [
     { service: S, route: "GET /lp/tickets" },
     { service: S, route: "POST /lp/tickets/fields" },
