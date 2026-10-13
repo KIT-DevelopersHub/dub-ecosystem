@@ -1,11 +1,126 @@
 // In-memory LpRepo for tests — same semantics as the D1 repo (bots excluded unless asked,
 // link aggregation skips untagged visits, visits newest-first by id).
-import type { AggregateBy, AggregateQuery, AggregateRow, LinkRow, LpRepo, PublishRow, VisitRow } from "./types";
+import type {
+  AggregateBy,
+  AggregateQuery,
+  AggregateRow,
+  LinkRow,
+  LpRepo,
+  LpTicketField,
+  PublishRow,
+  TicketOrderRow,
+  TicketSettingsRow,
+  TicketTypeAgg,
+  TicketTypeRow,
+  VisitRow,
+} from "./types";
+
+const clone = <T>(v: T): T => structuredClone(v);
 
 export class InMemoryLpRepo implements LpRepo {
   links: LinkRow[] = [];
   visits: VisitRow[] = [];
   publish = new Map<string, PublishRow>();
+  ticketSettings = new Map<string, TicketSettingsRow>();
+  ticketTypes: TicketTypeRow[] = [];
+  orders: TicketOrderRow[] = [];
+
+  async getTicketSettings(site: string) {
+    const r = this.ticketSettings.get(site);
+    return r ? clone(r) : null;
+  }
+  private upsertSettings(site: string, patch: Partial<TicketSettingsRow>, updatedBy: string, updatedAt: string) {
+    const cur = this.ticketSettings.get(site) ?? { site, enabled: false, ctaEnabled: false, fields: [], updatedBy: null, updatedAt };
+    this.ticketSettings.set(site, { ...cur, ...clone(patch), updatedBy, updatedAt });
+  }
+  async setTicketEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string) {
+    this.upsertSettings(site, { enabled }, updatedBy, updatedAt);
+  }
+  async setTicketCta(site: string, ctaEnabled: boolean, updatedBy: string, updatedAt: string) {
+    this.upsertSettings(site, { ctaEnabled }, updatedBy, updatedAt);
+  }
+  async setTicketFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string) {
+    this.upsertSettings(site, { fields }, updatedBy, updatedAt);
+  }
+  async listTicketTypes(site: string) {
+    return this.ticketTypes.filter((t) => t.site === site).map(clone);
+  }
+  async getTicketType(site: string, id: string) {
+    const t = this.ticketTypes.find((x) => x.site === site && x.id === id);
+    return t ? clone(t) : null;
+  }
+  async insertTicketType(row: TicketTypeRow) {
+    this.ticketTypes.push(clone(row));
+  }
+  async updateTicketType(row: TicketTypeRow) {
+    const i = this.ticketTypes.findIndex((x) => x.site === row.site && x.id === row.id);
+    if (i >= 0) this.ticketTypes[i] = clone(row);
+  }
+  private held(site: string, ticketTypeId: string, pendingSince: string): number {
+    return this.orders
+      .filter((o) => o.site === site && (o.status === "paid" || (o.status === "pending" && o.createdAt >= pendingSince)))
+      .flatMap((o) => o.items)
+      .filter((i) => i.ticketTypeId === ticketTypeId)
+      .reduce((n, i) => n + i.quantity, 0);
+  }
+  async ticketAggregates(site: string, pendingSince: string) {
+    const m = new Map<string, TicketTypeAgg>();
+    for (const o of this.orders.filter((x) => x.site === site && x.status !== "expired")) {
+      for (const i of o.items) {
+        const a = m.get(i.ticketTypeId) ?? { ticketTypeId: i.ticketTypeId, sold: 0, pending: 0, revenueJpy: 0 };
+        if (o.status === "paid") {
+          a.sold += i.quantity;
+          a.revenueJpy += i.quantity * i.unitPriceJpy;
+        } else if (o.createdAt >= pendingSince) a.pending += i.quantity;
+        m.set(i.ticketTypeId, a);
+      }
+    }
+    return [...m.values()];
+  }
+  async countOrdersSince(site: string, since: string) {
+    return this.orders.filter((o) => o.site === site && o.createdAt >= since).length;
+  }
+  async insertOrderIfAvailable(row: TicketOrderRow, capacities: ReadonlyMap<string, number | null>, pendingSince: string) {
+    const short = row.items.find((i) => {
+      const capacity = capacities.get(i.ticketTypeId) ?? null;
+      return capacity !== null && this.held(row.site, i.ticketTypeId, pendingSince) + i.quantity > capacity;
+    });
+    if (short) return { ok: false as const, ticketTypeId: short.ticketTypeId };
+    this.orders.push(clone(row));
+    return { ok: true as const };
+  }
+  async getOrder(site: string, id: string) {
+    const o = this.orders.find((x) => x.site === site && x.id === id);
+    return o ? clone(o) : null;
+  }
+  async getOrderBySession(sessionId: string) {
+    const o = this.orders.find((x) => x.stripeSessionId === sessionId);
+    return o ? clone(o) : null;
+  }
+  async setOrderSession(id: string, sessionId: string) {
+    const o = this.orders.find((x) => x.id === id);
+    if (o) o.stripeSessionId = sessionId;
+  }
+  async markOrderPaid(id: string, paidAt: string, sessionId: string | null) {
+    const o = this.orders.find((x) => x.id === id && x.status === "pending");
+    if (!o) return false;
+    Object.assign(o, { status: "paid", paidAt, stripeSessionId: o.stripeSessionId ?? sessionId });
+    return true;
+  }
+  async markOrderExpired(id: string) {
+    const o = this.orders.find((x) => x.id === id && x.status === "pending");
+    if (!o) return false;
+    o.status = "expired";
+    return true;
+  }
+  async listOrders(site: string, cursor: string | null, limit: number) {
+    const key = (o: TicketOrderRow) => `${o.createdAt}~${o.id}`;
+    return this.orders
+      .filter((o) => o.site === site && (cursor ? key(o) < cursor : true))
+      .sort((a, b) => (key(a) < key(b) ? 1 : -1))
+      .slice(0, limit)
+      .map(clone);
+  }
 
   private inRange(v: VisitRow, q: Omit<AggregateQuery, "includeBots"> & { includeBots?: boolean }): boolean {
     return v.orgId === q.orgId && v.dayJst >= q.from && v.dayJst <= q.to && (q.includeBots === true || v.device !== "bot");
