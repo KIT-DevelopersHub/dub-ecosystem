@@ -11,7 +11,10 @@ import {
   inFolder,
   latest,
   matchesQuery,
+  partitionNudged,
+  pendingReplyIds,
   relativeDate,
+  replyNudge,
   sharedRecipientLabel,
   snippet,
   threadMine,
@@ -89,28 +92,114 @@ function StopClick({ children, onClick, label, testId }: { children: JSX.Element
   );
 }
 
+/** Divider row above a group of threads. Passing `onToggle` makes it a collapse button. */
+function SectionHeader({
+  title,
+  count,
+  accent,
+  open,
+  onToggle,
+  testId,
+}: {
+  title: string;
+  count?: number;
+  accent?: boolean;
+  open?: boolean;
+  onToggle?: () => void;
+  testId: string;
+}): JSX.Element {
+  const label = count === undefined ? title : `${title} ${count}件`;
+  return (
+    <div
+      role="row"
+      data-testid={testId}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        height: 32,
+        padding: "0 12px",
+        borderBottom: "1px solid var(--dub-color-border-default)",
+        borderLeft: `4px solid ${accent ? "var(--dub-color-warning-500)" : "transparent"}`,
+        background: "var(--dub-color-surface-raised)",
+        fontSize: "var(--dub-font-size-xs)",
+        fontWeight: 600,
+        color: "var(--dub-color-text-secondary)",
+      }}
+    >
+      {onToggle ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          data-testid={`${testId}-toggle`}
+          onClick={onToggle}
+          style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          <MailIcon name={open ? "chevron-down" : "chevron-right"} size={16} />
+          {label}
+        </button>
+      ) : (
+        label
+      )}
+    </div>
+  );
+}
+
 function ThreadRow({
   thread,
   labels,
   leaving,
   narrow,
+  now,
+  pendingReplies,
   onArchive,
   onTrash,
+  onDismissNudge,
 }: {
   thread: MailThreadModel;
   labels: Label[];
   leaving: boolean;
   /** Phones: sender and subject stack on two lines; no hover-only actions. */
   narrow: boolean;
+  /** Render-time clock for the reply nudge (one per list render). */
+  now: Date;
+  /** Message-Ids with a scheduled reply pending (suppresses the nudge). */
+  pendingReplies: ReadonlySet<string>;
   onArchive: () => void;
   onTrash: () => void;
+  /** Rows inside the pinned 返信待ち group get an always-visible 返信不要 control. */
+  onDismissNudge?: () => void;
 }): JSX.Element {
   const { state, dispatch } = useMailStore();
   const [hover, setHover] = useState(false);
   const unread = threadUnread(thread);
   const last = latest(thread);
   const checked = state.checked.has(thread.id);
+  const nudge = replyNudge(thread, now, pendingReplies);
   const people = thread.folder === "sent" || thread.folder === "drafts" ? last.to[0] ?? state.me : last.from;
+
+  // 返信不要 inside the pinned group: always visible (phones have no hover); on phones it sits
+  // under the date so the subject keeps its width. Literal marker survives minification.
+  const dismissNudge =
+    nudge && onDismissNudge ? (
+      <span data-reply-nudge-dismiss="fe2-mail-reply-nudge-dismiss" style={{ display: "contents" }}>
+        <StopClick label="返信不要にする" testId="fe2-mail-reply-nudge-dismiss-row" onClick={onDismissNudge}>
+          <span
+            style={{
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              padding: "var(--dub-space-1) var(--dub-space-3)",
+              border: "1px solid var(--dub-color-border-default)",
+              borderRadius: "var(--dub-radius-full)",
+              fontSize: "var(--dub-font-size-xs)",
+              color: "var(--dub-color-text-secondary)",
+              background: "var(--dub-color-surface-base)",
+            }}
+          >
+            返信不要
+          </span>
+        </StopClick>
+      </span>
+    ) : null;
 
   // P25: `data-thread-row` is a static marker (literal string, survives minification) so a
   // live-deploy check can grep the built bundle for this row without depending on RTL testids.
@@ -239,7 +328,27 @@ function ThreadRow({
             </span>
           )}
           <LabelChips ids={thread.labels} labels={labels} />
-          <span style={{ fontWeight: unread ? 700 : 400, color: "var(--dub-color-text-primary)" }}>{thread.subject}</span>
+          {/* Subject yields width (ellipsis) so the nudge badge after it never gets clipped. */}
+          <span
+            style={{
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontWeight: unread ? 700 : 400,
+              color: "var(--dub-color-text-primary)",
+            }}
+          >
+            {thread.subject}
+          </span>
+          {nudge ? (
+            // Literal marker survives minification so verify:live can grep the bundle.
+            <span data-reply-nudge="fe2-mail-reply-nudge" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+              <Badge tone="warning" testId="fe2-mail-reply-nudge">
+                {`${nudge.days}日前・未返信`}
+              </Badge>
+            </span>
+          ) : null}
           <span style={{ color: "var(--dub-color-text-muted)", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis" }}>
             {" — "}
             {snippet(last.body, 80)}
@@ -247,7 +356,19 @@ function ThreadRow({
         </span>
       </span>
 
-      <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", minWidth: narrow ? 0 : 96 }}>
+      {narrow ? null : dismissNudge}
+
+      <span
+        style={{
+          flexShrink: 0,
+          display: "inline-flex",
+          flexDirection: narrow ? "column" : "row",
+          alignItems: narrow ? "flex-end" : "center",
+          justifyContent: "flex-end",
+          gap: "var(--dub-space-1)",
+          minWidth: narrow ? 0 : 96,
+        }}
+      >
         {hover && !narrow ? (
           <span style={{ display: "inline-flex", gap: 2, color: "var(--dub-color-text-secondary)" }}>
             {state.folder === "trash" ? (
@@ -291,6 +412,7 @@ function ThreadRow({
             {relativeDate(last.date)}
           </span>
         )}
+        {narrow ? dismissNudge : null}
       </span>
     </div>
   );
@@ -299,6 +421,9 @@ function ThreadRow({
 export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
+  const now = new Date();
+  const pendingReplies = pendingReplyIds(state.scheduled);
+  const [nudgeOpen, setNudgeOpen] = useState(true);
   const [leavingIds, setLeavingIds] = useState<Set<string>>(new Set());
   const leaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -346,9 +471,31 @@ export function ThreadList(): JSX.Element {
     return scope && matchesQuery(t, state.search);
   });
 
-  const allChecked = visible.length > 0 && visible.every((t) => state.checked.has(t.id));
+  // Inbox only: unanswered mail is pinned on top so it can't sink under newer arrivals.
+  const { nudged, rest } =
+    state.folder === "inbox" && !state.labelFilter
+      ? partitionNudged(visible, now, pendingReplies)
+      : { nudged: [], rest: visible };
+  const renderRow = (t: MailThreadModel, pinned = false): JSX.Element => (
+    <ThreadRow
+      key={t.id}
+      thread={t}
+      labels={state.labels}
+      leaving={leavingIds.has(t.id)}
+      narrow={narrow}
+      now={now}
+      pendingReplies={pendingReplies}
+      onArchive={() => beginLeave([t.id], "ARCHIVE")}
+      onTrash={() => beginLeave([t.id], "TRASH")}
+      {...(pinned ? { onDismissNudge: () => dispatch({ type: "DISMISS_NUDGE", ids: [t.id] }) } : {})}
+    />
+  );
+
+  // Bulk actions only reach rows on screen (a collapsed 返信待ち group is off-limits).
+  const shown = nudgeOpen ? [...nudged, ...rest] : rest;
+  const allChecked = shown.length > 0 && shown.every((t) => state.checked.has(t.id));
   const someChecked = state.checked.size > 0;
-  const checkedInView = visible.filter((t) => state.checked.has(t.id)).map((t) => t.id);
+  const checkedInView = shown.filter((t) => state.checked.has(t.id)).map((t) => t.id);
 
   return (
     <section
@@ -378,7 +525,7 @@ export function ThreadList(): JSX.Element {
           label={allChecked ? "全選択を解除" : "すべて選択"}
           testId="fe2-mail-select-all"
           onClick={() =>
-            allChecked || someChecked ? dispatch({ type: "CLEAR_CHECKS" }) : dispatch({ type: "CHECK_ALL", ids: visible.map((t) => t.id) })
+            allChecked || someChecked ? dispatch({ type: "CLEAR_CHECKS" }) : dispatch({ type: "CHECK_ALL", ids: shown.map((t) => t.id) })
           }
         >
           <span
@@ -461,17 +608,22 @@ export function ThreadList(): JSX.Element {
         </div>
       ) : (
         <div role="rowgroup" style={{ flex: 1, overflowY: "auto" }}>
-          {visible.map((t) => (
-            <ThreadRow
-              key={t.id}
-              thread={t}
-              labels={state.labels}
-              leaving={leavingIds.has(t.id)}
-              narrow={narrow}
-              onArchive={() => beginLeave([t.id], "ARCHIVE")}
-              onTrash={() => beginLeave([t.id], "TRASH")}
-            />
-          ))}
+          {nudged.length > 0 ? (
+            // Literal marker survives minification so verify:live can grep the bundle.
+            <div data-reply-nudge-pinned="fe2-mail-reply-nudge-pinned" style={{ display: "contents" }}>
+              <SectionHeader
+                title="返信待ち"
+                count={nudged.length}
+                accent
+                open={nudgeOpen}
+                onToggle={() => setNudgeOpen((o) => !o)}
+                testId="fe2-mail-nudge-section"
+              />
+              {nudgeOpen ? nudged.map((t) => renderRow(t, true)) : null}
+              {rest.length > 0 ? <SectionHeader title="その他" testId="fe2-mail-rest-section" /> : null}
+            </div>
+          ) : null}
+          {rest.map((t) => renderRow(t))}
         </div>
       )}
     </section>

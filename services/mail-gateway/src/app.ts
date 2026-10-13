@@ -452,8 +452,9 @@ function assertAttachmentsSupported(c: Context<AppBindings>, req: mail.SendMailR
   }
 }
 
-/** Validate a thread-flags PATCH body: an object with any of starred/archived/trashed/purged
- *  as booleans (purged = 完全に削除, per-user permanent hide; never a physical delete).
+/** Validate a thread-flags PATCH body: an object with any of starred/archived/trashed/purged/
+ *  noReply as booleans (purged = 完全に削除, per-user permanent hide; never a physical delete;
+ *  noReply = 返信不要, true stamps noReplyAt = now / false clears it).
  *  Rejects a non-object or a non-boolean flag (400). An empty {} is allowed (a no-op upsert
  *  that just returns the current state). */
 function parseFlagsPatch(body: unknown): mail.MailThreadFlagsPatch {
@@ -462,7 +463,7 @@ function parseFlagsPatch(body: unknown): mail.MailThreadFlagsPatch {
   }
   const src = body as Record<string, unknown>;
   const out: mail.MailThreadFlagsPatch = {};
-  for (const key of ["starred", "archived", "trashed", "purged"] as const) {
+  for (const key of ["starred", "archived", "trashed", "purged", "noReply"] as const) {
     if (src[key] !== undefined) {
       if (typeof src[key] !== "boolean") {
         throw new DubError("MAIL_INVALID_REQUEST", `flag "${key}" must be a boolean`, { status: 400 });

@@ -598,12 +598,14 @@ export interface UserFlagRow {
   // (0009). Never triggers a physical row delete — only this viewer's list is filtered.
   purged: number;
   purged_at: string | null;
+  // 返信不要 (0011): when the user dismissed the reply nudge; NULL = not dismissed.
+  no_reply_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 function rowToFlags(r: UserFlagRow): mail.MailThreadFlags {
-  return { threadId: r.thread_id, starred: r.starred === 1, archived: r.archived === 1, trashed: r.trashed === 1, purged: r.purged === 1 };
+  return { threadId: r.thread_id, starred: r.starred === 1, archived: r.archived === 1, trashed: r.trashed === 1, purged: r.purged === 1, noReplyAt: r.no_reply_at ?? null };
 }
 
 /** Every flag row for one user (absent thread = all-false default; not returned). Only rows
@@ -631,21 +633,23 @@ export async function upsertUserFlags(
     ownerUserId,
     threadId,
   );
-  const cur = existing ? rowToFlags(existing) : { threadId, starred: false, archived: false, trashed: false, purged: false };
+  const cur = existing ? rowToFlags(existing) : { threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
   const merged: mail.MailThreadFlags = {
     threadId,
     starred: patch.starred ?? cur.starred,
     archived: patch.archived ?? cur.archived,
     trashed: patch.trashed ?? cur.trashed,
     purged: patch.purged ?? cur.purged,
+    // 返信不要: every press re-stamps now (so mail received before it is covered); false clears.
+    noReplyAt: patch.noReply === undefined ? cur.noReplyAt : patch.noReply ? now : null,
   };
   // purged_at: stamp the moment the conversation is first purged; keep the existing stamp on
   // later writes; clear it only if a caller ever un-purges (no UI does, but keep it honest).
   const purgedAt = merged.purged ? (existing?.purged_at ?? now) : null;
   await db.run(
     `INSERT OR REPLACE INTO mail_user_flags
-       (owner_user_id, thread_id, starred, archived, trashed, purged, purged_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (owner_user_id, thread_id, starred, archived, trashed, purged, purged_at, no_reply_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ownerUserId,
     threadId,
     merged.starred ? 1 : 0,
@@ -653,6 +657,7 @@ export async function upsertUserFlags(
     merged.trashed ? 1 : 0,
     merged.purged ? 1 : 0,
     purgedAt,
+    merged.noReplyAt,
     existing?.created_at ?? now,
     now,
   );
