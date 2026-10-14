@@ -24,15 +24,12 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
+import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
 import { useMailStore } from "./useMailStore.tsx";
 import styles from "./replyNudge.module.css";
 import { useMailApi } from "../MailProvider.tsx";
 import { formatBytes, saveBlob } from "../mailApi.tsx";
-
-function fmtList(people: MailPerson[]): string {
-  return people.map(displayName).join(", ");
-}
 
 function Avatar({ p, size = 36 }: { p: MailPerson; size?: number }): JSX.Element {
   return (
@@ -207,8 +204,19 @@ function Attachments({ msg }: { msg: MailMsg }): JSX.Element | null {
   );
 }
 
-function MessageBlock({ msg, defaultOpen }: { msg: MailMsg; defaultOpen: boolean }): JSX.Element {
+function MessageBlock({
+  msg,
+  defaultOpen,
+  subject,
+  own,
+}: {
+  msg: MailMsg;
+  defaultOpen: boolean;
+  subject: string;
+  own: ReadonlySet<string>;
+}): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
+  const [details, setDetails] = useState(false);
   return (
     <div
       data-testid="fe2-mail-thread-message"
@@ -220,19 +228,49 @@ function MessageBlock({ msg, defaultOpen }: { msg: MailMsg; defaultOpen: boolean
       >
         <Avatar p={msg.from} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <strong style={{ fontSize: "var(--dub-font-size-sm)" }}>{displayName(msg.from)}</strong>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+            <strong style={{ fontSize: "var(--dub-font-size-sm)", whiteSpace: "nowrap", flexShrink: 0 }}>{displayName(msg.from)}</strong>
             {open ? (
-              <span style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
+              <span
+                style={{
+                  fontSize: "var(--dub-font-size-xs)",
+                  color: "var(--dub-color-text-muted)",
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 &lt;{msg.from.email}&gt;
               </span>
             ) : null}
           </div>
           {open ? (
-            <div style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
-              宛先: {fmtList(msg.to)}
-              {msg.cc && msg.cc.length > 0 ? ` ・ Cc: ${fmtList(msg.cc)}` : ""}
-            </div>
+            <button
+              type="button"
+              data-testid="fe2-mail-details-toggle"
+              aria-haspopup="dialog"
+              aria-label={`宛先: ${recipientSummary(msg, own)}（詳細を表示）`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setDetails(true);
+              }}
+              style={{
+                all: "unset",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 2,
+                maxWidth: "100%",
+                fontSize: "var(--dub-font-size-xs)",
+                color: "var(--dub-color-text-muted)",
+              }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                宛先: {recipientSummary(msg, own)}
+              </span>
+              <MailIcon name="chevron-down" size={14} style={{ flexShrink: 0 }} />
+            </button>
           ) : (
             <div
               style={{
@@ -268,6 +306,7 @@ function MessageBlock({ msg, defaultOpen }: { msg: MailMsg; defaultOpen: boolean
         </div>
       ) : null}
       {open ? <Attachments msg={msg} /> : null}
+      {details ? <MessageDetailsDialog msg={msg} subject={subject} own={own} onClose={() => setDetails(false)} /> : null}
     </div>
   );
 }
@@ -292,23 +331,25 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const mailApi = useMailApi();
   const [reply, setReply] = useState("");
   const lastIdx = thread.messages.length - 1;
+  const own = ownAddresses(thread, state.me);
   const last = thread.messages[lastIdx]!;
   const nudge = replyNudge(thread, new Date(), pendingReplyIds(state.scheduled));
   const chips = thread.labels.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => Boolean(l));
 
   // Reply targets the last message that ISN'T ours — the external correspondent — never
   // our own reply (which is now folded into the conversation). `ourAddresses` are the From
-  // addresses we sent as (info@ / the user's address), so reply-all can drop them too.
-  const ourAddresses = new Set(thread.messages.filter((m) => m.outbound).map((m) => m.from.email).filter(Boolean));
-  const notUs = (p: MailPerson): boolean => p.email.length > 0 && !ourAddresses.has(p.email);
+  // addresses we sent as plus the address mail was delivered to us at, so reply-all drops them.
+  const notUs = (p: MailPerson): boolean => p.email.length > 0 && !own.has(p.email.trim().toLowerCase());
   const replyTo = [...thread.messages].reverse().find((m) => !m.outbound) ?? last;
+  // A Reply-To header redirects replies (RFC 5322 §3.6.2), as Gmail does.
+  const sender = replyTo.headerMeta?.replyTo?.length ? replyTo.headerMeta.replyTo : [replyTo.from];
   const dedupPeople = (ps: MailPerson[]): MailPerson[] => {
     const m = new Map<string, MailPerson>();
     for (const p of ps) if (p.email && !m.has(p.email)) m.set(p.email, p);
     return [...m.values()];
   };
-  const replyRecipients = replyTo.outbound ? replyTo.to.filter(notUs) : [replyTo.from];
-  const allRecipients = dedupPeople([replyTo.from, ...replyTo.to, ...(replyTo.cc ?? [])].filter(notUs));
+  const replyRecipients = replyTo.outbound ? replyTo.to.filter(notUs) : sender;
+  const allRecipients = dedupPeople([...sender, ...replyTo.to, ...(replyTo.cc ?? [])].filter(notUs));
 
   const openCompose = (mode: "reply" | "replyAll" | "forward"): void => {
     const to = mode === "forward" ? [] : mode === "replyAll" ? allRecipients : replyRecipients;
@@ -442,7 +483,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
         ) : null}
 
         {thread.messages.map((m, i) => (
-          <MessageBlock key={m.id} msg={m} defaultOpen={i === lastIdx} />
+          <MessageBlock key={m.id} msg={m} defaultOpen={i === lastIdx} subject={thread.subject} own={own} />
         ))}
 
         <div style={{ borderTop: "1px solid var(--dub-color-border-default)", padding: "16px 24px", display: "flex", gap: 8, flexWrap: "wrap" }}>

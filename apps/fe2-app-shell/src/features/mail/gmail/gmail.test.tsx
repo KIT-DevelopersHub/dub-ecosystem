@@ -564,6 +564,83 @@ describe("GmailApp (hydrates from the gateway)", () => {
     await waitFor(() => expect(api.downloadAttachment).toHaveBeenCalledWith("messages", "mailin_1", "att_ok"));
   });
 
+  describe("recipient summary + details dialog (Gmail の「詳細を表示」)", () => {
+    const withMeta: mail.MailThread = {
+      ...DEMO_INBOX_THREAD,
+      messages: [
+        {
+          ...DEMO_INBOX_THREAD.messages[0]!,
+          cc: [{ email: "yuki@example.com", name: "伊藤 由紀" }, { email: "office@example.net" }],
+          headerMeta: {
+            replyTo: [{ email: "kanji@example.com", name: "幹事" }],
+            deliveredTo: "info@developershub.jp",
+            mailedBy: "mail.example.com",
+            signedBy: "example.com",
+            tls: true,
+          },
+        },
+      ],
+    };
+    const openFirst = async (api: MailApi): Promise<void> => {
+      render(wrap(<GmailApp />, api));
+      await userEvent.click((await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!);
+    };
+
+    it("summarises To + Cc on one line with the delivered-to address as 自分", async () => {
+      await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
+      const toggle = await screen.findByTestId("fe2-mail-details-toggle");
+      await waitFor(() => expect(toggle).toHaveTextContent("宛先: 自分, 伊藤 由紀, office@example.net"));
+      expect(screen.queryByTestId("fe2-mail-details")).toBeNull();
+    });
+
+    it("opens a dialog with every field, own address marked, without collapsing the message", async () => {
+      await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
+      await waitFor(() => expect(screen.getByTestId("fe2-mail-details-toggle")).toHaveTextContent("自分"));
+      await userEvent.click(screen.getByTestId("fe2-mail-details-toggle"));
+      const dialog = await screen.findByTestId("fe2-mail-details");
+      const row = (label: string): HTMLElement => within(dialog).getByTestId(`fe2-mail-details-row-${label}`);
+      expect(row("差出人")).toHaveTextContent("山田 花子 <hanako@example.com>");
+      expect(row("返信先")).toHaveTextContent("幹事 <kanji@example.com>");
+      expect(row("宛先")).toHaveTextContent("info@developershub.jp（自分）");
+      expect(row("Cc")).toHaveTextContent("伊藤 由紀 <yuki@example.com>");
+      expect(row("Cc")).toHaveTextContent("office@example.net");
+      expect(row("件名")).toHaveTextContent("登壇のご相談");
+      expect(row("送信元")).toHaveTextContent("mail.example.com");
+      expect(row("署名元")).toHaveTextContent("example.com");
+      expect(row("セキュリティ")).toHaveTextContent("標準的な暗号化（TLS）");
+      // The body stays open behind the dialog (the toggle must not fold the message).
+      expect(screen.getByTestId("fe2-mail-body-text")).toBeInTheDocument();
+    });
+
+    it("copies a single Cc address and all Cc addresses at once", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
+      await waitFor(() => expect(screen.getByTestId("fe2-mail-details-toggle")).toHaveTextContent("自分"));
+      await userEvent.click(screen.getByTestId("fe2-mail-details-toggle"));
+      const dialog = await screen.findByTestId("fe2-mail-details");
+      await userEvent.click(within(dialog).getByRole("button", { name: "yuki@example.comをコピー" }));
+      expect(writeText).toHaveBeenLastCalledWith("yuki@example.com");
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "yuki@example.comをコピーしました" })).toBeInTheDocument());
+      await userEvent.click(within(dialog).getByTestId("fe2-mail-details-copy-all-cc"));
+      expect(writeText).toHaveBeenLastCalledWith("yuki@example.com, office@example.net");
+    });
+
+    it("hides rows the message does not carry (pre-0013 mail: no Reply-To / security)", async () => {
+      await openFirst(fakeApi());
+      await userEvent.click(await screen.findByTestId("fe2-mail-details-toggle"));
+      const dialog = await screen.findByTestId("fe2-mail-details");
+      expect(within(dialog).queryByTestId("fe2-mail-details-row-返信先")).toBeNull();
+      expect(within(dialog).queryByTestId("fe2-mail-details-row-セキュリティ")).toBeNull();
+      expect(within(dialog).getByTestId("fe2-mail-details-row-Cc")).toHaveTextContent("伊藤 由紀");
+    });
+
+    it("replies to the Reply-To address (RFC 5322), not the From", async () => {
+      await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
+      await waitFor(() => expect(screen.getByPlaceholderText("幹事 に返信…")).toBeInTheDocument());
+    });
+  });
+
   it("surfaces an oversize attachment as a disabled chip instead of dropping it silently (改善#2)", async () => {
     const api = fakeApi();
     render(wrap(<GmailApp />, api));

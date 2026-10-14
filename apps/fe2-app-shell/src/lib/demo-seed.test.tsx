@@ -352,6 +352,31 @@ describe("demo outbox reply threading", () => {
   });
 });
 
+describe("demo mail Cc", () => {
+  it("serves a received mail with Cc on list, detail and thread", async () => {
+    const client = api();
+    const cc = [{ email: "yuki@example.com", name: "伊藤 由紀" }, { email: "office@example.net" }];
+    const list = await client.request<{ items: { id: string; cc?: unknown }[] }>({ method: "GET", path: "/api/v1/mail/messages" });
+    expect(list.items.find((m) => m.id === "msg_4")?.cc).toEqual(cc);
+    const thread = await client.request<{ messages: { cc?: unknown }[] }>({ method: "GET", path: "/api/v1/mail/threads/thr_4" });
+    expect(thread.messages[0]!.cc).toEqual(cc);
+  });
+
+  it("stores the archive auto-CC but hides it from Sent list/detail (like the gateway)", async () => {
+    globalThis.localStorage.removeItem("dub_demo_sent_usr_demo");
+    const client = api();
+    await client.request({ method: "POST", path: "/api/v1/mail/outbox", body: { to: [{ email: "x@example.com" }], cc: [{ email: "boss@example.com" }], subject: "cc", textBody: "b" } });
+    await client.request({ method: "POST", path: "/api/v1/mail/outbox", body: { to: [{ email: "x@example.com" }], subject: "nocc", textBody: "b" } });
+    expect(globalThis.localStorage.getItem("dub_demo_sent_usr_demo")).toContain("archive@developershub.jp");
+    const sent = await client.request<{ items: { id: string; subject: string; cc?: unknown }[] }>({ method: "GET", path: "/api/v1/mail/sent" });
+    const withCc = sent.items.find((s) => s.subject === "cc")!;
+    expect(withCc.cc).toEqual([{ email: "boss@example.com" }]);
+    expect(sent.items.find((s) => s.subject === "nocc")!.cc).toBeUndefined();
+    const detail = await client.request<{ cc?: unknown }>({ method: "GET", path: `/api/v1/mail/sent/${withCc.id}` });
+    expect(detail.cc).toEqual([{ email: "boss@example.com" }]);
+  });
+});
+
 describe("demo inbox showcases the reply nudge", () => {
   it("has one read human mail in the 3..14 day window and one recent one", async () => {
     const res = await api().request<{ items: { id: string; receivedAt: string; read: boolean }[] }>({ method: "GET", path: "/api/v1/mail/messages" });
