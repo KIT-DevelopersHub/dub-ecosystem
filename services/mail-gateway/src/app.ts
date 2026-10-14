@@ -27,7 +27,7 @@ import { HEADERS } from "@dub/observability";
 import { common, type mail } from "@dub/types";
 import type { AppBindings } from "./env";
 import { POLICY_TABLE } from "./policy-table";
-import { DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
+import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
 import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin } from "./email-routing-routes";
@@ -39,6 +39,17 @@ import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
 import { parseListMessagesQuery, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
 
+/** Drop the compliance archive address (auto-CC'd on every send) from a DTO's Cc for
+ *  display. It is an internal storage mailbox, not a person the user CC'd — showing it on
+ *  every sent mail (and on replies-all that echo it back) is noise. Stored data keeps it. */
+function hideArchiveCc<T extends { cc?: mail.MailAddress[] }>(item: T, archive: string | null): T {
+  if (!archive || !item.cc) return item;
+  const cc = item.cc.filter((a) => a.email.trim().toLowerCase() !== archive);
+  if (cc.length > 0) item.cc = cc;
+  else delete item.cc;
+  return item;
+}
+
 export function createApp() {
   const app = new Hono<AppBindings>();
 
@@ -47,6 +58,10 @@ export function createApp() {
 
   const ctxOf = (c: Context<AppBindings>): RequestContext => c.get("dubCtx");
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, ctxOf(c).requestId);
+  // Same expression as buildSendDeps' archiveCc, so the hidden address is exactly the one
+  // auto-CC'd on send (empty string = archive CC disabled = nothing hidden).
+  const archiveOf = (c: Context<AppBindings>): string | null =>
+    (c.env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS).trim().toLowerCase() || null;
 
   // ---- THE authorization layer. Mounted on every route, so it runs before every handler
   // including the ones registered below it; a route absent from POLICY_TABLE is denied
@@ -218,6 +233,7 @@ export function createApp() {
   ext.get("/messages", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
     const page = await listInbound(dbOf(c), { ...q, ownerUserId: await inboundScopeOf(c), viewer: ownerOf(c) });
+    for (const m of page.items) hideArchiveCc(m, archiveOf(c));
     return c.json(page satisfies common.Paginated<mail.MailMessageListItem>);
   });
 
@@ -225,6 +241,7 @@ export function createApp() {
     const db = dbOf(c);
     const msg = await getInboundDetail(db, c.req.param("id"), await inboundScopeOf(c), ownerOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
+    hideArchiveCc(msg, archiveOf(c));
     const attachments = await attachmentsFor(db, "inbound", msg.id);
     if (attachments.length > 0) msg.attachments = attachments;
     return c.json(msg satisfies mail.MailMessageDetail);
@@ -244,6 +261,7 @@ export function createApp() {
   ext.get("/sent", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
     const page = await listSent(dbOf(c), { ownerUserId: await scopeOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
+    for (const m of page.items) hideArchiveCc(m, archiveOf(c));
     return c.json(page satisfies common.Paginated<mail.MailSentListItem>);
   });
 
@@ -251,6 +269,7 @@ export function createApp() {
     const db = dbOf(c);
     const msg = await getSentDetail(db, c.req.param("id"), await scopeOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `sent message not found: ${c.req.param("id")}`, { status: 404 });
+    hideArchiveCc(msg, archiveOf(c));
     const attachments = await attachmentsFor(db, "sent", msg.id);
     if (attachments.length > 0) msg.attachments = attachments;
     return c.json(msg satisfies mail.MailSentDetail);
@@ -342,6 +361,7 @@ export function createApp() {
     const messages = await listThread(db, threadId, await inboundScopeOf(c), ownerOf(c));
     if (messages.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
     for (const m of messages) {
+      hideArchiveCc(m, archiveOf(c));
       const attachments = await attachmentsFor(db, "inbound", m.id);
       if (attachments.length > 0) m.attachments = attachments;
     }

@@ -74,6 +74,9 @@ function MessageCard({ message }: { message: mail.MailMessageDetail }): JSX.Elem
           {!message.read ? <Badge tone="info" testId="fe2-mail-thread-unread">未読</Badge> : null}
         </Stack>
         <small>宛先: {message.to.map(addressLabel).join(", ")}</small>
+        {message.cc && message.cc.length > 0 ? (
+          <small data-testid="fe2-mail-thread-cc">Cc: {message.cc.map(addressLabel).join(", ")}</small>
+        ) : null}
         <small>{formatReceived(message.receivedAt)}</small>
         <Divider />
         <MessageBody message={message} />

@@ -562,6 +562,14 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
     to: [{ email: "demo@developershub.jp" }], subject: "会場下見の日程", snippet: "来週の下見日程を共有します。",
     receivedAt: daysAgoIso(4), read: true, mine: true,
   },
+  {
+    // Received mail with Cc recipients (受信メールの CC 表示): the reading pane shows a Cc line.
+    id: "msg_4", messageId: "<m4@demo>", threadId: "thr_4", from: { email: "kenji@example.com", name: "高橋 健二" },
+    to: [{ email: "demo@developershub.jp" }],
+    cc: [{ email: "yuki@example.com", name: "伊藤 由紀" }, { email: "office@example.net" }],
+    subject: "懇親会会場の候補（CC共有）", snippet: "懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。",
+    receivedAt: daysAgoIso(2), read: false, mine: true,
+  },
 ];
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
@@ -581,12 +589,25 @@ const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
     ],
   },
   msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
+  msg_4: {
+    ...MAIL_LIST[3]!,
+    textBody: "高橋です。\n\n懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。\n\n1. 駅前のイタリアン（40名）\n2. 学内カフェテリア（60名）\n\nご意見をお願いします。",
+    // 「宛先: 自分, 伊藤 由紀, … ▾」→ 詳細ダイアログ (返信先 / 送信元 / 署名元 / セキュリティ).
+    headerMeta: {
+      replyTo: [{ email: "kondankai@example.com", name: "懇親会幹事" }],
+      deliveredTo: "demo@developershub.jp",
+      mailedBy: "mail.example.com",
+      signedBy: "example.com",
+      tls: true,
+    },
+  },
 };
 
 const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
+  thr_4: { id: "thr_4", messages: [MAIL_DETAIL.msg_4!] },
 };
 
 // ── demo accounts (per-account mail scope) ────────────────────────────────────
@@ -652,8 +673,16 @@ const LEAD_INBOX: mail.MailMessageDetail[] = [
 ];
 
 // Fixed archive address auto-CC'd on every send (mirrors the mail-gateway MAIL_ARCHIVE_CC
-// behavior so the demo/E2E shows the archive copy in the Sent detail's Cc).
+// behavior). Stored on the sent row like the gateway, but hidden from the read responses
+// (hideArchiveCc) exactly as the gateway does — it is an internal mailbox, not a person.
 const DEMO_ARCHIVE_CC = "archive@developershub.jp";
+
+function hideArchiveCc<T extends { cc?: mail.MailAddress[] }>(item: T): T {
+  if (!item.cc) return item;
+  const { cc, ...rest } = item;
+  const kept = cc.filter((a) => a.email.trim().toLowerCase() !== DEMO_ARCHIVE_CC);
+  return (kept.length > 0 ? { ...rest, cc: kept } : rest) as T;
+}
 
 // Oversight account (info@): an INDIVIDUAL admin account holding mail:read_all, so it
 // sees EVERY account's inbox + sent mail — the supervisor / archive view. Contrast with
@@ -956,7 +985,7 @@ function createMailStore() {
       const items: mail.MailSentListItem[] = readSent.map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
-        return listItem;
+        return hideArchiveCc(listItem);
       });
       return json(page(items));
     }
@@ -964,7 +993,7 @@ function createMailStore() {
       const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
       if (m) {
         const found = readSent.find((s) => s.id === decodeURIComponent(m[1]!));
-        return found ? json(found) : notFound(`GET ${pathname}`);
+        return found ? json(hideArchiveCc(found)) : notFound(`GET ${pathname}`);
       }
     }
 

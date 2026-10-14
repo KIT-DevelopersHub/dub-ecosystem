@@ -32,6 +32,7 @@ export type MailIconName =
   | "chevron-left"
   | "chevron-right"
   | "check"
+  | "copy"
   | "image"
   | "file"
   | "download"
@@ -159,6 +160,12 @@ const PATHS: Record<MailIconName, JSX.Element> = {
   "chevron-left": <path d="M15 6l-6 6 6 6" />,
   "chevron-right": <path d="M9 6l6 6-6 6" />,
   check: <path d="M5 12l5 5 9-11" />,
+  copy: (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a1 1 0 0 1 1-1h10" />
+    </>
+  ),
   image: (
     <>
       <rect x="3" y="4" width="18" height="16" rx="2" />
