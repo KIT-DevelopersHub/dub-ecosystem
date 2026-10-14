@@ -3,12 +3,12 @@
   "slug": "chat-sections",
   "worker": "dub-demo-chat-sections",
   "url": "https://dub-demo-chat-sections.developershub-site.workers.dev",
-  "deployedSha": "6922f34f",
+  "deployedSha": "7641916b",
   "branch": "feat/chat-channel-delete-sections",
   "actor": "ko-tarou",
-  "markers": ["fe6-section-create","fe6-settings-delete"],
+  "markers": ["fe6-details-tabs","fe6-details-add-member","fe6-settings-delete-agree","fe6-section-create"],
   "live": true,
-  "verifiedAt": "2026-10-14T04:09:07Z",
-  "updatedAt": "2026-10-14T04:09:07Z",
-  "note": "chat: channel delete + sections (rebased on 6cd0c8a4)"
+  "verifiedAt": "2026-10-14T04:29:06Z",
+  "updatedAt": "2026-10-14T04:29:06Z",
+  "note": "chat: Slack-style channel details (about/members/settings) + delete + sections"
 }
