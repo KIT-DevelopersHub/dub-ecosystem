@@ -13,6 +13,7 @@ import { getLastChannel, setLastChannel } from "../store/draft";
 import type { CreateChannelRequest } from "../api/contract";
 import { ChannelList } from "./ChannelList";
 import { ChannelPage } from "./ChannelPage";
+import type { ChannelDetailsTab } from "./ChannelDetails";
 import { CreateChannelModal } from "./CreateChannelModal";
 import { NewDmModal } from "./NewDmModal";
 import { SectionNameModal } from "./SectionNameModal";
@@ -20,7 +21,7 @@ import { useChatSections } from "../hooks/useChatSections";
 import { channelLabel } from "../lib/dm";
 import styles from "../styles/chat.module.css";
 
-type ChatAppProps = { initialChannelId?: common.ChannelId; eventId?: common.EventId };
+type ChatAppProps = { initialChannelId?: common.ChannelId; eventId?: common.EventId; initialDetailsTab?: ChannelDetailsTab };
 
 type SectionDialog = { mode: "create"; assignChannelId?: common.ChannelId } | { mode: "rename"; section: ChatSection };
 
@@ -33,7 +34,7 @@ export function ChatApp(props: ChatAppProps) {
   );
 }
 
-function ChatAppBody({ initialChannelId, eventId }: ChatAppProps) {
+function ChatAppBody({ initialChannelId, eventId, initialDetailsTab }: ChatAppProps) {
   const { api, can, currentUserId } = useChatRuntime();
   const unread = useChatStore((s) => s.unread);
   const setUnread = useChatStore((s) => s.setUnread);
@@ -263,6 +264,12 @@ function ChatAppBody({ initialChannelId, eventId }: ChatAppProps) {
           onChannelsChanged={() => void reloadChannels()}
           onChannelDeleted={onChannelDeleted}
           onOpenMobileNav={isMobile ? () => setMobileNavOpen(true) : undefined}
+          sections={{
+            items: sections.sections,
+            currentSectionId: sections.assignments[active] ?? null,
+            onMove: (sectionId) => sections.move(active, sectionId),
+          }}
+          {...(initialDetailsTab && active === initialChannelId ? { initialDetailsTab } : {})}
         />
       ) : (
         <section className={styles.main}>

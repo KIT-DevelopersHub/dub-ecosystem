@@ -379,4 +379,27 @@ describe("chat channel delete + personal sections (demo store)", () => {
     expect(after.items.map((x) => x.id)).toEqual(["sec_demo_ops"]);
     expect(after.assignments.chn_general).toBeUndefined();
   });
+
+  it("backs the channel details modal: rename / topic / archive (versioned) and members", async () => {
+    const a = api();
+    expect((await a.auth.me()).permissions).toContain("chat:moderate");
+    interface Wire { name: string; topic: string | null; archived: boolean; version: number; memberCount: number }
+    const updated = await a.request<Wire>({ method: "PATCH", path: "/api/v1/chat/channels/chn_dev", body: { name: "dev-core", topic: "", version: 1 } });
+    expect(updated).toMatchObject({ name: "dev-core", topic: null, version: 2 });
+    const archived = await a.request<Wire>({ method: "PATCH", path: "/api/v1/chat/channels/chn_dev", body: { archived: true, version: 2 } });
+    expect(archived.archived).toBe(true);
+    let err: unknown;
+    try {
+      await a.request<Wire>({ method: "PATCH", path: "/api/v1/chat/channels/chn_dev", body: { archived: false, version: 1 } });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as ApiError).status).toBe(409);
+
+    const members = () => a.request<{ userId: string; role: string }[]>({ method: "GET", path: "/api/v1/chat/channels/chn_team_ops/members" });
+    expect((await members()).map((m) => m.userId)).toEqual(["usr_demo", "usr_bob"]);
+    await a.request({ method: "POST", path: "/api/v1/chat/channels/chn_team_ops/members", body: { userId: "usr_carol" } });
+    await a.request<void>({ method: "DELETE", path: "/api/v1/chat/channels/chn_team_ops/members/usr_bob" });
+    expect((await members()).map((m) => m.userId)).toEqual(["usr_demo", "usr_carol"]);
+  });
 });

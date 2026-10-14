@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-// Channel top bar: #name (opens settings when moderator), topic, member roster
+// Channel top bar: #name (opens the channel details modal), topic, member roster
 // popover, pinned-messages popover, and in-channel search. Presentational — all
 // data + async come from ChannelPage via props. Slack-style layout, tokens/CSS.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
@@ -13,7 +13,7 @@ import styles from "../styles/chat.module.css";
 export interface ChannelHeaderProps {
   channel: Channel;
   canModerate: boolean;
-  /** Settings entry visibility; defaults to canModerate (delete-only roles also need it). */
+  /** Details entry visibility (every reader for non-DM channels); defaults to canModerate. */
   canOpenSettings?: boolean;
   members: ChannelMember[];
   pinned: Message[];
@@ -130,11 +130,11 @@ export function ChannelHeader({
           className={styles.channelTitle}
           onClick={canOpenSettings ? onOpenSettings : undefined}
           data-testid={canOpenSettings ? "fe6-channel-settings-open" : undefined}
-          title={canOpenSettings ? "チャンネル設定" : undefined}
+          title={canOpenSettings ? "チャンネル詳細" : undefined}
         >
           {!isDm && <span className={styles.channelTitleHash}>#</span>}
           <span>{channel.name}</span>
-          <span aria-hidden style={{ fontSize: "0.7em", opacity: 0.6 }}>▾</span>
+          {canOpenSettings && <Icon name="chevron-down" size="sm" />}
         </button>
         {channel.topic && <span className={styles.channelTopic}>{channel.topic}</span>}
       </div>

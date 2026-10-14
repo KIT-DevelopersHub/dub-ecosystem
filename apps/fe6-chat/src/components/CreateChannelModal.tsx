@@ -12,7 +12,7 @@ export interface CreateChannelModalProps {
   onCreate: (req: CreateChannelRequest) => void | Promise<void>;
 }
 
-function normalizeName(raw: string): string {
+export function normalizeChannelName(raw: string): string {
   return raw
     .trim()
     .toLowerCase()
@@ -26,7 +26,7 @@ export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelMod
   const [topic, setTopic] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [busy, setBusy] = useState(false);
-  const handle = normalizeName(name);
+  const handle = normalizeChannelName(name);
   const valid = handle.length > 0;
 
   const submit = async () => {
