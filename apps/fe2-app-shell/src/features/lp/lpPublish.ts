@@ -31,6 +31,15 @@ export function lpViewUrl(
   return `${base}/?version=${encodeURIComponent(v)}`;
 }
 
+/**
+ * 「プレビュー」タブの行き先。版は公開中でも番号で指定する（live はプレビュー cookie を消すため）。
+ * tickets: on = 販売停止中でも販売中の見た目（申し込み不可）/ off = 販売中でも出さない。
+ * どちらもこの閲覧者にだけ効き、公開中の LP は変わらない。
+ */
+export function lpPreviewUrl(id: string, tickets: "on" | "off", base: string = LP_PUBLIC_URL): string {
+  return `${base}/?version=${encodeURIComponent(id.replace(/^v/, ""))}&tickets=${tickets}`;
+}
+
 /** 切り替え日時の表示（"2026/10/12 14:05"）。壊れた値はそのまま返す。 */
 export function formatSwitchedAt(iso: string): string {
   const d = new Date(iso);

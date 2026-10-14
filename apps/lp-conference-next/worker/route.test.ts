@@ -1,7 +1,7 @@
 // Run: node --test worker/route.test.ts (Node >= 22.18 strips TS types natively).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeVersion, readCookie, resolveRequest, rewriteLocation } from "./route.ts";
+import { normalizeVersion, readCookie, resolveRequest, rewriteLocation, ticketsCookie, ticketsPreview } from "./route.ts";
 
 const BUNDLED = ["v3.4", "v3.3", "v3.1"];
 const at = (path: string) => new URL(path, "https://lp.example");
@@ -71,4 +71,21 @@ test("same-origin referer with ?version= picks that version when no cookie (ifra
   assert.equal(r.kind === "serve" && r.version, "v3.1");
   const x = resolveRequest(at("/logo.png"), null, "v3.4", BUNDLED, "https://evil.example/?version=3.1");
   assert.equal(x.kind === "serve" && x.version, "v3.4");
+});
+
+test("ticketsPreview: param > cookie > same-origin referer; live clears; public LP is null", () => {
+  assert.equal(ticketsPreview(at("/"), null), null);
+  assert.equal(ticketsPreview(at("/?version=3.4&tickets=on"), null), "on");
+  assert.equal(ticketsPreview(at("/?tickets=OFF"), "lp_tickets=on"), "off");
+  assert.equal(ticketsPreview(at("/tickets"), "lp_tickets=on"), "on");
+  assert.equal(ticketsPreview(at("/?tickets=yes"), null), null);
+  assert.equal(ticketsPreview(at("/logo.png"), null, "https://lp.example/?tickets=on"), "on");
+  assert.equal(ticketsPreview(at("/logo.png"), null, "https://evil.example/?tickets=on"), null);
+  assert.equal(ticketsPreview(at("/?version=live"), "lp_tickets=on"), null);
+});
+
+test("ticketsCookie: session cookie for ?tickets=, cleared by ?version=live", () => {
+  assert.equal(ticketsCookie(at("/?tickets=on")), "lp_tickets=on; Path=/; SameSite=None; Secure; HttpOnly");
+  assert.match(ticketsCookie(at("/?version=live")) ?? "", /^lp_tickets=; .*Max-Age=0$/);
+  assert.equal(ticketsCookie(at("/?version=3.4")), null);
 });
