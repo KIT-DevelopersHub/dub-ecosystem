@@ -3,12 +3,12 @@
   "slug": "orgchart-reps",
   "worker": "dub-demo-orgchart-reps",
   "url": "https://dub-demo-orgchart-reps.developershub-site.workers.dev",
-  "deployedSha": "c89c172b",
+  "deployedSha": "94f55def",
   "branch": "feat/orgchart-leads-row",
   "actor": "ko-tarou",
   "markers": ["members-orgchart-reps","副代表"],
   "live": true,
-  "verifiedAt": "2026-10-13T17:04:03Z",
-  "updatedAt": "2026-10-13T17:04:03Z",
-  "note": "組織図: 代表=統括チームで役割に代表/副代表を含む人 + 統括チーム列"
+  "verifiedAt": "2026-10-14T02:16:05Z",
+  "updatedAt": "2026-10-14T02:16:05Z",
+  "note": "組織図: 代表チップ左端の欠け見えを修正"
 }
