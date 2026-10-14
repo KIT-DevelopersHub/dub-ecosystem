@@ -24,6 +24,8 @@ import { createD1GoogleAccountStore } from "./google-account-store";
 import { createGoogleAccountService, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
 import { importTokenKey } from "./google/crypto";
 import { mockForced, parseConfig, type Env } from "./env";
+import { buildMeetingsService } from "./meetings-wiring";
+import { MeetingSyncDO } from "./meeting-sync-do";
 
 /** Pick the Drive client: real when an account is available (connected from Drive共有 > 設定, or
  *  the secret token), mock otherwise or when DRIVESHARE_MOCK forces it. */
@@ -94,8 +96,14 @@ async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof cre
     newId: () => newId("dsg"),
   });
 
-  return createApp({ service, roleGrants, authz, googleAccount });
+  const meetings = () => buildMeetingsService(env, reqCtx);
+
+  return createApp({ service, roleGrants, authz, googleAccount, meetings });
 }
+
+// The entry module exports ONLY the default handler and the Durable Object class (workerd
+// refuses to start a Worker whose entry exports anything else).
+export { MeetingSyncDO };
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

@@ -129,6 +129,7 @@ export function setAppAccessLevel(
 /** Fine-grained toggle pairs where the change key is useless without the read key. */
 const IMPLIED_DETAIL_KEYS: readonly (readonly [PermissionKey, PermissionKey])[] = [
   ["drive:settings_edit", "drive:settings_view"],
+  ["calendar:meetings_edit", "calendar:meetings_view"],
 ];
 
 /**

@@ -101,13 +101,15 @@ deploy gantt-service   services/gantt-service/wrangler.free.toml
 deploy notification    services/notification/wrangler.free.toml
 deploy file-meta       services/file-meta/wrangler.free.toml
 deploy drive-proxy     services/drive-proxy/wrangler.free.toml
-# drive-share-service binds only SVC_IDENTITY (step 1); api-gateway binds it (SVC_DRIVE_SHARE,
-# step 4), so it lands before the gateway. Owns a driveshare_* namespace on shared dub-core D1.
-deploy drive-share-service services/drive-share-service/wrangler.free.toml
-# member-service (運営メンバー管理) binds only SVC_IDENTITY (step 1), but chat-service now binds
-# IT (SVC_MEMBER = チーム単位メンションの展開) and api-gateway binds it too (step 4) — so it must
-# land BEFORE chat-service: binding a Worker that does not exist yet fails the deploy (CF 10143).
+# member-service (運営メンバー管理) binds only SVC_IDENTITY (step 1), but chat-service and
+# drive-share-service now bind IT (SVC_MEMBER = チーム単位メンションの展開 / ミーティング招待先の名簿
+# Gmail) and api-gateway binds it too (step 4) — so it must land BEFORE both: binding a Worker
+# that does not exist yet fails the deploy (CF 10143).
 deploy member-service  services/member-service/wrangler.free.toml
+# drive-share-service binds SVC_IDENTITY (step 1) + SVC_MEMBER (just above); api-gateway binds it
+# (SVC_DRIVE_SHARE, step 4), so it lands before the gateway. Owns a driveshare_* namespace on
+# shared dub-core D1. SQLite-DO alarm (MeetingSyncDO, hourly meeting sync), no cron slot.
+deploy drive-share-service services/drive-share-service/wrangler.free.toml
 deploy chat-service    services/chat-service/wrangler.free.toml
 deploy mail-gateway    services/mail-gateway/wrangler.free.toml
 deploy deploy-service  services/deploy-service/wrangler.free.toml

@@ -61,6 +61,10 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
       "driveshare_google_accounts",
       "driveshare_google_active_account",
       "driveshare_google_oauth_states",
+      "driveshare_meeting_calendars",
+      "driveshare_meetings",
+      "driveshare_meeting_invites",
+      "driveshare_meeting_calendar_acl",
     ],
   },
   {
