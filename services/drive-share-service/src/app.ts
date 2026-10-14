@@ -15,6 +15,7 @@ import { policyGate, type PermissionGranter, type PolicyGateVars } from "@dub/po
 import type { DriveShareService } from "./service";
 import type { RoleGrantsService } from "./role-grants-service";
 import type { GoogleAccountService } from "./google-account";
+import type { MeetingsService } from "./meetings-service";
 import { POLICY_TABLE } from "./policy-table";
 import type {
   CompleteGoogleConnectRequest,
@@ -34,6 +35,9 @@ export interface AppDeps {
   googleAccount: GoogleAccountService;
   /** Which of the requested permission keys the caller holds (identity /authz/check). */
   authz: PermissionGranter;
+  /** カレンダー > ミーティング (gateway segment /meetings). Lazy so non-meeting routes never pay
+   *  for its wiring. */
+  meetings: () => Promise<MeetingsService>;
 }
 
 type Vars = PolicyGateVars;
@@ -149,6 +153,32 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.delete("/driveshare/google-account/accounts/:id", async (c) =>
     c.json(await deps.googleAccount.remove(c.req.param("id"))),
   );
+
+  // ---- カレンダー > ミーティング (gateway segment /meetings; same shared Google account) ----
+  app.get("/meetings", async (c) => c.json(await (await deps.meetings()).list()));
+
+  app.get("/meetings/targets", async (c) => c.json(await (await deps.meetings()).targets(c.get("userId"))));
+
+  app.post("/meetings", async (c) => {
+    const body = await parseBody<unknown>(c);
+    return c.json(await (await deps.meetings()).create(c.get("userId"), body), 201);
+  });
+
+  // Reconcile invitations / calendar shares with role membership now (the alarm does it hourly).
+  app.post("/meetings/sync", async (c) => {
+    const { complete: _complete, ...res } = await (await deps.meetings()).sync();
+    return c.json(res);
+  });
+
+  app.patch("/meetings/:id", async (c) => {
+    const body = await parseBody<unknown>(c);
+    return c.json(await (await deps.meetings()).update(c.req.param("id"), body));
+  });
+
+  app.delete("/meetings/:id", async (c) => {
+    await (await deps.meetings()).remove(c.req.param("id"));
+    return c.body(null, 204);
+  });
 
   return app;
 }

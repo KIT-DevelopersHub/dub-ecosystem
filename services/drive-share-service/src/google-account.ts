@@ -31,6 +31,9 @@ import {
 const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const ABOUT_ENDPOINT = "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+/** カレンダー > ミーティング (calendars + events with Meet links on the shared account). Accounts
+ *  connected before this was requested lack it until reconnected (see meetings calendarReady). */
+export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
 const STATE_TTL_MS = 10 * 60 * 1000;
 /** Google sends the admin back here; the SPA page that finishes the round-trip. */
 export const OAUTH_RETURN_PATH = "/driveshare";
@@ -243,7 +246,7 @@ export function createGoogleAccountService(deps: {
         client_id: client.clientId,
         redirect_uri: redirectUri,
         response_type: "code",
-        scope: DRIVE_SCOPE,
+        scope: `${DRIVE_SCOPE} ${CALENDAR_SCOPE}`,
         access_type: "offline",
         prompt: "consent",
         state,

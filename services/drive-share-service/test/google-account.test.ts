@@ -8,7 +8,7 @@ import { createInMemoryGoogleAccountStore } from "../src/google-account-store";
 import { importTokenKey, openToken, sealToken } from "../src/google/crypto";
 import type { Env } from "../src/env";
 import { SECRET_ACCOUNT_ID } from "../src/types";
-import { AUTHED, buildRoleGrants, fakeRoster, memAuthzHolding } from "./helpers";
+import { AUTHED, buildRoleGrants, fakeRoster, memAuthzHolding, buildMeetings } from "./helpers";
 
 const ORG = "org_devhub";
 const KEY_B64 = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
@@ -105,7 +105,7 @@ describe("add-account flow", () => {
     expect(u.searchParams.get("prompt")).toBe("consent");
     expect(u.searchParams.get("client_id")).toBe("web-cid");
     expect(u.searchParams.get("redirect_uri")).toBe(REDIRECT);
-    expect(u.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive");
+    expect(u.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar");
     const row = store.states.get(stateOf(authUrl))!;
     expect(row).toMatchObject({ userId: "usr_admin", redirectUri: REDIRECT, orgId: ORG });
   });
@@ -417,7 +417,7 @@ describe("routes (through policyGate)", () => {
     const service = createDriveShareService({ client, config: { listPageSize: 50 } });
     const { service: roleGrants } = buildRoleGrants({ drive: client, roster: fakeRoster({}) });
     const { svc } = await setup();
-    return createApp({ service, roleGrants, authz: memAuthzHolding(...keys), googleAccount: svc });
+    return createApp({ service, roleGrants, authz: memAuthzHolding(...keys), googleAccount: svc, meetings: async () => buildMeetings().service });
   }
   const HDR = { ...AUTHED, "content-type": "application/json" };
   const ADMIN_KEYS = ["app:driveshare:view", "app:driveshare:edit", "drive:settings_view", "drive:settings_edit"] as Parameters<typeof memAuthzHolding>;

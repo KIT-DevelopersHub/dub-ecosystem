@@ -4,7 +4,7 @@
 // way users already know; text on them is always white, as in Google.
 import type { identity, task } from "@dub/types";
 import type { IconName } from "@dub/ui";
-import { PERSONAL_LABEL, isScheduleTask, kindOf, labelOf, type ItemKind } from "./calendar-model";
+import { PERSONAL_LABEL, isMeetingTask, isScheduleTask, kindOf, labelOf, type ItemKind } from "./calendar-model";
 
 export const UNTITLED_TITLE = "（タイトルなし）";
 
@@ -44,6 +44,9 @@ export const KIND_VISUALS: Record<ItemKind, StatusVisual> = {
   rehearsal: { label: "予行練習", color: "#e67c73" },
 };
 
+/** ミーティング (shared-account Google Calendar events) share the ミーティング 種類 color. */
+export const MEETING_VISUAL: StatusVisual = KIND_VISUALS.meeting;
+
 export const KIND_ICON: Record<ItemKind, IconName> = {
   event: "calendar",
   meeting: "users",
@@ -53,6 +56,7 @@ export const KIND_ICON: Record<ItemKind, IconName> = {
 
 /** Color/label for a drawn item: a 予定 by its 種類, a タスク by its status. */
 export function itemVisual(t: task.Task): StatusVisual {
+  if (isMeetingTask(t)) return MEETING_VISUAL;
   return isScheduleTask(t) ? KIND_VISUALS[kindOf(t)] : statusVisual(t.status);
 }
 

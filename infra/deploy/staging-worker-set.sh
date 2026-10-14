@@ -19,9 +19,10 @@ STAGING_WORKER_DIRS=(
   "services/notification"
   "services/file-meta"
   "services/drive-proxy"
-  "services/drive-share-service"
-  # member-service before chat-service — chat binds it (SVC_MEMBER = チーム単位メンションの展開).
+  # member-service before chat-service and drive-share-service — both bind it (SVC_MEMBER =
+  # チーム単位メンションの展開 / ミーティング招待先の名簿 Gmail).
   "services/member-service"
+  "services/drive-share-service"
   "services/chat-service"
   "services/mail-gateway"
   "services/deploy-service"

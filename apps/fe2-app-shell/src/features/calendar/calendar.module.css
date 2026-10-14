@@ -600,3 +600,54 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ── meetings (カレンダー > ミーティング) ─────────────────────────────── */
+
+.meetingActions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+
+.calListHeadRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  padding-right: var(--dub-space-1);
+}
+.calListHeadRow .calListHead { padding-bottom: var(--dub-space-2); }
+
+.calCount {
+  margin-left: auto;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+
+/* Shared account missing / no calendar scope: a quiet notice in the sidebar. */
+.meetingNotice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--dub-space-2);
+  margin: 0 var(--dub-space-2) var(--dub-space-2);
+  padding: var(--dub-space-3);
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-warning-200, #fedf89);
+  background: var(--dub-color-warning-50, #fffaeb);
+  color: var(--dub-color-warning-800, #93370d);
+  font-size: var(--dub-font-size-xs);
+  line-height: 1.6;
+}
+
+/* Dialog form: up to three fields per row, wraps on narrow dialogs. */
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--dub-space-4);
+}
+
+/* @dub/ui DatePicker draws its own icon; hide Chromium's native one (kept clickable). */
+.dateField { display: block; }
+.dateField input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }
+
