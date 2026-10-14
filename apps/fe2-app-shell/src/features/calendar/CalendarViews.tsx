@@ -22,7 +22,7 @@ import {
   timedItemsOn,
   type CalendarItem,
 } from "./calendar-model";
-import { ItemButton, rectOf, useItemTitle, type AnchorRect } from "./CalendarPanels.tsx";
+import { ItemButton, PendingMark, rectOf, useItemTitle, type AnchorRect } from "./CalendarPanels.tsx";
 import { itemVisual, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
@@ -352,11 +352,15 @@ function TimedBlock({
     >
       {compact ? (
         <div className={styles.tgEventTitle}>
+          <PendingMark task={it.task} />
           {title}、{formatTime(it.start!)}
         </div>
       ) : (
         <>
-          <div className={styles.tgEventTitle}>{title}</div>
+          <div className={styles.tgEventTitle}>
+            <PendingMark task={it.task} />
+            {title}
+          </div>
           <div className={styles.tgEventTime}>{time}</div>
         </>
       )}
@@ -609,6 +613,7 @@ export function ScheduleList({
                       {it.allDay || it.startDay !== it.endDay ? "終日" : `${formatTime(it.start!)}～${formatTime(it.end!)}`}
                     </span>
                     <span className={it.task.status === "cancelled" ? styles.cancelled : undefined}>
+                      <PendingMark task={it.task} />
                       {titleOf(it.task)}
                     </span>
                   </button>

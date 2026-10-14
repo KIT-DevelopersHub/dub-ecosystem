@@ -21,6 +21,7 @@ import {
   Modal,
   SegmentedControl,
   Select,
+  Spinner,
   TextField,
   Textarea,
   isSubmitEnter,
@@ -34,6 +35,7 @@ import {
   formatItemWhen,
   formatTime,
   ITEM_KINDS,
+  isPendingMeetingTask,
   isScheduleTask,
   isVacationTask,
   kindOf,
@@ -52,6 +54,17 @@ const ItemTitleCtx = createContext<(t: task.Task) => string>((t) => t.title || U
 export const ItemTitleProvider = ItemTitleCtx.Provider;
 export function useItemTitle(): (t: task.Task) => string {
   return useContext(ItemTitleCtx);
+}
+
+/** Spinner + 「作成中…」 on a meeting the server has not confirmed yet. */
+export function PendingMark({ task: t }: { task: task.Task }): JSX.Element | null {
+  if (!isPendingMeetingTask(t)) return null;
+  return (
+    <span className={styles.pendingMark} data-feature="meet-create-pending" data-testid="calendar-item-pending">
+      <Spinner size="sm" aria-label="作成中" />
+      作成中…
+    </span>
+  );
 }
 
 export interface AnchorRect {
@@ -560,13 +573,17 @@ export function ItemButton({
       {banner ? (
         <>
           {!item.allDay && `${formatTime(item.start!)} `}
+          <PendingMark task={item.task} />
           {title}
         </>
       ) : (
         <>
           <span className={styles.dot} style={{ background: v.color }} />
           <span className={styles.monthItemTime}>{formatTime(item.start!)}</span>
-          <span className={styles.monthItemTitle}>{title}</span>
+          <span className={styles.monthItemTitle}>
+            <PendingMark task={item.task} />
+            {title}
+          </span>
         </>
       )}
     </button>

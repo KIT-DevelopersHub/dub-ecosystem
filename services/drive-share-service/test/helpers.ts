@@ -103,6 +103,7 @@ export function buildMeetings(opts: {
   accountEmail?: string | null;
   store?: ReturnType<typeof createInMemoryMeetingStore>;
   googleBudget?: number;
+  syncTimeLimitMs?: number;
 } = {}) {
   const store = opts.store ?? createInMemoryMeetingStore();
   const calendar = opts.calendar ?? createMockCalendarClient();
@@ -126,6 +127,7 @@ export function buildMeetings(opts: {
       kicks.push(soonMs);
     },
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
+    ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
   });
   return { service, store, calendar, kicks };
 }

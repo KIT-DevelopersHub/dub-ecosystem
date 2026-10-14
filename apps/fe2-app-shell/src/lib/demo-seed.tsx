@@ -2504,6 +2504,10 @@ function createMeetingsDemoStore() {
         updatedAt: now,
       };
       write([...read(), created]);
+      // ?meetingCreate=timeout: saved, but the answer is lost like the gateway's 504.
+      if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("meetingCreate") === "timeout") {
+        return problem("UPSTREAM_TIMEOUT", "Gateway Timeout", 504);
+      }
       return json(created, 201);
     }
     const one = /^\/api\/v1\/meetings\/([^/]+)$/.exec(pathname);
@@ -4058,6 +4062,9 @@ export function createDemoFetch(): typeof fetch {
     // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
     // Nothing is persisted — the demo session is stateless for credentials.
     if (method === "POST" && url.pathname === "/api/v1/me/password") return json(null, 204);
+
+    // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
+    if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??

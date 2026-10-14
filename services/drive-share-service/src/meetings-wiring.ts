@@ -79,7 +79,7 @@ export async function kickMeetingSync(env: Env, soonMs?: number): Promise<void> 
 export async function buildMeetingsService(
   env: Env,
   ctx: { requestId: string; userId?: string },
-  opts: { system?: boolean; googleBudget?: number } = {},
+  opts: { system?: boolean; googleBudget?: number; syncTimeLimitMs?: number } = {},
 ): Promise<MeetingsService> {
   const orgId = common.DUB_DEFAULT_ORG_ID;
   const accountStore = createD1GoogleAccountStore(createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId }));
@@ -97,5 +97,6 @@ export async function buildMeetingsService(
     // The alarm reschedules itself; only request-path writes kick it.
     ...(opts.system ? {} : { kick: (soonMs?: number) => kickMeetingSync(env, soonMs) }),
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
+    ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
   });
 }
