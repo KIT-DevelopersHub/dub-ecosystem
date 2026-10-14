@@ -11,7 +11,13 @@ import type {
   AppDeps,
   Channel,
   ChannelRow,
+  ChatSection,
+  ChatSectionList,
   CreateChannelRequest,
+  CreateSectionRequest,
+  SectionRow,
+  SetChannelSectionRequest,
+  UpdateSectionRequest,
   UpdateChannelRequest,
   AddMemberRequest,
   DeleteMessageResult,
@@ -71,6 +77,16 @@ function nonEmptyString(value: unknown, field: string): string {
   }
   return value;
 }
+const MAX_SECTION_NAME_LEN = 40;
+const MAX_SECTIONS_PER_USER = 50;
+function requireSectionName(value: unknown): string {
+  const s = nonEmptyString(value, "name").trim();
+  if (s.length > MAX_SECTION_NAME_LEN) throw errors.validationFailed([{ field: "name", reason: "too_long" }]);
+  return s;
+}
+
+const toSection = (r: SectionRow): ChatSection => ({ id: r.id, name: r.name, position: r.position, createdAt: r.createdAt });
+
 function requireBody(value: unknown): string {
   const s = nonEmptyString(value, "body");
   if (s.length > MAX_BODY_LEN) throw errors.validationFailed([{ field: "body", reason: "too_long" }]);
@@ -325,6 +341,72 @@ export class ChatService {
 
     if (archivedNow) await this.audit(ctx, "chat.channel.archive", "channel", id, null);
     return toChannel(next);
+  }
+
+  // Physical delete (unlike archive). POLICY_TABLE's `chat:delete_channel` is the whole
+  // authority (no channel-admin fallback); the instance check here is readability only.
+  async deleteChannel(ctx: ReqCtx, id: common.ChannelId): Promise<void> {
+    const { channel } = await this.loadReadable(id, ctx.userId);
+    if (channel.type === "dm") throw errors.validationFailed([{ field: "type", reason: "dm_not_deletable" }]);
+    await this.deps.repo.hardDeleteChannel(id);
+    await this.audit(ctx, "chat.channel.delete", "channel", id, { name: channel.name, type: channel.type });
+  }
+
+  // ---- personal sidebar sections (caller-owned rows only) ----
+  async listSections(ctx: ReqCtx): Promise<ChatSectionList> {
+    const [rows, assignments] = await Promise.all([
+      this.deps.repo.listSections(ctx.userId),
+      this.deps.repo.sectionAssignments(ctx.userId),
+    ]);
+    return { items: rows.map(toSection), assignments: Object.fromEntries(assignments) };
+  }
+
+  async createSection(ctx: ReqCtx, body: CreateSectionRequest): Promise<ChatSection> {
+    const name = requireSectionName(body?.name);
+    const existing = await this.deps.repo.listSections(ctx.userId);
+    if (existing.length >= MAX_SECTIONS_PER_USER) throw errors.validationFailed([{ field: "name", reason: "too_many_sections" }]);
+    const now = this.deps.now();
+    const row: SectionRow = {
+      id: this.deps.newSectionId(),
+      userId: ctx.userId,
+      name,
+      position: existing.reduce((max, s) => Math.max(max, s.position), -1) + 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.deps.repo.createSection(row);
+    return toSection(row);
+  }
+
+  async updateSection(ctx: ReqCtx, id: string, body: UpdateSectionRequest): Promise<ChatSection> {
+    const cur = await this.deps.repo.getSection(ctx.userId, id);
+    if (!cur) throw errors.notFound("section", id);
+    const next: SectionRow = { ...cur, updatedAt: this.deps.now() };
+    if (body?.name !== undefined) next.name = requireSectionName(body.name);
+    if (body?.position !== undefined) {
+      if (!Number.isInteger(body.position) || body.position < 0) {
+        throw errors.validationFailed([{ field: "position", reason: "invalid" }]);
+      }
+      next.position = body.position;
+    }
+    await this.deps.repo.updateSection(next);
+    return toSection(next);
+  }
+
+  async deleteSection(ctx: ReqCtx, id: string): Promise<void> {
+    if (!(await this.deps.repo.deleteSection(ctx.userId, id))) throw errors.notFound("section", id);
+  }
+
+  async setChannelSection(ctx: ReqCtx, channelId: common.ChannelId, body: SetChannelSectionRequest): Promise<void> {
+    const sectionId = body?.sectionId;
+    if (sectionId !== null && typeof sectionId !== "string") {
+      throw errors.validationFailed([{ field: "sectionId", reason: "required" }]);
+    }
+    await this.loadReadable(channelId, ctx.userId);
+    if (sectionId !== null && !(await this.deps.repo.getSection(ctx.userId, sectionId))) {
+      throw errors.notFound("section", sectionId);
+    }
+    await this.deps.repo.setChannelSection(ctx.userId, channelId, sectionId);
   }
 
   async addMember(ctx: ReqCtx, id: common.ChannelId, body: AddMemberRequest): Promise<void> {

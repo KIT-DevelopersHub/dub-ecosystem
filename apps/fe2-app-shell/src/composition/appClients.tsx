@@ -23,6 +23,8 @@ import type {
   ChatApiClient,
   Channel,
   ChannelMember,
+  ChatSection,
+  ChatSectionList,
   CreateChannelRequest,
   DeleteMessageResult,
   DeletionPolicyResponse,
@@ -44,6 +46,7 @@ import type {
   UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateSectionRequest,
   WsTicketResponse,
 } from "./featureEntries.tsx";
 import type { common, identity } from "@dub/types";
@@ -173,6 +176,18 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       api.request<GetChannelResponse>({ method: "GET", path: `${CHAT}/channels/${id}` as ApiPath }),
     updateChannel: (id: common.ChannelId, req: UpdateChannelRequest) =>
       api.request<Channel>({ method: "PATCH", path: `${CHAT}/channels/${id}` as ApiPath, body: req }),
+    deleteChannel: (id: common.ChannelId) =>
+      api.request<void>({ method: "DELETE", path: `${CHAT}/channels/${id}` as ApiPath }),
+    listSections: () =>
+      api
+        .request<Partial<ChatSectionList> | null>({ method: "GET", path: `${CHAT}/sections` })
+        .then((r): ChatSectionList => ({ items: r?.items ?? [], assignments: r?.assignments ?? {} })),
+    createSection: (name: string) => api.request<ChatSection>({ method: "POST", path: `${CHAT}/sections`, body: { name } }),
+    updateSection: (id: string, req: UpdateSectionRequest) =>
+      api.request<ChatSection>({ method: "PATCH", path: `${CHAT}/sections/${id}` as ApiPath, body: req }),
+    deleteSection: (id: string) => api.request<void>({ method: "DELETE", path: `${CHAT}/sections/${id}` as ApiPath }),
+    setChannelSection: (channelId: common.ChannelId, sectionId: string | null) =>
+      api.request<void>({ method: "PUT", path: `${CHAT}/channels/${channelId}/section` as ApiPath, body: { sectionId } }),
     addMember: (id: common.ChannelId, userId: common.UserId, role?: ChannelMember["role"]) =>
       api.request<ChannelMember>({
         method: "POST",

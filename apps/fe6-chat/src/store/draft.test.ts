@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clearDraft, DRAFT_MAX_LEN, loadDraft, saveDraft } from "./draft";
+import { clearDraft, DRAFT_MAX_LEN, getCollapsedSections, loadDraft, saveDraft, setCollapsedSections } from "./draft";
 
 function memStore(): Pick<Storage, "getItem" | "setItem" | "removeItem"> {
   const m = new Map<string, string>();
@@ -32,5 +32,17 @@ describe("draft persistence", () => {
     saveDraft("chn_a", "again", s);
     clearDraft("chn_a", s);
     expect(loadDraft("chn_a", s)).toBe("");
+  });
+});
+
+describe("collapsed sidebar sections", () => {
+  it("round-trips only the collapsed keys and tolerates junk", () => {
+    const s = memStore();
+    setCollapsedSections({ sec_1: true, topic: false, dm: true }, s);
+    expect(getCollapsedSections(s)).toEqual({ sec_1: true, dm: true });
+    setCollapsedSections({}, s);
+    expect(getCollapsedSections(s)).toEqual({});
+    s.setItem("fe6.chat.collapsedSections", "{not json");
+    expect(getCollapsedSections(s)).toEqual({});
   });
 });

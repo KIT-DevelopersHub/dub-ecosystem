@@ -26,7 +26,7 @@ style.textContent = cssText;
 document.head.appendChild(style);
 
 const live = import.meta.env.VITE_CHAT_LIVE === "1" || import.meta.env.VITE_CHAT_LIVE === "true";
-const grants: identity.PermissionKey[] = ["chat:create", "chat:moderate"];
+const grants: identity.PermissionKey[] = ["chat:create", "chat:moderate", "chat:delete_channel"];
 
 // Live: real HTTP client + real DO-direct WS client (fresh ws-ticket per connect,
 // fetched through the same api). Mock: in-memory demo seed, no network.
