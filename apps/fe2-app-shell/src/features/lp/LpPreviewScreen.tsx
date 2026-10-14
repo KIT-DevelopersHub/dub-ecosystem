@@ -7,8 +7,11 @@
 //  - 選べるのは LP Worker に同梱された版（公開フラグの versions）だけ。それ以外は別 URL の版なので
 //    チケットを差し込めず、選択肢には出すが選べない。
 //  - 見るだけなので app:lp:view で使える（公開の操作は「バージョン」「チケット」タブ）。
-import { useMemo, useState } from "react";
+//  - 開くと /lp/preview?open=1 を履歴に積む。ブラウザの「戻る」はビューアを閉じてこのタブに留まる
+//    （積まないと、前に居たタブ＝チケット等へ戻ってしまう）。
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import {
   Badge,
   Button,
@@ -46,6 +49,27 @@ export function LpPreviewScreen(): JSX.Element {
   const [picked, setPicked] = useState<string | null>(null);
   const [mode, setMode] = useState<TicketsMode>("on");
   const [viewing, setViewing] = useState<LpVersion | null>(null);
+
+  const navigate = useNavigate();
+  const router = useRouter();
+  const openInUrl = useRouterState({
+    select: (st) => new URLSearchParams(st.location.searchStr ?? "").has("open"),
+  });
+  // ブラウザの「戻る」で ?open が外れたらビューアを閉じる。
+  const wasOpenInUrl = useRef(openInUrl);
+  useEffect(() => {
+    if (wasOpenInUrl.current && !openInUrl) setViewing(null);
+    wasOpenInUrl.current = openInUrl;
+  }, [openInUrl]);
+
+  const close = ({ frameNavigated }: { frameNavigated: boolean }): void => {
+    setViewing(null);
+    if (!openInUrl) return;
+    // LP 内で移動していなければ積んだ 1 件を戻す。移動していると履歴が何件積まれたか
+    // 分からないので、戻り過ぎて別タブへ出ないよう置き換えで閉じる。
+    if (!frameNavigated && router) router.history.back();
+    else void navigate({ to: "/lp/preview", replace: true });
+  };
 
   const versionId = picked ?? publish?.versionId ?? null;
   const options = useMemo(
@@ -95,6 +119,7 @@ export function LpPreviewScreen(): JSX.Element {
       if (!version) return;
       const label = mode === "on" ? "チケット販売あり" : "チケット販売なし";
       setViewing({ ...version, name: `${version.name}（${label}・プレビュー）`, url: lpPreviewUrl(version.id, mode) });
+      void navigate({ to: "/lp/preview", search: { open: "1" } });
     };
     body = (
       <Card
@@ -166,7 +191,7 @@ export function LpPreviewScreen(): JSX.Element {
       {header}
       <LpTabs active="preview" />
       {body}
-      {viewing ? <LpViewer version={viewing} onBack={() => setViewing(null)} /> : null}
+      {viewing ? <LpViewer version={viewing} onBack={close} /> : null}
     </Stack>
   );
 }

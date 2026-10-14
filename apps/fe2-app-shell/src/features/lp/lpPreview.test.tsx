@@ -11,7 +11,13 @@ import type { LpApi, LpPublishState, LpTicketsState } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
 import { lpPreviewUrl } from "./lpPublish.ts";
 
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
+const nav = vi.hoisted(() => ({ navigate: vi.fn(), back: vi.fn(), searchStr: "" }));
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => nav.navigate,
+  useRouter: () => ({ history: { back: nav.back } }),
+  useRouterState: ({ select }: { select: (s: { location: { searchStr: string } }) => unknown }) =>
+    select({ location: { searchStr: nav.searchStr } }),
+}));
 
 const PUBLISH: LpPublishState = {
   site: "hokuriku-it-conf.com",
@@ -96,6 +102,38 @@ describe("LpPreviewScreen", () => {
     expect(screen.getByTestId("fe2-lp-viewer-frame")).toHaveAttribute("src", lpPreviewUrl("v3.5", "off"));
     expect(api.setPublish).not.toHaveBeenCalled();
     expect(api.setTicketsEnabled).not.toHaveBeenCalled();
+  });
+
+  it("pushes ?open so the browser back closes the viewer and stays on this tab", async () => {
+    nav.navigate.mockClear();
+    nav.back.mockClear();
+    renderScreen();
+    fireEvent.click(await screen.findByTestId("fe2-lp-preview-open"));
+    expect(nav.navigate).toHaveBeenCalledWith({ to: "/lp/preview", search: { open: "1" } });
+  });
+
+  it("app-back pops the pushed entry, or replaces it once the LP navigated inside the frame", async () => {
+    nav.searchStr = "?open=1";
+    try {
+      renderScreen();
+      fireEvent.click(await screen.findByTestId("fe2-lp-preview-open"));
+      nav.navigate.mockClear();
+      fireEvent.click(screen.getByTestId("fe2-lp-back-button"));
+      expect(nav.back).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId("fe2-lp-viewer")).not.toBeInTheDocument();
+
+      nav.back.mockClear();
+      fireEvent.click(screen.getByTestId("fe2-lp-preview-open"));
+      const frame = screen.getByTestId("fe2-lp-viewer-frame");
+      fireEvent.load(frame);
+      fireEvent.load(frame);
+      nav.navigate.mockClear();
+      fireEvent.click(screen.getByTestId("fe2-lp-back-button"));
+      expect(nav.back).not.toHaveBeenCalled();
+      expect(nav.navigate).toHaveBeenCalledWith({ to: "/lp/preview", replace: true });
+    } finally {
+      nav.searchStr = "";
+    }
   });
 
   it("shows an error with retry when the publish state fails", async () => {
