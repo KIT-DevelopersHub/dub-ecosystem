@@ -2073,15 +2073,19 @@
 }
 
 /* ── channel details modal (Slack "チャンネル詳細": 概要 / メンバー / 設定) ──── */
+/* Fixed height (Slack): switching tabs must not resize/re-center the dialog. */
 .detailsBody {
   display: flex;
   flex-direction: column;
   gap: var(--dub-space-4);
-  min-height: 360px;
+  height: min(540px, 70vh);
 }
 .detailsPanel {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .detailsStack {
   display: flex;
@@ -2227,8 +2231,6 @@
 .detailsMemberList {
   display: flex;
   flex-direction: column;
-  max-height: 360px;
-  overflow-y: auto;
 }
 .detailsMember,
 .detailsMemberAdd {
