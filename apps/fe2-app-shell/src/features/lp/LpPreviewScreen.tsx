@@ -1,9 +1,10 @@
-// LP管理 — 「プレビュー」タブ。版とチケット販売あり/なしを選んで、その組み合わせの LP を開く。
+// LP管理 — 「プレビュー」タブ。版・チケット販売あり/なし・登壇者募集あり/なしを選んで、その組み合わせの LP を開く。
 //
 // 設計メモ:
-//  - 何も保存しない。選んだ条件は URL（?version=<番号>&tickets=on|off）に載り、LP Worker が
+//  - 何も保存しない。選んだ条件は URL（?version=<番号>&tickets=on|off&proposals=on|off）に載り、LP Worker が
 //    その閲覧者にだけ当てる。公開中の LP・販売状態・公開中の版は一切変わらない。
 //  - チケット「あり」は販売停止中でも販売中の見た目にするだけで、申し込みは LP Worker が 403 で拒否する。
+//    登壇者募集「あり」も同じ（「登壇に応募する」ボタンと /proposals が出るが、応募は 403）。
 //  - 選べるのは LP Worker に同梱された版（公開フラグの versions）だけ。それ以外は別 URL の版なので
 //    チケットを差し込めず、選択肢には出すが選べない。
 //  - 見るだけなので app:lp:view で使える（公開の操作は「バージョン」「チケット」タブ）。
@@ -28,26 +29,32 @@ import {
 import { listLpVersions, type LpVersion } from "./lpVersions.ts";
 import { useLpPublish } from "./lpHooks.ts";
 import { useLpTickets } from "./lpTicketsHooks.ts";
-import { lpPreviewUrl } from "./lpPublish.ts";
+import { useLpProposals } from "./lpProposalsHooks.ts";
+import { lpPreviewUrl, type LpPreviewMode } from "./lpPublish.ts";
 import { LpViewer } from "./LpViewer.tsx";
 import { LpTabs } from "./LpTabs.tsx";
 import styles from "./lp.module.css";
-
-type TicketsMode = "on" | "off";
 
 const TICKETS_OPTIONS = [
   { value: "on" as const, label: "あり", testId: "fe2-lp-preview-tickets-on" },
   { value: "off" as const, label: "なし", testId: "fe2-lp-preview-tickets-off" },
 ];
 
+const PROPOSALS_OPTIONS = [
+  { value: "on" as const, label: "あり", testId: "fe2-lp-preview-proposals-on" },
+  { value: "off" as const, label: "なし", testId: "fe2-lp-preview-proposals-off" },
+];
+
 export function LpPreviewScreen(): JSX.Element {
   const versionsQuery = useQuery({ queryKey: ["lp", "versions"], queryFn: listLpVersions });
   const publishQuery = useLpPublish();
   const tickets = useLpTickets();
+  const proposals = useLpProposals();
   const publish = publishQuery.data;
 
   const [picked, setPicked] = useState<string | null>(null);
-  const [mode, setMode] = useState<TicketsMode>("on");
+  const [mode, setMode] = useState<LpPreviewMode>("on");
+  const [proposalsMode, setProposalsMode] = useState<LpPreviewMode>("on");
   const [viewing, setViewing] = useState<LpVersion | null>(null);
 
   const navigate = useNavigate();
@@ -115,10 +122,15 @@ export function LpPreviewScreen(): JSX.Element {
     );
   } else {
     const sales = tickets.data ? (tickets.data.enabled ? "公開中" : "停止中") : null;
+    const call = proposals.data ? (proposals.data.enabled ? "募集中" : "停止中") : null;
     const open = (): void => {
       if (!version) return;
-      const label = mode === "on" ? "チケット販売あり" : "チケット販売なし";
-      setViewing({ ...version, name: `${version.name}（${label}・プレビュー）`, url: lpPreviewUrl(version.id, mode) });
+      const label = `${mode === "on" ? "チケット販売あり" : "チケット販売なし"}・${proposalsMode === "on" ? "登壇者募集あり" : "登壇者募集なし"}`;
+      setViewing({
+        ...version,
+        name: `${version.name}（${label}・プレビュー）`,
+        url: lpPreviewUrl(version.id, { tickets: mode, proposals: proposalsMode }),
+      });
       void navigate({ to: "/lp/preview", search: { open: 1 } });
     };
     body = (
@@ -155,7 +167,7 @@ export function LpPreviewScreen(): JSX.Element {
           </FormField>
           <Stack gap={2}>
             <div className={styles.previewTicketsRow}>
-              <SegmentedControl<TicketsMode>
+              <SegmentedControl<LpPreviewMode>
                 caption="チケット販売"
                 aria-label="チケット販売"
                 value={mode}
@@ -175,10 +187,32 @@ export function LpPreviewScreen(): JSX.Element {
                 : "販売を公開していても、チケットの表示が無い状態で開きます。"}
             </span>
           </Stack>
+          <Stack gap={2}>
+            <div className={styles.previewTicketsRow}>
+              <SegmentedControl<LpPreviewMode>
+                caption="登壇者募集"
+                aria-label="登壇者募集"
+                value={proposalsMode}
+                onChange={setProposalsMode}
+                options={PROPOSALS_OPTIONS}
+                testId="fe2-lp-preview-proposals"
+              />
+              {call ? (
+                <Badge tone={proposals.data?.enabled ? "success" : "neutral"} testId="fe2-lp-preview-proposals-state">
+                  実際の募集: {call}
+                </Badge>
+              ) : null}
+            </div>
+            <span className={styles.note} data-testid="fe2-lp-preview-proposals-note">
+              {proposalsMode === "on"
+                ? "募集を停止していても、「登壇に応募する」ボタンが押せて応募ページが出た状態で開きます。プレビュー中は応募できません。入力項目は「登壇者募集」タブで設定します。"
+                : "募集を公開していても、「登壇に応募する」ボタンが「準備中」のままの状態で開きます。"}
+            </span>
+          </Stack>
           <p className={styles.previewNotice} data-testid="fe2-lp-preview-notice">
             <Icon name="info" />
             <span>
-              これは確認用のプレビューです。開いたあなたの画面にだけ効き、公開中の LP・公開中の版・チケットの販売状態は変わりません。
+              これは確認用のプレビューです。開いたあなたの画面にだけ効き、公開中の LP・公開中の版・チケットの販売状態・登壇者の募集状態は変わりません。
             </span>
           </p>
         </Stack>

@@ -52,6 +52,11 @@ const linksStubs = {
   createTicketType: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   updateTicketType: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   listTicketOrders: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  getProposals: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  setProposalsEnabled: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  saveProposalFields: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  listProposals: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  setProposalStatus: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
 };
 
 const UNCONFIGURED_SITE = {
