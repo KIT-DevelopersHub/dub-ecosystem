@@ -147,9 +147,9 @@ describe("lpTickets (pure)", () => {
 });
 
 describe("demo transport serves the tickets wire contract", () => {
-  it("returns published-but-unpaid state with seeded types and non-zero stats", async () => {
+  it("returns stopped, unpaid state with seeded types and non-zero stats", async () => {
     const s = await demoLpApi().getTickets();
-    expect(s.enabled).toBe(true);
+    expect(s.enabled).toBe(false);
     expect(s.ctaEnabled).toBe(false);
     expect(s.paymentReady).toBe(false);
     expect(s.types.map((t) => `${t.name}|${t.dayLabel}`)).toEqual([
@@ -290,12 +290,48 @@ describe("LpTicketsScreen", () => {
     fireEvent.click(toggle);
     const dialog = await screen.findByTestId("fe2-lp-tickets-enabled-dialog");
     expect(dialog).toHaveTextContent("チケットを購入");
+    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-ack"));
     fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-confirm"));
 
     await waitFor(() => expect(screen.getByTestId("fe2-lp-tickets-enabled")).toBeChecked());
     reject(new Error("boom"));
     await waitFor(() => expect(screen.getByTestId("fe2-lp-tickets-enabled")).not.toBeChecked());
     expect(await screen.findByText("販売状態を切り替えられませんでした")).toBeInTheDocument();
+  });
+
+  it("publishing warns it goes public to everyone and needs the acknowledgement", async () => {
+    const setEnabled = vi.fn(({ enabled }: { enabled: boolean }) => Promise.resolve(baseState({ enabled })));
+    renderScreen(fakeApi({ setTicketsEnabled: setEnabled }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-tickets-enabled"));
+    const dialog = await screen.findByTestId("fe2-lp-tickets-enabled-dialog");
+    expect(within(dialog).getByTestId("fe2-lp-tickets-enabled-warning")).toHaveTextContent(
+      "本当に全ユーザーに公開されますがよろしいですか？",
+    );
+    const confirm = within(dialog).getByTestId("fe2-lp-tickets-enabled-confirm");
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(setEnabled).not.toHaveBeenCalled();
+
+    // Cancel resets the acknowledgement for the next attempt.
+    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-ack"));
+    expect(confirm).toBeEnabled();
+    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-cancel"));
+    fireEvent.click(screen.getByTestId("fe2-lp-tickets-enabled"));
+    const again = await screen.findByTestId("fe2-lp-tickets-enabled-dialog");
+    expect(within(again).getByTestId("fe2-lp-tickets-enabled-confirm")).toBeDisabled();
+    fireEvent.click(within(again).getByTestId("fe2-lp-tickets-enabled-ack"));
+    fireEvent.click(within(again).getByTestId("fe2-lp-tickets-enabled-confirm"));
+    await waitFor(() => expect(setEnabled).toHaveBeenCalledWith({ enabled: true }));
+  });
+
+  it("stopping sales needs no acknowledgement", async () => {
+    const setEnabled = vi.fn(({ enabled }: { enabled: boolean }) => Promise.resolve(baseState({ enabled })));
+    renderScreen(fakeApi({ getTickets: () => Promise.resolve(baseState({ enabled: true })), setTicketsEnabled: setEnabled }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-tickets-enabled"));
+    const dialog = await screen.findByTestId("fe2-lp-tickets-enabled-dialog");
+    expect(within(dialog).queryByTestId("fe2-lp-tickets-enabled-ack")).toBeNull();
+    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-confirm"));
+    await waitFor(() => expect(setEnabled).toHaveBeenCalledWith({ enabled: false }));
   });
 
   it("blocks a 30 yen type before calling the api", async () => {

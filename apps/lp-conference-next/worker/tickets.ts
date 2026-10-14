@@ -26,6 +26,8 @@ export interface PublicTicketType {
 }
 export interface TicketConfig {
   enabled: boolean;
+  /** Set by the Worker (previewConfig), never by lp-analytics: shown as on sale, never sells. */
+  preview: boolean;
   /** Swap the LP's 参加登録 buttons for 参加チケットを購入 (effective only with enabled). */
   ctaEnabled: boolean;
   paymentReady: boolean;
@@ -65,6 +67,7 @@ const DAY1 = "Day 1 - 9/13(月)";
 const DAY2 = "Day 2 - 9/14(火)";
 export const DEMO_CONFIG: TicketConfig = {
   enabled: true,
+  preview: false,
   ctaEnabled: true,
   paymentReady: true,
   fields: [
@@ -206,7 +209,14 @@ export function parseConfig(raw: unknown): TicketConfig | null {
     const options = Array.isArray(r.options) ? r.options.filter((x): x is string => typeof x === "string") : [];
     fields.push({ id: r.id, label: r.label, type, required: r.required === true, options });
   }
-  return { enabled: o.enabled, ctaEnabled: o.ctaEnabled === true, paymentReady: o.paymentReady === true, fields, types };
+  return {
+    enabled: o.enabled,
+    preview: false,
+    ctaEnabled: o.ctaEnabled === true,
+    paymentReady: o.paymentReady === true,
+    fields,
+    types,
+  };
 }
 
 // ---------- form parsing / validation ----------
@@ -783,7 +793,9 @@ function hero(o: { title: string; sub?: string; ghost: string; step?: number; sm
   );
 }
 
-function shell(title: string, body: string, demo: boolean): string {
+export const PREVIEW_NOTE = "プレビュー表示中です。このページはまだ一般公開されていません（お申し込みはできません）。";
+
+function shell(title: string, body: string, demo: boolean, preview = false): string {
   return (
     '<!doctype html><html lang="ja"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -796,6 +808,7 @@ function shell(title: string, body: string, demo: boolean): string {
     `<link rel="stylesheet" href="${FONT_HREF}">` +
     `<style>${STYLE}</style></head><body>` +
     (demo ? '<div class="demo" role="note">デモ環境です（実際の決済は行われません）</div>' : "") +
+    (preview ? `<div class="demo" role="note" data-lp-tk-preview>${PREVIEW_NOTE}</div>` : "") +
     '<div style="position:relative">' +
     `<header class="top"><div class="wrap"><a class="brand" href="/" aria-label="${CONF_NAME} トップへ">${BRAND}</a>` +
     '<a class="back" href="/"><span aria-hidden="true">←</span>トップへ戻る</a></div></header>' +
@@ -997,6 +1010,7 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
         '<h2>受付準備中</h2><p class="lead">現在お申し込みいただけるチケットはありません。公開までしばらくお待ちください。</p>' +
         '<div class="acts"><a class="btn1" href="/">トップへ戻る</a></div></section></div></div>',
       !!o.demo,
+      config.preview,
     );
   }
 
@@ -1026,7 +1040,7 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
       ? '<p class="note">有料チケットは Stripe の決済画面に移動してお支払いいただきます。無料チケットはそのままお申し込みが完了します。</p>'
       : "") +
     "</aside></form>";
-  return shell("チケット購入", top + `<div class="body"><div class="wrap">${form}</div></div>`, !!o.demo);
+  return shell("チケット購入", top + `<div class="body"><div class="wrap">${form}</div></div>`, !!o.demo, config.preview);
 }
 
 export type ThanksStatus = "paid" | "free" | "pending" | "expired" | "unknown";
@@ -1138,10 +1152,34 @@ export function ticketsCtaSwap(): string {
   return `<style id="lp-tickets-cta-css">${CTA_SWAP_CSS}</style><script id="lp-tickets-cta-swap">${CTA_SWAP_SCRIPT}</script>`;
 }
 
+/**
+ * LP管理「プレビュー」タブの指定 (?tickets=on|off) を、この閲覧者にだけ当てる。
+ * on: 販売停止中でも販売中の見た目 (preview: true = 申し込み不可)。off: 販売中でも出さない。
+ * 指定なしは実際の販売状態のまま（公開中の LP は不変）。
+ */
+export function previewConfig(cfg: TicketConfig | null, mode: "on" | "off" | null): TicketConfig | null {
+  if (!cfg || !mode) return cfg;
+  if (mode === "on" && !cfg.enabled) return { ...cfg, enabled: true, preview: true };
+  if (mode === "off" && cfg.enabled) return { ...cfg, enabled: false };
+  return cfg;
+}
+
+/** Bottom bar on LP pages while previewing ticket sales (keeps the LP header visible). */
+export function ticketsPreviewBar(): string {
+  return (
+    "<style>#lp-tickets-cta,#lp-preview-banner{bottom:56px!important}</style>" +
+    '<div id="lp-tickets-preview" role="note" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;' +
+    "padding:8px 16px;background:#fff4d6;color:#7a4b00;text-align:center;" +
+    "font:700 13px/1.5 'Zen Kaku Gothic New',system-ui,-apple-system,sans-serif;box-shadow:0 -2px 8px rgba(0,0,0,.12)\">" +
+    "チケット販売のプレビュー表示中です（一般には公開されていません）" +
+    '<a href="/?version=live" style="margin-left:12px;color:inherit;text-decoration:underline">解除</a></div>'
+  );
+}
+
 /** HTML appended to LP pages: floating CTA when enabled, plus the button swap when ctaEnabled too. */
 export function ticketsInjection(cfg: TicketConfig | null): string {
   if (!cfg || !cfg.enabled) return "";
-  return ticketsCta() + (cfg.ctaEnabled ? ticketsCtaSwap() : "");
+  return (cfg.preview ? ticketsPreviewBar() : "") + ticketsCta() + (cfg.ctaEnabled ? ticketsCtaSwap() : "");
 }
 
 // ---------- handler ----------
@@ -1247,6 +1285,10 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
   if (!parsed.ok) {
     if (parsed.spam) return redirect("/tickets/thanks");
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: parsed.errors, demo: deps.demo }), 400);
+  }
+  if (config.preview) {
+    const errors: FormErrors = { _form: "プレビュー表示中のため、お申し込みはできません。" };
+    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors, demo: deps.demo }), 403);
   }
   if (deps.demo) {
     const summary = itemsSummary(parsed.input.items, config.types);

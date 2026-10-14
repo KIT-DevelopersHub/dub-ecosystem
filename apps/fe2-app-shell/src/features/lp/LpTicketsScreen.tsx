@@ -3,6 +3,8 @@
 //
 // 設計メモ:
 //  - 販売の公開/停止は LP 全体に効くので lp:publish 必須 + 確認ダイアログ（版の公開と同じ扱い）。
+//    公開は誰でも見られる状態になるので、「全員に公開される」ことへの同意チェックを押すまで実行できない。
+//  - 公開前の見た目は「プレビュー」タブ（版とチケットあり/なしを選んで開く・申し込み不可）で確かめる。
 //  - 決済（Stripe）の鍵が未登録でも画面は動く。未設定の間は有料券は買えず、無料券だけ申し込める。
 //  - LP の「参加登録」ボタン差し替え（ctaEnabled）は販売公開に従属する 2 段目のスイッチ。
 //    効くのは enabled && ctaEnabled のときだけ。販売停止中でも予約として保存はできる。
@@ -13,6 +15,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   EmptyState,
   ErrorState,
   Icon,
@@ -101,6 +104,11 @@ function SummaryTile({ testId, label, value, hint }: { testId: string; label: st
 function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggle: boolean }): JSX.Element {
   const setEnabled = useSetTicketsEnabled();
   const [confirming, setConfirming] = useState<boolean | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const openConfirm = (next: boolean): void => {
+    setAcknowledged(false);
+    setConfirming(next);
+  };
 
   return (
     <Card testId="fe2-lp-tickets-status" header={<span className={styles.sectionTitle}>チケット販売</span>}>
@@ -112,7 +120,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             checked={state.enabled}
             disabled={!canToggle || setEnabled.isPending}
             label="チケット販売を公開"
-            onChange={(next) => setConfirming(next)}
+            onChange={openConfirm}
           />
           <Badge tone={state.enabled ? "success" : "neutral"} testId="fe2-lp-tickets-enabled-state">
             {state.enabled ? "公開中" : "停止中"}
@@ -153,7 +161,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
         <Modal
           open
           onClose={() => setConfirming(null)}
-          title={confirming ? "チケット販売を公開します" : "チケット販売を停止します"}
+          title={confirming ? "チケット販売を全員に公開しますか？" : "チケット販売を停止します"}
           size="sm"
           testId="fe2-lp-tickets-enabled-dialog"
           footer={
@@ -163,6 +171,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
               </Button>
               <Button
                 variant={confirming ? "primary" : "danger"}
+                disabled={confirming && !acknowledged}
                 onClick={() => {
                   const next = confirming;
                   setConfirming(null);
@@ -175,10 +184,16 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             </div>
           }
         >
+          {confirming ? (
+            <p className={styles.publishWarning} role="alert" data-testid="fe2-lp-tickets-enabled-warning">
+              {"本当に全ユーザーに公開されますがよろしいですか？公開すると、ログインしていない一般の方を含むインターネット上の誰でも、購入ページを開いて申し込めるようになります。"}
+            </p>
+          ) : null}
           <ul style={{ margin: 0, paddingLeft: "var(--dub-space-5)", display: "grid", gap: "var(--dub-space-2)" }}>
             {confirming ? (
               <>
                 <li>公開すると LP に「チケットを購入」ボタンと /tickets ページが出ます。</li>
+                <li>公開前の見た目は「プレビュー」タブで確かめられます。</li>
                 {state.ctaEnabled ? <li>LP の「参加登録」ボタンも「参加チケットを購入」に切り替わります。</li> : null}
                 {!state.paymentReady ? <li>決済が未設定のため、有料のチケットは「準備中」と表示されます。</li> : null}
               </>
@@ -191,6 +206,17 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             )}
             <li>反映まで最大 1 分ほどかかります。</li>
           </ul>
+          {confirming ? (
+            <div className={styles.publishAck}>
+              <Checkbox
+                id="fe2-lp-tickets-enabled-ack"
+                testId="fe2-lp-tickets-enabled-ack"
+                checked={acknowledged}
+                label="全ユーザーに公開されることを理解しました"
+                onChange={setAcknowledged}
+              />
+            </div>
+          ) : null}
         </Modal>
       ) : null}
     </Card>
