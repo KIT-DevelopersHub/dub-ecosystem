@@ -63,6 +63,7 @@ export function parseInbound(raw: RawInbound, policy: OwnerAddressPolicy = {}): 
   const subject = decodeHeaderWord(h["subject"] ?? "");
   const from = parseAddress(h["from"] ?? raw.from);
   const to = parseAddressList(h["to"] ?? raw.to);
+  const cc = parseAddressList(h["cc"]);
   const receivedAt = h["date"] ? new Date(h["date"]).toISOString() : new Date().toISOString();
 
   const message: mail.MailMessage = {
@@ -93,6 +94,7 @@ export function parseInbound(raw: RawInbound, policy: OwnerAddressPolicy = {}): 
     mailbox: localPart(raw.to),
     bodyText: extractBody(raw.rawText),
     htmlBody: null,
+    cc,
     references,
     ownerCandidates: ownerCandidatesFor(parseAddress(raw.to), message.to, policy),
   };
@@ -145,7 +147,7 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     archiveAddress: deps.archiveAddress ?? null,
     sharedAddress: deps.sharedAddress ?? null,
   });
-  const { message, loop, mailbox, bodyText, htmlBody, references, ownerCandidates } = parsed;
+  const { message, loop, mailbox, bodyText, htmlBody, cc, references, ownerCandidates } = parsed;
 
   // Normalize the thread id against messages we already have (改善#3): if any referenced
   // ancestor is a known inbound/sent message, adopt ITS thread so a trimmed References
@@ -169,6 +171,7 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     loopMarker: loop["x-dub-mail-loop"] ?? null,
     bodyText,
     htmlBody,
+    cc,
     ownerUserId,
   });
   if (changes === 0) {

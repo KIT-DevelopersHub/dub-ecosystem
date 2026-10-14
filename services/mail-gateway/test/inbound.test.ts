@@ -109,6 +109,32 @@ describe("handleInbound", () => {
     expect(stored?.messageId).toBe("inbound-1@outside.com");
   });
 
+  it("parses the Cc header (empty when absent)", () => {
+    expect(parseInbound(rawMessage()).cc).toEqual([]);
+    const parsed = parseInbound(rawMessage({}, { cc: '"Carol C" <carol@example.com>, dave@example.com' }));
+    expect(parsed.cc).toEqual([{ email: "carol@example.com", name: "Carol C" }, { email: "dave@example.com" }]);
+  });
+
+  it("persists Cc (0012) and surfaces it on list + detail", async () => {
+    const h = makeHarness();
+    await handleInbound(inboundDeps(h), rawMessage({}, { cc: "Carol <carol@example.com>" }));
+    const row = h.raw.prepare(`SELECT cc_json FROM mail_inbound`).get() as { cc_json: string | null };
+    expect(JSON.parse(row.cc_json!)).toEqual([{ email: "carol@example.com", name: "Carol" }]);
+    const page = await listInbound(h.db, { ownerUserId: "usr_info", limit: 10 });
+    expect(page.items[0]!.cc).toEqual([{ email: "carol@example.com", name: "Carol" }]);
+    const detail = await getInboundDetail(h.db, page.items[0]!.id, "usr_info");
+    expect(detail?.cc).toEqual([{ email: "carol@example.com", name: "Carol" }]);
+  });
+
+  it("stores NULL cc_json and omits cc when there is no Cc header", async () => {
+    const h = makeHarness();
+    await handleInbound(inboundDeps(h), rawMessage());
+    const row = h.raw.prepare(`SELECT cc_json FROM mail_inbound`).get() as { cc_json: string | null };
+    expect(row.cc_json).toBeNull();
+    const page = await listInbound(h.db, { ownerUserId: "usr_info", limit: 10 });
+    expect(page.items[0]!.cc).toBeUndefined();
+  });
+
   it("persists the plain-text body (unread) for the detail view", async () => {
     const h = makeHarness();
     await handleInbound(inboundDeps(h), rawMessage());

@@ -44,6 +44,7 @@ export interface InboundRow {
   html_body: string | null; // 0002: HTML part when present (sanitized before render)
   read_at: string | null; // 0002: ISO8601 when first opened; NULL = unread
   owner_user_id: string | null; // 0006: roster user the message was delivered to (Inbox scope); NULL = unassigned
+  cc_json: string | null; // 0012: JSON MailAddress[] of Cc header recipients; NULL = none / pre-0012
 }
 
 export interface MailboxRow {
@@ -348,6 +349,7 @@ export async function insertInbound(
     loopMarker: string | null;
     bodyText: string;
     htmlBody: string | null;
+    cc?: mail.MailAddress[];
     // Owner = the roster user this message was delivered to (Inbox scope). NULL when no
     // roster user matches the recipient — invisible to every account until assignable.
     ownerUserId: string | null;
@@ -356,8 +358,8 @@ export async function insertInbound(
   const res = await db.run(
     `INSERT OR IGNORE INTO mail_inbound
        (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
-        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id, cc_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
     m.id,
     m.messageId,
     m.threadId,
@@ -373,6 +375,7 @@ export async function insertInbound(
     extra.bodyText,
     extra.htmlBody,
     extra.ownerUserId,
+    extra.cc && extra.cc.length > 0 ? JSON.stringify(extra.cc) : null,
   );
   return res.meta.changes;
 }
@@ -396,6 +399,8 @@ function rowToListItem(r: InboundRow, viewer?: string): mail.MailMessageListItem
   // mine: delivered to the caller (vs visible via read_all / role sharing). Only set when
   // the caller is known so internal callers keep the frozen shape.
   if (viewer !== undefined) item.mine = r.owner_user_id === viewer;
+  const cc = parseAddresses(r.cc_json);
+  if (cc.length > 0) item.cc = cc;
   return item;
 }
 

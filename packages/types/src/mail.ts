@@ -117,6 +117,9 @@ export interface MailMessageListItem extends MailMessage, MailMessageState {
   // is visible only through oversight (mail:read_all) or role sharing (mail:read_role_shared).
   // Absent from older gateways — treat absent as true.
   mine?: boolean;
+  // ADDITIVE: Cc recipients of a received message (mail_inbound.cc_json, 0012). Omitted when
+  // the message had none or was stored before 0012.
+  cc?: MailAddress[];
 }
 /** Detail view: list item plus the full body. Inbound persists text; htmlBody is
  *  optional (present only when a message carried an HTML part) and MUST be sanitized

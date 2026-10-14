@@ -155,6 +155,8 @@ export const DEMO_INBOX_ITEMS: mail.MailMessageListItem[] = [
     threadId: "thr_in_1",
     from: { email: "hanako@example.com", name: "山田 花子" },
     to: [{ email: "info@developershub.jp" }],
+    // Received Cc (受信メールの CC 表示) — the reading pane renders a "Cc:" line.
+    cc: [{ email: "yuki@example.com", name: "伊藤 由紀" }],
     subject: "登壇のご相談",
     snippet: "カンファレンスでの登壇について相談させてください。",
     receivedAt: "2026-08-10T01:30:00.000Z",

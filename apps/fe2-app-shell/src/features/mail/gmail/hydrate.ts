@@ -12,7 +12,17 @@ export function inboxItemsToThreads(items: mail.MailMessageListItem[]): MailThre
   const byThread = new Map<string, MailThreadModel>();
   const order: string[] = [];
   for (const it of items) {
-    const msg: MailMsg = { id: it.id, messageId: it.messageId, from: it.from, to: it.to, date: it.receivedAt, body: it.snippet, read: it.read, ...(it.mine === false ? { mine: false } : {}) };
+    const msg: MailMsg = {
+      id: it.id,
+      messageId: it.messageId,
+      from: it.from,
+      to: it.to,
+      ...(it.cc && it.cc.length > 0 ? { cc: it.cc } : {}),
+      date: it.receivedAt,
+      body: it.snippet,
+      read: it.read,
+      ...(it.mine === false ? { mine: false } : {}),
+    };
     const existing = byThread.get(it.threadId);
     if (existing) {
       existing.messages.push(msg);
@@ -97,6 +107,7 @@ export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
     messageId: m.messageId,
     from: m.from,
     to: m.to,
+    ...(m.cc && m.cc.length > 0 ? { cc: m.cc } : {}),
     date: m.receivedAt,
     body: m.textBody,
     read: m.read,

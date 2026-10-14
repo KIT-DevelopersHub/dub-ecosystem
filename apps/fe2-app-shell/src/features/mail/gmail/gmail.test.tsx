@@ -564,6 +564,13 @@ describe("GmailApp (hydrates from the gateway)", () => {
     await waitFor(() => expect(api.downloadAttachment).toHaveBeenCalledWith("messages", "mailin_1", "att_ok"));
   });
 
+  it("shows the received message's Cc in the reading pane", async () => {
+    render(wrap(<GmailApp />));
+    const firstRow = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    await userEvent.click(firstRow);
+    await waitFor(() => expect(screen.getByText(/Cc: 伊藤 由紀/)).toBeInTheDocument());
+  });
+
   it("surfaces an oversize attachment as a disabled chip instead of dropping it silently (改善#2)", async () => {
     const api = fakeApi();
     render(wrap(<GmailApp />, api));
