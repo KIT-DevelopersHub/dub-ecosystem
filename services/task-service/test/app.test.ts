@@ -503,6 +503,16 @@ describe("GET /tasks (list + paging)", () => {
     expect(body.items[0]!.createdBy).toBe("usr_alice");
   });
 
+  it("allows omitting eventId for one team's tasks, whoever owns them (チームのタスクを表示)", async () => {
+    const { app } = setup();
+    await create(app, { assigneeId: "usr_bob", teamId: "team_dev" });
+    await create(app, { assigneeId: "usr_bob", teamId: "team_ops" });
+    const res = await app.request(`/tasks?teamId=team_dev`, userInit("GET", undefined, { userId: "usr_alice" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.ListTasksResponse;
+    expect(body.items.map((t) => t.teamId)).toEqual(["team_dev"]);
+  });
+
   it("400 when eventId omitted and createdById is another user (no cross-user leak)", async () => {
     const { app } = setup();
     const res = await app.request(
