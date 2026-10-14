@@ -3,12 +3,12 @@
   "slug": "lp-tickets-preview",
   "worker": "dub-demo-lp-tickets-preview",
   "url": "https://dub-demo-lp-tickets-preview.developershub-site.workers.dev",
-  "deployedSha": "04961539",
+  "deployedSha": "f0ddfa4f",
   "branch": "feat/lp-tickets-preview",
   "actor": "ko-tarou",
   "markers": ["fe2-lp-preview-open","lp-tickets-preview-demo.developershub-site.workers.dev","to:\"/lp/preview\"","replace:!0"],
   "live": true,
-  "verifiedAt": "2026-10-14T04:13:08Z",
-  "updatedAt": "2026-10-14T04:13:08Z",
+  "verifiedAt": "2026-10-14T04:14:29Z",
+  "updatedAt": "2026-10-14T04:14:29Z",
   "note": "プレビュータブ方式・戻るでプレビュータブに留まる"
 }
