@@ -113,6 +113,7 @@ export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
     read: m.read,
     ...(m.mine === false ? { mine: false } : {}),
     ...(m.attachments && m.attachments.length > 0 ? { attachments: m.attachments } : {}),
+    ...(m.headerMeta ? { headerMeta: m.headerMeta } : {}),
   }));
 }
 

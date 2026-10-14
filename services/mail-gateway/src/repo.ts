@@ -45,6 +45,7 @@ export interface InboundRow {
   read_at: string | null; // 0002: ISO8601 when first opened; NULL = unread
   owner_user_id: string | null; // 0006: roster user the message was delivered to (Inbox scope); NULL = unassigned
   cc_json: string | null; // 0012: JSON MailAddress[] of Cc header recipients; NULL = none / pre-0012
+  header_meta_json?: string | null; // 0013: JSON MailHeaderMeta; NULL = nothing known / pre-0013
 }
 
 export interface MailboxRow {
@@ -206,6 +207,16 @@ function sendRowToDetail(r: SendLogRow): mail.MailSentDetail {
   return detail;
 }
 
+function parseHeaderMeta(json: string | null | undefined): mail.MailHeaderMeta | null {
+  if (!json) return null;
+  try {
+    const v = JSON.parse(json) as unknown;
+    return v && typeof v === "object" ? (v as mail.MailHeaderMeta) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Read scope for the account-isolated mail queries. A plain userId string scopes a
  *  query to that owner's own mail (the #169 per-account isolation, fail-closed). The
  *  `{ readAll: true }` variant is the `mail:read_all` OVERSIGHT bypass: an authorized
@@ -350,6 +361,7 @@ export async function insertInbound(
     bodyText: string;
     htmlBody: string | null;
     cc?: mail.MailAddress[];
+    headerMeta?: mail.MailHeaderMeta;
     // Owner = the roster user this message was delivered to (Inbox scope). NULL when no
     // roster user matches the recipient — invisible to every account until assignable.
     ownerUserId: string | null;
@@ -358,8 +370,8 @@ export async function insertInbound(
   const res = await db.run(
     `INSERT OR IGNORE INTO mail_inbound
        (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
-        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id, cc_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id, cc_json, header_meta_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
     m.id,
     m.messageId,
     m.threadId,
@@ -376,6 +388,7 @@ export async function insertInbound(
     extra.htmlBody,
     extra.ownerUserId,
     extra.cc && extra.cc.length > 0 ? JSON.stringify(extra.cc) : null,
+    extra.headerMeta && Object.keys(extra.headerMeta).length > 0 ? JSON.stringify(extra.headerMeta) : null,
   );
   return res.meta.changes;
 }
@@ -408,6 +421,8 @@ function rowToListItem(r: InboundRow, viewer?: string): mail.MailMessageListItem
 function rowToDetail(r: InboundRow, viewer?: string): mail.MailMessageDetail {
   const detail: mail.MailMessageDetail = { ...rowToListItem(r, viewer), textBody: r.body_text ?? "" };
   if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
+  const meta = parseHeaderMeta(r.header_meta_json);
+  if (meta) detail.headerMeta = meta;
   return detail;
 }
 

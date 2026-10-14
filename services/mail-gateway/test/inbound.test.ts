@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { handleInbound, parseInbound } from "../src/inbound";
+import { dkimSignedBy, handleInbound, parseInbound, receivedOverTls } from "../src/inbound";
 import type { RawInbound } from "../src/mime";
 import { getInboundById, getInboundDetail, listInbound } from "../src/repo";
 import { makeHarness, inboundDeps, fakeIdentityFetcher } from "./helpers";
@@ -91,6 +91,31 @@ describe("parseInbound", () => {
   });
 });
 
+describe("delivery details (signed-by / TLS)", () => {
+  it("reads the DKIM pass domain from Cloudflare's own ARC verdict only", () => {
+    expect(dkimSignedBy("i=1; mx.cloudflare.net; dkim=pass header.d=Example.COM header.s=k; spf=pass")).toBe("example.com");
+    expect(dkimSignedBy("i=1; mx.cloudflare.net; dkim=pass header.i=@example.org; spf=pass")).toBe("example.org");
+    expect(dkimSignedBy("i=1; mx.cloudflare.net; dkim=fail header.d=example.com")).toBeUndefined();
+    // A sender-forged header (not Cloudflare's authserv-id) is ignored.
+    expect(dkimSignedBy("i=1; evil.example; dkim=pass header.d=bank.example")).toBeUndefined();
+    // A forged value combined after Cloudflare's own one is not read.
+    expect(dkimSignedBy("i=1; mx.cloudflare.net; dkim=none, i=1; evil.example; dkim=pass header.d=bank.example")).toBeUndefined();
+    expect(dkimSignedBy(undefined)).toBeUndefined();
+  });
+
+  it("detects TLS from the topmost Received hop's protocol", () => {
+    expect(receivedOverTls("from a (b) by mx.cloudflare.net with ESMTPS id 1; Sat, 09 Aug 2026")).toBe(true);
+    expect(receivedOverTls("from a (b) by mx.cloudflare.net with SMTP id 1; Sat, 09 Aug 2026")).toBe(false);
+    expect(receivedOverTls("from a by b; Sat, 09 Aug 2026")).toBeUndefined();
+    expect(receivedOverTls(undefined)).toBeUndefined();
+  });
+
+  it("omits every detail the headers do not carry", () => {
+    const meta = parseInbound(rawMessage()).headerMeta;
+    expect(meta).toEqual({ deliveredTo: "info@developershub.jp", mailedBy: "outside.com" });
+  });
+});
+
 describe("handleInbound", () => {
   it("persists + publishes mail.message.received exactly once", async () => {
     const h = makeHarness();
@@ -133,6 +158,32 @@ describe("handleInbound", () => {
     expect(row.cc_json).toBeNull();
     const page = await listInbound(h.db, { ownerUserId: "usr_info", limit: 10 });
     expect(page.items[0]!.cc).toBeUndefined();
+  });
+
+  it("persists delivery details (0013) and surfaces them on detail only", async () => {
+    const h = makeHarness();
+    await handleInbound(
+      inboundDeps(h),
+      rawMessage(
+        { from: "bounce+123@mail.outside.com" },
+        {
+          "reply-to": "Support <support@outside.com>",
+          "arc-authentication-results":
+            "i=1; mx.cloudflare.net; dkim=pass header.d=outside.com header.s=s1 header.b=abc; dmarc=pass header.from=outside.com; spf=pass smtp.mailfrom=bounce+123@mail.outside.com",
+          received: "from mail.outside.com (mail.outside.com [192.0.2.1]) by mx.cloudflare.net (Postfix) with ESMTPS id x; Sat, 09 Aug 2026 05:00:00 +0000",
+        },
+      ),
+    );
+    const page = await listInbound(h.db, { ownerUserId: "usr_info", limit: 10 });
+    expect(page.items[0]).not.toHaveProperty("headerMeta");
+    const detail = await getInboundDetail(h.db, page.items[0]!.id, "usr_info");
+    expect(detail?.headerMeta).toEqual({
+      replyTo: [{ email: "support@outside.com", name: "Support" }],
+      deliveredTo: "info@developershub.jp",
+      mailedBy: "mail.outside.com",
+      signedBy: "outside.com",
+      tls: true,
+    });
   });
 
   it("persists the plain-text body (unread) for the detail view", async () => {

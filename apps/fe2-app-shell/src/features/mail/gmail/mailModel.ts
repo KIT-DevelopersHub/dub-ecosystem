@@ -64,6 +64,9 @@ export interface MailMsg {
    *  (too large / message truncated), surfaced as a disabled chip rather than silently
    *  dropped (改善#2). */
   attachments?: mail.MailAttachment[];
+  /** Delivery details (Reply-To / mailed-by / signed-by / TLS / delivered-to) for the
+   *  "show details" dialog. Received messages only, from the detail fetch (getThread). */
+  headerMeta?: mail.MailHeaderMeta;
   /** False when this received message reached the viewer only via oversight (mail:read_all)
    *  or role sharing (mail:read_role_shared), not their own mailbox. Absent = mine. */
   mine?: boolean;

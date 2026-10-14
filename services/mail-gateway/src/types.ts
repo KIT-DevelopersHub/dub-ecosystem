@@ -76,6 +76,7 @@ export interface ParsedInbound {
   bodyText: string; // full plain-text body (persisted alongside; powers the detail view)
   htmlBody: string | null; // HTML part when present (sanitized before render); NULL otherwise
   cc: mail.MailAddress[]; // Cc header recipients (persisted to cc_json; frozen MailMessage has no cc)
+  headerMeta: mail.MailHeaderMeta; // delivery details for the detail dialog (persisted to header_meta_json)
   // Ordered ancestral Message-Ids this message references (all References tokens, then
   // In-Reply-To; most-ancestral first). Used to NORMALIZE thread_id against known messages
   // so a trimmed References chain still joins the root conversation (改善#3). Empty for a

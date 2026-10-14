@@ -589,6 +589,14 @@ const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
   msg_4: {
     ...MAIL_LIST[3]!,
     textBody: "高橋です。\n\n懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。\n\n1. 駅前のイタリアン（40名）\n2. 学内カフェテリア（60名）\n\nご意見をお願いします。",
+    // 「宛先: 自分, 伊藤 由紀, … ▾」→ 詳細ダイアログ (返信先 / 送信元 / 署名元 / セキュリティ).
+    headerMeta: {
+      replyTo: [{ email: "kondankai@example.com", name: "懇親会幹事" }],
+      deliveredTo: "demo@developershub.jp",
+      mailedBy: "mail.example.com",
+      signedBy: "example.com",
+      tls: true,
+    },
   },
 };
 
