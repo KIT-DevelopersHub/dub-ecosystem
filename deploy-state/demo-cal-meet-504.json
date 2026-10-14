@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "cal-meet-504",
+  "worker": "dub-demo-cal-meet-504",
+  "url": "https://dub-demo-cal-meet-504.developershub-site.workers.dev",
+  "deployedSha": "d23d2cea",
+  "branch": "fix/calendar-meeting-504",
+  "actor": "ko-tarou",
+  "markers": ["meet-create-pending"],
+  "live": true,
+  "verifiedAt": "2026-10-14T08:22:05Z",
+  "updatedAt": "2026-10-14T08:22:05Z",
+  "note": "PR fix/calendar-meeting-504"
+}
