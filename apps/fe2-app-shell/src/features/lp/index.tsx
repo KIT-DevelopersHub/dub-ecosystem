@@ -2,6 +2,7 @@
 export { LpManagementScreen } from "./LpManagementScreen.tsx";
 export { LpVisitLogScreen } from "./LpVisitLogScreen.tsx";
 export { LpLinksScreen } from "./LpLinksScreen.tsx";
+export { LpPreviewScreen } from "./LpPreviewScreen.tsx";
 export { LpTicketsScreen } from "./LpTicketsScreen.tsx";
 export { lpRoutes, lpNav } from "./module.tsx";
 export type { LpSourceRoute, LpNavEntry } from "./module.tsx";

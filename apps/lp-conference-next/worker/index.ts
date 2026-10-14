@@ -4,8 +4,16 @@
 //
 // NOTE: only `export default` here — workerd treats named exports as entrypoints.
 import manifest from "../versions.json";
-import { previewBanner, resolveRequest, rewriteLocation } from "./route.ts";
-import { DEMO_CONFIG, handleTickets, isTicketsPath, parseConfig, ticketsInjection, type TicketConfig } from "./tickets.ts";
+import { previewBanner, resolveRequest, rewriteLocation, ticketsCookie, ticketsPreview } from "./route.ts";
+import {
+  DEMO_CONFIG,
+  handleTickets,
+  isTicketsPath,
+  parseConfig,
+  previewConfig,
+  ticketsInjection,
+  type TicketConfig,
+} from "./tickets.ts";
 
 interface Fetcher {
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
@@ -55,9 +63,12 @@ async function publishedVersion(env: Env): Promise<string> {
 
 let ticketsCache: { value: TicketConfig | null; at: number } | null = null;
 
+// Demo has no lp-analytics: sales off, so only ?tickets=on (LP管理「プレビュー」タブ) shows them.
+const DEMO_PREVIEW: TicketConfig = { ...DEMO_CONFIG, enabled: false };
+
 /** Ticket config (30s cache). null = unavailable; never throws. */
 async function ticketConfig(env: Env): Promise<TicketConfig | null> {
-  if (env.TICKETS_DEMO === "1") return DEMO_CONFIG;
+  if (env.TICKETS_DEMO === "1") return DEMO_PREVIEW;
   const now = Date.now();
   if (ticketsCache && now - ticketsCache.at < FLAG_TTL_MS) return ticketsCache.value;
   let value: TicketConfig | null = null;
@@ -99,10 +110,14 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const ticketsPath = isTicketsPath(url.pathname);
+    // LP管理「プレビュー」タブの ?tickets=on|off はこの閲覧者にだけ効く（公開中の LP は不変）。
+    const mode = ticketsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
+    const getConfig = async (): Promise<TicketConfig | null> => previewConfig(await ticketConfig(env), mode);
+    const tkCookie = ticketsCookie(url);
     if (ticketsPath) {
       const handled = await handleTickets(req, {
         demo: env.TICKETS_DEMO === "1",
-        getConfig: () => ticketConfig(env),
+        getConfig,
         invalidate: () => {
           ticketsCache = null;
         },
@@ -111,15 +126,15 @@ export default {
       if (handled) return handled;
     }
     // Started in parallel; only awaited for HTML pages (CTA injection).
-    const tickets = ticketsPath ? null : ticketConfig(env);
+    const tickets = ticketsPath ? null : getConfig();
     const published = await publishedVersion(env);
     const r = resolveRequest(url, req.headers.get("cookie"), published, BUNDLED, req.headers.get("referer"));
 
     if (r.kind === "redirect") {
-      return new Response(null, {
-        status: 302,
-        headers: { location: r.location, "set-cookie": r.setCookie, vary: "Cookie", "cache-control": "no-store" },
-      });
+      const headers = new Headers({ location: r.location, vary: "Cookie", "cache-control": "no-store" });
+      headers.append("set-cookie", r.setCookie);
+      if (tkCookie) headers.append("set-cookie", tkCookie);
+      return new Response(null, { status: 302, headers });
     }
 
     let res = await env.ASSETS.fetch(new Request(url.origin + r.assetPath, req));
@@ -128,9 +143,10 @@ export default {
     const headers = new Headers(res.headers);
     headers.append("vary", "Cookie");
     if (r.setCookie) headers.append("set-cookie", r.setCookie);
+    if (tkCookie) headers.append("set-cookie", tkCookie);
     const loc = headers.get("location");
     if (loc) headers.set("location", rewriteLocation(loc, r.version, url.origin));
-    if (r.preview) headers.set("x-robots-tag", "noindex");
+    if (r.preview || mode) headers.set("x-robots-tag", "noindex");
 
     const isHtml = (headers.get("content-type") ?? "").includes("text/html");
     const cfg = isHtml && res.status === 200 && tickets ? await tickets : null;

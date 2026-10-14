@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Icon, IconButton, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import type { common, meeting, task } from "@dub/types";
+import type { common, identity, meeting, task } from "@dub/types";
 import { useCalendarApi, useCalendarCaps, useCalendarCurrentUserId, useCalendarCurrentUserName } from "./CalendarProvider.tsx";
 import {
   dayIndexOf,
@@ -34,7 +34,15 @@ import {
   type CalendarView,
   type EventDraft,
 } from "./calendar-model";
-import { AddTeamPicker, FilterGroup, RemoveTeamButton, useOpenSections, type FilterRow } from "./CalendarFilters.tsx";
+import {
+  AddTeamPicker,
+  FilterCheck,
+  FilterGroup,
+  PeopleSearch,
+  RemoveTeamButton,
+  useOpenSections,
+  type FilterRow,
+} from "./CalendarFilters.tsx";
 import { DayListPanel, DetailPanel, EventDialog, ItemTitleProvider, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
 import { MeetingDetailDialog } from "./MeetingDetailDialog.tsx";
@@ -66,12 +74,28 @@ const kindKey = (k: string) => `kind:${k}`;
 const labelKey = (k: string) => `label:${k}`;
 const statusKey = (s: string) => `status:${s}`;
 const scopeKey = (teamId: string | null | undefined) => `scope:${teamId ?? PERSONAL_LABEL}`;
+const personKey = (userId: string) => `person:${userId}`;
 const WATCHED_TEAMS_STORAGE = "dub.calendar.watchedTeams";
+const WATCHED_PEOPLE_STORAGE = "dub.calendar.watchedPeople";
 
 function loadWatchedTeams(): string[] {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(WATCHED_TEAMS_STORAGE) ?? "[]");
     return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** ユーザーを検索 で追加した人 (id + name, so the sidebar row renders before any fetch). */
+type WatchedPerson = { id: string; name: string };
+
+function loadWatchedPeople(): WatchedPerson[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(WATCHED_PEOPLE_STORAGE) ?? "[]");
+    return Array.isArray(v)
+      ? v.filter((x): x is WatchedPerson => typeof x?.id === "string" && typeof x?.name === "string")
+      : [];
   } catch {
     return [];
   }
@@ -139,6 +163,16 @@ export function CalendarScreen(): JSX.Element {
       /* private mode etc. — the choice just doesn't persist */
     }
   }, [watchedTeams]);
+  // ユーザーを検索: people whose 予定・タスク are shown next to the caller's (kept per browser).
+  const [watchedPeople, setWatchedPeople] = useState<WatchedPerson[]>(loadWatchedPeople);
+  useEffect(() => {
+    try {
+      localStorage.setItem(WATCHED_PEOPLE_STORAGE, JSON.stringify(watchedPeople));
+    } catch {
+      /* private mode etc. — the choice just doesn't persist */
+    }
+  }, [watchedPeople]);
+  const watchedPeopleIds = useMemo(() => watchedPeople.map((p) => p.id), [watchedPeople]);
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
   const [panel, setPanel] = useState<Panel | null>(null);
   useEffect(() => setSidebarOpen(!narrow), [narrow]);
@@ -170,24 +204,31 @@ export function CalendarScreen(): JSX.Element {
   }, [meetingsQ.data, visibleIds, firstKey, lastKey]);
 
   // Scope to the caller's own tasks (担当/依頼) — task-service's "/me rule" rejects a
-  // bare list — plus every task of the 他のチーム the caller added. One query, so the
-  // optimistic writes below touch a single cache entry. `enabled` waits for the session
-  // so no unscoped request is fired.
-  const queryKey = useMemo(() => ["calendar", "tasks", currentUserId, watchedTeams] as const, [currentUserId, watchedTeams]);
+  // bare list — plus every task of the 他のチーム and the people the caller added. One
+  // query, so the optimistic writes below touch a single cache entry. `enabled` waits
+  // for the session so no unscoped request is fired.
+  const queryKey = useMemo(
+    () => ["calendar", "tasks", currentUserId, watchedTeams, watchedPeopleIds] as const,
+    [currentUserId, watchedTeams, watchedPeopleIds],
+  );
   const { data, isPending, isError, refetch } = useQuery({
     queryKey,
     queryFn: async () => {
-      // A failing team only drops that team; the caller's own 予定 still show.
-      const [mine, teams] = await Promise.all([
+      // A failing team/person only drops that one; the caller's own 予定 still show.
+      const [mine, teams, people] = await Promise.all([
         api.listMyTasks(currentUserId as common.UserId),
         Promise.allSettled(watchedTeams.map((id) => api.listTeamTasks(id as common.TeamId))),
+        Promise.allSettled(watchedPeopleIds.map((id) => api.listUserTasks(id as common.UserId))),
       ]);
       if (teams.some((r) => r.status === "rejected")) {
         toast.show({ kind: "error", title: "一部のチームのタスクを取得できませんでした" });
       }
+      if (people.some((r) => r.status === "rejected")) {
+        toast.show({ kind: "error", title: "一部のユーザーの予定を取得できませんでした" });
+      }
       const byId = new Map<common.TaskId, task.Task>();
       for (const t of mine) byId.set(t.id, t);
-      for (const r of teams) if (r.status === "fulfilled") for (const t of r.value) byId.set(t.id, t);
+      for (const r of [...teams, ...people]) if (r.status === "fulfilled") for (const t of r.value) byId.set(t.id, t);
       return [...byId.values()];
     },
     enabled: currentUserId != null,
@@ -221,9 +262,10 @@ export function CalendarScreen(): JSX.Element {
   const names = useMemo(() => {
     const m = new Map<string, string>();
     if (currentUserId && currentUserName) m.set(currentUserId, currentUserName);
+    for (const p of watchedPeople) m.set(p.id, p.name);
     for (const u of usersQuery.data ?? []) m.set(u.id, u.displayName);
     return m;
-  }, [currentUserId, currentUserName, usersQuery.data]);
+  }, [currentUserId, currentUserName, watchedPeople, usersQuery.data]);
   const itemTitle = useCallback(
     (t: task.Task) =>
       ownedTitle(t, isMeetingTask(t) ? (meetingOcc.byId.get(t.id)?.meeting.targetName ?? null) : ownerOf(t, labels, names)),
@@ -237,10 +279,12 @@ export function CalendarScreen(): JSX.Element {
 
   const { items, undated } = useMemo(() => {
     // 予定 filter by 種類 + ラベル, タスク by 個人/チーム + 状態; each side has a master switch.
+    // An added person's checkbox hides everything that is theirs (担当, else 依頼).
     const shown = (t: task.Task) =>
-      isScheduleTask(t)
+      !hidden.has(personKey(t.assigneeId ?? t.createdBy ?? "")) &&
+      (isScheduleTask(t)
         ? !hidden.has(SCHEDULE_GROUP) && !hidden.has(kindKey(kindOf(t))) && !hidden.has(labelKey(labelKeyOf(t)))
-        : !hidden.has(TASK_GROUP) && !hidden.has(scopeKey(t.teamId)) && !hidden.has(statusKey(t.status));
+        : !hidden.has(TASK_GROUP) && !hidden.has(scopeKey(t.teamId)) && !hidden.has(statusKey(t.status)));
     const all = toCalendarItems(data ?? []);
     const meetings = toCalendarItems(meetingOcc.tasks).items;
     return { items: [...all.items.filter((it) => shown(it.task)), ...meetings], undated: all.undated.filter(shown) };
@@ -278,6 +322,20 @@ export function CalendarScreen(): JSX.Element {
     }),
   ];
   const addableTeams = (teamsQuery.data?.teams ?? []).filter((t) => !watchedTeams.includes(t.id));
+  const notSearchable = useMemo(
+    () => new Set([...(currentUserId ? [currentUserId] : []), ...watchedPeopleIds]),
+    [currentUserId, watchedPeopleIds],
+  );
+  const addPerson = (u: identity.UserSummary) =>
+    setWatchedPeople((w) => (w.some((p) => p.id === u.id) ? w : [...w, { id: u.id, name: u.displayName }]));
+  const removePerson = (id: string) => {
+    setWatchedPeople((w) => w.filter((p) => p.id !== id));
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.delete(personKey(id));
+      return next;
+    });
+  };
 
   // ── mutations (optimistic: reflect first, roll back on failure) ──────────
   // The key is captured per mutation: adding/removing a team mid-flight changes it.
@@ -586,6 +644,27 @@ export function CalendarScreen(): JSX.Element {
                   if (narrow) setSidebarOpen(false);
                 }}
               />
+
+              <div className={styles.calGroup}>
+                <PeopleSearch search={(q) => api.searchUsers(q)} exclude={notSearchable} onAdd={addPerson} />
+                {watchedPeople.length > 0 && (
+                  <div data-testid="calendar-people-added">
+                    {watchedPeople.map((p) => (
+                      <FilterCheck
+                        key={p.id}
+                        row={{
+                          key: personKey(p.id),
+                          label: p.name,
+                          color: LABEL_COLOR,
+                          trailing: <RemoveTeamButton name={p.name} onRemove={() => removePerson(p.id)} />,
+                        }}
+                        checked={!hidden.has(personKey(p.id))}
+                        onToggle={() => toggleFilter(personKey(p.id))}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <FilterGroup
                 groupKey={SCHEDULE_GROUP}

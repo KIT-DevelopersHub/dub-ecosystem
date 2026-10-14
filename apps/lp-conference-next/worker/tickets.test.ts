@@ -12,6 +12,7 @@ import {
   matchTicketsRoute,
   parseCheckoutForm,
   parseConfig,
+  previewConfig,
   renderThanksPage,
   renderTicketsPage,
   splitDayLabel,
@@ -37,6 +38,7 @@ const tt = (o: Partial<PublicTicketType> & { id: string }): PublicTicketType => 
 });
 const CFG: TicketConfig = {
   enabled: true,
+  preview: false,
   ctaEnabled: false,
   paymentReady: true,
   fields: [
@@ -260,6 +262,7 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
   });
   assert.deepEqual(c, {
     enabled: true,
+    preview: false,
     ctaEnabled: true,
     paymentReady: false,
     fields: [{ id: "a", label: "A", type: "text", required: false, options: [] }],
@@ -269,6 +272,34 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
     ],
   });
   assert.equal(parseConfig({ enabled: true, fields: [], types: [] })?.ctaEnabled, false);
+  // preview is decided by the Worker, never taken from the response.
+  assert.equal(parseConfig({ enabled: true, preview: true, fields: [], types: [] })?.preview, false);
+});
+
+test("previewConfig: ?tickets=on shows sales as a preview, off hides them, none keeps the real state", () => {
+  const off = { ...CFG, enabled: false };
+  assert.deepEqual(previewConfig(off, "on"), { ...off, enabled: true, preview: true });
+  assert.equal(previewConfig(off, null), off);
+  assert.equal(previewConfig(off, "off"), off);
+  assert.equal(previewConfig(CFG, "on"), CFG);
+  assert.equal(previewConfig(CFG, "off")?.enabled, false);
+  assert.equal(previewConfig(CFG, null), CFG);
+  assert.equal(previewConfig(null, "on"), null);
+});
+
+test("handler: preview shows the page with a notice but never checks out", async () => {
+  const d = deps({ getConfig: async () => ({ ...CFG, preview: true }) });
+  const page = await handleTickets(new Request("https://lp.example/tickets?version=3.4"), d);
+  assert.equal(page?.status, 200);
+  const html = await page!.text();
+  assert.match(html, /data-lp-tk-preview/);
+  assert.match(html, /まだ一般公開されていません/);
+  const res = await handleTickets(post("/tickets/checkout", VALID, { origin: "https://lp.example" }), d);
+  assert.equal(res?.status, 403);
+  assert.match(await res!.text(), /プレビュー表示中のため、お申し込みはできません/);
+  assert.equal(d.calls.length, 0);
+  // Public page has no preview notice.
+  assert.doesNotMatch(await (await handleTickets(new Request("https://lp.example/tickets"), deps()))!.text(), /data-lp-tk-preview/);
 });
 
 test("handler: non-tickets path / flag off / config failure -> not handled", async () => {
@@ -430,6 +461,10 @@ test("ticketsInjection: floating CTA follows enabled, button swap needs enabled 
   const both = ticketsInjection({ ...CFG, ctaEnabled: true });
   assert.match(both, /id="lp-tickets-cta"/);
   assert.match(both, /id="lp-tickets-cta-swap"/);
+  assert.doesNotMatch(both, /id="lp-tickets-preview"/);
+  const preview = ticketsInjection({ ...CFG, preview: true, ctaEnabled: true });
+  assert.match(preview, /id="lp-tickets-preview"/);
+  assert.match(preview, /id="lp-tickets-cta-swap"/);
 });
 
 test("ticketsCtaSwap: targets, label, hydration wait, script parses", () => {

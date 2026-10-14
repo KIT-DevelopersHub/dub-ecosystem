@@ -203,12 +203,23 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     // (c) a user listing ONE team's tasks (カレンダーの「チームのタスクを表示」): a team is a
     // shared grouping, the same tasks every task:read holder already sees per event, so a
     // team scope is not a per-person list.
+    // (d) a user listing ANOTHER member's tasks (カレンダーの「ユーザーを検索」). That is a
+    // per-person list, so it needs identity:read on top — the key that already lets the
+    // caller look that person up in the roster. Without it the old cross-user 403 holds.
     if (!eventId && !isServiceRole(principal)) {
       const isSelf =
         principal.kind === "user" &&
         (assigneeId === principal.userId || createdById === principal.userId);
       const isTeam = principal.kind === "user" && !!teamId;
-      if (!isSelf && !isTeam) throw errors.validationFailed([{ field: "assigneeId", reason: "required" }]);
+      const isPerson = principal.kind === "user" && !!(assigneeId || createdById);
+      if (!isSelf && !isTeam && !isPerson) throw errors.validationFailed([{ field: "assigneeId", reason: "required" }]);
+      if (!isSelf && !isTeam && !(await holdsKey(c, "identity:read"))) {
+        throw errors.forbidden("permission denied: identity:read", {
+          reason: "missing_permission",
+          required: ["identity:read"],
+          missing: ["identity:read"],
+        });
+      }
     }
 
     const statusRaw = (c.req.queries("status") ?? []).flatMap((s) => s.split(",")).filter(Boolean);

@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "calendar-people-search",
+  "worker": "dub-demo-calendar-people-search",
+  "url": "https://dub-demo-calendar-people-search.developershub-site.workers.dev",
+  "deployedSha": "006f05ab",
+  "branch": "feat/calendar-people-search",
+  "actor": "ko-tarou",
+  "markers": ["calendar-people-input"],
+  "live": true,
+  "verifiedAt": "2026-10-14T04:19:37Z",
+  "updatedAt": "2026-10-14T04:19:37Z",
+  "note": "カレンダー ユーザーを検索"
+}
