@@ -200,11 +200,15 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     // OWN tasks — assigned to them (担当) or issued by them (依頼), which scope to self so
     // the "My Tasks" hub never leaks other people's lists. Since tasks may be unlinked to
     // any event (判断44), a bare `GET /tasks` from a user for someone else is still gated.
+    // (c) a user listing ONE team's tasks (カレンダーの「チームのタスクを表示」): a team is a
+    // shared grouping, the same tasks every task:read holder already sees per event, so a
+    // team scope is not a per-person list.
     if (!eventId && !isServiceRole(principal)) {
       const isSelf =
         principal.kind === "user" &&
         (assigneeId === principal.userId || createdById === principal.userId);
-      if (!isSelf) throw errors.validationFailed([{ field: "assigneeId", reason: "required" }]);
+      const isTeam = principal.kind === "user" && !!teamId;
+      if (!isSelf && !isTeam) throw errors.validationFailed([{ field: "assigneeId", reason: "required" }]);
     }
 
     const statusRaw = (c.req.queries("status") ?? []).flatMap((s) => s.split(",")).filter(Boolean);
