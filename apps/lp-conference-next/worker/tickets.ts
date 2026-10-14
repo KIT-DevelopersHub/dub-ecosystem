@@ -26,8 +26,6 @@ export interface PublicTicketType {
 }
 export interface TicketConfig {
   enabled: boolean;
-  /** LP管理「バージョン」タブのトグル: 版のプレビューでだけ販売中に見せる。 */
-  previewEnabled: boolean;
   /** Set by the Worker (previewConfig), never by lp-analytics: shown as on sale, never sells. */
   preview: boolean;
   /** Swap the LP's 参加登録 buttons for 参加チケットを購入 (effective only with enabled). */
@@ -69,7 +67,6 @@ const DAY1 = "Day 1 - 9/13(月)";
 const DAY2 = "Day 2 - 9/14(火)";
 export const DEMO_CONFIG: TicketConfig = {
   enabled: true,
-  previewEnabled: false,
   preview: false,
   ctaEnabled: true,
   paymentReady: true,
@@ -214,9 +211,9 @@ export function parseConfig(raw: unknown): TicketConfig | null {
   }
   return {
     enabled: o.enabled,
-    previewEnabled: o.previewEnabled === true,
     preview: false,
-    ctaEnabled: o.ctaEnabled === true, paymentReady: o.paymentReady === true,
+    ctaEnabled: o.ctaEnabled === true,
+    paymentReady: o.paymentReady === true,
     fields,
     types,
   };
@@ -1156,12 +1153,15 @@ export function ticketsCtaSwap(): string {
 }
 
 /**
- * Sales off + the preview toggle on + the visitor picked a version (?version= / LP管理の「見る」)
- * → render as on sale with preview: true. The public LP (no version picked) stays as is.
+ * LP管理「プレビュー」タブの指定 (?tickets=on|off) を、この閲覧者にだけ当てる。
+ * on: 販売停止中でも販売中の見た目 (preview: true = 申し込み不可)。off: 販売中でも出さない。
+ * 指定なしは実際の販売状態のまま（公開中の LP は不変）。
  */
-export function previewConfig(cfg: TicketConfig | null, selected: boolean): TicketConfig | null {
-  if (!cfg || cfg.enabled || !cfg.previewEnabled || !selected) return cfg;
-  return { ...cfg, enabled: true, preview: true };
+export function previewConfig(cfg: TicketConfig | null, mode: "on" | "off" | null): TicketConfig | null {
+  if (!cfg || !mode) return cfg;
+  if (mode === "on" && !cfg.enabled) return { ...cfg, enabled: true, preview: true };
+  if (mode === "off" && cfg.enabled) return { ...cfg, enabled: false };
+  return cfg;
 }
 
 /** Bottom bar on LP pages while previewing ticket sales (keeps the LP header visible). */

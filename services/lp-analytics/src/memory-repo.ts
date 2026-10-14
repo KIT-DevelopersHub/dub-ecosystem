@@ -30,7 +30,7 @@ export class InMemoryLpRepo implements LpRepo {
     return r ? clone(r) : null;
   }
   private upsertSettings(site: string, patch: Partial<TicketSettingsRow>, updatedBy: string, updatedAt: string) {
-    const cur = this.ticketSettings.get(site) ?? { site, enabled: false, ctaEnabled: false, previewEnabled: false, fields: [], updatedBy: null, updatedAt };
+    const cur = this.ticketSettings.get(site) ?? { site, enabled: false, ctaEnabled: false, fields: [], updatedBy: null, updatedAt };
     this.ticketSettings.set(site, { ...cur, ...clone(patch), updatedBy, updatedAt });
   }
   async setTicketEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string) {
@@ -38,9 +38,6 @@ export class InMemoryLpRepo implements LpRepo {
   }
   async setTicketCta(site: string, ctaEnabled: boolean, updatedBy: string, updatedAt: string) {
     this.upsertSettings(site, { ctaEnabled }, updatedBy, updatedAt);
-  }
-  async setTicketPreview(site: string, previewEnabled: boolean, updatedBy: string, updatedAt: string) {
-    this.upsertSettings(site, { previewEnabled }, updatedBy, updatedAt);
   }
   async setTicketFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string) {
     this.upsertSettings(site, { fields }, updatedBy, updatedAt);

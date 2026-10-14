@@ -165,8 +165,6 @@ export interface LpTicketsState {
   enabled: boolean;
   /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える（enabled の間だけ効く）。 */
   ctaEnabled: boolean;
-  /** 版のプレビュー（?version=）でだけ販売中の見た目にする。公開中の LP には効かない。 */
-  previewEnabled: boolean;
   paymentReady: boolean;
   publicUrl: string;
   fields: LpTicketField[];
@@ -221,7 +219,6 @@ export interface TicketSettingsRow {
   site: string;
   enabled: boolean;
   ctaEnabled: boolean;
-  previewEnabled: boolean;
   fields: LpTicketField[];
   updatedBy: string | null;
   updatedAt: string;
@@ -245,7 +242,6 @@ export interface LpTicketRepo {
   /** Upsert; only the given column changes. */
   setTicketEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
   setTicketCta(site: string, ctaEnabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
-  setTicketPreview(site: string, previewEnabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
   setTicketFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string): Promise<void>;
   listTicketTypes(site: string): Promise<TicketTypeRow[]>;
   getTicketType(site: string, id: string): Promise<TicketTypeRow | null>;

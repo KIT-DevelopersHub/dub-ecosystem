@@ -5,16 +5,7 @@ export const VERSION_COOKIE = "lp_version";
 
 export type Resolution =
   | { kind: "redirect"; location: string; setCookie: string }
-  | {
-      kind: "serve";
-      version: string;
-      /** version differs from the published one (shows the version banner). */
-      preview: boolean;
-      /** The visitor picked a version (?version= / cookie / LP管理 iframe), even the published one. */
-      selected: boolean;
-      assetPath: string;
-      setCookie: string | null;
-    };
+  | { kind: "serve"; version: string; preview: boolean; assetPath: string; setCookie: string | null };
 
 /** "3.1" / "v3.1" -> "v3.1" when bundled, else null. */
 export function normalizeVersion(raw: string | null | undefined, bundled: readonly string[]): string | null {
@@ -55,32 +46,52 @@ export function resolveRequest(
     return { kind: "redirect", location: clean.pathname + clean.search, setCookie: clearCookie() };
   }
   const fromParam = normalizeVersion(param, bundled);
-  const selected = selectedVersion(url, cookieHeader, bundled, referer);
-  const version = selected ?? published;
+  const fromCookie = normalizeVersion(readCookie(cookieHeader, VERSION_COOKIE), bundled);
+  // Inside the LP管理 iframe the cookie is third-party and may be blocked, so a same-origin
+  // subresource falls back to the ?version= of the page that requested it.
+  const version = fromParam ?? fromCookie ?? versionFromReferer(referer, url.origin, bundled) ?? published;
   return {
     kind: "serve",
     version,
     preview: version !== published,
-    selected: selected !== null,
     assetPath: `/versions/${version}${url.pathname}`,
     setCookie: fromParam ? sessionCookie(fromParam) : null,
   };
 }
 
-/** Version the visitor explicitly picked, or null for the plain public LP. */
-export function selectedVersion(
-  url: URL,
-  cookieHeader: string | null,
-  bundled: readonly string[],
-  referer: string | null = null,
-): string | null {
-  // Inside the LP管理 iframe the cookie is third-party and may be blocked, so a same-origin
-  // subresource falls back to the ?version= of the page that requested it.
-  return (
-    normalizeVersion(url.searchParams.get("version"), bundled) ??
-    normalizeVersion(readCookie(cookieHeader, VERSION_COOKIE), bundled) ??
-    versionFromReferer(referer, url.origin, bundled)
-  );
+export const TICKETS_COOKIE = "lp_tickets";
+
+/** LP管理「プレビュー」タブのチケット販売あり/なし。null = 指定なし（実際の販売状態のまま）。 */
+export type TicketsPreview = "on" | "off";
+
+function normalizeTickets(raw: string | null | undefined): TicketsPreview | null {
+  const v = raw?.trim().toLowerCase();
+  return v === "on" || v === "off" ? v : null;
+}
+
+/** ?tickets= > cookie > same-origin referer (LP管理 iframe). ?version=live clears it. */
+export function ticketsPreview(url: URL, cookieHeader: string | null, referer: string | null = null): TicketsPreview | null {
+  if (url.searchParams.get("version")?.trim().toLowerCase() === "live") return null;
+  const fromParam = normalizeTickets(url.searchParams.get("tickets"));
+  if (fromParam) return fromParam;
+  const fromCookie = normalizeTickets(readCookie(cookieHeader, TICKETS_COOKIE));
+  if (fromCookie) return fromCookie;
+  if (!referer) return null;
+  try {
+    const u = new URL(referer);
+    return u.origin === url.origin ? normalizeTickets(u.searchParams.get("tickets")) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set-Cookie for ?tickets= (session) or ?version=live (clear); null otherwise. */
+export function ticketsCookie(url: URL): string | null {
+  if (url.searchParams.get("version")?.trim().toLowerCase() === "live") {
+    return `${TICKETS_COOKIE}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`;
+  }
+  const v = normalizeTickets(url.searchParams.get("tickets"));
+  return v ? `${TICKETS_COOKIE}=${v}; Path=/; SameSite=None; Secure; HttpOnly` : null;
 }
 
 function versionFromReferer(referer: string | null, origin: string, bundled: readonly string[]): string | null {

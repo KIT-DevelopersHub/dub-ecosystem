@@ -166,8 +166,6 @@ export interface LpTicketsState {
   enabled: boolean;
   /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える。効くのは enabled && ctaEnabled のとき。 */
   ctaEnabled: boolean;
-  /** 版のプレビュー（LP管理の「見る」・?version=）でだけ販売中の見た目にする。公開中の LP には効かない。 */
-  previewEnabled: boolean;
   paymentReady: boolean;
   /** LP_BASE_URL + "/tickets" */
   publicUrl: string;
@@ -241,8 +239,6 @@ export interface LpApi {
   setTicketsEnabled(input: { enabled: boolean }): Promise<LpTicketsState>;
   /** LP の参加登録ボタン差し替えの on/off (app:lp:edit + lp:publish)。販売停止中でも保存できる。 */
   setTicketsCta(input: { enabled: boolean }): Promise<LpTicketsState>;
-  /** プレビューでの販売表示の on/off (app:lp:edit)。販売状態は変えない。 */
-  setTicketsPreview(input: { enabled: boolean }): Promise<LpTicketsState>;
   /** 入力項目を丸ごと置き換える (app:lp:edit)。 */
   saveTicketFields(input: { fields: LpTicketField[] }): Promise<LpTicketsState>;
   /** 券種を追加 (app:lp:edit)。 */
@@ -301,8 +297,6 @@ export function createLpApi(api: ApiClient): LpApi {
       api.request<LpTicketsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/tickets/enabled`, body: input }),
     setTicketsCta: (input) =>
       api.request<LpTicketsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/tickets/cta`, body: input }),
-    setTicketsPreview: (input) =>
-      api.request<LpTicketsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/tickets/preview`, body: input }),
     saveTicketFields: (input) =>
       api.request<LpTicketsState, { fields: LpTicketField[] }>({
         method: "POST",

@@ -108,7 +108,6 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       site: "hokuriku-it-conf.com",
       enabled: false,
       ctaEnabled: false,
-      previewEnabled: false,
       paymentReady: false,
       publicUrl: "https://hokuriku-it-conf.com/tickets",
       fields: [],
@@ -141,20 +140,6 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     await enable(app);
     const internal = await body<{ enabled: boolean; ctaEnabled: boolean }>(await app.fetch(get("/lp/internal/tickets", INTERNAL)));
     expect(internal).toMatchObject({ enabled: true, ctaEnabled: true });
-  });
-
-  it("preview toggle needs edit only, never opens sales or checkout", async () => {
-    const view = await makeApp(kind, "view");
-    expect((await view.app.fetch(send("POST", "/lp/tickets/preview", { enabled: true }))).status).toBe(403);
-    const { app } = await setup(kind, { publish: false });
-    expect((await app.fetch(send("POST", "/lp/tickets/preview", { enabled: "on" }))).status).toBe(400);
-    const free = await addType(app, { name: "招待", priceJpy: 0 });
-    const res = await app.fetch(send("POST", "/lp/tickets/preview", { enabled: true }));
-    expect(res.status).toBe(200);
-    expect(await body<LpTicketsState>(res)).toMatchObject({ enabled: false, previewEnabled: true, updatedBy: "usr_admin" });
-    const internal = await body<{ enabled: boolean; previewEnabled: boolean }>(await app.fetch(get("/lp/internal/tickets", INTERNAL)));
-    expect(internal).toMatchObject({ enabled: false, previewEnabled: true });
-    expect((await app.fetch(checkout({ ticketTypeId: free.id }))).status).toBe(404);
   });
 
   it("dayLabel / maxPerOrder: defaults, trims, validates", async () => {

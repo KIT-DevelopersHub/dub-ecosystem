@@ -19,19 +19,25 @@ export function publishSuccessMessage(name: string): string {
 /**
  * 「見る」の行き先。公開対象の版は公開サイトのプレビュー URL、公開中の版は ?version=live
  * （プレビュー cookie を解除して本番の見え方にする）。公開対象外の版は元の URL のまま。
- * ticketsPreview（チケット販売のプレビュー表示中）は公開中の版も ?version=<番号> で開く。
- * LP は版を指定した閲覧にだけ販売中の見た目を出すので、live だとプレビューにならない。
  */
 export function lpViewUrl(
   id: string,
   fallbackUrl: string,
   publish: { versionId: string; versions: readonly string[] } | undefined,
   base: string = LP_PUBLIC_URL,
-  ticketsPreview = false,
 ): string {
   if (!publish || !publish.versions.includes(id)) return fallbackUrl;
-  const v = id === publish.versionId && !ticketsPreview ? "live" : id.replace(/^v/, "");
+  const v = id === publish.versionId ? "live" : id.replace(/^v/, "");
   return `${base}/?version=${encodeURIComponent(v)}`;
+}
+
+/**
+ * 「プレビュー」タブの行き先。版は公開中でも番号で指定する（live はプレビュー cookie を消すため）。
+ * tickets: on = 販売停止中でも販売中の見た目（申し込み不可）/ off = 販売中でも出さない。
+ * どちらもこの閲覧者にだけ効き、公開中の LP は変わらない。
+ */
+export function lpPreviewUrl(id: string, tickets: "on" | "off", base: string = LP_PUBLIC_URL): string {
+  return `${base}/?version=${encodeURIComponent(id.replace(/^v/, ""))}&tickets=${tickets}`;
 }
 
 /** 切り替え日時の表示（"2026/10/12 14:05"）。壊れた値はそのまま返す。 */

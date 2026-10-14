@@ -97,36 +97,6 @@ export function useSetTicketsCta() {
   });
 }
 
-/** プレビューでの販売表示（楽観的）。公開中の LP には効かないので確認ダイアログは挟まない。 */
-export function useSetTicketsPreview() {
-  const api = useLpApi();
-  const qc = useQueryClient();
-  const toast = useToast();
-  const key = lpTicketsKey();
-  return useMutation<LpTicketsState, unknown, { enabled: boolean }, Ctx>({
-    mutationFn: (vars) => api.setTicketsPreview(vars),
-    onMutate: async ({ enabled }) => {
-      await qc.cancelQueries({ queryKey: key, exact: true });
-      const prev = qc.getQueryData<LpTicketsState>(key);
-      if (prev) qc.setQueryData<LpTicketsState>(key, { ...prev, previewEnabled: enabled });
-      return { prev };
-    },
-    onError: (err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
-      toast.show({ kind: "error", title: messageFor(err, "プレビューの設定を切り替えられませんでした") });
-    },
-    onSuccess: (next) => {
-      qc.setQueryData(key, next);
-      toast.show({
-        kind: "success",
-        title: next.previewEnabled
-          ? "プレビューでチケット販売を表示します（公開中の LP は変わりません）"
-          : "プレビューでのチケット販売の表示をやめました",
-      });
-    },
-  });
-}
-
 export function useSaveTicketFields() {
   const api = useLpApi();
   const qc = useQueryClient();

@@ -1,7 +1,7 @@
 // Run: node --test worker/route.test.ts (Node >= 22.18 strips TS types natively).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeVersion, readCookie, resolveRequest, rewriteLocation, selectedVersion } from "./route.ts";
+import { normalizeVersion, readCookie, resolveRequest, rewriteLocation, ticketsCookie, ticketsPreview } from "./route.ts";
 
 const BUNDLED = ["v3.4", "v3.3", "v3.1"];
 const at = (path: string) => new URL(path, "https://lp.example");
@@ -15,7 +15,7 @@ test("normalizeVersion accepts 3.1 / v3.1 and rejects unknown", () => {
 
 test("root without param/cookie serves published", () => {
   const r = resolveRequest(at("/"), null, "v3.4", BUNDLED);
-  assert.deepEqual(r, { kind: "serve", version: "v3.4", preview: false, selected: false, assetPath: "/versions/v3.4/", setCookie: null });
+  assert.deepEqual(r, { kind: "serve", version: "v3.4", preview: false, assetPath: "/versions/v3.4/", setCookie: null });
 });
 
 test("?version=3.1 serves v3.1 as preview and sets session cookie", () => {
@@ -73,18 +73,19 @@ test("same-origin referer with ?version= picks that version when no cookie (ifra
   assert.equal(x.kind === "serve" && x.version, "v3.4");
 });
 
-test("selected: true whenever the visitor picked a version, even the published one", () => {
-  const pub = resolveRequest(at("/?version=3.4"), null, "v3.4", BUNDLED);
-  assert.equal(pub.kind === "serve" && pub.preview, false);
-  assert.equal(pub.kind === "serve" && pub.selected, true);
-  const plain = resolveRequest(at("/program/"), "lp_version=v0.1", "v3.4", BUNDLED);
-  assert.equal(plain.kind === "serve" && plain.selected, false);
+test("ticketsPreview: param > cookie > same-origin referer; live clears; public LP is null", () => {
+  assert.equal(ticketsPreview(at("/"), null), null);
+  assert.equal(ticketsPreview(at("/?version=3.4&tickets=on"), null), "on");
+  assert.equal(ticketsPreview(at("/?tickets=OFF"), "lp_tickets=on"), "off");
+  assert.equal(ticketsPreview(at("/tickets"), "lp_tickets=on"), "on");
+  assert.equal(ticketsPreview(at("/?tickets=yes"), null), null);
+  assert.equal(ticketsPreview(at("/logo.png"), null, "https://lp.example/?tickets=on"), "on");
+  assert.equal(ticketsPreview(at("/logo.png"), null, "https://evil.example/?tickets=on"), null);
+  assert.equal(ticketsPreview(at("/?version=live"), "lp_tickets=on"), null);
 });
 
-test("selectedVersion: param > cookie > same-origin referer; null for the public LP", () => {
-  assert.equal(selectedVersion(at("/tickets"), null, BUNDLED), null);
-  assert.equal(selectedVersion(at("/tickets"), "lp_version=v3.3", BUNDLED), "v3.3");
-  assert.equal(selectedVersion(at("/tickets?version=3.1"), "lp_version=v3.3", BUNDLED), "v3.1");
-  assert.equal(selectedVersion(at("/tickets"), null, BUNDLED, "https://lp.example/?version=3.4"), "v3.4");
-  assert.equal(selectedVersion(at("/tickets"), null, BUNDLED, "https://evil.example/?version=3.4"), null);
+test("ticketsCookie: session cookie for ?tickets=, cleared by ?version=live", () => {
+  assert.equal(ticketsCookie(at("/?tickets=on")), "lp_tickets=on; Path=/; SameSite=None; Secure; HttpOnly");
+  assert.match(ticketsCookie(at("/?version=live")) ?? "", /^lp_tickets=; .*Max-Age=0$/);
+  assert.equal(ticketsCookie(at("/?version=3.4")), null);
 });

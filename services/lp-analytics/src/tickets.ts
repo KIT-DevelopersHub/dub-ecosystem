@@ -313,7 +313,6 @@ export class TicketService {
       site: TICKET_SITE,
       enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
-      previewEnabled: settings?.previewEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
       publicUrl: `${this.deps.lpBaseUrl.replace(/\/+$/, "")}/tickets`,
       fields: settings?.fields ?? [],
@@ -338,14 +337,6 @@ export class TicketService {
     const enabled = (body as { enabled?: unknown } | null)?.enabled;
     if (typeof enabled !== "boolean") throw errors.validationFailed([{ field: "enabled", reason: "required" }]);
     await this.repo.setTicketCta(TICKET_SITE, enabled, ctx.userId, this.deps.now());
-    return this.getState();
-  }
-
-  /** 版のプレビューでだけ販売中に見せる。販売状態（enabled）は変えないので申し込みはできない。 */
-  async setPreview(ctx: ReqCtx, body: unknown): Promise<LpTicketsState> {
-    const enabled = (body as { enabled?: unknown } | null)?.enabled;
-    if (typeof enabled !== "boolean") throw errors.validationFailed([{ field: "enabled", reason: "required" }]);
-    await this.repo.setTicketPreview(TICKET_SITE, enabled, ctx.userId, this.deps.now());
     return this.getState();
   }
 
@@ -395,7 +386,6 @@ export class TicketService {
   async getPublic(): Promise<{
     enabled: boolean;
     ctaEnabled: boolean;
-    previewEnabled: boolean;
     paymentReady: boolean;
     fields: LpTicketField[];
     types: PublicTicketType[];
@@ -404,7 +394,6 @@ export class TicketService {
     return {
       enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
-      previewEnabled: settings?.previewEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
       fields: settings?.fields ?? [],
       types: types

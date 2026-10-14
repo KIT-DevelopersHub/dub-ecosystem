@@ -38,7 +38,6 @@ const tt = (o: Partial<PublicTicketType> & { id: string }): PublicTicketType => 
 });
 const CFG: TicketConfig = {
   enabled: true,
-  previewEnabled: false,
   preview: false,
   ctaEnabled: false,
   paymentReady: true,
@@ -263,7 +262,6 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
   });
   assert.deepEqual(c, {
     enabled: true,
-    previewEnabled: false,
     preview: false,
     ctaEnabled: true,
     paymentReady: false,
@@ -274,18 +272,19 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
     ],
   });
   assert.equal(parseConfig({ enabled: true, fields: [], types: [] })?.ctaEnabled, false);
-  assert.equal(parseConfig({ enabled: false, previewEnabled: true, fields: [], types: [] })?.previewEnabled, true);
   // preview is decided by the Worker, never taken from the response.
   assert.equal(parseConfig({ enabled: true, preview: true, fields: [], types: [] })?.preview, false);
 });
 
-test("previewConfig: only sales off + toggle on + a picked version turns into a preview", () => {
-  const off = { ...CFG, enabled: false, previewEnabled: true };
-  assert.deepEqual(previewConfig(off, true), { ...off, enabled: true, preview: true });
-  assert.equal(previewConfig(off, false), off);
-  assert.equal(previewConfig({ ...off, previewEnabled: false }, true)?.enabled, false);
-  assert.equal(previewConfig(CFG, true)?.preview, false);
-  assert.equal(previewConfig(null, true), null);
+test("previewConfig: ?tickets=on shows sales as a preview, off hides them, none keeps the real state", () => {
+  const off = { ...CFG, enabled: false };
+  assert.deepEqual(previewConfig(off, "on"), { ...off, enabled: true, preview: true });
+  assert.equal(previewConfig(off, null), off);
+  assert.equal(previewConfig(off, "off"), off);
+  assert.equal(previewConfig(CFG, "on"), CFG);
+  assert.equal(previewConfig(CFG, "off")?.enabled, false);
+  assert.equal(previewConfig(CFG, null), CFG);
+  assert.equal(previewConfig(null, "on"), null);
 });
 
 test("handler: preview shows the page with a notice but never checks out", async () => {

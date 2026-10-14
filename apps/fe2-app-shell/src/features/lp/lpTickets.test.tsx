@@ -51,7 +51,6 @@ function baseState(over: Partial<LpTicketsState> = {}): LpTicketsState {
     site: "hokuriku-it-conf.com",
     enabled: false,
     ctaEnabled: false,
-    previewEnabled: false,
     paymentReady: false,
     publicUrl: "https://hokuriku-it-conf.com/tickets",
     fields: [{ id: "f_aff", label: "所属", type: "text", required: false, options: [] }],
@@ -77,7 +76,6 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     getTickets: () => Promise.resolve(baseState()),
     setTicketsEnabled: ({ enabled }) => Promise.resolve(baseState({ enabled })),
     setTicketsCta: ({ enabled }) => Promise.resolve(baseState({ ctaEnabled: enabled })),
-    setTicketsPreview: ({ enabled }) => Promise.resolve(baseState({ previewEnabled: enabled })),
     saveTicketFields: ({ fields }) => Promise.resolve(baseState({ fields })),
     createTicketType: unused,
     updateTicketType: unused,
@@ -149,10 +147,9 @@ describe("lpTickets (pure)", () => {
 });
 
 describe("demo transport serves the tickets wire contract", () => {
-  it("returns stopped-with-preview, unpaid state with seeded types and non-zero stats", async () => {
+  it("returns stopped, unpaid state with seeded types and non-zero stats", async () => {
     const s = await demoLpApi().getTickets();
     expect(s.enabled).toBe(false);
-    expect(s.previewEnabled).toBe(true);
     expect(s.ctaEnabled).toBe(false);
     expect(s.paymentReady).toBe(false);
     expect(s.types.map((t) => `${t.name}|${t.dayLabel}`)).toEqual([
@@ -211,7 +208,6 @@ describe("demo transport serves the tickets wire contract", () => {
     await api.setTicketsEnabled({ enabled: false });
     const after = await api.setTicketsCta({ enabled: true });
     expect(after).toMatchObject({ enabled: false, ctaEnabled: true });
-    expect(await api.setTicketsPreview({ enabled: true })).toMatchObject({ enabled: false, previewEnabled: true });
   });
 });
 

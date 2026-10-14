@@ -10,7 +10,7 @@ import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../au
 import { ApiError, createApiClient } from "../../lib/api-client.tsx";
 import { createDemoFetch } from "../../lib/demo-seed.tsx";
 import { LpManagementScreen } from "./LpManagementScreen.tsx";
-import { createLpApi, type LpApi, type LpPublishState, type LpTicketsState } from "./lpApi.tsx";
+import { createLpApi, type LpApi, type LpPublishState } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
 import { lpViewUrl, PUBLISH_SUCCESS_MARKER } from "./lpPublish.ts";
 import { LP_VERSIONS } from "./lpVersions.ts";
@@ -24,23 +24,6 @@ function state(versionId: string): LpPublishState {
   return { site: "hokuriku-it-conf.com", versionId, versions: PUBLISHABLE, updatedAt: null, updatedBy: null };
 }
 
-function tickets(over: Partial<LpTicketsState> = {}): LpTicketsState {
-  return {
-    site: "hokuriku-it-conf.com",
-    enabled: false,
-    ctaEnabled: false,
-    previewEnabled: false,
-    paymentReady: false,
-    publicUrl: "https://hokuriku-it-conf.com/tickets",
-    fields: [],
-    types: [],
-    totals: { sold: 0, revenueJpy: 0 },
-    updatedAt: null,
-    updatedBy: null,
-    ...over,
-  };
-}
-
 function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
   const unused = () => Promise.reject(new Error("unused"));
   return {
@@ -50,10 +33,9 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     listLinks: unused,
     createLink: unused,
     setLinkActive: unused,
-    getTickets: () => Promise.resolve(tickets()),
+    getTickets: unused,
     setTicketsEnabled: unused,
     setTicketsCta: unused,
-    setTicketsPreview: ({ enabled }) => Promise.resolve(tickets({ previewEnabled: enabled })),
     saveTicketFields: unused,
     createTicketType: unused,
     updateTicketType: unused,
@@ -191,9 +173,6 @@ describe("lpViewUrl", () => {
     expect(lpViewUrl("v3.4", "https://old", publish, "https://lp.example")).toBe("https://lp.example/?version=live");
     expect(lpViewUrl("v1.0", "https://old", publish, "https://lp.example")).toBe("https://old");
     expect(lpViewUrl("v3.1", "https://old", undefined)).toBe("https://old");
-    // チケット販売のプレビュー中は公開中の版も版指定で開く（live だとプレビューにならない）。
-    expect(lpViewUrl("v3.4", "https://old", publish, "https://lp.example", true)).toBe("https://lp.example/?version=3.4");
-    expect(lpViewUrl("v3.1", "https://old", publish, "https://lp.example", true)).toBe("https://lp.example/?version=3.1");
   });
 });
 
@@ -206,40 +185,5 @@ describe("demo transport serves /lp/publish", () => {
     expect(next.updatedAt).not.toBeNull();
     expect((await api.getPublish()).versionId).toBe("v3.1");
     await expect(api.setPublish({ versionId: "v1.0" })).rejects.toMatchObject({ status: 400 });
-  });
-});
-
-describe("チケット販売のプレビュー表示", () => {
-  it("turns on without touching sales and makes 見る open the live version as a preview", async () => {
-    const setPreview = vi.fn(({ enabled }: { enabled: boolean }) => Promise.resolve(tickets({ previewEnabled: enabled })));
-    const setEnabled = vi.fn(() => Promise.reject(new Error("must not publish")));
-    renderScreen(fakeApi({ setTicketsPreview: setPreview, setTicketsEnabled: setEnabled }), editorPermissions("lp"));
-    const toggle = await screen.findByTestId("fe2-lp-tickets-preview");
-    expect(toggle).not.toBeChecked();
-    expect(screen.getByTestId("fe2-lp-tickets-preview-state")).toHaveTextContent("表示しない");
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(setPreview).toHaveBeenCalledWith({ enabled: true }));
-    expect(setEnabled).not.toHaveBeenCalled();
-    expect(await screen.findByTestId("fe2-lp-tickets-preview-state")).toHaveTextContent("プレビューのみ");
-    expect(screen.getByTestId("fe2-lp-tickets-preview")).toBeChecked();
-  });
-
-  it("is read-only for viewers", async () => {
-    renderScreen(fakeApi(), viewerPermissions("lp"));
-    expect(await screen.findByTestId("fe2-lp-tickets-preview")).toBeDisabled();
-  });
-
-  it("is locked on while sales are public", async () => {
-    renderScreen(fakeApi({ getTickets: () => Promise.resolve(tickets({ enabled: true })) }));
-    const toggle = await screen.findByTestId("fe2-lp-tickets-preview");
-    expect(toggle).toBeChecked();
-    expect(toggle).toBeDisabled();
-    expect(screen.getByTestId("fe2-lp-tickets-preview-state")).toHaveTextContent("販売を公開中");
-  });
-
-  it("shows a skeleton while loading", async () => {
-    renderScreen(fakeApi({ getTickets: () => new Promise(() => {}) }));
-    expect(await screen.findByTestId("fe2-lp-tickets-preview-loading")).toBeInTheDocument();
   });
 });
