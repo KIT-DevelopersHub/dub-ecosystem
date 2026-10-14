@@ -3,12 +3,12 @@
   "slug": "mail-show-cc",
   "worker": "dub-demo-mail-show-cc",
   "url": "https://dub-demo-mail-show-cc.developershub-site.workers.dev",
-  "deployedSha": "30dd7187",
+  "deployedSha": "03b735b9",
   "branch": "feat/mail-show-cc",
   "actor": "ko-tarou",
   "markers": ["fe2-mail-details-toggle","メッセージの詳細"],
   "live": true,
-  "verifiedAt": "2026-10-14T04:14:15Z",
-  "updatedAt": "2026-10-14T04:14:15Z",
+  "verifiedAt": "2026-10-14T04:15:46Z",
+  "updatedAt": "2026-10-14T04:15:46Z",
   "note": "受信メールの CC 表示 + 宛先詳細ダイアログ"
 }
