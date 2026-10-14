@@ -10,7 +10,7 @@
 //   • iframe で埋め込めない LP(X-Frame-Options 等)でも行き止まりにしないよう
 //     「新しいタブで開く」フォールバック導線を右側に残す。
 // バックエンド依存はなく、LP の URL は lpVersions.ts の静的カタログ由来。
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Button, Icon } from "@dub/ui";
 import { toCssVarName } from "@dub/tokens";
@@ -19,8 +19,11 @@ import type { LpVersion } from "./lpVersions.ts";
 export interface LpViewerProps {
   /** 表示中の LP バージョン。 */
   version: LpVersion;
-  /** 「アプリに戻る」= ビューアを閉じて通常 UI へ復帰。 */
-  onBack: () => void;
+  /**
+   * 「アプリに戻る」= ビューアを閉じて通常 UI へ復帰。frameNavigated は LP 内で画面を移動したか
+   * （iframe の遷移はブラウザ履歴に積まれるので、履歴を戻して閉じる側が使う）。
+   */
+  onBack: (info: { frameNavigated: boolean }) => void;
 }
 
 const surface = (path: string): string => toCssVarName(path);
@@ -30,10 +33,15 @@ const surface = (path: string): string => toCssVarName(path);
  * document.body に portal し、Escape でも戻れる。開いている間は背後のスクロールを止める。
  */
 export function LpViewer({ version, onBack }: LpViewerProps): JSX.Element {
+  const frameLoads = useRef(0);
+  const back = (): void => onBack({ frameNavigated: frameLoads.current > 1 });
+  const backRef = useRef(back);
+  backRef.current = back;
+
   // Escape で戻る + 開いている間は背後(body)のスクロールをロック。
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onBack();
+      if (e.key === "Escape") backRef.current();
     };
     window.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
@@ -42,7 +50,7 @@ export function LpViewer({ version, onBack }: LpViewerProps): JSX.Element {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [onBack]);
+  }, []);
 
   const overlay = (
     <div
@@ -75,7 +83,7 @@ export function LpViewer({ version, onBack }: LpViewerProps): JSX.Element {
         <Button
           variant="secondary"
           iconLeft={<Icon name="home" />}
-          onClick={onBack}
+          onClick={back}
           testId="fe2-lp-back-button"
         >
           アプリに戻る
@@ -109,6 +117,9 @@ export function LpViewer({ version, onBack }: LpViewerProps): JSX.Element {
         src={version.url}
         title={version.name}
         data-testid="fe2-lp-viewer-frame"
+        onLoad={() => {
+          frameLoads.current += 1;
+        }}
         style={{ flex: "1 1 auto", width: "100%", height: "100%", border: "none" }}
       />
     </div>

@@ -59,6 +59,41 @@ export function resolveRequest(
   };
 }
 
+export const TICKETS_COOKIE = "lp_tickets";
+
+/** LP管理「プレビュー」タブのチケット販売あり/なし。null = 指定なし（実際の販売状態のまま）。 */
+export type TicketsPreview = "on" | "off";
+
+function normalizeTickets(raw: string | null | undefined): TicketsPreview | null {
+  const v = raw?.trim().toLowerCase();
+  return v === "on" || v === "off" ? v : null;
+}
+
+/** ?tickets= > cookie > same-origin referer (LP管理 iframe). ?version=live clears it. */
+export function ticketsPreview(url: URL, cookieHeader: string | null, referer: string | null = null): TicketsPreview | null {
+  if (url.searchParams.get("version")?.trim().toLowerCase() === "live") return null;
+  const fromParam = normalizeTickets(url.searchParams.get("tickets"));
+  if (fromParam) return fromParam;
+  const fromCookie = normalizeTickets(readCookie(cookieHeader, TICKETS_COOKIE));
+  if (fromCookie) return fromCookie;
+  if (!referer) return null;
+  try {
+    const u = new URL(referer);
+    return u.origin === url.origin ? normalizeTickets(u.searchParams.get("tickets")) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set-Cookie for ?tickets= (session) or ?version=live (clear); null otherwise. */
+export function ticketsCookie(url: URL): string | null {
+  if (url.searchParams.get("version")?.trim().toLowerCase() === "live") {
+    return `${TICKETS_COOKIE}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`;
+  }
+  const v = normalizeTickets(url.searchParams.get("tickets"));
+  return v ? `${TICKETS_COOKIE}=${v}; Path=/; SameSite=None; Secure; HttpOnly` : null;
+}
+
 function versionFromReferer(referer: string | null, origin: string, bundled: readonly string[]): string | null {
   if (!referer) return null;
   try {

@@ -3627,7 +3627,8 @@ function createLpTicketsStore() {
   const t0 = "2026-09-20T09:00:00.000Z";
   const settings = {
     site: "hokuriku-it-conf.com",
-    enabled: true,
+    // 販売は停止中（「プレビュー」タブでチケットありの見た目を確かめる demo）。
+    enabled: false,
     ctaEnabled: false,
     paymentReady: false,
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
