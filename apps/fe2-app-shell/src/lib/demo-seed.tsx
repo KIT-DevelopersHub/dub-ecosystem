@@ -3331,7 +3331,7 @@ function createLpStore() {
 //   GET   /api/v1/lp/tickets
 //   POST  /api/v1/lp/tickets/enabled     { enabled }
 //   POST  /api/v1/lp/tickets/cta         { enabled }      ctaEnabled (saved even while sales are off)
-//   POST  /api/v1/lp/tickets/preview                     201 { url, expiresAt } (24h; state unchanged)
+//   POST  /api/v1/lp/tickets/preview     { enabled }      previewEnabled (版のプレビューでだけ販売中に見せる)
 //   POST  /api/v1/lp/tickets/fields      { fields }      400 on invalid list
 //   POST  /api/v1/lp/tickets/types       LpTicketTypeInput   201
 //   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
@@ -3390,8 +3390,10 @@ function createLpTicketsStore() {
   const t0 = "2026-09-20T09:00:00.000Z";
   const settings = {
     site: "hokuriku-it-conf.com",
-    enabled: true,
+    // 販売は停止中・プレビュー表示はオン（LP の demo Worker も同じ状態で動く）。
+    enabled: false,
     ctaEnabled: false,
+    previewEnabled: true,
     paymentReady: false,
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
@@ -3510,9 +3512,10 @@ function createLpTicketsStore() {
     }
 
     if (method === "POST" && pathname === "/api/v1/lp/tickets/preview") {
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      const token = `demo-preview-${Date.now().toString(36).padStart(24, "0")}`;
-      return json({ url: `${settings.publicUrl}?preview=${token}`, expiresAt }, 201);
+      if (typeof req.enabled !== "boolean") return problem("VALIDATION_FAILED", "enabled を指定してください", 400);
+      settings.previewEnabled = req.enabled;
+      touch();
+      return json(state());
     }
 
     if (method === "POST" && pathname === "/api/v1/lp/tickets/fields") {

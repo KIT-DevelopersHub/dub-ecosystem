@@ -8,6 +8,9 @@
 // 「公開中」バッジはサーバーの公開フラグ（GET /api/v1/lp/publish）が正で、lpVersions.ts の
 // status ではない。lp:publish を持つ編集者だけが「この版を公開」で切り替えられる（確認ダイアログ
 // → 楽観的にバッジを移動 → 失敗でロールバック）。ビルド/デプロイはしない。
+//
+// 「チケット販売をプレビューで表示」トグルは版のプレビュー（「見る」・?version=）にだけ効く。
+// 公開中の LP は変わらず申し込みもできないので確認ダイアログは挟まない（販売の公開は「チケット」タブ）。
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -22,12 +25,14 @@ import {
   Skeleton,
   SkeletonLoader,
   Stack,
+  Switch,
 } from "@dub/ui";
 import type { BadgeTone } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { listLpVersions, type LpVersion } from "./lpVersions.ts";
 import type { LpPublishState } from "./lpApi.tsx";
 import { useLpPublish, useSetLpPublish } from "./lpHooks.ts";
+import { useLpTickets, useSetTicketsPreview } from "./lpTicketsHooks.ts";
 import { formatSwitchedAt, lpViewUrl, PUBLISH_SUCCESS_MARKER } from "./lpPublish.ts";
 import { LpViewer } from "./LpViewer.tsx";
 import { LpTabs } from "./LpTabs.tsx";
@@ -144,11 +149,13 @@ export function LpManagementScreen(): JSX.Element {
   const { can } = usePermissions();
   const canPublish = canEdit && can("lp:publish");
   const publish = publishQuery.data;
+  const tickets = useLpTickets();
+  const ticketsPreview = !!tickets.data && !tickets.data.enabled && tickets.data.previewEnabled;
 
   // 「見る」の行き先は公開フラグ次第（公開対象の版 = 公開サイトのプレビュー URL）。
   const versions = useMemo(
-    () => query.data?.map((v) => ({ ...v, url: lpViewUrl(v.id, v.url, publish) })),
-    [query.data, publish],
+    () => query.data?.map((v) => ({ ...v, url: lpViewUrl(v.id, v.url, publish, undefined, ticketsPreview) })),
+    [query.data, publish, ticketsPreview],
   );
   const nameOf = (id: string): string => query.data?.find((v) => v.id === id)?.name ?? id;
 
@@ -205,6 +212,7 @@ export function LpManagementScreen(): JSX.Element {
           nameOf={nameOf}
           onRetry={() => void publishQuery.refetch()}
         />
+        <TicketsPreviewSetting query={tickets} canEdit={canEdit} />
         <Card padded={false} testId="fe2-lp-list">
           {versions.map((v) => (
             <VersionRow
@@ -285,6 +293,64 @@ function PublishSummary({
         {publish.updatedAt ? `（${formatSwitchedAt(publish.updatedAt)} に切り替え）` : null}
       </span>
     </div>
+  );
+}
+
+/** チケット販売を版のプレビューでだけ表示するトグル。公開中の LP と販売状態は変えない。 */
+function TicketsPreviewSetting({
+  query,
+  canEdit,
+}: {
+  query: ReturnType<typeof useLpTickets>;
+  canEdit: boolean;
+}): JSX.Element {
+  const setPreview = useSetTicketsPreview();
+  const state = query.data;
+  let control: JSX.Element;
+  if (query.isLoading) {
+    control = <Skeleton width={320} height={24} testId="fe2-lp-tickets-preview-loading" />;
+  } else if (query.isError || !state) {
+    control = (
+      <div className={styles.publishSummary} data-testid="fe2-lp-tickets-preview-error">
+        <span>チケット販売の設定を読み込めませんでした。</span>
+        <Button variant="ghost" size="sm" onClick={() => void query.refetch()}>
+          再読み込み
+        </Button>
+      </div>
+    );
+  } else {
+    const badge = state.enabled
+      ? { tone: "success" as const, label: "販売を公開中" }
+      : state.previewEnabled
+        ? { tone: "info" as const, label: "プレビューのみ" }
+        : { tone: "neutral" as const, label: "表示しない" };
+    control = (
+      <div className={styles.statusRow}>
+        <Switch
+          id="fe2-lp-tickets-preview"
+          testId="fe2-lp-tickets-preview"
+          checked={state.enabled || state.previewEnabled}
+          disabled={!canEdit || state.enabled || setPreview.isPending}
+          label="チケット販売をプレビューで表示"
+          onChange={(next) => setPreview.mutate({ enabled: next })}
+        />
+        <Badge tone={badge.tone} testId="fe2-lp-tickets-preview-state">
+          {badge.label}
+        </Badge>
+      </div>
+    );
+  }
+  return (
+    <Card testId="fe2-lp-tickets-preview-setting">
+      <Stack gap={2}>
+        {control}
+        <span className={styles.note}>
+          {state?.enabled
+            ? "チケット販売は公開中のため、公開中の LP にも購入ボタンが出ています（停止は「チケット」タブ）。"
+            : "オンにすると「見る」で開いた LP だけがチケット販売中の見た目になります。公開中の LP は変わらず、お申し込みもできません。券種などの設定は「チケット」タブで行います。"}
+        </span>
+      </Stack>
+    </Card>
   );
 }
 

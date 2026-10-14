@@ -13,7 +13,6 @@ import type {
   LpTicketOrderItem,
   LpTicketOrderStatus,
   LpTicketOrdersPage,
-  LpTicketPreview,
   LpTicketsState,
   LpTicketType,
   LpTicketTypeInput,
@@ -64,15 +63,6 @@ const SESSION_EVENTS: ReadonlySet<string> = new Set([
   "checkout.session.async_payment_failed",
   "checkout.session.expired",
 ]);
-
-/** 公開前プレビューのリンクの有効期間。 */
-export const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
-const PREVIEW_TOKEN_RE = /^[A-Za-z0-9_-]{32,128}$/;
-
-export async function hashPreviewToken(token: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 const DEFAULT_ORDERS_PAGE = 50;
 const MAX_ORDERS_PAGE = 200;
@@ -323,6 +313,7 @@ export class TicketService {
       site: TICKET_SITE,
       enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
+      previewEnabled: settings?.previewEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
       publicUrl: `${this.deps.lpBaseUrl.replace(/\/+$/, "")}/tickets`,
       fields: settings?.fields ?? [],
@@ -350,25 +341,12 @@ export class TicketService {
     return this.getState();
   }
 
-  /** 販売停止中でも /tickets を確認できる期限付きリンク。申し込みはできない（checkout は enabled のみ）。 */
-  async createPreview(ctx: ReqCtx): Promise<LpTicketPreview> {
-    const token = this.deps.newPreviewToken();
-    const createdAt = this.deps.now();
-    const expiresAt = new Date(Date.parse(createdAt) + PREVIEW_TTL_MS).toISOString();
-    await this.repo.insertTicketPreview({
-      tokenHash: await hashPreviewToken(token),
-      site: TICKET_SITE,
-      createdBy: ctx.userId,
-      createdAt,
-      expiresAt,
-    });
-    const base = this.deps.lpBaseUrl.replace(/\/+$/, "");
-    return { url: `${base}/tickets?preview=${encodeURIComponent(token)}`, expiresAt };
-  }
-
-  private async previewValid(token: string | undefined): Promise<boolean> {
-    if (!token || !PREVIEW_TOKEN_RE.test(token)) return false;
-    return this.repo.isTicketPreviewValid(TICKET_SITE, await hashPreviewToken(token), this.deps.now());
+  /** 版のプレビューでだけ販売中に見せる。販売状態（enabled）は変えないので申し込みはできない。 */
+  async setPreview(ctx: ReqCtx, body: unknown): Promise<LpTicketsState> {
+    const enabled = (body as { enabled?: unknown } | null)?.enabled;
+    if (typeof enabled !== "boolean") throw errors.validationFailed([{ field: "enabled", reason: "required" }]);
+    await this.repo.setTicketPreview(TICKET_SITE, enabled, ctx.userId, this.deps.now());
+    return this.getState();
   }
 
   async setFields(ctx: ReqCtx, body: unknown): Promise<LpTicketsState> {
@@ -414,25 +392,19 @@ export class TicketService {
 
   // ---- internal (public LP Worker) ----
 
-  /**
-   * `previewToken` が有効なら、販売停止中でも公開時と同じ内容を preview: true で返す
-   * (LP Worker はその要求だけに表示する)。公開中なら preview は常に false。
-   */
-  async getPublic(previewToken?: string): Promise<{
+  async getPublic(): Promise<{
     enabled: boolean;
-    preview: boolean;
     ctaEnabled: boolean;
+    previewEnabled: boolean;
     paymentReady: boolean;
     fields: LpTicketField[];
     types: PublicTicketType[];
   }> {
     const [settings, types] = await Promise.all([this.repo.getTicketSettings(TICKET_SITE), this.summaries()]);
-    const enabled = settings?.enabled ?? false;
-    const preview = !enabled && (await this.previewValid(previewToken));
     return {
-      enabled: enabled || preview,
-      preview,
+      enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
+      previewEnabled: settings?.previewEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
       fields: settings?.fields ?? [],
       types: types

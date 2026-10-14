@@ -9,7 +9,6 @@ import type {
   LpTicketField,
   PublishRow,
   TicketOrderRow,
-  TicketPreviewRow,
   TicketSettingsRow,
   TicketTypeAgg,
   TicketTypeRow,
@@ -25,22 +24,13 @@ export class InMemoryLpRepo implements LpRepo {
   ticketSettings = new Map<string, TicketSettingsRow>();
   ticketTypes: TicketTypeRow[] = [];
   orders: TicketOrderRow[] = [];
-  previews: TicketPreviewRow[] = [];
-
-  async insertTicketPreview(row: TicketPreviewRow) {
-    this.previews = this.previews.filter((p) => p.expiresAt > row.createdAt);
-    this.previews.push(clone(row));
-  }
-  async isTicketPreviewValid(site: string, tokenHash: string, now: string) {
-    return this.previews.some((p) => p.site === site && p.tokenHash === tokenHash && p.expiresAt > now);
-  }
 
   async getTicketSettings(site: string) {
     const r = this.ticketSettings.get(site);
     return r ? clone(r) : null;
   }
   private upsertSettings(site: string, patch: Partial<TicketSettingsRow>, updatedBy: string, updatedAt: string) {
-    const cur = this.ticketSettings.get(site) ?? { site, enabled: false, ctaEnabled: false, fields: [], updatedBy: null, updatedAt };
+    const cur = this.ticketSettings.get(site) ?? { site, enabled: false, ctaEnabled: false, previewEnabled: false, fields: [], updatedBy: null, updatedAt };
     this.ticketSettings.set(site, { ...cur, ...clone(patch), updatedBy, updatedAt });
   }
   async setTicketEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string) {
@@ -48,6 +38,9 @@ export class InMemoryLpRepo implements LpRepo {
   }
   async setTicketCta(site: string, ctaEnabled: boolean, updatedBy: string, updatedAt: string) {
     this.upsertSettings(site, { ctaEnabled }, updatedBy, updatedAt);
+  }
+  async setTicketPreview(site: string, previewEnabled: boolean, updatedBy: string, updatedAt: string) {
+    this.upsertSettings(site, { previewEnabled }, updatedBy, updatedAt);
   }
   async setTicketFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string) {
     this.upsertSettings(site, { fields }, updatedBy, updatedAt);

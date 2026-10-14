@@ -5,7 +5,16 @@ export const VERSION_COOKIE = "lp_version";
 
 export type Resolution =
   | { kind: "redirect"; location: string; setCookie: string }
-  | { kind: "serve"; version: string; preview: boolean; assetPath: string; setCookie: string | null };
+  | {
+      kind: "serve";
+      version: string;
+      /** version differs from the published one (shows the version banner). */
+      preview: boolean;
+      /** The visitor picked a version (?version= / cookie / LP管理 iframe), even the published one. */
+      selected: boolean;
+      assetPath: string;
+      setCookie: string | null;
+    };
 
 /** "3.1" / "v3.1" -> "v3.1" when bundled, else null. */
 export function normalizeVersion(raw: string | null | undefined, bundled: readonly string[]): string | null {
@@ -46,17 +55,32 @@ export function resolveRequest(
     return { kind: "redirect", location: clean.pathname + clean.search, setCookie: clearCookie() };
   }
   const fromParam = normalizeVersion(param, bundled);
-  const fromCookie = normalizeVersion(readCookie(cookieHeader, VERSION_COOKIE), bundled);
-  // Inside the LP管理 iframe the cookie is third-party and may be blocked, so a same-origin
-  // subresource falls back to the ?version= of the page that requested it.
-  const version = fromParam ?? fromCookie ?? versionFromReferer(referer, url.origin, bundled) ?? published;
+  const selected = selectedVersion(url, cookieHeader, bundled, referer);
+  const version = selected ?? published;
   return {
     kind: "serve",
     version,
     preview: version !== published,
+    selected: selected !== null,
     assetPath: `/versions/${version}${url.pathname}`,
     setCookie: fromParam ? sessionCookie(fromParam) : null,
   };
+}
+
+/** Version the visitor explicitly picked, or null for the plain public LP. */
+export function selectedVersion(
+  url: URL,
+  cookieHeader: string | null,
+  bundled: readonly string[],
+  referer: string | null = null,
+): string | null {
+  // Inside the LP管理 iframe the cookie is third-party and may be blocked, so a same-origin
+  // subresource falls back to the ?version= of the page that requested it.
+  return (
+    normalizeVersion(url.searchParams.get("version"), bundled) ??
+    normalizeVersion(readCookie(cookieHeader, VERSION_COOKIE), bundled) ??
+    versionFromReferer(referer, url.origin, bundled)
+  );
 }
 
 function versionFromReferer(referer: string | null, origin: string, bundled: readonly string[]): string | null {

@@ -119,7 +119,7 @@ function ticketRepo(db: DbClient): LpTicketRepo {
   const one = async (r: TicketOrderDbRow | null): Promise<TicketOrderRow | null> => (r ? (await withItems([r]))[0]! : null);
   const upsertSetting = async (
     site: string,
-    column: "enabled" | "cta_enabled" | "fields_json",
+    column: "enabled" | "cta_enabled" | "preview_enabled" | "fields_json",
     value: unknown,
     updatedBy: string,
     updatedAt: string,
@@ -140,15 +140,17 @@ function ticketRepo(db: DbClient): LpTicketRepo {
         site: string;
         enabled: number;
         cta_enabled: number;
+        preview_enabled: number;
         fields_json: string;
         updated_by: string | null;
         updated_at: string;
-      }>("SELECT site, enabled, cta_enabled, fields_json, updated_by, updated_at FROM lp_ticket_settings WHERE site = ?", site);
+      }>("SELECT site, enabled, cta_enabled, preview_enabled, fields_json, updated_by, updated_at FROM lp_ticket_settings WHERE site = ?", site);
       return r
         ? {
             site: r.site,
             enabled: r.enabled === 1,
             ctaEnabled: r.cta_enabled === 1,
+            previewEnabled: r.preview_enabled === 1,
             fields: parseJsonArray<LpTicketField>(r.fields_json),
             updatedBy: r.updated_by,
             updatedAt: r.updated_at,
@@ -161,25 +163,8 @@ function ticketRepo(db: DbClient): LpTicketRepo {
     async setTicketCta(site, ctaEnabled, updatedBy, updatedAt) {
       await upsertSetting(site, "cta_enabled", ctaEnabled ? 1 : 0, updatedBy, updatedAt);
     },
-    async insertTicketPreview(row) {
-      await db.run("DELETE FROM lp_ticket_previews WHERE expires_at <= ?", row.createdAt);
-      await db.run(
-        "INSERT INTO lp_ticket_previews (token_hash, site, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-        row.tokenHash,
-        row.site,
-        row.createdBy,
-        row.createdAt,
-        row.expiresAt,
-      );
-    },
-    async isTicketPreviewValid(site, tokenHash, now) {
-      const r = await db.first<{ n: number }>(
-        "SELECT 1 AS n FROM lp_ticket_previews WHERE token_hash = ? AND site = ? AND expires_at > ?",
-        tokenHash,
-        site,
-        now,
-      );
-      return r !== null;
+    async setTicketPreview(site, previewEnabled, updatedBy, updatedAt) {
+      await upsertSetting(site, "preview_enabled", previewEnabled ? 1 : 0, updatedBy, updatedAt);
     },
     async setTicketFields(site, fields, updatedBy, updatedAt) {
       await upsertSetting(site, "fields_json", JSON.stringify(fields), updatedBy, updatedAt);

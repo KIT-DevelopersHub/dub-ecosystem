@@ -5,7 +5,7 @@ import { useToast } from "@dub/ui";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useLpApi } from "./LpProvider.tsx";
-import type { LpTicketField, LpTicketPreview, LpTicketTypeInput, LpTicketTypeSummary, LpTicketsState } from "./lpApi.tsx";
+import type { LpTicketField, LpTicketTypeInput, LpTicketTypeSummary, LpTicketsState } from "./lpApi.tsx";
 
 const STALE_MS = 30 * 1000;
 export const TICKET_ORDERS_PAGE_SIZE = 25;
@@ -97,14 +97,32 @@ export function useSetTicketsCta() {
   });
 }
 
-/** 公開前プレビューのリンク発行。サーバー状態を変えないので楽観更新は無し。 */
-export function useCreateTicketsPreview() {
+/** プレビューでの販売表示（楽観的）。公開中の LP には効かないので確認ダイアログは挟まない。 */
+export function useSetTicketsPreview() {
   const api = useLpApi();
+  const qc = useQueryClient();
   const toast = useToast();
-  return useMutation<LpTicketPreview, unknown, void>({
-    mutationFn: () => api.createTicketsPreview(),
-    onError: (err) => {
-      toast.show({ kind: "error", title: messageFor(err, "プレビューのリンクを発行できませんでした") });
+  const key = lpTicketsKey();
+  return useMutation<LpTicketsState, unknown, { enabled: boolean }, Ctx>({
+    mutationFn: (vars) => api.setTicketsPreview(vars),
+    onMutate: async ({ enabled }) => {
+      await qc.cancelQueries({ queryKey: key, exact: true });
+      const prev = qc.getQueryData<LpTicketsState>(key);
+      if (prev) qc.setQueryData<LpTicketsState>(key, { ...prev, previewEnabled: enabled });
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, "プレビューの設定を切り替えられませんでした") });
+    },
+    onSuccess: (next) => {
+      qc.setQueryData(key, next);
+      toast.show({
+        kind: "success",
+        title: next.previewEnabled
+          ? "プレビューでチケット販売を表示します（公開中の LP は変わりません）"
+          : "プレビューでのチケット販売の表示をやめました",
+      });
     },
   });
 }

@@ -1,7 +1,7 @@
 // Run: node --test worker/route.test.ts (Node >= 22.18 strips TS types natively).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeVersion, readCookie, resolveRequest, rewriteLocation } from "./route.ts";
+import { normalizeVersion, readCookie, resolveRequest, rewriteLocation, selectedVersion } from "./route.ts";
 
 const BUNDLED = ["v3.4", "v3.3", "v3.1"];
 const at = (path: string) => new URL(path, "https://lp.example");
@@ -15,7 +15,7 @@ test("normalizeVersion accepts 3.1 / v3.1 and rejects unknown", () => {
 
 test("root without param/cookie serves published", () => {
   const r = resolveRequest(at("/"), null, "v3.4", BUNDLED);
-  assert.deepEqual(r, { kind: "serve", version: "v3.4", preview: false, assetPath: "/versions/v3.4/", setCookie: null });
+  assert.deepEqual(r, { kind: "serve", version: "v3.4", preview: false, selected: false, assetPath: "/versions/v3.4/", setCookie: null });
 });
 
 test("?version=3.1 serves v3.1 as preview and sets session cookie", () => {
@@ -71,4 +71,20 @@ test("same-origin referer with ?version= picks that version when no cookie (ifra
   assert.equal(r.kind === "serve" && r.version, "v3.1");
   const x = resolveRequest(at("/logo.png"), null, "v3.4", BUNDLED, "https://evil.example/?version=3.1");
   assert.equal(x.kind === "serve" && x.version, "v3.4");
+});
+
+test("selected: true whenever the visitor picked a version, even the published one", () => {
+  const pub = resolveRequest(at("/?version=3.4"), null, "v3.4", BUNDLED);
+  assert.equal(pub.kind === "serve" && pub.preview, false);
+  assert.equal(pub.kind === "serve" && pub.selected, true);
+  const plain = resolveRequest(at("/program/"), "lp_version=v0.1", "v3.4", BUNDLED);
+  assert.equal(plain.kind === "serve" && plain.selected, false);
+});
+
+test("selectedVersion: param > cookie > same-origin referer; null for the public LP", () => {
+  assert.equal(selectedVersion(at("/tickets"), null, BUNDLED), null);
+  assert.equal(selectedVersion(at("/tickets"), "lp_version=v3.3", BUNDLED), "v3.3");
+  assert.equal(selectedVersion(at("/tickets?version=3.1"), "lp_version=v3.3", BUNDLED), "v3.1");
+  assert.equal(selectedVersion(at("/tickets"), null, BUNDLED, "https://lp.example/?version=3.4"), "v3.4");
+  assert.equal(selectedVersion(at("/tickets"), null, BUNDLED, "https://evil.example/?version=3.4"), null);
 });

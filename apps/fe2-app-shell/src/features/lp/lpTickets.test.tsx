@@ -51,6 +51,7 @@ function baseState(over: Partial<LpTicketsState> = {}): LpTicketsState {
     site: "hokuriku-it-conf.com",
     enabled: false,
     ctaEnabled: false,
+    previewEnabled: false,
     paymentReady: false,
     publicUrl: "https://hokuriku-it-conf.com/tickets",
     fields: [{ id: "f_aff", label: "所属", type: "text", required: false, options: [] }],
@@ -76,8 +77,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     getTickets: () => Promise.resolve(baseState()),
     setTicketsEnabled: ({ enabled }) => Promise.resolve(baseState({ enabled })),
     setTicketsCta: ({ enabled }) => Promise.resolve(baseState({ ctaEnabled: enabled })),
-    createTicketsPreview: () =>
-      Promise.resolve({ url: "https://hokuriku-it-conf.com/tickets?preview=tok", expiresAt: "2026-10-08T03:00:00.000Z" }),
+    setTicketsPreview: ({ enabled }) => Promise.resolve(baseState({ previewEnabled: enabled })),
     saveTicketFields: ({ fields }) => Promise.resolve(baseState({ fields })),
     createTicketType: unused,
     updateTicketType: unused,
@@ -149,9 +149,10 @@ describe("lpTickets (pure)", () => {
 });
 
 describe("demo transport serves the tickets wire contract", () => {
-  it("returns published-but-unpaid state with seeded types and non-zero stats", async () => {
+  it("returns stopped-with-preview, unpaid state with seeded types and non-zero stats", async () => {
     const s = await demoLpApi().getTickets();
-    expect(s.enabled).toBe(true);
+    expect(s.enabled).toBe(false);
+    expect(s.previewEnabled).toBe(true);
     expect(s.ctaEnabled).toBe(false);
     expect(s.paymentReady).toBe(false);
     expect(s.types.map((t) => `${t.name}|${t.dayLabel}`)).toEqual([
@@ -210,9 +211,7 @@ describe("demo transport serves the tickets wire contract", () => {
     await api.setTicketsEnabled({ enabled: false });
     const after = await api.setTicketsCta({ enabled: true });
     expect(after).toMatchObject({ enabled: false, ctaEnabled: true });
-    const preview = await api.createTicketsPreview();
-    expect(preview.url).toMatch(/\/tickets\?preview=demo-preview-[0-9a-z]{24}$/);
-    expect((await api.getTickets()).enabled).toBe(false);
+    expect(await api.setTicketsPreview({ enabled: true })).toMatchObject({ enabled: false, previewEnabled: true });
   });
 });
 
@@ -337,28 +336,6 @@ describe("LpTicketsScreen", () => {
     expect(within(dialog).queryByTestId("fe2-lp-tickets-enabled-ack")).toBeNull();
     fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-confirm"));
     await waitFor(() => expect(setEnabled).toHaveBeenCalledWith({ enabled: false }));
-  });
-
-  it("issues a preview link while sales are off (editors only, hidden once public)", async () => {
-    renderScreen(fakeApi(), EDITOR);
-    fireEvent.click(await screen.findByTestId("fe2-lp-tickets-preview-create"));
-    const link = await screen.findByTestId("fe2-lp-tickets-preview-url");
-    expect(link).toHaveAttribute("href", "https://hokuriku-it-conf.com/tickets?preview=tok");
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(screen.getByTestId("fe2-lp-tickets-preview-expires")).toHaveTextContent("まで有効");
-    expect(screen.getByTestId("fe2-lp-tickets-preview-create")).toHaveTextContent("リンクを発行し直す");
-  });
-
-  it("hides the preview for viewers", async () => {
-    renderScreen(fakeApi(), VIEWER);
-    await screen.findByTestId("fe2-lp-tickets-status");
-    expect(screen.queryByTestId("fe2-lp-tickets-preview")).toBeNull();
-  });
-
-  it("hides the preview once sales are public", async () => {
-    renderScreen(fakeApi({ getTickets: () => Promise.resolve(baseState({ enabled: true })) }));
-    await screen.findByTestId("fe2-lp-tickets-status");
-    expect(screen.queryByTestId("fe2-lp-tickets-preview")).toBeNull();
   });
 
   it("blocks a 30 yen type before calling the api", async () => {

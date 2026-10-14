@@ -12,6 +12,7 @@ import {
   matchTicketsRoute,
   parseCheckoutForm,
   parseConfig,
+  previewConfig,
   renderThanksPage,
   renderTicketsPage,
   splitDayLabel,
@@ -37,6 +38,7 @@ const tt = (o: Partial<PublicTicketType> & { id: string }): PublicTicketType => 
 });
 const CFG: TicketConfig = {
   enabled: true,
+  previewEnabled: false,
   preview: false,
   ctaEnabled: false,
   paymentReady: true,
@@ -261,6 +263,7 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
   });
   assert.deepEqual(c, {
     enabled: true,
+    previewEnabled: false,
     preview: false,
     ctaEnabled: true,
     paymentReady: false,
@@ -271,12 +274,23 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
     ],
   });
   assert.equal(parseConfig({ enabled: true, fields: [], types: [] })?.ctaEnabled, false);
-  assert.equal(parseConfig({ enabled: true, preview: true, fields: [], types: [] })?.preview, true);
+  assert.equal(parseConfig({ enabled: false, previewEnabled: true, fields: [], types: [] })?.previewEnabled, true);
+  // preview is decided by the Worker, never taken from the response.
+  assert.equal(parseConfig({ enabled: true, preview: true, fields: [], types: [] })?.preview, false);
+});
+
+test("previewConfig: only sales off + toggle on + a picked version turns into a preview", () => {
+  const off = { ...CFG, enabled: false, previewEnabled: true };
+  assert.deepEqual(previewConfig(off, true), { ...off, enabled: true, preview: true });
+  assert.equal(previewConfig(off, false), off);
+  assert.equal(previewConfig({ ...off, previewEnabled: false }, true)?.enabled, false);
+  assert.equal(previewConfig(CFG, true)?.preview, false);
+  assert.equal(previewConfig(null, true), null);
 });
 
 test("handler: preview shows the page with a notice but never checks out", async () => {
   const d = deps({ getConfig: async () => ({ ...CFG, preview: true }) });
-  const page = await handleTickets(new Request("https://lp.example/tickets?preview=x"), d);
+  const page = await handleTickets(new Request("https://lp.example/tickets?version=3.4"), d);
   assert.equal(page?.status, 200);
   const html = await page!.text();
   assert.match(html, /data-lp-tk-preview/);

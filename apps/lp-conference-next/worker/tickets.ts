@@ -26,7 +26,9 @@ export interface PublicTicketType {
 }
 export interface TicketConfig {
   enabled: boolean;
-  /** Sales are off but this request carries a valid preview link: show the page, never sell. */
+  /** LP管理「バージョン」タブのトグル: 版のプレビューでだけ販売中に見せる。 */
+  previewEnabled: boolean;
+  /** Set by the Worker (previewConfig), never by lp-analytics: shown as on sale, never sells. */
   preview: boolean;
   /** Swap the LP's 参加登録 buttons for 参加チケットを購入 (effective only with enabled). */
   ctaEnabled: boolean;
@@ -67,6 +69,7 @@ const DAY1 = "Day 1 - 9/13(月)";
 const DAY2 = "Day 2 - 9/14(火)";
 export const DEMO_CONFIG: TicketConfig = {
   enabled: true,
+  previewEnabled: false,
   preview: false,
   ctaEnabled: true,
   paymentReady: true,
@@ -209,7 +212,14 @@ export function parseConfig(raw: unknown): TicketConfig | null {
     const options = Array.isArray(r.options) ? r.options.filter((x): x is string => typeof x === "string") : [];
     fields.push({ id: r.id, label: r.label, type, required: r.required === true, options });
   }
-  return { enabled: o.enabled, preview: o.preview === true, ctaEnabled: o.ctaEnabled === true, paymentReady: o.paymentReady === true, fields, types };
+  return {
+    enabled: o.enabled,
+    previewEnabled: o.previewEnabled === true,
+    preview: false,
+    ctaEnabled: o.ctaEnabled === true, paymentReady: o.paymentReady === true,
+    fields,
+    types,
+  };
 }
 
 // ---------- form parsing / validation ----------
@@ -1145,14 +1155,24 @@ export function ticketsCtaSwap(): string {
   return `<style id="lp-tickets-cta-css">${CTA_SWAP_CSS}</style><script id="lp-tickets-cta-swap">${CTA_SWAP_SCRIPT}</script>`;
 }
 
-/** Bottom bar on LP pages while browsing with a preview link (keeps the LP header visible). */
+/**
+ * Sales off + the preview toggle on + the visitor picked a version (?version= / LP管理の「見る」)
+ * → render as on sale with preview: true. The public LP (no version picked) stays as is.
+ */
+export function previewConfig(cfg: TicketConfig | null, selected: boolean): TicketConfig | null {
+  if (!cfg || cfg.enabled || !cfg.previewEnabled || !selected) return cfg;
+  return { ...cfg, enabled: true, preview: true };
+}
+
+/** Bottom bar on LP pages while previewing ticket sales (keeps the LP header visible). */
 export function ticketsPreviewBar(): string {
   return (
-    "<style>#lp-tickets-cta{bottom:56px!important}</style>" +
+    "<style>#lp-tickets-cta,#lp-preview-banner{bottom:56px!important}</style>" +
     '<div id="lp-tickets-preview" role="note" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;' +
     "padding:8px 16px;background:#fff4d6;color:#7a4b00;text-align:center;" +
     "font:700 13px/1.5 'Zen Kaku Gothic New',system-ui,-apple-system,sans-serif;box-shadow:0 -2px 8px rgba(0,0,0,.12)\">" +
-    "チケット販売のプレビュー表示中です（一般には公開されていません）</div>"
+    "チケット販売のプレビュー表示中です（一般には公開されていません）" +
+    '<a href="/?version=live" style="margin-left:12px;color:inherit;text-decoration:underline">解除</a></div>'
   );
 }
 
