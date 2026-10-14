@@ -156,6 +156,141 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteChannel
+      summary: Permanently delete a channel
+      description: Requires chat:delete_channel. Physically removes the channel and all its messages, reactions, pins, read states and section assignments (unlike archive). DMs cannot be deleted (400).
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /chat/channels/{id}/section:
+    put:
+      operationId: setChannelSection
+      summary: Put a channel into one of the caller's sidebar sections
+      description: Personal (per-user) sidebar organization. sectionId null removes the channel from its section.
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetChannelSectionRequest'
+      responses:
+        '204':
+          description: Updated.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /chat/sections:
+    get:
+      operationId: listSections
+      summary: List the caller's sidebar sections
+      tags:
+        - chat
+      responses:
+        '200':
+          description: Sections (by position) and channelId -> sectionId assignments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSectionList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      operationId: createSection
+      summary: Create a sidebar section (appended last)
+      tags:
+        - chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSectionRequest'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSection'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /chat/sections/{id}:
+    patch:
+      operationId: updateSection
+      summary: Rename or reorder one of the caller's sections
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSectionRequest'
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSection'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteSection
+      summary: Delete one of the caller's sections (its channels return to the default groups)
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /chat/channels/{id}/members:
     get:
       operationId: listMembers
@@ -772,6 +907,55 @@ components:
       properties:
         name:
           type: string
+    ChatSection:
+      type: object
+      required: [id, name, position, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          maxLength: 40
+        position:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    ChatSectionList:
+      type: object
+      required: [items, assignments]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatSection'
+        assignments:
+          type: object
+          description: channelId -> sectionId
+          additionalProperties:
+            type: string
+    CreateSectionRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 40
+    UpdateSectionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 40
+        position:
+          type: integer
+          minimum: 0
+    SetChannelSectionRequest:
+      type: object
+      required: [sectionId]
+      properties:
+        sectionId:
+          type: [string, 'null']
     AddMemberRequest:
       type: object
       required:

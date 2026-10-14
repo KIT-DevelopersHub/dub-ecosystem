@@ -63,7 +63,8 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 //   get chat:create only) and 0008 (per-app tier: admin/maintainer チャット = 編集,
 //   organizer/member チャット = 閲覧).
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate"],
+  // + 0020: chat:delete_channel is admin-only by default.
+  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel"],
   maintainer: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate"],
   organizer: ["app:chat:view", "chat:create"],
   member: ["app:chat:view", "chat:create"],
@@ -103,10 +104,16 @@ const READS = [
   "GET /chat/channels/:id/ws-ticket",
   "GET /chat/messages",
   "GET /chat/search",
+  "GET /chat/sections",
   "GET /chat/settings/deletion-policy",
   "GET /chat/unfurl",
   "GET /chat/unread",
   "POST /chat/channels/:id/read",
+  // Personal sidebar sections: caller-owned rows only, so 閲覧 like read state.
+  "DELETE /chat/sections/:id",
+  "PATCH /chat/sections/:id",
+  "POST /chat/sections",
+  "PUT /chat/channels/:id/section",
 ];
 // チャット = 編集, no 詳細 key.
 const WRITES = [
@@ -122,9 +129,11 @@ const WRITES = [
 // 編集 + a 詳細 key.
 const CREATE = ["POST /chat/channels"]; // + chat:create
 const MODERATE = ["PATCH /chat/settings/deletion-policy"]; // + chat:moderate
+const DELETE_CHANNEL = ["DELETE /chat/channels/:id"]; // + chat:delete_channel
 
 const READ_ONLY = [...PUBLIC_ROUTES, ...READS].sort();
-const FULL = [...PUBLIC_ROUTES, ...READS, ...WRITES, ...CREATE, ...MODERATE].sort();
+const EDITOR = [...PUBLIC_ROUTES, ...READS, ...WRITES, ...CREATE, ...MODERATE].sort();
+const FULL = [...EDITOR, ...DELETE_CHANNEL].sort();
 
 describe("role x endpoint matrix (frozen)", () => {
   // Changing a rule changes one of these arrays — a visible diff in review.
@@ -139,7 +148,7 @@ describe("role x endpoint matrix (frozen)", () => {
   // what the tier is for), NOT a looser rule here.
   const EXPECTED: Record<keyof typeof ROLE_KEYS, string[]> = {
     admin: FULL,
-    maintainer: FULL,
+    maintainer: EDITOR,
     organizer: READ_ONLY,
     member: READ_ONLY,
     "disabled-tier-with-legacy-chat-keys": PUBLIC_ROUTES,

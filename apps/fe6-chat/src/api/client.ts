@@ -9,6 +9,8 @@ import { normalizeMessage, reactionsFromWire } from "../store/timeline";
 import type {
   Channel,
   ChannelMember,
+  ChatSection,
+  ChatSectionList,
   CreateChannelRequest,
   DeleteMessageResult,
   DeletionPolicyResponse,
@@ -30,6 +32,7 @@ import type {
   UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateSectionRequest,
   WsTicketResponse,
 } from "./contract";
 
@@ -38,6 +41,15 @@ export interface ChatApiClient {
   createChannel(req: CreateChannelRequest): Promise<Channel>;
   getChannel(id: common.ChannelId): Promise<GetChannelResponse>;
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel>;
+  /** Hard delete (chat:delete_channel). Messages are erased; DMs are rejected. */
+  deleteChannel(id: common.ChannelId): Promise<void>;
+  /** Caller's personal sidebar sections + channel assignments. */
+  listSections(): Promise<ChatSectionList>;
+  createSection(name: string): Promise<ChatSection>;
+  updateSection(id: string, req: UpdateSectionRequest): Promise<ChatSection>;
+  deleteSection(id: string): Promise<void>;
+  /** sectionId null = back to the default group. */
+  setChannelSection(channelId: common.ChannelId, sectionId: string | null): Promise<void>;
   addMember(id: common.ChannelId, userId: common.UserId, role?: ChannelMember["role"]): Promise<ChannelMember>;
   removeMember(id: common.ChannelId, userId: common.UserId): Promise<void>;
   listMembers(id: common.ChannelId): Promise<ChannelMember[]>;
@@ -174,6 +186,25 @@ export class HttpChatClient implements ChatApiClient {
   }
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel> {
     return this.request<Channel>("PATCH", `${CHAT}/channels/${id}`, req);
+  }
+  deleteChannel(id: common.ChannelId): Promise<void> {
+    return this.request<void>("DELETE", `${CHAT}/channels/${id}`);
+  }
+  async listSections(): Promise<ChatSectionList> {
+    const res = await this.request<Partial<ChatSectionList> | null>("GET", `${CHAT}/sections`);
+    return { items: res?.items ?? [], assignments: res?.assignments ?? {} };
+  }
+  createSection(name: string): Promise<ChatSection> {
+    return this.request<ChatSection>("POST", `${CHAT}/sections`, { name });
+  }
+  updateSection(id: string, req: UpdateSectionRequest): Promise<ChatSection> {
+    return this.request<ChatSection>("PATCH", `${CHAT}/sections/${id}`, req);
+  }
+  deleteSection(id: string): Promise<void> {
+    return this.request<void>("DELETE", `${CHAT}/sections/${id}`);
+  }
+  setChannelSection(channelId: common.ChannelId, sectionId: string | null): Promise<void> {
+    return this.request<void>("PUT", `${CHAT}/channels/${channelId}/section`, { sectionId });
   }
   addMember(id: common.ChannelId, userId: common.UserId, role: ChannelMember["role"] = "member"): Promise<ChannelMember> {
     return this.request<ChannelMember>("POST", `${CHAT}/channels/${id}/members`, { userId, role });

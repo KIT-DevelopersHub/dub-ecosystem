@@ -119,4 +119,43 @@ describe("MockChatClient", () => {
     const ok = await api.postMessage({ channelId: GENERAL, body: "y", clientTempId: "r2" });
     expect(ok.message.body).toBe("y");
   });
+  it("hard-deletes a channel with its messages and section assignment", async () => {
+    await api.setChannelSection(GENERAL, "sec_seed_ops");
+    await api.deleteChannel(GENERAL);
+    expect((await api.listChannels()).some((c) => c.id === GENERAL)).toBe(false);
+    expect((await api.listMessages({ channelId: GENERAL })).items).toHaveLength(0);
+    expect((await api.listSections()).assignments[GENERAL]).toBeUndefined();
+    await expect(api.getChannel(GENERAL)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("deletes archived channels but refuses DMs", async () => {
+    await api.deleteChannel(ARCHIVED);
+    expect((await api.listChannels()).some((c) => c.id === ARCHIVED)).toBe(false);
+    const dm = (await api.listChannels()).find((c) => c.type === "dm")!;
+    await expect(api.deleteChannel(dm.id)).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
+  it("manages personal sections: create appends, rename, assign, delete falls back", async () => {
+    const seeded = await api.listSections();
+    expect(seeded.items.map((x) => x.name)).toEqual(["運営"]);
+    const created = await api.createSection("  広報  ");
+    expect(created.name).toBe("広報");
+    expect(created.position).toBeGreaterThan(seeded.items[0]!.position);
+    await expect(api.createSection("   ")).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(api.createSection("あ".repeat(41))).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+
+    const renamed = await api.updateSection(created.id, { name: "PR" });
+    expect(renamed.name).toBe("PR");
+    await api.setChannelSection(GENERAL, created.id);
+    expect((await api.listSections()).assignments[GENERAL]).toBe(created.id);
+    await api.setChannelSection(GENERAL, null);
+    expect((await api.listSections()).assignments[GENERAL]).toBeUndefined();
+
+    await api.setChannelSection(GENERAL, created.id);
+    await api.deleteSection(created.id);
+    const after = await api.listSections();
+    expect(after.items.some((x) => x.id === created.id)).toBe(false);
+    expect(after.assignments[GENERAL]).toBeUndefined();
+    await expect(api.setChannelSection(GENERAL, created.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 });

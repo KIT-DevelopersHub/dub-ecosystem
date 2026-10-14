@@ -3,7 +3,7 @@
 // No cross-namespace joins (chat is the DB-split first candidate).
 import type { DbClient } from "@dub/db";
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind, MessageDeletionMode } from "./types";
+import type { ChatRepo, ChannelRow, SectionRow, MemberRow, MessageRow, SearchRow, ChannelType, ChannelVisibility, ChannelRole, MessageKind, MessageDeletionMode } from "./types";
 
 interface ChannelDbRow {
   id: string;
@@ -57,6 +57,17 @@ function toChannelRow(r: ChannelDbRow): ChannelRow {
 }
 function toMemberRow(r: MemberDbRow): MemberRow {
   return { channelId: r.channel_id, userId: r.user_id, role: r.role as ChannelRole, joinedAt: r.joined_at };
+}
+interface SectionDbRow {
+  id: string;
+  user_id: string;
+  name: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+function toSectionRow(r: SectionDbRow): SectionRow {
+  return { id: r.id, userId: r.user_id, name: r.name, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at };
 }
 function toMessageRow(r: MessageDbRow): MessageRow {
   let attachments: string[] = [];
@@ -459,6 +470,71 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       );
       await db.run(`DELETE FROM chat_messages WHERE thread_root_id = ?`, id);
       await db.run(`DELETE FROM chat_messages WHERE id = ?`, id);
+    },
+
+    async hardDeleteChannel(id: common.ChannelId): Promise<void> {
+      // One batch = one transaction; children first so the FKs never dangle.
+      const byMessage = `IN (SELECT id FROM chat_messages WHERE channel_id = ?)`;
+      await db.batch([
+        { sql: `DELETE FROM chat_reactions WHERE message_id ${byMessage}`, binds: [id] },
+        { sql: `DELETE FROM chat_pins WHERE channel_id = ? OR message_id ${byMessage}`, binds: [id, id] },
+        { sql: `DELETE FROM chat_read_states WHERE channel_id = ?`, binds: [id] },
+        { sql: `DELETE FROM chat_channel_sections WHERE channel_id = ?`, binds: [id] },
+        { sql: `DELETE FROM chat_messages WHERE channel_id = ? AND thread_root_id IS NOT NULL`, binds: [id] },
+        { sql: `DELETE FROM chat_messages WHERE channel_id = ?`, binds: [id] },
+        { sql: `DELETE FROM chat_channel_members WHERE channel_id = ?`, binds: [id] },
+        { sql: `DELETE FROM chat_channels WHERE id = ?`, binds: [id] },
+      ]);
+    },
+
+    // ---- personal sidebar sections ----
+    async listSections(userId: common.UserId): Promise<SectionRow[]> {
+      const rows = await db.all<SectionDbRow>(
+        `SELECT * FROM chat_sections WHERE user_id = ? ORDER BY position ASC, id ASC`,
+        userId,
+      );
+      return rows.map(toSectionRow);
+    },
+    async getSection(userId: common.UserId, id: string): Promise<SectionRow | null> {
+      const r = await db.first<SectionDbRow>(`SELECT * FROM chat_sections WHERE id = ? AND user_id = ?`, id, userId);
+      return r ? toSectionRow(r) : null;
+    },
+    async createSection(row: SectionRow): Promise<void> {
+      await db.run(
+        `INSERT INTO chat_sections (id, user_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        row.id, row.userId, row.name, row.position, row.createdAt, row.updatedAt,
+      );
+    },
+    async updateSection(row: SectionRow): Promise<void> {
+      await db.run(
+        `UPDATE chat_sections SET name = ?, position = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+        row.name, row.position, row.updatedAt, row.id, row.userId,
+      );
+    },
+    async deleteSection(userId: common.UserId, id: string): Promise<boolean> {
+      const results = await db.batch([
+        { sql: `DELETE FROM chat_channel_sections WHERE section_id = ? AND user_id = ?`, binds: [id, userId] },
+        { sql: `DELETE FROM chat_sections WHERE id = ? AND user_id = ?`, binds: [id, userId] },
+      ]);
+      return (results[1]?.meta.changes ?? 0) > 0;
+    },
+    async sectionAssignments(userId: common.UserId): Promise<Map<string, string>> {
+      const rows = await db.all<{ channel_id: string; section_id: string }>(
+        `SELECT channel_id, section_id FROM chat_channel_sections WHERE user_id = ?`,
+        userId,
+      );
+      return new Map(rows.map((r) => [r.channel_id, r.section_id]));
+    },
+    async setChannelSection(userId: common.UserId, channelId: common.ChannelId, sectionId: string | null): Promise<void> {
+      if (sectionId === null) {
+        await db.run(`DELETE FROM chat_channel_sections WHERE user_id = ? AND channel_id = ?`, userId, channelId);
+        return;
+      }
+      await db.run(
+        `INSERT INTO chat_channel_sections (user_id, channel_id, section_id) VALUES (?, ?, ?)
+         ON CONFLICT (user_id, channel_id) DO UPDATE SET section_id = excluded.section_id`,
+        userId, channelId, sectionId,
+      );
     },
   } satisfies ChatRepo;
 }

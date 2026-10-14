@@ -29,6 +29,9 @@ export type { ChatApiClient } from "@dub/fe6-chat/src/api/client";
 export type {
   Channel,
   ChannelMember,
+  ChatSection,
+  ChatSectionList,
+  UpdateSectionRequest,
   CreateChannelRequest,
   DeleteMessageResult,
   DeletionPolicyResponse,
