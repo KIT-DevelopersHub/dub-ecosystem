@@ -118,6 +118,7 @@ describe("LpPreviewScreen", () => {
     renderScreen(api);
     expect(await screen.findByTestId("fe2-lp-preview-proposals-state")).toHaveTextContent("実際の募集: 募集中");
     expect(screen.getByTestId("fe2-lp-preview-proposals-on")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("fe2-lp-preview-proposals-note")).toHaveTextContent("本物の応募");
     fireEvent.click(screen.getByTestId("fe2-lp-preview-proposals-off"));
     expect(screen.getByTestId("fe2-lp-preview-proposals-note")).toHaveTextContent("「準備中」のまま");
     fireEvent.click(screen.getByTestId("fe2-lp-preview-open"));

@@ -151,7 +151,7 @@ export class InMemoryLpRepo implements LpRepo {
   async setProposalStatus(site: string, id: string, status: LpProposalStatus, reviewedBy: string, updatedAt: string) {
     const p = this.proposals.find((x) => x.site === site && x.id === id);
     if (!p) return false;
-    Object.assign(p, { status, reviewedBy, updatedAt });
+    Object.assign(p, { status, reviewedBy: status === "submitted" ? null : reviewedBy, updatedAt });
     return true;
   }
   async listProposals(site: string, cursor: string | null, limit: number) {
@@ -170,8 +170,10 @@ export class InMemoryLpRepo implements LpRepo {
       rejected: mine.filter((p) => p.status === "rejected").length,
     };
   }
-  async countProposalsSince(site: string, since: string) {
-    return this.proposals.filter((p) => p.site === site && p.createdAt >= since).length;
+  async countProposalsSince(site: string, since: string, clientKey?: string) {
+    return this.proposals.filter(
+      (p) => p.site === site && p.createdAt >= since && (!clientKey || p.clientKey === clientKey),
+    ).length;
   }
 
   private inRange(v: VisitRow, q: Omit<AggregateQuery, "includeBots"> & { includeBots?: boolean }): boolean {

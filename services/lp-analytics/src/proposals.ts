@@ -28,6 +28,10 @@ export const DEFAULT_PROPOSAL_FIELDS: readonly LpTicketField[] = [
   { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
 ];
 
+/** 同じ送信元（IP ハッシュ）から 1 日 (JST) に受け付ける応募数。全体上限をボット 1 台で使い切らせない。 */
+export const PER_CLIENT_DAILY_CAP = 5;
+const CLIENT_KEY_RE = /^[a-f0-9]{16,64}$/;
+
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;
 
@@ -63,7 +67,7 @@ export function proposalCursor(p: { createdAt: string; id: string }): string {
   return `${p.createdAt}~${p.id}`;
 }
 
-const toProposal = ({ site: _s, ...p }: ProposalRow): LpProposal => p;
+const toProposal = ({ site: _s, clientKey: _c, ...p }: ProposalRow): LpProposal => p;
 
 export class ProposalService {
   constructor(private readonly deps: AppDeps) {}
@@ -137,8 +141,14 @@ export class ProposalService {
     const settings = await this.repo.getProposalSettings(PROPOSAL_SITE);
     if (!settings?.enabled) throw errors.notFound("lp_proposals");
     const input = parseProposal(body, settings.fields ?? DEFAULT_PROPOSAL_FIELDS);
+    const raw = (body as { clientKey?: unknown } | null)?.clientKey;
+    const clientKey = typeof raw === "string" && CLIENT_KEY_RE.test(raw) ? raw : null;
     const now = this.deps.now();
-    if ((await this.repo.countProposalsSince(PROPOSAL_SITE, jstDayStartIso(now))) >= this.deps.dailyProposalCap) {
+    const since = jstDayStartIso(now);
+    if (clientKey && (await this.repo.countProposalsSince(PROPOSAL_SITE, since, clientKey)) >= PER_CLIENT_DAILY_CAP) {
+      throw errors.rateLimited(3600);
+    }
+    if ((await this.repo.countProposalsSince(PROPOSAL_SITE, since)) >= this.deps.dailyProposalCap) {
       throw errors.rateLimited(60);
     }
     const row: ProposalRow = {
@@ -151,6 +161,7 @@ export class ProposalService {
       answers: input.answers,
       status: "submitted",
       reviewedBy: null,
+      clientKey,
       createdAt: now,
       updatedAt: now,
     };

@@ -50,8 +50,9 @@ const STATUS_OPTIONS = (Object.keys(PROPOSAL_STATUS_LABELS) as LpProposalStatus[
   label: PROPOSAL_STATUS_LABELS[v],
 }));
 
-/** 固定項目（LP の応募フォームで必ず入力してもらう）。 */
-const LOCKED_FIELDS = ["発表タイトル", "発表の概要", "氏名", "メールアドレス"] as const;
+/** 固定項目（LP の応募フォームで必ず入力してもらう）。追加項目は発表内容と登壇者情報の間に並ぶ。 */
+const LOCKED_TALK = ["発表タイトル", "発表の概要"] as const;
+const LOCKED_SPEAKER = ["氏名", "メールアドレス"] as const;
 
 export function LpProposalsScreen(): JSX.Element {
   const proposals = useLpProposals();
@@ -98,16 +99,25 @@ export function LpProposalsScreen(): JSX.Element {
           fields={state.fields}
           canEdit={canEdit}
           save={saveFields}
-          locked={LOCKED_FIELDS}
+          locked={LOCKED_TALK}
+          lockedAfter={LOCKED_SPEAKER}
           note={
             <>
               応募ページのフォームに並ぶ項目です。発表タイトル・発表の概要・氏名・メールアドレスは選考と連絡に使うため必ず入力してもらいます。
-              発表形式（セッション / LT など）や所属はここで変えられます。追加の項目は最大 {TICKET_FIELDS_MAX} 個まで。
+              発表形式（セッション / LT など）や所属はここで変えられます。並びは応募ページと同じです。追加の項目は最大 {TICKET_FIELDS_MAX} 個まで。
             </>
           }
           testIdPrefix="fe2-lp-proposal-field"
         />
-        {canEdit ? <SubmissionsCard /> : null}
+        {canEdit ? (
+          <SubmissionsCard />
+        ) : (
+          <Card testId="fe2-lp-proposal-submissions-locked" header={<span className={styles.sectionTitle}>応募一覧</span>}>
+            <span className={styles.note}>
+              応募者の氏名・メールアドレスを含むため、一覧は LP管理 の編集権限がある人にだけ表示されます。
+            </span>
+          </Card>
+        )}
       </Stack>
     );
   }

@@ -182,7 +182,9 @@ export function LpPreviewScreen(): JSX.Element {
               ) : null}
             </div>
             <span className={styles.note}>
-              {mode === "on"
+              {mode === "on" && tickets.data?.enabled
+                ? "販売を公開中のため、実際の購入ページがそのまま開きます（申し込むと本物の購入になります）。"
+                : mode === "on"
                 ? "販売を停止していても、購入ボタンとチケット購入ページが出た状態で開きます。プレビュー中はお申し込みできません。券種などの設定は「チケット」タブで行います。"
                 : "販売を公開していても、チケットの表示が無い状態で開きます。"}
             </span>
@@ -205,7 +207,9 @@ export function LpPreviewScreen(): JSX.Element {
             </div>
             <span className={styles.note} data-testid="fe2-lp-preview-proposals-note">
               {proposalsMode === "on"
-                ? "募集を停止していても、「登壇に応募する」ボタンが押せて応募ページが出た状態で開きます。プレビュー中は応募できません。入力項目は「登壇者募集」タブで設定します。"
+                ? proposals.data?.enabled
+                  ? "募集を公開中のため、実際の応募ページがそのまま開きます（送信すると本物の応募として届きます）。"
+                  : "募集を停止していても、「登壇に応募する」ボタンが押せて応募ページが出た状態で開きます。プレビュー中は応募できません。入力項目は「登壇者募集」タブで設定します。"
                 : "募集を公開していても、「登壇に応募する」ボタンが「準備中」のままの状態で開きます。"}
             </span>
           </Stack>

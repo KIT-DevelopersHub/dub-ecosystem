@@ -139,7 +139,8 @@ describe("LpProposalsScreen", () => {
     expect(screen.getByTestId("fe2-lp-proposals-accepted")).toHaveTextContent("1 件");
     expect(screen.getByTestId("fe2-lp-proposals-enabled-state")).toHaveTextContent("停止中");
     expect(screen.getByTestId("fe2-lp-proposals-public-url")).toHaveAttribute("href", "https://hokuriku-it-conf.com/proposals");
-    expect(screen.getAllByTestId("fe2-lp-proposal-field-locked")).toHaveLength(4);
+    const locked = screen.getAllByTestId("fe2-lp-proposal-field-locked").map((el) => el.textContent);
+    expect(locked).toEqual(["発表タイトル必須・固定", "発表の概要必須・固定", "氏名必須・固定", "メールアドレス必須・固定"]);
     expect(screen.getByTestId("fe2-lp-proposal-field-format")).toBeInTheDocument();
   });
 
@@ -174,6 +175,7 @@ describe("LpProposalsScreen", () => {
     renderScreen(fakeApi({ listProposals }), VIEWER);
     expect(await screen.findByTestId("fe2-lp-proposals-total")).toBeInTheDocument();
     expect(screen.queryByTestId("fe2-lp-proposal-submissions")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe2-lp-proposal-submissions-locked")).toHaveTextContent("編集権限がある人にだけ");
     expect(listProposals).not.toHaveBeenCalled();
   });
 

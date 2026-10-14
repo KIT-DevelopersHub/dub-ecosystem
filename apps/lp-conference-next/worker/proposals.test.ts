@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEMO_PROPOSAL_CONFIG,
+  clientKeyFor,
   SPEAKER_CTA_SELECTOR,
   handleProposals,
   mapSubmitError,
@@ -93,7 +94,8 @@ test("renderProposalsPage escapes values and shows the configured fields", () =>
   assert.match(html, /name="f_format"/);
   assert.match(html, /action="\/proposals\/submit"/);
   assert.doesNotMatch(html, /data-lp-tk-preview/);
-  assert.match(renderProposalsPage({ config: { ...CFG, preview: true } }), /data-lp-tk-preview/);
+  assert.match(renderProposalsPage({ config: { ...CFG, preview: true } }), /応募はできません/);
+  assert.match(html, /選考とご連絡にのみ使用します/);
 });
 
 test("handleProposals: closed / unavailable fall through to the 404 page", async () => {
@@ -119,6 +121,15 @@ test("handleProposals: valid submit goes to lp-analytics then thanks", async () 
   assert.equal(res.headers.get("location"), "/proposals/thanks");
   assert.equal(calls[0]!.path, "/lp/internal/proposals/submit");
   assert.deepEqual(JSON.parse(calls[0]!.body).answers.format, "LT（5分）");
+});
+
+test("handleProposals: sends a hashed sender key, never the raw IP", async () => {
+  const calls: { path: string; body: string }[] = [];
+  await handleProposals(post(VALID, { "cf-connecting-ip": "203.0.113.7" }), deps({}, calls));
+  const sent = JSON.parse(calls[0]!.body);
+  assert.match(sent.clientKey, /^[a-f0-9]{32}$/);
+  assert.doesNotMatch(calls[0]!.body, /203\.0\.113\.7/);
+  assert.equal(sent.clientKey, await clientKeyFor(new Request("https://x", { headers: { "cf-connecting-ip": "203.0.113.7" } })));
 });
 
 test("handleProposals: invalid form re-renders with 400 and never calls upstream", async () => {
@@ -156,7 +167,7 @@ test("handleProposals: upstream errors map to inline messages", async () => {
     deps({ internal: async () => Response.json({ error: { code: "RATE_LIMITED" } }, { status: 429 }) }),
   ))!;
   assert.equal(res.status, 429);
-  assert.match(await res.text(), /応募が集中しています/);
+  assert.match(await res.text(), /多くの応募があったため/);
   const e = mapSubmitError(400, { error: { details: [{ field: "answers.format", reason: "invalid" }, { field: "title" }] } }, CFG);
   assert.equal(e.f_format, "入力内容を確認してください");
   assert.equal(e.title, "入力内容を確認してください");

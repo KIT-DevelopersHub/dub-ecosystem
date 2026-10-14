@@ -813,6 +813,7 @@ export function shell(
   demo: boolean,
   preview = false,
   demoNote = "デモ環境です（実際の決済は行われません）",
+  previewNote = PREVIEW_NOTE,
 ): string {
   return (
     '<!doctype html><html lang="ja"><head><meta charset="utf-8">' +
@@ -826,7 +827,7 @@ export function shell(
     `<link rel="stylesheet" href="${FONT_HREF}">` +
     `<style>${STYLE}</style></head><body>` +
     (demo ? `<div class="demo" role="note">${demoNote}</div>` : "") +
-    (preview ? `<div class="demo" role="note" data-lp-tk-preview>${PREVIEW_NOTE}</div>` : "") +
+    (preview ? `<div class="demo" role="note" data-lp-tk-preview>${previewNote}</div>` : "") +
     '<div style="position:relative">' +
     `<header class="top"><div class="wrap"><a class="brand" href="/" aria-label="${CONF_NAME} トップへ">${BRAND}</a>` +
     '<a class="back" href="/"><span aria-hidden="true">←</span>トップへ戻る</a></div></header>' +

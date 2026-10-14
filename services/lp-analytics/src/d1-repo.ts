@@ -421,6 +421,7 @@ interface ProposalDbRow {
   answers_json: string;
   status: string;
   reviewed_by: string | null;
+  client_key: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -435,6 +436,7 @@ const toProposal = (r: ProposalDbRow): ProposalRow => ({
   answers: parseJsonArray<LpTicketAnswer>(r.answers_json),
   status: r.status as LpProposalStatus,
   reviewedBy: r.reviewed_by,
+  clientKey: r.client_key,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -474,8 +476,9 @@ function proposalRepo(db: DbClient): LpProposalRepo {
     },
     async insertProposal(p) {
       await db.run(
-        `INSERT INTO lp_proposals (id, site, speaker_name, email, title, abstract, answers_json, status, reviewed_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO lp_proposals (id, site, speaker_name, email, title, abstract, answers_json, status, reviewed_by, client_key,
+                                   created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         p.id,
         p.site,
         p.speakerName,
@@ -485,6 +488,7 @@ function proposalRepo(db: DbClient): LpProposalRepo {
         JSON.stringify(p.answers),
         p.status,
         p.reviewedBy,
+        p.clientKey,
         p.createdAt,
         p.updatedAt,
       );
@@ -497,7 +501,7 @@ function proposalRepo(db: DbClient): LpProposalRepo {
       const res = await db.run(
         "UPDATE lp_proposals SET status = ?, reviewed_by = ?, updated_at = ? WHERE site = ? AND id = ?",
         status,
-        reviewedBy,
+        status === "submitted" ? null : reviewedBy,
         updatedAt,
         site,
         id,
@@ -526,12 +530,19 @@ function proposalRepo(db: DbClient): LpProposalRepo {
       );
       return { total: r?.total ?? 0, accepted: r?.accepted ?? 0, rejected: r?.rejected ?? 0 };
     },
-    async countProposalsSince(site, since) {
-      const r = await db.first<{ c: number }>(
-        "SELECT COUNT(*) AS c FROM lp_proposals WHERE site = ? AND created_at >= ?",
-        site,
-        since,
-      );
+    async countProposalsSince(site, since, clientKey) {
+      const r = clientKey
+        ? await db.first<{ c: number }>(
+            "SELECT COUNT(*) AS c FROM lp_proposals WHERE site = ? AND client_key = ? AND created_at >= ?",
+            site,
+            clientKey,
+            since,
+          )
+        : await db.first<{ c: number }>(
+            "SELECT COUNT(*) AS c FROM lp_proposals WHERE site = ? AND created_at >= ?",
+            site,
+            since,
+          );
       return r?.c ?? 0;
     },
   };

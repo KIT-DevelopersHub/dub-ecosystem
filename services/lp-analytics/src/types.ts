@@ -312,6 +312,8 @@ export interface ProposalSettingsRow {
 }
 export interface ProposalRow extends LpProposal {
   site: string;
+  /** 送信元 IP のハッシュ（LP Worker が計算）。応募一覧には出さない。 */
+  clientKey: string | null;
 }
 
 export interface LpProposalRepo {
@@ -326,8 +328,8 @@ export interface LpProposalRepo {
   /** Newest first, keyset by (created_at, id). */
   listProposals(site: string, cursor: string | null, limit: number): Promise<ProposalRow[]>;
   proposalTotals(site: string): Promise<{ total: number; accepted: number; rejected: number }>;
-  /** Proposals created at/after `since` (daily submit cap). */
-  countProposalsSince(site: string, since: string): Promise<number>;
+  /** Proposals created at/after `since` (daily submit cap). With clientKey: only that sender's. */
+  countProposalsSince(site: string, since: string, clientKey?: string): Promise<number>;
 }
 
 export interface LpRepo extends LpTicketRepo, LpProposalRepo {

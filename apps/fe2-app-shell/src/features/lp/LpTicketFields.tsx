@@ -55,12 +55,29 @@ export interface LpFieldsEditorProps {
   };
   /** 固定項目のラベル（鍵つき・必須の行として先頭に出す）。 */
   locked: readonly string[];
+  /** 追加項目の後ろに出す固定項目（公開フォームでの並び順に合わせる）。 */
+  lockedAfter?: readonly string[];
   note: ReactNode;
   /** 例 "fe2-lp-ticket-field" → カードは "<prefix>s"、各行は "<prefix>-<id>"。 */
   testIdPrefix: string;
 }
 
-export function LpFieldsEditorCard({ fields, canEdit, save, locked, note, testIdPrefix: P }: LpFieldsEditorProps): JSX.Element {
+export function LpFieldsEditorCard({
+  fields,
+  canEdit,
+  save,
+  locked,
+  lockedAfter = [],
+  note,
+  testIdPrefix: P,
+}: LpFieldsEditorProps): JSX.Element {
+  const lockedRow = (label: string): JSX.Element => (
+    <div key={label} className={styles.fieldRowLocked} data-testid={`${P}-locked`}>
+      <Icon name="lock" />
+      <strong>{label}</strong>
+      <Badge tone="neutral">必須・固定</Badge>
+    </div>
+  );
   // null = 未編集（サーバー値をそのまま見せる）。編集を始めた時点で下書きを持つ。
   const [draft, setDraft] = useState<DraftField[] | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -109,13 +126,7 @@ export function LpFieldsEditorCard({ fields, canEdit, save, locked, note, testId
       <Stack gap={5}>
         <span className={styles.note}>{note}</span>
         <div className={styles.fieldList}>
-          {locked.map((label) => (
-            <div key={label} className={styles.fieldRowLocked} data-testid={`${P}-locked`}>
-              <Icon name="lock" />
-              <strong>{label}</strong>
-              <Badge tone="neutral">必須・固定</Badge>
-            </div>
-          ))}
+          {locked.map(lockedRow)}
           {list.map((f, i) => (
             <FieldRow
               key={f.id}
@@ -131,6 +142,7 @@ export function LpFieldsEditorCard({ fields, canEdit, save, locked, note, testId
             />
           ))}
           {list.length === 0 ? <span className={styles.note}>追加の項目はありません。</span> : null}
+          {lockedAfter.map(lockedRow)}
         </div>
         {canEdit ? (
           <div className={styles.formActions}>

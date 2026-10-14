@@ -47,6 +47,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const STEPS = ["応募内容の入力", "事務局で選考", "結果のご連絡"];
 const DEMO_NOTE = "デモ環境です（応募内容は保存されません）";
+export const PROPOSAL_PREVIEW_NOTE = "プレビュー表示中です。このページはまだ一般公開されていません（応募はできません）。";
+export const USAGE_NOTE = "ご入力いただいた情報は、登壇者の選考とご連絡にのみ使用します。";
 
 export const DEMO_PROPOSAL_CONFIG: ProposalConfig = {
   enabled: true,
@@ -159,7 +161,9 @@ export function mapSubmitError(status: number, body: unknown, config: ProposalCo
     return out;
   }
   if (status === 404) return { _form: "現在、登壇者の募集は行っていません。" };
-  if (status === 429) return { _form: "ただいま応募が集中しています。時間をおいてもう一度お試しください。" };
+  if (status === 429) {
+    return { _form: "短い時間に多くの応募があったため受け付けられませんでした。時間をおいてもう一度お試しください。" };
+  }
   return { _form: "送信できませんでした。時間をおいてもう一度お試しください。" };
 }
 
@@ -221,9 +225,17 @@ export function renderProposalsPage(o: ProposalsPageOptions): string {
     `<div class="two">${textInput("name", "氏名", values, errors, `type="text" autocomplete="name" maxlength="${NAME_MAX}" placeholder="北陸 太郎"`)}` +
     `${textInput("email", "メールアドレス", values, errors, `type="email" autocomplete="email" maxlength="${EMAIL_MAX}" placeholder="you@example.com"`)}</div>` +
     `<div class="hp" aria-hidden="true"><label>空欄のままにしてください<input type="text" name="${HONEYPOT}" tabindex="-1" autocomplete="off"></label></div>` +
+    `<p class="note">${USAGE_NOTE}</p>` +
     '<button class="submit" type="submit">この内容で応募する<span class="ar" aria-hidden="true">→</span></button>' +
     "</section></form>";
-  return shell("登壇者募集", top + `<div class="body"><div class="wrap">${form}</div></div>`, !!o.demo, config.preview, DEMO_NOTE);
+  return shell(
+    "登壇者募集",
+    top + `<div class="body"><div class="wrap">${form}</div></div>`,
+    !!o.demo,
+    config.preview,
+    DEMO_NOTE,
+    PROPOSAL_PREVIEW_NOTE,
+  );
 }
 
 export function renderProposalThanksPage(o: { demo?: boolean }): string {
@@ -277,6 +289,17 @@ export function proposalsInjection(cfg: ProposalConfig | null): string {
 
 // ---------- handler ----------
 
+/**
+ * Sender key for lp-analytics' per-sender daily cap: SHA-256 of the client IP (hex, 32 chars).
+ * The raw IP never leaves the Worker. null when the header is absent (local dev / tests).
+ */
+export async function clientKeyFor(req: Request): Promise<string | null> {
+  const ip = req.headers.get("cf-connecting-ip");
+  if (!ip) return null;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`lp-proposals:${ip}`));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
 export interface ProposalsDeps {
   demo: boolean;
   /** Proposals config, or null when unavailable (treated as flag off). */
@@ -327,7 +350,7 @@ export async function handleProposals(req: Request, deps: ProposalsDeps): Promis
     res = await deps.internal("/lp/internal/proposals/submit", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(parsed.input),
+      body: JSON.stringify({ ...parsed.input, clientKey: await clientKeyFor(req) }),
     });
   } catch {
     return page(mapSubmitError(502, null, config), 502);

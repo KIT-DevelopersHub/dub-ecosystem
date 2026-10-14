@@ -145,6 +145,26 @@ describe.each<RepoKind>(["memory", "d1"])("proposals (%s)", (kind) => {
     expect((await app.fetch(submit(VALID))).status).toBe(429);
   });
 
+  it("caps one sender (clientKey) per JST day without exposing the key", async () => {
+    const { app } = await setup(kind);
+    await open(app);
+    const a = "a".repeat(32);
+    for (let i = 0; i < 5; i++) expect((await app.fetch(submit({ ...VALID, clientKey: a }))).status).toBe(201);
+    expect((await app.fetch(submit({ ...VALID, clientKey: a }))).status).toBe(429);
+    expect((await app.fetch(submit({ ...VALID, clientKey: "b".repeat(32) }))).status).toBe(201);
+    const page = await body<LpProposalsPage>(await app.fetch(get("/lp/proposals/submissions")));
+    expect(page.items[0]).not.toHaveProperty("clientKey");
+  });
+
+  it("clears the reviewer when a proposal goes back to 未対応", async () => {
+    const { app } = await setup(kind);
+    await open(app);
+    const { id } = await body<{ id: string }>(await app.fetch(submit(VALID)));
+    await app.fetch(send("PATCH", `/lp/proposals/submissions/${id}`, { status: "accepted" }));
+    const back = await body<LpProposal>(await app.fetch(send("PATCH", `/lp/proposals/submissions/${id}`, { status: "submitted" })));
+    expect(back.reviewedBy).toBeNull();
+  });
+
   it("pages with a cursor", async () => {
     const { app, clock } = await setup(kind);
     await open(app);
