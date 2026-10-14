@@ -73,25 +73,25 @@ function Inlines({ segs, resolveUser, resolveTeam }: { segs: BodySegment[] } & M
           case "bold":
             return (
               <strong key={i} className={styles.mdBold}>
-                {seg.value}
+                {seg.children ? <Inlines segs={seg.children} resolveUser={resolveUser} resolveTeam={resolveTeam} /> : seg.value}
               </strong>
             );
           case "italic":
             return (
               <em key={i} className={styles.mdItalic}>
-                {seg.value}
+                {seg.children ? <Inlines segs={seg.children} resolveUser={resolveUser} resolveTeam={resolveTeam} /> : seg.value}
               </em>
             );
           case "underline":
             return (
               <u key={i} className={styles.mdUnderline}>
-                {seg.value}
+                {seg.children ? <Inlines segs={seg.children} resolveUser={resolveUser} resolveTeam={resolveTeam} /> : seg.value}
               </u>
             );
           case "strike":
             return (
               <s key={i} className={styles.mdStrike}>
-                {seg.value}
+                {seg.children ? <Inlines segs={seg.children} resolveUser={resolveUser} resolveTeam={resolveTeam} /> : seg.value}
               </s>
             );
           case "link": {

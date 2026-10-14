@@ -1,0 +1,13 @@
+-- mail-gateway (返信不要 / reply-nudge dismiss) — per-user "no reply needed" stamp.
+-- Mirror of infra/d1/migrations/mail/0011_user_flags_no_reply.sql (kept byte-identical; infra
+-- is the 正本 / runner, this copy backs the in-memory test schema in test/d1.ts).
+-- Additive, forward-only; extends mail_user_flags (0008/0009) with one nullable column.
+--
+-- The reply nudge (返信待ち) flags a read inbox thread whose last received message has gone
+-- unanswered for days. "返信不要" lets the user dismiss it. Like Gmail's dismiss it applies
+-- ONLY to the mail received up to that moment: a message arriving after no_reply_at brings
+-- the nudge back. It is a PER-USER view state (each viewer has their own row); nothing is
+-- deleted. A missing row (or NULL) means "not dismissed".
+--   no_reply_at : when the user last pressed 返信不要 (ISO-8601; re-stamped on every press,
+--                 NULL after an undo).
+ALTER TABLE mail_user_flags ADD COLUMN no_reply_at TEXT;

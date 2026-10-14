@@ -535,6 +535,10 @@ function seedMailImageBlob(id: string, filename: string, contentType: string, ba
 const DEMO_PNG_8x8 =
   "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR4nGNkYPhfz0AEYBpVSF+FAP7pAv4prsMnAAAAAElFTkSuQmCC";
 
+// Relative to page load so the reply nudge (3..14 days unanswered, read) is demoable:
+// msg_3 sits in the window, msg_2 is too recent; msg_1 keeps its fixed (stale) date.
+const daysAgoIso = (d: number): string => new Date(Date.now() - d * 86_400_000).toISOString();
+
 const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_1", messageId: "<m1@demo>", threadId: "thr_1", from: { email: "hanako@example.com", name: "山田 花子" },
@@ -544,12 +548,12 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_2", messageId: "<m2@demo>", threadId: "thr_2", from: { email: "sponsor@acme.co.jp", name: "ACME株式会社" },
     to: [{ email: "demo@developershub.jp" }], subject: "スポンサー契約書の送付", snippet: "契約書を添付いたします。ご確認ください。",
-    receivedAt: "2026-08-01T05:00:00Z", read: false, mine: true,
+    receivedAt: daysAgoIso(1), read: false, mine: true,
   },
   {
     id: "msg_3", messageId: "<m3@demo>", threadId: "thr_3", from: { email: "staff@developershub.jp", name: "運営スタッフ" },
     to: [{ email: "demo@developershub.jp" }], subject: "会場下見の日程", snippet: "来週の下見日程を共有します。",
-    receivedAt: "2026-07-30T08:00:00Z", read: true, mine: true,
+    receivedAt: daysAgoIso(4), read: true, mine: true,
   },
 ];
 
@@ -762,6 +766,15 @@ function createMailStore() {
     }
     return received[id]!;
   }
+  // Mirrors the gateway's send-time resolveThreadId: a reply's In-Reply-To is matched
+  // (angle brackets ignored) against received Message-Ids so the sent row carries the
+  // conversation's threadId and folds into it; unknown refs fall back to the ref itself.
+  const bare = (ref: string): string => ref.trim().replace(/^<|>$/g, "").trim();
+  function replyThreadId(inReplyTo: string): string {
+    const ref = bare(inReplyTo);
+    const parent = DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)).find((m) => m.messageId && bare(m.messageId) === ref);
+    return parent?.threadId ?? inReplyTo;
+  }
   // Sent is PERSISTED per account (localStorage) so it survives a reload and stays
   // strictly account-scoped: a mail account A sent lives under A's key and is therefore
   // invisible when the shell reloads as account B. Read fresh on every request.
@@ -825,6 +838,7 @@ function createMailStore() {
         status: "sent",
         textBody: s.textBody,
         ...(s.htmlBody ? { htmlBody: s.htmlBody } : {}),
+        ...(s.inReplyTo ? { threadId: replyThreadId(s.inReplyTo) } : {}),
       } as mail.MailSentDetail);
     }
     saveSent(accountId, sent);
@@ -921,6 +935,7 @@ function createMailStore() {
         provider: "resend",
         providerMessageId,
         status: "sent",
+        ...(req.inReplyTo ? { threadId: replyThreadId(req.inReplyTo) } : {}),
         textBody: req.textBody ?? "",
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
         ...(attachments.length > 0 ? { attachments } : {}),
@@ -1033,7 +1048,7 @@ function createMailStore() {
         const threadId = decodeURIComponent(m[1]!);
         const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
         const flags = loadFlags();
-        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false, purged: false };
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
         const next: mail.MailThreadFlags = {
           threadId,
           starred: patch.starred ?? prev.starred,
@@ -1042,6 +1057,8 @@ function createMailStore() {
           // purged (完全に削除): per-user permanent hide. Mirrors the gateway — the mail row is
           // never removed; only THIS account's flag flips, so an admin/other account still sees it.
           purged: patch.purged ?? prev.purged ?? false,
+          // 返信不要: true re-stamps now (like the gateway), false clears, absent keeps.
+          noReplyAt: patch.noReply === undefined ? (prev.noReplyAt ?? null) : patch.noReply ? new Date().toISOString() : null,
         };
         saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
         return json(next);

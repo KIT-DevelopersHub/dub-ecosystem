@@ -123,6 +123,8 @@ export function ThreadPane({
         channelId={`${channelId}:thread:${root.id}` as common.ChannelId}
         placeholder="スレッドに返信する"
         resolveMentionCandidates={resolveMentionCandidates}
+        resolveUser={resolveUser}
+        resolveTeam={resolveTeam}
         onSend={onSend}
       />
     </aside>
