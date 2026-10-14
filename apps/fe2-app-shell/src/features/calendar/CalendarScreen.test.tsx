@@ -36,7 +36,7 @@ function mk(id: string, over: Partial<task.Task> = {}): task.Task {
   };
 }
 
-function memoryApi(seed: task.Task[], teamRows: task.Task[] = []) {
+function memoryApi(seed: task.Task[], teamRows: task.Task[] = [], peopleRows: task.Task[] = []) {
   const rows = [...seed];
   const api: CalendarApi = {
     listTasks: async () => ({ items: rows, nextCursor: null }),
@@ -73,6 +73,13 @@ function memoryApi(seed: task.Task[], teamRows: task.Task[] = []) {
       myTeamIds: ["team_hq"],
     })),
     listTeamTasks: vi.fn(async (teamId: common.TeamId) => teamRows.filter((t) => t.teamId === teamId)),
+    searchUsers: vi.fn(async (q: string) =>
+      [
+        { id: ME, displayName: "山田", avatarUrl: null },
+        { id: "usr_sato" as common.UserId, displayName: "佐藤 花子", avatarUrl: null, email: "sato@example.jp" },
+      ].filter((u) => u.displayName.includes(q)),
+    ),
+    listUserTasks: vi.fn(async (userId: common.UserId) => peopleRows.filter((t) => t.assigneeId === userId)),
     listMeetings: vi.fn(async () => ({ items: [], account: { email: null, calendarReady: false } })),
     listMeetingTargets: vi.fn(async () => ({ items: [] })),
     createMeeting: vi.fn(),
@@ -461,6 +468,49 @@ describe("CalendarScreen", () => {
     expect(await screen.findByText("一部のチームのタスクを取得できませんでした")).toBeInTheDocument();
     expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
     expect(screen.queryByTestId("calendar-error")).not.toBeInTheDocument();
+  });
+
+  it("ユーザーを検索: adds a member's 予定, hides them by checkbox, and removes them", async () => {
+    const user = userEvent.setup();
+    const api = memoryApi(
+      [mk("mine", { title: "受付準備", dueAt: "2026-10-10T00:00:00.000Z" })],
+      [],
+      [mk("satos", { title: "取材", assigneeId: "usr_sato" as common.UserId, dueAt: "2026-10-09T00:00:00.000Z" })],
+    );
+    renderScreen(api);
+    await screen.findByTestId("calendar-item-mine");
+    expect(screen.queryByTestId("calendar-item-satos")).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("combobox", { name: "ユーザーを検索" }), "佐");
+    // Yourself is never offered (already on the calendar).
+    const option = await screen.findByTestId("calendar-people-option-usr_sato");
+    expect(screen.queryByTestId(`calendar-people-option-${ME}`)).not.toBeInTheDocument();
+    await user.click(option);
+    await waitFor(() => expect(api.listUserTasks).toHaveBeenCalledWith("usr_sato"));
+    expect(await screen.findByTestId("calendar-item-satos")).toHaveTextContent("佐藤：取材");
+    expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("dub.calendar.watchedPeople") ?? "[]")).toEqual([{ id: "usr_sato", name: "佐藤 花子" }]);
+
+    await user.click(screen.getByTestId("calendar-filter-person:usr_sato"));
+    expect(screen.queryByTestId("calendar-item-satos")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("calendar-filter-person:usr_sato"));
+    expect(screen.getByTestId("calendar-item-satos")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("佐藤 花子の表示をやめる"));
+    await waitFor(() => expect(screen.queryByTestId("calendar-item-satos")).not.toBeInTheDocument());
+    expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
+  });
+
+  it("picks a searched member with the keyboard", async () => {
+    const user = userEvent.setup();
+    const api = memoryApi([]);
+    renderScreen(api);
+    await screen.findByTestId("calendar-timegrid");
+    await user.type(screen.getByRole("combobox", { name: "ユーザーを検索" }), "佐藤");
+    await screen.findByTestId("calendar-people-option-usr_sato");
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("calendar-filter-person:usr_sato")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "ユーザーを検索" })).toHaveValue("");
   });
 
   it("disables 作成 without write permission", async () => {

@@ -3,6 +3,8 @@
 // "タスクだけ消す" is one click and the rows underneath keep their own state.
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Icon, IconButton, Select, SkeletonLoader } from "@dub/ui";
+import { useQuery } from "@tanstack/react-query";
+import type { identity } from "@dub/types";
 import styles from "./calendar.module.css";
 
 export interface FilterRow {
@@ -23,7 +25,7 @@ export interface FilterSection {
   footer?: ReactNode;
 }
 
-function FilterCheck({
+export function FilterCheck({
   row,
   checked,
   disabled,
@@ -187,4 +189,129 @@ export function AddTeamPicker({
 
 export function RemoveTeamButton({ name, onRemove }: { name: string; onRemove: () => void }): JSX.Element {
   return <IconButton name="x" size="sm" aria-label={`${name}の表示をやめる`} onClick={onRemove} />;
+}
+
+/** Debounce a fast-changing value (search-as-you-type without a request per key). */
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+/**
+ * ユーザーを検索 (Google Calendar's "Search for people"): type a name or email, pick a
+ * member, and their 予定・タスク are added to the calendar. `exclude` hides people who
+ * are already shown (yourself, added ones).
+ */
+export function PeopleSearch({
+  search,
+  exclude,
+  onAdd,
+}: {
+  search: (q: string) => Promise<identity.UserSummary[]>;
+  exclude: ReadonlySet<string>;
+  onAdd: (user: identity.UserSummary) => void;
+}): JSX.Element {
+  const listId = useId();
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const q = useDebounced(text.trim(), 250);
+  const { data, isFetching, isError } = useQuery({
+    queryKey: ["calendar", "people-search", q],
+    queryFn: () => search(q),
+    enabled: q.length > 0,
+    staleTime: 60_000,
+  });
+  const results = (data ?? []).filter((u) => !exclude.has(u.id));
+  const showList = open && text.trim().length > 0;
+  const pending = text.trim() !== q || (isFetching && !data);
+  useEffect(() => setActive(0), [q]);
+
+  const pick = (u: identity.UserSummary) => {
+    onAdd(u);
+    setText("");
+    setOpen(false);
+  };
+
+  return (
+    <div className={styles.people} data-testid="calendar-people-search">
+      <div className={styles.peopleField}>
+        <Icon name="users" size="sm" />
+        <input
+          className={styles.peopleInput}
+          type="search"
+          role="combobox"
+          aria-label="ユーザーを検索"
+          aria-expanded={showList}
+          aria-controls={listId}
+          aria-activedescendant={showList && results[active] ? `${listId}-${results[active]!.id}` : undefined}
+          placeholder="ユーザーを検索"
+          autoComplete="off"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActive((i) => Math.min(i + 1, Math.max(results.length - 1, 0)));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((i) => Math.max(i - 1, 0));
+            } else if (e.key === "Enter" && showList && results[active]) {
+              e.preventDefault();
+              pick(results[active]!);
+            } else if (e.key === "Escape") {
+              setText("");
+              setOpen(false);
+            }
+          }}
+          data-testid="calendar-people-input"
+        />
+      </div>
+      {showList && (
+        <div className={styles.peopleList} id={listId} role="listbox" aria-label="ユーザー" data-testid="calendar-people-results">
+          {pending ? (
+            <SkeletonLoader lines={2} />
+          ) : isError ? (
+            <p className={styles.peopleEmpty}>検索できませんでした</p>
+          ) : results.length === 0 ? (
+            <p className={styles.peopleEmpty}>該当するユーザーがいません</p>
+          ) : (
+            results.map((u, i) => (
+              <div
+                key={u.id}
+                id={`${listId}-${u.id}`}
+                role="option"
+                aria-selected={i === active}
+                className={`${styles.peopleOption} ${i === active ? styles.peopleOptionActive : ""}`}
+                // mousedown, not click: the input's blur would close the list first.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(u);
+                }}
+                onMouseEnter={() => setActive(i)}
+                data-testid={`calendar-people-option-${u.id}`}
+              >
+                <span className={styles.peopleAvatar} aria-hidden="true">
+                  {u.displayName.slice(0, 1)}
+                </span>
+                <span className={styles.calItemLabel}>
+                  {u.displayName}
+                  {u.email && <span className={styles.calItemNote}>{u.email}</span>}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
