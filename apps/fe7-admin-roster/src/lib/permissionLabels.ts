@@ -24,6 +24,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   audit: "監査ログ",
   github: "GitHub 連携",
   drive: "Google Drive",
+  calendar: "カレンダー",
   webhook: "Webhook",
   app: "アプリのアクセス権",
 };
@@ -92,6 +93,8 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "drive:write": { label: "Drive の更新", description: "Google Drive へのファイルのアップロード・更新ができるようになります。" },
   "drive:settings_view": { label: "Drive共有の設定の閲覧", description: "Drive共有の「設定」を開き、使っている Google アカウントを確認できるようになります。" },
   "drive:settings_edit": { label: "Drive共有の設定の変更", description: "Drive共有が使う Google アカウントの追加・切り替え・削除ができるようになります（保存すると閲覧も ON になります）。" },
+  "calendar:meetings_view": { label: "ミーティングを見る", description: "カレンダーの「ミーティング」で、共有 Google アカウントに設定した定例・会議の一覧を見られるようになります。" },
+  "calendar:meetings_edit": { label: "ミーティングを設定", description: "共有 Google アカウントで Meet 付きのミーティングを作成・変更・削除し、ロールのメンバーを自動で招待できるようになります（保存すると「見る」も ON になります）。" },
   "webhook:read": { label: "Webhook の閲覧", description: "Webhook の配信履歴を検索・確認できるようになります。" },
   ...Object.fromEntries(
     APP_LABELS.flatMap((a) => [

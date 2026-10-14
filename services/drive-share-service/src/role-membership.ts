@@ -10,12 +10,26 @@
 import { createServiceClient, type RequestContext } from "@dub/http";
 import type { Fetcher } from "@cloudflare/workers-types";
 
+/** An active Dub account as カレンダー > ミーティング needs it. */
+export interface ActiveUser {
+  id: string;
+  /** Dub login address (trimmed, lowercased). */
+  email: string;
+  name: string;
+  roleIds: string[];
+}
+
 /** Role membership + naming, as drive-share-service needs it. */
 export interface RoleMembership {
   /** Active member emails of a role (trimmed, lowercased, de-duplicated). */
   listActiveEmails(roleId: string): Promise<string[]>;
   /** Human-readable role name, or null if the role id is unknown. */
   roleName(roleId: string): Promise<string | null>;
+  /** Active users of a role, or of the whole org when roleId is omitted ("全体"). Internal S2S
+   *  only, so it also works for the system actor of the hourly meeting sync. */
+  listActiveUsers(roleId?: string): Promise<ActiveUser[]>;
+  /** Every role (id + name). Needs the acting user (identity:read). */
+  listRoles(): Promise<{ id: string; name: string }[]>;
 }
 
 /** Builds a request-scoped RoleMembership for the acting user. */
@@ -24,7 +38,7 @@ export type RoleMembershipFactory = (ctx: RequestContext) => RoleMembership;
 const PAGE_LIMIT = 200;
 
 interface UsersPage {
-  items: { email?: string | null }[];
+  items: { id?: string; email?: string | null; displayName?: string | null; roleIds?: string[] | null }[];
   nextCursor: string | null;
 }
 interface RolesPage {
@@ -71,6 +85,27 @@ export function createIdentityRoleMembership(binding: Fetcher, ctx: RequestConte
     async roleName(roleId: string): Promise<string | null> {
       const roles = await loadRoles();
       return roles.get(roleId) ?? null;
+    },
+
+    async listActiveUsers(roleId?: string): Promise<ActiveUser[]> {
+      const out = new Map<string, ActiveUser>();
+      let cursor: string | undefined;
+      do {
+        const page = await client.get<UsersPage>(ctx, "/internal/users", {
+          query: { ...(roleId ? { role: roleId } : {}), status: "active", limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+        });
+        for (const u of page.items) {
+          const email = u.email?.trim().toLowerCase();
+          if (!u.id || !email || out.has(u.id)) continue;
+          out.set(u.id, { id: u.id, email, name: u.displayName?.trim() || email, roleIds: [...(u.roleIds ?? [])] });
+        }
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      return [...out.values()];
+    },
+
+    async listRoles(): Promise<{ id: string; name: string }[]> {
+      return [...(await loadRoles())].map(([id, name]) => ({ id, name }));
     },
   };
 }

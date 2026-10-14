@@ -16,6 +16,12 @@ import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate";
 const GOOGLE_ACCOUNT_VIEW = appLevel("driveshare", "view", "drive:settings_view");
 const GOOGLE_ACCOUNT_EDIT = appLevel("driveshare", "edit", "drive:settings_edit");
 
+// カレンダー > ミーティング (meetings on the shared Google account): 閲覧/編集 on カレンダー plus the
+// ミーティング toggles of ロール管理 > カレンダー > 細かい権限. Migration identity/0019 gives both
+// keys to the system admin role only; every other role starts off.
+const MEETINGS_VIEW = appLevel("calendar", "view", "calendar:meetings_view");
+const MEETINGS_EDIT = appLevel("calendar", "edit", "calendar:meetings_edit");
+
 export const POLICY_TABLE = definePolicyTable({
   // Liveness. INTERNAL, deliberately NOT PUBLIC.
   //
@@ -52,4 +58,12 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /driveshare/google-account/callback": GOOGLE_ACCOUNT_EDIT,
   "POST /driveshare/google-account/active": GOOGLE_ACCOUNT_EDIT,
   "DELETE /driveshare/google-account/accounts/:id": GOOGLE_ACCOUNT_EDIT,
+
+  // ---- カレンダー > ミーティング ----
+  "GET /meetings": MEETINGS_VIEW,
+  "GET /meetings/targets": MEETINGS_VIEW,
+  "POST /meetings": MEETINGS_EDIT,
+  "POST /meetings/sync": MEETINGS_EDIT,
+  "PATCH /meetings/:id": MEETINGS_EDIT,
+  "DELETE /meetings/:id": MEETINGS_EDIT,
 });

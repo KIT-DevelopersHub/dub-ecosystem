@@ -101,6 +101,15 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.listTeamIdentityUserIds(teamIds));
   });
 
+  // 名簿の Gmail 逆引き (drive-share-service → member-service, s2s のみ). カレンダー > ミーティングの
+  // 招待先を「名簿の Gmail、無ければ Dub のログインメール」で決めるため。body { userIds } ->
+  // { items: [{ userId, gmail, name }] } (リンク済みの行だけ)。
+  app.post("/members/internal/google-emails", async (c) => {
+    const body = await readJson<{ userIds?: unknown }>(c);
+    const userIds = Array.isArray(body.userIds) ? body.userIds.filter((v): v is string => typeof v === "string") : [];
+    return c.json(await svc.listGoogleEmails(userIds));
+  });
+
   // 公開オンボーディング案内 (gateway GET /api/v1/public/onboarding → ここ, s2s のみ)。
   // 未ログインの新メンバーが見るページの中身。案内項目は公開前提なので応答は管理画面と同じ。
   app.get("/members/internal/onboarding", async (c) => {

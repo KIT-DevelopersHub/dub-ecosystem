@@ -2,20 +2,23 @@
 // ガントチャート. 予定 created here are tasks (startAt〜dueAt, assigned to self) written
 // through the canonical task-service API, so they also show up in マイタスク/ガント.
 // No new backend: reads GET /api/v1/tasks (self-scoped), writes POST/PATCH/DELETE.
+// ミーティング (drive-share-service /meetings) are drawn alongside as their own calendars.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Icon, IconButton, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import type { common, identity, task } from "@dub/types";
+import type { common, identity, meeting, task } from "@dub/types";
 import { useCalendarApi, useCalendarCaps, useCalendarCurrentUserId, useCalendarCurrentUserName } from "./CalendarProvider.tsx";
 import {
   dayIndexOf,
+  dayKeyOf,
   draftFromItem,
   draftForAllDay,
   draftForSlot,
   draftToDates,
   encodeDescription,
   formatRangeTitle,
+  isMeetingTask,
   formatRangeTitleShort,
   isScheduleTask,
   itemsOnDay,
@@ -42,6 +45,12 @@ import {
 } from "./CalendarFilters.tsx";
 import { DayListPanel, DetailPanel, EventDialog, ItemTitleProvider, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
+import { MeetingDetailDialog } from "./MeetingDetailDialog.tsx";
+import { MeetingFilter } from "./MeetingFilter.tsx";
+import { MeetingFormDialog } from "./MeetingFormDialog.tsx";
+import { loadVisibleTargets, saveVisibleTargets } from "./meeting-form";
+import { meetingTasks, type MeetingOccurrence } from "./meeting-occurrences";
+import { useMeetingMutations, useMeetingTargetsQuery, useMeetingsAccess, useMeetingsQuery } from "./useMeetings.tsx";
 import {
   KIND_VISUALS,
   STATUS_ORDER,
@@ -91,6 +100,12 @@ function loadWatchedPeople(): WatchedPerson[] {
     return [];
   }
 }
+
+/** Liveness marker for the meetings feature (shipped in the bundle; checked by verify:live). */
+export const MEETINGS_FEATURE_MARKER = "cal-meet-v1";
+
+/** Opens Drive共有 > 設定 on load (driveshare/DriveShareSettings settingsOpenOnLoad). */
+const DRIVE_SETTINGS_URL = "/driveshare?setting=google-account";
 
 type Panel =
   | { kind: "create"; draft: EventDraft; ghost: SlotGhost | null }
@@ -161,6 +176,32 @@ export function CalendarScreen(): JSX.Element {
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
   const [panel, setPanel] = useState<Panel | null>(null);
   useEffect(() => setSidebarOpen(!narrow), [narrow]);
+  const days = visibleDays(view, anchorDay);
+
+  // ── meetings (no view permission → the whole meetings UI stays hidden) ──
+  const access = useMeetingsAccess();
+  const meetingsQ = useMeetingsQuery(access.canView);
+  const targetsQ = useMeetingTargetsQuery(access.canView);
+  const targets = useMemo(() => targetsQ.data?.items ?? [], [targetsQ.data]);
+  const { create: createMeeting, update: updateMeeting, remove: removeMeeting, sync } = useMeetingMutations(targets);
+  const [chosenTargets, setChosenTargets] = useState<string[] | null>(null);
+  // Default = the calendars I belong to (+ 全体); a manual choice is remembered per browser.
+  const visibleIds = useMemo(
+    () => chosenTargets ?? (targetsQ.data ? loadVisibleTargets(targetsQ.data.items) : null),
+    [chosenTargets, targetsQ.data],
+  );
+  const [meetingForm, setMeetingForm] = useState<{ editing: meeting.Meeting | null } | null>(null);
+  const [selectedMeeting, setSelectedMeeting] = useState<MeetingOccurrence | null>(null);
+  const account = meetingsQ.data?.account ?? null;
+  const accountReady = !!account?.email && account.calendarReady;
+  const firstKey = dayKeyOf(days[0]!);
+  const lastKey = dayKeyOf(days[days.length - 1]!);
+  const meetingOcc = useMemo(() => {
+    const all = meetingsQ.data?.items ?? [];
+    // Targets unavailable (error) → show every meeting rather than hide them all.
+    const shown = visibleIds ? all.filter((m) => visibleIds.includes(m.targetId)) : all;
+    return meetingTasks(shown, firstKey, lastKey);
+  }, [meetingsQ.data, visibleIds, firstKey, lastKey]);
 
   // Scope to the caller's own tasks (担当/依頼) — task-service's "/me rule" rejects a
   // bare list — plus every task of the 他のチーム and the people the caller added. One
@@ -225,7 +266,11 @@ export function CalendarScreen(): JSX.Element {
     for (const u of usersQuery.data ?? []) m.set(u.id, u.displayName);
     return m;
   }, [currentUserId, currentUserName, watchedPeople, usersQuery.data]);
-  const itemTitle = useCallback((t: task.Task) => ownedTitle(t, ownerOf(t, labels, names)), [labels, names]);
+  const itemTitle = useCallback(
+    (t: task.Task) =>
+      ownedTitle(t, isMeetingTask(t) ? (meetingOcc.byId.get(t.id)?.meeting.targetName ?? null) : ownerOf(t, labels, names)),
+    [labels, names, meetingOcc],
+  );
   const detailLabelName = (t: task.Task) => {
     const label = resolveLabel(labels, labelOf(t));
     const owner = ownerOf(t, labels, names);
@@ -241,8 +286,9 @@ export function CalendarScreen(): JSX.Element {
         ? !hidden.has(SCHEDULE_GROUP) && !hidden.has(kindKey(kindOf(t))) && !hidden.has(labelKey(labelKeyOf(t)))
         : !hidden.has(TASK_GROUP) && !hidden.has(scopeKey(t.teamId)) && !hidden.has(statusKey(t.status)));
     const all = toCalendarItems(data ?? []);
-    return { items: all.items.filter((it) => shown(it.task)), undated: all.undated.filter(shown) };
-  }, [data, hidden, labelKeyOf]);
+    const meetings = toCalendarItems(meetingOcc.tasks).items;
+    return { items: [...all.items.filter((it) => shown(it.task)), ...meetings], undated: all.undated.filter(shown) };
+  }, [data, hidden, labelKeyOf, meetingOcc]);
 
   // タスク rows: 個人, then every team the caller has tasks in or added, named from 運営チーム.
   const teamById = useMemo(() => new Map((teamsQuery.data?.teams ?? []).map((t) => [t.id as string, t])), [teamsQuery.data]);
@@ -389,12 +435,28 @@ export function CalendarScreen(): JSX.Element {
     if (canWrite) setPanel({ kind: "create", draft, ghost });
   };
   const openCreateDialog = () => openCreate(nextHourDraft(anchorDay));
-  const selectItem = (item: CalendarItem, anchor: AnchorRect) => setPanel({ kind: "detail", item, anchor });
+  const selectItem = (item: CalendarItem, anchor: AnchorRect) => {
+    if (isMeetingTask(item.task)) {
+      setPanel(null);
+      setSelectedMeeting(meetingOcc.byId.get(item.task.id) ?? null);
+    } else setPanel({ kind: "detail", item, anchor });
+  };
+  const submitMeeting = (body: meeting.CreateMeetingRequest) => {
+    const editing = meetingForm?.editing ?? null;
+    setMeetingForm(null);
+    if (editing) {
+      updateMeeting.mutate({ id: editing.id, body }, { onSuccess: () => toast.show({ kind: "success", title: "ミーティングを更新しました" }) });
+    } else {
+      createMeeting.mutate(body, {
+        onSuccess: (m) => toast.show({ kind: "success", title: "ミーティングを登録しました", description: `Meet を発行し、${m.attendeeCount}人を招待しました` }),
+      });
+    }
+  };
 
   // Google's single-key shortcuts: t 今日 / j,n 次 / k,p 前 / d w m a 表示 / c 作成.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target) || panel) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target) || panel || meetingForm || selectedMeeting) return;
       const k = e.key.toLowerCase();
       if (k === "t") setAnchorDay(today);
       else if (k === "j" || k === "n") setAnchorDay((a) => shiftAnchor(view, a, 1));
@@ -407,9 +469,34 @@ export function CalendarScreen(): JSX.Element {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [panel, view, today, anchorDay, canWrite]);
+  }, [panel, view, today, anchorDay, canWrite, meetingForm, selectedMeeting]);
 
-  const days = visibleDays(view, anchorDay);
+  const meetingNotice = !access.canView ? null : meetingsQ.isError ? (
+    <div className={styles.meetingNotice} role="alert" data-testid="calendar-meetings-error">
+      ミーティングを取得できませんでした。
+      <Button variant="secondary" size="sm" onClick={() => meetingsQ.refetch()}>
+        再試行
+      </Button>
+    </div>
+  ) : account && !accountReady ? (
+    <div
+      className={styles.meetingNotice}
+      role="status"
+      data-testid={account.email ? "calendar-meetings-reconnect" : "calendar-meetings-no-account"}
+    >
+      {account.email
+        ? "共有 Google アカウントにカレンダー権限がありません。Drive共有 > 設定 で再接続してください。"
+        : "共有 Google アカウントが未接続です（Drive共有 > 設定）。"}
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => window.location.assign(DRIVE_SETTINGS_URL)}
+        testId="calendar-meetings-open-drive-settings"
+      >
+        Drive共有 の設定を開く
+      </Button>
+    </div>
+  ) : null;
 
   let body: JSX.Element;
   if (isPending) {
@@ -534,6 +621,21 @@ export function CalendarScreen(): JSX.Element {
                 </Button>
               </div>
 
+              {access.canEdit && (
+                <div className={styles.meetingActions} data-feature={MEETINGS_FEATURE_MARKER} data-testid="calendar-meetings-toolbar">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    iconLeft={<Icon name="plus" />}
+                    onClick={() => setMeetingForm({ editing: null })}
+                    disabled={!accountReady}
+                    testId="calendar-meetings-create"
+                  >
+                    ミーティングを設定
+                  </Button>
+                </div>
+              )}
+
               <MiniCalendar
                 selectedDay={anchorDay}
                 today={today}
@@ -617,6 +719,32 @@ export function CalendarScreen(): JSX.Element {
                 ]}
               />
 
+              {access.canView && (
+                <MeetingFilter
+                  targets={targets}
+                  visible={new Set(visibleIds ?? [])}
+                  loading={targetsQ.isPending}
+                  notice={meetingNotice}
+                  headAction={
+                    access.canEdit && accountReady ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => sync.mutate()}
+                        loading={sync.isPending}
+                        testId="calendar-meetings-sync"
+                      >
+                        招待を同期
+                      </Button>
+                    ) : null
+                  }
+                  onChange={(ids) => {
+                    setChosenTargets(ids);
+                    saveVisibleTargets(ids);
+                  }}
+                />
+              )}
+
               {undated.length > 0 && (
                 <div className={styles.undated} data-testid="calendar-undated">
                   <div className={styles.calListHead}>日付未設定（{undated.length}件）</div>
@@ -635,7 +763,10 @@ export function CalendarScreen(): JSX.Element {
                 </div>
               )}
 
-              <p className={styles.sideNote}>予定はマイタスクのタスクとして保存され、マイタスク・ガントにも表示されます。</p>
+              <p className={styles.sideNote}>
+                予定はマイタスクのタスクとして保存され、マイタスク・ガントにも表示されます。
+                {access.canView && " ミーティングは共有 Google アカウントのカレンダーに登録され、対象ロールのメンバーへ招待が届きます。"}
+              </p>
             </aside>
           )}
           {body}
@@ -701,6 +832,33 @@ export function CalendarScreen(): JSX.Element {
             }}
             onClose={close}
             saving={updateMut.isPending}
+          />
+        )}
+
+        {access.canView && (
+          <MeetingDetailDialog
+            occurrence={selectedMeeting}
+            canEdit={access.canEdit}
+            onClose={() => setSelectedMeeting(null)}
+            onEdit={(m) => {
+              setSelectedMeeting(null);
+              setMeetingForm({ editing: m });
+            }}
+            onDelete={(m) => {
+              setSelectedMeeting(null);
+              removeMeeting.mutate(m.id, { onSuccess: () => toast.show({ kind: "success", title: "ミーティングを削除しました" }) });
+            }}
+          />
+        )}
+
+        {access.canEdit && (
+          <MeetingFormDialog
+            open={meetingForm != null}
+            editing={meetingForm?.editing ?? null}
+            targets={targets}
+            accountEmail={account?.email ?? null}
+            onClose={() => setMeetingForm(null)}
+            onSubmit={submitMeeting}
           />
         )}
       </div>
