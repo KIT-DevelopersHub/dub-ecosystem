@@ -18,6 +18,7 @@ export type { Env } from "./env";
 const DEFAULT_LP_BASE_URL = "https://hokuriku-it-conf.com";
 const DEFAULT_DAILY_VISIT_CAP = 5000;
 const DEFAULT_DAILY_CHECKOUT_CAP = 300;
+const DEFAULT_DAILY_PROPOSAL_CAP = 200;
 
 function siteTrafficFrom(env: Env): AppDeps["siteTraffic"] {
   const { CF_ANALYTICS_TOKEN: token, CF_ACCOUNT_ID: accountId, LP_WEB_ANALYTICS_SITE_TAG: siteTag } = env;
@@ -47,6 +48,9 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
       Number(env.LP_DAILY_CHECKOUT_CAP) > 0 ? Number(env.LP_DAILY_CHECKOUT_CAP) : DEFAULT_DAILY_CHECKOUT_CAP,
     stripe: env.STRIPE_SECRET_KEY ? createStripeClient(env.STRIPE_SECRET_KEY) : null,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
+    newProposalId: () => newId("lpp"),
+    dailyProposalCap:
+      Number(env.LP_DAILY_PROPOSAL_CAP) > 0 ? Number(env.LP_DAILY_PROPOSAL_CAP) : DEFAULT_DAILY_PROPOSAL_CAP,
   };
 }
 

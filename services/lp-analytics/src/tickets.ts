@@ -48,7 +48,7 @@ export const CHECKBOX_YES = "はい";
 
 export const BUYER_NAME_MAX = 100;
 export const BUYER_EMAIL_MAX = 254;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ANSWER_MAX: Record<LpTicketFieldType, number> = { text: 200, textarea: 2000, select: FIELD_OPTION_MAX, checkbox: 10 };
 
 /** Stripe session lifetime. Stripe requires >= 30 min, so a minute of headroom for clock/network skew. */
@@ -123,7 +123,8 @@ export function parseTicketTypeInput(body: unknown, partial: boolean): Partial<L
   return out;
 }
 
-export function parseFields(body: unknown): LpTicketField[] {
+/** `reserved` = fixed-field ids the caller's form already has (custom fields must not reuse them). */
+export function parseFields(body: unknown, reserved: ReadonlySet<string> = RESERVED_FIELD_IDS): LpTicketField[] {
   const raw = (body as { fields?: unknown } | null)?.fields;
   if (!Array.isArray(raw)) throw errors.validationFailed([{ field: "fields", reason: "required" }]);
   if (raw.length > FIELDS_MAX) throw errors.validationFailed([{ field: "fields", reason: "too_many" }]);
@@ -135,7 +136,7 @@ export function parseFields(body: unknown): LpTicketField[] {
     const at = (k: string) => `fields[${i}].${k}`;
     const before = bad.length;
     const id = typeof f.id === "string" ? f.id : "";
-    if (!FIELD_ID_RE.test(id) || RESERVED_FIELD_IDS.has(id)) bad.push({ field: at("id"), reason: "invalid" });
+    if (!FIELD_ID_RE.test(id) || reserved.has(id)) bad.push({ field: at("id"), reason: "invalid" });
     else if (seen.has(id)) bad.push({ field: at("id"), reason: "duplicate" });
     seen.add(id);
     const label = typeof f.label === "string" ? f.label.trim() : "";
@@ -204,7 +205,14 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
   }
   if (!origin) bad.push({ field: "origin", reason: "invalid" });
 
-  const rawAnswers = (b.answers && typeof b.answers === "object" ? b.answers : {}) as Record<string, unknown>;
+  const answers = parseAnswers(b.answers, fields, bad);
+  if (bad.length > 0) throw errors.validationFailed(bad);
+  return { items, name, email, answers, origin };
+}
+
+/** Answers to the configured custom fields (label snapshot kept). Problems go to `bad`. */
+export function parseAnswers(raw: unknown, fields: readonly LpTicketField[], bad: FieldError[]): LpTicketAnswer[] {
+  const rawAnswers = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const answers: LpTicketAnswer[] = [];
   for (const f of fields) {
     const v0 = rawAnswers[f.id];
@@ -216,8 +224,7 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
     else if (value !== "" && f.type === "checkbox" && value !== CHECKBOX_YES) bad.push({ field: key, reason: "invalid" });
     answers.push({ fieldId: f.id, label: f.label, value });
   }
-  if (bad.length > 0) throw errors.validationFailed(bad);
-  return { items, name, email, answers, origin };
+  return answers;
 }
 
 export function statsFor(t: Pick<LpTicketType, "capacity">, agg: TicketTypeAgg | undefined): LpTicketTypeStats {
