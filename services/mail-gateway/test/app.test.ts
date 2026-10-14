@@ -769,8 +769,11 @@ describe("archive auto-CC on send", () => {
   const asUser = (userId: string, over: Record<string, string> = {}) =>
     ({ "content-type": "application/json", "x-dub-request-id": "req_cc", "x-dub-user-id": userId, ...over });
 
+  const storedCc = (raw: ReturnType<typeof makeEnv>["raw"]): string[] =>
+    (JSON.parse((raw.prepare(`SELECT cc_json FROM mail_send_log`).get() as { cc_json: string }).cc_json) as mail.MailAddress[]).map((a) => a.email);
+
   it("adds the archive address to Cc on every outbox send (default archive@developershub.jp)", async () => {
-    const { env } = makeEnv(); // MAIL_ARCHIVE_CC unset -> DEFAULT_ARCHIVE_CC_ADDRESS
+    const { env, raw } = makeEnv(); // MAIL_ARCHIVE_CC unset -> DEFAULT_ARCHIVE_CC_ADDRESS
     const out = await app.fetch(
       new Request("https://svc/mail/outbox", {
         method: "POST",
@@ -781,14 +784,42 @@ describe("archive auto-CC on send", () => {
     );
     expect(out.status).toBe(202);
     // The persisted Sent row records the archive in its Cc.
-    const detailList = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
-    const id = detailList.items[0]!.id;
-    const detail = (await (await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(id)}`, { headers: asUser("usr_alice") }), env)).json()) as mail.MailSentDetail;
-    expect((detail.cc ?? []).map((a) => a.email)).toContain("archive@developershub.jp");
+    expect(storedCc(raw)).toContain("archive@developershub.jp");
+  });
+
+  it("hides the archive address from the Sent list/detail Cc but keeps the user's own Cc", async () => {
+    const { env, raw } = makeEnv();
+    await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: asUser("usr_alice", { "x-dub-idempotency-key": "cc-hide" }),
+        body: JSON.stringify({ to: [{ email: "b@x.com" }], cc: [{ email: "boss@example.com", name: "Boss" }], subject: "R", textBody: "b" }),
+      }),
+      env,
+    );
+    expect(storedCc(raw)).toEqual(["boss@example.com", "archive@developershub.jp"]); // stored data unchanged
+    const list = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
+    expect(list.items[0]!.cc).toEqual([{ email: "boss@example.com", name: "Boss" }]);
+    const detail = (await (await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(list.items[0]!.id)}`, { headers: asUser("usr_alice") }), env)).json()) as mail.MailSentDetail;
+    expect(detail.cc).toEqual([{ email: "boss@example.com", name: "Boss" }]);
+  });
+
+  it("omits cc entirely when the archive was the only Cc", async () => {
+    const { env } = makeEnv();
+    await app.fetch(
+      new Request("https://svc/mail/outbox", {
+        method: "POST",
+        headers: asUser("usr_alice", { "x-dub-idempotency-key": "cc-only" }),
+        body: JSON.stringify({ to: [{ email: "b@x.com" }], subject: "R", textBody: "b" }),
+      }),
+      env,
+    );
+    const list = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
+    expect(list.items[0]!.cc).toBeUndefined();
   });
 
   it("does not duplicate the archive address when the caller already CC'd it", async () => {
-    const { env } = makeEnv({ MAIL_ARCHIVE_CC: "archive@developershub.jp" });
+    const { env, raw } = makeEnv({ MAIL_ARCHIVE_CC: "archive@developershub.jp" });
     await app.fetch(
       new Request("https://svc/mail/outbox", {
         method: "POST",
@@ -797,9 +828,7 @@ describe("archive auto-CC on send", () => {
       }),
       env,
     );
-    const list = (await (await app.fetch(new Request("https://svc/mail/sent", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailSentListItem[] };
-    const detail = (await (await app.fetch(new Request(`https://svc/mail/sent/${encodeURIComponent(list.items[0]!.id)}`, { headers: asUser("usr_alice") }), env)).json()) as mail.MailSentDetail;
-    const archives = (detail.cc ?? []).filter((a) => a.email === "archive@developershub.jp");
+    const archives = storedCc(raw).filter((e) => e === "archive@developershub.jp");
     expect(archives).toHaveLength(1);
   });
 
@@ -988,5 +1017,51 @@ describe("role sharing — mail:read_role_shared widens the INBOUND scope to rol
     seedAll(raw);
     expect((await list(env, "usr_bob")).map((m) => m.id)).toEqual(["in_bob"]);
     expect((await app.fetch(new Request("https://svc/mail/messages/in_alice", { headers: asUser("usr_bob") }), env)).status).toBe(404);
+  });
+});
+
+describe("inbound Cc display (0012)", () => {
+  const asUser = (userId: string) => ({ "content-type": "application/json", "x-dub-request-id": "req_icc", "x-dub-user-id": userId });
+  const seed = (raw: ReturnType<typeof makeEnv>["raw"], id: string, cc: mail.MailAddress[] | null) =>
+    raw
+      .prepare(
+        `INSERT INTO mail_inbound
+           (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet, received_at, created_at, body_text, owner_user_id, cc_json)
+         VALUES (?, ?, 'thr_cc', 'info', ?, ?, 'Hello', 'snip', ?, ?, 'body', 'usr_alice', ?)`,
+      )
+      .run(
+        id,
+        `${id}@x`,
+        JSON.stringify({ email: "sender@x.com" }),
+        JSON.stringify([{ email: "info@developershub.jp" }]),
+        `2026-08-10T00:00:0${id.length % 10}.000Z`,
+        "2026-08-10T00:00:00.000Z",
+        cc ? JSON.stringify(cc) : null,
+      );
+  const CC = [{ email: "carol@example.com", name: "Carol" }, { email: "archive@developershub.jp" }];
+
+  it("returns cc on list, detail and thread (archive address hidden)", async () => {
+    const { env, raw } = makeEnv();
+    seed(raw, "mi_cc", CC);
+    seed(raw, "mi_nocc", null);
+    const want = [{ email: "carol@example.com", name: "Carol" }];
+
+    const list = (await (await app.fetch(new Request("https://svc/mail/messages", { headers: asUser("usr_alice") }), env)).json()) as { items: mail.MailMessageListItem[] };
+    expect(list.items.find((m) => m.id === "mi_cc")!.cc).toEqual(want);
+    expect(list.items.find((m) => m.id === "mi_nocc")!.cc).toBeUndefined();
+
+    const detail = (await (await app.fetch(new Request("https://svc/mail/messages/mi_cc", { headers: asUser("usr_alice") }), env)).json()) as mail.MailMessageDetail;
+    expect(detail.cc).toEqual(want);
+
+    const thread = (await (await app.fetch(new Request("https://svc/mail/threads/thr_cc", { headers: asUser("usr_alice") }), env)).json()) as mail.MailThread;
+    expect(thread.messages.find((m) => m.id === "mi_cc")!.cc).toEqual(want);
+    expect(thread.messages.find((m) => m.id === "mi_nocc")!.cc).toBeUndefined();
+  });
+
+  it("MAIL_ARCHIVE_CC='' hides nothing", async () => {
+    const { env, raw } = makeEnv({ MAIL_ARCHIVE_CC: "" });
+    seed(raw, "mi_cc", CC);
+    const detail = (await (await app.fetch(new Request("https://svc/mail/messages/mi_cc", { headers: asUser("usr_alice") }), env)).json()) as mail.MailMessageDetail;
+    expect(detail.cc).toEqual(CC);
   });
 });

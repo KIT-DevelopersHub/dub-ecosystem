@@ -360,4 +360,13 @@ describe("ThreadDetail", () => {
     expect(el.innerHTML).toContain("hi");
     expect(el.innerHTML).not.toContain("script");
   });
+
+  it("shows the Cc line only when the message has Cc", async () => {
+    const messages = [detail({ id: "m1", cc: [{ email: "carol@example.com", name: "Carol" }] }), detail({ id: "m2" })];
+    const api = fullApi({ getThread: vi.fn().mockResolvedValue({ id: "t1", messages }) });
+    render(wrap(<ThreadDetail threadId="t1" onBack={vi.fn()} />, api));
+    const cc = await screen.findAllByTestId("fe2-mail-thread-cc");
+    expect(cc).toHaveLength(1);
+    expect(cc[0]).toHaveTextContent("Cc: Carol <carol@example.com>");
+  });
 });

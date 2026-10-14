@@ -112,3 +112,21 @@ describe("mine (role-shared / oversight visibility)", () => {
     expect(threadDetailToMessages(detail)[0]!.mine).toBe(false);
   });
 });
+
+describe("received Cc", () => {
+  const cc: mail.MailAddress[] = [{ email: "carol@example.com", name: "Carol" }];
+
+  it("inboxItemsToThreads carries cc; absent/empty stays absent", () => {
+    const items: mail.MailMessageListItem[] = [{ ...inbox[0]!, cc }, { ...inbox[2]!, cc: [] }];
+    const [withCc, without] = inboxItemsToThreads(items);
+    expect(withCc!.messages[0]!.cc).toEqual(cc);
+    expect("cc" in without!.messages[0]!).toBe(false);
+  });
+
+  it("threadDetailToMessages carries cc; absent stays absent", () => {
+    const thread: mail.MailThread = { id: "T", messages: [{ ...inbox[0]!, cc, textBody: "b" }, { ...inbox[1]!, textBody: "c" }] };
+    const [a, b] = threadDetailToMessages(thread);
+    expect(a!.cc).toEqual(cc);
+    expect("cc" in b!).toBe(false);
+  });
+});

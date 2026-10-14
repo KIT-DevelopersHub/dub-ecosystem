@@ -2,7 +2,8 @@
 // guarantees end-to-end in a real Chromium, on top of the #169 per-account isolation:
 //   ② a mail:read_all account (監督 / info@developershub.jp) sees EVERY account's mail,
 //      while a personal account sees only its own (isolation, contrast);
-//   ③ every send auto-CCs the fixed archive address (archive@developershub.jp).
+//   ③ every send auto-CCs the fixed archive address (archive@developershub.jp) — stored on
+//      the sent row but hidden from the displayed Cc (internal mailbox, not a person).
 // Accounts are switched via the demo selector (localStorage["dub_demo_account"]) + a
 // reload, which re-scopes /me, the inbox and the Sent folder. The demo transport enforces
 // the same read_all bypass + archive-CC the mail-gateway does (see src/lib/demo-seed.tsx).
@@ -40,7 +41,7 @@ async function composeSend(page: Page, subject: string): Promise<void> {
   await expect(page.getByTestId("fe2-mail-sent")).toBeVisible();
 }
 
-test("③ every send auto-CCs the fixed archive address", async ({ page }) => {
+test("③ every send auto-CCs the archive address, but it is not shown as a Cc", async ({ page }) => {
   await page.goto("/mail/inbox");
   await expect(page.getByTestId("fe2-mail-inbox")).toBeVisible();
   await openSent(page);
@@ -48,10 +49,13 @@ test("③ every send auto-CCs the fixed archive address", async ({ page }) => {
   const subject = `アーカイブCC ${Date.now()}`;
   await composeSend(page, subject);
 
-  // Open the just-sent mail's detail — its Cc line must carry the archive address.
+  // Stored with the archive CC (like mail_send_log.cc_json) ...
+  const stored = await page.evaluate(() => localStorage.getItem("dub_demo_sent_usr_demo") ?? "");
+  expect(stored).toContain(ARCHIVE);
+  // ... but the opened detail never displays it.
   await page.getByText(subject).first().click();
   await expect(page.getByTestId("fe2-mail-sent-detail")).toBeVisible();
-  await expect(page.getByText(new RegExp(ARCHIVE))).toBeVisible();
+  await expect(page.getByText(new RegExp(ARCHIVE))).toHaveCount(0);
   await page.screenshot({ path: shot("ovr-03-archive-cc.png"), fullPage: true });
 });
 
