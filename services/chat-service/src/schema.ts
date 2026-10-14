@@ -110,3 +110,30 @@ CREATE TABLE chat_settings (
 );
 `.trim(),
 };
+
+// Forward-only add-on: personal sidebar sections (Slack-style). Each user owns their
+// sections; a channel sits in at most one of the user's sections (PK user_id+channel_id),
+// unassigned channels stay in the default type groups. Additive only. Physical mirror:
+// infra/d1/migrations/chat/0004_sections.sql.
+export const CHAT_SECTIONS_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0004_sections",
+  up: `
+CREATE TABLE chat_sections (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_chat_sections_user ON chat_sections(user_id, position);
+CREATE TABLE chat_channel_sections (
+  user_id    TEXT NOT NULL,
+  channel_id TEXT NOT NULL REFERENCES chat_channels(id),
+  section_id TEXT NOT NULL REFERENCES chat_sections(id),
+  PRIMARY KEY (user_id, channel_id)
+);
+CREATE INDEX idx_chat_channel_sections_section ON chat_channel_sections(section_id);
+`.trim(),
+};

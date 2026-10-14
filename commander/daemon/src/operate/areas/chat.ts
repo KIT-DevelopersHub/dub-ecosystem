@@ -7,6 +7,7 @@ const VIEW = { keys: [], appLevel: { app: "chat", level: "view" } } as const;
 const EDIT = { keys: [], appLevel: { app: "chat", level: "edit" } } as const;
 const CREATE = { keys: ["chat:create"], appLevel: { app: "chat", level: "edit" } } as const;
 const SCOPE_OUT = "依頼範囲外（ピン留め・リアクションは依頼表に無い）";
+const SIDEBAR = "ボット自身のサイドバーのセクション分けで、Dub のデータではない";
 const CHANNEL_ADMIN = "ボットがそのチャンネルの管理者（自分で作ったチャンネル等）でないと拒否される";
 
 export const CHAT: AreaSpec = {
@@ -259,6 +260,16 @@ export const CHAT: AreaSpec = {
     },
     { service: S, route: "POST /chat/channels/:id/pins", reason: SCOPE_OUT },
     { service: S, route: "POST /chat/messages/:id/reactions", reason: SCOPE_OUT },
+    {
+      service: S,
+      route: "DELETE /chat/channels/:id",
+      reason: "チャンネルと全メッセージを物理削除する操作で復元不能。アーカイブ（chat.channels.update）で一覧から消せる",
+    },
+    { service: S, route: "GET /chat/sections", reason: SIDEBAR },
+    { service: S, route: "POST /chat/sections", reason: SIDEBAR },
+    { service: S, route: "PATCH /chat/sections/:id", reason: SIDEBAR },
+    { service: S, route: "DELETE /chat/sections/:id", reason: SIDEBAR },
+    { service: S, route: "PUT /chat/channels/:id/section", reason: SIDEBAR },
   ],
   pending: [],
   ownerOpenedIrreversible: {

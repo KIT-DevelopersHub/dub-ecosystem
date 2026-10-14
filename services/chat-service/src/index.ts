@@ -198,6 +198,7 @@ export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext):
     now: nowIso,
     newChannelId: () => newId("chan"),
     newMessageId: () => newId("msg"),
+    newSectionId: () => newId("csec"),
     // Link previews: outbound fetch from the Worker (SSRF-guarded in unfurl.ts).
     unfurler: createUnfurler({ fetchImpl: fetch.bind(globalThis) }),
   };
@@ -256,6 +257,6 @@ export { ChatService } from "./service";
 export { createD1ChatRepo } from "./d1-repo";
 export { InMemoryChatRepo } from "./memory-repo";
 export { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
-export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION } from "./schema";
+export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SECTIONS_MIGRATION } from "./schema";
 export { signWsTicket, verifyWsTicket, ticketExpiryMs } from "./wsticket";
 export type { AppDeps } from "./types";

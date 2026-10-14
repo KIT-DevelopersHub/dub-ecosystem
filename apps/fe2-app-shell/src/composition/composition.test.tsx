@@ -270,6 +270,26 @@ describe("app client adapters feed ApiClient.request", () => {
     expect(calls).toHaveLength(2); // no request for an empty batch
   });
 
+  it("chat client (FE6) maps channel delete + personal section endpoints", async () => {
+    const { api, calls } = fakeApi();
+    const chat = createChatApiClient(api);
+    await chat.deleteChannel("ch_1" as never);
+    await chat.listSections();
+    await chat.createSection("運営");
+    await chat.updateSection("s1", { name: "x" });
+    await chat.deleteSection("s1");
+    await chat.setChannelSection("ch_1" as never, null);
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "DELETE /api/v1/chat/channels/ch_1",
+      "GET /api/v1/chat/sections",
+      "POST /api/v1/chat/sections",
+      "PATCH /api/v1/chat/sections/s1",
+      "DELETE /api/v1/chat/sections/s1",
+      "PUT /api/v1/chat/channels/ch_1/section",
+    ]);
+    expect(calls[5]).toMatchObject({ body: { sectionId: null } });
+  });
+
   it("chat client unwraps the Paginated { items } envelope to an array (channels/unread/users)", async () => {
     // Regression: the server returns common.Paginated<T> = { items, nextCursor } for
     // channels/unread/users. Returning that object as-is made groupChannels drop it

@@ -27,13 +27,16 @@ import type {
   AppDeps,
   AddMemberRequest,
   CreateChannelRequest,
+  CreateSectionRequest,
   PinToggleRequest,
   PostMessageRequest,
   PostSystemMessageRequest,
   ReactionToggleRequest,
   ReadStateUpdateRequest,
+  SetChannelSectionRequest,
   UpdateChannelRequest,
   UpdateDeletionPolicyRequest,
+  UpdateSectionRequest,
 } from "./types";
 import { ChatService, type ReqCtx } from "./service";
 import { POLICY_TABLE } from "./policy-table";
@@ -155,6 +158,37 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.patch("/chat/channels/:id", async (c) => {
     const body = await readJson<UpdateChannelRequest>(c);
     return c.json(await svc.updateChannel(reqCtx(c), c.req.param("id"), body));
+  });
+
+  app.delete("/chat/channels/:id", async (c) => {
+    await svc.deleteChannel(reqCtx(c), c.req.param("id"));
+    return c.body(null, 204);
+  });
+
+  app.put("/chat/channels/:id/section", async (c) => {
+    const body = await readJson<SetChannelSectionRequest>(c);
+    await svc.setChannelSection(reqCtx(c), c.req.param("id"), body);
+    return c.body(null, 204);
+  });
+
+  // ---- personal sidebar sections ----
+  app.get("/chat/sections", async (c) => {
+    return c.json(await svc.listSections(reqCtx(c)));
+  });
+
+  app.post("/chat/sections", async (c) => {
+    const body = await readJson<CreateSectionRequest>(c);
+    return c.json(await svc.createSection(reqCtx(c), body), 201);
+  });
+
+  app.patch("/chat/sections/:id", async (c) => {
+    const body = await readJson<UpdateSectionRequest>(c);
+    return c.json(await svc.updateSection(reqCtx(c), c.req.param("id"), body));
+  });
+
+  app.delete("/chat/sections/:id", async (c) => {
+    await svc.deleteSection(reqCtx(c), c.req.param("id"));
+    return c.body(null, 204);
   });
 
   app.get("/chat/channels/:id/members", async (c) => {
