@@ -81,6 +81,17 @@ describe("compactRead", () => {
     expect(hintFields("items[].id・title")).toEqual(new Set(["items", "id", "title"]));
   });
 
+  it("keeps the roster's gmail column so unregistered members can be listed", () => {
+    const members = [
+      { id: "m1", name: "A", status: "added", teamIds: [], schoolEmail: "a@school", gmail: "a@gmail.com", phone: null },
+      { id: "m2", name: "B", status: "added", teamIds: [], schoolEmail: "b@school", gmail: null, phone: null },
+    ];
+    const text = compactRead({ teams: [], members }, findEntry("members.overview")!.hint).text;
+    expect(text).toContain("| a@school | a@gmail.com |");
+    expect(text).toContain("| b@school | - |");
+    expect(text.split("\n").find((l) => l.startsWith("| id"))).toContain("gmail");
+  });
+
   it("says when a list has more pages", () => {
     expect(compactRead({ items: [], nextCursor: "abc" }, "items[].id").text).toContain("nextCursor: 続きあり");
   });
