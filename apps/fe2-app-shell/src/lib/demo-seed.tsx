@@ -291,6 +291,11 @@ function calendarDemoTasks(): task.Task[] {
     { ...mk("cal_t3", "名簿インポート検証", "todo", allDay(3), allDay(3)), teamId: "team_dev" },
     { ...mk("cal_t4", "配信機材の手配", "todo", allDay(1), allDay(1)), teamId: "team_hq", assigneeId: "usr_bob", createdBy: "usr_bob" },
     { ...mk("cal_t5", "当日シフト表 確定", "done", allDay(-1), allDay(-1)), teamId: "team_hq", assigneeId: "usr_bob", createdBy: "usr_bob" },
+    // 他のメンバーの予定 (サイドバーの「ユーザーを検索」で追加すると表示される)。
+    { ...mk("cal_p1", "会場下見", "todo", at(0, "15:00"), at(0, "16:30")), assigneeId: "usr_bob", createdBy: "usr_bob" },
+    { ...mk("cal_p2", "休暇", "todo", allDay(2), allDay(3), "#休暇"), assigneeId: "usr_bob", createdBy: "usr_bob" },
+    { ...mk("cal_p3", "デザイン相談会", "todo", at(1, "11:00"), at(1, "12:00"), "#ミーティング"), assigneeId: "usr_emi", createdBy: "usr_emi" },
+    { ...mk("cal_p4", "協賛企業訪問", "todo", at(3, "14:00"), at(3, "15:30")), assigneeId: "usr_emi", createdBy: "usr_emi" },
   ];
 }
 

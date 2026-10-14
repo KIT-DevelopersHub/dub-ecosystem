@@ -54,6 +54,10 @@ export interface CalendarApi {
   listTeams(): Promise<{ teams: member.Team[]; myTeamIds: string[] }>;
   /** Every task of one team, whoever owns it (チームのタスクを表示). */
   listTeamTasks(teamId: common.TeamId): Promise<task.Task[]>;
+  /** ユーザーを検索: active members whose name/email matches (GET /identity/users?q=, identity:read). */
+  searchUsers(q: string): Promise<identity.UserSummary[]>;
+  /** One member's 担当 + 依頼 tasks (ユーザーを検索 で追加した人の予定). */
+  listUserTasks(userId: common.UserId): Promise<task.Task[]>;
 
   // カレンダー > ミーティング (drive-share-service /meetings, @dub/types meeting).
   listMeetings(): Promise<meeting.ListMeetingsResponse>;
@@ -92,18 +96,20 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     return all;
   };
 
-  const listMyTasks: CalendarApi["listMyTasks"] = async (currentUserId) => {
-    // Two self-scoped lenses, run in parallel then merged (last write wins on id),
-    // identical to マイタスク's lensQueries("all"). Both satisfy the "/me rule".
+  // Two person-scoped lenses (担当 + 依頼), run in parallel then merged (last write wins
+  // on id), identical to マイタスク's lensQueries("all"). Both satisfy the "/me rule";
+  // for someone else task-service additionally requires identity:read.
+  const listUserTasks: CalendarApi["listUserTasks"] = async (userId) => {
     const [assigned, created] = await Promise.all([
-      listAllTasks({ assigneeId: currentUserId }),
-      listAllTasks({ createdById: currentUserId }),
+      listAllTasks({ assigneeId: userId }),
+      listAllTasks({ createdById: userId }),
     ]);
     const byId = new Map<common.TaskId, task.Task>();
     for (const t of assigned) byId.set(t.id, t);
     for (const t of created) byId.set(t.id, t);
     return [...byId.values()];
   };
+  const listMyTasks: CalendarApi["listMyTasks"] = listUserTasks;
 
   const createTask: CalendarApi["createTask"] = (req) =>
     api.request<task.Task>({ method: "POST", path: `${P}/tasks`, body: req });
@@ -145,6 +151,15 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
 
   const listTeamTasks: CalendarApi["listTeamTasks"] = (teamId) => listAllTasks({ teamId });
 
+  const searchUsers: CalendarApi["searchUsers"] = async (q) => {
+    const page = await api.request<common.Paginated<identity.UserSummary>>({
+      method: "GET",
+      path: `${P}/identity/users`,
+      query: { q, status: "active", limit: 8 },
+    });
+    return page.items;
+  };
+
   const m = (id: string): `/api/v1/${string}` => `${P}/meetings/${encodeURIComponent(id)}`;
   return {
     listTasks,
@@ -157,6 +172,8 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     getUsers,
     listTeams,
     listTeamTasks,
+    searchUsers,
+    listUserTasks,
     listMeetings: () => api.request<meeting.ListMeetingsResponse>({ method: "GET", path: `${P}/meetings` }),
     listMeetingTargets: () => api.request<meeting.ListMeetingTargetsResponse>({ method: "GET", path: `${P}/meetings/targets` }),
     createMeeting: (body) => api.request<meeting.Meeting>({ method: "POST", path: `${P}/meetings`, body }),
