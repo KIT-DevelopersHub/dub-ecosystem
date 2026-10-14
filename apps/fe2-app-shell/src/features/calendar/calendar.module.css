@@ -187,6 +187,63 @@
 .calItemLabel { display: flex; flex-direction: column; min-width: 0; }
 .calItemNote { font-size: var(--dub-font-size-xs); color: var(--dub-color-text-muted); }
 .calAddTeam { padding: var(--dub-space-1) var(--dub-space-2) 0; }
+
+/* ユーザーを検索 */
+.people { position: relative; }
+.peopleField {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  padding: 0 var(--dub-space-3);
+  height: 40px;
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-muted);
+}
+.peopleField:focus-within { box-shadow: inset 0 -2px 0 var(--gcal-blue); }
+.peopleInput {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+}
+.peopleList {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + var(--dub-space-1));
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--dub-space-2) 0;
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+  box-shadow: var(--dub-shadow-lg);
+}
+.peopleOption {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  font-size: var(--dub-font-size-sm);
+  cursor: pointer;
+}
+.peopleOptionActive { background: var(--dub-color-surface-sunken); }
+.peopleEmpty { margin: 0; padding: var(--dub-space-2) var(--dub-space-3); font-size: var(--dub-font-size-sm); color: var(--dub-color-text-muted); }
+.peopleAvatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--dub-radius-full);
+  display: inline-grid;
+  place-content: center;
+  background: var(--gcal-blue-soft);
+  color: var(--gcal-blue);
+  font-weight: var(--dub-font-weight-medium);
+}
 .sideNote { font-size: var(--dub-font-size-xs); color: var(--dub-color-text-muted); line-height: 1.6; padding: 0 var(--dub-space-2); }
 
 .main {
