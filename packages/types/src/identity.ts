@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (68 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (70 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -67,6 +67,10 @@ export const PERMISSION_CATALOG = [
   // settings_edit IMPLIES settings_view (policy.normalizeAppAccessKeys).
   { key: "drive:settings_view", name: "View Drive共有 settings", description: "Open Drive共有's settings and see its Google accounts (read-only)", domain: "drive", dangerous: false },
   { key: "drive:settings_edit", name: "Edit Drive共有 settings", description: "Add/switch/remove the Google accounts Drive共有 acts as (implies view)", domain: "drive", dangerous: true },
+  // カレンダー > ミーティング (meetings on the shared Google account, drive-share-service /meetings).
+  // Two toggles in カレンダー's 詳細設定; meetings_edit IMPLIES meetings_view (policy.normalizeAppAccessKeys).
+  { key: "calendar:meetings_view", name: "View meetings", description: "See the meetings set up on the shared Google account (カレンダー > ミーティング)", domain: "calendar", dangerous: false },
+  { key: "calendar:meetings_edit", name: "Edit meetings", description: "Create/change/delete meetings on the shared Google account and invite role members (implies view)", domain: "calendar", dangerous: true },
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
   // ── per-app access tier (domain "app") — one graded pair per launcher app ──────
   { key: "app:events:view", name: "Open イベント app", description: "Open and view the イベント app", domain: "app", dangerous: false },

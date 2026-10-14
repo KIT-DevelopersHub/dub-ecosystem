@@ -27,5 +27,6 @@ export * as member from "./member"; // member-service (運営メンバー管理;
 export * as appRegistry from "./app-registry"; // canonical launcher app set ↔ per-app RBAC keys (SoT)
 export * as policy from "./policy"; // RBAC policy layer (PDP): 無効/閲覧/編集 levels, capability flags, decisions
 export * as lp from "./lp"; // lp-analytics (LP管理: 公開版切り替え)
+export * as meeting from "./meeting"; // drive-share-service /meetings (カレンダー > ミーティング)
 
 export const CONTRACT_VERSION = "1.0.0";

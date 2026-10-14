@@ -407,6 +407,13 @@ export function kindOf(t: Pick<task.Task, "description">): ItemKind {
   return parseDescription(t.description).kind ?? "event";
 }
 
+/** Meeting occurrences ride the views as synthetic tasks whose id carries this prefix. */
+export const MEETING_ITEM_PREFIX = "meet:";
+
+export function isMeetingTask(t: Pick<task.Task, "id">): boolean {
+  return t.id.startsWith(MEETING_ITEM_PREFIX);
+}
+
 /** The item's label key (PERSONAL_LABEL when untagged). */
 export function labelOf(t: Pick<task.Task, "description">): string {
   return parseDescription(t.description).label;
