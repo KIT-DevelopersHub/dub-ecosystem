@@ -141,6 +141,7 @@ describe("add-account flow", () => {
           connectedBy: "usr_admin",
           active: true,
           needsReconnect: false,
+          calendarMissing: false,
         },
       ],
     });
@@ -302,7 +303,7 @@ describe("status + credential precedence", () => {
     expect(await svc.status()).toEqual({
       canConnect: false,
       accounts: [
-        { id: SECRET_ACCOUNT_ID, kind: "secret", email: "new-owner@gmail.com", connectedAt: null, connectedBy: null, active: true, needsReconnect: false },
+        { id: SECRET_ACCOUNT_ID, kind: "secret", email: "new-owner@gmail.com", connectedAt: null, connectedBy: null, active: true, needsReconnect: false, calendarMissing: false },
       ],
     });
     const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key: null });
@@ -338,6 +339,22 @@ describe("status + credential precedence", () => {
     const { accounts } = await svc.status();
     expect(accounts.find((a) => a.id === "dga_1")).toMatchObject({ email: "new-owner@gmail.com", active: true, needsReconnect: true });
     expect(accounts.find((a) => a.id === SECRET_ACCOUNT_ID)).toMatchObject({ needsReconnect: false });
+  });
+
+  it("a grant without the calendar scope surfaces as calendarMissing so the UI offers 再接続", async () => {
+    const env = { ...SECRET_ENV, ...WEB_ENV } as Env;
+    let scope: string | undefined = "https://www.googleapis.com/auth/drive";
+    const google = fakeGoogle(() => json({ access_token: "at", refresh_token: "rt-d1", ...(scope ? { scope } : {}) }));
+    const { svc } = await setup({ env, fetchImpl: google as unknown as typeof fetch });
+    await addAccount(svc);
+    expect((await svc.status()).accounts.find((a) => a.id === "dga_1")).toMatchObject({ needsReconnect: false, calendarMissing: true });
+
+    scope = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar";
+    expect((await svc.status()).accounts.map((a) => a.calendarMissing)).toEqual([false, false]);
+
+    // Google did not report scopes: not flagged (same as meetings calendarReady)
+    scope = undefined;
+    expect((await svc.status()).accounts.map((a) => a.calendarMissing)).toEqual([false, false]);
   });
 
   it("a row that no longer opens (rotated key) fails closed and asks to reconnect — never the secret", async () => {

@@ -295,6 +295,11 @@ function calendarDemoTasks(): task.Task[] {
     { ...mk("cal_t3", "名簿インポート検証", "todo", allDay(3), allDay(3)), teamId: "team_dev" },
     { ...mk("cal_t4", "配信機材の手配", "todo", allDay(1), allDay(1)), teamId: "team_hq", assigneeId: "usr_bob", createdBy: "usr_bob" },
     { ...mk("cal_t5", "当日シフト表 確定", "done", allDay(-1), allDay(-1)), teamId: "team_hq", assigneeId: "usr_bob", createdBy: "usr_bob" },
+    // 他のメンバーの予定 (サイドバーの「ユーザーを検索」で追加すると表示される)。
+    { ...mk("cal_p1", "会場下見", "todo", at(0, "15:00"), at(0, "16:30")), assigneeId: "usr_bob", createdBy: "usr_bob" },
+    { ...mk("cal_p2", "休暇", "todo", allDay(2), allDay(3), "#休暇"), assigneeId: "usr_bob", createdBy: "usr_bob" },
+    { ...mk("cal_p3", "デザイン相談会", "todo", at(1, "11:00"), at(1, "12:00"), "#ミーティング"), assigneeId: "usr_emi", createdBy: "usr_emi" },
+    { ...mk("cal_p4", "協賛企業訪問", "todo", at(3, "14:00"), at(3, "15:30")), assigneeId: "usr_emi", createdBy: "usr_emi" },
   ];
 }
 
@@ -2213,8 +2218,8 @@ const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 // No real OAuth in the demo: "add account" returns the SPA's own /driveshare?code&state, which
 // stands in for Google's redirect. The list lives in sessionStorage so it survives that
 // full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
-// unconfigured on any demo URL (remembered for the tab).
-type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "unconfigured";
+// nocalendar|unconfigured on any demo URL (remembered for the tab).
+type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "nocalendar" | "unconfigured";
 interface DemoDriveGoogleAccount {
   id: string;
   kind: "connected" | "secret";
@@ -2223,6 +2228,7 @@ interface DemoDriveGoogleAccount {
   connectedBy: string | null;
   active: boolean;
   needsReconnect: boolean;
+  calendarMissing?: boolean;
 }
 interface DemoDriveGoogleStatus {
   accounts: DemoDriveGoogleAccount[];
@@ -2260,6 +2266,7 @@ function demoDriveGoogleStatus(mode: DemoDriveGoogleMode): DemoDriveGoogleStatus
   };
   if (mode === "none") return { accounts: [], canConnect: true };
   if (mode === "invalid") return { accounts: [secret, sub, { ...main, needsReconnect: true }], canConnect: true };
+  if (mode === "nocalendar") return { accounts: [secret, sub, { ...main, calendarMissing: true }], canConnect: true };
   if (mode === "unconfigured") return { accounts: [{ ...secret, active: true }], canConnect: false };
   return { accounts: [secret, sub, main], canConnect: true };
 }
@@ -2273,7 +2280,7 @@ function createDriveGoogleDemoStore() {
     }
   };
   const fromUrl = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("driveGoogle");
-  if (fromUrl && ["connected", "none", "invalid", "unconfigured"].includes(fromUrl)) {
+  if (fromUrl && ["connected", "none", "invalid", "nocalendar", "unconfigured"].includes(fromUrl)) {
     storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(demoDriveGoogleStatus(fromUrl as DemoDriveGoogleMode)));
   }
   const read = (): DemoDriveGoogleStatus => {
@@ -2314,7 +2321,7 @@ function createDriveGoogleDemoStore() {
         return write({
           ...cur,
           accounts: cur.accounts.map((a) =>
-            a.id === known.id ? { ...a, needsReconnect: false, connectedAt: new Date().toISOString() } : a,
+            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, connectedAt: new Date().toISOString() } : a,
           ),
         });
       }
