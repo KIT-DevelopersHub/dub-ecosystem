@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mail-show-cc",
+  "worker": "dub-demo-mail-show-cc",
+  "url": "https://dub-demo-mail-show-cc.developershub-site.workers.dev",
+  "deployedSha": "70503c8a",
+  "branch": "feat/mail-show-cc",
+  "actor": "ko-tarou",
+  "markers": ["懇親会会場の候補（CC共有）"],
+  "live": true,
+  "verifiedAt": "2026-10-14T02:37:15Z",
+  "updatedAt": "2026-10-14T02:37:15Z",
+  "note": "受信メールの CC 表示"
+}
