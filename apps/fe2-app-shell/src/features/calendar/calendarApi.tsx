@@ -5,7 +5,7 @@
 // canonical task-service endpoint GET /api/v1/tasks, typed against @dub/types
 // `task` (the API-contract SoT). No schema is added or changed. Writes (予定の追加/編集/削除) use the same
 // task-service create/update/archive endpoints マイタスク uses.
-import type { common, identity, meeting, task } from "@dub/types";
+import type { common, identity, meeting, member, task } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 const P = "/api/v1";
@@ -50,6 +50,10 @@ export interface CalendarApi {
   listRoles(): Promise<identity.Role[]>;
   /** Display names for the given users (GET /identity/users?ids=, identity:read). */
   getUsers(ids: readonly common.UserId[]): Promise<identity.UserSummary[]>;
+  /** Every 運営チーム + the caller's own (GET /members/me/mention-teams, any signed-in user). */
+  listTeams(): Promise<{ teams: member.Team[]; myTeamIds: string[] }>;
+  /** Every task of one team, whoever owns it (チームのタスクを表示). */
+  listTeamTasks(teamId: common.TeamId): Promise<task.Task[]>;
 
   // カレンダー > ミーティング (drive-share-service /meetings, @dub/types meeting).
   listMeetings(): Promise<meeting.ListMeetingsResponse>;
@@ -136,6 +140,11 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     return page.items;
   };
 
+  const listTeams: CalendarApi["listTeams"] = () =>
+    api.request<{ teams: member.Team[]; myTeamIds: string[] }>({ method: "GET", path: `${P}/members/me/mention-teams` });
+
+  const listTeamTasks: CalendarApi["listTeamTasks"] = (teamId) => listAllTasks({ teamId });
+
   const m = (id: string): `/api/v1/${string}` => `${P}/meetings/${encodeURIComponent(id)}`;
   return {
     listTasks,
@@ -146,6 +155,8 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     deleteTask,
     listRoles,
     getUsers,
+    listTeams,
+    listTeamTasks,
     listMeetings: () => api.request<meeting.ListMeetingsResponse>({ method: "GET", path: `${P}/meetings` }),
     listMeetingTargets: () => api.request<meeting.ListMeetingTargetsResponse>({ method: "GET", path: `${P}/meetings/targets` }),
     createMeeting: (body) => api.request<meeting.Meeting>({ method: "POST", path: `${P}/meetings`, body }),

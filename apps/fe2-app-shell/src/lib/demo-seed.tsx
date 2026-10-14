@@ -276,14 +276,21 @@ function calendarDemoTasks(): task.Task[] {
     teamId: null, startAt, dueAt, origin: "internal", archivedAt: null, createdAt: isoNowSeed(), updatedAt: isoNowSeed(),
   });
   return [
-    mk("cal_1", "運営定例ミーティング", "in_progress", at(0, "10:00"), at(0, "11:00"), "#ラベル:role_lead\n進捗共有と次アクションの確認"),
-    mk("cal_2", "スポンサー打ち合わせ", "todo", at(0, "13:00"), at(0, "14:30")),
+    mk("cal_1", "運営定例ミーティング", "in_progress", at(0, "10:00"), at(0, "11:00"), "#ミーティング\n#ラベル:role_lead\n進捗共有と次アクションの確認"),
+    mk("cal_2", "スポンサー打ち合わせ", "todo", at(0, "13:00"), at(0, "14:30"), "#ミーティング"),
     mk("cal_3", "会場への連絡", "todo", at(0, "13:30"), at(0, "14:00")),
     mk("cal_4", "ふりかえり会", "done", at(-1, "15:00"), at(-1, "16:00")),
     mk("cal_5", "登壇資料 提出締切", "blocked", allDay(1), allDay(1)),
     mk("cal_6", "北陸ITカンファレンス 準備週間", "todo", allDay(2), allDay(4), "#ラベル:role_member"),
     mk("cal_7", "デザインレビュー", "todo", at(2, "16:00"), at(2, "17:00")),
     mk("cal_8", "休暇", "todo", allDay(5), allDay(6), "#休暇\n急ぎの連絡はチャットへ"),
+    mk("cal_9", "開会式 予行練習", "todo", at(3, "18:00"), at(3, "19:30"), "#予行練習\n#ラベル:role_member"),
+    // タスク (マイタスク/ガント側・日付だけ): 個人 / 自分のチーム / 他人のチーム分。
+    mk("cal_t1", "交通費の精算", "todo", allDay(1), allDay(1)),
+    { ...mk("cal_t2", "受付マニュアル更新", "in_progress", allDay(0), allDay(2)), teamId: "team_hq" },
+    { ...mk("cal_t3", "名簿インポート検証", "todo", allDay(3), allDay(3)), teamId: "team_dev" },
+    { ...mk("cal_t4", "配信機材の手配", "todo", allDay(1), allDay(1)), teamId: "team_hq", assigneeId: "usr_bob", createdBy: "usr_bob" },
+    { ...mk("cal_t5", "当日シフト表 確定", "done", allDay(-1), allDay(-1)), teamId: "team_hq", assigneeId: "usr_bob", createdBy: "usr_bob" },
   ];
 }
 
@@ -1761,7 +1768,19 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       if (id) return EVENT_DETAIL[id] ? json(EVENT_DETAIL[id]) : notFound(`GET ${pathname}`);
     }
     // tasks
-    if (pathname === "/api/v1/tasks") return json(page(TASKS));
+    if (pathname === "/api/v1/tasks") {
+      // Honour the scopes the real task-service filters on, so the calendar's 個人/チーム
+      // split (担当・依頼 vs チームのタスクを表示) reads true in the demo.
+      const q = url.searchParams;
+      const rows = TASKS.filter(
+        (t) =>
+          (!q.get("assigneeId") || t.assigneeId === q.get("assigneeId")) &&
+          // Older seed rows carry no createdBy; treat them as issued by the demo user.
+          (!q.get("createdById") || (t.createdBy ?? ME_ID) === q.get("createdById")) &&
+          (!q.get("teamId") || t.teamId === q.get("teamId")),
+      );
+      return json(page(rows));
+    }
     {
       const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
       if (id) {
@@ -2668,9 +2687,9 @@ function createMembersStore() {
   // 「休み中」、declined＝「辞退」(名簿一覧では既定非表示・辞退者フィルタで参照)。
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
-    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
+    mk("member_1", "高岡 己太朗", "副代表", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
     mk("member_h2", "黒川 誠", "統括リーダー", "added", ["team_hq"], 1, null, "情報工学科", "3年", null, "member_1"),
-    mk("member_h3", "金井 涼", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null, "member_h2"),
+    mk("member_h3", "金井 友楽", "代表", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null),
     // 開発 — リーダー2人、各リーダーに配下2人。
     mk("member_d1", "荒木 大地", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
     mk("member_d2", "阿閉 健", "開発リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年", null, "member_d1"),

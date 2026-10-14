@@ -3,7 +3,8 @@
 // event palette (ピーコック/ブルーベリー/ミカン/セージ/グラファイト) so blocks read the
 // way users already know; text on them is always white, as in Google.
 import type { identity, task } from "@dub/types";
-import { PERSONAL_LABEL, isMeetingTask, isVacationTask, labelOf } from "./calendar-model";
+import type { IconName } from "@dub/ui";
+import { PERSONAL_LABEL, isMeetingTask, isScheduleTask, kindOf, labelOf, type ItemKind } from "./calendar-model";
 
 export const UNTITLED_TITLE = "（タイトルなし）";
 
@@ -35,16 +36,34 @@ export const PRIORITY_LABEL: Record<task.TaskPriority, string> = {
   urgent: "緊急",
 };
 
-/** 休暇 gets its own calendar color (Google's グレープ), whatever its status. */
-export const VACATION_VISUAL: StatusVisual = { label: "休暇", color: "#8e24aa" };
+/** 予定 are colored by 種類 (Google's ラベンダー/バジル/グレープ/フラミンゴ), タスク by status. */
+export const KIND_VISUALS: Record<ItemKind, StatusVisual> = {
+  event: { label: "予定", color: "#7986cb" },
+  meeting: { label: "ミーティング", color: "#0b8043" },
+  vacation: { label: "休暇", color: "#8e24aa" },
+  rehearsal: { label: "予行練習", color: "#e67c73" },
+};
 
-/** ミーティング (shared-account Google Calendar events) — Google の バジル (no status uses it). */
-export const MEETING_VISUAL: StatusVisual = { label: "ミーティング", color: "#0b8043" };
+/** ミーティング (shared-account Google Calendar events) share the ミーティング 種類 color. */
+export const MEETING_VISUAL: StatusVisual = KIND_VISUALS.meeting;
 
-/** Color/label for a drawn item: ミーティング, 休暇, else its status. */
+export const KIND_ICON: Record<ItemKind, IconName> = {
+  event: "calendar",
+  meeting: "users",
+  vacation: "sun",
+  rehearsal: "flag",
+};
+
+/** Color/label for a drawn item: a 予定 by its 種類, a タスク by its status. */
 export function itemVisual(t: task.Task): StatusVisual {
   if (isMeetingTask(t)) return MEETING_VISUAL;
-  return isVacationTask(t) ? VACATION_VISUAL : statusVisual(t.status);
+  return isScheduleTask(t) ? KIND_VISUALS[kindOf(t)] : statusVisual(t.status);
+}
+
+/** タスク lead with a check mark (○ open / ✓ 完了) so they read apart from 予定. */
+export function taskMark(t: task.Task): string | null {
+  if (isScheduleTask(t)) return null;
+  return t.status === "done" ? "✓" : "○";
 }
 
 // ── ラベル ──────────────────────────────────────────────────────────────────
@@ -80,8 +99,10 @@ export function ownerOf(
   return (person && names.get(person)) || null;
 }
 
-/** "<owner>：<title>" so a month grid shows whose 予定/休暇 it is at a glance. */
+/** "<owner>：<title>" so a month grid shows whose 予定/休暇 it is at a glance; タスク get their mark. */
 export function ownedTitle(t: task.Task, owner: string | null): string {
   const title = t.title || UNTITLED_TITLE;
-  return owner ? `${owner}：${title}` : title;
+  const owned = owner ? `${owner}：${title}` : title;
+  const mark = taskMark(t);
+  return mark ? `${mark} ${owned}` : owned;
 }

@@ -152,6 +152,41 @@
   border-width: 0 2px 2px 0;
   transform: translateY(-1px) rotate(45deg);
 }
+.calGroup { display: flex; flex-direction: column; gap: var(--dub-space-1); }
+.calGroup > .calItemRow .calItem { font-weight: var(--dub-font-weight-medium); }
+.calGroupBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding-left: var(--dub-space-4);
+}
+.calSubHead {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border-radius: var(--dub-radius-sm);
+  cursor: pointer;
+  text-align: left;
+}
+.calSubHead:hover { background: var(--dub-color-surface-sunken); color: var(--dub-color-text-primary); }
+.calChevron, .calChevronOpen { display: inline-flex; transition: transform 120ms ease; }
+.calChevronOpen { transform: rotate(90deg); }
+.calSubHeadTitle { flex: 1; }
+.calSubHeadNote { white-space: nowrap; }
+.calItemRow { display: flex; align-items: center; }
+.calItemRow > .calItem { flex: 1; min-width: 0; }
+.calItemOff { opacity: 0.45; }
+.calItemOff .calItem { cursor: default; }
+.calItemLabel { display: flex; flex-direction: column; min-width: 0; }
+.calItemNote { font-size: var(--dub-font-size-xs); color: var(--dub-color-text-muted); }
+.calAddTeam { padding: var(--dub-space-1) var(--dub-space-2) 0; }
 .sideNote { font-size: var(--dub-font-size-xs); color: var(--dub-color-text-muted); line-height: 1.6; padding: 0 var(--dub-space-2); }
 
 .main {

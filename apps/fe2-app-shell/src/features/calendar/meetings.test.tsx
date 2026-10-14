@@ -58,6 +58,8 @@ function fakeApi(over: Partial<CalendarApi> = {}, account: meeting.MeetingAccoun
     updateTask: vi.fn(),
     deleteTask: vi.fn(),
     listRoles: vi.fn(() => Promise.resolve([])),
+    listTeams: vi.fn(async () => ({ teams: [], myTeamIds: [] })),
+    listTeamTasks: vi.fn(async () => []),
     getUsers: vi.fn(() => Promise.resolve([])),
     listMeetings: vi.fn(() => Promise.resolve({ items, account })),
     listMeetingTargets: vi.fn(() => Promise.resolve({ items: TARGETS })),
