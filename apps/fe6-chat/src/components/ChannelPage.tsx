@@ -34,12 +34,15 @@ export function ChannelPage({
   onThreadOpenChange,
   onSelectChannel,
   onChannelsChanged,
+  onChannelDeleted,
   onOpenMobileNav,
 }: {
   channelId: common.ChannelId;
   onThreadOpenChange?: (open: boolean) => void;
   onSelectChannel?: (channelId: common.ChannelId) => void;
   onChannelsChanged?: () => void;
+  // Fired after a successful hard delete so ChatApp can move off the channel.
+  onChannelDeleted?: (channelId: common.ChannelId) => void;
   // Hamburger callback for the mobile channel-list drawer (P21) — forwarded to
   // ChannelHeader, which only shows the button under the mobile breakpoint.
   onOpenMobileNav?: () => void;
@@ -70,6 +73,8 @@ export function ChannelPage({
   const [searchLoading, setSearchLoading] = useState(false);
 
   const canModerate = can("chat:moderate") || membership?.role === "admin";
+  // Hard delete is decided by the key alone (no channel-admin fallback); DMs never.
+  const canDelete = can("chat:delete_channel") && channel !== null && channel.type !== "dm";
   const pinnedIds = useMemo(() => new Set(pinned.map((m) => m.id)), [pinned]);
 
   useEffect(() => {
@@ -280,6 +285,20 @@ export function ChannelPage({
     [api, channelId, onChannelsChanged],
   );
 
+  const onDeleteChannel = useCallback(async () => {
+    const name = channel?.name ?? "";
+    try {
+      await api.deleteChannel(channelId);
+    } catch (err) {
+      const code = err instanceof ChatApiError ? err.code : "INTERNAL";
+      show({ kind: "error", title: "チャンネルを削除できませんでした", description: mapChatError(code).message });
+      throw err;
+    }
+    setSettingsOpen(false);
+    show({ kind: "success", title: `#${name} を削除しました` });
+    onChannelDeleted?.(channelId);
+  }, [api, channel, channelId, show, onChannelDeleted]);
+
   const archived = channel?.archived ?? false;
   // A DM shows "the other side" (resolved from its members), not its stored name.
   const shownChannel = useMemo(
@@ -295,6 +314,7 @@ export function ChannelPage({
           <ChannelHeader
             channel={shownChannel}
             canModerate={canModerate}
+            canOpenSettings={canModerate || canDelete}
             members={members}
             pinned={pinned}
             searchValue={searchQuery}
@@ -387,7 +407,13 @@ export function ChannelPage({
 
       {channel && settingsOpen && (
         <Modal open onClose={() => setSettingsOpen(false)} title={`#${channel.name} の設定`} size="sm">
-          <ChannelSettingsForm channel={channel} onSave={onSaveSettings} onArchiveToggle={onArchiveToggle} />
+          <ChannelSettingsForm
+            channel={channel}
+            canEdit={canModerate}
+            onSave={onSaveSettings}
+            onArchiveToggle={onArchiveToggle}
+            {...(canDelete ? { onDelete: onDeleteChannel } : {})}
+          />
         </Modal>
       )}
 

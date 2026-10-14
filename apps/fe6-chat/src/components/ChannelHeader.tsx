@@ -13,6 +13,8 @@ import styles from "../styles/chat.module.css";
 export interface ChannelHeaderProps {
   channel: Channel;
   canModerate: boolean;
+  /** Settings entry visibility; defaults to canModerate (delete-only roles also need it). */
+  canOpenSettings?: boolean;
   members: ChannelMember[];
   pinned: Message[];
   searchValue: string;
@@ -92,6 +94,7 @@ function Dropdown({
 export function ChannelHeader({
   channel,
   canModerate,
+  canOpenSettings = canModerate,
   members,
   pinned,
   searchValue,
@@ -125,9 +128,9 @@ export function ChannelHeader({
         <button
           type="button"
           className={styles.channelTitle}
-          onClick={canModerate ? onOpenSettings : undefined}
-          data-testid={canModerate ? "fe6-channel-settings-open" : undefined}
-          title={canModerate ? "チャンネル設定" : undefined}
+          onClick={canOpenSettings ? onOpenSettings : undefined}
+          data-testid={canOpenSettings ? "fe6-channel-settings-open" : undefined}
+          title={canOpenSettings ? "チャンネル設定" : undefined}
         >
           {!isDm && <span className={styles.channelTitleHash}>#</span>}
           <span>{channel.name}</span>

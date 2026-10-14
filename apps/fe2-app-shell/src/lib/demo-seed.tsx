@@ -49,6 +49,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:send",
   "mail:admin",
   "chat:create",
+  // Channel hard delete (admin only by default) — shows 「チャンネルを削除」 in channel settings.
+  "chat:delete_channel",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -1510,6 +1512,27 @@ function createChatStore() {
   });
   const byId = new Map(all.map((c) => [c.id, c]));
 
+  // Personal sidebar sections, per signed-in account (account switcher). The demo
+  // admin starts with one 「運営」 section holding #admin so the feature shows at once.
+  interface DemoSection { id: string; name: string; position: number; createdAt: string }
+  const sectionsByUser = new Map<string, { items: DemoSection[]; assignments: Record<string, string> }>([
+    [ME_ID, { items: [{ id: "sec_demo_ops", name: "運営", position: 0, createdAt: CH_TS }], assignments: { chn_admin: "sec_demo_ops" } }],
+  ]);
+  let sectionSeq = 0;
+  const mySections = () => {
+    const me = currentAccount().id;
+    let entry = sectionsByUser.get(me);
+    if (!entry) {
+      entry = { items: [], assignments: {} };
+      sectionsByUser.set(me, entry);
+    }
+    return entry;
+  };
+  const sectionName = (raw: unknown): string | null => {
+    const name = typeof raw === "string" ? raw.trim() : "";
+    return name.length >= 1 && name.length <= 40 ? name : null;
+  };
+
   // Seeded timeline for #general — includes a SYSTEM post (authorId: null, chat-service
   // `kind: "system"`). System posts have no author; the client must render them as
   // "システム" and never feed null into the Avatar (initials(null).trim() would crash
@@ -1618,12 +1641,75 @@ function createChatStore() {
     if (method === "GET" && pathname === "/api/v1/chat/unread") {
       return json([]); // no unread badges in demo
     }
+    if (pathname === "/api/v1/chat/sections") {
+      const mine = mySections();
+      if (method === "GET") {
+        return json({ items: [...mine.items].sort((a, b) => a.position - b.position), assignments: { ...mine.assignments } });
+      }
+      if (method === "POST") {
+        const name = sectionName((body as { name?: unknown } | null)?.name);
+        if (!name) return validationFailed("section name must be 1..40 chars");
+        const position = mine.items.reduce((max, x) => Math.max(max, x.position + 1), 0);
+        const created: DemoSection = { id: `sec_demo_${++sectionSeq}`, name, position, createdAt: new Date().toISOString() };
+        mine.items.push(created);
+        return json(created, 201);
+      }
+    }
+    {
+      const m = /^\/api\/v1\/chat\/sections\/([^/]+)$/.exec(pathname);
+      if (m && (method === "PATCH" || method === "DELETE")) {
+        const mine = mySections();
+        const id = decodeURIComponent(m[1]!);
+        const idx = mine.items.findIndex((x) => x.id === id);
+        if (idx < 0) return notFound(`${method} ${pathname}`);
+        if (method === "DELETE") {
+          mine.items.splice(idx, 1);
+          for (const [c, sec] of Object.entries(mine.assignments)) if (sec === id) delete mine.assignments[c];
+          return json(null, 204);
+        }
+        const req = (body ?? {}) as { name?: unknown; position?: unknown };
+        const next = { ...mine.items[idx]! };
+        if (req.name !== undefined) {
+          const name = sectionName(req.name);
+          if (!name) return validationFailed("section name must be 1..40 chars");
+          next.name = name;
+        }
+        if (typeof req.position === "number") next.position = req.position;
+        mine.items[idx] = next;
+        return json(next);
+      }
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/section$/.exec(pathname);
+      if (m && method === "PUT") {
+        const channelId = decodeURIComponent(m[1]!);
+        const sectionId = (body as { sectionId?: string | null } | null)?.sectionId ?? null;
+        const mine = mySections();
+        if (!byId.has(channelId)) return notFound(`PUT ${pathname}`);
+        if (sectionId !== null && !mine.items.some((x) => x.id === sectionId)) return notFound(`PUT ${pathname} (section)`);
+        if (sectionId === null) delete mine.assignments[channelId];
+        else mine.assignments[channelId] = sectionId;
+        return json(null, 204);
+      }
+    }
     {
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const c = byId.get(decodeURIComponent(m[1]!));
         if (!c) return notFound(`GET ${pathname}`);
         return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "member", joinedAt: CH_TS } });
+      }
+      if (m && method === "DELETE") {
+        // Hard delete: the channel, its posts and every user's section assignment go.
+        const id = decodeURIComponent(m[1]!);
+        const c = byId.get(id);
+        if (!c) return notFound(`DELETE ${pathname}`);
+        if (c.type === "dm") return validationFailed("direct messages cannot be deleted");
+        all.splice(all.indexOf(c), 1);
+        byId.delete(id);
+        posted.delete(id);
+        for (const entry of sectionsByUser.values()) delete entry.assignments[id];
+        return json(null, 204);
       }
     }
     {
@@ -1657,6 +1743,10 @@ function createChatStore() {
 
 function json(body: unknown, status = 200): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+function validationFailed(message: string): Response {
+  const body: ErrorResponse = { error: { code: "VALIDATION_FAILED", message, retryable: false } };
+  return json(body, 400);
 }
 function notFound(route: string): Response {
   const body: ErrorResponse = { error: { code: "NOT_FOUND", message: `demo: no handler for ${route}`, retryable: false } };

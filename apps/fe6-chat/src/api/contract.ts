@@ -206,3 +206,20 @@ export interface UnfurlResponse {
   url: string;
   preview: UnfurlPreview | null;
 }
+
+// Personal sidebar sections (Slack-style): per user, a channel sits in at most one.
+// Unassigned channels stay in the default groups (チャンネル / イベント / ダイレクト).
+export interface ChatSection {
+  id: string;
+  name: string;
+  position: number;
+  createdAt: common.ISODateTime;
+}
+export interface ChatSectionList {
+  items: ChatSection[]; // position asc
+  assignments: Record<common.ChannelId, string>; // channelId -> sectionId
+}
+export interface UpdateSectionRequest {
+  name?: string;
+  position?: number;
+}

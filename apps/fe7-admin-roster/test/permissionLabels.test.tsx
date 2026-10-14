@@ -38,6 +38,10 @@ describe("permissionLabels — localization map", () => {
     }
   });
 
+  it("labels the channel hard-delete key", () => {
+    expect(permissionLabel("chat:delete_channel", "EN")).toBe("チャンネルを削除");
+  });
+
   it("falls back to catalog english text for an unknown key/domain", () => {
     expect(domainLabel("unknown-domain")).toBe("unknown-domain");
     expect(permissionLabel("unknown:key", "English Name")).toBe("English Name");

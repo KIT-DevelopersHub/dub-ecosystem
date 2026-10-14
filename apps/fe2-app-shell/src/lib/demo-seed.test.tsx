@@ -142,7 +142,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 67-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 68-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -151,7 +151,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(67);
+    expect(catalog).toHaveLength(68);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -335,5 +335,48 @@ describe("demo flags mock persists 返信不要 (noReplyAt)", () => {
     const list = await client.request<{ items: { threadId: string; noReplyAt: string | null }[] }>({ method: "GET", path: "/api/v1/mail/flags" });
     expect(list.items.find((f) => f.threadId === "thr_3")?.noReplyAt).toBe(set.noReplyAt);
     expect(await post({ noReply: false })).toMatchObject({ noReplyAt: null, starred: true });
+  });
+});
+
+describe("chat channel delete + personal sections (demo store)", () => {
+  interface Section { id: string; name: string; position: number }
+  interface SectionList { items: Section[]; assignments: Record<string, string> }
+  const listSections = (a: ReturnType<typeof api>) => a.request<SectionList>({ method: "GET", path: "/api/v1/chat/sections" });
+  const channelIds = async (a: ReturnType<typeof api>) =>
+    (await a.request<{ id: string }[]>({ method: "GET", path: "/api/v1/chat/channels" })).map((c) => c.id);
+
+  it("grants the demo admin chat:delete_channel", async () => {
+    expect((await api().auth.me()).permissions).toContain("chat:delete_channel");
+  });
+
+  it("hard-deletes a topic channel (and its assignment) but refuses a DM", async () => {
+    const a = api();
+    expect((await listSections(a)).assignments.chn_admin).toBe("sec_demo_ops");
+    await a.request<void>({ method: "DELETE", path: "/api/v1/chat/channels/chn_admin" });
+    expect(await channelIds(a)).not.toContain("chn_admin");
+    expect((await listSections(a)).assignments.chn_admin).toBeUndefined();
+    let err: unknown;
+    try {
+      await a.request<void>({ method: "DELETE", path: "/api/v1/chat/channels/chn_dm_bob" });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+  });
+
+  it("seeds 運営 and supports create / rename / assign / delete", async () => {
+    const a = api();
+    expect((await listSections(a)).items.map((x) => x.name)).toEqual(["運営"]);
+    const created = await a.request<Section>({ method: "POST", path: "/api/v1/chat/sections", body: { name: " 広報 " } });
+    expect(created.name).toBe("広報");
+    const renamed = await a.request<Section>({ method: "PATCH", path: `/api/v1/chat/sections/${created.id}`, body: { name: "PR" } });
+    expect(renamed.name).toBe("PR");
+    await a.request<void>({ method: "PUT", path: "/api/v1/chat/channels/chn_general/section", body: { sectionId: created.id } });
+    expect((await listSections(a)).assignments.chn_general).toBe(created.id);
+    await a.request<void>({ method: "DELETE", path: `/api/v1/chat/sections/${created.id}` });
+    const after = await listSections(a);
+    expect(after.items.map((x) => x.id)).toEqual(["sec_demo_ops"]);
+    expect(after.assignments.chn_general).toBeUndefined();
   });
 });
