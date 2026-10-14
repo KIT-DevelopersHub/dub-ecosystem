@@ -1,13 +1,13 @@
 // LP管理 → プレビュー tests.
-// 版とチケット販売あり/なしを選んで「プレビューを開く」と、その条件の URL を LP ビューアで開く。
-// 何も保存しない（公開・販売の API は呼ばない）。
+// 版・チケット販売あり/なし・登壇者募集あり/なしを選んで「プレビューを開く」と、その条件の URL を
+// LP ビューアで開く。何も保存しない（公開・販売・募集の API は呼ばない）。
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import { describe, expect, it, vi } from "vitest";
 import { FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { LpPreviewScreen } from "./LpPreviewScreen.tsx";
-import type { LpApi, LpPublishState, LpTicketsState } from "./lpApi.tsx";
+import type { LpApi, LpProposalsState, LpPublishState, LpTicketsState } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
 import { lpPreviewUrl } from "./lpPublish.ts";
 
@@ -43,6 +43,11 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: unused,
+    getProposals: () => Promise.resolve({ enabled: true } as LpProposalsState),
+    setProposalsEnabled: unused,
+    saveProposalFields: unused,
+    listProposals: unused,
+    setProposalStatus: unused,
     getPublish: () => Promise.resolve(PUBLISH),
     setPublish: unused,
     ...overrides,
@@ -66,8 +71,12 @@ function renderScreen(api: LpApi = fakeApi()): void {
 
 describe("lpPreviewUrl", () => {
   it("always pins the version number (never live) and carries tickets=on|off", () => {
-    expect(lpPreviewUrl("v3.4", "on", "https://lp.example")).toBe("https://lp.example/?version=3.4&tickets=on");
-    expect(lpPreviewUrl("v3.5", "off", "https://lp.example")).toBe("https://lp.example/?version=3.5&tickets=off");
+    expect(lpPreviewUrl("v3.4", { tickets: "on", proposals: "on" }, "https://lp.example")).toBe(
+      "https://lp.example/?version=3.4&tickets=on&proposals=on",
+    );
+    expect(lpPreviewUrl("v3.5", { tickets: "off", proposals: "off" }, "https://lp.example")).toBe(
+      "https://lp.example/?version=3.5&tickets=off&proposals=off",
+    );
   });
 });
 
@@ -93,15 +102,32 @@ describe("LpPreviewScreen", () => {
     renderScreen(api);
     fireEvent.change(await screen.findByTestId("fe2-lp-preview-version"), { target: { value: "v3.5" } });
     fireEvent.click(screen.getByTestId("fe2-lp-preview-open"));
-    expect(screen.getByTestId("fe2-lp-viewer-frame")).toHaveAttribute("src", lpPreviewUrl("v3.5", "on"));
-    expect(screen.getByTestId("fe2-lp-viewer")).toHaveAccessibleName(/チケット販売あり・プレビュー/);
+    expect(screen.getByTestId("fe2-lp-viewer-frame")).toHaveAttribute("src", lpPreviewUrl("v3.5", { tickets: "on", proposals: "on" }));
+    expect(screen.getByTestId("fe2-lp-viewer")).toHaveAccessibleName(/チケット販売あり・登壇者募集あり・プレビュー/);
 
     fireEvent.click(screen.getByTestId("fe2-lp-back-button"));
     fireEvent.click(screen.getByTestId("fe2-lp-preview-tickets-off"));
     fireEvent.click(screen.getByTestId("fe2-lp-preview-open"));
-    expect(screen.getByTestId("fe2-lp-viewer-frame")).toHaveAttribute("src", lpPreviewUrl("v3.5", "off"));
+    expect(screen.getByTestId("fe2-lp-viewer-frame")).toHaveAttribute("src", lpPreviewUrl("v3.5", { tickets: "off", proposals: "on" }));
     expect(api.setPublish).not.toHaveBeenCalled();
     expect(api.setTicketsEnabled).not.toHaveBeenCalled();
+  });
+
+  it("toggles 登壇者募集 independently and shows the real call state", async () => {
+    const api = fakeApi();
+    renderScreen(api);
+    expect(await screen.findByTestId("fe2-lp-preview-proposals-state")).toHaveTextContent("実際の募集: 募集中");
+    expect(screen.getByTestId("fe2-lp-preview-proposals-on")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("fe2-lp-preview-proposals-note")).toHaveTextContent("本物の応募");
+    fireEvent.click(screen.getByTestId("fe2-lp-preview-proposals-off"));
+    expect(screen.getByTestId("fe2-lp-preview-proposals-note")).toHaveTextContent("「準備中」のまま");
+    fireEvent.click(screen.getByTestId("fe2-lp-preview-open"));
+    expect(screen.getByTestId("fe2-lp-viewer-frame")).toHaveAttribute(
+      "src",
+      lpPreviewUrl("v3.4", { tickets: "on", proposals: "off" }),
+    );
+    expect(screen.getByTestId("fe2-lp-viewer")).toHaveAccessibleName(/登壇者募集なし・プレビュー/);
+    expect(api.setProposalsEnabled).not.toHaveBeenCalled();
   });
 
   it("pushes ?open so the browser back closes the viewer and stays on this tab", async () => {

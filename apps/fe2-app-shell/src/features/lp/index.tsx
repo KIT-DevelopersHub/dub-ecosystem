@@ -4,6 +4,7 @@ export { LpVisitLogScreen } from "./LpVisitLogScreen.tsx";
 export { LpLinksScreen } from "./LpLinksScreen.tsx";
 export { LpPreviewScreen } from "./LpPreviewScreen.tsx";
 export { LpTicketsScreen } from "./LpTicketsScreen.tsx";
+export { LpProposalsScreen } from "./LpProposalsScreen.tsx";
 export { lpRoutes, lpNav } from "./module.tsx";
 export type { LpSourceRoute, LpNavEntry } from "./module.tsx";
 export { LP_VERSIONS, listLpVersions } from "./lpVersions.ts";
@@ -21,5 +22,8 @@ export type {
   LpTicketField,
   LpTicketTypeSummary,
   LpTicketOrder,
+  LpProposalsState,
+  LpProposal,
+  LpProposalStatus,
 } from "./lpApi.tsx";
 export { LP_BASE_URL, LP_TRACKING_PARAM, buildTrackingUrl, slugifySource, validateLinkDraft } from "./lpLinks.ts";

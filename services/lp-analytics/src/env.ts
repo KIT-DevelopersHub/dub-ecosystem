@@ -21,4 +21,6 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET?: string;
   /** 1 日 (JST) に作れる checkout の上限（既定 300）。 */
   LP_DAILY_CHECKOUT_CAP?: string;
+  /** 1 日 (JST) に受け付ける登壇応募の上限（既定 200）。 */
+  LP_DAILY_PROPOSAL_CAP?: string;
 }

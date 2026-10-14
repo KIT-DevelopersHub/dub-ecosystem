@@ -4,16 +4,34 @@
 //
 // NOTE: only `export default` here — workerd treats named exports as entrypoints.
 import manifest from "../versions.json";
-import { previewBanner, resolveRequest, rewriteLocation, ticketsCookie, ticketsPreview } from "./route.ts";
+import {
+  previewBanner,
+  proposalsCookie,
+  proposalsPreview,
+  resolveRequest,
+  rewriteLocation,
+  ticketsCookie,
+  ticketsPreview,
+} from "./route.ts";
 import {
   DEMO_CONFIG,
   handleTickets,
   isTicketsPath,
   parseConfig,
+  previewBar,
   previewConfig,
   ticketsInjection,
   type TicketConfig,
 } from "./tickets.ts";
+import {
+  DEMO_PROPOSAL_CONFIG,
+  handleProposals,
+  isProposalsPath,
+  parseProposalConfig,
+  previewProposals,
+  proposalsInjection,
+  type ProposalConfig,
+} from "./proposals.ts";
 
 interface Fetcher {
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
@@ -87,6 +105,32 @@ async function ticketConfig(env: Env): Promise<TicketConfig | null> {
   return value;
 }
 
+let proposalsCache: { value: ProposalConfig | null; at: number } | null = null;
+
+// Demo has no lp-analytics: closed, so only ?proposals=on (LP管理「プレビュー」タブ) shows it.
+const DEMO_PROPOSALS_PREVIEW: ProposalConfig = { ...DEMO_PROPOSAL_CONFIG, enabled: false };
+
+/** Proposals config (30s cache). null = unavailable; never throws. */
+async function proposalConfig(env: Env): Promise<ProposalConfig | null> {
+  if (env.TICKETS_DEMO === "1") return DEMO_PROPOSALS_PREVIEW;
+  const now = Date.now();
+  if (proposalsCache && now - proposalsCache.at < FLAG_TTL_MS) return proposalsCache.value;
+  let value: ProposalConfig | null = null;
+  try {
+    if (env.LP_FLAG) {
+      const res = await env.LP_FLAG.fetch("https://lp-analytics/lp/internal/proposals", {
+        headers: { "x-dub-internal": "1" },
+        signal: AbortSignal.timeout(FLAG_TIMEOUT_MS),
+      });
+      if (res.ok) value = parseProposalConfig(await res.json());
+    }
+  } catch {
+    // Never fail the page because of the proposals config.
+  }
+  proposalsCache = { value, at: now };
+  return value;
+}
+
 function ticketsInternal(env: Env): ((path: string, init: RequestInit) => Promise<Response>) | null {
   const flag = env.LP_FLAG;
   if (!flag || env.TICKETS_DEMO === "1") return null;
@@ -114,6 +158,19 @@ export default {
     const mode = ticketsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
     const getConfig = async (): Promise<TicketConfig | null> => previewConfig(await ticketConfig(env), mode);
     const tkCookie = ticketsCookie(url);
+    // 登壇者募集も同じ流儀（?proposals=on|off はこの閲覧者にだけ効く）。
+    const proposalsPath = isProposalsPath(url.pathname);
+    const spMode = proposalsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
+    const getProposals = async (): Promise<ProposalConfig | null> => previewProposals(await proposalConfig(env), spMode);
+    const spCookie = proposalsCookie(url);
+    if (proposalsPath) {
+      const handled = await handleProposals(req, {
+        demo: env.TICKETS_DEMO === "1",
+        getConfig: getProposals,
+        internal: ticketsInternal(env),
+      });
+      if (handled) return handled;
+    }
     if (ticketsPath) {
       const handled = await handleTickets(req, {
         demo: env.TICKETS_DEMO === "1",
@@ -127,6 +184,7 @@ export default {
     }
     // Started in parallel; only awaited for HTML pages (CTA injection).
     const tickets = ticketsPath ? null : getConfig();
+    const proposals = proposalsPath ? null : getProposals();
     const published = await publishedVersion(env);
     const r = resolveRequest(url, req.headers.get("cookie"), published, BUNDLED, req.headers.get("referer"));
 
@@ -134,6 +192,7 @@ export default {
       const headers = new Headers({ location: r.location, vary: "Cookie", "cache-control": "no-store" });
       headers.append("set-cookie", r.setCookie);
       if (tkCookie) headers.append("set-cookie", tkCookie);
+      if (spCookie) headers.append("set-cookie", spCookie);
       return new Response(null, { status: 302, headers });
     }
 
@@ -144,13 +203,24 @@ export default {
     headers.append("vary", "Cookie");
     if (r.setCookie) headers.append("set-cookie", r.setCookie);
     if (tkCookie) headers.append("set-cookie", tkCookie);
+    if (spCookie) headers.append("set-cookie", spCookie);
     const loc = headers.get("location");
     if (loc) headers.set("location", rewriteLocation(loc, r.version, url.origin));
-    if (r.preview || mode) headers.set("x-robots-tag", "noindex");
+    if (r.preview || mode || spMode) headers.set("x-robots-tag", "noindex");
 
     const isHtml = (headers.get("content-type") ?? "").includes("text/html");
-    const cfg = isHtml && res.status === 200 && tickets ? await tickets : null;
-    const inject = (r.preview ? previewBanner(r.version, published) : "") + ticketsInjection(cfg);
+    const page = isHtml && res.status === 200;
+    const cfg = page && tickets ? await tickets : null;
+    const spCfg = page && proposals ? await proposals : null;
+    const previewing = [
+      cfg?.enabled && cfg.preview ? "チケット販売" : null,
+      spCfg?.enabled && spCfg.preview ? "登壇者募集" : null,
+    ].filter((x): x is string => x !== null);
+    const inject =
+      (r.preview ? previewBanner(r.version, published) : "") +
+      previewBar(previewing) +
+      ticketsInjection(cfg, false) +
+      proposalsInjection(spCfg);
     if (inject) headers.delete("etag");
     const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     if (!inject || !isHtml) return out;

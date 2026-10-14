@@ -5,8 +5,11 @@ import type {
   AggregateQuery,
   AggregateRow,
   LinkRow,
+  LpProposalStatus,
   LpRepo,
   LpTicketField,
+  ProposalRow,
+  ProposalSettingsRow,
   PublishRow,
   TicketOrderRow,
   TicketSettingsRow,
@@ -24,6 +27,8 @@ export class InMemoryLpRepo implements LpRepo {
   ticketSettings = new Map<string, TicketSettingsRow>();
   ticketTypes: TicketTypeRow[] = [];
   orders: TicketOrderRow[] = [];
+  proposalSettings = new Map<string, ProposalSettingsRow>();
+  proposals: ProposalRow[] = [];
 
   async getTicketSettings(site: string) {
     const r = this.ticketSettings.get(site);
@@ -120,6 +125,55 @@ export class InMemoryLpRepo implements LpRepo {
       .sort((a, b) => (key(a) < key(b) ? 1 : -1))
       .slice(0, limit)
       .map(clone);
+  }
+
+  async getProposalSettings(site: string) {
+    const r = this.proposalSettings.get(site);
+    return r ? clone(r) : null;
+  }
+  private upsertProposalSettings(site: string, patch: Partial<ProposalSettingsRow>, updatedBy: string, updatedAt: string) {
+    const cur = this.proposalSettings.get(site) ?? { site, enabled: false, fields: null, updatedBy: null, updatedAt };
+    this.proposalSettings.set(site, { ...cur, ...clone(patch), updatedBy, updatedAt });
+  }
+  async setProposalEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string) {
+    this.upsertProposalSettings(site, { enabled }, updatedBy, updatedAt);
+  }
+  async setProposalFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string) {
+    this.upsertProposalSettings(site, { fields }, updatedBy, updatedAt);
+  }
+  async insertProposal(row: ProposalRow) {
+    this.proposals.push(clone(row));
+  }
+  async getProposal(site: string, id: string) {
+    const p = this.proposals.find((x) => x.site === site && x.id === id);
+    return p ? clone(p) : null;
+  }
+  async setProposalStatus(site: string, id: string, status: LpProposalStatus, reviewedBy: string, updatedAt: string) {
+    const p = this.proposals.find((x) => x.site === site && x.id === id);
+    if (!p) return false;
+    Object.assign(p, { status, reviewedBy: status === "submitted" ? null : reviewedBy, updatedAt });
+    return true;
+  }
+  async listProposals(site: string, cursor: string | null, limit: number) {
+    const key = (p: ProposalRow) => `${p.createdAt}~${p.id}`;
+    return this.proposals
+      .filter((p) => p.site === site && (cursor ? key(p) < cursor : true))
+      .sort((a, b) => (key(a) < key(b) ? 1 : -1))
+      .slice(0, limit)
+      .map(clone);
+  }
+  async proposalTotals(site: string) {
+    const mine = this.proposals.filter((p) => p.site === site);
+    return {
+      total: mine.length,
+      accepted: mine.filter((p) => p.status === "accepted").length,
+      rejected: mine.filter((p) => p.status === "rejected").length,
+    };
+  }
+  async countProposalsSince(site: string, since: string, clientKey?: string) {
+    return this.proposals.filter(
+      (p) => p.site === site && p.createdAt >= since && (!clientKey || p.clientKey === clientKey),
+    ).length;
   }
 
   private inRange(v: VisitRow, q: Omit<AggregateQuery, "includeBots"> & { includeBots?: boolean }): boolean {

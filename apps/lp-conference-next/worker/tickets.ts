@@ -746,7 +746,7 @@ if(E)E.hidden=c>0;if(C)C.textContent=c+"枚";if(T)T.textContent=c>0?yen(t):"¥0"
 f.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".qb"):null;if(!b||b.disabled)return;var s=b.closest(".tk").querySelector("select");if(!s||s.disabled)return;var i=s.selectedIndex+(+b.getAttribute("data-step"));if(i<0||i>=s.options.length)return;s.selectedIndex=i;up()});
 f.addEventListener("change",up);up();f.addEventListener("submit",function(){var b=f.querySelector(".submit");if(b){b.classList.add("is-busy");b.setAttribute("aria-busy","true")}})})();`;
 
-const CONF_NAME = "北陸ITカンファレンス 2027";
+export const CONF_NAME = "北陸ITカンファレンス 2027";
 const EVENT_DATE = "2027年9月13日(月)・14日(火)";
 const EVENT_VENUE = "金沢工業大学";
 
@@ -766,12 +766,24 @@ const NET = (() => {
 const BRAND =
   '<span class="mark" aria-hidden="true"></span><span class="bname">HOKURIKU IT CONFERENCE<b>2027</b></span>';
 
-function hero(o: { title: string; sub?: string; ghost: string; step?: number; small?: boolean }): string {
+const TICKET_STEPS = ["券種と枚数", "参加者情報", "お支払い・完了"];
+
+export function hero(o: {
+  title: string;
+  sub?: string;
+  ghost: string;
+  step?: number;
+  small?: boolean;
+  /** Eyebrow above the title (default TICKETS). */
+  eyebrow?: string;
+  /** Step labels (default: the ticket purchase flow). */
+  steps?: string[];
+}): string {
   const steps =
     o.step === undefined
       ? ""
       : '<ol class="steps rise d4" aria-label="お申し込みの流れ">' +
-        ["券種と枚数", "参加者情報", "お支払い・完了"]
+        (o.steps ?? TICKET_STEPS)
           .map((s, i) => `<li${i + 1 <= o.step! ? ' class="on"' : ""}><b>${i + 1}</b><span>${s}</span></li>`)
           .join("") +
         "</ol>";
@@ -782,7 +794,7 @@ function hero(o: { title: string; sub?: string; ghost: string; step?: number; sm
     NET +
     `<span class="ghost" aria-hidden="true">${o.ghost}</span>` +
     '<div class="wrap">' +
-    '<span class="eyebrow rise">TICKETS<span class="ey2"> · HOKURIKU IT CONFERENCE 2027</span></span>' +
+    `<span class="eyebrow rise">${o.eyebrow ?? "TICKETS"}<span class="ey2"> · HOKURIKU IT CONFERENCE 2027</span></span>` +
     `<h1 class="rise d1">${o.title}</h1>` +
     (o.sub ? `<p class="sub rise d2">${o.sub}</p>` : "") +
     '<div class="meta rise d3">' +
@@ -795,7 +807,14 @@ function hero(o: { title: string; sub?: string; ghost: string; step?: number; sm
 
 export const PREVIEW_NOTE = "プレビュー表示中です。このページはまだ一般公開されていません（お申し込みはできません）。";
 
-function shell(title: string, body: string, demo: boolean, preview = false): string {
+export function shell(
+  title: string,
+  body: string,
+  demo: boolean,
+  preview = false,
+  demoNote = "デモ環境です（実際の決済は行われません）",
+  previewNote = PREVIEW_NOTE,
+): string {
   return (
     '<!doctype html><html lang="ja"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -807,8 +826,8 @@ function shell(title: string, body: string, demo: boolean, preview = false): str
     '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
     `<link rel="stylesheet" href="${FONT_HREF}">` +
     `<style>${STYLE}</style></head><body>` +
-    (demo ? '<div class="demo" role="note">デモ環境です（実際の決済は行われません）</div>' : "") +
-    (preview ? `<div class="demo" role="note" data-lp-tk-preview>${PREVIEW_NOTE}</div>` : "") +
+    (demo ? `<div class="demo" role="note">${demoNote}</div>` : "") +
+    (preview ? `<div class="demo" role="note" data-lp-tk-preview>${previewNote}</div>` : "") +
     '<div style="position:relative">' +
     `<header class="top"><div class="wrap"><a class="brand" href="/" aria-label="${CONF_NAME} トップへ">${BRAND}</a>` +
     '<a class="back" href="/"><span aria-hidden="true">←</span>トップへ戻る</a></div></header>' +
@@ -819,12 +838,12 @@ function shell(title: string, body: string, demo: boolean, preview = false): str
   );
 }
 
-function errMsg(errors: FormErrors, key: string): string {
+export function errMsg(errors: FormErrors, key: string): string {
   const m = errors[key];
   return m ? `<p class="msg" id="${escapeHtml(key)}-err">${escapeHtml(m)}</p>` : "";
 }
 
-function reqMark(required: boolean): string {
+export function reqMark(required: boolean): string {
   return required ? '<span class="req">必須</span>' : '<span class="opt">任意</span>';
 }
 
@@ -936,7 +955,7 @@ function renderSummary(config: TicketConfig, values: FormValues): string {
   );
 }
 
-function renderField(f: TicketField, values: FormValues, errors: FormErrors): string {
+export function renderField(f: TicketField, values: FormValues, errors: FormErrors): string {
   const key = fieldInputName(f.id);
   const k = escapeHtml(key);
   const v = values[key] ?? "";
@@ -1130,22 +1149,31 @@ const CTA_SWAP_CSS =
 // Runs after React hydration (a __reactFiber$ key on the element) and edits the existing nodes in
 // place: replacing/removing React-owned nodes, or rewriting server-side, would be undone by
 // hydration. Gives up waiting after ~5s and swaps anyway.
-const CTA_SWAP_SCRIPT =
-  "(function(){var d=document,LB=" +
-  JSON.stringify(CTA_SWAP_LABEL) +
-  ',HREF="/tickets",SEL=' +
-  JSON.stringify(CTA_SWAP_SELECTOR) +
-  ",n=0;" +
-  'function hyd(el){return Object.keys(el).some(function(k){return k.indexOf("__reactFiber$")===0})}' +
-  "function txt(el){for(var c=el.firstChild;c;c=c.nextSibling){if(c.nodeType===3&&c.nodeValue.trim()){c.nodeValue=LB;return}}}" +
-  "function go(e){if(e)e.preventDefault();location.href=HREF}" +
-  'function swap(el){el.setAttribute("data-lp-tk","");el.classList.remove("is-disabled");el.removeAttribute("disabled");el.removeAttribute("aria-disabled");' +
-  'if(el.tagName==="A")el.setAttribute("href",HREF);else{el.setAttribute("role","link");el.tabIndex=0}' +
-  'if(el.hasAttribute("aria-label"))el.setAttribute("aria-label",LB);' +
-  'var jp=el.querySelector(".git-btn-jp");if(jp)txt(jp);else if(!el.classList.contains("svc-card-link"))txt(el);' +
-  'el.addEventListener("click",go);el.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "||e.key==="Spacebar")go(e)})}' +
-  'function run(force){var all=d.querySelectorAll(SEL),left=0;[].forEach.call(all,function(el){if(el.hasAttribute("data-lp-tk"))return;if(force||hyd(el))swap(el);else left++});return all.length>0&&left===0}' +
-  "(function tick(){n++;if(run(n>=50)||n>=50)return;setTimeout(tick,100)})()})();";
+export function ctaSwapScript(o: { attr: string; label: string; href: string; selector: string }): string {
+  return (
+    "(function(){var d=document,A=" +
+    JSON.stringify(o.attr) +
+    ",LB=" +
+    JSON.stringify(o.label) +
+    ",HREF=" +
+    JSON.stringify(o.href) +
+    ",SEL=" +
+    JSON.stringify(o.selector) +
+    ",n=0;" +
+    'function hyd(el){return Object.keys(el).some(function(k){return k.indexOf("__reactFiber$")===0})}' +
+    "function txt(el){for(var c=el.firstChild;c;c=c.nextSibling){if(c.nodeType===3&&c.nodeValue.trim()){c.nodeValue=LB;return}}}" +
+    "function go(e){if(e)e.preventDefault();location.href=HREF}" +
+    'function swap(el){el.setAttribute(A,"");el.classList.remove("is-disabled");el.removeAttribute("disabled");el.removeAttribute("aria-disabled");' +
+    'if(el.tagName==="A")el.setAttribute("href",HREF);else{el.setAttribute("role","link");el.tabIndex=0}' +
+    'if(el.hasAttribute("aria-label"))el.setAttribute("aria-label",LB);' +
+    'var jp=el.querySelector(".git-btn-jp");if(jp)txt(jp);else if(!el.classList.contains("svc-card-link"))txt(el);' +
+    'el.addEventListener("click",go);el.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "||e.key==="Spacebar")go(e)})}' +
+    "function run(force){var all=d.querySelectorAll(SEL),left=0;[].forEach.call(all,function(el){if(el.hasAttribute(A))return;if(force||hyd(el))swap(el);else left++});return all.length>0&&left===0}" +
+    "(function tick(){n++;if(run(n>=50)||n>=50)return;setTimeout(tick,100)})()})();"
+  );
+}
+
+const CTA_SWAP_SCRIPT = ctaSwapScript({ attr: "data-lp-tk", label: CTA_SWAP_LABEL, href: "/tickets", selector: CTA_SWAP_SELECTOR });
 
 /** In-place swap of the LP's 参加登録 buttons to 参加チケットを購入 (-> /tickets). */
 export function ticketsCtaSwap(): string {
@@ -1164,27 +1192,35 @@ export function previewConfig(cfg: TicketConfig | null, mode: "on" | "off" | nul
   return cfg;
 }
 
-/** Bottom bar on LP pages while previewing ticket sales (keeps the LP header visible). */
-export function ticketsPreviewBar(): string {
+/** Bottom bar on LP pages while previewing (keeps the LP header visible). `features` e.g. ["チケット販売"]. */
+export function previewBar(features: readonly string[]): string {
+  if (features.length === 0) return "";
   return (
     "<style>#lp-tickets-cta,#lp-preview-banner{bottom:56px!important}</style>" +
     '<div id="lp-tickets-preview" role="note" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;' +
     "padding:8px 16px;background:#fff4d6;color:#7a4b00;text-align:center;" +
     "font:700 13px/1.5 'Zen Kaku Gothic New',system-ui,-apple-system,sans-serif;box-shadow:0 -2px 8px rgba(0,0,0,.12)\">" +
-    "チケット販売のプレビュー表示中です（一般には公開されていません）" +
+    `${features.join("・")}のプレビュー表示中です（一般には公開されていません）` +
     '<a href="/?version=live" style="margin-left:12px;color:inherit;text-decoration:underline">解除</a></div>'
   );
 }
 
-/** HTML appended to LP pages: floating CTA when enabled, plus the button swap when ctaEnabled too. */
-export function ticketsInjection(cfg: TicketConfig | null): string {
+export function ticketsPreviewBar(): string {
+  return previewBar(["チケット販売"]);
+}
+
+/**
+ * HTML appended to LP pages: floating CTA when enabled, plus the button swap when ctaEnabled too.
+ * withBar=false when the caller renders one shared preview bar (tickets + proposals).
+ */
+export function ticketsInjection(cfg: TicketConfig | null, withBar = true): string {
   if (!cfg || !cfg.enabled) return "";
-  return (cfg.preview ? ticketsPreviewBar() : "") + ticketsCta() + (cfg.ctaEnabled ? ticketsCtaSwap() : "");
+  return (cfg.preview && withBar ? ticketsPreviewBar() : "") + ticketsCta() + (cfg.ctaEnabled ? ticketsCtaSwap() : "");
 }
 
 // ---------- handler ----------
 
-const BASE_HEADERS: Record<string, string> = {
+export const BASE_HEADERS: Record<string, string> = {
   "cache-control": "no-store",
   "x-robots-tag": "noindex",
 };
@@ -1196,7 +1232,7 @@ export function htmlResponse(html: string, status = 200): Response {
   });
 }
 
-function redirect(location: string): Response {
+export function redirect(location: string): Response {
   return new Response(null, { status: 303, headers: { ...BASE_HEADERS, location } });
 }
 

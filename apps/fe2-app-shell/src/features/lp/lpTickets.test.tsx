@@ -80,6 +80,11 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: () => Promise.resolve({ items: [], nextCursor: null }),
+    getProposals: unused,
+    setProposalsEnabled: unused,
+    saveProposalFields: unused,
+    listProposals: unused,
+    setProposalStatus: unused,
     ...overrides,
   };
 }

@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-proposals",
+  "worker": "dub-demo-lp-proposals",
+  "url": "https://dub-demo-lp-proposals.developershub-site.workers.dev",
+  "deployedSha": "7743dd12",
+  "branch": "feat/lp-proposals",
+  "actor": "ko-tarou",
+  "markers": ["fe2-lp-proposals-screen","lp-proposals-demo.developershub-site.workers.dev","fe2-lp-preview-proposals"],
+  "live": true,
+  "verifiedAt": "2026-10-14T07:27:15Z",
+  "updatedAt": "2026-10-14T07:27:15Z",
+  "note": "LP管理 登壇者募集タブ + プレビューの登壇者募集あり/なし (LP demo: lp-proposals-demo)"
+}

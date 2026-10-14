@@ -6,6 +6,8 @@ import type {
   AggregateRow,
   LinkRow,
   LpDevice,
+  LpProposalRepo,
+  LpProposalStatus,
   LpRepo,
   LpTicketAnswer,
   LpTicketField,
@@ -13,6 +15,7 @@ import type {
   LpTicketOrderStatus,
   LpTicketRepo,
   LpVisitKind,
+  ProposalRow,
   TicketOrderRow,
   TicketTypeRow,
   VisitRow,
@@ -408,9 +411,147 @@ function parseCursor(raw: string): { day: string; id: string } | null {
   return i > 0 ? { day: raw.slice(0, i), id: raw.slice(i + 1) } : null;
 }
 
+interface ProposalDbRow {
+  id: string;
+  site: string;
+  speaker_name: string;
+  email: string;
+  title: string;
+  abstract: string;
+  answers_json: string;
+  status: string;
+  reviewed_by: string | null;
+  client_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const toProposal = (r: ProposalDbRow): ProposalRow => ({
+  id: r.id,
+  site: r.site,
+  speakerName: r.speaker_name,
+  email: r.email,
+  title: r.title,
+  abstract: r.abstract,
+  answers: parseJsonArray<LpTicketAnswer>(r.answers_json),
+  status: r.status as LpProposalStatus,
+  reviewedBy: r.reviewed_by,
+  clientKey: r.client_key,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+function proposalRepo(db: DbClient): LpProposalRepo {
+  const upsertSetting = async (column: "enabled" | "fields_json", site: string, value: unknown, by: string, at: string) => {
+    await db.run(
+      `INSERT INTO lp_proposal_settings (site, ${column}, updated_by, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(site) DO UPDATE SET ${column} = excluded.${column}, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      site,
+      value,
+      by,
+      at,
+    );
+  };
+  return {
+    async getProposalSettings(site) {
+      const r = await db.first<{ site: string; enabled: number; fields_json: string | null; updated_by: string | null; updated_at: string }>(
+        "SELECT site, enabled, fields_json, updated_by, updated_at FROM lp_proposal_settings WHERE site = ?",
+        site,
+      );
+      return r
+        ? {
+            site: r.site,
+            enabled: r.enabled === 1,
+            fields: r.fields_json === null ? null : parseJsonArray<LpTicketField>(r.fields_json),
+            updatedBy: r.updated_by,
+            updatedAt: r.updated_at,
+          }
+        : null;
+    },
+    async setProposalEnabled(site, enabled, updatedBy, updatedAt) {
+      await upsertSetting("enabled", site, enabled ? 1 : 0, updatedBy, updatedAt);
+    },
+    async setProposalFields(site, fields, updatedBy, updatedAt) {
+      await upsertSetting("fields_json", site, JSON.stringify(fields), updatedBy, updatedAt);
+    },
+    async insertProposal(p) {
+      await db.run(
+        `INSERT INTO lp_proposals (id, site, speaker_name, email, title, abstract, answers_json, status, reviewed_by, client_key,
+                                   created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        p.id,
+        p.site,
+        p.speakerName,
+        p.email,
+        p.title,
+        p.abstract,
+        JSON.stringify(p.answers),
+        p.status,
+        p.reviewedBy,
+        p.clientKey,
+        p.createdAt,
+        p.updatedAt,
+      );
+    },
+    async getProposal(site, id) {
+      const r = await db.first<ProposalDbRow>("SELECT * FROM lp_proposals WHERE site = ? AND id = ?", site, id);
+      return r ? toProposal(r) : null;
+    },
+    async setProposalStatus(site, id, status, reviewedBy, updatedAt) {
+      const res = await db.run(
+        "UPDATE lp_proposals SET status = ?, reviewed_by = ?, updated_at = ? WHERE site = ? AND id = ?",
+        status,
+        status === "submitted" ? null : reviewedBy,
+        updatedAt,
+        site,
+        id,
+      );
+      return res.meta.changes > 0;
+    },
+    async listProposals(site, cursor, limit) {
+      const binds: unknown[] = [site];
+      let sql = "SELECT * FROM lp_proposals WHERE site = ?";
+      const c = cursor ? parseCursor(cursor) : null;
+      if (c) {
+        sql += " AND (created_at < ? OR (created_at = ? AND id < ?))";
+        binds.push(c.day, c.day, c.id);
+      }
+      sql += " ORDER BY created_at DESC, id DESC LIMIT ?";
+      binds.push(limit);
+      return (await db.all<ProposalDbRow>(sql, ...binds)).map(toProposal);
+    },
+    async proposalTotals(site) {
+      const r = await db.first<{ total: number; accepted: number | null; rejected: number | null }>(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected
+         FROM lp_proposals WHERE site = ?`,
+        site,
+      );
+      return { total: r?.total ?? 0, accepted: r?.accepted ?? 0, rejected: r?.rejected ?? 0 };
+    },
+    async countProposalsSince(site, since, clientKey) {
+      const r = clientKey
+        ? await db.first<{ c: number }>(
+            "SELECT COUNT(*) AS c FROM lp_proposals WHERE site = ? AND client_key = ? AND created_at >= ?",
+            site,
+            clientKey,
+            since,
+          )
+        : await db.first<{ c: number }>(
+            "SELECT COUNT(*) AS c FROM lp_proposals WHERE site = ? AND created_at >= ?",
+            site,
+            since,
+          );
+      return r?.c ?? 0;
+    },
+  };
+}
+
 export function createD1LpRepo(db: DbClient): LpRepo {
   return {
     ...ticketRepo(db),
+    ...proposalRepo(db),
     async listLinks(orgId) {
       return (await db.all<LinkDbRow>("SELECT * FROM lp_links WHERE org_id = ?", orgId)).map(toLink);
     },
