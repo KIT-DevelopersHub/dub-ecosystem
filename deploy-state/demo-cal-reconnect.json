@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "cal-reconnect",
+  "worker": "dub-demo-cal-reconnect",
+  "url": "https://dub-demo-cal-reconnect.developershub-site.workers.dev",
+  "deployedSha": "b60fe872",
+  "branch": "fix/driveshare-calendar-reconnect",
+  "actor": "ko-tarou",
+  "markers": ["calendar-missing-warning"],
+  "live": true,
+  "verifiedAt": "2026-10-14T05:11:04Z",
+  "updatedAt": "2026-10-14T05:11:04Z",
+  "note": "driveshare calendar reconnect"
+}
