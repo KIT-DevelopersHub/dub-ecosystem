@@ -268,10 +268,10 @@ describe("per-user thread flags (/mail/flags — 改善#8)", () => {
       env,
     );
     expect(post.status).toBe(200);
-    expect(await post.json()).toEqual({ threadId: "thr_1", starred: true, archived: false, trashed: false, purged: false });
+    expect(await post.json()).toEqual({ threadId: "thr_1", starred: true, archived: false, trashed: false, purged: false, noReplyAt: null });
     // A fresh request (new "session") reads the persisted flag from the same DB.
     const get = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_alice" }) }), env);
-    expect(await get.json()).toEqual({ items: [{ threadId: "thr_1", starred: true, archived: false, trashed: false, purged: false }] });
+    expect(await get.json()).toEqual({ items: [{ threadId: "thr_1", starred: true, archived: false, trashed: false, purged: false, noReplyAt: null }] });
   });
 
   it("trash then restore round-trips the trashed flag (ゴミ箱→復元), body never deleted", async () => {
@@ -279,13 +279,13 @@ describe("per-user thread flags (/mail/flags — 改善#8)", () => {
     const h = headers({ "x-dub-user-id": "usr_carol" });
     // Trash: the per-user soft-delete. Only this user's flag changes; no message row is touched.
     const trash = await app.fetch(new Request("https://svc/mail/flags/thr_trash", { method: "POST", headers: h, body: JSON.stringify({ trashed: true }) }), env);
-    expect(await trash.json()).toEqual({ threadId: "thr_trash", starred: false, archived: false, trashed: true, purged: false });
+    expect(await trash.json()).toEqual({ threadId: "thr_trash", starred: false, archived: false, trashed: true, purged: false, noReplyAt: null });
     // Restore: flips the same personal flag back off.
     const restore = await app.fetch(new Request("https://svc/mail/flags/thr_trash", { method: "POST", headers: h, body: JSON.stringify({ trashed: false }) }), env);
-    expect(await restore.json()).toEqual({ threadId: "thr_trash", starred: false, archived: false, trashed: false, purged: false });
+    expect(await restore.json()).toEqual({ threadId: "thr_trash", starred: false, archived: false, trashed: false, purged: false, noReplyAt: null });
     // Persisted state reads back as not-trashed (survives a reload).
     const get = await app.fetch(new Request("https://svc/mail/flags", { headers: h }), env);
-    expect(await get.json()).toEqual({ items: [{ threadId: "thr_trash", starred: false, archived: false, trashed: false, purged: false }] });
+    expect(await get.json()).toEqual({ items: [{ threadId: "thr_trash", starred: false, archived: false, trashed: false, purged: false, noReplyAt: null }] });
   });
 
   it("完全に削除 (purge) persists as a per-user flag and NEVER deletes the row", async () => {
@@ -298,10 +298,10 @@ describe("per-user thread flags (/mail/flags — 改善#8)", () => {
     ).run();
     // Purge (完全に削除): only the per-user flag flips; the message body row is untouched.
     const purge = await app.fetch(new Request("https://svc/mail/flags/thr_purge", { method: "POST", headers: h, body: JSON.stringify({ purged: true }) }), env);
-    expect(await purge.json()).toEqual({ threadId: "thr_purge", starred: false, archived: false, trashed: false, purged: true });
+    expect(await purge.json()).toEqual({ threadId: "thr_purge", starred: false, archived: false, trashed: false, purged: true, noReplyAt: null });
     // Reads back (survives a reload) and stamped purged_at.
     const get = await app.fetch(new Request("https://svc/mail/flags", { headers: h }), env);
-    expect(await get.json()).toEqual({ items: [{ threadId: "thr_purge", starred: false, archived: false, trashed: false, purged: true }] });
+    expect(await get.json()).toEqual({ items: [{ threadId: "thr_purge", starred: false, archived: false, trashed: false, purged: true, noReplyAt: null }] });
     const at = raw.prepare(`SELECT purged, purged_at FROM mail_user_flags WHERE owner_user_id='usr_carol' AND thread_id='thr_purge'`).get() as { purged: number; purged_at: string | null };
     expect(at.purged).toBe(1);
     expect(at.purged_at).not.toBeNull();
@@ -332,7 +332,7 @@ describe("per-user thread flags (/mail/flags — 改善#8)", () => {
     const h = headers({ "x-dub-user-id": "usr_bob" });
     await app.fetch(new Request("https://svc/mail/flags/thr_2", { method: "POST", headers: h, body: JSON.stringify({ starred: true }) }), env);
     const res = await app.fetch(new Request("https://svc/mail/flags/thr_2", { method: "POST", headers: h, body: JSON.stringify({ archived: true }) }), env);
-    expect(await res.json()).toEqual({ threadId: "thr_2", starred: true, archived: true, trashed: false, purged: false });
+    expect(await res.json()).toEqual({ threadId: "thr_2", starred: true, archived: true, trashed: false, purged: false, noReplyAt: null });
   });
 
   it("flags are per-user (Bob never sees Alice's stars)", async () => {
@@ -340,6 +340,41 @@ describe("per-user thread flags (/mail/flags — 改善#8)", () => {
     await app.fetch(new Request("https://svc/mail/flags/thr_3", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify({ starred: true }) }), env);
     const bob = await app.fetch(new Request("https://svc/mail/flags", { headers: headers({ "x-dub-user-id": "usr_bob" }) }), env);
     expect(await bob.json()).toEqual({ items: [] });
+  });
+
+  it("返信不要: noReply:true stamps noReplyAt (re-stamped per press), keeps other flags, false clears", async () => {
+    const { env, raw } = makeEnv();
+    const h = headers({ "x-dub-user-id": "usr_dave" });
+    const post = (body: unknown) =>
+      app.fetch(new Request("https://svc/mail/flags/thr_nr", { method: "POST", headers: h, body: JSON.stringify(body) }), env);
+    await post({ starred: true });
+    const first = (await (await post({ noReply: true })).json()) as { starred: boolean; noReplyAt: string | null };
+    expect(first.starred).toBe(true);
+    expect(first.noReplyAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // Reads back from GET (survives a reload).
+    const list = (await (await app.fetch(new Request("https://svc/mail/flags", { headers: h }), env)).json()) as { items: { noReplyAt: string | null }[] };
+    expect(list.items[0]!.noReplyAt).toBe(first.noReplyAt);
+    // A later unrelated patch leaves it alone.
+    const other = (await (await post({ archived: true })).json()) as { noReplyAt: string | null };
+    expect(other.noReplyAt).toBe(first.noReplyAt);
+    // A second press re-stamps now (not kept from the first press).
+    raw.prepare(`UPDATE mail_user_flags SET no_reply_at='2020-01-01T00:00:00.000Z' WHERE thread_id='thr_nr'`).run();
+    const again = (await (await post({ noReply: true })).json()) as { noReplyAt: string | null };
+    expect(again.noReplyAt).not.toBe("2020-01-01T00:00:00.000Z");
+    // Undo clears it.
+    const cleared = (await (await post({ noReply: false })).json()) as { noReplyAt: string | null; starred: boolean };
+    expect(cleared).toMatchObject({ noReplyAt: null, starred: true });
+    const row = raw.prepare(`SELECT no_reply_at FROM mail_user_flags WHERE thread_id='thr_nr'`).get() as { no_reply_at: string | null };
+    expect(row.no_reply_at).toBeNull();
+  });
+
+  it("400s on a non-boolean noReply", async () => {
+    const { env } = makeEnv();
+    const res = await app.fetch(
+      new Request("https://svc/mail/flags/thr_5", { method: "POST", headers: headers({ "x-dub-user-id": "usr_alice" }), body: JSON.stringify({ noReply: "2026-01-01" }) }),
+      env,
+    );
+    expect(res.status).toBe(400);
   });
 
   it("400s on a non-boolean flag", async () => {

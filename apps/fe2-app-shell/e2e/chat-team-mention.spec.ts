@@ -39,17 +39,14 @@ test("@ でチームを選ぶと、そのチーム宛メンションとして投
   await expect(menu).toContainText("チーム全員に通知");
   await page.screenshot({ path: shot("02-team-mention-menu.png"), fullPage: false });
 
-  // 選ぶ → 本文にチームメンションのトークンが入る。
+  // 選ぶ → チームメンションが入る(本文にはトークン、画面にはチップ)。
   await menu.getByRole("button", { name: /法人チーム/ }).first().click();
-  await expect(input).toHaveValue("<!team:team_corp> ");
-  // 候補確定後のキャレット復帰は requestAnimationFrame 経由。人の打鍵より速く型を打つと
-  // トークンの途中に入ってしまうので、キャレットが末尾に戻るのを待ってから続きを打つ。
-  await page.waitForFunction(() => {
-    const el = document.querySelector<HTMLTextAreaElement>('[data-testid="fe6-composer-input"]');
-    return !!el && el.selectionStart === el.value.length;
-  });
+  // 入力欄は書式付き表示: トークンではなくチーム名のチップが入る。
+  await expect(input.locator("[data-mention='team']")).toHaveText("@法人チーム");
+  await expect(input).not.toContainText("<!team:");
   await input.type("契約書のレビューお願いします");
-  await page.getByTestId("fe6-composer-send").click();
+  // 送信ボタンは右下のフィードバック FAB と重なるので Enter で送る。
+  await input.press("Enter");
 
   // 送信後: 生のトークンではなくチーム名のチップで表示される。
   await expect(chips.filter({ hasText: "法人チーム" })).toHaveCount(2);

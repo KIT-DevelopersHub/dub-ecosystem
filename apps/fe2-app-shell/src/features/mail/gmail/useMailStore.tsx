@@ -63,6 +63,7 @@ export type MailAction =
   | { type: "TRASH"; ids: string[] }
   | { type: "PURGE"; ids: string[] } // 完全に削除: per-user permanent hide (no undo/restore)
   | { type: "RESTORE"; ids: string[] }
+  | { type: "DISMISS_NUDGE"; ids: string[] } // 返信不要: drop from the reply nudge (undoable)
   | { type: "TOGGLE_LABEL"; id: string; label: string }
   | { type: "TOGGLE_CHECK"; id: string }
   | { type: "CHECK_ALL"; ids: string[] }
@@ -77,7 +78,7 @@ export type MailAction =
   // ---- server sync ----
   | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson } // replace threads from the gateway
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
-  | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean; purged: boolean }[] } // restore server-persisted star/archive/trash/purge
+  | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean; purged: boolean; noReplyAt?: string | null }[] } // restore server-persisted star/archive/trash/purge/返信不要
   | { type: "HYDRATE_SCHEDULED"; scheduled: mail.ScheduledSendListItem[] } // replace the Scheduled folder list
   | { type: "REQUEST_SYNC" }; // ask the hydration hook to re-fetch (post-send)
 
@@ -163,6 +164,18 @@ export function reducer(state: MailState, action: MailAction): MailState {
         ),
         checked: new Set(),
         openThreadId: state.openThreadId && ids.has(state.openThreadId) ? null : state.openThreadId,
+      };
+    }
+    case "DISMISS_NUDGE": {
+      // 返信不要: stamp now so the nudge skips mail received up to this moment (a newer
+      // received message brings it back). useMailSync POSTs setFlags(noReply:true); the undo
+      // snapshot restores the old stamp, which the sync turns into noReply:false.
+      const ids = new Set(action.ids);
+      const at = new Date().toISOString();
+      return {
+        ...state,
+        undo: { label: "返信不要にしました", prevThreads: state.threads },
+        threads: state.threads.map((t) => (ids.has(t.id) ? { ...t, noReplyAt: at } : t)),
       };
     }
     case "TOGGLE_LABEL":
@@ -301,7 +314,7 @@ export function reducer(state: MailState, action: MailAction): MailState {
           if (!f) return t;
           const folder = f.trashed ? "trash" : f.archived ? "archive" : t.folder;
           // purged (完全に削除) survives the reload: hidden from every folder for this viewer.
-          return { ...t, starred: f.starred, folder, purged: f.purged };
+          return { ...t, starred: f.starred, folder, purged: f.purged, noReplyAt: f.noReplyAt ?? null };
         }),
       };
     }

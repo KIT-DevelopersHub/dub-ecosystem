@@ -351,6 +351,8 @@ export function ChannelPage({
           placeholder={shownChannel ? `${channelHandle(shownChannel, shownChannel.name)} へメッセージ` : "メッセージを入力"}
           error={composerError}
           resolveMentionCandidates={resolveMentionCandidates}
+          resolveUser={resolveUser}
+          resolveTeam={resolveTeam}
           onSend={onSend}
         />
       </section>
