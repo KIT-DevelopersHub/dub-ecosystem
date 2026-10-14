@@ -1,6 +1,6 @@
 // LP 登壇者募集: LP管理 API (/lp/proposals*) + 公開 LP Worker 向け内部 API (/lp/internal/proposals*).
 import { describe, it, expect } from "vitest";
-import { DEFAULT_PROPOSAL_FIELDS } from "../src/proposals";
+import { DEFAULT_PROPOSAL_FIELDS, PER_CLIENT_DAILY_CAP } from "../src/proposals";
 import type { LpProposal, LpProposalsPage, LpProposalsState } from "../src/types";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
@@ -149,7 +149,7 @@ describe.each<RepoKind>(["memory", "d1"])("proposals (%s)", (kind) => {
     const { app } = await setup(kind);
     await open(app);
     const a = "a".repeat(32);
-    for (let i = 0; i < 5; i++) expect((await app.fetch(submit({ ...VALID, clientKey: a }))).status).toBe(201);
+    for (let i = 0; i < PER_CLIENT_DAILY_CAP; i++) expect((await app.fetch(submit({ ...VALID, clientKey: a }))).status).toBe(201);
     expect((await app.fetch(submit({ ...VALID, clientKey: a }))).status).toBe(429);
     expect((await app.fetch(submit({ ...VALID, clientKey: "b".repeat(32) }))).status).toBe(201);
     const page = await body<LpProposalsPage>(await app.fetch(get("/lp/proposals/submissions")));

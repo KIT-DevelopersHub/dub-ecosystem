@@ -28,8 +28,9 @@ export const DEFAULT_PROPOSAL_FIELDS: readonly LpTicketField[] = [
   { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
 ];
 
-/** 同じ送信元（IP ハッシュ）から 1 日 (JST) に受け付ける応募数。全体上限をボット 1 台で使い切らせない。 */
-export const PER_CLIENT_DAILY_CAP = 5;
+/** 同じ送信元（IP ハッシュ）から 1 日 (JST) に受け付ける応募数。全体上限をボット 1 台で使い切らせない。
+ *  学内 NAT など 1 つの IP を共有する応募者を弾かない程度に緩める。 */
+export const PER_CLIENT_DAILY_CAP = 20;
 const CLIENT_KEY_RE = /^[a-f0-9]{16,64}$/;
 
 const DEFAULT_PAGE = 50;
