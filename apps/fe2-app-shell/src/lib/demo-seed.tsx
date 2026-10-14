@@ -3781,6 +3781,35 @@ function validDemoTicketType(input: Record<string, unknown>, partial: boolean): 
   return null;
 }
 
+/** Custom form fields (tickets / proposals): same rules as lp-analytics parseFields. null = invalid. */
+function validDemoFields(raw: unknown, reserved: readonly string[]): DemoTicketField[] | null {
+  const ok =
+    Array.isArray(raw) &&
+    raw.length <= 20 &&
+    new Set(raw.map((f: DemoTicketField) => f?.id)).size === raw.length &&
+    raw.every(
+      (f: DemoTicketField) =>
+        typeof f?.id === "string" &&
+        /^[a-z0-9_-]{1,40}$/.test(f.id) &&
+        !reserved.includes(f.id) &&
+        typeof f.label === "string" &&
+        f.label.trim().length >= 1 &&
+        f.label.length <= 60 &&
+        ["text", "textarea", "select", "checkbox"].includes(f.type) &&
+        typeof f.required === "boolean" &&
+        Array.isArray(f.options) &&
+        (f.type !== "select" || (f.options.length >= 1 && f.options.length <= 20)),
+    );
+  if (!ok) return null;
+  return (raw as DemoTicketField[]).map((f) => ({
+    id: f.id,
+    label: f.label.trim(),
+    type: f.type,
+    required: f.required,
+    options: f.type === "select" ? [...f.options] : [],
+  }));
+}
+
 function createLpTicketsStore() {
   const t0 = "2026-09-20T09:00:00.000Z";
   const settings = {
@@ -3906,31 +3935,9 @@ function createLpTicketsStore() {
     }
 
     if (method === "POST" && pathname === "/api/v1/lp/tickets/fields") {
-      const fields = req.fields;
-      const ok =
-        Array.isArray(fields) &&
-        fields.length <= 20 &&
-        new Set(fields.map((f: DemoTicketField) => f?.id)).size === fields.length &&
-        fields.every(
-          (f: DemoTicketField) =>
-            typeof f?.id === "string" &&
-            /^[a-z0-9_-]{1,40}$/.test(f.id) &&
-            typeof f.label === "string" &&
-            f.label.trim().length >= 1 &&
-            f.label.length <= 60 &&
-            ["text", "textarea", "select", "checkbox"].includes(f.type) &&
-            typeof f.required === "boolean" &&
-            Array.isArray(f.options) &&
-            (f.type !== "select" || (f.options.length >= 1 && f.options.length <= 20)),
-        );
-      if (!ok) return problem("VALIDATION_FAILED", "入力項目の形式が正しくありません", 400);
-      settings.fields = (fields as DemoTicketField[]).map((f) => ({
-        id: f.id,
-        label: f.label.trim(),
-        type: f.type,
-        required: f.required,
-        options: f.type === "select" ? [...f.options] : [],
-      }));
+      const fields = validDemoFields(req.fields, ["name", "email"]);
+      if (!fields) return problem("VALIDATION_FAILED", "入力項目の形式が正しくありません", 400);
+      settings.fields = fields;
       touch();
       return json(state());
     }
@@ -3981,6 +3988,126 @@ function createLpTicketsStore() {
       const items = sorted.slice(startIdx, startIdx + limit);
       const nextCursor = startIdx + limit < sorted.length ? (items[items.length - 1]?.id ?? null) : null;
       return json({ items, nextCursor });
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
+
+// Answers the proposals wire contract in features/lp/lpApi.tsx:
+//   GET   /api/v1/lp/proposals
+//   POST  /api/v1/lp/proposals/enabled           { enabled }
+//   POST  /api/v1/lp/proposals/fields            { fields }   400 on invalid list / fixed ids
+//   GET   /api/v1/lp/proposals/submissions       ?cursor&limit   newest first
+//   PATCH /api/v1/lp/proposals/submissions/:id   { status }
+type DemoProposalStatus = "submitted" | "accepted" | "rejected";
+type DemoProposal = {
+  id: string;
+  speakerName: string;
+  email: string;
+  title: string;
+  abstract: string;
+  answers: { fieldId: string; label: string; value: string }[];
+  status: DemoProposalStatus;
+  reviewedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function createLpProposalsStore() {
+  const settings = {
+    site: "hokuriku-it-conf.com",
+    enabled: false,
+    publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/proposals`,
+    fields: [
+      { id: "format", label: "発表形式", type: "select", required: true, options: ["セッション（30分）", "LT（5分）"] },
+      { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
+      { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
+    ] as DemoTicketField[],
+    updatedAt: null as string | null,
+    updatedBy: null as string | null,
+  };
+  const seed: [string, string, string, string, string, string, DemoProposalStatus, string][] = [
+    ["金沢 花子", "hanako@example.com", "北陸の中小企業で始める生成 AI 活用", "社内の問い合わせ対応を LLM で半自動化した 1 年間の記録。失敗した設計と、続いている運用の工夫を話します。", "セッション（30分）", "株式会社カナザワソフト", "submitted", "2026-10-13T09:12:00Z"],
+    ["富山 次郎", "jiro@example.com", "Cloudflare Workers だけで作るイベントサイト", "無料枠に収めるための D1 / KV の使い分けと、1 Worker に全版を同梱して公開版をフラグで切り替える方法。", "LT（5分）", "", "accepted", "2026-10-12T14:40:00Z"],
+    ["福井 三郎", "saburo@example.com", "学生エンジニアがハッカソンで勝つためのチーム設計", "ハッカソンで 3 回入賞したチームの役割分担と、48 時間の時間配分の実例。", "セッション（30分）", "金沢工業大学", "submitted", "2026-10-11T03:05:00Z"],
+    ["石川 四郎", "shiro@example.com", "レガシー PHP を止めずに TypeScript へ移す", "毎日売上が立つ EC サイトを、止めずに段階移行した手順と計測。", "セッション（30分）", "北陸 EC 株式会社", "rejected", "2026-10-10T08:20:00Z"],
+    ["能登 五月", "satsuki@example.com", "地方からリモートで OSS にコントリビュートする", "初めての PR からメンテナになるまでにやったこと。", "LT（5分）", "フリーランス", "submitted", "2026-10-09T12:00:00Z"],
+  ];
+  const proposals: DemoProposal[] = seed.map(([speakerName, email, title, abstract, format, aff, status, createdAt], i) => ({
+    id: `lpp_demo_${i + 1}`,
+    speakerName,
+    email,
+    title,
+    abstract,
+    answers: [
+      { fieldId: "format", label: "発表形式", value: format },
+      { fieldId: "affiliation", label: "所属", value: aff },
+      { fieldId: "bio", label: "自己紹介", value: "" },
+    ],
+    status,
+    reviewedBy: status === "submitted" ? null : "デモ 管理者",
+    createdAt,
+    updatedAt: createdAt,
+  }));
+  const state = () => ({
+    ...settings,
+    fields: settings.fields.map((f) => ({ ...f, options: [...f.options] })),
+    totals: {
+      total: proposals.length,
+      accepted: proposals.filter((p) => p.status === "accepted").length,
+      rejected: proposals.filter((p) => p.status === "rejected").length,
+    },
+  });
+  const touch = (): void => {
+    settings.updatedAt = new Date().toISOString();
+    settings.updatedBy = "デモ 管理者";
+  };
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (!pathname.startsWith("/api/v1/lp/proposals")) return null;
+    const req = (body ?? {}) as Record<string, unknown>;
+
+    if (method === "GET" && pathname === "/api/v1/lp/proposals") return json(state());
+
+    if (method === "POST" && pathname === "/api/v1/lp/proposals/enabled") {
+      if (typeof req.enabled !== "boolean") return problem("VALIDATION_FAILED", "enabled を指定してください", 400);
+      settings.enabled = req.enabled;
+      touch();
+      return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/proposals/fields") {
+      const fields = validDemoFields(req.fields, ["name", "email", "title", "abstract"]);
+      if (!fields) return problem("VALIDATION_FAILED", "入力項目の形式が正しくありません", 400);
+      settings.fields = fields;
+      touch();
+      return json(state());
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/proposals/submissions") {
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
+      const cursor = url.searchParams.get("cursor");
+      const sorted = [...proposals].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+      const startIdx = cursor ? sorted.findIndex((p) => p.id === cursor) + 1 : 0;
+      const items = sorted.slice(startIdx, startIdx + limit);
+      const nextCursor = startIdx + limit < sorted.length ? (items[items.length - 1]?.id ?? null) : null;
+      return json({ items, nextCursor });
+    }
+
+    const m = /^\/api\/v1\/lp\/proposals\/submissions\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && m) {
+      const p = proposals.find((x) => x.id === decodeURIComponent(m[1]!));
+      if (!p) return problem("NOT_FOUND", "その応募は見つかりません", 404);
+      if (req.status !== "submitted" && req.status !== "accepted" && req.status !== "rejected") {
+        return problem("VALIDATION_FAILED", "選考状況が正しくありません", 400);
+      }
+      p.status = req.status;
+      p.reviewedBy = "デモ 管理者";
+      p.updatedAt = new Date().toISOString();
+      return json(p);
     }
 
     return null;
@@ -4041,6 +4168,8 @@ export function createDemoFetch(): typeof fetch {
   const lpStore = createLpStore();
   // LP チケット販売（券種・入力項目・購入者）— LP管理のチケットタブ。
   const lpTicketsStore = createLpTicketsStore();
+  // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
+  const lpProposalsStore = createLpProposalsStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -4076,6 +4205,7 @@ export function createDemoFetch(): typeof fetch {
       chatStore.handle(method, url.pathname, url, parsedBody) ??
       lpStore.handle(method, url.pathname, url, parsedBody) ??
       lpTicketsStore.handle(method, url.pathname, url, parsedBody) ??
+      lpProposalsStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.

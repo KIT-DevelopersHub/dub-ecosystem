@@ -76,6 +76,8 @@ export async function makeApp(
     dailyCheckoutCap: 300,
     stripe: null,
     stripeWebhookSecret: null,
+    newProposalId: () => id("lpp"),
+    dailyProposalCap: 200,
     ...overrides,
   };
   const app = createApp(deps);

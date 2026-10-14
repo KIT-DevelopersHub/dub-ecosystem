@@ -9,6 +9,7 @@ import type { Context } from "hono";
 import { dubContext, DUB_HEADERS, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
 import { LpService } from "./service";
+import { ProposalService } from "./proposals";
 import { TicketService } from "./tickets";
 import type { AppDeps, IngestVisitRequest, LpDevice, ReqCtx } from "./types";
 
@@ -56,6 +57,7 @@ function parseIngest(body: unknown): IngestVisitRequest {
 export function createApp(deps: AppDeps): Hono {
   const svc = new LpService(deps);
   const tickets = new TicketService(deps);
+  const proposals = new ProposalService(deps);
   const app = new Hono();
 
   app.onError(dubErrorHandler({ service: "lp-analytics" }));
@@ -84,6 +86,9 @@ export function createApp(deps: AppDeps): Hono {
     const raw = await c.req.text();
     return c.json(await tickets.webhook(raw, c.req.header("stripe-signature")));
   });
+  // 登壇者募集 (public LP Worker → service binding).
+  app.get("/lp/internal/proposals", async (c) => c.json(await proposals.getPublic()));
+  app.post("/lp/internal/proposals/submit", async (c) => c.json(await proposals.submit(await readJson(c)), 201));
 
   // ---- user routes (signed-in + LP管理 policy gate) ----
   app.use("/lp/*", async (c, next) => {
@@ -116,6 +121,15 @@ export function createApp(deps: AppDeps): Hono {
     c.json(await tickets.patchType(c.req.param("id"), await readJson(c))),
   );
   app.get("/lp/tickets/orders", edit, async (c) => c.json(await tickets.listOrders(c.req.query())));
+
+  // 登壇者募集: 募集 on/off はチケット販売と同じ lp:publish。応募一覧は個人情報なので edit。
+  app.get("/lp/proposals", view, async (c) => c.json(await proposals.getState()));
+  app.post("/lp/proposals/enabled", publish, async (c) => c.json(await proposals.setEnabled(reqCtx(c), await readJson(c))));
+  app.post("/lp/proposals/fields", edit, async (c) => c.json(await proposals.setFields(reqCtx(c), await readJson(c))));
+  app.get("/lp/proposals/submissions", edit, async (c) => c.json(await proposals.list(c.req.query())));
+  app.patch("/lp/proposals/submissions/:id", edit, async (c) =>
+    c.json(await proposals.setStatus(reqCtx(c), c.req.param("id"), await readJson(c))),
+  );
 
   return app;
 }
