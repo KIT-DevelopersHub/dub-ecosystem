@@ -362,6 +362,20 @@ describe("Drive共有 > 設定 > Google アカウント", () => {
     expect(startGoogleConnect).toHaveBeenCalledWith(`${window.location.origin}/driveshare`, undefined);
   });
 
+  it("an account without calendar access offers 再接続 with its address preselected", async () => {
+    const noCalendar = {
+      ...CONNECTED,
+      accounts: CONNECTED.accounts.map((a) => (a.id === "dga_main" ? { ...a, calendarMissing: true } : a)),
+    };
+    const startGoogleConnect = vi.fn(() => new Promise<{ authUrl: string }>(() => {}));
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(noCalendar), startGoogleConnect })));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-calendar-missing-warning")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-driveshare-google-no-calendar-dga_main")).toHaveTextContent("カレンダー権限なし");
+    await userEvent.click(screen.getByTestId("fe2-driveshare-google-reconnect-dga_main"));
+    expect(startGoogleConnect).toHaveBeenCalledWith(`${window.location.origin}/driveshare`, "hackit.drive@gmail.com");
+  });
+
   it("returning from Google to /driveshare?code&state opens the dialog and completes the add", async () => {
     window.history.replaceState(null, "", "/driveshare?code=c1&state=s1");
     const completeGoogleConnect = vi.fn(() => Promise.resolve(CONNECTED));

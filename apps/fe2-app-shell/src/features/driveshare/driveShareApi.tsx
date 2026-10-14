@@ -117,6 +117,8 @@ export interface DriveGoogleAccount {
   active: boolean;
   /** Google answered invalid_grant (revoked / expired): reconnect needed. */
   needsReconnect: boolean;
+  /** The grant lacks Google カレンダー access (カレンダー > ミーティング): reconnect to grant it. */
+  calendarMissing?: boolean;
 }
 
 export interface DriveGoogleAccountsStatus {
