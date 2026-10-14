@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "chat-sections",
+  "worker": "dub-demo-chat-sections",
+  "url": "https://dub-demo-chat-sections.developershub-site.workers.dev",
+  "deployedSha": "6922f34f",
+  "branch": "feat/chat-channel-delete-sections",
+  "actor": "ko-tarou",
+  "markers": ["fe6-section-create","fe6-settings-delete"],
+  "live": true,
+  "verifiedAt": "2026-10-14T04:09:07Z",
+  "updatedAt": "2026-10-14T04:09:07Z",
+  "note": "chat: channel delete + sections (rebased on 6cd0c8a4)"
+}
