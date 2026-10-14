@@ -109,7 +109,7 @@ describe("LpPreviewScreen", () => {
     nav.back.mockClear();
     renderScreen();
     fireEvent.click(await screen.findByTestId("fe2-lp-preview-open"));
-    expect(nav.navigate).toHaveBeenCalledWith({ to: "/lp/preview", search: { open: "1" } });
+    expect(nav.navigate).toHaveBeenCalledWith({ to: "/lp/preview", search: { open: 1 } });
   });
 
   it("app-back pops the pushed entry, or replaces it once the LP navigated inside the frame", async () => {

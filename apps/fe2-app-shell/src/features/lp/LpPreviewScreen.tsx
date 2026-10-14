@@ -119,7 +119,7 @@ export function LpPreviewScreen(): JSX.Element {
       if (!version) return;
       const label = mode === "on" ? "チケット販売あり" : "チケット販売なし";
       setViewing({ ...version, name: `${version.name}（${label}・プレビュー）`, url: lpPreviewUrl(version.id, mode) });
-      void navigate({ to: "/lp/preview", search: { open: "1" } });
+      void navigate({ to: "/lp/preview", search: { open: 1 } });
     };
     body = (
       <Card
