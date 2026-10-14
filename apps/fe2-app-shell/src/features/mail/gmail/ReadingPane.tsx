@@ -228,10 +228,19 @@ function MessageBlock({
       >
         <Avatar p={msg.from} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <strong style={{ fontSize: "var(--dub-font-size-sm)" }}>{displayName(msg.from)}</strong>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+            <strong style={{ fontSize: "var(--dub-font-size-sm)", whiteSpace: "nowrap", flexShrink: 0 }}>{displayName(msg.from)}</strong>
             {open ? (
-              <span style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
+              <span
+                style={{
+                  fontSize: "var(--dub-font-size-xs)",
+                  color: "var(--dub-color-text-muted)",
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 &lt;{msg.from.email}&gt;
               </span>
             ) : null}
