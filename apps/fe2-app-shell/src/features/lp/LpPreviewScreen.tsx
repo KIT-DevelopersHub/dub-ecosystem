@@ -129,7 +129,7 @@ export function LpPreviewScreen(): JSX.Element {
             />
           </FormField>
           <Stack gap={2}>
-            <div className={styles.statusRow}>
+            <div className={styles.previewTicketsRow}>
               <SegmentedControl<TicketsMode>
                 caption="チケット販売"
                 aria-label="チケット販売"

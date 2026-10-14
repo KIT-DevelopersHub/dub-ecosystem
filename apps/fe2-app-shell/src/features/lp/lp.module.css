@@ -542,6 +542,18 @@
 }
 
 /* ── プレビュー タブ ────────────────────────────────────────────────────── */
+/* 「実際の販売」バッジは caption ではなく切り替えの帯の高さに揃える。 */
+.previewTicketsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--dub-space-3);
+}
+
+.previewTicketsRow > [data-testid="fe2-lp-preview-sales-state"] {
+  margin-bottom: var(--dub-space-3);
+}
+
 .previewFooter {
   display: flex;
   justify-content: flex-end;
