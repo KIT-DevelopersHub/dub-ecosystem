@@ -32,6 +32,21 @@ database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 binding = "SVC_IDENTITY"
 service = "dub-identity-roster"   # POST /authz/check (drive:read / drive:write) + role expansion
 
+[[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"   # POST /members/internal/google-emails (名簿 Gmail = ミーティングの招待先)
+
+# --- Durable Object: カレンダー > ミーティング hourly invitation sync (ALARM, not a Cron Trigger —
+#     the Workers Free plan's 5-cron account cap is full). Kicked by every meeting write and
+#     POST /meetings/sync, then self-reschedules hourly. SQLite-backed = available on the FREE plan.
+[[durable_objects.bindings]]
+name = "MEETING_SYNC"
+class_name = "MeetingSyncDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MeetingSyncDO"]
+
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
 DRIVESHARE_LIST_PAGE_SIZE = "50"

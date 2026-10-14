@@ -131,6 +131,18 @@ describe("<OperateDub> planner", () => {
     expect(persisted(api, "【確認結果】")).toHaveLength(1);
     expect(screen.getAllByTestId("operate-conclusion").map((c) => c.textContent)).toContain("結論: 読み取りだけを行いました。データは変更していません");
   });
+
+  it("a chat still previewing does not lock the input of another chat", async () => {
+    const { operateClient } = setup();
+    operateClient.preview.mockImplementation(() => new Promise(() => {}));
+    await send("概要を差し替えて");
+    await waitFor(() => expect(operateClient.preview).toHaveBeenCalled());
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("chat-new-session"));
+    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
+    fireEvent.click(screen.getAllByTestId("chat-select-session")[1]!);
+    await waitFor(() => expect(screen.getByTestId("chat-input")).toBeDisabled());
+  });
 });
 
 describe("<OperateDub> read budget", () => {

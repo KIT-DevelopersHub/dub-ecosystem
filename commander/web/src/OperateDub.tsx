@@ -60,11 +60,16 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
   const chat = useChat();
   const sessionId = chat.activeId("operate");
   const messages = sessionId ? chat.messages(sessionId) : [];
-  const busy = sessionId ? chat.isRunning(sessionId) : false;
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState<Record<string, ApprovalState>>({});
-  const [pending, setPending] = useState(false);
+  // Per session: a preview/execute in one chat must not lock the composer of another.
+  const [pendingBySession, setPendingBySession] = useState<Record<string, number>>({});
+  const setPending = useCallback(
+    (sid: string, on: boolean) => setPendingBySession((prev) => ({ ...prev, [sid]: Math.max(0, (prev[sid] ?? 0) + (on ? 1 : -1)) })),
+    [],
+  );
+  const busy = sessionId ? chat.isRunning(sessionId) || (pendingBySession[sessionId] ?? 0) > 0 : false;
 
   useEffect(() => {
     let alive = true;
@@ -111,7 +116,7 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
     async (sid: string, planMsgId: string, plan: PlannerPlan, history: ChatMessage[], opts: { rounds?: number } = {}) => {
       if (!catalog) return;
       setApproval(planMsgId, { status: "loading" });
-      setPending(true);
+      setPending(sid, true);
       // The store snapshot in this closure is stale during the flow: track the turn here.
       let hist = history;
       try {
@@ -158,10 +163,10 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
       } catch (e) {
         await fail(sid, planMsgId, e);
       } finally {
-        setPending(false);
+        setPending(sid, false);
       }
     },
-    [answer, catalog, chat, fail, operateClient, setApproval],
+    [answer, catalog, chat, fail, operateClient, setApproval, setPending],
   );
 
   /** 全部読む: the budget is raised once for the preview already read. */
@@ -171,14 +176,14 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
       const s = approvals[msgId];
       if (!sid || s?.status !== "overBudget" || s.preview.readLimit || readBytes(s.preview) > FULL_READ_BUDGET_BYTES) return;
       setApproval(msgId, { status: "readonly" });
-      setPending(true);
+      setPending(sid, true);
       try {
         await answer(sid, s.preview, messages);
       } finally {
-        setPending(false);
+        setPending(sid, false);
       }
     },
-    [answer, approvals, chat, messages, setApproval],
+    [answer, approvals, chat, messages, setApproval, setPending],
   );
 
   /** 絞り込む: the chosen narrowing becomes the next plan (no further automatic rounds). */
@@ -221,7 +226,7 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
       const s = approvals[planMsgId];
       if (!sid || s?.status !== "ready") return;
       setApproval(planMsgId, { status: "executing", preview: s.preview, skip });
-      setPending(true);
+      setPending(sid, true);
       try {
         const result = await operateClient.execute(s.preview.previewId, skip);
         setApproval(planMsgId, { status: "done", preview: s.preview, result });
@@ -231,10 +236,10 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
         setApproval(planMsgId, err);
         if (err.status === "error") await chat.note(sid, `${RESULT_PREFIX.execution}できませんでした: ${err.message}`);
       } finally {
-        setPending(false);
+        setPending(sid, false);
       }
     },
-    [approvals, chat, operateClient, setApproval],
+    [approvals, chat, operateClient, setApproval, setPending],
   );
 
   const cancel = useCallback(
@@ -355,8 +360,8 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
           <ChatComposer
             sessionId={sessionId ?? "none"}
             placeholder="やりたいことを書く（例: 通知『デプロイ完了』を削除して）"
-            disabled={busy || pending || !catalog}
-            busy={busy || pending}
+            disabled={busy || !catalog}
+            busy={busy}
             sendLabel="送信"
             onSend={(text) => void planIntent(text)}
           />

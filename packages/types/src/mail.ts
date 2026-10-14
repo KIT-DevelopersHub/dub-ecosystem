@@ -117,13 +117,28 @@ export interface MailMessageListItem extends MailMessage, MailMessageState {
   // is visible only through oversight (mail:read_all) or role sharing (mail:read_role_shared).
   // Absent from older gateways — treat absent as true.
   mine?: boolean;
+  // ADDITIVE: Cc recipients of a received message (mail_inbound.cc_json, 0012). Omitted when
+  // the message had none or was stored before 0012.
+  cc?: MailAddress[];
 }
 /** Detail view: list item plus the full body. Inbound persists text; htmlBody is
  *  optional (present only when a message carried an HTML part) and MUST be sanitized
  *  before rendering. */
+/** Delivery details of a received message, read from its headers at ingest (Gmail's
+ *  "show details" dialog). Every field is best-effort: absent = the header was missing
+ *  or the row was stored before 0013. */
+export interface MailHeaderMeta {
+  replyTo?: MailAddress[]; // Reply-To header
+  deliveredTo?: string; // envelope recipient = the address this copy reached (the owner's own)
+  mailedBy?: string; // envelope sender (MAIL FROM) domain
+  signedBy?: string; // DKIM signing domain that passed (Cloudflare's ARC-Authentication-Results)
+  tls?: boolean; // whether the hop into Cloudflare used TLS; absent = unknown
+}
 export interface MailMessageDetail extends MailMessageListItem {
   textBody: string;
   htmlBody?: string;
+  // ADDITIVE (0013): delivery details for the "show details" dialog. Omitted when unknown.
+  headerMeta?: MailHeaderMeta;
   // ADDITIVE (attachments slice): attachment metadata for this message. Omitted/[] when
   // the message carried none; each entry links to GET …/messages/:id/attachments/:attId.
   attachments?: MailAttachment[];

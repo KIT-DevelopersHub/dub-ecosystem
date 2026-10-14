@@ -27,6 +27,8 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0009_user_flags_purged.sql"),
   join(HERE, "../db/0010_scheduled_send.sql"),
   join(HERE, "../db/0011_user_flags_no_reply.sql"),
+  join(HERE, "../db/0012_inbound_cc.sql"),
+  join(HERE, "../db/0013_inbound_header_meta.sql"),
 ];
 
 function norm(v: unknown): unknown {

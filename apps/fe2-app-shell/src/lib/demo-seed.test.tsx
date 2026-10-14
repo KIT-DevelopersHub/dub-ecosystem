@@ -125,6 +125,45 @@ describe("event section layout (shared D&D order/visibility)", () => {
   });
 });
 
+describe("calendar meetings (カレンダー > ミーティング)", () => {
+  interface Meeting { id: string; title: string; targetName: string; meetUrl: string | null; startsAt: string }
+  interface List { items: Meeting[]; account: { email: string | null; calendarReady: boolean } }
+
+  it("grants the demo admin the カレンダー app and both meeting keys", async () => {
+    const me = await api().auth.me();
+    for (const k of ["app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit"]) {
+      expect(me.permissions).toContain(k);
+    }
+  });
+
+  it("serves seeded meetings + targets on a connected shared account", async () => {
+    const a = api();
+    const list = await a.request<List>({ method: "GET", path: "/api/v1/meetings" });
+    expect(list.account).toEqual({ email: "hackit.dub@gmail.com", calendarReady: true });
+    expect(list.items.map((m) => m.title)).toEqual(expect.arrayContaining(["全体定例", "統括定例"]));
+    const targets = await a.request<{ items: { id: string; isMine: boolean }[] }>({ method: "GET", path: "/api/v1/meetings/targets" });
+    expect(targets.items.filter((t) => t.isMine).map((t) => t.id)).toEqual(["all", "role_lead"]);
+  });
+
+  it("create → patch → delete round-trips in the session, with a fake Meet link", async () => {
+    const a = api();
+    const created = await a.request<Meeting>({
+      method: "POST",
+      path: "/api/v1/meetings",
+      body: { title: "週次", targetId: "role_member", startsAt: "2026-10-19T12:00:00.000Z", durationMinutes: 60, recurrence: "weekly" },
+    });
+    expect(created.meetUrl).toMatch(/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
+    expect(created.targetName).toBe("member");
+    const patched = await a.request<Meeting>({ method: "PATCH", path: `/api/v1/meetings/${created.id}`, body: { title: "週次MTG" } });
+    expect(patched.title).toBe("週次MTG");
+    await a.request({ method: "DELETE", path: `/api/v1/meetings/${created.id}` });
+    const list = await a.request<List>({ method: "GET", path: "/api/v1/meetings" });
+    expect(list.items.some((m) => m.id === created.id)).toBe(false);
+    const sync = await a.request<{ withoutGoogleAccount: unknown[] }>({ method: "POST", path: "/api/v1/meetings/sync" });
+    expect(sync.withoutGoogleAccount.length).toBeGreaterThan(0);
+  });
+});
+
 describe("isDemoEnabled", () => {
   it("is true only for explicit opt-in flags", () => {
     expect(isDemoEnabled({ VITE_DEMO: "1" })).toBe(true);
@@ -142,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 67-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 69-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -151,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(67);
+    expect(catalog).toHaveLength(69);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -310,6 +349,31 @@ describe("demo outbox reply threading", () => {
     const sent = await client.request<{ items: { subject: string; threadId?: string }[] }>({ method: "GET", path: "/api/v1/mail/sent" });
     expect(sent.items.find((s) => s.subject === "Re: 登壇のご相談")?.threadId).toBe("thr_1");
     expect(sent.items.find((s) => s.subject === "新規")?.threadId).toBeUndefined();
+  });
+});
+
+describe("demo mail Cc", () => {
+  it("serves a received mail with Cc on list, detail and thread", async () => {
+    const client = api();
+    const cc = [{ email: "yuki@example.com", name: "伊藤 由紀" }, { email: "office@example.net" }];
+    const list = await client.request<{ items: { id: string; cc?: unknown }[] }>({ method: "GET", path: "/api/v1/mail/messages" });
+    expect(list.items.find((m) => m.id === "msg_4")?.cc).toEqual(cc);
+    const thread = await client.request<{ messages: { cc?: unknown }[] }>({ method: "GET", path: "/api/v1/mail/threads/thr_4" });
+    expect(thread.messages[0]!.cc).toEqual(cc);
+  });
+
+  it("stores the archive auto-CC but hides it from Sent list/detail (like the gateway)", async () => {
+    globalThis.localStorage.removeItem("dub_demo_sent_usr_demo");
+    const client = api();
+    await client.request({ method: "POST", path: "/api/v1/mail/outbox", body: { to: [{ email: "x@example.com" }], cc: [{ email: "boss@example.com" }], subject: "cc", textBody: "b" } });
+    await client.request({ method: "POST", path: "/api/v1/mail/outbox", body: { to: [{ email: "x@example.com" }], subject: "nocc", textBody: "b" } });
+    expect(globalThis.localStorage.getItem("dub_demo_sent_usr_demo")).toContain("archive@developershub.jp");
+    const sent = await client.request<{ items: { id: string; subject: string; cc?: unknown }[] }>({ method: "GET", path: "/api/v1/mail/sent" });
+    const withCc = sent.items.find((s) => s.subject === "cc")!;
+    expect(withCc.cc).toEqual([{ email: "boss@example.com" }]);
+    expect(sent.items.find((s) => s.subject === "nocc")!.cc).toBeUndefined();
+    const detail = await client.request<{ cc?: unknown }>({ method: "GET", path: `/api/v1/mail/sent/${withCc.id}` });
+    expect(detail.cc).toEqual([{ email: "boss@example.com" }]);
   });
 });
 

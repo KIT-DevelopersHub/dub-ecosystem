@@ -81,6 +81,9 @@ export const ROUTES: readonly GatewayRoute[] = [
   // Hackit Drive sharing manager (fe2 driveshare feature). Manages Google Drive
   // permissions for the shared Gmail via drive-share-service (drive:read / drive:write).
   { segment: "driveshare", binding: "SVC_DRIVE_SHARE", auth: "required" },
+  // カレンダー > ミーティング: meetings on the shared Google account connected in Drive共有 > 設定
+  // (same Worker; calendar:meetings_view / calendar:meetings_edit).
+  { segment: "meetings", binding: "SVC_DRIVE_SHARE", auth: "required" },
   { segment: "chat", binding: "SVC_CHAT", auth: "required" }, // HTTP only; WS upgrade is rejected
   {
     // User-facing mail: inbox reads (/mail/messages, /mail/threads) + compose

@@ -21,7 +21,7 @@
 // boot mock and surface as a normal NOT_FOUND (in-frame fallback, never a white
 // screen), so "what is seeded vs. still stubbed" stays honest.
 import type { ErrorResponse } from "@dub/errors";
-import type { auditLog, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
+import type { auditLog, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
@@ -58,6 +58,9 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
+  // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
+  "calendar:meetings_view",
+  "calendar:meetings_edit",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -559,6 +562,14 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
     to: [{ email: "demo@developershub.jp" }], subject: "会場下見の日程", snippet: "来週の下見日程を共有します。",
     receivedAt: daysAgoIso(4), read: true, mine: true,
   },
+  {
+    // Received mail with Cc recipients (受信メールの CC 表示): the reading pane shows a Cc line.
+    id: "msg_4", messageId: "<m4@demo>", threadId: "thr_4", from: { email: "kenji@example.com", name: "高橋 健二" },
+    to: [{ email: "demo@developershub.jp" }],
+    cc: [{ email: "yuki@example.com", name: "伊藤 由紀" }, { email: "office@example.net" }],
+    subject: "懇親会会場の候補（CC共有）", snippet: "懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。",
+    receivedAt: daysAgoIso(2), read: false, mine: true,
+  },
 ];
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
@@ -578,12 +589,25 @@ const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
     ],
   },
   msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
+  msg_4: {
+    ...MAIL_LIST[3]!,
+    textBody: "高橋です。\n\n懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。\n\n1. 駅前のイタリアン（40名）\n2. 学内カフェテリア（60名）\n\nご意見をお願いします。",
+    // 「宛先: 自分, 伊藤 由紀, … ▾」→ 詳細ダイアログ (返信先 / 送信元 / 署名元 / セキュリティ).
+    headerMeta: {
+      replyTo: [{ email: "kondankai@example.com", name: "懇親会幹事" }],
+      deliveredTo: "demo@developershub.jp",
+      mailedBy: "mail.example.com",
+      signedBy: "example.com",
+      tls: true,
+    },
+  },
 };
 
 const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
+  thr_4: { id: "thr_4", messages: [MAIL_DETAIL.msg_4!] },
 };
 
 // ── demo accounts (per-account mail scope) ────────────────────────────────────
@@ -649,8 +673,16 @@ const LEAD_INBOX: mail.MailMessageDetail[] = [
 ];
 
 // Fixed archive address auto-CC'd on every send (mirrors the mail-gateway MAIL_ARCHIVE_CC
-// behavior so the demo/E2E shows the archive copy in the Sent detail's Cc).
+// behavior). Stored on the sent row like the gateway, but hidden from the read responses
+// (hideArchiveCc) exactly as the gateway does — it is an internal mailbox, not a person.
 const DEMO_ARCHIVE_CC = "archive@developershub.jp";
+
+function hideArchiveCc<T extends { cc?: mail.MailAddress[] }>(item: T): T {
+  if (!item.cc) return item;
+  const { cc, ...rest } = item;
+  const kept = cc.filter((a) => a.email.trim().toLowerCase() !== DEMO_ARCHIVE_CC);
+  return (kept.length > 0 ? { ...rest, cc: kept } : rest) as T;
+}
 
 // Oversight account (info@): an INDIVIDUAL admin account holding mail:read_all, so it
 // sees EVERY account's inbox + sent mail — the supervisor / archive view. Contrast with
@@ -953,7 +985,7 @@ function createMailStore() {
       const items: mail.MailSentListItem[] = readSent.map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
-        return listItem;
+        return hideArchiveCc(listItem);
       });
       return json(page(items));
     }
@@ -961,7 +993,7 @@ function createMailStore() {
       const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
       if (m) {
         const found = readSent.find((s) => s.id === decodeURIComponent(m[1]!));
-        return found ? json(found) : notFound(`GET ${pathname}`);
+        return found ? json(hideArchiveCc(found)) : notFound(`GET ${pathname}`);
       }
     }
 
@@ -2160,6 +2192,188 @@ function createDriveGoogleDemoStore() {
         return problem("CONFLICT", "使用中のアカウントは削除できません。先に別のアカウントに切り替えてください。", 409);
       }
       return write({ ...cur, accounts: cur.accounts.filter((a) => a.id !== target.id) });
+    }
+    return null;
+  }
+  return { handle };
+}
+
+// ── calendar meetings (カレンダー > ミーティング) ─────────────────────────────
+// Mirrors drive-share-service /meetings: meetings live on the shared Google account with a
+// fake Meet link; nothing reaches Google. State lasts for the tab (sessionStorage).
+// ?meetingAccount=none|reconnect previews the 未接続 / 再接続 banners.
+const DEMO_MEETINGS_KEY = "dub-demo:calendar-meetings";
+
+const DEMO_MEETING_TARGETS: meeting.MeetingTarget[] = [
+  { id: "all", name: "全体", memberCount: 9, isMine: true },
+  { id: "role_lead", name: "統括", memberCount: 2, isMine: true },
+  { id: "role_maintainer", name: "maintainer", memberCount: 3, isMine: false },
+  { id: "role_member", name: "member", memberCount: 4, isMine: false },
+];
+
+/** JST date `days` from today at hh:mm (UTC ISO). */
+function demoJstAt(days: number, hh: number, mm: number): string {
+  const jst = new Date(Date.now() + 9 * 3_600_000);
+  return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() + days, hh - 9, mm)).toISOString();
+}
+
+function demoMeetUrl(): string {
+  const r = (n: number) => Array.from({ length: n }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("");
+  return `https://meet.google.com/${r(3)}-${r(4)}-${r(3)}`;
+}
+
+function seedMeetings(): meeting.Meeting[] {
+  const base = { createdBy: ME_ID as meeting.Meeting["createdBy"], createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z" };
+  return [
+    {
+      ...base,
+      id: "mtg_all",
+      title: "全体定例",
+      description: "今週の進捗共有と来週の予定確認",
+      targetId: "all",
+      targetName: "全体",
+      startsAt: "2026-09-07T12:00:00.000Z", // 月曜 21:00 JST
+      durationMinutes: 60,
+      recurrence: "weekly",
+      until: null,
+      meetUrl: "https://meet.google.com/abc-defg-hij",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_all",
+      attendeeCount: 9,
+    },
+    {
+      ...base,
+      id: "mtg_lead",
+      title: "統括定例",
+      description: null,
+      targetId: "role_lead",
+      targetName: "統括",
+      startsAt: "2026-09-10T11:00:00.000Z", // 木曜 20:00 JST
+      durationMinutes: 30,
+      recurrence: "biweekly",
+      until: null,
+      meetUrl: "https://meet.google.com/kln-opqr-stu",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_lead",
+      attendeeCount: 2,
+    },
+    {
+      ...base,
+      id: "mtg_kickoff",
+      title: "Hackit 秋 キックオフ",
+      description: "会場・広報・審査の担当決め",
+      targetId: "role_maintainer",
+      targetName: "maintainer",
+      startsAt: demoJstAt(3, 19, 0),
+      durationMinutes: 90,
+      recurrence: "none",
+      until: null,
+      meetUrl: "https://meet.google.com/vwx-yzab-cde",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_kickoff",
+      attendeeCount: 3,
+    },
+  ];
+}
+
+function createMeetingsDemoStore() {
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  let memory: meeting.Meeting[] | null = null;
+  const read = (): meeting.Meeting[] => {
+    const raw = storage()?.getItem(DEMO_MEETINGS_KEY);
+    if (raw) return JSON.parse(raw) as meeting.Meeting[];
+    return (memory ??= seedMeetings());
+  };
+  const write = (next: meeting.Meeting[]) => {
+    memory = next;
+    storage()?.setItem(DEMO_MEETINGS_KEY, JSON.stringify(next));
+  };
+  const account = (): meeting.MeetingAccountState => {
+    const mode = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("meetingAccount");
+    if (mode === "none") return { email: null, calendarReady: false };
+    if (mode === "reconnect") return { email: "hackit.dub@gmail.com", calendarReady: false };
+    return { email: "hackit.dub@gmail.com", calendarReady: true };
+  };
+  const target = (id: string) => DEMO_MEETING_TARGETS.find((t) => t.id === id);
+  const BASE = "/api/v1/meetings";
+
+  function handle(method: string, pathname: string, body: unknown): Response | null {
+    if (!pathname.startsWith(BASE)) return null;
+    if (method === "GET" && pathname === BASE) {
+      const res: meeting.ListMeetingsResponse = { items: read(), account: account() };
+      return json(res);
+    }
+    if (method === "GET" && pathname === `${BASE}/targets`) {
+      const res: meeting.ListMeetingTargetsResponse = { items: DEMO_MEETING_TARGETS };
+      return json(res);
+    }
+    if (method === "POST" && pathname === `${BASE}/sync`) {
+      const res: meeting.SyncMeetingsResponse = {
+        syncedAt: new Date().toISOString(),
+        meetings: read().length,
+        invitedAdded: 1,
+        invitedRemoved: 0,
+        withoutGoogleAccount: [{ userId: "usr_carol" as meeting.MemberWithoutGoogleAccount["userId"], name: "鈴木 一郎", email: "ichiro@developershub.jp" }],
+      };
+      return json(res);
+    }
+    if (method === "POST" && pathname === BASE) {
+      const b = (body ?? {}) as Partial<meeting.CreateMeetingRequest>;
+      const t = b.targetId ? target(b.targetId) : undefined;
+      if (!b.title?.trim() || !t || !b.startsAt || !b.durationMinutes || !b.recurrence) {
+        return problem("VALIDATION_FAILED", "タイトル・対象・日時・所要時間・繰り返しは必須です", 400);
+      }
+      const now = new Date().toISOString();
+      const created: meeting.Meeting = {
+        id: `mtg_${Date.now().toString(36)}`,
+        title: b.title.trim(),
+        description: b.description ?? null,
+        targetId: t.id,
+        targetName: t.name,
+        startsAt: b.startsAt,
+        durationMinutes: b.durationMinutes,
+        recurrence: b.recurrence,
+        until: b.recurrence === "none" ? null : (b.until ?? null),
+        meetUrl: demoMeetUrl(),
+        htmlLink: "https://calendar.google.com/calendar/",
+        attendeeCount: t.memberCount,
+        createdBy: ME_ID as meeting.Meeting["createdBy"],
+        createdAt: now,
+        updatedAt: now,
+      };
+      write([...read(), created]);
+      return json(created, 201);
+    }
+    const one = /^\/api\/v1\/meetings\/([^/]+)$/.exec(pathname);
+    if (one) {
+      const id = decodeURIComponent(one[1]!);
+      const cur = read();
+      const found = cur.find((m) => m.id === id);
+      if (!found) return problem("NOT_FOUND", "meeting not found", 404);
+      if (method === "DELETE") {
+        write(cur.filter((m) => m.id !== id));
+        return json(null, 204);
+      }
+      if (method === "PATCH") {
+        const b = (body ?? {}) as meeting.UpdateMeetingRequest;
+        const t = b.targetId ? target(b.targetId) : target(found.targetId);
+        if (!t) return problem("VALIDATION_FAILED", "対象が見つかりません", 400);
+        const next: meeting.Meeting = {
+          ...found,
+          ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)),
+          description: b.description !== undefined ? b.description ?? null : found.description,
+          targetId: t.id,
+          targetName: t.name,
+          attendeeCount: t.memberCount,
+          updatedAt: new Date().toISOString(),
+        };
+        if (next.recurrence === "none") next.until = null;
+        write(cur.map((m) => (m.id === id ? next : m)));
+        return json(next);
+      }
     }
     return null;
   }
@@ -3654,6 +3868,8 @@ export function createDemoFetch(): typeof fetch {
   // Mutable Hackit Drive sharing state (grant/change/revoke/link toggle persist).
   const driveShareStore = createDriveShareStore();
   const driveGoogleStore = createDriveGoogleDemoStore();
+  // カレンダー > ミーティング (fake Meet links; nothing reaches Google).
+  const meetingsStore = createMeetingsDemoStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
@@ -3688,6 +3904,7 @@ export function createDemoFetch(): typeof fetch {
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
+      meetingsStore.handle(method, url.pathname, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??

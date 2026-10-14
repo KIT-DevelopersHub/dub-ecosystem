@@ -18,7 +18,7 @@ import { createApp } from "../src/app";
 import { POLICY_TABLE } from "../src/policy-table";
 import { createDriveShareService } from "../src/service";
 import { createMockDriveShareClient } from "../src/mock-client";
-import { allowAll, AUTHED, buildRoleGrants, fakeRoster, stubGoogleAccount } from "./helpers";
+import { allowAll, AUTHED, buildRoleGrants, fakeRoster, stubGoogleAccount, buildMeetings } from "./helpers";
 import type { PermissionGranter } from "@dub/policy-gate";
 
 function buildApp(authz: PermissionGranter = allowAll) {
@@ -28,7 +28,7 @@ function buildApp(authz: PermissionGranter = allowAll) {
     drive: client,
     roster: fakeRoster({ role_sys_member: ["staff-a@example.com"] }, { role_sys_member: "member" }),
   });
-  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount() });
+  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service });
 }
 
 describe("route coverage (POLICY_TABLE <-> router)", () => {
@@ -57,10 +57,14 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 // Drive-relevant grants of each system role, per the identity migrations that define them:
 //   0002 (domain keys: maintainer gets drive:read/write), 0005 (admin gets drive:read/write),
 //   0008 (per-app tier: admin/maintainer 編集, organizer/member 閲覧),
-//   0017 (Drive共有 の「設定」: only the system admin role gets settings_view + settings_edit).
+//   0017 (Drive共有 の「設定」: only the system admin role gets settings_view + settings_edit),
+//   0019 (カレンダー > ミーティング: only the system admin role gets meetings_view + meetings_edit).
 // The last two rows are not roles but the two legacy shapes the table was written to fix.
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  admin: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin", "drive:settings_view", "drive:settings_edit"],
+  admin: [
+    "app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin", "drive:settings_view", "drive:settings_edit",
+    "app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit",
+  ],
   maintainer: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write"],
   organizer: ["app:driveshare:view"],
   member: ["app:driveshare:view"],
@@ -75,6 +79,14 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "settings-edit-on-view-tier": ["app:driveshare:view", "drive:read", "drive:settings_view", "drive:settings_edit"],
   // identity:admin alone does not open the settings (0017 grants the keys to role_sys_admin only).
   "identity-admin-without-settings-keys": ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin"],
+  // カレンダー at 編集 alone does not open ミーティング (0019 grants its keys to role_sys_admin only).
+  "calendar-editor-without-meeting-keys": ["app:calendar:view", "app:calendar:edit"],
+  // ミーティング「見る」 only.
+  "meetings-view": ["app:calendar:view", "app:calendar:edit", "calendar:meetings_view"],
+  // ミーティング「設定」 on a 閲覧-only カレンダー: the app tier caps it at reading.
+  "meetings-edit-on-view-tier": ["app:calendar:view", "calendar:meetings_view", "calendar:meetings_edit"],
+  // Full ミーティング without any Drive共有 key: meetings never open Drive.
+  "meetings-editor": ["app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit"],
 };
 
 /**
@@ -114,10 +126,13 @@ const SETTINGS_WRITE = [
   "POST /driveshare/google-account/callback",
   "POST /driveshare/google-account/connect",
 ];
+// カレンダー > ミーティング.
+const MEETINGS_READ = ["GET /meetings", "GET /meetings/targets"];
+const MEETINGS_WRITE = ["DELETE /meetings/:id", "PATCH /meetings/:id", "POST /meetings", "POST /meetings/sync"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /internal/health"];
 // The whole external surface — what a caller can reach through api-gateway at most.
-const FULL = [...READS, ...WRITES, ...SETTINGS_READ, ...SETTINGS_WRITE].sort();
+const FULL = [...READS, ...WRITES, ...SETTINGS_READ, ...SETTINGS_WRITE, ...MEETINGS_READ, ...MEETINGS_WRITE].sort();
 const OPERATOR = [...READS, ...WRITES].sort();
 const READ_ONLY = [...READS].sort();
 const NONE: string[] = [];
@@ -134,6 +149,10 @@ describe("role x endpoint matrix (frozen)", () => {
     "settings-view": [...OPERATOR, ...SETTINGS_READ].sort(),
     "settings-edit-on-view-tier": [...READS, ...SETTINGS_READ].sort(),
     "identity-admin-without-settings-keys": OPERATOR,
+    "calendar-editor-without-meeting-keys": NONE,
+    "meetings-view": [...MEETINGS_READ].sort(),
+    "meetings-edit-on-view-tier": [...MEETINGS_READ].sort(),
+    "meetings-editor": [...MEETINGS_READ, ...MEETINGS_WRITE].sort(),
   };
 
   it("matches the committed matrix for every role", () => {
