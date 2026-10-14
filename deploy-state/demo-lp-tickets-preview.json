@@ -3,12 +3,12 @@
   "slug": "lp-tickets-preview",
   "worker": "dub-demo-lp-tickets-preview",
   "url": "https://dub-demo-lp-tickets-preview.developershub-site.workers.dev",
-  "deployedSha": "5b6fc170",
+  "deployedSha": "3d9ed19b",
   "branch": "feat/lp-tickets-preview",
   "actor": "ko-tarou",
-  "markers": ["全ユーザーに公開されることを理解しました","lp-tickets-preview-demo.developershub-site.workers.dev"],
+  "markers": ["lp-tickets-preview-demo.developershub-site.workers.dev"],
   "live": true,
-  "verifiedAt": "2026-10-13T17:01:55Z",
-  "updatedAt": "2026-10-13T17:01:55Z",
-  "note": "LP チケット公開前プレビュー + 公開確認強化"
+  "verifiedAt": "2026-10-14T02:21:46Z",
+  "updatedAt": "2026-10-14T02:21:46Z",
+  "note": ""
 }
