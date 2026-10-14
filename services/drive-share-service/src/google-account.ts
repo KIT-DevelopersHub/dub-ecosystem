@@ -176,11 +176,17 @@ export function createGoogleAccountService(deps: {
 
   /** Try the token so a revoked / expired grant shows before anyone hits Drive.
    *  invalid_grant => reconnect; other failures (network) are not the account's fault. */
-  async function probe(credentials: GoogleCredentials): Promise<{ accessToken: string | null; invalid: boolean }> {
+  async function probe(
+    credentials: GoogleCredentials,
+  ): Promise<{ accessToken: string | null; invalid: boolean; calendarMissing: boolean }> {
     try {
-      return { accessToken: await createTokenProvider({ credentials, fetchImpl: doFetch, now }).getAccessToken(), invalid: false };
+      const token = createTokenProvider({ credentials, fetchImpl: doFetch, now });
+      const accessToken = await token.getAccessToken();
+      // Granted on the refresh just made (cached). Unknown (null) is given the benefit of the doubt.
+      const scopes = await token.grantedScopes();
+      return { accessToken, invalid: false, calendarMissing: scopes !== null && !scopes.includes(CALENDAR_SCOPE) };
     } catch (err) {
-      return { accessToken: null, invalid: isInvalidGrant(err) };
+      return { accessToken: null, invalid: isInvalidGrant(err), calendarMissing: false };
     }
   }
 
@@ -191,7 +197,7 @@ export function createGoogleAccountService(deps: {
     ]);
     const entries: Promise<GoogleAccountEntry>[] = rows.map(async (row): Promise<GoogleAccountEntry> => {
       const credentials = await credentialsFor(env, deps.key, row);
-      const needsReconnect = credentials ? (await probe(credentials)).invalid : true;
+      const probed = credentials ? await probe(credentials) : null;
       return {
         id: row.id,
         kind: "connected",
@@ -199,13 +205,14 @@ export function createGoogleAccountService(deps: {
         connectedAt: row.connectedAt,
         connectedBy: row.connectedBy,
         active: row.id === activeRow?.id,
-        needsReconnect,
+        needsReconnect: probed ? probed.invalid : true,
+        calendarMissing: probed?.calendarMissing ?? false,
       };
     });
     const secret = secretCredentials(env);
     if (secret) {
       entries.unshift(
-        probe(secret).then(async ({ accessToken, invalid }): Promise<GoogleAccountEntry> => ({
+        probe(secret).then(async ({ accessToken, invalid, calendarMissing }): Promise<GoogleAccountEntry> => ({
           id: SECRET_ACCOUNT_ID,
           kind: "secret",
           email: accessToken ? await accountEmail(accessToken) : null,
@@ -213,6 +220,7 @@ export function createGoogleAccountService(deps: {
           connectedBy: null,
           active: !activeRow,
           needsReconnect: invalid,
+          calendarMissing,
         })),
       );
     }

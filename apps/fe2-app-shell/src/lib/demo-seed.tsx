@@ -2066,8 +2066,8 @@ const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 // No real OAuth in the demo: "add account" returns the SPA's own /driveshare?code&state, which
 // stands in for Google's redirect. The list lives in sessionStorage so it survives that
 // full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
-// unconfigured on any demo URL (remembered for the tab).
-type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "unconfigured";
+// nocalendar|unconfigured on any demo URL (remembered for the tab).
+type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "nocalendar" | "unconfigured";
 interface DemoDriveGoogleAccount {
   id: string;
   kind: "connected" | "secret";
@@ -2076,6 +2076,7 @@ interface DemoDriveGoogleAccount {
   connectedBy: string | null;
   active: boolean;
   needsReconnect: boolean;
+  calendarMissing?: boolean;
 }
 interface DemoDriveGoogleStatus {
   accounts: DemoDriveGoogleAccount[];
@@ -2113,6 +2114,7 @@ function demoDriveGoogleStatus(mode: DemoDriveGoogleMode): DemoDriveGoogleStatus
   };
   if (mode === "none") return { accounts: [], canConnect: true };
   if (mode === "invalid") return { accounts: [secret, sub, { ...main, needsReconnect: true }], canConnect: true };
+  if (mode === "nocalendar") return { accounts: [secret, sub, { ...main, calendarMissing: true }], canConnect: true };
   if (mode === "unconfigured") return { accounts: [{ ...secret, active: true }], canConnect: false };
   return { accounts: [secret, sub, main], canConnect: true };
 }
@@ -2126,7 +2128,7 @@ function createDriveGoogleDemoStore() {
     }
   };
   const fromUrl = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("driveGoogle");
-  if (fromUrl && ["connected", "none", "invalid", "unconfigured"].includes(fromUrl)) {
+  if (fromUrl && ["connected", "none", "invalid", "nocalendar", "unconfigured"].includes(fromUrl)) {
     storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(demoDriveGoogleStatus(fromUrl as DemoDriveGoogleMode)));
   }
   const read = (): DemoDriveGoogleStatus => {
@@ -2167,7 +2169,7 @@ function createDriveGoogleDemoStore() {
         return write({
           ...cur,
           accounts: cur.accounts.map((a) =>
-            a.id === known.id ? { ...a, needsReconnect: false, connectedAt: new Date().toISOString() } : a,
+            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, connectedAt: new Date().toISOString() } : a,
           ),
         });
       }
