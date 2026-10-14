@@ -125,6 +125,45 @@ describe("event section layout (shared D&D order/visibility)", () => {
   });
 });
 
+describe("calendar meetings (カレンダー > ミーティング)", () => {
+  interface Meeting { id: string; title: string; targetName: string; meetUrl: string | null; startsAt: string }
+  interface List { items: Meeting[]; account: { email: string | null; calendarReady: boolean } }
+
+  it("grants the demo admin the カレンダー app and both meeting keys", async () => {
+    const me = await api().auth.me();
+    for (const k of ["app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit"]) {
+      expect(me.permissions).toContain(k);
+    }
+  });
+
+  it("serves seeded meetings + targets on a connected shared account", async () => {
+    const a = api();
+    const list = await a.request<List>({ method: "GET", path: "/api/v1/meetings" });
+    expect(list.account).toEqual({ email: "hackit.dub@gmail.com", calendarReady: true });
+    expect(list.items.map((m) => m.title)).toEqual(expect.arrayContaining(["全体定例", "統括定例"]));
+    const targets = await a.request<{ items: { id: string; isMine: boolean }[] }>({ method: "GET", path: "/api/v1/meetings/targets" });
+    expect(targets.items.filter((t) => t.isMine).map((t) => t.id)).toEqual(["all", "role_lead"]);
+  });
+
+  it("create → patch → delete round-trips in the session, with a fake Meet link", async () => {
+    const a = api();
+    const created = await a.request<Meeting>({
+      method: "POST",
+      path: "/api/v1/meetings",
+      body: { title: "週次", targetId: "role_member", startsAt: "2026-10-19T12:00:00.000Z", durationMinutes: 60, recurrence: "weekly" },
+    });
+    expect(created.meetUrl).toMatch(/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
+    expect(created.targetName).toBe("member");
+    const patched = await a.request<Meeting>({ method: "PATCH", path: `/api/v1/meetings/${created.id}`, body: { title: "週次MTG" } });
+    expect(patched.title).toBe("週次MTG");
+    await a.request({ method: "DELETE", path: `/api/v1/meetings/${created.id}` });
+    const list = await a.request<List>({ method: "GET", path: "/api/v1/meetings" });
+    expect(list.items.some((m) => m.id === created.id)).toBe(false);
+    const sync = await a.request<{ withoutGoogleAccount: unknown[] }>({ method: "POST", path: "/api/v1/meetings/sync" });
+    expect(sync.withoutGoogleAccount.length).toBeGreaterThan(0);
+  });
+});
+
 describe("isDemoEnabled", () => {
   it("is true only for explicit opt-in flags", () => {
     expect(isDemoEnabled({ VITE_DEMO: "1" })).toBe(true);
@@ -142,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 67-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 69-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -151,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(67);
+    expect(catalog).toHaveLength(69);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {

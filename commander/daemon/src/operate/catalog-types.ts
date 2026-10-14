@@ -1,7 +1,7 @@
 // Types of the operate allow-list. Kept apart from catalog.ts so the per-area files under
 // areas/ can import them without an import cycle.
 
-export type OpArea = "event" | "task" | "gantt" | "notification" | "chat" | "member" | "role" | "drive" | "lp" | "commander";
+export type OpArea = "event" | "task" | "gantt" | "notification" | "chat" | "member" | "role" | "drive" | "meeting" | "lp" | "commander";
 export type OpKind = "read" | "write" | "delete";
 export type OpRisk = "low" | "mid" | "high";
 export type OpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";

@@ -19,6 +19,7 @@ import { DRIVE } from "./areas/drive.ts";
 import { EVENT } from "./areas/event.ts";
 import { GANTT } from "./areas/gantt.ts";
 import { LP } from "./areas/lp.ts";
+import { MEETING } from "./areas/meeting.ts";
 import { MEMBER } from "./areas/member.ts";
 import { NOTIFICATION } from "./areas/notification.ts";
 import { ROLE } from "./areas/role.ts";
@@ -28,7 +29,7 @@ export type * from "./catalog-types.ts";
 
 export const API_PREFIX = "/api/v1";
 
-export const AREAS: readonly AreaSpec[] = [EVENT, TASK, GANTT, NOTIFICATION, CHAT, MEMBER, ROLE, DRIVE, LP, COMMANDER];
+export const AREAS: readonly AreaSpec[] = [EVENT, TASK, GANTT, NOTIFICATION, CHAT, MEMBER, ROLE, DRIVE, MEETING, LP, COMMANDER];
 
 export const CATALOG: readonly CatalogEntry[] = AREAS.flatMap((a) => a.entries);
 export const EXCLUDED: readonly ExcludedRoute[] = AREAS.flatMap((a) => a.excluded);
@@ -38,7 +39,8 @@ export const EXCLUDED: readonly ExcludedRoute[] = AREAS.flatMap((a) => a.exclude
  * and that belong to an area above. Every non-internal route under them is either a catalog
  * entry, excluded with a reason, or pending — the catalog test fails on anything else, so a
  * route added to a service later cannot be silently missing from this decision.
- * Out of scope entirely: calendar, external mail (mail-gateway send/read, mail-automation)
+ * Out of scope entirely: the calendar's own events (task-service; カレンダー > ミーティング is in
+ * via drive-share-service /meetings), external mail (mail-gateway send/read, mail-automation)
  * and usage-meter.
  */
 export const SCOPE: Readonly<Record<string, readonly string[]>> = {
@@ -50,7 +52,7 @@ export const SCOPE: Readonly<Record<string, readonly string[]>> = {
   "member-service": ["/members/"],
   "identity-roster": ["/identity/"],
   "mail-gateway": ["/mail/admin/email-routing/issued-addresses", "/mail/admin/email-routing/roster-addresses"],
-  "drive-share-service": ["/driveshare/"],
+  "drive-share-service": ["/driveshare/", "/meetings"],
   "drive-proxy": ["/drive/"],
   "file-meta": ["/files"],
   "lp-analytics": ["/lp/"],

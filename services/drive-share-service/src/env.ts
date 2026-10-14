@@ -7,7 +7,7 @@
 // GOOGLE_HACKIT_OAUTH_* secrets are present the REAL Drive v3 client is wired;
 // when they are absent the in-memory MOCK client runs, so the whole surface builds,
 // runs, and is E2E-testable at $0 before any real refresh token exists.
-import type { D1Database, Fetcher } from "@cloudflare/workers-types";
+import type { D1Database, DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types";
 
 export interface Env {
   // ---- D1 (driveshare_* namespace) ----
@@ -18,6 +18,12 @@ export interface Env {
 
   // ---- Service Bindings ----
   SVC_IDENTITY: Fetcher; // identity-roster /authz/check (drive:read / drive:write) + role expansion
+  // member-service POST /members/internal/google-emails (名簿 Gmail for meeting invitations).
+  // Optional: absent => everyone is invited at their Dub login address.
+  SVC_MEMBER?: Fetcher;
+
+  // ---- Durable Object (カレンダー > ミーティング hourly invitation sync; alarm, not a cron) ----
+  MEETING_SYNC?: DurableObjectNamespace;
 
   // ---- Secrets (Hackit shared-Gmail OAuth; never logged) ----
   // A personal Gmail cannot use a service account / domain-wide delegation, so the
