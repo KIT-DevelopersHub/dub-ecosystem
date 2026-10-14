@@ -10,7 +10,9 @@ import {
   draftForSlot,
   draftFromItem,
   encodeDescription,
+  isScheduleTask,
   isVacationTask,
+  kindOf,
   labelOf,
   userDescription,
   withKind,
@@ -219,9 +221,28 @@ describe("休暇", () => {
     expect(labelOf(both)).toBe("role_lead");
     expect(userDescription(both)).toBe("連絡はチャットへ");
     expect(encodeDescription({ kind: "vacation", label: "role_lead", description: "連絡はチャットへ" })).toBe(both.description);
-    expect(encodeDescription({ kind: "event", label: "role_lead", description: "" })).toBe("#ラベル:role_lead");
-    expect(encodeDescription({ kind: "event", label: "personal", description: "  " })).toBeNull();
+    expect(encodeDescription({ kind: "event", label: "role_lead", description: "" })).toBe("#予定\n#ラベル:role_lead");
+    expect(encodeDescription({ kind: "event", label: "personal", description: "  " })).toBe("#予定");
     // Plain descriptions are untouched (no tag parsing past the first non-tag line).
     expect(userDescription({ description: "メモ\n#ラベル:role_lead" })).toBe("メモ\n#ラベル:role_lead");
+  });
+});
+
+describe("予定 vs タスク", () => {
+  const at = (description: string | null, startAt: string | null, dueAt: string | null, eventId: string | null = null) =>
+    ({ description, startAt, dueAt, eventId: eventId as common.EventId | null });
+  it("a kind or ラベル tag makes a 予定, whatever its dates", () => {
+    expect(isScheduleTask(at("#ミーティング", null, "2026-10-10T00:00:00.000Z"))).toBe(true);
+    expect(kindOf({ description: "#ミーティング\n#ラベル:role_lead" })).toBe("meeting");
+    expect(kindOf({ description: "#予行練習" })).toBe("rehearsal");
+    expect(isScheduleTask(at("#ラベル:role_lead", null, "2026-10-10T00:00:00.000Z"))).toBe(true);
+  });
+  it("an untagged timed item is a 予定 saved before kinds; date-only is a タスク", () => {
+    expect(isScheduleTask(at(null, "2026-10-10T09:00:00+09:00", "2026-10-10T10:00:00+09:00"))).toBe(true);
+    expect(kindOf({ description: null })).toBe("event");
+    expect(isScheduleTask(at(null, null, "2026-10-10T00:00:00.000Z"))).toBe(false);
+    expect(isScheduleTask(at("メモ", "2026-10-09T00:00:00.000Z", "2026-10-10T00:00:00.000Z"))).toBe(false);
+    // An event task with a time is still a タスク.
+    expect(isScheduleTask(at(null, null, "2026-10-10T09:00:00Z", "evt_1"))).toBe(false);
   });
 });

@@ -35,7 +35,7 @@ function mk(id: string, over: Partial<task.Task> = {}): task.Task {
   };
 }
 
-function memoryApi(seed: task.Task[]) {
+function memoryApi(seed: task.Task[], teamRows: task.Task[] = []) {
   const rows = [...seed];
   const api: CalendarApi = {
     listTasks: async () => ({ items: rows, nextCursor: null }),
@@ -64,6 +64,14 @@ function memoryApi(seed: task.Task[]) {
     getUsers: vi.fn(async (ids: readonly common.UserId[]) =>
       ids.map((id) => ({ id, displayName: id === ME ? "山田" : "佐藤", avatarUrl: null })),
     ),
+    listTeams: vi.fn(async () => ({
+      teams: [
+        { id: "team_hq", key: "hq", name: "統括チーム", color: "#1e3a5f", description: null },
+        { id: "team_dev", key: "dev", name: "開発チーム", color: null, description: null },
+      ],
+      myTeamIds: ["team_hq"],
+    })),
+    listTeamTasks: vi.fn(async (teamId: common.TeamId) => teamRows.filter((t) => t.teamId === teamId)),
   };
   return api;
 }
@@ -93,13 +101,47 @@ if (typeof window.PointerEvent === "undefined") {
   window.PointerEvent = PointerEventShim as unknown as typeof PointerEvent;
 }
 
+const ALL_SECTIONS = ["group:schedule/kind", "group:schedule/label", "group:task/scope", "group:task/status"];
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(local(8));
+  // Sections start folded; most tests drive the checkboxes, so start them unfolded.
+  localStorage.setItem("dub.calendar.openFilterSections", JSON.stringify(ALL_SECTIONS));
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  localStorage.clear();
+});
 
 describe("CalendarScreen", () => {
+  it("folds the filter sections, remembers it, and tells what a folded section hides", async () => {
+    localStorage.removeItem("dub.calendar.openFilterSections");
+    const user = userEvent.setup();
+    const { unmount } = renderScreen(memoryApi([]));
+    await screen.findByTestId("calendar-timegrid");
+
+    const kind = screen.getByTestId("calendar-section-kind");
+    expect(kind).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("calendar-filter-kind:meeting")).not.toBeInTheDocument();
+    // The 予定 / タスク master checkboxes stay reachable while folded.
+    expect(screen.getByTestId("calendar-filter-group:task")).toBeInTheDocument();
+
+    await user.click(kind);
+    expect(kind).toHaveAttribute("aria-expanded", "true");
+    await user.click(screen.getByTestId("calendar-filter-kind:vacation"));
+    await user.click(kind);
+    expect(kind).toHaveTextContent("1件オフ");
+    expect(screen.queryByTestId("calendar-filter-kind:vacation")).not.toBeInTheDocument();
+
+    await user.click(kind);
+    unmount();
+    renderScreen(memoryApi([]));
+    await screen.findByTestId("calendar-timegrid");
+    expect(screen.getByTestId("calendar-section-kind")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("calendar-section-status")).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("opens on the week view with today's header and the week's 予定", async () => {
     renderScreen(
       memoryApi([
@@ -197,7 +239,7 @@ describe("CalendarScreen", () => {
     await waitFor(() => expect(screen.queryByText("山田：失敗する予定")).not.toBeInTheDocument());
   });
 
-  it("shows month view and hides a status via マイカレンダー", async () => {
+  it("shows month view and hides a タスク status", async () => {
     const user = userEvent.setup();
     renderScreen(
       memoryApi([
@@ -210,7 +252,7 @@ describe("CalendarScreen", () => {
     expect(await screen.findByTestId("calendar-month")).toBeInTheDocument();
     expect(screen.getByTestId("calendar-item-a")).toBeInTheDocument();
 
-    await user.click(screen.getByTestId("calendar-filter-done"));
+    await user.click(screen.getByTestId("calendar-filter-status:done"));
     expect(screen.queryByTestId("calendar-item-a")).not.toBeInTheDocument();
     expect(screen.getByTestId("calendar-item-b")).toBeInTheDocument();
   });
@@ -237,10 +279,10 @@ describe("CalendarScreen", () => {
     });
     expect(await screen.findByText("休暇を登録しました")).toBeInTheDocument();
 
-    // Hidden/shown on its own via マイカレンダー, independent of status.
+    // Hidden/shown on its own via 予定 > 種類, independent of status.
     const bar = await within(screen.getByTestId("calendar-allday")).findByText("山田：休暇");
     expect(bar).toBeInTheDocument();
-    await user.click(screen.getByTestId("calendar-filter-vacation"));
+    await user.click(screen.getByTestId("calendar-filter-kind:vacation"));
     expect(within(screen.getByTestId("calendar-allday")).queryByText("山田：休暇")).not.toBeInTheDocument();
   });
 
@@ -272,9 +314,9 @@ describe("CalendarScreen", () => {
     await screen.findByTestId("calendar-item-mine");
 
     // Sidebar ラベル list is 個人 + the roles, with no manual management.
-    const list = screen.getByTestId("calendar-label-list");
+    const list = screen.getByTestId("calendar-group-group:schedule");
     expect(await within(list).findByText("統括")).toBeInTheDocument();
-    expect(within(list).getByText("個人")).toBeInTheDocument();
+    expect(within(list).getByText("個人の予定")).toBeInTheDocument();
     expect(within(list).getByText("広報")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("calendar-create"));
@@ -286,7 +328,7 @@ describe("CalendarScreen", () => {
     await user.click(within(dialog).getByTestId("calendar-form-save"));
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.createTask).mock.calls[0]![0].description).toBe("#ラベル:role_lead");
+    expect(vi.mocked(api.createTask).mock.calls[0]![0].description).toBe("#予定\n#ラベル:role_lead");
 
     const created = await screen.findByText("統括：統括定例");
     await user.click(created);
@@ -296,7 +338,7 @@ describe("CalendarScreen", () => {
     await user.click(within(detail).getByLabelText("閉じる"));
 
     // Hiding 統括 hides only the labelled 予定.
-    await user.click(screen.getByTestId("calendar-label-filter-role_lead"));
+    await user.click(screen.getByTestId("calendar-filter-label:role_lead"));
     expect(screen.queryByText("統括：統括定例")).not.toBeInTheDocument();
     expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
   });
@@ -306,7 +348,7 @@ describe("CalendarScreen", () => {
     renderScreen(
       memoryApi([
         mk("off", { title: "休暇", description: "#休暇", dueAt: "2026-10-12T00:00:00.000Z" }),
-        mk("other", { title: "面談", assigneeId: "usr_sato" as common.UserId, dueAt: "2026-10-13T00:00:00.000Z" }),
+        mk("other", { title: "面談", description: "#予定", assigneeId: "usr_sato" as common.UserId, dueAt: "2026-10-13T00:00:00.000Z" }),
         mk("lead", { title: "定例", description: "#ラベル:role_lead", dueAt: "2026-10-14T00:00:00.000Z" }),
       ]),
     );
@@ -319,6 +361,96 @@ describe("CalendarScreen", () => {
     await user.click(screen.getByText("山田：休暇"));
     const detail = await screen.findByTestId("calendar-event-detail");
     expect(within(detail).getByTestId("calendar-detail-label")).toHaveTextContent("個人（山田）");
+  });
+
+  it("splits 予定 and タスク: each has its own switch, 個人の予定 and 個人のタスク apart", async () => {
+    const user = userEvent.setup();
+    renderScreen(
+      memoryApi([
+        mk("plan", { title: "面談", startAt: local(10).toISOString(), dueAt: local(11).toISOString() }),
+        mk("mtg", { title: "定例", description: "#ミーティング", startAt: local(13).toISOString(), dueAt: local(14).toISOString() }),
+        mk("todo", { title: "精算", dueAt: "2026-10-10T00:00:00.000Z" }),
+        mk("done", { title: "提出", status: "done", dueAt: "2026-10-09T00:00:00.000Z" }),
+      ]),
+    );
+    // タスク read apart from 予定 by their mark.
+    expect(await screen.findByTestId("calendar-item-todo")).toHaveTextContent("○ 山田：精算");
+    expect(screen.getByTestId("calendar-item-done")).toHaveTextContent("✓ 山田：提出");
+    expect(screen.getByTestId("calendar-item-plan")).toHaveTextContent("山田：面談");
+    expect(screen.getByTestId("calendar-item-plan")).not.toHaveTextContent("○");
+
+    // A タスク opens read-only here (edited in マイタスク, so it never turns into a 予定).
+    await user.click(screen.getByTestId("calendar-item-todo"));
+    const detail = await screen.findByTestId("calendar-event-detail");
+    expect(within(detail).getByTestId("calendar-detail-kind")).toHaveTextContent("タスク");
+    expect(within(detail).queryByTestId("calendar-detail-edit")).not.toBeInTheDocument();
+    await user.click(within(detail).getByLabelText("閉じる"));
+
+    // タスクだけ消す: one click, 予定 stay.
+    await user.click(screen.getByTestId("calendar-filter-group:task"));
+    expect(screen.queryByTestId("calendar-item-todo")).not.toBeInTheDocument();
+    expect(screen.getByTestId("calendar-item-plan")).toBeInTheDocument();
+    expect(screen.getByTestId("calendar-filter-status:todo")).toBeDisabled();
+    await user.click(screen.getByTestId("calendar-filter-group:task"));
+
+    // 個人のタスク and 個人の予定 are separate checkboxes.
+    await user.click(screen.getByTestId("calendar-filter-scope:personal"));
+    expect(screen.queryByTestId("calendar-item-todo")).not.toBeInTheDocument();
+    expect(screen.getByTestId("calendar-item-plan")).toBeInTheDocument();
+    await user.click(screen.getByTestId("calendar-filter-scope:personal"));
+    await user.click(screen.getByTestId("calendar-filter-label:personal"));
+    expect(screen.queryByTestId("calendar-item-plan")).not.toBeInTheDocument();
+    expect(screen.getByTestId("calendar-item-todo")).toBeInTheDocument();
+    await user.click(screen.getByTestId("calendar-filter-label:personal"));
+
+    // ミーティング only: uncheck the other 種類.
+    for (const k of ["event", "vacation", "rehearsal"]) await user.click(screen.getByTestId(`calendar-filter-kind:${k}`));
+    expect(screen.getByTestId("calendar-item-mtg")).toBeInTheDocument();
+    expect(screen.queryByTestId("calendar-item-plan")).not.toBeInTheDocument();
+  });
+
+  it("shows a chosen team's tasks, not only the caller's own", async () => {
+    const user = userEvent.setup();
+    const api = memoryApi(
+      [mk("mine", { title: "受付準備", teamId: "team_hq" as common.TeamId, dueAt: "2026-10-10T00:00:00.000Z" })],
+      [
+        mk("bobs", {
+          title: "機材手配",
+          teamId: "team_dev" as common.TeamId,
+          assigneeId: "usr_bob" as common.UserId,
+          dueAt: "2026-10-09T00:00:00.000Z",
+        }),
+      ],
+    );
+    renderScreen(api);
+    await screen.findByTestId("calendar-item-mine");
+    // The caller's own team shows as a row (担当・依頼 only) before anything is added.
+    expect(await screen.findByTestId("calendar-filter-scope:team_hq")).toBeInTheDocument();
+    expect(screen.queryByTestId("calendar-item-bobs")).not.toBeInTheDocument();
+
+    await user.selectOptions(await screen.findByTestId("calendar-add-team"), "team_dev");
+    await waitFor(() => expect(api.listTeamTasks).toHaveBeenCalledWith("team_dev"));
+    expect(await screen.findByTestId("calendar-item-bobs")).toBeInTheDocument();
+    expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("calendar-filter-scope:team_dev"));
+    expect(screen.queryByTestId("calendar-item-bobs")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("calendar-filter-scope:team_dev"));
+    await user.click(screen.getByLabelText("開発チームの表示をやめる"));
+    expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("calendar-item-bobs")).not.toBeInTheDocument());
+  });
+
+  it("keeps the caller's own items when a team fails to load", async () => {
+    const user = userEvent.setup();
+    const api = memoryApi([mk("mine", { title: "受付準備", dueAt: "2026-10-10T00:00:00.000Z" })]);
+    vi.mocked(api.listTeamTasks).mockRejectedValue(new Error("400"));
+    renderScreen(api);
+    await screen.findByTestId("calendar-item-mine");
+    await user.selectOptions(await screen.findByTestId("calendar-add-team"), "team_dev");
+    expect(await screen.findByText("一部のチームのタスクを取得できませんでした")).toBeInTheDocument();
+    expect(screen.getByTestId("calendar-item-mine")).toBeInTheDocument();
+    expect(screen.queryByTestId("calendar-error")).not.toBeInTheDocument();
   });
 
   it("disables 作成 without write permission", async () => {
