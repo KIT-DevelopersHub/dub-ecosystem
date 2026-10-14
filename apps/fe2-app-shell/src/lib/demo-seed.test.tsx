@@ -388,6 +388,13 @@ describe("chat channel delete + personal sections (demo store)", () => {
     expect((await api().auth.me()).permissions).toContain("chat:delete_channel");
   });
 
+  it("starts chat:delete_channel OFF for every non-admin role in ロール管理", async () => {
+    const roles = await api().request<{ items: { name: string; permissions: string[] }[] }>({ method: "GET", path: "/api/v1/identity/roles" });
+    for (const r of roles.items.filter((x) => x.name !== "admin")) {
+      expect(r.permissions, r.name).not.toContain("chat:delete_channel");
+    }
+  });
+
   it("hard-deletes a topic channel (and its assignment) but refuses a DM", async () => {
     const a = api();
     expect((await listSections(a)).assignments.chn_admin).toBe("sec_demo_ops");
