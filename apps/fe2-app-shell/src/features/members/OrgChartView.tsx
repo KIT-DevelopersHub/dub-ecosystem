@@ -209,7 +209,7 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
                 {reps.map((m) => {
                   const badge = statusLabel(m.status);
                   return (
-                    <div key={m.id} className={`${styles.namechip} ${styles.lead}`} data-testid={`members-orgrep-${m.id}`}>
+                    <div key={m.id} className={styles.namechip} data-testid={`members-orgrep-${m.id}`}>
                       {m.name}
                       {m.roleTitle ? <span className={styles.namechipRole}>{m.roleTitle}</span> : null}
                       {badge ? <span className={styles.miniBadge}>{badge}</span> : null}
