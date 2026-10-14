@@ -5,18 +5,21 @@
 // 突合候補を提示し、同一人物なら結合(link=在籍へ昇格・重複なし)、候補が無ければ新規
 // (create) を確認ダイアログで確定する。反映は組織図(体制図)にも重複なく反映される。
 // 追加済の行は「紐付けを解除」で未処理に戻せる (名簿メンバー自体はそのまま残る)。
+// 追加の直後に「メールアドレスも発行しますか？」を出し、発行・アカウント作成(ロール付与)・
+// 紐付けまで続けて行える (IssueMailDialog)。
 // Route gate = identity:read; 反映確定(resolve)はサーバで identity:admin (fail-close)。
 import { useMemo, useState } from "react";
 import { PageHeader, DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, TextField, EmptyState, SkeletonLoader, ErrorState } from "@dub/ui";
 import type { ColumnDef, BadgeTone } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useAppCapability } from "../../auth/AuthProvider.tsx";
+import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
 import { REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import { PUBLIC_PARTICIPATION_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
+import { IssueMailDialog } from "./IssueMailDialog.tsx";
 import styles from "./participation.module.css";
 
 /** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
@@ -58,8 +61,8 @@ function fmtDateTime(iso: string): string {
   return d.toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-/** アルファベットのメールアドレス素案 (first.last@…) を romaji から作る (表示専用)。
- *  実際の発行フローには繋がず、運営が候補として確認できるようにするだけ。 */
+/** アルファベットのメールアドレス素案 (first.last@…) を romaji から作る。詳細の表示と、
+ *  追加直後のメール発行ダイアログの初期値に使う。 */
 function emailCandidate(p: Participation): string | null {
   const clean = (v: string | null): string => (v ?? "").trim().toLowerCase().replace(/[^a-z]/g, "");
   const first = clean(p.firstNameRomaji);
@@ -74,6 +77,12 @@ export function ParticipationListPage(): JSX.Element {
   // (requireParticipationEdit)。同じ判定を UI にも効かせ、閲覧のみの運営には押せる形で
   // 見せない — 押しても 403 になるボタンを出さないため。
   const { canEdit } = useAppCapability("participation");
+  // メール発行はアドレス発行(mail:admin)・アカウント作成(管理アプリの編集 + identity:admin)・
+  // 名簿との紐付け(運営メンバーの編集)を全部持つ人だけ。持たない人には聞かない (403 になるため)。
+  const { can } = usePermissions();
+  const adminCap = useAppCapability("admin");
+  const membersCap = useAppCapability("members");
+  const canIssueMail = adminCap.canEdit && membersCap.canEdit && can("identity:admin") && can("mail:admin");
   const list = useParticipationList();
   const teamsQuery = useParticipationTeams();
   const resolveMut = useResolveParticipation();
@@ -82,6 +91,7 @@ export function ParticipationListPage(): JSX.Element {
   const [addTarget, setAddTarget] = useState<Participation | null>(null);
   const [skipTarget, setSkipTarget] = useState<Participation | null>(null);
   const [unlinkTarget, setUnlinkTarget] = useState<Participation | null>(null);
+  const [issueTarget, setIssueTarget] = useState<{ participation: Participation; member: RosterMember } | null>(null);
   // 解除確認に「誰との紐付けか」を出すため、確認を開いた時だけ名簿を引く。
   const rosterQuery = useParticipationRosterMembers(unlinkTarget !== null);
   const unlinkMemberName = unlinkTarget?.memberId
@@ -94,7 +104,17 @@ export function ParticipationListPage(): JSX.Element {
   }, [teamsQuery.data]);
 
   const doResolve = (id: string, body: Parameters<typeof resolveMut.mutate>[0]["body"]): void => {
-    resolveMut.mutate({ id, body });
+    resolveMut.mutate(
+      { id, body },
+      {
+        onSuccess: (res) => {
+          // まだログインアカウントの無い人を追加した時だけ、続けて発行するか聞く。
+          if (canIssueMail && res.member && !res.member.identityUserId) {
+            setIssueTarget({ participation: res.participation, member: res.member });
+          }
+        },
+      },
+    );
     setAddTarget(null);
     setSkipTarget(null);
     setUnlinkTarget(null);
@@ -194,6 +214,15 @@ export function ParticipationListPage(): JSX.Element {
           onLink={(t) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version })}
           onCreate={() => doResolve(addTarget.id, { action: "create" })}
           onSkip={() => doResolve(addTarget.id, { action: "skip" })}
+        />
+      ) : null}
+
+      {issueTarget ? (
+        <IssueMailDialog
+          participation={issueTarget.participation}
+          member={issueTarget.member}
+          defaultLocalPart={emailCandidate(issueTarget.participation) ?? ""}
+          onClose={() => setIssueTarget(null)}
         />
       ) : null}
 

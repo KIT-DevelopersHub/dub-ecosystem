@@ -29,6 +29,9 @@ export const MEMBERS_OVERVIEW_KEY: QueryKey = queryKeys.feature("members", "over
 export const ONBOARDING_KEY: QueryKey = queryKeys.feature("participation", "onboarding");
 export const PUBLIC_ONBOARDING_KEY: QueryKey = queryKeys.feature("participation", "onboarding", "public");
 export const CANDIDATES_KEY = (id: string): QueryKey => queryKeys.feature("participation", "candidates", id);
+export const ROLES_KEY: QueryKey = queryKeys.feature("participation", "roles");
+/** 名簿の「紐付けアカウント」列が引くアカウント一覧のキー (members/hooks.ts と同じ)。 */
+const IDENTITY_USERS_KEY: QueryKey = queryKeys.feature("members", "identity-users");
 
 export function useParticipationTeams() {
   const api = useParticipationApi();
@@ -125,6 +128,91 @@ export function useResolveParticipation() {
       // サーバ確定値へ同期＋組織図(重複なし昇格/新ノード)を再描画。
       void qc.invalidateQueries({ queryKey: LIST_KEY });
       void qc.invalidateQueries({ queryKey: MEMBERS_OVERVIEW_KEY });
+    },
+  });
+}
+
+/** メール発行ダイアログのロール候補。ダイアログを開いた時だけ取得する。 */
+export function useParticipationRoles(enabled: boolean) {
+  const api = useParticipationApi();
+  return useQuery({ queryKey: ROLES_KEY, queryFn: () => api.listRoles(), enabled, retry: false, staleTime: 60_000 });
+}
+
+/** 発行の途中経過。失敗後の再実行は済んだ段を飛ばす (発行済みアドレスを二重発行しない)。 */
+export interface MailIssueProgress {
+  address?: string;
+  identityUserId?: string;
+  linked?: boolean;
+}
+export type MailIssueStep = "mail" | "account" | "link";
+
+/** どの段で失敗したかと、そこまでに済んだ分を運ぶ。 */
+export class MailIssueError extends Error {
+  readonly step: MailIssueStep;
+  readonly progress: MailIssueProgress;
+  readonly reason: unknown;
+  constructor(step: MailIssueStep, progress: MailIssueProgress, reason: unknown) {
+    super(ApiError.isApiError(reason) ? toDisplayableError(reason).message : "処理に失敗しました");
+    this.step = step;
+    this.progress = progress;
+    this.reason = reason;
+  }
+}
+
+export interface MailIssueInput {
+  memberId: string;
+  memberVersion: number;
+  localPart: string;
+  displayName: string;
+  furigana?: string;
+  roleIds: string[];
+  progress: MailIssueProgress;
+}
+
+/** 参加届から追加したメンバーに、アドレス発行 → アカウント作成(ロール付与) → 名簿と紐付け
+ *  を一続きで行う。後からユーザー名簿で別作業にすると、付けるロールを忘れるため。 */
+export function useIssueParticipationMail() {
+  const api = useParticipationApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<MailIssueProgress, MailIssueError, MailIssueInput>({
+    mutationFn: async (input) => {
+      const progress: MailIssueProgress = { ...input.progress };
+      const step = async <T,>(name: MailIssueStep, fn: () => Promise<T>): Promise<T> => {
+        try {
+          return await fn();
+        } catch (err) {
+          throw new MailIssueError(name, { ...progress }, err);
+        }
+      };
+      if (!progress.address) {
+        progress.address = (await step("mail", () => api.issueMailAddress(input.localPart))).address;
+      }
+      if (!progress.identityUserId) {
+        const address = progress.address;
+        const user = await step("account", () =>
+          api.inviteAccount({
+            email: address,
+            displayName: input.displayName,
+            ...(input.furigana ? { furigana: input.furigana } : {}),
+            roleIds: input.roleIds,
+          }),
+        );
+        progress.identityUserId = user.id;
+      }
+      if (!progress.linked) {
+        const identityUserId = progress.identityUserId;
+        await step("link", () => api.linkAccount(input.memberId, { identityUserId, version: input.memberVersion }));
+        progress.linked = true;
+      }
+      return progress;
+    },
+    onSuccess: (res) => {
+      toast.show({ kind: "success", title: "メールアドレスを発行しました", description: res.address });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: MEMBERS_OVERVIEW_KEY });
+      void qc.invalidateQueries({ queryKey: IDENTITY_USERS_KEY });
     },
   });
 }
