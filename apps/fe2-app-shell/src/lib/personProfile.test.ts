@@ -25,14 +25,22 @@ describe("personProfile (運営名簿と参加届の共通項目)", () => {
   });
 
   it("サーバと同じルールで正規化・検証する", () => {
-    const draft = { ...emptyProfileDraft(), lastName: " 山田 ", grade: "3年", rosterNumber: "３ep２ー２６", gmail: "bad" };
+    const draft = { ...emptyProfileDraft(), lastName: " 山田 ", grade: "3年", rosterNumber: "３ep２ー２６", studentNumber: "１４００９８０", gmail: "bad" };
     const { profile, errors } = parseProfileDraft(draft, ["lastName", "schoolEmail"]);
     expect(profile.lastName).toBe("山田");
     expect(profile.grade).toBe("3");
     expect(profile.rosterNumber).toBe("3EP2-26");
+    expect(profile.studentNumber).toBe("1400980");
     expect(errors.gmail).toBe("メールアドレスの形式が正しくありません");
     expect(errors.schoolEmail).toBe("学校のメールアドレスを入力してください");
     expect(errors.lastName).toBeUndefined();
+  });
+
+  it("学籍番号は半角数字 7 桁以外をエラーにする", () => {
+    for (const bad of ["140098", "14009801", "S140098"]) {
+      const { errors } = parseProfileDraft({ ...emptyProfileDraft(), studentNumber: bad });
+      expect(errors.studentNumber).toBe("学籍番号は半角数字 7 桁（例: 1400980）で入力してください");
+    }
   });
 
   it("学年・希望活動はラベルで表示する", () => {
