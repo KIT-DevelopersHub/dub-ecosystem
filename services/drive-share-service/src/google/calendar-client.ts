@@ -16,6 +16,8 @@ export interface CalendarAttendee {
 }
 
 export interface CalendarEventInput {
+  /** Client-chosen event id (base32hex). Makes insert idempotent: a retry returns the event. */
+  id?: string;
   summary: string;
   description: string | null;
   /** RFC 3339 (UTC ISO is fine; the zone below drives recurrence expansion). */
@@ -32,6 +34,13 @@ export interface CalendarEvent {
   htmlLink: string | null;
   meetUrl: string | null;
   attendees: CalendarAttendee[];
+  /** Event fields as Google holds them now (absent = unknown); reconcile mirrors edits made there. */
+  summary?: string;
+  description?: string | null;
+  /** UTC ISO; absent for an all-day event. */
+  start?: string;
+  end?: string;
+  recurrence?: string[];
 }
 
 export interface CalendarAclRule {
@@ -48,7 +57,8 @@ export interface CalendarClient {
   insertAcl(calendarId: string, email: string): Promise<{ id: string }>;
   /** Idempotent: an already-removed rule is success. */
   deleteAcl(calendarId: string, ruleId: string): Promise<void>;
-  /** Creates the event with a new Google Meet link. */
+  /** Creates the event with a new Google Meet link. With `input.id`, an existing event of that
+   *  id is returned instead (retry after an interrupted insert). */
   insertEvent(calendarId: string, input: CalendarEventInput): Promise<CalendarEvent>;
   /** null = the event no longer exists (404/410). */
   getEvent(calendarId: string, eventId: string): Promise<CalendarEvent | null>;
@@ -59,24 +69,43 @@ export interface CalendarClient {
 
 interface GoogleEvent {
   id?: string;
+  summary?: string;
+  description?: string;
+  start?: { dateTime?: string };
+  end?: { dateTime?: string };
+  recurrence?: string[];
   htmlLink?: string;
   hangoutLink?: string;
   conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] };
   attendees?: CalendarAttendee[];
 }
 
+const isoOf = (v: string | undefined): string | undefined => {
+  const t = v ? Date.parse(v) : NaN;
+  return Number.isNaN(t) ? undefined : new Date(t).toISOString();
+};
+
 export function mapEvent(e: GoogleEvent): CalendarEvent {
   const video = e.conferenceData?.entryPoints?.find((p) => p.entryPointType === "video")?.uri;
-  return {
+  const ev: CalendarEvent = {
     id: e.id ?? "",
     htmlLink: e.htmlLink ?? null,
     meetUrl: e.hangoutLink ?? video ?? null,
     attendees: (e.attendees ?? []).filter((a) => typeof a.email === "string"),
+    summary: e.summary ?? "",
+    description: e.description?.trim() ? e.description.trim() : null,
+    recurrence: e.recurrence ?? [],
   };
+  const start = isoOf(e.start?.dateTime);
+  const end = isoOf(e.end?.dateTime);
+  if (start) ev.start = start;
+  if (end) ev.end = end;
+  return ev;
 }
 
 function eventBody(p: Partial<CalendarEventInput>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
+  if (p.id !== undefined) body.id = p.id;
   if (p.summary !== undefined) body.summary = p.summary;
   if (p.description !== undefined) body.description = p.description ?? "";
   if (p.start !== undefined) body.start = { dateTime: p.start, timeZone: p.timeZone };
@@ -121,7 +150,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
   const gone = (status: number) => status === 404 || status === 410;
   const cal = (id: string) => `${CAL_BASE}/calendars/${encodeURIComponent(id)}`;
 
-  return {
+  const client: CalendarClient = {
     async createCalendar(summary, timeZone) {
       const res = await call(`${CAL_BASE}/calendars`, { method: "POST", body: JSON.stringify({ summary, timeZone }) });
       const json = await readJson<{ id?: string }>(res);
@@ -174,7 +203,13 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
         ...eventBody(input),
         conferenceData: { createRequest: { requestId: requestId(), conferenceSolutionKey: { type: "hangoutsMeet" } } },
       };
-      return mapEvent(await readJson<GoogleEvent>(await call(url.toString(), { method: "POST", body: JSON.stringify(body) })));
+      const res = await call(url.toString(), { method: "POST", body: JSON.stringify(body) });
+      if (res.status === 409 && input.id) {
+        // Already inserted by an earlier, interrupted attempt. A deleted event's id stays taken.
+        const existing = await client.getEvent(calendarId, input.id);
+        if (existing) return existing;
+      }
+      return mapEvent(await readJson<GoogleEvent>(res));
     },
 
     async getEvent(calendarId, eventId) {
@@ -200,4 +235,5 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
       await fail(res);
     },
   };
+  return client;
 }

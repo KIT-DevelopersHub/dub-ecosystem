@@ -10,7 +10,8 @@ import { createGoogleCalendarClient } from "../src/google/calendar-client";
 import { createTokenProvider } from "../src/google/token";
 import { createMockCalendarClient } from "../src/calendar-mock-client";
 import { staticMemberDirectory } from "../src/member-directory";
-import { jstDate, toRecurrence, validateMeeting } from "../src/meeting-rules";
+import { fromRecurrence, jstDate, toRecurrence, validateMeeting } from "../src/meeting-rules";
+import { eventIdFor } from "../src/meetings-service";
 import { nextAlarmAt } from "../src/meeting-sync-do";
 import { resolveMeetingAccount } from "../src/meetings-wiring";
 import type { ActiveUser } from "../src/role-membership";
@@ -295,6 +296,136 @@ describe("reconcile (sync)", () => {
     await service.sync();
     const cal = [...base.state.calendars.values()][0]!;
     expect(cal.acl.filter((r) => r.role === "reader").map((r) => r.email).sort()).toEqual(["b@dub.example", "c@dub.example"]);
+  });
+});
+
+describe("Google Calendar is the source of truth", () => {
+  type Mock = ReturnType<typeof createMockCalendarClient>;
+  const eventOf = (calendar: unknown) => {
+    const cal = [...(calendar as Mock).state.calendars.values()][0]!;
+    return [...cal.events.values()][0]!;
+  };
+
+  it("fromRecurrence reads back every rule toRecurrence writes, and refuses others", () => {
+    for (const recurrence of ["none", "weekly", "biweekly", "monthly_weekday"] as const) {
+      for (const until of recurrence === "none" ? [null] : [null, "2027-03-31"]) {
+        expect(fromRecurrence(toRecurrence({ startsAt: BASE.startsAt, recurrence, until }))).toEqual({ recurrence, until });
+      }
+    }
+    expect(fromRecurrence(["RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261026T095959Z"])).toEqual({ recurrence: "weekly", until: "2026-10-26" });
+    expect(fromRecurrence(["RRULE:FREQ=DAILY"])).toBeNull();
+    expect(fromRecurrence(["RRULE:FREQ=WEEKLY;BYDAY=MO,TU"])).toBeNull();
+    expect(fromRecurrence(["RRULE:FREQ=WEEKLY", "EXDATE:20261027T100000Z"])).toBeNull();
+  });
+
+  it("the event id is derived from the meeting id (valid base32hex, stable)", () => {
+    expect(eventIdFor("dsm_01M4ZFHQ742WZSWX90EHQVF6MS")).toMatch(/^[a-v0-9]{5,1024}$/);
+    expect(eventIdFor("dsm_x")).toBe(eventIdFor("dsm_x"));
+  });
+
+  it("create stores the row under the derived event id; a failed insert leaves neither", async () => {
+    const ok = buildMeetings({ roster: roster() });
+    const m = await ok.service.create("usr_admin", BASE);
+    expect(ok.store.meetings.get(m.id)).toMatchObject({ googleEventId: eventIdFor(m.id) });
+    expect(ok.store.meetings.get(m.id)!.syncedAt).not.toBeNull();
+    expect(eventOf(ok.calendar).id).toBe(eventIdFor(m.id));
+
+    const base = createMockCalendarClient();
+    const calendar = { ...base, insertEvent: async () => {
+      throw new Error("google down");
+    } };
+    const bad = buildMeetings({ roster: roster(), calendar });
+    await expect(bad.service.create("usr_admin", BASE)).rejects.toThrow("google down");
+    expect(bad.store.meetings.size).toBe(0);
+  });
+
+  it("a create cut off before its event existed is finished by the sync (no orphan either way)", async () => {
+    // Like Google (unlike the tolerant mock): an id never inserted reads back as gone.
+    const base = createMockCalendarClient();
+    const calendar = { ...base, getEvent: async (c: string, e: string) => (base.state.calendars.get(c)?.events.has(e) ? base.getEvent(c, e) : null) };
+    const { service, store } = buildMeetings({ roster: roster(), calendar });
+    const m = await service.create("usr_admin", BASE);
+    // Simulate the request dying after the D1 row: no event, syncedAt still null.
+    const row = store.meetings.get(m.id)!;
+    base.state.calendars.get(row.calendarId)!.events.clear();
+    store.meetings.set(m.id, { ...row, syncedAt: null, meetUrl: null });
+
+    await service.sync();
+    const ev = eventOf(base);
+    expect(ev.id).toBe(row.googleEventId);
+    expect(ev.summary).toBe("開発定例");
+    expect(store.meetings.get(m.id)).toMatchObject({ meetUrl: ev.meetUrl });
+    expect(store.meetings.get(m.id)!.syncedAt).not.toBeNull();
+  });
+
+  it("an event deleted in Google Calendar removes the meeting from Dub", async () => {
+    const { service, calendar, store } = buildMeetings({ roster: roster() });
+    const keep = await service.create("usr_admin", BASE);
+    const gone = await service.create("usr_admin", { ...BASE, title: "消される会" });
+    const row = store.meetings.get(gone.id)!;
+    await calendar.deleteEvent(row.calendarId, row.googleEventId); // by hand, in Google Calendar
+
+    await service.sync();
+    expect([...store.meetings.keys()]).toEqual([keep.id]);
+    expect(await store.listInvites(gone.id)).toEqual([]);
+    expect((await service.list()).items.map((i) => i.id)).toEqual([keep.id]);
+  });
+
+  it("an unreachable calendar (lost grant / other account) never removes meetings", async () => {
+    const base = createMockCalendarClient();
+    let reachable = true;
+    const calendar = {
+      ...base,
+      getEvent: async (c: string, e: string) => (reachable ? base.getEvent(c, e) : null),
+      listAcl: async (c: string) => {
+        if (!reachable) throw new Error("404 calendar");
+        return base.listAcl(c);
+      },
+    };
+    const { service, store } = buildMeetings({ roster: roster(), calendar });
+    await service.create("usr_admin", BASE);
+    reachable = false;
+    await service.sync();
+    expect(store.meetings.size).toBe(1);
+  });
+
+  it("edits made in Google Calendar (title / time / length / repeat) are pulled into Dub", async () => {
+    const { service, calendar, store } = buildMeetings({ roster: roster() });
+    const m = await service.create("usr_admin", BASE);
+    const ev = eventOf(calendar);
+    Object.assign(ev, {
+      summary: "開発定例（時間変更）",
+      start: "2026-10-21T11:00:00+09:00",
+      end: "2026-10-21T12:30:00+09:00",
+      recurrence: ["RRULE:FREQ=WEEKLY;INTERVAL=2"],
+    });
+    await service.sync();
+    expect(store.meetings.get(m.id)).toMatchObject({
+      title: "開発定例（時間変更）",
+      startsAt: "2026-10-21T02:00:00.000Z",
+      durationMinutes: 90,
+      recurrence: "biweekly",
+      until: null,
+    });
+  });
+
+  it("listing pulls the sync close so Google-side changes show up quickly", async () => {
+    const { service, kicks } = buildMeetings({ roster: roster() });
+    await service.list();
+    expect(kicks).toEqual([15_000]);
+  });
+
+  it("the real client: insert with an id is idempotent (409 returns the existing event)", async () => {
+    const fetchImpl = (async (input: string | URL, init?: RequestInit) => {
+      const u = new URL(String(input));
+      if (init?.method === "POST") return new Response(JSON.stringify({ error: { code: 409, message: "duplicate" } }), { status: 409 });
+      if (u.pathname.endsWith("/events/dubabc")) return Response.json({ id: "dubabc", hangoutLink: "https://meet.google.com/x", summary: "S", start: { dateTime: "2026-10-20T19:00:00+09:00" }, end: { dateTime: "2026-10-20T20:00:00+09:00" } });
+      return new Response("{}", { status: 404 });
+    }) as unknown as typeof fetch;
+    const token = { getAccessToken: async () => "tok", grantedScopes: async () => null };
+    const client = createGoogleCalendarClient({ token, fetchImpl });
+    const ev = await client.insertEvent("cal", { id: "dubabc", summary: "S", description: null, start: "", end: "", timeZone: "Asia/Tokyo", recurrence: [], attendees: [] });
+    expect(ev).toMatchObject({ id: "dubabc", meetUrl: "https://meet.google.com/x", start: "2026-10-20T10:00:00.000Z", end: "2026-10-20T11:00:00.000Z" });
   });
 });
 

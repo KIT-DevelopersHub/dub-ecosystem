@@ -56,6 +56,32 @@ export function toRecurrence(f: Pick<MeetingFields, "startsAt" | "recurrence" | 
   return [`RRULE:${parts.join(";")}`];
 }
 
+/** The inverse of toRecurrence for an event's current rule (possibly edited in Google Calendar);
+ *  null when it is not a shape Dub can represent (the stored one is kept). */
+export function fromRecurrence(lines: readonly string[]): Pick<MeetingFields, "recurrence" | "until"> | null {
+  const rules = lines.filter((l) => l.startsWith("RRULE:"));
+  if (lines.length === 0) return { recurrence: "none", until: null };
+  if (rules.length !== 1 || rules.length !== lines.length) return null;
+  const p = new Map(rules[0]!.slice(6).split(";").map((kv) => kv.split("=") as [string, string]));
+  const allowed = new Set(["FREQ", "INTERVAL", "BYDAY", "UNTIL", "WKST"]);
+  if ([...p.keys()].some((k) => !allowed.has(k))) return null;
+  let recurrence: meeting.MeetingRecurrence;
+  const interval = p.get("INTERVAL") ?? "1";
+  if (p.get("FREQ") === "WEEKLY" && (interval === "1" || interval === "2") && (!p.has("BYDAY") || !p.get("BYDAY")!.includes(","))) {
+    recurrence = interval === "1" ? "weekly" : "biweekly";
+  } else if (p.get("FREQ") === "MONTHLY" && interval === "1" && /^-?\d[A-Z]{2}$/.test(p.get("BYDAY") ?? "")) {
+    recurrence = "monthly_weekday";
+  } else {
+    return null;
+  }
+  const u = p.get("UNTIL");
+  if (!u) return { recurrence, until: null };
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?$/.exec(u);
+  if (!m) return null;
+  const instant = m[4] ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z` : `${m[1]}-${m[2]}-${m[3]}T00:00:00+09:00`;
+  return { recurrence, until: jstDate(instant) };
+}
+
 /** End instant of the first occurrence. */
 export function endsAt(f: Pick<MeetingFields, "startsAt" | "durationMinutes">): string {
   return new Date(Date.parse(f.startsAt) + f.durationMinutes * 60_000).toISOString();
