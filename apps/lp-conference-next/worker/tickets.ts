@@ -1156,13 +1156,23 @@ const COUPON_FORM_ID = "tk-coupon";
  * buyer fields still submits the purchase, and applying works without JS. Applied: the code rides
  * the purchase form as a hidden field; 解除 is a plain link back to the normal page.
  */
-function renderCoupon(coupon: AppliedCoupon | null, type: PublicTicketType | undefined, values: FormValues, errors: FormErrors, demo: boolean): string {
+/** Preview (?tickets=on) only lives in the URL / referer: keep it on our own POST targets and links. */
+const previewQuery = (config: TicketConfig): string => (config.preview ? "?tickets=on" : "");
+
+function renderCoupon(
+  coupon: AppliedCoupon | null,
+  type: PublicTicketType | undefined,
+  values: FormValues,
+  errors: FormErrors,
+  demo: boolean,
+  q: string,
+): string {
   const err = errMsg(errors, COUPON_FIELD);
   if (coupon && type) {
     const n = quantityCap(type, true, coupon);
     return (
       `<div class="cpn top" id="coupon"><div class="cpn-applied"><span class="cpn-k">クーポン適用中</span>` +
-      `<b class="cpn-code">${escapeHtml(coupon.code)}</b><a class="cpn-clear" href="/tickets">解除</a></div>` +
+      `<b class="cpn-code">${escapeHtml(coupon.code)}</b><a class="cpn-clear" href="/tickets${q}">解除</a></div>` +
       `<p class="cpn-hint">「${escapeHtml(typeLabel(type))}」を無料でお申し込みいただけます（1 回 ${n} 枚まで）。` +
       "クーポン適用中は他の券種と同時にお申し込みできません。</p>" +
       `<input type="hidden" name="${COUPON_FIELD}" value="${escapeHtml(coupon.code)}">${err}</div>`
@@ -1219,10 +1229,11 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
 
   const hasPaid = !coupon && types.some((t) => t.priceJpy > 0);
   const extra = config.fields.map((f) => renderField(f, values, errors)).join("");
-  const couponBlock = renderCoupon(coupon, couponType, values, errors, !!o.demo);
+  const q = previewQuery(config);
+  const couponBlock = renderCoupon(coupon, couponType, values, errors, !!o.demo, q);
   const form =
-    (coupon ? "" : `<form id="${COUPON_FORM_ID}" method="post" action="/tickets/coupon" novalidate></form>`) +
-    `<form class="buy grid" method="post" action="/tickets/checkout" novalidate data-max="${ORDER_MAX}"><div>` +
+    (coupon ? "" : `<form id="${COUPON_FORM_ID}" method="post" action="/tickets/coupon${q}" novalidate></form>`) +
+    `<form class="buy grid" method="post" action="/tickets/checkout${q}" novalidate data-max="${ORDER_MAX}"><div>` +
     alerts +
     `<section class="card rv"><fieldset class="${errors.items ? "bad" : ""}"><legend>券種と枚数（必須）</legend>` +
     `<div class="shead"><span class="no">01</span><h2>券種と枚数を選ぶ</h2><p>1 回のお申し込みで合計 ${ORDER_MAX} 枚まで</p></div>` +

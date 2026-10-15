@@ -584,6 +584,20 @@ test("quantityCap: coupon caps at min(remainingUses, maxPerOrder, remaining); lo
   assert.equal(quantityCap(CFG.types[0], true, null), 5);
 });
 
+test("render: preview keeps ?tickets=on on the coupon / checkout targets and 解除 (it only lives in the URL)", () => {
+  const html = renderTicketsPage({ config: { ...CPN_CFG, preview: true } });
+  assert.match(html, /action="\/tickets\/coupon\?tickets=on"/);
+  assert.match(html, /action="\/tickets\/checkout\?tickets=on"/);
+  const applied = renderTicketsPage({
+    config: { ...CPN_CFG, preview: true },
+    coupon: { code: "TRYFREE234", ticketTypeId: "invite", remainingUses: 3 },
+  });
+  assert.match(applied, /href="\/tickets\?tickets=on">解除/);
+  // published (not preview): plain targets
+  const live = renderTicketsPage({ config: CPN_CFG });
+  assert.match(live, /action="\/tickets\/checkout" /);
+});
+
 test("render: coupon-only types are hidden from the normal list; coupon entry posts to its own form", () => {
   const html = renderTicketsPage({ config: CPN_CFG });
   assert.doesNotMatch(html, /qty_invite/);
