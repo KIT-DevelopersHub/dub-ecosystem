@@ -11,6 +11,9 @@
 //  - 購入者一覧は個人情報なので app:lp:edit のときだけ取得・表示する（閲覧者には出さない）。
 //  - 要確認（needs_review）の注文は理由を出し、lp:publish を持つ人だけ「確認して確定する」で支払い済みに
 //    できる。確定しない場合の出口は Stripe での返金（webhook で自動的に返金済み）。返金なしの取消は置かない。
+//  - 無料券（0 円）はクーポンコード必須。クーポンはコード自体が券と同じ価値なので、一覧・発行・停止とも
+//    lp:publish を持つ人だけ（LpTicketCoupons.tsx）。クーポン注文は購入者一覧に「クーポン」バッジを出し、
+//    lp:publish がある人にだけコードも併記する。
 //  - 読み込み中はセクションごとのスケルトン、失敗は再試行つき ErrorState、書き込みは楽観的 UI。
 import { useMemo, useState } from "react";
 import {
@@ -32,6 +35,7 @@ import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import type { LpTicketOrder, LpTicketsState } from "./lpApi.tsx";
 import {
   useApproveTicketOrder,
+  useLpTicketCoupons,
   useLpTicketOrders,
   useLpTickets,
   useSetTicketsCta,
@@ -40,6 +44,7 @@ import {
 import { ORDER_STATUS, formatDateTime, formatPrice, formatYen, orderItemLabel, reviewReasonLabel } from "./lpTickets.ts";
 import { LpTicketTypesCard } from "./LpTicketTypes.tsx";
 import { LpTicketFieldsCard } from "./LpTicketFields.tsx";
+import { LpTicketCouponsCard, LpTicketCouponsLockedCard } from "./LpTicketCoupons.tsx";
 import { LpTabs } from "./LpTabs.tsx";
 import styles from "./lp.module.css";
 
@@ -53,7 +58,7 @@ export function LpTicketsScreen(): JSX.Element {
   if (tickets.isLoading) {
     body = (
       <Stack gap={6} testId="fe2-lp-tickets-loading">
-        {["status", "summary", "types", "fields"].map((k) => (
+        {["status", "summary", "types", "coupons", "fields"].map((k) => (
           <Card key={k} testId={`fe2-lp-tickets-loading-${k}`}>
             <SkeletonLoader lines={k === "summary" ? 2 : 4} />
           </Card>
@@ -78,6 +83,7 @@ export function LpTicketsScreen(): JSX.Element {
           <SummaryTile testId="fe2-lp-tickets-revenue" label="売上" value={formatYen(state.totals.revenueJpy)} hint="支払い済みの合計（税込）" />
         </div>
         <LpTicketTypesCard types={state.types} canEdit={canEdit} />
+        {canToggle ? <LpTicketCouponsCard types={state.types} /> : canEdit ? <LpTicketCouponsLockedCard /> : null}
         <LpTicketFieldsCard fields={state.fields} canEdit={canEdit} />
         {canEdit ? <OrdersCard canApprove={canToggle} /> : null}
       </Stack>
@@ -160,7 +166,7 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
           </Badge>
           {!state.paymentReady ? (
             <span className={styles.note}>
-              Stripe の鍵を登録するまで有料のチケットは購入できません（無料のチケットは申し込めます）。
+              Stripe の鍵を登録するまで有料のチケットは購入できません（無料のチケットはクーポンコードで申し込めます）。
             </span>
           ) : null}
         </div>
@@ -312,6 +318,9 @@ function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
   const approve = useApproveTicketOrder();
   const [confirming, setConfirming] = useState<LpTicketOrder | null>(null);
   const rows = useMemo(() => orders.data?.pages.flatMap((p) => p.items) ?? [], [orders.data]);
+  // クーポン注文にコードを併記する（lp:publish のときだけ。クーポンカードとキャッシュを共有するので取得は 1 回）。
+  const coupons = useLpTicketCoupons(canApprove);
+  const couponCodes = useMemo(() => new Map((coupons.data?.items ?? []).map((c) => [c.id, c.code])), [coupons.data]);
 
   let content: JSX.Element;
   if (orders.isLoading) {
@@ -338,7 +347,13 @@ function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
       <Stack gap={5}>
         <div className={styles.orderList} data-testid="fe2-lp-ticket-orders-list">
           {rows.map((o) => (
-            <OrderRow key={o.id} order={o} canApprove={canApprove} onApprove={() => setConfirming(o)} />
+            <OrderRow
+              key={o.id}
+              order={o}
+              couponCode={o.couponId ? (couponCodes.get(o.couponId) ?? null) : null}
+              canApprove={canApprove}
+              onApprove={() => setConfirming(o)}
+            />
           ))}
         </div>
         <LoadMore
@@ -399,10 +414,13 @@ function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
 
 function OrderRow({
   order: o,
+  couponCode,
   canApprove,
   onApprove,
 }: {
   order: LpTicketOrder;
+  /** o.couponId のコード（一覧から引けたときだけ）。 */
+  couponCode: string | null;
   canApprove: boolean;
   onApprove: () => void;
 }): JSX.Element {
@@ -425,7 +443,14 @@ function OrderRow({
           <span className={styles.num}>{formatPrice(o.amountJpy)}</span>
           <small className={styles.kpiHint}>計 {o.quantity.toLocaleString("ja-JP")} 枚</small>
         </span>
-        <Badge tone={status.tone}>{status.label}</Badge>
+        <span className={styles.orderBadges}>
+          <Badge tone={status.tone}>{status.label}</Badge>
+          {o.couponId ? (
+            <Badge tone="info" testId={`fe2-lp-ticket-order-coupon-${o.id}`}>
+              {couponCode ? `クーポン ${couponCode}` : "クーポン"}
+            </Badge>
+          ) : null}
+        </span>
         <small className={styles.versionDate}>{formatDateTime(o.createdAt)}</small>
         <Button
           variant="ghost"

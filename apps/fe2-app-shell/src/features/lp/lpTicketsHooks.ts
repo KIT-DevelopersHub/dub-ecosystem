@@ -6,6 +6,9 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useLpApi } from "./LpProvider.tsx";
 import type {
+  LpTicketCoupon,
+  LpTicketCouponInput,
+  LpTicketCouponsPage,
   LpTicketField,
   LpTicketOrder,
   LpTicketOrdersPage,
@@ -23,6 +26,10 @@ export function lpTicketsKey() {
 
 export function lpTicketOrdersKey() {
   return queryKeys.feature("lp", "tickets", "orders");
+}
+
+export function lpTicketCouponsKey() {
+  return queryKeys.feature("lp", "tickets", "coupons");
 }
 
 function messageFor(err: unknown, fallback: string): string {
@@ -241,6 +248,65 @@ export function useApproveTicketOrder() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ordersKey, exact: true });
       void qc.invalidateQueries({ queryKey: stateKey, exact: true });
+    },
+  });
+}
+
+/** 無料券のクーポン一覧（app:lp:edit + lp:publish のときだけ取りにいく）。 */
+export function useLpTicketCoupons(enabled: boolean) {
+  const api = useLpApi();
+  return useQuery({ queryKey: lpTicketCouponsKey(), queryFn: () => api.listTicketCoupons(), staleTime: STALE_MS, enabled });
+}
+
+/**
+ * クーポンの発行。コードはサーバーが作るので楽観的に行を足さない（仮のコードを見せてコピーされる事故を防ぐ）。
+ * 成功したら先頭へ差し込む。
+ */
+export function useCreateTicketCoupon() {
+  const api = useLpApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = lpTicketCouponsKey();
+  return useMutation<LpTicketCoupon, unknown, LpTicketCouponInput>({
+    mutationFn: (input) => api.createTicketCoupon(input),
+    onError: (err) => {
+      toast.show({ kind: "error", title: messageFor(err, "クーポンを発行できませんでした") });
+    },
+    onSuccess: (saved) => {
+      qc.setQueryData<LpTicketCouponsPage>(key, (old) =>
+        old ? { items: [saved, ...old.items.filter((c) => c.id !== saved.id)] } : { items: [saved] },
+      );
+      toast.show({ kind: "success", title: `クーポンを発行しました（${saved.code}）` });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: key, exact: true });
+    },
+  });
+}
+
+/** クーポンの停止/再開。先に行を切り替え、失敗で戻す。 */
+export function useSetTicketCouponActive() {
+  const api = useLpApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = lpTicketCouponsKey();
+  return useMutation<LpTicketCoupon, unknown, { id: string; active: boolean }, { prev: LpTicketCouponsPage | undefined }>({
+    mutationFn: ({ id, active }) => api.setTicketCouponActive(id, { active }),
+    onMutate: async ({ id, active }) => {
+      await qc.cancelQueries({ queryKey: key, exact: true });
+      const prev = qc.getQueryData<LpTicketCouponsPage>(key);
+      if (prev) qc.setQueryData<LpTicketCouponsPage>(key, { items: prev.items.map((c) => (c.id === id ? { ...c, active } : c)) });
+      return { prev };
+    },
+    onError: (err, vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, vars.active ? "クーポンを再開できませんでした" : "クーポンを停止できませんでした") });
+    },
+    onSuccess: (saved) => {
+      qc.setQueryData<LpTicketCouponsPage>(key, (old) =>
+        old ? { items: old.items.map((c) => (c.id === saved.id ? saved : c)) } : old,
+      );
+      toast.show({ kind: "success", title: saved.active ? `クーポン ${saved.code} を再開しました` : `クーポン ${saved.code} を停止しました` });
     },
   });
 }

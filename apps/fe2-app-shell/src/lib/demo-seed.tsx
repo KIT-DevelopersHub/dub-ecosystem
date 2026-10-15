@@ -3729,6 +3729,11 @@ function createLpStore() {
 //   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
 //   GET   /api/v1/lp/tickets/orders      ?cursor&limit   newest first
 //   POST  /api/v1/lp/tickets/orders/:id/approve        needs_review -> paid (409 otherwise)
+//   GET   /api/v1/lp/tickets/coupons     newest first; used = held tickets (paid / pending / needs_review)
+//   POST  /api/v1/lp/tickets/coupons     { ticketTypeId, maxUses 1..1000, label? <=60, expiresAt? future }  201
+//   PATCH /api/v1/lp/tickets/coupons/:id { active }   no delete (orders reference coupons)
+//   (coupons need edit + lp:publish on the real backend; like the other publish routes the demo
+//    session always holds lp:publish, so the store does not re-check it — the screen gates it.)
 // Demo starts PUBLISHED but with paymentReady=false so the 「決済 未設定」 state is visible.
 // Event = 2027-09-13(月) / 14(火): 一般・学生は Day 別の券種。sold/pending are TICKET counts.
 // Orders are fixed (not random) so the stats a reviewer sees are the same every load.
@@ -3759,7 +3764,21 @@ type DemoTicketOrder = {
   createdAt: string;
   paidAt: string | null;
   reviewReason: string | null;
+  couponId: string | null;
 };
+type DemoTicketCoupon = {
+  id: string;
+  code: string;
+  label: string;
+  ticketTypeId: string;
+  maxUses: number;
+  expiresAt: string | null;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+const DEMO_COUPON_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 type DemoTicketOrderStatus = "pending" | "paid" | "expired" | "refunded" | "needs_review";
 
 function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
@@ -3848,6 +3867,7 @@ function createLpTicketsStore() {
   ];
   const seedOrders: [string, [string, number][], string, DemoTicketOrderStatus, string, string, string][] = [
     // [id, [[typeId, 枚数]...], buyer, status, createdAt, 所属, 参加区分]
+    ["ord_011", [["tt_invite", 1]], "松本 蓮", "paid", "2026-10-14T03:00:00.000Z", "登壇者", "現地"],
     ["ord_010", [["tt_general_d1", 1]], "小林 大輔", "needs_review", "2026-10-13T04:10:00.000Z", "", "現地"],
     ["ord_009", [["tt_student_d2", 1]], "加藤 さくら", "refunded", "2026-10-12T15:00:00.000Z", "金沢大学", "オンライン"],
     ["ord_008", [["tt_general_d1", 2], ["tt_general_d2", 2]], "山田 太郎", "pending", "2026-10-12T11:20:00.000Z", "北陸テック株式会社", "現地"],
@@ -3859,10 +3879,29 @@ function createLpTicketsStore() {
     ["ord_002", [["tt_general_d1", 5]], "渡辺 翔", "paid", "2026-10-03T12:10:00.000Z", "石川システム", "現地"],
     ["ord_001", [["tt_general_d1", 1], ["tt_general_d2", 1]], "中村 葵", "paid", "2026-10-01T09:45:00.000Z", "福井 IT 協会", "現地"],
   ];
+  // クーポン: 使用中 / 上限到達 / 停止中 / 期限切れ を 1 件ずつ。used は注文から数える。
+  const cp = (
+    id: string,
+    code: string,
+    label: string,
+    maxUses: number,
+    active: boolean,
+    expiresAt: string | null,
+    createdAt: string,
+  ): DemoTicketCoupon => ({ id, code, label, ticketTypeId: "tt_invite", maxUses, expiresAt, active, createdBy: "デモ 管理者", createdAt, updatedAt: createdAt });
+  const coupons: DemoTicketCoupon[] = [
+    cp("cpn_speakers", "SPKR7Q2M9X", "登壇者向け", 20, true, null, "2026-10-08T01:00:00.000Z"),
+    cp("cpn_sponsor_a", "SPNSRA4K8H", "スポンサー A 社", 3, true, null, "2026-10-06T01:00:00.000Z"),
+    cp("cpn_staff", "STAFF6WEB3", "運営スタッフ", 10, false, null, "2026-10-04T01:00:00.000Z"),
+    cp("cpn_press", "PRESS5YTN2", "メディア招待", 5, true, "2026-10-10T14:59:59.000Z", "2026-10-02T01:00:00.000Z"),
+  ];
+  const couponOf: Record<string, string> = { ord_011: "cpn_speakers", ord_005: "cpn_sponsor_a" };
   const orders: DemoTicketOrder[] = seedOrders.map(([id, lines, buyerName, status, createdAt, aff, att], i) => {
+    const couponId = couponOf[id] ?? null;
     const items = lines.map(([typeId, quantity]) => {
       const t = types.find((x) => x.id === typeId)!;
-      return { ticketTypeId: t.id, ticketTypeName: t.name, dayLabel: t.dayLabel, unitPriceJpy: t.priceJpy, quantity };
+      // クーポン注文は常に 0 円。
+      return { ticketTypeId: t.id, ticketTypeName: t.name, dayLabel: t.dayLabel, unitPriceJpy: couponId ? 0 : t.priceJpy, quantity };
     });
     return {
       id,
@@ -3872,8 +3911,9 @@ function createLpTicketsStore() {
       status,
       // 支払額が注文額と違った注文（人が Stripe で入金を確かめて確定する）。
       reviewReason: status === "needs_review" ? "amount_mismatch" : null,
+      couponId,
       buyerName,
-      buyerEmail: `buyer${10 - i}@example.com`,
+      buyerEmail: `buyer${seedOrders.length - i}@example.com`,
       answers: [
         { fieldId: "f_affiliation", label: "所属", value: aff },
         { fieldId: "f_attendance", label: "参加区分", value: att },
@@ -3916,6 +3956,20 @@ function createLpTicketsStore() {
   const touch = (): void => {
     settings.updatedAt = new Date().toISOString();
     settings.updatedBy = "デモ 管理者";
+  };
+
+  const couponView = (c: DemoTicketCoupon) => ({
+    ...c,
+    used: orders
+      .filter((o) => o.couponId === c.id && (o.status === "paid" || o.status === "pending" || o.status === "needs_review"))
+      .reduce((n, o) => n + o.quantity, 0),
+  });
+  const newCouponCode = (): string => {
+    let code = "";
+    do {
+      code = Array.from({ length: 10 }, () => DEMO_COUPON_ALPHABET[Math.floor(Math.random() * DEMO_COUPON_ALPHABET.length)]).join("");
+    } while (coupons.some((c) => c.code === code));
+    return code;
   };
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
@@ -3992,6 +4046,52 @@ function createLpTicketsStore() {
       const items = sorted.slice(startIdx, startIdx + limit);
       const nextCursor = startIdx + limit < sorted.length ? (items[items.length - 1]?.id ?? null) : null;
       return json({ items, nextCursor });
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/coupons") {
+      const items = [...coupons].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)).map(couponView);
+      return json({ items });
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/coupons") {
+      const now = new Date().toISOString();
+      const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
+      const typeId = typeof req.ticketTypeId === "string" ? req.ticketTypeId.trim() : "";
+      if (!typeId) return problem("VALIDATION_FAILED", "対象の券種を指定してください", 400);
+      if (!types.some((t) => t.id === typeId)) return problem("VALIDATION_FAILED", "その券種は見つかりません", 400);
+      if (!isInt(req.maxUses) || req.maxUses < 1 || req.maxUses > 1000) return problem("VALIDATION_FAILED", "使える枚数は 1〜1000 です", 400);
+      const label = req.label === undefined || req.label === null ? "" : req.label;
+      if (typeof label !== "string" || label.trim().length > 60) return problem("VALIDATION_FAILED", "用途メモは 60 文字以内です", 400);
+      let expiresAt: string | null = null;
+      if (req.expiresAt !== undefined && req.expiresAt !== null && req.expiresAt !== "") {
+        const ms = typeof req.expiresAt === "string" ? Date.parse(req.expiresAt) : NaN;
+        if (!Number.isFinite(ms) || ms <= Date.parse(now)) return problem("VALIDATION_FAILED", "期限は未来の日時にしてください", 400);
+        expiresAt = new Date(ms).toISOString();
+      }
+      const created: DemoTicketCoupon = {
+        id: `cpn_${Math.random().toString(36).slice(2, 10)}`,
+        code: newCouponCode(),
+        label: label.trim(),
+        ticketTypeId: typeId,
+        maxUses: req.maxUses,
+        expiresAt,
+        active: true,
+        createdBy: "デモ 管理者",
+        createdAt: now,
+        updatedAt: now,
+      };
+      coupons.push(created);
+      return json(couponView(created), 201);
+    }
+
+    const couponMatch = method === "PATCH" ? /^\/api\/v1\/lp\/tickets\/coupons\/([^/]+)$/.exec(pathname) : null;
+    if (couponMatch) {
+      const c = coupons.find((x) => x.id === decodeURIComponent(couponMatch[1]!));
+      if (!c) return problem("NOT_FOUND", "そのクーポンは見つかりません", 404);
+      if (typeof req.active !== "boolean") return problem("VALIDATION_FAILED", "active を指定してください", 400);
+      c.active = req.active;
+      c.updatedAt = new Date().toISOString();
+      return json(couponView(c));
     }
 
     const approveMatch = method === "POST" ? /^\/api\/v1\/lp\/tickets\/orders\/([^/]+)\/approve$/.exec(pathname) : null;
