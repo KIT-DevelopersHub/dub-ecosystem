@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 70-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 71-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(70);
+    expect(catalog).toHaveLength(71);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -417,6 +417,17 @@ describe("chat channel delete + personal sections (demo store)", () => {
     const roles = await api().request<{ items: { name: string; permissions: string[] }[] }>({ method: "GET", path: "/api/v1/identity/roles" });
     for (const r of roles.items.filter((x) => x.name !== "admin")) {
       expect(r.permissions, r.name).not.toContain("chat:delete_channel");
+    }
+  });
+
+  it("grants the demo admin chat:slack_import", async () => {
+    expect((await api().auth.me()).permissions).toContain("chat:slack_import");
+  });
+
+  it("starts chat:slack_import OFF for every non-admin role in ロール管理", async () => {
+    const roles = await api().request<{ items: { name: string; permissions: string[] }[] }>({ method: "GET", path: "/api/v1/identity/roles" });
+    for (const r of roles.items.filter((x) => x.name !== "admin")) {
+      expect(r.permissions, r.name).not.toContain("chat:slack_import");
     }
   });
 

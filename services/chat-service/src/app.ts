@@ -293,7 +293,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
 
   // ---- Slack channel import (admin; resumable step job — see src/slack-import.ts) ----
-  // Every route is admin-only in POLICY_TABLE (編集 + chat:create + chat:moderate). The
+  // Every route is gated in POLICY_TABLE by 編集 + chat:slack_import (admin only by default). The
   // browser drives the job: it POSTs …/step in a loop while the page is open, and a
   // reopened page resumes from the persisted cursor.
   const importer = (): SlackImporter => {

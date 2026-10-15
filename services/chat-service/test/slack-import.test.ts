@@ -318,7 +318,8 @@ describe("SlackImporter — full step loop", () => {
 });
 
 describe("Slack import routes", () => {
-  const app = (slackImport?: SlackImporter, keys = ALL_CHAT_KEYS) =>
+  const IMPORTER_KEYS: typeof ALL_CHAT_KEYS = [...ALL_CHAT_KEYS, "chat:slack_import"];
+  const app = (slackImport?: SlackImporter, keys = IMPORTER_KEYS) =>
     createApp(makeDeps({ slackImport, authz: fakeAuthz(new Set(keys)) }));
 
   it("answers 412 when SLACK_BOT_TOKEN is not configured", async () => {
@@ -352,8 +353,8 @@ describe("Slack import routes", () => {
     ]);
   });
 
-  it("is admin-only: 編集 without chat:moderate gets 403", async () => {
-    const a = app(importer, ["app:chat:view", "app:chat:edit", "chat:create"]);
+  it("needs chat:slack_import: 編集 + every other chat key still gets 403", async () => {
+    const a = app(importer, ALL_CHAT_KEYS);
     expect((await call(a, "GET", "/chat/slack-import/jobs", { userId: ADMIN })).status).toBe(403);
     expect((await call(a, "POST", "/chat/slack-import/jobs", { userId: ADMIN, body: { channel: "general" } })).status).toBe(403);
   });

@@ -53,6 +53,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   // members in the channel details modal. Hard delete is its own key (admin only by default).
   "chat:moderate",
   "chat:delete_channel",
+  "chat:slack_import",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.

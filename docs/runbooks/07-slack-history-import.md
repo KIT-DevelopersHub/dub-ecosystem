@@ -64,11 +64,11 @@ SLACK_BOT_TOKEN=xoxb-... CLOUDFLARE_API_TOKEN=... pnpm --filter @dub/infra-d1 sl
 
 ## 5b. アプリ内取り込み(fe6-chat 「チャンネル取り込み」)
 
-管理者(`role_sys_admin` / `role_sys_maintainer` = チャット 編集 + `chat:create` + `chat:moderate`)が
+ロール管理 > チャット > 細かい権限「Slack から取り込み」(`chat:slack_import`・既定は admin のみ ON)を持つ人が
 画面からチャンネル名を選ぶと、chat-service の **再開可能なステップ式ジョブ**が上と同じ内容を取り込む。
 
 - 有効化(オーナー許可後・staging から): `SLACK_BOT_TOKEN` を chat-service の Worker Secret に設定し、
-  `infra/d1/migrations/chat/0005_slack_import_jobs.sql` を dub-core に 1 回適用。未設定なら API は 412。
+  `infra/d1/migrations/chat/0005_slack_import_jobs.sql` と `identity/0021_chat_slack_import_perm.sql` を dub-core に 1 回適用。未設定なら API は 412。
 - ブラウザが `POST /chat/slack-import/jobs/:id/step` を繰り返す(1 ステップ = 無料枠内の小さな仕事 +
   1 回の D1 batch)。タブを閉じても次に開いた時に続きから再開。Slack 429 は `retryAfterMs` 待ちで再開。
 - 失敗したジョブは同じチャンネルで再度「取り込み」を押すと続きから再開。完了済みを押すと差分取り込み。

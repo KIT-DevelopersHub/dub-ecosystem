@@ -78,7 +78,7 @@ export interface ChatApiClient {
   listMentionTeams(): Promise<MentionTeams>;
   /** Link preview (OGP) for one URL; null = no card. Best-effort: never rejects. */
   unfurl(url: string): Promise<UnfurlPreview | null>;
-  // ---- Slack channel import (admin: chat:create + chat:moderate) ----
+  // ---- Slack channel import (編集 + chat:slack_import) ----
   /** Channels the Slack bot can see (private ones only once LMB is invited). */
   listSlackChannels(): Promise<SlackChannelOption[]>;
   listSlackImportJobs(limit?: number): Promise<SlackImportJob[]>;
