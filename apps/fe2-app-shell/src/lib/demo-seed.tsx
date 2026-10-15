@@ -2973,7 +2973,7 @@ function createMembersStore() {
     const code = mem.department ? DEPT_CODE[mem.department] : undefined;
     if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
     // 学籍番号の seed (例 "1400980")。半角数字 7 桁の仮番号。
-    if (year) mem.studentNumber = `14${String(980 + i * 37).padStart(5, "0")}`;
+    if (year) mem.studentNumber = `13${String(100 + i * 37).padStart(5, "0")}`;
   });
 
   // オンボーディング案内の初期項目 (公開ページ /onboarding に並ぶ)。実際の受け入れの流れ:
