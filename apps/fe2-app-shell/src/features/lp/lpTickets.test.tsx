@@ -6,6 +6,8 @@
 //   v2: 対象日（dayLabel）でのグルーピング / 1 回の購入上限 / 参加登録ボタン差し替え（ctaEnabled）/
 //       1 注文 = 複数券種 × 枚数
 //   v3: 要確認（needs_review）の理由表示と「確認して確定する」（lp:publish 必須・楽観更新 + ロールバック）
+//   v4: 無料券のクーポン（一覧/発行/停止は lp:publish 必須・状態バッジ・停止の楽観更新 + ロールバック・
+//       購入者のクーポンバッジ・0 円券種の補足）
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
@@ -14,10 +16,25 @@ import { describe, expect, it, vi } from "vitest";
 import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { createApiClient } from "../../lib/api-client.tsx";
 import { createDemoFetch } from "../../lib/demo-seed.tsx";
-import { createLpApi, type LpApi, type LpTicketOrder, type LpTicketsState, type LpTicketTypeSummary } from "./lpApi.tsx";
+import {
+  createLpApi,
+  type LpApi,
+  type LpTicketCoupon,
+  type LpTicketOrder,
+  type LpTicketsState,
+  type LpTicketTypeSummary,
+} from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
 import { LpTicketsScreen } from "./LpTicketsScreen.tsx";
-import { groupTicketTypesByDay, validateTicketFields, validateTicketType } from "./lpTickets.ts";
+import {
+  couponExpiryIso,
+  couponState,
+  groupTicketTypesByDay,
+  todayJst,
+  validateCouponDraft,
+  validateTicketFields,
+  validateTicketType,
+} from "./lpTickets.ts";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
 
@@ -82,6 +99,9 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     updateTicketType: unused,
     listTicketOrders: () => Promise.resolve({ items: [], nextCursor: null }),
     approveTicketOrder: unused,
+    listTicketCoupons: () => Promise.resolve({ items: [] }),
+    createTicketCoupon: unused,
+    setTicketCouponActive: unused,
     getProposals: unused,
     setProposalsEnabled: unused,
     saveProposalFields: unused,
@@ -195,10 +215,11 @@ describe("demo transport serves the tickets wire contract", () => {
     expect(p1.items).toHaveLength(5);
     expect(p1.items[0]!.createdAt >= p1.items[1]!.createdAt).toBe(true);
     const p2 = await api.listTicketOrders({ limit: 5, cursor: p1.nextCursor! });
-    expect(p2.nextCursor).toBeNull();
-    expect(p1.items.length + p2.items.length).toBe(10);
+    const p3 = await api.listTicketOrders({ limit: 5, cursor: p2.nextCursor! });
+    expect(p3.nextCursor).toBeNull();
+    expect(p1.items.length + p2.items.length + p3.items.length).toBe(11);
     // v2: an order carries several types x quantity; totals are consistent with its lines
-    const all = [...p1.items, ...p2.items];
+    const all = [...p1.items, ...p2.items, ...p3.items];
     expect(all.some((o) => o.items.length > 1)).toBe(true);
     for (const o of all) {
       expect(o.quantity).toBe(o.items.reduce((n, it) => n + it.quantity, 0));
@@ -453,6 +474,7 @@ describe("LpTicketsScreen", () => {
       createdAt: "2026-10-12T11:20:00.000Z",
       paidAt: "2026-10-12T11:21:00.000Z",
       reviewReason: null,
+      couponId: null,
     };
     renderScreen(fakeApi({ listTicketOrders: () => Promise.resolve({ items: [order], nextCursor: null }) }));
     const items = await screen.findByTestId("fe2-lp-ticket-order-items-ord_x");
@@ -479,6 +501,7 @@ describe("LpTicketsScreen", () => {
         createdAt: "2026-10-12T11:20:00.000Z",
         paidAt: null,
         reviewReason: "oversold",
+        couponId: null,
         ...over,
       };
     }
@@ -544,5 +567,255 @@ describe("LpTicketsScreen", () => {
   it("shows a retryable error state when loading fails", async () => {
     renderScreen(fakeApi({ getTickets: () => Promise.reject(new Error("boom")) }));
     expect(await screen.findByTestId("fe2-lp-tickets-error")).toBeInTheDocument();
+  });
+});
+
+function coupon(over: Partial<LpTicketCoupon> = {}): LpTicketCoupon {
+  return {
+    id: "cpn_a",
+    code: "ABCDE23456",
+    label: "登壇者向け",
+    ticketTypeId: "tt_invite",
+    maxUses: 5,
+    used: 1,
+    expiresAt: null,
+    active: true,
+    createdBy: "usr_1",
+    createdAt: "2026-10-01T00:00:00Z",
+    updatedAt: "2026-10-01T00:00:00Z",
+    ...over,
+  };
+}
+
+const INVITE = ticketType({ id: "tt_invite", name: "招待", priceJpy: 0, capacity: null });
+
+describe("coupons (pure)", () => {
+  const now = new Date("2026-10-15T03:00:00Z"); // 12:00 JST
+
+  it("derives one state: paused > expired > used up > active", () => {
+    expect(couponState(coupon(), now)).toBe("active");
+    expect(couponState(coupon({ used: 5 }), now)).toBe("used_up");
+    expect(couponState(coupon({ used: 5, expiresAt: "2026-10-14T00:00:00Z" }), now)).toBe("expired");
+    expect(couponState(coupon({ used: 5, expiresAt: "2026-10-14T00:00:00Z", active: false }), now)).toBe("paused");
+  });
+
+  it("validates the draft like the server (1..1000, label <= 60, expiry today or later as end of day JST)", () => {
+    const d = { ticketTypeId: "tt_invite", maxUses: "3", label: " 登壇者 ", expiresOn: null };
+    expect(validateCouponDraft(d, now).input).toEqual({ ticketTypeId: "tt_invite", maxUses: 3, label: "登壇者" });
+    expect(validateCouponDraft({ ...d, maxUses: "0" }, now).errors.maxUses).toBeTruthy();
+    expect(validateCouponDraft({ ...d, maxUses: "1001" }, now).errors.maxUses).toBeTruthy();
+    expect(validateCouponDraft({ ...d, label: "x".repeat(61) }, now).errors.label).toMatch(/60文字/);
+    expect(validateCouponDraft({ ...d, ticketTypeId: "" }, now).errors.ticketTypeId).toBeTruthy();
+    expect(validateCouponDraft({ ...d, expiresOn: "2026-10-14" }, now).errors.expiresOn).toMatch(/今日以降/);
+    expect(validateCouponDraft({ ...d, expiresOn: "2026-10-15" }, now).input?.expiresAt).toBe("2026-10-15T14:59:59.000Z");
+    expect(validateCouponDraft({ ...d, label: "" }, now).input).not.toHaveProperty("label");
+    expect(todayJst(new Date("2026-10-15T16:00:00Z"))).toBe("2026-10-16");
+    expect(couponExpiryIso("2026-12-31")).toBe("2026-12-31T14:59:59.000Z");
+  });
+});
+
+describe("demo transport serves the coupons contract", () => {
+  it("seeds in-use / used-up / paused / expired coupons with used counted from orders", async () => {
+    const { items } = await demoLpApi().listTicketCoupons();
+    const by = new Map(items.map((c) => [c.id, c]));
+    expect(items.map((c) => c.createdAt)).toEqual([...items.map((c) => c.createdAt)].sort().reverse());
+    expect(couponState(by.get("cpn_speakers")!)).toBe("active");
+    expect(by.get("cpn_speakers")!.used).toBe(1);
+    expect(couponState(by.get("cpn_sponsor_a")!)).toBe("used_up");
+    expect(couponState(by.get("cpn_staff")!)).toBe("paused");
+    expect(couponState(by.get("cpn_press")!)).toBe("expired");
+  });
+
+  it("marks coupon orders with couponId at 0 yen", async () => {
+    const api = demoLpApi();
+    const { items } = await api.listTicketOrders({ limit: 100 });
+    const couponOrders = items.filter((o) => o.couponId !== null);
+    expect(couponOrders.length).toBeGreaterThan(0);
+    expect(couponOrders.every((o) => o.amountJpy === 0)).toBe(true);
+    expect(items.find((o) => o.id === "ord_011")).toMatchObject({ couponId: "cpn_speakers", status: "paid" });
+  });
+
+  it("issues a server-generated code, rejects bad input, and pauses / resumes", async () => {
+    const api = demoLpApi();
+    const created = await api.createTicketCoupon({ ticketTypeId: "tt_invite", maxUses: 2, label: "テスト" });
+    expect(created.code).toMatch(/^[A-HJKMNP-Z2-9]{10}$/);
+    expect(created).toMatchObject({ used: 0, active: true, expiresAt: null });
+    expect((await api.listTicketCoupons()).items[0]!.id).toBe(created.id);
+    await expect(api.createTicketCoupon({ ticketTypeId: "tt_invite", maxUses: 0 })).rejects.toThrow();
+    await expect(api.createTicketCoupon({ ticketTypeId: "nope", maxUses: 1 })).rejects.toThrow();
+    await expect(api.createTicketCoupon({ ticketTypeId: "tt_invite", maxUses: 1, expiresAt: "2020-01-01T00:00:00Z" })).rejects.toThrow();
+    expect((await api.setTicketCouponActive(created.id, { active: false })).active).toBe(false);
+    expect((await api.setTicketCouponActive(created.id, { active: true })).active).toBe(true);
+  });
+});
+
+describe("LpTicketsScreen coupons", () => {
+  const withInvite = () => Promise.resolve(baseState({ types: [ticketType(), INVITE] }));
+
+  it("lists coupons with type, usage, expiry and a glanceable state", async () => {
+    const list = () =>
+      Promise.resolve({
+        items: [
+          coupon(),
+          coupon({ id: "cpn_full", used: 5 }),
+          coupon({ id: "cpn_old", expiresAt: "2026-01-01T00:00:00Z" }),
+          coupon({ id: "cpn_off", active: false }),
+          coupon({ id: "cpn_paid", ticketTypeId: "tt_general" }),
+        ],
+      });
+    renderScreen(fakeApi({ getTickets: withInvite, listTicketCoupons: list }));
+    expect(await screen.findByTestId("fe2-lp-coupon-code-cpn_a")).toHaveTextContent("ABCDE23456");
+    expect(screen.getByTestId("fe2-lp-coupon-issue")).toHaveTextContent("クーポンを発行");
+    expect(screen.getByTestId("fe2-lp-coupon-type-cpn_a")).toHaveTextContent("招待");
+    expect(screen.getByTestId("fe2-lp-coupon-used-cpn_a")).toHaveTextContent("1 / 5");
+    expect(screen.getByTestId("fe2-lp-coupon-expires-cpn_a")).toHaveTextContent("期限なし");
+    expect(screen.getByTestId("fe2-lp-coupon-state-cpn_a")).toHaveTextContent("使用可");
+    expect(screen.getByTestId("fe2-lp-coupon-state-cpn_full")).toHaveTextContent("上限に達した");
+    expect(screen.getByTestId("fe2-lp-coupon-state-cpn_old")).toHaveTextContent("期限切れ");
+    expect(screen.getByTestId("fe2-lp-coupon-state-cpn_off")).toHaveTextContent("停止中");
+    expect(screen.getByTestId("fe2-lp-coupon-paid-type-cpn_paid")).toHaveTextContent("このコードなら無料");
+    expect(screen.getByTestId("fe2-lp-coupon-toggle-cpn_off")).toHaveTextContent("再開する");
+  });
+
+  it("shows a skeleton while loading and an empty state with no coupons", async () => {
+    let resolve: (v: { items: LpTicketCoupon[] }) => void = () => undefined;
+    renderScreen(fakeApi({ listTicketCoupons: () => new Promise((r) => (resolve = r)) }));
+    expect(await screen.findByTestId("fe2-lp-coupons-loading")).toBeInTheDocument();
+    resolve({ items: [] });
+    expect(await screen.findByTestId("fe2-lp-coupons-empty")).toBeInTheDocument();
+  });
+
+  it("does not fetch coupons without lp:publish and explains why", async () => {
+    const list = vi.fn(() => Promise.resolve({ items: [coupon()] }));
+    renderScreen(fakeApi({ listTicketCoupons: list }), EDITOR);
+    expect(await screen.findByTestId("fe2-lp-coupons-publish-hint")).toHaveTextContent("lp:publish");
+    expect(screen.queryByTestId("fe2-lp-coupon-issue")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-coupons")).not.toBeInTheDocument();
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("hides the coupon section from a viewer", async () => {
+    renderScreen(fakeApi(), VIEWER);
+    await screen.findByTestId("fe2-lp-ticket-types-table");
+    expect(screen.queryByTestId("fe2-lp-coupons")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-coupons-locked")).not.toBeInTheDocument();
+  });
+
+  it("issues a coupon with the chosen type, count, memo and end-of-day expiry", async () => {
+    const created = coupon({ id: "cpn_new", code: "NEWCQDE234", used: 0 });
+    const stored: LpTicketCoupon[] = [];
+    const create = vi.fn(() => {
+      stored.unshift(created);
+      return Promise.resolve(created);
+    });
+    renderScreen(fakeApi({ getTickets: withInvite, createTicketCoupon: create, listTicketCoupons: () => Promise.resolve({ items: [...stored] }) }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-coupon-issue"));
+    const dialog = await screen.findByTestId("fe2-lp-coupon-dialog");
+    // defaults to the free type, so no paid warning
+    expect(within(dialog).getByTestId("fe2-lp-coupon-type")).toHaveValue("tt_invite");
+    expect(within(dialog).queryByTestId("fe2-lp-coupon-paid-warning")).toBeNull();
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-coupon-max"), { target: { value: "10" } });
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-coupon-label"), { target: { value: "スポンサー B 社" } });
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-coupon-expires"), { target: { value: "2099-12-31" } });
+    fireEvent.click(within(dialog).getByTestId("fe2-lp-coupon-save"));
+
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith({ ticketTypeId: "tt_invite", maxUses: 10, label: "スポンサー B 社", expiresAt: "2099-12-31T14:59:59.000Z" });
+    expect(await screen.findByTestId("fe2-lp-coupon-code-cpn_new")).toHaveTextContent(created.code);
+    await waitFor(() => expect(screen.queryByTestId("fe2-lp-coupon-dialog")).not.toBeInTheDocument());
+  });
+
+  it("warns that a coupon for a paid type makes it free, and blocks invalid counts before the api", async () => {
+    const create = vi.fn(() => Promise.reject(new Error("should not be called")));
+    renderScreen(fakeApi({ getTickets: withInvite, createTicketCoupon: create }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-coupon-issue"));
+    const dialog = await screen.findByTestId("fe2-lp-coupon-dialog");
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-coupon-type"), { target: { value: "tt_general" } });
+    expect(within(dialog).getByTestId("fe2-lp-coupon-paid-warning")).toHaveTextContent("0 円になり");
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-coupon-max"), { target: { value: "0" } });
+    fireEvent.click(within(dialog).getByTestId("fe2-lp-coupon-save"));
+    expect(await within(dialog).findByText(/1〜1,000/)).toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("pauses optimistically and rolls back when the server refuses", async () => {
+    let reject: (e: Error) => void = () => undefined;
+    const toggle = vi.fn(
+      () =>
+        new Promise<LpTicketCoupon>((_res, rej) => {
+          reject = rej;
+        }),
+    );
+    renderScreen(fakeApi({ getTickets: withInvite, listTicketCoupons: () => Promise.resolve({ items: [coupon()] }), setTicketCouponActive: toggle }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-coupon-toggle-cpn_a"));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-coupon-state-cpn_a")).toHaveTextContent("停止中"));
+    expect(toggle).toHaveBeenCalledWith("cpn_a", { active: false });
+    reject(new Error("boom"));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-coupon-state-cpn_a")).toHaveTextContent("使用可"));
+    expect(await screen.findByText("クーポンを停止できませんでした")).toBeInTheDocument();
+  });
+
+  it("does not offer resume for an expired paused coupon", async () => {
+    const list = () => Promise.resolve({ items: [coupon({ active: false, expiresAt: "2026-01-01T00:00:00Z" })] });
+    renderScreen(fakeApi({ getTickets: withInvite, listTicketCoupons: list }));
+    expect(await screen.findByTestId("fe2-lp-coupon-state-cpn_a")).toHaveTextContent("停止中");
+    expect(screen.queryByTestId("fe2-lp-coupon-toggle-cpn_a")).not.toBeInTheDocument();
+  });
+
+  it("badges coupon orders in the buyer list, with the code when lp:publish can read it", async () => {
+    const order: LpTicketOrder = {
+      id: "ord_c",
+      items: [{ ticketTypeId: "tt_invite", ticketTypeName: "招待", dayLabel: "", unitPriceJpy: 0, quantity: 1 }],
+      quantity: 1,
+      amountJpy: 0,
+      status: "paid",
+      buyerName: "松本 蓮",
+      buyerEmail: "m@example.com",
+      answers: [],
+      createdAt: "2026-10-14T03:00:00.000Z",
+      paidAt: "2026-10-14T03:00:00.000Z",
+      reviewReason: null,
+      couponId: "cpn_a",
+    };
+    const orders = () => Promise.resolve({ items: [order], nextCursor: null });
+    renderScreen(fakeApi({ listTicketOrders: orders, listTicketCoupons: () => Promise.resolve({ items: [coupon()] }) }));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-coupon-ord_c")).toHaveTextContent("クーポン ABCDE23456"));
+  });
+
+  it("badges coupon orders without the code for an editor lacking lp:publish", async () => {
+    const order = {
+      id: "ord_c",
+      items: [{ ticketTypeId: "tt_invite", ticketTypeName: "招待", dayLabel: "", unitPriceJpy: 0, quantity: 1 }],
+      quantity: 1,
+      amountJpy: 0,
+      status: "paid" as const,
+      buyerName: "松本 蓮",
+      buyerEmail: "m@example.com",
+      answers: [],
+      createdAt: "2026-10-14T03:00:00.000Z",
+      paidAt: "2026-10-14T03:00:00.000Z",
+      reviewReason: null,
+      couponId: "cpn_a",
+    };
+    renderScreen(fakeApi({ listTicketOrders: () => Promise.resolve({ items: [order], nextCursor: null }) }), EDITOR);
+    expect(await screen.findByTestId("fe2-lp-ticket-order-coupon-ord_c")).toHaveTextContent(/^クーポン$/);
+  });
+
+  it("explains that a 0 yen type is coupon-only while editing its price", async () => {
+    renderScreen(fakeApi());
+    fireEvent.click(await screen.findByTestId("fe2-lp-ticket-type-add"));
+    const dialog = await screen.findByTestId("fe2-lp-ticket-type-dialog");
+    expect(within(dialog).queryByTestId("fe2-lp-ticket-type-coupon-note")).toBeNull();
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-ticket-type-price"), { target: { value: "0" } });
+    expect(within(dialog).getByTestId("fe2-lp-ticket-type-coupon-note")).toHaveTextContent("0 円の券種はクーポンコードでのみ申し込めます");
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-ticket-type-price"), { target: { value: "1000" } });
+    expect(within(dialog).queryByTestId("fe2-lp-ticket-type-coupon-note")).toBeNull();
+  });
+
+  it("renders the seeded demo coupons end to end", async () => {
+    renderScreen(demoLpApi());
+    expect(await screen.findByTestId("fe2-lp-coupons-table")).toHaveTextContent("SPKR7Q2M9X");
+    expect(screen.getByTestId("fe2-lp-coupon-state-cpn_sponsor_a")).toHaveTextContent("上限に達した");
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-coupon-ord_011")).toHaveTextContent("クーポン SPKR7Q2M9X"));
   });
 });

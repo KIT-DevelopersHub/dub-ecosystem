@@ -202,6 +202,8 @@ export interface LpTicketOrder {
   paidAt: string | null;
   /** Why it is / was needs_review (amount_mismatch / currency_mismatch / oversold / dispute). Kept after approval. */
   reviewReason: string | null;
+  /** The coupon this order used (a coupon order is always 0 yen). */
+  couponId: string | null;
 }
 export interface LpTicketOrdersPage {
   items: LpTicketOrder[];
@@ -215,6 +217,24 @@ export interface LpTicketTypeInput {
   dayLabel: string;
   maxPerOrder: number;
   active: boolean;
+}
+
+/** 無料券のクーポン。1 コード = 1 券種 x 最大 maxUses 枚。used = 使った枚数（席の押さえと同じ規則で数える）。 */
+export interface LpTicketCoupon {
+  id: string;
+  code: string;
+  label: string;
+  ticketTypeId: string;
+  maxUses: number;
+  used: number;
+  expiresAt: string | null;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface LpTicketCouponsPage {
+  items: LpTicketCoupon[];
 }
 
 // ---- tickets persistence ----
@@ -239,6 +259,9 @@ export interface TicketOrderRow extends LpTicketOrder {
   resolvedAt: string | null;
   /** Hashed sender IP from the public LP Worker (per-sender hold cap). Never the raw IP. */
   clientKey: string | null;
+}
+export interface TicketCouponRow extends Omit<LpTicketCoupon, "used"> {
+  site: string;
 }
 export interface TicketTypeAgg {
   ticketTypeId: string;
@@ -279,11 +302,26 @@ export interface LpTicketRepo {
    * (capacity null = unlimited). All-or-nothing: on a short item nothing stays held and that
    * item's ticketTypeId is returned.
    */
+  /**
+   * With row.couponId: in the SAME batch, the order is only inserted while it is one line of the coupon's
+   * type, the coupon is active, not expired at row.createdAt, and its held uses + row.quantity <= max_uses
+   * (else "coupon_used_up").
+   */
   insertOrderIfAvailable(
     row: TicketOrderRow,
     capacities: ReadonlyMap<string, number | null>,
     pendingSince: string,
-  ): Promise<{ ok: true } | { ok: false; ticketTypeId: string }>;
+  ): Promise<{ ok: true } | { ok: false; reason: "sold_out"; ticketTypeId: string } | { ok: false; reason: "coupon_used_up" }>;
+  /** false when (site, code) already exists. */
+  insertCoupon(row: TicketCouponRow): Promise<boolean>;
+  getCoupon(site: string, id: string): Promise<TicketCouponRow | null>;
+  /** `code` is already normalized. */
+  getCouponByCode(site: string, code: string): Promise<TicketCouponRow | null>;
+  setCouponActive(site: string, id: string, active: boolean, updatedAt: string): Promise<boolean>;
+  /** Newest first. */
+  listCoupons(site: string): Promise<TicketCouponRow[]>;
+  /** Tickets used per coupon (held orders: paid / needs_review / fresh pending). */
+  couponUses(site: string, pendingSince: string): Promise<Map<string, number>>;
   getOrder(site: string, id: string): Promise<TicketOrderRow | null>;
   getOrderBySession(sessionId: string): Promise<TicketOrderRow | null>;
   setOrderSession(id: string, sessionId: string): Promise<void>;
@@ -424,6 +462,7 @@ export interface AppDeps {
   siteTraffic: SiteTrafficSource | null;
   newTicketTypeId: () => string;
   newOrderId: () => string;
+  newCouponId: () => string;
   /** 1 日 (JST) に作れる checkout の上限。公開フォームからの書き込み濫用の天井。 */
   dailyCheckoutCap: number;
   /** null = STRIPE_SECRET_KEY 未設定（paymentReady=false）。 */

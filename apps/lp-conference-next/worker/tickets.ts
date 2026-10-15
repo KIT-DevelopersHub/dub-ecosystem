@@ -23,6 +23,8 @@ export interface PublicTicketType {
   /** Seats left after holds; null = no capacity. */
   remaining: number | null;
   soldOut: boolean;
+  /** 0-yen type that needs a coupon code: hidden from the normal list. */
+  couponOnly: boolean;
 }
 export interface TicketConfig {
   enabled: boolean;
@@ -44,6 +46,16 @@ export interface CheckoutInput {
   name: string;
   email: string;
   answers: Record<string, string>;
+  /** Normalized code; only set on a coupon order (the server re-checks it). */
+  couponCode?: string;
+}
+
+/** A code the server accepted (POST /lp/internal/tickets/coupon). Display only: the server decides. */
+export interface AppliedCoupon {
+  code: string;
+  ticketTypeId: string;
+  /** Tickets this code can still get. */
+  remainingUses: number;
 }
 
 /** Form values keyed by input name (qty_<typeId> / name / email / f_<fieldId>). */
@@ -62,6 +74,18 @@ const BODY_MAX = 32 * 1024;
 export const ORDER_MAX = 20;
 const DEFAULT_MAX_PER_ORDER = 10;
 const LOW_STOCK = 10;
+const COUPON_RAW_MAX = 40;
+/** Same normalization as lp-analytics (upper case, spaces / hyphens dropped). */
+const COUPON_CODE_RE = /^[A-Z0-9]{4,32}$/;
+export const COUPON_FIELD = "couponCode";
+export const COUPON_MSG = {
+  required: "クーポンコードを入力してください",
+  invalid: "クーポンコードが正しくないか、利用できません",
+  usedUp: "このクーポンは使用上限に達しています",
+  notApplicable: "このクーポンは選択された券種には使えません。クーポンの対象券種のみ、1 種類でお申し込みください",
+  couponRequired: "この券種のお申し込みにはクーポンコードが必要です",
+  tooMany: "クーポンコードの入力回数が上限に達しました。しばらく時間をおいて再度お試しください。",
+} as const;
 
 const DAY1 = "Day 1 - 9/13(月)";
 const DAY2 = "Day 2 - 9/14(火)";
@@ -75,11 +99,17 @@ export const DEMO_CONFIG: TicketConfig = {
     { id: "attendance", label: "参加区分", type: "select", required: true, options: ["現地", "オンライン"] },
   ],
   types: [
-    { id: "demo-general-d1", name: "一般", description: "Day 1 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY1, maxPerOrder: 10, remaining: null, soldOut: false },
-    { id: "demo-student-d1", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY1, maxPerOrder: 10, remaining: 3, soldOut: false },
-    { id: "demo-general-d2", name: "一般", description: "Day 2 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY2, maxPerOrder: 10, remaining: null, soldOut: false },
-    { id: "demo-student-d2", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY2, maxPerOrder: 10, remaining: 0, soldOut: true },
+    { id: "demo-general-d1", name: "一般", description: "Day 1 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY1, maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false },
+    { id: "demo-student-d1", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY1, maxPerOrder: 10, remaining: 3, soldOut: false, couponOnly: false },
+    { id: "demo-invite-d1", name: "招待", description: "招待コードをお持ちの方向け", priceJpy: 0, dayLabel: DAY1, maxPerOrder: 5, remaining: 20, soldOut: false, couponOnly: true },
+    { id: "demo-general-d2", name: "一般", description: "Day 2 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY2, maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false },
+    { id: "demo-student-d2", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY2, maxPerOrder: 10, remaining: 0, soldOut: true, couponOnly: false },
   ],
+};
+/** Demo only (no lp-analytics): codes -> what the real coupon endpoint would answer. */
+export const DEMO_COUPONS: Readonly<Record<string, { ticketTypeId: string; remainingUses: number }>> = {
+  TRYFREE234: { ticketTypeId: "demo-invite-d1", remainingUses: 3 },
+  USEDUP2345: { ticketTypeId: "demo-invite-d1", remainingUses: 0 },
 };
 
 // ---------- helpers ----------
@@ -115,6 +145,30 @@ export function maxQuantity(t: PublicTicketType, paymentReady: boolean): number 
   if (!isSelectable(t, paymentReady)) return 0;
   const cap = t.remaining === null ? t.maxPerOrder : Math.min(t.maxPerOrder, t.remaining);
   return Math.max(0, Math.min(cap, ORDER_MAX));
+}
+
+/** "abcde-12345 " -> "ABCDE12345"; null when it can not be a code. */
+export function normalizeCouponCode(raw: string): string | null {
+  const code = raw.toUpperCase().replace(/[\s-]/g, "");
+  return COUPON_CODE_RE.test(code) ? code : null;
+}
+
+/**
+ * Selectable quantity for a type on this page: with a coupon only its type (at 0 yen, capped by the
+ * code's remaining uses); without one, coupon-only types are not offered.
+ */
+export function quantityCap(t: PublicTicketType, paymentReady: boolean, coupon?: AppliedCoupon | null): number {
+  if (coupon) {
+    if (t.id !== coupon.ticketTypeId || t.soldOut || t.remaining === 0) return 0;
+    return Math.max(0, Math.min(t.maxPerOrder, t.remaining ?? ORDER_MAX, coupon.remainingUses, ORDER_MAX));
+  }
+  if (t.couponOnly) return 0;
+  return maxQuantity(t, paymentReady);
+}
+
+/** Types shown on the page: coupon-only ones stay hidden unless a coupon unlocked them. */
+export function visibleTypes(types: PublicTicketType[], coupon?: AppliedCoupon | null): PublicTicketType[] {
+  return types.filter((t) => !t.couponOnly || (coupon !== null && coupon !== undefined && t.id === coupon.ticketTypeId));
 }
 
 /** Splits "Day 1 - 9/13(月)" into { main: "Day 1", sub: "9/13(月)" }. */
@@ -157,10 +211,11 @@ export function itemsSummary(items: CheckoutItem[], types: PublicTicketType[]): 
 }
 
 /** Maps a request path to a tickets route, or null when it is not a tickets path. */
-export function matchTicketsRoute(pathname: string): "page" | "checkout" | "thanks" | "webhook" | null {
+export function matchTicketsRoute(pathname: string): "page" | "checkout" | "coupon" | "thanks" | "webhook" | null {
   const p = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   if (p === "/tickets") return "page";
   if (p === "/tickets/checkout") return "checkout";
+  if (p === "/tickets/coupon") return "coupon";
   if (p === "/tickets/thanks") return "thanks";
   if (p === "/tickets/stripe-webhook") return "webhook";
   return null;
@@ -198,6 +253,8 @@ export function parseConfig(raw: unknown): TicketConfig | null {
       maxPerOrder,
       remaining,
       soldOut: r.soldOut === true || remaining === 0,
+      // Explicit only: an older lp-analytics without the flag still sells 0-yen types openly.
+      couponOnly: r.couponOnly === true,
     });
   }
   const fields: TicketField[] = [];
@@ -227,7 +284,7 @@ export type ParseResult =
   | { ok: true; input: CheckoutInput; values: FormValues }
   | { ok: false; spam: boolean; values: FormValues; errors: FormErrors };
 
-export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig): ParseResult {
+export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig, coupon: AppliedCoupon | null = null): ParseResult {
   const values: FormValues = {
     name: (form.get("name") ?? "").trim(),
     email: (form.get("email") ?? "").trim(),
@@ -255,12 +312,17 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig): 
     }
     const q = Number(raw);
     if (q === 0) continue;
-    const max = maxQuantity(t, config.paymentReady);
+    const max = quantityCap(t, config.paymentReady, coupon);
+    const forCoupon = coupon !== null && t.id === coupon.ticketTypeId;
     if (t.soldOut || t.remaining === 0) errors[key] = "この券種は売り切れました";
+    else if (max === 0 && coupon && !forCoupon) errors[key] = "クーポン適用中は、クーポンの対象券種のみお申し込みいただけます";
+    else if (max === 0 && t.couponOnly && !coupon) errors[key] = COUPON_MSG.couponRequired;
     else if (max === 0) errors[key] = "この券種は現在お申し込みいただけません";
     else if (q > max) {
       errors[key] =
-        t.remaining !== null && t.remaining < Math.min(t.maxPerOrder, ORDER_MAX)
+        forCoupon && coupon.remainingUses <= Math.min(t.maxPerOrder, t.remaining ?? ORDER_MAX, ORDER_MAX)
+          ? `このクーポンで申し込めるのは残り${coupon.remainingUses}枚です`
+          : t.remaining !== null && t.remaining < Math.min(t.maxPerOrder, ORDER_MAX)
           ? `残り${t.remaining}枚です。${t.remaining}枚以下でお選びください`
           : `この券種は1回のお申し込みで${max}枚までです`;
     }
@@ -296,7 +358,9 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig): 
     answers[f.id] = v;
   }
   if (Object.keys(errors).length > 0) return { ok: false, spam: false, values, errors };
-  return { ok: true, values, input: { items, name: values.name, email: values.email, answers } };
+  const input: CheckoutInput = { items, name: values.name, email: values.email, answers };
+  if (coupon) input.couponCode = coupon.code;
+  return { ok: true, values, input };
 }
 
 /**
@@ -339,9 +403,14 @@ export function mapCheckoutError(status: number, body: unknown, config: TicketCo
         const reason = d && typeof d === "object" ? str((d as { reason?: unknown }).reason) : "";
         const key = detailKey(field, ids, typeIds);
         if (key) errors[key] = errors[key] ?? itemReasonMessage(key, reason);
+        // The coupon-only type is hidden without a code: say it where the buyer can act.
+        if (reason === "coupon_required") errors[COUPON_FIELD] = errors[COUPON_FIELD] ?? COUPON_MSG.couponRequired;
       }
     }
     errors._form = "入力内容に誤りがあります。各項目をご確認ください。";
+  } else if (status === 409 && isCouponUsedUp(body)) {
+    errors[COUPON_FIELD] = COUPON_MSG.usedUp;
+    errors._form = "このクーポンの残り枚数が足りなくなりました。枚数を減らすか、クーポンを解除してお申し込みください。";
   } else if (status === 409) {
     const id = soldOutTypeId(body);
     if (id && config.types.some((t) => t.id === id)) errors[qtyInputName(id)] = "残数が足りません（売り切れ）";
@@ -358,12 +427,25 @@ export function mapCheckoutError(status: number, body: unknown, config: TicketCo
 }
 
 function itemReasonMessage(key: string, reason: string): string {
+  if (key === COUPON_FIELD) return reason === "not_applicable" ? COUPON_MSG.notApplicable : COUPON_MSG.invalid;
+  if (reason === "coupon_required") return COUPON_MSG.couponRequired;
   if (key === "items" && reason === "too_many") return `1 回のお申し込みは合計${ORDER_MAX}枚までです`;
   if (key === "items") return "チケットを 1 枚以上選んでください";
   if (!key.startsWith("qty_")) return "入力内容を確認してください";
   if (reason === "unavailable") return "この券種は現在お申し込みいただけません";
   if (reason === "too_many") return "選べる枚数を超えています";
   return "枚数を選び直してください";
+}
+
+/** 409 { error: { code: "LP_TICKET_COUPON_USED_UP", details: { reason: "coupon_used_up" } } }. */
+function isCouponUsedUp(body: unknown): boolean {
+  const err = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
+  if (!err || typeof err !== "object") return false;
+  if ((err as { code?: unknown }).code === "LP_TICKET_COUPON_USED_UP") return true;
+  const details = (err as { details?: unknown }).details;
+  return (Array.isArray(details) ? details : [details]).some(
+    (d) => !!d && typeof d === "object" && (d as { reason?: unknown }).reason === "coupon_used_up",
+  );
 }
 
 /** 409 body: { error: { details: { reason: "sold_out", ticketTypeId } } } (array form tolerated). */
@@ -380,6 +462,7 @@ function soldOutTypeId(body: unknown): string | null {
 }
 
 function detailKey(field: string, ids: Set<string>, typeIds: Set<string>): string | null {
+  if (field === COUPON_FIELD) return COUPON_FIELD;
   if (field === "items" || field === "ticketTypeId") return "items";
   if (field.startsWith("items.")) {
     const id = field.slice("items.".length);
@@ -531,8 +614,25 @@ transition:transform .25s cubic-bezier(.2,.7,.2,1),box-shadow .25s,border-color 
 .badge{display:inline-block;font:800 11px/1 var(--font);border-radius:999px;padding:5px 10px;background:#eceef2;color:var(--soft);letter-spacing:.04em}
 .badge.so{background:#fde8e7;color:var(--err)}
 .badge.low{background:#fff1d1;color:#8a5a00}
+.badge.cp{background:#e3f7f0;color:#0b7a5f}
+.tk-price small.cp{display:block;margin:8px 0 0;text-align:center;font-size:11px;color:#0b7a5f;-webkit-text-fill-color:#0b7a5f}
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .items-err{margin-top:16px}
+
+/* coupon code */
+.cpn{margin:32px 0 0;padding:26px 0 0;border-top:1.5px dashed rgba(16,28,168,.14)}
+.cpn.cpn-top{margin:0 0 32px;padding:0 0 26px;border-top:0;border-bottom:1.5px dashed rgba(16,28,168,.14)}
+.cpn-row{display:flex;gap:12px;align-items:stretch}
+.cpn-row input[type=text]{flex:1;min-width:0;font-family:"Inter",var(--font);font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.cpn-btn{flex:none;border:1.5px solid rgba(42,95,208,.4);background:#fff;color:var(--btn);border-radius:12px;padding:0 24px;font:inherit;font-size:15px;font-weight:800;cursor:pointer;transition:background .2s,color .2s,border-color .2s}
+.cpn-btn:hover{background:var(--btn);border-color:var(--btn);color:#fff}
+.cpn-hint{margin:10px 0 0;font-size:13px;color:var(--mute)}
+.cpn-applied{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:16px 18px;border-radius:14px;background:#effaf6;border:1.5px solid rgba(23,184,146,.35)}
+.cpn-k{font-size:13px;font-weight:800;color:#0b7a5f}
+.cpn-code{font:800 17px/1 "Inter",sans-serif;letter-spacing:.14em;color:var(--h)}
+.cpn-clear{margin-left:auto;font-size:14px;font-weight:800;color:var(--btn);text-decoration:none;border:1.5px solid rgba(42,95,208,.4);background:#fff;border-radius:999px;padding:6px 16px}
+.cpn-clear:hover{background:var(--btn);border-color:var(--btn);color:#fff}
+.cpn-lead{margin:0;padding:18px 20px;border-radius:14px;background:var(--alt);color:var(--soft);font-size:14px;font-weight:600}
 
 /* form fields */
 .field{margin:0 0 22px}
@@ -626,6 +726,7 @@ footer a.fl:hover{color:#fff;text-decoration:underline}
 .tk-stub{flex-direction:row;flex-wrap:wrap;justify-content:space-between;padding:12px 16px 14px 20px;border-left:0;border-top:2px dashed rgba(16,28,168,.14)}
 .tk-stub::before,.tk-stub::after{display:none}.tk-cap{width:100%;order:3}
 .day-d{font-size:17px}.days{gap:28px}
+.cpn-row{flex-direction:column}.cpn-btn{padding:13px 24px}
 .two{grid-template-columns:1fr}.ey2{display:none}.shead p{display:none}.bname{display:none}.steps li span{display:none}.steps li+li::before{width:14px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -876,30 +977,41 @@ const CAL =
   '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>';
 
 /** Quantity currently chosen for a type, clamped to what can be selected. */
-function chosenQty(t: PublicTicketType, paymentReady: boolean, values: FormValues): number {
+function chosenQty(t: PublicTicketType, max: number, values: FormValues): number {
   const raw = values[qtyInputName(t.id)] ?? "";
   const q = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
-  return Math.min(q, maxQuantity(t, paymentReady));
+  return Math.min(q, max);
+}
+
+/** Unit price shown / summed on the page (display only: the server prices the order). */
+function shownPrice(t: PublicTicketType, coupon: AppliedCoupon | null): number {
+  return coupon && t.id === coupon.ticketTypeId ? 0 : Math.max(0, Math.trunc(t.priceJpy));
 }
 
 function typeLabel(t: PublicTicketType): string {
   return t.dayLabel ? `${t.name}（${t.dayLabel}）` : t.name;
 }
 
-function renderType(t: PublicTicketType, paymentReady: boolean, values: FormValues, errors: FormErrors): string {
-  const max = maxQuantity(t, paymentReady);
-  const q = chosenQty(t, paymentReady, values);
+function renderType(t: PublicTicketType, config: TicketConfig, coupon: AppliedCoupon | null, values: FormValues, errors: FormErrors): string {
+  const max = quantityCap(t, config.paymentReady, coupon);
+  const q = chosenQty(t, max, values);
   const key = qtyInputName(t.id);
   const k = escapeHtml(key);
   const soldOut = t.soldOut || t.remaining === 0;
+  const forCoupon = coupon !== null && t.id === coupon.ticketTypeId;
   const badge = soldOut
     ? '<span class="badge so">売り切れ</span>'
-    : max === 0
-      ? '<span class="badge">決済準備中</span>'
-      : t.remaining !== null && t.remaining <= LOW_STOCK
-        ? `<span class="badge low">残りわずか ${t.remaining}枚</span>`
-        : "";
-  const price = formatPrice(t.priceJpy);
+    : forCoupon
+      ? '<span class="badge cp">クーポン適用</span>'
+      : coupon
+        ? '<span class="badge">クーポン適用中は選べません</span>'
+        : max === 0
+          ? '<span class="badge">決済準備中</span>'
+          : t.remaining !== null && t.remaining <= LOW_STOCK
+            ? `<span class="badge low">残りわずか ${t.remaining}枚</span>`
+            : "";
+  const unit = shownPrice(t, coupon);
+  const price = formatPrice(unit);
   const label = typeLabel(t);
   const aria = errors[key] ? ` aria-invalid="true" aria-describedby="${k}-err"` : "";
   const opts: string[] = [];
@@ -916,21 +1028,29 @@ function renderType(t: PublicTicketType, paymentReady: boolean, values: FormValu
   const day = t.dayLabel ? splitDayLabel(t.dayLabel) : null;
   const cls = `tk${max === 0 ? " off" : ""}${q > 0 ? " on" : ""}${errors[key] ? " bad" : ""}`;
   return (
-    `<div class="${cls}" data-id="${escapeHtml(t.id)}" data-name="${escapeHtml(t.name)}" data-day="${escapeHtml(day ? day.main : "")}" data-price="${Math.max(0, Math.trunc(t.priceJpy))}">` +
+    `<div class="${cls}" data-id="${escapeHtml(t.id)}" data-name="${escapeHtml(t.name)}" data-day="${escapeHtml(day ? day.main : "")}" data-price="${unit}">` +
     `<div class="tk-main"><div class="tk-name">${escapeHtml(t.name)}${badge}</div>` +
     (t.description ? `<span class="tk-desc">${escapeHtml(t.description)}</span>` : "") +
     (day ? `<div class="tk-meta"><span class="tk-day">${CAL}対象日 ${escapeHtml(t.dayLabel)}</span></div>` : "") +
     errMsg(errors, key) +
     "</div>" +
-    `<div class="tk-stub"><span class="tk-price${t.priceJpy <= 0 ? " free" : ""}">${escapeHtml(price)}${t.priceJpy > 0 ? "<small>/枚</small>" : ""}</span>` +
+    `<div class="tk-stub"><span class="tk-price${unit <= 0 ? " free" : ""}">${escapeHtml(price)}` +
+    (forCoupon ? '<small class="cp">（クーポン適用）</small>' : unit > 0 ? "<small>/枚</small>" : "") +
+    "</span>" +
     stepper +
     (max > 0 ? `<span class="tk-cap">1 回 ${max} 枚まで</span>` : "") +
     "</div></div>"
   );
 }
 
-function renderDayGroups(config: TicketConfig, values: FormValues, errors: FormErrors): string {
-  const groups = groupByDay(config.types);
+function renderDayGroups(
+  config: TicketConfig,
+  types: PublicTicketType[],
+  coupon: AppliedCoupon | null,
+  values: FormValues,
+  errors: FormErrors,
+): string {
+  const groups = groupByDay(types);
   const onlyUndated = groups.length === 1 && groups[0].dayLabel === "";
   return (
     '<div class="days">' +
@@ -946,8 +1066,8 @@ function renderDayGroups(config: TicketConfig, values: FormValues, errors: FormE
         } else if (!onlyUndated) {
           head = '<h3 class="day-h"><span class="day-k plain">共通</span><span class="day-d">全日程</span></h3>';
         }
-        const types = g.types.map((t) => renderType(t, config.paymentReady, values, errors)).join("");
-        return `<section class="day" aria-label="${escapeHtml(g.dayLabel || "共通")}">${head}<div class="types">${types}</div></section>`;
+        const cards = g.types.map((t) => renderType(t, config, coupon, values, errors)).join("");
+        return `<section class="day" aria-label="${escapeHtml(g.dayLabel || "共通")}">${head}<div class="types">${cards}</div></section>`;
       })
       .join("") +
     "</div>"
@@ -955,14 +1075,14 @@ function renderDayGroups(config: TicketConfig, values: FormValues, errors: FormE
 }
 
 /** Server-side order summary (same markup the inline script rebuilds live). */
-function renderSummary(config: TicketConfig, values: FormValues): string {
+function renderSummary(config: TicketConfig, types: PublicTicketType[], coupon: AppliedCoupon | null, values: FormValues): string {
   let count = 0;
   let total = 0;
   const lines: string[] = [];
-  for (const t of config.types) {
-    const q = chosenQty(t, config.paymentReady, values);
+  for (const t of types) {
+    const q = chosenQty(t, quantityCap(t, config.paymentReady, coupon), values);
     if (q <= 0) continue;
-    const p = Math.max(0, Math.trunc(t.priceJpy));
+    const p = shownPrice(t, coupon);
     count += q;
     total += p * q;
     const day = t.dayLabel ? splitDayLabel(t.dayLabel).main + " · " : "";
@@ -1025,6 +1145,50 @@ export interface TicketsPageOptions {
   errors?: FormErrors;
   canceled?: boolean;
   demo?: boolean;
+  /** Accepted coupon: its type is offered at 0 yen and every other type is locked. */
+  coupon?: AppliedCoupon | null;
+}
+
+const COUPON_FORM_ID = "tk-coupon";
+
+/**
+ * Coupon entry. Its input / button belong to a separate form (form="tk-coupon") so Enter in the
+ * buyer fields still submits the purchase, and applying works without JS. Applied: the code rides
+ * the purchase form as a hidden field; 解除 is a plain link back to the normal page.
+ */
+/** Preview (?tickets=on) only lives in the URL / referer: keep it on our own POST targets and links. */
+const previewQuery = (config: TicketConfig): string => (config.preview ? "?tickets=on" : "");
+
+function renderCoupon(
+  coupon: AppliedCoupon | null,
+  type: PublicTicketType | undefined,
+  values: FormValues,
+  errors: FormErrors,
+  demo: boolean,
+  q: string,
+): string {
+  const err = errMsg(errors, COUPON_FIELD);
+  if (coupon && type) {
+    const n = quantityCap(type, true, coupon);
+    return (
+      `<div class="cpn cpn-top" id="coupon"><div class="cpn-applied"><span class="cpn-k">クーポン適用中</span>` +
+      `<b class="cpn-code">${escapeHtml(coupon.code)}</b><a class="cpn-clear" href="/tickets${q}">解除</a></div>` +
+      `<p class="cpn-hint">「${escapeHtml(typeLabel(type))}」を無料でお申し込みいただけます（1 回 ${n} 枚まで）。` +
+      "クーポン適用中は他の券種と同時にお申し込みできません。</p>" +
+      `<input type="hidden" name="${COUPON_FIELD}" value="${escapeHtml(coupon.code)}">${err}</div>`
+    );
+  }
+  const bad = errors[COUPON_FIELD] ? " bad" : "";
+  const aria = errors[COUPON_FIELD] ? ` aria-invalid="true" aria-describedby="${COUPON_FIELD}-err"` : "";
+  return (
+    `<div class="cpn${bad}" id="coupon"><label class="lbl" for="${COUPON_FIELD}">クーポンコードをお持ちの方${reqMark(false)}</label>` +
+    `<div class="cpn-row"><input type="text" id="${COUPON_FIELD}" name="${COUPON_FIELD}" form="${COUPON_FORM_ID}" value="${escapeHtml(values[COUPON_FIELD] ?? "")}"` +
+    ` maxlength="${COUPON_RAW_MAX}" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="例: ABCD234567"${aria}>` +
+    `<button type="submit" class="cpn-btn" form="${COUPON_FORM_ID}">適用</button></div>` +
+    '<p class="cpn-hint">招待・無料チケットのコードをお持ちの方は、入力して「適用」を押してください。' +
+    (demo ? `デモ用コード: ${Object.keys(DEMO_COUPONS).join(" / ")}` : "") +
+    `</p>${err}</div>`
+  );
 }
 
 const LOCK =
@@ -1034,18 +1198,23 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
   const { config } = o;
   const values = o.values ?? {};
   const errors = o.errors ?? {};
-  const selectable = config.types.filter((t) => isSelectable(t, config.paymentReady));
+  const couponType = o.coupon ? config.types.find((t) => t.id === o.coupon!.ticketTypeId) : undefined;
+  const coupon = o.coupon && couponType ? o.coupon : null;
+  const types = visibleTypes(config.types, coupon);
+  const selectable = config.types.filter((t) => quantityCap(t, config.paymentReady, null) > 0);
+  // Coupon-only types keep the page open (as a coupon entry) even with nothing on open sale.
+  const open = selectable.length > 0 || coupon !== null || config.types.some((t) => t.couponOnly && !t.soldOut && t.remaining !== 0);
   const top = hero({
     title: 'チケット<span class="g">購入</span>',
     sub: "日程ごとに券種と枚数を選び、必要事項を入力してお申し込みください。",
     ghost: "TICKETS",
-    step: selectable.length === 0 ? undefined : 1,
+    step: open ? 1 : undefined,
   });
   let alerts = "";
   if (o.canceled) alerts += '<div class="alert info" role="status">お支払いはキャンセルされました。</div>';
   if (errors._form) alerts += `<div class="alert err" role="alert">${escapeHtml(errors._form)}</div>`;
 
-  if (selectable.length === 0) {
+  if (!open) {
     return shell(
       "チケット購入",
       top +
@@ -1058,15 +1227,22 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
     );
   }
 
-  const hasPaid = config.types.some((t) => t.priceJpy > 0);
+  const hasPaid = !coupon && types.some((t) => t.priceJpy > 0);
   const extra = config.fields.map((f) => renderField(f, values, errors)).join("");
+  const q = previewQuery(config);
+  const couponBlock = renderCoupon(coupon, couponType, values, errors, !!o.demo, q);
   const form =
-    `<form class="buy grid" method="post" action="/tickets/checkout" novalidate data-max="${ORDER_MAX}"><div>` +
+    (coupon ? "" : `<form id="${COUPON_FORM_ID}" method="post" action="/tickets/coupon${q}" novalidate></form>`) +
+    `<form class="buy grid" method="post" action="/tickets/checkout${q}" novalidate data-max="${ORDER_MAX}"><div>` +
     alerts +
     `<section class="card rv"><fieldset class="${errors.items ? "bad" : ""}"><legend>券種と枚数（必須）</legend>` +
     `<div class="shead"><span class="no">01</span><h2>券種と枚数を選ぶ</h2><p>1 回のお申し込みで合計 ${ORDER_MAX} 枚まで</p></div>` +
-    renderDayGroups(config, values, errors) +
+    (coupon ? couponBlock : "") +
+    (types.length > 0
+      ? renderDayGroups(config, types, coupon, values, errors)
+      : '<p class="cpn-lead">現在、一般販売中のチケットはありません。クーポンコードをお持ちの方は下の欄に入力してください。</p>') +
     (errors.items ? `<div class="items-err">${errMsg(errors, "items")}</div>` : "") +
+    (coupon ? "" : couponBlock) +
     "</fieldset></section>" +
     '<section class="card rv"><div class="shead"><span class="no">02</span><h2>参加者情報</h2><p>確認メールをお送りします</p></div>' +
     `<div class="two">${fixedField("name", "氏名", values, errors)}${fixedField("email", "メールアドレス", values, errors)}</div>` +
@@ -1076,8 +1252,8 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
     '<aside class="sum rv" aria-label="お申し込み内容"><div class="sum-card">' +
     '<p class="sum-k">YOUR ORDER</p>' +
     `<p class="sum-ev">${CONF_NAME}<br>${EVENT_DATE}</p>` +
-    renderSummary(config, values) +
-    '<button class="submit" type="submit">購入手続きへ<span class="ar" aria-hidden="true">→</span></button>' +
+    renderSummary(config, types, coupon, values) +
+    `<button class="submit" type="submit">${coupon ? "申し込む" : "購入手続きへ"}<span class="ar" aria-hidden="true">→</span></button>` +
     (hasPaid ? `<p class="secure">${LOCK}カード決済は Stripe で安全に処理されます</p>` : "") +
     "</div>" +
     (hasPaid
@@ -1269,6 +1445,118 @@ export interface TicketsDeps {
   invalidate(): void;
   /** Calls lp-analytics (path like "/lp/internal/tickets/checkout"); null when no binding. */
   internal: ((path: string, init: RequestInit) => Promise<Response>) | null;
+  /** Failed coupon attempts per sender (default: the per-isolate COUPON_LIMITER). */
+  couponLimiter?: FailureLimiter;
+}
+
+/**
+ * Fixed-window counter of failed attempts per key, in isolate memory ($0, no store). Best effort:
+ * each isolate counts on its own, so it slows guessing down rather than giving an exact global cap.
+ * Codes are 10 chars from 31 symbols, so this is defense in depth, not the only barrier.
+ */
+export class FailureLimiter {
+  max: number;
+  windowMs: number;
+  now: () => number;
+  hits = new Map<string, { n: number; until: number }>();
+  constructor(max: number, windowMs: number, now: () => number = Date.now) {
+    this.max = max;
+    this.windowMs = windowMs;
+    this.now = now;
+  }
+  blocked(key: string): boolean {
+    const h = this.hits.get(key);
+    return !!h && h.until > this.now() && h.n >= this.max;
+  }
+  fail(key: string): void {
+    const t = this.now();
+    const h = this.hits.get(key);
+    if (h && h.until > t) h.n++;
+    else this.hits.set(key, { n: 1, until: t + this.windowMs });
+    if (this.hits.size > LIMITER_KEYS_MAX) {
+      for (const [k, v] of this.hits) if (v.until <= t) this.hits.delete(k);
+      if (this.hits.size > LIMITER_KEYS_MAX) this.hits.clear();
+    }
+  }
+}
+const LIMITER_KEYS_MAX = 10_000;
+/** 10 wrong codes per sender network per 15 min. */
+export const COUPON_FAIL_MAX = 10;
+export const COUPON_FAIL_WINDOW_MS = 15 * 60 * 1000;
+const COUPON_LIMITER = new FailureLimiter(COUPON_FAIL_MAX, COUPON_FAIL_WINDOW_MS);
+
+type CouponResult = { ok: true; coupon: AppliedCoupon } | { ok: false; status: number; errors: FormErrors };
+
+const couponFail = (status: number, errors: FormErrors): CouponResult => ({ ok: false, status, errors });
+const COUPON_FORM_ALERT = "クーポンを適用できませんでした。クーポンコードの欄をご確認ください。";
+
+/** Asks lp-analytics (demo: DEMO_COUPONS) what a typed code unlocks. Never throws. */
+export async function resolveCoupon(raw: string, config: TicketConfig, req: Request, deps: TicketsDeps): Promise<CouponResult> {
+  if (!raw.trim()) return couponFail(400, { [COUPON_FIELD]: COUPON_MSG.required, _form: COUPON_FORM_ALERT });
+  // Only wrong codes count: re-submitting an applied code never slows a buyer down.
+  // No client IP (local dev / tests) = no key, same as the other per-sender caps.
+  const limiter = deps.couponLimiter ?? COUPON_LIMITER;
+  const sender = await senderKeyFor(req, "lp-tickets");
+  if (sender && limiter.blocked(sender)) return couponFail(429, { [COUPON_FIELD]: COUPON_MSG.tooMany, _form: COUPON_MSG.tooMany });
+  const r = await checkCoupon(raw.length <= COUPON_RAW_MAX ? normalizeCouponCode(raw) : null, config, sender, deps);
+  if (sender && !r.ok && (r.status === 400 || r.status === 409)) limiter.fail(sender);
+  return r;
+}
+
+async function checkCoupon(code: string | null, config: TicketConfig, sender: string | null, deps: TicketsDeps): Promise<CouponResult> {
+  const invalid = () => couponFail(400, { [COUPON_FIELD]: COUPON_MSG.invalid, _form: COUPON_FORM_ALERT });
+  const usedUp = () => couponFail(409, { [COUPON_FIELD]: COUPON_MSG.usedUp, _form: COUPON_FORM_ALERT });
+  if (!code) return invalid();
+  let ticketTypeId: unknown;
+  let remainingUses: unknown;
+  if (deps.demo) {
+    const c = Object.prototype.hasOwnProperty.call(DEMO_COUPONS, code) ? DEMO_COUPONS[code] : undefined;
+    if (!c) return invalid();
+    if (c.remainingUses <= 0) return usedUp();
+    ({ ticketTypeId, remainingUses } = c);
+  } else {
+    if (!deps.internal) return couponFail(503, { _form: "現在クーポンを確認できません。時間をおいて再度お試しください。" });
+    let res: Response;
+    try {
+      res = await deps.internal("/lp/internal/tickets/coupon", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, clientKey: sender }),
+      });
+    } catch {
+      return couponFail(502, { _form: "クーポンを確認できませんでした。時間をおいて再度お試しください。" });
+    }
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (!res.ok) {
+      if (res.status === 400) return invalid();
+      if (res.status === 409) return usedUp();
+      if (res.status === 404) {
+        return couponFail(404, {
+          _form: config.preview ? "プレビュー表示中のため、クーポンは利用できません。" : "現在お申し込みを受け付けていません。",
+        });
+      }
+      if (res.status === 429) return couponFail(429, mapCheckoutError(429, null, config));
+      return couponFail(502, { _form: "クーポンを確認できませんでした。時間をおいて再度お試しください。" });
+    }
+    const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    ({ ticketTypeId, remainingUses } = b);
+  }
+  // The target must be on this page's config (cached up to 30s); otherwise it can not be offered.
+  if (
+    typeof ticketTypeId !== "string" ||
+    typeof remainingUses !== "number" ||
+    !Number.isInteger(remainingUses) ||
+    remainingUses < 1 ||
+    !config.types.some((t) => t.id === ticketTypeId)
+  ) {
+    return invalid();
+  }
+  return { ok: true, coupon: { code, ticketTypeId, remainingUses } };
 }
 
 /**
@@ -1337,27 +1625,52 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     return htmlResponse(renderTicketsPage({ config, canceled: url.searchParams.get("canceled") === "1", demo: deps.demo }));
   }
 
-  // route === "checkout"
+  // route === "checkout" | "coupon"
   if (req.method !== "POST") return redirect("/tickets");
   const origin = req.headers.get("origin");
   if (origin && origin !== url.origin) return new Response("Forbidden", { status: 403, headers: BASE_HEADERS });
   const text = await req.text();
   if (text.length > BODY_MAX) return new Response("Payload Too Large", { status: 413, headers: BASE_HEADERS });
-  const parsed = parseCheckoutForm(new URLSearchParams(text), config);
+  const form = new URLSearchParams(text);
+  const rawCoupon = (form.get(COUPON_FIELD) ?? "").trim();
+
+  if (route === "coupon") {
+    const r = await resolveCoupon(rawCoupon, config, req, deps);
+    if (!r.ok) {
+      const values: FormValues = { [COUPON_FIELD]: rawCoupon.slice(0, COUPON_RAW_MAX) };
+      return htmlResponse(renderTicketsPage({ config, values, errors: r.errors, demo: deps.demo }), r.status);
+    }
+    // Pre-select one ticket so the summary already shows the free line.
+    const values: FormValues = { [qtyInputName(r.coupon.ticketTypeId)]: "1" };
+    return htmlResponse(renderTicketsPage({ config, values, coupon: r.coupon, demo: deps.demo }));
+  }
+
+  if ((form.get(HONEYPOT) ?? "") !== "") return redirect("/tickets/thanks");
+  // The hidden code is re-checked on every submit: what it unlocks may have changed since applying.
+  let coupon: AppliedCoupon | null = null;
+  if (rawCoupon) {
+    const r = await resolveCoupon(rawCoupon, config, req, deps);
+    if (!r.ok) {
+      const values = { ...parseCheckoutForm(form, config).values, [COUPON_FIELD]: rawCoupon.slice(0, COUPON_RAW_MAX) };
+      return htmlResponse(renderTicketsPage({ config, values, errors: r.errors, demo: deps.demo }), r.status);
+    }
+    coupon = r.coupon;
+  }
+  const parsed = parseCheckoutForm(form, config, coupon);
   if (!parsed.ok) {
     if (parsed.spam) return redirect("/tickets/thanks");
-    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: parsed.errors, demo: deps.demo }), 400);
+    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: parsed.errors, coupon, demo: deps.demo }), 400);
   }
   if (config.preview) {
     const errors: FormErrors = { _form: "プレビュー表示中のため、お申し込みはできません。" };
-    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors, demo: deps.demo }), 403);
+    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors, coupon, demo: deps.demo }), 403);
   }
   if (deps.demo) {
     const summary = itemsSummary(parsed.input.items, config.types);
     return redirect(`/tickets/thanks?order=demo&summary=${encodeURIComponent(summary)}`);
   }
   if (!deps.internal) {
-    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(503, null, config) }), 503);
+    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(503, null, config), coupon }), 503);
   }
 
   let res: Response;
@@ -1368,7 +1681,7 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
       body: JSON.stringify({ ...parsed.input, origin: url.origin, clientKey: await senderKeyFor(req, "lp-tickets") }),
     });
   } catch {
-    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(502, null, config) }), 502);
+    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(502, null, config), coupon }), 502);
   }
   let body: unknown = null;
   try {
@@ -1379,13 +1692,26 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
   if (res.ok) {
     const target = body && typeof body === "object" ? str((body as { redirectUrl?: unknown }).redirectUrl) : "";
     if (/^https?:\/\//.test(target)) return redirect(target);
-    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(502, null, config) }), 502);
+    return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(502, null, config), coupon }), 502);
   }
   let shown = config;
+  let shownCoupon = coupon;
+  let dropped = "";
   if (res.status === 409) {
     deps.invalidate();
     shown = (await deps.getConfig()) ?? config;
+    // Show the code's fresh remaining uses, or drop it when it no longer works.
+    if (coupon) {
+      const r = await resolveCoupon(coupon.code, shown, req, deps);
+      shownCoupon = r.ok ? r.coupon : null;
+      if (!r.ok) dropped = r.errors[COUPON_FIELD] ?? COUPON_MSG.invalid;
+    }
   }
   const errors = mapCheckoutError(res.status, body, shown);
-  return htmlResponse(renderTicketsPage({ config: shown, values: parsed.values, errors }), res.status >= 400 && res.status < 600 ? res.status : 502);
+  if (dropped) errors[COUPON_FIELD] = dropped;
+  const values = shownCoupon ? parsed.values : { ...parsed.values, [COUPON_FIELD]: coupon?.code ?? "" };
+  return htmlResponse(
+    renderTicketsPage({ config: shown, values, errors, coupon: shownCoupon }),
+    res.status >= 400 && res.status < 600 ? res.status : 502,
+  );
 }

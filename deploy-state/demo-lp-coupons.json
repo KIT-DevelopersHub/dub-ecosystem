@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-coupons",
+  "worker": "dub-demo-lp-coupons",
+  "url": "https://dub-demo-lp-coupons.developershub-site.workers.dev",
+  "deployedSha": "9780c6e0",
+  "branch": "feat/lp-ticket-coupons",
+  "actor": "ko-tarou",
+  "markers": ["クーポンを発行","0 円の券種はクーポンコードでのみ申し込めます"],
+  "live": true,
+  "verifiedAt": "2026-10-15T09:43:44Z",
+  "updatedAt": "2026-10-15T09:43:44Z",
+  "note": "LP チケット: 無料券クーポンの発行・管理"
+}

@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-tickets-coupons",
+  "worker": "lp-tickets-demo-coupons",
+  "url": "https://lp-tickets-demo-coupons.developershub-site.workers.dev/tickets?tickets=on",
+  "deployedSha": "339f629c",
+  "branch": "feat/lp-ticket-coupons",
+  "actor": "ko-tarou",
+  "markers": ["クーポンコードをお持ちの方"],
+  "live": true,
+  "verifiedAt": "2026-10-15T09:57:03Z",
+  "updatedAt": "2026-10-15T09:57:03Z",
+  "note": "LP 公開 /tickets のクーポン入力 (TICKETS_DEMO・lp-analytics/Stripe を叩かない)。teardown: wrangler delete --name lp-tickets-demo-coupons"
+}

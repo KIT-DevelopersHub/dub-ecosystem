@@ -54,6 +54,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     siteTraffic: siteTrafficFrom(env),
     newTicketTypeId: () => newId("tkt"),
     newOrderId: () => newId("tko"),
+    newCouponId: () => newId("tkc"),
     dailyCheckoutCap:
       Number(env.LP_DAILY_CHECKOUT_CAP) > 0 ? Number(env.LP_DAILY_CHECKOUT_CAP) : DEFAULT_DAILY_CHECKOUT_CAP,
     stripe: stripeFrom(env),

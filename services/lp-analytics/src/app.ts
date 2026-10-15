@@ -81,6 +81,7 @@ export function createApp(deps: AppDeps): Hono {
   // the Stripe signature covers the exact bytes.
   app.get("/lp/internal/tickets", async (c) => c.json(await tickets.getPublic()));
   app.post("/lp/internal/tickets/checkout", async (c) => c.json(await tickets.checkout(await readJson(c))));
+  app.post("/lp/internal/tickets/coupon", async (c) => c.json(await tickets.checkCoupon(await readJson(c))));
   app.post("/lp/internal/tickets/confirm", async (c) => c.json(await tickets.confirm(await readJson(c))));
   app.post("/lp/internal/tickets/stripe-webhook", async (c) => {
     const raw = await c.req.text();
@@ -124,6 +125,13 @@ export function createApp(deps: AppDeps): Hono {
   // 要確認 -> 支払い済み の確定はお金と券を結び付ける操作なので、販売 on/off と同じ lp:publish。
   app.post("/lp/tickets/orders/:id/approve", publish, async (c) =>
     c.json(await tickets.approve(reqCtx(c), c.req.param("id"))),
+  );
+
+  // 無料券のクーポン: コードは券と同じ価値を持つので、一覧（コードが見える）も発行・停止も販売 on/off と同じ lp:publish。
+  app.get("/lp/tickets/coupons", publish, async (c) => c.json(await tickets.listCoupons()));
+  app.post("/lp/tickets/coupons", publish, async (c) => c.json(await tickets.createCoupon(reqCtx(c), await readJson(c)), 201));
+  app.patch("/lp/tickets/coupons/:id", publish, async (c) =>
+    c.json(await tickets.setCouponActive(reqCtx(c), c.req.param("id"), await readJson(c))),
   );
 
   // 登壇者募集: 募集 on/off はチケット販売と同じ lp:publish。応募一覧は個人情報なので edit。

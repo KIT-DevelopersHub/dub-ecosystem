@@ -17,6 +17,7 @@ import type {
   LpVisitKind,
   ProposalRow,
   TicketOrderRow,
+  TicketCouponRow,
   TicketTypeRow,
   VisitRow,
 } from "./types";
@@ -53,6 +54,20 @@ interface TicketOrderDbRow {
   resolved_by: string | null;
   resolved_at: string | null;
   client_key: string | null;
+  coupon_id: string | null;
+}
+interface TicketCouponDbRow {
+  id: string;
+  site: string;
+  code: string;
+  label: string;
+  ticket_type_id: string;
+  max_uses: number;
+  expires_at: string | null;
+  active: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }
 interface TicketItemDbRow {
   order_id: string;
@@ -114,6 +129,21 @@ const toTicketOrder = (r: TicketOrderDbRow, items: LpTicketOrderItem[]): TicketO
   resolvedBy: r.resolved_by ?? null,
   resolvedAt: r.resolved_at ?? null,
   clientKey: r.client_key ?? null,
+  couponId: r.coupon_id ?? null,
+});
+
+const toCoupon = (r: TicketCouponDbRow): TicketCouponRow => ({
+  id: r.id,
+  site: r.site,
+  code: r.code,
+  label: r.label,
+  ticketTypeId: r.ticket_type_id,
+  maxUses: r.max_uses,
+  expiresAt: r.expires_at,
+  active: r.active === 1,
+  createdBy: r.created_by,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
 });
 
 // Seats held = items of paid / needs_review orders + of pending orders still inside the hold window (alias o).
@@ -264,9 +294,17 @@ function ticketRepo(db: DbClient): LpTicketRepo {
       const n = o.items.length;
       const results = await db.batch([
         {
+          // A coupon order is only written while the coupon still has room (same transaction as the
+          // seat checks, so two buyers racing for the last use serialize and one gets coupon_used_up).
           sql: `INSERT INTO lp_ticket_orders (id, site, quantity, amount_jpy, status, buyer_name, buyer_email, answers_json,
-                                             stripe_session_id, created_at, paid_at, client_key)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                             stripe_session_id, created_at, paid_at, client_key, coupon_id)
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                WHERE ? IS NULL OR EXISTS (
+                  SELECT 1 FROM lp_ticket_coupons c
+                  WHERE c.id = ? AND c.site = ? AND c.active = 1 AND (c.expires_at IS NULL OR c.expires_at > ?)
+                    AND ? = 1 AND c.ticket_type_id = ?
+                    AND (SELECT COALESCE(SUM(o.quantity), 0) FROM lp_ticket_orders o WHERE o.coupon_id = c.id AND ${HELD}) + ? <= c.max_uses
+                )`,
           binds: [
             o.id,
             o.site,
@@ -280,6 +318,15 @@ function ticketRepo(db: DbClient): LpTicketRepo {
             o.createdAt,
             o.paidAt,
             o.clientKey,
+            o.couponId,
+            o.couponId,
+            o.couponId,
+            o.site,
+            o.createdAt,
+            o.items.length,
+            o.items[0]?.ticketTypeId ?? null,
+            pendingSince,
+            o.quantity,
           ],
         },
         ...o.items.map((i) => {
@@ -317,8 +364,61 @@ function ticketRepo(db: DbClient): LpTicketRepo {
           binds: [o.id, o.id],
         },
       ]);
+      if ((results[0]?.meta.changes ?? 0) === 0) return { ok: false, reason: "coupon_used_up" };
       const short = o.items.find((_, idx) => (results[idx + 1]?.meta.changes ?? 0) === 0);
-      return short ? { ok: false, ticketTypeId: short.ticketTypeId } : { ok: true };
+      return short ? { ok: false, reason: "sold_out", ticketTypeId: short.ticketTypeId } : { ok: true };
+    },
+    async insertCoupon(c) {
+      const r = await db.run(
+        `INSERT INTO lp_ticket_coupons (id, site, code, label, ticket_type_id, max_uses, expires_at, active, created_by,
+                                        created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(site, code) DO NOTHING`,
+        c.id,
+        c.site,
+        c.code,
+        c.label,
+        c.ticketTypeId,
+        c.maxUses,
+        c.expiresAt,
+        c.active ? 1 : 0,
+        c.createdBy,
+        c.createdAt,
+        c.updatedAt,
+      );
+      return r.meta.changes > 0;
+    },
+    async getCoupon(site, id) {
+      const r = await db.first<TicketCouponDbRow>("SELECT * FROM lp_ticket_coupons WHERE site = ? AND id = ?", site, id);
+      return r ? toCoupon(r) : null;
+    },
+    async getCouponByCode(site, code) {
+      const r = await db.first<TicketCouponDbRow>("SELECT * FROM lp_ticket_coupons WHERE site = ? AND code = ?", site, code);
+      return r ? toCoupon(r) : null;
+    },
+    async setCouponActive(site, id, active, updatedAt) {
+      const r = await db.run(
+        "UPDATE lp_ticket_coupons SET active = ?, updated_at = ? WHERE site = ? AND id = ?",
+        active ? 1 : 0,
+        updatedAt,
+        site,
+        id,
+      );
+      return r.meta.changes > 0;
+    },
+    async listCoupons(site) {
+      return (
+        await db.all<TicketCouponDbRow>("SELECT * FROM lp_ticket_coupons WHERE site = ? ORDER BY created_at DESC, id DESC", site)
+      ).map(toCoupon);
+    },
+    async couponUses(site, pendingSince) {
+      const rows = await db.all<{ k: string; n: number | null }>(
+        `SELECT o.coupon_id AS k, SUM(o.quantity) AS n FROM lp_ticket_orders o
+         WHERE o.site = ? AND o.coupon_id IS NOT NULL AND ${HELD} GROUP BY o.coupon_id`,
+        site,
+        pendingSince,
+      );
+      return new Map(rows.map((r) => [r.k, r.n ?? 0]));
     },
     async getOrder(site, id) {
       return one(await db.first<TicketOrderDbRow>("SELECT * FROM lp_ticket_orders WHERE site = ? AND id = ?", site, id));

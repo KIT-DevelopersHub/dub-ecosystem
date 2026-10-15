@@ -8,6 +8,8 @@ import { stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSessio
 import type {
   AppDeps,
   LpTicketAnswer,
+  LpTicketCoupon,
+  LpTicketCouponsPage,
   LpTicketField,
   LpTicketFieldType,
   LpTicketOrder,
@@ -20,6 +22,7 @@ import type {
   LpTicketTypeStats,
   LpTicketTypeSummary,
   ReqCtx,
+  TicketCouponRow,
   TicketOrderRow,
   TicketTypeAgg,
   TicketTypeRow,
@@ -58,6 +61,16 @@ export const CLIENT_KEY_RE = /^[a-f0-9]{16,64}$/;
  * campus IP still fits 20 tickets in flight at the same moment.
  */
 export const PER_CLIENT_HELD_MAX = 20;
+/**
+ * Coupon codes are generated here, never typed by staff: 10 chars from 31 symbols (no 0/O/1/I/L)
+ * = ~8e14 codes, so guessing one through the public form is not a practical attack.
+ */
+export const COUPON_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export const COUPON_CODE_LEN = 10;
+/** Accepted on input after normalizing (upper case, spaces / hyphens dropped). */
+const COUPON_CODE_RE = /^[A-Z0-9]{4,32}$/;
+export const COUPON_LABEL_MAX = 60;
+export const COUPON_MAX_USES_MAX = 1000;
 const ANSWER_MAX: Record<LpTicketFieldType, number> = { text: 200, textarea: 2000, select: FIELD_OPTION_MAX, checkbox: 10 };
 
 /** Stripe session lifetime. Stripe requires >= 30 min, so a minute of headroom for clock/network skew. */
@@ -208,6 +221,59 @@ export interface CheckoutInput {
   origin: string;
   /** null when absent / malformed (local dev): only the per-sender hold cap is skipped. */
   clientKey: string | null;
+  /** Normalized coupon code; null = none entered. */
+  couponCode: string | null;
+}
+
+/** "abcde-12345 " -> "ABCDE12345"; null when it can not be a code. */
+export function normalizeCouponCode(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const code = raw.toUpperCase().replace(/[\s-]/g, "");
+  return COUPON_CODE_RE.test(code) ? code : null;
+}
+
+/** Uniform over COUPON_ALPHABET (rejection sampling: no modulo bias). */
+export function generateCouponCode(): string {
+  const n = COUPON_ALPHABET.length;
+  const limit = 256 - (256 % n);
+  let out = "";
+  while (out.length < COUPON_CODE_LEN) {
+    for (const b of crypto.getRandomValues(new Uint8Array(16))) {
+      if (b < limit && out.length < COUPON_CODE_LEN) out += COUPON_ALPHABET[b % n];
+    }
+  }
+  return out;
+}
+
+export interface CouponInput {
+  ticketTypeId: string;
+  maxUses: number;
+  label: string;
+  expiresAt: string | null;
+}
+
+/** LP管理: a new coupon. `now` rejects an expiry already in the past. */
+export function parseCouponInput(body: unknown, now: string): CouponInput {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const bad: FieldError[] = [];
+  const ticketTypeId = typeof b.ticketTypeId === "string" ? b.ticketTypeId.trim() : "";
+  if (!ticketTypeId) bad.push({ field: "ticketTypeId", reason: "required" });
+  const maxUses = b.maxUses;
+  if (!isInt(maxUses) || maxUses < 1 || maxUses > COUPON_MAX_USES_MAX) bad.push({ field: "maxUses", reason: "invalid" });
+  const l = b.label === undefined || b.label === null ? "" : b.label;
+  let label = "";
+  if (typeof l !== "string") bad.push({ field: "label", reason: "invalid" });
+  else if (l.trim().length > COUPON_LABEL_MAX) bad.push({ field: "label", reason: "too_long" });
+  else label = l.trim();
+  let expiresAt: string | null = null;
+  if (b.expiresAt !== undefined && b.expiresAt !== null && b.expiresAt !== "") {
+    const ms = typeof b.expiresAt === "string" ? Date.parse(b.expiresAt) : NaN;
+    if (!Number.isFinite(ms)) bad.push({ field: "expiresAt", reason: "invalid" });
+    else if (ms <= Date.parse(now)) bad.push({ field: "expiresAt", reason: "in_past" });
+    else expiresAt = new Date(ms).toISOString();
+  }
+  if (bad.length > 0) throw errors.validationFailed(bad);
+  return { ticketTypeId, maxUses: maxUses as number, label, expiresAt };
 }
 
 /** Validates the public form against the configured fields. Answers keep a label snapshot. */
@@ -244,9 +310,16 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
   if (!origin) bad.push({ field: "origin", reason: "invalid" });
 
   const answers = parseAnswers(b.answers, fields, bad);
+  const hasCoupon = b.couponCode !== undefined && b.couponCode !== null;
+  const rawCoupon = typeof b.couponCode === "string" ? b.couponCode.trim() : "";
+  const couponCode = rawCoupon ? normalizeCouponCode(rawCoupon) : null;
+  // A non-string coupon is a broken client, not "no coupon": say so instead of charging full price silently.
+  if ((hasCoupon && typeof b.couponCode !== "string") || (rawCoupon && !couponCode)) {
+    bad.push({ field: "couponCode", reason: "invalid" });
+  }
   if (bad.length > 0) throw errors.validationFailed(bad);
   const clientKey = typeof b.clientKey === "string" && CLIENT_KEY_RE.test(b.clientKey) ? b.clientKey : null;
-  return { items, name, email, answers, origin, clientKey };
+  return { items, name, email, answers, origin, clientKey, couponCode };
 }
 
 /** Answers to the configured custom fields (label snapshot kept). Problems go to `bad`. */
@@ -301,6 +374,8 @@ const toOrder = ({
   ...o
 }: TicketOrderRow): LpTicketOrder => o;
 
+const toCoupon = ({ site: _s, ...c }: TicketCouponRow, used: number): LpTicketCoupon => ({ ...c, used });
+
 /** 409: not enough seats left for one of the items (contract: sold_out). */
 export const soldOut = (ticketTypeId: string): DubError =>
   new DubError("LP_TICKET_SOLD_OUT", "このチケットは残りが足りません", {
@@ -312,6 +387,15 @@ export const soldOut = (ticketTypeId: string): DubError =>
 export function orderSummary(items: readonly LpTicketOrderItem[]): string {
   return items.map((i) => `${i.dayLabel ? `${i.ticketTypeName} ${i.dayLabel}` : i.ticketTypeName} ×${i.quantity}`).join("、");
 }
+/** 409: the coupon has no uses left for this quantity (contract: coupon_used_up). */
+export const couponUsedUp = (): DubError =>
+  new DubError("LP_TICKET_COUPON_USED_UP", "このクーポンは使用上限に達しています", {
+    status: 409,
+    details: { reason: "coupon_used_up" },
+  });
+/** One answer for unknown / paused / expired codes and paused target types: no hint which it was. */
+const couponInvalid = (): DubError => errors.validationFailed([{ field: "couponCode", reason: "invalid" }]);
+
 /** 503: STRIPE_SECRET_KEY not configured (contract: payment_not_configured). */
 export const paymentNotConfigured = (): DubError =>
   new DubError("LP_PAYMENT_NOT_CONFIGURED", "決済は準備中です", {
@@ -330,6 +414,14 @@ export interface PublicTicketType {
   /** Left after paid + held. null = no capacity. */
   remaining: number | null;
   soldOut: boolean;
+  /** 0-yen type: only bought with a coupon code (the LP hides it from the normal list). */
+  couponOnly: boolean;
+}
+
+export interface PublicCoupon {
+  ticketTypeId: string;
+  /** Tickets this code can still get. */
+  remainingUses: number;
 }
 
 export interface ConfirmResult {
@@ -462,6 +554,7 @@ export class TicketService {
           maxPerOrder: t.maxPerOrder,
           remaining: t.stats.remaining,
           soldOut: t.stats.remaining === 0,
+          couponOnly: t.priceJpy === 0,
         })),
     };
   }
@@ -471,18 +564,26 @@ export class TicketService {
     if (!settings?.enabled) throw errors.notFound("lp_tickets");
     const input = parseCheckout(body, settings.fields);
     const types = new Map((await this.repo.listTicketTypes(TICKET_SITE)).map((t) => [t.id, t]));
+    const now = this.deps.now();
+    // A coupon order is exactly one line of the coupon's type at 0 yen: it never mixes with paid
+    // items, so a coupon can never touch the Stripe path (no partial discounts to get wrong).
+    const coupon = input.couponCode ? await this.usableCoupon(input.couponCode, types, now) : null;
+    if (coupon && (input.items.length !== 1 || input.items[0]!.ticketTypeId !== coupon.ticketTypeId)) {
+      throw errors.validationFailed([{ field: "couponCode", reason: "not_applicable" }]);
+    }
     const bad: FieldError[] = [];
     const items: LpTicketOrderItem[] = [];
     for (const i of input.items) {
       const t = types.get(i.ticketTypeId);
       if (!t || !t.active) bad.push({ field: `items.${i.ticketTypeId}`, reason: "unavailable" });
       else if (i.quantity > t.maxPerOrder) bad.push({ field: `items.${i.ticketTypeId}`, reason: "too_many" });
+      else if (!coupon && t.priceJpy === 0) bad.push({ field: `items.${i.ticketTypeId}`, reason: "coupon_required" });
       else
         items.push({
           ticketTypeId: t.id,
           ticketTypeName: t.name,
           dayLabel: t.dayLabel,
-          unitPriceJpy: t.priceJpy,
+          unitPriceJpy: coupon ? 0 : t.priceJpy,
           quantity: i.quantity,
         });
     }
@@ -492,7 +593,6 @@ export class TicketService {
     const stripe = this.deps.stripe;
     if (!free && !stripe) throw paymentNotConfigured();
 
-    const now = this.deps.now();
     if ((await this.repo.countOrdersSince(TICKET_SITE, jstDayStartIso(now))) >= this.deps.dailyCheckoutCap) {
       throw errors.rateLimited(60);
     }
@@ -524,10 +624,15 @@ export class TicketService {
       resolvedBy: null,
       resolvedAt: null,
       clientKey: input.clientKey,
+      couponId: coupon?.id ?? null,
     };
     const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
     const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
-    if (!held.ok) throw soldOut(held.ticketTypeId);
+    if (!held.ok) {
+      if (held.reason === "coupon_used_up") throw couponUsedUp();
+      throw soldOut(held.ticketTypeId);
+    }
+    if (coupon) log("info", "lp ticket coupon used", { orderId: row.id, couponId: coupon.id, quantity });
     if (free || !stripe) return { redirectUrl: `${input.origin}/tickets/thanks?order=${encodeURIComponent(row.id)}` };
 
     let session: CheckoutSession;
@@ -557,6 +662,75 @@ export class TicketService {
     await this.repo.setOrderSession(row.id, session.id);
     await this.armReconcile();
     return { redirectUrl: session.url };
+  }
+
+  /** The coupon behind a normalized code, or 400 couponCode invalid (unknown / paused / expired / type off). */
+  private async usableCoupon(code: string, types: ReadonlyMap<string, TicketTypeRow>, now: string): Promise<TicketCouponRow> {
+    const c = await this.repo.getCouponByCode(TICKET_SITE, code);
+    const t = c ? types.get(c.ticketTypeId) : undefined;
+    if (!c || !c.active || (c.expiresAt !== null && c.expiresAt <= now) || !t || !t.active) {
+      log("warn", "lp ticket coupon rejected", { found: c !== null });
+      throw couponInvalid();
+    }
+    return c;
+  }
+
+  /** Public LP: what a code unlocks, before the buyer fills the form. Same rules as checkout. */
+  async checkCoupon(body: unknown): Promise<PublicCoupon> {
+    const settings = await this.repo.getTicketSettings(TICKET_SITE);
+    if (!settings?.enabled) throw errors.notFound("lp_tickets");
+    const code = normalizeCouponCode((body as { code?: unknown } | null)?.code);
+    if (!code) throw couponInvalid();
+    const types = new Map((await this.repo.listTicketTypes(TICKET_SITE)).map((t) => [t.id, t]));
+    const c = await this.usableCoupon(code, types, this.deps.now());
+    const used = (await this.repo.couponUses(TICKET_SITE, this.pendingSince())).get(c.id) ?? 0;
+    const remainingUses = Math.max(0, c.maxUses - used);
+    if (remainingUses === 0) throw couponUsedUp();
+    return { ticketTypeId: c.ticketTypeId, remainingUses };
+  }
+
+  async listCoupons(): Promise<LpTicketCouponsPage> {
+    const [rows, uses] = await Promise.all([
+      this.repo.listCoupons(TICKET_SITE),
+      this.repo.couponUses(TICKET_SITE, this.pendingSince()),
+    ]);
+    return { items: rows.map((r) => toCoupon(r, uses.get(r.id) ?? 0)) };
+  }
+
+  async createCoupon(ctx: ReqCtx, body: unknown): Promise<LpTicketCoupon> {
+    const now = this.deps.now();
+    const input = parseCouponInput(body, now);
+    if (!(await this.repo.getTicketType(TICKET_SITE, input.ticketTypeId))) {
+      throw errors.validationFailed([{ field: "ticketTypeId", reason: "unknown" }]);
+    }
+    // A collision in ~8e14 codes is practically impossible; retry instead of failing if it happens.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const row: TicketCouponRow = {
+        id: this.deps.newCouponId(),
+        site: TICKET_SITE,
+        code: generateCouponCode(),
+        ...input,
+        active: true,
+        createdBy: ctx.userId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (await this.repo.insertCoupon(row)) {
+        log("info", "lp ticket coupon created", { couponId: row.id, ticketTypeId: row.ticketTypeId, maxUses: row.maxUses, by: ctx.userId });
+        return toCoupon(row, 0);
+      }
+    }
+    throw errors.conflict("クーポンコードを作れませんでした。もう一度お試しください", { reason: "code_collision" });
+  }
+
+  async setCouponActive(ctx: ReqCtx, id: string, body: unknown): Promise<LpTicketCoupon> {
+    const active = (body as { active?: unknown } | null)?.active;
+    if (typeof active !== "boolean") throw errors.validationFailed([{ field: "active", reason: "required" }]);
+    if (!(await this.repo.setCouponActive(TICKET_SITE, id, active, this.deps.now()))) throw errors.notFound("lp_ticket_coupon", id);
+    log("info", "lp ticket coupon toggled", { couponId: id, active, by: ctx.userId });
+    const row = (await this.repo.getCoupon(TICKET_SITE, id))!;
+    const used = (await this.repo.couponUses(TICKET_SITE, this.pendingSince())).get(id) ?? 0;
+    return toCoupon(row, used);
   }
 
   /** Best effort: a failure to arm must never fail a checkout (the next paid checkout retries). */
