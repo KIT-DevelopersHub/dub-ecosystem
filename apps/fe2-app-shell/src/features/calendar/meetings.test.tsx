@@ -8,10 +8,12 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { common, identity, meeting } from "@dub/types";
 import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
+import { ApiError } from "../../lib/api-client.tsx";
 import type { CalendarApi } from "./calendarApi.tsx";
 import { CalendarApiProvider } from "./CalendarProvider.tsx";
 import { CalendarScreen } from "./CalendarScreen.tsx";
 import { MEETING_FILTER_STORAGE_KEY } from "./meeting-form";
+import { findCreatedMeeting } from "./useMeetings.tsx";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
 
@@ -166,7 +168,39 @@ describe("定例ミーティングを設定", () => {
     });
     // Optimistic chip before the server answers (統括 is one of the caller's default-on targets).
     await waitFor(() => expect(chipsOf("tmp_[a-z0-9]+").length).toBe(1));
+    // …marked 作成中 with no Meet link, and no second registration meanwhile.
+    expect(within(chipsOf("tmp_[a-z0-9]+")[0]!).getByTestId("calendar-item-pending")).toHaveTextContent("作成中…");
+    expect(screen.getByTestId("calendar-meetings-create")).toBeDisabled();
+    await userEvent.click(chipsOf("tmp_[a-z0-9]+")[0]!);
+    expect(await screen.findByTestId("calendar-meeting-detail-no-meet")).toHaveTextContent("作成中…");
+    expect(screen.queryByTestId("calendar-meeting-detail-join")).not.toBeInTheDocument();
     resolve(mtg({ id: "mtg_new", title: "統括定例", targetId: "role_lead", recurrence: "none" }));
+    await waitFor(() => expect(screen.getByTestId("calendar-meetings-create")).toBeEnabled());
+  });
+
+  it("a 504 is not a failure when the re-read list has the meeting", async () => {
+    const made = mtg({ id: "mtg_made", title: "全体定例2", startsAt: "2026-01-06T12:00:00.000Z" });
+    const timeout = new ApiError(504, { error: { code: "UPSTREAM_TIMEOUT", message: "Gateway Timeout" } } as never);
+    let listed = [mtg({})];
+    const api = fakeApi({
+      listMeetings: vi.fn(async () => ({ items: listed, account: { email: "hackit.dub@gmail.com", calendarReady: true } })),
+      createMeeting: vi.fn(async () => {
+        listed = [...listed, made];
+        throw timeout;
+      }),
+    });
+    render(wrap(<CalendarScreen />, api, EDIT));
+    const create = await screen.findByTestId("calendar-meetings-create");
+    await waitFor(() => expect(create).toBeEnabled());
+    await userEvent.click(create);
+    const dialog = await screen.findByTestId("calendar-meeting-form");
+    await userEvent.type(within(dialog).getByTestId("calendar-meeting-form-title"), "全体定例2");
+    fireEvent.change(within(dialog).getByTestId("calendar-meeting-form-date"), { target: { value: "2026-01-06" } });
+    await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-time"), "21:00");
+    await userEvent.click(within(dialog).getByTestId("calendar-meeting-form-submit"));
+
+    expect(await screen.findByText("ミーティングを登録しました")).toBeInTheDocument();
+    expect(screen.queryByText("ミーティングを登録できませんでした")).not.toBeInTheDocument();
   });
 
   it("an unconnected shared account shows the banner and disables create", async () => {
@@ -190,6 +224,24 @@ describe("定例ミーティングを設定", () => {
     expect(api.deleteMeeting).not.toHaveBeenCalled();
     await userEvent.click(within(confirm).getByRole("button", { name: "削除する" }));
     await waitFor(() => expect(api.deleteMeeting).toHaveBeenCalledWith("mtg_all"));
+  });
+});
+
+describe("findCreatedMeeting", () => {
+  const body: meeting.CreateMeetingRequest = { title: "全体定例", targetId: "all", startsAt: "2026-01-05T12:00:00Z", durationMinutes: 60, recurrence: "weekly" };
+
+  it("finds a new meeting with the same title / target / start, ignoring ones already listed", async () => {
+    const api = { listMeetings: vi.fn(async () => ({ items: [mtg({}), mtg({ id: "mtg_new" })], account: { email: null, calendarReady: true } })) };
+    expect(await findCreatedMeeting(api, body, new Set(["mtg_all"]), [0])).toMatchObject({ id: "mtg_new" });
+    expect(await findCreatedMeeting(api, body, new Set(["mtg_all", "mtg_new"]), [0, 0])).toBeNull();
+    expect(api.listMeetings).toHaveBeenCalledTimes(3);
+  });
+
+  it("a different start or a failing list is not a match", async () => {
+    const api = { listMeetings: vi.fn(async () => ({ items: [mtg({ startsAt: "2026-01-12T12:00:00Z" })], account: { email: null, calendarReady: true } })) };
+    expect(await findCreatedMeeting(api, body, new Set(), [0])).toBeNull();
+    const down = { listMeetings: vi.fn(() => Promise.reject(new Error("offline"))) };
+    expect(await findCreatedMeeting(down, body, new Set(), [0])).toBeNull();
   });
 });
 
