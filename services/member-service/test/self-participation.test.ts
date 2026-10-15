@@ -42,6 +42,7 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
       phone: null,
       grade: null,
       department: null,
+      studentId: null,
       rosterNumber: null,
       desiredActivity: null,
       note: null,
@@ -63,6 +64,7 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
       phone: "090-1111-2222",
       grade: "3",
       department: "情報工学科",
+      studentId: "1400980",
       rosterNumber: "3EP2-26",
       desiredActivity: "dev",
       note: "よろしく",
@@ -104,6 +106,23 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
     const people = await deps.repo.listPeople(deps.orgId);
     const linked = people.filter((p) => p.identityUserId === IDU);
     expect(linked).toHaveLength(1);
+  });
+
+  it("normalizes 学籍番号 on self update and rejects a malformed one", async () => {
+    const app = createApp(makeDeps());
+    const ok = await call(app, "POST", "/members/internal/me/participation", {
+      userId: IDU,
+      internal: true,
+      body: { lastName: "佐藤", studentId: "１４００９８０" },
+    });
+    expect(ok.status).toBe(200);
+    expect(ok.json.studentId).toBe("1400980");
+    const bad = await call(app, "POST", "/members/internal/me/participation", {
+      userId: IDU,
+      internal: true,
+      body: { studentId: "14009801" },
+    });
+    expect(bad.status).toBe(400);
   });
 
   it("normalizes 名列番号 on self update and rejects a malformed one", async () => {

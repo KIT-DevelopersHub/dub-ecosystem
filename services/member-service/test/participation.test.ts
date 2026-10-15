@@ -126,6 +126,40 @@ describe("member-service 参加届 (participation)", () => {
     expect(res.json.member.rosterNumber).toBe("3EP2-26");
   });
 
+  it("学籍番号: submit normalizes it, rejects a malformed one, and resolve create carries it to the member", async () => {
+    const app = createApp(makeDeps());
+    const bad = await call(app, "POST", "/members/participation", {
+      body: { lastName: "山田", firstName: "太郎", studentId: "140098", ...EMAILS },
+    });
+    expect(bad.status).toBe(400);
+
+    const sub = await call(app, "POST", "/members/participation", {
+      body: { lastName: "山田", firstName: "太郎", studentId: "１４００９８０", ...EMAILS },
+    });
+    expect(sub.status).toBe(201);
+    expect(sub.json.participation.studentId).toBe("1400980");
+
+    const pid = sub.json.participation.id as string;
+    const res = await call(app, "POST", `/members/participation/${pid}/resolve`, { body: { action: "create" } });
+    expect(res.status).toBe(200);
+    expect(res.json.member.studentId).toBe("1400980");
+  });
+
+  it("学籍番号: resolve link fills an empty studentId on the existing member", async () => {
+    const app = createApp(makeDeps());
+    const m = await call(app, "POST", "/members/people", { body: { name: "山田 太郎", status: "invited", teamIds: [] } });
+    expect(m.json.studentId).toBeNull();
+    const sub = await call(app, "POST", "/members/participation", {
+      body: { lastName: "山田", firstName: "太郎", studentId: "1400980", ...EMAILS },
+    });
+    const pid = sub.json.participation.id as string;
+    const res = await call(app, "POST", `/members/participation/${pid}/resolve`, {
+      body: { action: "link", memberId: m.json.id, expectedVersion: m.json.version },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.member.studentId).toBe("1400980");
+  });
+
   it("resolve create -> makes a new 追加済 member from the submission, retaining both emails", async () => {
     const app = createApp(makeDeps());
     const t = await call(app, "POST", "/members/teams", { body: { name: "開発" } });
