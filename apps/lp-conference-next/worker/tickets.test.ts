@@ -20,6 +20,13 @@ import {
   ticketsCtaSwap,
   ticketsInjection,
   CTA_SWAP_SELECTOR,
+  COUPON_MSG,
+  DEMO_COUPONS,
+  normalizeCouponCode,
+  quantityCap,
+  FailureLimiter,
+  COUPON_FAIL_MAX,
+  COUPON_FAIL_WINDOW_MS,
   type PublicTicketType,
   type TicketConfig,
   type TicketsDeps,
@@ -36,6 +43,7 @@ const tt = (o: Partial<PublicTicketType> & { id: string }): PublicTicketType => 
   maxPerOrder: 10,
   remaining: null,
   soldOut: false,
+  couponOnly: false,
   ...o,
 });
 const CFG: TicketConfig = {
@@ -269,8 +277,8 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
     paymentReady: false,
     fields: [{ id: "a", label: "A", type: "text", required: false, options: [] }],
     types: [
-      { id: "t", name: "T", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: null, soldOut: false },
-      { id: "u", name: "U", description: "", priceJpy: 500, dayLabel: "Day 1", maxPerOrder: 4, remaining: 0, soldOut: true },
+      { id: "t", name: "T", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false },
+      { id: "u", name: "U", description: "", priceJpy: 500, dayLabel: "Day 1", maxPerOrder: 4, remaining: 0, soldOut: true, couponOnly: false },
     ],
   });
   assert.equal(parseConfig({ enabled: true, fields: [], types: [] })?.ctaEnabled, false);
@@ -342,9 +350,13 @@ test("handler: demo checkout validates locally then redirects to thanks with sum
   assert.match(t, /<b>一般 Day 1 x2<\/b><b>学生 Day 1 x1<\/b>/);
 });
 
-test("DEMO_CONFIG: 2 days x (一般/学生), one low stock, one sold out, CTA on", () => {
+test("DEMO_CONFIG: 2 days x (一般/学生), one low stock, one sold out, CTA on, one coupon-only type", () => {
   assert.equal(DEMO_CONFIG.ctaEnabled, true);
-  assert.deepEqual(groupByDay(DEMO_CONFIG.types).map((g) => g.types.length), [2, 2]);
+  assert.deepEqual(groupByDay(DEMO_CONFIG.types.filter((t) => !t.couponOnly)).map((g) => g.types.length), [2, 2]);
+  const invite = DEMO_CONFIG.types.filter((t) => t.couponOnly);
+  assert.equal(invite.length, 1);
+  assert.equal(invite[0].priceJpy, 0);
+  for (const c of Object.values(DEMO_COUPONS)) assert.equal(c.ticketTypeId, invite[0].id);
   assert.ok(DEMO_CONFIG.types.some((t) => t.remaining !== null && t.remaining > 0 && t.remaining <= 3));
   assert.ok(DEMO_CONFIG.types.some((t) => t.soldOut));
 });
@@ -528,4 +540,275 @@ test("page inline script parses", () => {
   const html = renderTicketsPage({ config: CFG });
   const js = /<script>([\s\S]*)<\/script><\/body>/.exec(html)![1];
   assert.doesNotThrow(() => new Function(js));
+});
+
+// ---------- coupon codes ----------
+
+const INVITE = tt({ id: "invite", name: "招待枠", priceJpy: 0, dayLabel: "Day 1 - 9/13(月)", maxPerOrder: 5, remaining: 4, couponOnly: true });
+const CPN_CFG: TicketConfig = { ...CFG, types: [...CFG.types, INVITE] };
+const APPLIED = { code: "ABCDE23456", ticketTypeId: "invite", remainingUses: 3 };
+const BUYER = { name: "山田 太郎", email: "taro@example.com", f_mode: "現地", f_agree: "はい" };
+const errBody = (status: number, error: unknown) => Response.json({ error }, { status });
+
+/** internal() that answers the coupon endpoint with `coupon` and checkout with `checkout`. */
+function cpnDeps(coupon: () => Response, checkout: () => Response = () => Response.json({ redirectUrl: "https://lp.example/tickets/thanks?order=tko_1" })) {
+  const d = deps({
+    getConfig: async () => CPN_CFG,
+    internal: async (path, init) => {
+      d.calls.push({ path, init });
+      return path === "/lp/internal/tickets/coupon" ? coupon() : checkout();
+    },
+  });
+  return d;
+}
+const okCoupon = (remainingUses = 3) => () => Response.json({ ticketTypeId: "invite", remainingUses });
+
+test("normalizeCouponCode / parseConfig couponOnly / matchTicketsRoute coupon", () => {
+  assert.equal(normalizeCouponCode(" abcde-23456 "), "ABCDE23456");
+  assert.equal(normalizeCouponCode("ab"), null);
+  assert.equal(normalizeCouponCode("ABC!DE"), null);
+  const c = parseConfig({ enabled: true, fields: [], types: [{ id: "t", name: "T", priceJpy: 0, couponOnly: true }, { id: "u", name: "U", priceJpy: 0 }] });
+  assert.deepEqual(c?.types.map((t) => t.couponOnly), [true, false]);
+  assert.equal(matchTicketsRoute("/tickets/coupon/"), "coupon");
+});
+
+test("quantityCap: coupon caps at min(remainingUses, maxPerOrder, remaining); locks other types", () => {
+  assert.equal(quantityCap(INVITE, true, null), 0);
+  assert.equal(quantityCap(INVITE, true, APPLIED), 3);
+  assert.equal(quantityCap(INVITE, true, { ...APPLIED, remainingUses: 50 }), 4);
+  assert.equal(quantityCap({ ...INVITE, remaining: null }, true, { ...APPLIED, remainingUses: 50 }), 5);
+  assert.equal(quantityCap({ ...INVITE, soldOut: true, remaining: 0 }, true, APPLIED), 0);
+  // payment readiness does not matter for a 0-yen coupon line
+  assert.equal(quantityCap(INVITE, false, APPLIED), 3);
+  assert.equal(quantityCap(CFG.types[0], true, APPLIED), 0);
+  assert.equal(quantityCap(CFG.types[0], true, null), 5);
+});
+
+test("render: coupon-only types are hidden from the normal list; coupon entry posts to its own form", () => {
+  const html = renderTicketsPage({ config: CPN_CFG });
+  assert.doesNotMatch(html, /qty_invite/);
+  assert.doesNotMatch(html, /招待枠/);
+  assert.match(html, /<form id="tk-coupon" method="post" action="\/tickets\/coupon" novalidate><\/form>/);
+  assert.match(html, /クーポンコードをお持ちの方/);
+  assert.match(html, /<input type="text" id="couponCode" name="couponCode" form="tk-coupon"/);
+  assert.match(html, /<button type="submit" class="cpn-btn" form="tk-coupon">適用<\/button>/);
+  // the purchase submit stays the first submit button owned by form.buy (Enter in buyer fields buys)
+  assert.ok(html.indexOf('class="submit"') > html.indexOf("cpn-btn"));
+  assert.doesNotMatch(html, /type="hidden" name="couponCode"/);
+  // only coupon-only types on sale: the page stays open as a coupon entry
+  const only = renderTicketsPage({ config: { ...CFG, types: [INVITE] } });
+  assert.match(only, /一般販売中のチケットはありません/);
+  assert.match(only, /id="couponCode"/);
+  assert.match(renderTicketsPage({ config: { ...CFG, types: [{ ...INVITE, soldOut: true, remaining: 0 }] } }), /受付準備中/);
+});
+
+test("render: applied coupon shows its type as 無料（クーポン適用）, caps quantity, locks others, carries the code", () => {
+  const html = renderTicketsPage({ config: CPN_CFG, coupon: APPLIED, values: { qty_invite: "2" } });
+  assert.match(html, /無料<small class="cp">（クーポン適用）<\/small>/);
+  assert.match(html, /<span class="badge cp">クーポン適用<\/span>/);
+  assert.match(html, /name="qty_invite"[^>]*>(<option[^>]*>\d+<\/option>){4}<\/select>/);
+  assert.match(html, /data-id="invite"[^>]*data-price="0"/);
+  assert.match(html, /name="qty_general" disabled/);
+  assert.match(html, /name="qty_student" disabled/);
+  assert.match(html, /クーポン適用中は選べません/);
+  assert.match(html, /<input type="hidden" name="couponCode" value="ABCDE23456">/);
+  assert.match(html, /<a class="cpn-clear" href="\/tickets">解除<\/a>/);
+  assert.match(html, /1 回 3 枚まで/);
+  assert.doesNotMatch(html, /id="tk-coupon"/);
+  assert.doesNotMatch(html, /Stripe/);
+  assert.match(html, />申し込む</);
+  assert.match(html, /data-sum-count>2枚</);
+  assert.match(html, /data-sum-total>無料</);
+  const js = /<script>([\s\S]*)<\/script><\/body>/.exec(html)![1];
+  assert.doesNotThrow(() => new Function(js));
+});
+
+test("parseCheckoutForm with a coupon: only its type, up to its remaining uses; couponCode in the input", () => {
+  const ok = parseCheckoutForm(form({ ...BUYER, qty_invite: "3" }), CPN_CFG, APPLIED);
+  assert.equal(ok.ok, true);
+  if (ok.ok) {
+    assert.deepEqual(ok.input.items, [{ ticketTypeId: "invite", quantity: 3 }]);
+    assert.equal(ok.input.couponCode, "ABCDE23456");
+  }
+  const over = parseCheckoutForm(form({ ...BUYER, qty_invite: "4" }), CPN_CFG, APPLIED);
+  assert.equal(!over.ok && over.errors.qty_invite, "このクーポンで申し込めるのは残り3枚です");
+  const mixed = parseCheckoutForm(form({ ...BUYER, qty_invite: "1", qty_general: "1" }), CPN_CFG, APPLIED);
+  assert.match(!mixed.ok ? mixed.errors.qty_general : "", /クーポンの対象券種のみ/);
+  const noCode = parseCheckoutForm(form({ ...BUYER, qty_invite: "1" }), CPN_CFG);
+  assert.equal(!noCode.ok && noCode.errors.qty_invite, COUPON_MSG.couponRequired);
+  // without a coupon the input has no couponCode key at all
+  const plain = parseCheckoutForm(form(VALID), CFG);
+  assert.ok(plain.ok && !("couponCode" in plain.input));
+});
+
+test("mapCheckoutError: coupon reasons in Japanese", () => {
+  const v = (details: unknown[]) => mapCheckoutError(400, { error: { code: "VALIDATION_FAILED", details } }, CPN_CFG);
+  assert.equal(v([{ field: "couponCode", reason: "invalid" }]).couponCode, "クーポンコードが正しくないか、利用できません");
+  assert.equal(v([{ field: "couponCode", reason: "not_applicable" }]).couponCode, COUPON_MSG.notApplicable);
+  const req = v([{ field: "items.invite", reason: "coupon_required" }]);
+  assert.equal(req.couponCode, COUPON_MSG.couponRequired);
+  assert.equal(req.qty_invite, COUPON_MSG.couponRequired);
+  const up = mapCheckoutError(409, { error: { code: "LP_TICKET_COUPON_USED_UP", details: { reason: "coupon_used_up" } } }, CPN_CFG);
+  assert.equal(up.couponCode, "このクーポンは使用上限に達しています");
+  assert.ok(up._form && !up.items);
+});
+
+test("handler: POST /tickets/coupon relays the normalized code (+ hashed sender key) and renders the applied page", async () => {
+  const d = cpnDeps(okCoupon(3));
+  const res = await handleTickets(
+    post("/tickets/coupon", { couponCode: " abcde-23456 " }, { origin: "https://lp.example", "cf-connecting-ip": "203.0.113.7" }),
+    d,
+  );
+  assert.equal(res?.status, 200);
+  assert.equal(d.calls.length, 1);
+  assert.equal(d.calls[0].path, "/lp/internal/tickets/coupon");
+  const sent = JSON.parse(String(d.calls[0].init.body));
+  assert.equal(sent.code, "ABCDE23456");
+  assert.match(sent.clientKey, /^[a-f0-9]{32}$/);
+  assert.ok(!String(d.calls[0].init.body).includes("203.0.113.7"));
+  const html = await res!.text();
+  assert.match(html, /クーポン適用中/);
+  assert.match(html, /<option value="1" selected>1<\/option>/);
+  assert.match(html, /data-sum-count>1枚</);
+  // GET falls back to the page, cross-origin is refused
+  assert.equal((await handleTickets(new Request("https://lp.example/tickets/coupon"), d))?.status, 303);
+  assert.equal((await handleTickets(post("/tickets/coupon", { couponCode: "ABCDE23456" }, { origin: "https://evil.example" }), d))?.status, 403);
+});
+
+test("handler: coupon errors (invalid / used up / sales off / malformed) in Japanese, code kept in the input", async () => {
+  const cases: Array<[() => Response, number, RegExp]> = [
+    [() => errBody(400, { code: "VALIDATION_FAILED", details: [{ field: "couponCode", reason: "invalid" }] }), 400, /クーポンコードが正しくないか、利用できません/],
+    [() => errBody(409, { code: "LP_TICKET_COUPON_USED_UP", details: { reason: "coupon_used_up" } }), 409, /このクーポンは使用上限に達しています/],
+    [() => errBody(404, { code: "NOT_FOUND" }), 404, /現在お申し込みを受け付けていません/],
+    [() => errBody(429, { code: "RATE_LIMITED" }), 429, /集中/],
+    [() => new Response("boom", { status: 500 }), 502, /クーポンを確認できませんでした/],
+    // 200 with a type the page does not know = can not be offered
+    [() => Response.json({ ticketTypeId: "ghost", remainingUses: 2 }), 400, /クーポンコードが正しくないか/],
+  ];
+  for (const [up, status, msg] of cases) {
+    const res = await handleTickets(post("/tickets/coupon", { couponCode: "ABCDE23456" }), cpnDeps(up));
+    assert.equal(res?.status, status, String(msg));
+    const html = await res!.text();
+    assert.match(html, msg);
+    assert.doesNotMatch(html, /クーポン適用中/);
+    if (status === 400 || status === 409) assert.match(html, /id="couponCode"[^>]*value="ABCDE23456"/);
+  }
+  // locally malformed / empty codes never reach lp-analytics
+  const d = cpnDeps(okCoupon());
+  assert.equal((await handleTickets(post("/tickets/coupon", { couponCode: "<b>!" }), d))?.status, 400);
+  const empty = await handleTickets(post("/tickets/coupon", { couponCode: "" }), d);
+  assert.match(await empty!.text(), /クーポンコードを入力してください/);
+  assert.equal(d.calls.length, 0);
+});
+
+test("handler: checkout with a coupon re-checks the code, then forwards couponCode with only its line", async () => {
+  const d = cpnDeps(okCoupon(3));
+  const res = await handleTickets(post("/tickets/checkout", { ...BUYER, couponCode: "ABCDE23456", qty_invite: "2" }, { origin: "https://lp.example" }), d);
+  assert.equal(res?.status, 303);
+  assert.equal(res?.headers.get("location"), "https://lp.example/tickets/thanks?order=tko_1");
+  assert.deepEqual(d.calls.map((c) => c.path), ["/lp/internal/tickets/coupon", "/lp/internal/tickets/checkout"]);
+  const sent = JSON.parse(String(d.calls[1].init.body));
+  assert.deepEqual(sent.items, [{ ticketTypeId: "invite", quantity: 2 }]);
+  assert.equal(sent.couponCode, "ABCDE23456");
+  assert.doesNotMatch(String(d.calls[1].init.body), /price|amount/i);
+  // over the code's remaining uses: stopped locally with the coupon still applied
+  const d2 = cpnDeps(okCoupon(1));
+  const over = await handleTickets(post("/tickets/checkout", { ...BUYER, couponCode: "ABCDE23456", qty_invite: "2" }), d2);
+  assert.equal(over?.status, 400);
+  const html = await over!.text();
+  assert.match(html, /このクーポンで申し込めるのは残り1枚です/);
+  assert.match(html, /type="hidden" name="couponCode" value="ABCDE23456"/);
+  assert.equal(d2.calls.length, 1);
+});
+
+test("handler: checkout with a code that stopped working falls back to the normal page with the reason", async () => {
+  const d = cpnDeps(() => errBody(400, { code: "VALIDATION_FAILED", details: [{ field: "couponCode", reason: "invalid" }] }));
+  const res = await handleTickets(post("/tickets/checkout", { ...BUYER, couponCode: "ABCDE23456", qty_invite: "1" }), d);
+  assert.equal(res?.status, 400);
+  const html = await res!.text();
+  assert.match(html, /クーポンコードが正しくないか、利用できません/);
+  assert.doesNotMatch(html, /type="hidden" name="couponCode"/);
+  assert.match(html, /value="山田 太郎"/);
+  assert.equal(d.calls.length, 1);
+});
+
+test("handler: checkout 409 coupon_used_up re-checks the code (fresh cap, or dropped when nothing is left)", async () => {
+  let left = 1;
+  const d = cpnDeps(
+    () => (left > 0 ? Response.json({ ticketTypeId: "invite", remainingUses: left }) : errBody(409, { code: "LP_TICKET_COUPON_USED_UP", details: { reason: "coupon_used_up" } })),
+    () => {
+      left = 1;
+      return errBody(409, { code: "LP_TICKET_COUPON_USED_UP", details: { reason: "coupon_used_up" } });
+    },
+  );
+  left = 3;
+  const res = await handleTickets(post("/tickets/checkout", { ...BUYER, couponCode: "ABCDE23456", qty_invite: "3" }), d);
+  assert.equal(res?.status, 409);
+  const html = await res!.text();
+  assert.match(html, /このクーポンは使用上限に達しています/);
+  assert.match(html, /1 回 1 枚まで/);
+  assert.match(html, /type="hidden" name="couponCode"/);
+
+  const gone = cpnDeps(
+    () => (gone.calls.length > 1 ? errBody(409, { code: "LP_TICKET_COUPON_USED_UP" }) : Response.json({ ticketTypeId: "invite", remainingUses: 2 })),
+    () => errBody(409, { code: "LP_TICKET_COUPON_USED_UP", details: { reason: "coupon_used_up" } }),
+  );
+  const res2 = await handleTickets(post("/tickets/checkout", { ...BUYER, couponCode: "ABCDE23456", qty_invite: "2" }), gone);
+  const html2 = await res2!.text();
+  assert.match(html2, /このクーポンは使用上限に達しています/);
+  assert.doesNotMatch(html2, /type="hidden" name="couponCode"/);
+  assert.match(html2, /id="couponCode"[^>]*value="ABCDE23456"/);
+});
+
+test("handler: demo resolves coupons locally (never calls lp-analytics) and checks out to thanks", async () => {
+  const d = deps({ demo: true, getConfig: async () => DEMO_CONFIG, internal: null });
+  const page = await (await handleTickets(new Request("https://lp.example/tickets"), d))!.text();
+  assert.doesNotMatch(page, /qty_demo-invite-d1/);
+  assert.match(page, /デモ用コード: TRYFREE234/);
+  const ok = await handleTickets(post("/tickets/coupon", { couponCode: "tryfree234" }), d);
+  assert.equal(ok?.status, 200);
+  const html = await ok!.text();
+  assert.match(html, /無料<small class="cp">（クーポン適用）<\/small>/);
+  assert.match(html, /name="qty_demo-invite-d1"[^>]*>(<option[^>]*>\d+<\/option>){4}<\/select>/);
+  const used = await handleTickets(post("/tickets/coupon", { couponCode: "USEDUP2345" }), d);
+  assert.equal(used?.status, 409);
+  assert.match(await used!.text(), /使用上限に達しています/);
+  assert.equal((await handleTickets(post("/tickets/coupon", { couponCode: "NOPE234567" }), d))?.status, 400);
+  const done = await handleTickets(
+    post("/tickets/checkout", { "qty_demo-invite-d1": "2", couponCode: "TRYFREE234", name: "A", email: "a@b.jp", f_attendance: "現地" }),
+    d,
+  );
+  assert.equal(done?.status, 303);
+  assert.match(decodeURIComponent(done!.headers.get("location")!), /summary=招待 Day 1 x2$/);
+  // the coupon-only type can not be bought without the code
+  const noCode = await handleTickets(post("/tickets/checkout", { "qty_demo-invite-d1": "1", name: "A", email: "a@b.jp", f_attendance: "現地" }), d);
+  assert.equal(noCode?.status, 400);
+});
+
+test("handler: wrong coupon codes are limited per sender network (applied codes never count)", async () => {
+  let t = 0;
+  const limiter = new FailureLimiter(COUPON_FAIL_MAX, COUPON_FAIL_WINDOW_MS, () => t);
+  let valid = false;
+  const d = cpnDeps(() =>
+    valid ? Response.json({ ticketTypeId: "invite", remainingUses: 3 }) : errBody(400, { code: "VALIDATION_FAILED", details: [{ field: "couponCode", reason: "invalid" }] }),
+  );
+  d.couponLimiter = limiter;
+  const ip = (v: string) => ({ "cf-connecting-ip": v });
+  for (let i = 0; i < COUPON_FAIL_MAX; i++) {
+    assert.equal((await handleTickets(post("/tickets/coupon", { couponCode: `WRONG${i}2345` }, ip("203.0.113.7")), d))?.status, 400);
+  }
+  valid = true;
+  const blocked = await handleTickets(post("/tickets/coupon", { couponCode: "ABCDE23456" }, ip("203.0.113.7")), d);
+  assert.equal(blocked?.status, 429);
+  assert.match(await blocked!.text(), /入力回数が上限に達しました/);
+  assert.equal(d.calls.length, COUPON_FAIL_MAX, "blocked attempts never reach lp-analytics");
+  // the checkout path can not be used to keep guessing either
+  assert.equal((await handleTickets(post("/tickets/checkout", { ...BUYER, couponCode: "ABCDE23456", qty_invite: "1" }, ip("203.0.113.7")), d))?.status, 429);
+  // another sender is unaffected; successes do not count
+  for (let i = 0; i < COUPON_FAIL_MAX + 2; i++) {
+    assert.equal((await handleTickets(post("/tickets/coupon", { couponCode: "ABCDE23456" }, ip("198.51.100.9")), d))?.status, 200);
+  }
+  // window over -> allowed again
+  t += COUPON_FAIL_WINDOW_MS + 1;
+  assert.equal((await handleTickets(post("/tickets/coupon", { couponCode: "ABCDE23456" }, ip("203.0.113.7")), d))?.status, 200);
 });
