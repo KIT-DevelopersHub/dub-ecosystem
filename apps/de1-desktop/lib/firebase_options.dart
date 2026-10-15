@@ -35,11 +35,13 @@ class DefaultFirebaseOptions {
         return android;
       case TargetPlatform.macOS:
         return macos;
+      case TargetPlatform.iOS:
+        return ios;
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions has not been configured for '
-          '$defaultTargetPlatform — de1-desktop push is Android + macOS only '
-          '(see lib/push/fcm_push.dart FcmPush.isSupported).',
+          '$defaultTargetPlatform — de1-desktop push is Android + iOS + macOS '
+          'only (see lib/push/fcm_push.dart FcmPush.isSupported).',
         );
     }
   }
@@ -63,4 +65,8 @@ class DefaultFirebaseOptions {
     storageBucket: 'dub-ecosystem.firebasestorage.app',
     iosBundleId: 'jp.developershub.dubDesktop',
   );
+
+  /// iOS shares the macOS Firebase IOS-platform app: the iOS Runner bundle id
+  /// is the same `jp.developershub.dubDesktop`.
+  static const ios = macos;
 }
