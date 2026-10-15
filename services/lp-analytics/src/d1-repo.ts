@@ -235,8 +235,11 @@ function ticketRepo(db: DbClient): LpTicketRepo {
       return r?.c ?? 0;
     },
     async insertOrderIfAvailable(o, capacities, pendingSince) {
-      // One batch (= one transaction): the order, then each item only if its type still has room.
+      // One batch (= one transaction): the order, each item only if its type still has room, then
+      // (still in the same batch) drop the order + its items when any item was short. No second
+      // write = no ghost partial order if the Worker dies in between.
       // Concurrent checkouts serialize on D1's single writer, so no oversell.
+      const n = o.items.length;
       const results = await db.batch([
         {
           sql: `INSERT INTO lp_ticket_orders (id, site, quantity, amount_jpy, status, buyer_name, buyer_email, answers_json,
@@ -282,15 +285,17 @@ function ticketRepo(db: DbClient): LpTicketRepo {
             ],
           };
         }),
+        {
+          sql: "DELETE FROM lp_ticket_orders WHERE id = ? AND (SELECT COUNT(*) FROM lp_ticket_order_items WHERE order_id = ?) < ?",
+          binds: [o.id, o.id, n],
+        },
+        {
+          sql: "DELETE FROM lp_ticket_order_items WHERE order_id = ? AND NOT EXISTS (SELECT 1 FROM lp_ticket_orders WHERE id = ?)",
+          binds: [o.id, o.id],
+        },
       ]);
       const short = o.items.find((_, idx) => (results[idx + 1]?.meta.changes ?? 0) === 0);
-      if (!short) return { ok: true };
-      // Roll back the partial hold so the other items are released immediately.
-      await db.batch([
-        { sql: "DELETE FROM lp_ticket_order_items WHERE order_id = ?", binds: [o.id] },
-        { sql: "DELETE FROM lp_ticket_orders WHERE id = ?", binds: [o.id] },
-      ]);
-      return { ok: false, ticketTypeId: short.ticketTypeId };
+      return short ? { ok: false, ticketTypeId: short.ticketTypeId } : { ok: true };
     },
     async getOrder(site, id) {
       return one(await db.first<TicketOrderDbRow>("SELECT * FROM lp_ticket_orders WHERE site = ? AND id = ?", site, id));
