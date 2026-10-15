@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "slack-import",
+  "worker": "dub-demo-slack-import",
+  "url": "https://dub-demo-slack-import.developershub-site.workers.dev",
+  "deployedSha": "645dc882",
+  "branch": "HEAD",
+  "actor": "ko-tarou",
+  "markers": ["slack-import-v1"],
+  "live": true,
+  "verifiedAt": "2026-10-15T05:15:28Z",
+  "updatedAt": "2026-10-15T05:15:28Z",
+  "note": "fe6 チャンネル取り込み (Slack) frontend+mock; branch feat/slack-history-importer 476c68d9 + origin/main"
+}
