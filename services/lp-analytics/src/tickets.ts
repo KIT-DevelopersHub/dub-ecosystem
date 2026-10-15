@@ -1,9 +1,10 @@
 // LP チケット購入: validation + TicketService (settings / types / orders / checkout / Stripe confirm).
 // Prices always come from D1; the client never supplies an amount.
 import { DubError, errors, type FieldError } from "@dub/errors";
+import { consoleSink, type LogLevel } from "@dub/observability";
 import { lp } from "@dub/types";
 import { dayJst } from "./domain";
-import { toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
+import { stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
 import type {
   AppDeps,
   LpTicketAnswer,
@@ -63,6 +64,31 @@ const SESSION_EVENTS: ReadonlySet<string> = new Set([
   "checkout.session.async_payment_failed",
   "checkout.session.expired",
 ]);
+const RELEASE_EVENTS: ReadonlySet<string> = new Set(["checkout.session.expired", "checkout.session.async_payment_failed"]);
+const CHARGE_EVENTS: ReadonlySet<string> = new Set(["charge.refunded", "charge.dispute.created"]);
+
+/** Reconcile window: younger sessions are still in flight; older ones are long settled at Stripe. */
+export const RECONCILE_MIN_AGE_MS = 5 * 60 * 1000;
+export const RECONCILE_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+export const RECONCILE_LIMIT = 50;
+
+export type SettleOutcome = "paid" | "needs_review" | "expired" | "unchanged" | "ignored";
+
+export interface ReconcileSummary {
+  checked: number;
+  paid: number;
+  needsReview: number;
+  expired: number;
+  unchanged: number;
+  ignored: number;
+  errors: number;
+  /** Session-less pending past the hold (Stripe create never finished). */
+  sessionlessExpired: number;
+}
+
+function log(level: LogLevel, message: string, fields: Record<string, unknown>): void {
+  consoleSink({ level, message, service: "lp-analytics", fields });
+}
 
 const DEFAULT_ORDERS_PAGE = 50;
 const MAX_ORDERS_PAGE = 200;
@@ -251,7 +277,14 @@ const sortTypes = (a: TicketTypeRow, b: TicketTypeRow): number =>
   a.sortOrder - b.sortOrder || (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
 
 const toType = ({ site: _s, ...t }: TicketTypeRow): LpTicketType => t;
-const toOrder = ({ site: _s, stripeSessionId: _ss, ...o }: TicketOrderRow): LpTicketOrder => o;
+const toOrder = ({
+  site: _s,
+  stripeSessionId: _ss,
+  paymentIntentId: _pi,
+  refundedAt: _ra,
+  reviewReason: _rr,
+  ...o
+}: TicketOrderRow): LpTicketOrder => o;
 
 /** 409: not enough seats left for one of the items (contract: sold_out). */
 export const soldOut = (ticketTypeId: string): DubError =>
@@ -462,6 +495,9 @@ export class TicketService {
       stripeSessionId: null,
       createdAt: now,
       paidAt: free ? now : null,
+      paymentIntentId: null,
+      refundedAt: null,
+      reviewReason: null,
     };
     const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
     const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
@@ -508,7 +544,7 @@ export class TicketService {
     if (order.status === "pending" && sessionId && this.deps.stripe) {
       try {
         const s = await this.deps.stripe.getCheckoutSession(sessionId);
-        await this.applySession(order.id, s);
+        await this.settle(order, s, { source: "confirm" });
         order = (await this.repo.getOrder(TICKET_SITE, order.id)) ?? order;
       } catch {
         // Stripe unreachable: answer the stored state; the webhook will settle it.
@@ -517,26 +553,168 @@ export class TicketService {
     return { status: order.status, summary: orderSummary(order.items) };
   }
 
-  private async applySession(orderId: string, s: CheckoutSession): Promise<void> {
-    if (s.paymentStatus === "paid") await this.repo.markOrderPaid(orderId, this.deps.now(), s.id || null);
-    else if (s.status === "expired") await this.repo.markOrderExpired(orderId);
+  /** True when settling `order` now would push one of its types over capacity (its own seat already lapsed). */
+  private async overCapacity(order: TicketOrderRow): Promise<boolean> {
+    const [types, aggs] = await Promise.all([
+      this.repo.listTicketTypes(TICKET_SITE),
+      this.repo.ticketAggregates(TICKET_SITE, this.pendingSince()),
+    ]);
+    return order.items.some((i) => {
+      const cap = types.find((t) => t.id === i.ticketTypeId)?.capacity ?? null;
+      const a = aggs.find((x) => x.ticketTypeId === i.ticketTypeId);
+      return cap !== null && (a?.sold ?? 0) + (a?.pending ?? 0) + i.quantity > cap;
+    });
   }
 
-  /** Stripe webhook (raw body). Bad / missing signature → 400. Unknown events / orders → ignored. */
+  /**
+   * The ONE settlement rule for webhook / confirm / reconcile.
+   * - session mode must match the key mode (test never touches live and vice versa)
+   * - paid only when payment_status=paid AND amount_total = order amount AND currency = jpy;
+   *   a mismatch goes to needs_review (money may be taken; a human looks)
+   * - paid wins: pending|expired -> paid; a late settle that no longer fits capacity -> needs_review "oversold"
+   * - release (expired / async failed) only moves pending -> expired, never paid -> expired
+   */
+  private async settle(
+    order: TicketOrderRow,
+    s: CheckoutSession,
+    o: { source: string; release?: boolean },
+  ): Promise<SettleOutcome> {
+    const ctx = { source: o.source, orderId: order.id, sessionId: s.id };
+    const stripe = this.deps.stripe;
+    if (!stripe || s.livemode !== stripe.livemode) {
+      log("warn", "lp ticket settle ignored: livemode mismatch", { ...ctx, sessionLivemode: s.livemode });
+      return "ignored";
+    }
+    if (order.status !== "pending" && order.status !== "expired") return "unchanged";
+    if (s.paymentStatus === "paid") {
+      const reason =
+        s.currency !== "jpy" ? "currency_mismatch" : s.amountTotal !== order.amountJpy ? "amount_mismatch" : null;
+      if (reason) {
+        await this.repo.markOrderNeedsReview(order.id, reason, s.paymentIntentId);
+        log("error", "lp ticket payment needs review", {
+          ...ctx,
+          reason,
+          amountTotal: s.amountTotal,
+          currency: s.currency,
+          expectedJpy: order.amountJpy,
+        });
+        return "needs_review";
+      }
+      const late = order.status === "expired" || order.createdAt < this.pendingSince();
+      const oversold = late && (await this.overCapacity(order));
+      const changed = await this.repo.markOrderPaid(order.id, {
+        paidAt: this.deps.now(),
+        sessionId: s.id || null,
+        paymentIntentId: s.paymentIntentId,
+        ...(oversold ? { reviewReason: "oversold" } : {}),
+      });
+      if (!changed) return "unchanged";
+      if (oversold) {
+        log("error", "lp ticket paid after hold lapsed and over capacity", { ...ctx, reason: "oversold" });
+        return "needs_review";
+      }
+      if (late) log("warn", "lp ticket settled paid after hold lapsed", ctx);
+      return "paid";
+    }
+    if (o.release || s.status === "expired") {
+      return (await this.repo.markOrderExpired(order.id)) ? "expired" : "unchanged";
+    }
+    return "unchanged";
+  }
+
+  /**
+   * Cron safety net for a missing / misconfigured webhook: re-reads Stripe for pending orders and
+   * settles them with the same rule. One failure never aborts the loop.
+   */
+  async reconcile(): Promise<ReconcileSummary> {
+    const sum: ReconcileSummary = {
+      checked: 0,
+      paid: 0,
+      needsReview: 0,
+      expired: 0,
+      unchanged: 0,
+      ignored: 0,
+      errors: 0,
+      sessionlessExpired: await this.repo.expireSessionlessPending(TICKET_SITE, this.pendingSince()),
+    };
+    const stripe = this.deps.stripe;
+    if (stripe) {
+      const nowMs = Date.parse(this.deps.now());
+      const rows = await this.repo.listPendingWithSession(
+        TICKET_SITE,
+        new Date(nowMs - RECONCILE_MAX_AGE_MS).toISOString(),
+        new Date(nowMs - RECONCILE_MIN_AGE_MS).toISOString(),
+        RECONCILE_LIMIT,
+      );
+      const key = {
+        paid: "paid",
+        needs_review: "needsReview",
+        expired: "expired",
+        unchanged: "unchanged",
+        ignored: "ignored",
+      } as const satisfies Record<SettleOutcome, keyof ReconcileSummary>;
+      for (const order of rows) {
+        sum.checked++;
+        try {
+          const s = await stripe.getCheckoutSession(order.stripeSessionId!);
+          sum[key[await this.settle(order, s, { source: "reconcile" })]]++;
+        } catch (e) {
+          sum.errors++;
+          log("error", "lp ticket reconcile failed for order", { orderId: order.id, error: String(e) });
+        }
+      }
+    }
+    log(sum.errors > 0 || sum.needsReview > 0 ? "warn" : "info", "lp ticket reconcile finished", { ...sum });
+    return sum;
+  }
+
+  /** charge.refunded (full only) -> refunded; charge.dispute.created -> needs_review. Matched by payment_intent. */
+  private async applyCharge(type: string, obj: Record<string, unknown>): Promise<void> {
+    const pi = stripeId(obj.payment_intent);
+    const order = pi ? await this.repo.getOrderByPaymentIntent(pi) : null;
+    if (!order) {
+      log("warn", "lp ticket charge event without a matching order", { type, paymentIntent: pi });
+      return;
+    }
+    if (type === "charge.dispute.created") {
+      await this.repo.markOrderNeedsReview(order.id, "dispute");
+      log("error", "lp ticket payment disputed", { orderId: order.id, paymentIntent: pi });
+      return;
+    }
+    const amount = typeof obj.amount === "number" ? obj.amount : null;
+    const refunded = typeof obj.amount_refunded === "number" ? obj.amount_refunded : 0;
+    if (amount === null || refunded < amount) {
+      log("info", "lp ticket partial refund: order unchanged", { orderId: order.id, amount, refunded });
+      return;
+    }
+    await this.repo.markOrderRefunded(order.id, this.deps.now());
+  }
+
+  /** Stripe webhook (raw body). Bad / missing signature → 400. Unknown events / orders / other mode → ignored. */
   async webhook(rawBody: string, signature: string | undefined): Promise<{ received: true }> {
     const secret = this.deps.stripeWebhookSecret;
     const nowSec = Math.floor(Date.parse(this.deps.now()) / 1000);
     if (!secret || !(await verifyStripeSignature(signature, rawBody, secret, nowSec))) {
       throw errors.validationFailed([{ field: "stripe-signature", reason: "invalid" }]);
     }
-    let event: { type?: unknown; data?: { object?: unknown } };
+    let event: { id?: unknown; type?: unknown; livemode?: unknown; data?: { object?: unknown } };
     try {
       event = JSON.parse(rawBody) as typeof event;
     } catch {
       throw errors.validationFailed([{ field: "body", reason: "invalid_json" }]);
     }
-    if (!SESSION_EVENTS.has(event.type as string)) return { received: true };
+    const type = typeof event.type === "string" ? event.type : "";
+    if (!SESSION_EVENTS.has(type) && !CHARGE_EVENTS.has(type)) return { received: true };
+    const stripe = this.deps.stripe;
+    if (!stripe || event.livemode !== stripe.livemode) {
+      log("warn", "lp ticket webhook ignored: livemode mismatch", { eventId: event.id, type, livemode: event.livemode });
+      return { received: true };
+    }
     const obj = (event.data?.object ?? {}) as Record<string, unknown>;
+    if (CHARGE_EVENTS.has(type)) {
+      await this.applyCharge(type, obj);
+      return { received: true };
+    }
     const session = toCheckoutSession(obj);
     const metaOrder = (obj.metadata as Record<string, unknown> | undefined)?.order_id;
     const orderId = session.clientReferenceId ?? (typeof metaOrder === "string" ? metaOrder : null);
@@ -544,10 +722,7 @@ export class TicketService {
       (orderId ? await this.repo.getOrder(TICKET_SITE, orderId) : null) ??
       (session.id ? await this.repo.getOrderBySession(session.id) : null);
     if (!order) return { received: true };
-    if (event.type === "checkout.session.expired" || event.type === "checkout.session.async_payment_failed") {
-      await this.repo.markOrderExpired(order.id);
-    }
-    else await this.applySession(order.id, session);
+    await this.settle(order, session, { source: "webhook", release: RELEASE_EVENTS.has(type) });
     return { received: true };
   }
 }

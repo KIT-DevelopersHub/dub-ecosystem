@@ -31,14 +31,30 @@ export interface CheckoutSession {
   /** "paid" | "unpaid" | "no_payment_required" */
   paymentStatus: string | null;
   clientReferenceId: string | null;
+  /** Smallest currency unit (JPY = yen). */
+  amountTotal: number | null;
+  currency: string | null;
+  paymentIntentId: string | null;
+  livemode: boolean | null;
 }
 
 export interface StripeClient {
+  /** true = live key (sk_live_ / rk_live_). Events/sessions of the other mode are ignored. */
+  readonly livemode: boolean;
   createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSession>;
   getCheckoutSession(id: string): Promise<CheckoutSession>;
 }
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
+
+export const isLiveKey = (secretKey: string): boolean => /^(sk|rk)_live_/.test(secretKey);
+
+/** Expandable field: id string or the expanded object. */
+export function stripeId(v: unknown): string | null {
+  if (typeof v === "string") return v;
+  const id = (v as { id?: unknown } | null)?.id;
+  return typeof id === "string" ? id : null;
+}
 
 export function toCheckoutSession(raw: unknown): CheckoutSession {
   const r = (raw ?? {}) as Record<string, unknown>;
@@ -49,11 +65,20 @@ export function toCheckoutSession(raw: unknown): CheckoutSession {
     status: s(r.status),
     paymentStatus: s(r.payment_status),
     clientReferenceId: s(r.client_reference_id),
+    amountTotal: typeof r.amount_total === "number" ? r.amount_total : null,
+    currency: s(r.currency),
+    paymentIntentId: stripeId(r.payment_intent),
+    livemode: typeof r.livemode === "boolean" ? r.livemode : null,
   };
 }
 
 export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, init) => fetch(i, init)): StripeClient {
-  const call = async (method: "GET" | "POST", path: string, form?: URLSearchParams): Promise<CheckoutSession> => {
+  const call = async (
+    method: "GET" | "POST",
+    path: string,
+    form?: URLSearchParams,
+    idempotencyKey?: string,
+  ): Promise<CheckoutSession> => {
     let res: Response;
     try {
       res = await fetchFn(`${API}${path}`, {
@@ -61,6 +86,7 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
         headers: {
           authorization: `Bearer ${secretKey}`,
           ...(form ? { "content-type": "application/x-www-form-urlencoded" } : {}),
+          ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
         },
         ...(form ? { body: form.toString() } : {}),
       });
@@ -72,6 +98,7 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
   };
 
   return {
+    livemode: isLiveKey(secretKey),
     createCheckoutSession(i) {
       const f = new URLSearchParams();
       f.set("mode", "payment");
@@ -91,7 +118,8 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
       f.set("cancel_url", i.cancelUrl);
       f.set("expires_at", String(i.expiresAt));
       f.set("locale", "ja");
-      return call("POST", "/checkout/sessions", f);
+      // A retried create for the same order returns the same session instead of a second one.
+      return call("POST", "/checkout/sessions", f, `checkout-${i.orderId}`);
     },
     getCheckoutSession(id) {
       return call("GET", `/checkout/sessions/${encodeURIComponent(id)}`);

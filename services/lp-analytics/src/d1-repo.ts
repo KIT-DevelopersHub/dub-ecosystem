@@ -47,6 +47,9 @@ interface TicketOrderDbRow {
   stripe_session_id: string | null;
   created_at: string;
   paid_at: string | null;
+  payment_intent_id: string | null;
+  refunded_at: string | null;
+  review_reason: string | null;
 }
 interface TicketItemDbRow {
   order_id: string;
@@ -102,10 +105,13 @@ const toTicketOrder = (r: TicketOrderDbRow, items: LpTicketOrderItem[]): TicketO
   stripeSessionId: r.stripe_session_id,
   createdAt: r.created_at,
   paidAt: r.paid_at,
+  paymentIntentId: r.payment_intent_id ?? null,
+  refundedAt: r.refunded_at ?? null,
+  reviewReason: r.review_reason ?? null,
 });
 
-// Seats held = items of paid orders + of pending orders still inside the hold window (alias o).
-const HELD = "(o.status = 'paid' OR (o.status = 'pending' AND o.created_at >= ?))";
+// Seats held = items of paid / needs_review orders + of pending orders still inside the hold window (alias o).
+const HELD = "(o.status IN ('paid', 'needs_review') OR (o.status = 'pending' AND o.created_at >= ?))";
 
 function ticketRepo(db: DbClient): LpTicketRepo {
   const withItems = async (rows: TicketOrderDbRow[]): Promise<TicketOrderRow[]> => {
@@ -217,10 +223,10 @@ function ticketRepo(db: DbClient): LpTicketRepo {
       const rows = await db.all<{ k: string; sold: number | null; pending: number | null; revenue: number | null }>(
         `SELECT i.ticket_type_id AS k,
                 SUM(CASE WHEN o.status = 'paid' THEN i.quantity ELSE 0 END) AS sold,
-                SUM(CASE WHEN o.status = 'pending' AND o.created_at >= ? THEN i.quantity ELSE 0 END) AS pending,
+                SUM(CASE WHEN o.status = 'needs_review' OR (o.status = 'pending' AND o.created_at >= ?) THEN i.quantity ELSE 0 END) AS pending,
                 SUM(CASE WHEN o.status = 'paid' THEN i.quantity * i.unit_price_jpy ELSE 0 END) AS revenue
          FROM lp_ticket_order_items i JOIN lp_ticket_orders o ON o.id = i.order_id
-         WHERE o.site = ? AND o.status != 'expired' GROUP BY i.ticket_type_id`,
+         WHERE o.site = ? AND o.status IN ('paid', 'needs_review', 'pending') GROUP BY i.ticket_type_id`,
         pendingSince,
         site,
       );
@@ -306,12 +312,21 @@ function ticketRepo(db: DbClient): LpTicketRepo {
     async setOrderSession(id, sessionId) {
       await db.run("UPDATE lp_ticket_orders SET stripe_session_id = ? WHERE id = ?", sessionId, id);
     },
-    async markOrderPaid(id, paidAt, sessionId) {
+    async getOrderByPaymentIntent(paymentIntentId) {
+      return one(
+        await db.first<TicketOrderDbRow>("SELECT * FROM lp_ticket_orders WHERE payment_intent_id = ?", paymentIntentId),
+      );
+    },
+    async markOrderPaid(id, p) {
       const res = await db.run(
-        `UPDATE lp_ticket_orders SET status = 'paid', paid_at = ?, stripe_session_id = COALESCE(stripe_session_id, ?)
-         WHERE id = ? AND status = 'pending'`,
-        paidAt,
-        sessionId,
+        `UPDATE lp_ticket_orders SET status = ?, paid_at = ?, stripe_session_id = COALESCE(stripe_session_id, ?),
+                payment_intent_id = COALESCE(payment_intent_id, ?), review_reason = ?
+         WHERE id = ? AND status IN ('pending', 'expired')`,
+        p.reviewReason ? "needs_review" : "paid",
+        p.paidAt,
+        p.sessionId,
+        p.paymentIntentId,
+        p.reviewReason ?? null,
         id,
       );
       return res.meta.changes > 0;
@@ -319,6 +334,46 @@ function ticketRepo(db: DbClient): LpTicketRepo {
     async markOrderExpired(id) {
       const res = await db.run("UPDATE lp_ticket_orders SET status = 'expired' WHERE id = ? AND status = 'pending'", id);
       return res.meta.changes > 0;
+    },
+    async markOrderNeedsReview(id, reason, paymentIntentId = null) {
+      const res = await db.run(
+        `UPDATE lp_ticket_orders SET status = 'needs_review', review_reason = ?, payment_intent_id = COALESCE(payment_intent_id, ?)
+         WHERE id = ? AND status IN ('pending', 'expired', 'paid')`,
+        reason,
+        paymentIntentId,
+        id,
+      );
+      return res.meta.changes > 0;
+    },
+    async markOrderRefunded(id, refundedAt) {
+      const res = await db.run(
+        "UPDATE lp_ticket_orders SET status = 'refunded', refunded_at = ? WHERE id = ? AND status IN ('paid', 'needs_review')",
+        refundedAt,
+        id,
+      );
+      return res.meta.changes > 0;
+    },
+    async listPendingWithSession(site, from, to, limit) {
+      return withItems(
+        await db.all<TicketOrderDbRow>(
+          `SELECT * FROM lp_ticket_orders
+           WHERE site = ? AND status = 'pending' AND stripe_session_id IS NOT NULL AND created_at >= ? AND created_at < ?
+           ORDER BY created_at, id LIMIT ?`,
+          site,
+          from,
+          to,
+          limit,
+        ),
+      );
+    },
+    async expireSessionlessPending(site, before) {
+      const res = await db.run(
+        `UPDATE lp_ticket_orders SET status = 'expired'
+         WHERE site = ? AND status = 'pending' AND stripe_session_id IS NULL AND created_at < ?`,
+        site,
+        before,
+      );
+      return res.meta.changes;
     },
     async listOrders(site, cursor, limit) {
       const binds: unknown[] = [site];

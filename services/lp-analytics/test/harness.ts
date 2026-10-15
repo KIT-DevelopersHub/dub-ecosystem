@@ -82,7 +82,7 @@ export async function makeApp(
   };
   const app = createApp(deps);
   const clock: Clock = { set: (iso) => (now = iso) };
-  return { app, repo, clock };
+  return { app, repo, clock, deps };
 }
 
 const USER = { "x-dub-user-id": "usr_admin", "x-dub-request-id": "req_test" };

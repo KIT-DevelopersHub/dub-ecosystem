@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { createStripeClient, signStripePayload } from "../src/stripe";
 import type { LpTicketOrdersPage, LpTicketsState, LpTicketTypeSummary } from "../src/types";
+import { TicketService } from "../src/tickets";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
 const body = async <T>(res: Response): Promise<T> => (await res.json()) as T;
@@ -14,11 +15,16 @@ interface StripeCall {
   url: string;
   method: string;
   auth: string | null;
+  idempotencyKey: string | null;
   form: URLSearchParams | null;
 }
 
-function fakeStripe(session: { payment_status?: string; status?: string } = {}) {
+type SessionOverride = { payment_status?: string; status?: string; amount_total?: number; currency?: string; livemode?: boolean };
+
+/** Remembers each created session's real total so GET answers like Stripe; `session` overrides fields, `failGet` ids 500. */
+function fakeStripe(session: SessionOverride = {}, opts: { key?: string; failGet?: Set<string> } = {}) {
   const calls: StripeCall[] = [];
+  const totals = new Map<string, { amount: number; ref: string | null }>();
   let n = 0;
   const fetchFn = async (url: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? "GET";
@@ -27,24 +33,45 @@ function fakeStripe(session: { payment_status?: string; status?: string } = {}) 
       url,
       method,
       auth: headers.get("authorization"),
+      idempotencyKey: headers.get("idempotency-key"),
       form: typeof init?.body === "string" ? new URLSearchParams(init.body) : null,
     });
     if (method === "POST") {
       const id = `cs_test_${n++}`;
       const form = new URLSearchParams(init?.body as string);
+      let amount = 0;
+      for (let i = 0; form.has(`line_items[${i}][quantity]`); i++) {
+        amount += Number(form.get(`line_items[${i}][price_data][unit_amount]`)) * Number(form.get(`line_items[${i}][quantity]`));
+      }
+      totals.set(id, { amount, ref: form.get("client_reference_id") });
       return Response.json({
         id,
         url: `https://checkout.stripe.com/c/pay/${id}`,
         status: "open",
         payment_status: "unpaid",
         client_reference_id: form.get("client_reference_id"),
+        livemode: false,
       });
     }
     const id = url.split("/").pop()!;
-    return Response.json({ id, status: session.status ?? "complete", payment_status: session.payment_status ?? "paid" });
+    if (opts.failGet?.has(id)) return new Response("boom", { status: 500 });
+    return Response.json({
+      id,
+      status: "complete",
+      payment_status: "paid",
+      amount_total: totals.get(id)?.amount ?? 0,
+      currency: "jpy",
+      livemode: false,
+      payment_intent: `pi_${id}`,
+      client_reference_id: totals.get(id)?.ref ?? null,
+      ...session,
+    });
   };
-  return { calls, client: createStripeClient("sk_test_123", fetchFn) };
+  return { calls, client: createStripeClient(opts.key ?? "sk_test_123", fetchFn) };
 }
+
+/** Test-mode Checkout Session object as Stripe sends it in a webhook. */
+const cs = (o: Record<string, unknown>) => ({ livemode: false, currency: "jpy", ...o });
 
 async function setup(
   kind: RepoKind,
@@ -88,8 +115,9 @@ const checkout = ({ ticketTypeId, quantity, ...b }: Record<string, unknown>) =>
     INTERNAL,
   );
 
-async function webhook(app: App, event: unknown, sig?: string) {
-  const raw = JSON.stringify(event);
+/** Events default to test mode (livemode: false) unless given. */
+async function webhook(app: App, event: Record<string, unknown>, sig?: string) {
+  const raw = JSON.stringify({ livemode: false, ...event });
   const header = sig ?? (await signStripePayload(raw, WHSEC, NOW_SEC));
   return app.fetch(
     new Request("https://lp/lp/internal/tickets/stripe-webhook", {
@@ -458,12 +486,13 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const event = {
       id: "evt_1",
       type: "checkout.session.completed",
-      data: { object: { id: "cs_test_0", client_reference_id: orderId, payment_status: "paid", status: "complete" } },
+      data: { object: cs({ id: "cs_test_0", client_reference_id: orderId, payment_status: "paid", status: "complete", amount_total: 3000 }) },
     };
 
+    const raw = JSON.stringify({ livemode: false, ...event });
     expect((await webhook(app, event, "t=1,v1=deadbeef")).status).toBe(400);
-    expect((await webhook(app, event, await signStripePayload(JSON.stringify(event), "whsec_other", NOW_SEC))).status).toBe(400);
-    expect((await webhook(app, event, await signStripePayload(JSON.stringify(event), WHSEC, NOW_SEC - 301))).status).toBe(400);
+    expect((await webhook(app, event, await signStripePayload(raw, "whsec_other", NOW_SEC))).status).toBe(400);
+    expect((await webhook(app, event, await signStripePayload(raw, WHSEC, NOW_SEC - 301))).status).toBe(400);
     let s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
     expect(s.types[0]!.stats.sold).toBe(0);
 
@@ -472,7 +501,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(await ok.json()).toEqual({ received: true });
     expect((await webhook(app, event)).status).toBe(200);
     expect(
-      (await webhook(app, { id: "evt_2", type: "checkout.session.expired", data: { object: { id: "cs_test_0", client_reference_id: orderId } } }))
+      (await webhook(app, { id: "evt_2", type: "checkout.session.expired", data: { object: cs({ id: "cs_test_0", client_reference_id: orderId }) } }))
         .status,
     ).toBe(200);
     s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
@@ -488,7 +517,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     await enable(app);
     const t = await addType(app, { name: "一般", priceJpy: 3000, capacity: 1 });
     await app.fetch(checkout({ ticketTypeId: t.id }));
-    const res = await webhook(app, { id: "evt_x", type: "checkout.session.expired", data: { object: { id: "cs_test_0" } } });
+    const res = await webhook(app, { id: "evt_x", type: "checkout.session.expired", data: { object: cs({ id: "cs_test_0" }) } });
     expect(res.status).toBe(200);
     const s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
     expect(s.types[0]!.stats).toEqual({ sold: 0, pending: 0, revenueJpy: 0, remaining: 1 });
@@ -503,12 +532,8 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     await app.fetch(checkout({ ticketTypeId: t.id }));
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const [a, b] = [0, 1].map((i) => stripe.calls[i]!.form!.get("client_reference_id"));
-    const obj = (id: string, ref: string | null | undefined, ps: string) => ({
-      id,
-      client_reference_id: ref,
-      payment_status: ps,
-      status: "complete",
-    });
+    const obj = (id: string, ref: string | null | undefined, ps: string) =>
+      cs({ id, client_reference_id: ref, payment_status: ps, status: "complete", amount_total: 3000 });
     await webhook(app, { id: "e1", type: "checkout.session.completed", data: { object: obj("cs_test_0", a, "unpaid") } });
     let orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
     expect(orders.items.find((o) => o.id === a)!.status).toBe("pending");
@@ -584,6 +609,174 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     );
     expect(p2.items.map((o) => o.buyerName)).toEqual(["n0"]);
     expect(p2.nextCursor).toBeNull();
+  });
+
+  // ---- payment safety ----
+
+  /** One paid-ticket order; returns its id (session = cs_test_<n>). */
+  async function paidSetup(opts: { capacity?: number | null; stripe?: ReturnType<typeof fakeStripe> } = {}) {
+    const stripe = opts.stripe ?? fakeStripe();
+    const h = await setup(kind, { stripe });
+    await enable(h.app);
+    const t = await addType(h.app, { name: "一般", priceJpy: 3000, capacity: opts.capacity ?? null });
+    const buy = async () => {
+      expect((await h.app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
+      const c = stripe.calls.filter((x) => x.method === "POST").at(-1)!;
+      return c.form!.get("client_reference_id")!;
+    };
+    const stats = async () => (await body<LpTicketsState>(await h.app.fetch(get("/lp/tickets")))).types[0]!.stats;
+    return { ...h, stripe, t, buy, stats };
+  }
+  const completed = (id: string, ref: string, o: Record<string, unknown> = {}) => ({
+    id: `evt_${id}`,
+    type: "checkout.session.completed",
+    data: {
+      object: cs({ id, client_reference_id: ref, payment_status: "paid", status: "complete", amount_total: 3000, payment_intent: `pi_${id}`, ...o }),
+    },
+  });
+
+  it("checkout sends Idempotency-Key = checkout-<orderId>", async () => {
+    const { stripe, buy } = await paidSetup();
+    const orderId = await buy();
+    expect(stripe.calls[0]!.idempotencyKey).toBe(`checkout-${orderId}`);
+  });
+
+  it("amount mismatch → needs_review (not paid), seat kept, no revenue", async () => {
+    const { app, repo, buy, stats } = await paidSetup({ capacity: 1 });
+    const id = await buy();
+    expect((await webhook(app, completed("cs_test_0", id, { amount_total: 300 }))).status).toBe(200);
+    expect(await repo.getOrder("hokuriku-it-conf.com", id)).toMatchObject({
+      status: "needs_review",
+      reviewReason: "amount_mismatch",
+      paidAt: null,
+      paymentIntentId: "pi_cs_test_0",
+    });
+    expect(await stats()).toEqual({ sold: 0, pending: 1, revenueJpy: 0, remaining: 0 });
+    expect((await app.fetch(checkout({ ticketTypeId: (await repo.listTicketTypes("hokuriku-it-conf.com"))[0]!.id }))).status).toBe(409);
+  });
+
+  it("currency mismatch (confirm path) → needs_review", async () => {
+    const { app, repo, buy } = await paidSetup({ stripe: fakeStripe({ currency: "usd" }) });
+    const id = await buy();
+    const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
+    expect(await res.json()).toMatchObject({ status: "needs_review" });
+    expect((await repo.getOrder("hokuriku-it-conf.com", id))!.reviewReason).toBe("currency_mismatch");
+  });
+
+  it("livemode mismatch is ignored: live event, live session object, live key vs test events", async () => {
+    const { app, repo, buy } = await paidSetup();
+    const id = await buy();
+    expect(await (await webhook(app, { ...completed("cs_test_0", id), livemode: true })).json()).toEqual({ received: true });
+    await webhook(app, completed("cs_test_0", id, { livemode: true }));
+    expect((await repo.getOrder("hokuriku-it-conf.com", id))!.status).toBe("pending");
+
+    const live = await paidSetup({ stripe: fakeStripe({}, { key: "sk_live_abc" }) });
+    const liveId = await live.buy();
+    expect((await webhook(live.app, completed("cs_test_0", liveId))).status).toBe(200);
+    // confirm: the fake answers livemode=false to a live key → ignored too
+    await live.app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
+    expect((await live.repo.getOrder("hokuriku-it-conf.com", liveId))!.status).toBe("pending");
+  });
+
+  it("late paid wins over expired; paid never goes back to expired; duplicate webhook idempotent", async () => {
+    const { app, repo, clock, buy } = await paidSetup();
+    const id = await buy();
+    await webhook(app, { id: "evt_exp", type: "checkout.session.expired", data: { object: cs({ id: "cs_test_0", client_reference_id: id }) } });
+    expect((await repo.getOrder("hokuriku-it-conf.com", id))!.status).toBe("expired");
+
+    await webhook(app, completed("cs_test_0", id));
+    expect(await repo.getOrder("hokuriku-it-conf.com", id)).toMatchObject({ status: "paid", paidAt: NOW, paymentIntentId: "pi_cs_test_0" });
+
+    clock.set("2026-10-07T03:10:00.000Z");
+    await webhook(app, completed("cs_test_0", id));
+    for (const type of ["checkout.session.expired", "checkout.session.async_payment_failed"]) {
+      await webhook(app, { id: `evt_${type}`, type, data: { object: cs({ id: "cs_test_0", client_reference_id: id, payment_status: "unpaid" }) } });
+    }
+    expect(await repo.getOrder("hokuriku-it-conf.com", id)).toMatchObject({ status: "paid", paidAt: NOW });
+  });
+
+  it("late paid with no seat left → needs_review 'oversold' (money taken, seat kept)", async () => {
+    const { app, repo, buy, stats } = await paidSetup({ capacity: 1 });
+    const a = await buy();
+    await webhook(app, { id: "evt_exp", type: "checkout.session.expired", data: { object: cs({ id: "cs_test_0", client_reference_id: a }) } });
+    const b = await buy();
+    await webhook(app, completed("cs_test_1", b));
+    await webhook(app, completed("cs_test_0", a));
+    expect(await repo.getOrder("hokuriku-it-conf.com", a)).toMatchObject({ status: "needs_review", reviewReason: "oversold", paidAt: NOW });
+    expect((await repo.getOrder("hokuriku-it-conf.com", b))!.status).toBe("paid");
+    expect(await stats()).toEqual({ sold: 1, pending: 1, revenueJpy: 3000, remaining: 0 });
+  });
+
+  it("reconcile: settles a paid session, expires session-less stale pending, survives a Stripe error", async () => {
+    const stripe = fakeStripe({}, { failGet: new Set(["cs_test_0"]) });
+    const { repo, clock, deps, buy, t } = await paidSetup({ stripe });
+    const broken = await buy(); // 03:00, Stripe GET fails
+    clock.set("2026-10-07T03:01:00.000Z");
+    const good = await buy();
+    const item = { ticketTypeId: t.id, ticketTypeName: "一般", dayLabel: "", unitPriceJpy: 3000, quantity: 1 };
+    const orphan = {
+      id: "tko_orphan",
+      site: "hokuriku-it-conf.com",
+      items: [item],
+      quantity: 1,
+      amountJpy: 3000,
+      status: "pending" as const,
+      buyerName: "x",
+      buyerEmail: "x@example.com",
+      answers: [],
+      stripeSessionId: null,
+      createdAt: "2026-10-07T03:02:00.000Z",
+      paidAt: null,
+      paymentIntentId: null,
+      refundedAt: null,
+      reviewReason: null,
+    };
+    expect((await repo.insertOrderIfAvailable(orphan, new Map(), "2026-10-07T00:00:00.000Z")).ok).toBe(true);
+    clock.set("2026-10-07T03:38:00.000Z");
+    const fresh = await buy(); // too young to reconcile
+
+    const sum = await new TicketService(deps).reconcile();
+    expect(sum).toMatchObject({ checked: 2, paid: 1, errors: 1, sessionlessExpired: 1 });
+    const status = async (id: string) => (await repo.getOrder("hokuriku-it-conf.com", id))!.status;
+    expect(await status(broken)).toBe("pending");
+    expect(await status(good)).toBe("paid");
+    expect(await status("tko_orphan")).toBe("expired");
+    expect(await status(fresh)).toBe("pending");
+    expect(stripe.calls.some((c) => c.method === "GET" && c.url.endsWith("/cs_test_2"))).toBe(false);
+  });
+
+  it("charge.refunded: full → refunded + seat released; partial → stays paid", async () => {
+    const { app, repo, buy, stats } = await paidSetup({ capacity: 2 });
+    const a = await buy();
+    const b = await buy();
+    await webhook(app, completed("cs_test_0", a));
+    await webhook(app, completed("cs_test_1", b));
+    const refund = (pi: string, refunded: number) => ({
+      id: `evt_r_${pi}_${refunded}`,
+      type: "charge.refunded",
+      data: { object: { id: `ch_${pi}`, payment_intent: pi, amount: 3000, amount_refunded: refunded, livemode: false } },
+    });
+    await webhook(app, refund("pi_cs_test_1", 1000));
+    await webhook(app, refund("pi_cs_test_0", 3000));
+    expect((await repo.getOrder("hokuriku-it-conf.com", a))).toMatchObject({ status: "refunded", refundedAt: NOW });
+    expect((await repo.getOrder("hokuriku-it-conf.com", b))!.status).toBe("paid");
+    expect(await stats()).toEqual({ sold: 1, pending: 0, revenueJpy: 3000, remaining: 1 });
+    // refunded never comes back via a replayed session event
+    await webhook(app, completed("cs_test_0", a));
+    expect((await repo.getOrder("hokuriku-it-conf.com", a))!.status).toBe("refunded");
+    await buy();
+  });
+
+  it("charge.dispute.created → needs_review", async () => {
+    const { app, repo, buy } = await paidSetup();
+    const a = await buy();
+    await webhook(app, completed("cs_test_0", a));
+    await webhook(app, {
+      id: "evt_dp",
+      type: "charge.dispute.created",
+      data: { object: { id: "dp_1", charge: "ch_1", payment_intent: "pi_cs_test_0", livemode: false } },
+    });
+    expect(await repo.getOrder("hokuriku-it-conf.com", a)).toMatchObject({ status: "needs_review", reviewReason: "dispute" });
   });
 });
 

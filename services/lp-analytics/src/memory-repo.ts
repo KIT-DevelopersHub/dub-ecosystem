@@ -8,6 +8,8 @@ import type {
   LpProposalStatus,
   LpRepo,
   LpTicketField,
+  LpTicketOrderStatus,
+  PaidSettlement,
   ProposalRow,
   ProposalSettingsRow,
   PublishRow,
@@ -61,22 +63,25 @@ export class InMemoryLpRepo implements LpRepo {
     const i = this.ticketTypes.findIndex((x) => x.site === row.site && x.id === row.id);
     if (i >= 0) this.ticketTypes[i] = clone(row);
   }
+  private isHeld(o: TicketOrderRow, pendingSince: string): boolean {
+    return o.status === "paid" || o.status === "needs_review" || (o.status === "pending" && o.createdAt >= pendingSince);
+  }
   private held(site: string, ticketTypeId: string, pendingSince: string): number {
     return this.orders
-      .filter((o) => o.site === site && (o.status === "paid" || (o.status === "pending" && o.createdAt >= pendingSince)))
+      .filter((o) => o.site === site && this.isHeld(o, pendingSince))
       .flatMap((o) => o.items)
       .filter((i) => i.ticketTypeId === ticketTypeId)
       .reduce((n, i) => n + i.quantity, 0);
   }
   async ticketAggregates(site: string, pendingSince: string) {
     const m = new Map<string, TicketTypeAgg>();
-    for (const o of this.orders.filter((x) => x.site === site && x.status !== "expired")) {
+    for (const o of this.orders.filter((x) => x.site === site && ["paid", "needs_review", "pending"].includes(x.status))) {
       for (const i of o.items) {
         const a = m.get(i.ticketTypeId) ?? { ticketTypeId: i.ticketTypeId, sold: 0, pending: 0, revenueJpy: 0 };
         if (o.status === "paid") {
           a.sold += i.quantity;
           a.revenueJpy += i.quantity * i.unitPriceJpy;
-        } else if (o.createdAt >= pendingSince) a.pending += i.quantity;
+        } else if (this.isHeld(o, pendingSince)) a.pending += i.quantity;
         m.set(i.ticketTypeId, a);
       }
     }
@@ -106,17 +111,56 @@ export class InMemoryLpRepo implements LpRepo {
     const o = this.orders.find((x) => x.id === id);
     if (o) o.stripeSessionId = sessionId;
   }
-  async markOrderPaid(id: string, paidAt: string, sessionId: string | null) {
-    const o = this.orders.find((x) => x.id === id && x.status === "pending");
+  async getOrderByPaymentIntent(paymentIntentId: string) {
+    const o = this.orders.find((x) => x.paymentIntentId === paymentIntentId);
+    return o ? clone(o) : null;
+  }
+  private transition(id: string, from: readonly LpTicketOrderStatus[], patch: Partial<TicketOrderRow>): boolean {
+    const o = this.orders.find((x) => x.id === id && from.includes(x.status));
     if (!o) return false;
-    Object.assign(o, { status: "paid", paidAt, stripeSessionId: o.stripeSessionId ?? sessionId });
+    Object.assign(o, patch);
     return true;
   }
+  async markOrderPaid(id: string, p: PaidSettlement) {
+    const o = this.orders.find((x) => x.id === id);
+    return this.transition(id, ["pending", "expired"], {
+      status: p.reviewReason ? "needs_review" : "paid",
+      paidAt: p.paidAt,
+      stripeSessionId: o?.stripeSessionId ?? p.sessionId,
+      paymentIntentId: o?.paymentIntentId ?? p.paymentIntentId,
+      reviewReason: p.reviewReason ?? null,
+    });
+  }
   async markOrderExpired(id: string) {
-    const o = this.orders.find((x) => x.id === id && x.status === "pending");
-    if (!o) return false;
-    o.status = "expired";
-    return true;
+    return this.transition(id, ["pending"], { status: "expired" });
+  }
+  async markOrderNeedsReview(id: string, reason: string, paymentIntentId: string | null = null) {
+    const o = this.orders.find((x) => x.id === id);
+    return this.transition(id, ["pending", "expired", "paid"], {
+      status: "needs_review",
+      reviewReason: reason,
+      paymentIntentId: o?.paymentIntentId ?? paymentIntentId,
+    });
+  }
+  async markOrderRefunded(id: string, refundedAt: string) {
+    return this.transition(id, ["paid", "needs_review"], { status: "refunded", refundedAt });
+  }
+  async listPendingWithSession(site: string, from: string, to: string, limit: number) {
+    return this.orders
+      .filter((o) => o.site === site && o.status === "pending" && o.stripeSessionId && o.createdAt >= from && o.createdAt < to)
+      .sort((a, b) => (`${a.createdAt}~${a.id}` < `${b.createdAt}~${b.id}` ? -1 : 1))
+      .slice(0, limit)
+      .map(clone);
+  }
+  async expireSessionlessPending(site: string, before: string) {
+    let n = 0;
+    for (const o of this.orders) {
+      if (o.site === site && o.status === "pending" && !o.stripeSessionId && o.createdAt < before) {
+        o.status = "expired";
+        n++;
+      }
+    }
+    return n;
   }
   async listOrders(site: string, cursor: string | null, limit: number) {
     const key = (o: TicketOrderRow) => `${o.createdAt}~${o.id}`;
