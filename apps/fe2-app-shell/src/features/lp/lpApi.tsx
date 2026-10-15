@@ -151,7 +151,7 @@ export interface LpTicketType {
   createdAt: string;
   updatedAt: string;
 }
-/** sold / pending は「枚数」（注文数ではない）。 */
+/** sold / pending は「枚数」（注文数ではない）。pending = 確保中で未販売（決済待ち + 要確認）。 */
 export interface LpTicketTypeStats {
   sold: number;
   pending: number;
@@ -175,7 +175,8 @@ export interface LpTicketsState {
   updatedAt: string | null;
   updatedBy: string | null;
 }
-export type LpTicketOrderStatus = "pending" | "paid" | "expired";
+/** needs_review = 金額/通貨の不一致・チャージバック等で人の確認が必要（席は確保したまま）。 */
+export type LpTicketOrderStatus = "pending" | "paid" | "expired" | "refunded" | "needs_review";
 export interface LpTicketAnswer {
   fieldId: string;
   label: string;
