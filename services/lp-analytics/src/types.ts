@@ -271,7 +271,68 @@ export interface LpTicketRepo {
   listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
 }
 
-export interface LpRepo extends LpTicketRepo {
+// ---- proposals wire (lockstep with fe2 lpApi.tsx) ----
+/** submitted = 未対応 / accepted = 採択 / rejected = 見送り。 */
+export type LpProposalStatus = "submitted" | "accepted" | "rejected";
+export interface LpProposalsState {
+  site: string;
+  enabled: boolean;
+  publicUrl: string;
+  /** 追加の入力項目（氏名・メール・タイトル・概要は固定なので含めない）。未保存なら既定の項目。 */
+  fields: LpTicketField[];
+  totals: { total: number; accepted: number; rejected: number };
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+export interface LpProposal {
+  id: string;
+  speakerName: string;
+  email: string;
+  title: string;
+  abstract: string;
+  answers: LpTicketAnswer[];
+  status: LpProposalStatus;
+  reviewedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface LpProposalsPage {
+  items: LpProposal[];
+  nextCursor: string | null;
+}
+
+// ---- proposals persistence ----
+export interface ProposalSettingsRow {
+  site: string;
+  enabled: boolean;
+  /** null = never saved (use the service default). */
+  fields: LpTicketField[] | null;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+export interface ProposalRow extends LpProposal {
+  site: string;
+  /** 送信元 IP のハッシュ（LP Worker が計算）。応募一覧には出さない。 */
+  clientKey: string | null;
+}
+
+export interface LpProposalRepo {
+  getProposalSettings(site: string): Promise<ProposalSettingsRow | null>;
+  /** Upsert; only the given column changes. */
+  setProposalEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
+  setProposalFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string): Promise<void>;
+  insertProposal(row: ProposalRow): Promise<void>;
+  getProposal(site: string, id: string): Promise<ProposalRow | null>;
+  /** false when the proposal does not exist. */
+  setProposalStatus(site: string, id: string, status: LpProposalStatus, reviewedBy: string, updatedAt: string): Promise<boolean>;
+  /** Newest first, keyset by (created_at, id). */
+  listProposals(site: string, cursor: string | null, limit: number): Promise<ProposalRow[]>;
+  proposalTotals(site: string): Promise<{ total: number; accepted: number; rejected: number }>;
+  /** Proposals created at/after `since` (daily submit cap). With clientKey: only that sender's. */
+  countProposalsSince(site: string, since: string, clientKey?: string): Promise<number>;
+}
+
+export interface LpRepo extends LpTicketRepo, LpProposalRepo {
   listLinks(orgId: string): Promise<LinkRow[]>;
   getLink(orgId: string, id: string): Promise<LinkRow | null>;
   getLinkBySlug(orgId: string, slug: string): Promise<LinkRow | null>;
@@ -330,4 +391,7 @@ export interface AppDeps {
   stripe: StripeClient | null;
   /** STRIPE_WEBHOOK_SECRET。null なら webhook は常に 400。 */
   stripeWebhookSecret: string | null;
+  newProposalId: () => string;
+  /** 1 日 (JST) に受け付ける登壇応募の上限。公開フォームからの書き込み濫用の天井。 */
+  dailyProposalCap: number;
 }

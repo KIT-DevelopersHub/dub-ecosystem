@@ -216,6 +216,37 @@ export interface LpTicketTypeInput {
   active: boolean;
 }
 
+// ── 登壇者募集（/proposals）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
+/** submitted = 未対応 / accepted = 採択 / rejected = 見送り。 */
+export type LpProposalStatus = "submitted" | "accepted" | "rejected";
+export interface LpProposalsState {
+  site: string;
+  enabled: boolean;
+  /** LP_BASE_URL + "/proposals" */
+  publicUrl: string;
+  /** 追加の入力項目（氏名・メール・タイトル・概要は固定）。 */
+  fields: LpTicketField[];
+  totals: { total: number; accepted: number; rejected: number };
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+export interface LpProposal {
+  id: string;
+  speakerName: string;
+  email: string;
+  title: string;
+  abstract: string;
+  answers: LpTicketAnswer[];
+  status: LpProposalStatus;
+  reviewedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface LpProposalsPage {
+  items: LpProposal[];
+  nextCursor: string | null;
+}
+
 export interface LpApi {
   /** Aggregated visit counters for a day range (app:lp:view). */
   getStats(query: LpStatsQuery): Promise<LpStats>;
@@ -247,6 +278,16 @@ export interface LpApi {
   updateTicketType(id: string, input: Partial<LpTicketTypeInput>): Promise<LpTicketTypeSummary>;
   /** 購入者一覧・新しい順 (app:lp:edit = 個人情報)。 */
   listTicketOrders(query: { cursor?: string; limit?: number }): Promise<LpTicketOrdersPage>;
+  /** 登壇者募集の設定・応募数 (app:lp:view)。 */
+  getProposals(): Promise<LpProposalsState>;
+  /** 募集の公開/停止 (app:lp:edit + lp:publish)。 */
+  setProposalsEnabled(input: { enabled: boolean }): Promise<LpProposalsState>;
+  /** 追加の入力項目を丸ごと置き換える (app:lp:edit)。 */
+  saveProposalFields(input: { fields: LpTicketField[] }): Promise<LpProposalsState>;
+  /** 応募一覧・新しい順 (app:lp:edit = 個人情報)。 */
+  listProposals(query: { cursor?: string; limit?: number }): Promise<LpProposalsPage>;
+  /** 応募の選考状況を変える (app:lp:edit)。 */
+  setProposalStatus(id: string, input: { status: LpProposalStatus }): Promise<LpProposal>;
 }
 
 const BASE = "/api/v1/lp";
@@ -317,5 +358,26 @@ export function createLpApi(api: ApiClient): LpApi {
       if (query.limit !== undefined) q.limit = query.limit;
       return api.request<LpTicketOrdersPage>({ method: "GET", path: `${BASE}/tickets/orders`, query: q });
     },
+    getProposals: () => api.request<LpProposalsState>({ method: "GET", path: `${BASE}/proposals` }),
+    setProposalsEnabled: (input) =>
+      api.request<LpProposalsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/proposals/enabled`, body: input }),
+    saveProposalFields: (input) =>
+      api.request<LpProposalsState, { fields: LpTicketField[] }>({
+        method: "POST",
+        path: `${BASE}/proposals/fields`,
+        body: input,
+      }),
+    listProposals: (query) => {
+      const q: Record<string, string | number | boolean | undefined> = {};
+      if (query.cursor !== undefined) q.cursor = query.cursor;
+      if (query.limit !== undefined) q.limit = query.limit;
+      return api.request<LpProposalsPage>({ method: "GET", path: `${BASE}/proposals/submissions`, query: q });
+    },
+    setProposalStatus: (id, input) =>
+      api.request<LpProposal, { status: LpProposalStatus }>({
+        method: "PATCH",
+        path: `${BASE}/proposals/submissions/${encodeURIComponent(id)}`,
+        body: input,
+      }),
   };
 }

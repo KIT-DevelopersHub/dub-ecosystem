@@ -2,7 +2,8 @@
 # as wrangler.toml, on *.workers.dev only (NO routes / custom domain). TICKETS_DEMO="1" makes
 # the Worker use an in-memory mock ticket config and skip payment (checkout goes straight to
 # /tickets/thanks), so there is intentionally NO LP_FLAG binding: it never calls lp-analytics
-# or Stripe. Tear down after the demo review.
+# or Stripe. The same flag also mocks /proposals (登壇者募集・応募は保存しない).
+# Tear down after the demo review.
 #
 #   https://lp-tickets-demo.developershub-site.workers.dev/tickets
 #

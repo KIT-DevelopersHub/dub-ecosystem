@@ -60,38 +60,64 @@ export function resolveRequest(
 }
 
 export const TICKETS_COOKIE = "lp_tickets";
+export const PROPOSALS_COOKIE = "lp_proposals";
 
-/** LP管理「プレビュー」タブのチケット販売あり/なし。null = 指定なし（実際の販売状態のまま）。 */
+/** LP管理「プレビュー」タブの あり/なし。null = 指定なし（実際の公開状態のまま）。 */
 export type TicketsPreview = "on" | "off";
+export type FeaturePreview = TicketsPreview;
 
-function normalizeTickets(raw: string | null | undefined): TicketsPreview | null {
+function normalizeMode(raw: string | null | undefined): FeaturePreview | null {
   const v = raw?.trim().toLowerCase();
   return v === "on" || v === "off" ? v : null;
 }
 
-/** ?tickets= > cookie > same-origin referer (LP管理 iframe). ?version=live clears it. */
-export function ticketsPreview(url: URL, cookieHeader: string | null, referer: string | null = null): TicketsPreview | null {
+/** ?<param>= > cookie > same-origin referer (LP管理 iframe). ?version=live clears it. */
+function featurePreview(
+  param: string,
+  cookie: string,
+  url: URL,
+  cookieHeader: string | null,
+  referer: string | null,
+): FeaturePreview | null {
   if (url.searchParams.get("version")?.trim().toLowerCase() === "live") return null;
-  const fromParam = normalizeTickets(url.searchParams.get("tickets"));
+  const fromParam = normalizeMode(url.searchParams.get(param));
   if (fromParam) return fromParam;
-  const fromCookie = normalizeTickets(readCookie(cookieHeader, TICKETS_COOKIE));
+  const fromCookie = normalizeMode(readCookie(cookieHeader, cookie));
   if (fromCookie) return fromCookie;
   if (!referer) return null;
   try {
     const u = new URL(referer);
-    return u.origin === url.origin ? normalizeTickets(u.searchParams.get("tickets")) : null;
+    return u.origin === url.origin ? normalizeMode(u.searchParams.get(param)) : null;
   } catch {
     return null;
   }
 }
 
-/** Set-Cookie for ?tickets= (session) or ?version=live (clear); null otherwise. */
-export function ticketsCookie(url: URL): string | null {
+/** Set-Cookie for ?<param>= (session) or ?version=live (clear); null otherwise. */
+function featureCookie(param: string, cookie: string, url: URL): string | null {
   if (url.searchParams.get("version")?.trim().toLowerCase() === "live") {
-    return `${TICKETS_COOKIE}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`;
+    return `${cookie}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`;
   }
-  const v = normalizeTickets(url.searchParams.get("tickets"));
-  return v ? `${TICKETS_COOKIE}=${v}; Path=/; SameSite=None; Secure; HttpOnly` : null;
+  const v = normalizeMode(url.searchParams.get(param));
+  return v ? `${cookie}=${v}; Path=/; SameSite=None; Secure; HttpOnly` : null;
+}
+
+/** チケット販売あり/なし (?tickets=on|off)。 */
+export function ticketsPreview(url: URL, cookieHeader: string | null, referer: string | null = null): TicketsPreview | null {
+  return featurePreview("tickets", TICKETS_COOKIE, url, cookieHeader, referer);
+}
+
+export function ticketsCookie(url: URL): string | null {
+  return featureCookie("tickets", TICKETS_COOKIE, url);
+}
+
+/** 登壇者募集あり/なし (?proposals=on|off)。 */
+export function proposalsPreview(url: URL, cookieHeader: string | null, referer: string | null = null): FeaturePreview | null {
+  return featurePreview("proposals", PROPOSALS_COOKIE, url, cookieHeader, referer);
+}
+
+export function proposalsCookie(url: URL): string | null {
+  return featureCookie("proposals", PROPOSALS_COOKIE, url);
 }
 
 function versionFromReferer(referer: string | null, origin: string, bundled: readonly string[]): string | null {
