@@ -402,3 +402,36 @@
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-primary);
 }
+
+/* 追加直後の「メールアドレスも発行しますか？」ダイアログ. */
+.mailRow {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+.mailSuffix {
+  color: var(--dub-color-text-secondary, var(--dub-color-text-primary));
+  white-space: nowrap;
+}
+.roleFieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.roleLegend {
+  margin-bottom: var(--dub-space-2);
+  padding: 0;
+  font-weight: 600;
+}
+.roleList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-2) var(--dub-space-4);
+}
+.issueError {
+  margin: 0;
+  color: var(--dub-color-danger-fg);
+}

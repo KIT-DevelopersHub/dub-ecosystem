@@ -1369,7 +1369,8 @@ function createRosterStore() {
         const user: identity.IdentityUser = { id: rid("usr"), orgId: ORG, displayName: req.displayName ?? req.email!, email: req.email!, githubLogin: null, avatarUrl: null, status: "invited", roleIds: req.roleIds ?? [], createdAt: isoNow(), updatedAt: new Date().toISOString() };
         users.push(user);
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
-        return json(user);
+        // 実 identity-roster と同じ { user } 形 (InviteUserResponse)。
+        return json({ user }, 201);
       }
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
