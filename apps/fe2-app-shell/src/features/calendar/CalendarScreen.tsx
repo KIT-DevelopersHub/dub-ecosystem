@@ -628,10 +628,11 @@ export function CalendarScreen(): JSX.Element {
                     size="sm"
                     iconLeft={<Icon name="plus" />}
                     onClick={() => setMeetingForm({ editing: null })}
-                    disabled={!accountReady}
+                    disabled={!accountReady || createMeeting.isPending}
+                    loading={createMeeting.isPending}
                     testId="calendar-meetings-create"
                   >
-                    ミーティングを設定
+                    {createMeeting.isPending ? "作成中…" : "ミーティングを設定"}
                   </Button>
                 </div>
               )}

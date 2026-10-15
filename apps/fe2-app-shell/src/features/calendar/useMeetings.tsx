@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@
 import { useToast } from "@dub/ui";
 import type { meeting } from "@dub/types";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
-import type { ApiError } from "../../lib/api-client.tsx";
+import { ApiError } from "../../lib/api-client.tsx";
 import { createOptimisticMutation } from "../../lib/optimistic.tsx";
+import type { CalendarApi } from "./calendarApi.tsx";
 import { useCalendarApi } from "./CalendarProvider.tsx";
 
 export const MEETINGS_KEY = ["calendar", "meetings"] as const;
@@ -33,6 +34,35 @@ function errorText(err: unknown): string {
 }
 
 type Cache = meeting.ListMeetingsResponse;
+
+/** Re-read the list this long after an ambiguous create failure (the server may still be finishing). */
+const RECHECK_DELAYS_MS = [0, 3_000, 6_000] as const;
+
+/** A timeout / 5xx / dropped connection does not mean the meeting was not made. */
+function mayHaveCreated(err: unknown): boolean {
+  return ApiError.isApiError(err) && (err.status === 0 || err.status >= 500);
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** The meeting `body` created, if a fresh list has one that was not there before. */
+export async function findCreatedMeeting(
+  api: Pick<CalendarApi, "listMeetings">,
+  body: meeting.CreateMeetingRequest,
+  known: ReadonlySet<string>,
+  delays: readonly number[] = RECHECK_DELAYS_MS,
+): Promise<meeting.Meeting | null> {
+  const at = Date.parse(body.startsAt);
+  for (const wait of delays) {
+    if (wait > 0) await sleep(wait);
+    const list = await api.listMeetings().catch(() => null);
+    const hit = list?.items.find(
+      (m) => !known.has(m.id) && m.title === body.title && m.targetId === body.targetId && Date.parse(m.startsAt) === at,
+    );
+    if (hit) return hit;
+  }
+  return null;
+}
 type Mutation<D, V> = UseMutationResult<D, ApiError, V, unknown>;
 
 export interface MeetingMutations {
@@ -51,7 +81,18 @@ export function useMeetingMutations(targets: readonly meeting.MeetingTarget[]): 
 
   const create = useMutation(
     createOptimisticMutation<meeting.Meeting, meeting.CreateMeetingRequest, Cache>(qc, {
-      mutationFn: (body) => api.createMeeting(body),
+      mutationFn: async (body) => {
+        const known = new Set((qc.getQueryData<Cache>(MEETINGS_KEY)?.items ?? []).map((m) => m.id));
+        try {
+          return await api.createMeeting(body);
+        } catch (err) {
+          // Shown as a failure only when the list confirms nothing was made.
+          if (!mayHaveCreated(err)) throw err;
+          const made = await findCreatedMeeting(api, body, known);
+          if (made) return made;
+          throw err;
+        }
+      },
       cacheKey: MEETINGS_KEY,
       applyOptimistic: (prev, body) => {
         const now = new Date().toISOString();

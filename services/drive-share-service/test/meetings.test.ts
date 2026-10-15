@@ -103,7 +103,7 @@ describe("validateMeeting", () => {
 });
 
 describe("create", () => {
-  it("creates the target calendar lazily, invites members at 名簿 Gmail else Dub address, shares the calendar with everyone", async () => {
+  it("creates the target calendar lazily, invites members at 名簿 Gmail else Dub address; the kicked sync shares it with everyone", async () => {
     const { service, store, calendar, kicks } = buildMeetings({ roster: roster(), directory: GMAIL });
     const m = await service.create("usr_admin", BASE);
     expect(m).toMatchObject({ title: "開発定例", targetId: "role_dev", targetName: "開発", attendeeCount: 2, recurrence: "weekly" });
@@ -116,10 +116,13 @@ describe("create", () => {
     expect(ev.attendees.map((a) => a.email).sort()).toEqual(["a.gmail@gmail.com", "b@dub.example"]);
     expect(ev.recurrence).toEqual(["RRULE:FREQ=WEEKLY"]);
     expect(ev.timeZone).toBe("Asia/Tokyo");
+    // sharing is one Google call per member: not in the request (gateway 15 s), the kicked sync does it
+    expect(cal.acl.filter((r) => r.role === "reader")).toEqual([]);
+    expect(kicks).toEqual([60_000]);
+    await service.sync();
     // shared read-only with every active member (not only the role)
     expect(cal.acl.filter((r) => r.role === "reader").map((r) => r.email).sort()).toEqual(["a.gmail@gmail.com", "b@dub.example", "c@dub.example"]);
     expect((await store.listAcl("org_devhub", calId)).length).toBe(3);
-    expect(kicks).toEqual([60_000]);
 
     // a second meeting for the same target reuses the calendar
     await service.create("usr_admin", { ...BASE, title: "別の会" });
@@ -257,6 +260,20 @@ describe("reconcile (sync)", () => {
     expect(r.complete).toBe(false);
   });
 
+  it("stops at the time limit too, so a request-path sync answers before the gateway's 15 s", async () => {
+    const base = createMockCalendarClient();
+    const slow = { ...base, getEvent: async (c: string, e: string) => {
+      await new Promise((r) => setTimeout(r, 30));
+      return base.getEvent(c, e);
+    } };
+    const { service, kicks } = buildMeetings({ roster: roster(), calendar: slow, syncTimeLimitMs: 10 });
+    await service.create("usr_admin", BASE);
+    await service.create("usr_admin", { ...BASE, title: "別の会" });
+    const r = await service.sync();
+    expect(r).toMatchObject({ meetings: 1, complete: false });
+    expect(kicks.at(-1)).toBe(60_000);
+  });
+
   it("a complete sync only keeps the hourly loop alive; an incomplete one asks for a minute", async () => {
     const full = buildMeetings({ roster: roster() });
     await full.service.sync();
@@ -275,6 +292,7 @@ describe("reconcile (sync)", () => {
     } };
     const { service } = buildMeetings({ roster: roster(), calendar });
     await service.create("usr_admin", BASE);
+    await service.sync();
     const cal = [...base.state.calendars.values()][0]!;
     expect(cal.acl.filter((r) => r.role === "reader").map((r) => r.email).sort()).toEqual(["b@dub.example", "c@dub.example"]);
   });

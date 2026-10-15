@@ -80,7 +80,7 @@ export function MeetingDetailDialog({
           </div>
           <div style={row}>
             <span style={label}>招待</span>
-            <span style={value} data-testid={`${tid}-attendees`}>{pending ? "登録中…" : `${m.attendeeCount}人`}</span>
+            <span style={value} data-testid={`${tid}-attendees`}>{pending ? "作成中…" : `${m.attendeeCount}人`}</span>
           </div>
           {m.description ? (
             <div style={{ ...row, flexDirection: "column", gap: "var(--dub-space-1)" }}>
@@ -96,7 +96,7 @@ export function MeetingDetailDialog({
               </Button>
             ) : (
               <span style={{ ...value, color: "var(--dub-color-text-muted)" }} data-testid={`${tid}-no-meet`}>
-                {pending ? "Meet を発行中…" : "Meet リンクはまだありません"}
+                {pending ? "作成中… 完了すると Meet リンクが出ます" : "Meet リンクはまだありません"}
               </span>
             )}
             {m.htmlLink ? (

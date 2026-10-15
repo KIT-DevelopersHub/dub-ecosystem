@@ -11,6 +11,10 @@
 //
 // Workers allow few subrequests per invocation, so Google calls run against a budget: a run that
 // hits it stops cleanly and reports `complete: false`; the alarm picks up the rest a minute later.
+//
+// Writes answer as soon as the event and the D1 row exist: sharing the target calendar costs one
+// Google call per member and blew the gateway's 15 s limit (504 although the meeting was made), so
+// it is left to the sync the write kicks (MeetingSyncDO, no request deadline).
 import { errors } from "@dub/errors";
 import { meeting } from "@dub/types";
 import type { CalendarAttendee, CalendarClient, CalendarEventInput } from "./google/calendar-client";
@@ -21,6 +25,7 @@ import type { RoleMembership } from "./role-membership";
 
 export const ALL_TARGET_NAME = "全体";
 const SOON_MS = 60_000;
+const SYNC_TIME_LIMIT_MS = 8_000;
 const NO_CALENDAR_SCOPE =
   "Google アカウントにカレンダーの権限がありません。Drive共有 > 設定 で同じアカウントを「再接続」してください。";
 
@@ -46,6 +51,8 @@ export interface MeetingsDeps {
   kick?: (soonMs?: number) => Promise<void>;
   /** Max Google calls per invocation (default 25). */
   googleBudget?: number;
+  /** Wall-clock cap of one sync run (default 8 s, under the gateway's 15 s). */
+  syncTimeLimitMs?: number;
 }
 
 export interface SyncResult extends meeting.SyncMeetingsResponse {
@@ -80,12 +87,12 @@ class BudgetExhausted extends Error {
   }
 }
 
-/** Wrap a client so it refuses calls once `limit` is spent. */
-function budgeted(client: CalendarClient, limit: number): CalendarClient & { exhausted: () => boolean } {
+/** Wrap a client so it refuses calls once `limit` is spent or past `deadline` (epoch ms). */
+function budgeted(client: CalendarClient, limit: number, deadline = Infinity): CalendarClient & { exhausted: () => boolean } {
   let left = limit;
   let hit = false;
   const spend = () => {
-    if (left <= 0) {
+    if (left <= 0 || Date.now() > deadline) {
       hit = true;
       throw new BudgetExhausted();
     }
@@ -156,8 +163,9 @@ function toMeeting(m: MeetingRow, targetName: string, attendeeCount: number): me
 export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
   const { store, orgId } = deps;
   const budgetLimit = deps.googleBudget ?? 25;
+  const syncTimeLimit = deps.syncTimeLimitMs ?? SYNC_TIME_LIMIT_MS;
 
-  /** After a write: run the sync within a minute (finishes calendar sharing, follows membership). */
+  /** After a write: run the sync within a minute (shares the calendar, follows membership). */
   async function kick(soonMs: number | undefined): Promise<void> {
     try {
       await deps.kick?.(soonMs);
@@ -291,15 +299,6 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     return { added: toAdd.length, removed: removedFromEvent };
   }
 
-  async function shareTargetCalendar(cal: CalendarClient, account: MeetingAccount, calendarId: string, all: Invitee[]): Promise<void> {
-    try {
-      await reconcileAcl(cal, calendarId, new Set(all.map((i) => i.email)), account.email ? lower(account.email) : null);
-    } catch (err) {
-      // The meeting itself exists; the alarm finishes the sharing.
-      if (!(err instanceof BudgetExhausted)) log("meeting_calendar_share_failed", { calendarId, message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
   return {
     async list() {
       const [rows, counts] = await Promise.all([store.listMeetings(orgId), store.inviteCounts(orgId)]);
@@ -346,8 +345,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       const name = await requireTargetName(f.targetId);
       const account = await readyAccount();
       const cal = budgeted(account.calendar, budgetLimit);
-      const all = await invitees();
-      const members = forTarget(all, f.targetId);
+      const members = forTarget(await invitees(), f.targetId);
 
       const calendarId = await ensureCalendar(cal, account.accountId, f.targetId, name);
       const ev = await cal.insertEvent(calendarId, { ...eventInput(f), attendees: members.map((m) => ({ email: m.email })) });
@@ -381,7 +379,6 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         await store.deleteMeeting(row.id).catch(() => undefined);
         throw err;
       }
-      await shareTargetCalendar(cal, account, calendarId, all);
       await kick(SOON_MS);
       return toMeeting(row, name, members.length);
     },
@@ -402,8 +399,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
       if (f.targetId !== row.targetId) {
         // Moving target = a new event on the other calendar (new Meet link), then drop the old one.
-        const all = await invitees();
-        const members = forTarget(all, f.targetId);
+        const members = forTarget(await invitees(), f.targetId);
         const calendarId = await ensureCalendar(cal, account.accountId, f.targetId, name);
         const ev = await cal.insertEvent(calendarId, { ...eventInput(f), attendees: members.map((m) => ({ email: m.email })) });
         next = { ...row, ...f, calendarId, googleEventId: ev.id, meetUrl: ev.meetUrl, htmlLink: ev.htmlLink, updatedAt: at, syncedAt: at };
@@ -414,7 +410,6 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         } catch (err) {
           log("meeting_old_event_delete_failed", { meetingId: row.id, message: err instanceof Error ? err.message : String(err) });
         }
-        await shareTargetCalendar(cal, account, calendarId, all);
         attendeeCount = members.length;
       } else {
         const ev = await cal.patchEvent(row.calendarId, row.googleEventId, eventInput(f));
@@ -449,7 +444,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         }
         throw errors.conflict(NO_CALENDAR_SCOPE, { reason: "calendar_scope_missing" });
       }
-      const cal = budgeted(account.calendar, budgetLimit);
+      const cal = budgeted(account.calendar, budgetLimit, Date.now() + syncTimeLimit);
       const all = await invitees();
       const out = { ...empty, withoutGoogleAccount: all.filter((i) => !i.hasGoogle).map((i) => ({ userId: i.userId, name: i.name, email: i.email })) };
 
