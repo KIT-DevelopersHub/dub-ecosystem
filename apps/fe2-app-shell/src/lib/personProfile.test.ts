@@ -35,6 +35,27 @@ describe("personProfile (運営名簿と参加届の共通項目)", () => {
     expect(errors.lastName).toBeUndefined();
   });
 
+  it("学籍番号は全角を半角に寄せ、7 桁の数字以外はエラーにする (任意項目)", () => {
+    const ok = parseProfileDraft({ ...emptyProfileDraft(), studentId: "１４００９８０" });
+    expect(ok.profile.studentId).toBe("1400980");
+    expect(ok.errors.studentId).toBeUndefined();
+    for (const bad of ["140098", "14009801", "a400980"]) {
+      const r = parseProfileDraft({ ...emptyProfileDraft(), studentId: bad });
+      expect(r.errors.studentId, bad).toBe("学籍番号は 1400980 のように 7 桁の数字で入力してください");
+    }
+    expect(parseProfileDraft(emptyProfileDraft()).errors.studentId).toBeUndefined();
+  });
+
+  it("学籍番号は入力欄 (数字キーボード) と一覧の列を持ち、名列番号の隣に並ぶ", () => {
+    const keys = PERSON_PROFILE_FIELDS.map((f) => f.key);
+    expect(keys.indexOf("rosterNumber") - keys.indexOf("studentId")).toBe(1);
+    const field = PERSON_PROFILE_FIELDS.find((f) => f.key === "studentId")!;
+    expect(field).toMatchObject({ label: "学籍番号", kind: "text", half: true, inputMode: "numeric", placeholder: "1400980", help: "例: 1400980" });
+    const col = PROFILE_DISPLAY_COLUMNS.find((c) => c.id === "studentId")!;
+    expect(col.header).toBe("学籍番号");
+    expect(col.value({ studentId: "0012345" })).toBe("0012345");
+  });
+
   it("学年・希望活動はラベルで表示する", () => {
     expect(formatProfileValue("grade", { grade: "graduate" })).toBe("院生");
     expect(formatProfileValue("desiredActivity", { desiredActivity: "dev" })).toBe("チーム開発");

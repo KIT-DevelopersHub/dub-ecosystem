@@ -206,6 +206,25 @@ describe("MembersPage", () => {
     expect(api.createMember).not.toHaveBeenCalled();
   });
 
+  it("学籍番号: 形式違いは送信を止め、全角は半角 7 桁にして送る", async () => {
+    const api = makeApi();
+    render(wrap(<MembersPage />, api));
+    await screen.findByText("山田太郎");
+    await userEvent.click(screen.getByRole("button", { name: "山田太郎 を編集" }));
+    const dialog = await screen.findByTestId("members-form-dialog");
+    const input = within(dialog).getByTestId("members-form-student-id");
+    expect(input).toHaveAttribute("inputmode", "numeric");
+    await userEvent.type(input, "140098");
+    await userEvent.click(within(dialog).getByTestId("members-form-submit"));
+    expect(await within(dialog).findByText("学籍番号は 1400980 のように 7 桁の数字で入力してください")).toBeInTheDocument();
+    expect(api.updateMember).not.toHaveBeenCalled();
+    await userEvent.clear(input);
+    await userEvent.type(input, "１４００９８０");
+    await userEvent.click(within(dialog).getByTestId("members-form-submit"));
+    await waitFor(() => expect(api.updateMember).toHaveBeenCalledTimes(1));
+    expect((api.updateMember as any).mock.calls[0][1]).toMatchObject({ studentId: "1400980", version: 1 });
+  });
+
   it("deletes a member via the confirm dialog", async () => {
     const api = makeApi();
     render(wrap(<MembersPage />, api));
