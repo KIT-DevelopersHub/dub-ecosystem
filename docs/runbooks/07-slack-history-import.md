@@ -66,8 +66,8 @@ SLACK_BOT_TOKEN=xoxb-... CLOUDFLARE_API_TOKEN=... pnpm --filter @dub/infra-d1 sl
 
 | ファイル | 役割 |
 |---|---|
-| `infra/d1/src/slackImport.ts` | 純粋関数層（型・決定的 ID・本文変換・絵文字・行/SQL 生成） |
-| `infra/d1/src/slackImportRun.ts` | 取得と順序付け（仮ユーザー → チャンネル → メッセージ） |
-| `infra/d1/src/slackClient.ts` | Slack Web API（ページネーション・429 リトライ・join・ファイル DL） |
+| `packages/slack-import/src/mapping.ts` | 純粋関数層（型・決定的 ID・本文変換・絵文字・行/SQL 生成） |
+| `packages/slack-import/src/run.ts` | CLI 用の取得と順序付け（仮ユーザー → チャンネル → メッセージ） |
+| `packages/slack-import/src/client.ts` | Slack Web API（ページネーション・429 リトライ・join・ファイル DL） |
 | `infra/d1/src/slackFixtureSource.ts` + `infra/d1/fixtures/slack/` | オフライン dry-run 用 |
 | `infra/d1/scripts/slack-import.ts` | CLI |

@@ -1,4 +1,4 @@
-// Pure mapping layer of the Slack history importer (infra/d1/src/slackImport.ts).
+// Pure mapping layer of the Slack history importer (packages/slack-import/src/mapping.ts).
 import { describe, it, expect } from "vitest";
 import {
   type MappingContext,
@@ -17,7 +17,7 @@ import {
   placeholderUserIdFor,
   resolveEmoji,
   slackTsToMs,
-} from "../src/slackImport";
+} from "../src/mapping";
 
 const ctx: MappingContext = {
   slackUserIdToDubUserId: new Map([

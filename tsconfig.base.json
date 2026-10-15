@@ -33,6 +33,7 @@
       "@dub/tokens/css": ["packages/tokens/src/css.ts"],
       "@dub/app-ui": ["packages/app-ui/src/index.ts"],
       "@dub/commander-phases": ["packages/commander-phases/src/index.ts"],
+      "@dub/slack-import": ["packages/slack-import/src/index.ts"],
       "@dub/commander-web": ["commander/web/src/index.ts"]
     }
   }

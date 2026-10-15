@@ -1,8 +1,8 @@
 // Offline SlackSource — reads infra/d1/fixtures/slack/*.json (or any directory with
 // the same file-naming convention) instead of calling the Slack Web API. This is what
 // makes the importer's dry-run mode work with zero network access / no token: the same
-// `runSlackImport` orchestration in slackImportRun.ts runs unmodified against either
-// this or the live `slackClient.ts`-backed source.
+// `runSlackImport` orchestration (@dub/slack-import) runs unmodified against either
+// this or the live Slack client.
 //
 // File naming convention (mirrors the Slack API method each file stands in for):
 //   users.json                                  <- users.list            (members[])
@@ -13,8 +13,7 @@
 //   bookmarks-<channelId>.json                   <- bookmarks.list        (bookmarks[])
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { SlackBookmark, SlackChannel, SlackMessage, SlackUser } from "./slackImport";
-import type { SlackSource } from "./slackImportRun";
+import type { SlackBookmark, SlackChannel, SlackMessage, SlackSource, SlackUser } from "@dub/slack-import";
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;

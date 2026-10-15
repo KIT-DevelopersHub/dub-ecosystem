@@ -18,6 +18,7 @@
   "dependencies": {
     "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",
+    "@dub/slack-import": "workspace:*",
     "@dub/types": "workspace:*"
   },
   "devDependencies": {

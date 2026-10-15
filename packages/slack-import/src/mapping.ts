@@ -1,4 +1,6 @@
 // Slack history -> Dub fe6-chat (D1) importer — pure mapping/SQL-building layer.
+// Shared by the offline CLI (infra/d1/scripts/slack-import.ts) and chat-service's
+// in-app step engine (services/chat-service/src/slack-import.ts).
 // (方式A: Slack Web API → パース/マッピング → dub-core D1 直INSERT。chat-service の公開API
 // は経由しない=通知の暴発や既存の楽観ロック/イベント発火を避けるオフライン専用インポーター。)
 //
@@ -12,7 +14,7 @@
 // Idempotency: every dub id is DERIVED from the Slack id (see slackId below), so the same
 // Slack message always maps to the same dub row and `INSERT OR IGNORE` alone makes a
 // re-run (or a re-applied / partially-applied batch) a no-op. No local state file needed.
-import { createHash } from "node:crypto";
+import { sha256 } from "./sha256";
 
 // ---------------------------------------------------------------------------
 // Slack API shapes (subset)
@@ -114,7 +116,7 @@ function encodeTime(ms: number): string {
 }
 
 export function slackId(prefix: string, atMs: number, seed: string): string {
-  const digest = createHash("sha256").update(`slack-import:${prefix}:${seed}`).digest();
+  const digest = sha256(`slack-import:${prefix}:${seed}`);
   let rand = "";
   for (let i = 0; i < 16; i++) rand += CROCKFORD[digest[i]! % 32]!;
   return `${prefix}_${encodeTime(atMs)}${rand}`;
@@ -443,6 +445,24 @@ export function buildInsertMessageSql(row: MessageInsertRow): string {
       lit(JSON.stringify(row.attachmentFileIds)), "1", lit(row.editedAt), "NULL", lit(row.createdAt),
     ],
   );
+}
+
+/** Thread reply seen via conversations.replies. A broadcast reply ("also send to channel")
+ *  may already exist as a top-level row from the history pass; attach it to its root
+ *  instead of ignoring it. Never detaches or rewrites anything else. */
+export function buildUpsertThreadReplySql(row: MessageInsertRow): string {
+  return (
+    buildInsertMessageSql(row).replace(/^INSERT OR IGNORE INTO/, "INSERT INTO").replace(/;$/, "") +
+    "\nON CONFLICT(id) DO UPDATE SET thread_root_id = excluded.thread_root_id" +
+    " WHERE chat_messages.thread_root_id IS NULL AND excluded.thread_root_id IS NOT NULL;"
+  );
+}
+
+const MENTION_RE = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
+
+/** Slack user ids mentioned as `<@U…>` in a message body (deduped). */
+export function mentionedSlackUserIds(text: string | undefined): string[] {
+  return [...new Set([...(text ?? "").matchAll(MENTION_RE)].map((m) => m[1]!))];
 }
 
 // ---------------------------------------------------------------------------

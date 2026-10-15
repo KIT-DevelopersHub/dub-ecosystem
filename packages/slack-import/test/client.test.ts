@@ -3,7 +3,7 @@
 // API shapes (ok/error/response_metadata.next_cursor) for conversations.list/history/
 // replies + users.list.
 import { describe, it, expect, vi } from "vitest";
-import { createSlackClient, SlackApiError } from "../src/slackClient";
+import { createSlackClient, SlackApiError } from "../src/client";
 
 function jsonResponse(body: unknown, init?: { status?: number; headers?: Record<string, string> }): Response {
   return new Response(JSON.stringify(body), {

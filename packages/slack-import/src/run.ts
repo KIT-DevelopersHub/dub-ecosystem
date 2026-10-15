@@ -1,10 +1,12 @@
-// Orchestration layer: wires a SlackSource (live Slack API or offline fixtures) + the
-// current identity_users export into the ordered SQL statement list the CLI script
-// (scripts/slack-import.ts) writes to disk / applies via `wrangler d1 execute`.
+// Offline (CLI) orchestration: wires a SlackSource (live Slack API or offline fixtures) +
+// the current identity_users export into the ordered SQL statement list the CLI script
+// (infra/d1/scripts/slack-import.ts) writes to disk / applies via `wrangler d1 execute`.
+// The in-app importer does NOT use this (it must bound work per Worker invocation); it has
+// its own resumable step engine in services/chat-service/src/slack-import.ts.
 //
-// Every mapping/SQL decision lives in the pure module (slackImport.ts); this file only
+// Every mapping/SQL decision lives in the pure module (mapping.ts); this file only
 // fetches + sequences. `SlackSource` is the seam that makes it testable end-to-end
-// without a live Slack token (test/slackImportRun.test.ts uses infra/d1/fixtures/slack).
+// without a live Slack token (infra/d1/test/slackImportRun.test.ts uses infra/d1/fixtures/slack).
 import {
   type ImportSummary,
   type MappingContext,
@@ -33,7 +35,7 @@ import {
   placeholderEmailFor,
   placeholderUserIdFor,
   type SlackFile,
-} from "./slackImport";
+} from "./mapping";
 
 export interface SlackSource {
   listUsers(): Promise<SlackUser[]>;

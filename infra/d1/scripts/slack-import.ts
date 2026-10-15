@@ -5,14 +5,14 @@
 // writes the generated idempotent .sql to --out, but touches neither remote D1 nor R2.
 // Real writes require BOTH --apply AND CLOUDFLARE_API_TOKEN (+ SLACK_BOT_TOKEN for a
 // live, non-fixture run) — run only with the owner's explicit go-ahead.
-// Re-running is always safe: every dub id is derived from the Slack id (slackImport.ts).
+// Re-running is always safe: every dub id is derived from the Slack id (@dub/slack-import).
 //
 // Two run modes:
 //   --fixture-dir <dir>   Offline dry-run. Reads Slack-API-shaped JSON fixtures instead
 //                          of the network (see infra/d1/fixtures/slack/README.md).
 //                          --apply is refused in this mode — it can never touch prod.
 //   --channels <list>     Live mode. Comma-separated Slack channel names or ids. Requires
-//                          SLACK_BOT_TOKEN and fetches from the Slack Web API (slackClient.ts).
+//                          SLACK_BOT_TOKEN and fetches from the Slack Web API (@dub/slack-import client).
 //
 // Usage:
 //   # offline dry-run against the checked-in fixtures (no token needed)
@@ -31,10 +31,16 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { batchStatements, R2_ATTACHMENT_BUCKET } from "../src/slackImport";
+import {
+  batchStatements,
+  createSlackClient,
+  R2_ATTACHMENT_BUCKET,
+  resolveTargetChannels,
+  runSlackImport,
+  type IdentityUserExportRow,
+  type SlackSource,
+} from "@dub/slack-import";
 import { createFixtureSlackSource } from "../src/slackFixtureSource";
-import { createSlackClient } from "../src/slackClient";
-import { runSlackImport, resolveTargetChannels, type IdentityUserExportRow, type SlackSource } from "../src/slackImportRun";
 
 const WRANGLER = ["dlx", "wrangler@4.35.0"]; // matches infra/d1/scripts/admin-notify.ts
 const D1_NAME = "dub-core";

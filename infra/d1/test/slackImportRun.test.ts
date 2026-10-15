@@ -6,8 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { count, fkViolations, migratedD1 } from "./d1";
 import { createFixtureSlackSource } from "../src/slackFixtureSource";
-import { runSlackImport, type IdentityUserExportRow, type SlackImportConfig } from "../src/slackImportRun";
-import { placeholderUserIdFor } from "../src/slackImport";
+import { placeholderUserIdFor, runSlackImport, type IdentityUserExportRow, type SlackImportConfig } from "@dub/slack-import";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "slack");
 const ORG_ID = "org_fixture";
