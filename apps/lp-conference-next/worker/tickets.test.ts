@@ -407,6 +407,24 @@ test("handler: thanks with session_id calls confirm and shows summary", async ()
   assert.match(await pending!.text(), /決済を確認中です（数分後にメールをご確認ください）/);
 });
 
+test("handler: thanks still confirms when sales were turned off / config unavailable mid-checkout", async () => {
+  for (const getConfig of [async () => ({ ...CFG, enabled: false }), async () => null]) {
+    const d = deps({
+      getConfig,
+      internal: async (path, init) => {
+        d.calls.push({ path, init });
+        return Response.json({ status: "paid", summary: "一般 Day 1 x1" });
+      },
+    });
+    const res = await handleTickets(new Request("https://lp.example/tickets/thanks?session_id=cs_1"), d);
+    assert.equal(res?.status, 200);
+    assert.match(await res!.text(), /お申し込みが完了しました/);
+    assert.equal(d.calls[0].path, "/lp/internal/tickets/confirm");
+  }
+  // the form itself stays gated
+  assert.equal(await handleTickets(new Request("https://lp.example/tickets"), deps({ getConfig: async () => null })), null);
+});
+
 test("handler: thanks with order confirms by orderId (query string alone never shows success)", async () => {
   const d = deps({
     internal: async (path, init) => {
