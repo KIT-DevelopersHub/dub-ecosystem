@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { createStripeClient, signStripePayload } from "../src/stripe";
 import type { LpTicketOrdersPage, LpTicketsState, LpTicketTypeSummary } from "../src/types";
+import { stripeFrom } from "../src/index";
 import { TicketService } from "../src/tickets";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
@@ -777,6 +778,15 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       data: { object: { id: "dp_1", charge: "ch_1", payment_intent: "pi_cs_test_0", livemode: false } },
     });
     expect(await repo.getOrder("hokuriku-it-conf.com", a)).toMatchObject({ status: "needs_review", reviewReason: "dispute" });
+  });
+});
+
+describe("stripeFrom", () => {
+  it("needs BOTH secrets; mode follows the key", () => {
+    expect(stripeFrom({ STRIPE_SECRET_KEY: "sk_test_1" })).toBeNull();
+    expect(stripeFrom({ STRIPE_WEBHOOK_SECRET: "whsec_1" })).toBeNull();
+    expect(stripeFrom({ STRIPE_SECRET_KEY: "sk_test_1", STRIPE_WEBHOOK_SECRET: "whsec_1" })!.livemode).toBe(false);
+    expect(stripeFrom({ STRIPE_SECRET_KEY: "sk_live_1", STRIPE_WEBHOOK_SECRET: "whsec_1" })!.livemode).toBe(true);
   });
 });
 
