@@ -27,6 +27,8 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  SlackChannelOption,
+  SlackImportJob,
   TeamSummary,
   UnfurlPreview,
   UnfurlResponse,
@@ -76,6 +78,15 @@ export interface ChatApiClient {
   listMentionTeams(): Promise<MentionTeams>;
   /** Link preview (OGP) for one URL; null = no card. Best-effort: never rejects. */
   unfurl(url: string): Promise<UnfurlPreview | null>;
+  // ---- Slack channel import (admin: chat:create + chat:moderate) ----
+  /** Channels the Slack bot can see (private ones only once LMB is invited). */
+  listSlackChannels(): Promise<SlackChannelOption[]>;
+  listSlackImportJobs(limit?: number): Promise<SlackImportJob[]>;
+  /** Create, resume (failed) or restart (done) the job for a channel name / id. */
+  startSlackImport(channel: string): Promise<SlackImportJob>;
+  getSlackImportJob(id: string): Promise<SlackImportJob>;
+  /** Advance one bounded step; safe to call repeatedly (server holds a lease). */
+  stepSlackImport(id: string): Promise<SlackImportJob>;
 }
 
 /** GET /api/v1/members/me/mention-teams のレスポンス。 */
@@ -295,6 +306,22 @@ export class HttpChatClient implements ChatApiClient {
     // read the chip by name. The caller is taken from the session (no userId in the path).
     const res = await this.request<Partial<MentionTeams>>("GET", `${MEMBERS}/me/mention-teams`);
     return { teams: res?.teams ?? [], myTeamIds: res?.myTeamIds ?? [] };
+  }
+
+  async listSlackChannels(): Promise<SlackChannelOption[]> {
+    return unwrapItems<SlackChannelOption>(await this.request<unknown>("GET", `${CHAT}/slack-import/channels`));
+  }
+  async listSlackImportJobs(limit?: number): Promise<SlackImportJob[]> {
+    return unwrapItems<SlackImportJob>(await this.request<unknown>("GET", `${CHAT}/slack-import/jobs${qs({ limit })}`));
+  }
+  startSlackImport(channel: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("POST", `${CHAT}/slack-import/jobs`, { channel });
+  }
+  getSlackImportJob(id: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("GET", `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}`);
+  }
+  stepSlackImport(id: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("POST", `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}/step`);
   }
 
   async unfurl(url: string): Promise<UnfurlPreview | null> {
