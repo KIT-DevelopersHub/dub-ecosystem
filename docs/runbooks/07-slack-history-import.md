@@ -1,110 +1,73 @@
 # Slack 履歴インポート Runbook（Slack → fe6-chat D1 移行）
 
-結論: カンファ運営の指定 Slack チャンネル（公開＋プライベート）の履歴を、chat-service の公開
-API を経由せず **dub-core D1 へ直接 INSERT するオフライン専用インポーター**で移行する（方式A =
-Slack Web API）。**手順のみ。実移行（本番 D1 書込・R2 アップロード）はトークン／対象チャンネル
-リスト到着後、ユーザー許可を得てから実行する**（`--apply` は実装済みだが、このドキュメント自体は
-実行しない — `~/.claude/rules/dub-development-flow.md` §5 のフェーズゲート）。
+結論: 指定した Slack チャンネルの履歴を、**同じ名前の新しい Dub チャンネル**として dub-core D1 へ
+直接 INSERT するオフライン専用インポーター（chat-service の公開 API は経由しない＝通知の暴発・
+無料枠圧迫を避ける）。Slack 側は旧 LMB の Slack アプリ（bot）を再インストールして使う。
+**実移行（本番 D1 書込・R2 アップロード）はオーナーの明示許可を得てから `--apply` で行う。**
 
-## 目次
+## 1. 何が取り込まれるか
 
-- [1. 実装の所在](#1-実装の所在)
-- [2. マッピング](#2-マッピング)
-- [3. 冪等性（処理済み ts レジャー）](#3-冪等性処理済み-ts-レジャー)
-- [4. 必要なもの（トークン scope・対象チャンネル）](#4-必要なものトークン-scope対象チャンネル)
-- [5. パイロット手順（dry-run → 1 チャンネル実移行）](#5-パイロット手順dry-run--1-チャンネル実移行)
-- [6. D1 無料枠対策（バッチ分割）](#6-d1-無料枠対策バッチ分割)
-- [7. 未マッピングユーザーの扱い](#7-未マッピングユーザーの扱い)
+| Slack | Dub | 備考 |
+|---|---|---|
+| チャンネル | `chat_channels`（同名・新規作成、公開/非公開を維持） | ID は Slack チャンネル ID から決定的に生成。再実行しても同じチャンネル。アーカイブ済みは archived で作成。 |
+| メンバー | `chat_channel_members` | Dub アカウントがある人だけ（作成者は admin）。非公開チャンネルはここに居る人だけが見られる。 |
+| 投稿者 | `identity_users`（email 突合） | 突合できない人（退職者・ゲスト）と bot は **停止状態（`status='disabled'`）の仮ユーザー**を作る。bot は表示名に `(bot)`。ログイン不可・メンション候補にも出ない。 |
+| メッセージ | `chat_messages` | 本文は Slack mrkdwn → Dub 記法に変換。編集日時も保持。参加/退出は system 行。bot の添付カード本文は引用として残す。 |
+| スレッド | `thread_root_id` | 全返信を取得。親が見えない返信（無料プランの 90 日外）は通常メッセージとして表示。 |
+| リアクション | `chat_reactions` | **全件**。標準絵文字は Unicode に、スキントーン対応、カスタム絵文字は `:name:` の文字で保持。 |
+| ピン留め | `chat_pins` | |
+| ブックマーク | ピン留めされた system メッセージ 1 件 | Dub にブックマーク欄が無いため、リンク一覧として先頭にピン留め。再実行で内容を更新。 |
+| 添付ファイル | R2 `dub-file-attachments` + `file_meta_files` / `file_meta_links` | Slack 側で削除済み・無料プランで非表示のものは件数だけ数えてスキップ。 |
 
-## 1. 実装の所在
+取り込まないもの（2 回目以降の候補）: カスタム絵文字の画像、Canvas、DM、ブックマークのフォルダ。
+
+## 2. 無料プランの制約
+
+Slack 無料プランは **直近 90 日分**のメッセージ・ファイルしか API で返さない。インポーターは
+見える範囲をそのまま取り込む（設定不要）。古い分が必要になったら有料化 or Slack 標準
+エクスポートからの取り込みを別途検討する。
+
+## 3. 冪等性
+
+すべての ID（チャンネル・メッセージ・ファイル・仮ユーザー）を **Slack 側 ID のハッシュから決定的に
+生成**し、SQL は `INSERT OR IGNORE`。途中で失敗しても、何度再実行しても重複しない。
+ローカルの状態ファイルは不要。新しい投稿が増えた後に再実行すれば差分だけが入る。
+
+## 4. 準備（LMB アプリの再インストール）
+
+1. [Slack API: Your Apps](https://api.slack.com/apps) で旧 LMB アプリを開く。
+2. OAuth & Permissions の Bot Token Scopes に次を追加:
+   `channels:read` `groups:read` `channels:history` `groups:history` `channels:join`
+   `users:read` `users:read.email` `files:read` `bookmarks:read`
+3. ワークスペースに再インストールし、Bot User OAuth Token（`xoxb-...`）を控える（コミットしない）。
+4. 取り込みたい**非公開**チャンネルで `/invite @<LMBアプリ名>`（公開チャンネルは自動で参加する）。
+
+## 5. 実行手順
+
+```bash
+# 1. offline dry-run (no token)
+pnpm --filter @dub/infra-d1 slack:import \
+  --fixture-dir fixtures/slack --identity-export fixtures/slack/identity-users.json \
+  --org-id org_fixture --system-user-id usr_system0000000000000001
+
+# 2. live preview (writes nothing; SQL goes to --out)
+SLACK_BOT_TOKEN=xoxb-... CLOUDFLARE_API_TOKEN=... pnpm --filter @dub/infra-d1 slack:import \
+  --channels general,conference-core --system-user-id usr_... --out /tmp/slack-preview
+
+# 3. after owner approval: same command + --apply
+```
+
+- `--channels` はチャンネル名（`#` 有無どちらでも）か ID のカンマ区切り。
+- `--identity-export` を省略すると本番 `identity_users`（id, email, org_id）を wrangler で取得する。
+- `--no-attachments` でファイルを後回しにできる。`--batch-size`（既定 200 文）で D1 への 1 回の量を調整。
+- 実行後、fe6-chat で該当チャンネルを実ブラウザ確認（スレッド・リアクション・添付・ピン・作者名）。
+
+## 6. 実装の所在
 
 | ファイル | 役割 |
 |---|---|
-| `infra/d1/src/slackImport.ts` | 純粋関数層。Slack API 形状の型、user/channel/message/reaction/attachment → dub 行マッピング、Slack mrkdwn → dub Markdown-subset 変換、`INSERT OR IGNORE` SQL 生成、処理済み ts レジャー、バッチ分割。ネットワーク／ファイルI/O無し = フルユニットテスト対象。 |
-| `infra/d1/src/slackClient.ts` | Slack Web API クライアント（`conversations.list/history/replies`・`users.list`・ファイルDL）。ページネーション + 429 レート制限リトライ（`Retry-After` 優先、無ければ指数バックオフ）。 |
-| `infra/d1/src/slackFixtureSource.ts` | オフライン `SlackSource`。`infra/d1/fixtures/slack/*.json` を読み、Slack API を叩かず同じパイプラインを検証する（dry-run の実体）。 |
-| `infra/d1/src/slackImportRun.ts` | オーケストレーション。`SlackSource`（live/fixture 共通インターフェース）+ identity_users export + レジャーを結線し、順序付き SQL 文字列配列を生成。 |
-| `infra/d1/scripts/slack-import.ts` | CLI 本体。`--fixture-dir`（オフライン dry-run）/ `--channels`（本番、要 `SLACK_BOT_TOKEN`）。既定はプレビュー（何も書き込まない）。`--apply`（+ `CLOUDFLARE_API_TOKEN`）で初めて実書込。 |
-| `infra/d1/fixtures/slack/*.json` | パイロット用サンプル（公開ch 1 + プライベートch 1、スレッド・リアクション・添付・未マッピングユーザーを網羅）。詳細は同ディレクトリの README。 |
-| `infra/d1/test/slackImport.test.ts` / `slackClient.test.ts` / `slackImportRun.test.ts` | ユニット + 実スキーマ適用（`migratedD1()`）+ 冪等性テスト。 |
-
-chat-service の公開 API（`postMessage` 等）は経由しない — 通知の暴発・楽観ロック衝突・無料枠
-（Queue/Worker 呼び出し）圧迫を避けるため。
-
-## 2. マッピング
-
-| Slack | dub-core D1 | 備考 |
-|---|---|---|
-| `users.list` の `profile.email` | `identity_users.id`（email 突合） | email 一致なしは「未マッピング」扱い（§7）。 |
-| `conversations.list` の channel | `chat_channels`（`type='topic'`, `visibility`=`is_private`で分岐） | `event_id`/`dm_key` は NULL（イベント関連付け・DM は対象外）。 |
-| message（`ts`） | `chat_messages.id = msg_<ulid(slackTsをms化)>` | `packages/db/src/ids.ts` の `ulid(now)` を **Slack の元 ts** で呼ぶことで、後から挿入しても `id DESC`（実インデックス）で真の時系列になる。 |
-| `thread_ts` | `thread_root_id` | 2パス: (1) チャンネル内の全メッセージ（root+reply）を先にIDミント → (2) `thread_ts !== ts` のメッセージだけレジャー参照で root の dub id を解決。 |
-| `reactions[].name`（shortcode） | `chat_reactions.emoji`（unicode） | fe6-chat はUnicode絵文字をそのまま描画するため変換必須。`SLACK_SHORTCODE_TO_EMOJI` にある主要リアクションのみ移行、未知shortcodeはスキップ（件数はsummaryに出る）。 |
-| `files[]` | `file_meta_files`(source=R2) + `file_meta_links`(target_type='message') | R2バケット `dub-file-attachments`（既存, file-meta所有）。キーは `slack-import/<channelId>/<ts>/<fileId>-<name>`（Slack ID起点で決定的 = 再アップロード事故を防ぐ）。 |
-| Slack mrkdwn body | dub Markdown-subset body | `*bold* _italic_ ~strike~ `code`` `>` blockquote は共通そのまま。`<@U…>`→`<@dubUserId>`（未マッピングは `@表示名` プレーンテキスト）、`<#C…\|name>`→`#name`、`<!here>`等→`@here`等、`<url\|label>`→`[label](url)`、`&amp;/&lt;/&gt;`をデコード。 |
-
-## 3. 冪等性（処理済み ts レジャー）
-
-`newId`/`ulid` はランダムサフィックスを含むため、同じメッセージを毎回同じIDで再ミントすること
-はできない。そこで **レジャー（`channelId:ts` → 発行済み dub id の対応表）を実際の冪等性の
-根拠**にする：
-
-- 初回: レジャーに無い ts → 新規ミント → レジャーに記録 → INSERTを生成。
-- 再実行: レジャーにある ts → 既存IDを再利用し、**その行のINSERTは生成すらしない**（`summary.alreadyImportedMessages` でカウント）。
-- 生成されたSQL自体も全て `INSERT OR IGNORE`（`infra/d1/src/adminNotify.ts` と同じ流儀）— レジャーファイルを万一失っても、同じ `.sql` を再適用するだけなら重複しない（二重の安全網）。
-
-レジャーはCLIが `--ledger`（既定 `infra/d1/.slack-import/ledger.json`、`.gitignore`済み）に
-JSONで永続化し、次回実行時に読み込む。**このファイルは移行の実体そのもの**なので、実移行後は
-DubVault等バックアップ推奨（削除すると次回実行が全件再スキャン=時間はかかるが二重挿入はしない）。
-
-## 4. 必要なもの（トークン scope・対象チャンネル）
-
-**現時点で未着手（このPRの対象外）:**
-
-| 項目 | 内容 |
-|---|---|
-| Slack Bot Token（`xoxb-...`） | scope: `channels:read` `groups:read` `channels:history` `groups:history` `users:read` `users:read.email` `files:read` |
-| Bot をプライベートチャンネルへ招待 | `groups:history` は **botがinviteされているチャンネルのみ**履歴を返す。対象プライベートch全てに事前招待が必要。 |
-| 対象チャンネルIDリスト | カンファ関連の公開chID + プライベートchID（`--channels C1,C2,...`）。 |
-| （任意）identity_users export | 本番D1から `SELECT id, email FROM identity_users` を都度取得も可（`CLOUDFLARE_API_TOKEN` があれば自動）。 |
-
-トークンは環境変数 `SLACK_BOT_TOKEN`（ローカル/DubVault保管、コミットしない）で渡す。
-
-## 5. パイロット手順（dry-run → 1 チャンネル実移行）
-
-1. **オフライン dry-run（今すぐ実行可能・トークン不要）**:
-   ```bash
-   pnpm --filter @dub/infra-d1 slack:import -- \
-     --fixture-dir infra/d1/fixtures/slack \
-     --identity-export infra/d1/fixtures/slack/identity-users.json \
-     --system-user-id usr_system0000000000000001
-   ```
-   出力される `# total SQL statements` 等のサマリーとバッチ `.sql` を確認する。
-2. **トークン到着後、小規模チャンネル1本でライブpreview**（まだ書き込まない）:
-   ```bash
-   SLACK_BOT_TOKEN=xoxb-... pnpm --filter @dub/infra-d1 slack:import -- \
-     --channels C_PILOT_CHANNEL --system-user-id usr_system...
-   ```
-   `--identity-export` を省略すると `CLOUDFLARE_API_TOKEN` があれば本番 identity_users を自動取得。
-3. 生成された `.sql` バッチをレビュー（本文の変換結果・未マッピング件数・添付件数を確認）。
-4. **ユーザー許可を得てから** `--apply` を追加（+ `CLOUDFLARE_API_TOKEN`）して実書込。
-5. fe6-chat 上で当該チャンネルを実ブラウザ確認（スレッド・リアクション・添付・メンションが正しく出るか）。
-6. 問題なければ残り全チャンネルを `--channels` にまとめて実行（レジャーがあるので既に入れた分は再挿入されない）。
-
-## 6. D1 無料枠対策（バッチ分割）
-
-`batchStatements()` が既定200文単位で `.sql` を分割し、CLIは1バッチ=1回の
-`wrangler d1 execute --file` 呼び出しにする（`--batch-size`で調整可）。実行前にCLI出力の
-`# total SQL statements` / `# batches of N: M` で件数見積りを確認できる。
-
-## 7. 未マッピングユーザーの扱い
-
-Slackユーザーの email が現行 `identity_users` に無い場合（退職者・外部ゲスト・Slack Bot）:
-
-- **既定（`embed-name`）**: メッセージは`kind='user'`のまま`author_id=NULL`でインポートし、本文
-  先頭に `[Slack: <表示名>] ` を付与 — 発言内容と話者名は失わないが、実アカウントには紐付かない
-  （チャットUI上は「誰でもない発言」として表示される）。
-- **`--unmapped-policy skip-message`**: そのメッセージ自体をインポートしない
-  （そのメッセージがスレッドrootだった場合、返信は「rootの無いスレッド」= `thread_root_id`が
-  解決できずNULLになる — 既定のembed-nameを推奨する理由）。
-- リアクションは未マッピングユーザー分は個別にドロップ（`author_id`必須の`chat_reactions`制約のため）。
+| `infra/d1/src/slackImport.ts` | 純粋関数層（型・決定的 ID・本文変換・絵文字・行/SQL 生成） |
+| `infra/d1/src/slackImportRun.ts` | 取得と順序付け（仮ユーザー → チャンネル → メッセージ） |
+| `infra/d1/src/slackClient.ts` | Slack Web API（ページネーション・429 リトライ・join・ファイル DL） |
+| `infra/d1/src/slackFixtureSource.ts` + `infra/d1/fixtures/slack/` | オフライン dry-run 用 |
+| `infra/d1/scripts/slack-import.ts` | CLI |

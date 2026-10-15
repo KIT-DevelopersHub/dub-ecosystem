@@ -9,13 +9,19 @@
 //   channels.json                                <- conversations.list    (channels[])
 //   history-<channelId>.json                     <- conversations.history (messages[])
 //   replies-<channelId>-<threadTs>.json          <- conversations.replies (messages[])
+//   members-<channelId>.json                     <- conversations.members (members[])
+//   bookmarks-<channelId>.json                   <- bookmarks.list        (bookmarks[])
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { SlackChannel, SlackMessage, SlackUser } from "./slackImport";
+import type { SlackBookmark, SlackChannel, SlackMessage, SlackUser } from "./slackImport";
 import type { SlackSource } from "./slackImportRun";
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
+}
+
+function readOptional<T>(path: string): T[] {
+  return existsSync(path) ? readJson<T[]>(path) : [];
 }
 
 export function createFixtureSlackSource(dir: string): SlackSource {
@@ -27,14 +33,16 @@ export function createFixtureSlackSource(dir: string): SlackSource {
       return readJson<SlackChannel[]>(join(dir, "channels.json"));
     },
     async historyForChannel(channelId: string): Promise<SlackMessage[]> {
-      const path = join(dir, `history-${channelId}.json`);
-      if (!existsSync(path)) return [];
-      return readJson<SlackMessage[]>(path);
+      return readOptional<SlackMessage>(join(dir, `history-${channelId}.json`));
     },
     async repliesForThread(channelId: string, threadTs: string): Promise<SlackMessage[]> {
-      const path = join(dir, `replies-${channelId}-${threadTs}.json`);
-      if (!existsSync(path)) return [];
-      return readJson<SlackMessage[]>(path);
+      return readOptional<SlackMessage>(join(dir, `replies-${channelId}-${threadTs}.json`));
+    },
+    async membersOfChannel(channelId: string): Promise<string[]> {
+      return readOptional<string>(join(dir, `members-${channelId}.json`));
+    },
+    async bookmarksForChannel(channelId: string): Promise<SlackBookmark[]> {
+      return readOptional<SlackBookmark>(join(dir, `bookmarks-${channelId}.json`));
     },
   };
 }

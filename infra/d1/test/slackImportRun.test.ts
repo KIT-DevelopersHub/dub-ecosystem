@@ -1,132 +1,100 @@
-// End-to-end dry-run test: fixtures (infra/d1/fixtures/slack) -> runSlackImport ->
-// generated SQL applies cleanly to the real aggregated dub-core schema, and a second
-// run against the SAME (persisted) ledger imports nothing new — the concrete proof that
-// "コード実装＋dry-run可能な状態" actually works end to end without a live Slack token.
+// End-to-end dry-run: fixtures (infra/d1/fixtures/slack) -> runSlackImport -> the
+// generated SQL applied to the real aggregated dub-core schema, twice (idempotency).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import { migratedD1 } from "./d1";
-import { createLedger } from "../src/slackImport";
+import { count, fkViolations, migratedD1 } from "./d1";
 import { createFixtureSlackSource } from "../src/slackFixtureSource";
-import { runSlackImport, type IdentityUserExportRow } from "../src/slackImportRun";
+import { runSlackImport, type IdentityUserExportRow, type SlackImportConfig } from "../src/slackImportRun";
+import { placeholderUserIdFor } from "../src/slackImport";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "slack");
+const ORG_ID = "org_fixture";
 const SYSTEM_USER_ID = "usr_system0000000000000001";
 
-function loadIdentityUsers(): IdentityUserExportRow[] {
-  return JSON.parse(readFileSync(join(FIXTURE_DIR, "identity-users.json"), "utf8")) as IdentityUserExportRow[];
+const identityUsers = JSON.parse(readFileSync(join(FIXTURE_DIR, "identity-users.json"), "utf8")) as IdentityUserExportRow[];
+
+function config(overrides: Partial<SlackImportConfig> = {}): SlackImportConfig {
+  return {
+    source: createFixtureSlackSource(FIXTURE_DIR),
+    targetChannels: ["conference-general", "C_CONF_CORE"],
+    identityUsers,
+    orgId: ORG_ID,
+    systemUserId: SYSTEM_USER_ID,
+    nowIso: () => "2026-10-15T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+async function seededDb() {
+  const { raw } = await migratedD1();
+  const t = "2026-01-01T00:00:00.000Z";
+  raw.exec(`INSERT INTO identity_orgs (id, name, created_at) VALUES ('${ORG_ID}', 'DevHub', '${t}');`);
+  for (const u of [...identityUsers, { id: SYSTEM_USER_ID, email: "ops@developershub.jp" }]) {
+    raw.exec(
+      `INSERT INTO identity_users (id, org_id, email, display_name, created_at, updated_at) VALUES ('${u.id}', '${ORG_ID}', '${u.email}', '${u.id}', '${t}', '${t}');`,
+    );
+  }
+  return raw;
 }
 
 describe("runSlackImport — offline fixture dry-run", () => {
-  it("maps both the public and private pilot channels end to end", async () => {
-    const source = createFixtureSlackSource(FIXTURE_DIR);
-    const ledger = createLedger();
-    const result = await runSlackImport({
-      source,
-      targetChannelIds: ["C_CONF_PUBLIC", "C_CONF_CORE"],
-      identityUsers: loadIdentityUsers(),
-      systemUserId: SYSTEM_USER_ID,
-      ledger,
-      nowIso: () => "2026-09-16T00:00:00.000Z",
-    });
-
-    expect(result.summary.channels).toBe(2);
-    // C_CONF_PUBLIC: 5 top-level (root + Bob + Alice-file + Guest + Bot) + 2 replies
-    // pulled in from the thread fixture (not present in the top-level history) = 7.
-    // C_CONF_CORE: 1 plain message.
-    expect(result.summary.messages).toBe(8);
-    expect(result.summary.alreadyImportedMessages).toBe(0);
-    // U_GUEST has no identity_users match -> counted, but still imported (embed-name default)
-    expect(result.summary.messagesSkippedUnmappedAuthor).toBeGreaterThan(0);
-    expect(result.summary.attachments).toBe(1); // reception-guide.pdf
-    expect(result.summary.reactions).toBeGreaterThan(0);
-    expect(result.summary.reactionsSkippedUnmappedEmoji).toBeGreaterThan(0); // the custom shortcode
-    expect(Object.keys(result.channelIds)).toEqual(["C_CONF_PUBLIC", "C_CONF_CORE"]);
-    expect(result.pendingUploads).toHaveLength(1);
-    expect(result.pendingUploads[0]!.file.name).toBe("reception-guide.pdf");
+  it("summarises everything the fixtures contain", async () => {
+    const { summary, pendingUploads, channelIds } = await runSlackImport(config());
+    expect(summary.channels).toBe(2);
+    // public: 8 history + 2 thread replies, private: 1
+    expect(summary.messages).toBe(11);
+    expect(summary.threadReplies).toBe(2); // the orphan reply is surfaced top-level
+    // U_GUEST, U_BOT (Slack bot user), B_REMINDER (bot_id-only post)
+    expect(summary.placeholderUsers).toBe(3);
+    expect(summary.reactions).toBe(5);
+    expect(summary.customEmojiReactions).toBe(1);
+    expect(summary.pins).toBe(1);
+    expect(summary.bookmarks).toBe(2);
+    expect(summary.attachments).toBe(1);
+    expect(summary.attachmentsUnavailable).toBe(1);
+    expect(summary.members).toBe(3); // public: alice+bob (guest has no account), private: bob
+    expect(pendingUploads.map((u) => u.file.name)).toEqual(["reception-guide.pdf"]);
+    expect(Object.keys(channelIds)).toEqual(["C_CONF_PUBLIC", "C_CONF_CORE"]);
   });
 
-  it("throws a clear error when a requested channel id is not visible to the bot", async () => {
-    const source = createFixtureSlackSource(FIXTURE_DIR);
-    await expect(
-      runSlackImport({
-        source,
-        targetChannelIds: ["C_NOT_A_MEMBER"],
-        identityUsers: loadIdentityUsers(),
-        systemUserId: SYSTEM_USER_ID,
-        ledger: createLedger(),
-      }),
-    ).rejects.toThrow(/C_NOT_A_MEMBER/);
+  it("names a channel the token cannot see", async () => {
+    await expect(runSlackImport(config({ targetChannels: ["#not-invited"] }))).rejects.toThrow(/not-invited/);
   });
 
-  it("the generated SQL applies cleanly to the real dub-core schema", async () => {
-    const { raw } = await migratedD1();
-    const source = createFixtureSlackSource(FIXTURE_DIR);
-    const result = await runSlackImport({
-      source,
-      targetChannelIds: ["C_CONF_PUBLIC"],
-      identityUsers: loadIdentityUsers(),
-      systemUserId: SYSTEM_USER_ID,
-      ledger: createLedger(),
-      nowIso: () => "2026-09-16T00:00:00.000Z",
-    });
-    raw.exec(result.sql.join("\n"));
-
-    const channelCount = raw.prepare("SELECT COUNT(*) AS c FROM chat_channels").get() as { c: number };
-    expect(Number(channelCount.c)).toBe(1);
-    const messageCount = raw.prepare("SELECT COUNT(*) AS c FROM chat_messages").get() as { c: number };
-    expect(Number(messageCount.c)).toBe(7);
-
-    // The thread reply landed with thread_root_id pointing at the root's dub id.
-    const root = raw.prepare("SELECT id FROM chat_messages WHERE body LIKE ?").get("%今日の進行%") as { id: string };
-    const replies = raw.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE thread_root_id = ?").get(root.id) as { c: number };
-    expect(Number(replies.c)).toBe(2);
-
-    // Guest's message kept its content but has no author_id (unmapped, embed-name policy).
-    const guestMsg = raw.prepare("SELECT author_id, body FROM chat_messages WHERE body LIKE ?").get("%手伝えることが%") as {
-      author_id: string | null;
-      body: string;
-    };
-    expect(guestMsg.author_id).toBeNull();
-    expect(guestMsg.body).toContain("[Slack: carol]");
-  });
-
-  it("re-running against the SAME persisted ledger is a no-op (idempotent across runs)", async () => {
-    const source = createFixtureSlackSource(FIXTURE_DIR);
-    const identityUsers = loadIdentityUsers();
-
-    const ledger1 = createLedger();
-    const first = await runSlackImport({ source, targetChannelIds: ["C_CONF_PUBLIC"], identityUsers, systemUserId: SYSTEM_USER_ID, ledger: ledger1 });
-    expect(first.summary.messages).toBe(7);
-
-    // Persist + reload the ledger exactly like the CLI does between runs.
-    const ledger2 = createLedger(ledger1.toJSON());
-    const second = await runSlackImport({ source, targetChannelIds: ["C_CONF_PUBLIC"], identityUsers, systemUserId: SYSTEM_USER_ID, ledger: ledger2 });
-    expect(second.summary.messages).toBe(0);
-    expect(second.summary.alreadyImportedMessages).toBe(7);
-    // Only the (idempotent) channel INSERT OR IGNORE remains; no message/reaction/file SQL.
-    expect(second.sql).toHaveLength(1);
-
-    // Applying both runs' SQL back to back never duplicates a row.
-    const { raw } = await migratedD1();
+  it("applies cleanly to the real schema and re-applying is a no-op", async () => {
+    const raw = await seededDb();
+    const first = await runSlackImport(config());
     raw.exec(first.sql.join("\n"));
+    const second = await runSlackImport(config({ nowIso: () => "2026-10-16T00:00:00.000Z" }));
     raw.exec(second.sql.join("\n"));
-    const messageCount = raw.prepare("SELECT COUNT(*) AS c FROM chat_messages").get() as { c: number };
-    expect(Number(messageCount.c)).toBe(7);
-  });
 
-  it("includeAttachments: false skips attachment planning entirely", async () => {
-    const source = createFixtureSlackSource(FIXTURE_DIR);
-    const result = await runSlackImport({
-      source,
-      targetChannelIds: ["C_CONF_PUBLIC"],
-      identityUsers: loadIdentityUsers(),
-      systemUserId: SYSTEM_USER_ID,
-      ledger: createLedger(),
-      includeAttachments: false,
-    });
-    expect(result.summary.attachments).toBe(0);
-    expect(result.pendingUploads).toHaveLength(0);
+    expect(fkViolations(raw)).toEqual([]);
+    expect(count(raw, "chat_channels")).toBe(2);
+    expect(count(raw, "chat_messages")).toBe(12); // 11 + the pinned bookmarks message
+    expect(count(raw, "chat_reactions")).toBe(5);
+    expect(count(raw, "chat_pins")).toBe(2);
+    expect(count(raw, "file_meta_files")).toBe(1);
+
+    const channel = raw.prepare("SELECT visibility FROM chat_channels WHERE name = 'conference-core-private'").get() as { visibility: string };
+    expect(channel.visibility).toBe("private");
+
+    const guest = raw.prepare("SELECT display_name, status FROM identity_users WHERE id = ?").get(placeholderUserIdFor("U_GUEST")) as {
+      display_name: string;
+      status: string;
+    };
+    expect({ ...guest }).toEqual({ display_name: "carol", status: "disabled" });
+    const bot = raw.prepare("SELECT display_name FROM identity_users WHERE id = ?").get(placeholderUserIdFor("B_REMINDER")) as { display_name: string };
+    expect(bot.display_name).toBe("Reminder (bot)");
+
+    const guestMsg = raw.prepare("SELECT author_id FROM chat_messages WHERE body LIKE ?").get("%手伝えることが%") as { author_id: string };
+    expect(guestMsg.author_id).toBe(placeholderUserIdFor("U_GUEST"));
+
+    const root = raw.prepare("SELECT id FROM chat_messages WHERE body LIKE ?").get("%今日の進行%") as { id: string };
+    expect(Number((raw.prepare("SELECT COUNT(*) AS c FROM chat_messages WHERE thread_root_id = ?").get(root.id) as { c: number }).c)).toBe(2);
+
+    const orphan = raw.prepare("SELECT thread_root_id FROM chat_messages WHERE body LIKE ?").get("%古いスレッド%") as { thread_root_id: string | null };
+    expect(orphan.thread_root_id).toBeNull();
   });
 });

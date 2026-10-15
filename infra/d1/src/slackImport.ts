@@ -2,20 +2,17 @@
 // (方式A: Slack Web API → パース/マッピング → dub-core D1 直INSERT。chat-service の公開API
 // は経由しない=通知の暴発や既存の楽観ロック/イベント発火を避けるオフライン専用インポーター。)
 //
-// This module is filesystem/network-free and fully unit-testable. It owns:
+// This module is network/filesystem-free and fully unit-testable. It owns:
 //  - Slack API response shapes (subset actually used)
-//  - user/channel/message/reaction/attachment -> dub row mapping
+//  - user/channel/message/reaction/pin/bookmark/attachment -> dub row mapping
 //  - Slack mrkdwn -> dub's Markdown-subset body conversion
-//  - idempotent SQL generation (INSERT OR IGNORE, literal-escaped — same style as
-//    infra/d1/src/adminNotify.ts, since the apply path is `wrangler d1 execute --file`,
-//    which has no bound params)
-//  - the processed-ts ledger (channel+ts -> minted dub id) that makes re-running the
-//    importer over the same Slack history idempotent even though id minting uses a
-//    genuinely random ULID suffix (packages/db/src/ids.ts `ulid`). The ledger, not id
-//    collision, is the source of truth for "already imported"; INSERT OR IGNORE is a
-//    second line of defense for re-applying the exact same generated .sql file.
-//  - batching (D1 free-tier write-limit friendly) + a size estimate for preview.
-import { ulid } from "@dub/db";
+//  - idempotent SQL generation (literal-escaped — same style as infra/d1/src/adminNotify.ts,
+//    since the apply path is `wrangler d1 execute --file`, which has no bound params)
+//
+// Idempotency: every dub id is DERIVED from the Slack id (see slackId below), so the same
+// Slack message always maps to the same dub row and `INSERT OR IGNORE` alone makes a
+// re-run (or a re-applied / partially-applied batch) a no-op. No local state file needed.
+import { createHash } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Slack API shapes (subset)
@@ -23,8 +20,8 @@ import { ulid } from "@dub/db";
 
 export interface SlackUser {
   id: string;
-  team_id?: string;
   name?: string;
+  real_name?: string;
   deleted?: boolean;
   is_bot?: boolean;
   profile?: {
@@ -37,167 +34,116 @@ export interface SlackUser {
 export interface SlackChannel {
   id: string;
   name: string;
+  created?: number; // epoch seconds
   is_private?: boolean;
-  is_channel?: boolean;
-  is_group?: boolean;
+  is_member?: boolean;
   is_archived?: boolean;
   topic?: { value?: string };
+  purpose?: { value?: string };
   creator?: string; // Slack user id
 }
 
 export interface SlackReaction {
-  name: string; // shortcode without colons, e.g. "thumbsup"
+  name: string; // shortcode without colons, e.g. "thumbsup", "+1::skin-tone-2"
   users: string[]; // Slack user ids
 }
 
 export interface SlackFile {
   id: string;
-  name: string;
+  name?: string;
+  title?: string;
   mimetype?: string;
   size?: number;
+  mode?: string; // "tombstone" / "hidden_by_limit" (free plan) have no body
   url_private?: string; // requires Authorization: Bearer <token> to download
 }
 
+export interface SlackLegacyAttachment {
+  fallback?: string;
+  pretext?: string;
+  title?: string;
+  title_link?: string;
+  text?: string;
+}
+
 export interface SlackMessage {
-  ts: string; // "1699999999.000100" — Slack timestamp, also the message's stable id
-  user?: string; // Slack user id (absent for some system/bot messages)
+  ts: string; // "1699999999.000100" — Slack timestamp, unique within a channel
+  user?: string;
   bot_id?: string;
-  subtype?: string; // e.g. "channel_join", "bot_message" — non-'user' content
+  bot_profile?: { name?: string };
+  username?: string; // bot_message display name
+  subtype?: string; // e.g. "channel_join", "bot_message"
   text: string; // raw Slack mrkdwn
   thread_ts?: string; // present on both the root (== ts) and every reply
   reply_count?: number;
+  edited?: { ts: string };
+  pinned_to?: string[]; // channel ids this message is pinned in
   reactions?: SlackReaction[];
   files?: SlackFile[];
+  attachments?: SlackLegacyAttachment[];
+}
+
+export interface SlackBookmark {
+  id: string;
+  title: string;
+  link?: string;
+  emoji?: string;
+  type?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Mapping context
+// Deterministic id minting
 // ---------------------------------------------------------------------------
+//
+// Same shape as packages/db `newId` (`<prefix>_<10 time chars><16 chars>`), but the
+// trailing 16 chars come from sha256(seed) instead of randomness. The time component is
+// the Slack timestamp, so `ORDER BY id DESC` (chat_messages' actual index) reproduces
+// true chronological order even though rows are inserted long after the fact.
 
-export type UnmappedUserPolicy = "embed-name" | "skip-message";
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-export interface MappingContext {
-  /** Slack user id -> Dub identity_users.id, built from users.list ∩ identity_users
-   *  (email is the join key). Users with no email match (退職/ゲスト/bot) are absent. */
-  slackUserIdToDubUserId: ReadonlyMap<string, string>;
-  /** Slack user id -> display name, used when a user can't be mapped (embed-name policy)
-   *  and for @mention fallback text. */
-  slackUserIdToDisplayName: ReadonlyMap<string, string>;
-  /** Slack channel id -> channel name, used to render `<#C…|name>` as plain "#name". */
-  slackChannelIdToName: ReadonlyMap<string, string>;
-  /** Fallback identity_users.id used as created_by for channels whose Slack creator is
-   *  unmapped, and as file_meta_files.owner_id when a file's uploader is unmapped. */
-  systemUserId: string;
-  /** What to do with a message whose author has no Dub mapping. Default "embed-name":
-   *  keep the message (kind='user', author_id=NULL) and prefix the body with
-   *  "[Slack: <display name>] " so the historical author is not silently lost — the
-   *  message just won't render as a proper chat bubble tied to a user account. This
-   *  matters for 退職者/ゲスト whose Slack account will never have a Dub identity. */
-  unmappedUserPolicy?: UnmappedUserPolicy;
+function encodeTime(ms: number): string {
+  let out = "";
+  let t = Math.max(0, Math.floor(ms));
+  for (let i = 0; i < 10; i++) {
+    const mod = t % 32;
+    out = CROCKFORD[mod]! + out;
+    t = (t - mod) / 32;
+  }
+  return out;
 }
 
-export const DEFAULT_UNMAPPED_POLICY: UnmappedUserPolicy = "embed-name";
-
-// ---------------------------------------------------------------------------
-// Ledger — processed-ts registry (the actual idempotency mechanism)
-// ---------------------------------------------------------------------------
-
-export interface SlackImportLedger {
-  getChannel(slackChannelId: string): string | undefined;
-  setChannel(slackChannelId: string, dubChannelId: string): void;
-  getMessage(slackChannelId: string, ts: string): string | undefined;
-  setMessage(slackChannelId: string, ts: string, dubMessageId: string): void;
-  /** Whether a file (by Slack file id) was already uploaded/registered. */
-  getFile(slackFileId: string): string | undefined;
-  setFile(slackFileId: string, dubFileId: string): void;
-  toJSON(): SlackImportLedgerData;
+export function slackId(prefix: string, atMs: number, seed: string): string {
+  const digest = createHash("sha256").update(`slack-import:${prefix}:${seed}`).digest();
+  let rand = "";
+  for (let i = 0; i < 16; i++) rand += CROCKFORD[digest[i]! % 32]!;
+  return `${prefix}_${encodeTime(atMs)}${rand}`;
 }
 
-export interface SlackImportLedgerData {
-  version: 1;
-  channels: Record<string, string>; // slackChannelId -> dubChannelId
-  messages: Record<string, string>; // "<slackChannelId>:<ts>" -> dubMessageId
-  files: Record<string, string>; // slackFileId -> dubFileId
-}
-
-function messageKey(channelId: string, ts: string): string {
-  return `${channelId}:${ts}`;
-}
-
-/** In-memory ledger, seedable from a previously-persisted SlackImportLedgerData (the
- *  CLI script loads/saves this as JSON between runs — see scripts/slack-import.ts). */
-export function createLedger(seed?: SlackImportLedgerData): SlackImportLedger {
-  const channels = new Map<string, string>(Object.entries(seed?.channels ?? {}));
-  const messages = new Map<string, string>(Object.entries(seed?.messages ?? {}));
-  const files = new Map<string, string>(Object.entries(seed?.files ?? {}));
-  return {
-    getChannel: (id) => channels.get(id),
-    setChannel: (id, dubId) => void channels.set(id, dubId),
-    getMessage: (channelId, ts) => messages.get(messageKey(channelId, ts)),
-    setMessage: (channelId, ts, dubId) => void messages.set(messageKey(channelId, ts), dubId),
-    getFile: (id) => files.get(id),
-    setFile: (id, dubId) => void files.set(id, dubId),
-    toJSON: () => ({
-      version: 1,
-      channels: Object.fromEntries(channels),
-      messages: Object.fromEntries(messages),
-      files: Object.fromEntries(files),
-    }),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// id minting — Slack ts drives the ULID time component so `ORDER BY id DESC`
-// (chat_messages' actual index) reproduces true chronological order even though
-// rows are inserted long after the fact, in whatever order the Slack API returns.
-// ---------------------------------------------------------------------------
-
-/** Slack ts ("1699999999.000100") -> epoch milliseconds. The fractional part is real
- *  sub-second precision (microseconds since epoch), not just a disambiguator, so it is
- *  parsed as a float and rounded rather than truncated at the decimal point. */
+/** Slack ts ("1699999999.000100") -> epoch milliseconds. */
 export function slackTsToMs(ts: string): number {
   const seconds = Number(ts);
   if (!Number.isFinite(seconds)) throw new Error(`slackTsToMs: invalid Slack ts "${ts}"`);
   return Math.round(seconds * 1000);
 }
 
-function mintId(prefix: string, atMs: number): string {
-  return `${prefix}_${ulid(atMs)}`;
-}
+export const messageIdFor = (slackChannelId: string, ts: string): string =>
+  slackId("msg", slackTsToMs(ts), `${slackChannelId}:${ts}`);
 
-/** Mint-or-reuse the dub message id for one Slack message, consulting the ledger first
- *  (idempotency). Also records the mapping so later calls (and later runs, once the
- *  ledger is persisted) are stable. */
-export function mintMessageId(ledger: SlackImportLedger, slackChannelId: string, ts: string): { id: string; isNew: boolean } {
-  const existing = ledger.getMessage(slackChannelId, ts);
-  if (existing) return { id: existing, isNew: false };
-  const id = mintId("msg", slackTsToMs(ts));
-  ledger.setMessage(slackChannelId, ts, id);
-  return { id, isNew: true };
-}
+export const channelIdFor = (c: SlackChannel): string => slackId("chan", (c.created ?? 0) * 1000, c.id);
 
-/** Mint-or-reuse the dub channel id for one Slack channel. Channels have no natural
- *  "creation ts" in the payload we read, so the mint uses now() like `newId` normally
- *  would — reordering channels by id is not a requirement (messages are). */
-export function mintChannelId(ledger: SlackImportLedger, slackChannelId: string, atMs: number = Date.now()): { id: string; isNew: boolean } {
-  const existing = ledger.getChannel(slackChannelId);
-  if (existing) return { id: existing, isNew: false };
-  const id = mintId("chan", atMs);
-  ledger.setChannel(slackChannelId, id);
-  return { id, isNew: true };
-}
+export const fileIdFor = (slackFileId: string, ts: string): string => slackId("file", slackTsToMs(ts), slackFileId);
 
-export function mintFileId(ledger: SlackImportLedger, slackFileId: string, atMs: number): { id: string; isNew: boolean } {
-  const existing = ledger.getFile(slackFileId);
-  if (existing) return { id: existing, isNew: false };
-  const id = mintId("file", atMs);
-  ledger.setFile(slackFileId, id);
-  return { id, isNew: true };
-}
+/** Placeholder identity for a Slack author with no Dub account. `key` is the Slack user
+ *  id (U…) or, for app/bot posts without a user, the bot id (B…). */
+export const placeholderUserIdFor = (key: string): string => slackId("usr", 0, key);
+
+/** Deterministic email so a re-run joins the placeholder back by email (UNIQUE(org_id,email))
+ *  instead of minting a second one. `.invalid` is reserved (RFC 2606): never deliverable. */
+export const placeholderEmailFor = (key: string): string => `slack-${key.toLowerCase()}@slack-import.invalid`;
 
 // ---------------------------------------------------------------------------
-// SQL literal helpers (mirrors infra/d1/src/adminNotify.ts `lit` — the apply path is
-// `wrangler d1 execute --file`, which has no bound params, so literals are escaped here).
+// SQL helpers
 // ---------------------------------------------------------------------------
 
 export function lit(v: string | null): string {
@@ -210,137 +156,203 @@ function insertOrIgnore(table: string, cols: readonly string[], vals: readonly s
 }
 
 // ---------------------------------------------------------------------------
+// Mapping context
+// ---------------------------------------------------------------------------
+
+export interface MappingContext {
+  /** Slack user/bot id -> Dub identity_users.id. Covers EVERY author/reactor: real
+   *  accounts (email join) and disabled placeholders alike. */
+  slackUserIdToDubUserId: ReadonlyMap<string, string>;
+  /** Slack user/bot id -> display name (for system lines like joins). */
+  slackUserIdToDisplayName: ReadonlyMap<string, string>;
+  /** Slack channel id -> channel name, used to render `<#C…>` as plain "#name". */
+  slackChannelIdToName: ReadonlyMap<string, string>;
+  /** created_by / owner fallback when nothing better is known (the operator). */
+  systemUserId: string;
+}
+
+/** The Slack-side author key of a message: the user id, or the bot id for app posts. */
+export function authorKeyOf(m: SlackMessage): string | undefined {
+  return m.user ?? m.bot_id;
+}
+
+// ---------------------------------------------------------------------------
+// Placeholder users (退職者・ゲスト・bot) — status='disabled' so they cannot sign in and
+// never show up in mention search (fe6-chat searches status=active only), but their
+// display name still resolves on every historical message.
+// ---------------------------------------------------------------------------
+
+export interface PlaceholderUserRow {
+  id: string;
+  orgId: string;
+  email: string;
+  displayName: string;
+  createdAt: string;
+}
+
+export function placeholderDisplayName(name: string, isBot: boolean): string {
+  return isBot ? `${name} (bot)` : name;
+}
+
+export function buildInsertPlaceholderUserSql(row: PlaceholderUserRow): string {
+  return insertOrIgnore(
+    "identity_users",
+    ["id", "org_id", "email", "display_name", "status", "created_at", "updated_at"],
+    [lit(row.id), lit(row.orgId), lit(row.email), lit(row.displayName), lit("disabled"), lit(row.createdAt), lit(row.createdAt)],
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Body conversion — Slack mrkdwn -> dub's Markdown-subset (apps/fe6-chat/src/lib/render-body.ts)
 // ---------------------------------------------------------------------------
 //
-// Shared surface (no conversion needed): *bold* _italic_ ~strike~ `code` ``` code
-// block ``` > blockquote. Slack-specific tokens that DO need conversion:
-//   <@U0123>            -> <@dubUserId>            (same wrapper syntax; only the id changes)
-//   <@U0123|display>    -> <@dubUserId>             (labelled form; label discarded, live name is resolved client-side)
-//   <#C0123|name>       -> #name                    (channel ref; dub has no channel-mention syntax)
-//   <!channel> <!here> <!everyone> -> @channel / @here / @everyone (plain text)
-//   <https://x|label>   -> [label](https://x)        (dub uses markdown link syntax)
-//   <https://x>         -> [https://x](https://x)
-//   &amp; &lt; &gt;     -> & < >                      (Slack HTML-entity-escapes literal text)
+// Shared surface (no conversion needed): *bold* _italic_ ~strike~ `code` ``` > quote.
+//   <@U0123> / <@U0123|x> -> <@dubUserId>
+//   <#C0123|name>         -> #name
+//   <!here> etc.          -> @here
+//   <https://x|label>     -> [label](https://x)
+//   &amp; &lt; &gt;       -> & < >
 
 const SLACK_TOKEN_RE = /<([^>]+)>/g;
 
 function decodeSlackEntities(text: string): string {
-  return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  return text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
 function convertToken(token: string, ctx: MappingContext): string {
-  // token is the content between < and >, e.g. "@U0123|display", "#C0123|name", "!here",
-  // "https://x|label".
   if (token.startsWith("@")) {
-    const slackUserId = token.slice(1).split("|")[0]!;
-    const dubUserId = ctx.slackUserIdToDubUserId.get(slackUserId);
+    const [slackUserId, label] = token.slice(1).split("|");
+    const dubUserId = ctx.slackUserIdToDubUserId.get(slackUserId ?? "");
     if (dubUserId) return `<@${dubUserId}>`;
-    const name = ctx.slackUserIdToDisplayName.get(slackUserId) ?? slackUserId;
-    return `@${name}`; // unmapped user: plain text, not a live mention pill
+    return `@${label ?? ctx.slackUserIdToDisplayName.get(slackUserId ?? "") ?? slackUserId}`;
   }
   if (token.startsWith("#")) {
     const [rawId, labelPart] = token.slice(1).split("|");
-    const name = labelPart ?? ctx.slackChannelIdToName.get(rawId ?? "") ?? rawId ?? "channel";
-    return `#${name}`;
+    return `#${labelPart || ctx.slackChannelIdToName.get(rawId ?? "") || rawId || "channel"}`;
   }
   if (token.startsWith("!")) {
-    const special = token.slice(1).split("|")[0]!;
-    if (special === "channel" || special === "here" || special === "everyone") return `@${special}`;
-    return `@${special}`; // unknown special mention (e.g. subteam) — best-effort passthrough
+    const [special, label] = token.slice(1).split("|");
+    if (special?.startsWith("subteam^")) return label ?? "@group";
+    if (special?.startsWith("date^")) return label ?? special;
+    return `@${special}`;
   }
-  // link: "<url>" or "<url|label>"
   const bar = token.indexOf("|");
   const url = bar >= 0 ? token.slice(0, bar) : token;
   const label = bar >= 0 ? token.slice(bar + 1) : token;
-  if (/^https?:\/\//i.test(url)) return `[${label}](${url})`;
-  return `<${token}>`; // not a recognized Slack token shape — leave as-is
+  if (/^(https?:\/\/|mailto:)/i.test(url)) return `[${label}](${url})`;
+  return `<${token}>`;
 }
 
-/** Convert one Slack message's `text` to dub's Markdown-subset body. Pure + total (never
- *  throws on malformed input — falls back to leaving unrecognized tokens untouched). */
 export function convertSlackBodyToDubBody(text: string, ctx: MappingContext): string {
-  const withTokens = text.replace(SLACK_TOKEN_RE, (_m, inner: string) => convertToken(inner, ctx));
-  return decodeSlackEntities(withTokens);
+  return decodeSlackEntities(text.replace(SLACK_TOKEN_RE, (_m, inner: string) => convertToken(inner, ctx)));
+}
+
+/** Legacy `attachments` (bot posts / unfurl cards) carry content that `text` may lack.
+ *  Rendered as quoted lines under the body so nothing the bot said is lost. */
+function legacyAttachmentLines(atts: readonly SlackLegacyAttachment[] | undefined, ctx: MappingContext): string[] {
+  const out: string[] = [];
+  for (const a of atts ?? []) {
+    const title = a.title ? (a.title_link ? `[${a.title}](${a.title_link})` : `*${a.title}*`) : "";
+    const parts = [a.pretext, title, a.text].filter((s): s is string => !!s?.trim());
+    const content = parts.length > 0 ? parts.join("\n") : (a.fallback ?? "");
+    if (!content.trim()) continue;
+    out.push(...convertSlackBodyToDubBody(content, ctx).split("\n").map((l) => `> ${l}`));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
-// Reaction emoji — Slack reactions are shortcodes ("thumbsup"); dub renders the emoji
-// character directly (apps/fe6-chat/src/components/MessageItem.tsx: `<span>{r.emoji}</span>`),
-// so shortcodes must resolve to a real unicode glyph. Curated map covering the common
-// Slack default reactions; anything unmapped is skipped (never imported as a bare
-// ":shortcode:" string, which would render as literal text in the reaction pill).
+// Reaction emoji — Slack shortcodes -> the unicode glyph fe6-chat renders directly.
+// Shortcodes outside this map (workspace custom emoji, rare glyphs) are imported as the
+// literal ":name:" so the reaction and who reacted are never dropped.
+// ---------------------------------------------------------------------------
+
 export const SLACK_SHORTCODE_TO_EMOJI: Readonly<Record<string, string>> = {
-  thumbsup: "👍",
-  "+1": "👍",
-  thumbsdown: "👎",
-  "-1": "👎",
-  heart: "❤️",
-  heavy_heart_exclamation: "❤️",
-  joy: "😂",
-  smile: "😄",
-  smiley: "😃",
-  grinning: "😀",
-  tada: "🎉",
-  clap: "👏",
-  pray: "🙏",
-  fire: "🔥",
-  eyes: "👀",
-  thinking_face: "🤔",
-  raised_hands: "🙌",
-  ok_hand: "👌",
-  100: "💯",
-  rocket: "🚀",
-  white_check_mark: "✅",
-  heavy_check_mark: "✔️",
-  x: "❌",
-  cry: "😢",
-  sob: "😭",
-  sweat_smile: "😅",
-  wave: "👋",
-  bow: "🙇",
-  muscle: "💪",
-  point_up: "☝️",
-  bulb: "💡",
-  warning: "⚠️",
-  question: "❓",
-  exclamation: "❗",
+  "+1": "👍", thumbsup: "👍", "-1": "👎", thumbsdown: "👎", ok_hand: "👌", clap: "👏",
+  pray: "🙏", raised_hands: "🙌", wave: "👋", muscle: "💪", point_up: "☝️", point_right: "👉",
+  point_left: "👈", point_down: "👇", v: "✌️", handshake: "🤝", writing_hand: "✍️", bow: "🙇",
+  raising_hand: "🙋", ok_woman: "🙆", no_good: "🙅", man_bowing: "🙇‍♂️", woman_bowing: "🙇‍♀️",
+  heart: "❤️", orange_heart: "🧡", yellow_heart: "💛", green_heart: "💚", blue_heart: "💙",
+  purple_heart: "💜", black_heart: "🖤", white_heart: "🤍", sparkling_heart: "💖", two_hearts: "💕",
+  heart_eyes: "😍", smiling_face_with_3_hearts: "🥰", kissing_heart: "😘",
+  smile: "😄", smiley: "😃", grinning: "😀", grin: "😁", laughing: "😆", satisfied: "😆",
+  sweat_smile: "😅", joy: "😂", rolling_on_the_floor_laughing: "🤣", slightly_smiling_face: "🙂",
+  upside_down_face: "🙃", wink: "😉", blush: "😊", innocent: "😇", relaxed: "☺️", yum: "😋",
+  sunglasses: "😎", nerd_face: "🤓", star_struck: "🤩", partying_face: "🥳", smirk: "😏",
+  thinking_face: "🤔", face_with_monocle: "🧐", neutral_face: "😐", expressionless: "😑",
+  no_mouth: "😶", face_with_rolling_eyes: "🙄", grimacing: "😬", relieved: "😌", pensive: "😔",
+  sleepy: "😪", sleeping: "😴", zany_face: "🤪", hugging_face: "🤗", shushing_face: "🤫",
+  hand_over_mouth: "🤭", face_with_hand_over_mouth: "🤭", saluting_face: "🫡", melting_face: "🫠",
+  confused: "😕", worried: "😟", slightly_frowning_face: "🙁", open_mouth: "😮", hushed: "😯",
+  astonished: "😲", flushed: "😳", pleading_face: "🥺", cry: "😢", sob: "😭", scream: "😱",
+  confounded: "😖", persevere: "😣", disappointed: "😞", sweat: "😓", weary: "😩", tired_face: "😫",
+  triumph: "😤", rage: "😡", angry: "😠", exploding_head: "🤯", cold_sweat: "😰", fearful: "😨",
+  skull: "💀", ghost: "👻", robot_face: "🤖", see_no_evil: "🙈", hear_no_evil: "🙉", speak_no_evil: "🙊",
+  eyes: "👀", eye: "👁️", brain: "🧠", fire: "🔥", sparkles: "✨", star: "⭐", star2: "🌟",
+  dizzy: "💫", boom: "💥", zap: "⚡", 100: "💯", tada: "🎉", confetti_ball: "🎊", gift: "🎁",
+  balloon: "🎈", trophy: "🏆", medal: "🏅", first_place_medal: "🥇", crown: "👑", gem: "💎",
+  rocket: "🚀", bulb: "💡", memo: "📝", pencil: "📝", pencil2: "✏️", pushpin: "📌",
+  round_pushpin: "📍", paperclip: "📎", link: "🔗", calendar: "📆", date: "📅", clock: "🕐",
+  hourglass: "⌛", hourglass_flowing_sand: "⏳", alarm_clock: "⏰", bell: "🔔", mega: "📣",
+  loudspeaker: "📢", email: "📧", envelope: "✉️", inbox_tray: "📥", outbox_tray: "📤",
+  package: "📦", computer: "💻", iphone: "📱", camera: "📷", mag: "🔍", lock: "🔒", key: "🔑",
+  hammer_and_wrench: "🛠️", wrench: "🔧", gear: "⚙️", bug: "🐛", chart_with_upwards_trend: "📈",
+  bar_chart: "📊", clipboard: "📋", books: "📚", book: "📖", bookmark: "🔖", label: "🏷️",
+  moneybag: "💰", coffee: "☕", tea: "🍵", beer: "🍺", beers: "🍻", pizza: "🍕", sushi: "🍣",
+  cake: "🍰", birthday: "🎂", rice_ball: "🍙", ramen: "🍜", apple: "🍎", cherry_blossom: "🌸",
+  sunflower: "🌻", seedling: "🌱", four_leaf_clover: "🍀", sunny: "☀️", rainbow: "🌈",
+  umbrella: "☔", snowflake: "❄️", cat: "🐱", dog: "🐶", panda_face: "🐼", bear: "🐻",
+  rabbit: "🐰", tiger: "🐯", penguin: "🐧", turtle: "🐢", snail: "🐌", tada_animated: "🎉",
+  white_check_mark: "✅", heavy_check_mark: "✔️", ballot_box_with_check: "☑️", x: "❌",
+  negative_squared_cross_mark: "❎", heavy_multiplication_x: "✖️", o: "⭕", warning: "⚠️",
+  no_entry: "⛔", no_entry_sign: "🚫", question: "❓", grey_question: "❔", exclamation: "❗",
+  grey_exclamation: "❕", bangbang: "‼️", interrobang: "⁉️", heavy_plus_sign: "➕",
+  heavy_minus_sign: "➖", arrow_right: "➡️", arrow_left: "⬅️", arrow_up: "⬆️", arrow_down: "⬇️",
+  arrows_counterclockwise: "🔄", repeat: "🔁", new: "🆕", ok: "🆗", up: "🆙", cool: "🆒",
+  sos: "🆘", red_circle: "🔴", large_blue_circle: "🔵", large_green_circle: "🟢",
+  large_yellow_circle: "🟡", white_circle: "⚪", black_circle: "⚫", checkered_flag: "🏁",
+  triangular_flag_on_post: "🚩", flag_jp: "🇯🇵", jp: "🇯🇵", japan: "🗾", man_dancing: "🕺",
+  dancer: "💃", running: "🏃", walking: "🚶", zzz: "💤", sweat_drops: "💦", dash: "💨",
+  speech_balloon: "💬", thought_balloon: "💭", koko: "🈁", sa: "🈂️", u5408: "🈴", u7a7a: "🈳",
+  accept: "🉑", ideograph_advantage: "🉐", congratulations: "㊗️", secret: "㊙️",
 };
 
-export function resolveEmoji(slackShortcode: string): string | null {
-  return SLACK_SHORTCODE_TO_EMOJI[slackShortcode] ?? null;
+const SKIN_TONE: Readonly<Record<string, string>> = {
+  "skin-tone-2": "🏻", "skin-tone-3": "🏼", "skin-tone-4": "🏽", "skin-tone-5": "🏾", "skin-tone-6": "🏿",
+};
+
+/** Slack reaction name -> the stored `chat_reactions.emoji` string. Never null. */
+export function resolveEmoji(slackName: string): string {
+  const [base = slackName, tone] = slackName.split("::");
+  const glyph = SLACK_SHORTCODE_TO_EMOJI[base];
+  if (!glyph) return `:${slackName}:`;
+  return tone && SKIN_TONE[tone] ? glyph.replace(/️$/, "") + SKIN_TONE[tone] : glyph;
 }
 
 // ---------------------------------------------------------------------------
-// Row shapes + SQL builders
+// Channel + members
 // ---------------------------------------------------------------------------
 
 export interface ChannelInsertRow {
   id: string;
-  type: "topic";
   visibility: "public" | "private";
   name: string;
   topic: string | null;
   createdBy: string;
   createdAt: string;
+  archivedAt: string | null;
 }
 
-export function buildChannelRow(
-  slack: SlackChannel,
-  ledger: SlackImportLedger,
-  ctx: MappingContext,
-  createdAt: string,
-): ChannelInsertRow {
-  const { id } = mintChannelId(ledger, slack.id);
-  const createdBy = (slack.creator && ctx.slackUserIdToDubUserId.get(slack.creator)) ?? ctx.systemUserId;
+export function buildChannelRow(slack: SlackChannel, ctx: MappingContext, nowIso: string): ChannelInsertRow {
+  const topic = slack.topic?.value?.trim() || slack.purpose?.value?.trim() || null;
   return {
-    id,
-    type: "topic",
+    id: channelIdFor(slack),
     visibility: slack.is_private ? "private" : "public",
     name: slack.name,
-    topic: slack.topic?.value?.trim() ? slack.topic.value.trim() : null,
-    createdBy,
-    createdAt,
+    topic,
+    createdBy: (slack.creator && ctx.slackUserIdToDubUserId.get(slack.creator)) || ctx.systemUserId,
+    createdAt: slack.created ? new Date(slack.created * 1000).toISOString() : nowIso,
+    archivedAt: slack.is_archived ? nowIso : null,
   };
 }
 
@@ -349,100 +361,77 @@ export function buildInsertChannelSql(row: ChannelInsertRow): string {
     "chat_channels",
     ["id", "type", "visibility", "name", "topic", "event_id", "dm_key", "created_by", "archived_at", "version", "created_at", "updated_at"],
     [
-      lit(row.id),
-      lit(row.type),
-      lit(row.visibility),
-      lit(row.name),
-      lit(row.topic),
-      "NULL", // event_id — Slack import has no event association by default
-      "NULL", // dm_key — DMs are out of scope for this importer
-      lit(row.createdBy),
-      "NULL", // archived_at
-      "1", // version
-      lit(row.createdAt),
-      lit(row.createdAt),
+      lit(row.id), lit("topic"), lit(row.visibility), lit(row.name), lit(row.topic), "NULL", "NULL",
+      lit(row.createdBy), lit(row.archivedAt), "1", lit(row.createdAt), lit(row.createdAt),
     ],
   );
 }
+
+export function buildInsertMemberSql(channelId: string, userId: string, role: "admin" | "member", joinedAt: string): string {
+  return insertOrIgnore(
+    "chat_channel_members",
+    ["channel_id", "user_id", "role", "joined_at"],
+    [lit(channelId), lit(userId), lit(role), lit(joinedAt)],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
 
 export interface MessageInsertRow {
   id: string;
   channelId: string;
   threadRootId: string | null;
   authorId: string | null;
+  kind: "user" | "system";
   body: string;
   attachmentFileIds: string[];
+  editedAt: string | null;
   createdAt: string;
 }
 
+const SYSTEM_SUBTYPES: Readonly<Record<string, string>> = {
+  channel_join: "がチャンネルに参加しました",
+  channel_leave: "がチャンネルから退出しました",
+};
+
 export interface BuildMessageOptions {
   slack: SlackMessage;
-  dubChannelId: string;
   slackChannelId: string;
-  ledger: SlackImportLedger;
+  dubChannelId: string;
   ctx: MappingContext;
-  /** dub file_meta id for each of slack.files, in order (already registered via
-   *  buildFileMetaRow by the caller — see slackImportRun.ts). */
   attachmentFileIds?: string[];
-  /** Resolved via resolveThreadRootId — requires every message's id (root + replies) to
-   *  already be minted in the ledger before this is called (2-pass; see
-   *  slackImportRun.ts). null for a top-level message or an orphaned reply. */
-  threadRootId?: string | null;
 }
 
-/** Map one Slack message to a dub MessageInsertRow. */
 export function buildMessageRow(opts: BuildMessageOptions): MessageInsertRow {
-  const { slack, dubChannelId, slackChannelId, ledger, ctx } = opts;
-  const { id } = mintMessageId(ledger, slackChannelId, slack.ts);
-  const createdAt = new Date(slackTsToMs(slack.ts)).toISOString();
+  const { slack, slackChannelId, dubChannelId, ctx } = opts;
+  const key = authorKeyOf(slack);
+  const authorId = (key && ctx.slackUserIdToDubUserId.get(key)) || null;
+  const isReply = !!slack.thread_ts && slack.thread_ts !== slack.ts;
 
-  let authorId: string | null = null;
-  let body = convertSlackBodyToDubBody(slack.text ?? "", ctx);
-  if (slack.user) {
-    const mapped = ctx.slackUserIdToDubUserId.get(slack.user);
-    if (mapped) {
-      authorId = mapped;
-    } else {
-      const policy = ctx.unmappedUserPolicy ?? DEFAULT_UNMAPPED_POLICY;
-      const name = ctx.slackUserIdToDisplayName.get(slack.user) ?? slack.user;
-      if (policy === "embed-name") {
-        body = `[Slack: ${name}] ${body}`;
-      }
-      // "skip-message" is handled by the caller BEFORE calling buildMessageRow (see
-      // shouldSkipMessage below) — this function always returns a row when called.
-    }
+  const systemSuffix = slack.subtype ? SYSTEM_SUBTYPES[slack.subtype] : undefined;
+  let kind: "user" | "system" = "user";
+  let body: string;
+  if (systemSuffix) {
+    kind = "system";
+    body = `${(key && ctx.slackUserIdToDisplayName.get(key)) || "メンバー"} ${systemSuffix}`;
+  } else {
+    const lines = [convertSlackBodyToDubBody(slack.text ?? "", ctx), ...legacyAttachmentLines(slack.attachments, ctx)];
+    body = lines.filter((l) => l.length > 0).join("\n");
   }
 
   return {
-    id,
+    id: messageIdFor(slackChannelId, slack.ts),
     channelId: dubChannelId,
-    threadRootId: opts.threadRootId ?? null,
-    authorId,
+    threadRootId: isReply ? messageIdFor(slackChannelId, slack.thread_ts!) : null,
+    authorId: kind === "system" ? null : authorId,
+    kind,
     body,
     attachmentFileIds: opts.attachmentFileIds ?? [],
-    createdAt,
+    editedAt: slack.edited?.ts ? new Date(slackTsToMs(slack.edited.ts)).toISOString() : null,
+    createdAt: new Date(slackTsToMs(slack.ts)).toISOString(),
   };
-}
-
-/** Whether buildMessageRow's row should actually be inserted, per unmappedUserPolicy. */
-export function shouldSkipMessage(slack: SlackMessage, ctx: MappingContext): boolean {
-  if (!slack.user) return false; // no author at all (system/bot) — never skipped on this basis
-  if (ctx.slackUserIdToDubUserId.has(slack.user)) return false;
-  return (ctx.unmappedUserPolicy ?? DEFAULT_UNMAPPED_POLICY) === "skip-message";
-}
-
-/**
- * Resolve one message's thread_root_id. A message is a thread root iff thread_ts is
- * absent or equals its own ts; it is a reply iff thread_ts is present and differs from
- * ts, in which case the root's dub id is looked up from the ledger. Requires the root's
- * id to already be minted (2-pass: callers mint every message's id — root AND replies —
- * before building any row; see runSlackImport's pass 1 in slackImportRun.ts). Returns
- * null (silently) if the root was never minted, e.g. a thread whose root fell outside
- * the fetched history window — the reply still imports, just without a thread anchor.
- */
-export function resolveThreadRootId(slack: SlackMessage, slackChannelId: string, ledger: SlackImportLedger): string | null {
-  if (!slack.thread_ts || slack.thread_ts === slack.ts) return null;
-  return ledger.getMessage(slackChannelId, slack.thread_ts) ?? null;
 }
 
 export function buildInsertMessageSql(row: MessageInsertRow): string {
@@ -450,20 +439,15 @@ export function buildInsertMessageSql(row: MessageInsertRow): string {
     "chat_messages",
     ["id", "channel_id", "thread_root_id", "author_id", "kind", "body", "attachment_file_ids", "version", "edited_at", "deleted_at", "created_at"],
     [
-      lit(row.id),
-      lit(row.channelId),
-      lit(row.threadRootId),
-      lit(row.authorId),
-      lit("user"),
-      lit(row.body),
-      lit(JSON.stringify(row.attachmentFileIds)),
-      "1",
-      "NULL",
-      "NULL",
-      lit(row.createdAt),
+      lit(row.id), lit(row.channelId), lit(row.threadRootId), lit(row.authorId), lit(row.kind), lit(row.body),
+      lit(JSON.stringify(row.attachmentFileIds)), "1", lit(row.editedAt), "NULL", lit(row.createdAt),
     ],
   );
 }
+
+// ---------------------------------------------------------------------------
+// Reactions + pins
+// ---------------------------------------------------------------------------
 
 export interface ReactionInsertRow {
   messageId: string;
@@ -472,35 +456,17 @@ export interface ReactionInsertRow {
   createdAt: string;
 }
 
-export interface ReactionBuildResult {
-  rows: ReactionInsertRow[];
-  skippedUnmappedEmoji: number;
-  skippedUnmappedUser: number;
-}
-
-/** Slack does not expose per-user reaction timestamps — every reaction on a message is
- *  stamped with the message's own createdAt (best available approximation; ordering
- *  among reactions on the same message is not otherwise observable from the API). */
-export function buildReactionRows(slack: SlackMessage, dubMessageId: string, messageCreatedAt: string, ctx: MappingContext): ReactionBuildResult {
+/** Slack exposes no per-user reaction time, so each reaction carries the message's time. */
+export function buildReactionRows(slack: SlackMessage, dubMessageId: string, messageCreatedAt: string, ctx: MappingContext): ReactionInsertRow[] {
   const rows: ReactionInsertRow[] = [];
-  let skippedUnmappedEmoji = 0;
-  let skippedUnmappedUser = 0;
   for (const r of slack.reactions ?? []) {
     const emoji = resolveEmoji(r.name);
-    if (!emoji) {
-      skippedUnmappedEmoji += r.users.length; // unmapped shortcode (see SLACK_SHORTCODE_TO_EMOJI)
-      continue;
-    }
     for (const slackUserId of r.users) {
       const userId = ctx.slackUserIdToDubUserId.get(slackUserId);
-      if (!userId) {
-        skippedUnmappedUser += 1; // unmapped reactor — dropped (no author_id-less reactions in schema)
-        continue;
-      }
-      rows.push({ messageId: dubMessageId, emoji, userId, createdAt: messageCreatedAt });
+      if (userId) rows.push({ messageId: dubMessageId, emoji, userId, createdAt: messageCreatedAt });
     }
   }
-  return { rows, skippedUnmappedEmoji, skippedUnmappedUser };
+  return rows;
 }
 
 export function buildInsertReactionSql(row: ReactionInsertRow): string {
@@ -511,9 +477,59 @@ export function buildInsertReactionSql(row: ReactionInsertRow): string {
   );
 }
 
+export function buildInsertPinSql(channelId: string, messageId: string, pinnedBy: string, pinnedAt: string): string {
+  return insertOrIgnore("chat_pins", ["channel_id", "message_id", "pinned_by", "pinned_at"], [lit(channelId), lit(messageId), lit(pinnedBy), lit(pinnedAt)]);
+}
+
+// ---------------------------------------------------------------------------
+// Bookmarks — dub has no bookmark bar, so a channel's Slack bookmarks become ONE pinned
+// system message listing them (Slack's closest analogue in fe6-chat: the pins panel).
+// Upserted on re-run so added/removed bookmarks are reflected.
+// ---------------------------------------------------------------------------
+
+/** Anchored at the channel's creation time so it sits at the very start of the history. */
+export function bookmarkMessageIdFor(channel: SlackChannel): string {
+  return slackId("msg", (channel.created ?? 0) * 1000, `${channel.id}:bookmarks`);
+}
+
+export function buildBookmarkBody(bookmarks: readonly SlackBookmark[]): string | null {
+  const lines = bookmarks
+    .filter((b) => b.link)
+    .map((b) => `- ${b.emoji ? `${resolveEmoji(b.emoji.replace(/:/g, ""))} ` : ""}[${b.title || b.link}](${b.link})`);
+  if (lines.length === 0) return null;
+  return ["*Slack のブックマーク*", ...lines].join("\n");
+}
+
+export function buildUpsertBookmarkSqls(channel: SlackChannel, dubChannelId: string, body: string, pinnedBy: string, nowIso: string): string[] {
+  const id = bookmarkMessageIdFor(channel);
+  const createdAt = channel.created ? new Date(channel.created * 1000).toISOString() : nowIso;
+  return [
+    `INSERT INTO chat_messages (id, channel_id, thread_root_id, author_id, kind, body, attachment_file_ids, version, edited_at, deleted_at, created_at)\n` +
+      `VALUES (${lit(id)}, ${lit(dubChannelId)}, NULL, NULL, 'system', ${lit(body)}, '[]', 1, NULL, NULL, ${lit(createdAt)})\n` +
+      `ON CONFLICT(id) DO UPDATE SET body = excluded.body WHERE chat_messages.body <> excluded.body;`,
+    buildInsertPinSql(dubChannelId, id, pinnedBy, nowIso),
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Attachments — file_meta_files (source=r2) + file_meta_links (target_type='message')
 // ---------------------------------------------------------------------------
+
+export const R2_ATTACHMENT_BUCKET = "dub-file-attachments";
+
+/** Files Slack will not serve (deleted, or beyond the free plan's visible window). */
+export function isDownloadable(file: SlackFile): boolean {
+  return !!file.url_private && file.mode !== "tombstone" && file.mode !== "hidden_by_limit";
+}
+
+export function fileNameOf(file: SlackFile): string {
+  return file.name || file.title || file.id;
+}
+
+/** Deterministic R2 key — stable across re-runs, so a repeat --apply overwrites in place. */
+export function r2KeyForSlackFile(slackChannelId: string, ts: string, file: SlackFile): string {
+  return `slack-import/${slackChannelId}/${ts}/${file.id}-${fileNameOf(file)}`;
+}
 
 export interface FileMetaInsertRow {
   id: string;
@@ -525,38 +541,15 @@ export interface FileMetaInsertRow {
   createdAt: string;
 }
 
-export interface FileLinkInsertRow {
-  fileId: string;
-  targetId: string; // dub message id
-  linkedBy: string;
-  linkedAt: string;
-}
-
-export const R2_ATTACHMENT_BUCKET = "dub-file-attachments";
-
-/** Deterministic R2 key for a Slack file — stable across re-runs (keyed by Slack ids,
- *  not the minted dub file id) so a repeat --apply never re-uploads under a new key. */
-export function r2KeyForSlackFile(slackChannelId: string, ts: string, file: SlackFile): string {
-  return `slack-import/${slackChannelId}/${ts}/${file.id}-${file.name}`;
-}
-
-export function buildFileMetaRow(
-  file: SlackFile,
-  slackChannelId: string,
-  ts: string,
-  uploaderId: string,
-  ledger: SlackImportLedger,
-  createdAt: string,
-): FileMetaInsertRow {
-  const { id } = mintFileId(ledger, file.id, slackTsToMs(ts));
+export function buildFileMetaRow(file: SlackFile, slackChannelId: string, ts: string, ownerId: string): FileMetaInsertRow {
   return {
-    id,
-    name: file.name,
+    id: fileIdFor(file.id, ts),
+    name: fileNameOf(file),
     mimeType: file.mimetype ?? "application/octet-stream",
     sizeBytes: file.size ?? 0,
-    ownerId: uploaderId,
+    ownerId,
     r2Key: r2KeyForSlackFile(slackChannelId, ts, file),
-    createdAt,
+    createdAt: new Date(slackTsToMs(ts)).toISOString(),
   };
 }
 
@@ -565,75 +558,49 @@ export function buildInsertFileMetaSql(row: FileMetaInsertRow): string {
     "file_meta_files",
     ["id", "name", "mime_type", "size_bytes", "owner_id", "visibility", "drive_file_id", "r2_key", "archived_at", "created_by", "created_at", "updated_at"],
     [
-      lit(row.id),
-      lit(row.name),
-      lit(row.mimeType),
-      String(row.sizeBytes),
-      lit(row.ownerId),
-      lit("org"),
-      "NULL",
-      lit(row.r2Key),
-      "NULL",
-      lit(row.ownerId),
-      lit(row.createdAt),
-      lit(row.createdAt),
+      lit(row.id), lit(row.name), lit(row.mimeType), String(row.sizeBytes), lit(row.ownerId), lit("org"), "NULL",
+      lit(row.r2Key), "NULL", lit(row.ownerId), lit(row.createdAt), lit(row.createdAt),
     ],
   );
 }
 
-export function buildFileLinkRow(fileId: string, dubMessageId: string, linkedBy: string, linkedAt: string): FileLinkInsertRow {
-  return { fileId, targetId: dubMessageId, linkedBy, linkedAt };
-}
-
-export function buildInsertFileLinkSql(row: FileLinkInsertRow): string {
+export function buildInsertFileLinkSql(fileId: string, dubMessageId: string, linkedBy: string, linkedAt: string): string {
   return insertOrIgnore(
     "file_meta_links",
     ["file_id", "target_type", "target_id", "linked_by", "linked_at", "archived_at"],
-    [lit(row.fileId), lit("message"), lit(row.targetId), lit(row.linkedBy), lit(row.linkedAt), "NULL"],
+    [lit(fileId), lit("message"), lit(dubMessageId), lit(linkedBy), lit(linkedAt), "NULL"],
   );
 }
 
 // ---------------------------------------------------------------------------
-// Batching + size estimate (D1 free-tier write-limit friendliness + preview counts)
+// Summary + batching
 // ---------------------------------------------------------------------------
 
 export interface ImportSummary {
   channels: number;
+  members: number;
+  placeholderUsers: number;
   messages: number;
-  /** Messages whose Slack author has no Dub identity mapping. NOT necessarily skipped —
-   *  under the default "embed-name" policy these are still imported (see
-   *  UnmappedUserPolicy); only "skip-message" actually drops them. */
-  messagesSkippedUnmappedAuthor: number;
+  threadReplies: number;
   reactions: number;
-  reactionsSkippedUnmappedEmoji: number;
-  reactionsSkippedUnmappedUser: number;
+  customEmojiReactions: number; // stored as literal ":name:" (no unicode glyph)
+  pins: number;
+  bookmarks: number;
   attachments: number;
-  alreadyImportedMessages: number; // ledger hits — not re-emitted
+  attachmentsUnavailable: number; // deleted / hidden by the free plan limit
   estimatedStatements: number;
 }
 
 export function emptySummary(): ImportSummary {
   return {
-    channels: 0,
-    messages: 0,
-    messagesSkippedUnmappedAuthor: 0,
-    reactions: 0,
-    reactionsSkippedUnmappedEmoji: 0,
-    reactionsSkippedUnmappedUser: 0,
-    attachments: 0,
-    alreadyImportedMessages: 0,
-    estimatedStatements: 0,
+    channels: 0, members: 0, placeholderUsers: 0, messages: 0, threadReplies: 0, reactions: 0,
+    customEmojiReactions: 0, pins: 0, bookmarks: 0, attachments: 0, attachmentsUnavailable: 0, estimatedStatements: 0,
   };
 }
 
-/** Split a flat list of SQL statements into batches of at most `maxPerBatch` statements
- *  each, so a single `wrangler d1 execute --file` call stays comfortably under D1's
- *  free-tier per-request row/statement limits and any CI/network timeout. */
+/** Split statements into batches so one `wrangler d1 execute --file` stays small. */
 export function batchStatements(statements: readonly string[], maxPerBatch = 200): string[][] {
-  if (statements.length === 0) return [];
   const out: string[][] = [];
-  for (let i = 0; i < statements.length; i += maxPerBatch) {
-    out.push(statements.slice(i, i + maxPerBatch));
-  }
+  for (let i = 0; i < statements.length; i += maxPerBatch) out.push(statements.slice(i, i + maxPerBatch));
   return out;
 }

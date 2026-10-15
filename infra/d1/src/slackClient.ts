@@ -10,8 +10,10 @@
 //   users:read            users.list
 //   users:read.email      users.list profile.email (needed for the identity_users join)
 //   files:read            file metadata + url_private download
-// The bot must be INVITED to every private (group) channel in scope before groups:history
-// returns anything for it — Slack does not expose private-channel history otherwise.
+//   bookmarks:read        bookmarks.list
+//   channels:join         conversations.join (bot joins a public channel by itself)
+// The bot must be INVITED to every private channel in scope — Slack does not expose
+// private-channel history otherwise. Public channels are joined automatically.
 
 export type FetchImpl = typeof fetch;
 
@@ -129,6 +131,32 @@ export function createSlackClient(opts: SlackClientOptions) {
         cursor = page.response_metadata?.next_cursor || undefined;
       } while (cursor);
       return out;
+    },
+
+    /** Slack user ids currently in the channel. */
+    async membersOfChannel(channelId: string): Promise<string[]> {
+      const out: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await call<{ members: string[]; response_metadata?: { next_cursor?: string } }>("conversations.members", {
+          channel: channelId,
+          limit: 200,
+          cursor,
+        });
+        out.push(...page.members);
+        cursor = page.response_metadata?.next_cursor || undefined;
+      } while (cursor);
+      return out;
+    },
+
+    async bookmarksForChannel(channelId: string): Promise<import("./slackImport").SlackBookmark[]> {
+      const res = await call<{ bookmarks?: import("./slackImport").SlackBookmark[] }>("bookmarks.list", { channel_id: channelId });
+      return res.bookmarks ?? [];
+    },
+
+    /** Join a public channel (no-op if already a member). Private channels need an invite. */
+    async joinChannel(channelId: string): Promise<void> {
+      await call("conversations.join", { channel: channelId });
     },
 
     /** Download a file's body (url_private requires the same bot token as a Bearer
