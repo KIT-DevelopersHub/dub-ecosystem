@@ -14,6 +14,7 @@ import type {
   ProposalSettingsRow,
   PublishRow,
   TicketOrderRow,
+  TicketCouponRow,
   TicketSettingsRow,
   TicketTypeAgg,
   TicketTypeRow,
@@ -29,6 +30,7 @@ export class InMemoryLpRepo implements LpRepo {
   ticketSettings = new Map<string, TicketSettingsRow>();
   ticketTypes: TicketTypeRow[] = [];
   orders: TicketOrderRow[] = [];
+  coupons: TicketCouponRow[] = [];
   proposalSettings = new Map<string, ProposalSettingsRow>();
   proposals: ProposalRow[] = [];
 
@@ -100,9 +102,56 @@ export class InMemoryLpRepo implements LpRepo {
       const capacity = capacities.get(i.ticketTypeId) ?? null;
       return capacity !== null && this.held(row.site, i.ticketTypeId, pendingSince) + i.quantity > capacity;
     });
-    if (short) return { ok: false as const, ticketTypeId: short.ticketTypeId };
+    if (row.couponId !== null) {
+      const c = this.coupons.find((x) => x.site === row.site && x.id === row.couponId);
+      const fits =
+        c !== undefined &&
+        c.active &&
+        (c.expiresAt === null || c.expiresAt > row.createdAt) &&
+        this.usedBy(c.id, pendingSince) + row.quantity <= c.maxUses;
+      if (!fits) return { ok: false as const, reason: "coupon_used_up" as const };
+    }
+    if (short) return { ok: false as const, reason: "sold_out" as const, ticketTypeId: short.ticketTypeId };
     this.orders.push(clone(row));
     return { ok: true as const };
+  }
+  private usedBy(couponId: string, pendingSince: string): number {
+    return this.orders
+      .filter((o) => o.couponId === couponId && this.isHeld(o, pendingSince))
+      .reduce((n, o) => n + o.quantity, 0);
+  }
+  async insertCoupon(row: TicketCouponRow) {
+    if (this.coupons.some((x) => x.site === row.site && x.code === row.code)) return false;
+    this.coupons.push(clone(row));
+    return true;
+  }
+  async getCoupon(site: string, id: string) {
+    const c = this.coupons.find((x) => x.site === site && x.id === id);
+    return c ? clone(c) : null;
+  }
+  async getCouponByCode(site: string, code: string) {
+    const c = this.coupons.find((x) => x.site === site && x.code === code);
+    return c ? clone(c) : null;
+  }
+  async setCouponActive(site: string, id: string, active: boolean, updatedAt: string) {
+    const c = this.coupons.find((x) => x.site === site && x.id === id);
+    if (!c) return false;
+    Object.assign(c, { active, updatedAt });
+    return true;
+  }
+  async listCoupons(site: string) {
+    return this.coupons
+      .filter((c) => c.site === site)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.id < b.id ? 1 : -1))
+      .map(clone);
+  }
+  async couponUses(site: string, pendingSince: string) {
+    const m = new Map<string, number>();
+    for (const c of this.coupons.filter((x) => x.site === site)) {
+      const n = this.usedBy(c.id, pendingSince);
+      if (n > 0) m.set(c.id, n);
+    }
+    return m;
   }
   async getOrder(site: string, id: string) {
     const o = this.orders.find((x) => x.site === site && x.id === id);

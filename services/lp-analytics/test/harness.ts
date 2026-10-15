@@ -73,6 +73,7 @@ export async function makeApp(
     siteTraffic,
     newTicketTypeId: () => id("tkt"),
     newOrderId: () => id("tko"),
+    newCouponId: () => id("tkc"),
     dailyCheckoutCap: 300,
     stripe: null,
     stripeWebhookSecret: null,
