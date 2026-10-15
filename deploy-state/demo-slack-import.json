@@ -3,12 +3,15 @@
   "slug": "slack-import",
   "worker": "dub-demo-slack-import",
   "url": "https://dub-demo-slack-import.developershub-site.workers.dev",
-  "deployedSha": "645dc882",
-  "branch": "HEAD",
+  "deployedSha": "a2080024",
+  "branch": "feat/slack-history-importer",
   "actor": "ko-tarou",
-  "markers": ["slack-import-v1"],
+  "markers": [
+    "chat:slack_import",
+    "Slack から取り込み"
+  ],
   "live": true,
-  "verifiedAt": "2026-10-15T05:15:28Z",
-  "updatedAt": "2026-10-15T05:15:28Z",
-  "note": "fe6 チャンネル取り込み (Slack) frontend+mock; branch feat/slack-history-importer 476c68d9 + origin/main"
+  "verifiedAt": "2026-10-15T05:30:24Z",
+  "updatedAt": "2026-10-15T05:30:24Z",
+  "note": "fe6 チャンネル取り込み (Slack) + ロール管理 チャット 詳細権限 chat:slack_import (admin のみ既定ON)"
 }

@@ -51,7 +51,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab }: ChatAppPr
   const [createOpen, setCreateOpen] = useState(false);
   const [newDmOpen, setNewDmOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  // Same keys chat-service's POLICY_TABLE requires for /chat/slack-import/* (admin/maintainer).
+  // Same keys chat-service's POLICY_TABLE requires for /chat/slack-import/* (admin only by default).
   const canImport = can("app:chat:edit") && can("chat:slack_import");
   // DM peers' display names (a DM is labelled by "the other side").
   const [dmUsers, setDmUsers] = useState<Record<common.UserId, identity.UserSummary>>({});
