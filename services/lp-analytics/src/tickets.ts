@@ -50,6 +50,14 @@ export const CHECKBOX_YES = "はい";
 export const BUYER_NAME_MAX = 100;
 export const BUYER_EMAIL_MAX = 254;
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Hashed sender IP from the public LP Worker (clientKeyFor). Anything else is treated as absent. */
+export const CLIENT_KEY_RE = /^[a-f0-9]{16,64}$/;
+/**
+ * Unpaid seats one sender may hold at once (pending orders inside the hold window). Stops one source
+ * from locking a type's capacity with abandoned checkouts; real buyers pay within minutes, and a shared
+ * campus IP still fits 20 tickets in flight at the same moment.
+ */
+export const PER_CLIENT_HELD_MAX = 20;
 const ANSWER_MAX: Record<LpTicketFieldType, number> = { text: 200, textarea: 2000, select: FIELD_OPTION_MAX, checkbox: 10 };
 
 /** Stripe session lifetime. Stripe requires >= 30 min, so a minute of headroom for clock/network skew. */
@@ -65,7 +73,7 @@ const SESSION_EVENTS: ReadonlySet<string> = new Set([
   "checkout.session.expired",
 ]);
 const RELEASE_EVENTS: ReadonlySet<string> = new Set(["checkout.session.expired", "checkout.session.async_payment_failed"]);
-const CHARGE_EVENTS: ReadonlySet<string> = new Set(["charge.refunded", "charge.dispute.created"]);
+const CHARGE_EVENTS: ReadonlySet<string> = new Set(["charge.refunded", "charge.dispute.created", "charge.dispute.closed"]);
 
 /** Reconcile window: younger sessions are still in flight; older ones are long settled at Stripe. */
 export const RECONCILE_MIN_AGE_MS = 5 * 60 * 1000;
@@ -84,6 +92,8 @@ export interface ReconcileSummary {
   errors: number;
   /** Session-less pending past the hold (Stripe create never finished). */
   sessionlessExpired: number;
+  /** Pre-0005 paid orders that got their payment_intent_id (so refunds / disputes match them). */
+  paymentIntentBackfilled: number;
 }
 
 function log(level: LogLevel, message: string, fields: Record<string, unknown>): void {
@@ -196,6 +206,8 @@ export interface CheckoutInput {
   email: string;
   answers: LpTicketAnswer[];
   origin: string;
+  /** null when absent / malformed (local dev): only the per-sender hold cap is skipped. */
+  clientKey: string | null;
 }
 
 /** Validates the public form against the configured fields. Answers keep a label snapshot. */
@@ -233,7 +245,8 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
 
   const answers = parseAnswers(b.answers, fields, bad);
   if (bad.length > 0) throw errors.validationFailed(bad);
-  return { items, name, email, answers, origin };
+  const clientKey = typeof b.clientKey === "string" && CLIENT_KEY_RE.test(b.clientKey) ? b.clientKey : null;
+  return { items, name, email, answers, origin, clientKey };
 }
 
 /** Answers to the configured custom fields (label snapshot kept). Problems go to `bad`. */
@@ -282,7 +295,9 @@ const toOrder = ({
   stripeSessionId: _ss,
   paymentIntentId: _pi,
   refundedAt: _ra,
-  reviewReason: _rr,
+  resolvedBy: _rb,
+  resolvedAt: _rt,
+  clientKey: _ck,
   ...o
 }: TicketOrderRow): LpTicketOrder => o;
 
@@ -481,12 +496,20 @@ export class TicketService {
     if ((await this.repo.countOrdersSince(TICKET_SITE, jstDayStartIso(now))) >= this.deps.dailyCheckoutCap) {
       throw errors.rateLimited(60);
     }
+    const quantity = items.reduce((n, i) => n + i.quantity, 0);
+    if (
+      !free &&
+      input.clientKey &&
+      (await this.repo.heldPendingByClient(TICKET_SITE, input.clientKey, this.pendingSince())) + quantity > PER_CLIENT_HELD_MAX
+    ) {
+      throw errors.rateLimited(60);
+    }
 
     const row: TicketOrderRow = {
       id: this.deps.newOrderId(),
       site: TICKET_SITE,
       items,
-      quantity: items.reduce((n, i) => n + i.quantity, 0),
+      quantity,
       amountJpy,
       status: free ? "paid" : "pending",
       buyerName: input.name,
@@ -498,6 +521,9 @@ export class TicketService {
       paymentIntentId: null,
       refundedAt: null,
       reviewReason: null,
+      resolvedBy: null,
+      resolvedAt: null,
+      clientKey: input.clientKey,
     };
     const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
     const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
@@ -526,8 +552,40 @@ export class TicketService {
       await this.repo.markOrderExpired(row.id);
       throw e;
     }
+    // The buyer only gets the payment URL once the session is stored: if this write throws, nobody
+    // can pay this session, so there is no "money taken, order unknown" state to reconcile.
     await this.repo.setOrderSession(row.id, session.id);
+    await this.armReconcile();
     return { redirectUrl: session.url };
+  }
+
+  /** Best effort: a failure to arm must never fail a checkout (the next paid checkout retries). */
+  private async armReconcile(): Promise<void> {
+    if (!this.deps.armReconcile) return;
+    try {
+      await this.deps.armReconcile();
+    } catch (e) {
+      log("error", "lp ticket reconcile alarm could not be armed", { error: String(e) });
+    }
+  }
+
+  /**
+   * LP管理: a human resolves needs_review as paid (after checking the money in the Stripe dashboard).
+   * The only other way out is a refund in Stripe (webhook -> refunded): there is deliberately no
+   * "cancel" here, since that would keep the money with no ticket.
+   */
+  async approve(ctx: ReqCtx, id: string): Promise<LpTicketOrder> {
+    const order = await this.repo.getOrder(TICKET_SITE, id);
+    if (!order) throw errors.notFound("lp_ticket_order", id);
+    // An open dispute is decided by Stripe (dispute.closed settles it automatically), not by us.
+    if (order.status === "needs_review" && order.reviewReason === "dispute") {
+      throw errors.conflict("チャージバックの審理中です。結果は Stripe から自動で反映されます", { reason: "dispute_open" });
+    }
+    if (!(await this.repo.approveOrder(id, ctx.userId, this.deps.now()))) {
+      throw errors.conflict("この注文は要確認ではありません", { reason: "not_needs_review", status: order.status });
+    }
+    log("warn", "lp ticket needs_review approved", { orderId: id, by: ctx.userId, reviewReason: order.reviewReason });
+    return toOrder((await this.repo.getOrder(TICKET_SITE, id))!);
   }
 
   /** thanks page: by Stripe session (paid) or order id (free). Idempotent. */
@@ -551,19 +609,6 @@ export class TicketService {
       }
     }
     return { status: order.status, summary: orderSummary(order.items) };
-  }
-
-  /** True when settling `order` now would push one of its types over capacity (its own seat already lapsed). */
-  private async overCapacity(order: TicketOrderRow): Promise<boolean> {
-    const [types, aggs] = await Promise.all([
-      this.repo.listTicketTypes(TICKET_SITE),
-      this.repo.ticketAggregates(TICKET_SITE, this.pendingSince()),
-    ]);
-    return order.items.some((i) => {
-      const cap = types.find((t) => t.id === i.ticketTypeId)?.capacity ?? null;
-      const a = aggs.find((x) => x.ticketTypeId === i.ticketTypeId);
-      return cap !== null && (a?.sold ?? 0) + (a?.pending ?? 0) + i.quantity > cap;
-    });
   }
 
   /**
@@ -601,15 +646,14 @@ export class TicketService {
         return "needs_review";
       }
       const late = order.status === "expired" || order.createdAt < this.pendingSince();
-      const oversold = late && (await this.overCapacity(order));
-      const changed = await this.repo.markOrderPaid(order.id, {
+      const result = await this.repo.markOrderPaid(order.id, {
         paidAt: this.deps.now(),
         sessionId: s.id || null,
         paymentIntentId: s.paymentIntentId,
-        ...(oversold ? { reviewReason: "oversold" } : {}),
+        ...(late ? { capacitySince: this.pendingSince() } : {}),
       });
-      if (!changed) return "unchanged";
-      if (oversold) {
+      if (!result) return "unchanged";
+      if (result === "needs_review") {
         log("error", "lp ticket paid after hold lapsed and over capacity", { ...ctx, reason: "oversold" });
         return "needs_review";
       }
@@ -636,6 +680,7 @@ export class TicketService {
       ignored: 0,
       errors: 0,
       sessionlessExpired: await this.repo.expireSessionlessPending(TICKET_SITE, this.pendingSince()),
+      paymentIntentBackfilled: 0,
     };
     const stripe = this.deps.stripe;
     if (stripe) {
@@ -663,12 +708,29 @@ export class TicketService {
           log("error", "lp ticket reconcile failed for order", { orderId: order.id, error: String(e) });
         }
       }
+      // Orders paid before 0005 have no payment_intent_id: without it a refund / dispute webhook
+      // cannot find them. Bounded per run; only sessions of the key's mode (cs_live_ / cs_test_) so
+      // rows Stripe would 404 never clog the batch. The list empties once every order is filled.
+      for (const order of await this.repo.listMissingPaymentIntent(TICKET_SITE, stripe.livemode, RECONCILE_LIMIT)) {
+        try {
+          const s = await stripe.getCheckoutSession(order.stripeSessionId!);
+          if (s.livemode !== stripe.livemode || !s.paymentIntentId) continue;
+          await this.repo.setOrderPaymentIntent(order.id, s.paymentIntentId);
+          sum.paymentIntentBackfilled++;
+        } catch (e) {
+          sum.errors++;
+          log("error", "lp ticket payment_intent backfill failed", { orderId: order.id, error: String(e) });
+        }
+      }
     }
     log(sum.errors > 0 || sum.needsReview > 0 ? "warn" : "info", "lp ticket reconcile finished", { ...sum });
     return sum;
   }
 
-  /** charge.refunded (full only) -> refunded; charge.dispute.created -> needs_review. Matched by payment_intent. */
+  /**
+   * Matched by payment_intent. charge.refunded (full only) -> refunded; charge.dispute.created -> needs_review;
+   * charge.dispute.closed: lost -> refunded (the money went back to the buyer), won / warning_closed -> paid again.
+   */
   private async applyCharge(type: string, obj: Record<string, unknown>): Promise<void> {
     const pi = stripeId(obj.payment_intent);
     const order = pi ? await this.repo.getOrderByPaymentIntent(pi) : null;
@@ -679,6 +741,14 @@ export class TicketService {
     if (type === "charge.dispute.created") {
       await this.repo.markOrderNeedsReview(order.id, "dispute");
       log("error", "lp ticket payment disputed", { orderId: order.id, paymentIntent: pi });
+      return;
+    }
+    if (type === "charge.dispute.closed") {
+      const status = typeof obj.status === "string" ? obj.status : "";
+      if (status === "lost") await this.repo.markOrderRefunded(order.id, this.deps.now());
+      // warning_closed = an inquiry that never became a chargeback: the money stayed with us.
+      else if (status === "won" || status === "warning_closed") await this.repo.approveOrder(order.id, "stripe", this.deps.now(), "dispute");
+      log("warn", "lp ticket dispute closed", { orderId: order.id, paymentIntent: pi, status });
       return;
     }
     const amount = typeof obj.amount === "number" ? obj.amount : null;
@@ -710,6 +780,9 @@ export class TicketService {
       log("warn", "lp ticket webhook ignored: livemode mismatch", { eventId: event.id, type, livemode: event.livemode });
       return { received: true };
     }
+    // Any verified event also (re)arms the free-plan reconcile loop, so refunds / disputes on old
+    // orders get their payment_intent backfilled even before the next paid checkout.
+    await this.armReconcile();
     const obj = (event.data?.object ?? {}) as Record<string, unknown>;
     if (CHARGE_EVENTS.has(type)) {
       await this.applyCharge(type, obj);

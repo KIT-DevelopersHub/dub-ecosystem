@@ -36,7 +36,20 @@ LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
 #   npx wrangler secret put STRIPE_WEBHOOK_SECRET   (whsec_... 公開 LP の /tickets/stripe-webhook 用)
 # migration: npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0003_tickets.sql
 #            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0005_ticket_payment_safety.sql
-# NOTE: no [triggers] here. The account is at the Workers FREE plan's 5/5 cron cap, so adding
-# the reconcile cron (wrangler.toml) would make CF reject this deploy. Until a slot / DO alarm is
-# decided, the scheduled() reconcile does not run on free tier; the webhook + thanks-page confirm settle.
+#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0006_ticket_review_and_client.sql
+#   ORDER: apply 0005 / 0006 BEFORE deploying code that uses them (checkout INSERTs client_key; without
+#   it every checkout 500s). The deploy.yml D1 schema gate blocks the deploy otherwise. ALTER ADD COLUMN
+#   is not re-runnable: if an apply fails midway, check PRAGMA table_info(lp_ticket_orders) and add the rest.
 # LP_DAILY_CHECKOUT_CAP = "300"   # 1 日 (JST) の checkout 作成上限（既定 300）
+
+# --- Ticket payment reconcile via a Durable Object ALARM, NOT a Cron Trigger. The account is at
+# the Workers FREE plan's 5/5 cron cap (a 6th cron makes CF reject this deploy); a DO alarm does
+# not count against it. Same pattern as github-sync's GithubReconcileDO. No manual bootstrap:
+# every paid checkout arms the loop (src/reconcile-do.ts), then it reschedules itself every 10 min.
+[[durable_objects.bindings]]
+name = "TICKET_RECONCILE_DO"
+class_name = "TicketReconcileDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TicketReconcileDO"]   # SQLite-backed DO is available on the Workers Free plan
