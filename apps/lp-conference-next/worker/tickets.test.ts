@@ -23,6 +23,8 @@ import {
   type PublicTicketType,
   type TicketConfig,
   type TicketsDeps,
+  senderKeyFor,
+  senderNetwork,
 } from "./tickets.ts";
 
 const XSS = '<script>alert("x")</script>';
@@ -363,7 +365,28 @@ test("handler: checkout forwards items JSON with origin and redirects to Stripe"
     email: "taro@example.com",
     answers: { org: "", mode: "現地", agree: "はい" },
     origin: "https://lp.example",
+    clientKey: null,
   });
+});
+
+test("senderNetwork: IPv4 as is; IPv6 (any spelling) cut to its /64", () => {
+  assert.equal(senderNetwork("203.0.113.7"), "203.0.113.7");
+  assert.equal(senderNetwork("2001:db8:0:1::5"), "2001:db8:0:1::/64");
+  assert.equal(senderNetwork("2001:0DB8:0000:0001:ffff:1:2:3"), "2001:db8:0:1::/64");
+  assert.equal(senderNetwork("2001:db8::1"), "2001:db8:0:0::/64");
+  assert.equal(senderNetwork("::1"), "0:0:0:0::/64");
+  assert.equal(senderNetwork("bogus:ip"), "bogus:ip");
+});
+
+test("handler: checkout sends a hashed sender key (never the raw IP), distinct from the proposals key", async () => {
+  const d = deps();
+  await handleTickets(post("/tickets/checkout", VALID, { "cf-connecting-ip": "203.0.113.7" }), d);
+  const sent = JSON.parse(String(d.calls[0].init.body));
+  assert.match(sent.clientKey, /^[a-f0-9]{32}$/);
+  assert.ok(!String(d.calls[0].init.body).includes("203.0.113.7"));
+  const req = () => new Request("https://x", { headers: { "cf-connecting-ip": "203.0.113.7" } });
+  assert.equal(sent.clientKey, await senderKeyFor(req(), "lp-tickets"));
+  assert.notEqual(sent.clientKey, await senderKeyFor(req(), "lp-proposals"));
 });
 
 test("handler: cross-origin post is rejected; honeypot silently redirects without calling upstream", async () => {

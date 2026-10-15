@@ -299,6 +299,31 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig): 
   return { ok: true, values, input: { items, name: values.name, email: values.email, answers } };
 }
 
+/**
+ * IPv4 as is; IPv6 cut to its /64 (one subscriber usually owns a whole /64, so rotating the
+ * low bits must not mint new senders). Unparseable input is used verbatim.
+ */
+export function senderNetwork(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const [head = "", tail] = ip.toLowerCase().split("::");
+  const hs = head ? head.split(":") : [];
+  const ts = tail === undefined ? [] : tail ? tail.split(":") : [];
+  const groups = tail === undefined ? hs : [...hs, ...Array(Math.max(0, 8 - hs.length - ts.length)).fill("0"), ...ts];
+  if (groups.length !== 8) return ip;
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+/**
+ * Sender key for lp-analytics' per-sender caps: SHA-256 of `${scope}:${senderNetwork(client IP)}` (hex, 32 chars).
+ * The raw IP never leaves the Worker. null when the header is absent (local dev / tests).
+ */
+export async function senderKeyFor(req: Request, scope: string): Promise<string | null> {
+  const raw = req.headers.get("cf-connecting-ip");
+  if (!raw) return null;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${scope}:${senderNetwork(raw)}`));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
 /** Maps a lp-analytics checkout error to inline errors / a form-level message. */
 export function mapCheckoutError(status: number, body: unknown, config: TicketConfig): FormErrors {
   const errors: FormErrors = {};
@@ -1340,7 +1365,7 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     res = await deps.internal("/lp/internal/tickets/checkout", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...parsed.input, origin: url.origin }),
+      body: JSON.stringify({ ...parsed.input, origin: url.origin, clientKey: await senderKeyFor(req, "lp-tickets") }),
     });
   } catch {
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(502, null, config) }), 502);
