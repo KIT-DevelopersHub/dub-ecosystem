@@ -2,7 +2,7 @@
 // Create-channel modal (Slack "Create a channel"): name, optional topic, and a
 // public/private visibility toggle. Name is normalized to a slug-ish handle.
 import { useState } from "react";
-import { Modal } from "@dub/ui";
+import { Modal, isSubmitEnter } from "@dub/ui";
 import type { CreateChannelRequest } from "../api/contract";
 import styles from "../styles/chat.module.css";
 
@@ -61,7 +61,10 @@ export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelMod
               aria-label="チャンネル名"
               data-testid="fe6-create-name"
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void submit()}
+              onKeyDown={(e) => {
+                // 変換確定 Enter (IME composing) must not create the channel.
+                if (isSubmitEnter(e)) void submit();
+              }}
             />
           </div>
           {name && <span className={styles.createHint}>作成されるチャンネル: #{handle}</span>}
