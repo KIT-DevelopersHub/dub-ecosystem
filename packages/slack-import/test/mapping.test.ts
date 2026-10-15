@@ -4,6 +4,9 @@ import {
   type MappingContext,
   type SlackMessage,
   batchStatements,
+  buildInsertPinSql,
+  buildInsertReactionSql,
+  compactStatements,
   bookmarkMessageIdFor,
   buildBookmarkBody,
   buildMessageRow,
@@ -166,5 +169,19 @@ describe("misc", () => {
   it("batchStatements splits into chunks", () => {
     expect(batchStatements(["a", "b", "c"], 2)).toEqual([["a", "b"], ["c"]]);
     expect(batchStatements([], 2)).toEqual([]);
+  });
+
+  it("compactStatements merges per table in first-occurrence order and caps by UTF-8 bytes", () => {
+    const r = (id: string, emoji: string) => buildInsertReactionSql({ messageId: id, emoji, userId: "u", createdAt: "t" });
+    const out = compactStatements([r("m1", "a"), buildInsertPinSql("c", "m1", "u", "t"), r("m2", "b"), "DELETE FROM x;"]);
+    expect(out).toHaveLength(3);
+    expect(out[0]).toMatch(/^INSERT OR IGNORE INTO chat_reactions[\s\S]*'m1'[\s\S]*'m2'[\s\S]*;$/);
+    expect(out[1]).toContain("chat_pins");
+    expect(out[2]).toBe("DELETE FROM x;");
+    // 3-byte chars: 40 tuples of ~3KB UTF-8 (1K UTF-16 units) must split under a 10KB cap.
+    const big = Array.from({ length: 40 }, (_, i) => r(`m${i}`, "あ".repeat(1000)));
+    const chunks = compactStatements(big, { maxBytes: 10_000 });
+    expect(chunks.length).toBeGreaterThanOrEqual(12);
+    for (const c of chunks) expect(new TextEncoder().encode(c).length).toBeLessThan(10_000 + 500);
   });
 });

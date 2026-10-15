@@ -7,8 +7,8 @@
 //   users    one users.list page (200)          -> Slack user -> Dub account (email join)
 //   channel  join (public) + members + bookmarks -> chat_channels / members / bookmark pin
 //   history  one conversations.history page (50) -> messages, reactions, pins, file rows
-//   threads  up to 8 conversations.replies pages -> thread replies (+ their reactions/files)
-//   files    up to 4 downloads -> R2 dub-file-attachments
+//   threads  up to 8 conversations.replies pages / ~50 replies -> thread replies (+ reactions/files)
+//   files    up to 4 downloads -> R2 dub-file-attachments (unavailable -> rows dropped)
 //   finalize mark everything read for the channel's members (no unread flood), done
 //
 // Idempotency + atomicity: every Dub id is derived from the Slack id (@dub/slack-import), all
@@ -51,6 +51,7 @@ import {
   isDownloadable,
   lit,
   mentionedSlackUserIds,
+  messageIdFor,
   placeholderDisplayName,
   placeholderEmailFor,
   placeholderUserIdFor,
@@ -62,6 +63,7 @@ export const THREADS_PER_STEP = 8;
 export const FILES_PER_STEP = 4;
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const LEASE_MS = 60_000;
+const LEASE_POLL_MS = 1_000;
 
 export type JobStatus = "queued" | "running" | "done" | "failed";
 export type JobPhase = "users" | "channel" | "history" | "threads" | "files" | "finalize" | "done";
@@ -112,6 +114,7 @@ type UserEntry = [string, 0 | 1, string | null];
 
 interface PendingFile {
   fileId: string;
+  messageId: string;
   url: string;
   key: string;
   size: number;
@@ -185,7 +188,10 @@ function addMs(iso: string, ms: number): string {
 
 function toWire(row: JobRow, nowIso: string): SlackImportJob {
   const state = JSON.parse(row.state) as JobState;
-  const waitMs = row.next_run_at ? Math.max(0, Date.parse(row.next_run_at) - Date.parse(nowIso)) : 0;
+  const nowMs = Date.parse(nowIso);
+  let waitMs = row.next_run_at ? Math.max(0, Date.parse(row.next_run_at) - nowMs) : 0;
+  // Another tab is mid-step: poll again shortly instead of hammering the lease.
+  if (row.lease_until && Date.parse(row.lease_until) > nowMs) waitMs = Math.max(waitMs, LEASE_POLL_MS);
   return {
     id: row.id,
     slackChannelId: row.slack_channel_id,
@@ -220,6 +226,14 @@ function slimChannel(c: SlackChannel): SlackChannel {
   };
 }
 
+function dropFileSqls(f: PendingFile): string[] {
+  return [
+    `UPDATE chat_messages SET attachment_file_ids = (SELECT json_group_array(value) FROM json_each(chat_messages.attachment_file_ids) WHERE value <> ${lit(f.fileId)}) WHERE id = ${lit(f.messageId)};`,
+    `DELETE FROM file_meta_links WHERE file_id = ${lit(f.fileId)};`,
+    `DELETE FROM file_meta_files WHERE id = ${lit(f.fileId)};`,
+  ];
+}
+
 function freshState(channel: SlackChannel): JobState {
   return { channel: slimChannel(channel), usersCursor: null, users: {}, historyCursor: null, threadQueue: [], threadCursor: null, fileQueue: [] };
 }
@@ -241,6 +255,8 @@ class StepWriter {
     private readonly systemUserId: string,
     private readonly nowIso: string,
     readonly counters: ImportCounters,
+    /** false when no R2 bucket is bound: attachments are counted as skipped, no rows. */
+    private readonly canStoreFiles: boolean,
   ) {
     const names = new Map<string, string>();
     for (const [id, [name]] of Object.entries(state.users)) names.set(id, name);
@@ -288,15 +304,17 @@ class StepWriter {
     const channel = this.state.channel;
     const authorId = this.idMap.get(authorKeyOf(m) ?? "") ?? this.systemUserId;
     const attachmentFileIds: string[] = [];
+    const messageId = messageIdFor(channel.id, m.ts);
     for (const file of m.files ?? []) {
-      if (!isDownloadable(file)) {
+      // Skipped up front = no file rows, so the message never shows a dead attachment.
+      if (!isDownloadable(file) || !this.canStoreFiles || (file.size ?? 0) > MAX_FILE_BYTES) {
         this.counters.filesSkipped += 1;
         continue;
       }
       const fileRow = buildFileMetaRow(file, channel.id, m.ts, authorId);
       this.sql.push(buildInsertFileMetaSql(fileRow));
       attachmentFileIds.push(fileRow.id);
-      this.state.fileQueue.push({ fileId: fileRow.id, url: file.url_private!, key: fileRow.r2Key, size: fileRow.sizeBytes, mime: fileRow.mimeType });
+      this.state.fileQueue.push({ fileId: fileRow.id, messageId, url: file.url_private!, key: fileRow.r2Key, size: fileRow.sizeBytes, mime: fileRow.mimeType });
     }
     const row = buildMessageRow({ slack: m, slackChannelId: channel.id, dubChannelId, ctx: this.ctx, attachmentFileIds });
     if (opts.asThreadReply) {
@@ -410,15 +428,20 @@ export class SlackImporter {
       }
       return { job: await this.getJob(existing.id), created: false };
     }
-    const id = this.deps.newJobId();
-    await this.deps.db
+    // ON CONFLICT: two admins starting the same channel at once share one job (no 500).
+    const inserted = await this.deps.db
       .prepare(
         `INSERT INTO chat_slack_import_jobs (id, org_id, slack_channel_id, slack_channel_name, is_private, dub_channel_id, status, phase, state, counters, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'queued', 'users', ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, 'queued', 'users', ?, ?, ?, ?, ?)
+         ON CONFLICT(org_id, slack_channel_id) DO NOTHING`,
       )
-      .bind(id, this.deps.orgId, channel.id, channel.name, channel.is_private ? 1 : 0, channelIdFor(channel), JSON.stringify(freshState(channel)), JSON.stringify(emptyCounters()), createdBy, now, now)
+      .bind(this.deps.newJobId(), this.deps.orgId, channel.id, channel.name, channel.is_private ? 1 : 0, channelIdFor(channel), JSON.stringify(freshState(channel)), JSON.stringify(emptyCounters()), createdBy, now, now)
       .run();
-    return { job: await this.getJob(id), created: true };
+    const row = await this.deps.db
+      .prepare("SELECT * FROM chat_slack_import_jobs WHERE org_id = ? AND slack_channel_id = ?")
+      .bind(this.deps.orgId, channel.id)
+      .first<JobRow>();
+    return { job: toWire(row!, now), created: (inserted.meta?.changes ?? 0) === 1 };
   }
 
   /** Advance one bounded step. Safe to call concurrently / repeatedly (lease + idempotency). */
@@ -496,7 +519,7 @@ export class SlackImporter {
     counters: ImportCounters,
     now: string,
   ): Promise<{ phase: JobPhase; statements: string[] }> {
-    const w = new StepWriter(state, row.org_id, row.created_by, now, counters);
+    const w = new StepWriter(state, row.org_id, row.created_by, now, counters, this.deps.bucket !== null);
     const channel = state.channel;
     const dubChannelId = row.dub_channel_id;
 
@@ -543,10 +566,23 @@ export class SlackImporter {
       }
 
       case "threads": {
-        for (let calls = 0; calls < THREADS_PER_STEP && state.threadQueue.length > 0; calls++) {
+        // Bounded by calls AND messages (CPU: every row hashes ids), like one history page.
+        let seen = 0;
+        for (let calls = 0; calls < THREADS_PER_STEP && seen < HISTORY_PAGE_SIZE && state.threadQueue.length > 0; calls++) {
           const rootTs = state.threadQueue[0]!;
-          const page = await slack.repliesPage(channel.id, rootTs, state.threadCursor);
-          for (const m of page.items) if (m.ts !== rootTs) w.addMessage(m, dubChannelId, { asThreadReply: true });
+          let page: { items: SlackMessage[]; nextCursor: string | null };
+          try {
+            page = await slack.repliesPage(channel.id, rootTs, state.threadCursor, HISTORY_PAGE_SIZE);
+          } catch (e) {
+            // Root deleted / hidden since the history pass: nothing to attach, skip it.
+            if (!(e instanceof SlackApiError && e.slackError === "thread_not_found")) throw e;
+            page = { items: [], nextCursor: null };
+          }
+          for (const m of page.items) {
+            if (m.ts === rootTs) continue;
+            w.addMessage(m, dubChannelId, { asThreadReply: true });
+            seen += 1;
+          }
           state.threadCursor = page.nextCursor;
           if (!page.nextCursor) state.threadQueue.shift();
         }
@@ -554,17 +590,20 @@ export class SlackImporter {
       }
 
       case "files": {
+        const statements: string[] = [];
         for (let i = 0; i < FILES_PER_STEP && state.fileQueue.length > 0; i++) {
           const f = state.fileQueue.shift()!;
-          const bytes = f.size <= MAX_FILE_BYTES && this.deps.bucket ? await slack.downloadFile(f.url) : null;
-          if (bytes && this.deps.bucket) {
+          const bytes = this.deps.bucket ? await slack.downloadFile(f.url) : null;
+          if (bytes && bytes.byteLength <= MAX_FILE_BYTES && this.deps.bucket) {
             await this.deps.bucket.put(f.key, bytes, { httpMetadata: { contentType: f.mime } });
             counters.files += 1;
           } else {
+            // Unavailable body: drop the rows the history pass wrote, so no dead attachment.
             counters.filesSkipped += 1;
+            statements.push(...dropFileSqls(f));
           }
         }
-        return { phase: state.fileQueue.length > 0 ? "files" : "finalize", statements: [] };
+        return { phase: state.fileQueue.length > 0 ? "files" : "finalize", statements };
       }
 
       case "finalize": {

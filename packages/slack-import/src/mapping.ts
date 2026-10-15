@@ -633,6 +633,8 @@ export function batchStatements(statements: readonly string[], maxPerBatch = 200
  * order (which preserves every FK dependency: a row always follows the row it references),
  * and each merged statement is capped by row count and byte size.
  */
+const utf8 = new TextEncoder();
+
 export function compactStatements(statements: readonly string[], opts: { maxRows?: number; maxBytes?: number } = {}): string[] {
   const maxRows = opts.maxRows ?? 100;
   const maxBytes = opts.maxBytes ?? 90_000;
@@ -673,9 +675,11 @@ export function compactStatements(statements: readonly string[], opts: { maxRows
       bytes = 0;
     };
     for (const t of g.tuples) {
-      if (chunk.length >= maxRows || (chunk.length > 0 && bytes + t.length > maxBytes)) flush();
+      // D1's statement limit is in UTF-8 bytes (Japanese = 3 bytes/char), not UTF-16 units.
+      const size = utf8.encode(t).length + 2;
+      if (chunk.length >= maxRows || (chunk.length > 0 && bytes + size > maxBytes)) flush();
       chunk.push(t);
-      bytes += t.length;
+      bytes += size;
     }
     flush();
   }

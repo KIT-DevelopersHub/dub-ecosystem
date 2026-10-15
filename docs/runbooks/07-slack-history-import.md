@@ -62,10 +62,23 @@ SLACK_BOT_TOKEN=xoxb-... CLOUDFLARE_API_TOKEN=... pnpm --filter @dub/infra-d1 sl
 - `--no-attachments` でファイルを後回しにできる。`--batch-size`（既定 200 文）で D1 への 1 回の量を調整。
 - 実行後、fe6-chat で該当チャンネルを実ブラウザ確認（スレッド・リアクション・添付・ピン・作者名）。
 
+## 5b. アプリ内取り込み(fe6-chat 「チャンネル取り込み」)
+
+管理者(`role_sys_admin` / `role_sys_maintainer` = チャット 編集 + `chat:create` + `chat:moderate`)が
+画面からチャンネル名を選ぶと、chat-service の **再開可能なステップ式ジョブ**が上と同じ内容を取り込む。
+
+- 有効化(オーナー許可後・staging から): `SLACK_BOT_TOKEN` を chat-service の Worker Secret に設定し、
+  `infra/d1/migrations/chat/0005_slack_import_jobs.sql` を dub-core に 1 回適用。未設定なら API は 412。
+- ブラウザが `POST /chat/slack-import/jobs/:id/step` を繰り返す(1 ステップ = 無料枠内の小さな仕事 +
+  1 回の D1 batch)。タブを閉じても次に開いた時に続きから再開。Slack 429 は `retryAfterMs` 待ちで再開。
+- 失敗したジョブは同じチャンネルで再度「取り込み」を押すと続きから再開。完了済みを押すと差分取り込み。
+- 20MB 超・DL 不可のファイルは件数だけ数えて添付行を作らない。
+
 ## 6. 実装の所在
 
 | ファイル | 役割 |
 |---|---|
+| `services/chat-service/src/slack-import.ts` | アプリ内取り込みのステップエンジン(ルートは `app.ts`、認可は `policy-table.ts`) |
 | `packages/slack-import/src/mapping.ts` | 純粋関数層（型・決定的 ID・本文変換・絵文字・行/SQL 生成） |
 | `packages/slack-import/src/run.ts` | CLI 用の取得と順序付け（仮ユーザー → チャンネル → メッセージ） |
 | `packages/slack-import/src/client.ts` | Slack Web API（ページネーション・429 リトライ・join・ファイル DL） |
