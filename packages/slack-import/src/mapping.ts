@@ -43,6 +43,7 @@ export interface SlackChannel {
   topic?: { value?: string };
   purpose?: { value?: string };
   creator?: string; // Slack user id
+  num_members?: number; // conversations.list only
 }
 
 export interface SlackReaction {
@@ -622,5 +623,61 @@ export function emptySummary(): ImportSummary {
 export function batchStatements(statements: readonly string[], maxPerBatch = 200): string[][] {
   const out: string[][] = [];
   for (let i = 0; i < statements.length; i += maxPerBatch) out.push(statements.slice(i, i + maxPerBatch));
+  return out;
+}
+
+/**
+ * Merge single-row statements produced by this module into multi-row INSERTs so a Worker
+ * step stays inside D1's per-invocation query budget. Statements are grouped by their
+ * `INSERT … (cols)` header + `ON CONFLICT …` tail, groups are emitted in first-occurrence
+ * order (which preserves every FK dependency: a row always follows the row it references),
+ * and each merged statement is capped by row count and byte size.
+ */
+export function compactStatements(statements: readonly string[], opts: { maxRows?: number; maxBytes?: number } = {}): string[] {
+  const maxRows = opts.maxRows ?? 100;
+  const maxBytes = opts.maxBytes ?? 90_000;
+  const groups = new Map<string, { head: string; tail: string; tuples: string[] }>();
+  const passthrough: Array<string | { key: string }> = [];
+  for (const stmt of statements) {
+    const v = stmt.indexOf("\nVALUES (");
+    if (v < 0 || !stmt.endsWith(";")) {
+      passthrough.push(stmt);
+      continue;
+    }
+    const head = stmt.slice(0, v);
+    const body = stmt.slice(v + "\nVALUES ".length, -1);
+    const c = body.lastIndexOf("\nON CONFLICT(");
+    const tuple = c >= 0 ? body.slice(0, c) : body;
+    const tail = c >= 0 ? body.slice(c) : "";
+    const key = `${head}\u0000${tail}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { head, tail, tuples: [] };
+      groups.set(key, g);
+      passthrough.push({ key });
+    }
+    g.tuples.push(tuple);
+  }
+  const out: string[] = [];
+  for (const item of passthrough) {
+    if (typeof item === "string") {
+      out.push(item);
+      continue;
+    }
+    const g = groups.get(item.key)!;
+    let chunk: string[] = [];
+    let bytes = 0;
+    const flush = () => {
+      if (chunk.length > 0) out.push(`${g.head}\nVALUES ${chunk.join(",\n")}${g.tail};`);
+      chunk = [];
+      bytes = 0;
+    };
+    for (const t of g.tuples) {
+      if (chunk.length >= maxRows || (chunk.length > 0 && bytes + t.length > maxBytes)) flush();
+      chunk.push(t);
+      bytes += t.length;
+    }
+    flush();
+  }
   return out;
 }

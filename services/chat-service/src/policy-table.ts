@@ -101,6 +101,20 @@ export const POLICY_TABLE = definePolicyTable({
   // messages. Its own toggle in ロール管理 so it can be granted apart from moderate. This rule
   // is the whole authority (no channel-admin fallback); the handler only runs loadReadable.
   "DELETE /chat/channels/:id": appLevel("chat", "edit", "chat:delete_channel"),
+
+  // ---- Slack channel import: admin only (編集 + chat:create + chat:moderate) ----
+  // It creates a channel AND writes org-wide data outside a caller's own scope (disabled
+  // placeholder users, every imported author's messages), so it needs both 詳細 keys:
+  // chat:create (makes a channel) and chat:moderate (the admin/maintainer tier — the same
+  // tier that sets the org-wide deletion policy). Reads (picker / job list / status) are
+  // gated identically: Slack channel names and import progress are admin information too.
+  // There is no channel-scoped half here: the job rows are org-scoped (org_id in every
+  // query) and the imported channel is created, not read.
+  "GET /chat/slack-import/channels": appLevel("chat", "edit", "chat:create", "chat:moderate"),
+  "GET /chat/slack-import/jobs": appLevel("chat", "edit", "chat:create", "chat:moderate"),
+  "POST /chat/slack-import/jobs": appLevel("chat", "edit", "chat:create", "chat:moderate"),
+  "GET /chat/slack-import/jobs/:id": appLevel("chat", "edit", "chat:create", "chat:moderate"),
+  "POST /chat/slack-import/jobs/:id/step": appLevel("chat", "edit", "chat:create", "chat:moderate"),
 });
 
 // NOT in this table, deliberately — both are outside the HTTP app entirely:

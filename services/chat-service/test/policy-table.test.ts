@@ -130,9 +130,17 @@ const WRITES = [
 const CREATE = ["POST /chat/channels"]; // + chat:create
 const MODERATE = ["PATCH /chat/settings/deletion-policy"]; // + chat:moderate
 const DELETE_CHANNEL = ["DELETE /chat/channels/:id"]; // + chat:delete_channel
+// Slack channel import: 編集 + chat:create + chat:moderate (admin / maintainer only).
+const SLACK_IMPORT = [
+  "GET /chat/slack-import/channels",
+  "GET /chat/slack-import/jobs",
+  "GET /chat/slack-import/jobs/:id",
+  "POST /chat/slack-import/jobs",
+  "POST /chat/slack-import/jobs/:id/step",
+];
 
 const READ_ONLY = [...PUBLIC_ROUTES, ...READS].sort();
-const EDITOR = [...PUBLIC_ROUTES, ...READS, ...WRITES, ...CREATE, ...MODERATE].sort();
+const EDITOR = [...PUBLIC_ROUTES, ...READS, ...WRITES, ...CREATE, ...MODERATE, ...SLACK_IMPORT].sort();
 const FULL = [...EDITOR, ...DELETE_CHANNEL].sort();
 
 describe("role x endpoint matrix (frozen)", () => {

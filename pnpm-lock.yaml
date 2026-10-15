@@ -1131,6 +1131,9 @@ importers:
       '@dub/policy-gate':
         specifier: workspace:*
         version: link:../../packages/policy-gate
+      '@dub/slack-import':
+        specifier: workspace:*
+        version: link:../../packages/slack-import
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
