@@ -203,3 +203,12 @@ jobs:
             --services "全Worker + fe2 + mo3 (deploy-prod.sh)" \
             --ref "${GITHUB_REF}"
 
+      # --- Read-only contract smoke (GET only, no credentials, never writes) ---
+      # Status + response JSON validated against docs/openapi/api-gateway.yaml: /healthz,
+      # and anonymous reads of identity / members / driveshare must be the documented 401.
+      # Last on purpose: the deploy is already live, so a violation turns the run red
+      # without suppressing the admin notification of what actually shipped.
+      - name: Read-only contract smoke (prod)
+        if: ${{ !inputs.skip_healthcheck }}
+        run: node scripts/smoke-readonly.ts prod --base-url "${GATEWAY_HEALTH_URL}"
+
