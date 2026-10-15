@@ -5,6 +5,7 @@
 //       ロールバック / 券種追加の検証 / 入力項目の一括保存 / 購入者は編集者だけ
 //   v2: 対象日（dayLabel）でのグルーピング / 1 回の購入上限 / 参加登録ボタン差し替え（ctaEnabled）/
 //       1 注文 = 複数券種 × 枚数
+//   v3: 要確認（needs_review）の理由表示と「確認して確定する」（lp:publish 必須・楽観更新 + ロールバック）
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
@@ -80,6 +81,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: () => Promise.resolve({ items: [], nextCursor: null }),
+    approveTicketOrder: unused,
     getProposals: unused,
     setProposalsEnabled: unused,
     saveProposalFields: unused,
@@ -194,7 +196,7 @@ describe("demo transport serves the tickets wire contract", () => {
     expect(p1.items[0]!.createdAt >= p1.items[1]!.createdAt).toBe(true);
     const p2 = await api.listTicketOrders({ limit: 5, cursor: p1.nextCursor! });
     expect(p2.nextCursor).toBeNull();
-    expect(p1.items.length + p2.items.length).toBe(8);
+    expect(p1.items.length + p2.items.length).toBe(10);
     // v2: an order carries several types x quantity; totals are consistent with its lines
     const all = [...p1.items, ...p2.items];
     expect(all.some((o) => o.items.length > 1)).toBe(true);
@@ -208,11 +210,20 @@ describe("demo transport serves the tickets wire contract", () => {
     const api = demoLpApi();
     const s = await api.getTickets();
     const d1 = s.types.find((t) => t.id === "tt_general_d1")!;
-    // paid: ord_003 x1 + ord_002 x5 + ord_001 x1 = 7 tickets; pending: ord_008 x2
-    expect(d1.stats).toMatchObject({ sold: 7, pending: 2, revenueJpy: 21000, remaining: 200 - 7 - 2 });
+    // paid: ord_003 x1 + ord_002 x5 + ord_001 x1 = 7 tickets; held: ord_008 x2 (pending) + ord_010 x1 (needs_review)
+    expect(d1.stats).toMatchObject({ sold: 7, pending: 3, revenueJpy: 21000, remaining: 200 - 7 - 3 });
     await api.setTicketsEnabled({ enabled: false });
     const after = await api.setTicketsCta({ enabled: true });
     expect(after).toMatchObject({ enabled: false, ctaEnabled: true });
+  });
+
+  it("approves the seeded needs_review order once (then 409); it moves from held to sold", async () => {
+    const api = demoLpApi();
+    const approved = await api.approveTicketOrder("ord_010");
+    expect(approved).toMatchObject({ status: "paid", reviewReason: "amount_mismatch" });
+    await expect(api.approveTicketOrder("ord_010")).rejects.toThrow();
+    const d1 = (await api.getTickets()).types.find((t) => t.id === "tt_general_d1")!;
+    expect(d1.stats).toMatchObject({ sold: 8, pending: 2 });
   });
 });
 
@@ -441,6 +452,7 @@ describe("LpTicketsScreen", () => {
       answers: [],
       createdAt: "2026-10-12T11:20:00.000Z",
       paidAt: "2026-10-12T11:21:00.000Z",
+      reviewReason: null,
     };
     renderScreen(fakeApi({ listTicketOrders: () => Promise.resolve({ items: [order], nextCursor: null }) }));
     const items = await screen.findByTestId("fe2-lp-ticket-order-items-ord_x");
@@ -451,6 +463,82 @@ describe("LpTicketsScreen", () => {
     expect(screen.getByTestId("fe2-lp-ticket-order-total-ord_x")).toHaveTextContent("計 3 枚");
     fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-details-ord_x"));
     expect(screen.getByTestId("fe2-lp-ticket-order-answers-ord_x")).toHaveTextContent("¥3,000 × 2 枚 = ¥6,000");
+  });
+
+  describe("needs_review orders", () => {
+    function reviewOrder(over: Partial<LpTicketOrder> = {}): LpTicketOrder {
+      return {
+        id: "ord_r",
+        items: [{ ticketTypeId: "g1", ticketTypeName: "一般", dayLabel: "", unitPriceJpy: 3000, quantity: 1 }],
+        quantity: 1,
+        amountJpy: 3000,
+        status: "needs_review",
+        buyerName: "佐藤 花子",
+        buyerEmail: "s@example.com",
+        answers: [],
+        createdAt: "2026-10-12T11:20:00.000Z",
+        paidAt: null,
+        reviewReason: "oversold",
+        ...over,
+      };
+    }
+
+    it("shows the reason in plain words and the approve button only with lp:publish", async () => {
+      const list = () => Promise.resolve({ items: [reviewOrder()], nextCursor: null });
+      renderScreen(fakeApi({ listTicketOrders: list }));
+      expect(await screen.findByTestId("fe2-lp-ticket-order-reason-ord_r")).toHaveTextContent("定員超過後に支払いが完了");
+      expect(screen.getByTestId("fe2-lp-ticket-order-approve-ord_r")).toHaveTextContent("確認して確定する");
+    });
+
+    it("shows only the reason (no button) without lp:publish, and falls back for unknown reasons", async () => {
+      const list = () => Promise.resolve({ items: [reviewOrder({ reviewReason: "something_new" })], nextCursor: null });
+      renderScreen(fakeApi({ listTicketOrders: list }), EDITOR);
+      expect(await screen.findByTestId("fe2-lp-ticket-order-reason-ord_r")).toHaveTextContent("要確認");
+      expect(screen.queryByTestId("fe2-lp-ticket-order-approve-ord_r")).not.toBeInTheDocument();
+    });
+
+    it("confirms, calls approveTicketOrder and shows the row as paid", async () => {
+      let current = reviewOrder();
+      const approve = vi.fn((id: string) => {
+        current = { ...current, status: "paid", paidAt: "2026-10-12T12:00:00.000Z" };
+        return Promise.resolve({ ...current, id });
+      });
+      renderScreen(
+        fakeApi({ listTicketOrders: () => Promise.resolve({ items: [current], nextCursor: null }), approveTicketOrder: approve }),
+      );
+      fireEvent.click(await screen.findByTestId("fe2-lp-ticket-order-approve-ord_r"));
+      const dialog = await screen.findByTestId("fe2-lp-ticket-order-approve-dialog");
+      expect(dialog).toHaveTextContent("Stripe ダッシュボードで入金額を確認してから確定してください");
+      expect(dialog).toHaveTextContent("販売数・売上に入ります");
+      expect(dialog).toHaveTextContent("自動で「返金済み」になり");
+      fireEvent.click(within(dialog).getByTestId("fe2-lp-ticket-order-approve-confirm"));
+
+      await waitFor(() => expect(approve).toHaveBeenCalledWith("ord_r"));
+      const row = screen.getByTestId("fe2-lp-ticket-order-ord_r");
+      await waitFor(() => expect(row).toHaveTextContent("支払い済み"));
+      expect(screen.queryByTestId("fe2-lp-ticket-order-review-ord_r")).not.toBeInTheDocument();
+    });
+
+    it("flips optimistically and rolls back to 要確認 when the server refuses", async () => {
+      let reject: (e: Error) => void = () => undefined;
+      renderScreen(
+        fakeApi({
+          listTicketOrders: () => Promise.resolve({ items: [reviewOrder()], nextCursor: null }),
+          approveTicketOrder: () =>
+            new Promise((_res, rej) => {
+              reject = rej;
+            }),
+        }),
+      );
+      fireEvent.click(await screen.findByTestId("fe2-lp-ticket-order-approve-ord_r"));
+      fireEvent.click(within(await screen.findByTestId("fe2-lp-ticket-order-approve-dialog")).getByTestId("fe2-lp-ticket-order-approve-confirm"));
+
+      await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-ord_r")).toHaveTextContent("支払い済み"));
+      reject(new Error("boom"));
+      await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-ord_r")).toHaveTextContent("要確認"));
+      expect(screen.getByTestId("fe2-lp-ticket-order-approve-ord_r")).toBeInTheDocument();
+      expect(await screen.findByText("注文を確定できませんでした")).toBeInTheDocument();
+    });
   });
 
   it("shows a retryable error state when loading fails", async () => {

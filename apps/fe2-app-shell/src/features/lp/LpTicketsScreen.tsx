@@ -9,6 +9,8 @@
 //  - LP の「参加登録」ボタン差し替え（ctaEnabled）は販売公開に従属する 2 段目のスイッチ。
 //    効くのは enabled && ctaEnabled のときだけ。販売停止中でも予約として保存はできる。
 //  - 購入者一覧は個人情報なので app:lp:edit のときだけ取得・表示する（閲覧者には出さない）。
+//  - 要確認（needs_review）の注文は理由を出し、lp:publish を持つ人だけ「確認して確定する」で支払い済みに
+//    できる。確定しない場合の出口は Stripe での返金（webhook で自動的に返金済み）。返金なしの取消は置かない。
 //  - 読み込み中はセクションごとのスケルトン、失敗は再試行つき ErrorState、書き込みは楽観的 UI。
 import { useMemo, useState } from "react";
 import {
@@ -28,8 +30,14 @@ import {
 } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import type { LpTicketOrder, LpTicketsState } from "./lpApi.tsx";
-import { useLpTicketOrders, useLpTickets, useSetTicketsCta, useSetTicketsEnabled } from "./lpTicketsHooks.ts";
-import { ORDER_STATUS, formatDateTime, formatPrice, formatYen, orderItemLabel } from "./lpTickets.ts";
+import {
+  useApproveTicketOrder,
+  useLpTicketOrders,
+  useLpTickets,
+  useSetTicketsCta,
+  useSetTicketsEnabled,
+} from "./lpTicketsHooks.ts";
+import { ORDER_STATUS, formatDateTime, formatPrice, formatYen, orderItemLabel, reviewReasonLabel } from "./lpTickets.ts";
 import { LpTicketTypesCard } from "./LpTicketTypes.tsx";
 import { LpTicketFieldsCard } from "./LpTicketFields.tsx";
 import { LpTabs } from "./LpTabs.tsx";
@@ -71,7 +79,7 @@ export function LpTicketsScreen(): JSX.Element {
         </div>
         <LpTicketTypesCard types={state.types} canEdit={canEdit} />
         <LpTicketFieldsCard fields={state.fields} canEdit={canEdit} />
-        {canEdit ? <OrdersCard /> : null}
+        {canEdit ? <OrdersCard canApprove={canToggle} /> : null}
       </Stack>
     );
   }
@@ -299,8 +307,10 @@ function CtaSetting({ state, canToggle }: { state: LpTicketsState; canToggle: bo
   );
 }
 
-function OrdersCard(): JSX.Element {
+function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
   const orders = useLpTicketOrders(true);
+  const approve = useApproveTicketOrder();
+  const [confirming, setConfirming] = useState<LpTicketOrder | null>(null);
   const rows = useMemo(() => orders.data?.pages.flatMap((p) => p.items) ?? [], [orders.data]);
 
   let content: JSX.Element;
@@ -328,7 +338,7 @@ function OrdersCard(): JSX.Element {
       <Stack gap={5}>
         <div className={styles.orderList} data-testid="fe2-lp-ticket-orders-list">
           {rows.map((o) => (
-            <OrderRow key={o.id} order={o} />
+            <OrderRow key={o.id} order={o} canApprove={canApprove} onApprove={() => setConfirming(o)} />
           ))}
         </div>
         <LoadMore
@@ -344,11 +354,58 @@ function OrdersCard(): JSX.Element {
   return (
     <Card testId="fe2-lp-ticket-orders" header={<span className={styles.sectionTitle}>購入者</span>}>
       {content}
+      {confirming ? (
+        <Modal
+          open
+          onClose={() => setConfirming(null)}
+          title="この注文を支払い済みに確定しますか？"
+          size="sm"
+          testId="fe2-lp-ticket-order-approve-dialog"
+          footer={
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--dub-space-3)" }}>
+              <Button variant="secondary" onClick={() => setConfirming(null)} testId="fe2-lp-ticket-order-approve-cancel">
+                キャンセル
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const id = confirming.id;
+                  setConfirming(null);
+                  approve.mutate({ id });
+                }}
+                testId="fe2-lp-ticket-order-approve-confirm"
+              >
+                確定する
+              </Button>
+            </div>
+          }
+        >
+          <Stack gap={4}>
+            <span className={styles.note}>
+              {confirming.buyerName}（{formatPrice(confirming.amountJpy)}・計 {confirming.quantity.toLocaleString("ja-JP")} 枚）
+              ／ 理由: {reviewReasonLabel(confirming.reviewReason)}
+            </span>
+            <ul style={{ margin: 0, paddingLeft: "var(--dub-space-5)", display: "grid", gap: "var(--dub-space-2)" }}>
+              <li>Stripe ダッシュボードで入金額を確認してから確定してください。</li>
+              <li>確定するとチケットが有効になり、販売数・売上に入ります。</li>
+              <li>確定しない場合は、Stripe で返金すると自動で「返金済み」になり、席が空きます。</li>
+            </ul>
+          </Stack>
+        </Modal>
+      ) : null}
     </Card>
   );
 }
 
-function OrderRow({ order: o }: { order: LpTicketOrder }): JSX.Element {
+function OrderRow({
+  order: o,
+  canApprove,
+  onApprove,
+}: {
+  order: LpTicketOrder;
+  canApprove: boolean;
+  onApprove: () => void;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   const status = ORDER_STATUS[o.status];
   return (
@@ -380,6 +437,22 @@ function OrderRow({ order: o }: { order: LpTicketOrder }): JSX.Element {
           詳細
         </Button>
       </div>
+      {o.status === "needs_review" ? (
+        <div className={styles.orderReview} data-testid={`fe2-lp-ticket-order-review-${o.id}`}>
+          <span className={styles.note} data-testid={`fe2-lp-ticket-order-reason-${o.id}`}>
+            理由: {reviewReasonLabel(o.reviewReason)}
+          </span>
+          {o.reviewReason === "dispute" ? (
+            <span className={styles.note} data-testid={`fe2-lp-ticket-order-dispute-${o.id}`}>
+              審理の結果は Stripe から自動で反映されます
+            </span>
+          ) : canApprove ? (
+            <Button variant="secondary" size="sm" onClick={onApprove} testId={`fe2-lp-ticket-order-approve-${o.id}`}>
+              確認して確定する
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {open ? (
         <dl className={styles.orderAnswers} data-testid={`fe2-lp-ticket-order-answers-${o.id}`}>
           {o.items.map((it) => (
