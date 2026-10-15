@@ -2,7 +2,7 @@
 // connected, or DRIVESHARE_MOCK forces it) so カレンダー > ミーティング builds, runs and E2Es at $0.
 // Mirrors the real client's observable behaviour (Meet link on insert, idempotent deletes,
 // deleted events read back as null, a client-chosen id makes insert idempotent).
-import type { CalendarAclRule, CalendarClient, CalendarEvent, CalendarEventInput } from "./google/calendar-client";
+import { EventIdTaken, type CalendarAclRule, type CalendarClient, type CalendarEvent, type CalendarEventInput } from "./google/calendar-client";
 
 interface MockCalendar {
   summary: string;
@@ -74,7 +74,7 @@ export function createMockCalendarClient(state: MockCalendarState = createMockCa
       if (input.id) {
         const existing = c.events.get(input.id);
         if (existing) return toEvent(calendarId, existing);
-        if (state.deleted.has(key(calendarId, input.id))) throw new Error("mock: event id already used");
+        if (state.deleted.has(key(calendarId, input.id))) throw new EventIdTaken(input.id);
       }
       const id = input.id ?? next("evt");
       const ev = { ...input, attendees: input.attendees.map((a) => ({ ...a })), id, meetUrl: `https://meet.google.com/mock-${id}` };

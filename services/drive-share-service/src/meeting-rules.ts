@@ -78,8 +78,9 @@ export function fromRecurrence(lines: readonly string[]): Pick<MeetingFields, "r
   if (!u) return { recurrence, until: null };
   const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?$/.exec(u);
   if (!m) return null;
-  const instant = m[4] ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z` : `${m[1]}-${m[2]}-${m[3]}T00:00:00+09:00`;
-  return { recurrence, until: jstDate(instant) };
+  // Google's UI writes UNTIL as the next JST midnight (…T150000Z): the last day is 1 s before.
+  const instant = m[4] ? Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`) - 1000 : Date.parse(`${m[1]}-${m[2]}-${m[3]}T00:00:00+09:00`);
+  return { recurrence, until: jstDate(new Date(instant).toISOString()) };
 }
 
 /** End instant of the first occurrence. */

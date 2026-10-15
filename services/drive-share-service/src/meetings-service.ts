@@ -22,17 +22,19 @@
 // an event deleted there removes the meeting, an edit there (title / time / repeat) updates it.
 import { errors } from "@dub/errors";
 import { meeting } from "@dub/types";
-import type { CalendarAttendee, CalendarClient, CalendarEvent, CalendarEventInput } from "./google/calendar-client";
+import { EventIdTaken, type CalendarAttendee, type CalendarClient, type CalendarEvent, type CalendarEventInput } from "./google/calendar-client";
 import type { MemberDirectory } from "./member-directory";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
-import { DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
+import { DESCRIPTION_MAX, DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
 import type { RoleMembership } from "./role-membership";
 
 export const ALL_TARGET_NAME = "全体";
 const SOON_MS = 60_000;
 const SYNC_TIME_LIMIT_MS = 8_000;
-/** A list pulls the sync this close, so edits made in Google Calendar show up quickly. */
+/** A list pulls the sync this close, so edits made in Google Calendar show up quickly… */
 const LIST_SOON_MS = 15_000;
+/** …unless a sync ran this recently (open tabs must not keep Google busy). */
+const LIST_KICK_MIN_GAP_MS = 60_000;
 const NO_CALENDAR_SCOPE =
   "Google アカウントにカレンダーの権限がありません。Drive共有 > 設定 で同じアカウントを「再接続」してください。";
 
@@ -134,7 +136,9 @@ function fieldsFromEvent(m: MeetingRow, ev: CalendarEvent): Partial<MeetingField
   const out: Partial<MeetingFields> = {};
   const title = ev.summary.trim();
   if (title && title.length <= TITLE_MAX && title !== m.title) out.title = title;
-  if (ev.description !== undefined && ev.description !== m.description) out.description = ev.description;
+  // Google Calendar's editor stores HTML; Dub shows and writes back plain text, so leave such a description alone.
+  const d = ev.description;
+  if (d !== undefined && d !== m.description && !/<[a-z/][^>]*>/i.test(d ?? "") && (d?.length ?? 0) <= DESCRIPTION_MAX) out.description = d;
   if (startsAt !== m.startsAt) out.startsAt = startsAt;
   const minutes = Math.round((endMs - startMs) / 60_000);
   if (minutes >= DURATION_MIN && minutes <= DURATION_MAX && minutes !== m.durationMinutes) out.durationMinutes = minutes;
@@ -293,17 +297,22 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     let m = row;
     let ev = await cal.getEvent(m.calendarId, m.googleEventId);
     if (!ev && m.syncedAt === null) {
-      // The create was cut off before its event existed: finish it.
-      ev = await cal.insertEvent(m.calendarId, { ...eventInput(fieldsOf(m)), id: m.googleEventId, attendees: desired.map((d) => ({ email: d.email })) });
-      await store.replaceInvites(m.id, desired.map((d) => ({ meetingId: m.id, email: d.email, userId: d.userId })));
-      log("meeting_sync_create_finished", { meetingId: m.id });
+      // The create was cut off before its event existed: finish it. A taken id = it was created and
+      // already deleted in Google Calendar (falls through to the removal below).
+      try {
+        ev = await cal.insertEvent(m.calendarId, { ...eventInput(fieldsOf(m)), id: m.googleEventId, attendees: desired.map((d) => ({ email: d.email })) });
+        await store.replaceInvites(m.id, desired.map((d) => ({ meetingId: m.id, email: d.email, userId: d.userId })));
+        log("meeting_sync_create_finished", { meetingId: m.id });
+      } catch (err) {
+        if (!(err instanceof EventIdTaken)) throw err;
+      }
     }
     if (!ev) {
       // Deleted in Google Calendar: Dub follows. Only when the calendar itself still answers — a lost
-      // grant or a switched account reads as "gone" too and must never wipe meetings (throws here).
+      // grant or a switched account reads as "gone" too and must never wipe meetings (throws here) —
+      // and only if the row still points at that event (a target move meanwhile made a new one).
       await cal.listAcl(m.calendarId);
-      await store.deleteMeeting(m.id);
-      log("meeting_sync_event_gone_removed", { meetingId: m.id });
+      if (await store.deleteMeetingIf(m.id, m.calendarId, m.googleEventId)) log("meeting_sync_event_gone_removed", { meetingId: m.id });
       return { added: 0, removed: 0 };
     }
     const pulled = fieldsFromEvent(m, ev);
@@ -317,7 +326,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     // a role emptied on purpose — never mass-uninvite on it.
     if (desired.length === 0 && ledger.length > 0) {
       log("meeting_sync_empty_target_skipped", { meetingId: m.id, targetId: m.targetId });
-      await store.updateMeeting({ ...m, syncedAt: deps.now() });
+      await store.updateMeetingIf({ ...m, syncedAt: deps.now() }, row.updatedAt);
       return { added: 0, removed: 0 };
     }
     const want = new Map(desired.map((d) => [d.email, d]));
@@ -343,14 +352,17 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       ...toAdd.filter((d) => !ledgerEmails.has(d.email)).map((d) => ({ meetingId: m.id, email: d.email, userId: d.userId })),
     ];
     if (removeSet.size > 0 || nextLedger.length !== ledger.length) await store.replaceInvites(m.id, nextLedger);
-    await store.updateMeeting({ ...next, syncedAt: deps.now() });
+    if (!(await store.updateMeetingIf({ ...next, syncedAt: deps.now() }, row.updatedAt))) {
+      log("meeting_sync_row_changed_skipped", { meetingId: m.id }); // edited meanwhile: the next run catches up
+    }
     return { added: toAdd.length, removed: removedFromEvent };
   }
 
   return {
     async list() {
-      await kick(LIST_SOON_MS);
       const [rows, counts] = await Promise.all([store.listMeetings(orgId), store.inviteCounts(orgId)]);
+      const lastSync = Math.max(0, ...rows.map((r) => (r.syncedAt ? Date.parse(r.syncedAt) : 0)));
+      if (rows.length > 0 && Date.parse(deps.now()) - lastSync > LIST_KICK_MIN_GAP_MS) await kick(LIST_SOON_MS);
       let names = new Map<string, string>();
       if (rows.some((r) => r.targetId !== meeting.ALL_MEMBERS_TARGET_ID)) {
         try {

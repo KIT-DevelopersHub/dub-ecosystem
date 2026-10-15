@@ -9,6 +9,14 @@ import type { TokenProvider } from "./token";
 
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
 
+/** insertEvent with an id Google already used for an event that is now deleted (ids are never reused). */
+export class EventIdTaken extends Error {
+  constructor(eventId: string) {
+    super(`event id already used: ${eventId}`);
+    this.name = "EventIdTaken";
+  }
+}
+
 export interface CalendarAttendee {
   email: string;
   /** Every other attendee field Google returned (responseStatus, …), kept on patch. */
@@ -208,6 +216,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
         // Already inserted by an earlier, interrupted attempt. A deleted event's id stays taken.
         const existing = await client.getEvent(calendarId, input.id);
         if (existing) return existing;
+        throw new EventIdTaken(input.id);
       }
       return mapEvent(await readJson<GoogleEvent>(res));
     },

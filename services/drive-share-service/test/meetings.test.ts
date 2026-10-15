@@ -313,6 +313,8 @@ describe("Google Calendar is the source of truth", () => {
       }
     }
     expect(fromRecurrence(["RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261026T095959Z"])).toEqual({ recurrence: "weekly", until: "2026-10-26" });
+    // Google's UI: UNTIL = next JST midnight
+    expect(fromRecurrence(["RRULE:FREQ=WEEKLY;UNTIL=20261026T150000Z"])).toEqual({ recurrence: "weekly", until: "2026-10-26" });
     expect(fromRecurrence(["RRULE:FREQ=DAILY"])).toBeNull();
     expect(fromRecurrence(["RRULE:FREQ=WEEKLY;BYDAY=MO,TU"])).toBeNull();
     expect(fromRecurrence(["RRULE:FREQ=WEEKLY", "EXDATE:20261027T100000Z"])).toBeNull();
@@ -409,10 +411,57 @@ describe("Google Calendar is the source of truth", () => {
     });
   });
 
-  it("listing pulls the sync close so Google-side changes show up quickly", async () => {
-    const { service, kicks } = buildMeetings({ roster: roster() });
-    await service.list();
-    expect(kicks).toEqual([15_000]);
+  it("listing pulls the sync close, unless one ran within the last minute", async () => {
+    let now = "2026-10-14T00:00:00.000Z";
+    const { service, kicks, store } = buildMeetings({ roster: roster() });
+    const m = await service.create("usr_admin", BASE);
+    kicks.length = 0;
+    store.meetings.set(m.id, { ...store.meetings.get(m.id)!, syncedAt: now });
+    const svc = buildMeetings({ roster: roster(), store, now: () => now });
+    await svc.service.list();
+    expect(svc.kicks).toEqual([]);
+    now = "2026-10-14T00:05:00.000Z";
+    await svc.service.list();
+    expect(svc.kicks).toEqual([15_000]);
+  });
+
+  it("a meeting moved to another target while the sync ran is not removed", async () => {
+    const { service, calendar, store } = buildMeetings({ roster: roster() });
+    const m = await service.create("usr_admin", BASE);
+    const stale = { ...store.meetings.get(m.id)! };
+    await service.update(m.id, { targetId: "role_pr" }); // new event, old one deleted
+    expect(await calendar.getEvent(stale.calendarId, stale.googleEventId)).toBeNull();
+    expect(await store.deleteMeetingIf(stale.id, stale.calendarId, stale.googleEventId)).toBe(false);
+    expect(store.meetings.has(m.id)).toBe(true);
+  });
+
+  it("the sync never overwrites an edit that landed after it read the row", async () => {
+    const { service, store } = buildMeetings({ roster: roster() });
+    const m = await service.create("usr_admin", BASE);
+    const stale = { ...store.meetings.get(m.id)! };
+    await service.update(m.id, { title: "新しい名前" });
+    expect(await store.updateMeetingIf({ ...stale, syncedAt: "x" }, stale.updatedAt)).toBe(false);
+    expect(store.meetings.get(m.id)!.title).toBe("新しい名前");
+  });
+
+  it("an HTML description written by Google's editor is not pulled in", async () => {
+    const { service, calendar, store } = buildMeetings({ roster: roster() });
+    const m = await service.create("usr_admin", { ...BASE, description: "議題" });
+    eventOf(calendar).description = "議題<br><b>追記</b>";
+    await service.sync();
+    expect(store.meetings.get(m.id)!.description).toBe("議題");
+  });
+
+  it("a cut-off create whose event id is already taken (deleted in Google) is removed, not retried forever", async () => {
+    const base = createMockCalendarClient();
+    const calendar = { ...base, getEvent: async (c: string, e: string) => (base.state.calendars.get(c)?.events.has(e) ? base.getEvent(c, e) : null) };
+    const { service, store } = buildMeetings({ roster: roster(), calendar });
+    const m = await service.create("usr_admin", BASE);
+    const row = store.meetings.get(m.id)!;
+    await calendar.deleteEvent(row.calendarId, row.googleEventId);
+    store.meetings.set(m.id, { ...row, syncedAt: null });
+    await service.sync();
+    expect(store.meetings.has(m.id)).toBe(false);
   });
 
   it("the real client: insert with an id is idempotent (409 returns the existing event)", async () => {
