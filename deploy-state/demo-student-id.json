@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "student-id",
+  "worker": "dub-demo-student-id",
+  "url": "https://dub-demo-student-id.developershub-site.workers.dev",
+  "deployedSha": "35999659",
+  "branch": "feat/member-student-id",
+  "actor": "ko-tarou",
+  "markers": ["学籍番号","1400980"],
+  "live": true,
+  "verifiedAt": "2026-10-15T05:22:25Z",
+  "updatedAt": "2026-10-15T05:22:25Z",
+  "note": "運営名簿・参加届に学籍番号 (7桁) を追加"
+}
