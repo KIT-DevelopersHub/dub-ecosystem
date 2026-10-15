@@ -127,8 +127,8 @@ export function createApp(deps: AppDeps): Hono {
     c.json(await tickets.approve(reqCtx(c), c.req.param("id"))),
   );
 
-  // 無料券のクーポン: コードは券と同じ価値を持つので、発行・停止は販売 on/off と同じ lp:publish。一覧は edit。
-  app.get("/lp/tickets/coupons", edit, async (c) => c.json(await tickets.listCoupons()));
+  // 無料券のクーポン: コードは券と同じ価値を持つので、一覧（コードが見える）も発行・停止も販売 on/off と同じ lp:publish。
+  app.get("/lp/tickets/coupons", publish, async (c) => c.json(await tickets.listCoupons()));
   app.post("/lp/tickets/coupons", publish, async (c) => c.json(await tickets.createCoupon(reqCtx(c), await readJson(c)), 201));
   app.patch("/lp/tickets/coupons/:id", publish, async (c) =>
     c.json(await tickets.setCouponActive(reqCtx(c), c.req.param("id"), await readJson(c))),

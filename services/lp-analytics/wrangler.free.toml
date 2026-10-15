@@ -31,13 +31,14 @@ LP_BASE_URL = "https://hokuriku-it-conf.com"
 #   npx wrangler secret put CF_ANALYTICS_TOKEN   (Account Analytics:Read)
 CF_ACCOUNT_ID = "b8f6ddbf8fa8cf4e421eae870bdb6dac"
 LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
-# チケット購入 (Stripe Checkout)。secret が無ければ「決済準備中」(有料券 503・無料券は動く):
+# チケット購入 (Stripe Checkout)。secret が無ければ「決済準備中」(有料券 503・無料券はクーポンで動く):
 #   npx wrangler secret put STRIPE_SECRET_KEY       (sk_live_... / sk_test_...)
 #   npx wrangler secret put STRIPE_WEBHOOK_SECRET   (whsec_... 公開 LP の /tickets/stripe-webhook 用)
 # migration: npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0003_tickets.sql
 #            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0005_ticket_payment_safety.sql
 #            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0006_ticket_review_and_client.sql
-#   ORDER: apply 0005 / 0006 BEFORE deploying code that uses them (checkout INSERTs client_key; without
+#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0007_ticket_coupons.sql
+#   ORDER: apply 0005 / 0006 / 0007 BEFORE deploying code that uses them (checkout INSERTs client_key; without
 #   it every checkout 500s). The deploy.yml D1 schema gate blocks the deploy otherwise. ALTER ADD COLUMN
 #   is not re-runnable: if an apply fails midway, check PRAGMA table_info(lp_ticket_orders) and add the rest.
 # LP_DAILY_CHECKOUT_CAP = "300"   # 1 日 (JST) の checkout 作成上限（既定 300）

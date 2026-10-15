@@ -302,6 +302,7 @@ function ticketRepo(db: DbClient): LpTicketRepo {
                 WHERE ? IS NULL OR EXISTS (
                   SELECT 1 FROM lp_ticket_coupons c
                   WHERE c.id = ? AND c.site = ? AND c.active = 1 AND (c.expires_at IS NULL OR c.expires_at > ?)
+                    AND ? = 1 AND c.ticket_type_id = ?
                     AND (SELECT COALESCE(SUM(o.quantity), 0) FROM lp_ticket_orders o WHERE o.coupon_id = c.id AND ${HELD}) + ? <= c.max_uses
                 )`,
           binds: [
@@ -322,6 +323,8 @@ function ticketRepo(db: DbClient): LpTicketRepo {
             o.couponId,
             o.site,
             o.createdAt,
+            o.items.length,
+            o.items[0]?.ticketTypeId ?? null,
             pendingSince,
             o.quantity,
           ],

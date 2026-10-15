@@ -107,6 +107,8 @@ export class InMemoryLpRepo implements LpRepo {
       const fits =
         c !== undefined &&
         c.active &&
+        row.items.length === 1 &&
+        row.items[0]!.ticketTypeId === c.ticketTypeId &&
         (c.expiresAt === null || c.expiresAt > row.createdAt) &&
         this.usedBy(c.id, pendingSince) + row.quantity <= c.maxUses;
       if (!fits) return { ok: false as const, reason: "coupon_used_up" as const };

@@ -310,9 +310,13 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
   if (!origin) bad.push({ field: "origin", reason: "invalid" });
 
   const answers = parseAnswers(b.answers, fields, bad);
+  const hasCoupon = b.couponCode !== undefined && b.couponCode !== null;
   const rawCoupon = typeof b.couponCode === "string" ? b.couponCode.trim() : "";
   const couponCode = rawCoupon ? normalizeCouponCode(rawCoupon) : null;
-  if (rawCoupon && !couponCode) bad.push({ field: "couponCode", reason: "invalid" });
+  // A non-string coupon is a broken client, not "no coupon": say so instead of charging full price silently.
+  if ((hasCoupon && typeof b.couponCode !== "string") || (rawCoupon && !couponCode)) {
+    bad.push({ field: "couponCode", reason: "invalid" });
+  }
   if (bad.length > 0) throw errors.validationFailed(bad);
   const clientKey = typeof b.clientKey === "string" && CLIENT_KEY_RE.test(b.clientKey) ? b.clientKey : null;
   return { items, name, email, answers, origin, clientKey, couponCode };

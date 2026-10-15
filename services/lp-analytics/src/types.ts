@@ -303,8 +303,9 @@ export interface LpTicketRepo {
    * item's ticketTypeId is returned.
    */
   /**
-   * With row.couponId: in the SAME batch, the order is only inserted while the coupon is active, not
-   * expired at row.createdAt, and its held uses + row.quantity <= max_uses (else "coupon_used_up").
+   * With row.couponId: in the SAME batch, the order is only inserted while it is one line of the coupon's
+   * type, the coupon is active, not expired at row.createdAt, and its held uses + row.quantity <= max_uses
+   * (else "coupon_used_up").
    */
   insertOrderIfAvailable(
     row: TicketOrderRow,

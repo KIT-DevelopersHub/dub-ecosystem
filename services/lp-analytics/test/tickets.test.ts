@@ -975,7 +975,8 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const t0 = await addType(noPublish.app, { name: "招待", priceJpy: 0 });
     expect((await noPublish.app.fetch(send("POST", "/lp/tickets/coupons", { ticketTypeId: t0.id, maxUses: 1 }))).status).toBe(403);
     expect((await noPublish.app.fetch(send("PATCH", "/lp/tickets/coupons/x", { active: false }))).status).toBe(403);
-    expect((await noPublish.app.fetch(get("/lp/tickets/coupons"))).status).toBe(200);
+    // the list shows the codes themselves (= free tickets), so it needs lp:publish too
+    expect((await noPublish.app.fetch(get("/lp/tickets/coupons"))).status).toBe(403);
 
     const { app } = await setup(kind);
     const t = await addType(app, { name: "招待", priceJpy: 0 });
@@ -1021,6 +1022,11 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const c = await issueCoupon(app, t.id);
     const messy = ` ${c.code.slice(0, 5).toLowerCase()}-${c.code.slice(5)} `;
     expect((await app.fetch(checkout({ ticketTypeId: t.id, couponCode: messy }))).status).toBe(200);
+    for (const couponCode of [123, ["X"], { code: c.code }]) {
+      const r = await app.fetch(checkout({ ticketTypeId: t.id, couponCode }));
+      expect(r.status).toBe(400);
+      expect(JSON.stringify(await r.json())).toContain("couponCode");
+    }
     // an empty coupon field is "no coupon", not an invalid one
     expect(JSON.stringify(await (await app.fetch(checkout({ ticketTypeId: t.id, couponCode: "  " }))).json())).toContain("coupon_required");
   });
@@ -1159,6 +1165,15 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     await repo.setCouponActive("hokuriku-it-conf.com", c2.id, false, NOW);
     expect(await repo.insertOrderIfAvailable({ ...order("o4"), couponId: c2.id }, new Map(), since)).toEqual({ ok: false, reason: "coupon_used_up" });
     expect(await repo.insertOrderIfAvailable({ ...order("o5"), couponId: "tkc_missing" }, new Map(), since)).toEqual({ ok: false, reason: "coupon_used_up" });
+    // defense in depth: the write itself refuses another type or an extra line, even if the service let it through
+    const other = await addType(app, { name: "一般", priceJpy: 3000 });
+    const c3 = await issueCoupon(app, t.id, 5);
+    const otherLine = { ticketTypeId: other.id, ticketTypeName: "一般", dayLabel: "", unitPriceJpy: 0, quantity: 1 };
+    expect(await repo.insertOrderIfAvailable({ ...order("o6"), couponId: c3.id, items: [otherLine] }, new Map(), since)).toEqual({ ok: false, reason: "coupon_used_up" });
+    expect(
+      await repo.insertOrderIfAvailable({ ...order("o7"), couponId: c3.id, items: [...order("o7").items, otherLine], quantity: 2 }, new Map(), since),
+    ).toEqual({ ok: false, reason: "coupon_used_up" });
+    expect(await repo.getOrder("hokuriku-it-conf.com", "o7")).toBeNull();
   });
 
   it("check endpoint: sales off → 404; internal only", async () => {
