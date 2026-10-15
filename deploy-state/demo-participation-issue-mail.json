@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "participation-issue-mail",
+  "worker": "dub-demo-participation-issue-mail",
+  "url": "https://dub-demo-participation-issue-mail.developershub-site.workers.dev",
+  "deployedSha": "7d7ea27a",
+  "branch": "feat/participation-issue-mail",
+  "actor": "ko-tarou",
+  "markers": ["participation-issue-mail-dialog"],
+  "live": true,
+  "verifiedAt": "2026-10-14T07:47:26Z",
+  "updatedAt": "2026-10-14T07:47:26Z",
+  "note": "参加届 追加と同時にメールアドレス発行+ロール付与"
+}
