@@ -621,7 +621,7 @@ transition:transform .25s cubic-bezier(.2,.7,.2,1),box-shadow .25s,border-color 
 
 /* coupon code */
 .cpn{margin:32px 0 0;padding:26px 0 0;border-top:1.5px dashed rgba(16,28,168,.14)}
-.cpn.top{margin:0 0 32px;padding:0 0 26px;border-top:0;border-bottom:1.5px dashed rgba(16,28,168,.14)}
+.cpn.cpn-top{margin:0 0 32px;padding:0 0 26px;border-top:0;border-bottom:1.5px dashed rgba(16,28,168,.14)}
 .cpn-row{display:flex;gap:12px;align-items:stretch}
 .cpn-row input[type=text]{flex:1;min-width:0;font-family:"Inter",var(--font);font-weight:700;letter-spacing:.12em;text-transform:uppercase}
 .cpn-btn{flex:none;border:1.5px solid rgba(42,95,208,.4);background:#fff;color:var(--btn);border-radius:12px;padding:0 24px;font:inherit;font-size:15px;font-weight:800;cursor:pointer;transition:background .2s,color .2s,border-color .2s}
@@ -1171,7 +1171,7 @@ function renderCoupon(
   if (coupon && type) {
     const n = quantityCap(type, true, coupon);
     return (
-      `<div class="cpn top" id="coupon"><div class="cpn-applied"><span class="cpn-k">クーポン適用中</span>` +
+      `<div class="cpn cpn-top" id="coupon"><div class="cpn-applied"><span class="cpn-k">クーポン適用中</span>` +
       `<b class="cpn-code">${escapeHtml(coupon.code)}</b><a class="cpn-clear" href="/tickets${q}">解除</a></div>` +
       `<p class="cpn-hint">「${escapeHtml(typeLabel(type))}」を無料でお申し込みいただけます（1 回 ${n} 枚まで）。` +
       "クーポン適用中は他の券種と同時にお申し込みできません。</p>" +
