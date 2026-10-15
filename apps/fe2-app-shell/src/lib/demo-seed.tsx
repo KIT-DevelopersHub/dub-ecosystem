@@ -3728,6 +3728,7 @@ function createLpStore() {
 //   POST  /api/v1/lp/tickets/types       LpTicketTypeInput   201
 //   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
 //   GET   /api/v1/lp/tickets/orders      ?cursor&limit   newest first
+//   POST  /api/v1/lp/tickets/orders/:id/approve        needs_review -> paid (409 otherwise)
 // Demo starts PUBLISHED but with paymentReady=false so the 「決済 未設定」 state is visible.
 // Event = 2027-09-13(月) / 14(火): 一般・学生は Day 別の券種。sold/pending are TICKET counts.
 // Orders are fixed (not random) so the stats a reviewer sees are the same every load.
@@ -3751,13 +3752,15 @@ type DemoTicketOrder = {
   items: DemoTicketOrderItem[];
   quantity: number;
   amountJpy: number;
-  status: "pending" | "paid" | "expired";
+  status: DemoTicketOrderStatus;
   buyerName: string;
   buyerEmail: string;
   answers: { fieldId: string; label: string; value: string }[];
   createdAt: string;
   paidAt: string | null;
+  reviewReason: string | null;
 };
+type DemoTicketOrderStatus = "pending" | "paid" | "expired" | "refunded" | "needs_review";
 
 function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
   const has = (k: string): boolean => input[k] !== undefined;
@@ -3843,8 +3846,10 @@ function createLpTicketsStore() {
     tt("tt_student_d2", "学生", "学生証を当日ご提示ください", 1000, 100, D2, 10, 3),
     tt("tt_invite", "招待", "登壇者・スポンサー向け（両日）", 0, null, "", 5, 4),
   ];
-  const seedOrders: [string, [string, number][], string, "pending" | "paid" | "expired", string, string, string][] = [
+  const seedOrders: [string, [string, number][], string, DemoTicketOrderStatus, string, string, string][] = [
     // [id, [[typeId, 枚数]...], buyer, status, createdAt, 所属, 参加区分]
+    ["ord_010", [["tt_general_d1", 1]], "小林 大輔", "needs_review", "2026-10-13T04:10:00.000Z", "", "現地"],
+    ["ord_009", [["tt_student_d2", 1]], "加藤 さくら", "refunded", "2026-10-12T15:00:00.000Z", "金沢大学", "オンライン"],
     ["ord_008", [["tt_general_d1", 2], ["tt_general_d2", 2]], "山田 太郎", "pending", "2026-10-12T11:20:00.000Z", "北陸テック株式会社", "現地"],
     ["ord_007", [["tt_student_d1", 1], ["tt_student_d2", 1]], "佐藤 花子", "paid", "2026-10-11T08:05:00.000Z", "金沢工業大学", "現地"],
     ["ord_006", [["tt_general_d2", 1]], "鈴木 一郎", "paid", "2026-10-10T13:40:00.000Z", "", "オンライン"],
@@ -3865,14 +3870,16 @@ function createLpTicketsStore() {
       quantity: items.reduce((n, it) => n + it.quantity, 0),
       amountJpy: items.reduce((n, it) => n + it.unitPriceJpy * it.quantity, 0),
       status,
+      // 支払額が注文額と違った注文（人が Stripe で入金を確かめて確定する）。
+      reviewReason: status === "needs_review" ? "amount_mismatch" : null,
       buyerName,
-      buyerEmail: `buyer${8 - i}@example.com`,
+      buyerEmail: `buyer${10 - i}@example.com`,
       answers: [
         { fieldId: "f_affiliation", label: "所属", value: aff },
         { fieldId: "f_attendance", label: "参加区分", value: att },
       ],
       createdAt,
-      paidAt: status === "paid" ? createdAt : null,
+      paidAt: status === "paid" || status === "refunded" ? createdAt : null,
     };
   });
 
@@ -3886,7 +3893,7 @@ function createLpTicketsStore() {
         if (o.status === "paid") {
           sold += it.quantity;
           revenueJpy += it.unitPriceJpy * it.quantity;
-        } else if (o.status === "pending") pending += it.quantity;
+        } else if (o.status === "pending" || o.status === "needs_review") pending += it.quantity;
       }
     }
     return {
@@ -3985,6 +3992,16 @@ function createLpTicketsStore() {
       const items = sorted.slice(startIdx, startIdx + limit);
       const nextCursor = startIdx + limit < sorted.length ? (items[items.length - 1]?.id ?? null) : null;
       return json({ items, nextCursor });
+    }
+
+    const approveMatch = method === "POST" ? /^\/api\/v1\/lp\/tickets\/orders\/([^/]+)\/approve$/.exec(pathname) : null;
+    if (approveMatch) {
+      const o = orders.find((x) => x.id === decodeURIComponent(approveMatch[1]!));
+      if (!o) return json({ error: { code: "NOT_FOUND", message: "order not found" } }, 404);
+      if (o.status !== "needs_review") return json({ error: { code: "CONFLICT", message: "この注文は要確認ではありません" } }, 409);
+      o.status = "paid";
+      o.paidAt = o.paidAt ?? new Date().toISOString();
+      return json(o);
     }
 
     return null;

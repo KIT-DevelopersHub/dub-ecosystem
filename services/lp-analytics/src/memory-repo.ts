@@ -90,6 +90,11 @@ export class InMemoryLpRepo implements LpRepo {
   async countOrdersSince(site: string, since: string) {
     return this.orders.filter((o) => o.site === site && o.createdAt >= since).length;
   }
+  async heldPendingByClient(site: string, clientKey: string, pendingSince: string) {
+    return this.orders
+      .filter((o) => o.site === site && o.clientKey === clientKey && o.status === "pending" && o.createdAt >= pendingSince)
+      .reduce((n, o) => n + o.quantity, 0);
+  }
   async insertOrderIfAvailable(row: TicketOrderRow, capacities: ReadonlyMap<string, number | null>, pendingSince: string) {
     const short = row.items.find((i) => {
       const capacity = capacities.get(i.ticketTypeId) ?? null;
@@ -123,13 +128,27 @@ export class InMemoryLpRepo implements LpRepo {
   }
   async markOrderPaid(id: string, p: PaidSettlement) {
     const o = this.orders.find((x) => x.id === id);
-    return this.transition(id, ["pending", "expired"], {
-      status: p.reviewReason ? "needs_review" : "paid",
+    const since = p.capacitySince;
+    const over =
+      since !== undefined &&
+      (o?.items ?? []).some((i) => {
+        const cap = this.ticketTypes.find((t) => t.id === i.ticketTypeId)?.capacity ?? null;
+        const others = this.orders
+          .filter((x) => x.id !== id && this.isHeld(x, since))
+          .flatMap((x) => x.items)
+          .filter((x) => x.ticketTypeId === i.ticketTypeId)
+          .reduce((n, x) => n + x.quantity, 0);
+        return cap !== null && others + i.quantity > cap;
+      });
+    const status = over ? "needs_review" : "paid";
+    const ok = this.transition(id, ["pending", "expired"], {
+      status,
       paidAt: p.paidAt,
       stripeSessionId: o?.stripeSessionId ?? p.sessionId,
       paymentIntentId: o?.paymentIntentId ?? p.paymentIntentId,
-      reviewReason: p.reviewReason ?? null,
+      reviewReason: over ? "oversold" : null,
     });
+    return ok ? status : null;
   }
   async markOrderExpired(id: string) {
     return this.transition(id, ["pending"], { status: "expired" });
@@ -144,6 +163,29 @@ export class InMemoryLpRepo implements LpRepo {
   }
   async markOrderRefunded(id: string, refundedAt: string) {
     return this.transition(id, ["paid", "needs_review"], { status: "refunded", refundedAt });
+  }
+  async approveOrder(id: string, resolvedBy: string, resolvedAt: string, onlyReason?: string) {
+    const o = this.orders.find((x) => x.id === id);
+    if (!o || (onlyReason !== undefined && o.reviewReason !== onlyReason)) return false;
+    return this.transition(id, ["needs_review"], { status: "paid", paidAt: o.paidAt ?? resolvedAt, resolvedBy, resolvedAt });
+  }
+  async setOrderPaymentIntent(id: string, paymentIntentId: string) {
+    const o = this.orders.find((x) => x.id === id);
+    if (o && o.paymentIntentId === null) o.paymentIntentId = paymentIntentId;
+  }
+  async listMissingPaymentIntent(site: string, livemode: boolean, limit: number) {
+    const prefix = livemode ? "cs_live_" : "cs_test_";
+    return this.orders
+      .filter(
+        (o) =>
+          o.site === site &&
+          (o.status === "paid" || o.status === "needs_review") &&
+          o.stripeSessionId?.startsWith(prefix) &&
+          !o.paymentIntentId,
+      )
+      .sort((a, b) => (`${a.createdAt}~${a.id}` < `${b.createdAt}~${b.id}` ? -1 : 1))
+      .slice(0, limit)
+      .map(clone);
   }
   async listPendingWithSession(site: string, from: string, to: string, limit: number) {
     return this.orders

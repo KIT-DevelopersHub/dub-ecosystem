@@ -34,6 +34,6 @@ LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
 # LP_DAILY_CHECKOUT_CAP = "300"   # 1 日 (JST) の checkout 作成上限（既定 300）
 
 # Ticket payment reconcile (TicketService.reconcile): settles pending orders from Stripe when the
-# webhook is missing / misconfigured. See wrangler.free.toml for the free-tier situation.
+# webhook is missing / misconfigured. The free tier runs the same pass from a DO alarm (wrangler.free.toml).
 [triggers]
 crons = ["*/10 * * * *"]

@@ -202,6 +202,8 @@ export interface LpTicketOrder {
   answers: LpTicketAnswer[];
   createdAt: string;
   paidAt: string | null;
+  /** needs_review になった理由。確定後も履歴として残る（status は paid）。 */
+  reviewReason: string | null;
 }
 export interface LpTicketOrdersPage {
   items: LpTicketOrder[];
@@ -279,6 +281,8 @@ export interface LpApi {
   updateTicketType(id: string, input: Partial<LpTicketTypeInput>): Promise<LpTicketTypeSummary>;
   /** 購入者一覧・新しい順 (app:lp:edit = 個人情報)。 */
   listTicketOrders(query: { cursor?: string; limit?: number }): Promise<LpTicketOrdersPage>;
+  /** 要確認(needs_review)の注文を支払い済みに確定 (app:lp:edit + lp:publish)。要確認でなければ 409。 */
+  approveTicketOrder(id: string): Promise<LpTicketOrder>;
   /** 登壇者募集の設定・応募数 (app:lp:view)。 */
   getProposals(): Promise<LpProposalsState>;
   /** 募集の公開/停止 (app:lp:edit + lp:publish)。 */
@@ -359,6 +363,8 @@ export function createLpApi(api: ApiClient): LpApi {
       if (query.limit !== undefined) q.limit = query.limit;
       return api.request<LpTicketOrdersPage>({ method: "GET", path: `${BASE}/tickets/orders`, query: q });
     },
+    approveTicketOrder: (id) =>
+      api.request<LpTicketOrder>({ method: "POST", path: `${BASE}/tickets/orders/${encodeURIComponent(id)}/approve` }),
     getProposals: () => api.request<LpProposalsState>({ method: "GET", path: `${BASE}/proposals` }),
     setProposalsEnabled: (input) =>
       api.request<LpProposalsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/proposals/enabled`, body: input }),

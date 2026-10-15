@@ -471,6 +471,15 @@
   padding: var(--dub-space-3) 0;
 }
 
+/* 要確認の注文: 理由と確定ボタンを行の下に 1 段で出す */
+.orderReview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--dub-space-3);
+  padding: 0 0 var(--dub-space-3);
+}
+
 .orderItems {
   display: grid;
   gap: var(--dub-space-1);

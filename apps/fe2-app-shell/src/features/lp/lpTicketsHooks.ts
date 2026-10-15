@@ -1,11 +1,18 @@
 // LP管理 → チケット のデータフック。書き込みはすべて楽観的 UI（先にキャッシュへ反映 → 失敗で
 // スナップショットへ戻してエラートースト）。lpHooks.ts と同じ流儀。
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useToast } from "@dub/ui";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useLpApi } from "./LpProvider.tsx";
-import type { LpTicketField, LpTicketTypeInput, LpTicketTypeSummary, LpTicketsState } from "./lpApi.tsx";
+import type {
+  LpTicketField,
+  LpTicketOrder,
+  LpTicketOrdersPage,
+  LpTicketTypeInput,
+  LpTicketTypeSummary,
+  LpTicketsState,
+} from "./lpApi.tsx";
 
 const STALE_MS = 30 * 1000;
 export const TICKET_ORDERS_PAGE_SIZE = 25;
@@ -199,5 +206,41 @@ export function useLpTicketOrders(enabled: boolean) {
     getNextPageParam: (last) => last.nextCursor,
     staleTime: STALE_MS,
     enabled,
+  });
+}
+
+type OrderPages = InfiniteData<LpTicketOrdersPage, string | null>;
+
+function replaceOrder(pages: OrderPages, id: string, patch: (o: LpTicketOrder) => LpTicketOrder): OrderPages {
+  return { ...pages, pages: pages.pages.map((p) => ({ ...p, items: p.items.map((o) => (o.id === id ? patch(o) : o)) })) };
+}
+
+/** 要確認の注文を支払い済みに確定。先に行を「支払い済み」にし、失敗で戻す。販売数・売上はサーバー集計を取り直す。 */
+export function useApproveTicketOrder() {
+  const api = useLpApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const ordersKey = lpTicketOrdersKey();
+  const stateKey = lpTicketsKey();
+  return useMutation<LpTicketOrder, unknown, { id: string }, { prev: OrderPages | undefined }>({
+    mutationFn: ({ id }) => api.approveTicketOrder(id),
+    onMutate: async ({ id }) => {
+      await qc.cancelQueries({ queryKey: ordersKey, exact: true });
+      const prev = qc.getQueryData<OrderPages>(ordersKey);
+      if (prev) qc.setQueryData<OrderPages>(ordersKey, replaceOrder(prev, id, (o) => ({ ...o, status: "paid" })));
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ordersKey, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, "注文を確定できませんでした") });
+    },
+    onSuccess: (saved) => {
+      qc.setQueryData<OrderPages>(ordersKey, (old) => (old ? replaceOrder(old, saved.id, () => saved) : old));
+      toast.show({ kind: "success", title: `${saved.buyerName} さんの注文を確定しました` });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ordersKey, exact: true });
+      void qc.invalidateQueries({ queryKey: stateKey, exact: true });
+    },
   });
 }

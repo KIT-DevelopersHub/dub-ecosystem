@@ -50,6 +50,9 @@ interface TicketOrderDbRow {
   payment_intent_id: string | null;
   refunded_at: string | null;
   review_reason: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  client_key: string | null;
 }
 interface TicketItemDbRow {
   order_id: string;
@@ -108,6 +111,9 @@ const toTicketOrder = (r: TicketOrderDbRow, items: LpTicketOrderItem[]): TicketO
   paymentIntentId: r.payment_intent_id ?? null,
   refundedAt: r.refunded_at ?? null,
   reviewReason: r.review_reason ?? null,
+  resolvedBy: r.resolved_by ?? null,
+  resolvedAt: r.resolved_at ?? null,
+  clientKey: r.client_key ?? null,
 });
 
 // Seats held = items of paid / needs_review orders + of pending orders still inside the hold window (alias o).
@@ -240,6 +246,16 @@ function ticketRepo(db: DbClient): LpTicketRepo {
       );
       return r?.c ?? 0;
     },
+    async heldPendingByClient(site, clientKey, pendingSince) {
+      const r = await db.first<{ n: number | null }>(
+        `SELECT SUM(quantity) AS n FROM lp_ticket_orders
+         WHERE client_key = ? AND site = ? AND status = 'pending' AND created_at >= ?`,
+        clientKey,
+        site,
+        pendingSince,
+      );
+      return r?.n ?? 0;
+    },
     async insertOrderIfAvailable(o, capacities, pendingSince) {
       // One batch (= one transaction): the order, each item only if its type still has room, then
       // (still in the same batch) drop the order + its items when any item was short. No second
@@ -249,8 +265,8 @@ function ticketRepo(db: DbClient): LpTicketRepo {
       const results = await db.batch([
         {
           sql: `INSERT INTO lp_ticket_orders (id, site, quantity, amount_jpy, status, buyer_name, buyer_email, answers_json,
-                                             stripe_session_id, created_at, paid_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                             stripe_session_id, created_at, paid_at, client_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           binds: [
             o.id,
             o.site,
@@ -263,6 +279,7 @@ function ticketRepo(db: DbClient): LpTicketRepo {
             o.stripeSessionId,
             o.createdAt,
             o.paidAt,
+            o.clientKey,
           ],
         },
         ...o.items.map((i) => {
@@ -318,18 +335,32 @@ function ticketRepo(db: DbClient): LpTicketRepo {
       );
     },
     async markOrderPaid(id, p) {
-      const res = await db.run(
-        `UPDATE lp_ticket_orders SET status = ?, paid_at = ?, stripe_session_id = COALESCE(stripe_session_id, ?),
-                payment_intent_id = COALESCE(payment_intent_id, ?), review_reason = ?
-         WHERE id = ? AND status IN ('pending', 'expired')`,
-        p.reviewReason ? "needs_review" : "paid",
+      // One statement = atomic on D1's single writer: two late settles racing for the last seat
+      // serialize here, so the second sees the first as held and goes to needs_review.
+      const over = `? IS NOT NULL AND EXISTS (
+        SELECT 1 FROM lp_ticket_order_items mine JOIN lp_ticket_types t ON t.id = mine.ticket_type_id
+        WHERE mine.order_id = ? AND t.capacity IS NOT NULL AND (
+          SELECT COALESCE(SUM(i.quantity), 0) FROM lp_ticket_order_items i JOIN lp_ticket_orders o ON o.id = i.order_id
+          WHERE i.ticket_type_id = mine.ticket_type_id AND o.id != ? AND ${HELD}
+        ) + mine.quantity > t.capacity)`;
+      const since = p.capacitySince ?? null;
+      const overBinds = [since, id, id, since];
+      const r = await db.first<{ status: "paid" | "needs_review" }>(
+        `UPDATE lp_ticket_orders SET
+                status = CASE WHEN ${over} THEN 'needs_review' ELSE 'paid' END,
+                review_reason = CASE WHEN ${over} THEN 'oversold' ELSE NULL END,
+                paid_at = ?, stripe_session_id = COALESCE(stripe_session_id, ?),
+                payment_intent_id = COALESCE(payment_intent_id, ?)
+         WHERE id = ? AND status IN ('pending', 'expired')
+         RETURNING status`,
+        ...overBinds,
+        ...overBinds,
         p.paidAt,
         p.sessionId,
         p.paymentIntentId,
-        p.reviewReason ?? null,
         id,
       );
-      return res.meta.changes > 0;
+      return r?.status ?? null;
     },
     async markOrderExpired(id) {
       const res = await db.run("UPDATE lp_ticket_orders SET status = 'expired' WHERE id = ? AND status = 'pending'", id);
@@ -352,6 +383,38 @@ function ticketRepo(db: DbClient): LpTicketRepo {
         id,
       );
       return res.meta.changes > 0;
+    },
+    async approveOrder(id, resolvedBy, resolvedAt, onlyReason) {
+      const res = await db.run(
+        `UPDATE lp_ticket_orders SET status = 'paid', paid_at = COALESCE(paid_at, ?), resolved_by = ?, resolved_at = ?
+         WHERE id = ? AND status = 'needs_review' AND (? IS NULL OR review_reason = ?)`,
+        resolvedAt,
+        resolvedBy,
+        resolvedAt,
+        id,
+        onlyReason ?? null,
+        onlyReason ?? null,
+      );
+      return res.meta.changes > 0;
+    },
+    async setOrderPaymentIntent(id, paymentIntentId) {
+      await db.run(
+        "UPDATE lp_ticket_orders SET payment_intent_id = ? WHERE id = ? AND payment_intent_id IS NULL",
+        paymentIntentId,
+        id,
+      );
+    },
+    async listMissingPaymentIntent(site, livemode, limit) {
+      return withItems(
+        await db.all<TicketOrderDbRow>(
+          `SELECT * FROM lp_ticket_orders
+           WHERE site = ? AND status IN ('paid', 'needs_review') AND stripe_session_id LIKE ? AND payment_intent_id IS NULL
+           ORDER BY created_at, id LIMIT ?`,
+          site,
+          livemode ? "cs_live_%" : "cs_test_%",
+          limit,
+        ),
+      );
     },
     async listPendingWithSession(site, from, to, limit) {
       return withItems(

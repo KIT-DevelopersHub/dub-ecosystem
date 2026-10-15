@@ -1,6 +1,6 @@
 // Worker bindings for lp-analytics: the shared dub-core D1 (lp_* namespace) + identity-roster
-// for the LP管理 policy gate. No queues / events.
-import type { D1Database, Fetcher } from "@cloudflare/workers-types";
+// for the LP管理 policy gate (+ the free-plan reconcile DO). No queues / events.
+import type { D1Database, DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types";
 
 export interface Env {
   DB: D1Database;
@@ -23,4 +23,6 @@ export interface Env {
   LP_DAILY_CHECKOUT_CAP?: string;
   /** 1 日 (JST) に受け付ける登壇応募の上限（既定 200）。 */
   LP_DAILY_PROPOSAL_CAP?: string;
+  /** Free plan only: alarm loop that runs the ticket payment reconcile (no cron slot left). */
+  TICKET_RECONCILE_DO?: DurableObjectNamespace;
 }
