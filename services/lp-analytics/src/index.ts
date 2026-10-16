@@ -1,5 +1,5 @@
 // Worker entrypoint. Wires the runtime env (D1, identity Service Binding) into AppDeps.
-import type { ExecutionContext } from "@cloudflare/workers-types";
+import type { ExecutionContext, ScheduledController } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
 import { common } from "@dub/types";
@@ -8,6 +8,7 @@ import { createApp } from "./app";
 import { createD1LpRepo } from "./d1-repo";
 import { createCfSiteTrafficSource } from "./site-traffic";
 import { createStripeClient } from "./stripe";
+import { TicketService } from "./tickets";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -23,6 +24,11 @@ const DEFAULT_DAILY_PROPOSAL_CAP = 200;
 function siteTrafficFrom(env: Env): AppDeps["siteTraffic"] {
   const { CF_ANALYTICS_TOKEN: token, CF_ACCOUNT_ID: accountId, LP_WEB_ANALYTICS_SITE_TAG: siteTag } = env;
   return token && accountId && siteTag ? createCfSiteTrafficSource({ token, accountId, siteTag }) : null;
+}
+
+/** Payments need BOTH secrets: charging without a webhook secret risks money taken but no ticket. */
+export function stripeFrom(env: Pick<Env, "STRIPE_SECRET_KEY" | "STRIPE_WEBHOOK_SECRET">): AppDeps["stripe"] {
+  return env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET ? createStripeClient(env.STRIPE_SECRET_KEY) : null;
 }
 
 export function buildDeps(env: Env, requestId?: string): AppDeps {
@@ -46,7 +52,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newOrderId: () => newId("tko"),
     dailyCheckoutCap:
       Number(env.LP_DAILY_CHECKOUT_CAP) > 0 ? Number(env.LP_DAILY_CHECKOUT_CAP) : DEFAULT_DAILY_CHECKOUT_CAP,
-    stripe: env.STRIPE_SECRET_KEY ? createStripeClient(env.STRIPE_SECRET_KEY) : null,
+    stripe: stripeFrom(env),
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     newProposalId: () => newId("lpp"),
     dailyProposalCap:
@@ -59,6 +65,10 @@ export default {
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
     const app = createApp(buildDeps(env, requestId));
     return app.fetch(request as unknown as Request) as unknown as Response;
+  },
+  // Ticket payment reconcile (safety net when the Stripe webhook is missing / misconfigured).
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    await new TicketService(buildDeps(env)).reconcile();
   },
 };
 

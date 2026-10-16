@@ -35,4 +35,8 @@ LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
 #   npx wrangler secret put STRIPE_SECRET_KEY       (sk_live_... / sk_test_...)
 #   npx wrangler secret put STRIPE_WEBHOOK_SECRET   (whsec_... 公開 LP の /tickets/stripe-webhook 用)
 # migration: npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0003_tickets.sql
+#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0005_ticket_payment_safety.sql
+# NOTE: no [triggers] here. The account is at the Workers FREE plan's 5/5 cron cap, so adding
+# the reconcile cron (wrangler.toml) would make CF reject this deploy. Until a slot / DO alarm is
+# decided, the scheduled() reconcile does not run on free tier; the webhook + thanks-page confirm settle.
 # LP_DAILY_CHECKOUT_CAP = "300"   # 1 日 (JST) の checkout 作成上限（既定 300）

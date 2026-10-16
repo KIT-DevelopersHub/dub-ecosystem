@@ -150,7 +150,7 @@ export interface LpTicketType {
   createdAt: string;
   updatedAt: string;
 }
-/** sold / pending are ticket counts (sum of quantities), not orders. */
+/** sold / pending are ticket counts (sum of quantities), not orders. pending = held but not sold (fresh pending + needs_review). */
 export interface LpTicketTypeStats {
   sold: number;
   pending: number;
@@ -173,7 +173,8 @@ export interface LpTicketsState {
   updatedAt: string | null;
   updatedBy: string | null;
 }
-export type LpTicketOrderStatus = "pending" | "paid" | "expired";
+/** needs_review = Stripe says paid but amount/currency mismatched, or disputed: a human must look (seat kept). */
+export type LpTicketOrderStatus = "pending" | "paid" | "expired" | "refunded" | "needs_review";
 export interface LpTicketAnswer {
   fieldId: string;
   label: string;
@@ -229,12 +230,23 @@ export interface TicketTypeRow extends LpTicketType {
 export interface TicketOrderRow extends LpTicketOrder {
   site: string;
   stripeSessionId: string | null;
+  paymentIntentId: string | null;
+  refundedAt: string | null;
+  reviewReason: string | null;
 }
 export interface TicketTypeAgg {
   ticketTypeId: string;
   sold: number;
   pending: number;
   revenueJpy: number;
+}
+
+export interface PaidSettlement {
+  paidAt: string;
+  sessionId: string | null;
+  paymentIntentId: string | null;
+  /** Set => money taken but a human must look (e.g. "oversold"): status needs_review instead of paid. */
+  reviewReason?: string;
 }
 
 export interface LpTicketRepo {
@@ -264,9 +276,19 @@ export interface LpTicketRepo {
   getOrder(site: string, id: string): Promise<TicketOrderRow | null>;
   getOrderBySession(sessionId: string): Promise<TicketOrderRow | null>;
   setOrderSession(id: string, sessionId: string): Promise<void>;
-  /** WHERE status='pending'. true = this call made the transition. */
-  markOrderPaid(id: string, paidAt: string, sessionId: string | null): Promise<boolean>;
+  getOrderByPaymentIntent(paymentIntentId: string): Promise<TicketOrderRow | null>;
+  /** pending|expired -> paid, or needs_review with reviewReason ("paid wins" over a late expiry). true = this call made the transition. */
+  markOrderPaid(id: string, p: PaidSettlement): Promise<boolean>;
+  /** pending -> expired only (never from paid). */
   markOrderExpired(id: string): Promise<boolean>;
+  /** pending|expired|paid -> needs_review. */
+  markOrderNeedsReview(id: string, reason: string, paymentIntentId?: string | null): Promise<boolean>;
+  /** paid|needs_review -> refunded (releases the seat). */
+  markOrderRefunded(id: string, refundedAt: string): Promise<boolean>;
+  /** Reconcile: pending orders with a Stripe session, from <= created_at < to, oldest first. */
+  listPendingWithSession(site: string, from: string, to: string, limit: number): Promise<TicketOrderRow[]>;
+  /** Reconcile: pending orders without a session created before `before` -> expired. Returns count. */
+  expireSessionlessPending(site: string, before: string): Promise<number>;
   /** Newest first, keyset by (created_at, id). */
   listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
 }
