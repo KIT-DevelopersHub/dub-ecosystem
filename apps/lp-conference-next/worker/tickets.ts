@@ -1225,10 +1225,20 @@ export const BASE_HEADERS: Record<string, string> = {
   "x-robots-tag": "noindex",
 };
 
+/**
+ * Framing allowlist: only our own Workers (Dub app LpViewer, fe2-demo) may embed the
+ * payment pages; any other site stays blocked (clickjacking).
+ */
+export const FRAME_ANCESTORS = "frame-ancestors 'self' https://*.developershub-site.workers.dev";
+
 export function htmlResponse(html: string, status = 200): Response {
   return new Response(html, {
     status,
-    headers: { ...BASE_HEADERS, "content-type": "text/html; charset=utf-8", "x-frame-options": "DENY" },
+    headers: {
+      ...BASE_HEADERS,
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": FRAME_ANCESTORS,
+    },
   });
 }
 
