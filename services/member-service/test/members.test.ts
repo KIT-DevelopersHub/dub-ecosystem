@@ -148,6 +148,32 @@ describe("member-service HTTP surface", () => {
     expect(cleared.json.rosterNumber).toBeNull();
   });
 
+  it("学籍番号(studentId) is normalized, validated, and editable", async () => {
+    const app = createApp(makeDeps());
+    const created = await call(app, "POST", "/members/people", {
+      body: { name: "田中", status: "added", teamIds: [], studentId: " １４００９８０ " },
+    });
+    expect(created.status).toBe(201);
+    expect(created.json.studentId).toBe("1400980");
+    const memberId = created.json.id as string;
+
+    const ov = await call(app, "GET", "/members/overview");
+    expect(ov.json.members[0].studentId).toBe("1400980");
+
+    for (const bad of ["140098", "14009801", "a400980"]) {
+      const res = await call(app, "POST", "/members/people", {
+        body: { name: "佐藤", status: "added", teamIds: [], studentId: bad },
+      });
+      expect(res.status, bad).toBe(400);
+    }
+
+    const kept = await call(app, "PATCH", `/members/people/${memberId}`, { body: { studentId: "0012345", version: 1 } });
+    expect(kept.json.studentId).toBe("0012345"); // leading zeros survive
+    const cleared = await call(app, "PATCH", `/members/people/${memberId}`, { body: { studentId: "", version: 2 } });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.studentId).toBeNull();
+  });
+
   it("参加届と同じ人物項目(PersonProfile)で追加・編集でき、表示名は 姓/名 から合成される", async () => {
     const app = createApp(makeDeps());
     const created = await call(app, "POST", "/members/people", {

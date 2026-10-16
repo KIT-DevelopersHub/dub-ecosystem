@@ -186,6 +186,8 @@ export interface TextFieldProps extends TestableProps {
   invalid?: boolean;
   disabled?: boolean;
   type?: "text" | "email" | "password" | "url" | "number";
+  /** モバイルの仮想キーボード種別 (例 "numeric")。 */
+  inputMode?: "text" | "numeric" | "decimal" | "tel" | "email" | "url" | "search" | "none";
   "aria-describedby"?: string;
 }
 

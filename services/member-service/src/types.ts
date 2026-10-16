@@ -30,6 +30,8 @@ export interface PersonRow extends member.PersonProfile {
   department: string | null;
   /** 学年。旧データの表記ゆれ ("2年" / "３") は読み出し時に normalizeGrade で正規化。 */
   grade: member.Grade | null;
+  /** 学籍番号 (例 "1400980")。正規化済み (0016 additive column)。 */
+  studentId: string | null;
   /** 名列番号 (例 "3EP2-26")。正規化済み (0011 additive column)。 */
   rosterNumber: string | null;
   /** Linked identity-roster account (identity userId), or null when unlinked. */
@@ -77,6 +79,8 @@ export interface ParticipationRow extends member.PersonProfile {
   firstNameRomaji: string | null;
   grade: member.Grade | null;
   department: string | null;
+  /** 学籍番号 (例 "1400980")。正規化済み (0017 additive column)。 */
+  studentId: string | null;
   /** 名列番号 (例 "3EP2-26")。正規化済み (0012 additive column)。 */
   rosterNumber: string | null;
   contact: string | null;

@@ -2973,6 +2973,12 @@ function createMembersStore() {
     const code = mem.department ? DEPT_CODE[mem.department] : undefined;
     if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
   });
+  // 学籍番号の seed (例 "1400980")。学年が入っている人だけ、入学年度 2 桁 + 連番 5 桁の 7 桁。
+  members.forEach((mem, i) => {
+    if (!mem.grade) return;
+    const entry = mem.grade === "graduate" ? 12 : 17 - Number(mem.grade);
+    mem.studentId = `${entry}${String(980 + i * 37).padStart(5, "0")}`;
+  });
 
   // オンボーディング案内の初期項目 (公開ページ /onboarding に並ぶ)。実際の受け入れの流れ:
   // 参加届 → Slack 参加 → 表示名 → アイコン → ミーティング (日時とリンクは meetings 側)。
@@ -3003,7 +3009,7 @@ function createMembersStore() {
       id: "part_seed_1", orgId: ORG, memberId: "member_h2", name: "黒川", normalizedName: "黒川",
       lastName: "黒川", firstName: null, nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
       nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null,
-      grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222",
+      grade: "3", department: "情報工学科", studentId: "1400980", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222",
       schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
       desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
       matchKind: "linked_existing", reviewState: "added", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -3013,7 +3019,7 @@ function createMembersStore() {
       id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
-      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      grade: "2", department: "電気電子工学科", studentId: "1500431", rosterNumber: "2EE1-15", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -3023,7 +3029,7 @@ function createMembersStore() {
       id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
       lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
       nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
-      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      grade: "1", department: "情報工学科", studentId: "1600712", rosterNumber: "1EP2-08", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
       schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),

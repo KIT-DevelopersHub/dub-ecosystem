@@ -68,6 +68,16 @@ describe("POST /api/v1/public/participation", () => {
     expect(forwarded.rosterNumber).toBe("3EP2-26");
   });
 
+  it("forwards 学籍番号 to member-service as-is (format is validated there)", async () => {
+    const member = memberBinding("created_new");
+    const env = makeEnv({ SVC_MEMBER: member.fetcher });
+    const app = createApp({ ...NO_RL, turnstile: async () => true });
+    const res = await app.fetch(post({ ...validBody, studentId: "1400980" }), env, execCtx);
+    expect(res.status).toBe(200);
+    const forwarded = (await member.requests[0]!.json()) as Record<string, unknown>;
+    expect(forwarded.studentId).toBe("1400980");
+  });
+
   it("does not leak the member identity nor any resolution result", async () => {
     const member = memberBinding("linked_existing");
     const env = makeEnv({ SVC_MEMBER: member.fetcher });

@@ -18,7 +18,8 @@ const ADMIN_EDIT = { keys: ["identity:admin"], appLevel: { app: "admin", level: 
 // 名簿 (member_people) の中身: 氏名・連絡先・プロフィール各項目。
 const PROFILE_FIELDS = [
   "lastName", "firstName", "lastNameKana", "firstNameKana", "lastNameRomaji", "firstNameRomaji",
-  "schoolEmail", "gmail", "phone", "grade", "department", "rosterNumber", "desiredActivity", "note",
+  "schoolEmail", "gmail", "phone", "grade", "department", "studentId", "rosterNumber", "desiredActivity",
+  "note",
 ];
 const PERSON_FIELDS = ["name", "roleTitle", "status", "teamIds", "leaderId", "contact", ...PROFILE_FIELDS];
 const PERSON_LABELS: Record<string, string> = {
@@ -41,6 +42,7 @@ const PERSON_LABELS: Record<string, string> = {
   phone: "電話番号",
   grade: "学年",
   department: "学科",
+  studentId: "学籍番号",
   rosterNumber: "名列番号",
   desiredActivity: "希望する活動",
   note: "備考",
@@ -48,7 +50,7 @@ const PERSON_LABELS: Record<string, string> = {
 const PERSON_HINT =
   "status は added / invited / considering / on_leave / declined。teamIds は所属の全置換（members.teams.list の id）。" +
   "姓名(lastName/firstName)を送ると表示名 name は自動合成されるので name は一緒に送らない。" +
-  "値はサービスが正規化するので正規化済みで送る: grade は 1〜4 / graduate、rosterNumber は 3EP2-26 形式、desiredActivity は event / dev / both、" +
+  "値はサービスが正規化するので正規化済みで送る: grade は 1〜4 / graduate、studentId は 1400980 のような 7 桁の数字（先頭 0 も保つ文字列）、rosterNumber は 3EP2-26 形式、desiredActivity は event / dev / both、" +
   "空にしたい項目は null（空文字は null として保存され読み直しが一致しない）";
 
 export const MEMBER: AreaSpec = {
@@ -61,7 +63,7 @@ export const MEMBER: AreaSpec = {
       service: M,
       requires: MEMBERS_VIEW,
       description: "メンバー名簿（チームと所属メンバー）を取得する",
-      hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・gmail・phone・grade・department・rosterNumber・version（gmail 等の空欄は未登録）。identityUserId = ログインアカウントの id（tasks の assigneeId・users の id と同じ。null はアカウント未紐付けで担当を照合できない）",
+      hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・gmail・phone・grade・department・studentId・rosterNumber・version（gmail 等の空欄は未登録）。identityUserId = ログインアカウントの id（tasks の assigneeId・users の id と同じ。null はアカウント未紐付けで担当を照合できない）",
     }),
     read({
       id: "members.teams.list",

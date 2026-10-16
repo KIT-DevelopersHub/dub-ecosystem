@@ -23,6 +23,8 @@ export interface PersonProfileFieldDescriptor {
   half?: boolean;
   help?: string;
   placeholder?: string;
+  /** モバイルの仮想キーボード種別。 */
+  inputMode?: "numeric";
   options?: { value: string; label: string }[];
 }
 
@@ -39,6 +41,7 @@ const FIELD_UI: Record<PersonProfileKey, FieldUi> = {
   schoolEmail: { kind: "email", half: true, help: "学校から配布されたアドレス", placeholder: "you@school.ac.jp" },
   gmail: { kind: "email", half: true, help: "連絡・共有に使う Gmail", placeholder: "you@gmail.com" },
   phone: { kind: "text", half: true, help: "緊急連絡用", placeholder: "090-1234-5678" },
+  studentId: { kind: "text", half: true, inputMode: "numeric", help: "例: 1400980", placeholder: "1400980" },
   rosterNumber: { kind: "text", half: true, help: "例: 3EP2-26", placeholder: "3EP2-26" },
   grade: {
     kind: "select",
@@ -48,6 +51,7 @@ const FIELD_UI: Record<PersonProfileKey, FieldUi> = {
   department: { kind: "text", half: true, placeholder: "情報工学科" },
   desiredActivity: {
     kind: "select",
+    half: true,
     options: member.DESIRED_ACTIVITIES.map((a) => ({ value: a, label: member.ACTIVITY_LABEL[a] })),
   },
   note: { kind: "textarea", help: "連絡事項など" },
@@ -63,10 +67,11 @@ const FIELD_ORDER: readonly PersonProfileKey[] = [
   "firstNameRomaji",
   "schoolEmail",
   "gmail",
-  "phone",
+  "studentId",
   "rosterNumber",
   "grade",
   "department",
+  "phone",
   "desiredActivity",
   "note",
 ];
@@ -144,6 +149,7 @@ export const PROFILE_DISPLAY_COLUMNS: readonly ProfileDisplayColumn[] = [
     keys: ["lastNameKana", "firstNameKana"],
     value: (p) => joinParts([p.lastNameKana, p.firstNameKana]) || (p.nameKana ?? ""),
   },
+  single("studentId"),
   single("rosterNumber"),
   {
     id: "nameRomaji",
@@ -226,6 +232,7 @@ export function PersonProfileFields({
         value={val}
         onChange={(v) => set(f.key, v)}
         {...(f.placeholder ? { placeholder: f.placeholder } : {})}
+        {...(f.inputMode ? { inputMode: f.inputMode } : {})}
         testId={fid}
       />
     );

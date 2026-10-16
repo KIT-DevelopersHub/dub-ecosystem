@@ -21,6 +21,7 @@ export function TextField({
   invalid,
   disabled,
   type = "text",
+  inputMode,
   testId,
   ...rest
 }: TextFieldProps) {
@@ -31,6 +32,7 @@ export function TextField({
       data-size={size}
       data-testid={testId}
       type={type}
+      inputMode={inputMode}
       value={value}
       placeholder={placeholder}
       disabled={disabled}

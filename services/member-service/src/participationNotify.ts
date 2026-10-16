@@ -23,7 +23,7 @@ export const PARTICIPATION_NOTIFY_TYPE = "member.participation.submitted";
 export function buildParticipationNotify(p: member.Participation): notification.NotifyRequest {
   const body = [
     `氏名: ${p.name}`,
-    ...(["grade", "department", "rosterNumber", "desiredActivity", "schoolEmail", "gmail", "phone"] as const).map((k) => {
+    ...(["grade", "department", "studentId", "rosterNumber", "desiredActivity", "schoolEmail", "gmail", "phone"] as const).map((k) => {
       const v = member.formatPersonProfileValue(k, p);
       return v ? `${member.PERSON_PROFILE_LABEL[k]}: ${v}` : null;
     }),
