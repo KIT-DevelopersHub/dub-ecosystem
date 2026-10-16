@@ -11,6 +11,8 @@ import {
   buildBookmarkBody,
   buildMessageRow,
   buildReactionRows,
+  buildUpsertMessageSql,
+  buildUpsertThreadReplySql,
   channelIdFor,
   convertSlackBodyToDubBody,
   isDownloadable,
@@ -86,6 +88,43 @@ describe("convertSlackBodyToDubBody", () => {
 
   it("keeps shared formatting untouched", () => {
     expect(convertSlackBodyToDubBody("*b* _i_ ~s~ `c`", ctx)).toBe("*b* _i_ ~s~ `c`");
+  });
+
+  it("moves Slack's inline ``` fences onto their own lines so the content survives", () => {
+    expect(convertSlackBodyToDubBody("```echo hi```", ctx)).toBe("```\necho hi\n```");
+    expect(convertSlackBodyToDubBody("```line1\nline2```", ctx)).toBe("```\nline1\nline2\n```");
+    expect(convertSlackBodyToDubBody("```\nline1\n```", ctx)).toBe("```\nline1\n```");
+    expect(convertSlackBodyToDubBody("手順:```pnpm i\npnpm dev```以上", ctx)).toBe("手順:\n```\npnpm i\npnpm dev\n```\n以上");
+    expect(convertSlackBodyToDubBody("a\n```x```\nb", ctx)).toBe("a\n```\nx\n```\nb");
+  });
+
+  it("keeps code block content literal (links/mentions as plain text, entities decoded)", () => {
+    expect(convertSlackBodyToDubBody("```curl <https://x.com/a?b=1> <@U_ALICE> a &amp;&amp; b &lt;T&gt;```", ctx)).toBe(
+      "```\ncurl https://x.com/a?b=1 @alice a && b <T>\n```",
+    );
+    expect(convertSlackBodyToDubBody("<https://y.com|y> ```z```", ctx)).toBe("[y](https://y.com) \n```\nz\n```");
+  });
+});
+
+describe("message upserts (re-import refreshes untouched bodies)", () => {
+  const row = buildMessageRow({ slack: { ts: "1700000000.000100", user: "U_ALICE", text: "```a```" }, slackChannelId: "C_GEN", dubChannelId: "ch_x", ctx });
+
+  it("history pass refreshes only never-edited, non-deleted rows", () => {
+    const sql = buildUpsertMessageSql(row);
+    expect(sql).toMatch(/^INSERT INTO chat_messages /);
+    expect(sql).toContain("ON CONFLICT(id) DO UPDATE SET body = excluded.body WHERE chat_messages.version = 1 AND chat_messages.deleted_at IS NULL");
+  });
+
+  it("thread pass still attaches broadcasts and never detaches", () => {
+    const sql = buildUpsertThreadReplySql(row);
+    expect(sql).toContain("thread_root_id = COALESCE(chat_messages.thread_root_id, excluded.thread_root_id)");
+    expect(sql).toContain("body = CASE WHEN chat_messages.version = 1 AND chat_messages.deleted_at IS NULL THEN excluded.body ELSE chat_messages.body END");
+  });
+
+  it("merges into multi-row statements with the conflict tail intact", () => {
+    const merged = compactStatements([buildUpsertMessageSql(row), buildUpsertMessageSql({ ...row, id: "other" })]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatch(/\),\n\(.*\nON CONFLICT\(id\) DO UPDATE SET body = excluded\.body/s);
   });
 });
 
