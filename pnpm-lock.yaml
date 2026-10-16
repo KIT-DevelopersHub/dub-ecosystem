@@ -764,6 +764,9 @@ importers:
       '@dub/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@dub/slack-import':
+        specifier: workspace:*
+        version: link:../../packages/slack-import
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -952,6 +955,8 @@ importers:
         specifier: ^4
         version: 4.13.1
 
+  packages/slack-import: {}
+
   packages/tokens: {}
 
   packages/types: {}
@@ -1129,6 +1134,9 @@ importers:
       '@dub/policy-gate':
         specifier: workspace:*
         version: link:../../packages/policy-gate
+      '@dub/slack-import':
+        specifier: workspace:*
+        version: link:../../packages/slack-import
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types

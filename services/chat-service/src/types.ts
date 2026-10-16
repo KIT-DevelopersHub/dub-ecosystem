@@ -391,6 +391,8 @@ export interface ChatRepo {
   setChannelSection(userId: common.UserId, channelId: common.ChannelId, sectionId: string | null): Promise<void>;
 }
 
+import type { SlackImporter } from "./slack-import";
+
 export interface AppDeps {
   repo: ChatRepo;
   authz: PermissionGranter;
@@ -410,4 +412,7 @@ export interface AppDeps {
   // Link preview resolver (GET /chat/unfurl). Optional: absent => the route answers
   // `preview: null` so clients simply render no card (tests / minimal deploys).
   unfurler?: Unfurler;
+  // In-app Slack channel import (src/slack-import.ts). Absent => the /chat/slack-import/*
+  // routes answer 412 (not configured).
+  slackImport?: SlackImporter;
 }

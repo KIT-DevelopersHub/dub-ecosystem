@@ -17,6 +17,7 @@ import type { ChannelDetailsTab } from "./ChannelDetails";
 import { CreateChannelModal } from "./CreateChannelModal";
 import { NewDmModal } from "./NewDmModal";
 import { SectionNameModal } from "./SectionNameModal";
+import { SlackImportModal } from "./slack-import/SlackImportModal";
 import { useChatSections } from "../hooks/useChatSections";
 import { channelLabel } from "../lib/dm";
 import styles from "../styles/chat.module.css";
@@ -49,6 +50,9 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab }: ChatAppPr
   const [threadOpen, setThreadOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newDmOpen, setNewDmOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  // Same keys chat-service's POLICY_TABLE requires for /chat/slack-import/* (admin only by default).
+  const canImport = can("app:chat:edit") && can("chat:slack_import");
   // DM peers' display names (a DM is labelled by "the other side").
   const [dmUsers, setDmUsers] = useState<Record<common.UserId, identity.UserSummary>>({});
   const [dmUsersFailed, setDmUsersFailed] = useState(false);
@@ -234,6 +238,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab }: ChatAppPr
           onDelete: setPendingSectionDelete,
           onMove: sections.move,
         }}
+        {...(canImport ? { onImport: () => setImportOpen(true) } : {})}
       />
     </>
   );
@@ -290,6 +295,17 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab }: ChatAppPr
       )}
 
       <CreateChannelModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={onCreateChannel} />
+      <SlackImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => void reloadChannels().catch(() => undefined)}
+        onOpenChannel={(channelId) => {
+          setImportOpen(false);
+          void reloadChannels()
+            .catch(() => undefined)
+            .then(() => onSelect(channelId));
+        }}
+      />
       <NewDmModal open={newDmOpen} onClose={() => setNewDmOpen(false)} onStart={onStartDm} />
       <SectionNameModal
         open={sectionDialog !== null}

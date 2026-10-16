@@ -223,3 +223,48 @@ export interface UpdateSectionRequest {
   name?: string;
   position?: number;
 }
+
+// ---- Slack channel import (admin) — mirrors services/chat-service/src/slack-import.ts ----
+// The browser drives a job by POSTing …/step in a loop while the screen is open; a
+// reopened screen resumes from the persisted cursor. 412 = SLACK_BOT_TOKEN not set.
+export type SlackImportJobStatus = "queued" | "running" | "done" | "failed";
+export type SlackImportPhase = "users" | "channel" | "history" | "threads" | "files" | "finalize" | "done";
+
+export interface SlackImportCounters {
+  members: number;
+  messages: number;
+  threadReplies: number;
+  reactions: number;
+  pins: number;
+  files: number;
+  filesSkipped: number;
+}
+
+export interface SlackImportJob {
+  id: string;
+  slackChannelId: string;
+  slackChannelName: string;
+  isPrivate: boolean;
+  dubChannelId: common.ChannelId;
+  status: SlackImportJobStatus;
+  phase: SlackImportPhase;
+  counters: SlackImportCounters;
+  pending: { threads: number; files: number };
+  error: { code: string; message: string } | null;
+  /** >0 while parked on a Slack rate limit: wait this long before the next step. */
+  retryAfterMs: number;
+  createdBy: common.UserId;
+  createdAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
+  finishedAt: common.ISODateTime | null;
+}
+
+export interface SlackChannelOption {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  isArchived: boolean;
+  memberCount: number | null;
+  /** Latest job for this channel, if it was imported before. */
+  job: { id: string; status: SlackImportJobStatus } | null;
+}

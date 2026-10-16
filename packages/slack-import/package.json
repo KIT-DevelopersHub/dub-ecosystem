@@ -1,0 +1,19 @@
+{
+  "name": "@dub/slack-import",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Slack -> Dub chat importer core: Slack Web API client, pure mapping/SQL builders (deterministic ids), and the offline orchestration. Platform-neutral (no node:* imports) so both the infra/d1 CLI and chat-service (Workers) consume it.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

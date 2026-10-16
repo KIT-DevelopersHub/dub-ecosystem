@@ -25,7 +25,7 @@ import type { auditLog, event, gantt, gateway, identity, mail, meeting, notifica
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
-import { mockUnfurl } from "../composition/featureEntries";
+import { createSlackImportSim, mockUnfurl, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -53,6 +53,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   // members in the channel details modal. Hard delete is its own key (admin only by default).
   "chat:moderate",
   "chat:delete_channel",
+  "chat:slack_import",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -1478,7 +1479,16 @@ function createRosterStore() {
     return null;
   }
 
-  return { handle };
+  // Slack import (チャンネル取り込み) creates disabled placeholder users for bots /
+  // unmatched authors, exactly like the real importer writes identity_users.
+  function addUsers(list: { id: string; displayName: string }[]): void {
+    for (const u of list) {
+      if (users.some((x) => x.id === u.id)) continue;
+      users.push({ id: u.id, orgId: ORG, displayName: u.displayName, email: `${u.id}@slack-import.invalid`, githubLogin: null, avatarUrl: null, status: "disabled", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() });
+    }
+  }
+
+  return { handle, addUsers };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -1501,9 +1511,12 @@ interface DemoChatChannel {
   archived?: boolean;
   version?: number;
   roster?: { userId: string; role: "admin" | "member"; joinedAt: string }[];
+  visibility?: "public" | "private"; // default: dm -> private, else public
 }
 
-function createChatStore() {
+type DemoMessage = Record<string, unknown> & { id: string; channelId: string; threadRootId: string | null };
+
+function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayName: string }[]) => void }) {
   const CH_TS = "2026-08-01T00:00:00.000Z";
   // 全体: everyone. announcements is the read-mostly 全体周知 channel.
   const overall: DemoChatChannel[] = [
@@ -1546,7 +1559,7 @@ function createChatStore() {
     name: c.name,
     topic: c.topic,
     eventId: c.eventId,
-    visibility: c.type === "dm" ? "private" : "public",
+    visibility: c.visibility ?? (c.type === "dm" ? "private" : "public"),
     archived: c.archived ?? false,
     memberCount: c.roster?.length ?? c.memberCount,
     ...(c.memberIds ? { memberIds: c.memberIds } : {}),
@@ -1638,13 +1651,51 @@ function createChatStore() {
     msg({ id: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", body: "LP の文言、確認してもらえますか？急ぎではないです 🙏", createdAt: "2026-08-01T01:00:00.000Z" }),
     msg({ id: "msg_01SEEDDMB0000000000000002", channelId: "chn_dm_bob", authorId: ME_ID, body: "了解です、今日中に見ます！", createdAt: "2026-08-01T01:03:00.000Z" }),
   ];
-  const messagesOf = (channelId: string | null) => [
+  // チャンネル取り込み (Slack): the shared fe6 simulator drives the jobs; a finished job
+  // materializes its Dub channel (thread, reactions, placeholder authors, pins, files).
+  const imported = new Map<string, { messages: DemoMessage[]; pinnedIds: string[] }>();
+  const materializeImport = (c: ImportedChannel) => {
+    const existing = byId.get(c.id);
+    if (existing) {
+      existing.archived = c.archived;
+    } else {
+      const created: DemoChatChannel = { id: c.id, type: "topic", name: c.name, topic: c.topic, eventId: null, memberCount: c.memberCount, visibility: c.visibility, archived: c.archived };
+      all.push(created);
+      byId.set(created.id, created);
+    }
+    imported.set(c.id, { messages: c.messages as unknown as DemoMessage[], pinnedIds: [...c.pinnedIds] });
+    addUsers(c.placeholderUsers);
+  };
+  const slackImport = createSlackImportSim({
+    // usr_ken is a disabled (退会済み) roster account — still matched by email.
+    authors: { me: ME_ID, a: "usr_bob", b: "usr_emi", disabled: "usr_ken" },
+    onDone: materializeImport,
+  });
+  const simResponse = (r: ReturnType<typeof slackImport.step>): Response =>
+    r.ok ? json(r.value, r.status) : json({ error: { code: r.code, message: r.message, retryable: false } } satisfies ErrorResponse, r.status);
+
+  const messagesOf = (channelId: string | null): DemoMessage[] => [
     ...(channelId === "chn_general" ? generalMessages : []),
     ...(channelId === "chn_dm_bob" ? dmMessages : []),
+    ...(channelId ? (imported.get(channelId)?.messages ?? []) : []),
     ...(channelId ? (posted.get(channelId) ?? []) : []),
   ];
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (pathname.startsWith("/api/v1/chat/slack-import/")) {
+      if (method === "GET" && pathname === "/api/v1/chat/slack-import/channels") return json({ items: slackImport.listChannels() });
+      if (method === "GET" && pathname === "/api/v1/chat/slack-import/jobs") {
+        return json({ items: slackImport.listJobs(Number(url.searchParams.get("limit") ?? 20) || 20) });
+      }
+      if (method === "POST" && pathname === "/api/v1/chat/slack-import/jobs") {
+        return simResponse(slackImport.createJob((body as { channel?: unknown } | null)?.channel));
+      }
+      const step = /^\/api\/v1\/chat\/slack-import\/jobs\/([^/]+)\/step$/.exec(pathname);
+      if (step && method === "POST") return simResponse(slackImport.step(decodeURIComponent(step[1]!)));
+      const one = /^\/api\/v1\/chat\/slack-import\/jobs\/([^/]+)$/.exec(pathname);
+      if (one && method === "GET") return simResponse(slackImport.getJob(decodeURIComponent(one[1]!)));
+      return null;
+    }
     if (method === "POST" && pathname === "/api/v1/chat/messages") {
       const req = (body ?? {}) as { channelId?: string; body?: string; threadRootId?: string | null };
       if (!req.channelId || typeof req.body !== "string") return notFound(`POST ${pathname}`);
@@ -1796,8 +1847,10 @@ function createChatStore() {
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
       const channelId = url.searchParams.get("channelId");
       // #general opens to a seeded timeline (incl. a system post); others start empty
-      // and grow with posts made during the session.
-      return json(page(messagesOf(channelId)));
+      // and grow with posts made during the session. Like chat-service: the channel
+      // timeline holds top-level posts only; ?threadRootId= returns that thread's replies.
+      const threadRootId = url.searchParams.get("threadRootId");
+      return json(page(messagesOf(channelId).filter((m) => (m.threadRootId ?? null) === (threadRootId || null))));
     }
     {
       // Members / pins: demo returns a small roster and no pins (bare arrays per the
@@ -1833,7 +1886,11 @@ function createChatStore() {
         return json(null, 204);
       }
       const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
-      if (pin && method === "GET") return json([]);
+      if (pin && method === "GET") {
+        const channelId = decodeURIComponent(pin[1]!);
+        const imp = imported.get(channelId);
+        return json(imp ? imp.messages.filter((m) => imp.pinnedIds.includes(m.id)) : []);
+      }
     }
     return null;
   }
@@ -4166,7 +4223,7 @@ export function createDemoFetch(): typeof fetch {
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
-  const chatStore = createChatStore();
+  const chatStore = createChatStore({ addUsers: roster.addUsers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
   const lpStore = createLpStore();
   // LP チケット販売（券種・入力項目・購入者）— LP管理のチケットタブ。

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "Bk1",
+    "title": "運営マニュアル",
+    "link": "https://example.com/manual",
+    "emoji": ":book:"
+  },
+  {
+    "id": "Bk2",
+    "title": "タイムテーブル",
+    "link": "https://example.com/tt"
+  },
+  {
+    "id": "Bk3",
+    "title": "folder",
+    "type": "folder"
+  }
+]

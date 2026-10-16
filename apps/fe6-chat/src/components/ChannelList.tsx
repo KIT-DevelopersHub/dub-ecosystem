@@ -38,6 +38,8 @@ export interface ChannelListProps {
   sections?: ChatSection[];
   assignments?: Record<common.ChannelId, string>;
   sectionActions?: SectionActions;
+  /** Admin-only 「チャンネル取り込み」 (Slack). Omit to hide the entry. */
+  onImport?: () => void;
 }
 
 export interface SectionActions {
@@ -67,6 +69,7 @@ export function ChannelList({
   sections = [],
   assignments = {},
   sectionActions,
+  onImport,
 }: ChannelListProps) {
   const layout = buildSidebar(channels, sectionActions ? sections : [], sectionActions ? assignments : {});
   const grouped = layout.groups;
@@ -300,6 +303,12 @@ export function ChannelList({
                 data-testid="fe6-section-create"
               >
                 ＋ セクションを作成
+              </button>
+            )}
+
+            {onImport && (
+              <button type="button" className={styles.sectionCreate} onClick={onImport} data-testid="fe6-slack-import-open">
+                ⇩ チャンネル取り込み（Slack）
               </button>
             )}
           </>
