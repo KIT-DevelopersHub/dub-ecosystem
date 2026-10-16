@@ -8,6 +8,7 @@ const EDIT = { keys: [], appLevel: { app: "chat", level: "edit" } } as const;
 const CREATE = { keys: ["chat:create"], appLevel: { app: "chat", level: "edit" } } as const;
 const SCOPE_OUT = "依頼範囲外（ピン留め・リアクションは依頼表に無い）";
 const SIDEBAR = "ボット自身のサイドバーのセクション分けで、Dub のデータではない";
+const SLACK_IMPORT = "Slack 履歴の一括取り込みで、管理者が画面から実行する移行作業。エージェントの操作対象にしない";
 const CHANNEL_ADMIN = "ボットがそのチャンネルの管理者（自分で作ったチャンネル等）でないと拒否される";
 
 export const CHAT: AreaSpec = {
@@ -270,6 +271,11 @@ export const CHAT: AreaSpec = {
     { service: S, route: "PATCH /chat/sections/:id", reason: SIDEBAR },
     { service: S, route: "DELETE /chat/sections/:id", reason: SIDEBAR },
     { service: S, route: "PUT /chat/channels/:id/section", reason: SIDEBAR },
+    { service: S, route: "GET /chat/slack-import/channels", reason: SLACK_IMPORT },
+    { service: S, route: "GET /chat/slack-import/jobs", reason: SLACK_IMPORT },
+    { service: S, route: "POST /chat/slack-import/jobs", reason: SLACK_IMPORT },
+    { service: S, route: "GET /chat/slack-import/jobs/:id", reason: SLACK_IMPORT },
+    { service: S, route: "POST /chat/slack-import/jobs/:id/step", reason: SLACK_IMPORT },
   ],
   pending: [],
   ownerOpenedIrreversible: {
