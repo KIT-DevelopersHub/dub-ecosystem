@@ -107,10 +107,11 @@ test("handleProposals: closed / unavailable fall through to the 404 page", async
   assert.equal(await handleProposals(new Request("https://lp.example/other"), deps()), null);
 });
 
-test("handleProposals: page has noindex + DENY framing", async () => {
+test("handleProposals: page has noindex + own-Workers-only framing", async () => {
   const res = (await handleProposals(new Request("https://lp.example/proposals"), deps()))!;
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("x-robots-tag"), "noindex");
+  assert.match(res.headers.get("content-security-policy") ?? "", /^frame-ancestors 'self' /);
   assert.match(await res.text(), /この内容で応募する/);
 });
 
