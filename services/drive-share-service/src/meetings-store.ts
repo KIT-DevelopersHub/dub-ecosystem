@@ -58,8 +58,13 @@ export interface MeetingStore {
   getMeeting(orgId: string, id: string): Promise<MeetingRow | null>;
   insertMeeting(row: MeetingRow): Promise<void>;
   updateMeeting(row: MeetingRow): Promise<void>;
+  /** updateMeeting only while the stored updated_at is still `expectedUpdatedAt` (the sync must not
+   *  overwrite a user edit that landed after it read the row). false = skipped. */
+  updateMeetingIf(row: MeetingRow, expectedUpdatedAt: string): Promise<boolean>;
   /** Deletes the meeting and its invite ledger. */
   deleteMeeting(id: string): Promise<void>;
+  /** deleteMeeting only while it still points at that event (not moved meanwhile). false = skipped. */
+  deleteMeetingIf(id: string, calendarId: string, googleEventId: string): Promise<boolean>;
 
   listInvites(meetingId: string): Promise<MeetingInviteRow[]>;
   replaceInvites(meetingId: string, rows: readonly MeetingInviteRow[]): Promise<void>;
@@ -194,9 +199,31 @@ export function createD1MeetingStore(db: DbClient): MeetingStore {
         m.updatedAt, m.syncedAt, m.id,
       );
     },
+    async updateMeetingIf(m, expectedUpdatedAt) {
+      const r = await db.run(
+        `UPDATE driveshare_meetings SET
+           target_id = ?, account_id = ?, calendar_id = ?, google_event_id = ?, title = ?, description = ?,
+           starts_at = ?, duration_minutes = ?, recurrence = ?, until = ?, meet_url = ?, html_link = ?,
+           updated_at = ?, synced_at = ?
+         WHERE id = ? AND updated_at = ?`,
+        m.targetId, m.accountId, m.calendarId, m.googleEventId, m.title, m.description,
+        m.startsAt, m.durationMinutes, m.recurrence, m.until, m.meetUrl, m.htmlLink,
+        m.updatedAt, m.syncedAt, m.id, expectedUpdatedAt,
+      );
+      return r.meta.changes > 0;
+    },
     async deleteMeeting(id) {
       await db.run(`DELETE FROM driveshare_meeting_invites WHERE meeting_id = ?`, id);
       await db.run(`DELETE FROM driveshare_meetings WHERE id = ?`, id);
+    },
+    async deleteMeetingIf(id, calendarId, googleEventId) {
+      const r = await db.run(
+        `DELETE FROM driveshare_meetings WHERE id = ? AND calendar_id = ? AND google_event_id = ?`,
+        id, calendarId, googleEventId,
+      );
+      if (r.meta.changes === 0) return false;
+      await db.run(`DELETE FROM driveshare_meeting_invites WHERE meeting_id = ?`, id);
+      return true;
     },
 
     async listInvites(meetingId) {
@@ -292,9 +319,21 @@ export function createInMemoryMeetingStore(): MeetingStore & {
     async updateMeeting(row: MeetingRow) {
       if (meetings.has(row.id)) meetings.set(row.id, { ...row });
     },
+    async updateMeetingIf(row: MeetingRow, expectedUpdatedAt: string) {
+      if (meetings.get(row.id)?.updatedAt !== expectedUpdatedAt) return false;
+      meetings.set(row.id, { ...row });
+      return true;
+    },
     async deleteMeeting(id: string) {
       meetings.delete(id);
       invites.delete(id);
+    },
+    async deleteMeetingIf(id: string, calendarId: string, googleEventId: string) {
+      const m = meetings.get(id);
+      if (!m || m.calendarId !== calendarId || m.googleEventId !== googleEventId) return false;
+      meetings.delete(id);
+      invites.delete(id);
+      return true;
     },
     async listInvites(meetingId: string) {
       return (invites.get(meetingId) ?? []).map((r) => ({ ...r })).sort((a, b) => a.email.localeCompare(b.email));
