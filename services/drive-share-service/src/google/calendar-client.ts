@@ -8,6 +8,12 @@ import { mapGoogleError } from "../drive-client";
 import type { TokenProvider } from "./token";
 
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
+const MEET_BASE = "https://meet.googleapis.com/v2";
+
+/** "abc-defg-hij" from a Meet link, null when it is not one. */
+export function meetingCodeOf(meetUrl: string): string | null {
+  return /^https:\/\/meet\.google\.com\/([a-z]+-[a-z]+-[a-z]+)(?:[/?#]|$)/i.exec(meetUrl)?.[1] ?? null;
+}
 
 /** insertEvent with an id Google already used for an event that is now deleted (ids are never reused). */
 export class EventIdTaken extends Error {
@@ -73,6 +79,9 @@ export interface CalendarClient {
   patchEvent(calendarId: string, eventId: string, patch: Partial<CalendarEventInput>): Promise<CalendarEvent>;
   /** Idempotent: 404/410 (already gone) is success. */
   deleteEvent(calendarId: string, eventId: string): Promise<void>;
+  /** Meet REST v2: let anyone with the link join without knocking (accessType OPEN). Calendar
+   *  cannot set this, so it is applied to the space after the event exists. false = not a Meet link. */
+  openMeet(meetUrl: string): Promise<boolean>;
 }
 
 interface GoogleEvent {
@@ -242,6 +251,21 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
       const res = await call(url.toString(), { method: "DELETE" });
       if (res.ok || gone(res.status)) return;
       await fail(res);
+    },
+
+    async openMeet(meetUrl) {
+      const code = meetingCodeOf(meetUrl);
+      if (!code) return false;
+      // A meeting code is an alias of the space; patch needs its real name ("spaces/…").
+      const space = await readJson<{ name?: string; config?: { accessType?: string } }>(
+        await call(`${MEET_BASE}/spaces/${encodeURIComponent(code)}`, { method: "GET" }),
+      );
+      if (space.config?.accessType === "OPEN") return true;
+      if (!space.name || !/^spaces\/[\w-]+$/.test(space.name)) throw errors.upstreamUnavailable("google:meet");
+      const url = new URL(`${MEET_BASE}/${space.name}`);
+      url.searchParams.set("updateMask", "config.accessType");
+      await readJson(await call(url.toString(), { method: "PATCH", body: JSON.stringify({ config: { accessType: "OPEN" } }) }));
+      return true;
     },
   };
   return client;

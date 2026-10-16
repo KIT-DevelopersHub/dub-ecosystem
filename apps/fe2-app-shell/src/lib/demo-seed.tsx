@@ -2287,6 +2287,7 @@ interface DemoDriveGoogleAccount {
   active: boolean;
   needsReconnect: boolean;
   calendarMissing?: boolean;
+  meetMissing?: boolean;
 }
 interface DemoDriveGoogleStatus {
   accounts: DemoDriveGoogleAccount[];
@@ -2379,7 +2380,7 @@ function createDriveGoogleDemoStore() {
         return write({
           ...cur,
           accounts: cur.accounts.map((a) =>
-            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, connectedAt: new Date().toISOString() } : a,
+            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, meetMissing: false, connectedAt: new Date().toISOString() } : a,
           ),
         });
       }
