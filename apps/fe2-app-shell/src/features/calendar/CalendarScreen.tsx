@@ -48,7 +48,8 @@ import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from 
 import { MeetingDetailDialog } from "./MeetingDetailDialog.tsx";
 import { MeetingFilter } from "./MeetingFilter.tsx";
 import { MeetingFormDialog } from "./MeetingFormDialog.tsx";
-import { loadVisibleTargets, saveVisibleTargets } from "./meeting-form";
+import { useUserPref } from "./calendar-prefs";
+import { isMeetingTargetVisible, parseMeetingTargetChoices, type MeetingTargetChoices } from "./meeting-form";
 import { meetingTasks, type MeetingOccurrence } from "./meeting-occurrences";
 import { useMeetingMutations, useMeetingTargetsQuery, useMeetingsAccess, useMeetingsQuery } from "./useMeetings.tsx";
 import {
@@ -75,6 +76,12 @@ const labelKey = (k: string) => `label:${k}`;
 const statusKey = (s: string) => `status:${s}`;
 const scopeKey = (teamId: string | null | undefined) => `scope:${teamId ?? PERSONAL_LABEL}`;
 const personKey = (userId: string) => `person:${userId}`;
+const HIDDEN_PREF = "hidden";
+const MEETING_TARGETS_PREF = "meetingTargets";
+const NO_KEYS: readonly string[] = [];
+const NO_CHOICES: MeetingTargetChoices = {};
+const decodeHidden = (v: unknown): readonly string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : NO_KEYS;
 const WATCHED_TEAMS_STORAGE = "dub.calendar.watchedTeams";
 const WATCHED_PEOPLE_STORAGE = "dub.calendar.watchedPeople";
 
@@ -142,16 +149,12 @@ export function CalendarScreen(): JSX.Element {
   // Phones open on 日 (seven columns don't fit), desktop on 週 — Google's defaults.
   const [view, setView] = useState<CalendarView>(() => (narrow ? "day" : "week"));
   const [anchorDay, setAnchorDay] = useState(today);
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  // Unticked sidebar checkboxes, remembered per user across reloads.
+  const [hiddenKeys, setHiddenKeys] = useUserPref(HIDDEN_PREF, currentUserId, decodeHidden, NO_KEYS);
+  const hidden = useMemo<ReadonlySet<string>>(() => new Set(hiddenKeys), [hiddenKeys]);
   const toggleFilter = useCallback(
-    (key: string) =>
-      setHidden((prev) => {
-        const next = new Set(prev);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        return next;
-      }),
-    [],
+    (key: string) => setHiddenKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])),
+    [setHiddenKeys],
   );
   const [openSections, toggleSection] = useOpenSections();
   // 他のチーム: teams whose every task is shown, not only the caller's own (kept per browser).
@@ -184,11 +187,12 @@ export function CalendarScreen(): JSX.Element {
   const targetsQ = useMeetingTargetsQuery(access.canView);
   const targets = useMemo(() => targetsQ.data?.items ?? [], [targetsQ.data]);
   const { create: createMeeting, update: updateMeeting, remove: removeMeeting, sync } = useMeetingMutations(targets);
-  const [chosenTargets, setChosenTargets] = useState<string[] | null>(null);
-  // Default = the calendars I belong to (+ 全体); a manual choice is remembered per browser.
-  const visibleIds = useMemo(
-    () => chosenTargets ?? (targetsQ.data ? loadVisibleTargets(targetsQ.data.items) : null),
-    [chosenTargets, targetsQ.data],
+  // Default = the calendars I belong to (+ 全体); a manual choice is remembered per user.
+  const [targetChoices, setTargetChoices] = useUserPref(MEETING_TARGETS_PREF, currentUserId, parseMeetingTargetChoices, NO_CHOICES);
+  const targetState = targetsQ.isError ? "error" : (targetsQ.data?.items ?? null);
+  const isTargetVisible = useCallback(
+    (id: string) => isMeetingTargetVisible(id, targetChoices, targetState),
+    [targetChoices, targetState],
   );
   const [meetingForm, setMeetingForm] = useState<{ editing: meeting.Meeting | null } | null>(null);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingOccurrence | null>(null);
@@ -197,11 +201,9 @@ export function CalendarScreen(): JSX.Element {
   const firstKey = dayKeyOf(days[0]!);
   const lastKey = dayKeyOf(days[days.length - 1]!);
   const meetingOcc = useMemo(() => {
-    const all = meetingsQ.data?.items ?? [];
-    // Targets unavailable (error) → show every meeting rather than hide them all.
-    const shown = visibleIds ? all.filter((m) => visibleIds.includes(m.targetId)) : all;
+    const shown = (meetingsQ.data?.items ?? []).filter((m) => isTargetVisible(m.targetId));
     return meetingTasks(shown, firstKey, lastKey);
-  }, [meetingsQ.data, visibleIds, firstKey, lastKey]);
+  }, [meetingsQ.data, isTargetVisible, firstKey, lastKey]);
 
   // Scope to the caller's own tasks (担当/依頼) — task-service's "/me rule" rejects a
   // bare list — plus every task of the 他のチーム and the people the caller added. One
@@ -330,11 +332,7 @@ export function CalendarScreen(): JSX.Element {
     setWatchedPeople((w) => (w.some((p) => p.id === u.id) ? w : [...w, { id: u.id, name: u.displayName }]));
   const removePerson = (id: string) => {
     setWatchedPeople((w) => w.filter((p) => p.id !== id));
-    setHidden((prev) => {
-      const next = new Set(prev);
-      next.delete(personKey(id));
-      return next;
-    });
+    setHiddenKeys((prev) => prev.filter((k) => k !== personKey(id)));
   };
 
   // ── mutations (optimistic: reflect first, roll back on failure) ──────────
@@ -723,7 +721,7 @@ export function CalendarScreen(): JSX.Element {
               {access.canView && (
                 <MeetingFilter
                   targets={targets}
-                  visible={new Set(visibleIds ?? [])}
+                  visible={new Set(targets.map((t) => t.id).filter(isTargetVisible))}
                   loading={targetsQ.isPending}
                   notice={meetingNotice}
                   headAction={
@@ -739,10 +737,9 @@ export function CalendarScreen(): JSX.Element {
                       </Button>
                     ) : null
                   }
-                  onChange={(ids) => {
-                    setChosenTargets(ids);
-                    saveVisibleTargets(ids);
-                  }}
+                  onChange={(ids) =>
+                    setTargetChoices((prev) => ({ ...prev, ...Object.fromEntries(targets.map((t) => [t.id, ids.includes(t.id)])) }))
+                  }
                 />
               )}
 

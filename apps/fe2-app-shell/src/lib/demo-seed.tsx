@@ -3029,6 +3029,8 @@ function createMembersStore() {
     const year = mem.grade && mem.grade !== "graduate" ? mem.grade : undefined;
     const code = mem.department ? DEPT_CODE[mem.department] : undefined;
     if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
+    // 学籍番号の seed (例 "1400980")。半角数字 7 桁の仮番号。
+    if (year) mem.studentNumber = `13${String(100 + i * 37).padStart(5, "0")}`;
   });
 
   // オンボーディング案内の初期項目 (公開ページ /onboarding に並ぶ)。実際の受け入れの流れ:
@@ -3070,7 +3072,7 @@ function createMembersStore() {
       id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
-      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", studentNumber: "1401123", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -3080,7 +3082,7 @@ function createMembersStore() {
       id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
       lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
       nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
-      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", studentNumber: "1500456", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
       schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
