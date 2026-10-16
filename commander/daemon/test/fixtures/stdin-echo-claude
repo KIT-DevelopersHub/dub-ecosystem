@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+// Test fixture standing in for the `claude` CLI: reads stdin to EOF and echoes argv plus
+// the stdin text back as the stream-json result (for the image-on-stdin path).
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (c) => (input += c));
+process.stdin.on("end", () => {
+  const result = JSON.stringify({ argv: process.argv.slice(2), stdin: input });
+  process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result }) + "\n");
+  process.exit(0);
+});

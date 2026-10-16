@@ -25,6 +25,8 @@ export interface Run {
   /** Optional task this run belongs to (commander_tasks.id), for the board. */
   taskId?: string;
   status: RunStatus;
+  /** Images sent with the prompt (count only; the bytes are never kept on the run). */
+  imageCount?: number;
   startedAt: string;
   endedAt?: string;
   exitCode?: number | null;
@@ -44,9 +46,16 @@ export interface StartRunInput {
    * stay conversational rather than crawl the whole repo.
    */
   args?: string[];
+  /**
+   * Images sent alongside the prompt. When present the prompt is fed on stdin as one
+   * stream-json user message (image blocks + text) — the same shape Claude Code sends
+   * for a pasted image — instead of as the `-p` argument.
+   */
+  images?: StagedImage[];
 }
 
 import type { OperateConfig } from "./operate/routes.ts";
+import type { StagedImage } from "./uploads.ts";
 
 export interface DaemonConfig {
   port: number;

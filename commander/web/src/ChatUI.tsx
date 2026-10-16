@@ -6,6 +6,8 @@ import type { ChatKind, ChatMessage, ChatSession } from "./lib/commanderApi.ts";
 import { loadDraft, saveDraft, TITLE_MAX, useChat } from "./lib/chatStore.tsx";
 import { btnGhost, btnPrimary, card, input, t } from "./lib/theme.ts";
 import { isSubmitEnter } from "./lib/keyboard.ts";
+import { imageFiles, MAX_IMAGES, prepareImage, type ChatImage } from "./lib/images.ts";
+import { Skeleton } from "@dub/ui";
 
 export function SessionSidebar({ kind }: { kind: ChatKind }) {
   const chat = useChat();
@@ -205,8 +207,13 @@ function SessionNameInput({
   );
 }
 
+/** Prompt used when the operator sends images without typing anything. */
+export const IMAGE_ONLY_TEXT = "この画像を見てください。";
+
 /** A composer whose draft is stored per session in localStorage. Remounts (via `key`)
- *  and a sessionId effect both re-seed it, so navigating away and back keeps the text. */
+ *  and a sessionId effect both re-seed it, so navigating away and back keeps the text.
+ *  Images can be pasted (Cmd/Ctrl+V), dropped, or picked with 📎, like Claude Code;
+ *  they stay in memory only and are dropped on a session switch. */
 export function ChatComposer({
   sessionId,
   placeholder,
@@ -220,16 +227,23 @@ export function ChatComposer({
   disabled?: boolean;
   busy?: boolean;
   sendLabel: string;
-  onSend: (text: string) => void;
+  onSend: (text: string, images: ChatImage[]) => void;
 }) {
   const [draft, setDraft] = useState(() => loadDraft(sessionId));
+  const [images, setImages] = useState<ChatImage[]>([]);
+  const [preparing, setPreparing] = useState(0);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const sidRef = useRef(sessionId);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   // Re-seed when the active session changes (component may stay mounted across switches).
   useEffect(() => {
     if (sidRef.current !== sessionId) {
       sidRef.current = sessionId;
       setDraft(loadDraft(sessionId));
+      setImages([]);
+      setImageError(null);
     }
   }, [sessionId]);
 
@@ -238,11 +252,35 @@ export function ChatComposer({
     saveDraft(sessionId, text);
   };
 
+  const addFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    setImageError(null);
+    const room = MAX_IMAGES - images.length - preparing;
+    if (files.length > room) setImageError(`画像は1回に${MAX_IMAGES}枚までです`);
+    const accepted = files.slice(0, Math.max(0, room));
+    if (accepted.length === 0) return;
+    const sid = sessionId;
+    setPreparing((n) => n + accepted.length);
+    for (const file of accepted) {
+      try {
+        const img = await prepareImage(file);
+        if (sidRef.current === sid) setImages((prev) => [...prev, img]);
+      } catch (e) {
+        setImageError((e as Error).message);
+      } finally {
+        setPreparing((n) => n - 1);
+      }
+    }
+  };
+
+  const canSend = (draft.trim() !== "" || images.length > 0) && !disabled && preparing === 0;
+
   const submit = () => {
-    const text = draft.trim();
-    if (!text || disabled) return;
-    onSend(text);
+    if (!canSend) return;
+    onSend(draft.trim() || IMAGE_ONLY_TEXT, images);
     update("");
+    setImages([]);
+    setImageError(null);
   };
 
   return (
@@ -251,32 +289,181 @@ export function ChatComposer({
         e.preventDefault();
         submit();
       }}
-      style={{ display: "flex", gap: t.space3, alignItems: "flex-end" }}
+      onDragOver={(e) => {
+        if (disabled || !Array.from(e.dataTransfer.types).includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (disabled) return;
+        e.preventDefault();
+        setDragging(false);
+        void addFiles(imageFiles(e.dataTransfer.files));
+      }}
+      data-testid="chat-composer"
+      data-dragging={dragging ? "1" : "0"}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: t.space3,
+        borderRadius: t.radius,
+        outline: dragging ? `2px dashed ${t.primary}` : "none",
+        outlineOffset: 4,
+      }}
     >
-      <textarea
-        data-testid="chat-input"
-        value={draft}
-        onChange={(e) => update(e.target.value)}
-        onKeyDown={(e) => {
-          if (isSubmitEnter(e)) {
+      {(images.length > 0 || preparing > 0) && (
+        <div data-testid="chat-attachments" style={{ display: "flex", flexWrap: "wrap", gap: t.space3, paddingTop: t.space2 }}>
+          {images.map((img) => (
+            <div key={img.id} data-testid="chat-attachment" style={{ position: "relative" }}>
+              <img src={img.previewUrl} alt={img.name} title={img.name} style={thumb} />
+              <button
+                type="button"
+                data-testid="chat-attachment-remove"
+                aria-label={`${img.name} を外す`}
+                title="外す"
+                onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
+                style={removeBtn}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {Array.from({ length: preparing }, (_, i) => (
+            <div key={`prep-${i}`} data-testid="chat-attachment-skeleton" aria-label="画像を準備中">
+              <Skeleton variant="rect" width={72} height={72} radius="var(--dub-radius-sm, 8px)" />
+            </div>
+          ))}
+        </div>
+      )}
+      {imageError && (
+        <p data-testid="chat-attachment-error" role="alert" style={{ margin: 0, fontSize: 12, color: t.danger }}>
+          {imageError}
+        </p>
+      )}
+      <div style={{ display: "flex", gap: t.space3, alignItems: "flex-end" }}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          multiple
+          hidden
+          data-testid="chat-file-input"
+          onChange={(e) => {
+            void addFiles(imageFiles(e.target.files));
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          data-testid="chat-attach"
+          aria-label="画像を添付"
+          title="画像を添付（貼り付け・ドラッグ&ドロップでも可）"
+          disabled={disabled}
+          onClick={() => fileRef.current?.click()}
+          style={{ ...btnGhost, padding: `${t.space2} ${t.space3}`, opacity: disabled ? 0.5 : 1 }}
+        >
+          📎
+        </button>
+        <textarea
+          data-testid="chat-input"
+          value={draft}
+          onChange={(e) => update(e.target.value)}
+          onPaste={(e) => {
+            const files = imageFiles(e.clipboardData.files);
+            if (files.length === 0) return; // plain text paste stays native
             e.preventDefault();
-            submit();
-          }
-        }}
-        placeholder={placeholder}
-        rows={2}
-        style={{ ...input, resize: "vertical", fontFamily: "inherit" }}
-        disabled={disabled}
-      />
-      <button
-        type="submit"
-        style={{ ...btnPrimary, whiteSpace: "nowrap", opacity: disabled || !draft.trim() ? 0.5 : 1 }}
-        disabled={disabled || !draft.trim()}
-        data-testid="chat-send"
-      >
-        {busy ? "実行中…" : sendLabel}
-      </button>
+            void addFiles(files);
+          }}
+          onKeyDown={(e) => {
+            if (isSubmitEnter(e)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder={placeholder}
+          rows={2}
+          style={{ ...input, resize: "vertical", fontFamily: "inherit" }}
+          disabled={disabled}
+        />
+        <button
+          type="submit"
+          style={{ ...btnPrimary, whiteSpace: "nowrap", opacity: canSend ? 1 : 0.5 }}
+          disabled={!canSend}
+          data-testid="chat-send"
+        >
+          {busy ? "実行中…" : sendLabel}
+        </button>
+      </div>
     </form>
+  );
+}
+
+const thumb: React.CSSProperties = {
+  width: 72,
+  height: 72,
+  objectFit: "cover",
+  borderRadius: "var(--dub-radius-sm, 8px)",
+  border: `1px solid ${t.border}`,
+  display: "block",
+};
+
+const removeBtn: React.CSSProperties = {
+  position: "absolute",
+  top: -8,
+  right: -8,
+  width: 22,
+  height: 22,
+  borderRadius: "50%",
+  border: `1px solid ${t.borderStrong}`,
+  background: t.surface,
+  color: t.text,
+  fontSize: 13,
+  lineHeight: "18px",
+  padding: 0,
+  cursor: "pointer",
+};
+
+/** Thumbnails of the images a user message was sent with; click to view full size. */
+function MessageImages({ urls }: { urls: string[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <div data-testid="chat-msg-images" style={{ display: "flex", flexWrap: "wrap", gap: t.space2, justifyContent: "flex-end" }}>
+      {urls.map((url, i) => (
+        <button
+          key={i}
+          type="button"
+          aria-label={`添付画像 ${i + 1} を拡大`}
+          onClick={() => setOpen(url)}
+          style={{ padding: 0, border: 0, background: "transparent", cursor: "zoom-in" }}
+        >
+          <img src={url} alt={`添付画像 ${i + 1}`} style={{ ...thumb, width: 120, height: 90 }} />
+        </button>
+      ))}
+      {open && (
+        <div
+          data-testid="chat-image-viewer"
+          role="dialog"
+          aria-label="添付画像"
+          onClick={() => setOpen(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: t.space6,
+            cursor: "zoom-out",
+          }}
+        >
+          <img src={open} alt="添付画像（拡大）" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: t.radius }} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -304,6 +491,7 @@ export function MessageBubble({
         gap: t.space2,
       }}
     >
+      {isUser && msg.images && msg.images.length > 0 && <MessageImages urls={msg.images} />}
       {bodyOverride ?? (
         <div
           style={{

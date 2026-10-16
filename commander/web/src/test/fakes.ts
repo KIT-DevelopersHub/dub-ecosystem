@@ -165,10 +165,15 @@ export function makeFakeApi(initial: BoardItem[] = []): FakeApi {
   return api;
 }
 
-export function makeFakeClient(events: DaemonRunEvent[] = []): CommanderClient & { startRun: ReturnType<typeof vi.fn> } {
+export function makeFakeClient(
+  events: DaemonRunEvent[] = [],
+): CommanderClient & { startRun: ReturnType<typeof vi.fn>; uploadImage: ReturnType<typeof vi.fn> } {
   const startRun = vi.fn(async (_p: string, _o?: StartRunOptions) => ({ runId: "run-new" }));
+  let uploads = 0;
+  const uploadImage = vi.fn(async (_img: { mediaType: string; data: string }) => ({ uploadId: `up-${++uploads}` }));
   return {
     startRun,
+    uploadImage,
     cancelRun: vi.fn(async () => {}),
     health: vi.fn(async () => true),
     streamEvents: (_runId, onEvent, onClose) => {

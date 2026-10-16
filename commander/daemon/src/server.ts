@@ -3,7 +3,8 @@
 // Routes:
 //   GET    /health             -> { ok, service, version }        (always open)
 //   GET    /                   -> tiny built-in test UI           (always open)
-//   POST   /runs               -> { runId }            (body: { prompt, cwd? })
+//   POST   /uploads            -> { uploadId }         (body: { mediaType, data(base64) })
+//   POST   /runs               -> { runId }            (body: { prompt, cwd?, images?: uploadId[] })
 //   GET    /runs               -> Run[]                (history, newest first)
 //   GET    /runs/:id           -> Run                  (with buffered events)
 //   DELETE /runs/:id           -> 202 (cancel) | 404   (cancel a running run)
@@ -24,6 +25,7 @@ import { nullSink, HttpRunSink, type RunSink } from "./sink.ts";
 import { INDEX_HTML } from "./index-html.ts";
 import { createOperateHandler } from "./operate/routes.ts";
 import { scriptRestarter, type Restarter } from "./restart.ts";
+import { MAX_IMAGE_BYTES, MAX_IMAGES_PER_RUN, UploadStore, type StagedImage } from "./uploads.ts";
 
 export const VERSION = "0.1.0";
 const SERVICE = "commander-daemon";
@@ -39,13 +41,13 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+function readBody(req: IncomingMessage, maxChars = 1_000_000): Promise<string> {
   return new Promise((resolve, reject) => {
     let buf = "";
     req.setEncoding("utf8");
     req.on("data", (c) => {
       buf += c;
-      if (buf.length > 1_000_000) reject(new Error("body too large"));
+      if (buf.length > maxChars) reject(new Error("body too large"));
     });
     req.on("end", () => resolve(buf));
     req.on("error", reject);
@@ -73,6 +75,7 @@ export function createDaemonServer(
     ? new HttpRunSink(config.serviceUrl, config.serviceToken)
     : nullSink;
   const store = new RunStore(config, sink);
+  const uploads = new UploadStore();
   const operate = createOperateHandler(config.operate);
   let restarting = false;
 
@@ -120,10 +123,24 @@ export function createDaemonServer(
       return json(res, out.status, out.body);
     }
 
+    if (method === "POST" && pathname === "/uploads") {
+      let parsed: { mediaType?: unknown; data?: unknown };
+      try {
+        // base64 of a MAX_IMAGE_BYTES image plus the JSON wrapper.
+        parsed = JSON.parse((await readBody(req, Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 1024)) || "{}");
+      } catch (e) {
+        const tooLarge = (e as Error).message === "body too large";
+        return json(res, tooLarge ? 413 : 400, { error: tooLarge ? "image_too_large" : "invalid_json" });
+      }
+      const staged = uploads.stage(parsed.mediaType, parsed.data);
+      if (!staged.ok) return json(res, staged.error === "image_too_large" ? 413 : 400, { error: staged.error });
+      return json(res, 201, { uploadId: staged.id });
+    }
+
     if (method === "POST" && pathname === "/runs") {
       // A run started now would be killed by the pending relaunch.
       if (restarting) return json(res, 503, { error: "restarting" });
-      let parsed: { prompt?: unknown; cwd?: unknown; taskId?: unknown; args?: unknown };
+      let parsed: { prompt?: unknown; cwd?: unknown; taskId?: unknown; args?: unknown; images?: unknown };
       try {
         parsed = JSON.parse((await readBody(req)) || "{}");
       } catch {
@@ -138,7 +155,22 @@ export function createDaemonServer(
       const args = Array.isArray(parsed.args)
         ? parsed.args.filter((a): a is string => typeof a === "string")
         : undefined;
-      const run = store.start({ prompt: parsed.prompt, cwd, taskId, args });
+      // Staged upload ids (POST /uploads); consumed here so each image feeds one run.
+      let images: StagedImage[] | undefined;
+      if (parsed.images !== undefined) {
+        const ids = parsed.images;
+        if (
+          !Array.isArray(ids) ||
+          ids.length > MAX_IMAGES_PER_RUN ||
+          !ids.every((x): x is string => typeof x === "string")
+        ) {
+          return json(res, 400, { error: "invalid_images" });
+        }
+        const taken = uploads.take(ids);
+        if (!taken) return json(res, 400, { error: "image_not_found" });
+        images = taken;
+      }
+      const run = store.start({ prompt: parsed.prompt, cwd, taskId, args, images });
       return json(res, 201, { runId: run.id, status: run.status });
     }
 

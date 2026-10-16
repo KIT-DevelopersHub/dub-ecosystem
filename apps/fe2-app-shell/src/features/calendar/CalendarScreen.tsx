@@ -190,9 +190,13 @@ export function CalendarScreen(): JSX.Element {
   // Default = the calendars I belong to (+ 全体); a manual choice is remembered per user.
   const [targetChoices, setTargetChoices] = useUserPref(MEETING_TARGETS_PREF, currentUserId, parseMeetingTargetChoices, NO_CHOICES);
   const targetState = targetsQ.isError ? "error" : (targetsQ.data?.items ?? null);
+  const createdTargets = useMemo(
+    () => new Set((meetingsQ.data?.items ?? []).filter((m) => m.createdBy === currentUserId).map((m) => m.targetId)),
+    [meetingsQ.data, currentUserId],
+  );
   const isTargetVisible = useCallback(
-    (id: string) => isMeetingTargetVisible(id, targetChoices, targetState),
-    [targetChoices, targetState],
+    (id: string) => isMeetingTargetVisible(id, targetChoices, targetState, createdTargets),
+    [targetChoices, targetState, createdTargets],
   );
   const [meetingForm, setMeetingForm] = useState<{ editing: meeting.Meeting | null } | null>(null);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingOccurrence | null>(null);
@@ -442,6 +446,8 @@ export function CalendarScreen(): JSX.Element {
   const submitMeeting = (body: meeting.CreateMeetingRequest) => {
     const editing = meetingForm?.editing ?? null;
     setMeetingForm(null);
+    // The calendar just written to is shown, even if it was unticked (it lands where the user looks).
+    if (!isTargetVisible(body.targetId)) setTargetChoices((prev) => ({ ...prev, [body.targetId]: true }));
     if (editing) {
       updateMeeting.mutate({ id: editing.id, body }, { onSuccess: () => toast.show({ kind: "success", title: "ミーティングを更新しました" }) });
     } else {
