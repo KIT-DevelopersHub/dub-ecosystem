@@ -21,6 +21,18 @@ function clean(url: string): string {
   return url.replace(/[.,;:!?)\]]+$/, "");
 }
 
+// The one PR the operator should label 確認した, declared as `これに付けて: <PR URL>`
+// (markdown emphasis / full-width colon / <> wrapping tolerated).
+const LABEL_TARGET_RE =
+  /これに付けて[*_`\s]*[:：][*_`\s]*<?(https?:\/\/github\.com\/[^\s)"'<>\]]+\/pull\/\d+)/g;
+
+/** The declared label-target PR (last declaration wins), if any. */
+export function extractLabelTarget(text: string): string | undefined {
+  let target: string | undefined;
+  for (const m of text.matchAll(LABEL_TARGET_RE)) target = clean(m[1]!);
+  return target;
+}
+
 /** demo vs staging from the URL text: an explicit "staging"/"stg" marks staging;
  *  "demo" (or anything else) is treated as a demo artifact — demo is the first thing a
  *  commander-driven Dub task produces, so an unlabelled deploy defaults to demo. */
@@ -31,13 +43,16 @@ function classifyDeploy(url: string): "staging" | "demo" {
 /**
  * Extract artifact URLs from a chunk of run output. Latest-wins: when several deploy
  * URLs of the same kind appear (e.g. a re-deploy), the last one is returned, so the
- * task always points at the freshest artifact. Returns only the fields it found.
+ * task always points at the freshest artifact. A `これに付けて:` PR beats other PR links.
+ * Returns only the fields it found.
  */
 export function extractArtifactUrls(text: string): ExtractedUrls {
   if (!text) return {};
   const out: ExtractedUrls = {};
 
   for (const m of text.matchAll(PR_RE)) out.prUrl = clean(m[0]);
+  const target = extractLabelTarget(text);
+  if (target) out.prUrl = target;
   for (const m of text.matchAll(DEPLOY_RE)) {
     const url = clean(m[0]);
     if (classifyDeploy(url) === "staging") out.stagingUrl = url;

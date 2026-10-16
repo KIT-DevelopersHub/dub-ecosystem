@@ -66,6 +66,8 @@ staging_review→prod_shipped と Web ボードが担う)。
 - **フェーズは排他**(demo 確認一覧と staging 確認一覧に同時に載せない・進んだら前から消す)。
 - **demo で却下したものは staging に進めない**。修正して demo に再反映→再確認。
 - **確認依頼は必ず live URL + 確認項目表 + Before/After + verify:live PASS 証跡**をセットで。
+- **`確認した`ラベルは 1 タスク 1 本**。main 向け PR は 1 本に絞り(分割分はそのブランチに積む)、
+  付けてほしい時は最終報告に `これに付けて: <PR URL>` を 1 行書く。
 - 詳細: [[rules/dub-development-flow]] / [[rules/review-and-workflow]]。
 
 ## 自己承認の禁止(最重要ゲート)
