@@ -46,6 +46,6 @@ describe("<TaskComposer>", () => {
     await userEvent.type(screen.getByLabelText("task-prompt"), " やって ");
     await userEvent.click(screen.getByTestId("composer-submit"));
 
-    expect(onSubmit).toHaveBeenCalledWith({ title: "作る", cwd: "", prompt: "やって", ledgerRef: "" });
+    expect(onSubmit).toHaveBeenCalledWith({ title: "作る", cwd: "", prompt: "やって", ledgerRef: "", images: [] });
   });
 });
