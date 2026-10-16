@@ -148,6 +148,25 @@ describe("member-service HTTP surface", () => {
     expect(cleared.json.rosterNumber).toBeNull();
   });
 
+  it("学籍番号(studentNumber) is normalized, validated, and editable", async () => {
+    const app = createApp(makeDeps());
+    const created = await call(app, "POST", "/members/people", {
+      body: { name: "田中", status: "added", teamIds: [], studentNumber: " １４００９８０ " },
+    });
+    expect(created.status).toBe(201);
+    expect(created.json.studentNumber).toBe("1400980");
+    const memberId = created.json.id as string;
+
+    const bad = await call(app, "POST", "/members/people", {
+      body: { name: "佐藤", status: "added", teamIds: [], studentNumber: "14009801" },
+    });
+    expect(bad.status).toBe(400);
+
+    const cleared = await call(app, "PATCH", `/members/people/${memberId}`, { body: { studentNumber: "", version: 1 } });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.studentNumber).toBeNull();
+  });
+
   it("参加届と同じ人物項目(PersonProfile)で追加・編集でき、表示名は 姓/名 から合成される", async () => {
     const app = createApp(makeDeps());
     const created = await call(app, "POST", "/members/people", {

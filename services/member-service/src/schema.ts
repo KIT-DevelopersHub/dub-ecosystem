@@ -274,6 +274,19 @@ CREATE TABLE member_onboarding_meetings (
 `.trim(),
 };
 
+// 0016: 学籍番号 (student_number, 例 "1400980") を名簿と参加届に足す additive ALTER
+// (non-destructive)。既存行は全て null。形式検証・正規化はアプリ層。参加届は管理者が
+// 確定すると member_people.student_number へ引き継ぐ。Mirrors 0016_student_number.sql
+// (schema-lockstep).
+export const MEMBER_STUDENT_NUMBER_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0016_student_number",
+  up: `
+ALTER TABLE member_people ADD COLUMN student_number TEXT;
+ALTER TABLE member_participations ADD COLUMN student_number TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -291,4 +304,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PERSON_GRADE_NORMALIZE_MIGRATION,
   MEMBER_ONBOARDING_ITEMS_MIGRATION,
   MEMBER_ONBOARDING_MEETINGS_MIGRATION,
+  MEMBER_STUDENT_NUMBER_MIGRATION,
 ];

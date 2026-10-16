@@ -104,6 +104,7 @@ export function buildMeetings(opts: {
   store?: ReturnType<typeof createInMemoryMeetingStore>;
   googleBudget?: number;
   syncTimeLimitMs?: number;
+  now?: () => string;
 } = {}) {
   const store = opts.store ?? createInMemoryMeetingStore();
   const calendar = opts.calendar ?? createMockCalendarClient();
@@ -121,7 +122,7 @@ export function buildMeetings(opts: {
       calendar,
     }),
     orgId: common.DUB_DEFAULT_ORG_ID,
-    now: () => `2026-10-14T00:00:${String(tick++ % 60).padStart(2, "0")}.000Z`,
+    now: opts.now ?? (() => `2026-10-14T00:00:${String(tick++ % 60).padStart(2, "0")}.000Z`),
     newId: () => `dsm_test_${++seq}`,
     kick: async (soonMs?: number) => {
       kicks.push(soonMs);

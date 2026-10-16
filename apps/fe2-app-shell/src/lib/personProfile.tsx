@@ -39,6 +39,7 @@ const FIELD_UI: Record<PersonProfileKey, FieldUi> = {
   schoolEmail: { kind: "email", half: true, help: "学校から配布されたアドレス", placeholder: "you@school.ac.jp" },
   gmail: { kind: "email", half: true, help: "連絡・共有に使う Gmail", placeholder: "you@gmail.com" },
   phone: { kind: "text", half: true, help: "緊急連絡用", placeholder: "090-1234-5678" },
+  studentNumber: { kind: "text", half: true, help: "半角数字 7 桁", placeholder: "1400980" },
   rosterNumber: { kind: "text", half: true, help: "例: 3EP2-26", placeholder: "3EP2-26" },
   grade: {
     kind: "select",
@@ -63,10 +64,11 @@ const FIELD_ORDER: readonly PersonProfileKey[] = [
   "firstNameRomaji",
   "schoolEmail",
   "gmail",
-  "phone",
+  "studentNumber",
   "rosterNumber",
   "grade",
   "department",
+  "phone",
   "desiredActivity",
   "note",
 ];
@@ -144,6 +146,7 @@ export const PROFILE_DISPLAY_COLUMNS: readonly ProfileDisplayColumn[] = [
     keys: ["lastNameKana", "firstNameKana"],
     value: (p) => joinParts([p.lastNameKana, p.firstNameKana]) || (p.nameKana ?? ""),
   },
+  single("studentNumber"),
   single("rosterNumber"),
   {
     id: "nameRomaji",
