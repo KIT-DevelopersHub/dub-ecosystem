@@ -27,6 +27,12 @@ describe("unread aggregation", () => {
     expect(map["b"]!.unreadCount).toBe(1);
   });
 
+  it("does not count thread replies (they can't be read from the main timeline)", () => {
+    const reply: ChatRealtimeEvent = { ...created("b", "reply"), threadRootId: "msg_root" } as ChatRealtimeEvent;
+    const map = applyUnreadEvent({}, reply, "a", ME);
+    expect(map["b"]).toBeUndefined();
+  });
+
   it("does not increment the active channel", () => {
     const map = applyUnreadEvent({}, created("a", "hi"), "a", ME);
     expect(map["a"]).toBeUndefined();

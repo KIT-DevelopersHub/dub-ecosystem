@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 // Read-state debouncer (design §2-5). When the timeline bottom is visible, send
-// POST /read after a 2s debounce; never send while the tab is inactive; never
+// POST /read after a 2s debounce; never send while the tab is inactive (retried
+// until it is visible); never
 // send a stale (older) lastReadMessageId. Scheduler + visibility are injectable
 // so the logic is unit-testable without real timers or a DOM.
 import type { common } from "@dub/types";
@@ -39,7 +40,12 @@ export class ReadTracker {
     this.timer = null;
     const id = this.pendingId;
     if (id === null) return;
-    if (!this.deps.isVisible()) return; // hidden tab: hold until re-observed
+    if (!this.deps.isVisible()) {
+      // Hidden tab: re-arm so the read is sent once the tab is visible again, even if
+      // no newer message arrives (otherwise it would be lost and reappear on reload).
+      this.timer = this.deps.setTimer(() => this.flush(), this.deps.debounceMs);
+      return;
+    }
     this.pendingId = null;
     this.sentId = id;
     this.deps.send(id);

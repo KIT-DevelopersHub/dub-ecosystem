@@ -419,7 +419,11 @@ export class MockChatClient implements ChatApiClient {
     for (const channelId of this.channels.keys()) {
       const lastRead = this.readState.get(channelId) ?? null;
       const unread = this.messages.filter(
-        (m) => m.channelId === channelId && m.authorId !== this.me && (lastRead === null || m.id > lastRead),
+        (m) =>
+          m.channelId === channelId &&
+          m.threadRootId === null &&
+          m.authorId !== this.me &&
+          (lastRead === null || m.id > lastRead),
       );
       out.push({
         channelId,
