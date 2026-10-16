@@ -20,6 +20,9 @@
 // null) and inserts the event under an id derived from the meeting id, so a request cut off midway
 // never leaves an event Dub does not know (the sync finishes it). Reconcile mirrors Google back:
 // an event deleted there removes the meeting, an edit there (title / time / repeat) updates it.
+//
+// Every Meet is opened to anyone with the link (Meet REST, best-effort): right after the event is
+// made, and by the sync for meetings made before that or while the Meet scope was missing.
 import { errors } from "@dub/errors";
 import { meeting } from "@dub/types";
 import { EventIdTaken, type CalendarAttendee, type CalendarClient, type CalendarEvent, type CalendarEventInput } from "./google/calendar-client";
@@ -45,6 +48,8 @@ export interface MeetingAccount {
   email: string | null;
   /** false = the token lacks the calendar scope (or the account is unusable): reconnect. */
   calendarReady: boolean;
+  /** false = the token lacks the Meet settings scope: Meet links stay as Google made them. */
+  meetReady: boolean;
   calendar: CalendarClient;
 }
 
@@ -62,6 +67,8 @@ export interface MeetingsDeps {
   googleBudget?: number;
   /** Wall-clock cap of one sync run (default 8 s, under the gateway's 15 s). */
   syncTimeLimitMs?: number;
+  /** Meet links already confirmed open (shared per isolate so the sync checks each once). */
+  openedMeets?: Set<string>;
 }
 
 export interface SyncResult extends meeting.SyncMeetingsResponse {
@@ -117,6 +124,8 @@ function budgeted(client: CalendarClient, limit: number, deadline = Infinity): C
     getEvent: async (c, e) => (spend(), client.getEvent(c, e)),
     patchEvent: async (c, e, p) => (spend(), client.patchEvent(c, e, p)),
     deleteEvent: async (c, e) => (spend(), client.deleteEvent(c, e)),
+    // Up to two calls (look the space up, then patch it).
+    openMeet: async (u) => (spend(), spend(), client.openMeet(u)),
   };
 }
 
@@ -198,6 +207,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
   const { store, orgId } = deps;
   const budgetLimit = deps.googleBudget ?? 25;
   const syncTimeLimit = deps.syncTimeLimitMs ?? SYNC_TIME_LIMIT_MS;
+  const openedMeets = deps.openedMeets ?? new Set<string>();
 
   /** After a write: run the sync within a minute (shares the calendar, follows membership). */
   async function kick(soonMs: number | undefined): Promise<void> {
@@ -212,6 +222,17 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     const account = await deps.account();
     if (!account.calendarReady) throw errors.conflict(NO_CALENDAR_SCOPE, { reason: "calendar_scope_missing" });
     return account;
+  }
+
+  /** Let anyone with the link join. Best-effort: a Meet that stays restricted never fails the meeting. */
+  async function openMeet(cal: CalendarClient, account: MeetingAccount, meetUrl: string | null): Promise<void> {
+    if (!account.meetReady || !meetUrl || openedMeets.has(meetUrl)) return;
+    try {
+      if (await cal.openMeet(meetUrl)) openedMeets.add(meetUrl);
+    } catch (err) {
+      if (err instanceof BudgetExhausted) throw err;
+      log("meeting_meet_open_failed", { message: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   /** Role id -> name (identity:read of the acting user). */
@@ -446,6 +467,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         await store.deleteMeeting(row.id).catch(() => undefined);
         throw err;
       }
+      await openMeet(account.calendar, account, done.meetUrl);
       return toMeeting(done, name, members.length);
     },
 
@@ -471,6 +493,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         next = { ...row, ...f, calendarId, googleEventId: ev.id, meetUrl: ev.meetUrl, htmlLink: ev.htmlLink, updatedAt: at, syncedAt: at };
         await store.updateMeeting(next);
         await store.replaceInvites(row.id, members.map((m) => ({ meetingId: row.id, email: m.email, userId: m.userId })));
+        await openMeet(account.calendar, account, next.meetUrl);
         try {
           await account.calendar.deleteEvent(row.calendarId, row.googleEventId);
         } catch (err) {
@@ -537,6 +560,17 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
             if (err instanceof BudgetExhausted) break;
             log("meeting_calendar_acl_sync_failed", { calendarId: c.calendarId, message: err instanceof Error ? err.message : String(err) });
           }
+        }
+      }
+
+      if (!cal.exhausted() && account.meetReady) {
+        // Re-read: reconcile above may have just filled in a Meet link.
+        try {
+          for (const m of await store.listMeetings(orgId)) {
+            if (m.accountId === account.accountId) await openMeet(cal, account, m.meetUrl);
+          }
+        } catch (err) {
+          if (!(err instanceof BudgetExhausted)) throw err;
         }
       }
       out.complete = !cal.exhausted();

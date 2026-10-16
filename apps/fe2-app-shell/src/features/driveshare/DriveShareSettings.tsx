@@ -209,6 +209,7 @@ function GoogleAccountSection(): JSX.Element {
   const busy = switchTo.isPending || remove.isPending || leaving;
   const activeBroken = s?.accounts.some((a) => a.active && a.needsReconnect) ?? false;
   const activeNoCalendar = s?.accounts.some((a) => a.active && !a.needsReconnect && a.calendarMissing) ?? false;
+  const activeNoMeet = s?.accounts.some((a) => a.active && !a.needsReconnect && !a.calendarMissing && a.meetMissing) ?? false;
   const noneActive = s ? s.accounts.length > 0 && !s.accounts.some((a) => a.active) : false;
 
   return (
@@ -260,6 +261,11 @@ function GoogleAccountSection(): JSX.Element {
               使用中のアカウントにカレンダー権限がありません。「再接続」を押し、Google の画面でカレンダーへのアクセスにもチェックを入れてください。
             </p>
           ) : null}
+          {activeNoMeet ? (
+            <p style={alertStyle} role="alert" data-testid={`${tid}-meet-missing-warning`}>
+              使用中のアカウントに Meet の設定権限がないため、ミーティングの Meet が「誰でも参加可」になりません。「再接続」を押し、Google の画面で Meet の設定へのアクセスにもチェックを入れてください。
+            </p>
+          ) : null}
           {noneActive ? (
             <p style={alertStyle} role="alert" data-testid={`${tid}-none-active`}>
               使用中のアカウントがありません。使うアカウントに切り替えてください。
@@ -282,6 +288,9 @@ function GoogleAccountSection(): JSX.Element {
                       {!a.needsReconnect && a.calendarMissing ? (
                         <Badge tone="warning" testId={`${tid}-no-calendar-${a.id}`}>カレンダー権限なし</Badge>
                       ) : null}
+                      {!a.needsReconnect && !a.calendarMissing && a.meetMissing ? (
+                        <Badge tone="warning" testId={`${tid}-no-meet-${a.id}`}>Meet 権限なし</Badge>
+                      ) : null}
                     </span>
                     {metaFor(a) ? <span style={metaStyle}>{metaFor(a)}</span> : null}
                     {a.needsReconnect && a.kind === "secret" ? <span style={alertStyle}>サーバー設定の更新が必要です</span> : null}
@@ -290,7 +299,7 @@ function GoogleAccountSection(): JSX.Element {
                     ) : null}
                   </div>
                   <span style={actionsStyle}>
-                    {canEdit && (a.needsReconnect || a.calendarMissing) && a.kind === "connected" && s.canConnect ? (
+                    {canEdit && (a.needsReconnect || a.calendarMissing || a.meetMissing) && a.kind === "connected" && s.canConnect ? (
                       <Button
                         variant="primary"
                         size="sm"
