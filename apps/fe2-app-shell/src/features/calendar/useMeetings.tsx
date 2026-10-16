@@ -19,9 +19,13 @@ export function useMeetingsAccess(): { canView: boolean; canEdit: boolean } {
   return { canView: canEdit || (app.canView && can("calendar:meetings_view")), canEdit };
 }
 
+/** Google Calendar is the source of truth; each list pulls the server sync close, so re-read
+ *  while the page is shown to follow edits / deletions made there. */
+const MEETINGS_REFETCH_MS = 60_000;
+
 export function useMeetingsQuery(enabled: boolean) {
   const api = useCalendarApi();
-  return useQuery({ queryKey: MEETINGS_KEY, queryFn: () => api.listMeetings(), enabled });
+  return useQuery({ queryKey: MEETINGS_KEY, queryFn: () => api.listMeetings(), enabled, refetchInterval: MEETINGS_REFETCH_MS });
 }
 
 export function useMeetingTargetsQuery(enabled: boolean) {

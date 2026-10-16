@@ -3,6 +3,7 @@
 // The address entries used to be a separate "mail" area; they are merged here because their
 // subject is a member, and a "mail" area would suggest mail sending/reading is reachable
 // (it is out of scope).
+import { member } from "@dub/types";
 import type { AreaSpec } from "../catalog-types.ts";
 import { read } from "./helpers.ts";
 
@@ -15,11 +16,9 @@ const MAIL_ADMIN = { keys: ["mail:admin"] } as const;
 const MEMBERS_EDIT = { keys: [], appLevel: { app: "members", level: "edit" } } as const;
 const ADMIN_EDIT = { keys: ["identity:admin"], appLevel: { app: "admin", level: "edit" } } as const;
 
-// 名簿 (member_people) の中身: 氏名・連絡先・プロフィール各項目。
-const PROFILE_FIELDS = [
-  "lastName", "firstName", "lastNameKana", "firstNameKana", "lastNameRomaji", "firstNameRomaji",
-  "schoolEmail", "gmail", "phone", "grade", "department", "rosterNumber", "desiredActivity", "note",
-];
+// 名簿 (member_people) の中身: 氏名・連絡先・プロフィール各項目。プロフィール項目は
+// 共通契約 (@dub/types) を正典にし、項目追加がここへ自動で届くようにする。
+const PROFILE_FIELDS: string[] = [...member.PERSON_PROFILE_KEYS];
 const PERSON_FIELDS = ["name", "roleTitle", "status", "teamIds", "leaderId", "contact", ...PROFILE_FIELDS];
 const PERSON_LABELS: Record<string, string> = {
   name: "表示名",
@@ -30,25 +29,12 @@ const PERSON_LABELS: Record<string, string> = {
   contact: "連絡先",
   identityUserId: "ログインアカウント",
   sortOrder: "並び順",
-  lastName: "氏名（苗字）",
-  firstName: "氏名（名前）",
-  lastNameKana: "ふりがな（せい）",
-  firstNameKana: "ふりがな（めい）",
-  lastNameRomaji: "ローマ字（姓）",
-  firstNameRomaji: "ローマ字（名）",
-  schoolEmail: "学校のメールアドレス",
-  gmail: "Gmail アドレス",
-  phone: "電話番号",
-  grade: "学年",
-  department: "学科",
-  rosterNumber: "名列番号",
-  desiredActivity: "希望する活動",
-  note: "備考",
+  ...member.PERSON_PROFILE_LABEL,
 };
 const PERSON_HINT =
   "status は added / invited / considering / on_leave / declined。teamIds は所属の全置換（members.teams.list の id）。" +
   "姓名(lastName/firstName)を送ると表示名 name は自動合成されるので name は一緒に送らない。" +
-  "値はサービスが正規化するので正規化済みで送る: grade は 1〜4 / graduate、rosterNumber は 3EP2-26 形式、desiredActivity は event / dev / both、" +
+  "値はサービスが正規化するので正規化済みで送る: grade は 1〜4 / graduate、rosterNumber は 3EP2-26 形式、studentNumber は半角数字7桁（例 1400980）、desiredActivity は event / dev / both、" +
   "空にしたい項目は null（空文字は null として保存され読み直しが一致しない）";
 
 export const MEMBER: AreaSpec = {
@@ -61,7 +47,7 @@ export const MEMBER: AreaSpec = {
       service: M,
       requires: MEMBERS_VIEW,
       description: "メンバー名簿（チームと所属メンバー）を取得する",
-      hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・gmail・phone・grade・department・rosterNumber・version（gmail 等の空欄は未登録）。identityUserId = ログインアカウントの id（tasks の assigneeId・users の id と同じ。null はアカウント未紐付けで担当を照合できない）",
+      hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・gmail・phone・grade・department・rosterNumber・studentNumber・version（gmail 等の空欄は未登録）。identityUserId = ログインアカウントの id（tasks の assigneeId・users の id と同じ。null はアカウント未紐付けで担当を照合できない）",
     }),
     read({
       id: "members.teams.list",
@@ -88,7 +74,7 @@ export const MEMBER: AreaSpec = {
       service: M,
       requires: { keys: ["identity:read"], appLevel: { app: "participation", level: "view" } },
       description: "届いた参加届の一覧を取得する",
-      hint: "{ participations[] }。id・name・schoolEmail・desiredTeamId・reviewState",
+      hint: "{ participations[] }。id・name・schoolEmail・studentNumber・desiredTeamId・reviewState",
     }),
     read({
       id: "members.participation.candidates",

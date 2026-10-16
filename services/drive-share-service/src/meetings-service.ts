@@ -15,17 +15,26 @@
 // Writes answer as soon as the event and the D1 row exist: sharing the target calendar costs one
 // Google call per member and blew the gateway's 15 s limit (504 although the meeting was made), so
 // it is left to the sync the write kicks (MeetingSyncDO, no request deadline).
+//
+// Google Calendar is the source of truth for an event: create writes the D1 row FIRST (syncedAt
+// null) and inserts the event under an id derived from the meeting id, so a request cut off midway
+// never leaves an event Dub does not know (the sync finishes it). Reconcile mirrors Google back:
+// an event deleted there removes the meeting, an edit there (title / time / repeat) updates it.
 import { errors } from "@dub/errors";
 import { meeting } from "@dub/types";
-import type { CalendarAttendee, CalendarClient, CalendarEventInput } from "./google/calendar-client";
+import { EventIdTaken, type CalendarAttendee, type CalendarClient, type CalendarEvent, type CalendarEventInput } from "./google/calendar-client";
 import type { MemberDirectory } from "./member-directory";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
-import { endsAt, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
+import { DESCRIPTION_MAX, DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
 import type { RoleMembership } from "./role-membership";
 
 export const ALL_TARGET_NAME = "全体";
 const SOON_MS = 60_000;
 const SYNC_TIME_LIMIT_MS = 8_000;
+/** A list pulls the sync this close, so edits made in Google Calendar show up quickly… */
+const LIST_SOON_MS = 15_000;
+/** …unless a sync ran this recently (open tabs must not keep Google busy). */
+const LIST_KICK_MIN_GAP_MS = 60_000;
 const NO_CALENDAR_SCOPE =
   "Google アカウントにカレンダーの権限がありません。Drive共有 > 設定 で同じアカウントを「再接続」してください。";
 
@@ -112,6 +121,31 @@ function budgeted(client: CalendarClient, limit: number, deadline = Infinity): C
 }
 
 const lower = (e: string) => e.trim().toLowerCase();
+
+/** The Google event id of a meeting: base32hex ("a"–"v", digits) as Google requires, unique per meeting. */
+export function eventIdFor(meetingId: string): string {
+  return `dub${[...new TextEncoder().encode(meetingId)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** The meeting fields as Google holds them now (null = nothing to take over). */
+function fieldsFromEvent(m: MeetingRow, ev: CalendarEvent): Partial<MeetingFields> | null {
+  const startMs = ev.start ? Date.parse(ev.start) : NaN;
+  const endMs = ev.end ? Date.parse(ev.end) : NaN;
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || ev.summary === undefined) return null;
+  const startsAt = new Date(startMs).toISOString();
+  const out: Partial<MeetingFields> = {};
+  const title = ev.summary.trim();
+  if (title && title.length <= TITLE_MAX && title !== m.title) out.title = title;
+  // Google Calendar's editor stores HTML; Dub shows and writes back plain text, so leave such a description alone.
+  const d = ev.description;
+  if (d !== undefined && d !== m.description && !/<[a-z/][^>]*>/i.test(d ?? "") && (d?.length ?? 0) <= DESCRIPTION_MAX) out.description = d;
+  if (startsAt !== m.startsAt) out.startsAt = startsAt;
+  const minutes = Math.round((endMs - startMs) / 60_000);
+  if (minutes >= DURATION_MIN && minutes <= DURATION_MAX && minutes !== m.durationMinutes) out.durationMinutes = minutes;
+  const rule = ev.recurrence ? fromRecurrence(ev.recurrence) : null;
+  if (rule && (rule.recurrence !== m.recurrence || rule.until !== m.until)) Object.assign(out, rule);
+  return Object.keys(out).length > 0 ? out : null;
+}
 
 function log(event: string, fields: Record<string, unknown>): void {
   console.warn(JSON.stringify({ service: "drive-share-service", event, ...fields }));
@@ -254,22 +288,45 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     }
   }
 
-  /** Bring one meeting's attendees in line with its target. */
+  /** Mirror Google's state of one meeting into D1, then bring its attendees in line with its target. */
   async function reconcileMeeting(
     cal: CalendarClient,
-    m: MeetingRow,
+    row: MeetingRow,
     desired: Invitee[],
   ): Promise<{ added: number; removed: number }> {
+    let m = row;
+    let ev = await cal.getEvent(m.calendarId, m.googleEventId);
+    if (!ev && m.syncedAt === null) {
+      // The create was cut off before its event existed: finish it. A taken id = it was created and
+      // already deleted in Google Calendar (falls through to the removal below).
+      try {
+        ev = await cal.insertEvent(m.calendarId, { ...eventInput(fieldsOf(m)), id: m.googleEventId, attendees: desired.map((d) => ({ email: d.email })) });
+        await store.replaceInvites(m.id, desired.map((d) => ({ meetingId: m.id, email: d.email, userId: d.userId })));
+        log("meeting_sync_create_finished", { meetingId: m.id });
+      } catch (err) {
+        if (!(err instanceof EventIdTaken)) throw err;
+      }
+    }
+    if (!ev) {
+      // Deleted in Google Calendar: Dub follows. Only when the calendar itself still answers — a lost
+      // grant or a switched account reads as "gone" too and must never wipe meetings (throws here) —
+      // and only if the row still points at that event (a target move meanwhile made a new one).
+      await cal.listAcl(m.calendarId);
+      if (await store.deleteMeetingIf(m.id, m.calendarId, m.googleEventId)) log("meeting_sync_event_gone_removed", { meetingId: m.id });
+      return { added: 0, removed: 0 };
+    }
+    const pulled = fieldsFromEvent(m, ev);
+    if (pulled) {
+      m = { ...m, ...pulled, updatedAt: deps.now() };
+      log("meeting_sync_pulled_from_google", { meetingId: m.id, fields: Object.keys(pulled) });
+    }
+
     const ledger = await store.listInvites(m.id);
     // An empty target with invites on record is far more likely a transient identity glitch than
     // a role emptied on purpose — never mass-uninvite on it.
     if (desired.length === 0 && ledger.length > 0) {
       log("meeting_sync_empty_target_skipped", { meetingId: m.id, targetId: m.targetId });
-      return { added: 0, removed: 0 };
-    }
-    const ev = await cal.getEvent(m.calendarId, m.googleEventId);
-    if (!ev) {
-      log("meeting_sync_event_gone", { meetingId: m.id });
+      await store.updateMeetingIf({ ...m, syncedAt: deps.now() }, row.updatedAt);
       return { added: 0, removed: 0 };
     }
     const want = new Map(desired.map((d) => [d.email, d]));
@@ -295,13 +352,17 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       ...toAdd.filter((d) => !ledgerEmails.has(d.email)).map((d) => ({ meetingId: m.id, email: d.email, userId: d.userId })),
     ];
     if (removeSet.size > 0 || nextLedger.length !== ledger.length) await store.replaceInvites(m.id, nextLedger);
-    await store.updateMeeting({ ...next, syncedAt: deps.now() });
+    if (!(await store.updateMeetingIf({ ...next, syncedAt: deps.now() }, row.updatedAt))) {
+      log("meeting_sync_row_changed_skipped", { meetingId: m.id }); // edited meanwhile: the next run catches up
+    }
     return { added: toAdd.length, removed: removedFromEvent };
   }
 
   return {
     async list() {
       const [rows, counts] = await Promise.all([store.listMeetings(orgId), store.inviteCounts(orgId)]);
+      const lastSync = Math.max(0, ...rows.map((r) => (r.syncedAt ? Date.parse(r.syncedAt) : 0)));
+      if (rows.length > 0 && Date.parse(deps.now()) - lastSync > LIST_KICK_MIN_GAP_MS) await kick(LIST_SOON_MS);
       let names = new Map<string, string>();
       if (rows.some((r) => r.targetId !== meeting.ALL_MEMBERS_TARGET_ID)) {
         try {
@@ -348,39 +409,44 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       const members = forTarget(await invitees(), f.targetId);
 
       const calendarId = await ensureCalendar(cal, account.accountId, f.targetId, name);
-      const ev = await cal.insertEvent(calendarId, { ...eventInput(f), attendees: members.map((m) => ({ email: m.email })) });
       const at = deps.now();
+      const id = deps.newId();
       const row: MeetingRow = {
-        id: deps.newId(),
+        id,
         orgId,
         targetId: f.targetId,
         accountId: account.accountId,
         calendarId,
-        googleEventId: ev.id,
+        googleEventId: eventIdFor(id),
         title: f.title,
         description: f.description,
         startsAt: f.startsAt,
         durationMinutes: f.durationMinutes,
         recurrence: f.recurrence,
         until: f.until,
-        meetUrl: ev.meetUrl,
-        htmlLink: ev.htmlLink,
+        meetUrl: null,
+        htmlLink: null,
         createdBy: userId,
         createdAt: at,
         updatedAt: at,
-        syncedAt: at,
+        // null until the event exists: a run cut off before that is finished by the sync.
+        syncedAt: null,
       };
+      await store.insertMeeting(row);
+      let done: MeetingRow;
       try {
-        await store.insertMeeting(row);
         await store.replaceInvites(row.id, members.map((m) => ({ meetingId: row.id, email: m.email, userId: m.userId })));
+        await kick(SOON_MS);
+        const ev = await cal.insertEvent(calendarId, { ...eventInput(f), id: row.googleEventId, attendees: members.map((m) => ({ email: m.email })) });
+        done = { ...row, meetUrl: ev.meetUrl, htmlLink: ev.htmlLink, syncedAt: deps.now() };
+        await store.updateMeeting(done);
       } catch (err) {
-        // Do not leave an event nobody can manage from Dub.
-        await account.calendar.deleteEvent(calendarId, ev.id).catch(() => undefined);
+        // Neither half may outlive a failed create.
+        await account.calendar.deleteEvent(calendarId, row.googleEventId).catch(() => undefined);
         await store.deleteMeeting(row.id).catch(() => undefined);
         throw err;
       }
-      await kick(SOON_MS);
-      return toMeeting(row, name, members.length);
+      return toMeeting(done, name, members.length);
     },
 
     async update(id, body) {
