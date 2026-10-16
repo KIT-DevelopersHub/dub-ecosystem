@@ -8,6 +8,7 @@ import { ASK_RUN_ARGS, buildAskPrompt, buildTranscript, DUB_ECOSYSTEM_CWD } from
 import { useChat } from "./lib/chatStore.tsx";
 import { ChatComposer, MessageLog, SessionSidebar } from "./ChatUI.tsx";
 import { t } from "./lib/theme.ts";
+import type { ChatImage } from "./lib/images.ts";
 
 export function AskDub() {
   const chat = useChat();
@@ -16,7 +17,7 @@ export function AskDub() {
   const busy = sessionId ? chat.isRunning(sessionId) : false;
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, images: ChatImage[] = []) => {
       // Auto-create a session on the first send if none is active.
       let sid = chat.activeId("ask");
       if (!sid) {
@@ -30,6 +31,7 @@ export function AskDub() {
         userText: text,
         prompt,
         opts: { cwd: DUB_ECOSYSTEM_CWD, args: ASK_RUN_ARGS },
+        images,
       });
     },
     [chat],
@@ -59,7 +61,7 @@ export function AskDub() {
             disabled={busy}
             busy={busy}
             sendLabel="聞く"
-            onSend={(text) => void send(text)}
+            onSend={(text, images) => void send(text, images)}
           />
         </div>
       </div>
