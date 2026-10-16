@@ -62,6 +62,9 @@ describe("toPlainMentions (一覧プレビュー用)", () => {
     );
     expect(out).toBe("@統括チーム と @佐藤 花子 と @gone");
   });
+  it("shows an unresolvable user as 不明な人 instead of the raw id", () => {
+    expect(toPlainMentions("<@usr_0000000000BKKFVE5771H9CKX3> へ", () => undefined)).toBe("@不明な人 へ");
+  });
 });
 
 describe("detectMentionTrigger", () => {
