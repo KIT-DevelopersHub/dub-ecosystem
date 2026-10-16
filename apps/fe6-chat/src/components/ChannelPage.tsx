@@ -13,9 +13,9 @@ import { useChannelView } from "../hooks/useChannelView";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ReadTracker } from "../store/read-tracker";
 import { mapChatError } from "../lib/errors";
-import { ChatApiError } from "../api/client";
+import { ChatApiError, IDENTITY_BATCH_MAX } from "../api/client";
 import type { Attachment, Channel, ChannelMember, Message, SearchHit, TeamSummary } from "../api/contract";
-import type { MentionCandidate } from "../lib/mentions";
+import { extractMentions, type MentionCandidate } from "../lib/mentions";
 import { ChannelHeader } from "./ChannelHeader";
 import { ChannelDetails, type ChannelDetailsSections, type ChannelDetailsTab } from "./ChannelDetails";
 import { MessageTimeline } from "./MessageTimeline";
@@ -112,16 +112,22 @@ export function ChannelPage({
     };
   }, [api, channelId]);
 
-  // resolve author display names in batch as new authors/members appear
+  // resolve author / member / @-mentioned display names in batch as they appear.
+  // Ids the roster could not return are remembered so they are not refetched forever.
+  const unresolvable = useRef(new Set<common.UserId>());
   useEffect(() => {
     // Drop null authorIds (system posts have no author to resolve).
     const authorIds = view.state.messages.map((m) => m.authorId).filter((id): id is common.UserId => id !== null);
-    const ids = new Set<common.UserId>([...authorIds, ...members.map((m) => m.userId)]);
-    const missing = [...ids].filter((id) => !(id in users));
+    const mentionIds = [...view.state.messages, ...pinned].flatMap((m) => extractMentions(m.body));
+    const ids = new Set<common.UserId>([...authorIds, ...mentionIds, ...members.map((m) => m.userId)]);
+    const missing = [...ids].filter((id) => !(id in users) && !unresolvable.current.has(id));
     if (missing.length === 0) return;
     let cancelled = false;
     void api.resolveUsers(missing).then((summaries) => {
       if (cancelled) return;
+      const batch = missing.slice(0, IDENTITY_BATCH_MAX);
+      const found = new Set(summaries.map((u) => u.id));
+      for (const id of batch) if (!found.has(id)) unresolvable.current.add(id);
       setUsers((prev) => {
         const next = { ...prev };
         for (const u of summaries) next[u.id] = u;
@@ -131,7 +137,7 @@ export function ChannelPage({
     return () => {
       cancelled = true;
     };
-  }, [api, view.state.messages, members, users]);
+  }, [api, view.state.messages, pinned, members, users]);
 
   // debounced workspace search
   useEffect(() => {
