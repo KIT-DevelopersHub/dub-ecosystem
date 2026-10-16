@@ -121,7 +121,7 @@ const IDENTITY = `${API}/identity`;
 // 運営チームは member-service が単一の真実源。チームメンションはそこを読むだけで、
 // chat 側にチームを複製しない。
 const MEMBERS = `${API}/members`;
-const IDENTITY_BATCH_MAX = 50;
+export const IDENTITY_BATCH_MAX = 50;
 const USER_SEARCH_LIMIT = 20;
 
 function qs(params: Record<string, string | number | undefined>): string {
