@@ -40,6 +40,8 @@ import { DoneList } from "./DoneList.tsx";
 import { TaskComposer, type ComposerSubmit } from "./TaskComposer.tsx";
 import { TaskDrawer } from "./TaskDrawer.tsx";
 import { btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
+import type { ChatImage } from "./lib/images.ts";
+import { imageNote } from "./lib/chatStore.tsx";
 
 // ホバー表現はインラインstyleで書けないので、ボード内だけに効くクラスを1つの<style>で持つ。
 const BOARD_CSS = `
@@ -81,6 +83,22 @@ const defaultApi = new HttpCommanderApi();
 function composePrompt(prior: string | null, addition: string): string {
   if (!prior) return addition;
   return `${prior}\n\n---\n[前回の実行へのフィードバック / 追加指示]\n${addition}`;
+}
+
+/** Start a run with pasted screenshots: stage each on the daemon, then pass the ids. The
+ *  prompt notes the count so later follow-ups (which re-inject it) know images were sent. */
+async function startRunWithImages(
+  client: CommanderClient,
+  prompt: string,
+  opts: { taskId?: string; cwd?: string },
+  images: ChatImage[],
+): Promise<{ runId: string }> {
+  if (images.length === 0) return client.startRun(prompt, opts);
+  const uploaded = await Promise.all(images.map((img) => client.uploadImage(img)));
+  return client.startRun(`${prompt}\n${imageNote(images.length)}`, {
+    ...opts,
+    images: uploaded.map((u) => u.uploadId),
+  });
 }
 
 // Instruction the staging反映 run carries when the user approves demo → staging. This is
@@ -301,10 +319,12 @@ export function Board({
           setOptimistic((prev) => prev.filter((o) => o.taskId !== placeholder.taskId));
           return;
         }
-        await client.startRun(v.prompt, {
-          taskId: res.value.task.id,
-          ...(v.cwd ? { cwd: v.cwd } : {}),
-        });
+        await startRunWithImages(
+          client,
+          v.prompt,
+          { taskId: res.value.task.id, ...(v.cwd ? { cwd: v.cwd } : {}) },
+          v.images,
+        );
         await load();
       } catch {
         setOptimistic((prev) => prev.filter((o) => o.taskId !== placeholder.taskId));
@@ -394,12 +414,14 @@ export function Board({
   );
 
   const startFollowUpRun = useCallback(
-    async (item: BoardItem, addition: string) => {
+    async (item: BoardItem, addition: string, images: ChatImage[] = []) => {
       const prior = await priorPrompt(item.latestRun?.id);
-      await client.startRun(composePrompt(prior, addition), {
-        taskId: item.taskId,
-        ...(item.latestRun?.cwd ? { cwd: item.latestRun.cwd } : {}),
-      });
+      await startRunWithImages(
+        client,
+        composePrompt(prior, addition),
+        { taskId: item.taskId, ...(item.latestRun?.cwd ? { cwd: item.latestRun.cwd } : {}) },
+        images,
+      );
     },
     [client, priorPrompt],
   );
@@ -446,12 +468,12 @@ export function Board({
   );
 
   const handleReject = useCallback(
-    async (to: FeaturePhase, feedback: string) => {
+    async (to: FeaturePhase, feedback: string, images: ChatImage[] = []) => {
       if (!selected) return;
       await api.transition(selected.featureId, to, { approvedByUser: false, note: feedback });
       // reject → back to building, then spawn the fix run (feedback carried into the prompt).
       await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
-      await startFollowUpRun(selected, feedback);
+      await startFollowUpRun(selected, feedback, images);
       await leaveBundle(selected.taskId);
       await refreshAfterAction();
     },
@@ -459,7 +481,7 @@ export function Board({
   );
 
   const handleRerun = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, images: ChatImage[] = []) => {
       if (!selected) return;
       // A rejected feature is reset to demo_building so a successful fix run returns it to
       // 確認待ち. Any other phase (本番反映済 included) stays where it is.
@@ -472,7 +494,7 @@ export function Board({
         if (needsReset) {
           await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
         }
-        await startFollowUpRun(selected, prompt);
+        await startFollowUpRun(selected, prompt, images);
       } catch (e) {
         deployingRef.current.delete(selected.featureId);
         throw e;
