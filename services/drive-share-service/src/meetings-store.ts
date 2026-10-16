@@ -217,13 +217,19 @@ export function createD1MeetingStore(db: DbClient): MeetingStore {
       await db.run(`DELETE FROM driveshare_meetings WHERE id = ?`, id);
     },
     async deleteMeetingIf(id, calendarId, googleEventId) {
-      const r = await db.run(
-        `DELETE FROM driveshare_meetings WHERE id = ? AND calendar_id = ? AND google_event_id = ?`,
-        id, calendarId, googleEventId,
-      );
-      if (r.meta.changes === 0) return false;
-      await db.run(`DELETE FROM driveshare_meeting_invites WHERE meeting_id = ?`, id);
-      return true;
+      // Invites first (they reference the meeting: FK), both in one batch = one transaction.
+      const [, r] = await db.batch([
+        {
+          sql: `DELETE FROM driveshare_meeting_invites WHERE meeting_id = ? AND EXISTS
+                  (SELECT 1 FROM driveshare_meetings WHERE id = ? AND calendar_id = ? AND google_event_id = ?)`,
+          binds: [id, id, calendarId, googleEventId],
+        },
+        {
+          sql: `DELETE FROM driveshare_meetings WHERE id = ? AND calendar_id = ? AND google_event_id = ?`,
+          binds: [id, calendarId, googleEventId],
+        },
+      ]);
+      return (r?.meta.changes ?? 0) > 0;
     },
 
     async listInvites(meetingId) {
