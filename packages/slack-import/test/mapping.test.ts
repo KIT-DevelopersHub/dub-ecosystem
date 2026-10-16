@@ -87,6 +87,18 @@ describe("convertSlackBodyToDubBody", () => {
   it("keeps shared formatting untouched", () => {
     expect(convertSlackBodyToDubBody("*b* _i_ ~s~ `c`", ctx)).toBe("*b* _i_ ~s~ `c`");
   });
+
+  it("re-lays Slack inline ``` fences onto their own lines so the code text survives", () => {
+    expect(convertSlackBodyToDubBody("```npm i\nfoo```", ctx)).toBe("```\nnpm i\nfoo\n```");
+    expect(convertSlackBodyToDubBody("```hello```", ctx)).toBe("```\nhello\n```");
+    expect(convertSlackBodyToDubBody("see ```x``` here", ctx)).toBe("see \n```\nx\n```\n here");
+    expect(convertSlackBodyToDubBody("run:\n```\na &lt; b\n```\ndone", ctx)).toBe("run:\n```\na < b\n```\ndone");
+  });
+
+  it("shows links inside code as text and keeps an unclosed ``` literal", () => {
+    expect(convertSlackBodyToDubBody("```curl <https://x.com>```", ctx)).toBe("```\ncurl https://x.com\n```");
+    expect(convertSlackBodyToDubBody("a ``` b", ctx)).toBe("a ``` b");
+  });
 });
 
 describe("resolveEmoji", () => {

@@ -246,8 +246,48 @@ function convertToken(token: string, ctx: MappingContext): string {
   return `<${token}>`;
 }
 
-export function convertSlackBodyToDubBody(text: string, ctx: MappingContext): string {
+function convertInline(text: string, ctx: MappingContext): string {
   return decodeSlackEntities(text.replace(SLACK_TOKEN_RE, (_m, inner: string) => convertToken(inner, ctx)));
+}
+
+/** Inside a code block Slack shows a link as its text, not as markup. */
+function convertCode(text: string, ctx: MappingContext): string {
+  return decodeSlackEntities(
+    text.replace(SLACK_TOKEN_RE, (_m, inner: string) => {
+      const bar = inner.indexOf("|");
+      const url = bar >= 0 ? inner.slice(0, bar) : inner;
+      if (/^(https?:\/\/|mailto:)/i.test(url)) return bar >= 0 ? inner.slice(bar + 1) : url;
+      return convertToken(inner, ctx);
+    }),
+  );
+}
+
+/**
+ * Slack ``` fences are inline: code may start on the fence line and the closer may end a
+ * content line ("```npm i\nfoo```", "see ```x``` here"). dub fences are line-based
+ * (render-body parseBlocks): the rest of the opening line is a lang hint and only a line
+ * starting with ``` closes. So each Slack fence is re-laid onto its own lines, otherwise
+ * the code text is dropped or swallows the rest of the body. An unclosed ``` stays literal.
+ */
+export function convertSlackBodyToDubBody(text: string, ctx: MappingContext): string {
+  const parts = text.split("```");
+  let out = "";
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    const isCode = i % 2 === 1 && i < parts.length - 1;
+    if (isCode) {
+      if (out && !out.endsWith("\n")) out += "\n";
+      out += "```\n" + convertCode(part.replace(/^\n/, "").replace(/\n$/, ""), ctx) + "\n```";
+      continue;
+    }
+    if (i % 2 === 1) {
+      out += convertInline("```" + part, ctx); // unclosed trailing fence
+      continue;
+    }
+    const plain = convertInline(part, ctx);
+    out += i > 0 && plain && !plain.startsWith("\n") ? `\n${plain}` : plain;
+  }
+  return out;
 }
 
 /** Legacy `attachments` (bot posts / unfurl cards) carry content that `text` may lack.
