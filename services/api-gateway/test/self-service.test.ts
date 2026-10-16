@@ -38,6 +38,7 @@ const SELF_PART: member.SelfParticipation = {
   grade: "3",
   department: "情報工学科",
   rosterNumber: "3EP2-26",
+  studentNumber: "1400980",
   desiredActivity: "dev",
   note: null,
 };
