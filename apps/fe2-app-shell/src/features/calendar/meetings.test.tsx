@@ -51,7 +51,10 @@ const TARGETS: meeting.MeetingTarget[] = [
 ];
 
 function fakeApi(over: Partial<CalendarApi> = {}, account: meeting.MeetingAccountState = { email: "hackit.dub@gmail.com", calendarReady: true }) {
-  const items = [mtg({}), mtg({ id: "mtg_member", title: "メンバー会", targetId: "role_member", targetName: "member" })];
+  const items = [
+    mtg({}),
+    mtg({ id: "mtg_member", title: "メンバー会", targetId: "role_member", targetName: "member", createdBy: "user_other" as meeting.Meeting["createdBy"] }),
+  ];
   const api: CalendarApi = {
     listTasks: vi.fn(),
     listAllTasks: vi.fn(),
@@ -260,6 +263,12 @@ describe("サイドバー ミーティング", () => {
       role_lead: true,
       role_member: true,
     });
+  });
+
+  it("a meeting I created for a role I am not in still shows by default", async () => {
+    const mine = mtg({ id: "mtg_mine", title: "統括外の会", targetId: "role_member", targetName: "member" });
+    render(wrap(<CalendarScreen />, fakeApi({ listMeetings: vi.fn(async () => ({ items: [mine], account: { email: "hackit.dub@gmail.com", calendarReady: true } })) }), VIEW));
+    await waitFor(() => expect(chipsOf("mtg_mine").length).toBeGreaterThan(0));
   });
 
   it("a choice survives a reload and is drawn before the target list arrives", async () => {
