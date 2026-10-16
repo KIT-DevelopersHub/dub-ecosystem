@@ -166,6 +166,8 @@ export interface PersonProfile {
   department: string | null;
   /** 名列番号 (例 "3EP2-26"). normalizeRosterNumber で正規化済み。 */
   rosterNumber: string | null;
+  /** 学籍番号 (例 "1400980"). normalizeStudentNumber で正規化済み。 */
+  studentNumber: string | null;
   desiredActivity: DesiredActivity | null;
   /** 備考 (連絡事項など). */
   note: string | null;
@@ -186,6 +188,7 @@ export const PERSON_PROFILE_KEYS = [
   "grade",
   "department",
   "rosterNumber",
+  "studentNumber",
   "desiredActivity",
   "note",
 ] as const satisfies readonly PersonProfileKey[];
@@ -207,6 +210,7 @@ export const PERSON_PROFILE_LABEL: Record<PersonProfileKey, string> = {
   grade: "学年",
   department: "学科",
   rosterNumber: "名列番号",
+  studentNumber: "学籍番号",
   desiredActivity: "希望する活動",
   note: "備考",
 };
@@ -241,6 +245,16 @@ export function normalizeRosterNumber(raw: string): string | null {
   return s.length === 0 ? null : s;
 }
 
+// ---- 学籍番号 ----
+/** 学籍番号の形式: 半角数字 7 桁。例 "1400980"。 */
+export const STUDENT_NUMBER_PATTERN = /^[0-9]{7}$/;
+
+/** 全角→半角・空白除去。空なら null。形式検証は呼び出し側で。 */
+export function normalizeStudentNumber(raw: string): string | null {
+  const s = raw.normalize("NFKC").replace(/\s+/g, "");
+  return s.length === 0 ? null : s;
+}
+
 /** 学年の表記ゆれを吸収する ("3" / "３" / "3年" / "3年生" / "M1" / "院生" / "graduate")。
  *  空は null、解釈できなければ undefined。 */
 export function normalizeGrade(raw: string): Grade | null | undefined {
@@ -267,6 +281,7 @@ export const PERSON_PROFILE_ERROR: Partial<Record<PersonProfileKey, string>> = {
   phone: "電話番号の形式が正しくありません",
   grade: "学年を選択肢から選んでください",
   rosterNumber: "名列番号は 3EP2-26 の形式で入力してください",
+  studentNumber: "学籍番号は半角数字 7 桁（例: 1400980）で入力してください",
   desiredActivity: "希望する活動を選択肢から選んでください",
 };
 
@@ -292,6 +307,10 @@ export function parsePersonProfileField<K extends PersonProfileKey>(key: K, raw:
     case "rosterNumber": {
       const n = normalizeRosterNumber(t);
       return n !== null && ROSTER_NUMBER_PATTERN.test(n) ? ok(n) : { ok: false };
+    }
+    case "studentNumber": {
+      const n = normalizeStudentNumber(t);
+      return n !== null && STUDENT_NUMBER_PATTERN.test(n) ? ok(n) : { ok: false };
     }
     case "grade": {
       const g = normalizeGrade(t);

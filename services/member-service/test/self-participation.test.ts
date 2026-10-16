@@ -43,6 +43,7 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
       grade: null,
       department: null,
       rosterNumber: null,
+      studentNumber: null,
       desiredActivity: null,
       note: null,
     });
@@ -64,6 +65,7 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
       grade: "3",
       department: "情報工学科",
       rosterNumber: "3EP2-26",
+      studentNumber: "1400980",
       desiredActivity: "dev",
       note: "よろしく",
     };
