@@ -125,6 +125,17 @@ export const PROD_DEPLOY_PROMPT =
   "(3) `pnpm verify:live prod \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
   "(4) 完了したら本番 URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
 
+// Pin the deploy run to the task's own PR. Without it the agent guessed the PR from the
+// cwd's branch — a shared worktree whose branch belonged to another, already-merged PR —
+// and reported this task as "already merged to main" when it never was.
+export function withTargetPr(prompt: string, item: { prUrl: string | null; prUrls: string[] }): string {
+  const pr = item.prUrl ?? item.prUrls.at(-1);
+  const line = pr
+    ? `対象 PR: ${pr} (作業ディレクトリのブランチの PR と取り違えない。マージ済みかどうかは必ず \`gh pr view ${pr} --json state,mergedAt\` で確かめる)`
+    : "対象 PR: 未記録。作業ディレクトリのブランチから推測せず、このタスクの run 出力に出た PR を確かめてから進める。";
+  return `${prompt}\n\n${line}`;
+}
+
 // Phases a 追加指示 must rewind to demo_building before the follow-up run starts
 // (却下済み =「直して再 demo」). Every other phase keeps its phase: the follow-up run is
 // just added to the same task. Moving back is the explicit 「フェーズを戻す」 action.
@@ -439,7 +450,7 @@ export function Board({
         await api.transition(selected.featureId, to, { approvedByUser: true });
         deployingRef.current.add(selected.featureId);
         try {
-          await client.startRun(STAGING_DEPLOY_PROMPT, { taskId: selected.taskId, ...cwdOpt });
+          await client.startRun(withTargetPr(STAGING_DEPLOY_PROMPT, selected), { taskId: selected.taskId, ...cwdOpt });
         } catch {
           // daemon down: can't run the reflect now. Fall back to the phase-only advance so
           // the task still leaves 確認待ち instead of getting stuck; the shield is released.
@@ -452,7 +463,7 @@ export function Board({
         // deriveLane が古い run の結果で「本番確認中」に一瞬飛ぶ flash が起きる）。
         // これで prod_shipped + 走行中 run = 「本番反映中」→ 終われば「本番確認中」(失敗は要修正表示)。
         try {
-          await client.startRun(PROD_DEPLOY_PROMPT, { taskId: selected.taskId, ...cwdOpt });
+          await client.startRun(withTargetPr(PROD_DEPLOY_PROMPT, selected), { taskId: selected.taskId, ...cwdOpt });
         } catch {
           // daemon down: no progress run possible — fall through to the phase-only ship so
           // the approval still registers (本番反映済) instead of getting stuck in 確認待ち.
