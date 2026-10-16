@@ -690,6 +690,9 @@ importers:
       '@dub/commander-phases':
         specifier: workspace:*
         version: link:../../packages/commander-phases
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../../packages/types
     devDependencies:
       '@types/node':
         specifier: ^22.10.2

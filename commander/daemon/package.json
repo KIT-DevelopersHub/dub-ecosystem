@@ -11,7 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@dub/commander-phases": "workspace:*"
+    "@dub/commander-phases": "workspace:*",
+    "@dub/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
