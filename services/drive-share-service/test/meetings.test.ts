@@ -12,6 +12,7 @@ import { createMockCalendarClient } from "../src/calendar-mock-client";
 import { staticMemberDirectory } from "../src/member-directory";
 import { fromRecurrence, jstDate, toRecurrence, validateMeeting } from "../src/meeting-rules";
 import { eventIdFor } from "../src/meetings-service";
+import { createInMemoryMeetingStore } from "../src/meetings-store";
 import { nextAlarmAt } from "../src/meeting-sync-do";
 import { resolveMeetingAccount } from "../src/meetings-wiring";
 import type { ActiveUser } from "../src/role-membership";
@@ -177,6 +178,72 @@ describe("create", () => {
     expect(insert.body.attendees.map((a: { email: string }) => a.email).sort()).toEqual(["a.gmail@gmail.com", "b@dub.example"]);
     const created = calls.find((c) => new URL(c.url).pathname.endsWith("/calendars"))!;
     expect(created.body).toEqual({ summary: "開発", timeZone: "Asia/Tokyo" });
+  });
+});
+
+describe("Meet open to anyone with the link", () => {
+  function meetFetch(accessType: string) {
+    const calls: { url: string; method: string; body: any }[] = [];
+    const fetchImpl = (async (input: string, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+      const u = new URL(String(input));
+      if (u.pathname === "/v2/spaces/abc-defg-hij") return Response.json({ name: "spaces/jQCFfuBOdN5z", config: { accessType } });
+      if (u.pathname === "/v2/spaces/jQCFfuBOdN5z") return Response.json({ name: "spaces/jQCFfuBOdN5z", config: { accessType: "OPEN" } });
+      return new Response("{}", { status: 404 });
+    }) as unknown as typeof fetch;
+    const token = { getAccessToken: async () => "tok", grantedScopes: async () => null };
+    return { calls, client: createGoogleCalendarClient({ token, fetchImpl }) };
+  }
+
+  it("looks the space up by meeting code, then patches only config.accessType to OPEN", async () => {
+    const { calls, client } = meetFetch("TRUSTED");
+    expect(await client.openMeet("https://meet.google.com/abc-defg-hij")).toBe(true);
+    expect(calls.map((c) => c.method)).toEqual(["GET", "PATCH"]);
+    const patch = new URL(calls[1]!.url);
+    expect(patch.origin + patch.pathname).toBe("https://meet.googleapis.com/v2/spaces/jQCFfuBOdN5z");
+    expect(patch.searchParams.get("updateMask")).toBe("config.accessType");
+    expect(calls[1]!.body).toEqual({ config: { accessType: "OPEN" } });
+  });
+
+  it("an already open space is not patched; a non-Meet link is left alone", async () => {
+    const { calls, client } = meetFetch("OPEN");
+    expect(await client.openMeet("https://meet.google.com/abc-defg-hij?authuser=0")).toBe(true);
+    expect(calls.map((c) => c.method)).toEqual(["GET"]);
+    expect(await client.openMeet("https://example.com/abc-defg-hij")).toBe(false);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("create and a target move open the new Meet", async () => {
+    const calendar = createMockCalendarClient();
+    const { service } = buildMeetings({ roster: roster(), calendar });
+    const m = await service.create("usr_admin", BASE);
+    expect([...calendar.state.openMeets]).toEqual([m.meetUrl]);
+    const moved = await service.update(m.id, { targetId: "role_pr" });
+    expect(calendar.state.openMeets.has(moved.meetUrl!)).toBe(true);
+  });
+
+  it("a Meet that cannot be opened never fails the meeting", async () => {
+    const calendar = createMockCalendarClient();
+    calendar.openMeet = async () => {
+      throw new Error("403 insufficient scope");
+    };
+    const { service } = buildMeetings({ roster: roster(), calendar });
+    const m = await service.create("usr_admin", BASE);
+    expect(m.meetUrl).toBeTruthy();
+    expect((await service.list()).items.map((i) => i.id)).toEqual([m.id]);
+  });
+
+  it("without the Meet scope nothing is touched; once granted, the sync opens the earlier ones", async () => {
+    const calendar = createMockCalendarClient();
+    const store = createInMemoryMeetingStore();
+    const before = buildMeetings({ roster: roster(), calendar, store, meetReady: false });
+    const m = await before.service.create("usr_admin", BASE);
+    await before.service.sync();
+    expect(calendar.state.openMeets.size).toBe(0);
+
+    const after = buildMeetings({ roster: roster(), calendar, store });
+    await after.service.sync();
+    expect([...calendar.state.openMeets]).toEqual([m.meetUrl]);
   });
 });
 

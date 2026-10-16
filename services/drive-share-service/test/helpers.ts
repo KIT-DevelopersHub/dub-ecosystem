@@ -105,6 +105,7 @@ export function buildMeetings(opts: {
   googleBudget?: number;
   syncTimeLimitMs?: number;
   now?: () => string;
+  meetReady?: boolean;
 } = {}) {
   const store = opts.store ?? createInMemoryMeetingStore();
   const calendar = opts.calendar ?? createMockCalendarClient();
@@ -119,6 +120,7 @@ export function buildMeetings(opts: {
       accountId: opts.accountId ?? "dga_1",
       email: opts.accountEmail === undefined ? "hackit@gmail.com" : opts.accountEmail,
       calendarReady: opts.calendarReady ?? true,
+      meetReady: opts.meetReady ?? true,
       calendar,
     }),
     orgId: common.DUB_DEFAULT_ORG_ID,

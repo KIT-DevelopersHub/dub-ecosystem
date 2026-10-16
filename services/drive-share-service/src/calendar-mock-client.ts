@@ -14,11 +14,13 @@ export interface MockCalendarState {
   calendars: Map<string, MockCalendar>;
   /** "calendarId eventId" of every deleted event (reads back as gone, id stays taken). */
   deleted: Set<string>;
+  /** Meet links made open to anyone (openMeet). */
+  openMeets: Set<string>;
   seq: number;
 }
 
 export function createMockCalendarState(): MockCalendarState {
-  return { calendars: new Map(), deleted: new Set(), seq: 0 };
+  return { calendars: new Map(), deleted: new Set(), openMeets: new Set(), seq: 0 };
 }
 
 /** `state` is injectable so a deployed mock keeps its calendars across requests in one isolate
@@ -99,6 +101,10 @@ export function createMockCalendarClient(state: MockCalendarState = createMockCa
     async deleteEvent(calendarId, eventId) {
       state.calendars.get(calendarId)?.events.delete(eventId);
       state.deleted.add(key(calendarId, eventId));
+    },
+    async openMeet(meetUrl) {
+      state.openMeets.add(meetUrl);
+      return true;
     },
   };
 }
