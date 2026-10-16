@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { meeting } from "@dub/types";
 import {
-  MEETING_FILTER_STORAGE_KEY,
-  defaultVisibleTargets,
   emptyMeetingForm,
-  loadVisibleTargets,
-  saveVisibleTargets,
+  isMeetingTargetVisible,
+  parseMeetingTargetChoices,
   toMeetingRequest,
   validateMeetingForm,
   type MeetingFormValues,
@@ -73,21 +71,26 @@ describe("表示するカレンダー filter", () => {
     { id: "role_member", name: "member", memberCount: 4, isMine: false },
   ];
 
-  function memStore(): Storage {
-    const m = new Map<string, string>();
-    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } as Storage;
-  }
+  const visible = (choices: Record<string, boolean>, t: typeof targets | null | "error" = targets) =>
+    ["all", "role_lead", "role_member", "role_gone"].filter((id) => isMeetingTargetVisible(id, choices, t));
 
-  it("defaults to 全体 (always) + the caller's own targets", () => {
-    expect(defaultVisibleTargets(targets)).toEqual(["all", "role_lead"]);
-    expect(loadVisibleTargets(targets, memStore())).toEqual(["all", "role_lead"]);
+  it("defaults to 全体 (always) + the caller's own targets; a deleted role stays visible", () => {
+    expect(visible({})).toEqual(["all", "role_lead", "role_gone"]);
   });
 
-  it("restores a saved choice, and ignores a corrupt value", () => {
-    const s = memStore();
-    saveVisibleTargets(["role_member"], s);
-    expect(loadVisibleTargets(targets, s)).toEqual(["role_member"]);
-    s.setItem(MEETING_FILTER_STORAGE_KEY, "{oops");
-    expect(loadVisibleTargets(targets, s)).toEqual(["all", "role_lead"]);
+  it("an explicit choice wins over the default, and new targets fall back to the default", () => {
+    expect(visible({ all: false, role_member: true })).toEqual(["role_lead", "role_member", "role_gone"]);
+  });
+
+  it("while targets load only 全体 / chosen ones show (nothing flashes then vanishes); on error all show", () => {
+    expect(visible({}, null)).toEqual(["all"]);
+    expect(visible({ role_lead: true }, null)).toEqual(["all", "role_lead"]);
+    expect(visible({}, "error")).toEqual(["all", "role_lead", "role_member", "role_gone"]);
+  });
+
+  it("parses only boolean choices", () => {
+    expect(parseMeetingTargetChoices({ a: true, b: "x", c: false })).toEqual({ a: true, c: false });
+    expect(parseMeetingTargetChoices(["a"])).toEqual({});
+    expect(parseMeetingTargetChoices(null)).toEqual({});
   });
 });

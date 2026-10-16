@@ -93,41 +93,28 @@ export function toMeetingRequest(v: MeetingFormValues): meeting.CreateMeetingReq
 
 // ── 表示するカレンダー filter ────────────────────────────────────────────────
 
-export const MEETING_FILTER_STORAGE_KEY = "dub:calendar:meeting-targets";
+/** Checkboxes the user ticked / unticked, by target id. Unlisted targets use the default. */
+export type MeetingTargetChoices = Readonly<Record<string, boolean>>;
 
-/** Default ON = 全体 + the targets the caller belongs to. */
-export function defaultVisibleTargets(targets: readonly meeting.MeetingTarget[]): string[] {
-  return targets.filter((t) => t.id === meeting.ALL_MEMBERS_TARGET_ID || t.isMine).map((t) => t.id);
+/**
+ * Whether meetings of `targetId` are drawn. An explicit choice wins; otherwise 全体 and the
+ * caller's own targets are ON. `targets` = null while loading: an unknown default stays OFF
+ * so a meeting appears late rather than flashing and vanishing; "error" shows everything.
+ * A target missing from the list (deleted role) is ON so its meetings never silently hide.
+ */
+export function isMeetingTargetVisible(
+  targetId: string,
+  choices: MeetingTargetChoices,
+  targets: readonly meeting.MeetingTarget[] | null | "error",
+): boolean {
+  const chosen = choices[targetId];
+  if (chosen !== undefined) return chosen;
+  if (targetId === meeting.ALL_MEMBERS_TARGET_ID || targets === "error") return true;
+  if (targets === null) return false;
+  return targets.find((t) => t.id === targetId)?.isMine ?? true;
 }
 
-type StorageLike = Pick<Storage, "getItem" | "setItem">;
-
-function storage(): StorageLike | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** The saved choice, or the defaults when nothing (valid) is saved. */
-export function loadVisibleTargets(targets: readonly meeting.MeetingTarget[], store: StorageLike | null = storage()): string[] {
-  try {
-    const raw = store?.getItem(MEETING_FILTER_STORAGE_KEY);
-    if (raw) {
-      const ids: unknown = JSON.parse(raw);
-      if (Array.isArray(ids) && ids.every((x) => typeof x === "string")) return ids as string[];
-    }
-  } catch {
-    // corrupt value: fall back to defaults
-  }
-  return defaultVisibleTargets(targets);
-}
-
-export function saveVisibleTargets(ids: readonly string[], store: StorageLike | null = storage()): void {
-  try {
-    store?.setItem(MEETING_FILTER_STORAGE_KEY, JSON.stringify(ids));
-  } catch {
-    // storage blocked: the choice lasts for this page only
-  }
+export function parseMeetingTargetChoices(v: unknown): MeetingTargetChoices {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  return Object.fromEntries(Object.entries(v).filter((e): e is [string, boolean] => typeof e[1] === "boolean"));
 }
