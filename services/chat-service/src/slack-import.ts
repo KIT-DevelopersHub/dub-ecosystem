@@ -38,7 +38,7 @@ import {
   buildInsertFileLinkSql,
   buildInsertFileMetaSql,
   buildInsertMemberSql,
-  buildInsertMessageSql,
+  buildUpsertMessageSql,
   buildInsertPinSql,
   buildInsertPlaceholderUserSql,
   buildInsertReactionSql,
@@ -324,7 +324,7 @@ class StepWriter {
       // History pass: a broadcast reply is written top-level for now; the threads pass
       // attaches it to its root (or it stays top-level if the root is outside 90 days).
       row.threadRootId = null;
-      this.sql.push(buildInsertMessageSql(row));
+      this.sql.push(buildUpsertMessageSql(row));
     }
     this.counters.messages += 1;
     for (const fileId of attachmentFileIds) this.sql.push(buildInsertFileLinkSql(fileId, row.id, authorId, row.createdAt));

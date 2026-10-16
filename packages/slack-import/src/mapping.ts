@@ -246,8 +246,40 @@ function convertToken(token: string, ctx: MappingContext): string {
   return `<${token}>`;
 }
 
-export function convertSlackBodyToDubBody(text: string, ctx: MappingContext): string {
+/** Inside a code block everything is literal: links/mentions become their plain text. */
+function codeToken(token: string, ctx: MappingContext): string {
+  if (token.startsWith("@")) {
+    const [slackUserId, label] = token.slice(1).split("|");
+    return `@${label ?? ctx.slackUserIdToDisplayName.get(slackUserId ?? "") ?? slackUserId}`;
+  }
+  const bar = token.indexOf("|");
+  if (/^(https?:\/\/|mailto:)/i.test(token)) return bar >= 0 ? token.slice(bar + 1) : token;
+  return convertToken(token, ctx);
+}
+
+function convertInline(text: string, ctx: MappingContext): string {
   return decodeSlackEntities(text.replace(SLACK_TOKEN_RE, (_m, inner: string) => convertToken(inner, ctx)));
+}
+
+// Slack writes ```code``` inline ("```a\nb```", "see ```x``` here"); dub's parser only
+// recognizes a fence on a line of its own and treats the rest of the opening line as a
+// language hint, so the content must be moved onto its own lines.
+const SLACK_FENCE_RE = /```([\s\S]*?)```/g;
+
+export function convertSlackBodyToDubBody(text: string, ctx: MappingContext): string {
+  let out = "";
+  let last = 0;
+  for (const m of text.matchAll(SLACK_FENCE_RE)) {
+    const idx = m.index ?? 0;
+    out += convertInline(text.slice(last, idx), ctx);
+    const inner = m[1]!.replace(/^\n/, "").replace(/\n$/, "");
+    const code = decodeSlackEntities(inner.replace(SLACK_TOKEN_RE, (_t, tok: string) => codeToken(tok, ctx)));
+    if (out.length > 0 && !out.endsWith("\n")) out += "\n";
+    out += "```\n" + code + "\n```";
+    last = idx + m[0].length;
+    if (last < text.length && text[last] !== "\n") out += "\n";
+  }
+  return out + convertInline(text.slice(last), ctx);
 }
 
 /** Legacy `attachments` (bot posts / unfurl cards) carry content that `text` may lack.
@@ -448,14 +480,33 @@ export function buildInsertMessageSql(row: MessageInsertRow): string {
   );
 }
 
+// A re-import refreshes the body of a row nobody touched in dub (version 1 = never edited,
+// not deleted), so a conversion fix also reaches already-imported messages.
+const BODY_REFRESHABLE = "chat_messages.version = 1 AND chat_messages.deleted_at IS NULL";
+
+function upsertMessageSql(row: MessageInsertRow, onConflict: string): string {
+  return buildInsertMessageSql(row).replace(/^INSERT OR IGNORE INTO/, "INSERT INTO").replace(/;$/, "") + `\n${onConflict};`;
+}
+
+/** History-pass message: insert, or refresh an untouched imported row's body. */
+export function buildUpsertMessageSql(row: MessageInsertRow): string {
+  return upsertMessageSql(
+    row,
+    `ON CONFLICT(id) DO UPDATE SET body = excluded.body WHERE ${BODY_REFRESHABLE} AND chat_messages.body <> excluded.body`,
+  );
+}
+
 /** Thread reply seen via conversations.replies. A broadcast reply ("also send to channel")
  *  may already exist as a top-level row from the history pass; attach it to its root
- *  instead of ignoring it. Never detaches or rewrites anything else. */
+ *  instead of ignoring it. Never detaches; otherwise only refreshes an untouched body. */
 export function buildUpsertThreadReplySql(row: MessageInsertRow): string {
-  return (
-    buildInsertMessageSql(row).replace(/^INSERT OR IGNORE INTO/, "INSERT INTO").replace(/;$/, "") +
-    "\nON CONFLICT(id) DO UPDATE SET thread_root_id = excluded.thread_root_id" +
-    " WHERE chat_messages.thread_root_id IS NULL AND excluded.thread_root_id IS NOT NULL;"
+  return upsertMessageSql(
+    row,
+    "ON CONFLICT(id) DO UPDATE SET" +
+      " thread_root_id = COALESCE(chat_messages.thread_root_id, excluded.thread_root_id)," +
+      ` body = CASE WHEN ${BODY_REFRESHABLE} THEN excluded.body ELSE chat_messages.body END` +
+      " WHERE (chat_messages.thread_root_id IS NULL AND excluded.thread_root_id IS NOT NULL)" +
+      ` OR (${BODY_REFRESHABLE} AND chat_messages.body <> excluded.body)`,
   );
 }
 

@@ -253,6 +253,22 @@ describe("SlackImporter — full step loop", () => {
     expect((await importer.listJobs()).items).toHaveLength(1);
   });
 
+  it("re-import refreshes bodies of untouched rows but never dub-edited or deleted ones", async () => {
+    const { job } = await importer.createJob("general", ADMIN);
+    await runToEnd(job.id);
+    // stale bodies from an older converter; ts(2) was edited in dub, ts(4) deleted
+    raw.exec(`UPDATE chat_messages SET body = 'stale' WHERE id IN ('${msg(ts(1))}', '${msg(ts(11))}')`);
+    raw.exec(`UPDATE chat_messages SET body = 'edited in dub', version = 2 WHERE id = '${msg(ts(2))}'`);
+    raw.exec(`UPDATE chat_messages SET body = 'gone', deleted_at = 'x', version = 2 WHERE id = '${msg(ts(4))}'`);
+    await importer.createJob("general", ADMIN);
+    await runToEnd(job.id);
+    expect(row("SELECT body FROM chat_messages WHERE id = ?", msg(ts(1)))?.body).toContain("hello <@");
+    expect(row("SELECT body, thread_root_id FROM chat_messages WHERE id = ?", msg(ts(11)))).toEqual({ body: "bot reply", thread_root_id: msg(ROOT) });
+    expect(row("SELECT body FROM chat_messages WHERE id = ?", msg(ts(2)))?.body).toBe("edited in dub");
+    expect(row("SELECT body FROM chat_messages WHERE id = ?", msg(ts(4)))?.body).toBe("gone");
+    expect(row("SELECT thread_root_id FROM chat_messages WHERE id = ?", msg(ts(12)))?.thread_root_id).toBe(msg(ROOT));
+  });
+
   it("parks on a Slack 429 and resumes after Retry-After", async () => {
     const { job } = await importer.createJob("general", ADMIN);
     slack.fail["conversations.history"] = [new SlackApiError("conversations.history", "rate_limited", 7)];
