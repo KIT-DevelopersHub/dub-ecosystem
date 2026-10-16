@@ -135,6 +135,23 @@ describe("<Board>", () => {
     expect(api.transition).not.toHaveBeenCalledWith("feat-1", "staging_review", expect.anything());
   });
 
+  it("pins the staging反映 run to the task's own PR (not the cwd branch's PR)", async () => {
+    const pr = "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/676";
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "反映対象", featurePhase: "demo_review", runStatus: "succeeded", prUrls: [pr] }),
+    ]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-rev"));
+    await userEvent.click(await screen.findByTestId("action-approve"));
+    await userEvent.click(await screen.findByTestId("approval-confirm-yes"));
+
+    await waitFor(() => expect(client.startRun).toHaveBeenCalled());
+    const [prompt] = client.startRun.mock.calls.at(-1)!;
+    expect(prompt).toContain(`対象 PR: ${pr}`);
+  });
+
   it("shows a visible 反映中 in-flight banner while a staging approval is processing", async () => {
     const api = makeFakeApi([
       makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "反映対象", featurePhase: "demo_review", runStatus: "succeeded" }),

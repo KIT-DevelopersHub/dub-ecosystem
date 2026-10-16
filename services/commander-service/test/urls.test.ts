@@ -3,6 +3,7 @@ import {
   authoredText,
   eventText,
   extractArtifactUrls,
+  extractEventUrls,
   extractLabelTarget,
   extractPrUrls,
   mergePrUrls,
@@ -130,5 +131,24 @@ describe("PR list helpers", () => {
     expect(authoredText({ data: { type: "result", result: "done" } })).toBe("done");
     expect(authoredText({ data: { type: "user", message: { content: [{ type: "tool_result" }] } } })).toBe("");
     expect(authoredText({ line: "https://github.com/o/r/pull/1" })).toBe("");
+  });
+});
+
+describe("extractEventUrls", () => {
+  it("takes deploy URLs from tool output but the PR only from authored text", () => {
+    const tool = {
+      data: {
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", content: "https://github.com/o/r/pull/670 https://dub-demo-x.example.workers.dev" },
+          ],
+        },
+      },
+    };
+    expect(extractEventUrls(tool)).toEqual({ demoUrl: "https://dub-demo-x.example.workers.dev" });
+    expect(extractEventUrls({ data: { type: "result", result: "これに付けて: https://github.com/o/r/pull/676" } })).toEqual({
+      prUrl: "https://github.com/o/r/pull/676",
+    });
   });
 });
