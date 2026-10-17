@@ -23,6 +23,8 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useMembersOverview, useDeleteMember, useIdentityUsers, useUnlinkIdentity } from "./hooks.ts";
+import { useMembersApi } from "./MembersProvider.tsx";
+import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
 import { ListView } from "./ListView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
@@ -40,12 +42,15 @@ export function MemberRosterPage(): JSX.Element {
   const deleteMember = useDeleteMember();
   const identityUsers = useIdentityUsers();
   const unlinkIdentity = useUnlinkIdentity();
+  const membersApi = useMembersApi();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<RosterStatusFilter>("roster");
   const [memberDialog, setMemberDialog] = useState<{ open: boolean; editing: OrgMember | null }>({ open: false, editing: null });
   const [linkDialog, setLinkDialog] = useState<{ open: boolean; member: OrgMember | null }>({ open: false, member: null });
   const [confirm, setConfirm] = useState<OrgMember | null>(null);
+  // アカウント発行メール: opened after a link (only when the member has a Gmail) or from the row.
+  const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
 
   const teams = overview.data?.teams ?? [];
   const members = overview.data?.members ?? [];
@@ -58,6 +63,12 @@ export function MemberRosterPage(): JSX.Element {
     for (const u of identityUsers.data?.items ?? []) map.set(u.id, u.email || u.displayName);
     return map;
   }, [identityUsers.data]);
+  const accountEmails = useMemo(
+    () => new Map((identityUsers.data?.items ?? []).map((u) => [u.id, u.email])),
+    [identityUsers.data],
+  );
+  const openAccountMail = (m: OrgMember) =>
+    setMailTarget(accountMailTarget(m.identityUserId, m.name, m.gmail, m.identityUserId ? accountEmails.get(m.identityUserId) : null));
   const takenIds = useMemo(
     () => new Set(members.map((m) => m.identityUserId).filter((id): id is string => !!id)),
     [members],
@@ -179,6 +190,7 @@ export function MemberRosterPage(): JSX.Element {
         onDelete={(m) => setConfirm(m)}
         onLink={(m) => setLinkDialog({ open: true, member: m })}
         onUnlink={(m) => unlinkIdentity.mutate({ id: m.id, version: m.version })}
+        onSendAccountMail={openAccountMail}
       />
 
       <MemberFormDialog
@@ -194,7 +206,10 @@ export function MemberRosterPage(): JSX.Element {
         onClose={() => setLinkDialog({ open: false, member: null })}
         member={linkDialog.member}
         takenIds={takenIds}
+        onLinked={(m, user) => setMailTarget(accountMailTarget(user.id, m.name, m.gmail, user.email))}
       />
+
+      <AccountMailPrompt target={mailTarget} send={membersApi.sendAccountMail} onClose={() => setMailTarget(null)} />
 
       <ConfirmDialog
         open={confirm !== null}

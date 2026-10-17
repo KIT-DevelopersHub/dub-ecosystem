@@ -594,6 +594,22 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
     await waitFor(() => expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument());
   });
 
+  it("発行→紐付けが済んだら、続けてアカウント発行メールを送るか聞き、送る で API を呼ぶ", async () => {
+    const sendAccountMail = vi.fn(() =>
+      Promise.resolve({ ok: true as const, to: TANAKA.gmail ?? "", cc: "minoru.tanaka@developershub.jp", appUrl: "https://app.developershub.jp", passwordSource: "generated" as const, messageId: "m" }),
+    );
+    const api = issueApi({ sendAccountMail });
+    render(wrap(<ParticipationListPage />, api, issuer));
+    await addAsNew();
+    await userEvent.click(await screen.findByTestId("participation-issue-mail-submit"));
+    const dialog = await screen.findByTestId("account-mail-dialog");
+    expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("account-mail-dialog-to")).toHaveTextContent(TANAKA.gmail ?? "");
+    expect(within(dialog).getByTestId("account-mail-dialog-cc")).toHaveTextContent("minoru.tanaka@developershub.jp");
+    await userEvent.click(within(dialog).getByTestId("account-mail-dialog-send"));
+    await waitFor(() => expect(sendAccountMail).toHaveBeenCalledWith("usr_new"));
+  });
+
   it("途中で失敗したら、再試行は発行済みのアドレスを作り直さず続きから行う", async () => {
     const inviteAccount = vi
       .fn()

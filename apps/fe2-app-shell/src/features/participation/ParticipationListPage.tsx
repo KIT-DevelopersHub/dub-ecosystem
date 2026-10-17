@@ -20,6 +20,8 @@ import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import { PUBLIC_PARTICIPATION_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
 import { IssueMailDialog } from "./IssueMailDialog.tsx";
+import { useParticipationApi } from "./ParticipationProvider.tsx";
+import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
 import styles from "./participation.module.css";
 
 /** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
@@ -92,6 +94,9 @@ export function ParticipationListPage(): JSX.Element {
   const [skipTarget, setSkipTarget] = useState<Participation | null>(null);
   const [unlinkTarget, setUnlinkTarget] = useState<Participation | null>(null);
   const [issueTarget, setIssueTarget] = useState<{ participation: Participation; member: RosterMember } | null>(null);
+  // 発行→紐付けまで済んだら、続けてアカウント発行メールを送るか聞く (Gmail がある時だけ)。
+  const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
+  const participationApi = useParticipationApi();
   // 解除確認に「誰との紐付けか」を出すため、確認を開いた時だけ名簿を引く。
   const rosterQuery = useParticipationRosterMembers(unlinkTarget !== null);
   const unlinkMemberName = unlinkTarget?.memberId
@@ -223,8 +228,17 @@ export function ParticipationListPage(): JSX.Element {
           member={issueTarget.member}
           defaultLocalPart={emailCandidate(issueTarget.participation) ?? ""}
           onClose={() => setIssueTarget(null)}
+          onIssued={(progress) => {
+            const { participation, member } = issueTarget;
+            setIssueTarget(null);
+            setMailTarget(
+              accountMailTarget(progress.identityUserId, member.name, member.gmail || participation.gmail, progress.address),
+            );
+          }}
         />
       ) : null}
+
+      <AccountMailPrompt target={mailTarget} send={participationApi.sendAccountMail} onClose={() => setMailTarget(null)} />
 
       <ConfirmDialog
         open={skipTarget !== null}
