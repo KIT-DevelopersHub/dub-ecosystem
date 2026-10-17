@@ -21,7 +21,7 @@
 // boot mock and surface as a normal NOT_FOUND (in-frame fallback, never a white
 // screen), so "what is seeded vs. still stubbed" stays honest.
 import type { ErrorResponse } from "@dub/errors";
-import type { auditLog, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
+import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
@@ -1488,7 +1488,12 @@ function createRosterStore() {
     }
   }
 
-  return { handle, addUsers };
+  /** Login account by id (アカウント発行メールの CC 解決用). */
+  function findUser(id: string): DemoRosterUser | undefined {
+    return users.find((u) => u.id === id);
+  }
+
+  return { handle, addUsers, findUser };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -3015,8 +3020,16 @@ function createMembersStore() {
     member_5: ["やまだ", "さぶろう"],
     member_6: ["たむら", "み"],
   };
+  // Gmail (参加届から流入) の seed。アカウント発行メールの確認用: 高岡 は紐付け済み(行から再送)、
+  // 鈴木 一郎 / 黒川 誠 は未紐付け(紐付け直後に送信確認が出る)。
+  const GMAIL: Record<string, string> = {
+    member_1: "takaoka.demo@gmail.com",
+    member_3: "suzuki.ichiro@gmail.com",
+    member_h2: "kurokawa.dev@gmail.com",
+  };
   for (const mem of members) {
     const kana = KANA[mem.id];
+    if (GMAIL[mem.id]) mem.gmail = GMAIL[mem.id]!;
     if (kana) {
       mem.lastNameKana = kana[0];
       mem.firstNameKana = kana[1];
@@ -3424,7 +3437,12 @@ function createMembersStore() {
     return null;
   }
 
-  return { handle };
+  /** 運営メンバー linked to a login (アカウント発行メールの宛先解決用). */
+  function findByIdentity(identityUserId: string): DemoMember | undefined {
+    return members.find((x) => x.identityUserId === identityUserId);
+  }
+
+  return { handle, findByIdentity };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -4255,6 +4273,26 @@ export function createDemoFetch(): typeof fetch {
 
     // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
     if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));
+
+    // アカウント発行メール (gateway-owned): member Gmail (to) + login (cc). Nothing is sent.
+    {
+      const am = /^\/api\/v1\/admin\/users\/([^/]+)\/account-mail$/.exec(url.pathname);
+      if (am && method === "POST") {
+        const uid = decodeURIComponent(am[1]!);
+        const linked = membersStore.findByIdentity(uid);
+        const gmail = (linked?.gmail ?? "").trim();
+        if (!linked || !gmail) return problem("VALIDATION_FAILED", "運営メンバーの Gmail が登録されていません", 400);
+        const res: authTypes.AdminSendAccountMailResponse = {
+          ok: true,
+          to: gmail,
+          cc: roster.findUser(uid)?.email ?? "",
+          appUrl: "https://app.developershub.jp",
+          passwordSource: "existing",
+          messageId: `demo_msg_${Date.now()}`,
+        };
+        return json(res);
+      }
+    }
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
