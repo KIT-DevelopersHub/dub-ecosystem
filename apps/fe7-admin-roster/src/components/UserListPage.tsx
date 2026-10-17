@@ -26,6 +26,7 @@ import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
 import { IssuedAddressesDialog } from "./IssuedAddressesDialog";
 import { SyncPreviewDialog } from "./SyncPreviewDialog";
 import { MemberLinkDialog } from "./MemberLinkDialog";
+import { AccountMailPrompt, accountMailTargetOf, type AccountMailTarget } from "./AccountMailPrompt";
 import {
   useUsers,
   useRoles,
@@ -101,6 +102,8 @@ export function UserListPage() {
   const [manageAddressesOpen, setManageAddressesOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkAccount, setLinkAccount] = useState<RosterUser | null>(null);
+  // アカウント発行メール: asked right after a link when the member has a Gmail.
+  const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
   const { can } = usePermissions();
   const canAdminEdit = useCanAdminEdit();
   const { me } = useRosterContext();
@@ -406,7 +409,13 @@ export function UserListPage() {
         onApply={applySync}
         onCancel={() => setPreviewOpen(false)}
       />
-      <MemberLinkDialog open={!!linkAccount} account={linkAccount} onClose={() => setLinkAccount(null)} />
+      <MemberLinkDialog
+        open={!!linkAccount}
+        account={linkAccount}
+        onClose={() => setLinkAccount(null)}
+        onLinked={(m, account) => setMailTarget(accountMailTargetOf(m, account))}
+      />
+      <AccountMailPrompt target={mailTarget} onClose={() => setMailTarget(null)} />
     </div>
   );
 }
