@@ -21,6 +21,8 @@ GATEWAY_VERSION = "0.1.0"
 ALLOWED_ORIGINS = "https://app.developershub.jp,https://dub-fe2-app-shell.developershub-site.workers.dev,http://localhost:5173,http://localhost:3000"
 DEFAULT_MAX_BODY_BYTES = "10485760"
 FILES_MAX_BODY_BYTES = "26214400"
+# Login URL written into the account-issue mail (handlers/account-mail.ts).
+APP_BASE_URL = "https://app.developershub.jp"
 
 [[services]]
 binding = "SVC_AUTH"

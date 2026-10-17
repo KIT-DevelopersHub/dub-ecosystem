@@ -47,6 +47,9 @@ export interface GatewayEnv {
   // Origins whose LP pageview beacons are recorded (comma-separated). Default = the
   // production conference LP (handlers/public-lp-visit.ts DEFAULT_LP_ORIGINS).
   LP_BEACON_ORIGINS?: string;
+  // Login URL written into the account-issue mail (handlers/account-mail.ts). Default
+  // https://app.developershub.jp.
+  APP_BASE_URL?: string;
   // Rate-limit policy tuning (both optional; defaults 100 / 60_000 ms). Env-tunable
   // without a contract change — clients depend only on the wire signals (§7).
   RATE_LIMIT_MAX?: string;
