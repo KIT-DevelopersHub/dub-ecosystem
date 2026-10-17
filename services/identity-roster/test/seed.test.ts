@@ -75,6 +75,15 @@ describe("seedReferenceData / system roles", () => {
     }
   });
 
+  it("calendar:schedule_edit starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("calendar:schedule_edit");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("calendar:schedule_edit");
+    }
+  });
+
   it("is idempotent: re-seeding does not duplicate roles or widen admin", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);

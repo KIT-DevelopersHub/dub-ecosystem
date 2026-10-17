@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "calendar-schedule-perm",
+  "worker": "dub-demo-calendar-schedule-perm",
+  "url": "https://dub-demo-calendar-schedule-perm.developershub-site.workers.dev",
+  "deployedSha": "19e6048d",
+  "branch": "feat/calendar-schedule-write-perm",
+  "actor": "ko-tarou",
+  "markers": ["calendar:schedule_edit","_meetingFormRow_"],
+  "live": true,
+  "verifiedAt": "2026-10-16T10:29:52Z",
+  "updatedAt": "2026-10-16T10:29:52Z",
+  "note": "カレンダー 予定を登録 権限トグル + 予定作成ダイアログ間隔修正"
+}

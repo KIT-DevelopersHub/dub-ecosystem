@@ -63,6 +63,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
+  // カレンダー: 予定の登録（予定を作成ボタン）。
+  "calendar:schedule_edit",
   // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
   "calendar:meetings_view",
   "calendar:meetings_edit",
