@@ -76,6 +76,31 @@ staging_review→prod_shipped と Web ボードが担う)。
   本番デプロイ起動)は **ユーザーが明示許可した時のみ**。エージェントの自己承認・勝手なフェーズ
   移行は禁止。実装・調査・demo/staging 反映(=確認材料づくり)までは自走可、**本番へ進める最後の
   一手だけは常に許可待ち**。$0 厳守(課金しない)。
+- **`確認した`ラベルはオーナー(ユーザー)だけが付ける。エージェントは理由を問わず絶対に付けない**
+  (`gh pr edit --add-label` / `gh api` / GraphQL / ラベル改名、どの経路でも)。付けてほしい時は
+  最終報告に `これに付けて: <PR URL>` を 1 行書いて止まる。
+- **「staging に進んで」は staging まで**。staging 反映 + verify:live + 確認依頼で止まり、main
+  マージ・本番デプロイには絶対に進まない。本番に進むのは、オーナーが `確認した`を付け、かつ本番へ
+  進む指示(Commander の本番承認)を出した時だけ。
+- main マージは **`確認した`付きの PR だけ**。`--admin` マージ・main 直 push・`gh workflow run`
+  での本番 deploy 起動・手元からの本番 `wrangler deploy` は禁止(本番は main マージで deploy.yml が
+  自動で行う)。
+- これらは `hooks/prod-gate-guard.mjs`(PreToolUse)が実行前にブロックする。ブロックされたら
+  迂回策を探さず、`これに付けて:` を書いて止まる。
+
+## Commander 自身の開発は例外(一気に本番)
+
+- **Commander アプリだけを変えるタスクは demo / staging / `確認した`を省略し、実装 → PR → main
+  マージ → 自動本番まで自走してよい**(オーナー決定 2026-10-18)。型/テスト/ビルド green と
+  セルフレビューは省略しない。
+- 対象は `scripts/commander-only-pr.sh` が commander-only と判定する PR だけ
+  (`commander/`・`services/commander-service/`・`packages/commander-phases/`・
+  `apps/fe2-app-shell/src/features/commander/`)。他アプリのファイルが 1 つでも混ざれば通常フロー。
+- **例外の例外**: `commander/.claude-home/`(この規約・hook・settings)、`infra/d1/migrations/`、
+  `scripts/`・`.github/` を触る PR は Commander のタスクでも `確認した`が要る(ゲート自体を
+  エージェントが緩められないように)。Commander の PR は他アプリの PR と混ぜない。
+- 本番反映後は、daemon / web を動かしているローカル checkout を更新して `restart.sh` で再起動
+  するまでが反映。
 
 ## フロントエンド / UI 規約
 

@@ -21,7 +21,10 @@ Commander の daemon が `claude -p` を spawn するとき、この dir を `CL
 - `rules/review-and-workflow.md` — 開発の進め方・多角レビュー・サブエージェント運用の dev 部分。
 - `lessons/dev-lessons.md` — 個人 memory の dev 部分のみ(実ブラウザ E2E / verify:live /
   design-system / 楽観的 UI / スケルトン / 並行開発の安全 / 自己承認禁止 等)。
-- `settings.json` — **hooks は空**(個人 hooks を一切継承しない)。
+- `settings.json` — 個人 hooks は一切継承しない。登録するのは Commander 専用の
+  `hooks/prod-gate-guard.mjs`(PreToolUse/Bash) だけ。`確認した`ラベルの自己付与・ラベル無し
+  PR の main マージ・main 直 push・手元からの本番デプロイを**実行前にブロック**する(Commander
+  のみの PR は `scripts/commander-only-pr.sh` で判定しマージ可)。
 
 ## 含めていないもの(意図的除外)
 
