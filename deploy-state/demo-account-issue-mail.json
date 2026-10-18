@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "account-issue-mail",
+  "worker": "dub-demo-account-issue-mail",
+  "url": "https://dub-demo-account-issue-mail.developershub-site.workers.dev",
+  "deployedSha": "2ed88a23",
+  "branch": "feat/operate-account-issue-mail",
+  "actor": "ko-tarou",
+  "markers": ["account-mail-dialog","members-account-mail-","fe7-account-mail-dialog"],
+  "live": true,
+  "verifiedAt": "2026-10-18T07:22:21Z",
+  "updatedAt": "2026-10-18T07:22:21Z",
+  "note": "運営名簿/参加届/メール名簿: Gmail・ログイン・DevHubアドレスが揃った瞬間にアカウント発行メール送信確認"
+}
