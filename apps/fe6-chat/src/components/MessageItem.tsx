@@ -17,6 +17,7 @@ import { MessageBody } from "./MessageBody";
 import { LinkPreviews } from "./LinkPreview";
 import { Attachments } from "./Attachments";
 import { EmojiPicker } from "./EmojiPicker";
+import { ReactionEmoji } from "./CustomEmoji";
 import styles from "../styles/chat.module.css";
 
 export interface MessageItemProps {
@@ -250,7 +251,7 @@ export function MessageItem({
                   data-testid="fe6-timeline-reaction"
                   onClick={() => onToggleReaction?.(message.id, r.emoji)}
                 >
-                  <span>{r.emoji}</span>
+                  <ReactionEmoji emoji={r.emoji} />
                   <span className={styles.reactionCount}>{r.userIds.length}</span>
                 </button>
               );

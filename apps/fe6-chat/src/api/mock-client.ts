@@ -9,6 +9,8 @@ import type {
   ChatSection,
   ChatSectionList,
   CreateChannelRequest,
+  CustomEmoji,
+  EmojiImportResult,
   DeleteMessageResult,
   DeletionPolicyResponse,
   EditMessageRequest,
@@ -38,6 +40,7 @@ import { ChatApiError } from "./client";
 import { toggleReactionLocal } from "../store/timeline";
 import { mockUnfurl } from "../lib/unfurl-mock";
 import { createSlackImportSim, type ImportedChannel, type SimResult, type SlackDemoAuthors, type SlackImportSim } from "../lib/slack-import-demo";
+import { createCustomEmojiSim, type CustomEmojiSim } from "../lib/custom-emoji-demo";
 
 const now = (): common.ISODateTime => new Date().toISOString();
 
@@ -81,6 +84,7 @@ export class MockChatClient implements ChatApiClient {
   private readonly me: common.UserId;
   private readonly slackAuthors: SlackDemoAuthors;
   private slackSim: SlackImportSim | null = null;
+  private emojiSim: CustomEmojiSim | null = null;
   /** Workspace message-deletion policy (mock default = product default: all hard). */
   private deletionPolicy: MessageDeletionPolicy = { ...chat.DEFAULT_MESSAGE_DELETION_POLICY };
   private deletionPolicyVersion = 0;
@@ -521,5 +525,22 @@ export class MockChatClient implements ChatApiClient {
   }
   stepSlackImport(id: string): Promise<SlackImportJob> {
     return this.simValue(this.sim().step(id));
+  }
+
+  // ---- custom emoji (simulated Slack workspace; see lib/custom-emoji-demo.ts) ----
+  private emojis(): CustomEmojiSim {
+    this.emojiSim ??= createCustomEmojiSim();
+    return this.emojiSim;
+  }
+  async listCustomEmojis(): Promise<CustomEmoji[]> {
+    return this.settle(this.emojis().list());
+  }
+  async customEmojiImage(name: string): Promise<Blob> {
+    const img = this.emojis().image(name);
+    if (!img) throw notFound(`custom_emoji ${name}`);
+    return this.settle(new Blob([img.body], { type: img.contentType }));
+  }
+  async importSlackEmojis(after: string | null): Promise<EmojiImportResult> {
+    return this.settle(this.emojis().importStep(after));
   }
 }

@@ -1623,10 +1623,10 @@
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
-  width: 264px;
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 2px;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
   padding: var(--dub-space-2);
   background: var(--dub-color-surface-overlay);
   border: 1px solid var(--dub-color-border-default);
@@ -1657,6 +1657,60 @@
 }
 .emojiOption:hover {
   background: var(--dub-color-surface-sunken);
+}
+.emojiGrid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+/* ── custom emoji (reaction chips + picker カスタム tab) ─────────────────── */
+/* Sized in em so a custom image sits at the same visual size as the Unicode glyph
+   next to it (reaction chip font-size), whatever the source image's pixel size. */
+.customEmoji {
+  display: inline-block;
+  width: 1.4em;
+  height: 1.4em;
+  object-fit: contain;
+  vertical-align: -0.3em;
+}
+.customEmojiLoading {
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+}
+.customEmojiPick {
+  font-size: 18px;
+}
+.customEmojiTab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.customEmojiGrid {
+  max-height: 216px;
+  overflow-y: auto;
+}
+.customEmojiEmpty {
+  margin: 0;
+  padding: var(--dub-space-3) var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  text-align: center;
+}
+.customEmojiImport {
+  align-self: stretch;
+  padding: var(--dub-space-2);
+  border: 1px dashed var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  font: inherit;
+  font-size: var(--dub-font-size-xs);
+  cursor: pointer;
+}
+.customEmojiImport:hover {
+  border-color: var(--dub-color-brand-400);
+  color: var(--dub-color-brand-700);
 }
 
 /* ── channel-header dropdowns (members / pins) ───────────────────────────── */

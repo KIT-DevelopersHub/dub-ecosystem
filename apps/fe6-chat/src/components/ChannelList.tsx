@@ -40,6 +40,8 @@ export interface ChannelListProps {
   sectionActions?: SectionActions;
   /** Admin-only 「チャンネル取り込み」 (Slack). Omit to hide the entry. */
   onImport?: () => void;
+  /** Admin-only 「絵文字取り込み」 (Slack custom emoji). Omit to hide the entry. */
+  onImportEmoji?: () => void;
 }
 
 export interface SectionActions {
@@ -70,6 +72,7 @@ export function ChannelList({
   assignments = {},
   sectionActions,
   onImport,
+  onImportEmoji,
 }: ChannelListProps) {
   const layout = buildSidebar(channels, sectionActions ? sections : [], sectionActions ? assignments : {});
   const grouped = layout.groups;
@@ -309,6 +312,11 @@ export function ChannelList({
             {onImport && (
               <button type="button" className={styles.sectionCreate} onClick={onImport} data-testid="fe6-slack-import-open">
                 ⇩ チャンネル取り込み（Slack）
+              </button>
+            )}
+            {onImportEmoji && (
+              <button type="button" className={styles.sectionCreate} onClick={onImportEmoji} data-testid="fe6-emoji-import-sidebar">
+                ⇩ 絵文字取り込み（Slack）
               </button>
             )}
           </>

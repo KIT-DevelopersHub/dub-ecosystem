@@ -18,6 +18,8 @@ import { CreateChannelModal } from "./CreateChannelModal";
 import { NewDmModal } from "./NewDmModal";
 import { SectionNameModal } from "./SectionNameModal";
 import { SlackImportModal } from "./slack-import/SlackImportModal";
+import { EmojiImportModal } from "./custom-emoji/EmojiImportModal";
+import { CustomEmojiProvider } from "./CustomEmoji";
 import { useChatSections } from "../hooks/useChatSections";
 import { channelLabel } from "../lib/dm";
 import styles from "../styles/chat.module.css";
@@ -26,16 +28,25 @@ type ChatAppProps = { initialChannelId?: common.ChannelId; eventId?: common.Even
 
 type SectionDialog = { mode: "create"; assignChannelId?: common.ChannelId } | { mode: "rename"; section: ChatSection };
 
-// ToastProvider wraps the body so hooks in it (sections, delete) can toast.
+// ToastProvider wraps the body so hooks in it (sections, delete) can toast. The custom emoji
+// list + image cache is shared by every reaction chip / picker below it.
 export function ChatApp(props: ChatAppProps) {
+  const { api, can } = useChatRuntime();
+  // Same keys as POST /chat/custom-emojis/slack-import (admin only by default).
+  const canImportEmoji = can("app:chat:edit") && can("chat:emoji_import");
+  const [emojiImportOpen, setEmojiImportOpen] = useState(false);
+  const openEmojiImport = useCallback(() => setEmojiImportOpen(true), []);
   return (
     <ToastProvider>
-      <ChatAppBody {...props} />
+      <CustomEmojiProvider api={api} {...(canImportEmoji ? { onOpenImport: openEmojiImport } : {})}>
+        <ChatAppBody {...props} {...(canImportEmoji ? { onImportEmoji: openEmojiImport } : {})} />
+        <EmojiImportModal open={emojiImportOpen} onClose={() => setEmojiImportOpen(false)} />
+      </CustomEmojiProvider>
     </ToastProvider>
   );
 }
 
-function ChatAppBody({ initialChannelId, eventId, initialDetailsTab }: ChatAppProps) {
+function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmoji }: ChatAppProps & { onImportEmoji?: () => void }) {
   const { api, can, currentUserId } = useChatRuntime();
   const unread = useChatStore((s) => s.unread);
   const setUnread = useChatStore((s) => s.setUnread);
@@ -239,6 +250,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab }: ChatAppPr
           onMove: sections.move,
         }}
         {...(canImport ? { onImport: () => setImportOpen(true) } : {})}
+        {...(onImportEmoji ? { onImportEmoji } : {})}
       />
     </>
   );
