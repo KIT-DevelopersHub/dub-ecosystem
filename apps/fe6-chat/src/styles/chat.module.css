@@ -1649,6 +1649,7 @@
   justify-content: center;
   width: 30px;
   height: 30px;
+  padding: 0;
   border: none;
   border-radius: var(--dub-radius-sm);
   background: transparent;
@@ -1671,6 +1672,7 @@
 .customEmoji {
   display: inline-block;
   flex: none; /* never squeezed by the inline-flex chip / grid cell */
+  max-width: none; /* the global img reset (max-width: 100%) would clamp it to a padded cell */
   width: 1.4em;
   height: 1.4em;
   object-fit: contain;
