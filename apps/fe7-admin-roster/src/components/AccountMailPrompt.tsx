@@ -9,14 +9,25 @@ import { useSendAccountMail } from "../hooks/useRosterApi";
 import { useToast } from "../hooks/useToast";
 import { presentError } from "../lib/errorDisplay";
 
+type MailAccount = Pick<RosterUser, "id" | "email">;
+
 export interface AccountMailTarget {
   member: member.Member;
-  account: RosterUser;
+  account: MailAccount;
+}
+
+/** What is still missing before the mail can be sent (empty = ready). */
+export function accountMailMissing(m: member.Member | null | undefined, account: MailAccount): string[] {
+  const missing: string[] = [];
+  if (!isDevhubAddress(account.email)) missing.push("ログインメールが @developershub.jp のアドレスではありません");
+  if (!m) missing.push("運営メンバーと紐付いていません");
+  else if (!(m.gmail ?? "").trim()) missing.push("運営メンバーの Gmail が登録されていません");
+  return missing;
 }
 
 /** Only when Gmail + login + @developershub.jp address are all linked — otherwise no prompt. */
-export function accountMailTargetOf(m: member.Member | null | undefined, account: RosterUser): AccountMailTarget | null {
-  return m && (m.gmail ?? "").trim() && isDevhubAddress(account.email) ? { member: m, account } : null;
+export function accountMailTargetOf(m: member.Member | null | undefined, account: MailAccount): AccountMailTarget | null {
+  return m && accountMailMissing(m, account).length === 0 ? { member: m, account } : null;
 }
 
 export function AccountMailPrompt({ target, onClose }: { target: AccountMailTarget | null; onClose: () => void }): JSX.Element | null {

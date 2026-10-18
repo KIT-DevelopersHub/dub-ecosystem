@@ -68,7 +68,7 @@ function seedState(seed?: MockSeed): MockState {
   // 運営メンバー: 佐藤 太郎 is linked to user_bob (#1) so退任 fans out to the org-chart.
   // 山田 花子 / 鈴木 一郎 are UNLINKED so the メール名簿「運営メンバーと紐付け」flow has candidates.
   const members: member.Member[] = [
-    { ...member.emptyPersonProfile(), id: "member_bob", orgId: ORG, name: "佐藤 太郎", roleTitle: "会場リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1024, version: 1, createdAt: now(), updatedAt: now() },
+    { ...member.emptyPersonProfile(), gmail: "taro.sato@gmail.com", id: "member_bob", orgId: ORG, name: "佐藤 太郎", roleTitle: "会場リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1024, version: 1, createdAt: now(), updatedAt: now() },
     { ...member.emptyPersonProfile(), gmail: "hanako.yamada@gmail.com", id: "member_hanako", orgId: ORG, name: "山田 花子", roleTitle: "広報担当", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2048, version: 1, createdAt: now(), updatedAt: now() },
     { ...member.emptyPersonProfile(), id: "member_ichiro", orgId: ORG, name: "鈴木 一郎", roleTitle: "開発リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 3072, version: 1, createdAt: now(), updatedAt: now() },
   ];
