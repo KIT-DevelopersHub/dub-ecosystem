@@ -1,5 +1,17 @@
 {
-  "hooks": {},
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_CONFIG_DIR/hooks/prod-gate-guard.mjs\""
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
