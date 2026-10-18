@@ -33,6 +33,8 @@ export interface AccountMailContent {
   appUrl: string;
   loginEmail: string;
   password: string;
+  /** true = freshly issued (must be changed on first login); false = the current one. */
+  generated: boolean;
 }
 
 /** Pure: the plain-text body of the account-issue mail. */
@@ -40,15 +42,14 @@ export function buildAccountMailBody(c: AccountMailContent): string {
   return [
     `${c.name} さん`,
     "",
-    "Developers Hub の運営アプリのアカウントを発行しました。",
+    "Developers Hub の運営アプリのアカウント情報をお送りします。",
     "次の情報でログインしてください。",
     "",
     `アプリ URL: ${c.appUrl}`,
     `ログインメールアドレス: ${c.loginEmail}`,
-    `初期パスワード: ${c.password}`,
+    `${c.generated ? "初期パスワード" : "パスワード"}: ${c.password}`,
     "",
-    "ログイン後にパスワードを変更してください。",
-    "",
+    ...(c.generated ? ["初回ログイン時にパスワードの変更をお願いします。", ""] : []),
     `このメールは ${c.loginEmail} にも CC しています。`,
     "",
     "Developers Hub 運営",
@@ -98,7 +99,7 @@ export async function adminSendAccountMailHandler(c: Ctx): Promise<Response> {
     to: [{ email: gmail, name: linked.name }],
     cc: [{ email: loginEmail }],
     subject: ACCOUNT_MAIL_SUBJECT,
-    textBody: buildAccountMailBody({ name: linked.name, appUrl, loginEmail, password }),
+    textBody: buildAccountMailBody({ name: linked.name, appUrl, loginEmail, password, generated: passwordSource === "generated" }),
   };
   // System send: without a userId mail-gateway does not require the admin to hold mail:send.
   const sysCtx: RequestContext = { requestId, caller: "api-gateway" };

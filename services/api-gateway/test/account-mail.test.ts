@@ -64,12 +64,12 @@ function send(env: ReturnType<typeof makeEnv>) {
 
 describe("buildAccountMailBody", () => {
   it("contains name, app url, login, password, change notice and cc notice", () => {
-    const body = buildAccountMailBody({ name: "山田 太郎", appUrl: "https://app.example", loginEmail: "taro@developershub.jp", password: "Pw-1" });
+    const body = buildAccountMailBody({ name: "山田 太郎", appUrl: "https://app.example", loginEmail: "taro@developershub.jp", password: "Pw-1", generated: true });
     expect(body).toContain("山田 太郎 さん");
     expect(body).toContain("アプリ URL: https://app.example");
     expect(body).toContain("ログインメールアドレス: taro@developershub.jp");
     expect(body).toContain("初期パスワード: Pw-1");
-    expect(body).toContain("ログイン後にパスワードを変更してください");
+    expect(body).toContain("初回ログイン時にパスワードの変更をお願いします");
     expect(body).toContain("このメールは taro@developershub.jp にも CC しています");
   });
 });
@@ -106,7 +106,9 @@ describe("POST /api/v1/admin/users/:id/account-mail", () => {
     expect(sent.to).toEqual([{ email: "taro.yamada@gmail.com", name: "山田 太郎" }]);
     expect(sent.cc).toEqual([{ email: "taro@developershub.jp" }]);
     expect(sent.subject).toBe(ACCOUNT_MAIL_SUBJECT);
-    expect(sent.textBody).toContain("初期パスワード: Curr3nt!pw");
+    expect(sent.textBody).toContain("パスワード: Curr3nt!pw");
+    expect(sent.textBody).not.toContain("初期パスワード");
+    expect(sent.textBody).not.toContain("パスワードの変更");
   });
 
   it("no viewable password: issues one (generate + mustChange) and sends it", async () => {

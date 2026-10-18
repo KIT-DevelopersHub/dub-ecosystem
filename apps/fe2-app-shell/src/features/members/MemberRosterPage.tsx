@@ -199,6 +199,10 @@ export function MemberRosterPage(): JSX.Element {
         teams={teams}
         editing={memberDialog.editing}
         members={members}
+        onUpdated={(saved, before) => {
+          // 紐付け済みの人に Gmail が後から入った時も「3つが揃った瞬間」なので聞く。
+          if (!(before.gmail ?? "").trim()) openAccountMail(saved);
+        }}
       />
 
       <LinkIdentityDialog

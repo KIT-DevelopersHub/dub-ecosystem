@@ -60,8 +60,8 @@ export function AccountMailDialog({
     >
       <div className={styles.body}>
         <p className={styles.lead}>
-          「{name}」さんの Gmail に、アプリ URL・ログイン用メールアドレス・初期パスワードを1通で送ります。
-          パスワードが未発行なら初期パスワードを発行して送ります。既にある場合は現在のパスワードを送ります。
+          「{name}」さんの Gmail に、アプリ URL・ログイン用メールアドレス・パスワードを 1 通で送ります。
+          パスワードは、設定済みならそのパスワードを、まだ無ければ新しく発行して送ります。
         </p>
         <dl className={styles.list}>
           <dt className={styles.term}>宛先（Gmail）</dt>

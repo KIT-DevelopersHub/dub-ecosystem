@@ -23,12 +23,14 @@ const OVERVIEW: MembersOverview = {
     { ...P0, ...base, id: "m1", name: "山田太郎", gmail: "taro.yamada@gmail.com", identityUserId: null, sortOrder: 1 },
     { ...P0, ...base, id: "m2", name: "佐藤花子", gmail: null, identityUserId: null, sortOrder: 2 },
     { ...P0, ...base, id: "m3", name: "鈴木一郎", gmail: "ichiro@gmail.com", identityUserId: "u3", sortOrder: 3 },
+    { ...P0, ...base, id: "m4", name: "高橋次郎", gmail: null, identityUserId: "u4", sortOrder: 4 },
   ],
 };
 
 const USERS: identity.IdentityUser[] = [
   { id: "u1", orgId: "o", displayName: "山田太郎", email: "taro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: [], createdAt: "t", updatedAt: "t" },
   { id: "u3", orgId: "o", displayName: "鈴木一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: [], createdAt: "t", updatedAt: "t" },
+  { id: "u4", orgId: "o", displayName: "高橋次郎", email: "jiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: [], createdAt: "t", updatedAt: "t" },
 ] as identity.IdentityUser[];
 
 function makeApi(): MembersApi & { sendAccountMail: ReturnType<typeof vi.fn> } {
@@ -39,7 +41,9 @@ function makeApi(): MembersApi & { sendAccountMail: ReturnType<typeof vi.fn> } {
     updateTeam: vi.fn(),
     deleteTeam: vi.fn(),
     createMember: vi.fn(),
-    updateMember: vi.fn(),
+    updateMember: vi.fn((id: string, patch: Partial<OrgMember>) =>
+      Promise.resolve({ ...(OVERVIEW.members.find((m) => m.id === id) as OrgMember), ...patch, version: 2 }),
+    ),
     deleteMember: vi.fn(),
     linkIdentity: vi.fn((id: string) => Promise.resolve(OVERVIEW.members.find((m) => m.id === id) as OrgMember)),
     listIdentityUsers: vi.fn(() => Promise.resolve({ items: USERS, nextCursor: null })),
@@ -108,5 +112,30 @@ describe("運営名簿 — アカウント発行メール", () => {
     await user.click(screen.getByTestId("members-account-mail-m3"));
     const dialog = await screen.findByTestId("account-mail-dialog");
     expect(within(dialog).getByTestId("account-mail-dialog-cc")).toHaveTextContent("ichiro@developershub.jp");
+  });
+
+  it("紐付け済みの人に Gmail を後から登録して保存すると送信確認を出す", async () => {
+    const api = makeApi();
+    const user = userEvent.setup();
+    render(wrap(<MemberRosterPage />, api));
+    await user.click(await screen.findByTestId("members-edit-m4"));
+    const form = await screen.findByTestId("members-form-dialog");
+    await user.type(within(form).getByTestId("members-form-gmail"), "jiro.takahashi@gmail.com");
+    await user.click(within(form).getByTestId("members-form-submit"));
+    const dialog = await screen.findByTestId("account-mail-dialog");
+    expect(within(dialog).getByTestId("account-mail-dialog-to")).toHaveTextContent("jiro.takahashi@gmail.com");
+    expect(within(dialog).getByTestId("account-mail-dialog-cc")).toHaveTextContent("jiro@developershub.jp");
+  });
+
+  it("もともと Gmail がある人を編集して保存しても送信確認は出ない", async () => {
+    const api = makeApi();
+    const user = userEvent.setup();
+    render(wrap(<MemberRosterPage />, api));
+    await user.click(await screen.findByTestId("members-edit-m3"));
+    const form = await screen.findByTestId("members-form-dialog");
+    await user.click(within(form).getByTestId("members-form-submit"));
+    await waitFor(() => expect(api.updateMember).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("account-mail-dialog")).not.toBeInTheDocument();
   });
 });
