@@ -111,14 +111,17 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
   };
   const listMyTasks: CalendarApi["listMyTasks"] = listUserTasks;
 
+  // Writes use the calendar-events routes: gated by カレンダー 編集 + 「予定を登録」, not
+  // マイタスク 編集 (task-service policy-table.ts).
+  const EV = `${P}/tasks/calendar-events`;
   const createTask: CalendarApi["createTask"] = (req) =>
-    api.request<task.Task>({ method: "POST", path: `${P}/tasks`, body: req });
+    api.request<task.Task>({ method: "POST", path: EV, body: req });
 
   const updateTask: CalendarApi["updateTask"] = (id, req) =>
-    api.request<task.Task>({ method: "PATCH", path: `${P}/tasks/${encodeURIComponent(id)}`, body: req });
+    api.request<task.Task>({ method: "PATCH", path: `${EV}/${encodeURIComponent(id)}`, body: req });
 
   const deleteTask: CalendarApi["deleteTask"] = async (id) => {
-    await api.request<unknown>({ method: "DELETE", path: `${P}/tasks/${encodeURIComponent(id)}` });
+    await api.request<unknown>({ method: "DELETE", path: `${EV}/${encodeURIComponent(id)}` });
   };
 
   const listRoles: CalendarApi["listRoles"] = async () => {

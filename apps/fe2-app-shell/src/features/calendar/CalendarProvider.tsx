@@ -18,10 +18,10 @@ const CalendarUserCtx = createContext<common.UserId | null>(null);
 /** The signed-in user's display name: names 個人 予定 even without identity:read. */
 const CalendarUserNameCtx = createContext<string | null>(null);
 
-/** Which write affordances (予定の追加/編集/削除) are live. 予定 are tasks, so the
- *  server gate is マイタスク's (task-service POLICY_TABLE: app:tasks:edit + task:write,
- *  DELETE + task:delete); the calendar's own edit tier and its 「予定を登録」 toggle
- *  (calendar:schedule_edit, ロール管理 > カレンダー > 細かい権限) are required on top. */
+/** Which write affordances (予定の追加/編集/削除) are live. 予定 are tasks written via
+ *  task-service's /tasks/calendar-events routes, whose gate is the calendar's own: カレンダー
+ *  編集 + 「予定を登録」 (calendar:schedule_edit, ロール管理 > カレンダー > 細かい権限);
+ *  削除 additionally needs task:delete. マイタスク's tier plays no part. */
 export interface CalendarCaps {
   canWrite: boolean;
   canDelete: boolean;
@@ -32,10 +32,9 @@ const CalendarCapsCtx = createContext<CalendarCaps>(ALL_CAPS);
 /** The gate above as a pure function (unit-testable without an auth session). */
 export function calendarCaps(
   calendarCanEdit: boolean,
-  tasksCanEdit: boolean,
   can: (key: identity.PermissionKey) => boolean,
 ): CalendarCaps {
-  const canWrite = calendarCanEdit && can("calendar:schedule_edit") && tasksCanEdit && can("task:write");
+  const canWrite = calendarCanEdit && can("calendar:schedule_edit");
   return { canWrite, canDelete: canWrite && can("task:delete") };
 }
 
@@ -46,8 +45,7 @@ export function CalendarProvider({ api, children }: { api: ApiClient; children: 
   const currentUserName = auth.status === "authenticated" ? auth.me.user.displayName : null;
   const { can } = usePermissions();
   const calendarCap = useAppCapability("calendar");
-  const tasksCap = useAppCapability("tasks");
-  const { canWrite, canDelete } = calendarCaps(calendarCap.canEdit, tasksCap.canEdit, can);
+  const { canWrite, canDelete } = calendarCaps(calendarCap.canEdit, can);
   const caps = useMemo(() => ({ canWrite, canDelete }), [canWrite, canDelete]);
   return (
     <CalendarApiCtx.Provider value={calendarApi}>
