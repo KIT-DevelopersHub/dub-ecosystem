@@ -392,6 +392,7 @@ export interface ChatRepo {
 }
 
 import type { SlackImporter } from "./slack-import";
+import type { CustomEmojis } from "./custom-emoji";
 
 export interface AppDeps {
   repo: ChatRepo;
@@ -415,4 +416,7 @@ export interface AppDeps {
   // In-app Slack channel import (src/slack-import.ts). Absent => the /chat/slack-import/*
   // routes answer 412 (not configured).
   slackImport?: SlackImporter;
+  // Workspace custom emoji (src/custom-emoji.ts). Absent => the list is empty and the image /
+  // import routes answer 412 (not configured).
+  customEmoji?: CustomEmojis;
 }
