@@ -3,12 +3,12 @@
   "slug": "account-issue-mail",
   "worker": "dub-demo-account-issue-mail",
   "url": "https://dub-demo-account-issue-mail.developershub-site.workers.dev",
-  "deployedSha": "cd459be1",
+  "deployedSha": "43ef9e8a",
   "branch": "feat/operate-account-issue-mail",
   "actor": "ko-tarou",
   "markers": ["account-mail-dialog","members-account-mail-","fe7-account-mail-dialog","fe7-user-account-mail-open"],
   "live": true,
-  "verifiedAt": "2026-10-18T09:05:43Z",
-  "updatedAt": "2026-10-18T09:05:43Z",
+  "verifiedAt": "2026-10-18T09:10:39Z",
+  "updatedAt": "2026-10-18T09:10:39Z",
   "note": ""
 }
