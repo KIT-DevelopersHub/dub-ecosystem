@@ -37,6 +37,7 @@ export function MemberFormDialog({
   teams,
   editing,
   members = [],
+  onUpdated,
 }: {
   open: boolean;
   onClose: () => void;
@@ -44,6 +45,8 @@ export function MemberFormDialog({
   editing: OrgMember | null;
   /** 全メンバー(リーダー選択の候補に使う)。省略時はリーダー選択を出さない。 */
   members?: OrgMember[];
+  /** 編集の保存がサーバで確定し、ダイアログを閉じた後 (アカウント発行メール)。 */
+  onUpdated?: (saved: OrgMember, before: OrgMember) => void;
 }): JSX.Element {
   const create = useCreateMember();
   const update = useUpdateMember();
@@ -117,7 +120,15 @@ export function MemberFormDialog({
     };
     const done = () => onClose();
     if (editing) {
-      update.mutate({ id: editing.id, patch: { ...payload, version: editing.version } }, { onSuccess: done });
+      update.mutate(
+        { id: editing.id, patch: { ...payload, version: editing.version } },
+        {
+          onSuccess: (saved) => {
+            done();
+            onUpdated?.(saved, editing);
+          },
+        },
+      );
     } else {
       create.mutate(payload, { onSuccess: done });
     }

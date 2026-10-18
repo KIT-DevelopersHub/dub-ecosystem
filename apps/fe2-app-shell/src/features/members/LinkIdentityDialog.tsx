@@ -15,12 +15,15 @@ export function LinkIdentityDialog({
   onClose,
   member,
   takenIds,
+  onLinked,
 }: {
   open: boolean;
   onClose: () => void;
   member: OrgMember | null;
   /** identity userIds already linked to OTHER members (disabled in the picker). */
   takenIds: ReadonlySet<string>;
+  /** Fired after the server confirmed the link and this dialog closed (アカウント発行メール). */
+  onLinked?: (member: OrgMember, user: identity.IdentityUser) => void;
 }): JSX.Element {
   const usersQuery = useIdentityUsers();
   const link = useLinkIdentity();
@@ -37,9 +40,17 @@ export function LinkIdentityDialog({
 
   const confirm = () => {
     if (!member || !selected) return;
+    const user = users.find((u) => u.id === selected);
     link.mutate(
       { id: member.id, req: { identityUserId: selected, version: member.version } },
-      { onSuccess: () => { setSelected(null); setSearch(""); onClose(); } },
+      {
+        onSuccess: () => {
+          setSelected(null);
+          setSearch("");
+          onClose();
+          if (user) onLinked?.(member, user);
+        },
+      },
     );
   };
 

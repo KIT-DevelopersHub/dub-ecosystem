@@ -3,7 +3,7 @@
 // resolve at the gateway to services/member-service (participation lives there,
 // next to 運営メンバー管理, so submitting can reflect onto the roster in one hop).
 import type { ApiClient } from "../../lib/api-client.tsx";
-import type { common, identity } from "@dub/types";
+import type { auth, common, identity } from "@dub/types";
 import type {
   ListOnboardingItemsResponse,
   ListParticipationCandidatesResponse,
@@ -62,6 +62,8 @@ export interface ParticipationApi {
   inviteAccount(input: identity.InviteUserRequest): Promise<identity.IdentityUser>;
   /** 運営メンバーをログインアカウントに紐付け (運営メンバーの編集)。 */
   linkAccount(memberId: string, input: { identityUserId: string; version: number }): Promise<RosterMember>;
+  /** アカウント発行メール: login + password to the member's Gmail (identity:admin)。 */
+  sendAccountMail(identityUserId: string): Promise<auth.AdminSendAccountMailResponse>;
 }
 
 const BASE = "/api/v1/members";
@@ -144,6 +146,12 @@ export function createParticipationApi(api: ApiClient): ParticipationApi {
         method: "POST",
         path: `${BASE}/people/${encodeURIComponent(memberId)}/identity-link`,
         body: input,
+      }),
+    sendAccountMail: (identityUserId) =>
+      api.request<auth.AdminSendAccountMailResponse>({
+        method: "POST",
+        path: `/api/v1/admin/users/${encodeURIComponent(identityUserId)}/account-mail`,
+        body: {},
       }),
   };
 }

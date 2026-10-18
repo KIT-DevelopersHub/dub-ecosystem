@@ -41,3 +41,10 @@ export {
   type UseUndoRedoOptions,
   type UndoRedoHotkeysOptions,
 } from "./hooks/useUndoRedo";
+
+export {
+  AccountMailDialog,
+  ACCOUNT_MAIL_APP_URL,
+  isDevhubAddress,
+  type AccountMailDialogProps,
+} from "./components/AccountMailDialog";
