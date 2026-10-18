@@ -45,5 +45,6 @@ export {
 export {
   AccountMailDialog,
   ACCOUNT_MAIL_APP_URL,
+  isDevhubAddress,
   type AccountMailDialogProps,
 } from "./components/AccountMailDialog";

@@ -10,6 +10,11 @@ import styles from "./AccountMailDialog.module.css";
 /** The login URL the mail carries (gateway APP_BASE_URL default). */
 export const ACCOUNT_MAIL_APP_URL = "https://app.developershub.jp";
 
+/** The 3 are linked only when the login is a Developers Hub address (it is also the CC). */
+export function isDevhubAddress(email: string | null | undefined): email is string {
+  return (email ?? "").trim().toLowerCase().endsWith("@developershub.jp");
+}
+
 export interface AccountMailDialogProps {
   open: boolean;
   /** 運営メンバーの氏名. */
@@ -17,7 +22,7 @@ export interface AccountMailDialogProps {
   /** 宛先 = the member's Gmail. */
   to: string;
   /** CC = the member's @developershub.jp login (also the send record). */
-  cc: string | null;
+  cc: string;
   appUrl?: string;
   sending?: boolean;
   /** Send failure message (shown inline; the dialog stays open for a retry). */
@@ -67,7 +72,7 @@ export function AccountMailDialog({
           <dt className={styles.term}>宛先（Gmail）</dt>
           <dd className={styles.value} data-testid={`${testId}-to`}>{to}</dd>
           <dt className={styles.term}>CC</dt>
-          <dd className={styles.value} data-testid={`${testId}-cc`}>{cc ?? "ログイン用の @developershub.jp アドレス"}</dd>
+          <dd className={styles.value} data-testid={`${testId}-cc`}>{cc}</dd>
           <dt className={styles.term}>アプリ URL</dt>
           <dd className={styles.value} data-testid={`${testId}-app-url`}>{appUrl}</dd>
         </dl>

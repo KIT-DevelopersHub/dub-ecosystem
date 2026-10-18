@@ -26,7 +26,7 @@ function authSvc(opts: { viewable?: string | null } = {}): CapturedBinding {
   });
 }
 
-function identitySvc(perms: string[] = ["identity:admin"]): CapturedBinding {
+function identitySvc(perms: string[] = ["identity:admin"], email = "taro@developershub.jp"): CapturedBinding {
   return fakeBinding(async (req) => {
     const path = new URL(req.url).pathname;
     if (path === "/authz/check") {
@@ -35,7 +35,7 @@ function identitySvc(perms: string[] = ["identity:admin"]): CapturedBinding {
         decisions: body.checks.map((q) => ({ allowed: perms.includes(q.permission), evaluatedAt: "2026-01-01T00:00:00Z", ttlSeconds: 60 })),
       } satisfies identity.AuthzCheckResponse);
     }
-    if (path === "/users/usr_target") return json(200, { id: "usr_target", email: "taro@developershub.jp", displayName: "山田 太郎" });
+    if (path === "/users/usr_target") return json(200, { id: "usr_target", email, displayName: "山田 太郎" });
     return json(404, {});
   });
 }
@@ -176,6 +176,22 @@ describe("POST /api/v1/admin/users/:id/account-mail", () => {
     const res = await send(env);
     expect(res.status).toBe(403);
     expect(member.requests).toHaveLength(0);
+    expect(mailB.requests).toHaveLength(0);
+  });
+
+  it("login account outside @developershub.jp: 400 validation, no password touched, nothing sent", async () => {
+    const auth = authSvc({ viewable: null });
+    const mailB = mailSvc();
+    const env = makeEnv({
+      SVC_AUTH: auth.fetcher,
+      SVC_IDENTITY: identitySvc(["identity:admin"], "bot@slack-import.invalid").fetcher,
+      SVC_MEMBER: memberSvc({ name: "山田 太郎", gmail: "taro.yamada@gmail.com" }).fetcher,
+      SVC_MAIL_GATEWAY: mailB.fetcher,
+    });
+    const res = await send(env);
+    expect(res.status).toBe(400);
+    expect((await errOf(res)).code).toBe("VALIDATION_FAILED");
+    expect(auth.requests.some((r) => new URL(r.url).pathname === PATH)).toBe(false);
     expect(mailB.requests).toHaveLength(0);
   });
 });

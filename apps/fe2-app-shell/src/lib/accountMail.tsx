@@ -4,7 +4,7 @@
 import { useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@dub/ui";
-import { AccountMailDialog } from "@dub/app-ui";
+import { AccountMailDialog, isDevhubAddress } from "@dub/app-ui";
 import type { auth } from "@dub/types";
 import { ApiError, toDisplayableError } from "./api-client.tsx";
 
@@ -13,11 +13,11 @@ export interface AccountMailTarget {
   name: string;
   /** member.gmail (宛先). */
   gmail: string;
-  /** the @developershub.jp login (CC), when known. */
-  devhubEmail: string | null;
+  /** the @developershub.jp login (CC). */
+  devhubEmail: string;
 }
 
-/** Build a target only when the member has a Gmail — no Gmail, no prompt. */
+/** Build a target only when Gmail + login + @developershub.jp address are all linked. */
 export function accountMailTarget(
   identityUserId: string | null | undefined,
   name: string,
@@ -25,8 +25,8 @@ export function accountMailTarget(
   devhubEmail: string | null | undefined,
 ): AccountMailTarget | null {
   const to = (gmail ?? "").trim();
-  if (!identityUserId || !to) return null;
-  return { identityUserId, name, gmail: to, devhubEmail: devhubEmail ?? null };
+  if (!identityUserId || !to || !isDevhubAddress(devhubEmail)) return null;
+  return { identityUserId, name, gmail: to, devhubEmail: devhubEmail.trim() };
 }
 
 export function AccountMailPrompt({

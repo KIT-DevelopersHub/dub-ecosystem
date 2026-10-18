@@ -63,6 +63,7 @@ export function ListView({
   onLink,
   onUnlink,
   onSendAccountMail,
+  canSendAccountMail,
 }: {
   members: OrgMember[];
   teamsById: Map<string, MemberTeam>;
@@ -76,8 +77,10 @@ export function ListView({
   onDelete: (m: OrgMember) => void;
   onLink: (m: OrgMember) => void;
   onUnlink: (m: OrgMember) => void;
-  /** アカウント発行メールの手動送信 (紐付け済み + Gmail ありの行だけ表示). */
+  /** アカウント発行メールの手動送信 (canSendAccountMail が true の行だけ表示). */
   onSendAccountMail?: (m: OrgMember) => void;
+  /** Gmail・ログイン・@developershub.jp の3つが揃った行か。 */
+  canSendAccountMail?: (m: OrgMember) => boolean;
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
@@ -156,7 +159,7 @@ export function ListView({
       hideable: false,
       cell: (m) => (
         <StopRowClick>
-          {onSendAccountMail && m.identityUserId && m.gmail ? (
+          {onSendAccountMail && canSendAccountMail?.(m) ? (
             <IconButton
               name="send"
               aria-label={`${m.name} にアカウント発行メールを送る`}

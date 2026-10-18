@@ -2,7 +2,7 @@
 // AccountMailDialog with fe7's send mutation + toast. Shown only when the linked member
 // has a Gmail (the caller decides by passing a target or null).
 import { useEffect } from "react";
-import { AccountMailDialog } from "@dub/app-ui";
+import { AccountMailDialog, isDevhubAddress } from "@dub/app-ui";
 import type { member } from "@dub/types";
 import type { RosterUser } from "../contracts/pending";
 import { useSendAccountMail } from "../hooks/useRosterApi";
@@ -14,9 +14,9 @@ export interface AccountMailTarget {
   account: RosterUser;
 }
 
-/** Only a member with a Gmail can receive the mail — otherwise no prompt. */
+/** Only when Gmail + login + @developershub.jp address are all linked — otherwise no prompt. */
 export function accountMailTargetOf(m: member.Member | null | undefined, account: RosterUser): AccountMailTarget | null {
-  return m && (m.gmail ?? "").trim() ? { member: m, account } : null;
+  return m && (m.gmail ?? "").trim() && isDevhubAddress(account.email) ? { member: m, account } : null;
 }
 
 export function AccountMailPrompt({ target, onClose }: { target: AccountMailTarget | null; onClose: () => void }): JSX.Element | null {

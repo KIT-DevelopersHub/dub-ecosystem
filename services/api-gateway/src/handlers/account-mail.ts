@@ -23,6 +23,8 @@ import { authedActor } from "../policy";
 
 type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
 
+/** The cc / login must be a Developers Hub address — otherwise the three are not linked yet. */
+export const DEVHUB_MAIL_DOMAIN = "developershub.jp";
 export const DEFAULT_APP_BASE_URL = "https://app.developershub.jp";
 export const ACCOUNT_MAIL_SUBJECT = "【Developers Hub】アカウント発行のお知らせ";
 /** auth-service: no decryptable copy of the password exists (never set / legacy hash). */
@@ -75,7 +77,10 @@ export async function adminSendAccountMailHandler(c: Ctx): Promise<Response> {
     throw errors.validationFailed([{ field: "gmail", reason: "required" }], "運営メンバーの Gmail が登録されていません");
   }
   const user = await svc.identity.get<identity.IdentityUser>(ctx, `/users/${enc}`);
-  const loginEmail = user.email;
+  const loginEmail = (user.email ?? "").trim();
+  if (!loginEmail.toLowerCase().endsWith(`@${DEVHUB_MAIL_DOMAIN}`)) {
+    throw errors.validationFailed([{ field: "email", reason: "not_devhub" }], "ログインアカウントが @developershub.jp のアドレスではありません");
+  }
 
   const pwPath = `/internal/admin/users/${enc}/password`;
   let password: string;

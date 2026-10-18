@@ -67,8 +67,9 @@ export function MemberRosterPage(): JSX.Element {
     () => new Map((identityUsers.data?.items ?? []).map((u) => [u.id, u.email])),
     [identityUsers.data],
   );
-  const openAccountMail = (m: OrgMember) =>
-    setMailTarget(accountMailTarget(m.identityUserId, m.name, m.gmail, m.identityUserId ? accountEmails.get(m.identityUserId) : null));
+  const mailTargetOf = (m: OrgMember) =>
+    accountMailTarget(m.identityUserId, m.name, m.gmail, m.identityUserId ? accountEmails.get(m.identityUserId) : null);
+  const openAccountMail = (m: OrgMember) => setMailTarget(mailTargetOf(m));
   const takenIds = useMemo(
     () => new Set(members.map((m) => m.identityUserId).filter((id): id is string => !!id)),
     [members],
@@ -191,6 +192,7 @@ export function MemberRosterPage(): JSX.Element {
         onLink={(m) => setLinkDialog({ open: true, member: m })}
         onUnlink={(m) => unlinkIdentity.mutate({ id: m.id, version: m.version })}
         onSendAccountMail={openAccountMail}
+        canSendAccountMail={(m) => mailTargetOf(m) !== null}
       />
 
       <MemberFormDialog

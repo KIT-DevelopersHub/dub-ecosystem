@@ -31,6 +31,7 @@ const USERS: identity.IdentityUser[] = [
   { id: "u1", orgId: "o", displayName: "山田太郎", email: "taro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: [], createdAt: "t", updatedAt: "t" },
   { id: "u3", orgId: "o", displayName: "鈴木一郎", email: "ichiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: [], createdAt: "t", updatedAt: "t" },
   { id: "u4", orgId: "o", displayName: "高橋次郎", email: "jiro@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", roleIds: [], createdAt: "t", updatedAt: "t" },
+  { id: "u5", orgId: "o", displayName: "bot", email: "bot@slack-import.invalid", githubLogin: null, avatarUrl: null, status: "active", roleIds: [], createdAt: "t", updatedAt: "t" },
 ] as identity.IdentityUser[];
 
 function makeApi(): MembersApi & { sendAccountMail: ReturnType<typeof vi.fn> } {
@@ -136,6 +137,16 @@ describe("運営名簿 — アカウント発行メール", () => {
     await user.click(within(form).getByTestId("members-form-submit"));
     await waitFor(() => expect(api.updateMember).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("account-mail-dialog")).not.toBeInTheDocument();
+  });
+
+  it("@developershub.jp ではないアカウントに紐付けても送信確認は出ない", async () => {
+    const api = makeApi();
+    const user = userEvent.setup();
+    render(wrap(<MemberRosterPage />, api));
+    await linkTo(user, "m1", "u5");
+    await waitFor(() => expect(api.linkIdentity).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("members-link-dialog")).not.toBeInTheDocument());
     expect(screen.queryByTestId("account-mail-dialog")).not.toBeInTheDocument();
   });
 });
