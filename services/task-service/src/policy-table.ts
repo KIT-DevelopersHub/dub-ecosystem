@@ -62,4 +62,13 @@ export const POLICY_TABLE = definePolicyTable({
   // Soft delete, so 編集 + task:delete (which 一般メンバー does not hold — see the role matrix
   // in test/policy-table.test.ts).
   "DELETE /tasks/:id": appLevel("tasks", "edit", "task:delete"),
+
+  // ---- カレンダーの予定: same handlers as POST/PATCH/DELETE /tasks, different gate ----
+  // A calendar 予定 IS a task, but who may add one is decided by カレンダー 編集 + its
+  // 「予定を登録」 toggle (calendar:schedule_edit, ロール管理 > カレンダー > 細かい権限), not by
+  // マイタスク's tier. Without these routes a role with マイタスク = 閲覧 could never use the
+  // toggle (the /tasks writes above refuse it). Archiving still needs task:delete, as above.
+  "POST /tasks/calendar-events": appLevel("calendar", "edit", "calendar:schedule_edit"),
+  "PATCH /tasks/calendar-events/:id": appLevel("calendar", "edit", "calendar:schedule_edit"),
+  "DELETE /tasks/calendar-events/:id": appLevel("calendar", "edit", "calendar:schedule_edit", "task:delete"),
 });
