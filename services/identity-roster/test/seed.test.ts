@@ -84,6 +84,15 @@ describe("seedReferenceData / system roles", () => {
     }
   });
 
+  it("chat:emoji_import starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("chat:emoji_import");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("chat:emoji_import");
+    }
+  });
+
   it("is idempotent: re-seeding does not duplicate roles or widen admin", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);
