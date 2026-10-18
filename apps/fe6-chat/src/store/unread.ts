@@ -35,6 +35,9 @@ export function applyUnreadEvent(
   myTeamIds: readonly string[] = [],
 ): UnreadMap {
   if (event.kind !== "message.created") return map;
+  // Thread replies never reach the main timeline, so they could never be marked read
+  // (server unread excludes them too).
+  if (event.threadRootId) return map;
   if (event.channelId === activeChannelId) return map;
   if (event.authorId === currentUserId) return map;
   const prev = map[event.channelId];
