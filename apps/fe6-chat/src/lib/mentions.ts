@@ -6,6 +6,9 @@ import type { common } from "@dub/types";
 import { stripCodeSpans } from "./render-body";
 
 const MENTION_RE = /<@([A-Za-z0-9_]+)>/g;
+// A mention whose user cannot be resolved (left the org / never existed) reads as
+// this instead of a 30-char raw id.
+export const UNKNOWN_USER_NAME = "不明な人";
 // team ids are member-service ULIDs ("team_01J…") — hyphen is allowed so a
 // slug-shaped id never silently drops out of the token.
 const TEAM_MENTION_RE = /<!team:([A-Za-z0-9_-]+)>/g;
@@ -78,7 +81,7 @@ export function toPlainMentions(
 ): string {
   return body
     .replace(TEAM_MENTION_RE, (_m, id: string) => `@${resolveTeamName?.(id) ?? id}`)
-    .replace(MENTION_RE, (_m, id: string) => `@${resolveUserName?.(id) ?? id}`);
+    .replace(MENTION_RE, (_m, id: string) => `@${resolveUserName?.(id) ?? UNKNOWN_USER_NAME}`);
 }
 
 export interface MentionTrigger {

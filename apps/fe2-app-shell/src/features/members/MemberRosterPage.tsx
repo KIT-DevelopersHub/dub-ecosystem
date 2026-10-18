@@ -20,6 +20,8 @@ import {
 } from "@dub/ui";
 import type { SelectOption } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { useAppCapability } from "../../auth/AuthProvider.tsx";
+import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useMembersOverview, useDeleteMember, useIdentityUsers, useUnlinkIdentity } from "./hooks.ts";
 import { ListView } from "./ListView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
@@ -32,6 +34,8 @@ import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import styles from "./members.module.css";
 
 export function MemberRosterPage(): JSX.Element {
+  // 書き込みは運営メンバータブと同じ要件 (app:members:edit)。閲覧のみなら操作を無効化する。
+  const { canEdit } = useAppCapability("members");
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const identityUsers = useIdentityUsers();
@@ -115,9 +119,14 @@ export function MemberRosterPage(): JSX.Element {
 
   return (
     <div data-testid="member-roster-page">
+      <AppReadOnlyNotice appId="members" testId="member-roster-readonly-notice" />
       <PageHeader
         title="運営名簿"
-        description="運営メンバー全員の情報を一覧で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）"
+        description={
+          canEdit
+            ? "運営メンバー全員の情報を一覧で表示します。行をクリックすると情報を編集できます"
+            : "運営メンバー全員の情報を一覧で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）"
+        }
         actions={
           <>
             <Menu
@@ -132,7 +141,7 @@ export function MemberRosterPage(): JSX.Element {
                 { id: "pdf", label: "PDF（.pdf）", onSelect: () => download("pdf"), testId: "member-roster-export-pdf" },
               ]}
             />
-            <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={openAddMember} testId="member-roster-add-member">
+            <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} disabled={!canEdit} onClick={openAddMember} testId="member-roster-add-member">
               メンバーを追加
             </Button>
           </>
@@ -165,6 +174,7 @@ export function MemberRosterPage(): JSX.Element {
         teamsById={teamsById}
         accountLabels={accountLabels}
         leaderNames={leaderNames}
+        readOnly={!canEdit}
         onEdit={openEditMember}
         onDelete={(m) => setConfirm(m)}
         onLink={(m) => setLinkDialog({ open: true, member: m })}
