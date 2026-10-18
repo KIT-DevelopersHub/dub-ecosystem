@@ -4294,6 +4294,20 @@ export function createDemoFetch(): typeof fetch {
         };
         return json(res);
       }
+      // Admin password issue / view (メール名簿の右ペイン): generated on demand, never stored.
+      const pw = /^\/api\/v1\/admin\/users\/([^/]+)\/password$/.exec(url.pathname);
+      if (pw && method === "POST") {
+        const generated = !(parsedBody as authTypes.AdminSetPasswordRequest | undefined)?.password;
+        const res: authTypes.AdminSetPasswordResponse = generated
+          ? { ok: true, password: `Demo-${Math.random().toString(36).slice(2, 10)}` }
+          : { ok: true };
+        return json(res);
+      }
+      if (pw && method === "GET") {
+        const uid = decodeURIComponent(pw[1]!);
+        const res: authTypes.AdminViewPasswordResponse = { userId: uid, email: roster.findUser(uid)?.email ?? "", password: "Demo-pass-1234" };
+        return json(res);
+      }
     }
 
     const hit =
