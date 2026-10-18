@@ -19,8 +19,11 @@ function fakeTimers(): { setTimer: (fn: () => void, ms: number) => number; clear
       timers.delete(h);
     },
     run: () => {
-      for (const fn of [...timers.values()]) fn();
-      timers.clear();
+      // Only fire what is due now; timers re-armed by a callback stay pending.
+      for (const [h, fn] of [...timers]) {
+        timers.delete(h);
+        fn();
+      }
     },
     pending: () => timers.size,
   };
@@ -39,13 +42,18 @@ describe("ReadTracker", () => {
     expect(send).toHaveBeenCalledWith("msg_b");
   });
 
-  it("does not send while the tab is hidden", () => {
+  it("does not send while the tab is hidden, then sends once it becomes visible", () => {
     const clock = fakeTimers();
     const send = vi.fn();
-    const t = new ReadTracker({ send, isVisible: () => false, setTimer: clock.setTimer, clearTimer: clock.clearTimer });
+    let visible = false;
+    const t = new ReadTracker({ send, isVisible: () => visible, setTimer: clock.setTimer, clearTimer: clock.clearTimer });
     t.observeBottom("msg_a");
     clock.run();
     expect(send).not.toHaveBeenCalled();
+    expect(clock.pending()).toBe(1); // re-armed, not dropped
+    visible = true;
+    clock.run();
+    expect(send).toHaveBeenCalledWith("msg_a");
   });
 
   it("ignores ids not newer than what was already sent", () => {

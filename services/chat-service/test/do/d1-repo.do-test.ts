@@ -370,6 +370,11 @@ describe("d1-repo: read state + unread", () => {
     await repo.setReadState(chan.id, me, m2.id, AT);
     expect((await repo.getReadState(chan.id, me))?.lastReadMessageId).toBe(m2.id);
     expect(await repo.countUnread(chan.id, me, m2.id)).toBe(0);
+
+    // a thread reply newer than the cursor is not channel unread (the main timeline,
+    // which drives the cursor, never shows replies)
+    await repo.createMessage(message({ id: id.msg(5), channelId: chan.id, authorId: other, threadRootId: m2.id }));
+    expect(await repo.countUnread(chan.id, me, m2.id)).toBe(0);
   });
 });
 

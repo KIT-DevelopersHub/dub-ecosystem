@@ -706,14 +706,15 @@
   line-height: 1.6;
 }
 
-/* Dialog form: up to three fields per row, wraps on narrow dialogs. */
-.formRow {
+/* Meeting dialog: up to three fields per row, wraps on narrow dialogs.
+   Own names: reusing .formRow/.dateField overrode the event form's icon grid. */
+.meetingFormRow {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   gap: var(--dub-space-4);
 }
 
 /* @dub/ui DatePicker draws its own icon; hide Chromium's native one (kept clickable). */
-.dateField { display: block; }
-.dateField input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }
+.meetingDateField { display: block; }
+.meetingDateField input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }
 
