@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Board } from "./Board.tsx";
+import { Board, PROD_DEPLOY_PROMPT, STAGING_DEPLOY_PROMPT, followUpPrompt } from "./Board.tsx";
 import { makeBoardItem, makeFakeApi, makeFakeClient } from "./test/fakes.ts";
 
 describe("<Board>", () => {
@@ -287,6 +287,25 @@ describe("<Board>", () => {
     expect(opts.taskId).toBe("rev");
   });
 
+  it("追加指示 (再実行) の run にもタスクの PR を明記する", async () => {
+    const pr = "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/677";
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "再実行対象", featurePhase: "staging_review", runStatus: "failed", prUrls: [pr] }),
+    ]);
+    const client = makeFakeClient();
+    render(<Board client={client} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-rev"));
+    await userEvent.click(await screen.findByTestId("action-rerun"));
+    await userEvent.type(screen.getByLabelText("rerun-prompt"), "再実行頼む");
+    await userEvent.click(screen.getByTestId("rerun-submit"));
+
+    await waitFor(() => expect(client.startRun).toHaveBeenCalled());
+    const [prompt] = client.startRun.mock.calls.at(-1)!;
+    expect(prompt).toContain("再実行頼む");
+    expect(prompt).toContain(`対象 PR: ${pr}`);
+  });
+
   it("本番反映済で追加指示を出してもフェーズは本番反映済のまま", async () => {
     const api = makeFakeApi([
       makeBoardItem({ taskId: "shp", featureId: "feat-1", title: "本番後の不備", featurePhase: "prod_shipped", runStatus: "succeeded" }),
@@ -408,5 +427,24 @@ describe("<Board>", () => {
     await screen.findByTestId("board-empty");
     await userEvent.click(screen.getByTestId("lane-add-task"));
     expect(screen.getByLabelText("task-title")).toBeInTheDocument();
+  });
+});
+
+describe("followUpPrompt", () => {
+  const pr = "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/677";
+
+  it("deploy run の再実行は PR 未記録でも「推測するな」の行を付ける", () => {
+    const out = followUpPrompt(STAGING_DEPLOY_PROMPT, "再実行頼む", { prUrl: null, prUrls: [] });
+    expect(out).toContain("対象 PR: 未記録");
+  });
+
+  it("既に同じ行で終わる prompt に二重に付けない", () => {
+    const once = followUpPrompt(PROD_DEPLOY_PROMPT, "x", { prUrl: pr, prUrls: [] });
+    const twice = followUpPrompt(null, once, { prUrl: pr, prUrls: [] });
+    expect(twice.split(`対象 PR: ${pr}`).length - 1).toBe(1);
+  });
+
+  it("PR 未記録の通常の追加指示には付けない", () => {
+    expect(followUpPrompt("元の指示", "ボタンを大きく", { prUrl: null, prUrls: [] })).not.toContain("対象 PR");
   });
 });

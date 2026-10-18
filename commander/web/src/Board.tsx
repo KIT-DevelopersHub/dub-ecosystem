@@ -133,7 +133,19 @@ export function withTargetPr(prompt: string, item: { prUrl: string | null; prUrl
   const line = pr
     ? `対象 PR: ${pr} (作業ディレクトリのブランチの PR と取り違えない。マージ済みかどうかは必ず \`gh pr view ${pr} --json state,mergedAt\` で確かめる)`
     : "対象 PR: 未記録。作業ディレクトリのブランチから推測せず、このタスクの run 出力に出た PR を確かめてから進める。";
-  return `${prompt}\n\n${line}`;
+  return prompt.trimEnd().endsWith(line) ? prompt : `${prompt}\n\n${line}`;
+}
+
+// 再実行 / 却下 re-inject the prior prompt, so a deploy run's follow-up must re-pin the PR
+// too (its prior may predate withTargetPr). Other follow-ups get it once a PR is recorded.
+export function followUpPrompt(
+  prior: string | null,
+  addition: string,
+  item: { prUrl: string | null; prUrls: string[] },
+): string {
+  const prompt = composePrompt(prior, addition);
+  const isDeploy = !!prior && (prior.startsWith(STAGING_DEPLOY_PROMPT) || prior.startsWith(PROD_DEPLOY_PROMPT));
+  return isDeploy || item.prUrl || item.prUrls.length > 0 ? withTargetPr(prompt, item) : prompt;
 }
 
 // Phases a 追加指示 must rewind to demo_building before the follow-up run starts
@@ -429,7 +441,7 @@ export function Board({
       const prior = await priorPrompt(item.latestRun?.id);
       await startRunWithImages(
         client,
-        composePrompt(prior, addition),
+        followUpPrompt(prior, addition, item),
         { taskId: item.taskId, ...(item.latestRun?.cwd ? { cwd: item.latestRun.cwd } : {}) },
         images,
       );
