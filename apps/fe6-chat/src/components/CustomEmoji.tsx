@@ -37,6 +37,7 @@ export function CustomEmojiProvider({ api, onOpenImport, children }: { api: Chat
   const [failed, setFailed] = useState(false);
   const images = useRef(new Map<string, Promise<string | null>>());
   const urls = useRef<string[]>([]);
+  const mounted = useRef(true);
 
   const reload = useCallback(async () => {
     try {
@@ -53,11 +54,15 @@ export function CustomEmojiProvider({ api, onOpenImport, children }: { api: Chat
     void reload();
   }, [reload]);
 
+  // Object URLs live as long as the provider. An image that resolves after unmount is
+  // revoked on arrival instead of leaking. (StrictMode's fake unmount re-arms `mounted`.)
   useEffect(() => {
+    mounted.current = true;
     const created = urls.current;
     const cache = images.current;
     return () => {
-      for (const u of created) URL.revokeObjectURL?.(u);
+      mounted.current = false;
+      for (const u of created.splice(0)) URL.revokeObjectURL?.(u);
       cache.clear();
     };
   }, []);
@@ -70,6 +75,11 @@ export function CustomEmojiProvider({ api, onOpenImport, children }: { api: Chat
           (blob) => {
             if (typeof URL.createObjectURL !== "function") return null;
             const url = URL.createObjectURL(blob);
+            if (!mounted.current) {
+              URL.revokeObjectURL?.(url);
+              images.current.delete(imageName);
+              return null;
+            }
             urls.current.push(url);
             return url;
           },

@@ -48,7 +48,9 @@ export function EmojiPicker({
   const [tab, setTab] = useState<PickerTab>("standard");
   const wrapRef = useRef<HTMLSpanElement>(null);
   const panelId = useId();
-  const custom = useCustomEmojis();
+  const ctx = useCustomEmojis();
+  // No dead-end tab: hidden when the workspace has no custom emoji and the caller can't import.
+  const custom = ctx && (ctx.emojis === null || ctx.emojis.length > 0 || ctx.openImport) ? ctx : null;
 
   useEffect(() => {
     if (!open) return;

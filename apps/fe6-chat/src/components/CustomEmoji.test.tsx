@@ -111,6 +111,20 @@ describe("EmojiPicker カスタム tab", () => {
     expect(onOpenImport).toHaveBeenCalled();
   });
 
+  it("hides an empty カスタム tab from someone who cannot import (no dead end)", async () => {
+    const user = userEvent.setup();
+    const api = new MockChatClient({ currentUserId: ME });
+    api.listCustomEmojis = async () => [];
+    render(
+      <CustomEmojiProvider api={api}>
+        <MessageItem message={msg([{ emoji: "👍", userIds: [ME] }])} currentUserId={ME} canModerate={false} />
+      </CustomEmojiProvider>,
+    );
+    await act(async () => undefined);
+    await user.click(screen.getByTestId("fe6-timeline-add-reaction"));
+    expect(screen.queryByTestId("fe6-emoji-tab-custom")).toBeNull();
+  });
+
   it("has no カスタム tab outside a provider (plain curated grid)", async () => {
     const user = userEvent.setup();
     render(<MessageItem message={msg([{ emoji: "👍", userIds: [ME] }])} currentUserId={ME} canModerate={false} />);

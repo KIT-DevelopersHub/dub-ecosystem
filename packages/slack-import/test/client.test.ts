@@ -136,7 +136,18 @@ describe("createSlackClient — downloadEmoji", () => {
     const got = await client.downloadEmoji("https://emoji.slack-edge.com/T0/p/abc.gif");
     expect(new Uint8Array(got!.bytes)).toEqual(new Uint8Array([71, 73, 70]));
     expect(got!.contentType).toBe("image/gif");
-    expect(fetchImpl.mock.calls[0]!.length).toBe(1); // no init = no Authorization header
+    const init = fetchImpl.mock.calls[0]![1] as RequestInit;
+    expect(init).toEqual({ redirect: "error" }); // no Authorization header, no redirects
+  });
+
+  it("refuses bodies over the size cap (declared or actual)", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(new Uint8Array(10), { status: 200, headers: { "content-length": "999999999" } }))
+      .mockResolvedValueOnce(new Response(new Uint8Array(20), { status: 200 }));
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    expect(await client.downloadEmoji("https://emoji.slack-edge.com/T0/a/1.png", 16)).toBeNull();
+    expect(await client.downloadEmoji("https://emoji.slack-edge.com/T0/b/1.png", 16)).toBeNull();
   });
 
   it("never fetches a non-Slack host and returns null on HTTP / network errors", async () => {

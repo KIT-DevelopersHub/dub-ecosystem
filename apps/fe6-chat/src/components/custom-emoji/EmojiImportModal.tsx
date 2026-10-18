@@ -29,6 +29,7 @@ function EmojiImportModalBody({ onClose }: { onClose: () => void }) {
   const { show } = useToast();
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<EmojiImportResult | null>(null);
+  const [waiting, setWaiting] = useState(false);
   const [total, setTotal] = useState<number | null>(null);
   const [failed, setFailed] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -48,13 +49,17 @@ function EmojiImportModalBody({ onClose }: { onClose: () => void }) {
       const last = await driveEmojiImport(api, {
         signal: c.signal,
         onUpdate: (r) => {
+          setWaiting(r.retryAfterMs > 0);
+          // A rate-limited answer (total null) carries no progress: keep the last one.
+          if (r.total === null) return;
           setProgress(r);
-          if (r.total !== null) setTotal(r.total);
+          setTotal(r.total);
           if (r.failed.length > 0) setFailed((cur) => [...cur, ...r.failed]);
           if (r.added > 0) void custom?.reload();
         },
       });
       if (c.signal.aborted) return;
+      setWaiting(false);
       setPhase("done");
       void custom?.reload();
       show({ kind: "success", title: `Slack の絵文字を取り込みました（${last?.imported ?? 0} 件）` });
@@ -101,7 +106,7 @@ function EmojiImportModalBody({ onClose }: { onClose: () => void }) {
                 <div className={styles.emojiProgressTrack} aria-hidden>
                   <div className={styles.emojiProgressFill} style={{ width: `${pct}%` }} />
                 </div>
-                {(progress?.retryAfterMs ?? 0) > 0 && phase === "running" && (
+                {waiting && phase === "running" && (
                   <p className={styles.hint}>Slack のレート制限中です。少し待ってから自動で再開します。</p>
                 )}
                 {phase === "done" && notDone > 0 && (

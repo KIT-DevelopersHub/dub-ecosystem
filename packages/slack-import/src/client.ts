@@ -154,15 +154,22 @@ export function createSlackClient(opts: SlackClientOptions) {
 
     /**
      * Download an emoji image from Slack's public CDN. No Authorization header (the token
-     * never leaves for a CDN host) and only *.slack-edge.com URLs are fetched. Null on any
-     * failure so one broken emoji never aborts the batch.
+     * never leaves for a CDN host), only *.slack-edge.com URLs, no redirects, at most
+     * `maxBytes`. Null on any failure so one broken emoji never aborts the batch.
      */
-    async downloadEmoji(url: string): Promise<{ bytes: ArrayBuffer; contentType: string | null } | null> {
+    async downloadEmoji(url: string, maxBytes = 1024 * 1024): Promise<{ bytes: ArrayBuffer; contentType: string | null } | null> {
       if (!isSlackEmojiUrl(url)) return null;
       try {
-        const res = await fetchImpl(url);
+        // redirect "error": a 3xx can never walk the fetch off the *.slack-edge.com allow-list.
+        const res = await fetchImpl(url, { redirect: "error" });
         if (!res.ok) return null;
-        return { bytes: await res.arrayBuffer(), contentType: res.headers.get("content-type") };
+        const declared = Number(res.headers.get("content-length") ?? "0");
+        if (declared > maxBytes) {
+          await res.body?.cancel().catch(() => undefined);
+          return null;
+        }
+        const bytes = await res.arrayBuffer();
+        return bytes.byteLength > maxBytes ? null : { bytes, contentType: res.headers.get("content-type") };
       } catch {
         return null;
       }

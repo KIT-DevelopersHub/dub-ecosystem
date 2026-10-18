@@ -22,6 +22,7 @@ import {
   isValidCustomEmojiName,
   lit,
   parseSlackEmojiList,
+  type ParsedSlackEmoji,
 } from "@dub/slack-import";
 
 /** Downloads per call: 1 emoji.list + 20 fetches + 20 R2 puts + D1 stays under 50. */
@@ -95,8 +96,9 @@ const SLACK_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   invalid_auth: "Slack のトークンが無効です。管理者に SLACK_BOT_TOKEN の確認を依頼してください。",
 };
 
-// Module scope on purpose: deps are rebuilt per request, the isolate outlives them.
-let listMemo: { at: number; map: Record<string, string> } | null = null;
+// Module scope on purpose: deps are rebuilt per request, the isolate outlives them. The PARSED
+// list is memoized too, so a batch does not re-parse thousands of entries (free-plan CPU).
+let listMemo: { at: number; parsed: ParsedSlackEmoji } | null = null;
 
 function insertSql(row: { name: string; r2Key: string | null; contentType: string | null; aliasOf: string | null; createdBy: string; createdAt: string }): string {
   return `INSERT OR IGNORE INTO chat_custom_emojis (name, r2_key, content_type, alias_of, source, created_by, created_at)\nVALUES (${[
@@ -147,12 +149,13 @@ export class CustomEmojis {
     const bucket = this.deps.bucket;
     if (!bucket) throw errors.preconditionFailed("custom_emoji_storage_not_configured");
 
-    let map: Record<string, string>;
+    let parsed: ParsedSlackEmoji;
     try {
-      map = await this.emojiMap(slack);
+      parsed = await this.emojiList(slack);
     } catch (e) {
       if (e instanceof SlackApiError && e.slackError === "rate_limited") {
-        return { total: null, imported: await this.countSlackRows(), added: 0, skipped: 0, failed: [], nextAfter: after, retryAfterMs: (e.retryAfterSec ?? 30) * 1000 };
+        // Slack not reached: totals unknown (null) — clients keep their last progress.
+        return { total: null, imported: 0, added: 0, skipped: 0, failed: [], nextAfter: after, retryAfterMs: (e.retryAfterSec ?? 30) * 1000 };
       }
       if (e instanceof SlackApiError) {
         throw errors.conflict(SLACK_ERROR_MESSAGES[e.slackError] ?? `Slack API エラー: ${e.slackError}`, { reason: e.slackError });
@@ -160,7 +163,7 @@ export class CustomEmojis {
       throw e;
     }
 
-    const { images, aliases, invalid } = parseSlackEmojiList(map);
+    const { images, aliases, invalid } = parsed;
     const existing = new Set(
       ((await this.deps.db.prepare("SELECT name FROM chat_custom_emojis").all<{ name: string }>()).results ?? []).map((r) => r.name),
     );
@@ -173,7 +176,7 @@ export class CustomEmojis {
     const pending = images.filter((i) => (after === null || i.name > after) && !existing.has(i.name));
     const batch = pending.slice(0, EMOJI_IMPORT_BATCH);
     for (const img of batch) {
-      const got = await slack.downloadEmoji(img.url);
+      const got = await slack.downloadEmoji(img.url, MAX_EMOJI_BYTES);
       const type = got ? customEmojiContentType(got.contentType, img.url) : null;
       if (!got || !type || got.bytes.byteLength === 0 || got.bytes.byteLength > MAX_EMOJI_BYTES) {
         failed.push(img.name);
@@ -218,17 +221,12 @@ export class CustomEmojis {
     };
   }
 
-  private async emojiMap(slack: SlackClient): Promise<Record<string, string>> {
+  private async emojiList(slack: SlackClient): Promise<ParsedSlackEmoji> {
     const ttl = this.deps.listCacheMs ?? LIST_CACHE_MS;
     const nowMs = Date.parse(this.deps.now());
-    if (ttl > 0 && listMemo && nowMs - listMemo.at < ttl) return listMemo.map;
-    const map = await slack.emojiList();
-    if (ttl > 0) listMemo = { at: nowMs, map };
-    return map;
-  }
-
-  private async countSlackRows(): Promise<number> {
-    const row = await this.deps.db.prepare("SELECT COUNT(*) AS n FROM chat_custom_emojis WHERE source = 'slack'").first<{ n: number }>();
-    return row?.n ?? 0;
+    if (ttl > 0 && listMemo && nowMs - listMemo.at < ttl) return listMemo.parsed;
+    const parsed = parseSlackEmojiList(await slack.emojiList());
+    if (ttl > 0) listMemo = { at: nowMs, parsed };
+    return parsed;
   }
 }

@@ -31,10 +31,10 @@ class FakeSlack {
         if (e) throw e;
         return { ...this.emoji };
       },
-      downloadEmoji: async (url: string) => {
+      downloadEmoji: async (url: string, maxBytes: number) => {
         this.calls.push(`download ${url}`);
         if (url.includes("/broken/")) return null;
-        if (url.includes("/huge/")) return { bytes: new ArrayBuffer(MAX_EMOJI_BYTES + 1), contentType: "image/png" };
+        if (url.includes("/huge/")) return maxBytes >= MAX_EMOJI_BYTES + 1 ? { bytes: new ArrayBuffer(MAX_EMOJI_BYTES + 1), contentType: "image/png" } : null;
         if (url.endsWith(".svg")) return { bytes: new TextEncoder().encode("<svg/>").buffer, contentType: "image/svg+xml" };
         const type = url.endsWith(".gif") ? "image/gif" : "image/png";
         return { bytes: new TextEncoder().encode(url).buffer, contentType: type };
@@ -146,7 +146,7 @@ describe("CustomEmojis.importFromSlack", () => {
   it("answers retryAfterMs with the same cursor on a Slack 429 (no sleeping, no writes)", async () => {
     slack.failList.push(new SlackApiError("emoji.list", "rate_limited", 7));
     const r = await emojis.importFromSlack("kit-dev", ADMIN);
-    expect(r).toMatchObject({ total: null, added: 0, nextAfter: "kit-dev", retryAfterMs: 7000 });
+    expect(r).toMatchObject({ total: null, imported: 0, added: 0, nextAfter: "kit-dev", retryAfterMs: 7000 });
     expect(count(raw, "chat_custom_emojis")).toBe(0);
   });
 

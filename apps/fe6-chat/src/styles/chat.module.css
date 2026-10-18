@@ -831,7 +831,8 @@
   box-shadow: var(--dub-shadow-md);
   z-index: 2;
 }
-.messageRow:hover .hoverActions {
+.messageRow:hover .hoverActions,
+.messageRow:focus-within .hoverActions {
   display: flex;
 }
 .hoverAction {
