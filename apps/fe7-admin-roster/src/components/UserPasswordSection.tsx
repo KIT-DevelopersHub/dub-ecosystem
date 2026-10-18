@@ -240,11 +240,14 @@ export function UserPasswordSection({ user }: { user: identity.IdentityUser }) {
             </Button>
           </div>
           {mailMissing.length > 0 ? (
-            <ul style={missingListStyle} data-testid="fe7-user-account-mail-missing">
-              {mailMissing.map((m) => (
-                <li key={m}>{m}</li>
-              ))}
-            </ul>
+            <div data-testid="fe7-user-account-mail-missing">
+              <p style={helpStyle}>送るには次の情報が足りません:</p>
+              <ul style={missingListStyle}>
+                {mailMissing.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </>
       )}
