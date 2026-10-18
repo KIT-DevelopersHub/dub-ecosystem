@@ -95,6 +95,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "drive:write": { label: "Drive の更新", description: "Google Drive へのファイルのアップロード・更新ができるようになります。" },
   "drive:settings_view": { label: "Drive共有の設定の閲覧", description: "Drive共有の「設定」を開き、使っている Google アカウントを確認できるようになります。" },
   "drive:settings_edit": { label: "Drive共有の設定の変更", description: "Drive共有が使う Google アカウントの追加・切り替え・削除ができるようになります（保存すると閲覧も ON になります）。" },
+  "calendar:schedule_edit": { label: "予定を登録", description: "カレンダーで予定（休暇・ラベル付きの予定など）を追加・変更・削除できるようになります。カレンダーの「編集」と、予定の保存先であるマイタスクの「編集」も必要です。" },
   "calendar:meetings_view": { label: "ミーティングを見る", description: "カレンダーの「ミーティング」で、共有 Google アカウントに設定した定例・会議の一覧を見られるようになります。" },
   "calendar:meetings_edit": { label: "ミーティングを設定", description: "共有 Google アカウントで Meet 付きのミーティングを作成・変更・削除し、ロールのメンバーを自動で招待できるようになります（保存すると「見る」も ON になります）。" },
   "webhook:read": { label: "Webhook の閲覧", description: "Webhook の配信履歴を検索・確認できるようになります。" },

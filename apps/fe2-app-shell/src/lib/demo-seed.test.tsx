@@ -129,9 +129,9 @@ describe("calendar meetings (カレンダー > ミーティング)", () => {
   interface Meeting { id: string; title: string; targetName: string; meetUrl: string | null; startsAt: string }
   interface List { items: Meeting[]; account: { email: string | null; calendarReady: boolean } }
 
-  it("grants the demo admin the カレンダー app and both meeting keys", async () => {
+  it("grants the demo admin the カレンダー app, 予定を登録 and both meeting keys", async () => {
     const me = await api().auth.me();
-    for (const k of ["app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit"]) {
+    for (const k of ["app:calendar:view", "app:calendar:edit", "calendar:schedule_edit", "calendar:meetings_view", "calendar:meetings_edit"]) {
       expect(me.permissions).toContain(k);
     }
   });
@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 71-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 72-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(71);
+    expect(catalog).toHaveLength(72);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
