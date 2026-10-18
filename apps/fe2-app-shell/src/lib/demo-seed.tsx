@@ -2085,7 +2085,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   if (method === "POST") {
     // task create (カレンダーの予定追加 / マイタスク). Appended to the in-memory seed so
     // the new 予定 survives a refetch within the session.
-    if (pathname === "/api/v1/tasks") {
+    if (pathname === "/api/v1/tasks" || pathname === "/api/v1/tasks/calendar-events") {
       const b = (body ?? {}) as Partial<task.CreateTaskRequest>;
       if (typeof b.title !== "string" || !b.title.trim()) return notFound(`POST ${pathname}`);
       const now = new Date().toISOString();
@@ -2208,7 +2208,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     // Detail-panel edit (title/status/priority/担当/チーム/開始日/期日). Updates the task and,
     // when the dates change, mirrors them onto the gantt row so the BAR moves immediately.
     {
-      const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+      const id = seg(/^\/api\/v1\/tasks\/(?:calendar-events\/)?([^/]+)$/);
       if (id) {
         const t = TASKS.find((x) => x.id === id);
         if (!t) return notFound(`PATCH ${pathname}`);
@@ -2236,7 +2236,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   // task archive (カレンダーの予定削除). task-service soft-deletes; the demo drops the row
   // so every list (calendar / マイタスク) stops showing it.
   if (method === "DELETE") {
-    const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+    const id = seg(/^\/api\/v1\/tasks\/(?:calendar-events\/)?([^/]+)$/);
     if (id) {
       const i = TASKS.findIndex((x) => x.id === id);
       if (i < 0) return notFound(`DELETE ${pathname}`);
