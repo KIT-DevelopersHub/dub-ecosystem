@@ -10,7 +10,7 @@ import {
   Card,
   EmptyState,
   ErrorState,
-  LoadMore,
+  Pagination,
   FormField,
   Spinner,
   type ColumnDef,
@@ -57,11 +57,15 @@ const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems:
 const noticeBodyStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
 const noticeTitleStyle: React.CSSProperties = { fontWeight: 600 };
 const noticeTextStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0 };
+/** Rows per page of the 名簿 (numbered pages instead of「さらに読み込む」). */
+const PAGE_SIZE = 20;
+
 const summaryStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: "12px 0 8px", fontWeight: 500 };
 
 // Master (table) + detail (right pane) — the roster and the selected user's management
 // surface sit side by side on ONE screen. Wraps under the table on narrow viewports.
 const splitStyle: React.CSSProperties = { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap", marginTop: 16 };
+const paginationStyle: React.CSSProperties = { display: "flex", justifyContent: "center", marginTop: 16 };
 const tableColStyle: React.CSSProperties = { flex: "1 1 460px", minWidth: 0 };
 const paneColStyle: React.CSSProperties = { flex: "1 1 340px", minWidth: 300, position: "sticky", top: 16 };
 const paneHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12 };
@@ -95,7 +99,7 @@ export function UserListPage() {
   const initialView = useMemo(() => readRosterViewFromUrl(), []);
   const [filters, setFilters] = useState<UserListFilters>({ ...DEFAULT_USER_FILTERS, ...initialView.filters });
   const [sort, setSort] = useState<SortState | undefined>(initialView.sort);
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
@@ -107,8 +111,8 @@ export function UserListPage() {
   const { can } = usePermissions();
   const canAdminEdit = useCanAdminEdit();
   const { me } = useRosterContext();
-  const query = useUsers({ ...filters, ...(cursor ? { cursor } : {}) });
-  // ⑤ Unfiltered total for the「X件中Y件」summary (cheap: cached, one page in demo).
+  const query = useUsers(filters);
+  // ⑤ Unfiltered total for the「X件中Y件」summary (cached; same query when not narrowed).
   const totalQuery = useUsers(DEFAULT_USER_FILTERS);
 
   // ⑧ Mirror the active filter + sort into the URL query (replace, not push).
@@ -152,13 +156,18 @@ export function UserListPage() {
   }
 
   const items = query.data?.items ?? [];
-  // ⑤ Client-side sort of the loaded rows (demo returns the full set in one page).
+  // ⑤ Client-side sort over the whole filtered set, then slice the current page.
   const sortedItems = useMemo(() => sortUsers(items, sort), [items, sort]);
+  const totalPages = Math.max(1, Math.ceil(sortedItems.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages); // clamp when rows shrink (filter/disable)
+  const pageItems = sortedItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   // ⑤ Count summary: total (unfiltered) vs. currently shown (filtered) rows.
   const shownCount = items.length;
   const totalCount = totalQuery.data?.items.length ?? shownCount;
   const isNarrowed = filters.search.trim() !== "" || filters.status !== "all";
-  const countSummary = isNarrowed ? `${totalCount}件中 ${shownCount}件を表示` : `全 ${totalCount}件`;
+  const pageRange =
+    totalPages > 1 ? `（${(currentPage - 1) * PAGE_SIZE + 1}〜${(currentPage - 1) * PAGE_SIZE + pageItems.length}件目）` : "";
+  const countSummary = (isNarrowed ? `${totalCount}件中 ${shownCount}件を表示` : `全 ${totalCount}件`) + pageRange;
   // Selection acts on the currently-loaded rows; drop keys that left the filter.
   const visibleIds = new Set(items.map((u) => u.id));
   const effectiveSelected = selectedIds.filter((id) => visibleIds.has(id));
@@ -300,7 +309,7 @@ export function UserListPage() {
             id="fe7-users-search"
             value={filters.search}
             onChange={(v) => {
-              setCursor(undefined);
+              setPage(1);
               setSelectedIds([]);
               setFilters((f) => ({ ...f, search: v }));
             }}
@@ -313,7 +322,7 @@ export function UserListPage() {
             value={filters.status}
             options={STATUS_OPTIONS}
             onChange={(v) => {
-              setCursor(undefined);
+              setPage(1);
               setSelectedIds([]);
               setFilters((f) => ({ ...f, status: v }));
             }}
@@ -345,19 +354,28 @@ export function UserListPage() {
             ) : null}
             <DataTable
               columns={columns}
-              rows={sortedItems}
+              rows={pageItems}
               rowKey={(u) => u.id}
               sort={sort}
-              onSortChange={setSort}
+              onSortChange={(next) => {
+                setSort(next);
+                setPage(1);
+              }}
               selection={canBulk ? { selectedKeys: selectedIds, onChange: setSelectedIds } : undefined}
               onRowClick={(u) => setSelectedId(u.id)}
               testId="fe7-users-table"
             />
-            <LoadMore
-              hasMore={!!query.data?.nextCursor}
-              onLoadMore={() => setCursor(query.data?.nextCursor ?? undefined)}
-              testId="fe7-users-loadmore"
-            />
+            {totalPages > 1 ? (
+              <div style={paginationStyle}>
+                <Pagination
+                  page={currentPage}
+                  pageSize={PAGE_SIZE}
+                  totalCount={sortedItems.length}
+                  onPageChange={setPage}
+                  testId="fe7-users-pagination"
+                />
+              </div>
+            ) : null}
           </div>
 
           {selectedUser ? (

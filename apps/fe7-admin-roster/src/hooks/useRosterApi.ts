@@ -37,9 +37,29 @@ export function isEmailRoutingUnconfigured(err: unknown): boolean {
 }
 
 // ---- queries ----
+/** identity-roster's default page (it reads role assignments per row, so keep requests at the
+ *  size prod already serves rather than MAX_LIMIT), and a guard against a never-ending cursor. */
+const USERS_PAGE_LIMIT = 50;
+const USERS_MAX_PAGES = 50;
+
+/** Every user matching the filters, walking the server cursor to the end. The 名簿 pages
+ *  client-side (numbered pages + whole-list sort/count), so it needs the full set. */
 export function useUsers(filters: UserListFilters): UseQueryResult<common.Paginated<RosterUser>> {
   const { api } = useRosterContext();
-  return useQuery({ queryKey: queryKeys.users(filters), queryFn: () => api.listUsers(filters) });
+  return useQuery({
+    queryKey: queryKeys.users(filters),
+    queryFn: async () => {
+      const items: RosterUser[] = [];
+      let cursor: string | undefined;
+      for (let i = 0; i < USERS_MAX_PAGES; i++) {
+        const page = await api.listUsers({ ...filters, limit: USERS_PAGE_LIMIT, ...(cursor ? { cursor } : {}) });
+        items.push(...page.items);
+        if (!page.nextCursor) break;
+        cursor = page.nextCursor;
+      }
+      return { items, nextCursor: null };
+    },
+  });
 }
 
 export function useUser(userId: common.UserId): UseQueryResult<identity.IdentityUserDetail> {
