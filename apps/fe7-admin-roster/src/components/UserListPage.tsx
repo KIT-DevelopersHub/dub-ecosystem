@@ -65,7 +65,7 @@ const summaryStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #5
 // Master (table) + detail (right pane) — the roster and the selected user's management
 // surface sit side by side on ONE screen. Wraps under the table on narrow viewports.
 const splitStyle: React.CSSProperties = { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap", marginTop: 16 };
-const paginationStyle: React.CSSProperties = { display: "flex", justifyContent: "center", marginTop: 16 };
+const paginationStyle: React.CSSProperties = { display: "flex", justifyContent: "center", margin: "16px 0 48px" };
 const tableColStyle: React.CSSProperties = { flex: "1 1 460px", minWidth: 0 };
 const paneColStyle: React.CSSProperties = { flex: "1 1 340px", minWidth: 300, position: "sticky", top: 16 };
 const paneHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12 };
