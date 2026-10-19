@@ -160,8 +160,9 @@ export function createSlackClient(opts: SlackClientOptions) {
     async downloadEmoji(url: string, maxBytes = 1024 * 1024): Promise<{ bytes: ArrayBuffer; contentType: string | null } | null> {
       if (!isSlackEmojiUrl(url)) return null;
       try {
-        // redirect "error": a 3xx can never walk the fetch off the *.slack-edge.com allow-list.
-        const res = await fetchImpl(url, { redirect: "error" });
+        // redirect "manual": a 3xx is not ok, so it can never walk the fetch off the
+        // *.slack-edge.com allow-list. Workers throws on "error" (follow / manual only).
+        const res = await fetchImpl(url, { redirect: "manual" });
         if (!res.ok) return null;
         const declared = Number(res.headers.get("content-length") ?? "0");
         if (declared > maxBytes) {
