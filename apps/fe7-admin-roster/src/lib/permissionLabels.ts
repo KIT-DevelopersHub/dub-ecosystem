@@ -81,6 +81,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "chat:delete_channel": { label: "チャンネルを削除", description: "チャンネルを完全に削除できるようになります（メッセージもすべて消え、元に戻せません）。" },
   "chat:slack_import": { label: "Slack から取り込み", description: "Slack のチャンネルを選んで、メッセージ・スレッド・リアクション・ファイルごとチャットに取り込めるようになります。" },
   "chat:emoji_import": { label: "Slack の絵文字を取り込み", description: "Slack のカスタム絵文字(画像)をチャットに取り込み、リアクションで使えるようにします。" },
+  "chat:manage_sections": { label: "セクションを管理", description: "全員に共通のサイドバーのセクションを作成・名前変更・並べ替え・削除し、チャンネルを振り分けられるようになります。" },
   "usage:view": { label: "使用量ダッシュボードの閲覧", description: "無料枠の使用量・課金ガードのダッシュボードを閲覧できるようになります。" },
   "infra:read": { label: "インフラの閲覧", description: "サイト・デプロイ・DNS・ドメインの状態を閲覧できるようになります。" },
   "infra:deploy": { label: "デプロイの実行", description: "サイトのデプロイ（公開・反映）を実行できるようになります。" },
