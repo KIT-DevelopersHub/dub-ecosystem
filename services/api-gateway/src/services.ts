@@ -35,6 +35,9 @@ export interface GatewayServices {
   // x-dub-internal (+ x-dub-user-id from ctx), which the auth-service internal-only admin
   // routes require. Password mutations are NOT retried (POST without an idempotency key).
   authSvc: ServiceClient;
+  // mail-gateway client for the admin account-issue mail (/api/v1/admin/users/:id/account-mail).
+  // Sent as a SYSTEM call (no x-dub-user-id) so mail-gateway skips its per-user mail:send check.
+  mail: ServiceClient;
 }
 
 export function createServices(env: GatewayEnv): GatewayServices {
@@ -47,6 +50,7 @@ export function createServices(env: GatewayEnv): GatewayServices {
     member: createServiceClient(env.SVC_MEMBER, { service: "member-service", caller: CALLER }),
     lp: createServiceClient(env.SVC_LP_ANALYTICS, { service: "lp-analytics", caller: CALLER }),
     authSvc: createServiceClient(env.SVC_AUTH, { service: "auth-service", caller: CALLER }),
+    mail: createServiceClient(env.SVC_MAIL_GATEWAY, { service: "mail-gateway", caller: CALLER }),
     auth: createAuthClient({
       identityBinding: env.SVC_IDENTITY,
       authBinding: env.SVC_AUTH,

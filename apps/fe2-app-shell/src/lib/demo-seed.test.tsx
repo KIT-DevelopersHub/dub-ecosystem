@@ -129,9 +129,9 @@ describe("calendar meetings (カレンダー > ミーティング)", () => {
   interface Meeting { id: string; title: string; targetName: string; meetUrl: string | null; startsAt: string }
   interface List { items: Meeting[]; account: { email: string | null; calendarReady: boolean } }
 
-  it("grants the demo admin the カレンダー app and both meeting keys", async () => {
+  it("grants the demo admin the カレンダー app, 予定を登録 and both meeting keys", async () => {
     const me = await api().auth.me();
-    for (const k of ["app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit"]) {
+    for (const k of ["app:calendar:view", "app:calendar:edit", "calendar:schedule_edit", "calendar:meetings_view", "calendar:meetings_edit"]) {
       expect(me.permissions).toContain(k);
     }
   });
@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 70-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 72-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(70);
+    expect(catalog).toHaveLength(72);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -420,6 +420,17 @@ describe("chat channel delete + personal sections (demo store)", () => {
     }
   });
 
+  it("grants the demo admin chat:slack_import", async () => {
+    expect((await api().auth.me()).permissions).toContain("chat:slack_import");
+  });
+
+  it("starts chat:slack_import OFF for every non-admin role in ロール管理", async () => {
+    const roles = await api().request<{ items: { name: string; permissions: string[] }[] }>({ method: "GET", path: "/api/v1/identity/roles" });
+    for (const r of roles.items.filter((x) => x.name !== "admin")) {
+      expect(r.permissions, r.name).not.toContain("chat:slack_import");
+    }
+  });
+
   it("hard-deletes a topic channel (and its assignment) but refuses a DM", async () => {
     const a = api();
     expect((await listSections(a)).assignments.chn_admin).toBe("sec_demo_ops");
@@ -472,5 +483,42 @@ describe("chat channel delete + personal sections (demo store)", () => {
     await a.request({ method: "POST", path: "/api/v1/chat/channels/chn_team_ops/members", body: { userId: "usr_carol" } });
     await a.request<void>({ method: "DELETE", path: "/api/v1/chat/channels/chn_team_ops/members/usr_bob" });
     expect((await members()).map((m) => m.userId)).toEqual(["usr_demo", "usr_carol"]);
+  });
+});
+
+describe("チャンネル取り込み (Slack import demo)", () => {
+  interface Job { id: string; status: string; dubChannelId: string; retryAfterMs: number }
+  interface Msg { id: string; authorId: string | null; threadRootId: string | null; replyCount: number; reactions: unknown[]; attachments: unknown[] }
+
+  it("imports a channel to done and materializes thread, reactions, placeholders, pins, files", async () => {
+    const a = api();
+    const channels = await a.request<{ items: { name: string; isPrivate: boolean; job: { status: string } | null }[] }>({ method: "GET", path: "/api/v1/chat/slack-import/channels" });
+    expect(channels.items.find((c) => c.name === "conference-core")?.isPrivate).toBe(true);
+    expect(channels.items.find((c) => c.name === "design-review")?.job?.status).toBe("done");
+
+    let job = await a.request<Job>({ method: "POST", path: "/api/v1/chat/slack-import/jobs", body: { channel: "#general" } });
+    for (let i = 0; i < 30 && job.status !== "done"; i++) {
+      if (job.retryAfterMs > 0) await new Promise((r) => setTimeout(r, job.retryAfterMs));
+      job = await a.request<Job>({ method: "POST", path: `/api/v1/chat/slack-import/jobs/${job.id}/step` });
+    }
+    expect(job.status).toBe("done");
+
+    const list = await a.request<{ id: string; visibility: string }[]>({ method: "GET", path: "/api/v1/chat/channels" });
+    expect(list.map((c) => c.id)).toContain(job.dubChannelId);
+    const top = await a.request<{ items: Msg[] }>({ method: "GET", path: "/api/v1/chat/messages", query: { channelId: job.dubChannelId } });
+    expect(top.items.every((m) => m.threadRootId === null)).toBe(true);
+    const root = top.items.find((m) => m.replyCount > 0)!;
+    expect(root.reactions.length).toBeGreaterThan(0);
+    const replies = await a.request<{ items: Msg[] }>({ method: "GET", path: "/api/v1/chat/messages", query: { channelId: job.dubChannelId, threadRootId: root.id } });
+    expect(replies.items).toHaveLength(3);
+    expect(top.items.some((m) => m.attachments.length > 0)).toBe(true);
+    const pins = await a.request<Msg[]>({ method: "GET", path: `/api/v1/chat/channels/${job.dubChannelId}/pins` });
+    expect(pins.some((m) => m.authorId === null)).toBe(true); // bookmark post
+    const users = await a.request<{ items: { id: string; displayName: string }[] }>({ method: "GET", path: "/api/v1/identity/users", query: { ids: "usr_slk_bot_github" } });
+    expect(users.items.find((u) => u.id === "usr_slk_bot_github")?.displayName).toBe("GitHub (bot)");
+  }, 15_000);
+
+  it("404s an unknown Slack channel", async () => {
+    await expect(api().request({ method: "POST", path: "/api/v1/chat/slack-import/jobs", body: { channel: "nope" } })).rejects.toMatchObject({ status: 404 });
   });
 });

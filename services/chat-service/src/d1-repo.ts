@@ -338,9 +338,11 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       return r ? { lastReadMessageId: r.last_read_message_id } : null;
     },
     async countUnread(channelId, userId, lastReadMessageId): Promise<number> {
+      // Top-level only: the read cursor is the newest message in the main timeline, which
+      // never contains thread replies — counting them would leave an unread that can't be cleared.
       const sql = lastReadMessageId === null
-        ? `SELECT COUNT(*) AS n FROM chat_messages WHERE channel_id = ? AND deleted_at IS NULL AND (author_id IS NULL OR author_id != ?)`
-        : `SELECT COUNT(*) AS n FROM chat_messages WHERE channel_id = ? AND deleted_at IS NULL AND (author_id IS NULL OR author_id != ?) AND id > ?`;
+        ? `SELECT COUNT(*) AS n FROM chat_messages WHERE channel_id = ? AND thread_root_id IS NULL AND deleted_at IS NULL AND (author_id IS NULL OR author_id != ?)`
+        : `SELECT COUNT(*) AS n FROM chat_messages WHERE channel_id = ? AND thread_root_id IS NULL AND deleted_at IS NULL AND (author_id IS NULL OR author_id != ?) AND id > ?`;
       const binds: unknown[] = lastReadMessageId === null ? [channelId, userId] : [channelId, userId, lastReadMessageId];
       const r = await db.first<{ n: number }>(sql, ...binds);
       return r?.n ?? 0;

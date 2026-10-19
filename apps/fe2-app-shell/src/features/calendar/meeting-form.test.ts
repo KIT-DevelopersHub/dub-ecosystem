@@ -88,6 +88,14 @@ describe("表示するカレンダー filter", () => {
     expect(visible({}, "error")).toEqual(["all", "role_lead", "role_member", "role_gone"]);
   });
 
+  it("a target the caller made meetings for shows by default, even if not theirs (unless unticked)", () => {
+    const mine = new Set(["role_member"]);
+    const ids = ["all", "role_lead", "role_member"];
+    expect(ids.filter((id) => isMeetingTargetVisible(id, {}, targets, mine))).toEqual(ids);
+    expect(ids.filter((id) => isMeetingTargetVisible(id, {}, null, mine))).toEqual(["all", "role_member"]);
+    expect(isMeetingTargetVisible("role_member", { role_member: false }, targets, mine)).toBe(false);
+  });
+
   it("parses only boolean choices", () => {
     expect(parseMeetingTargetChoices({ a: true, b: "x", c: false })).toEqual({ a: true, c: false });
     expect(parseMeetingTargetChoices(["a"])).toEqual({});

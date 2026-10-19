@@ -134,6 +134,14 @@ export function useViewUserPassword(userId: common.UserId) {
   });
 }
 
+/** NON-optimistic: send the アカウント発行メール (one-shot; the caller toasts + closes). */
+export function useSendAccountMail() {
+  const { api } = useRosterContext();
+  return useMutation<auth.AdminSendAccountMailResponse, unknown, common.UserId>({
+    mutationFn: (userId) => api.sendAccountMail(userId),
+  });
+}
+
 /** OPTIMISTIC: role grant. Appends a pending assignment, rolls back on error. */
 export function useAssignRole(userId: common.UserId, grantedBy: common.UserId) {
   const { api } = useRosterContext();

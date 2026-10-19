@@ -4,7 +4,7 @@
 //
 // AUTHZ: none in this file or in any handler. `gatewayPolicyGate` is the single
 // authorization layer and derives every decision from POLICY_TABLE (src/policy-table.ts),
-// which lists all 12 gateway-owned routes. Do NOT add a permission check to a route or a
+// which lists all 13 gateway-owned routes. Do NOT add a permission check to a route or a
 // handler — add the route to the table (test/policy-table.test.ts fails if you forget).
 // Proxied /api/v1/* routes are authorized by the service that owns them (see policy-table.ts
 // for why the catch-all is deliberately not a table entry).
@@ -21,6 +21,7 @@ import { createPublicParticipationHandler } from "./handlers/public-participatio
 import { publicOnboardingHandler } from "./handlers/public-onboarding";
 import { publicLpVisitHandler } from "./handlers/public-lp-visit";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
+import { adminSendAccountMailHandler } from "./handlers/account-mail";
 import { getSelfProfileHandler, updateSelfProfileHandler } from "./handlers/self-profile";
 import { getSelfParticipationHandler, updateSelfParticipationHandler } from "./handlers/self-participation";
 import { gatewayRouteHandler } from "./gateway-route";
@@ -91,6 +92,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.post(`${API_PREFIX}/me/password`, selfPasswordHandler);
   app.post(`${API_PREFIX}/admin/users/:userId/password`, adminSetPasswordHandler);
   app.get(`${API_PREFIX}/admin/users/:userId/password`, adminViewPasswordHandler);
+  // アカウント発行メール: member Gmail <- login + password, cc the devhub address.
+  app.post(`${API_PREFIX}/admin/users/:userId/account-mail`, adminSendAccountMailHandler);
 
   // Self service (アカウント設定): the signed-in user reads/edits their OWN profile (表示名/
   // アバター → identity-roster) and 参加届 (参加情報 → member-service). Gateway-owned because

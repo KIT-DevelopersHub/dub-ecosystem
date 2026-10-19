@@ -10,7 +10,7 @@
 //
 // The ChatRoom Durable Object (RT hub) is NOT a paid Queue — SQLite-backed DOs run on
 // the free plan — so it is preserved verbatim (CHAT_ROOM namespace + WS routing).
-import type { D1Database, Fetcher, Queue, DurableObjectNamespace } from "@cloudflare/workers-types";
+import type { D1Database, Fetcher, Queue, DurableObjectNamespace, R2Bucket } from "@cloudflare/workers-types";
 import type { ChatRoom } from "./chat-room-do";
 
 export interface Env {
@@ -33,4 +33,10 @@ export interface Env {
   DUB_DEFAULT_ORG_ID?: string;
   CHAT_RT_DO_URL_BASE?: string;
   WS_TICKET_SECRET?: string;
+
+  // Slack channel import (src/slack-import.ts). SLACK_BOT_TOKEN is a Worker SECRET (the LMB
+  // bot token; never in toml) — absent => the import routes answer 412 not configured.
+  // ATTACHMENTS = R2 dub-file-attachments; absent => files are counted as skipped.
+  SLACK_BOT_TOKEN?: string;
+  ATTACHMENTS?: R2Bucket;
 }

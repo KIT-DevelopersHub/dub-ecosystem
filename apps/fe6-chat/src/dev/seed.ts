@@ -226,5 +226,18 @@ const sections = [{ id: "sec_seed_ops", name: "運営", position: 0, createdAt: 
 const sectionAssignments = { [C_DEV]: "sec_seed_ops" };
 
 export function demoSeed(): MockSeed {
-  return { currentUserId: ME, channels, messages, members, users, pins, teams, myTeamIds, sections, sectionAssignments };
+  return {
+    currentUserId: ME,
+    channels,
+    messages,
+    members,
+    users,
+    pins,
+    teams,
+    myTeamIds,
+    sections,
+    sectionAssignments,
+    // Slack import demo: posts by members, KENICHI plays the disabled (退会済み) account.
+    slackAuthors: { me: ME, a: HANAKO, b: DAISUKE, disabled: KENICHI },
+  };
 }

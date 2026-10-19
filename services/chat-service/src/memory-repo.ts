@@ -196,6 +196,7 @@ export class InMemoryChatRepo implements ChatRepo {
     let n = 0;
     for (const m of this.messages.values()) {
       if (m.channelId !== channelId) continue;
+      if (m.threadRootId !== null) continue; // thread replies are not channel unread (see d1-repo)
       if (m.deletedAt !== null) continue;
       if (m.authorId === userId) continue; // own messages are not unread
       if (lastReadMessageId === null || m.id > lastReadMessageId) n++;

@@ -101,15 +101,17 @@ export type MeetingTargetChoices = Readonly<Record<string, boolean>>;
  * caller's own targets are ON. `targets` = null while loading: an unknown default stays OFF
  * so a meeting appears late rather than flashing and vanishing; "error" shows everything.
  * A target missing from the list (deleted role) is ON so its meetings never silently hide.
+ * `created` = targets the caller has made meetings for: ON too (a meeting I set up must show).
  */
 export function isMeetingTargetVisible(
   targetId: string,
   choices: MeetingTargetChoices,
   targets: readonly meeting.MeetingTarget[] | null | "error",
+  created: ReadonlySet<string> = new Set(),
 ): boolean {
   const chosen = choices[targetId];
   if (chosen !== undefined) return chosen;
-  if (targetId === meeting.ALL_MEMBERS_TARGET_ID || targets === "error") return true;
+  if (targetId === meeting.ALL_MEMBERS_TARGET_ID || targets === "error" || created.has(targetId)) return true;
   if (targets === null) return false;
   return targets.find((t) => t.id === targetId)?.isMine ?? true;
 }

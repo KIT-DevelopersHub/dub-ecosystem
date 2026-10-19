@@ -21,11 +21,11 @@
 // boot mock and surface as a normal NOT_FOUND (in-frame fallback, never a white
 // screen), so "what is seeded vs. still stubbed" stays honest.
 import type { ErrorResponse } from "@dub/errors";
-import type { auditLog, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
+import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
-import { mockUnfurl } from "../composition/featureEntries";
+import { createSlackImportSim, mockUnfurl, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -53,6 +53,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   // members in the channel details modal. Hard delete is its own key (admin only by default).
   "chat:moderate",
   "chat:delete_channel",
+  "chat:slack_import",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -62,6 +63,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
+  // カレンダー: 予定の登録（予定を作成ボタン）。
+  "calendar:schedule_edit",
   // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
   "calendar:meetings_view",
   "calendar:meetings_edit",
@@ -1478,7 +1481,21 @@ function createRosterStore() {
     return null;
   }
 
-  return { handle };
+  // Slack import (チャンネル取り込み) creates disabled placeholder users for bots /
+  // unmatched authors, exactly like the real importer writes identity_users.
+  function addUsers(list: { id: string; displayName: string }[]): void {
+    for (const u of list) {
+      if (users.some((x) => x.id === u.id)) continue;
+      users.push({ id: u.id, orgId: ORG, displayName: u.displayName, email: `${u.id}@slack-import.invalid`, githubLogin: null, avatarUrl: null, status: "disabled", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() });
+    }
+  }
+
+  /** Login account by id (アカウント発行メールの CC 解決用). */
+  function findUser(id: string): DemoRosterUser | undefined {
+    return users.find((u) => u.id === id);
+  }
+
+  return { handle, addUsers, findUser };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -1501,9 +1518,12 @@ interface DemoChatChannel {
   archived?: boolean;
   version?: number;
   roster?: { userId: string; role: "admin" | "member"; joinedAt: string }[];
+  visibility?: "public" | "private"; // default: dm -> private, else public
 }
 
-function createChatStore() {
+type DemoMessage = Record<string, unknown> & { id: string; channelId: string; threadRootId: string | null };
+
+function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayName: string }[]) => void }) {
   const CH_TS = "2026-08-01T00:00:00.000Z";
   // 全体: everyone. announcements is the read-mostly 全体周知 channel.
   const overall: DemoChatChannel[] = [
@@ -1546,7 +1566,7 @@ function createChatStore() {
     name: c.name,
     topic: c.topic,
     eventId: c.eventId,
-    visibility: c.type === "dm" ? "private" : "public",
+    visibility: c.visibility ?? (c.type === "dm" ? "private" : "public"),
     archived: c.archived ?? false,
     memberCount: c.roster?.length ?? c.memberCount,
     ...(c.memberIds ? { memberIds: c.memberIds } : {}),
@@ -1638,13 +1658,51 @@ function createChatStore() {
     msg({ id: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", body: "LP の文言、確認してもらえますか？急ぎではないです 🙏", createdAt: "2026-08-01T01:00:00.000Z" }),
     msg({ id: "msg_01SEEDDMB0000000000000002", channelId: "chn_dm_bob", authorId: ME_ID, body: "了解です、今日中に見ます！", createdAt: "2026-08-01T01:03:00.000Z" }),
   ];
-  const messagesOf = (channelId: string | null) => [
+  // チャンネル取り込み (Slack): the shared fe6 simulator drives the jobs; a finished job
+  // materializes its Dub channel (thread, reactions, placeholder authors, pins, files).
+  const imported = new Map<string, { messages: DemoMessage[]; pinnedIds: string[] }>();
+  const materializeImport = (c: ImportedChannel) => {
+    const existing = byId.get(c.id);
+    if (existing) {
+      existing.archived = c.archived;
+    } else {
+      const created: DemoChatChannel = { id: c.id, type: "topic", name: c.name, topic: c.topic, eventId: null, memberCount: c.memberCount, visibility: c.visibility, archived: c.archived };
+      all.push(created);
+      byId.set(created.id, created);
+    }
+    imported.set(c.id, { messages: c.messages as unknown as DemoMessage[], pinnedIds: [...c.pinnedIds] });
+    addUsers(c.placeholderUsers);
+  };
+  const slackImport = createSlackImportSim({
+    // usr_ken is a disabled (退会済み) roster account — still matched by email.
+    authors: { me: ME_ID, a: "usr_bob", b: "usr_emi", disabled: "usr_ken" },
+    onDone: materializeImport,
+  });
+  const simResponse = (r: ReturnType<typeof slackImport.step>): Response =>
+    r.ok ? json(r.value, r.status) : json({ error: { code: r.code, message: r.message, retryable: false } } satisfies ErrorResponse, r.status);
+
+  const messagesOf = (channelId: string | null): DemoMessage[] => [
     ...(channelId === "chn_general" ? generalMessages : []),
     ...(channelId === "chn_dm_bob" ? dmMessages : []),
+    ...(channelId ? (imported.get(channelId)?.messages ?? []) : []),
     ...(channelId ? (posted.get(channelId) ?? []) : []),
   ];
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (pathname.startsWith("/api/v1/chat/slack-import/")) {
+      if (method === "GET" && pathname === "/api/v1/chat/slack-import/channels") return json({ items: slackImport.listChannels() });
+      if (method === "GET" && pathname === "/api/v1/chat/slack-import/jobs") {
+        return json({ items: slackImport.listJobs(Number(url.searchParams.get("limit") ?? 20) || 20) });
+      }
+      if (method === "POST" && pathname === "/api/v1/chat/slack-import/jobs") {
+        return simResponse(slackImport.createJob((body as { channel?: unknown } | null)?.channel));
+      }
+      const step = /^\/api\/v1\/chat\/slack-import\/jobs\/([^/]+)\/step$/.exec(pathname);
+      if (step && method === "POST") return simResponse(slackImport.step(decodeURIComponent(step[1]!)));
+      const one = /^\/api\/v1\/chat\/slack-import\/jobs\/([^/]+)$/.exec(pathname);
+      if (one && method === "GET") return simResponse(slackImport.getJob(decodeURIComponent(one[1]!)));
+      return null;
+    }
     if (method === "POST" && pathname === "/api/v1/chat/messages") {
       const req = (body ?? {}) as { channelId?: string; body?: string; threadRootId?: string | null };
       if (!req.channelId || typeof req.body !== "string") return notFound(`POST ${pathname}`);
@@ -1796,8 +1854,10 @@ function createChatStore() {
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
       const channelId = url.searchParams.get("channelId");
       // #general opens to a seeded timeline (incl. a system post); others start empty
-      // and grow with posts made during the session.
-      return json(page(messagesOf(channelId)));
+      // and grow with posts made during the session. Like chat-service: the channel
+      // timeline holds top-level posts only; ?threadRootId= returns that thread's replies.
+      const threadRootId = url.searchParams.get("threadRootId");
+      return json(page(messagesOf(channelId).filter((m) => (m.threadRootId ?? null) === (threadRootId || null))));
     }
     {
       // Members / pins: demo returns a small roster and no pins (bare arrays per the
@@ -1833,7 +1893,11 @@ function createChatStore() {
         return json(null, 204);
       }
       const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
-      if (pin && method === "GET") return json([]);
+      if (pin && method === "GET") {
+        const channelId = decodeURIComponent(pin[1]!);
+        const imp = imported.get(channelId);
+        return json(imp ? imp.messages.filter((m) => imp.pinnedIds.includes(m.id)) : []);
+      }
     }
     return null;
   }
@@ -2021,7 +2085,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   if (method === "POST") {
     // task create (カレンダーの予定追加 / マイタスク). Appended to the in-memory seed so
     // the new 予定 survives a refetch within the session.
-    if (pathname === "/api/v1/tasks") {
+    if (pathname === "/api/v1/tasks" || pathname === "/api/v1/tasks/calendar-events") {
       const b = (body ?? {}) as Partial<task.CreateTaskRequest>;
       if (typeof b.title !== "string" || !b.title.trim()) return notFound(`POST ${pathname}`);
       const now = new Date().toISOString();
@@ -2144,7 +2208,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     // Detail-panel edit (title/status/priority/担当/チーム/開始日/期日). Updates the task and,
     // when the dates change, mirrors them onto the gantt row so the BAR moves immediately.
     {
-      const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+      const id = seg(/^\/api\/v1\/tasks\/(?:calendar-events\/)?([^/]+)$/);
       if (id) {
         const t = TASKS.find((x) => x.id === id);
         if (!t) return notFound(`PATCH ${pathname}`);
@@ -2172,7 +2236,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   // task archive (カレンダーの予定削除). task-service soft-deletes; the demo drops the row
   // so every list (calendar / マイタスク) stops showing it.
   if (method === "DELETE") {
-    const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+    const id = seg(/^\/api\/v1\/tasks\/(?:calendar-events\/)?([^/]+)$/);
     if (id) {
       const i = TASKS.findIndex((x) => x.id === id);
       if (i < 0) return notFound(`DELETE ${pathname}`);
@@ -2230,6 +2294,7 @@ interface DemoDriveGoogleAccount {
   active: boolean;
   needsReconnect: boolean;
   calendarMissing?: boolean;
+  meetMissing?: boolean;
 }
 interface DemoDriveGoogleStatus {
   accounts: DemoDriveGoogleAccount[];
@@ -2322,7 +2387,7 @@ function createDriveGoogleDemoStore() {
         return write({
           ...cur,
           accounts: cur.accounts.map((a) =>
-            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, connectedAt: new Date().toISOString() } : a,
+            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, meetMissing: false, connectedAt: new Date().toISOString() } : a,
           ),
         });
       }
@@ -2957,8 +3022,16 @@ function createMembersStore() {
     member_5: ["やまだ", "さぶろう"],
     member_6: ["たむら", "み"],
   };
+  // Gmail (参加届から流入) の seed。アカウント発行メールの確認用: 高岡 は紐付け済み(行から再送)、
+  // 鈴木 一郎 / 黒川 誠 は未紐付け(紐付け直後に送信確認が出る)。
+  const GMAIL: Record<string, string> = {
+    member_1: "takaoka.demo@gmail.com",
+    member_3: "suzuki.ichiro@gmail.com",
+    member_h2: "kurokawa.dev@gmail.com",
+  };
   for (const mem of members) {
     const kana = KANA[mem.id];
+    if (GMAIL[mem.id]) mem.gmail = GMAIL[mem.id]!;
     if (kana) {
       mem.lastNameKana = kana[0];
       mem.firstNameKana = kana[1];
@@ -3366,7 +3439,12 @@ function createMembersStore() {
     return null;
   }
 
-  return { handle };
+  /** 運営メンバー linked to a login (アカウント発行メールの宛先解決用). */
+  function findByIdentity(identityUserId: string): DemoMember | undefined {
+    return members.find((x) => x.identityUserId === identityUserId);
+  }
+
+  return { handle, findByIdentity };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -4166,7 +4244,7 @@ export function createDemoFetch(): typeof fetch {
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
-  const chatStore = createChatStore();
+  const chatStore = createChatStore({ addUsers: roster.addUsers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
   const lpStore = createLpStore();
   // LP チケット販売（券種・入力項目・購入者）— LP管理のチケットタブ。
@@ -4197,6 +4275,40 @@ export function createDemoFetch(): typeof fetch {
 
     // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
     if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));
+
+    // アカウント発行メール (gateway-owned): member Gmail (to) + login (cc). Nothing is sent.
+    {
+      const am = /^\/api\/v1\/admin\/users\/([^/]+)\/account-mail$/.exec(url.pathname);
+      if (am && method === "POST") {
+        const uid = decodeURIComponent(am[1]!);
+        const linked = membersStore.findByIdentity(uid);
+        const gmail = (linked?.gmail ?? "").trim();
+        if (!linked || !gmail) return problem("VALIDATION_FAILED", "運営メンバーの Gmail が登録されていません", 400);
+        const res: authTypes.AdminSendAccountMailResponse = {
+          ok: true,
+          to: gmail,
+          cc: roster.findUser(uid)?.email ?? "",
+          appUrl: "https://app.developershub.jp",
+          passwordSource: "existing",
+          messageId: `demo_msg_${Date.now()}`,
+        };
+        return json(res);
+      }
+      // Admin password issue / view (メール名簿の右ペイン): generated on demand, never stored.
+      const pw = /^\/api\/v1\/admin\/users\/([^/]+)\/password$/.exec(url.pathname);
+      if (pw && method === "POST") {
+        const generated = !(parsedBody as authTypes.AdminSetPasswordRequest | undefined)?.password;
+        const res: authTypes.AdminSetPasswordResponse = generated
+          ? { ok: true, password: `Demo-${Math.random().toString(36).slice(2, 10)}` }
+          : { ok: true };
+        return json(res);
+      }
+      if (pw && method === "GET") {
+        const uid = decodeURIComponent(pw[1]!);
+        const res: authTypes.AdminViewPasswordResponse = { userId: uid, email: roster.findUser(uid)?.email ?? "", password: "Demo-pass-1234" };
+        return json(res);
+      }
+    }
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??

@@ -41,6 +41,7 @@ import type {
 import { ChatService, type ReqCtx } from "./service";
 import { POLICY_TABLE } from "./policy-table";
 import { validateUnfurlUrl, UNFURL_CACHE_TTL_SECONDS, type UnfurlResponse } from "./unfurl";
+import type { SlackImporter } from "./slack-import";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getDubCtx(c: Context): RequestContext | undefined {
@@ -289,6 +290,38 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.patch("/chat/settings/deletion-policy", async (c) => {
     const body = await readJson<UpdateDeletionPolicyRequest>(c);
     return c.json(await svc.updateDeletionPolicy(reqCtx(c), body));
+  });
+
+  // ---- Slack channel import (admin; resumable step job — see src/slack-import.ts) ----
+  // Every route is gated in POLICY_TABLE by 編集 + chat:slack_import (admin only by default). The
+  // browser drives the job: it POSTs …/step in a loop while the page is open, and a
+  // reopened page resumes from the persisted cursor.
+  const importer = (): SlackImporter => {
+    if (!deps.slackImport) throw errors.preconditionFailed("slack_import_not_configured");
+    return deps.slackImport;
+  };
+  app.get("/chat/slack-import/channels", async (c) => {
+    reqCtx(c);
+    return c.json(await importer().listSlackChannels());
+  });
+  app.get("/chat/slack-import/jobs", async (c) => {
+    reqCtx(c);
+    return c.json(await importer().listJobs(qNum(c.req.query("limit")) ?? 20));
+  });
+  app.post("/chat/slack-import/jobs", async (c) => {
+    const ctx = reqCtx(c);
+    const body = await readJson<{ channel?: unknown }>(c);
+    if (typeof body.channel !== "string") throw errors.validationFailed([{ field: "channel", reason: "required" }]);
+    const { job, created } = await importer().createJob(body.channel, ctx.userId);
+    return c.json(job, created ? 201 : 200);
+  });
+  app.get("/chat/slack-import/jobs/:id", async (c) => {
+    reqCtx(c);
+    return c.json(await importer().getJob(c.req.param("id")));
+  });
+  app.post("/chat/slack-import/jobs/:id/step", async (c) => {
+    reqCtx(c);
+    return c.json(await importer().step(c.req.param("id")));
   });
 
   return app;
