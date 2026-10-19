@@ -6,7 +6,6 @@ const S = "chat-service";
 const VIEW = { keys: [], appLevel: { app: "chat", level: "view" } } as const;
 const EDIT = { keys: [], appLevel: { app: "chat", level: "edit" } } as const;
 const CREATE = { keys: ["chat:create"], appLevel: { app: "chat", level: "edit" } } as const;
-const SCOPE_OUT = "依頼範囲外（ピン留め・リアクションは依頼表に無い）";
 const SIDEBAR = "ボット自身のサイドバーのセクション分けで、Dub のデータではない";
 const SLACK_IMPORT = "Slack 履歴の一括取り込みで、管理者が画面から実行する移行作業。エージェントの操作対象にしない";
 const CUSTOM_EMOJI = "リアクション描画用の絵文字画像の一覧・配信で、依頼表に無い";
@@ -50,7 +49,7 @@ export const CHAT: AreaSpec = {
       service: S,
       requires: VIEW,
       description: "チャンネルのピン留めメッセージを取得する",
-      hint: "配列 [{ id, body, authorId }]",
+      hint: "配列 [{ id, body, authorId }]（新しいメッセージ順・全件）",
     }),
     read({
       id: "chat.search",
@@ -69,7 +68,7 @@ export const CHAT: AreaSpec = {
       service: S,
       requires: VIEW,
       description: "チャンネルのメッセージを取得する",
-      hint: "query.channelId 必須。items[].id・authorId・body・version・deletedAt。threadRootId でスレッド内",
+      hint: "query.channelId 必須。items[].id・authorId・body・version・deletedAt・reactions（{ 絵文字: [付けた人の userId] }）。threadRootId でスレッド内",
       query: ["channelId", "threadRootId", "afterMessageId", "limit", "cursor"],
     }),
     read({
@@ -249,6 +248,52 @@ export const CHAT: AreaSpec = {
       unverifiable:
         "メッセージを1件だけ読む手段が無く、一覧は新しい順の一部しか返さない（スレッドの返信は別の一覧）ため、一覧に無いことでは「消えた」と確かめられない",
     },
+    {
+      id: "chat.reactions.toggle",
+      area: "chat",
+      method: "POST",
+      path: "/chat/messages/:id/reactions",
+      service: S,
+      requires: EDIT,
+      kind: "write",
+      reversible: true,
+      risk: "mid",
+      description: "メッセージにリアクションを付ける／外す（付けた人はボット）",
+      hint:
+        "emoji 必須（標準の絵文字は文字そのもの例 👍、カスタム絵文字は :name: 形式）。付け外しの切り替えなので、既にボットが同じ絵文字を付けていれば外れる。" +
+        "付ける（外す）前に必ず chat.messages.list で対象の reactions を読み、ボットの userId が入っていない（入っている）ことを確かめてから呼ぶ（ボットの userId はボットが送ったメッセージの authorId で分かる。分からないままその絵文字が既に付いていれば、付くか外れるか分からないと要約に書く）。" +
+        "削除済みメッセージ・ボットが書き込めないチャンネルには不可。応答 { messageId, reactions }（切り替え後の全リアクション）",
+      impact: "{count}件のメッセージのリアクションがボットの名前で全参加者の画面で切り替わります。もう一度同じ絵文字で切り替えれば元に戻ります。",
+      body: { allowed: ["emoji"], required: ["emoji"] },
+      fieldLabels: { emoji: "絵文字" },
+      unverifiable:
+        "応答にチャンネルが含まれず、メッセージを1件だけ読む手段も無いため、付け外し後の状態を読み直して確かめられない",
+    },
+    {
+      id: "chat.pins.toggle",
+      area: "chat",
+      method: "POST",
+      path: "/chat/channels/:id/pins",
+      service: S,
+      requires: EDIT,
+      kind: "write",
+      reversible: true,
+      risk: "mid",
+      description: "チャンネルのメッセージをピン留めする／外す",
+      hint:
+        "messageId 必須（そのチャンネルのメッセージ。chat.messages.list で探す）。付け外しの切り替えなので、既にピン留めされていれば外れる（誰がピンしたかは問わない）。" +
+        "ピン留めする（外す）前に必ず chat.pins.list で対象が無い（有る）ことを確かめてから呼ぶ。アーカイブ済み・削除済みメッセージは不可。応答は切り替え後のピン留め一覧（配列）",
+      impact: "{count}件のメッセージのピン留めが全参加者の画面で切り替わります。もう一度切り替えれば元に戻ります。",
+      body: { allowed: ["messageId"], required: ["messageId"] },
+      fieldLabels: { messageId: "メッセージ", "[*].id": "ピン留めの一覧" },
+      // Toggle: the direction is unknown up front, so compare the re-read list with the
+      // post-toggle list the write returned (complete, unpaginated).
+      verify: {
+        read: "chat.pins.list",
+        params: { id: "$params.id" },
+        expect: { "[*].id": "$result.[*].id" },
+      },
+    },
   ],
   excluded: [
     { service: S, route: "GET /chat/channels/:id/ws-ticket", reason: "リアルタイム接続用の券でデータではない" },
@@ -260,8 +305,6 @@ export const CHAT: AreaSpec = {
       route: "PATCH /chat/settings/deletion-policy",
       reason: "組織全体の削除方式を変える設定。完全削除に切り替えると以後の削除が復元不能になる",
     },
-    { service: S, route: "POST /chat/channels/:id/pins", reason: SCOPE_OUT },
-    { service: S, route: "POST /chat/messages/:id/reactions", reason: SCOPE_OUT },
     {
       service: S,
       route: "DELETE /chat/channels/:id",

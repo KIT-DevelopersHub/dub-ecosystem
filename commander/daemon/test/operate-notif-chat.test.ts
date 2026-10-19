@@ -16,6 +16,8 @@ function fakeGateway(opts: Opts = {}) {
   ]);
   const members = new Map<string, { userId: string; role: string }[]>([["c1", [{ userId: "bot", role: "admin" }, { userId: "u1", role: "member" }]]]);
   const messages = [{ id: "m1", channelId: "c1", threadRootId: null, authorId: "bot", body: "こんにちは", version: 1, deletedAt: null }];
+  const pins = new Map<string, string[]>([["c1", []]]);
+  const reactions = new Map<string, Record<string, string[]>>();
   const calls: string[] = [];
   let seq = 0;
 
@@ -62,6 +64,24 @@ function fakeGateway(opts: Opts = {}) {
       if (method === "DELETE" && !drop) members.set(mem[1]!, list.filter((m) => m.userId !== mem[2]));
       return new Response(null, { status: 204 });
     }
+    const pin = path.match(/^\/chat\/channels\/([^/]+)\/pins$/);
+    if (pin) {
+      const ids = pins.get(pin[1]!) ?? [];
+      const list = (xs: string[]) => messages.filter((m) => xs.includes(m.id));
+      if (method === "GET") return reply(200, list(ids));
+      const next = ids.includes(body.messageId) ? ids.filter((x) => x !== body.messageId) : [...ids, body.messageId];
+      if (!drop) pins.set(pin[1]!, next);
+      return reply(200, list(next));
+    }
+    const react = path.match(/^\/chat\/messages\/([^/]+)\/reactions$/);
+    if (react && method === "POST") {
+      const set = { ...(reactions.get(react[1]!) ?? {}) };
+      const users = set[body.emoji] ?? [];
+      set[body.emoji] = users.includes("bot") ? users.filter((u) => u !== "bot") : [...users, "bot"];
+      if (set[body.emoji]!.length === 0) delete set[body.emoji];
+      if (!drop) reactions.set(react[1]!, set);
+      return reply(200, { messageId: react[1], reactions: set });
+    }
     if (method === "GET" && path === "/chat/messages") {
       const root = url.searchParams.get("threadRootId") || null;
       return reply(200, { items: messages.filter((m) => m.channelId === url.searchParams.get("channelId") && m.threadRootId === root), nextCursor: null });
@@ -86,7 +106,7 @@ function fakeGateway(opts: Opts = {}) {
     return reply(404, { error: { code: "no_route" } });
   }) as typeof fetch;
 
-  return { fetchImpl, calls, inbox, channels, members, messages };
+  return { fetchImpl, calls, inbox, channels, members, messages, pins, reactions };
 }
 
 function setup(opts: Opts = {}) {
@@ -161,6 +181,35 @@ describe("チャットの書き込み", () => {
     expect((await run(exec, { op: "chat.messages.post", body: { channelId: "c1", body: "お知らせです" } })).result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
     expect((await run(exec, { op: "chat.messages.edit", params: { id: "m1" }, body: { version: 1, body: "こんばんは" } })).result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
     expect((await run(exec, { op: "chat.channels.update", params: { id: "c1" }, body: { version: 2, archived: true } })).result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
+  });
+
+  it("ピン留めは切り替え後の一覧を読み直し、もう一度で外れる", async () => {
+    const { gw, exec } = setup();
+    const on = await run(exec, { op: "chat.pins.toggle", params: { id: "c1" }, body: { messageId: "m1" } });
+    expect(on.preview.writes[0]).toMatchObject({ reversible: true, risk: "mid" });
+    expect(on.result).toMatchObject({ verdict: "done", results: [{ outcome: "ok" }] });
+    expect(gw.pins.get("c1")).toEqual(["m1"]);
+    expect((await run(exec, { op: "chat.pins.toggle", params: { id: "c1" }, body: { messageId: "m1" } })).result).toMatchObject({ verdict: "done" });
+    expect(gw.pins.get("c1")).toEqual([]);
+    expect(gw.calls).toContain("GET /chat/channels/c1/pins");
+  });
+
+  it("ピン留めが反映されなければ未確認になる", async () => {
+    const { exec } = setup({ dropWrites: true });
+    const { result } = await run(exec, { op: "chat.pins.toggle", params: { id: "c1" }, body: { messageId: "m1" } });
+    expect(result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
+    expect(JSON.stringify(result)).toContain("ピン留めの一覧");
+  });
+
+  it("リアクションはボットの名前で切り替わり、検証不能の受付として報告する", async () => {
+    const { gw, exec } = setup();
+    const { preview, result } = await run(exec, { op: "chat.reactions.toggle", params: { id: "m1" }, body: { emoji: "👍" } });
+    expect(preview.requiresPhrase).toBe(false);
+    expect(preview.writes[0]!.unverifiable).toContain("確かめられない");
+    expect(result).toMatchObject({ verdict: "done", results: [{ outcome: "accepted" }] });
+    expect(gw.reactions.get("m1")).toEqual({ "👍": ["bot"] });
+    await run(exec, { op: "chat.reactions.toggle", params: { id: "m1" }, body: { emoji: "👍" } });
+    expect(gw.reactions.get("m1")).toEqual({});
   });
 
   it("メッセージ削除は確認フレーズ必須で、検証不能の受付として報告する", async () => {
