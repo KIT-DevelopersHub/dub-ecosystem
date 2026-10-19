@@ -1202,6 +1202,11 @@ const SEED_USERS: DemoRosterUser[] = [
   { id: "usr_lead", orgId: ORG, displayName: "統括 山本", email: "lead@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "manual", roleIds: ["role_lead"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_mana", orgId: ORG, displayName: "加藤 真名", email: "mana@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_noa", orgId: ORG, displayName: "吉田 乃愛", email: "noa@developershub.jp", githubLogin: "noa-y", avatarUrl: null, status: "disabled", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  // Bulk Email Routing addresses so the 名簿 spans several 20-row pages in the demo.
+  ...Array.from({ length: 30 }, (_, i): DemoRosterUser => {
+    const n = String(i + 1).padStart(2, "0");
+    return { id: `usr_mail${n}`, orgId: ORG, displayName: `メンバー ${n}`, email: `member${n}@developershub.jp`, githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() };
+  }),
 ];
 
 // identity-roster's role DTO carries the cross-role mail visibility set (fe7 RoleView).
