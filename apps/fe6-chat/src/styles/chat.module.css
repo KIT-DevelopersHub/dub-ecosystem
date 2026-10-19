@@ -283,6 +283,10 @@
 .rowMenu:has([aria-expanded="true"]) {
   opacity: 1;
 }
+/* The open dropdown must sit above the rows that follow; otherwise they take its clicks. */
+.channelRow:has(.rowMenu [aria-expanded="true"]) {
+  z-index: 1;
+}
 .channelRow:hover .countBadge,
 .channelRow:hover .mentionBadge,
 .channelRow:focus-within .countBadge,
