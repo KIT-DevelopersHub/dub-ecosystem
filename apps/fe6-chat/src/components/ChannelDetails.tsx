@@ -445,7 +445,7 @@ function SettingsTab({ channel, canEdit, onUpdate, onDelete, sections }: Channel
           <div className={styles.detailsRow}>
             <div className={styles.detailsRowMain}>
               <span className={styles.detailsLabel}>サイドバーのセクション</span>
-              <span className={styles.detailsHelp}>自分のサイドバーでの表示場所です。他のメンバーには影響しません。</span>
+              <span className={styles.detailsHelp}>全員のサイドバーでの表示場所です。変更はメンバー全員に反映されます。</span>
             </div>
             <select
               className={styles.detailsSelect}

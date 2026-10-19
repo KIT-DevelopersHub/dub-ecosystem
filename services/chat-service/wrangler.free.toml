@@ -111,6 +111,8 @@ bucket_name = "dub-file-attachments"
 #   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0005_slack_import_jobs.sql
 # Custom emoji (src/custom-emoji.ts; images in this bucket under custom-emoji/, token needs emoji:read):
 #   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0006_custom_emojis.sql
+# Org-wide sidebar sections (writes need chat:manage_sections, identity/0024):
+#   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0007_shared_sections.sql
 #
 # NOTE: WS_TICKET_SECRET is a Worker Secret (never in this toml). Set via
 # `wrangler secret put WS_TICKET_SECRET` at Apply. The ChatRoom DO verifies with

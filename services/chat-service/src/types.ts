@@ -172,7 +172,7 @@ export interface SearchRow {
 // WsTicketResponse is frozen in @dub/types (chat); re-export under the local name.
 export type WsTicketResponse = chat.WsTicketResponse;
 
-// Personal sidebar sections (wire).
+// Org-wide sidebar sections (wire). One shared set; every member sees the same.
 export interface ChatSection {
   id: string;
   name: string;
@@ -181,7 +181,7 @@ export interface ChatSection {
 }
 export interface ChatSectionList {
   items: ChatSection[];
-  /** channelId -> sectionId */
+  /** channelId -> sectionId, limited to channels the caller can read. */
   assignments: Record<string, string>;
 }
 export interface CreateSectionRequest {
@@ -212,7 +212,7 @@ export interface ChannelRow {
 }
 export interface SectionRow {
   id: string;
-  userId: common.UserId;
+  createdBy: common.UserId;
   name: string;
   position: number;
   createdAt: common.ISODateTime;
@@ -378,17 +378,18 @@ export interface ChatRepo {
    *  reactions, pins, read states, section assignments) in ONE transaction. Idempotent. */
   hardDeleteChannel(id: common.ChannelId): Promise<void>;
 
-  // personal sidebar sections (always scoped by the owner's userId)
-  listSections(userId: common.UserId): Promise<SectionRow[]>;
-  getSection(userId: common.UserId, id: string): Promise<SectionRow | null>;
+  // org-wide sidebar sections (one shared set; writes gated by chat:manage_sections)
+  listSections(): Promise<SectionRow[]>;
+  getSection(id: string): Promise<SectionRow | null>;
   createSection(row: SectionRow): Promise<void>;
   updateSection(row: SectionRow): Promise<void>;
   /** Delete the section and its channel assignments (channels themselves stay). */
-  deleteSection(userId: common.UserId, id: string): Promise<boolean>;
-  /** channelId -> sectionId for the user's assigned channels. */
-  sectionAssignments(userId: common.UserId): Promise<Map<string, string>>;
+  deleteSection(id: string): Promise<boolean>;
+  /** channelId -> sectionId, only for channels `viewerId` can read (public, or a member of
+   *  the private one) so a private channel's id never leaks to a non-member. */
+  sectionAssignments(viewerId: common.UserId): Promise<Map<string, string>>;
   /** sectionId null = unassign. */
-  setChannelSection(userId: common.UserId, channelId: common.ChannelId, sectionId: string | null): Promise<void>;
+  setChannelSection(channelId: common.ChannelId, sectionId: string | null): Promise<void>;
 }
 
 import type { SlackImporter } from "./slack-import";
