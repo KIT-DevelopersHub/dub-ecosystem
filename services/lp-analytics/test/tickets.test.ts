@@ -331,8 +331,8 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       success_url: "https://hokuriku-it-conf.com/tickets/thanks?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://hokuriku-it-conf.com/tickets?canceled=1",
       locale: "ja",
-      "payment_method_types[0]": "card",
     });
+    expect(c.form!.has("payment_method_types[0]")).toBe(false);
     const orderId = c.form!.get("client_reference_id");
     expect(c.form!.get("metadata[order_id]")).toBe(orderId);
     expect(Number(c.form!.get("expires_at")) - NOW_SEC).toBeGreaterThanOrEqual(1800);
