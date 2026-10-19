@@ -42,6 +42,7 @@ import { ChatService, type ReqCtx } from "./service";
 import { POLICY_TABLE } from "./policy-table";
 import { validateUnfurlUrl, UNFURL_CACHE_TTL_SECONDS, type UnfurlResponse } from "./unfurl";
 import type { SlackImporter } from "./slack-import";
+import type { CustomEmojis } from "./custom-emoji";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getDubCtx(c: Context): RequestContext | undefined {
@@ -322,6 +323,45 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.post("/chat/slack-import/jobs/:id/step", async (c) => {
     reqCtx(c);
     return c.json(await importer().step(c.req.param("id")));
+  });
+
+  // ---- custom emoji (reactions render ":name:" as the image when a row exists) ----
+  // List + image are 閲覧 (every chat reader renders reactions); the Slack import is 編集 +
+  // chat:emoji_import (admin only by default). All three rules are in POLICY_TABLE.
+  const emojis = (): CustomEmojis => {
+    if (!deps.customEmoji) throw errors.preconditionFailed("custom_emoji_not_configured");
+    return deps.customEmoji;
+  };
+  app.get("/chat/custom-emojis", async (c) => {
+    reqCtx(c);
+    return c.json(deps.customEmoji ? await deps.customEmoji.list() : { items: [] });
+  });
+  app.get("/chat/custom-emojis/:name/image", async (c) => {
+    reqCtx(c);
+    const img = await emojis().image(c.req.param("name"));
+    if (!img) throw errors.notFound("custom_emoji", c.req.param("name"));
+    // Stored bytes as-is (GIF animation kept). Raster types only (no SVG at import), and the
+    // CSP/nosniff pair keeps a directly-opened image inert anyway.
+    const headers: Record<string, string> = {
+      "content-type": img.contentType,
+      "cache-control": "private, max-age=86400",
+      etag: img.etag,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
+    };
+    if (c.req.header("if-none-match") === img.etag) {
+      await img.body.cancel().catch(() => undefined);
+      return new Response(null, { status: 304, headers });
+    }
+    return new Response(img.body as unknown as BodyInit, { status: 200, headers: { ...headers, "content-length": String(img.size) } });
+  });
+  app.post("/chat/custom-emojis/slack-import", async (c) => {
+    const ctx = reqCtx(c);
+    const body = await readJson<{ after?: unknown }>(c);
+    if (body.after !== undefined && body.after !== null && typeof body.after !== "string") {
+      throw errors.validationFailed([{ field: "after", reason: "invalid" }]);
+    }
+    return c.json(await emojis().importFromSlack(typeof body.after === "string" ? body.after : null, ctx.userId));
   });
 
   return app;

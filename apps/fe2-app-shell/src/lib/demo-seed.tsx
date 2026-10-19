@@ -25,7 +25,7 @@ import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
-import { createSlackImportSim, mockUnfurl, type ImportedChannel } from "../composition/featureEntries";
+import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -54,6 +54,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:moderate",
   "chat:delete_channel",
   "chat:slack_import",
+  "chat:emoji_import",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -1628,7 +1629,19 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
   // unfurl for known hosts; none for unknown) is visible without typing anything.
   const generalMessages = [
     msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
-    msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+    // Custom emoji reactions: :kit-dev: is registered from the start (image), :partyparrot:
+    // only after an admin runs 「Slack の絵文字を取り込む」 (text until then — the before/after).
+    msg({
+      id: "msg_01SEEDGEN0000000000000WEL",
+      authorId: ME_ID,
+      body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉",
+      createdAt: "2026-08-01T00:05:00.000Z",
+      reactions: [
+        { emoji: "🎉", userIds: ["usr_bob", "usr_emi"] },
+        { emoji: ":kit-dev:", userIds: ["usr_bob", ME_ID] },
+        { emoji: ":partyparrot:", userIds: ["usr_emi"] },
+      ],
+    }),
     msg({
       id: "msg_01SEEDGEN0000000000000URL",
       authorId: "usr_bob",
@@ -1649,7 +1662,44 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       body: "<!team:team_hq> 明日の定例は 10:00 開始に変更します。<!team:team_corp> 契約書のレビューもお願いします 🙏",
       createdAt: "2026-08-01T00:14:00.000Z",
     }),
+    // メッセージリンクの展開 (Slack unfurl): 同じチャンネル / DM / 読めないメッセージへのリンク。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZUL",
+      authorId: "usr_emi",
+      body: `LP の場所はこのメッセージにまとまっています ${demoMessageLink("chn_general", "msg_01SEEDGEN0000000000000URL")}`,
+      createdAt: "2026-08-01T00:16:00.000Z",
+    }),
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZUM",
+      authorId: ME_ID,
+      body: `DM で相談された件です ${demoMessageLink("chn_dm_bob", "msg_01SEEDDMB0000000000000001")} 削除されたメッセージへのリンクはこう見えます ${demoMessageLink("chn_general", "msg_01SEEDGEN000000000000GONE")}`,
+      createdAt: "2026-08-01T00:18:00.000Z",
+    }),
+    // 転送 (Slack の「メッセージを転送する」): 引用カードで表示される。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZVF",
+      authorId: "usr_bob",
+      body: buildForwardBody({
+        comment: "定例の変更、全体にも共有しておきます",
+        text: "明日の定例は 10:00 開始に変更します。",
+        authorName: "佐藤 太郎",
+        sourceChannelName: "#team-soukatsu",
+      }),
+      createdAt: "2026-08-01T00:20:00.000Z",
+    }),
   ];
+  // 「後で」: the demo admin starts with saved items, reminders and one 完了 (this device only).
+  seedLaterDemoPrefs(ME_ID, {
+    saved: [
+      { messageId: "msg_01SEEDGEN0000000000000URL", channelId: "chn_general", authorId: "usr_bob", excerpt: "LP の最新版はこちらです https://developershub.jp/conf/2026" },
+      { messageId: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", excerpt: "LP の文言、確認してもらえますか？急ぎではないです 🙏" },
+    ],
+    reminders: [
+      { messageId: "msg_01SEEDGEN0000000000000ZTM", channelId: "chn_general", authorId: "usr_bob", excerpt: "@統括チーム 明日の定例は 10:00 開始に変更します。", inMinutes: 180 },
+      { messageId: "msg_01SEEDGEN0000000000000UR2", channelId: "chn_general", authorId: ME_ID, excerpt: "こっちは画像なしのサイトです https://example.com/", inMinutes: 60 * 24 * 3 },
+    ],
+    completed: [{ messageId: "msg_01SEEDGEN0000000000000WEL", channelId: "chn_general", authorId: ME_ID, excerpt: "北陸ITカンファレンス運営チャンネルへようこそ 🎉" }],
+  });
   // Posted messages persist for the session (per channel) so a sent URL renders
   // its card in place; ids are minted ascending so they sort after the seed.
   const posted = new Map<string, ReturnType<typeof msg>[]>();
@@ -1678,6 +1728,8 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
     authors: { me: ME_ID, a: "usr_bob", b: "usr_emi", disabled: "usr_ken" },
     onDone: materializeImport,
   });
+  // カスタム絵文字 (Slack): the shared fe6 simulator (two pre-imported, the rest on import).
+  const customEmoji = createCustomEmojiSim();
   const simResponse = (r: ReturnType<typeof slackImport.step>): Response =>
     r.ok ? json(r.value, r.status) : json({ error: { code: r.code, message: r.message, retryable: false } } satisfies ErrorResponse, r.status);
 
@@ -1689,6 +1741,40 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
   ];
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (pathname.startsWith("/api/v1/chat/custom-emojis")) {
+      if (method === "GET" && pathname === "/api/v1/chat/custom-emojis") return json({ items: customEmoji.list() });
+      if (method === "POST" && pathname === "/api/v1/chat/custom-emojis/slack-import") {
+        const after = (body as { after?: unknown } | null)?.after;
+        return json(customEmoji.importStep(typeof after === "string" ? after : null));
+      }
+      const img = /^\/api\/v1\/chat\/custom-emojis\/([^/]+)\/image$/.exec(pathname);
+      if (img && method === "GET") {
+        const found = customEmoji.image(decodeURIComponent(img[1]!));
+        if (!found) return notFound(`GET ${pathname}`);
+        return new Response(found.body, { status: 200, headers: { "content-type": found.contentType, "cache-control": "private, max-age=86400" } });
+      }
+      return null;
+    }
+    {
+      // Reaction toggle (Slack-parity, incl. custom ":name:") on any demo message — mutated in
+      // place so the reaction survives a timeline refetch for the session.
+      const m = /^\/api\/v1\/chat\/messages\/([^/]+)\/reactions$/.exec(pathname);
+      if (m && method === "POST") {
+        const id = decodeURIComponent(m[1]!);
+        const emoji = (body as { emoji?: unknown } | null)?.emoji;
+        if (typeof emoji !== "string" || !emoji) return validationFailed("emoji is required");
+        const all = [...generalMessages, ...dmMessages, ...[...imported.values()].flatMap((x) => x.messages), ...[...posted.values()].flat()] as DemoMessage[];
+        const target = all.find((x) => x.id === id);
+        if (!target) return notFound(`POST ${pathname}`);
+        const me = currentAccount().id;
+        const reactions = ((target.reactions as { emoji: string; userIds: string[] }[] | undefined) ?? []).map((r) => ({ ...r, userIds: [...r.userIds] }));
+        const r = reactions.find((x) => x.emoji === emoji);
+        if (!r) reactions.push({ emoji, userIds: [me] });
+        else r.userIds = r.userIds.includes(me) ? r.userIds.filter((u) => u !== me) : [...r.userIds, me];
+        target.reactions = reactions.filter((x) => x.userIds.length > 0);
+        return json({ messageId: id, reactions: target.reactions });
+      }
+    }
     if (pathname.startsWith("/api/v1/chat/slack-import/")) {
       if (method === "GET" && pathname === "/api/v1/chat/slack-import/channels") return json({ items: slackImport.listChannels() });
       if (method === "GET" && pathname === "/api/v1/chat/slack-import/jobs") {

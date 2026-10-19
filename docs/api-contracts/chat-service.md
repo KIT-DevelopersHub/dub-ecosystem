@@ -179,6 +179,9 @@ All external paths are under the gateway mount `/api/v1/chat` (native: `/m/v1/ch
 | `DELETE /api/v1/chat/messages/:id` | session + author or admin | Soft-delete a message (idempotent) |
 | `POST /api/v1/chat/messages/:id/reactions` | session + member | Toggle the caller's reaction |
 | `GET /api/v1/chat/unread` | session | Per-channel unread summary for the caller |
+| `GET /api/v1/chat/custom-emojis` | session + チャット閲覧 | Workspace custom emoji (`{ items: CustomEmoji[] }`) |
+| `GET /api/v1/chat/custom-emojis/:name/image` | session + チャット閲覧 | Image bytes (alias -> target), original content type, `private, max-age=86400` + ETag |
+| `POST /api/v1/chat/custom-emojis/slack-import` | session + チャット編集 + `chat:emoji_import` ⚠ | One resumable Slack import batch (body `{ after }` -> `nextAfter`) |
 | `POST /internal/system-messages` | `x-dub-internal: 1` (notification only) | Deliver a system post to a channel or a user's DM |
 | `GET /health` | none | Liveness (`{ "status": "ok", "service": "chat-service" }`) |
 
@@ -433,6 +436,9 @@ Request (`ReactionToggleRequest`):
 ```json
 { "emoji": "👍" }
 ```
+
+A custom emoji is reacted with its shortcode (`":partyparrot:"`); when a `chat_custom_emojis`
+row of that name exists, clients render it as the image (see `GET /custom-emojis`).
 
 Empty emoji -> `VALIDATION_FAILED` (`required`). A missing / deleted message -> `404`.
 Response `200` (`ReactionToggleResponse`) — the message's full reaction map after the toggle:

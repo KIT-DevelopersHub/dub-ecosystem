@@ -114,6 +114,18 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /chat/slack-import/jobs": appLevel("chat", "edit", "chat:slack_import"),
   "GET /chat/slack-import/jobs/:id": appLevel("chat", "edit", "chat:slack_import"),
   "POST /chat/slack-import/jobs/:id/step": appLevel("chat", "edit", "chat:slack_import"),
+
+  // ---- custom emoji ----
+  // List + image are what every reader needs to RENDER a reaction (":name:" -> image), so they
+  // sit with the other 閲覧 reads. They carry no channel data (workspace-wide emoji set), so
+  // there is no channel-scoped half to pair with in the handler.
+  "GET /chat/custom-emojis": appLevel("chat", "view"),
+  "GET /chat/custom-emojis/:name/image": appLevel("chat", "view"),
+  // Slack emoji import: 編集 + chat:emoji_import (dangerous key — writes org-wide rows + R2
+  // objects and fetches from Slack). Its own toggle in ロール管理 > チャット > 細かい権限
+  // (identity 0023: admin only by default), separate from chat:slack_import so emoji can be
+  // delegated without handing out channel import.
+  "POST /chat/custom-emojis/slack-import": appLevel("chat", "edit", "chat:emoji_import"),
 });
 
 // NOT in this table, deliberately — both are outside the HTTP app entirely:

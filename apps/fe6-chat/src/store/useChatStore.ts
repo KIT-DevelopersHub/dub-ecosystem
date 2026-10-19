@@ -26,6 +26,8 @@ interface ChatStore {
   setTeams: (teams: TeamSummary[], myTeamIds: string[]) => void;
   applyEvent: (event: ChatRealtimeEvent, currentUserId: common.UserId) => void;
   markRead: (channelId: common.ChannelId, lastReadMessageId: common.MessageId) => void;
+  /** Replace one channel's unread entry (「未読にする」 — optimistic, then server value). */
+  setChannelUnread: (summary: UnreadSummary) => void;
   /** Forget a deleted channel's unread entry (nav badge must not count it). */
   dropChannel: (channelId: common.ChannelId) => void;
 }
@@ -43,6 +45,7 @@ export const useChatStore = create<ChatStore>((set) => ({
     set((s) => ({ unread: applyUnreadEvent(s.unread, event, s.activeChannelId, currentUserId, s.myTeamIds) })),
   markRead: (channelId, lastReadMessageId) =>
     set((s) => ({ unread: clearUnread(s.unread, channelId, lastReadMessageId) })),
+  setChannelUnread: (summary) => set((s) => ({ unread: { ...s.unread, [summary.channelId]: summary } })),
   dropChannel: (channelId) =>
     set((s) => {
       const { [channelId]: _dropped, ...rest } = s.unread;

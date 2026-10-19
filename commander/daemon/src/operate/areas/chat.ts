@@ -9,6 +9,7 @@ const CREATE = { keys: ["chat:create"], appLevel: { app: "chat", level: "edit" }
 const SCOPE_OUT = "依頼範囲外（ピン留め・リアクションは依頼表に無い）";
 const SIDEBAR = "ボット自身のサイドバーのセクション分けで、Dub のデータではない";
 const SLACK_IMPORT = "Slack 履歴の一括取り込みで、管理者が画面から実行する移行作業。エージェントの操作対象にしない";
+const CUSTOM_EMOJI = "リアクション描画用の絵文字画像の一覧・配信で、依頼表に無い";
 const CHANNEL_ADMIN = "ボットがそのチャンネルの管理者（自分で作ったチャンネル等）でないと拒否される";
 
 export const CHAT: AreaSpec = {
@@ -276,6 +277,9 @@ export const CHAT: AreaSpec = {
     { service: S, route: "POST /chat/slack-import/jobs", reason: SLACK_IMPORT },
     { service: S, route: "GET /chat/slack-import/jobs/:id", reason: SLACK_IMPORT },
     { service: S, route: "POST /chat/slack-import/jobs/:id/step", reason: SLACK_IMPORT },
+    { service: S, route: "POST /chat/custom-emojis/slack-import", reason: SLACK_IMPORT },
+    { service: S, route: "GET /chat/custom-emojis", reason: CUSTOM_EMOJI },
+    { service: S, route: "GET /chat/custom-emojis/:name/image", reason: CUSTOM_EMOJI },
   ],
   pending: [],
   ownerOpenedIrreversible: {
