@@ -12,6 +12,7 @@ import { useChatStore } from "../store/useChatStore";
 import { useChannelView } from "../hooks/useChannelView";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ReadTracker } from "../store/read-tracker";
+import { newClientTempId } from "../lib/ulid";
 import { mapChatError } from "../lib/errors";
 import { ChatApiError, IDENTITY_BATCH_MAX } from "../api/client";
 import type { Attachment, Channel, ChannelMember, Message, SearchHit, TeamSummary } from "../api/contract";
@@ -23,11 +24,20 @@ import { MessageComposer } from "./MessageComposer";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { SearchResults } from "./SearchResults";
 import { ThreadPane } from "./ThreadPane";
+import { ForwardMessageModal } from "./ForwardMessageModal";
+import { MessageActionsContext, type MessageActions } from "./MessageActions";
 import { channelHandle, channelLabel } from "../lib/dm";
+import { toPlainMentions } from "../lib/mentions";
+import { countUnreadAfter, messagePermalink, unreadMarkerFor } from "../lib/forward";
+import { REMINDER_PRESETS, reminderDueAt, useMessagePrefs, type SavedMessageRef } from "../lib/message-prefs";
 import styles from "../styles/chat.module.css";
 
 const MAX_MENTION_CANDIDATES = 8;
 const MAX_TEAM_CANDIDATES = 3;
+
+// A bookmark in another channel: remembered across the channel switch (ChannelPage
+// remounts per channel) and consumed like a ?message= deep link.
+let pendingJump: string | null = null;
 
 export function ChannelPage({
   channelId,
@@ -38,6 +48,8 @@ export function ChannelPage({
   onOpenMobileNav,
   sections,
   initialDetailsTab,
+  forwardTargets = [],
+  resolveChannelName,
 }: {
   channelId: common.ChannelId;
   onThreadOpenChange?: (open: boolean) => void;
@@ -52,11 +64,30 @@ export function ChannelPage({
   sections?: ChannelDetailsSections;
   // Open the details modal on mount (legacy /chat/channels/:id/settings deep link).
   initialDetailsTab?: ChannelDetailsTab;
+  // 転送先の候補 (サイドバーと同じ表示名) と、ブックマーク一覧のチャンネル名解決。
+  forwardTargets?: { id: common.ChannelId; label: string; archived: boolean }[];
+  resolveChannelName?: (id: common.ChannelId) => string | undefined;
 }) {
   const { api, can, currentUserId } = useChatRuntime();
-  const view = useChannelView(channelId);
   const { show } = useToast();
+  // 「新しい返信の通知を受け取る」: a reply by someone else to a followed message.
+  const follows = useMessagePrefs((s) => s.follows);
+  const followsRef = useRef(follows);
+  followsRef.current = follows;
+  const view = useChannelView(channelId, {
+    onEvent: (e) => {
+      if (e.kind !== "message.created" || !e.threadRootId || e.authorId === currentUserId) return;
+      if (!followsRef.current.includes(e.threadRootId)) return;
+      show({ kind: "info", title: "フォロー中のスレッドに新しい返信があります", description: e.body.slice(0, 80) });
+    },
+  });
   const markRead = useChatStore((s) => s.markRead);
+  const setChannelUnread = useChatStore((s) => s.setChannelUnread);
+  const bookmarks = useMessagePrefs((s) => s.bookmarks);
+  const toggleBookmarkPref = useMessagePrefs((s) => s.toggleBookmark);
+  const addReminderPref = useMessagePrefs((s) => s.addReminder);
+  const toggleFollowPref = useMessagePrefs((s) => s.toggleFollow);
+  const [forwarding, setForwarding] = useState<Message | null>(null);
   // 運営チーム (チーム単位メンション) は ChatApp が一度だけ読み込み store に載せる。
   const teams = useChatStore((s) => s.teams);
   const myTeamIds = useChatStore((s) => s.myTeamIds);
@@ -290,6 +321,127 @@ export function ChannelPage({
     [show],
   );
 
+  // ?message=<id> (「リンクをコピー」で作ったリンク) — jump once the row is loaded.
+  const [initialJump] = useState<string | null>(() => {
+    const v = pendingJump ?? new URLSearchParams(globalThis.location?.search ?? "").get("message");
+    pendingJump = null;
+    return v;
+  });
+  const deepLinkRef = useRef(initialJump);
+  useEffect(() => {
+    const target = deepLinkRef.current;
+    if (!target || !view.state.messages.some((m) => m.id === target)) return;
+    deepLinkRef.current = null;
+    globalThis.setTimeout(() => jumpToMessage(target as common.MessageId), 0);
+  }, [view.state.messages, jumpToMessage]);
+
+  const plainText = useCallback(
+    (m: Message) => toPlainMentions(m.body, (id) => users[id]?.displayName, (id) => resolveTeam(id)?.name),
+    [users, resolveTeam],
+  );
+  const refOf = useCallback(
+    (m: Message): SavedMessageRef => ({
+      messageId: m.id,
+      channelId: m.channelId,
+      authorId: m.authorId,
+      excerpt: plainText(m).slice(0, 140),
+    }),
+    [plainText],
+  );
+
+  const copyToClipboard = useCallback(
+    (text: string, done: string) => {
+      const clip = globalThis.navigator?.clipboard;
+      if (!clip) {
+        show({ kind: "error", title: "コピーできませんでした", description: "このブラウザはクリップボードに対応していません" });
+        return;
+      }
+      clip.writeText(text).then(
+        () => show({ kind: "success", title: done }),
+        () => show({ kind: "error", title: "コピーできませんでした", description: "ブラウザがクリップボードへの書き込みを許可しませんでした" }),
+      );
+    },
+    [show],
+  );
+
+  const messageActions = useMemo<MessageActions>(() => {
+    const bookmarked = new Set(bookmarks.map((b) => b.messageId));
+    return {
+      isBookmarked: (id) => bookmarked.has(id),
+      isFollowing: (id) => follows.includes(id),
+      canMarkUnread: (m) => m.threadRootId === null && m.channelId === channelId,
+      // Optimistic: divider + sidebar badge move at once, then the server's count wins.
+      markUnread: (m) => {
+        const marker = unreadMarkerFor(view.state.messages, m.id);
+        tracker.current?.cancel();
+        view.setLastRead(marker);
+        setChannelUnread({
+          channelId,
+          lastReadMessageId: marker,
+          unreadCount: countUnreadAfter(view.state.messages, marker, currentUserId),
+          mentioned: false,
+        });
+        show({ kind: "success", title: "このメッセージから未読にしました" });
+        api
+          .updateReadState({ channelId, lastReadMessageId: marker })
+          .then(() => api.listUnread())
+          .then((all) => {
+            const mine = all.find((u) => u.channelId === channelId);
+            if (mine) setChannelUnread(mine);
+          })
+          .catch((err) => failToast("未読にできませんでした", err));
+      },
+      toggleBookmark: (m) => {
+        const on = toggleBookmarkPref(refOf(m));
+        show({ kind: "success", title: on ? "ブックマークに追加しました" : "ブックマークから削除しました" });
+      },
+      addReminder: (m, preset) => {
+        addReminderPref(refOf(m), reminderDueAt(preset, new Date()));
+        const label = REMINDER_PRESETS.find((p) => p.id === preset)?.label ?? "";
+        show({ kind: "success", title: `${label}にリマインドします`, description: "この端末でチャットを開いている間に通知します" });
+      },
+      copyLink: (m) => copyToClipboard(messagePermalink(globalThis.location, m.channelId, m.id), "リンクをコピーしました"),
+      toggleFollow: (m) => {
+        const on = toggleFollowPref(m.threadRootId ?? m.id);
+        show({ kind: "success", title: on ? "新しい返信を通知します" : "返信の通知をオフにしました" });
+      },
+      copyText: (m) => copyToClipboard(plainText(m), "メッセージをコピーしました"),
+      forward: (m) => setForwarding(m),
+    };
+  }, [
+    api,
+    bookmarks,
+    follows,
+    channelId,
+    currentUserId,
+    view,
+    setChannelUnread,
+    toggleBookmarkPref,
+    addReminderPref,
+    toggleFollowPref,
+    refOf,
+    plainText,
+    copyToClipboard,
+    failToast,
+    show,
+  ]);
+
+  const onForward = useCallback(
+    async (target: common.ChannelId, body: string) => {
+      try {
+        // Same channel: through the timeline so the row appears optimistically.
+        if (target === channelId) await view.send(body);
+        else await api.postMessage({ channelId: target, body, clientTempId: newClientTempId() });
+      } catch (err) {
+        failToast("転送できませんでした", err);
+        throw err;
+      }
+      const name = forwardTargets.find((c) => c.id === target)?.label ?? "";
+      show({ kind: "success", title: `${name} に転送しました` });
+    },
+    [api, channelId, view, forwardTargets, failToast, show],
+  );
+
   // Optimistic: the modal/header reflect the patch at once; on failure only this
   // patch is reverted (version conflict included) and the reason is toasted.
   const onUpdateChannel = useCallback(
@@ -381,7 +533,7 @@ export function ChannelPage({
   const searchOpen = searchQuery.trim().length >= 2;
 
   return (
-    <>
+    <MessageActionsContext.Provider value={messageActions}>
       <section className={styles.main}>
         {shownChannel && (
           <ChannelHeader
@@ -398,6 +550,14 @@ export function ChannelPage({
             onUnpin={onUnpin}
             onJumpToMessage={jumpToMessage}
             onOpenMobileNav={onOpenMobileNav}
+            bookmarks={bookmarks}
+            resolveChannelName={resolveChannelName}
+            onOpenBookmark={(b) => {
+              if (b.channelId === channelId) return jumpToMessage(b.messageId);
+              pendingJump = b.messageId;
+              onSelectChannel?.(b.channelId);
+            }}
+            onRemoveBookmark={(b) => toggleBookmarkPref(b)}
           />
         )}
         {searchOpen && (
@@ -509,7 +669,18 @@ export function ChannelPage({
         onCancel={() => setPendingDelete(null)}
         testId="fe6-timeline-delete-confirm"
       />
-    </>
+
+      {forwarding && (
+        <ForwardMessageModal
+          sourceChannelName={shownChannel ? channelHandle(shownChannel, shownChannel.name) : ""}
+          channels={forwardTargets}
+          authorName={forwarding.authorId === null ? "システム" : (users[forwarding.authorId]?.displayName ?? forwarding.authorId)}
+          preview={plainText(forwarding)}
+          onClose={() => setForwarding(null)}
+          onForward={onForward}
+        />
+      )}
+    </MessageActionsContext.Provider>
   );
 }
 

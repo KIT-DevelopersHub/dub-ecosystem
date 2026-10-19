@@ -2,7 +2,7 @@
 // (when a thread is open) the right thread pane. In admin-spa the routes in
 // feature.tsx drive channel selection via TanStack Router params; standalone we
 // keep selection in local state and persist the last channel (design §3).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog, Drawer, Icon, ToastProvider } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
@@ -21,6 +21,8 @@ import { SlackImportModal } from "./slack-import/SlackImportModal";
 import { EmojiImportModal } from "./custom-emoji/EmojiImportModal";
 import { CustomEmojiProvider } from "./CustomEmoji";
 import { useChatSections } from "../hooks/useChatSections";
+import { useMessageReminders } from "../hooks/useMessageReminders";
+import { useMessagePrefs } from "../lib/message-prefs";
 import { channelLabel } from "../lib/dm";
 import styles from "../styles/chat.module.css";
 
@@ -168,6 +170,29 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
     [currentUserId, dmUsers, dmUsersFailed],
   );
 
+  // Message menu prefs (bookmarks / reminders / follows / frequent reactions) are per user.
+  const hydratePrefs = useMessagePrefs((s) => s.hydrate);
+  useEffect(() => hydratePrefs(currentUserId), [hydratePrefs, currentUserId]);
+  const channelHandleOf = useCallback(
+    (c: Channel) => {
+      const label = labelOf(c) ?? c.name;
+      return c.type === "dm" ? label : `#${label}`;
+    },
+    [labelOf],
+  );
+  const resolveChannelName = useCallback(
+    (id: common.ChannelId) => {
+      const c = channels.find((x) => x.id === id);
+      return c ? channelHandleOf(c) : undefined;
+    },
+    [channels, channelHandleOf],
+  );
+  const forwardTargets = useMemo(
+    () => channels.map((c) => ({ id: c.id, label: channelHandleOf(c), archived: c.archived })),
+    [channels, channelHandleOf],
+  );
+  useMessageReminders(resolveChannelName);
+
   const onStartDm = useCallback(
     async (peers: identity.UserSummary[]) => {
       setDmUsers((prev) => {
@@ -281,6 +306,8 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
           onChannelsChanged={() => void reloadChannels()}
           onChannelDeleted={onChannelDeleted}
           onOpenMobileNav={isMobile ? () => setMobileNavOpen(true) : undefined}
+          forwardTargets={forwardTargets}
+          resolveChannelName={resolveChannelName}
           sections={{
             items: sections.sections,
             currentSectionId: sections.assignments[active] ?? null,

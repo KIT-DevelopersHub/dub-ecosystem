@@ -852,6 +852,95 @@
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-primary);
 }
+/* forward = the reply arrow mirrored (no dedicated icon in @dub/ui) */
+.forwardIcon {
+  transform: scaleX(-1);
+}
+
+/* Slack-style 「その他」 menu */
+.msgMenuWrap {
+  position: relative;
+  display: inline-flex;
+}
+.msgMenuPanel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--dub-space-2) 0;
+  background: var(--dub-color-surface-overlay);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-lg, var(--dub-shadow-md));
+  z-index: var(--dub-zIndex-dropdown);
+}
+.msgMenuUp {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+.msgMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--dub-space-2) var(--dub-space-4);
+  border: none;
+  background: transparent;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.msgMenuItem:hover,
+.msgMenuItem:focus-visible {
+  background: var(--dub-color-brand-600);
+  color: var(--dub-color-text-inverse);
+  outline: none;
+}
+.msgMenuSubItem {
+  padding-left: var(--dub-space-6);
+}
+.msgMenuDanger {
+  color: var(--dub-color-danger-600);
+}
+.msgMenuDanger:hover,
+.msgMenuDanger:focus-visible {
+  background: var(--dub-color-danger-600);
+}
+.msgMenuChevron {
+  opacity: 0.7;
+}
+.msgMenuSeparator {
+  height: 1px;
+  margin: var(--dub-space-2) 0;
+  background: var(--dub-color-border-default);
+}
+
+/* forward dialog */
+.forwardForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+.forwardPreview {
+  padding: var(--dub-space-3);
+  border-left: 3px solid var(--dub-color-border-strong);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.forwardPreviewAuthor {
+  display: block;
+  margin-bottom: var(--dub-space-1);
+  font-weight: 600;
+  color: var(--dub-color-text-primary);
+}
 
 /* optimistic pending / failed rows */
 .pending {
@@ -2381,4 +2470,13 @@
   font-weight: var(--dub-font-weight-bold);
   color: var(--dub-color-text-primary);
   cursor: pointer;
+}
+
+/* bookmark list: source channel above the excerpt */
+.bookmarkChannel {
+  display: block;
+  margin-bottom: var(--dub-space-1);
+  font-size: var(--dub-font-size-xs);
+  font-weight: 600;
+  color: var(--dub-color-text-muted);
 }

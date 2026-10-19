@@ -8,6 +8,7 @@ import type { common, identity } from "@dub/types";
 import type { Channel, ChannelMember, Message, TeamSummary } from "../api/contract";
 import { getPresence } from "../lib/presence";
 import { toPlainMentions } from "../lib/mentions";
+import type { Bookmark } from "../lib/message-prefs";
 import styles from "../styles/chat.module.css";
 
 export interface ChannelHeaderProps {
@@ -28,6 +29,11 @@ export interface ChannelHeaderProps {
   // button itself is only shown under the mobile breakpoint via CSS, so passing
   // this has no visual effect on desktop.
   onOpenMobileNav?: () => void;
+  /** 「ブックマークに追加」 したメッセージ (全チャンネル・新しい順). */
+  bookmarks?: Bookmark[];
+  resolveChannelName?: (id: common.ChannelId) => string | undefined;
+  onOpenBookmark?: (bookmark: Bookmark) => void;
+  onRemoveBookmark?: (bookmark: Bookmark) => void;
 }
 
 function initials(name: string): string {
@@ -105,6 +111,10 @@ export function ChannelHeader({
   onUnpin,
   onJumpToMessage,
   onOpenMobileNav,
+  bookmarks,
+  resolveChannelName,
+  onOpenBookmark,
+  onRemoveBookmark,
 }: ChannelHeaderProps) {
   const isDm = channel.type === "dm";
   // authorId is null for system posts (pinned system message) — render "システム".
@@ -218,6 +228,58 @@ export function ChannelHeader({
             </div>
           )}
         </Dropdown>
+
+        {/* bookmarks (all channels) */}
+        {bookmarks && (
+          <Dropdown
+            trigger={
+              <>
+                <span aria-hidden>🔖</span>
+                {bookmarks.length > 0 && <span className={styles.pinCount}>{bookmarks.length}</span>}
+              </>
+            }
+            triggerClassName={styles.iconBtn}
+            triggerLabel="ブックマーク"
+            testId="fe6-bookmarks-open"
+          >
+            {(close) => (
+              <div className={styles.pinsPanel} data-testid="fe6-bookmarks-panel">
+                <div className={styles.dropdownTitle}>ブックマーク · {bookmarks.length}</div>
+                {bookmarks.length === 0 ? (
+                  <div className={styles.dropdownEmpty}>メッセージの「その他」からブックマークに追加できます</div>
+                ) : (
+                  <ul className={styles.pinsList}>
+                    {bookmarks.map((b) => (
+                      <li key={b.messageId} className={styles.pinsItem}>
+                        <div className={styles.pinsAuthor}>{initials(nameOf(b.authorId))}</div>
+                        <button
+                          type="button"
+                          className={styles.pinsBody}
+                          onClick={() => {
+                            onOpenBookmark?.(b);
+                            close();
+                          }}
+                        >
+                          <span className={styles.bookmarkChannel}>{resolveChannelName?.(b.channelId) ?? "チャンネル"}</span>
+                          {b.excerpt || "(添付ファイル)"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.pinsUnpin}
+                          aria-label="ブックマークから削除"
+                          title="ブックマークから削除"
+                          onClick={() => onRemoveBookmark?.(b)}
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </Dropdown>
+        )}
 
         <label className={styles.searchBox}>
           <Icon name="search" size="sm" />

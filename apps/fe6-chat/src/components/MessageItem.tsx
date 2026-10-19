@@ -5,11 +5,11 @@
 //    code / fenced code blocks
 //  - attachments (images inline, files as chips)
 //  - reaction pills (+ emoji picker) and a thread reply summary (faces + "N replies")
-//  - a hover action bar (react / reply / edit / delete / pin)
+//  - a Slack-order hover bar (frequent reactions / picker / thread / forward / その他)
 //  - inline edit editor (author-only), Enter saves · Esc cancels
 // Edit/delete are gated by authorship + can("chat:moderate") (design §6).
 // Deleted messages render as a redacted tombstone. Test-ids preserved for units.
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Avatar, Icon } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import type { Message, TeamSummary } from "../api/contract";
@@ -18,6 +18,8 @@ import { LinkPreviews } from "./LinkPreview";
 import { Attachments } from "./Attachments";
 import { EmojiPicker } from "./EmojiPicker";
 import { ReactionEmoji } from "./CustomEmoji";
+import { MessageMoreMenu, useMessageActions } from "./MessageActions";
+import { topReactions, useMessagePrefs } from "../lib/message-prefs";
 import styles from "../styles/chat.module.css";
 
 export interface MessageItemProps {
@@ -56,8 +58,6 @@ function timeShort(iso: string): string {
   return new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
 }
 
-const QUICK_REACTIONS = ["👍", "🎉", "✅"];
-
 export function MessageItem({
   message,
   currentUserId,
@@ -83,6 +83,18 @@ export function MessageItem({
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
+  const actions = useMessageActions();
+  const reactionUsage = useMessagePrefs((s) => s.reactionUsage);
+  const recordReaction = useMessagePrefs((s) => s.recordReaction);
+  const quickReactions = useMemo(() => topReactions(reactionUsage), [reactionUsage]);
+  const bookmarked = actions?.isBookmarked(message.id) ?? false;
+
+  // Only adding counts toward よく使うリアクション (removing your own is not a "use").
+  const react = (emoji: string) => {
+    const mine = message.reactions.some((r) => r.emoji === emoji && r.userIds.includes(currentUserId));
+    if (!mine) recordReaction(emoji);
+    onToggleReaction?.(message.id, emoji);
+  };
 
   const startEdit = () => {
     setDraft(message.body);
@@ -105,66 +117,64 @@ export function MessageItem({
 
   return (
     <div className={rowClasses} data-testid="fe6-timeline-message" data-message-id={message.id}>
-      {/* hover action bar */}
+      {/* hover action bar (Slack order): frequent reactions · picker · thread · forward · more */}
       {!isDeleted && !editing && (
         <div className={styles.hoverActions} role="toolbar" aria-label="メッセージ操作">
-          <EmojiPicker
-            align="right"
-            direction="down"
-            trigger="😊"
-            triggerClassName={styles.hoverAction}
-            triggerLabel="リアクションを追加"
-            testId="fe6-timeline-react"
-            onPick={(e) => onToggleReaction?.(message.id, e)}
-          />
-          {QUICK_REACTIONS.map((e) => (
+          {quickReactions.map((e) => (
             <button
               key={e}
               type="button"
               className={styles.hoverAction}
               aria-label={`${e} を追加`}
-              onClick={() => onToggleReaction?.(message.id, e)}
+              title={`${e} でリアクション`}
+              data-testid="fe6-timeline-quick-reaction"
+              onClick={() => react(e)}
             >
-              {e}
+              <ReactionEmoji emoji={e} />
             </button>
           ))}
-          <button type="button" className={styles.hoverAction} aria-label="スレッドで返信" onClick={() => onReply?.(message)}>
-            <Icon name="reply" size="sm" />
-          </button>
-          {onTogglePin && (
+          <EmojiPicker
+            align="right"
+            direction="down"
+            trigger={<Icon name="smile" size="sm" />}
+            triggerClassName={styles.hoverAction}
+            triggerLabel="他のリアクションを探す"
+            testId="fe6-timeline-react"
+            onPick={react}
+          />
+          {onReply && (
             <button
               type="button"
               className={styles.hoverAction}
-              aria-label={pinned ? "ピン留めを解除" : "ピン留め"}
-              title={pinned ? "ピン留めを解除" : "ピン留め"}
-              data-testid="fe6-timeline-pin"
-              onClick={() => onTogglePin(message)}
+              aria-label="スレッドで返信する"
+              title="スレッドで返信する"
+              data-testid="fe6-timeline-reply"
+              onClick={() => onReply(message)}
             >
-              <Icon name="pin" size="sm" />
+              <Icon name="message-circle" size="sm" />
             </button>
           )}
-          {canEdit && (
+          {actions && (
             <button
               type="button"
               className={styles.hoverAction}
-              aria-label="編集"
-              data-testid="fe6-timeline-edit"
-              onClick={startEdit}
+              aria-label="メッセージを転送する"
+              title="メッセージを転送する"
+              data-testid="fe6-timeline-forward"
+              onClick={() => actions.forward(message)}
             >
-              <Icon name="edit" size="sm" />
+              <Icon name="reply" size="sm" className={styles.forwardIcon} />
             </button>
           )}
-          {canDelete && (
-            <button
-              type="button"
-              className={styles.hoverAction}
-              aria-label="削除"
-              data-testid="fe6-timeline-delete"
-              onClick={() => onDelete?.(message)}
-            >
-              <Icon name="trash" size="sm" />
-            </button>
-          )}
+          <MessageMoreMenu
+            message={message}
+            pinned={pinned}
+            canEdit={canEdit}
+            canDelete={canDelete}
+            {...(onTogglePin ? { onTogglePin: () => onTogglePin(message) } : {})}
+            onEdit={startEdit}
+            onDelete={() => onDelete?.(message)}
+          />
         </div>
       )}
 
@@ -187,6 +197,11 @@ export function MessageItem({
             {pinned && (
               <span className={styles.pinnedTag} title="ピン留め済み">
                 📌 ピン留め
+              </span>
+            )}
+            {bookmarked && (
+              <span className={styles.pinnedTag} title="ブックマーク済み" data-testid="fe6-timeline-bookmarked">
+                🔖 ブックマーク
               </span>
             )}
           </div>
@@ -249,7 +264,7 @@ export function MessageItem({
                   type="button"
                   className={`${styles.reaction} ${mine ? styles.mine : ""}`}
                   data-testid="fe6-timeline-reaction"
-                  onClick={() => onToggleReaction?.(message.id, r.emoji)}
+                  onClick={() => react(r.emoji)}
                 >
                   <ReactionEmoji emoji={r.emoji} />
                   <span className={styles.reactionCount}>{r.userIds.length}</span>
@@ -261,7 +276,7 @@ export function MessageItem({
               triggerClassName={styles.addReaction}
               triggerLabel="リアクションを追加"
               testId="fe6-timeline-add-reaction"
-              onPick={(e) => onToggleReaction?.(message.id, e)}
+              onPick={react}
             />
           </div>
         )}
