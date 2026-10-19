@@ -19,6 +19,14 @@ const PART: SelfParticipation = {
   lastName: "高岡", firstName: "己太朗", lastNameKana: null, firstNameKana: null,
   lastNameRomaji: null, firstNameRomaji: null, schoolEmail: "kota@school.ac.jp", gmail: "kota@gmail.com",
   phone: "090-0000-0000", grade: "3", department: "情報工学科", rosterNumber: null, studentNumber: null, desiredActivity: "both", note: null,
+  contact: "kota@developershub.jp",
+  operations: {
+    name: "高岡 己太朗",
+    roleTitle: "副代表",
+    status: "added",
+    teams: [{ id: "team_hq", name: "統括チーム", color: "#1e3a5f" }],
+    leaderName: null,
+  },
 };
 
 function setup(
@@ -128,6 +136,50 @@ describe("AccountSettingsDialog", () => {
     expect(arg.lastName).toBe("高岡"); // unchanged fields still sent
     // Profile was untouched → updateProfile not called.
     expect(updateProfile).not.toHaveBeenCalled();
+  });
+
+  it("shows the roster's 運営 fields read-only and saves an edited 連絡先", async () => {
+    const updateProfile = vi.fn(() => Promise.resolve({ displayName: "Kota", avatarUrl: null }));
+    const { updateSelfParticipation } = setup(updateProfile);
+
+    expect(await screen.findByTestId("fe2-account-ops-role")).toHaveTextContent("副代表");
+    expect(screen.getByTestId("fe2-account-ops-status")).toHaveTextContent("通常メンバー");
+    expect(screen.getByTestId("fe2-account-ops-teams")).toHaveTextContent("統括チーム");
+    expect(screen.getByTestId("fe2-account-ops-leader")).toHaveTextContent("なし");
+
+    const contact = screen.getByTestId("fe2-account-contact") as HTMLInputElement;
+    await waitFor(() => expect(contact.value).toBe("kota@developershub.jp"));
+    await userEvent.clear(contact);
+    await userEvent.type(contact, "@kota");
+    await userEvent.click(screen.getByTestId("fe2-account-settings-save"));
+
+    await waitFor(() => expect(updateSelfParticipation).toHaveBeenCalled());
+    const arg = (updateSelfParticipation as unknown as { mock: { calls: Array<[Record<string, unknown>]> } }).mock.calls[0]![0];
+    expect(arg.contact).toBe("@kota");
+    // 運営の項目は送らない (名簿で管理者が設定する)。
+    expect(arg).not.toHaveProperty("operations");
+    expect(arg).not.toHaveProperty("roleTitle");
+  });
+
+  it("fills 姓/名 from the roster name for legacy entries without the split", async () => {
+    const legacy: SelfParticipation = { ...PART, lastName: null, firstName: null };
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(queryKeys.me, ME);
+    const shellApi = {
+      auth: { updateProfile: vi.fn(), getSelfParticipation: vi.fn(() => Promise.resolve(legacy)), updateSelfParticipation: vi.fn() },
+    } as unknown as ApiClient;
+    render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <AccountSettingsDialog api={shellApi} open onClose={vi.fn()} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    const last = (await screen.findByTestId("fe2-part-lastName")) as HTMLInputElement;
+    await waitFor(() => expect(last.value).toBe("高岡"));
+    expect((screen.getByTestId("fe2-part-firstName") as HTMLInputElement).value).toBe("己太朗");
+    // 埋めただけでは未変更扱い (保存ボタンは押せない)。
+    expect(screen.getByTestId("fe2-account-settings-save")).toBeDisabled();
   });
 
   it("P12: flashes success on the save button, then closes (button-position feedback)", async () => {
