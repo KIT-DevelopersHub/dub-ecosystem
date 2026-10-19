@@ -188,6 +188,13 @@ test("previewBar lists every previewed feature in one bar", () => {
   assert.match(previewBar(["チケット販売", "登壇者募集"]), /チケット販売・登壇者募集のプレビュー表示中です/);
 });
 
+test("previewBar explains a live feature hidden by the 「なし」 preview", () => {
+  const bar = previewBar([], ["チケット販売"]);
+  assert.match(bar, /チケット販売を「なし」にしたプレビュー表示中です/);
+  assert.match(bar, /href="\/\?version=live"/);
+  assert.doesNotMatch(bar, /一般には公開されていません/);
+});
+
 test("proposalsPreview / proposalsCookie mirror the tickets preview, independently", () => {
   const u = new URL("https://lp.example/?version=3.5&proposals=on");
   assert.equal(proposalsPreview(u, null), "on");

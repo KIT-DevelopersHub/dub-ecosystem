@@ -216,9 +216,16 @@ export default {
       cfg?.enabled && cfg.preview ? "チケット販売" : null,
       spCfg?.enabled && spCfg.preview ? "登壇者募集" : null,
     ].filter((x): x is string => x !== null);
+    // 「なし」preview hiding a live feature: say so (incl. the /tickets 404) or it looks broken.
+    const hidden = isHtml
+      ? [
+          mode === "off" && (await ticketConfig(env))?.enabled ? "チケット販売" : null,
+          spMode === "off" && (await proposalConfig(env))?.enabled ? "登壇者募集" : null,
+        ].filter((x): x is string => x !== null)
+      : [];
     const inject =
       (r.preview ? previewBanner(r.version, published) : "") +
-      previewBar(previewing) +
+      previewBar(previewing, hidden) +
       ticketsInjection(cfg, false) +
       proposalsInjection(spCfg);
     if (inject) headers.delete("etag");

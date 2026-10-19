@@ -93,13 +93,16 @@ function featurePreview(
   }
 }
 
-/** Set-Cookie for ?<param>= (session) or ?version=live (clear); null otherwise. */
+// A session cookie survives browser restarts and kept a 「なし」 preview hiding the real /tickets for days.
+const FEATURE_PREVIEW_MAX_AGE = 3600;
+
+/** Set-Cookie for ?<param>= (1 h) or ?version=live (clear); null otherwise. */
 function featureCookie(param: string, cookie: string, url: URL): string | null {
   if (url.searchParams.get("version")?.trim().toLowerCase() === "live") {
     return `${cookie}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`;
   }
   const v = normalizeMode(url.searchParams.get(param));
-  return v ? `${cookie}=${v}; Path=/; SameSite=None; Secure; HttpOnly` : null;
+  return v ? `${cookie}=${v}; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=${FEATURE_PREVIEW_MAX_AGE}` : null;
 }
 
 /** チケット販売あり/なし (?tickets=on|off)。 */
