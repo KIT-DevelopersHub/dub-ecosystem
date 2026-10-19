@@ -38,6 +38,18 @@ export interface StripeClient {
   getCheckoutSession(id: string): Promise<CheckoutSession>;
 }
 
+/** sk_live_ / rk_live_ = real charges. sk_test_ / rk_test_ = sandbox. */
+export function isLiveStripeKey(key: string): boolean {
+  return /^(sk|rk)_live_/.test(key);
+}
+
+/** Live keys are refused unless STRIPE_ALLOW_LIVE="1" (fail-closed: no real charges by accident). */
+export function usableStripeKey(key: string | undefined, allowLive: string | undefined): string | null {
+  if (!key) return null;
+  if (isLiveStripeKey(key) && allowLive !== "1") return null;
+  return key;
+}
+
 type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
 export function toCheckoutSession(raw: unknown): CheckoutSession {

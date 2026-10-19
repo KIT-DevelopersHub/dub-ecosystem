@@ -1,6 +1,6 @@
 // LP チケット購入: LP管理 API (/lp/tickets*) + 公開 LP Worker 向け内部 API (/lp/internal/tickets*).
 import { describe, it, expect } from "vitest";
-import { createStripeClient, signStripePayload } from "../src/stripe";
+import { createStripeClient, signStripePayload, usableStripeKey } from "../src/stripe";
 import type { LpTicketOrdersPage, LpTicketsState, LpTicketTypeSummary } from "../src/types";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
@@ -603,5 +603,23 @@ describe("tickets gate", () => {
     const { app } = await makeApp("memory");
     expect((await app.fetch(send("POST", "/lp/internal/tickets/checkout", {}, {}))).status).toBe(404);
     expect((await app.fetch(send("POST", "/lp/internal/tickets/stripe-webhook", {}, {}))).status).toBe(404);
+  });
+});
+
+describe("usableStripeKey (no real charges unless STRIPE_ALLOW_LIVE=1)", () => {
+  it("accepts sandbox keys", () => {
+    expect(usableStripeKey("sk_test_abc", undefined)).toBe("sk_test_abc");
+    expect(usableStripeKey("rk_test_abc", undefined)).toBe("rk_test_abc");
+  });
+  it("refuses live keys without the flag", () => {
+    expect(usableStripeKey("sk_live_abc", undefined)).toBeNull();
+    expect(usableStripeKey("rk_live_abc", "0")).toBeNull();
+  });
+  it("accepts live keys only with STRIPE_ALLOW_LIVE=1", () => {
+    expect(usableStripeKey("sk_live_abc", "1")).toBe("sk_live_abc");
+  });
+  it("treats a missing key as not configured", () => {
+    expect(usableStripeKey(undefined, "1")).toBeNull();
+    expect(usableStripeKey("", undefined)).toBeNull();
   });
 });

@@ -7,7 +7,7 @@ import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1LpRepo } from "./d1-repo";
 import { createCfSiteTrafficSource } from "./site-traffic";
-import { createStripeClient } from "./stripe";
+import { createStripeClient, usableStripeKey } from "./stripe";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -32,6 +32,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     logger: (e) =>
       consoleSink({ level: "debug", message: "db", service: "lp-analytics", fields: { sql: e.sql, ms: e.durationMs } }),
   });
+  const stripeKey = usableStripeKey(env.STRIPE_SECRET_KEY, env.STRIPE_ALLOW_LIVE);
   return {
     repo: createD1LpRepo(db),
     authz: createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "lp-analytics", mode: "trustedHeader" }),
@@ -46,7 +47,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newOrderId: () => newId("tko"),
     dailyCheckoutCap:
       Number(env.LP_DAILY_CHECKOUT_CAP) > 0 ? Number(env.LP_DAILY_CHECKOUT_CAP) : DEFAULT_DAILY_CHECKOUT_CAP,
-    stripe: env.STRIPE_SECRET_KEY ? createStripeClient(env.STRIPE_SECRET_KEY) : null,
+    stripe: stripeKey ? createStripeClient(stripeKey) : null,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     newProposalId: () => newId("lpp"),
     dailyProposalCap:
