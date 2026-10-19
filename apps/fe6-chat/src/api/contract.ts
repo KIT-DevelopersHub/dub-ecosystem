@@ -207,7 +207,7 @@ export interface UnfurlResponse {
   preview: UnfurlPreview | null;
 }
 
-// Personal sidebar sections (Slack-style): per user, a channel sits in at most one.
+// Org-wide sidebar sections (Slack-style): one shared set, a channel sits in at most one.
 // Unassigned channels stay in the default groups (チャンネル / イベント / ダイレクト).
 export interface ChatSection {
   id: string;
