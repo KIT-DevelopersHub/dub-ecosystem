@@ -60,14 +60,14 @@ function toMemberRow(r: MemberDbRow): MemberRow {
 }
 interface SectionDbRow {
   id: string;
-  user_id: string;
+  created_by: string;
   name: string;
   position: number;
   created_at: string;
   updated_at: string;
 }
 function toSectionRow(r: SectionDbRow): SectionRow {
-  return { id: r.id, userId: r.user_id, name: r.name, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at };
+  return { id: r.id, createdBy: r.created_by, name: r.name, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at };
 }
 function toMessageRow(r: MessageDbRow): MessageRow {
   let attachments: string[] = [];
@@ -482,6 +482,7 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
         { sql: `DELETE FROM chat_pins WHERE channel_id = ? OR message_id ${byMessage}`, binds: [id, id] },
         { sql: `DELETE FROM chat_read_states WHERE channel_id = ?`, binds: [id] },
         { sql: `DELETE FROM chat_channel_sections WHERE channel_id = ?`, binds: [id] },
+        { sql: `DELETE FROM chat_shared_channel_sections WHERE channel_id = ?`, binds: [id] },
         { sql: `DELETE FROM chat_messages WHERE channel_id = ? AND thread_root_id IS NOT NULL`, binds: [id] },
         { sql: `DELETE FROM chat_messages WHERE channel_id = ?`, binds: [id] },
         { sql: `DELETE FROM chat_channel_members WHERE channel_id = ?`, binds: [id] },
@@ -489,53 +490,54 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
       ]);
     },
 
-    // ---- personal sidebar sections ----
-    async listSections(userId: common.UserId): Promise<SectionRow[]> {
-      const rows = await db.all<SectionDbRow>(
-        `SELECT * FROM chat_sections WHERE user_id = ? ORDER BY position ASC, id ASC`,
-        userId,
-      );
+    // ---- org-wide sidebar sections ----
+    async listSections(): Promise<SectionRow[]> {
+      const rows = await db.all<SectionDbRow>(`SELECT * FROM chat_shared_sections ORDER BY position ASC, id ASC`);
       return rows.map(toSectionRow);
     },
-    async getSection(userId: common.UserId, id: string): Promise<SectionRow | null> {
-      const r = await db.first<SectionDbRow>(`SELECT * FROM chat_sections WHERE id = ? AND user_id = ?`, id, userId);
+    async getSection(id: string): Promise<SectionRow | null> {
+      const r = await db.first<SectionDbRow>(`SELECT * FROM chat_shared_sections WHERE id = ?`, id);
       return r ? toSectionRow(r) : null;
     },
     async createSection(row: SectionRow): Promise<void> {
       await db.run(
-        `INSERT INTO chat_sections (id, user_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        row.id, row.userId, row.name, row.position, row.createdAt, row.updatedAt,
+        `INSERT INTO chat_shared_sections (id, name, position, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        row.id, row.name, row.position, row.createdBy, row.createdAt, row.updatedAt,
       );
     },
     async updateSection(row: SectionRow): Promise<void> {
       await db.run(
-        `UPDATE chat_sections SET name = ?, position = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
-        row.name, row.position, row.updatedAt, row.id, row.userId,
+        `UPDATE chat_shared_sections SET name = ?, position = ?, updated_at = ? WHERE id = ?`,
+        row.name, row.position, row.updatedAt, row.id,
       );
     },
-    async deleteSection(userId: common.UserId, id: string): Promise<boolean> {
+    async deleteSection(id: string): Promise<boolean> {
       const results = await db.batch([
-        { sql: `DELETE FROM chat_channel_sections WHERE section_id = ? AND user_id = ?`, binds: [id, userId] },
-        { sql: `DELETE FROM chat_sections WHERE id = ? AND user_id = ?`, binds: [id, userId] },
+        { sql: `DELETE FROM chat_shared_channel_sections WHERE section_id = ?`, binds: [id] },
+        { sql: `DELETE FROM chat_shared_sections WHERE id = ?`, binds: [id] },
       ]);
       return (results[1]?.meta.changes ?? 0) > 0;
     },
-    async sectionAssignments(userId: common.UserId): Promise<Map<string, string>> {
+    async sectionAssignments(viewerId: common.UserId): Promise<Map<string, string>> {
       const rows = await db.all<{ channel_id: string; section_id: string }>(
-        `SELECT channel_id, section_id FROM chat_channel_sections WHERE user_id = ?`,
-        userId,
+        `SELECT s.channel_id, s.section_id
+           FROM chat_shared_channel_sections s
+           JOIN chat_channels c ON c.id = s.channel_id
+          WHERE c.visibility = 'public'
+             OR EXISTS (SELECT 1 FROM chat_channel_members m WHERE m.channel_id = s.channel_id AND m.user_id = ?)`,
+        viewerId,
       );
       return new Map(rows.map((r) => [r.channel_id, r.section_id]));
     },
-    async setChannelSection(userId: common.UserId, channelId: common.ChannelId, sectionId: string | null): Promise<void> {
+    async setChannelSection(channelId: common.ChannelId, sectionId: string | null): Promise<void> {
       if (sectionId === null) {
-        await db.run(`DELETE FROM chat_channel_sections WHERE user_id = ? AND channel_id = ?`, userId, channelId);
+        await db.run(`DELETE FROM chat_shared_channel_sections WHERE channel_id = ?`, channelId);
         return;
       }
       await db.run(
-        `INSERT INTO chat_channel_sections (user_id, channel_id, section_id) VALUES (?, ?, ?)
-         ON CONFLICT (user_id, channel_id) DO UPDATE SET section_id = excluded.section_id`,
-        userId, channelId, sectionId,
+        `INSERT INTO chat_shared_channel_sections (channel_id, section_id) VALUES (?, ?)
+         ON CONFLICT (channel_id) DO UPDATE SET section_id = excluded.section_id`,
+        channelId, sectionId,
       );
     },
   } satisfies ChatRepo;

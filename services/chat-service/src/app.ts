@@ -173,7 +173,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.body(null, 204);
   });
 
-  // ---- personal sidebar sections ----
+  // ---- org-wide sidebar sections (writes: chat:manage_sections, see POLICY_TABLE) ----
   app.get("/chat/sections", async (c) => {
     return c.json(await svc.listSections(reqCtx(c)));
   });

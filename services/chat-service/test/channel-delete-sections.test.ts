@@ -3,7 +3,8 @@ import type { identity } from "@dub/types";
 import { makeDeps, call, createApp, fakeAuthz, ALL_CHAT_KEYS } from "./harness";
 
 const topic = { type: "topic", visibility: "public", name: "General" } as const;
-const WITH_DELETE = new Set<identity.PermissionKey>([...ALL_CHAT_KEYS, "chat:delete_channel"]);
+const WITH_DELETE = new Set<identity.PermissionKey>([...ALL_CHAT_KEYS, "chat:delete_channel", "chat:manage_sections"]);
+const MANAGER = new Set<identity.PermissionKey>([...ALL_CHAT_KEYS, "chat:manage_sections"]);
 
 describe("DELETE /chat/channels/:id (physical delete)", () => {
   it("removes the channel and every dependent row; audits chat.channel.delete", async () => {
@@ -48,9 +49,11 @@ describe("DELETE /chat/channels/:id (physical delete)", () => {
   });
 });
 
-describe("personal sidebar sections", () => {
+describe("org-wide sidebar sections", () => {
+  const manager = () => createApp(makeDeps({ authz: fakeAuthz(MANAGER) }));
+
   it("create / list / rename / reorder / delete, appended in position order", async () => {
-    const app = createApp(makeDeps());
+    const app = manager();
     const a = await call(app, "POST", "/chat/sections", { body: { name: " 運営 " } });
     const b = await call(app, "POST", "/chat/sections", { body: { name: "イベント" } });
     expect(a.status).toBe(201);
@@ -64,10 +67,11 @@ describe("personal sidebar sections", () => {
 
     expect((await call(app, "DELETE", `/chat/sections/${b.json.id}`)).status).toBe(204);
     expect((await call(app, "GET", "/chat/sections")).json.items).toHaveLength(1);
+    expect((await call(app, "DELETE", `/chat/sections/${b.json.id}`)).status).toBe(404);
   });
 
   it("validates the name", async () => {
-    const app = createApp(makeDeps());
+    const app = manager();
     expect((await call(app, "POST", "/chat/sections", { body: { name: "  " } })).status).toBe(400);
     expect((await call(app, "POST", "/chat/sections", { body: { name: "x".repeat(41) } })).status).toBe(400);
     for (let i = 0; i < 50; i++) await call(app, "POST", "/chat/sections", { body: { name: `s${i}` } });
@@ -75,7 +79,7 @@ describe("personal sidebar sections", () => {
   });
 
   it("assigns / moves / unassigns a channel; deleting the section returns it to default", async () => {
-    const app = createApp(makeDeps());
+    const app = manager();
     const ch = await call(app, "POST", "/chat/channels", { body: topic });
     const a = await call(app, "POST", "/chat/sections", { body: { name: "A" } });
     const b = await call(app, "POST", "/chat/sections", { body: { name: "B" } });
@@ -91,25 +95,56 @@ describe("personal sidebar sections", () => {
     await call(app, "DELETE", `/chat/sections/${a.json.id}`);
     expect((await call(app, "GET", "/chat/sections")).json.assignments).toEqual({});
     expect((await call(app, "GET", `/chat/channels/${ch.json.id}`)).status).toBe(200);
+    expect((await call(app, "PUT", `/chat/channels/${ch.json.id}/section`, { body: { sectionId: "csec_missing" } })).status).toBe(404);
   });
 
-  it("sections are per user: others cannot see, edit, delete or assign into them", async () => {
-    const app = createApp(makeDeps());
+  it("sections are shared: every member sees the same set and assignments", async () => {
+    const app = manager();
     const ch = await call(app, "POST", "/chat/channels", { body: topic });
-    const mine = await call(app, "POST", "/chat/sections", { body: { name: "mine" } });
-    const other = { userId: "user_b" };
+    const sec = await call(app, "POST", "/chat/sections", { body: { name: "共通" } });
+    await call(app, "PUT", `/chat/channels/${ch.json.id}/section`, { body: { sectionId: sec.json.id } });
 
-    expect((await call(app, "GET", "/chat/sections", other)).json).toEqual({ items: [], assignments: {} });
-    expect((await call(app, "PATCH", `/chat/sections/${mine.json.id}`, { ...other, body: { name: "x" } })).status).toBe(404);
-    expect((await call(app, "DELETE", `/chat/sections/${mine.json.id}`, other)).status).toBe(404);
-    expect((await call(app, "PUT", `/chat/channels/${ch.json.id}/section`, { ...other, body: { sectionId: mine.json.id } })).status).toBe(404);
+    const seen = await call(app, "GET", "/chat/sections", { userId: "user_b" });
+    expect(seen.json.items.map((s: { name: string }) => s.name)).toEqual(["共通"]);
+    expect(seen.json.assignments).toEqual({ [ch.json.id]: sec.json.id });
+  });
+
+  it("a private channel's assignment is hidden from non-members", async () => {
+    const app = manager();
+    const priv = await call(app, "POST", "/chat/channels", { body: { ...topic, visibility: "private" } });
+    const sec = await call(app, "POST", "/chat/sections", { body: { name: "s" } });
+    await call(app, "PUT", `/chat/channels/${priv.json.id}/section`, { body: { sectionId: sec.json.id } });
+
+    expect((await call(app, "GET", "/chat/sections")).json.assignments).toEqual({ [priv.json.id]: sec.json.id });
+    expect((await call(app, "GET", "/chat/sections", { userId: "user_b" })).json.assignments).toEqual({});
   });
 
   it("cannot assign a private channel the caller cannot read", async () => {
-    const app = createApp(makeDeps());
+    const app = manager();
     const priv = await call(app, "POST", "/chat/channels", { body: { ...topic, visibility: "private" } });
-    const sec = await call(app, "POST", "/chat/sections", { userId: "user_b", body: { name: "s" } });
+    const sec = await call(app, "POST", "/chat/sections", { body: { name: "s" } });
     const res = await call(app, "PUT", `/chat/channels/${priv.json.id}/section`, { userId: "user_b", body: { sectionId: sec.json.id } });
     expect(res.status).toBe(404);
+  });
+
+  it("organizing needs chat:manage_sections: 編集 without it is refused, reading is not", async () => {
+    const deps = makeDeps(); // ALL_CHAT_KEYS = 編集 + create + moderate, no manage key
+    const app = createApp(deps);
+    const ch = await call(app, "POST", "/chat/channels", { body: topic });
+    const create = await call(app, "POST", "/chat/sections", { body: { name: "x" } });
+    expect(create.status).toBe(403);
+    expect(create.json.error.details.missing).toEqual(["chat:manage_sections"]);
+    for (const [method, path, body] of [
+      ["PATCH", "/chat/sections/csec_any", { name: "y" }],
+      ["DELETE", "/chat/sections/csec_any", undefined],
+      ["PUT", `/chat/channels/${ch.json.id}/section`, { sectionId: null }],
+    ] as const) {
+      expect((await call(app, method, path, body ? { body } : {})).status, `${method} ${path}`).toBe(403);
+    }
+    expect((await call(app, "GET", "/chat/sections")).status).toBe(200);
+
+    const viewer = createApp(makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["app:chat:view"])) }));
+    expect((await call(viewer, "GET", "/chat/sections")).status).toBe(200);
+    expect((await call(viewer, "POST", "/chat/sections", { body: { name: "x" } })).status).toBe(403);
   });
 });
