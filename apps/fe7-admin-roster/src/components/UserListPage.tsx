@@ -60,12 +60,19 @@ const noticeTextStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted,
 /** Rows per page of the 名簿 (numbered pages instead of「さらに読み込む」). */
 const PAGE_SIZE = 20;
 
-const summaryStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: "12px 0 8px", fontWeight: 500 };
+const summaryStyle: React.CSSProperties = { color: "var(--dub-color-fg-muted, #57606a)", fontSize: 13, margin: 0, fontWeight: 500 };
 
 // Master (table) + detail (right pane) — the roster and the selected user's management
 // surface sit side by side on ONE screen. Wraps under the table on narrow viewports.
 const splitStyle: React.CSSProperties = { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap", marginTop: 16 };
-const paginationStyle: React.CSSProperties = { display: "flex", justifyContent: "center", margin: "16px 0 48px" };
+const summaryRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 16,
+  flexWrap: "wrap",
+  margin: "12px 0 8px",
+};
 const tableColStyle: React.CSSProperties = { flex: "1 1 460px", minWidth: 0 };
 const paneColStyle: React.CSSProperties = { flex: "1 1 340px", minWidth: 300, position: "sticky", top: 16 };
 const paneHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12 };
@@ -338,10 +345,22 @@ export function UserListPage() {
       ) : (
         <div style={splitStyle}>
           <div style={tableColStyle}>
-            <p style={summaryStyle} data-testid="fe7-users-count">
-              {countSummary}
-              {effectiveSelected.length > 0 ? `・${effectiveSelected.length}件を選択中` : ""}
-            </p>
+            <div style={summaryRowStyle}>
+              <p style={summaryStyle} data-testid="fe7-users-count">
+                {countSummary}
+                {effectiveSelected.length > 0 ? `・${effectiveSelected.length}件を選択中` : ""}
+              </p>
+              {/* Above the table so paging needs no scroll to the bottom. */}
+              {totalPages > 1 ? (
+                <Pagination
+                  page={currentPage}
+                  pageSize={PAGE_SIZE}
+                  totalCount={sortedItems.length}
+                  onPageChange={setPage}
+                  testId="fe7-users-pagination"
+                />
+              ) : null}
+            </div>
             {canBulk && effectiveSelected.length > 0 ? (
               <BulkActionBar
                 selectedIds={effectiveSelected}
@@ -365,17 +384,6 @@ export function UserListPage() {
               onRowClick={(u) => setSelectedId(u.id)}
               testId="fe7-users-table"
             />
-            {totalPages > 1 ? (
-              <div style={paginationStyle}>
-                <Pagination
-                  page={currentPage}
-                  pageSize={PAGE_SIZE}
-                  totalCount={sortedItems.length}
-                  onPageChange={setPage}
-                  testId="fe7-users-pagination"
-                />
-              </div>
-            ) : null}
           </div>
 
           {selectedUser ? (

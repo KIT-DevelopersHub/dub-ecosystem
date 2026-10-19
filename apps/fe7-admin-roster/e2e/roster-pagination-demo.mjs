@@ -22,6 +22,10 @@ try {
   assert((await page.getByText("さらに読み込む").count()) === 0, "「さらに読み込む」ボタンが無い");
   const pager = page.getByTestId("fe7-users-pagination");
   assert((await pager.innerText()).includes(`1 / ${pages}`), "ページ表示 1 / " + pages);
+  const pagerBox = await pager.boundingBox();
+  const tableBox = await page.getByTestId("fe7-users-table").boundingBox();
+  assert(pagerBox.y + pagerBox.height <= tableBox.y, "ページ送りは表の上にある");
+  assert(pagerBox.y + pagerBox.height <= 900, "ページ送りはスクロール無しで見える");
   await page.screenshot({ path: OUT + "/01-page1.png", fullPage: true });
 
   await pager.getByLabel("次のページ").click();
