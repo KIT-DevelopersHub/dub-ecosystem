@@ -13,6 +13,8 @@ export interface SavedMessageRef {
   channelId: common.ChannelId;
   authorId: common.UserId | null;
   excerpt: string;
+  /** Set for thread replies (the jump opens the thread). */
+  threadRootId?: common.MessageId | null;
 }
 
 export interface Bookmark extends SavedMessageRef {
@@ -24,14 +26,27 @@ export interface Reminder extends SavedMessageRef {
   dueAt: string;
 }
 
+/** 「後で」 の 「完了」 タブ: saved items / reminders the user checked off. */
+export interface CompletedItem extends SavedMessageRef {
+  completedAt: string;
+}
+
 export interface MessagePrefsData {
   reactionUsage: Record<string, number>;
   bookmarks: Bookmark[];
   reminders: Reminder[];
   follows: common.MessageId[];
+  completed: CompletedItem[];
 }
 
-export const emptyPrefs = (): MessagePrefsData => ({ reactionUsage: {}, bookmarks: [], reminders: [], follows: [] });
+export const MAX_COMPLETED = 50;
+
+export const emptyPrefs = (): MessagePrefsData => ({ reactionUsage: {}, bookmarks: [], reminders: [], follows: [], completed: [] });
+
+/** Sidebar 「後で」 badge: distinct messages that are saved or have a pending reminder. */
+export function laterCount(p: Pick<MessagePrefsData, "bookmarks" | "reminders">): number {
+  return new Set([...p.bookmarks.map((b) => b.messageId), ...p.reminders.map((r) => r.messageId)]).size;
+}
 
 /** Most used reactions first; ties and gaps fall back to the defaults. */
 export function topReactions(usage: Record<string, number>, n = 3): string[] {
@@ -53,9 +68,27 @@ export const REMINDER_PRESETS: { id: ReminderPreset; label: string }[] = [
   { id: "20m", label: "20分後" },
   { id: "1h", label: "1時間後" },
   { id: "3h", label: "3時間後" },
-  { id: "tomorrow", label: "明日 9:00" },
-  { id: "nextWeek", label: "来週の月曜 9:00" },
+  { id: "tomorrow", label: "明日" },
+  { id: "nextWeek", label: "来週" },
 ];
+
+/** Hint shown next to a preset (Slack shows the resolved time on the right). */
+export function reminderPresetHint(preset: ReminderPreset, now: Date): string {
+  const d = reminderDueAt(preset, now);
+  return preset === "nextWeek" ? `${WEEKDAYS[d.getDay()]} ${hm(d)}` : hm(d);
+}
+
+const WEEKDAYS = ["日曜", "月曜", "火曜", "水曜", "木曜", "金曜", "土曜"];
+const hm = (d: Date) => `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+/** 「今日 15:00」 / 「明日 9:00」 / 「10月26日 9:00」 — reminder due label. */
+export function formatDue(due: Date, now: Date): string {
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(due) - day(now)) / 86_400_000);
+  if (diff === 0) return `今日 ${hm(due)}`;
+  if (diff === 1) return `明日 ${hm(due)}`;
+  return `${due.getMonth() + 1}月${due.getDate()}日 ${hm(due)}`;
+}
 
 export function reminderDueAt(preset: ReminderPreset, now: Date): Date {
   const d = new Date(now);
@@ -97,6 +130,7 @@ function load(userId: string): MessagePrefsData {
       bookmarks: Array.isArray(p.bookmarks) ? p.bookmarks : [],
       reminders: Array.isArray(p.reminders) ? p.reminders : [],
       follows: Array.isArray(p.follows) ? p.follows : [],
+      completed: Array.isArray(p.completed) ? p.completed : [],
     };
   } catch {
     return emptyPrefs();
@@ -120,9 +154,19 @@ interface MessagePrefsStore extends MessagePrefsData {
   recordReaction: (emoji: string) => void;
   toggleBookmark: (ref: SavedMessageRef) => boolean; // true = now bookmarked
   addReminder: (ref: SavedMessageRef, dueAt: Date) => void;
-  /** Removes due reminders and returns only those this call removed (one tab fires each). */
+  /** 「リマインダーを変更」: same message, new due time. */
+  rescheduleReminder: (id: string, dueAt: Date) => void;
+  removeReminder: (id: string) => void;
+  /**
+   * Removes due reminders and returns only those this call removed (one tab fires each).
+   * A fired reminder stays in 「後で」 as a saved item until the user completes it (Slack).
+   */
   takeDueReminders: (now: Date) => Reminder[];
   toggleFollow: (messageId: common.MessageId) => boolean; // true = now following
+  /** 「完了にする」: drop the message's saved item + reminders into the 完了 tab. */
+  complete: (messageId: common.MessageId) => void;
+  /** 「後で に戻す」 from 完了. */
+  restore: (messageId: common.MessageId) => void;
 }
 
 export const useMessagePrefs = create<MessagePrefsStore>((set, get) => {
@@ -156,20 +200,62 @@ export const useMessagePrefs = create<MessagePrefsStore>((set, get) => {
       update((c) => {
         const on = !c.bookmarks.some((b) => b.messageId === ref.messageId);
         const bookmarks = on
-          ? [{ ...ref, savedAt: new Date().toISOString() }, ...c.bookmarks]
+          ? [{ ...toRef(ref), savedAt: new Date().toISOString() }, ...c.bookmarks]
           : c.bookmarks.filter((b) => b.messageId !== ref.messageId);
-        return { next: { ...c, bookmarks }, result: on };
+        // Saving again takes it back out of 完了 (one item, one tab).
+        const completed = on ? (c.completed ?? []).filter((x) => x.messageId !== ref.messageId) : c.completed;
+        return { next: { ...c, bookmarks, completed }, result: on };
       }),
     addReminder: (ref, dueAt) =>
       update((c) => {
         const id = `${ref.messageId}:${dueAt.getTime()}`;
-        const reminders = [...c.reminders.filter((r) => r.id !== id), { ...ref, id, dueAt: dueAt.toISOString() }];
-        return { next: { ...c, reminders }, result: undefined };
+        const reminders = [...c.reminders.filter((r) => r.id !== id), { ...toRef(ref), id, dueAt: dueAt.toISOString() }];
+        const completed = (c.completed ?? []).filter((x) => x.messageId !== ref.messageId);
+        return { next: { ...c, reminders, completed }, result: undefined };
       }),
+    rescheduleReminder: (id, dueAt) =>
+      update((c) => ({
+        next: { ...c, reminders: c.reminders.map((r) => (r.id === id ? { ...r, dueAt: dueAt.toISOString() } : r)) },
+        result: undefined,
+      })),
+    removeReminder: (id) => update((c) => ({ next: { ...c, reminders: c.reminders.filter((r) => r.id !== id) }, result: undefined })),
     takeDueReminders: (now) =>
       update((c) => {
         const { due, rest } = partitionDue(c.reminders, now);
-        return { next: { ...c, reminders: rest }, result: due };
+        if (due.length === 0) return { next: c, result: due };
+        const saved = new Set(c.bookmarks.map((b) => b.messageId));
+        const keep: Bookmark[] = [];
+        for (const { id: _id, dueAt, ...ref } of due) {
+          if (saved.has(ref.messageId)) continue;
+          saved.add(ref.messageId);
+          keep.push({ ...ref, savedAt: dueAt });
+        }
+        return { next: { ...c, reminders: rest, bookmarks: [...keep, ...c.bookmarks] }, result: due };
+      }),
+    complete: (messageId) =>
+      update((c) => {
+        const ref: SavedMessageRef | undefined =
+          c.bookmarks.find((b) => b.messageId === messageId) ?? c.reminders.find((r) => r.messageId === messageId);
+        if (!ref) return { next: c, result: undefined };
+        const done: CompletedItem = { ...toRef(ref), completedAt: new Date().toISOString() };
+        return {
+          next: {
+            ...c,
+            bookmarks: c.bookmarks.filter((b) => b.messageId !== messageId),
+            reminders: c.reminders.filter((r) => r.messageId !== messageId),
+            completed: [done, ...c.completed.filter((x) => x.messageId !== messageId)].slice(0, MAX_COMPLETED),
+          },
+          result: undefined,
+        };
+      }),
+    restore: (messageId) =>
+      update((c) => {
+        const done = c.completed.find((x) => x.messageId === messageId);
+        if (!done) return { next: c, result: undefined };
+        const bookmarks = c.bookmarks.some((b) => b.messageId === messageId)
+          ? c.bookmarks
+          : [{ ...toRef(done), savedAt: new Date().toISOString() }, ...c.bookmarks];
+        return { next: { ...c, bookmarks, completed: c.completed.filter((x) => x.messageId !== messageId) }, result: undefined };
       }),
     toggleFollow: (messageId) =>
       update((c) => {
@@ -181,7 +267,17 @@ export const useMessagePrefs = create<MessagePrefsStore>((set, get) => {
 });
 
 function pick(s: MessagePrefsData): MessagePrefsData {
-  return { reactionUsage: s.reactionUsage, bookmarks: s.bookmarks, reminders: s.reminders, follows: s.follows };
+  return { reactionUsage: s.reactionUsage, bookmarks: s.bookmarks, reminders: s.reminders, follows: s.follows, completed: s.completed ?? [] };
+}
+
+function toRef(r: SavedMessageRef): SavedMessageRef {
+  return {
+    messageId: r.messageId,
+    channelId: r.channelId,
+    authorId: r.authorId,
+    excerpt: r.excerpt,
+    ...(r.threadRootId ? { threadRootId: r.threadRootId } : {}),
+  };
 }
 
 /** localStorage key for a user's prefs (the `storage` event filter). */

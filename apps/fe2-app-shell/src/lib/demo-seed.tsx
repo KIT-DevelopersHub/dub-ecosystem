@@ -25,7 +25,7 @@ import type { auditLog, event, gantt, gateway, identity, mail, meeting, notifica
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
-import { createCustomEmojiSim, createSlackImportSim, mockUnfurl, type ImportedChannel } from "../composition/featureEntries";
+import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -1657,7 +1657,44 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       body: "<!team:team_hq> 明日の定例は 10:00 開始に変更します。<!team:team_corp> 契約書のレビューもお願いします 🙏",
       createdAt: "2026-08-01T00:14:00.000Z",
     }),
+    // メッセージリンクの展開 (Slack unfurl): 同じチャンネル / DM / 読めないメッセージへのリンク。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZUL",
+      authorId: "usr_emi",
+      body: `LP の場所はこのメッセージにまとまっています ${demoMessageLink("chn_general", "msg_01SEEDGEN0000000000000URL")}`,
+      createdAt: "2026-08-01T00:16:00.000Z",
+    }),
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZUM",
+      authorId: ME_ID,
+      body: `DM で相談された件です ${demoMessageLink("chn_dm_bob", "msg_01SEEDDMB0000000000000001")} 削除されたメッセージへのリンクはこう見えます ${demoMessageLink("chn_general", "msg_01SEEDGEN000000000000GONE")}`,
+      createdAt: "2026-08-01T00:18:00.000Z",
+    }),
+    // 転送 (Slack の「メッセージを転送する」): 引用カードで表示される。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZVF",
+      authorId: "usr_bob",
+      body: buildForwardBody({
+        comment: "定例の変更、全体にも共有しておきます",
+        text: "明日の定例は 10:00 開始に変更します。",
+        authorName: "佐藤 太郎",
+        sourceChannelName: "#team-soukatsu",
+      }),
+      createdAt: "2026-08-01T00:20:00.000Z",
+    }),
   ];
+  // 「後で」: the demo admin starts with saved items, reminders and one 完了 (this device only).
+  seedLaterDemoPrefs(ME_ID, {
+    saved: [
+      { messageId: "msg_01SEEDGEN0000000000000URL", channelId: "chn_general", authorId: "usr_bob", excerpt: "LP の最新版はこちらです https://developershub.jp/conf/2026" },
+      { messageId: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", excerpt: "LP の文言、確認してもらえますか？急ぎではないです 🙏" },
+    ],
+    reminders: [
+      { messageId: "msg_01SEEDGEN0000000000000ZTM", channelId: "chn_general", authorId: "usr_bob", excerpt: "@統括チーム 明日の定例は 10:00 開始に変更します。", inMinutes: 180 },
+      { messageId: "msg_01SEEDGEN0000000000000UR2", channelId: "chn_general", authorId: ME_ID, excerpt: "こっちは画像なしのサイトです https://example.com/", inMinutes: 60 * 24 * 3 },
+    ],
+    completed: [{ messageId: "msg_01SEEDGEN0000000000000WEL", channelId: "chn_general", authorId: ME_ID, excerpt: "北陸ITカンファレンス運営チャンネルへようこそ 🎉" }],
+  });
   // Posted messages persist for the session (per channel) so a sent URL renders
   // its card in place; ids are minted ascending so they sort after the seed.
   const posted = new Map<string, ReturnType<typeof msg>[]>();

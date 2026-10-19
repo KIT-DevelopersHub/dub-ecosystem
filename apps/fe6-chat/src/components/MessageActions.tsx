@@ -5,7 +5,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import type { common } from "@dub/types";
 import type { Message } from "../api/contract";
-import { REMINDER_PRESETS, type ReminderPreset } from "../lib/message-prefs";
+import { REMINDER_PRESETS, reminderPresetHint, type ReminderPreset } from "../lib/message-prefs";
 import styles from "../styles/chat.module.css";
 
 export interface MessageActions {
@@ -15,7 +15,8 @@ export interface MessageActions {
   canMarkUnread: (message: Message) => boolean;
   markUnread: (message: Message) => void;
   toggleBookmark: (message: Message) => void;
-  addReminder: (message: Message, preset: ReminderPreset) => void;
+  /** A preset (「20分後」…) or a custom date-time (「カスタム…」). */
+  addReminder: (message: Message, when: ReminderPreset | Date) => void;
   copyLink: (message: Message) => void;
   toggleFollow: (message: Message) => void;
   copyText: (message: Message) => void;
@@ -54,6 +55,7 @@ export function MessageMoreMenu({
   const actions = useMessageActions();
   const [open, setOpen] = useState(false);
   const [reminderOpen, setReminderOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
   // Open toward the roomier side and cap the height to it; the panel scrolls beyond.
   const [place, setPlace] = useState<{ up: boolean; maxHeight: number }>({ up: false, maxHeight: MENU_HEIGHT_PX });
   const ref = useRef<HTMLSpanElement>(null);
@@ -80,7 +82,7 @@ export function MessageMoreMenu({
     }
     items.push({
       id: "bookmark",
-      label: actions.isBookmarked(message.id) ? "ブックマークから削除" : "ブックマークに追加",
+      label: actions.isBookmarked(message.id) ? "後で用の保存を解除" : "後で用に保存",
       onSelect: () => actions.toggleBookmark(message),
       testId: "fe6-msg-bookmark",
     });
@@ -124,6 +126,7 @@ export function MessageMoreMenu({
   const run = (fn: () => void) => {
     setOpen(false);
     setReminderOpen(false);
+    setCustomOpen(false);
     // Chrome keeps focus on the clicked item, which would pin the hover bar open.
     (document.activeElement as HTMLElement | null)?.blur?.();
     fn();
@@ -163,6 +166,7 @@ export function MessageMoreMenu({
           setPlace({ up, maxHeight: Math.min(MENU_HEIGHT_PX, up ? above : below) });
           setOpen((o) => !o);
           setReminderOpen(false);
+          setCustomOpen(false);
         }}
       >
         ⋮
@@ -193,24 +197,82 @@ export function MessageMoreMenu({
                   {reminderOpen ? "▾" : "▸"}
                 </span>
               </button>
-              {reminderOpen &&
-                REMINDER_PRESETS.map((p) => (
+              {reminderOpen && (
+                <>
+                  {REMINDER_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      role="menuitem"
+                      className={`${styles.msgMenuItem} ${styles.msgMenuSubItem}`}
+                      data-testid={`fe6-msg-reminder-${p.id}`}
+                      onClick={() => run(() => actions.addReminder(message, p.id))}
+                    >
+                      <span>{p.label}</span>
+                      <span className={styles.msgMenuHint}>{reminderPresetHint(p.id, new Date())}</span>
+                    </button>
+                  ))}
                   <button
-                    key={p.id}
                     type="button"
                     role="menuitem"
+                    aria-expanded={customOpen}
                     className={`${styles.msgMenuItem} ${styles.msgMenuSubItem}`}
-                    data-testid={`fe6-msg-reminder-${p.id}`}
-                    onClick={() => run(() => actions.addReminder(message, p.id))}
+                    data-testid="fe6-msg-reminder-custom"
+                    onClick={() => setCustomOpen((o) => !o)}
                   >
-                    {p.label}
+                    カスタム…
                   </button>
-                ))}
+                  {customOpen && <CustomReminderForm onSubmit={(at) => run(() => actions.addReminder(message, at))} />}
+                </>
+              )}
             </>
           )}
           {tail.map(row)}
         </div>
       )}
     </span>
+  );
+}
+
+/** `YYYY-MM-DDTHH:mm` in local time (datetime-local value). */
+export function toLocalInput(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Default for 「カスタム…」: the next full hour. */
+function nextHour(now: Date): Date {
+  const d = new Date(now);
+  d.setHours(d.getHours() + 1, 0, 0, 0);
+  return d;
+}
+
+/** 「カスタム…」 date-time picker inside a menu (also reused by the 後で view). */
+export function CustomReminderForm({ onSubmit, initial }: { onSubmit: (at: Date) => void; initial?: Date }) {
+  const [value, setValue] = useState(() => toLocalInput(initial ?? nextHour(new Date())));
+  const at = new Date(value);
+  const valid = !Number.isNaN(at.getTime()) && at.getTime() > Date.now();
+  return (
+    <form
+      className={styles.reminderCustom}
+      data-testid="fe6-reminder-custom-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valid) onSubmit(at);
+      }}
+    >
+      <input
+        type="datetime-local"
+        className={styles.reminderCustomInput}
+        value={value}
+        min={toLocalInput(new Date())}
+        aria-label="リマインダーの日時"
+        data-testid="fe6-reminder-custom-input"
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <button type="submit" className={styles.reminderCustomSave} disabled={!valid} data-testid="fe6-reminder-custom-save">
+        設定
+      </button>
+    </form>
   );
 }

@@ -42,6 +42,8 @@ export interface ChannelListProps {
   onImport?: () => void;
   /** Admin-only 「絵文字取り込み」 (Slack custom emoji). Omit to hide the entry. */
   onImportEmoji?: () => void;
+  /** Slack's 「後で」 entry above the channels (saved items + reminders). Omit to hide. */
+  later?: { count: number; active: boolean; onOpen: () => void };
 }
 
 export interface SectionActions {
@@ -73,6 +75,7 @@ export function ChannelList({
   sectionActions,
   onImport,
   onImportEmoji,
+  later,
 }: ChannelListProps) {
   const layout = buildSidebar(channels, sectionActions ? sections : [], sectionActions ? assignments : {});
   const grouped = layout.groups;
@@ -195,6 +198,28 @@ export function ChannelList({
       </div>
 
       <div className={styles.sidebarScroll}>
+        {later && (
+          <div className={styles.sidebarShortcuts}>
+            <button
+              type="button"
+              className={`${styles.channelItem} ${later.active ? styles.active : ""}`}
+              onClick={later.onOpen}
+              aria-current={later.active ? "page" : undefined}
+              data-testid="fe6-sidebar-later"
+              data-marker="fe6-later-sidebar"
+            >
+              <span className={styles.channelGlyph} aria-hidden>
+                🔖
+              </span>
+              <span className={styles.channelName}>後で</span>
+              {later.count > 0 && (
+                <span className={styles.countBadge} data-testid="fe6-sidebar-later-count">
+                  {later.count}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
         {loading ? (
           <div className={styles.sidebarSkeleton} data-testid="fe6-channel-list-loading" aria-busy="true">
             {[0, 1, 2].map((block) => (

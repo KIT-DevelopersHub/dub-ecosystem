@@ -12,7 +12,8 @@ import type { Channel, ChatSection } from "../api/contract";
 import { getLastChannel, setLastChannel } from "../store/draft";
 import type { CreateChannelRequest } from "../api/contract";
 import { ChannelList } from "./ChannelList";
-import { ChannelPage } from "./ChannelPage";
+import { ChannelPage, requestMessageJump } from "./ChannelPage";
+import { LaterView } from "./LaterView";
 import type { ChannelDetailsTab } from "./ChannelDetails";
 import { CreateChannelModal } from "./CreateChannelModal";
 import { NewDmModal } from "./NewDmModal";
@@ -22,7 +23,7 @@ import { EmojiImportModal } from "./custom-emoji/EmojiImportModal";
 import { CustomEmojiProvider } from "./CustomEmoji";
 import { useChatSections } from "../hooks/useChatSections";
 import { useMessageReminders } from "../hooks/useMessageReminders";
-import { useMessagePrefs } from "../lib/message-prefs";
+import { laterCount, useMessagePrefs, type SavedMessageRef } from "../lib/message-prefs";
 import { channelLabel } from "../lib/dm";
 import styles from "../styles/chat.module.css";
 
@@ -61,6 +62,9 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
   const [pendingSectionDelete, setPendingSectionDelete] = useState<ChatSection | null>(null);
   const [active, setActive] = useState<common.ChannelId | null>(initialChannelId ?? null);
   const [threadOpen, setThreadOpen] = useState(false);
+  // 「後で」 replaces the channel pane until a channel (or a saved item) is picked.
+  const [laterOpen, setLaterOpen] = useState(false);
+  const laterBadge = useMessagePrefs((s) => laterCount(s));
   const [createOpen, setCreateOpen] = useState(false);
   const [newDmOpen, setNewDmOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -133,6 +137,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
   }, [api, setTeams]);
 
   const onSelect = useCallback((channelId: common.ChannelId) => {
+    setLaterOpen(false);
     setActive(channelId);
     setLastChannel(channelId);
     // Picking a channel from the mobile drawer should dismiss it immediately —
@@ -192,6 +197,20 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
     [channels, channelHandleOf],
   );
   useMessageReminders(resolveChannelName);
+
+  const openLater = useCallback(() => {
+    setLaterOpen(true);
+    setThreadOpen(false); // the channel pane (and its thread column) unmounts
+    useChatStore.getState().setActiveChannel(null); // no channel is being read meanwhile
+    setMobileNavOpen(false);
+  }, []);
+  const openSaved = useCallback(
+    (ref: SavedMessageRef) => {
+      requestMessageJump(ref.messageId, ref.threadRootId ?? null);
+      onSelect(ref.channelId);
+    },
+    [onSelect],
+  );
 
   const onStartDm = useCallback(
     async (peers: identity.UserSummary[]) => {
@@ -258,7 +277,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
       <ChannelList
         channels={channels}
         unread={unread}
-        activeChannelId={active}
+        activeChannelId={laterOpen ? null : active}
         canCreate={can("chat:create")}
         onSelect={onSelect}
         onCreate={() => setCreateOpen(true)}
@@ -276,6 +295,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
         }}
         {...(canImport ? { onImport: () => setImportOpen(true) } : {})}
         {...(onImportEmoji ? { onImportEmoji } : {})}
+        later={{ count: laterBadge, active: laterOpen, onOpen: openLater }}
       />
     </>
   );
@@ -297,7 +317,13 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
         nav
       )}
 
-      {active ? (
+      {laterOpen ? (
+        <LaterView
+          resolveChannelName={resolveChannelName}
+          onOpen={openSaved}
+          onOpenMobileNav={isMobile ? () => setMobileNavOpen(true) : undefined}
+        />
+      ) : active ? (
         <ChannelPage
           key={active}
           channelId={active}

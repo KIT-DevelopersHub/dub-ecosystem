@@ -19,7 +19,9 @@ import { Attachments } from "./Attachments";
 import { EmojiPicker } from "./EmojiPicker";
 import { ReactionEmoji } from "./CustomEmoji";
 import { MessageMoreMenu, useMessageActions } from "./MessageActions";
-import { topReactions, useMessagePrefs } from "../lib/message-prefs";
+import { ForwardedCard, MessageUnfurls } from "./MessageUnfurl";
+import { formatDue, topReactions, useMessagePrefs } from "../lib/message-prefs";
+import { parseForwardBody } from "../lib/forward";
 import styles from "../styles/chat.module.css";
 
 export interface MessageItemProps {
@@ -90,6 +92,13 @@ export function MessageItem({
   const recordReaction = useMessagePrefs((s) => s.recordReaction);
   const quickReactions = useMemo(() => topReactions(reactionUsage), [reactionUsage]);
   const bookmarked = actions?.isBookmarked(message.id) ?? false;
+  const forwarded = useMemo(() => parseForwardBody(message.body), [message.body]);
+  // Earliest pending reminder on this message (a primitive, so other rows don't re-render).
+  const reminderDue = useMessagePrefs((s) => {
+    let min: string | undefined;
+    for (const r of s.reminders) if (r.messageId === message.id && (!min || r.dueAt < min)) min = r.dueAt;
+    return min;
+  });
 
   // Only adding counts toward よく使うリアクション (removing your own is not a "use").
   const react = (emoji: string) => {
@@ -113,6 +122,7 @@ export function MessageItem({
     grouped ? styles.grouped : "",
     mentionsMe ? styles.mentionsMe : "",
     pinned ? styles.pinnedRow : "",
+    (bookmarked || reminderDue) && !pinned ? styles.savedRow : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -180,6 +190,36 @@ export function MessageItem({
         </div>
       )}
 
+      {/* Slack: what happened to this message, on a line above it */}
+      {!isDeleted && (pinned || bookmarked || reminderDue) && (
+        <div className={styles.msgLabels}>
+          {reminderDue && (
+            <span className={`${styles.msgLabel} ${styles.msgLabelSaved}`} data-testid="fe6-timeline-reminder">
+              <span className={styles.msgLabelIcon} aria-hidden>
+                ⏰
+              </span>
+              リマインダー: {formatDue(new Date(reminderDue), new Date())}
+            </span>
+          )}
+          {bookmarked && (
+            <span className={`${styles.msgLabel} ${styles.msgLabelSaved}`} data-testid="fe6-timeline-bookmarked">
+              <span className={styles.msgLabelIcon} aria-hidden>
+                🔖
+              </span>
+              後で用に保存済み
+            </span>
+          )}
+          {pinned && (
+            <span className={`${styles.msgLabel} ${styles.msgLabelPinned}`} data-testid="fe6-timeline-pinned">
+              <span className={styles.msgLabelIcon} aria-hidden>
+                📌
+              </span>
+              このチャンネルにピン留め済み
+            </span>
+          )}
+        </div>
+      )}
+
       <div className={styles.avatarCol}>
         {grouped ? (
           <span className={styles.gutterTime} aria-hidden>
@@ -196,16 +236,6 @@ export function MessageItem({
             <span className={styles.author}>{authorName}</span>
             <span className={styles.time}>{timeShort(message.createdAt)}</span>
             {message.editedAt && <span className={styles.editedTag}>(編集済み)</span>}
-            {pinned && (
-              <span className={styles.pinnedTag} title="ピン留め済み">
-                📌 ピン留め
-              </span>
-            )}
-            {bookmarked && (
-              <span className={styles.pinnedTag} title="ブックマーク済み" data-testid="fe6-timeline-bookmarked">
-                🔖 ブックマーク
-              </span>
-            )}
           </div>
         )}
 
@@ -247,12 +277,20 @@ export function MessageItem({
           </div>
         ) : (
           <div className={styles.textBody} data-testid="fe6-timeline-body">
-            <MessageBody body={message.body} resolveUser={resolveUser} resolveTeam={resolveTeam} />
+            {forwarded ? (
+              <>
+                {forwarded.comment && <MessageBody body={forwarded.comment} resolveUser={resolveUser} resolveTeam={resolveTeam} />}
+                <ForwardedCard forward={forwarded} />
+              </>
+            ) : (
+              <MessageBody body={message.body} resolveUser={resolveUser} resolveTeam={resolveTeam} />
+            )}
             {grouped && message.editedAt && <span className={styles.editedTag}> (編集済み)</span>}
           </div>
         )}
 
-        {!isDeleted && !editing && <LinkPreviews body={message.body} />}
+        {!isDeleted && !editing && !forwarded && <MessageUnfurls body={message.body} selfId={message.id} />}
+        {!isDeleted && !editing && !forwarded && <LinkPreviews body={message.body} />}
 
         {!isDeleted && !editing && message.attachments.length > 0 && <Attachments attachments={message.attachments} />}
 
