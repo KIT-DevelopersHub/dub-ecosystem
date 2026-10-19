@@ -28,7 +28,9 @@ export function useMessageActions(): MessageActions | null {
   return useContext(MessageActionsContext);
 }
 
-const MENU_HEIGHT_PX = 420;
+// Matches .msgMenuPanel max-height; the panel scrolls beyond it (reminder list open).
+const MENU_HEIGHT_PX = 480;
+const MENU_MARGIN_PX = 12;
 
 type Item = { id: string; label: string; onSelect: () => void; danger?: boolean; divider?: boolean; testId?: string };
 
@@ -52,7 +54,8 @@ export function MessageMoreMenu({
   const actions = useMessageActions();
   const [open, setOpen] = useState(false);
   const [reminderOpen, setReminderOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
+  // Open toward the roomier side and cap the height to it; the panel scrolls beyond.
+  const [place, setPlace] = useState<{ up: boolean; maxHeight: number }>({ up: false, maxHeight: MENU_HEIGHT_PX });
   const ref = useRef<HTMLSpanElement>(null);
   const panelId = useId();
 
@@ -88,7 +91,7 @@ export function MessageMoreMenu({
       { id: "link", label: "リンクをコピー", onSelect: () => actions.copyLink(message), divider: true, testId: "fe6-msg-copy-link" },
       {
         id: "follow",
-        label: actions.isFollowing(message.id) ? "新しい返信の通知をオフにする" : "新しい返信の通知を受け取る",
+        label: actions.isFollowing(message.threadRootId ?? message.id) ? "新しい返信の通知をオフにする" : "新しい返信の通知を受け取る",
         onSelect: () => actions.toggleFollow(message),
         testId: "fe6-msg-follow",
       },
@@ -121,6 +124,8 @@ export function MessageMoreMenu({
   const run = (fn: () => void) => {
     setOpen(false);
     setReminderOpen(false);
+    // Chrome keeps focus on the clicked item, which would pin the hover bar open.
+    (document.activeElement as HTMLElement | null)?.blur?.();
     fn();
   };
   const row = (it: Item) => (
@@ -150,9 +155,12 @@ export function MessageMoreMenu({
         aria-controls={open ? panelId : undefined}
         data-testid="fe6-msg-more"
         onClick={(e) => {
-          // Rows near the bottom of the timeline open the panel upward so it isn't clipped.
+          // Rows near the bottom of the viewport open the panel upward so it isn't clipped.
           const rect = e.currentTarget.getBoundingClientRect();
-          setDropUp(globalThis.innerHeight - rect.bottom < MENU_HEIGHT_PX && rect.top > MENU_HEIGHT_PX);
+          const below = globalThis.innerHeight - rect.bottom - MENU_MARGIN_PX;
+          const above = rect.top - MENU_MARGIN_PX;
+          const up = below < MENU_HEIGHT_PX && above > below;
+          setPlace({ up, maxHeight: Math.min(MENU_HEIGHT_PX, up ? above : below) });
           setOpen((o) => !o);
           setReminderOpen(false);
         }}
@@ -164,7 +172,8 @@ export function MessageMoreMenu({
           id={panelId}
           role="menu"
           aria-label="メッセージのその他の操作"
-          className={`${styles.msgMenuPanel} ${dropUp ? styles.msgMenuUp : ""}`}
+          className={`${styles.msgMenuPanel} ${place.up ? styles.msgMenuUp : ""}`}
+          style={{ maxHeight: place.maxHeight }}
           data-testid="fe6-msg-menu"
         >
           {items.map(row)}

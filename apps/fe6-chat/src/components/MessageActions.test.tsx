@@ -48,6 +48,7 @@ function renderRow(a: MessageActions, onToggleReaction = vi.fn()) {
         onReply={vi.fn()}
         onTogglePin={vi.fn()}
         onDelete={vi.fn()}
+        onSubmitEdit={vi.fn()}
       />
     </MessageActionsContext.Provider>,
   );

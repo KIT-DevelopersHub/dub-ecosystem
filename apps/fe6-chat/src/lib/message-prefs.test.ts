@@ -72,8 +72,22 @@ describe("useMessagePrefs", () => {
     useMessagePrefs.getState().addReminder(ref, new Date("2099-01-01T00:00:00Z"));
     const [r] = useMessagePrefs.getState().reminders;
     expect(r?.dueAt).toBe("2099-01-01T00:00:00.000Z");
-    useMessagePrefs.getState().removeReminders([r!.id]);
+    expect(useMessagePrefs.getState().takeDueReminders(new Date("2026-01-01T00:00:00Z"))).toEqual([]);
+    expect(useMessagePrefs.getState().takeDueReminders(new Date("2099-01-02T00:00:00Z")).map((x) => x.id)).toEqual([r!.id]);
+    // already taken (e.g. by another tab): never fires twice
+    expect(useMessagePrefs.getState().takeDueReminders(new Date("2099-01-02T00:00:00Z"))).toEqual([]);
     expect(useMessagePrefs.getState().reminders).toEqual([]);
+  });
+
+  it("merges with what another tab saved instead of overwriting it", () => {
+    useMessagePrefs.getState().hydrate("usr_me");
+    useMessagePrefs.getState().toggleBookmark(ref);
+    // another tab adds a second bookmark straight into storage
+    const raw = JSON.parse(localStorage.getItem("dub.chat.prefs.usr_me")!);
+    raw.bookmarks.push({ ...ref, messageId: "msg_2", savedAt: "x" });
+    localStorage.setItem("dub.chat.prefs.usr_me", JSON.stringify(raw));
+    useMessagePrefs.getState().recordReaction("🔥");
+    expect(useMessagePrefs.getState().bookmarks.map((b) => b.messageId)).toEqual(["msg_1", "msg_2"]);
   });
 });
 

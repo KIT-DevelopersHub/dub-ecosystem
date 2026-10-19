@@ -74,10 +74,12 @@ export function ChannelPage({
   const follows = useMessagePrefs((s) => s.follows);
   const followsRef = useRef(follows);
   followsRef.current = follows;
+  // Already reading that thread in the pane: no toast for it.
+  const openThreadIdRef = useRef<common.MessageId | null>(null);
   const view = useChannelView(channelId, {
     onEvent: (e) => {
       if (e.kind !== "message.created" || !e.threadRootId || e.authorId === currentUserId) return;
-      if (!followsRef.current.includes(e.threadRootId)) return;
+      if (!followsRef.current.includes(e.threadRootId) || openThreadIdRef.current === e.threadRootId) return;
       show({ kind: "info", title: "フォロー中のスレッドに新しい返信があります", description: e.body.slice(0, 80) });
     },
   });
@@ -123,6 +125,7 @@ export function ChannelPage({
 
   useEffect(() => {
     onThreadOpenChange?.(thread !== null);
+    openThreadIdRef.current = thread?.id ?? null;
   }, [thread, onThreadOpenChange]);
 
   // channel detail + members + pins
@@ -208,8 +211,11 @@ export function ChannelPage({
   }, [api, channelId, markRead]);
 
   const newestId = view.state.messages[view.state.messages.length - 1]?.id;
+  // 「未読にする」 holds until the user leaves the channel (Slack), so new arrivals
+  // must not auto-read it back. ChannelPage remounts per channel, resetting this.
+  const manualUnreadRef = useRef(false);
   useEffect(() => {
-    if (newestId) tracker.current?.observeBottom(newestId);
+    if (newestId && !manualUnreadRef.current) tracker.current?.observeBottom(newestId);
   }, [newestId]);
 
   const resolveUser = useCallback((id: common.UserId) => users[id], [users]);
@@ -369,10 +375,16 @@ export function ChannelPage({
     return {
       isBookmarked: (id) => bookmarked.has(id),
       isFollowing: (id) => follows.includes(id),
-      canMarkUnread: (m) => m.threadRootId === null && m.channelId === channelId,
+      // The oldest loaded row with older history unloaded has no known predecessor id;
+      // "0" there would mark the whole channel history unread.
+      canMarkUnread: (m) =>
+        m.threadRootId === null &&
+        m.channelId === channelId &&
+        (view.state.messages[0]?.id !== m.id || view.state.nextCursor === null),
       // Optimistic: divider + sidebar badge move at once, then the server's count wins.
       markUnread: (m) => {
         const marker = unreadMarkerFor(view.state.messages, m.id);
+        manualUnreadRef.current = true;
         tracker.current?.cancel();
         view.setLastRead(marker);
         setChannelUnread({
@@ -403,7 +415,11 @@ export function ChannelPage({
       copyLink: (m) => copyToClipboard(messagePermalink(globalThis.location, m.channelId, m.id), "リンクをコピーしました"),
       toggleFollow: (m) => {
         const on = toggleFollowPref(m.threadRootId ?? m.id);
-        show({ kind: "success", title: on ? "新しい返信を通知します" : "返信の通知をオフにしました" });
+        show(
+          on
+            ? { kind: "success", title: "新しい返信を通知します", description: "このチャンネルを開いている間に通知します" }
+            : { kind: "success", title: "返信の通知をオフにしました" },
+        );
       },
       copyText: (m) => copyToClipboard(plainText(m), "メッセージをコピーしました"),
       forward: (m) => setForwarding(m),
@@ -676,6 +692,7 @@ export function ChannelPage({
           channels={forwardTargets}
           authorName={forwarding.authorId === null ? "システム" : (users[forwarding.authorId]?.displayName ?? forwarding.authorId)}
           preview={plainText(forwarding)}
+          hasAttachments={forwarding.attachments.length > 0}
           onClose={() => setForwarding(null)}
           onForward={onForward}
         />

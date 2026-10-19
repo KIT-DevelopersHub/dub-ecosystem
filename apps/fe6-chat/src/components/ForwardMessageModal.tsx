@@ -14,6 +14,8 @@ export interface ForwardMessageModalProps {
   authorName: string;
   /** Message body with mentions flattened to names (also what gets quoted). */
   preview: string;
+  /** Attachments aren't re-posted (no copy API yet) — say so instead of dropping them silently. */
+  hasAttachments?: boolean;
   onClose: () => void;
   onForward: (channelId: common.ChannelId, body: string) => Promise<void>;
 }
@@ -23,6 +25,7 @@ export function ForwardMessageModal({
   channels,
   authorName,
   preview,
+  hasAttachments = false,
   onClose,
   onForward,
 }: ForwardMessageModalProps) {
@@ -83,6 +86,7 @@ export function ForwardMessageModal({
           </span>
           {preview || "(添付ファイル)"}
         </div>
+        {hasAttachments && <span className={styles.createHint}>添付ファイルは転送されません (本文のみ転送します)</span>}
 
         <div className={styles.createActions}>
           <button type="button" className={styles.editCancel} onClick={onClose}>

@@ -115,18 +115,26 @@ function save(userId: string | null, data: MessagePrefsData): void {
 interface MessagePrefsStore extends MessagePrefsData {
   userId: string | null;
   hydrate: (userId: string) => void;
+  /** Re-read storage (another tab wrote it). */
+  reload: () => void;
   recordReaction: (emoji: string) => void;
   toggleBookmark: (ref: SavedMessageRef) => boolean; // true = now bookmarked
   addReminder: (ref: SavedMessageRef, dueAt: Date) => void;
-  removeReminders: (ids: string[]) => void;
+  /** Removes due reminders and returns only those this call removed (one tab fires each). */
+  takeDueReminders: (now: Date) => Reminder[];
   toggleFollow: (messageId: common.MessageId) => boolean; // true = now following
 }
 
 export const useMessagePrefs = create<MessagePrefsStore>((set, get) => {
-  const commit = (patch: Partial<MessagePrefsData>) => {
-    set(patch);
-    const s = get();
-    save(s.userId, { reactionUsage: s.reactionUsage, bookmarks: s.bookmarks, reminders: s.reminders, follows: s.follows });
+  // Read-modify-write against storage, not memory: another tab may have written since
+  // this one loaded, and saving a stale snapshot would drop its bookmarks/reminders.
+  const update = <T>(fn: (cur: MessagePrefsData) => { next: MessagePrefsData; result: T }): T => {
+    const userId = get().userId;
+    const cur = userId ? load(userId) : pick(get());
+    const { next, result } = fn(cur);
+    save(userId, next);
+    set(next);
+    return result;
   };
   return {
     ...emptyPrefs(),
@@ -135,35 +143,46 @@ export const useMessagePrefs = create<MessagePrefsStore>((set, get) => {
       if (get().userId === userId) return;
       set({ userId, ...load(userId) });
     },
-    recordReaction: (emoji) => {
-      const usage = get().reactionUsage;
-      commit({ reactionUsage: { ...usage, [emoji]: (usage[emoji] ?? 0) + 1 } });
+    reload: () => {
+      const userId = get().userId;
+      if (userId) set(load(userId));
     },
-    toggleBookmark: (ref) => {
-      const list = get().bookmarks;
-      if (list.some((b) => b.messageId === ref.messageId)) {
-        commit({ bookmarks: list.filter((b) => b.messageId !== ref.messageId) });
-        return false;
-      }
-      commit({ bookmarks: [{ ...ref, savedAt: new Date().toISOString() }, ...list] });
-      return true;
-    },
-    addReminder: (ref, dueAt) => {
-      const id = `${ref.messageId}:${dueAt.getTime()}`;
-      commit({ reminders: [...get().reminders.filter((r) => r.id !== id), { ...ref, id, dueAt: dueAt.toISOString() }] });
-    },
-    removeReminders: (ids) => {
-      if (ids.length === 0) return;
-      commit({ reminders: get().reminders.filter((r) => !ids.includes(r.id)) });
-    },
-    toggleFollow: (messageId) => {
-      const list = get().follows;
-      if (list.includes(messageId)) {
-        commit({ follows: list.filter((id) => id !== messageId) });
-        return false;
-      }
-      commit({ follows: [...list, messageId] });
-      return true;
-    },
+    recordReaction: (emoji) =>
+      update((c) => ({
+        next: { ...c, reactionUsage: { ...c.reactionUsage, [emoji]: (c.reactionUsage[emoji] ?? 0) + 1 } },
+        result: undefined,
+      })),
+    toggleBookmark: (ref) =>
+      update((c) => {
+        const on = !c.bookmarks.some((b) => b.messageId === ref.messageId);
+        const bookmarks = on
+          ? [{ ...ref, savedAt: new Date().toISOString() }, ...c.bookmarks]
+          : c.bookmarks.filter((b) => b.messageId !== ref.messageId);
+        return { next: { ...c, bookmarks }, result: on };
+      }),
+    addReminder: (ref, dueAt) =>
+      update((c) => {
+        const id = `${ref.messageId}:${dueAt.getTime()}`;
+        const reminders = [...c.reminders.filter((r) => r.id !== id), { ...ref, id, dueAt: dueAt.toISOString() }];
+        return { next: { ...c, reminders }, result: undefined };
+      }),
+    takeDueReminders: (now) =>
+      update((c) => {
+        const { due, rest } = partitionDue(c.reminders, now);
+        return { next: { ...c, reminders: rest }, result: due };
+      }),
+    toggleFollow: (messageId) =>
+      update((c) => {
+        const on = !c.follows.includes(messageId);
+        const follows = on ? [...c.follows, messageId] : c.follows.filter((id) => id !== messageId);
+        return { next: { ...c, follows }, result: on };
+      }),
   };
 });
+
+function pick(s: MessagePrefsData): MessagePrefsData {
+  return { reactionUsage: s.reactionUsage, bookmarks: s.bookmarks, reminders: s.reminders, follows: s.follows };
+}
+
+/** localStorage key for a user's prefs (the `storage` event filter). */
+export const prefsStorageKey = (userId: string): string => STORAGE_PREFIX + userId;

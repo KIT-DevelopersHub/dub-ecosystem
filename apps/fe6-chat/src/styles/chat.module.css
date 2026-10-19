@@ -832,7 +832,8 @@
   z-index: 2;
 }
 .messageRow:hover .hoverActions,
-.messageRow:focus-within .hoverActions {
+.messageRow:focus-within .hoverActions,
+.hoverActions:has([aria-expanded="true"]) {
   display: flex;
 }
 .hoverAction {
@@ -867,6 +868,8 @@
   top: calc(100% + 6px);
   right: 0;
   width: 260px;
+  max-height: min(480px, 70vh);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: var(--dub-space-2) 0;

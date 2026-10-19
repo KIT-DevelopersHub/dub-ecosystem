@@ -76,8 +76,10 @@ export function MessageItem({
 }: MessageItemProps) {
   const isAuthor = message.authorId === currentUserId;
   const isDeleted = message.deletedAt !== null;
-  const canEdit = isAuthor && !isDeleted; // authors only — even moderators can't edit others'
-  const canDelete = (isAuthor || canModerate) && !isDeleted;
+  // authors only — even moderators can't edit others'. No handler (thread pane) = no item,
+  // so the menu never offers an action that does nothing.
+  const canEdit = isAuthor && !isDeleted && onSubmitEdit !== undefined;
+  const canDelete = (isAuthor || canModerate) && !isDeleted && onDelete !== undefined;
   const authorName = nameOf(message.authorId, resolveUser);
   const authorAvatar = message.authorId ? (resolveUser?.(message.authorId)?.avatarUrl ?? undefined) : undefined;
 
