@@ -18,6 +18,8 @@ function fakeGateway(opts: Opts = {}) {
   const messages = [{ id: "m1", channelId: "c1", threadRootId: null, authorId: "bot", body: "こんにちは", version: 1, deletedAt: null }];
   const pins = new Map<string, string[]>([["c1", []]]);
   const reactions = new Map<string, Record<string, string[]>>();
+  const jobs: { id: string; slackChannelId: string; slackChannelName: string; dubChannelId: string; status: string }[] = [];
+  const emojis: string[] = [];
   const calls: string[] = [];
   let seq = 0;
 
@@ -82,6 +84,25 @@ function fakeGateway(opts: Opts = {}) {
       if (!drop) reactions.set(react[1]!, set);
       return reply(200, { messageId: react[1], reactions: set });
     }
+    if (method === "POST" && path === "/chat/slack-import/jobs") {
+      const ref = String(body.channel).replace(/^#/, "");
+      if (ref !== "general" && ref !== "C1") return reply(404, { error: { code: "not_found" } });
+      const existing = jobs.find((j) => j.slackChannelId === "C1");
+      if (existing) return reply(200, existing);
+      const job = { id: `job${jobs.length + 1}`, slackChannelId: "C1", slackChannelName: "general", dubChannelId: "slack-C1", status: "queued" };
+      if (!drop) jobs.push(job);
+      return reply(201, job);
+    }
+    const job = path.match(/^\/chat\/slack-import\/jobs\/([^/]+)$/);
+    if (job && method === "GET") {
+      const j = jobs.find((x) => x.id === job[1]);
+      return j ? reply(200, j) : reply(404, { error: { code: "not_found" } });
+    }
+    if (method === "POST" && path === "/chat/custom-emojis/slack-import") {
+      const added = ["party", "tada"].filter((n) => !emojis.includes(n));
+      if (!drop) emojis.push(...added);
+      return reply(200, { total: 2, imported: emojis.length, added: added.length, skipped: 0, failed: [], nextAfter: null, retryAfterMs: 0 });
+    }
     if (method === "GET" && path === "/chat/messages") {
       const root = url.searchParams.get("threadRootId") || null;
       return reply(200, { items: messages.filter((m) => m.channelId === url.searchParams.get("channelId") && m.threadRootId === root), nextCursor: null });
@@ -106,7 +127,7 @@ function fakeGateway(opts: Opts = {}) {
     return reply(404, { error: { code: "no_route" } });
   }) as typeof fetch;
 
-  return { fetchImpl, calls, inbox, channels, members, messages, pins, reactions };
+  return { fetchImpl, calls, inbox, channels, members, messages, pins, reactions, jobs, emojis };
 }
 
 function setup(opts: Opts = {}) {
@@ -219,5 +240,37 @@ describe("チャットの書き込み", () => {
     expect(preview.writes[0]!.unverifiable).toContain("確かめられない");
     expect(result).toMatchObject({ verdict: "done", results: [{ outcome: "accepted" }] });
     expect(gw.messages).toEqual([]);
+  });
+});
+
+describe("チャットの Slack 取り込み", () => {
+  it("取り込み開始は確認フレーズ必須で、作ったジョブを読み直す。2回目は同じジョブが返る", async () => {
+    const { gw, exec } = setup();
+    const { preview, result } = await run(exec, { op: "chat.slackImport.jobs.start", body: { channel: "#general" } });
+    expect(preview.requiresPhrase).toBe(true);
+    expect(preview.writes[0]).toMatchObject({ reversible: false, risk: "high" });
+    expect(result).toMatchObject({ verdict: "done", results: [{ outcome: "ok" }] });
+    expect(gw.calls).toContain("GET /chat/slack-import/jobs/job1");
+    expect((await run(exec, { op: "chat.slackImport.jobs.start", body: { channel: "C1" } })).result).toMatchObject({ verdict: "done" });
+    expect(gw.jobs).toHaveLength(1);
+    // The step loop belongs to the import screen, never to the bot.
+    expect(gw.calls.some((c) => c.endsWith("/step"))).toBe(false);
+  });
+
+  it("ジョブが作られていなければ未確認になる", async () => {
+    const { exec } = setup({ dropWrites: true });
+    const { result } = await run(exec, { op: "chat.slackImport.jobs.start", body: { channel: "general" } });
+    expect(result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
+  });
+
+  it("絵文字の取り込みは再実行しても登録済みを増やさず、検証不能の受付として報告する", async () => {
+    const { gw, exec } = setup();
+    const { preview, result } = await run(exec, { op: "chat.customEmojis.importFromSlack", body: {} });
+    expect(preview.requiresPhrase).toBe(false);
+    expect(preview.writes[0]).toMatchObject({ reversible: false, risk: "mid" });
+    expect(preview.writes[0]!.unverifiable).toContain("照合できない");
+    expect(result).toMatchObject({ verdict: "done", results: [{ outcome: "accepted" }] });
+    await run(exec, { op: "chat.customEmojis.importFromSlack", body: {} });
+    expect(gw.emojis).toEqual(["party", "tada"]);
   });
 });

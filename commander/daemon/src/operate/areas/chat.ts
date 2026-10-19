@@ -6,9 +6,13 @@ const S = "chat-service";
 const VIEW = { keys: [], appLevel: { app: "chat", level: "view" } } as const;
 const EDIT = { keys: [], appLevel: { app: "chat", level: "edit" } } as const;
 const CREATE = { keys: ["chat:create"], appLevel: { app: "chat", level: "edit" } } as const;
+const SLACK = { keys: ["chat:slack_import"], appLevel: { app: "chat", level: "edit" } } as const;
+const EMOJI_IMPORT = { keys: ["chat:emoji_import"], appLevel: { app: "chat", level: "edit" } } as const;
 const SIDEBAR = "ボット自身のサイドバーのセクション分けで、Dub のデータではない";
-const SLACK_IMPORT = "Slack 履歴の一括取り込みで、管理者が画面から実行する移行作業。エージェントの操作対象にしない";
-const CUSTOM_EMOJI = "リアクション描画用の絵文字画像の一覧・配信で、依頼表に無い";
+const SLACK_NOT_CONFIGURED = "chat-service に SLACK_BOT_TOKEN が無いと 412";
+const JOB_FIELDS =
+  "id・slackChannelId・slackChannelName・isPrivate・dubChannelId（取り込み先の Dub チャンネル）・status（queued|running|done|failed）・phase・" +
+  "counters（messages・threadReplies・reactions・pins・files 等）・pending・error（{ code, message } | null）";
 const CHANNEL_ADMIN = "ボットがそのチャンネルの管理者（自分で作ったチャンネル等）でないと拒否される";
 
 export const CHAT: AreaSpec = {
@@ -70,6 +74,45 @@ export const CHAT: AreaSpec = {
       description: "チャンネルのメッセージを取得する",
       hint: "query.channelId 必須。items[].id・authorId・body・version・deletedAt・reactions（{ 絵文字: [付けた人の userId] }）。threadRootId でスレッド内",
       query: ["channelId", "threadRootId", "afterMessageId", "limit", "cursor"],
+    }),
+    read({
+      id: "chat.slackImport.channels",
+      area: "chat",
+      path: "/chat/slack-import/channels",
+      service: S,
+      requires: SLACK,
+      description: "取り込める Slack のチャンネル一覧を取得する",
+      hint:
+        "{ items: [{ id, name, isPrivate, isArchived, memberCount, job（前に取り込んだジョブ { id, status } | null） }] }。" +
+        `非公開チャンネルは Slack で LMB を招待したものだけ出る。${SLACK_NOT_CONFIGURED}`,
+    }),
+    read({
+      id: "chat.slackImport.jobs.list",
+      area: "chat",
+      path: "/chat/slack-import/jobs",
+      service: S,
+      requires: SLACK,
+      description: "Slack 取り込みの状況一覧を取得する",
+      hint: `{ items: [ジョブ] }（更新の新しい順・limit 既定 20 / 最大 50）。ジョブ = ${JOB_FIELDS}`,
+      query: ["limit"],
+    }),
+    read({
+      id: "chat.slackImport.jobs.get",
+      area: "chat",
+      path: "/chat/slack-import/jobs/:id",
+      service: S,
+      requires: SLACK,
+      description: "Slack 取り込みの状況を1件取得する",
+      hint: `ジョブ = ${JOB_FIELDS}`,
+    }),
+    read({
+      id: "chat.customEmojis.list",
+      area: "chat",
+      path: "/chat/custom-emojis",
+      service: S,
+      requires: VIEW,
+      description: "登録済みのカスタム絵文字の一覧を取得する",
+      hint: "{ items: [{ name, aliasOf, contentType, source（slack|upload）, createdAt }] }（名前順・全件）。リアクションでは :name: で使う",
     }),
     read({
       id: "chat.settings.deletionPolicy",
@@ -294,6 +337,55 @@ export const CHAT: AreaSpec = {
         expect: { "[*].id": "$result.[*].id" },
       },
     },
+    {
+      id: "chat.slackImport.jobs.start",
+      area: "chat",
+      method: "POST",
+      path: "/chat/slack-import/jobs",
+      service: S,
+      requires: SLACK,
+      kind: "write",
+      reversible: false,
+      risk: "high",
+      description: "Slack のチャンネルを Dub のチャットに取り込み始める",
+      hint:
+        "channel 必須（Slack のチャンネル名 #general / general か id。chat.slackImport.channels で探す）。ジョブは Slack チャンネルごとに1つ：" +
+        "既存が queued|running ならそのまま返す、failed なら止まった所から再開、done なら最初からやり直す（同じメッセージは重複しない・その後の投稿も入る）。新規は 201、既存は 200。" +
+        "応答はジョブ（id・status・dubChannelId）。この操作だけでは取り込みは進まない：チャットの取り込み画面を開いている間だけ進み、開くと queued|running のジョブを自動で再開する。" +
+        `進み具合は chat.slackImport.jobs.get で見る。見つからない Slack チャンネルは 404（非公開は LMB の招待が必要）。${SLACK_NOT_CONFIGURED}`,
+      impact:
+        "{count}件の Slack チャンネルの取り込みが始まり、チャットの取り込み画面の状況一覧に出ます。取り込みはその画面を開いている間に進み、Slack の公開チャンネルには LMB が参加します。" +
+        "終わると Dub にチャンネルと過去のメッセージ・リアクション・ピン・添付ができ（ボットも参加者になります）、取り込んだ内容は取り消せません。",
+      body: { allowed: ["channel"], required: ["channel"] },
+      fieldLabels: { channel: "Slack チャンネル", slackChannelId: "Slack チャンネル", dubChannelId: "取り込み先" },
+      // Progress moves on its own once the screen drives the job, so only its identity is compared.
+      verify: {
+        read: "chat.slackImport.jobs.get",
+        params: { id: "$result.id" },
+        expect: { slackChannelId: "$result.slackChannelId", dubChannelId: "$result.dubChannelId" },
+      },
+    },
+    {
+      id: "chat.customEmojis.importFromSlack",
+      area: "chat",
+      method: "POST",
+      path: "/chat/custom-emojis/slack-import",
+      service: S,
+      requires: EMOJI_IMPORT,
+      kind: "write",
+      reversible: false,
+      risk: "mid",
+      description: "Slack のカスタム絵文字を取り込む（1回で最大20件）",
+      hint:
+        "after は前回の応答の nextAfter（最初は送らない）。1回で名前順に未登録の画像を最大 20 件登録し、対象画像が登録済みの別名も一緒に入る。登録済みの名前はスキップする（上書きしない）ので再実行は安全。" +
+        "応答 { total, imported（登録済み数）, added（今回登録した数）, skipped, failed[]（取れなかった画像名）, nextAfter, retryAfterMs }。" +
+        "nextAfter が null でなければ続きがあるので after=nextAfter で次の操作として呼ぶ。retryAfterMs>0 は Slack の回数制限で、その時間待って同じ after で呼び直す。" +
+        `結果は chat.customEmojis.list で確かめる。${SLACK_NOT_CONFIGURED}`,
+      impact: "Slack のカスタム絵文字が{count}回分（1回で最大20件）組織全体に登録され、リアクションで使えるようになります。登録済みの絵文字は変わりません。登録した絵文字を消す手段はありません。",
+      body: { allowed: ["after"], required: [] },
+      fieldLabels: { after: "続きの位置" },
+      unverifiable: "応答は件数だけで登録した絵文字の名前を返さないため、一覧を読み直して今回の分を照合できない",
+    },
   ],
   excluded: [
     { service: S, route: "GET /chat/channels/:id/ws-ticket", reason: "リアルタイム接続用の券でデータではない" },
@@ -315,17 +407,19 @@ export const CHAT: AreaSpec = {
     { service: S, route: "PATCH /chat/sections/:id", reason: SIDEBAR },
     { service: S, route: "DELETE /chat/sections/:id", reason: SIDEBAR },
     { service: S, route: "PUT /chat/channels/:id/section", reason: SIDEBAR },
-    { service: S, route: "GET /chat/slack-import/channels", reason: SLACK_IMPORT },
-    { service: S, route: "GET /chat/slack-import/jobs", reason: SLACK_IMPORT },
-    { service: S, route: "POST /chat/slack-import/jobs", reason: SLACK_IMPORT },
-    { service: S, route: "GET /chat/slack-import/jobs/:id", reason: SLACK_IMPORT },
-    { service: S, route: "POST /chat/slack-import/jobs/:id/step", reason: SLACK_IMPORT },
-    { service: S, route: "POST /chat/custom-emojis/slack-import", reason: SLACK_IMPORT },
-    { service: S, route: "GET /chat/custom-emojis", reason: CUSTOM_EMOJI },
-    { service: S, route: "GET /chat/custom-emojis/:name/image", reason: CUSTOM_EMOJI },
+    {
+      service: S,
+      route: "POST /chat/slack-import/jobs/:id/step",
+      reason: "取り込みの進行はチャットの取り込み画面が担う。開くと自動で再開する",
+    },
+    { service: S, route: "GET /chat/custom-emojis/:name/image", reason: "絵文字の画像そのもの（バイナリ）の配信で、データとして読むものではない" },
   ],
   pending: [],
   ownerOpenedIrreversible: {
+    "chat.slackImport.jobs.start":
+      "取り込みを止める・取り込んだチャンネルを消す API が無い。オーナーが「チャットの Slack 取り込みを操作する」を名指しで開放。確認フレーズ必須の高リスクで承認画面に出す",
+    "chat.customEmojis.importFromSlack":
+      "登録した絵文字を消す API は無いが、追加だけで既存の絵文字は変えない。オーナーが Slack 取り込みと合わせて名指しで開放",
     "chat.messages.delete":
       "オーナーが依頼表で「メッセージの削除」を名指しした。既定の完全削除は復元できないため、確認フレーズ必須の高リスクで承認画面に対象を出す",
   },
