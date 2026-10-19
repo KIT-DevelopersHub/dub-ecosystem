@@ -137,7 +137,15 @@ describe("createSlackClient — downloadEmoji", () => {
     expect(new Uint8Array(got!.bytes)).toEqual(new Uint8Array([71, 73, 70]));
     expect(got!.contentType).toBe("image/gif");
     const init = fetchImpl.mock.calls[0]![1] as RequestInit;
-    expect(init).toEqual({ redirect: "error" }); // no Authorization header, no redirects
+    // No Authorization header. "manual", not "error": Workers' fetch throws on "error".
+    expect(init).toEqual({ redirect: "manual" });
+  });
+
+  it("does not follow a redirect off Slack's CDN", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: "https://evil.example/x.png" } }));
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    expect(await client.downloadEmoji("https://emoji.slack-edge.com/T0/a/1.png")).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("refuses bodies over the size cap (declared or actual)", async () => {
