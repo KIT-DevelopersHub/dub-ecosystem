@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "roster-pagination",
+  "worker": "dub-demo-roster-pagination",
+  "url": "https://dub-demo-roster-pagination.developershub-site.workers.dev",
+  "deployedSha": "38aaec74",
+  "branch": "feat/roster-page-pagination",
+  "actor": "ko-tarou",
+  "markers": ["fe7-users-pagination","件目）"],
+  "live": true,
+  "verifiedAt": "2026-10-19T06:37:40Z",
+  "updatedAt": "2026-10-19T06:37:40Z",
+  "note": "メール名簿 20件ごとのページ切り替え"
+}
