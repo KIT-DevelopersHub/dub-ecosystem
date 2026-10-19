@@ -12,6 +12,7 @@ import { useChatStore } from "../store/useChatStore";
 import { useChannelView } from "../hooks/useChannelView";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ReadTracker } from "../store/read-tracker";
+import { newClientTempId } from "../lib/ulid";
 import { mapChatError } from "../lib/errors";
 import { ChatApiError, IDENTITY_BATCH_MAX } from "../api/client";
 import type { Attachment, Channel, ChannelMember, Message, SearchHit, TeamSummary } from "../api/contract";
@@ -23,11 +24,26 @@ import { MessageComposer } from "./MessageComposer";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { SearchResults } from "./SearchResults";
 import { ThreadPane } from "./ThreadPane";
+import { ForwardMessageModal } from "./ForwardMessageModal";
+import { MessageActionsContext, type MessageActions } from "./MessageActions";
+import { MessageLookupContext, type MessageLookup } from "./MessageUnfurl";
 import { channelHandle, channelLabel } from "../lib/dm";
+import { toPlainMentions } from "../lib/mentions";
+import { countUnreadAfter, messagePermalink, unreadMarkerFor, type MessageLink } from "../lib/forward";
+import { formatDue, reminderDueAt, useMessagePrefs, type SavedMessageRef } from "../lib/message-prefs";
 import styles from "../styles/chat.module.css";
 
 const MAX_MENTION_CANDIDATES = 8;
 const MAX_TEAM_CANDIDATES = 3;
+
+// A jump into another channel (後で / message link card): remembered across the channel
+// switch (ChannelPage remounts per channel) and consumed like a ?message= deep link.
+let pendingJump: { messageId: string; threadRootId: string | null } | null = null;
+
+/** Ask the next ChannelPage mount to scroll to (and flash) this message. */
+export function requestMessageJump(messageId: common.MessageId, threadRootId: common.MessageId | null = null): void {
+  pendingJump = { messageId, threadRootId };
+}
 
 export function ChannelPage({
   channelId,
@@ -38,6 +54,8 @@ export function ChannelPage({
   onOpenMobileNav,
   sections,
   initialDetailsTab,
+  forwardTargets = [],
+  resolveChannelName,
 }: {
   channelId: common.ChannelId;
   onThreadOpenChange?: (open: boolean) => void;
@@ -48,15 +66,36 @@ export function ChannelPage({
   // Hamburger callback for the mobile channel-list drawer (P21) — forwarded to
   // ChannelHeader, which only shows the button under the mobile breakpoint.
   onOpenMobileNav?: () => void;
-  // Personal sidebar section picker shown in the details 設定 tab.
+  // Org-wide sidebar section picker in the details 設定 tab (chat:manage_sections only).
   sections?: ChannelDetailsSections;
   // Open the details modal on mount (legacy /chat/channels/:id/settings deep link).
   initialDetailsTab?: ChannelDetailsTab;
+  // 転送先の候補 (サイドバーと同じ表示名) と、リンク展開カードのチャンネル名解決。
+  forwardTargets?: { id: common.ChannelId; label: string; archived: boolean }[];
+  resolveChannelName?: (id: common.ChannelId) => string | undefined;
 }) {
   const { api, can, currentUserId } = useChatRuntime();
-  const view = useChannelView(channelId);
   const { show } = useToast();
+  // 「新しい返信の通知を受け取る」: a reply by someone else to a followed message.
+  const follows = useMessagePrefs((s) => s.follows);
+  const followsRef = useRef(follows);
+  followsRef.current = follows;
+  // Already reading that thread in the pane: no toast for it.
+  const openThreadIdRef = useRef<common.MessageId | null>(null);
+  const view = useChannelView(channelId, {
+    onEvent: (e) => {
+      if (e.kind !== "message.created" || !e.threadRootId || e.authorId === currentUserId) return;
+      if (!followsRef.current.includes(e.threadRootId) || openThreadIdRef.current === e.threadRootId) return;
+      show({ kind: "info", title: "フォロー中のスレッドに新しい返信があります", description: e.body.slice(0, 80) });
+    },
+  });
   const markRead = useChatStore((s) => s.markRead);
+  const setChannelUnread = useChatStore((s) => s.setChannelUnread);
+  const bookmarks = useMessagePrefs((s) => s.bookmarks);
+  const toggleBookmarkPref = useMessagePrefs((s) => s.toggleBookmark);
+  const addReminderPref = useMessagePrefs((s) => s.addReminder);
+  const toggleFollowPref = useMessagePrefs((s) => s.toggleFollow);
+  const [forwarding, setForwarding] = useState<Message | null>(null);
   // 運営チーム (チーム単位メンション) は ChatApp が一度だけ読み込み store に載せる。
   const teams = useChatStore((s) => s.teams);
   const myTeamIds = useChatStore((s) => s.myTeamIds);
@@ -92,6 +131,7 @@ export function ChannelPage({
 
   useEffect(() => {
     onThreadOpenChange?.(thread !== null);
+    openThreadIdRef.current = thread?.id ?? null;
   }, [thread, onThreadOpenChange]);
 
   // channel detail + members + pins
@@ -177,8 +217,11 @@ export function ChannelPage({
   }, [api, channelId, markRead]);
 
   const newestId = view.state.messages[view.state.messages.length - 1]?.id;
+  // 「未読にする」 holds until the user leaves the channel (Slack), so new arrivals
+  // must not auto-read it back. ChannelPage remounts per channel, resetting this.
+  const manualUnreadRef = useRef(false);
   useEffect(() => {
-    if (newestId) tracker.current?.observeBottom(newestId);
+    if (newestId && !manualUnreadRef.current) tracker.current?.observeBottom(newestId);
   }, [newestId]);
 
   const resolveUser = useCallback((id: common.UserId) => users[id], [users]);
@@ -290,6 +333,179 @@ export function ChannelPage({
     [show],
   );
 
+  // ?message=<id>[&thread=<root>] (「リンクをコピー」で作ったリンク) — jump once the row
+  // is loaded; a thread reply jumps to its root and opens the thread pane.
+  const [initialJump] = useState<{ messageId: string; threadRootId: string | null } | null>(() => {
+    const q = new URLSearchParams(globalThis.location?.search ?? "");
+    const fromUrl = q.get("message");
+    const v = pendingJump ?? (fromUrl ? { messageId: fromUrl, threadRootId: q.get("thread") } : null);
+    pendingJump = null;
+    return v;
+  });
+  const deepLinkRef = useRef(initialJump);
+  useEffect(() => {
+    const target = deepLinkRef.current;
+    if (!target) return;
+    const rowId = target.threadRootId ?? target.messageId;
+    const row = view.state.messages.find((m) => m.id === rowId);
+    if (!row) return;
+    deepLinkRef.current = null;
+    if (target.threadRootId) setThread(row);
+    globalThis.setTimeout(() => jumpToMessage(rowId as common.MessageId), 0);
+  }, [view.state.messages, jumpToMessage]);
+
+  const plainText = useCallback(
+    (m: Message) => toPlainMentions(m.body, (id) => users[id]?.displayName, (id) => resolveTeam(id)?.name),
+    [users, resolveTeam],
+  );
+  const refOf = useCallback(
+    (m: Message): SavedMessageRef => ({
+      messageId: m.id,
+      channelId: m.channelId,
+      authorId: m.authorId,
+      excerpt: plainText(m).slice(0, 140),
+      threadRootId: m.threadRootId,
+    }),
+    [plainText],
+  );
+
+  const copyToClipboard = useCallback(
+    (text: string, done: string) => {
+      const clip = globalThis.navigator?.clipboard;
+      if (!clip) {
+        show({ kind: "error", title: "コピーできませんでした", description: "このブラウザはクリップボードに対応していません" });
+        return;
+      }
+      clip.writeText(text).then(
+        () => show({ kind: "success", title: done }),
+        () => show({ kind: "error", title: "コピーできませんでした", description: "ブラウザがクリップボードへの書き込みを許可しませんでした" }),
+      );
+    },
+    [show],
+  );
+
+  const messageActions = useMemo<MessageActions>(() => {
+    const bookmarked = new Set(bookmarks.map((b) => b.messageId));
+    return {
+      isBookmarked: (id) => bookmarked.has(id),
+      isFollowing: (id) => follows.includes(id),
+      // The oldest loaded row with older history unloaded has no known predecessor id;
+      // "0" there would mark the whole channel history unread.
+      canMarkUnread: (m) =>
+        m.threadRootId === null &&
+        m.channelId === channelId &&
+        (view.state.messages[0]?.id !== m.id || view.state.nextCursor === null),
+      // Optimistic: divider + sidebar badge move at once, then the server's count wins.
+      markUnread: (m) => {
+        const marker = unreadMarkerFor(view.state.messages, m.id);
+        manualUnreadRef.current = true;
+        tracker.current?.cancel();
+        view.setLastRead(marker);
+        setChannelUnread({
+          channelId,
+          lastReadMessageId: marker,
+          unreadCount: countUnreadAfter(view.state.messages, marker, currentUserId),
+          mentioned: false,
+        });
+        show({ kind: "success", title: "このメッセージから未読にしました" });
+        api
+          .updateReadState({ channelId, lastReadMessageId: marker })
+          .then(() => api.listUnread())
+          .then((all) => {
+            const mine = all.find((u) => u.channelId === channelId);
+            if (mine) setChannelUnread(mine);
+          })
+          .catch((err) => failToast("未読にできませんでした", err));
+      },
+      toggleBookmark: (m) => {
+        const on = toggleBookmarkPref(refOf(m));
+        show({
+          kind: "success",
+          title: on ? "後で用に保存しました" : "後で用の保存を解除しました",
+          ...(on ? { description: "サイドバーの「後で」から見返せます" } : {}),
+        });
+      },
+      addReminder: (m, when) => {
+        const now = new Date();
+        const due = when instanceof Date ? when : reminderDueAt(when, now);
+        addReminderPref(refOf(m), due);
+        show({ kind: "success", title: `${formatDue(due, now)} にリマインドします`, description: "サイドバーの「後で」に表示されます" });
+      },
+      copyLink: (m) =>
+        copyToClipboard(messagePermalink(globalThis.location, m.channelId, m.id, m.threadRootId), "リンクをコピーしました"),
+      toggleFollow: (m) => {
+        const on = toggleFollowPref(m.threadRootId ?? m.id);
+        show(
+          on
+            ? { kind: "success", title: "新しい返信を通知します", description: "このチャンネルを開いている間に通知します" }
+            : { kind: "success", title: "返信の通知をオフにしました" },
+        );
+      },
+      copyText: (m) => copyToClipboard(plainText(m), "メッセージをコピーしました"),
+      forward: (m) => setForwarding(m),
+    };
+  }, [
+    api,
+    bookmarks,
+    follows,
+    channelId,
+    currentUserId,
+    view,
+    setChannelUnread,
+    toggleBookmarkPref,
+    addReminderPref,
+    toggleFollowPref,
+    refOf,
+    plainText,
+    copyToClipboard,
+    failToast,
+    show,
+  ]);
+
+  // Link cards (MessageUnfurl): loaded rows answer at once; others are fetched there.
+  const openLink = useCallback(
+    (link: MessageLink) => {
+      if (link.channelId !== channelId) {
+        requestMessageJump(link.messageId, link.threadRootId);
+        onSelectChannel?.(link.channelId);
+        return;
+      }
+      const rowId = link.threadRootId ?? link.messageId;
+      const root = view.state.messages.find((m) => m.id === rowId);
+      if (link.threadRootId && root) setThread(root);
+      jumpToMessage(rowId);
+    },
+    [channelId, onSelectChannel, view.state.messages, jumpToMessage],
+  );
+  const messageLookup = useMemo<MessageLookup>(() => {
+    const byId = new Map<string, Message>();
+    for (const m of pinned) byId.set(m.id, m);
+    for (const m of view.state.messages) byId.set(m.id, m);
+    return {
+      findLoaded: (id) => byId.get(id),
+      resolveUser,
+      resolveTeam,
+      resolveChannelName: (id) => resolveChannelName?.(id),
+      onOpen: openLink,
+    };
+  }, [pinned, view.state.messages, resolveUser, resolveTeam, resolveChannelName, openLink]);
+
+  const onForward = useCallback(
+    async (target: common.ChannelId, body: string) => {
+      try {
+        // Same channel: through the timeline so the row appears optimistically.
+        if (target === channelId) await view.send(body);
+        else await api.postMessage({ channelId: target, body, clientTempId: newClientTempId() });
+      } catch (err) {
+        failToast("転送できませんでした", err);
+        throw err;
+      }
+      const name = forwardTargets.find((c) => c.id === target)?.label ?? "";
+      show({ kind: "success", title: `${name} に転送しました` });
+    },
+    [api, channelId, view, forwardTargets, failToast, show],
+  );
+
   // Optimistic: the modal/header reflect the patch at once; on failure only this
   // patch is reverted (version conflict included) and the reason is toasted.
   const onUpdateChannel = useCallback(
@@ -381,7 +597,8 @@ export function ChannelPage({
   const searchOpen = searchQuery.trim().length >= 2;
 
   return (
-    <>
+    <MessageActionsContext.Provider value={messageActions}>
+      <MessageLookupContext.Provider value={messageLookup}>
       <section className={styles.main}>
         {shownChannel && (
           <ChannelHeader
@@ -509,7 +726,21 @@ export function ChannelPage({
         onCancel={() => setPendingDelete(null)}
         testId="fe6-timeline-delete-confirm"
       />
-    </>
+
+      {forwarding && (
+        <ForwardMessageModal
+          sourceChannelName={shownChannel ? channelHandle(shownChannel, shownChannel.name) : ""}
+          channels={forwardTargets}
+          authorName={forwarding.authorId === null ? "システム" : (users[forwarding.authorId]?.displayName ?? forwarding.authorId)}
+          preview={plainText(forwarding)}
+          hasAttachments={forwarding.attachments.length > 0}
+          onClose={() => setForwarding(null)}
+          link={messagePermalink(globalThis.location, forwarding.channelId, forwarding.id, forwarding.threadRootId)}
+          onForward={onForward}
+        />
+      )}
+      </MessageLookupContext.Provider>
+    </MessageActionsContext.Provider>
   );
 }
 

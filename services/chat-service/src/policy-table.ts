@@ -66,14 +66,18 @@ export const POLICY_TABLE = definePolicyTable({
   // role must be able to clear its own unread badge.
   "POST /chat/channels/:id/read": appLevel("chat", "view"),
 
-  // Personal sidebar sections: same reasoning as read state — every row is the CALLER's own
-  // (user id from the session, repo queries scoped by it), so organizing one's own sidebar
-  // is 閲覧-level. Assigning a channel also runs loadReadable on it.
+  // Org-wide sidebar sections (one shared set, chat/0007): every チャット reader sees them.
+  // The assignment map is filtered to channels the caller can read (repo), so a private
+  // channel's id never reaches a non-member.
   "GET /chat/sections": appLevel("chat", "view"),
-  "POST /chat/sections": appLevel("chat", "view"),
-  "PATCH /chat/sections/:id": appLevel("chat", "view"),
-  "DELETE /chat/sections/:id": appLevel("chat", "view"),
-  "PUT /chat/channels/:id/section": appLevel("chat", "view"),
+
+  // Organizing the shared sections rewrites EVERY member's sidebar, so it is 編集 +
+  // chat:manage_sections (admin only by default, identity/0024) — not 閲覧 like the old
+  // per-user sections. Assigning a channel also runs loadReadable on it.
+  "POST /chat/sections": appLevel("chat", "edit", "chat:manage_sections"),
+  "PATCH /chat/sections/:id": appLevel("chat", "edit", "chat:manage_sections"),
+  "DELETE /chat/sections/:id": appLevel("chat", "edit", "chat:manage_sections"),
+  "PUT /chat/channels/:id/section": appLevel("chat", "edit", "chat:manage_sections"),
 
   // ---- writes: チャット = 編集 (`app:chat:view` + `app:chat:edit`) ----
   // Instance-level authority still comes from the handler: ensureCanWrite for posting /
@@ -114,6 +118,18 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /chat/slack-import/jobs": appLevel("chat", "edit", "chat:slack_import"),
   "GET /chat/slack-import/jobs/:id": appLevel("chat", "edit", "chat:slack_import"),
   "POST /chat/slack-import/jobs/:id/step": appLevel("chat", "edit", "chat:slack_import"),
+
+  // ---- custom emoji ----
+  // List + image are what every reader needs to RENDER a reaction (":name:" -> image), so they
+  // sit with the other 閲覧 reads. They carry no channel data (workspace-wide emoji set), so
+  // there is no channel-scoped half to pair with in the handler.
+  "GET /chat/custom-emojis": appLevel("chat", "view"),
+  "GET /chat/custom-emojis/:name/image": appLevel("chat", "view"),
+  // Slack emoji import: 編集 + chat:emoji_import (dangerous key — writes org-wide rows + R2
+  // objects and fetches from Slack). Its own toggle in ロール管理 > チャット > 細かい権限
+  // (identity 0023: admin only by default), separate from chat:slack_import so emoji can be
+  // delegated without handing out channel import.
+  "POST /chat/custom-emojis/slack-import": appLevel("chat", "edit", "chat:emoji_import"),
 });
 
 // NOT in this table, deliberately — both are outside the HTTP app entirely:

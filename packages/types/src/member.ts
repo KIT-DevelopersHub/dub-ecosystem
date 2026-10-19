@@ -408,15 +408,33 @@ export interface SubmitParticipationRequest extends Partial<PersonProfile> {
   desiredTeamId?: string | null;
 }
 
-/** The signed-in user's OWN 参加届 (self-service, session-scoped — no target id). The
- *  self-editable slice a 運営 member manages from アカウント設定 → 参加情報. Every field is
- *  nullable so an unfilled 届 reads as all-null; `SelfParticipationUpdateRequest` patches
- *  a subset. Backed by the caller's linked member_people row (resolved via identity link)
+/** 名簿で管理者が決める「運営での情報」(Member の運営固有項目)。本人は閲覧のみ
+ *  (自分で役割・ステータス・所属を変えられないよう、更新は受け付けない)。 */
+export interface SelfOperationsInfo {
+  /** 名簿の氏名 (合成値 "姓 名")。姓/名 が未分割の旧データで入力欄を埋めるのに使う。 */
+  name: string;
+  roleTitle: string | null;
+  status: MemberStatus;
+  teams: Array<Pick<Team, "id" | "name" | "color">>;
+  /** リーダー (上長) の氏名。直属リーダー無しは null。 */
+  leaderName: string | null;
+}
+
+/** The signed-in user's OWN roster entry as shown in アカウント設定 (self-service,
+ *  session-scoped — no target id). Mirrors `Member`: PersonProfile + 連絡先 are
+ *  self-editable, the remaining 運営 fields come back read-only in `operations`.
+ *  Every profile field is nullable so an unlinked user reads as all-null (`operations`
+ *  null). Backed by the caller's linked member_people row (resolved via identity link)
  *  — see member-service getSelfParticipation / updateSelfParticipation. Distinct from the
  *  admin `SubmitParticipationRequest` (which targets the review pipeline). */
-export type SelfParticipation = PersonProfile;
-/** Patch body for the self 参加届 (any subset of the fields). */
-export type SelfParticipationUpdateRequest = Partial<SelfParticipation>;
+export interface SelfParticipation extends PersonProfile {
+  /** 連絡先 (運営用・本人も編集可). */
+  contact: string | null;
+  /** 名簿に未登録 (identity 未紐付け) なら null。 */
+  operations: SelfOperationsInfo | null;
+}
+/** Patch body for the self entry: any subset of PersonProfile + 連絡先. */
+export type SelfParticipationUpdateRequest = Partial<PersonProfile> & { contact?: string | null };
 
 /** Response of a submit: the stored 参加届. 提出時は名簿へ反映しない（管理者が一覧で
  *  確定する）ので `reviewState` は "pending"。`member` は反映されるまで null。

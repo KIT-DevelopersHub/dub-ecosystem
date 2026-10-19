@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { UnfurlPreview } from "../api/contract";
 import { useOptionalChatRuntime } from "../context";
 import { extractPreviewUrls } from "../lib/render-body";
+import { parseMessageLink } from "../lib/forward";
 import { safeHref } from "./MessageBody";
 import styles from "../styles/chat.module.css";
 
@@ -87,7 +88,11 @@ function siteOf(p: UnfurlPreview): string {
 }
 
 export function LinkPreviews({ body }: { body: string }): JSX.Element | null {
-  const urls = useMemo(() => extractPreviewUrls(body, 2), [body]);
+  // Links to our own messages unfurl as a quote card (MessageUnfurls), not OGP.
+  const urls = useMemo(
+    () => extractPreviewUrls(body, 10).filter((u) => !parseMessageLink(u, globalThis.location?.origin)).slice(0, 2),
+    [body],
+  );
   const previews = usePreviews(urls);
   if (previews.length === 0) return null;
   return (
