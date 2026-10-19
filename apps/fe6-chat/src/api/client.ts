@@ -47,7 +47,7 @@ export interface ChatApiClient {
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel>;
   /** Hard delete (chat:delete_channel). Messages are erased; DMs are rejected. */
   deleteChannel(id: common.ChannelId): Promise<void>;
-  /** Caller's personal sidebar sections + channel assignments. */
+  /** Org-wide sidebar sections + channel assignments (writes need chat:manage_sections). */
   listSections(): Promise<ChatSectionList>;
   createSection(name: string): Promise<ChatSection>;
   updateSection(id: string, req: UpdateSectionRequest): Promise<ChatSection>;

@@ -308,18 +308,21 @@ by default) — channel-admin / `chat:moderate` alone is **not** enough. Respons
 DM -> `400 VALIDATION_FAILED`; missing / hidden private channel -> `404`. Audited as
 `chat.channel.delete`. No realtime event: other open clients see `404` on their next request.
 
-### Sidebar sections (personal)
+### Sidebar sections (org-wide)
 
-Each user groups channels into their own named sections (Slack-style; other users never see
-them). A channel is in at most one of the caller's sections; unassigned channels stay in the
-default type groups. All routes are 閲覧-level (caller-owned rows only).
+One shared set of named sections for the whole org (Slack-style); every member sees the same
+sections and the same channel placement. A channel is in at most one section; unassigned
+channels stay in the default type groups. Reading is 閲覧-level; every write needs 編集 +
+`chat:manage_sections` (ロール管理 > チャット > 細かい権限; admin-only by default). The old
+per-user sections (chat/0004) are no longer read — their rows are simply not shown.
 
 - `GET /sections` -> `{ items: ChatSection[] (by position), assignments: { [channelId]: sectionId } }`
-- `POST /sections` `{ name }` (trimmed, 1-40 chars, max 50 per user) -> `201 ChatSection`, appended last
-- `PATCH /sections/:id` `{ name?, position? }` -> `ChatSection` (`404` if not the caller's)
+  (assignments only for channels the caller can read — private channels need membership)
+- `POST /sections` `{ name }` (trimmed, 1-40 chars, max 50 in the org) -> `201 ChatSection`, appended last
+- `PATCH /sections/:id` `{ name?, position? }` -> `ChatSection` (`404` if missing)
 - `DELETE /sections/:id` -> `204`; its channels fall back to the default groups
 - `PUT /channels/:id/section` `{ sectionId: string | null }` -> `204` (`null` = unassign;
-  `404` if the channel is unreadable or the section is not the caller's)
+  `404` if the channel is unreadable or the section is missing)
 
 ### `POST /channels/:id/read`
 

@@ -63,9 +63,9 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 //   get chat:create only) and 0008 (per-app tier: admin/maintainer チャット = 編集,
 //   organizer/member チャット = 閲覧).
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  // + 0020 / 0021 / 0023: chat:delete_channel, chat:slack_import and chat:emoji_import are
-  // admin-only by default.
-  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import"],
+  // + 0020 / 0021 / 0023 / 0024: chat:delete_channel, chat:slack_import, chat:emoji_import and
+  // chat:manage_sections are admin-only by default.
+  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections"],
   maintainer: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate"],
   organizer: ["app:chat:view", "chat:create"],
   member: ["app:chat:view", "chat:create"],
@@ -110,11 +110,6 @@ const READS = [
   "GET /chat/unfurl",
   "GET /chat/unread",
   "POST /chat/channels/:id/read",
-  // Personal sidebar sections: caller-owned rows only, so 閲覧 like read state.
-  "DELETE /chat/sections/:id",
-  "PATCH /chat/sections/:id",
-  "POST /chat/sections",
-  "PUT /chat/channels/:id/section",
   // Custom emoji list + image: every reader renders ":name:" reactions as images.
   "GET /chat/custom-emojis",
   "GET /chat/custom-emojis/:name/image",
@@ -146,9 +141,18 @@ const SLACK_IMPORT = [
 // Slack custom emoji import: 編集 + chat:emoji_import (admin only by default).
 const EMOJI_IMPORT = ["POST /chat/custom-emojis/slack-import"];
 
+// Org-wide sidebar sections: reading is in READS; organizing them rewrites every member's
+// sidebar, so 編集 + chat:manage_sections (admin only by default).
+const MANAGE_SECTIONS = [
+  "DELETE /chat/sections/:id",
+  "PATCH /chat/sections/:id",
+  "POST /chat/sections",
+  "PUT /chat/channels/:id/section",
+];
+
 const READ_ONLY = [...PUBLIC_ROUTES, ...READS].sort();
 const EDITOR = [...PUBLIC_ROUTES, ...READS, ...WRITES, ...CREATE, ...MODERATE].sort();
-const FULL = [...EDITOR, ...DELETE_CHANNEL, ...SLACK_IMPORT, ...EMOJI_IMPORT].sort();
+const FULL = [...EDITOR, ...DELETE_CHANNEL, ...SLACK_IMPORT, ...EMOJI_IMPORT, ...MANAGE_SECTIONS].sort();
 
 describe("role x endpoint matrix (frozen)", () => {
   // Changing a rule changes one of these arrays — a visible diff in review.

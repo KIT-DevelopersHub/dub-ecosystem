@@ -55,6 +55,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:delete_channel",
   "chat:slack_import",
   "chat:emoji_import",
+  "chat:manage_sections",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -717,9 +718,13 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
   "mail:read",
 ];
 
+// チャット 編集 but NOT chat:manage_sections (the default for every non-admin role): sees the
+// org-wide sidebar sections without any organizing UI. ?demo_account=usr_bob previews it.
+const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "chat:manage_sections");
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
-  { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
+  { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: CHAT_EDITOR_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
@@ -1594,22 +1599,21 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
     return c.roster;
   };
 
-  // Personal sidebar sections, per signed-in account (account switcher). The demo
+  // Org-wide sidebar sections: ONE shared set every account sees (chat/0007). Writes need
+  // 編集 + chat:manage_sections like chat-service's POLICY_TABLE (403 otherwise). The demo
   // admin starts with one 「運営」 section holding #admin so the feature shows at once.
   interface DemoSection { id: string; name: string; position: number; createdAt: string }
-  const sectionsByUser = new Map<string, { items: DemoSection[]; assignments: Record<string, string> }>([
-    [ME_ID, { items: [{ id: "sec_demo_ops", name: "運営", position: 0, createdAt: CH_TS }], assignments: { chn_admin: "sec_demo_ops" } }],
-  ]);
-  let sectionSeq = 0;
-  const mySections = () => {
-    const me = currentAccount().id;
-    let entry = sectionsByUser.get(me);
-    if (!entry) {
-      entry = { items: [], assignments: {} };
-      sectionsByUser.set(me, entry);
-    }
-    return entry;
+  const shared: { items: DemoSection[]; assignments: Record<string, string> } = {
+    items: [{ id: "sec_demo_ops", name: "運営", position: 0, createdAt: CH_TS }],
+    assignments: { chn_admin: "sec_demo_ops" },
   };
+  let sectionSeq = 0;
+  const canManageSections = () => {
+    const perms = currentAccount().permissions;
+    return perms.includes("app:chat:edit") && perms.includes("chat:manage_sections");
+  };
+  const sectionsForbidden = (): Response =>
+    json({ error: { code: "FORBIDDEN", message: "chat:manage_sections required", retryable: false } } satisfies ErrorResponse, 403);
   const sectionName = (raw: unknown): string | null => {
     const name = typeof raw === "string" ? raw.trim() : "";
     return name.length >= 1 && name.length <= 40 ? name : null;
@@ -1847,11 +1851,12 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       return json([]); // no unread badges in demo
     }
     if (pathname === "/api/v1/chat/sections") {
-      const mine = mySections();
+      const mine = shared;
       if (method === "GET") {
         return json({ items: [...mine.items].sort((a, b) => a.position - b.position), assignments: { ...mine.assignments } });
       }
       if (method === "POST") {
+        if (!canManageSections()) return sectionsForbidden();
         const name = sectionName((body as { name?: unknown } | null)?.name);
         if (!name) return validationFailed("section name must be 1..40 chars");
         const position = mine.items.reduce((max, x) => Math.max(max, x.position + 1), 0);
@@ -1863,7 +1868,8 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
     {
       const m = /^\/api\/v1\/chat\/sections\/([^/]+)$/.exec(pathname);
       if (m && (method === "PATCH" || method === "DELETE")) {
-        const mine = mySections();
+        if (!canManageSections()) return sectionsForbidden();
+        const mine = shared;
         const id = decodeURIComponent(m[1]!);
         const idx = mine.items.findIndex((x) => x.id === id);
         if (idx < 0) return notFound(`${method} ${pathname}`);
@@ -1888,8 +1894,9 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/section$/.exec(pathname);
       if (m && method === "PUT") {
         const channelId = decodeURIComponent(m[1]!);
+        if (!canManageSections()) return sectionsForbidden();
         const sectionId = (body as { sectionId?: string | null } | null)?.sectionId ?? null;
-        const mine = mySections();
+        const mine = shared;
         if (!byId.has(channelId)) return notFound(`PUT ${pathname}`);
         if (sectionId !== null && !mine.items.some((x) => x.id === sectionId)) return notFound(`PUT ${pathname} (section)`);
         if (sectionId === null) delete mine.assignments[channelId];
@@ -1926,7 +1933,7 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
         return json(toWire(c));
       }
       if (m && method === "DELETE") {
-        // Hard delete: the channel, its posts and every user's section assignment go.
+        // Hard delete: the channel, its posts and its (shared) section assignment go.
         const id = decodeURIComponent(m[1]!);
         const c = byId.get(id);
         if (!c) return notFound(`DELETE ${pathname}`);
@@ -1934,7 +1941,7 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
         all.splice(all.indexOf(c), 1);
         byId.delete(id);
         posted.delete(id);
-        for (const entry of sectionsByUser.values()) delete entry.assignments[id];
+        delete shared.assignments[id];
         return json(null, 204);
       }
     }

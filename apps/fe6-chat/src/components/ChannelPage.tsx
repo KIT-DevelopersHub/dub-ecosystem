@@ -66,7 +66,7 @@ export function ChannelPage({
   // Hamburger callback for the mobile channel-list drawer (P21) — forwarded to
   // ChannelHeader, which only shows the button under the mobile breakpoint.
   onOpenMobileNav?: () => void;
-  // Personal sidebar section picker shown in the details 設定 tab.
+  // Org-wide sidebar section picker in the details 設定 tab (chat:manage_sections only).
   sections?: ChannelDetailsSections;
   // Open the details modal on mount (legacy /chat/channels/:id/settings deep link).
   initialDetailsTab?: ChannelDetailsTab;

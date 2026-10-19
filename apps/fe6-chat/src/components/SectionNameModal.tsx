@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-// Small name dialog for creating / renaming a personal sidebar section.
+// Small name dialog for creating / renaming an org-wide sidebar section.
 import { useEffect, useState } from "react";
 import { Button, FormField, Modal, TextField } from "@dub/ui";
 import styles from "../styles/chat.module.css";

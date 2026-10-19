@@ -2,8 +2,9 @@
 // #-prefixed channels, presence dots on DMs, unread = bold name + mention/count
 // badge. "New channel" (+) is gated by can("chat:create") upstream via canCreate.
 // Slack-style information design — built from @dub/ui + own glyphs, no Slack assets.
-// Personal sections (when `sections` handlers are passed) render above the default
-// groups; each row gets a hover/focus "⋯" menu to move it between sections.
+// Org-wide sections (one shared set) render above the default groups for everyone. Only
+// with `sectionActions` (chat:manage_sections) do the create / rename / delete entries and
+// the per-row "⋯" move menu appear.
 import { useState } from "react";
 import { Icon, Menu, Skeleton, type MenuItem } from "@dub/ui";
 import type { common } from "@dub/types";
@@ -34,7 +35,7 @@ export interface ChannelListProps {
   onCloseMobile?: () => void;
   /** Channels/sections still loading -> skeleton rows (not "no channels"). */
   loading?: boolean;
-  /** Personal sections overlay. Omit `sectionActions` to render the plain groups. */
+  /** Org-wide sections overlay. Omit `sectionActions` for a read-only view (no organizing UI). */
   sections?: ChatSection[];
   assignments?: Record<common.ChannelId, string>;
   sectionActions?: SectionActions;
@@ -53,6 +54,9 @@ export interface SectionActions {
   onDelete: (section: ChatSection) => void;
   onMove: (channelId: common.ChannelId, sectionId: string | null) => void;
 }
+
+/** Liveness marker for the org-wide (shared) sections build. */
+export const SHARED_SECTIONS_MARKER = "fe6-shared-sections-v1";
 
 function Dot({ p }: { p: Presence }) {
   return <span className={`${styles.presenceDot} ${styles[p]}`} aria-hidden />;
@@ -77,7 +81,7 @@ export function ChannelList({
   onImportEmoji,
   later,
 }: ChannelListProps) {
-  const layout = buildSidebar(channels, sectionActions ? sections : [], sectionActions ? assignments : {});
+  const layout = buildSidebar(channels, sections, assignments);
   const grouped = layout.groups;
   const groups: ChannelGroup[] =
     onNewDm && !grouped.some((g) => g.type === "dm") ? [...grouped, { type: "dm", label: "ダイレクト", channels: [] }] : grouped;
@@ -234,10 +238,18 @@ export function ChannelList({
         ) : (
           <>
             {layout.sections.map(({ section, channels: list }) => {
+              // Read-only viewers have nothing to do with an empty shared section.
+              if (!sectionActions && list.length === 0) return null;
               const isCollapsed = !!collapsed[section.id];
               const pending = isPendingSection(section.id);
               return (
-                <section key={section.id} className={styles.section} data-testid="fe6-sidebar-section" data-section-id={section.id}>
+                <section
+                  key={section.id}
+                  className={styles.section}
+                  data-testid="fe6-sidebar-section"
+                  data-section-id={section.id}
+                  data-marker={SHARED_SECTIONS_MARKER}
+                >
                   <div className={styles.sectionHeader}>
                     <button
                       type="button"

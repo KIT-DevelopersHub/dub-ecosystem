@@ -70,6 +70,9 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
   const [importOpen, setImportOpen] = useState(false);
   // Same keys chat-service's POLICY_TABLE requires for /chat/slack-import/* (admin only by default).
   const canImport = can("app:chat:edit") && can("chat:slack_import");
+  // Sections are one org-wide set: everyone sees them, only these keys may organize them
+  // (same keys as POST/PATCH/DELETE /chat/sections + PUT /chat/channels/:id/section).
+  const canManageSections = can("app:chat:edit") && can("chat:manage_sections");
   // DM peers' display names (a DM is labelled by "the other side").
   const [dmUsers, setDmUsers] = useState<Record<common.UserId, identity.UserSummary>>({});
   const [dmUsersFailed, setDmUsersFailed] = useState(false);
@@ -287,12 +290,17 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
         loading={!channelsLoaded || !sections.loaded}
         sections={sections.sections}
         assignments={sections.assignments}
-        sectionActions={{
-          onCreate: (assignChannelId) => setSectionDialog({ mode: "create", ...(assignChannelId ? { assignChannelId } : {}) }),
-          onRename: (section) => setSectionDialog({ mode: "rename", section }),
-          onDelete: setPendingSectionDelete,
-          onMove: sections.move,
-        }}
+        {...(canManageSections
+          ? {
+              sectionActions: {
+                onCreate: (assignChannelId?: common.ChannelId) =>
+                  setSectionDialog({ mode: "create", ...(assignChannelId ? { assignChannelId } : {}) }),
+                onRename: (section: ChatSection) => setSectionDialog({ mode: "rename", section }),
+                onDelete: setPendingSectionDelete,
+                onMove: sections.move,
+              },
+            }
+          : {})}
         {...(canImport ? { onImport: () => setImportOpen(true) } : {})}
         {...(onImportEmoji ? { onImportEmoji } : {})}
         later={{ count: laterBadge, active: laterOpen, onOpen: openLater }}
@@ -334,11 +342,15 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
           onOpenMobileNav={isMobile ? () => setMobileNavOpen(true) : undefined}
           forwardTargets={forwardTargets}
           resolveChannelName={resolveChannelName}
-          sections={{
-            items: sections.sections,
-            currentSectionId: sections.assignments[active] ?? null,
-            onMove: (sectionId) => sections.move(active, sectionId),
-          }}
+          {...(canManageSections
+            ? {
+                sections: {
+                  items: sections.sections,
+                  currentSectionId: sections.assignments[active] ?? null,
+                  onMove: (sectionId: string | null) => sections.move(active, sectionId),
+                },
+              }
+            : {})}
           {...(initialDetailsTab && active === initialChannelId ? { initialDetailsTab } : {})}
         />
       ) : (

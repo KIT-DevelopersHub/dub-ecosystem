@@ -66,14 +66,18 @@ export const POLICY_TABLE = definePolicyTable({
   // role must be able to clear its own unread badge.
   "POST /chat/channels/:id/read": appLevel("chat", "view"),
 
-  // Personal sidebar sections: same reasoning as read state — every row is the CALLER's own
-  // (user id from the session, repo queries scoped by it), so organizing one's own sidebar
-  // is 閲覧-level. Assigning a channel also runs loadReadable on it.
+  // Org-wide sidebar sections (one shared set, chat/0007): every チャット reader sees them.
+  // The assignment map is filtered to channels the caller can read (repo), so a private
+  // channel's id never reaches a non-member.
   "GET /chat/sections": appLevel("chat", "view"),
-  "POST /chat/sections": appLevel("chat", "view"),
-  "PATCH /chat/sections/:id": appLevel("chat", "view"),
-  "DELETE /chat/sections/:id": appLevel("chat", "view"),
-  "PUT /chat/channels/:id/section": appLevel("chat", "view"),
+
+  // Organizing the shared sections rewrites EVERY member's sidebar, so it is 編集 +
+  // chat:manage_sections (admin only by default, identity/0024) — not 閲覧 like the old
+  // per-user sections. Assigning a channel also runs loadReadable on it.
+  "POST /chat/sections": appLevel("chat", "edit", "chat:manage_sections"),
+  "PATCH /chat/sections/:id": appLevel("chat", "edit", "chat:manage_sections"),
+  "DELETE /chat/sections/:id": appLevel("chat", "edit", "chat:manage_sections"),
+  "PUT /chat/channels/:id/section": appLevel("chat", "edit", "chat:manage_sections"),
 
   // ---- writes: チャット = 編集 (`app:chat:view` + `app:chat:edit`) ----
   // Instance-level authority still comes from the handler: ensureCanWrite for posting /

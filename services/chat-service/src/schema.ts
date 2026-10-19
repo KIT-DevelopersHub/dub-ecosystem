@@ -190,3 +190,28 @@ CREATE TABLE chat_custom_emojis (
 );
 `.trim(),
 };
+
+// Forward-only add-on: ORG-WIDE sidebar sections (one shared set every member sees), replacing
+// 0004's per-user sections (left in place, no longer used). A channel sits in at most one
+// shared section (PK channel_id). Writes need chat:manage_sections. Physical mirror:
+// infra/d1/migrations/chat/0007_shared_sections.sql.
+export const CHAT_SHARED_SECTIONS_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0007_shared_sections",
+  up: `
+CREATE TABLE chat_shared_sections (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_chat_shared_sections_position ON chat_shared_sections(position);
+CREATE TABLE chat_shared_channel_sections (
+  channel_id TEXT PRIMARY KEY REFERENCES chat_channels(id),
+  section_id TEXT NOT NULL REFERENCES chat_shared_sections(id)
+);
+CREATE INDEX idx_chat_shared_channel_sections_section ON chat_shared_channel_sections(section_id);
+`.trim(),
+};
