@@ -41,6 +41,8 @@ const SELF_PART: member.SelfParticipation = {
   studentNumber: "1400980",
   desiredActivity: "dev",
   note: null,
+  contact: null,
+  operations: { name: "山田 太郎", roleTitle: null, status: "added", teams: [], leaderName: null },
 };
 
 describe("GET/POST /api/v1/me/profile", () => {

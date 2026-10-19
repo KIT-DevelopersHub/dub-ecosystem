@@ -3530,7 +3530,46 @@ function createMembersStore() {
     return members.find((x) => x.identityUserId === identityUserId);
   }
 
-  return { handle, findByIdentity };
+  // アカウント設定 (GET/POST /api/v1/me/participation): ログイン中アカウントに紐付いた名簿の
+  // 行そのものを読み書きする (member-service と同じく 本人の情報 + 連絡先 だけ編集可)。
+  function selfEntry(identityUserId: string, method: string, body: any): Response {
+    let mem = findByIdentity(identityUserId);
+    if (method === "POST") {
+      const r = memberValues.parsePersonProfilePatch((body ?? {}) as Record<string, unknown>);
+      if (r.errors.length > 0) {
+        return json({ error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } } satisfies ErrorResponse, 400);
+      }
+      if (!mem) {
+        mem = {
+          ...memberValues.emptyPersonProfile(),
+          id: nid("member"), orgId: ORG, name: "", roleTitle: null, status: "added", teamIds: [],
+          identityUserId, leaderId: null, contact: null,
+          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+        };
+        members.push(mem);
+      }
+      Object.assign(mem, r.value);
+      if (body?.contact !== undefined) mem.contact = typeof body.contact === "string" && body.contact.trim() ? body.contact.trim() : null;
+      mem.name = [mem.lastName, mem.firstName].filter((x) => !!x).join(" ") || mem.name || (mem.gmail ?? mem.schoolEmail ?? "").split("@")[0] || "メンバー";
+      mem.version += 1;
+      mem.updatedAt = isoNow();
+    }
+    if (!mem) return json({ ...memberValues.emptyPersonProfile(), contact: null, operations: null });
+    const leader = mem.leaderId ? members.find((x) => x.id === mem!.leaderId) : undefined;
+    return json({
+      ...memberValues.pickPersonProfile(mem),
+      contact: mem.contact,
+      operations: {
+        name: mem.name,
+        roleTitle: mem.roleTitle,
+        status: mem.status,
+        teams: teams.filter((t) => mem!.teamIds.includes(t.id)).map((t) => ({ id: t.id, name: t.name, color: t.color })),
+        leaderName: leader?.name ?? null,
+      },
+    });
+  }
+
+  return { handle, findByIdentity, selfEntry };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -4358,6 +4397,10 @@ export function createDemoFetch(): typeof fetch {
     // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
     // Nothing is persisted — the demo session is stateless for credentials.
     if (method === "POST" && url.pathname === "/api/v1/me/password") return json(null, 204);
+    // アカウント設定の「本人の情報 / 運営での情報」= 名簿の自分の行。
+    if ((method === "GET" || method === "POST") && url.pathname === "/api/v1/me/participation") {
+      return membersStore.selfEntry(currentMe().user.id, method, parsedBody);
+    }
 
     // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
     if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));

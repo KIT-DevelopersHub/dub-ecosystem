@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "account-settings-profile",
+  "worker": "dub-demo-account-settings-profile",
+  "url": "https://dub-demo-account-settings-profile.developershub-site.workers.dev",
+  "deployedSha": "24ade3b3",
+  "branch": "feat/account-settings-full-profile",
+  "actor": "ko-tarou",
+  "markers": ["fe2-account-ops-role"],
+  "live": true,
+  "verifiedAt": "2026-10-19T02:34:35Z",
+  "updatedAt": "2026-10-19T02:34:35Z",
+  "note": "アカウント設定で名簿の自分の情報を全部表示"
+}
