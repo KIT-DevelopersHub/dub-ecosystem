@@ -109,4 +109,7 @@ export const POLICY_TABLE = definePolicyTable({
   // returns a user's plaintext password, which auth-service audits on every view).
   "POST /api/v1/admin/users/:userId/password": ["identity:admin"],
   "GET /api/v1/admin/users/:userId/password": ["identity:admin"],
+  // Same subject shape (`:userId` from the caller) and the same secret: the account-issue
+  // mail carries that user's password to their Gmail, so it needs exactly the view right.
+  "POST /api/v1/admin/users/:userId/account-mail": ["identity:admin"],
 });

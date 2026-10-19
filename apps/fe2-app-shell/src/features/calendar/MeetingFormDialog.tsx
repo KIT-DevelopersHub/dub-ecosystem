@@ -108,8 +108,8 @@ export function MeetingFormDialog({
           <Select id={`${tid}-target`} value={form.targetId || null} onChange={(v) => set("targetId", v)} options={targetOptions} placeholder="選択してください" testId={`${tid}-target`} />
         </FormField>
 
-        <div className={styles.formRow}>
-          <div className={styles.dateField}>
+        <div className={styles.meetingFormRow}>
+          <div className={styles.meetingDateField}>
             <FormField label="日付" htmlFor={`${tid}-date`} required error={errors.date}>
               <DatePicker id={`${tid}-date`} value={form.date || null} onChange={(v) => set("date", v ?? "")} testId={`${tid}-date`} />
             </FormField>
@@ -128,7 +128,7 @@ export function MeetingFormDialog({
           </FormField>
         </div>
 
-        <div className={styles.formRow}>
+        <div className={styles.meetingFormRow}>
           <FormField label="繰り返し" htmlFor={`${tid}-recurrence`} error={errors.recurrence}>
             <Select<meeting.MeetingRecurrence>
               id={`${tid}-recurrence`}
@@ -139,7 +139,7 @@ export function MeetingFormDialog({
             />
           </FormField>
           {form.recurrence !== "none" ? (
-            <div className={styles.dateField}>
+            <div className={styles.meetingDateField}>
               <FormField label="終了日（任意）" htmlFor={`${tid}-until`} error={errors.until} help="空欄なら終了しません">
                 <DatePicker id={`${tid}-until`} value={form.until || null} min={form.date || undefined} onChange={(v) => set("until", v ?? "")} testId={`${tid}-until`} />
               </FormField>

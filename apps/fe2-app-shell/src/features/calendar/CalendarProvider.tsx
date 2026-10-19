@@ -8,7 +8,7 @@
 // to an event, so the calendar needs to know who "self" is to build its query. This
 // mirrors TaskProviders feeding マイタスク its currentUserId (moduleProviders.tsx).
 import { createContext, useContext, useMemo, type ReactNode } from "react";
-import type { common } from "@dub/types";
+import type { common, identity } from "@dub/types";
 import { useAppCapability, useAuth, usePermissions } from "../../auth/AuthProvider.tsx";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import { createCalendarApi, type CalendarApi } from "./calendarApi.tsx";
@@ -18,15 +18,25 @@ const CalendarUserCtx = createContext<common.UserId | null>(null);
 /** The signed-in user's display name: names 個人 予定 even without identity:read. */
 const CalendarUserNameCtx = createContext<string | null>(null);
 
-/** Which write affordances (予定の追加/編集/削除) are live. 予定 are tasks, so the
- *  server gate is マイタスク's (task-service POLICY_TABLE: app:tasks:edit + task:write,
- *  DELETE + task:delete); the calendar's own edit tier is required on top. */
+/** Which write affordances (予定の追加/編集/削除) are live. 予定 are tasks written via
+ *  task-service's /tasks/calendar-events routes, whose gate is the calendar's own: カレンダー
+ *  編集 + 「予定を登録」 (calendar:schedule_edit, ロール管理 > カレンダー > 細かい権限);
+ *  削除 additionally needs task:delete. マイタスク's tier plays no part. */
 export interface CalendarCaps {
   canWrite: boolean;
   canDelete: boolean;
 }
 const ALL_CAPS: CalendarCaps = { canWrite: true, canDelete: true };
 const CalendarCapsCtx = createContext<CalendarCaps>(ALL_CAPS);
+
+/** The gate above as a pure function (unit-testable without an auth session). */
+export function calendarCaps(
+  calendarCanEdit: boolean,
+  can: (key: identity.PermissionKey) => boolean,
+): CalendarCaps {
+  const canWrite = calendarCanEdit && can("calendar:schedule_edit");
+  return { canWrite, canDelete: canWrite && can("task:delete") };
+}
 
 export function CalendarProvider({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const calendarApi = useMemo(() => createCalendarApi(api), [api]);
@@ -35,9 +45,7 @@ export function CalendarProvider({ api, children }: { api: ApiClient; children: 
   const currentUserName = auth.status === "authenticated" ? auth.me.user.displayName : null;
   const { can } = usePermissions();
   const calendarCap = useAppCapability("calendar");
-  const tasksCap = useAppCapability("tasks");
-  const canWrite = calendarCap.canEdit && tasksCap.canEdit && can("task:write");
-  const canDelete = canWrite && can("task:delete");
+  const { canWrite, canDelete } = calendarCaps(calendarCap.canEdit, can);
   const caps = useMemo(() => ({ canWrite, canDelete }), [canWrite, canDelete]);
   return (
     <CalendarApiCtx.Provider value={calendarApi}>

@@ -89,7 +89,7 @@ export const APP_MANIFEST = [
   // カレンダー rides マイタスク's task:* keys (see gantt); its own 詳細 knobs are the ミーティング
   // pair (meetings on the shared Google account, drive-share-service /meetings).
   { id: "calendar", label: "カレンダー", navPath: "/calendar", domain: "task", permissions: ["task:read"], access: { view: "app:calendar:view", edit: "app:calendar:edit" },
-    detailPermissions: ["calendar:meetings_view", "calendar:meetings_edit"] },
+    detailPermissions: ["calendar:schedule_edit", "calendar:meetings_view", "calendar:meetings_edit"] },
   { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" },
     detailPermissions: ["notif:inbox:self", "notif:prefs:self", "notif:send", "notif:admin", "notif:broadcast_publish"] },
   { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" },
