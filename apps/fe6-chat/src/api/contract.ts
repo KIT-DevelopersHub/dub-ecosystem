@@ -268,3 +268,32 @@ export interface SlackChannelOption {
   /** Latest job for this channel, if it was imported before. */
   job: { id: string; status: SlackImportJobStatus } | null;
 }
+
+// ---- Custom emoji — mirrors services/chat-service/src/custom-emoji.ts ----
+// A reaction stores the literal ":name:"; when a custom emoji of that name exists it renders
+// as its image (an alias renders its target's image). The Slack import is a resumable batch:
+// POST { after } -> nextAfter until null. 412 = SLACK_BOT_TOKEN / R2 not configured.
+export interface CustomEmoji {
+  name: string;
+  aliasOf: string | null;
+  contentType: string | null;
+  source: "slack" | "upload";
+  createdAt: common.ISODateTime;
+}
+
+export interface EmojiImportResult {
+  /** Importable custom emoji in Slack (images + their aliases); null = Slack not reached. */
+  total: number | null;
+  /** Of `total`, how many are registered now. */
+  imported: number;
+  /** Rows registered by this call. */
+  added: number;
+  /** Never importable (aliases of standard emoji, unsafe names). */
+  skipped: number;
+  /** Images this call could not store. */
+  failed: string[];
+  /** Cursor for the next call; null = finished. */
+  nextAfter: string | null;
+  /** >0: Slack rate limit — call again with the same cursor after this long. */
+  retryAfterMs: number;
+}

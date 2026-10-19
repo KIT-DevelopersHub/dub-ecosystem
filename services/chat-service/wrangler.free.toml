@@ -109,6 +109,8 @@ bucket_name = "dub-file-attachments"
 # Without it the /chat/slack-import/* routes answer 412 (not configured); nothing else changes.
 # One-time D1 table for the job cursor:
 #   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0005_slack_import_jobs.sql
+# Custom emoji (src/custom-emoji.ts; images in this bucket under custom-emoji/, token needs emoji:read):
+#   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0006_custom_emojis.sql
 #
 # NOTE: WS_TICKET_SECRET is a Worker Secret (never in this toml). Set via
 # `wrangler secret put WS_TICKET_SECRET` at Apply. The ChatRoom DO verifies with

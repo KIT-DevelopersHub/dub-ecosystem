@@ -169,3 +169,24 @@ CREATE UNIQUE INDEX idx_chat_slack_import_jobs_channel ON chat_slack_import_jobs
 CREATE INDEX idx_chat_slack_import_jobs_recent ON chat_slack_import_jobs(org_id, updated_at DESC);
 `.trim(),
 };
+
+// Forward-only add-on: workspace custom emoji (src/custom-emoji.ts). An image row points at
+// R2 `custom-emoji/<name>`; an alias row has no image and renders alias_of. Physical mirror:
+// infra/d1/migrations/chat/0006_custom_emojis.sql.
+export const CHAT_CUSTOM_EMOJI_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0006_custom_emojis",
+  up: `
+CREATE TABLE chat_custom_emojis (
+  name         TEXT PRIMARY KEY,
+  r2_key       TEXT,
+  content_type TEXT,
+  alias_of     TEXT,
+  source       TEXT NOT NULL CHECK (source IN ('slack','upload')),
+  created_by   TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  CHECK ((alias_of IS NULL AND r2_key IS NOT NULL AND content_type IS NOT NULL)
+      OR (alias_of IS NOT NULL AND r2_key IS NULL AND content_type IS NULL))
+);
+`.trim(),
+};

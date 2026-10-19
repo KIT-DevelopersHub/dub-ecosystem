@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 72-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 73-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(72);
+    expect(catalog).toHaveLength(73);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -431,6 +431,14 @@ describe("chat channel delete + personal sections (demo store)", () => {
     }
   });
 
+  it("grants the demo admin chat:emoji_import and starts it OFF for every other role", async () => {
+    expect((await api().auth.me()).permissions).toContain("chat:emoji_import");
+    const roles = await api().request<{ items: { name: string; permissions: string[] }[] }>({ method: "GET", path: "/api/v1/identity/roles" });
+    for (const r of roles.items.filter((x) => x.name !== "admin")) {
+      expect(r.permissions, r.name).not.toContain("chat:emoji_import");
+    }
+  });
+
   it("hard-deletes a topic channel (and its assignment) but refuses a DM", async () => {
     const a = api();
     expect((await listSections(a)).assignments.chn_admin).toBe("sec_demo_ops");
@@ -483,6 +491,46 @@ describe("chat channel delete + personal sections (demo store)", () => {
     await a.request({ method: "POST", path: "/api/v1/chat/channels/chn_team_ops/members", body: { userId: "usr_carol" } });
     await a.request<void>({ method: "DELETE", path: "/api/v1/chat/channels/chn_team_ops/members/usr_bob" });
     expect((await members()).map((m) => m.userId)).toEqual(["usr_demo", "usr_carol"]);
+  });
+});
+
+describe("カスタム絵文字 (Slack emoji import demo)", () => {
+  interface Emoji { name: string; aliasOf: string | null }
+  interface Result { total: number; imported: number; nextAfter: string | null }
+  interface Msg { id: string; reactions: { emoji: string; userIds: string[] }[] }
+
+  it("starts with two emoji, imports the rest in batches, and serves image bytes", async () => {
+    const a = api();
+    const before = await a.request<{ items: Emoji[] }>({ method: "GET", path: "/api/v1/chat/custom-emojis" });
+    expect(before.items.map((e) => e.name)).toEqual(["devhub", "kit-dev"]);
+    const img = await a.download("/api/v1/chat/custom-emojis/kit-dev/image");
+    expect(img.type).toBe("image/svg+xml");
+    await expect(a.download("/api/v1/chat/custom-emojis/partyparrot/image")).rejects.toBeInstanceOf(ApiError);
+
+    let after: string | null = null;
+    let r: Result;
+    let calls = 0;
+    do {
+      r = await a.request<Result>({ method: "POST", path: "/api/v1/chat/custom-emojis/slack-import", body: { after } });
+      after = r.nextAfter;
+      calls += 1;
+    } while (after && calls < 20);
+    expect(calls).toBeGreaterThan(1);
+    expect(r.imported).toBe(r.total);
+    const list = await a.request<{ items: Emoji[] }>({ method: "GET", path: "/api/v1/chat/custom-emojis" });
+    expect(list.items.find((e) => e.name === "parrot")?.aliasOf).toBe("partyparrot");
+    expect((await a.download("/api/v1/chat/custom-emojis/parrot/image")).size).toBeGreaterThan(0);
+  });
+
+  it("seeds custom emoji reactions in #general and toggles a :name: reaction", async () => {
+    const a = api();
+    const page = await a.request<{ items: Msg[] }>({ method: "GET", path: "/api/v1/chat/messages", query: { channelId: "chn_general" } });
+    const welcome = page.items.find((m) => m.id === "msg_01SEEDGEN0000000000000WEL")!;
+    expect(welcome.reactions.map((r) => r.emoji)).toEqual(["🎉", ":kit-dev:", ":partyparrot:"]);
+    const added = await a.request<Msg & { messageId: string }>({ method: "POST", path: `/api/v1/chat/messages/${welcome.id}/reactions`, body: { emoji: ":devhub:" } });
+    expect(added.reactions.find((r) => r.emoji === ":devhub:")?.userIds).toHaveLength(1);
+    const removed = await a.request<Msg>({ method: "POST", path: `/api/v1/chat/messages/${welcome.id}/reactions`, body: { emoji: ":devhub:" } });
+    expect(removed.reactions.find((r) => r.emoji === ":devhub:")).toBeUndefined();
   });
 });
 

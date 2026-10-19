@@ -12,9 +12,11 @@ import type {
   ChatSection,
   ChatSectionList,
   CreateChannelRequest,
+  CustomEmoji,
   DeleteMessageResult,
   DeletionPolicyResponse,
   EditMessageRequest,
+  EmojiImportResult,
   GetChannelResponse,
   ListMessagesRequest,
   ListMessagesResponse,
@@ -87,6 +89,12 @@ export interface ChatApiClient {
   getSlackImportJob(id: string): Promise<SlackImportJob>;
   /** Advance one bounded step; safe to call repeatedly (server holds a lease). */
   stepSlackImport(id: string): Promise<SlackImportJob>;
+  // ---- custom emoji (list + image: 閲覧 / Slack import: 編集 + chat:emoji_import) ----
+  listCustomEmojis(): Promise<CustomEmoji[]>;
+  /** Image bytes of `name` (an alias resolves server-side). Rejects on 404 / network. */
+  customEmojiImage(name: string): Promise<Blob>;
+  /** One bounded import batch after `after` (null = from the top). */
+  importSlackEmojis(after: string | null): Promise<EmojiImportResult>;
 }
 
 /** GET /api/v1/members/me/mention-teams のレスポンス。 */
@@ -322,6 +330,18 @@ export class HttpChatClient implements ChatApiClient {
   }
   stepSlackImport(id: string): Promise<SlackImportJob> {
     return this.request<SlackImportJob>("POST", `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}/step`);
+  }
+
+  async listCustomEmojis(): Promise<CustomEmoji[]> {
+    return unwrapItems<CustomEmoji>(await this.request<unknown>("GET", `${CHAT}/custom-emojis`));
+  }
+  async customEmojiImage(name: string): Promise<Blob> {
+    const res = await this.fetchImpl(`${this.base}${CHAT}/custom-emojis/${encodeURIComponent(name)}/image`, { credentials: "include" });
+    if (!res.ok) throw new ChatApiError(res.status, null);
+    return res.blob();
+  }
+  importSlackEmojis(after: string | null): Promise<EmojiImportResult> {
+    return this.request<EmojiImportResult>("POST", `${CHAT}/custom-emojis/slack-import`, { after });
   }
 
   async unfurl(url: string): Promise<UnfurlPreview | null> {

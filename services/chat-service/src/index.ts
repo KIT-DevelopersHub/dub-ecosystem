@@ -18,6 +18,7 @@ import { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
 import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
 import { createUnfurler } from "./unfurl";
 import { SlackImporter } from "./slack-import";
+import { CustomEmojis } from "./custom-emoji";
 import { createSlackClient } from "@dub/slack-import";
 import type { Env } from "./env";
 import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient, MemberClient, RealtimePublisher } from "./types";
@@ -214,6 +215,13 @@ export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext):
       newJobId: () => newId("csij"),
       newLeaseToken: () => newId("lease"),
     }),
+    // Custom emoji: same LMB token (emoji:read scope) and the same R2 bucket (custom-emoji/).
+    customEmoji: new CustomEmojis({
+      db: env.DB,
+      slack: env.SLACK_BOT_TOKEN ? createSlackClient({ token: env.SLACK_BOT_TOKEN, maxRetries: 0 }) : null,
+      bucket: env.ATTACHMENTS ?? null,
+      now: nowIso,
+    }),
   };
 }
 
@@ -270,6 +278,6 @@ export { ChatService } from "./service";
 export { createD1ChatRepo } from "./d1-repo";
 export { InMemoryChatRepo } from "./memory-repo";
 export { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
-export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SECTIONS_MIGRATION, CHAT_SLACK_IMPORT_MIGRATION } from "./schema";
+export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SECTIONS_MIGRATION, CHAT_SLACK_IMPORT_MIGRATION, CHAT_CUSTOM_EMOJI_MIGRATION } from "./schema";
 export { signWsTicket, verifyWsTicket, ticketExpiryMs } from "./wsticket";
 export type { AppDeps } from "./types";

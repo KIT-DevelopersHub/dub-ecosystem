@@ -16,8 +16,10 @@
 //   users:read / users:read.email        users.list (+ profile.email for the account join)
 //   files:read                           url_private download
 //   bookmarks:read                       bookmarks.list
+//   emoji:read                           emoji.list (custom emoji import; Tier 2 ~20 req/min)
 // The bot must be INVITED to every private channel in scope. Public channels are joined.
 import type { SlackBookmark, SlackChannel, SlackMessage, SlackUser } from "./mapping";
+import { isSlackEmojiUrl } from "./emoji";
 
 export type FetchImpl = typeof fetch;
 
@@ -133,6 +135,44 @@ export function createSlackClient(opts: SlackClientOptions) {
     /** Join a public channel (no-op if already a member). Private channels need an invite. */
     async joinChannel(channelId: string): Promise<void> {
       await call("conversations.join", { channel: channelId });
+    },
+
+    /**
+     * The workspace's custom emoji: name -> image URL or "alias:<name>". Slack answers the whole
+     * map in one call; a `response_metadata.next_cursor`, if ever present, is followed.
+     */
+    async emojiList(): Promise<Record<string, string>> {
+      const out: Record<string, string> = {};
+      let cursor: string | null = null;
+      do {
+        const res: { emoji?: Record<string, string>; response_metadata?: { next_cursor?: string } } = await call("emoji.list", { cursor });
+        Object.assign(out, res.emoji ?? {});
+        cursor = res.response_metadata?.next_cursor || null;
+      } while (cursor);
+      return out;
+    },
+
+    /**
+     * Download an emoji image from Slack's public CDN. No Authorization header (the token
+     * never leaves for a CDN host), only *.slack-edge.com URLs, no redirects, at most
+     * `maxBytes`. Null on any failure so one broken emoji never aborts the batch.
+     */
+    async downloadEmoji(url: string, maxBytes = 1024 * 1024): Promise<{ bytes: ArrayBuffer; contentType: string | null } | null> {
+      if (!isSlackEmojiUrl(url)) return null;
+      try {
+        // redirect "error": a 3xx can never walk the fetch off the *.slack-edge.com allow-list.
+        const res = await fetchImpl(url, { redirect: "error" });
+        if (!res.ok) return null;
+        const declared = Number(res.headers.get("content-length") ?? "0");
+        if (declared > maxBytes) {
+          await res.body?.cancel().catch(() => undefined);
+          return null;
+        }
+        const bytes = await res.arrayBuffer();
+        return bytes.byteLength > maxBytes ? null : { bytes, contentType: res.headers.get("content-type") };
+      } catch {
+        return null;
+      }
     },
 
     /** Download a file body (url_private takes the bot token as a Bearer header). Null on
