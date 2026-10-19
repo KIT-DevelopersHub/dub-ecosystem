@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { Message } from "../api/contract";
 import { MessageItem } from "./MessageItem";
-import { MessageActionsContext, toLocalInput, type MessageActions } from "./MessageActions";
+import { MessageActionsContext, placeMenu, toLocalInput, type MessageActions } from "./MessageActions";
 import { useMessagePrefs } from "../lib/message-prefs";
 
 const ME = "usr_me";
@@ -168,5 +168,46 @@ describe("Slack-style message hover bar", () => {
     expect(screen.queryByTestId("fe6-msg-mark-unread")).toBeNull();
     expect(screen.getByTestId("fe6-msg-bookmark")).toHaveTextContent("後で用の保存を解除");
     expect(screen.getByTestId("fe6-msg-follow")).toHaveTextContent("新しい返信の通知をオフにする");
+  });
+
+  it("flips the menu upward when the reminder submenu would not fit below", () => {
+    const vh = 800;
+    vi.stubGlobal("innerHeight", vh);
+    // lower half: the plain menu (9 rows = 324px) fits in the 340px below, the submenu doesn't
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute("data-testid") === "fe6-msg-more"
+        ? ({ top: 420, bottom: 448, left: 0, right: 28, width: 28, height: 28, x: 0, y: 420, toJSON: () => ({}) } as DOMRect)
+        : ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+    });
+    // content height grows with the number of menu rows (36px each)
+    const heightSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.querySelectorAll('[role="menuitem"]').length * 36;
+      });
+    try {
+      renderRow(actions());
+      fireEvent.click(screen.getByTestId("fe6-msg-more"));
+      const panel = screen.getByTestId("fe6-msg-menu");
+      expect(panel.className).not.toMatch(/msgMenuUp/);
+      expect(panel.style.maxHeight).toBe("340px");
+      fireEvent.click(screen.getByTestId("fe6-msg-reminder"));
+      // 15 rows = 540px > 340px below, 408px above -> flips upward, clamped to the room above
+      expect(panel.className).toMatch(/msgMenuUp/);
+      expect(panel.style.maxHeight).toBe("408px");
+      expect(screen.getByTestId("fe6-msg-reminder-nextWeek")).toBeInTheDocument();
+    } finally {
+      rectSpy.mockRestore();
+      heightSpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("places by real content height and clamps to the room", () => {
+    const bounds = { top: 0, bottom: 800 };
+    expect(placeMenu({ top: 100, bottom: 128 }, 300, bounds)).toEqual({ up: false, maxHeight: 480 });
+    expect(placeMenu({ top: 610, bottom: 638 }, 140, bounds)).toEqual({ up: false, maxHeight: 150 });
+    expect(placeMenu({ top: 610, bottom: 638 }, 540, bounds)).toEqual({ up: true, maxHeight: 480 });
+    expect(placeMenu({ top: 300, bottom: 328 }, 540, { top: 0, bottom: 600 })).toEqual({ up: true, maxHeight: 288 });
   });
 });

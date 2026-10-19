@@ -2,7 +2,7 @@
 // Slack-style 「その他」 menu for a message row, plus the context ChannelPage uses to
 // hand it the side-effecting actions (clipboard / toasts / API). Without a provider
 // (unit tests, bare renders) only the props-driven items (pin / edit / delete) show.
-import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { common } from "@dub/types";
 import type { Message } from "../api/contract";
 import { REMINDER_PRESETS, reminderPresetHint, type ReminderPreset } from "../lib/message-prefs";
@@ -27,6 +27,39 @@ export const MessageActionsContext = createContext<MessageActions | null>(null);
 
 export function useMessageActions(): MessageActions | null {
   return useContext(MessageActionsContext);
+}
+
+/**
+ * Where the panel fits: below the trigger unless its content doesn't fit there and
+ * there is more room above (Slack flips it); the height is clamped to the chosen side.
+ */
+export function placeMenu(
+  trigger: { top: number; bottom: number },
+  contentHeight: number,
+  bounds: { top: number; bottom: number },
+): { up: boolean; maxHeight: number } {
+  const below = bounds.bottom - trigger.bottom - MENU_MARGIN_PX;
+  const above = trigger.top - bounds.top - MENU_MARGIN_PX;
+  const need = Math.min(contentHeight, MENU_HEIGHT_PX);
+  const up = need > below && above > below;
+  return { up, maxHeight: Math.max(0, Math.min(MENU_HEIGHT_PX, up ? above : below)) };
+}
+
+/** Visible area the panel may use: the viewport, narrowed by any clipping scroll ancestor (the timeline). */
+function clipBounds(el: HTMLElement): { top: number; bottom: number } {
+  let top = 0;
+  let bottom = globalThis.innerHeight;
+  for (let a = el.parentElement; a; a = a.parentElement) {
+    const o = globalThis.getComputedStyle(a).overflowY;
+    if (o === "auto" || o === "scroll" || o === "hidden") {
+      const r = a.getBoundingClientRect();
+      if (r.bottom > r.top) {
+        top = Math.max(top, r.top);
+        bottom = Math.min(bottom, r.bottom);
+      }
+    }
+  }
+  return { top, bottom };
 }
 
 // Matches .msgMenuPanel max-height; the panel scrolls beyond it (reminder list open).
@@ -59,7 +92,31 @@ export function MessageMoreMenu({
   // Open toward the roomier side and cap the height to it; the panel scrolls beyond.
   const [place, setPlace] = useState<{ up: boolean; maxHeight: number }>({ up: false, maxHeight: MENU_HEIGHT_PX });
   const ref = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const subRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
+
+  // Re-place whenever the content grows (reminder submenu / custom picker), measured
+  // from the real content height, so a row near the bottom flips upward instead of
+  // cutting the last preset off at the viewport edge.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const t = triggerRef.current;
+    const p = panelRef.current;
+    if (!t || !p) return;
+    const next = placeMenu(t.getBoundingClientRect(), p.scrollHeight, clipBounds(t));
+    setPlace((cur) => (cur.up === next.up && cur.maxHeight === next.maxHeight ? cur : next));
+  }, [open, reminderOpen, customOpen]);
+
+  // Still taller than the room (tiny viewport): scroll the opened submenu into the panel's view.
+  useLayoutEffect(() => {
+    const p = panelRef.current;
+    const sub = subRef.current;
+    if (!open || !reminderOpen || !p || !sub) return;
+    const bottom = sub.offsetTop + sub.offsetHeight;
+    if (bottom > p.scrollTop + p.clientHeight) p.scrollTop = Math.min(sub.offsetTop, bottom - p.clientHeight);
+  }, [open, reminderOpen, customOpen, place]);
 
   useEffect(() => {
     if (!open) return;
@@ -157,13 +214,8 @@ export function MessageMoreMenu({
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         data-testid="fe6-msg-more"
-        onClick={(e) => {
-          // Rows near the bottom of the viewport open the panel upward so it isn't clipped.
-          const rect = e.currentTarget.getBoundingClientRect();
-          const below = globalThis.innerHeight - rect.bottom - MENU_MARGIN_PX;
-          const above = rect.top - MENU_MARGIN_PX;
-          const up = below < MENU_HEIGHT_PX && above > below;
-          setPlace({ up, maxHeight: Math.min(MENU_HEIGHT_PX, up ? above : below) });
+        ref={triggerRef}
+        onClick={() => {
           setOpen((o) => !o);
           setReminderOpen(false);
           setCustomOpen(false);
@@ -178,6 +230,7 @@ export function MessageMoreMenu({
           aria-label="メッセージのその他の操作"
           className={`${styles.msgMenuPanel} ${place.up ? styles.msgMenuUp : ""}`}
           style={{ maxHeight: place.maxHeight }}
+          ref={panelRef}
           data-testid="fe6-msg-menu"
         >
           {items.map(row)}
@@ -198,7 +251,7 @@ export function MessageMoreMenu({
                 </span>
               </button>
               {reminderOpen && (
-                <>
+                <div ref={subRef} data-testid="fe6-msg-reminder-sub">
                   {REMINDER_PRESETS.map((p) => (
                     <button
                       key={p.id}
@@ -223,7 +276,7 @@ export function MessageMoreMenu({
                     カスタム…
                   </button>
                   {customOpen && <CustomReminderForm onSubmit={(at) => run(() => actions.addReminder(message, at))} />}
-                </>
+                </div>
               )}
             </>
           )}
