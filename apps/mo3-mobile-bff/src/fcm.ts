@@ -60,6 +60,8 @@ function buildFcmMessage(token: string, payload: mobile.MobilePushPayload): Reco
   const message: Record<string, unknown> = {
     token,
     notification: { title: payload.title, body: payload.body },
+    // APNs alerts are silent unless a sound is named (Android uses its channel default).
+    apns: { payload: { aps: { sound: "default" } } },
   };
   if (payload.data) message.data = payload.data; // FCM v1 requires a string->string map
   return message;

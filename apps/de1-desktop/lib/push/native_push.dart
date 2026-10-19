@@ -20,10 +20,12 @@ import 'mo3_session.dart';
 /// deferred-bearer retry, and platform gating — exactly mirroring [FcmPush] so
 /// the two transports behave identically from the app's point of view.
 ///
-/// The server (mo3-mobile-bff) routes by the `platform` value: `ios`/`macos`
-/// → its APNs adapter (macOS uses its own apns-topic), `windows` → the WNS
-/// adapter. The `pushToken` field is the raw APNs hex token on Apple and the
-/// full WNS Channel URI on Windows.
+/// The server (mo3-mobile-bff) sends `ios`/`macos`/`android` through FCM
+/// (#538) and only `windows` through WNS. So on Apple this controller only
+/// mints the APNs token (which firebase_messaging needs before `getToken()`)
+/// and does NOT register it with mo3 — a raw APNs token sent via FCM fails as
+/// `token_invalid` and gets the device deactivated. [FcmPush] registers the
+/// FCM token instead. On Windows the full WNS Channel URI is registered.
 class NativePush {
   NativePush({
     MobileBearerProvider? bearerProvider,
@@ -110,6 +112,7 @@ class NativePush {
   /// WebView's own `dub_session` cookie (see [readDubSessionCookie]) — either
   /// is deferred/retried if unavailable (e.g. before login).
   Future<void> _register(String platform, String token) async {
+    if (platform != 'windows') return; // Apple: FcmPush registers the FCM token
     final bearer = await _bearerProvider();
     final headers = {
       'content-type': 'application/json',
