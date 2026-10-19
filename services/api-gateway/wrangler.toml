@@ -15,6 +15,8 @@ FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8
 # Rate-limit policy (optional; defaults 100 / 60000ms when unset). Wire-signal only — see §7.
 RATE_LIMIT_MAX = "100"
 RATE_LIMIT_WINDOW_MS = "60000"
+# Login URL written into the account-issue mail (handlers/account-mail.ts).
+APP_BASE_URL = "https://app.developershub.jp"
 
 # ---- secrets (set via `wrangler secret put`, never committed) ----
 # TURNSTILE_SECRET  -> public inquiry siteverify
