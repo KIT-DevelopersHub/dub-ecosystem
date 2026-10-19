@@ -64,6 +64,9 @@ export interface MailMsg {
    *  (too large / message truncated), surfaced as a disabled chip rather than silently
    *  dropped (改善#2). */
   attachments?: mail.MailAttachment[];
+  /** Delivery details (Reply-To / mailed-by / signed-by / TLS / delivered-to) for the
+   *  "show details" dialog. Received messages only, from the detail fetch (getThread). */
+  headerMeta?: mail.MailHeaderMeta;
   /** False when this received message reached the viewer only via oversight (mail:read_all)
    *  or role sharing (mail:read_role_shared), not their own mailbox. Absent = mine. */
   mine?: boolean;
@@ -81,6 +84,9 @@ export interface MailThreadModel {
    *  stays in the store but is filtered out of every folder for this viewer. Never a physical
    *  delete: other accounts/admins still see it. Absent/false = normal. */
   purged?: boolean;
+  /** 返信不要: when the viewer dismissed the reply nudge (ISO). Covers only mail received up
+   *  to then — a newer received message brings the nudge back. Absent/null = not dismissed. */
+  noReplyAt?: string | null;
 }
 
 // ---- pure helpers ----
@@ -178,3 +184,64 @@ export function matchesQuery(t: MailThreadModel, q: string): boolean {
  *  them with the server's real From. The client never learns its own @developershub.jp
  *  address (/me omits email); the gateway resolves the real From server-side. */
 export const SELF: MailPerson = { email: "", name: "自分" };
+
+// ---- reply nudge (Gmail's "N日前に受信しました。返信しますか？") ----
+
+/** Whole days a received message may sit unanswered before the nudge appears. */
+export const NUDGE_DAYS = 3;
+/** Past this the mail is stale; nagging about it is clutter, not help. */
+export const NUDGE_MAX_DAYS = 14;
+const DAY_MS = 86_400_000;
+const AUTOMATED_SENDER = /^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?|bounce)/i;
+const bareId = (id: string): string => id.trim().replace(/^<|>$/g, "").trim();
+
+/** Message-Ids (brackets stripped) that a still-pending scheduled send replies to. */
+export function pendingReplyIds(scheduled: readonly mail.ScheduledSendListItem[]): Set<string> {
+  const ids = new Set<string>();
+  for (const s of scheduled) if (s.status === "scheduled" && s.inReplyTo) ids.add(bareId(s.inReplyTo));
+  return ids;
+}
+
+/** True when 返信不要 was pressed after the given (latest received) message arrived. */
+export function nudgeDismissed(t: MailThreadModel, last: MailMsg): boolean {
+  if (!t.noReplyAt) return false;
+  const at = new Date(t.noReplyAt).getTime();
+  const got = new Date(last.date).getTime();
+  return !Number.isNaN(at) && !Number.isNaN(got) && got <= at;
+}
+
+/** Derived (no state): non-null when a read inbox thread addressed to the viewer ends with a
+ *  received message from a human, unanswered for days..maxDays whole days, no scheduled
+ *  reply is pending for it, and the viewer has not marked it 返信不要 since it arrived.
+ *  A reply appends an outbound message, so the nudge clears itself. */
+export function replyNudge(
+  t: MailThreadModel,
+  now: Date,
+  pendingReplies: ReadonlySet<string> = new Set(),
+  days: number = NUDGE_DAYS,
+  maxDays: number = NUDGE_MAX_DAYS,
+): { days: number } | null {
+  if (t.purged || t.folder !== "inbox" || t.messages.length === 0 || threadUnread(t)) return null;
+  const last = latest(t);
+  if (last.outbound || last.mine === false) return null;
+  if (AUTOMATED_SENDER.test(last.from.email.split("@")[0] ?? "")) return null;
+  if (nudgeDismissed(t, last)) return null;
+  if (t.messages.some((m) => m.messageId && pendingReplies.has(bareId(m.messageId)))) return null;
+  const at = new Date(last.date).getTime();
+  if (Number.isNaN(at)) return null;
+  const elapsed = Math.floor((now.getTime() - at) / DAY_MS);
+  return elapsed >= days && elapsed <= maxDays ? { days: elapsed } : null;
+}
+
+/** Splits a list into nudged threads (pinned above the inbox so they don't sink under new
+ *  mail, like Gmail bumping a nudge to the top) and the rest; both keep their input order. */
+export function partitionNudged(
+  threads: readonly MailThreadModel[],
+  now: Date,
+  pendingReplies: ReadonlySet<string> = new Set(),
+): { nudged: MailThreadModel[]; rest: MailThreadModel[] } {
+  const nudged: MailThreadModel[] = [];
+  const rest: MailThreadModel[] = [];
+  for (const t of threads) (replyNudge(t, now, pendingReplies) ? nudged : rest).push(t);
+  return { nudged, rest };
+}

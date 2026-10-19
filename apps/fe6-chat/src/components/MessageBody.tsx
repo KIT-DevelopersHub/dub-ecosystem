@@ -4,6 +4,7 @@
 import type { common, identity } from "@dub/types";
 import type { TeamSummary } from "../api/contract";
 import { parseBlocks, type BodySegment } from "../lib/render-body";
+import { UNKNOWN_USER_NAME } from "../lib/mentions";
 import styles from "../styles/chat.module.css";
 
 /** Display-name resolvers for the two mention kinds (person / 運営チーム). */
@@ -13,7 +14,7 @@ export interface MentionResolvers {
 }
 
 function nameOf(userId: string, resolve?: (id: common.UserId) => identity.UserSummary | undefined): string {
-  return resolve?.(userId as common.UserId)?.displayName ?? userId;
+  return resolve?.(userId as common.UserId)?.displayName ?? UNKNOWN_USER_NAME;
 }
 
 // An unresolved team falls back to the raw id — never to an empty chip, so a
@@ -73,25 +74,25 @@ function Inlines({ segs, resolveUser, resolveTeam }: { segs: BodySegment[] } & M
           case "bold":
             return (
               <strong key={i} className={styles.mdBold}>
-                {seg.value}
+                {seg.children ? <Inlines segs={seg.children} resolveUser={resolveUser} resolveTeam={resolveTeam} /> : seg.value}
               </strong>
             );
           case "italic":
             return (
               <em key={i} className={styles.mdItalic}>
-                {seg.value}
+                {seg.children ? <Inlines segs={seg.children} resolveUser={resolveUser} resolveTeam={resolveTeam} /> : seg.value}
               </em>
             );
           case "underline":
             return (
               <u key={i} className={styles.mdUnderline}>
-                {seg.value}
+                {seg.children ? <Inlines segs={seg.children} resolveUser={resolveUser} resolveTeam={resolveTeam} /> : seg.value}
               </u>
             );
           case "strike":
             return (
               <s key={i} className={styles.mdStrike}>
-                {seg.value}
+                {seg.children ? <Inlines segs={seg.children} resolveUser={resolveUser} resolveTeam={resolveTeam} /> : seg.value}
               </s>
             );
           case "link": {

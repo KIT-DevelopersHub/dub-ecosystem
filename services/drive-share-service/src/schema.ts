@@ -71,3 +71,55 @@ CREATE TABLE driveshare_google_oauth_states (
 CREATE INDEX idx_driveshare_google_oauth_states_expires ON driveshare_google_oauth_states(expires_at);
 `.trim(),
 };
+
+// Physical twin: infra/d1/migrations/driveshare/0003_meetings.sql (lockstep test).
+// カレンダー > ミーティング: per-target calendars, meetings, and the ledgers of the attendees /
+// calendar shares we added.
+export const DRIVESHARE_MEETINGS_MIGRATION: Migration = {
+  namespace: "driveshare",
+  id: "0003_meetings",
+  up: `
+CREATE TABLE driveshare_meeting_calendars (
+  org_id      TEXT NOT NULL,
+  target_id   TEXT NOT NULL,
+  account_id  TEXT NOT NULL,
+  calendar_id TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  UNIQUE (org_id, target_id, account_id)
+);
+CREATE TABLE driveshare_meetings (
+  id               TEXT PRIMARY KEY,
+  org_id           TEXT NOT NULL,
+  target_id        TEXT NOT NULL,
+  account_id       TEXT NOT NULL,
+  calendar_id      TEXT NOT NULL,
+  google_event_id  TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  starts_at        TEXT NOT NULL,
+  duration_minutes INTEGER NOT NULL,
+  recurrence       TEXT NOT NULL CHECK (recurrence IN ('none','weekly','biweekly','monthly_weekday')),
+  until            TEXT,
+  meet_url         TEXT,
+  html_link        TEXT,
+  created_by       TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL,
+  synced_at        TEXT
+);
+CREATE INDEX idx_driveshare_meetings_org ON driveshare_meetings(org_id, starts_at);
+CREATE TABLE driveshare_meeting_invites (
+  meeting_id TEXT NOT NULL REFERENCES driveshare_meetings(id),
+  email      TEXT NOT NULL,
+  user_id    TEXT,
+  PRIMARY KEY (meeting_id, email)
+);
+CREATE TABLE driveshare_meeting_calendar_acl (
+  org_id      TEXT NOT NULL,
+  calendar_id TEXT NOT NULL,
+  email       TEXT NOT NULL,
+  rule_id     TEXT NOT NULL,
+  PRIMARY KEY (org_id, calendar_id, email)
+);
+`.trim(),
+};

@@ -12,6 +12,7 @@
 // here so it protects the actual UI users touch.
 import { useState } from "react";
 import type { identity } from "@dub/types";
+import type { RoleView } from "../contracts/pending";
 import { TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
 import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import { RolePolicyEditor } from "./RolePolicyEditor";
@@ -28,9 +29,10 @@ const actionsStyle: React.CSSProperties = { marginTop: 12 };
 interface RoleDraft {
   name: string;
   permissions: identity.PermissionKey[];
+  mailVisibleRoleIds?: string[];
 }
 
-export function RolePermissionsEditor({ role }: { role: identity.Role }) {
+export function RolePermissionsEditor({ role, initialDetailAppId = null }: { role: RoleView; initialDetailAppId?: string | null }) {
   const update = useUpdateRole(role.id);
   const canAdminEdit = useCanAdminEdit();
   const { toast } = useToast();
@@ -45,6 +47,8 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   // from that role's saved state.
   const [name, setName] = useState(initialDraft?.name ?? role.name);
   const [perms, setPerms] = useState<identity.PermissionKey[]>(initialDraft?.permissions ?? [...role.permissions]);
+  const savedMailVisible = role.mailVisibleRoleIds ?? [];
+  const [mailVisible, setMailVisible] = useState<string[]>(initialDraft?.mailVisibleRoleIds ?? [...savedMailVisible]);
   const [confirmSave, setConfirmSave] = useState(false);
 
   // System roles are now editable by admins; only the identity:admin authz gate
@@ -59,10 +63,12 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
   // the time this component mounts (RoleListPage only renders it once `active` exists),
   // so there is no async-race window where this evaluates false while the user has
   // already typed (unlike the old roleId-edit branch in RoleEditorPage).
-  const dirty = !!buildRoleUpdate({ name: role.name, permissions: role.permissions }, { name, permissions: perms });
+  const original = { name: role.name, permissions: role.permissions, mailVisibleRoleIds: savedMailVisible };
+  const next = { name, permissions: perms, mailVisibleRoleIds: mailVisible };
+  const dirty = !!buildRoleUpdate(original, next);
   const draft = useDraftAutosave<RoleDraft>({
     storageKey: draftKey,
-    value: { name, permissions: perms },
+    value: next,
     dirty,
     enabled: !readOnly,
   });
@@ -74,7 +80,7 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
       toast({ kind: "error", title: "この権限は外せません", description: "admin ロールから identity:admin は削除できません。" });
       return;
     }
-    const patch = buildRoleUpdate({ name: role.name, permissions: role.permissions }, { name, permissions: perms });
+    const patch = buildRoleUpdate(original, next);
     if (!patch) {
       toast({ kind: "info", title: "変更はありません" });
       return;
@@ -94,6 +100,7 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
           draft.clear();
           setName(role.name);
           setPerms([...role.permissions]);
+          setMailVisible([...savedMailVisible]);
         }}
         onKeep={draft.acknowledgeRestored}
         testId={`${ns}-draft-notice`}
@@ -103,7 +110,15 @@ export function RolePermissionsEditor({ role }: { role: identity.Role }) {
           <TextField id={`${ns}-name`} value={name} onChange={(v) => setName(v)} disabled={readOnly} testId={`${ns}-name`} />
         </FormField>
       ) : null}
-      <RolePolicyEditor selected={perms} disabled={readOnly} onChange={setPerms} idPrefix={ns} lockedKeys={lockedKeys} />
+      <RolePolicyEditor
+        selected={perms}
+        disabled={readOnly}
+        onChange={setPerms}
+        idPrefix={ns}
+        lockedKeys={lockedKeys}
+        mailVisibility={{ roleId: role.id, value: mailVisible, onChange: setMailVisible }}
+        initialDetailAppId={initialDetailAppId}
+      />
       {readOnly ? (
         <p style={noteStyle}>編集権限がありません。</p>
       ) : (

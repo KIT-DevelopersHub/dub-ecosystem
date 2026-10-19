@@ -51,3 +51,23 @@ export function getLastChannel(store: StorageLike | null = local()): common.Chan
 export function setLastChannel(channelId: common.ChannelId, store: StorageLike | null = local()): void {
   store?.setItem(LAST_CHANNEL_KEY, channelId);
 }
+
+// Sidebar section collapse state (UI setting, no PII): keys are section ids or
+// default group types ("topic" / "event" / "dm").
+const COLLAPSED_SECTIONS_KEY = "fe6.chat.collapsedSections";
+
+export function getCollapsedSections(store: StorageLike | null = local()): Record<string, boolean> {
+  try {
+    const raw = store?.getItem(COLLAPSED_SECTIONS_KEY);
+    const keys: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(keys) ? Object.fromEntries(keys.filter((k) => typeof k === "string").map((k) => [k, true])) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setCollapsedSections(collapsed: Record<string, boolean>, store: StorageLike | null = local()): void {
+  const keys = Object.keys(collapsed).filter((k) => collapsed[k]);
+  if (keys.length === 0) store?.removeItem(COLLAPSED_SECTIONS_KEY);
+  else store?.setItem(COLLAPSED_SECTIONS_KEY, JSON.stringify(keys));
+}

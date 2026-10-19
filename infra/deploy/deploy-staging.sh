@@ -134,6 +134,10 @@ for dir in "${STAGING_WORKER_DIRS[@]}"; do
   # deploy — production's auth-service has no DEMO_AUTOLOGIN, so /auth/demo-login 404s.
   extra_args=()
   if [ "${dir}" = "services/auth-service" ]; then extra_args=(--var "DEMO_AUTOLOGIN:1"); fi
+  # STAGING ONLY: point LP管理's public links (e.g. /tickets) at the preview LP, not prod.
+  if [ "${dir}" = "services/lp-analytics" ]; then
+    extra_args=(--var "LP_BASE_URL:https://lp-conference-next-preview.developershub-site.workers.dev")
+  fi
   deploy "${dir}/wrangler.staging.toml" "${extra_args[@]}"
   if [ "${dir}" = "services/api-gateway" ] && [ "${SKIP_HEALTHCHECK:-0}" != "1" ]; then
     check "staging gateway /healthz" "${GW}/healthz" 200

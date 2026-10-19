@@ -39,7 +39,13 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
   const [pendingDelete, setPendingDelete] = useState<identity.Role | null>(null);
   // Explicit user pick. When null we fall back to the first role (effectiveId
   // below) so the panel is never empty on load and after a delete.
-  const [activeId, setActiveId] = useState<string | null>(null);
+  // Deep link: ?role=<id>&app=<appId> opens that role with the app's 詳細設定 dialog, so a
+  // setting at the bottom of a dialog (e.g. メール > 別のロール宛て) can be linked directly.
+  const [deepLink] = useState(() => {
+    const p = new URLSearchParams(globalThis.location?.search ?? "");
+    return { role: p.get("role"), app: p.get("app") };
+  });
+  const [activeId, setActiveId] = useState<string | null>(() => deepLink.role);
   const canAdmin = canAdminEdit;
 
   function confirmDelete() {
@@ -129,7 +135,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
               {/* RolePermissionsEditor seeds its name/permissions from useState(role...)
                   at mount only; the changing key above also guarantees a fresh editor
                   per role so the previous role's edits never leak into the next tab. */}
-              <RolePermissionsEditor role={active} />
+              <RolePermissionsEditor role={active} initialDetailAppId={active.id === deepLink.role ? deepLink.app : null} />
             </div>
           ) : null}
         </>

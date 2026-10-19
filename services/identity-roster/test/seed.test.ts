@@ -57,6 +57,33 @@ describe("seedReferenceData / system roles", () => {
     expect(perms.has("infra:dns")).toBe(false);
   });
 
+  it("chat:delete_channel starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("chat:delete_channel");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("chat:delete_channel");
+    }
+  });
+
+  it("chat:slack_import starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("chat:slack_import");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("chat:slack_import");
+    }
+  });
+
+  it("calendar:schedule_edit starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("calendar:schedule_edit");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("calendar:schedule_edit");
+    }
+  });
+
   it("is idempotent: re-seeding does not duplicate roles or widen admin", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);

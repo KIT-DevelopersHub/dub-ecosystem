@@ -45,6 +45,55 @@ function allRefs(value: string | undefined): string[] {
     .map((t) => stripAngle(t))
     .filter(Boolean);
 }
+function domainOf(email: string): string | undefined {
+  const d = email.split("@")[1]?.trim().toLowerCase();
+  return d ? d : undefined;
+}
+
+// Only Email Routing's own verdict is trusted: a sender can add any header it likes, but
+// Cloudflare prepends its ARC-Authentication-Results, so its value comes first in the
+// combined (", "-joined) header and is cut at the next "i=N;" instance.
+const CF_AUTHSERV = /^\s*i=\d+;\s*mx\.cloudflare\.net;/i;
+
+/** DKIM signing domain that PASSED per Cloudflare's ARC-Authentication-Results. */
+export function dkimSignedBy(arcAuthResults: string | undefined): string | undefined {
+  if (!arcAuthResults || !CF_AUTHSERV.test(arcAuthResults)) return undefined;
+  const own = arcAuthResults.replace(CF_AUTHSERV, "").split(/,\s*i=\d+;/)[0] ?? "";
+  for (const clause of own.split(";")) {
+    if (!/^\s*dkim=pass\b/i.test(clause)) continue;
+    const d = /header\.d=([^\s;]+)/i.exec(clause)?.[1] ?? /header\.i=[^\s@;]*@([^\s;]+)/i.exec(clause)?.[1];
+    if (d) return d.toLowerCase();
+  }
+  return undefined;
+}
+
+/** TLS on the hop into Cloudflare: the topmost Received (written by the receiving MX, not
+ *  the sender) names the protocol in its "with" clause, before the ";" date. */
+export function receivedOverTls(received: string | undefined): boolean | undefined {
+  if (!received) return undefined;
+  const hop = received.split(";")[0] ?? "";
+  const proto = /\bwith\s+([A-Z0-9]+)/i.exec(hop)?.[1];
+  if (/\bTLS/i.test(hop)) return true;
+  if (!proto) return undefined;
+  return /SMTPSA?$/i.test(proto); // ESMTPS / ESMTPSA / UTF8SMTPS (RFC 3848)
+}
+
+function headerMetaFor(raw: RawInbound): mail.MailHeaderMeta {
+  const h = raw.headers;
+  const meta: mail.MailHeaderMeta = {};
+  const replyTo = parseAddressList(h["reply-to"]);
+  if (replyTo.length > 0) meta.replyTo = replyTo;
+  const deliveredTo = parseAddress(raw.to).email.trim().toLowerCase();
+  if (deliveredTo) meta.deliveredTo = deliveredTo;
+  const mailedBy = domainOf(parseAddress(raw.from).email);
+  if (mailedBy) meta.mailedBy = mailedBy;
+  const signedBy = dkimSignedBy(h["arc-authentication-results"]);
+  if (signedBy) meta.signedBy = signedBy;
+  const tls = receivedOverTls(h["received"]);
+  if (tls !== undefined) meta.tls = tls;
+  return meta;
+}
+
 function localPart(address: string): string | null {
   const email = parseAddress(address).email;
   const lp = email.split("@")[0];
@@ -63,6 +112,7 @@ export function parseInbound(raw: RawInbound, policy: OwnerAddressPolicy = {}): 
   const subject = decodeHeaderWord(h["subject"] ?? "");
   const from = parseAddress(h["from"] ?? raw.from);
   const to = parseAddressList(h["to"] ?? raw.to);
+  const cc = parseAddressList(h["cc"]);
   const receivedAt = h["date"] ? new Date(h["date"]).toISOString() : new Date().toISOString();
 
   const message: mail.MailMessage = {
@@ -93,6 +143,8 @@ export function parseInbound(raw: RawInbound, policy: OwnerAddressPolicy = {}): 
     mailbox: localPart(raw.to),
     bodyText: extractBody(raw.rawText),
     htmlBody: null,
+    cc,
+    headerMeta: headerMetaFor(raw),
     references,
     ownerCandidates: ownerCandidatesFor(parseAddress(raw.to), message.to, policy),
   };
@@ -145,7 +197,7 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     archiveAddress: deps.archiveAddress ?? null,
     sharedAddress: deps.sharedAddress ?? null,
   });
-  const { message, loop, mailbox, bodyText, htmlBody, references, ownerCandidates } = parsed;
+  const { message, loop, mailbox, bodyText, htmlBody, cc, headerMeta, references, ownerCandidates } = parsed;
 
   // Normalize the thread id against messages we already have (改善#3): if any referenced
   // ancestor is a known inbound/sent message, adopt ITS thread so a trimmed References
@@ -169,6 +221,8 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     loopMarker: loop["x-dub-mail-loop"] ?? null,
     bodyText,
     htmlBody,
+    cc,
+    headerMeta,
     ownerUserId,
   });
   if (changes === 0) {

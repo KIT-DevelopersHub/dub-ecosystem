@@ -17,7 +17,7 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
   {
     ns: "identity",
     ownerUnit: "identity-roster#3",
-    tables: ["identity_orgs", "identity_users", "identity_roles", "identity_role_permissions", "identity_role_assignments", "identity_webauthn_credentials", "identity_webauthn_challenges"],
+    tables: ["identity_orgs", "identity_users", "identity_roles", "identity_role_permissions", "identity_role_assignments", "identity_webauthn_credentials", "identity_webauthn_challenges", "identity_role_mail_visibility"],
   },
   {
     ns: "event",
@@ -65,6 +65,10 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
       "driveshare_google_accounts",
       "driveshare_google_active_account",
       "driveshare_google_oauth_states",
+      "driveshare_meeting_calendars",
+      "driveshare_meetings",
+      "driveshare_meeting_invites",
+      "driveshare_meeting_calendar_acl",
     ],
   },
   {
@@ -78,7 +82,22 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
       "commander_run_events",
     ],
   },
-  { ns: "lp", ownerUnit: "lp-analytics", tables: ["lp_links", "lp_visits", "lp_ingest_days", "lp_publish"] },
+  {
+    ns: "lp",
+    ownerUnit: "lp-analytics",
+    tables: [
+      "lp_links",
+      "lp_visits",
+      "lp_ingest_days",
+      "lp_publish",
+      "lp_ticket_settings",
+      "lp_ticket_types",
+      "lp_ticket_orders",
+      "lp_ticket_order_items",
+      "lp_proposal_settings",
+      "lp_proposals",
+    ],
+  },
 ];
 
 // Compile-time guard: every NAMESPACES entry appears exactly once in the registry.

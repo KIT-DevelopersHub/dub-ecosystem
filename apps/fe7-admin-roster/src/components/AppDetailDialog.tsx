@@ -2,6 +2,7 @@
 //
 //   1. このアプリの権限        … 無効 / 閲覧 / 編集 の 3 段階
 //   2. 細かい権限              … APP_MANIFEST の detailPermissions（チャットの「他人の投稿を削除」等）
+//   3. 別のロール宛てのメール  … メールだけ。ロール間の設定（権限キーではない）
 //
 // どちらも policy / APP_MANIFEST 由来なので、アプリや権限を足せばこのダイアログに自動で現れる。
 // 細かい権限は「アプリが有効（閲覧以上）」のときだけ触れる = アプリを OFF にしたまま配下だけ
@@ -11,6 +12,8 @@ import { policy } from "@dub/types";
 import { Badge, Button, Modal, SegmentedControl } from "@dub/ui";
 import { levelLabel, levelDescription, levelTone, type Level } from "../lib/policyLabels";
 import { PermissionToggleList } from "./PermissionToggleList";
+import { MailCrossRoleSection } from "./MailCrossRoleSection";
+import type { MailVisibilityProps } from "./RolePolicyEditor";
 
 const blockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-5, 20px)" };
 const headingStyle: React.CSSProperties = { fontWeight: 700, fontSize: 14, margin: 0 };
@@ -24,6 +27,7 @@ export function AppDetailDialog({
   onClose,
   lockedKeys = [],
   idPrefix = "fe7",
+  mailVisibility,
 }: {
   /** null = 閉じている. */
   appId: string | null;
@@ -33,6 +37,7 @@ export function AppDetailDialog({
   onClose: () => void;
   lockedKeys?: readonly identity.PermissionKey[];
   idPrefix?: string;
+  mailVisibility?: MailVisibilityProps;
 }) {
   const app = appId ? policy.appPolicyRows(selected).find((r) => r.id === appId) : undefined;
   if (!appId || !app) return null;
@@ -101,6 +106,19 @@ export function AppDetailDialog({
           </>
         )}
       </div>
+
+      {appId === "mail" && mailVisibility ? (
+        <div style={blockStyle}>
+          <MailCrossRoleSection
+            roleId={mailVisibility.roleId}
+            value={mailVisibility.value}
+            onChange={mailVisibility.onChange}
+            disabled={disabled || appOff}
+            locked={appOff}
+            idPrefix={idPrefix}
+          />
+        </div>
+      ) : null}
 
       <p style={hintStyle}>
         現在: <Badge tone={levelTone(app.level)}>{levelLabel(app.level)}</Badge> / 権限の変更はダイアログを閉じたあと「保存」で確定します。

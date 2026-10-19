@@ -23,6 +23,8 @@ import type {
   ChatApiClient,
   Channel,
   ChannelMember,
+  ChatSection,
+  ChatSectionList,
   CreateChannelRequest,
   DeleteMessageResult,
   DeletionPolicyResponse,
@@ -39,11 +41,14 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  SlackChannelOption,
+  SlackImportJob,
   TeamSummary,
   UnfurlPreview,
   UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateSectionRequest,
   WsTicketResponse,
 } from "./featureEntries.tsx";
 import type { common, identity } from "@dub/types";
@@ -173,6 +178,18 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       api.request<GetChannelResponse>({ method: "GET", path: `${CHAT}/channels/${id}` as ApiPath }),
     updateChannel: (id: common.ChannelId, req: UpdateChannelRequest) =>
       api.request<Channel>({ method: "PATCH", path: `${CHAT}/channels/${id}` as ApiPath, body: req }),
+    deleteChannel: (id: common.ChannelId) =>
+      api.request<void>({ method: "DELETE", path: `${CHAT}/channels/${id}` as ApiPath }),
+    listSections: () =>
+      api
+        .request<Partial<ChatSectionList> | null>({ method: "GET", path: `${CHAT}/sections` })
+        .then((r): ChatSectionList => ({ items: r?.items ?? [], assignments: r?.assignments ?? {} })),
+    createSection: (name: string) => api.request<ChatSection>({ method: "POST", path: `${CHAT}/sections`, body: { name } }),
+    updateSection: (id: string, req: UpdateSectionRequest) =>
+      api.request<ChatSection>({ method: "PATCH", path: `${CHAT}/sections/${id}` as ApiPath, body: req }),
+    deleteSection: (id: string) => api.request<void>({ method: "DELETE", path: `${CHAT}/sections/${id}` as ApiPath }),
+    setChannelSection: (channelId: common.ChannelId, sectionId: string | null) =>
+      api.request<void>({ method: "PUT", path: `${CHAT}/channels/${channelId}/section` as ApiPath, body: { sectionId } }),
     addMember: (id: common.ChannelId, userId: common.UserId, role?: ChannelMember["role"]) =>
       api.request<ChannelMember>({
         method: "POST",
@@ -253,6 +270,15 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
         })
         .then((r) => unwrapItems<identity.UserSummary>(r));
     },
+    // New-DM picker: active members by name (mirrors HttpChatClient.searchUsers).
+    searchUsers: (q: string) =>
+      api
+        .request<unknown>({
+          method: "GET",
+          path: `${IDENTITY}/users`,
+          query: { status: "active", limit: "20", ...(q.trim() ? { q: q.trim() } : {}) },
+        })
+        .then((r) => unwrapItems<identity.UserSummary>(r)),
     // チーム単位メンション (@統括チーム 等) の候補 + 自分の所属チーム。名簿権限を持たない
     // 一般メンバーでも読める self-scoped エンドポイントを使う (roster-gated な
     // /members/teams だと一般メンバーには候補もチーム名も出ない)。
@@ -263,6 +289,25 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
           path: `${MEMBERS}/me/mention-teams` as ApiPath,
         })
         .then((r) => ({ teams: r?.teams ?? [], myTeamIds: r?.myTeamIds ?? [] })),
+    // Slack channel import (admin) — mirrors HttpChatClient; the screen drives …/step.
+    listSlackChannels: () =>
+      api
+        .request<unknown>({ method: "GET", path: `${CHAT}/slack-import/channels` as ApiPath })
+        .then((r) => unwrapItems<SlackChannelOption>(r)),
+    listSlackImportJobs: (limit?: number) =>
+      api
+        .request<unknown>({
+          method: "GET",
+          path: `${CHAT}/slack-import/jobs` as ApiPath,
+          ...(limit !== undefined ? { query: { limit: String(limit) } } : {}),
+        })
+        .then((r) => unwrapItems<SlackImportJob>(r)),
+    startSlackImport: (channel: string) =>
+      api.request<SlackImportJob>({ method: "POST", path: `${CHAT}/slack-import/jobs` as ApiPath, body: { channel } }),
+    getSlackImportJob: (id: string) =>
+      api.request<SlackImportJob>({ method: "GET", path: `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}` as ApiPath }),
+    stepSlackImport: (id: string) =>
+      api.request<SlackImportJob>({ method: "POST", path: `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}/step` as ApiPath }),
     // Link preview is best-effort: a blocked URL (400) or a network error simply
     // means "no card" — never surface it as a chat error.
     unfurl: (url: string): Promise<UnfurlPreview | null> =>

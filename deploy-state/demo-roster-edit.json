@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "roster-edit",
+  "worker": "dub-demo-roster-edit",
+  "url": "https://dub-demo-roster-edit.developershub-site.workers.dev",
+  "deployedSha": "2965cc33",
+  "branch": "feat/member-roster-edit",
+  "actor": "ko-tarou",
+  "markers": ["行をクリックすると情報を編集できます","member-roster-readonly-notice"],
+  "live": true,
+  "verifiedAt": "2026-10-16T09:31:19Z",
+  "updatedAt": "2026-10-16T09:31:19Z",
+  "note": "運営名簿 行クリックで編集"
+}

@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (67 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (72 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -50,6 +50,8 @@ export const PERMISSION_CATALOG = [
   { key: "mail:admin", name: "Administer mail", description: "Manage mailbox/watch/rules", domain: "mail", dangerous: true },
   { key: "chat:create", name: "Create channels", description: "Create chat channels", domain: "chat", dangerous: false },
   { key: "chat:moderate", name: "Moderate chat", description: "Manage channels and delete others' messages", domain: "chat", dangerous: true },
+  { key: "chat:delete_channel", name: "Delete channels", description: "Permanently delete chat channels and all their messages", domain: "chat", dangerous: true },
+  { key: "chat:slack_import", name: "Import from Slack", description: "Import Slack channel history (messages, threads, reactions, files) into new chat channels", domain: "chat", dangerous: true },
   { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },
   { key: "infra:read", name: "Read infra", description: "View sites/deployments/dns/domains", domain: "infra", dangerous: false },
   { key: "infra:deploy", name: "Deploy", description: "Execute deployments", domain: "infra", dangerous: true },
@@ -66,6 +68,11 @@ export const PERMISSION_CATALOG = [
   // settings_edit IMPLIES settings_view (policy.normalizeAppAccessKeys).
   { key: "drive:settings_view", name: "View Drive共有 settings", description: "Open Drive共有's settings and see its Google accounts (read-only)", domain: "drive", dangerous: false },
   { key: "drive:settings_edit", name: "Edit Drive共有 settings", description: "Add/switch/remove the Google accounts Drive共有 acts as (implies view)", domain: "drive", dangerous: true },
+  // カレンダー > ミーティング (meetings on the shared Google account, drive-share-service /meetings).
+  // Two toggles in カレンダー's 詳細設定; meetings_edit IMPLIES meetings_view (policy.normalizeAppAccessKeys).
+  { key: "calendar:schedule_edit", name: "Edit schedules", description: "Add/change/delete 予定 in the カレンダー app (saved as the caller's tasks)", domain: "calendar", dangerous: false },
+  { key: "calendar:meetings_view", name: "View meetings", description: "See the meetings set up on the shared Google account (カレンダー > ミーティング)", domain: "calendar", dangerous: false },
+  { key: "calendar:meetings_edit", name: "Edit meetings", description: "Create/change/delete meetings on the shared Google account and invite role members (implies view)", domain: "calendar", dangerous: true },
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
   // ── per-app access tier (domain "app") — one graded pair per launcher app ──────
   { key: "app:events:view", name: "Open イベント app", description: "Open and view the イベント app", domain: "app", dangerous: false },

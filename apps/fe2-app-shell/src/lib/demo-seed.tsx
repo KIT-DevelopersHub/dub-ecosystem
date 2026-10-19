@@ -21,11 +21,11 @@
 // boot mock and surface as a normal NOT_FOUND (in-frame fallback, never a white
 // screen), so "what is seeded vs. still stubbed" stays honest.
 import type { ErrorResponse } from "@dub/errors";
-import type { auditLog, event, gantt, gateway, identity, mail, notification, task } from "@dub/types";
+import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
-import { mockUnfurl } from "../composition/featureEntries";
+import { createSlackImportSim, mockUnfurl, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -49,6 +49,11 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:send",
   "mail:admin",
   "chat:create",
+  // The real admin role holds chat:moderate (identity 0002): rename / topic / archive /
+  // members in the channel details modal. Hard delete is its own key (admin only by default).
+  "chat:moderate",
+  "chat:delete_channel",
+  "chat:slack_import",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -58,6 +63,11 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
+  // カレンダー: 予定の登録（予定を作成ボタン）。
+  "calendar:schedule_edit",
+  // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
+  "calendar:meetings_view",
+  "calendar:meetings_edit",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -247,7 +257,58 @@ const TASKS: task.Task[] = [
     status: "todo", priority: "urgent", assigneeId: ME_ID, teamId: "team_hq", startAt: "2026-09-20T00:00:00Z", dueAt: "2026-09-21T00:00:00Z", origin: "internal",
     archivedAt: null, createdAt: "2026-07-20T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
   },
+  ...calendarDemoTasks(),
 ];
+
+// カレンダー demo: a few 予定 around TODAY (the fixed seeds above sit in Aug–Sep, so a
+// calendar opened today would be empty). Timed ones carry the local offset exactly
+// like the calendar writes them; 終日 ones are UTC-midnight dates like マイタスク's.
+function calendarDemoTasks(): task.Task[] {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const base = new Date();
+  const dateKey = (offset: number) => {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+  const tz = (() => {
+    const off = -base.getTimezoneOffset();
+    return `${off >= 0 ? "+" : "-"}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
+  })();
+  const at = (offset: number, hhmm: string) => `${dateKey(offset)}T${hhmm}:00${tz}`;
+  const allDay = (offset: number) => `${dateKey(offset)}T00:00:00.000Z`;
+  const mk = (
+    id: string, title: string, status: task.TaskStatus, startAt: string, dueAt: string, description: string | null = null,
+  ): task.Task => ({
+    version: 1, id, eventId: null, title, description, status, priority: "medium", assigneeId: ME_ID, createdBy: ME_ID,
+    teamId: null, startAt, dueAt, origin: "internal", archivedAt: null, createdAt: isoNowSeed(), updatedAt: isoNowSeed(),
+  });
+  return [
+    mk("cal_1", "運営定例ミーティング", "in_progress", at(0, "10:00"), at(0, "11:00"), "#ミーティング\n#ラベル:role_lead\n進捗共有と次アクションの確認"),
+    mk("cal_2", "スポンサー打ち合わせ", "todo", at(0, "13:00"), at(0, "14:30"), "#ミーティング"),
+    mk("cal_3", "会場への連絡", "todo", at(0, "13:30"), at(0, "14:00")),
+    mk("cal_4", "ふりかえり会", "done", at(-1, "15:00"), at(-1, "16:00")),
+    mk("cal_5", "登壇資料 提出締切", "blocked", allDay(1), allDay(1)),
+    mk("cal_6", "北陸ITカンファレンス 準備週間", "todo", allDay(2), allDay(4), "#ラベル:role_member"),
+    mk("cal_7", "デザインレビュー", "todo", at(2, "16:00"), at(2, "17:00")),
+    mk("cal_8", "休暇", "todo", allDay(5), allDay(6), "#休暇\n急ぎの連絡はチャットへ"),
+    mk("cal_9", "開会式 予行練習", "todo", at(3, "18:00"), at(3, "19:30"), "#予行練習\n#ラベル:role_member"),
+    // タスク (マイタスク/ガント側・日付だけ): 個人 / 自分のチーム / 他人のチーム分。
+    mk("cal_t1", "交通費の精算", "todo", allDay(1), allDay(1)),
+    { ...mk("cal_t2", "受付マニュアル更新", "in_progress", allDay(0), allDay(2)), teamId: "team_hq" },
+    { ...mk("cal_t3", "名簿インポート検証", "todo", allDay(3), allDay(3)), teamId: "team_dev" },
+    { ...mk("cal_t4", "配信機材の手配", "todo", allDay(1), allDay(1)), teamId: "team_hq", assigneeId: "usr_bob", createdBy: "usr_bob" },
+    { ...mk("cal_t5", "当日シフト表 確定", "done", allDay(-1), allDay(-1)), teamId: "team_hq", assigneeId: "usr_bob", createdBy: "usr_bob" },
+    // 他のメンバーの予定 (サイドバーの「ユーザーを検索」で追加すると表示される)。
+    { ...mk("cal_p1", "会場下見", "todo", at(0, "15:00"), at(0, "16:30")), assigneeId: "usr_bob", createdBy: "usr_bob" },
+    { ...mk("cal_p2", "休暇", "todo", allDay(2), allDay(3), "#休暇"), assigneeId: "usr_bob", createdBy: "usr_bob" },
+    { ...mk("cal_p3", "デザイン相談会", "todo", at(1, "11:00"), at(1, "12:00"), "#ミーティング"), assigneeId: "usr_emi", createdBy: "usr_emi" },
+    { ...mk("cal_p4", "協賛企業訪問", "todo", at(3, "14:00"), at(3, "15:30")), assigneeId: "usr_emi", createdBy: "usr_emi" },
+  ];
+}
+
+function isoNowSeed(): string {
+  return new Date().toISOString();
+}
 
 const GANTT: Record<string, gantt.GanttChartDTO> = {
   evt_1: {
@@ -493,6 +554,10 @@ function seedMailImageBlob(id: string, filename: string, contentType: string, ba
 const DEMO_PNG_8x8 =
   "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR4nGNkYPhfz0AEYBpVSF+FAP7pAv4prsMnAAAAAElFTkSuQmCC";
 
+// Relative to page load so the reply nudge (3..14 days unanswered, read) is demoable:
+// msg_3 sits in the window, msg_2 is too recent; msg_1 keeps its fixed (stale) date.
+const daysAgoIso = (d: number): string => new Date(Date.now() - d * 86_400_000).toISOString();
+
 const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_1", messageId: "<m1@demo>", threadId: "thr_1", from: { email: "hanako@example.com", name: "山田 花子" },
@@ -502,12 +567,20 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     id: "msg_2", messageId: "<m2@demo>", threadId: "thr_2", from: { email: "sponsor@acme.co.jp", name: "ACME株式会社" },
     to: [{ email: "demo@developershub.jp" }], subject: "スポンサー契約書の送付", snippet: "契約書を添付いたします。ご確認ください。",
-    receivedAt: "2026-08-01T05:00:00Z", read: false, mine: true,
+    receivedAt: daysAgoIso(1), read: false, mine: true,
   },
   {
     id: "msg_3", messageId: "<m3@demo>", threadId: "thr_3", from: { email: "staff@developershub.jp", name: "運営スタッフ" },
     to: [{ email: "demo@developershub.jp" }], subject: "会場下見の日程", snippet: "来週の下見日程を共有します。",
-    receivedAt: "2026-07-30T08:00:00Z", read: true, mine: true,
+    receivedAt: daysAgoIso(4), read: true, mine: true,
+  },
+  {
+    // Received mail with Cc recipients (受信メールの CC 表示): the reading pane shows a Cc line.
+    id: "msg_4", messageId: "<m4@demo>", threadId: "thr_4", from: { email: "kenji@example.com", name: "高橋 健二" },
+    to: [{ email: "demo@developershub.jp" }],
+    cc: [{ email: "yuki@example.com", name: "伊藤 由紀" }, { email: "office@example.net" }],
+    subject: "懇親会会場の候補（CC共有）", snippet: "懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。",
+    receivedAt: daysAgoIso(2), read: false, mine: true,
   },
 ];
 
@@ -528,12 +601,25 @@ const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
     ],
   },
   msg_3: { ...MAIL_LIST[2]!, textBody: "運営スタッフです。来週火曜 14:00 から会場下見を予定しています。ご都合いかがでしょうか。" },
+  msg_4: {
+    ...MAIL_LIST[3]!,
+    textBody: "高橋です。\n\n懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。\n\n1. 駅前のイタリアン（40名）\n2. 学内カフェテリア（60名）\n\nご意見をお願いします。",
+    // 「宛先: 自分, 伊藤 由紀, … ▾」→ 詳細ダイアログ (返信先 / 送信元 / 署名元 / セキュリティ).
+    headerMeta: {
+      replyTo: [{ email: "kondankai@example.com", name: "懇親会幹事" }],
+      deliveredTo: "demo@developershub.jp",
+      mailedBy: "mail.example.com",
+      signedBy: "example.com",
+      tls: true,
+    },
+  },
 };
 
 const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
+  thr_4: { id: "thr_4", messages: [MAIL_DETAIL.msg_4!] },
 };
 
 // ── demo accounts (per-account mail scope) ────────────────────────────────────
@@ -548,7 +634,8 @@ export interface DemoAccount {
   email: string;
   permissions: identity.PermissionKey[];
   inbox: mail.MailMessageDetail[];
-  /** Role sharing (mail:read_role_shared): account ids whose inbox this account also reads. */
+  /** Account ids whose inbox this account also reads: same-role sharing (mail:read_role_shared)
+   *  and cross-role visibility (ロール管理 > メール > 別のロール宛てのメールも閲覧). */
   roleShareWith?: string[];
 }
 
@@ -584,9 +671,30 @@ const SPONSOR_INBOX: mail.MailMessageDetail[] = [
   },
 ];
 
+// 統括 (cross-role mail visibility): the 統括 role is set to also see the maintainer + member
+// roles' inbound mail, so this account reads 佐藤 (maintainer) and 鈴木 (member) under
+// 自分宛て以外 — one-way: neither of them sees the 統括 inbox. Open with ?demo_account=usr_lead.
+const LEAD_INBOX: mail.MailMessageDetail[] = [
+  {
+    id: "msg_l1", messageId: "<l1@demo>", threadId: "thr_l1",
+    from: { email: "office@kit.ac.jp", name: "大学 事務局" },
+    to: [{ email: "lead@developershub.jp", name: "統括 山本" }], subject: "年度末の活動報告書の提出について",
+    snippet: "活動報告書の提出期限は 3 月 10 日です。", receivedAt: "2026-08-04T01:00:00Z", read: false,
+    textBody: "山本様\n\n活動報告書の提出期限は 3 月 10 日です。様式は添付のとおりです。",
+  },
+];
+
 // Fixed archive address auto-CC'd on every send (mirrors the mail-gateway MAIL_ARCHIVE_CC
-// behavior so the demo/E2E shows the archive copy in the Sent detail's Cc).
+// behavior). Stored on the sent row like the gateway, but hidden from the read responses
+// (hideArchiveCc) exactly as the gateway does — it is an internal mailbox, not a person.
 const DEMO_ARCHIVE_CC = "archive@developershub.jp";
+
+function hideArchiveCc<T extends { cc?: mail.MailAddress[] }>(item: T): T {
+  if (!item.cc) return item;
+  const { cc, ...rest } = item;
+  const kept = cc.filter((a) => a.email.trim().toLowerCase() !== DEMO_ARCHIVE_CC);
+  return (kept.length > 0 ? { ...rest, cc: kept } : rest) as T;
+}
 
 // Oversight account (info@): an INDIVIDUAL admin account holding mail:read_all, so it
 // sees EVERY account's inbox + sent mail — the supervisor / archive view. Contrast with
@@ -614,6 +722,7 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
+  { id: "usr_lead", displayName: "統括 山本", email: "lead@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: LEAD_INBOX.map((m) => ({ ...m })), roleShareWith: ["usr_bob", "usr_sponsor"] },
 ];
 
 /** True when the account holds the mail:read_all oversight permission. */
@@ -627,6 +736,10 @@ const DEMO_ACCOUNT_STORAGE_KEY = "dub_demo_account";
 function currentAccount(): DemoAccount {
   let key: string | null = null;
   try {
+    // ?demo_account=<id|email> switches (and remembers) the account so a confirm link can
+    // open the demo as a specific account without devtools.
+    const fromUrl = new URLSearchParams(globalThis.location?.search ?? "").get("demo_account");
+    if (fromUrl) globalThis.localStorage?.setItem(DEMO_ACCOUNT_STORAGE_KEY, fromUrl);
     key = globalThis.localStorage?.getItem(DEMO_ACCOUNT_STORAGE_KEY) ?? null;
   } catch {
     key = null;
@@ -701,6 +814,15 @@ function createMailStore() {
     }
     return received[id]!;
   }
+  // Mirrors the gateway's send-time resolveThreadId: a reply's In-Reply-To is matched
+  // (angle brackets ignored) against received Message-Ids so the sent row carries the
+  // conversation's threadId and folds into it; unknown refs fall back to the ref itself.
+  const bare = (ref: string): string => ref.trim().replace(/^<|>$/g, "").trim();
+  function replyThreadId(inReplyTo: string): string {
+    const ref = bare(inReplyTo);
+    const parent = DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)).find((m) => m.messageId && bare(m.messageId) === ref);
+    return parent?.threadId ?? inReplyTo;
+  }
   // Sent is PERSISTED per account (localStorage) so it survives a reload and stays
   // strictly account-scoped: a mail account A sent lives under A's key and is therefore
   // invisible when the shell reloads as account B. Read fresh on every request.
@@ -764,6 +886,7 @@ function createMailStore() {
         status: "sent",
         textBody: s.textBody,
         ...(s.htmlBody ? { htmlBody: s.htmlBody } : {}),
+        ...(s.inReplyTo ? { threadId: replyThreadId(s.inReplyTo) } : {}),
       } as mail.MailSentDetail);
     }
     saveSent(accountId, sent);
@@ -860,6 +983,7 @@ function createMailStore() {
         provider: "resend",
         providerMessageId,
         status: "sent",
+        ...(req.inReplyTo ? { threadId: replyThreadId(req.inReplyTo) } : {}),
         textBody: req.textBody ?? "",
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
         ...(attachments.length > 0 ? { attachments } : {}),
@@ -873,7 +997,7 @@ function createMailStore() {
       const items: mail.MailSentListItem[] = readSent.map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
-        return listItem;
+        return hideArchiveCc(listItem);
       });
       return json(page(items));
     }
@@ -881,7 +1005,7 @@ function createMailStore() {
       const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
       if (m) {
         const found = readSent.find((s) => s.id === decodeURIComponent(m[1]!));
-        return found ? json(found) : notFound(`GET ${pathname}`);
+        return found ? json(hideArchiveCc(found)) : notFound(`GET ${pathname}`);
       }
     }
 
@@ -972,7 +1096,7 @@ function createMailStore() {
         const threadId = decodeURIComponent(m[1]!);
         const patch = (body ?? {}) as Partial<mail.MailThreadFlagsPatch>;
         const flags = loadFlags();
-        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false, purged: false };
+        const prev = flags.find((f) => f.threadId === threadId) ?? { threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
         const next: mail.MailThreadFlags = {
           threadId,
           starred: patch.starred ?? prev.starred,
@@ -981,6 +1105,8 @@ function createMailStore() {
           // purged (完全に削除): per-user permanent hide. Mirrors the gateway — the mail row is
           // never removed; only THIS account's flag flips, so an admin/other account still sees it.
           purged: patch.purged ?? prev.purged ?? false,
+          // 返信不要: true re-stamps now (like the gateway), false clears, absent keeps.
+          noReplyAt: patch.noReply === undefined ? (prev.noReplyAt ?? null) : patch.noReply ? new Date().toISOString() : null,
         };
         saveFlags([...flags.filter((f) => f.threadId !== threadId), next]);
         return json(next);
@@ -1067,14 +1193,20 @@ const SEED_USERS: DemoRosterUser[] = [
   { id: "usr_hana", orgId: ORG, displayName: "渡辺 花", email: "hana@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_ken", orgId: ORG, displayName: "中村 健", email: "ken@developershub.jp", githubLogin: "ken-n", avatarUrl: null, status: "disabled", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_lily", orgId: ORG, displayName: "小林 里", email: "ri@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_maintainer"], createdAt: isoNow(), updatedAt: isoNow() },
+  { id: "usr_lead", orgId: ORG, displayName: "統括 山本", email: "lead@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "manual", roleIds: ["role_lead"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_mana", orgId: ORG, displayName: "加藤 真名", email: "mana@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_noa", orgId: ORG, displayName: "吉田 乃愛", email: "noa@developershub.jp", githubLogin: "noa-y", avatarUrl: null, status: "disabled", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
 ];
 
-const SEED_ROLES: identity.Role[] = [
-  { id: "role_admin", orgId: ORG, name: "admin", permissions: DEMO_PERMISSIONS, isSystem: true },
-  { id: "role_maintainer", orgId: ORG, name: "maintainer", permissions: MAINTAINER_PERMISSIONS, isSystem: true },
-  { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true },
+// identity-roster's role DTO carries the cross-role mail visibility set (fe7 RoleView).
+type DemoRole = identity.Role & { mailVisibleRoleIds: string[] };
+
+const SEED_ROLES: DemoRole[] = [
+  { id: "role_admin", orgId: ORG, name: "admin", permissions: DEMO_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
+  { id: "role_maintainer", orgId: ORG, name: "maintainer", permissions: MAINTAINER_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
+  { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
+  // 統括: also reads the maintainer + member roles' inbound mail (メール > 詳細設定).
+  { id: "role_lead", orgId: ORG, name: "統括", permissions: [...MEMBER_PERMISSIONS, "app:mail:view", "mail:read"], isSystem: false, mailVisibleRoleIds: ["role_maintainer", "role_member"] },
 ];
 
 // FE7's RoleAssignment (contracts/pending) — org-wide (resource fields null) here.
@@ -1093,6 +1225,7 @@ const SEED_USER_ROLES: Record<string, DemoRoleAssignment[]> = {
   [ME_ID]: [{ id: "asg_1", userId: ME_ID, roleId: "role_admin", roleName: "admin", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
   usr_bob: [{ id: "asg_2", userId: "usr_bob", roleId: "role_maintainer", roleName: "maintainer", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
   usr_carol: [{ id: "asg_3", userId: "usr_carol", roleId: "role_member", roleName: "member", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
+  usr_lead: [{ id: "asg_lead", userId: "usr_lead", roleId: "role_lead", roleName: "統括", resourceType: null, resourceId: null, grantedBy: ME_ID, grantedAt: isoNow() }],
 };
 
 // Change-history seed (FE7 変更履歴 tab shows identity.* actions).
@@ -1135,7 +1268,7 @@ function problem(code: string, message: string, status: number, details?: unknow
  *  page reload resets the demo. Mirrors the identity-roster contract surface
  *  (GET/POST/PATCH/DELETE identity/roles + users + assignments, audit, mail). */
 function createRosterStore() {
-  const roles: identity.Role[] = SEED_ROLES.map((r) => ({ ...r, permissions: [...r.permissions] }));
+  const roles: DemoRole[] = SEED_ROLES.map((r) => ({ ...r, permissions: [...r.permissions], mailVisibleRoleIds: [...r.mailVisibleRoleIds] }));
   const users: DemoRosterUser[] = SEED_USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] }));
   const assignments: Record<string, DemoRoleAssignment[]> = {};
   for (const [k, v] of Object.entries(SEED_USER_ROLES)) assignments[k] = v.map((a) => ({ ...a }));
@@ -1206,10 +1339,10 @@ function createRosterStore() {
 
     if (method === "POST") {
       if (pathname === "/api/v1/identity/roles") {
-        const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+        const req = body as { name?: string; permissions?: identity.PermissionKey[]; mailVisibleRoleIds?: string[] };
         if (!req?.name?.trim()) return problem("VALIDATION_FAILED", "ロール名を入力してください", 400, [{ field: "name", reason: "required" }]);
         if (roles.some((r) => r.name === req.name)) return problem("CONFLICT", "同名のロールが既に存在します", 409);
-        const role: identity.Role = { id: rid("role"), orgId: ORG, name: req.name.trim(), permissions: req.permissions ?? [], isSystem: false };
+        const role: DemoRole = { id: rid("role"), orgId: ORG, name: req.name.trim(), permissions: req.permissions ?? [], isSystem: false, mailVisibleRoleIds: req.mailVisibleRoleIds ?? [] };
         roles.push(role);
         audit("identity.role.created", "role", role.id, { name: role.name, permissions: role.permissions.length });
         return json(role);
@@ -1239,7 +1372,8 @@ function createRosterStore() {
         const user: identity.IdentityUser = { id: rid("usr"), orgId: ORG, displayName: req.displayName ?? req.email!, email: req.email!, githubLogin: null, avatarUrl: null, status: "invited", roleIds: req.roleIds ?? [], createdAt: isoNow(), updatedAt: new Date().toISOString() };
         users.push(user);
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
-        return json(user);
+        // 実 identity-roster と同じ { user } 形 (InviteUserResponse)。
+        return json({ user }, 201);
       }
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
@@ -1261,9 +1395,15 @@ function createRosterStore() {
           const role = roles.find((r) => r.id === id);
           if (!role) return problem("NOT_FOUND", "role not found", 404);
           if (role.isSystem) return problem("CONFLICT", "システムロールは編集できません", 409);
-          const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+          const req = body as { name?: string; permissions?: identity.PermissionKey[]; mailVisibleRoleIds?: string[] };
           if (req?.name !== undefined) role.name = req.name;
           if (req?.permissions !== undefined) role.permissions = req.permissions;
+          if (req?.mailVisibleRoleIds !== undefined) {
+            if (req.mailVisibleRoleIds.some((t) => t === role.id || !roles.some((r) => r.id === t))) {
+              return problem("VALIDATION_FAILED", "閲覧対象のロールが不正です", 400, [{ field: "mailVisibleRoleIds", reason: "invalid" }]);
+            }
+            role.mailVisibleRoleIds = [...req.mailVisibleRoleIds].sort();
+          }
           audit("identity.role.updated", "role", role.id, { permissions: role.permissions.length });
           return json(role);
         }
@@ -1304,6 +1444,7 @@ function createRosterStore() {
           if (!role) return problem("NOT_FOUND", "role not found", 404);
           if (role.isSystem) return problem("CONFLICT", "システムロールは削除できません", 409);
           roles.splice(roles.indexOf(role), 1);
+          for (const r of roles) r.mailVisibleRoleIds = r.mailVisibleRoleIds.filter((t) => t !== role.id);
           audit("identity.role.deleted", "role", role.id, { name: role.name });
           return json(null, 204);
         }
@@ -1340,7 +1481,21 @@ function createRosterStore() {
     return null;
   }
 
-  return { handle };
+  // Slack import (チャンネル取り込み) creates disabled placeholder users for bots /
+  // unmatched authors, exactly like the real importer writes identity_users.
+  function addUsers(list: { id: string; displayName: string }[]): void {
+    for (const u of list) {
+      if (users.some((x) => x.id === u.id)) continue;
+      users.push({ id: u.id, orgId: ORG, displayName: u.displayName, email: `${u.id}@slack-import.invalid`, githubLogin: null, avatarUrl: null, status: "disabled", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() });
+    }
+  }
+
+  /** Login account by id (アカウント発行メールの CC 解決用). */
+  function findUser(id: string): DemoRosterUser | undefined {
+    return users.find((u) => u.id === id);
+  }
+
+  return { handle, addUsers, findUser };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -1358,9 +1513,17 @@ interface DemoChatChannel {
   topic: string | null;
   eventId: string | null;
   memberCount: number;
+  memberIds?: string[]; // dm only: participants (the FE labels a DM by the other side)
+  // Mutable via the channel details modal (PATCH / members) for the session.
+  archived?: boolean;
+  version?: number;
+  roster?: { userId: string; role: "admin" | "member"; joinedAt: string }[];
+  visibility?: "public" | "private"; // default: dm -> private, else public
 }
 
-function createChatStore() {
+type DemoMessage = Record<string, unknown> & { id: string; channelId: string; threadRootId: string | null };
+
+function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayName: string }[]) => void }) {
   const CH_TS = "2026-08-01T00:00:00.000Z";
   // 全体: everyone. announcements is the read-mostly 全体周知 channel.
   const overall: DemoChatChannel[] = [
@@ -1390,7 +1553,11 @@ function createChatStore() {
   const eventChannels: DemoChatChannel[] = [
     { id: "chn_evt_conf", type: "event", name: "北陸itカンファレンス", topic: "北陸ITカンファレンス2026 運営チャネル", eventId: "evt_1", memberCount: 18 },
   ];
-  const all = [...overall, ...teamChannels, ...roleChannels, ...eventChannels];
+  // ダイレクト: one seeded 1:1 DM so the section and a DM timeline are visible at once.
+  const dmChannels: DemoChatChannel[] = [
+    { id: "chn_dm_bob", type: "dm", name: "DM", topic: null, eventId: null, memberCount: 2, memberIds: [ME_ID, "usr_bob"] },
+  ];
+  const all = [...overall, ...teamChannels, ...roleChannels, ...eventChannels, ...dmChannels];
 
   const toWire = (c: DemoChatChannel) => ({
     id: c.id,
@@ -1399,13 +1566,48 @@ function createChatStore() {
     name: c.name,
     topic: c.topic,
     eventId: c.eventId,
-    archived: false,
-    memberCount: c.memberCount,
-    version: 1,
+    visibility: c.visibility ?? (c.type === "dm" ? "private" : "public"),
+    archived: c.archived ?? false,
+    memberCount: c.roster?.length ?? c.memberCount,
+    ...(c.memberIds ? { memberIds: c.memberIds } : {}),
+    version: c.version ?? 1,
     createdAt: CH_TS,
     updatedAt: CH_TS,
   });
   const byId = new Map(all.map((c) => [c.id, c]));
+  // Channel roster, materialized on first use: the demo admin (channel admin) plus seed
+  // users up to the channel's size, so the details modal's メンバー tab has real names.
+  const rosterOf = (c: DemoChatChannel) => {
+    if (!c.roster) {
+      const others = SEED_USERS.filter((u) => u.id !== ME_ID).slice(0, Math.max(0, c.memberCount - 1));
+      c.roster = [
+        { userId: ME_ID, role: "admin", joinedAt: CH_TS },
+        ...others.map((u) => ({ userId: u.id, role: "member" as const, joinedAt: CH_TS })),
+      ];
+    }
+    return c.roster;
+  };
+
+  // Personal sidebar sections, per signed-in account (account switcher). The demo
+  // admin starts with one 「運営」 section holding #admin so the feature shows at once.
+  interface DemoSection { id: string; name: string; position: number; createdAt: string }
+  const sectionsByUser = new Map<string, { items: DemoSection[]; assignments: Record<string, string> }>([
+    [ME_ID, { items: [{ id: "sec_demo_ops", name: "運営", position: 0, createdAt: CH_TS }], assignments: { chn_admin: "sec_demo_ops" } }],
+  ]);
+  let sectionSeq = 0;
+  const mySections = () => {
+    const me = currentAccount().id;
+    let entry = sectionsByUser.get(me);
+    if (!entry) {
+      entry = { items: [], assignments: {} };
+      sectionsByUser.set(me, entry);
+    }
+    return entry;
+  };
+  const sectionName = (raw: unknown): string | null => {
+    const name = typeof raw === "string" ? raw.trim() : "";
+    return name.length >= 1 && name.length <= 40 ? name : null;
+  };
 
   // Seeded timeline for #general — includes a SYSTEM post (authorId: null, chat-service
   // `kind: "system"`). System posts have no author; the client must render them as
@@ -1452,12 +1654,55 @@ function createChatStore() {
   // its card in place; ids are minted ascending so they sort after the seed.
   const posted = new Map<string, ReturnType<typeof msg>[]>();
   let postSeq = 0;
-  const messagesOf = (channelId: string | null) => [
+  const dmMessages = [
+    msg({ id: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", body: "LP の文言、確認してもらえますか？急ぎではないです 🙏", createdAt: "2026-08-01T01:00:00.000Z" }),
+    msg({ id: "msg_01SEEDDMB0000000000000002", channelId: "chn_dm_bob", authorId: ME_ID, body: "了解です、今日中に見ます！", createdAt: "2026-08-01T01:03:00.000Z" }),
+  ];
+  // チャンネル取り込み (Slack): the shared fe6 simulator drives the jobs; a finished job
+  // materializes its Dub channel (thread, reactions, placeholder authors, pins, files).
+  const imported = new Map<string, { messages: DemoMessage[]; pinnedIds: string[] }>();
+  const materializeImport = (c: ImportedChannel) => {
+    const existing = byId.get(c.id);
+    if (existing) {
+      existing.archived = c.archived;
+    } else {
+      const created: DemoChatChannel = { id: c.id, type: "topic", name: c.name, topic: c.topic, eventId: null, memberCount: c.memberCount, visibility: c.visibility, archived: c.archived };
+      all.push(created);
+      byId.set(created.id, created);
+    }
+    imported.set(c.id, { messages: c.messages as unknown as DemoMessage[], pinnedIds: [...c.pinnedIds] });
+    addUsers(c.placeholderUsers);
+  };
+  const slackImport = createSlackImportSim({
+    // usr_ken is a disabled (退会済み) roster account — still matched by email.
+    authors: { me: ME_ID, a: "usr_bob", b: "usr_emi", disabled: "usr_ken" },
+    onDone: materializeImport,
+  });
+  const simResponse = (r: ReturnType<typeof slackImport.step>): Response =>
+    r.ok ? json(r.value, r.status) : json({ error: { code: r.code, message: r.message, retryable: false } } satisfies ErrorResponse, r.status);
+
+  const messagesOf = (channelId: string | null): DemoMessage[] => [
     ...(channelId === "chn_general" ? generalMessages : []),
+    ...(channelId === "chn_dm_bob" ? dmMessages : []),
+    ...(channelId ? (imported.get(channelId)?.messages ?? []) : []),
     ...(channelId ? (posted.get(channelId) ?? []) : []),
   ];
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (pathname.startsWith("/api/v1/chat/slack-import/")) {
+      if (method === "GET" && pathname === "/api/v1/chat/slack-import/channels") return json({ items: slackImport.listChannels() });
+      if (method === "GET" && pathname === "/api/v1/chat/slack-import/jobs") {
+        return json({ items: slackImport.listJobs(Number(url.searchParams.get("limit") ?? 20) || 20) });
+      }
+      if (method === "POST" && pathname === "/api/v1/chat/slack-import/jobs") {
+        return simResponse(slackImport.createJob((body as { channel?: unknown } | null)?.channel));
+      }
+      const step = /^\/api\/v1\/chat\/slack-import\/jobs\/([^/]+)\/step$/.exec(pathname);
+      if (step && method === "POST") return simResponse(slackImport.step(decodeURIComponent(step[1]!)));
+      const one = /^\/api\/v1\/chat\/slack-import\/jobs\/([^/]+)$/.exec(pathname);
+      if (one && method === "GET") return simResponse(slackImport.getJob(decodeURIComponent(one[1]!)));
+      return null;
+    }
     if (method === "POST" && pathname === "/api/v1/chat/messages") {
       const req = (body ?? {}) as { channelId?: string; body?: string; threadRootId?: string | null };
       if (!req.channelId || typeof req.body !== "string") return notFound(`POST ${pathname}`);
@@ -1477,21 +1722,129 @@ function createChatStore() {
       const target = url.searchParams.get("url") ?? "";
       return json({ url: target, preview: mockUnfurl(target) });
     }
+    if (method === "POST" && pathname === "/api/v1/chat/channels") {
+      // DM only (channel creation is otherwise not demoed). Same participant set ->
+      // the existing DM, mirroring chat-service's dm_key dedup.
+      const req = (body ?? {}) as { type?: string; name?: string; memberIds?: string[] };
+      if (req.type !== "dm") return notFound(`POST ${pathname} (type=${String(req.type)})`);
+      const memberIds = [...new Set([currentAccount().id, ...(req.memberIds ?? [])])];
+      const key = [...memberIds].sort().join(",");
+      const existing = all.find((c) => c.type === "dm" && [...(c.memberIds ?? [])].sort().join(",") === key);
+      if (existing) return json(toWire(existing));
+      const created: DemoChatChannel = {
+        id: `chn_dm_${Date.now().toString(36)}`,
+        type: "dm",
+        name: req.name || "DM",
+        topic: null,
+        eventId: null,
+        memberCount: memberIds.length,
+        memberIds,
+      };
+      all.push(created);
+      byId.set(created.id, created);
+      return json(toWire(created), 201);
+    }
     if (method === "GET" && pathname === "/api/v1/chat/channels") {
       // Optional ?eventId= filter (contract): event channels for that event only.
       const eventId = url.searchParams.get("eventId");
-      const list = eventId ? all.filter((c) => c.eventId === eventId) : all;
+      const me = currentAccount().id;
+      const visible = all.filter((c) => c.type !== "dm" || (c.memberIds ?? []).includes(me)); // DMs: participants only
+      const list = eventId ? visible.filter((c) => c.eventId === eventId) : visible;
       return json(list.map(toWire)); // raw array (not Paginated) per fe6 contract
     }
     if (method === "GET" && pathname === "/api/v1/chat/unread") {
       return json([]); // no unread badges in demo
+    }
+    if (pathname === "/api/v1/chat/sections") {
+      const mine = mySections();
+      if (method === "GET") {
+        return json({ items: [...mine.items].sort((a, b) => a.position - b.position), assignments: { ...mine.assignments } });
+      }
+      if (method === "POST") {
+        const name = sectionName((body as { name?: unknown } | null)?.name);
+        if (!name) return validationFailed("section name must be 1..40 chars");
+        const position = mine.items.reduce((max, x) => Math.max(max, x.position + 1), 0);
+        const created: DemoSection = { id: `sec_demo_${++sectionSeq}`, name, position, createdAt: new Date().toISOString() };
+        mine.items.push(created);
+        return json(created, 201);
+      }
+    }
+    {
+      const m = /^\/api\/v1\/chat\/sections\/([^/]+)$/.exec(pathname);
+      if (m && (method === "PATCH" || method === "DELETE")) {
+        const mine = mySections();
+        const id = decodeURIComponent(m[1]!);
+        const idx = mine.items.findIndex((x) => x.id === id);
+        if (idx < 0) return notFound(`${method} ${pathname}`);
+        if (method === "DELETE") {
+          mine.items.splice(idx, 1);
+          for (const [c, sec] of Object.entries(mine.assignments)) if (sec === id) delete mine.assignments[c];
+          return json(null, 204);
+        }
+        const req = (body ?? {}) as { name?: unknown; position?: unknown };
+        const next = { ...mine.items[idx]! };
+        if (req.name !== undefined) {
+          const name = sectionName(req.name);
+          if (!name) return validationFailed("section name must be 1..40 chars");
+          next.name = name;
+        }
+        if (typeof req.position === "number") next.position = req.position;
+        mine.items[idx] = next;
+        return json(next);
+      }
+    }
+    {
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/section$/.exec(pathname);
+      if (m && method === "PUT") {
+        const channelId = decodeURIComponent(m[1]!);
+        const sectionId = (body as { sectionId?: string | null } | null)?.sectionId ?? null;
+        const mine = mySections();
+        if (!byId.has(channelId)) return notFound(`PUT ${pathname}`);
+        if (sectionId !== null && !mine.items.some((x) => x.id === sectionId)) return notFound(`PUT ${pathname} (section)`);
+        if (sectionId === null) delete mine.assignments[channelId];
+        else mine.assignments[channelId] = sectionId;
+        return json(null, 204);
+      }
     }
     {
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const c = byId.get(decodeURIComponent(m[1]!));
         if (!c) return notFound(`GET ${pathname}`);
-        return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "member", joinedAt: CH_TS } });
+        if (c.type === "dm") return json({ channel: toWire(c), membership: { channelId: c.id, userId: ME_ID, role: "member", joinedAt: CH_TS } });
+        const mine = rosterOf(c).find((r) => r.userId === currentAccount().id);
+        return json({ channel: toWire(c), membership: mine ? { channelId: c.id, ...mine } : null });
+      }
+      if (m && method === "PATCH") {
+        // Rename / topic / archive with the optimistic-lock version, like chat-service.
+        const c = byId.get(decodeURIComponent(m[1]!));
+        if (!c) return notFound(`PATCH ${pathname}`);
+        const req = (body ?? {}) as { name?: unknown; topic?: unknown; archived?: unknown; version?: unknown };
+        if (req.version !== (c.version ?? 1)) {
+          const err: ErrorResponse = { error: { code: "CHAT_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+          return json(err, 409);
+        }
+        if (req.name !== undefined) {
+          const name = typeof req.name === "string" ? req.name.trim() : "";
+          if (!name) return validationFailed("name is required");
+          c.name = name;
+        }
+        if (req.topic !== undefined) c.topic = typeof req.topic === "string" && req.topic.trim() ? req.topic : null;
+        if (typeof req.archived === "boolean") c.archived = req.archived;
+        c.version = (c.version ?? 1) + 1;
+        return json(toWire(c));
+      }
+      if (m && method === "DELETE") {
+        // Hard delete: the channel, its posts and every user's section assignment go.
+        const id = decodeURIComponent(m[1]!);
+        const c = byId.get(id);
+        if (!c) return notFound(`DELETE ${pathname}`);
+        if (c.type === "dm") return validationFailed("direct messages cannot be deleted");
+        all.splice(all.indexOf(c), 1);
+        byId.delete(id);
+        posted.delete(id);
+        for (const entry of sectionsByUser.values()) delete entry.assignments[id];
+        return json(null, 204);
       }
     }
     {
@@ -1501,18 +1854,50 @@ function createChatStore() {
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
       const channelId = url.searchParams.get("channelId");
       // #general opens to a seeded timeline (incl. a system post); others start empty
-      // and grow with posts made during the session.
-      return json(page(messagesOf(channelId)));
+      // and grow with posts made during the session. Like chat-service: the channel
+      // timeline holds top-level posts only; ?threadRootId= returns that thread's replies.
+      const threadRootId = url.searchParams.get("threadRootId");
+      return json(page(messagesOf(channelId).filter((m) => (m.threadRootId ?? null) === (threadRootId || null))));
     }
     {
       // Members / pins: demo returns a small roster and no pins (bare arrays per the
       // fe6 contract) so opening a channel does not 404 those companion fetches.
       const mem = /^\/api\/v1\/chat\/channels\/([^/]+)\/members$/.exec(pathname);
       if (mem && method === "GET") {
-        return json([{ channelId: decodeURIComponent(mem[1]!), userId: ME_ID, role: "admin", joinedAt: CH_TS }]);
+        const channelId = decodeURIComponent(mem[1]!);
+        const dmMembers = byId.get(channelId)?.memberIds;
+        if (dmMembers) return json(dmMembers.map((userId) => ({ channelId, userId, role: "member", joinedAt: CH_TS })));
+        const c = byId.get(channelId);
+        if (!c) return notFound(`GET ${pathname}`);
+        return json(rosterOf(c).map((r) => ({ channelId, ...r })));
+      }
+      if (mem && method === "POST") {
+        const channelId = decodeURIComponent(mem[1]!);
+        const c = byId.get(channelId);
+        const userId = (body as { userId?: unknown } | null)?.userId;
+        if (!c || typeof userId !== "string") return notFound(`POST ${pathname}`);
+        const roster = rosterOf(c);
+        let row = roster.find((r) => r.userId === userId);
+        if (!row) {
+          row = { userId, role: "member", joinedAt: new Date().toISOString() };
+          roster.push(row);
+        }
+        return json({ channelId, ...row }, 201);
+      }
+      const memDel = /^\/api\/v1\/chat\/channels\/([^/]+)\/members\/([^/]+)$/.exec(pathname);
+      if (memDel && method === "DELETE") {
+        const c = byId.get(decodeURIComponent(memDel[1]!));
+        if (!c) return notFound(`DELETE ${pathname}`);
+        const userId = decodeURIComponent(memDel[2]!);
+        c.roster = rosterOf(c).filter((r) => r.userId !== userId);
+        return json(null, 204);
       }
       const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
-      if (pin && method === "GET") return json([]);
+      if (pin && method === "GET") {
+        const channelId = decodeURIComponent(pin[1]!);
+        const imp = imported.get(channelId);
+        return json(imp ? imp.messages.filter((m) => imp.pinnedIds.includes(m.id)) : []);
+      }
     }
     return null;
   }
@@ -1522,6 +1907,10 @@ function createChatStore() {
 
 function json(body: unknown, status = 200): Response {
   return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+function validationFailed(message: string): Response {
+  const body: ErrorResponse = { error: { code: "VALIDATION_FAILED", message, retryable: false } };
+  return json(body, 400);
 }
 function notFound(route: string): Response {
   const body: ErrorResponse = { error: { code: "NOT_FOUND", message: `demo: no handler for ${route}`, retryable: false } };
@@ -1630,7 +2019,19 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       if (id) return EVENT_DETAIL[id] ? json(EVENT_DETAIL[id]) : notFound(`GET ${pathname}`);
     }
     // tasks
-    if (pathname === "/api/v1/tasks") return json(page(TASKS));
+    if (pathname === "/api/v1/tasks") {
+      // Honour the scopes the real task-service filters on, so the calendar's 個人/チーム
+      // split (担当・依頼 vs チームのタスクを表示) reads true in the demo.
+      const q = url.searchParams;
+      const rows = TASKS.filter(
+        (t) =>
+          (!q.get("assigneeId") || t.assigneeId === q.get("assigneeId")) &&
+          // Older seed rows carry no createdBy; treat them as issued by the demo user.
+          (!q.get("createdById") || (t.createdBy ?? ME_ID) === q.get("createdById")) &&
+          (!q.get("teamId") || t.teamId === q.get("teamId")),
+      );
+      return json(page(rows));
+    }
     {
       const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
       if (id) {
@@ -1682,6 +2083,21 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   }
 
   if (method === "POST") {
+    // task create (カレンダーの予定追加 / マイタスク). Appended to the in-memory seed so
+    // the new 予定 survives a refetch within the session.
+    if (pathname === "/api/v1/tasks" || pathname === "/api/v1/tasks/calendar-events") {
+      const b = (body ?? {}) as Partial<task.CreateTaskRequest>;
+      if (typeof b.title !== "string" || !b.title.trim()) return notFound(`POST ${pathname}`);
+      const now = new Date().toISOString();
+      const created: task.Task = {
+        version: 1, id: `tsk_demo_${Date.now()}`, eventId: b.eventId ?? null, title: b.title, description: b.description ?? null,
+        status: "todo", priority: b.priority ?? "medium", assigneeId: b.assigneeId ?? null, createdBy: ME_ID,
+        teamId: b.teamId ?? null, startAt: b.startAt ?? null, dueAt: b.dueAt ?? null, origin: "internal",
+        archivedAt: null, createdAt: now, updatedAt: now,
+      };
+      TASKS.push(created);
+      return json(created, 201);
+    }
     // mail read + send are served by the stateful mail store (createMailStore).
     if (pathname === "/api/v1/notifications/inbox/read-all") {
       const now = new Date().toISOString();
@@ -1792,12 +2208,13 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     // Detail-panel edit (title/status/priority/担当/チーム/開始日/期日). Updates the task and,
     // when the dates change, mirrors them onto the gantt row so the BAR moves immediately.
     {
-      const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+      const id = seg(/^\/api\/v1\/tasks\/(?:calendar-events\/)?([^/]+)$/);
       if (id) {
         const t = TASKS.find((x) => x.id === id);
         if (!t) return notFound(`PATCH ${pathname}`);
         const b = (body ?? {}) as Partial<task.UpdateTaskRequest>;
         if (b.title !== undefined) t.title = b.title;
+        if (b.description !== undefined) t.description = b.description;
         if (b.status !== undefined) t.status = b.status;
         if (b.priority !== undefined) t.priority = b.priority;
         if (b.assigneeId !== undefined) t.assigneeId = b.assigneeId;
@@ -1813,6 +2230,18 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         t.updatedAt = new Date().toISOString();
         return json(t);
       }
+    }
+  }
+
+  // task archive (カレンダーの予定削除). task-service soft-deletes; the demo drops the row
+  // so every list (calendar / マイタスク) stops showing it.
+  if (method === "DELETE") {
+    const id = seg(/^\/api\/v1\/tasks\/(?:calendar-events\/)?([^/]+)$/);
+    if (id) {
+      const i = TASKS.findIndex((x) => x.id === id);
+      if (i < 0) return notFound(`DELETE ${pathname}`);
+      const [gone] = TASKS.splice(i, 1);
+      return json({ ...gone!, archivedAt: new Date().toISOString() });
     }
   }
 
@@ -1854,8 +2283,8 @@ const DRIVE_FOLDER_MIME_DEMO = "application/vnd.google-apps.folder";
 // No real OAuth in the demo: "add account" returns the SPA's own /driveshare?code&state, which
 // stands in for Google's redirect. The list lives in sessionStorage so it survives that
 // full-page round-trip. Switch the shown state with ?driveGoogle=connected|none|invalid|
-// unconfigured on any demo URL (remembered for the tab).
-type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "unconfigured";
+// nocalendar|unconfigured on any demo URL (remembered for the tab).
+type DemoDriveGoogleMode = "connected" | "none" | "invalid" | "nocalendar" | "unconfigured";
 interface DemoDriveGoogleAccount {
   id: string;
   kind: "connected" | "secret";
@@ -1864,6 +2293,8 @@ interface DemoDriveGoogleAccount {
   connectedBy: string | null;
   active: boolean;
   needsReconnect: boolean;
+  calendarMissing?: boolean;
+  meetMissing?: boolean;
 }
 interface DemoDriveGoogleStatus {
   accounts: DemoDriveGoogleAccount[];
@@ -1901,6 +2332,7 @@ function demoDriveGoogleStatus(mode: DemoDriveGoogleMode): DemoDriveGoogleStatus
   };
   if (mode === "none") return { accounts: [], canConnect: true };
   if (mode === "invalid") return { accounts: [secret, sub, { ...main, needsReconnect: true }], canConnect: true };
+  if (mode === "nocalendar") return { accounts: [secret, sub, { ...main, calendarMissing: true }], canConnect: true };
   if (mode === "unconfigured") return { accounts: [{ ...secret, active: true }], canConnect: false };
   return { accounts: [secret, sub, main], canConnect: true };
 }
@@ -1914,7 +2346,7 @@ function createDriveGoogleDemoStore() {
     }
   };
   const fromUrl = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("driveGoogle");
-  if (fromUrl && ["connected", "none", "invalid", "unconfigured"].includes(fromUrl)) {
+  if (fromUrl && ["connected", "none", "invalid", "nocalendar", "unconfigured"].includes(fromUrl)) {
     storage()?.setItem(DEMO_DRIVE_GOOGLE_KEY, JSON.stringify(demoDriveGoogleStatus(fromUrl as DemoDriveGoogleMode)));
   }
   const read = (): DemoDriveGoogleStatus => {
@@ -1955,7 +2387,7 @@ function createDriveGoogleDemoStore() {
         return write({
           ...cur,
           accounts: cur.accounts.map((a) =>
-            a.id === known.id ? { ...a, needsReconnect: false, connectedAt: new Date().toISOString() } : a,
+            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, meetMissing: false, connectedAt: new Date().toISOString() } : a,
           ),
         });
       }
@@ -1985,6 +2417,192 @@ function createDriveGoogleDemoStore() {
         return problem("CONFLICT", "使用中のアカウントは削除できません。先に別のアカウントに切り替えてください。", 409);
       }
       return write({ ...cur, accounts: cur.accounts.filter((a) => a.id !== target.id) });
+    }
+    return null;
+  }
+  return { handle };
+}
+
+// ── calendar meetings (カレンダー > ミーティング) ─────────────────────────────
+// Mirrors drive-share-service /meetings: meetings live on the shared Google account with a
+// fake Meet link; nothing reaches Google. State lasts for the tab (sessionStorage).
+// ?meetingAccount=none|reconnect previews the 未接続 / 再接続 banners.
+const DEMO_MEETINGS_KEY = "dub-demo:calendar-meetings";
+
+const DEMO_MEETING_TARGETS: meeting.MeetingTarget[] = [
+  { id: "all", name: "全体", memberCount: 9, isMine: true },
+  { id: "role_lead", name: "統括", memberCount: 2, isMine: true },
+  { id: "role_maintainer", name: "maintainer", memberCount: 3, isMine: false },
+  { id: "role_member", name: "member", memberCount: 4, isMine: false },
+];
+
+/** JST date `days` from today at hh:mm (UTC ISO). */
+function demoJstAt(days: number, hh: number, mm: number): string {
+  const jst = new Date(Date.now() + 9 * 3_600_000);
+  return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() + days, hh - 9, mm)).toISOString();
+}
+
+function demoMeetUrl(): string {
+  const r = (n: number) => Array.from({ length: n }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("");
+  return `https://meet.google.com/${r(3)}-${r(4)}-${r(3)}`;
+}
+
+function seedMeetings(): meeting.Meeting[] {
+  const base = { createdBy: ME_ID as meeting.Meeting["createdBy"], createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z" };
+  return [
+    {
+      ...base,
+      id: "mtg_all",
+      title: "全体定例",
+      description: "今週の進捗共有と来週の予定確認",
+      targetId: "all",
+      targetName: "全体",
+      startsAt: "2026-09-07T12:00:00.000Z", // 月曜 21:00 JST
+      durationMinutes: 60,
+      recurrence: "weekly",
+      until: null,
+      meetUrl: "https://meet.google.com/abc-defg-hij",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_all",
+      attendeeCount: 9,
+    },
+    {
+      ...base,
+      id: "mtg_lead",
+      title: "統括定例",
+      description: null,
+      targetId: "role_lead",
+      targetName: "統括",
+      startsAt: "2026-09-10T11:00:00.000Z", // 木曜 20:00 JST
+      durationMinutes: 30,
+      recurrence: "biweekly",
+      until: null,
+      meetUrl: "https://meet.google.com/kln-opqr-stu",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_lead",
+      attendeeCount: 2,
+    },
+    {
+      ...base,
+      id: "mtg_kickoff",
+      title: "Hackit 秋 キックオフ",
+      description: "会場・広報・審査の担当決め",
+      targetId: "role_maintainer",
+      targetName: "maintainer",
+      startsAt: demoJstAt(3, 19, 0),
+      durationMinutes: 90,
+      recurrence: "none",
+      until: null,
+      meetUrl: "https://meet.google.com/vwx-yzab-cde",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_kickoff",
+      attendeeCount: 3,
+    },
+  ];
+}
+
+function createMeetingsDemoStore() {
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  let memory: meeting.Meeting[] | null = null;
+  const read = (): meeting.Meeting[] => {
+    const raw = storage()?.getItem(DEMO_MEETINGS_KEY);
+    if (raw) return JSON.parse(raw) as meeting.Meeting[];
+    return (memory ??= seedMeetings());
+  };
+  const write = (next: meeting.Meeting[]) => {
+    memory = next;
+    storage()?.setItem(DEMO_MEETINGS_KEY, JSON.stringify(next));
+  };
+  const account = (): meeting.MeetingAccountState => {
+    const mode = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("meetingAccount");
+    if (mode === "none") return { email: null, calendarReady: false };
+    if (mode === "reconnect") return { email: "hackit.dub@gmail.com", calendarReady: false };
+    return { email: "hackit.dub@gmail.com", calendarReady: true };
+  };
+  const target = (id: string) => DEMO_MEETING_TARGETS.find((t) => t.id === id);
+  const BASE = "/api/v1/meetings";
+
+  function handle(method: string, pathname: string, body: unknown): Response | null {
+    if (!pathname.startsWith(BASE)) return null;
+    if (method === "GET" && pathname === BASE) {
+      const res: meeting.ListMeetingsResponse = { items: read(), account: account() };
+      return json(res);
+    }
+    if (method === "GET" && pathname === `${BASE}/targets`) {
+      const res: meeting.ListMeetingTargetsResponse = { items: DEMO_MEETING_TARGETS };
+      return json(res);
+    }
+    if (method === "POST" && pathname === `${BASE}/sync`) {
+      const res: meeting.SyncMeetingsResponse = {
+        syncedAt: new Date().toISOString(),
+        meetings: read().length,
+        invitedAdded: 1,
+        invitedRemoved: 0,
+        withoutGoogleAccount: [{ userId: "usr_carol" as meeting.MemberWithoutGoogleAccount["userId"], name: "鈴木 一郎", email: "ichiro@developershub.jp" }],
+      };
+      return json(res);
+    }
+    if (method === "POST" && pathname === BASE) {
+      const b = (body ?? {}) as Partial<meeting.CreateMeetingRequest>;
+      const t = b.targetId ? target(b.targetId) : undefined;
+      if (!b.title?.trim() || !t || !b.startsAt || !b.durationMinutes || !b.recurrence) {
+        return problem("VALIDATION_FAILED", "タイトル・対象・日時・所要時間・繰り返しは必須です", 400);
+      }
+      const now = new Date().toISOString();
+      const created: meeting.Meeting = {
+        id: `mtg_${Date.now().toString(36)}`,
+        title: b.title.trim(),
+        description: b.description ?? null,
+        targetId: t.id,
+        targetName: t.name,
+        startsAt: b.startsAt,
+        durationMinutes: b.durationMinutes,
+        recurrence: b.recurrence,
+        until: b.recurrence === "none" ? null : (b.until ?? null),
+        meetUrl: demoMeetUrl(),
+        htmlLink: "https://calendar.google.com/calendar/",
+        attendeeCount: t.memberCount,
+        createdBy: ME_ID as meeting.Meeting["createdBy"],
+        createdAt: now,
+        updatedAt: now,
+      };
+      write([...read(), created]);
+      // ?meetingCreate=timeout: saved, but the answer is lost like the gateway's 504.
+      if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("meetingCreate") === "timeout") {
+        return problem("UPSTREAM_TIMEOUT", "Gateway Timeout", 504);
+      }
+      return json(created, 201);
+    }
+    const one = /^\/api\/v1\/meetings\/([^/]+)$/.exec(pathname);
+    if (one) {
+      const id = decodeURIComponent(one[1]!);
+      const cur = read();
+      const found = cur.find((m) => m.id === id);
+      if (!found) return problem("NOT_FOUND", "meeting not found", 404);
+      if (method === "DELETE") {
+        write(cur.filter((m) => m.id !== id));
+        return json(null, 204);
+      }
+      if (method === "PATCH") {
+        const b = (body ?? {}) as meeting.UpdateMeetingRequest;
+        const t = b.targetId ? target(b.targetId) : target(found.targetId);
+        if (!t) return problem("VALIDATION_FAILED", "対象が見つかりません", 400);
+        const next: meeting.Meeting = {
+          ...found,
+          ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)),
+          description: b.description !== undefined ? b.description ?? null : found.description,
+          targetId: t.id,
+          targetName: t.name,
+          attendeeCount: t.memberCount,
+          updatedAt: new Date().toISOString(),
+        };
+        if (next.recurrence === "none") next.until = null;
+        write(cur.map((m) => (m.id === id ? next : m)));
+        return json(next);
+      }
     }
     return null;
   }
@@ -2327,9 +2945,9 @@ function createMembersStore() {
   // 「休み中」、declined＝「辞退」(名簿一覧では既定非表示・辞退者フィルタで参照)。
   const members: DemoMember[] = [
     // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
-    mk("member_1", "高岡 己太朗", "実行委員長", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
+    mk("member_1", "高岡 己太朗", "副代表", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
     mk("member_h2", "黒川 誠", "統括リーダー", "added", ["team_hq"], 1, null, "情報工学科", "3年", null, "member_1"),
-    mk("member_h3", "金井 涼", "統括メンバー", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null, "member_h2"),
+    mk("member_h3", "金井 友楽", "代表", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null),
     // 開発 — リーダー2人、各リーダーに配下2人。
     mk("member_d1", "荒木 大地", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
     mk("member_d2", "阿閉 健", "開発リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年", null, "member_d1"),
@@ -2404,8 +3022,16 @@ function createMembersStore() {
     member_5: ["やまだ", "さぶろう"],
     member_6: ["たむら", "み"],
   };
+  // Gmail (参加届から流入) の seed。アカウント発行メールの確認用: 高岡 は紐付け済み(行から再送)、
+  // 鈴木 一郎 / 黒川 誠 は未紐付け(紐付け直後に送信確認が出る)。
+  const GMAIL: Record<string, string> = {
+    member_1: "takaoka.demo@gmail.com",
+    member_3: "suzuki.ichiro@gmail.com",
+    member_h2: "kurokawa.dev@gmail.com",
+  };
   for (const mem of members) {
     const kana = KANA[mem.id];
+    if (GMAIL[mem.id]) mem.gmail = GMAIL[mem.id]!;
     if (kana) {
       mem.lastNameKana = kana[0];
       mem.firstNameKana = kana[1];
@@ -2419,7 +3045,30 @@ function createMembersStore() {
     const year = mem.grade && mem.grade !== "graduate" ? mem.grade : undefined;
     const code = mem.department ? DEPT_CODE[mem.department] : undefined;
     if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
+    // 学籍番号の seed (例 "1400980")。半角数字 7 桁の仮番号。
+    if (year) mem.studentNumber = `13${String(100 + i * 37).padStart(5, "0")}`;
   });
+
+  // オンボーディング案内の初期項目 (公開ページ /onboarding に並ぶ)。実際の受け入れの流れ:
+  // 参加届 → Slack 参加 → 表示名 → アイコン → ミーティング (日時とリンクは meetings 側)。
+  const onbAt = "2026-10-01T09:00:00.000Z";
+  const onbItem = (n: number, title: string, description: string | null, url: string | null) => ({
+    id: `onb_demo_${n}`, title, description, url, sortOrder: n * 1024, createdAt: onbAt, updatedAt: onbAt,
+  });
+  const onboarding: Array<ReturnType<typeof onbItem>> = [
+    onbItem(1, "参加届を出す", "名前・学校のメールアドレス・Gmail を入力して送信してください。運営が確認して名簿に追加します。",
+      // 公開フォームは同じオリジンの /participate (demo はどの Worker でも同じ SPA)。
+      `${typeof window !== "undefined" ? window.location.origin : "https://example.com"}/participate`),
+    onbItem(2, "Slack に参加する", "運営の連絡はすべて Slack で行います。招待リンクから参加してください。", "https://join.slack.com/t/example/shared_invite/demo"),
+    onbItem(3, "Slack の表示名を変更する", "「名前（チーム名）」の形にしてください。例: 山田太郎（開発チーム）", null),
+    onbItem(4, "Slack のアイコンを設定する", "顔写真でなくても大丈夫です。誰か見分けられる画像にしてください。", null),
+  ];
+  // ミーティング案内 (teamId null = 全体)。カレンダー招待は送らず、時刻とリンクを見せるだけ。
+  const onboardingMeetings: Array<{ teamId: string | null; schedule: string; url: string | null; updatedAt: string }> = [
+    { teamId: null, schedule: "10/20(火) 19:00〜20:00", url: "https://meet.google.com/abc-defg-hij", updatedAt: onbAt },
+    { teamId: "team_dev", schedule: "毎週水曜 20:00〜", url: "https://meet.google.com/dev-team-mtg", updatedAt: onbAt },
+    { teamId: "team_pr", schedule: "毎週木曜 18:30〜", url: "https://meet.google.com/pr-team-mtg", updatedAt: onbAt },
+  ];
 
   // 参加届の回答一覧 (運営専用 GET) が返す提出済みレコード。submit のたびに push され、
   // ここに seed した 2 件で初回から一覧に中身が見える (実ブラウザ E2E 用)。
@@ -2439,7 +3088,7 @@ function createMembersStore() {
       id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
-      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", studentNumber: "1401123", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -2449,7 +3098,7 @@ function createMembersStore() {
       id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
       lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
       nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
-      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", studentNumber: "1500456", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
       schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -2718,10 +3367,84 @@ function createMembersStore() {
       return json({ error: { code: "VALIDATION_FAILED", message: "invalid action", retryable: false } }, 400);
     }
 
+    // オンボーディング案内 (管理タブ + 公開ページ)。検証は member-service と同じ共通関数。
+    const onboardingList = () => ({ items: onboarding.map((o) => ({ ...o })) });
+    const teamOrder = new Map(teams.map((t, i) => [t.id, i]));
+    const meetingList = () =>
+      onboardingMeetings
+        .filter((m) => m.teamId === null || teamOrder.has(m.teamId))
+        .sort((a, b) => (a.teamId === null ? -1 : b.teamId === null ? 1 : teamOrder.get(a.teamId)! - teamOrder.get(b.teamId)!))
+        .map((m) => ({ ...m }));
+    if (method === "GET" && (pathname === "/api/v1/members/onboarding" || pathname === "/api/v1/public/onboarding")) {
+      return json({
+        ...onboardingList(),
+        teams: teams.map((t) => ({ id: t.id, name: t.name, color: t.color })),
+        meetings: meetingList(),
+      });
+    }
+    const invalid = (fields: string[]) =>
+      json({ error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false, details: { fields } } }, 400);
+    if (method === "PUT" && pathname === "/api/v1/members/onboarding/meetings") {
+      const { value, errors } = memberValues.parseOnboardingMeetingInput(body ?? {});
+      if (errors.length > 0) return invalid(errors);
+      if (value.teamId !== null && !teamOrder.has(value.teamId)) {
+        return json({ error: { code: "MEMBER_TEAM_NOT_FOUND", message: "not found", retryable: false } }, 404);
+      }
+      const at = onboardingMeetings.findIndex((m) => m.teamId === value.teamId);
+      if (at >= 0) onboardingMeetings.splice(at, 1);
+      if (value.schedule !== null) {
+        onboardingMeetings.push({ teamId: value.teamId, schedule: value.schedule, url: value.url, updatedAt: isoNow() });
+      }
+      return json({ meetings: meetingList() });
+    }
+    if (method === "POST" && pathname === "/api/v1/members/onboarding") {
+      const { value, errors } = memberValues.parseOnboardingItemInput(body ?? {});
+      if (errors.length > 0) return invalid(errors);
+      const now = isoNow();
+      const last = onboarding[onboarding.length - 1];
+      const item = {
+        id: nid("onb"), title: value.title as string, description: value.description ?? null, url: value.url ?? null,
+        sortOrder: (last?.sortOrder ?? 0) + 1024, createdAt: now, updatedAt: now,
+      };
+      onboarding.push(item);
+      return json({ ...item }, 201);
+    }
+    if (method === "POST" && pathname === "/api/v1/members/onboarding/reorder") {
+      const ids: unknown = body?.ids;
+      const known = new Set(onboarding.map((o) => o.id));
+      if (!Array.isArray(ids) || ids.length !== onboarding.length || new Set(ids).size !== ids.length || !ids.every((x) => known.has(x))) {
+        return invalid(["ids"]);
+      }
+      const byId = new Map(onboarding.map((o) => [o.id, o]));
+      const next = ids.map((id: string, i: number) => ({ ...byId.get(id)!, sortOrder: (i + 1) * 1024, updatedAt: isoNow() }));
+      onboarding.splice(0, onboarding.length, ...next);
+      return json(onboardingList());
+    }
+    const onbMatch = pathname.match(/^\/api\/v1\/members\/onboarding\/([^/]+)$/);
+    if (onbMatch) {
+      const item = onboarding.find((o) => o.id === decodeURIComponent(onbMatch[1]!));
+      if (!item) return json({ error: { code: "MEMBER_ONBOARDING_ITEM_NOT_FOUND", message: "not found", retryable: false } }, 404);
+      if (method === "PATCH") {
+        const { value, errors } = memberValues.parseOnboardingItemInput(body ?? {}, true);
+        if (errors.length > 0) return invalid(errors);
+        Object.assign(item, value, { updatedAt: isoNow() });
+        return json({ ...item });
+      }
+      if (method === "DELETE") {
+        onboarding.splice(onboarding.indexOf(item), 1);
+        return json({ ok: true });
+      }
+    }
+
     return null;
   }
 
-  return { handle };
+  /** 運営メンバー linked to a login (アカウント発行メールの宛先解決用). */
+  function findByIdentity(identityUserId: string): DemoMember | undefined {
+    return members.find((x) => x.identityUserId === identityUserId);
+  }
+
+  return { handle, findByIdentity };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -3080,6 +3803,400 @@ function createLpStore() {
   return { handle };
 }
 
+// ── LP管理 → チケット ──────────────────────────────────────────────────────────
+// Answers the ticket wire contract (v2) in features/lp/lpApi.tsx:
+//   GET   /api/v1/lp/tickets
+//   POST  /api/v1/lp/tickets/enabled     { enabled }
+//   POST  /api/v1/lp/tickets/cta         { enabled }      ctaEnabled (saved even while sales are off)
+//   POST  /api/v1/lp/tickets/fields      { fields }      400 on invalid list
+//   POST  /api/v1/lp/tickets/types       LpTicketTypeInput   201
+//   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
+//   GET   /api/v1/lp/tickets/orders      ?cursor&limit   newest first
+// Demo starts PUBLISHED but with paymentReady=false so the 「決済 未設定」 state is visible.
+// Event = 2027-09-13(月) / 14(火): 一般・学生は Day 別の券種。sold/pending are TICKET counts.
+// Orders are fixed (not random) so the stats a reviewer sees are the same every load.
+type DemoTicketField = { id: string; label: string; type: "text" | "textarea" | "select" | "checkbox"; required: boolean; options: string[] };
+type DemoTicketType = {
+  id: string;
+  name: string;
+  description: string;
+  priceJpy: number;
+  capacity: number | null;
+  dayLabel: string;
+  maxPerOrder: number;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+type DemoTicketOrderItem = { ticketTypeId: string; ticketTypeName: string; dayLabel: string; unitPriceJpy: number; quantity: number };
+type DemoTicketOrder = {
+  id: string;
+  items: DemoTicketOrderItem[];
+  quantity: number;
+  amountJpy: number;
+  status: "pending" | "paid" | "expired";
+  buyerName: string;
+  buyerEmail: string;
+  answers: { fieldId: string; label: string; value: string }[];
+  createdAt: string;
+  paidAt: string | null;
+};
+
+function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
+  const has = (k: string): boolean => input[k] !== undefined;
+  const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
+  if (!partial || has("name")) {
+    if (typeof input.name !== "string" || input.name.trim().length < 1 || input.name.trim().length > 60) return "name";
+  }
+  if (has("description") && (typeof input.description !== "string" || input.description.length > 300)) return "description";
+  if (!partial || has("priceJpy")) {
+    const p = input.priceJpy;
+    if (!isInt(p) || p < 0 || p > 1_000_000 || (p > 0 && p < 50)) return "priceJpy";
+  }
+  if (has("capacity") && input.capacity !== null && (!isInt(input.capacity) || input.capacity < 1 || input.capacity > 100_000))
+    return "capacity";
+  if (has("dayLabel") && (typeof input.dayLabel !== "string" || input.dayLabel.trim().length > 30)) return "dayLabel";
+  if (has("maxPerOrder") && (!isInt(input.maxPerOrder) || input.maxPerOrder < 1 || input.maxPerOrder > 20)) return "maxPerOrder";
+  if (has("active") && typeof input.active !== "boolean") return "active";
+  return null;
+}
+
+/** Custom form fields (tickets / proposals): same rules as lp-analytics parseFields. null = invalid. */
+function validDemoFields(raw: unknown, reserved: readonly string[]): DemoTicketField[] | null {
+  const ok =
+    Array.isArray(raw) &&
+    raw.length <= 20 &&
+    new Set(raw.map((f: DemoTicketField) => f?.id)).size === raw.length &&
+    raw.every(
+      (f: DemoTicketField) =>
+        typeof f?.id === "string" &&
+        /^[a-z0-9_-]{1,40}$/.test(f.id) &&
+        !reserved.includes(f.id) &&
+        typeof f.label === "string" &&
+        f.label.trim().length >= 1 &&
+        f.label.length <= 60 &&
+        ["text", "textarea", "select", "checkbox"].includes(f.type) &&
+        typeof f.required === "boolean" &&
+        Array.isArray(f.options) &&
+        (f.type !== "select" || (f.options.length >= 1 && f.options.length <= 20)),
+    );
+  if (!ok) return null;
+  return (raw as DemoTicketField[]).map((f) => ({
+    id: f.id,
+    label: f.label.trim(),
+    type: f.type,
+    required: f.required,
+    options: f.type === "select" ? [...f.options] : [],
+  }));
+}
+
+function createLpTicketsStore() {
+  const t0 = "2026-09-20T09:00:00.000Z";
+  const settings = {
+    site: "hokuriku-it-conf.com",
+    // 販売は停止中（「プレビュー」タブでチケットありの見た目を確かめる demo）。
+    enabled: false,
+    ctaEnabled: false,
+    paymentReady: false,
+    // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
+    publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
+    fields: [
+      { id: "f_affiliation", label: "所属", type: "text", required: false, options: [] },
+      { id: "f_attendance", label: "参加区分", type: "select", required: true, options: ["現地", "オンライン"] },
+    ] as DemoTicketField[],
+    updatedAt: t0 as string | null,
+    updatedBy: "デモ 管理者" as string | null,
+  };
+  const D1 = "Day 1 · 9/13(月)";
+  const D2 = "Day 2 · 9/14(火)";
+  const tt = (
+    id: string,
+    name: string,
+    description: string,
+    priceJpy: number,
+    capacity: number | null,
+    dayLabel: string,
+    maxPerOrder: number,
+    sortOrder: number,
+  ): DemoTicketType => ({ id, name, description, priceJpy, capacity, dayLabel, maxPerOrder, active: true, sortOrder, createdAt: t0, updatedAt: t0 });
+  const types: DemoTicketType[] = [
+    tt("tt_general_d1", "一般", "社会人・一般の方", 3000, 200, D1, 10, 0),
+    tt("tt_student_d1", "学生", "学生証を当日ご提示ください", 1000, 100, D1, 10, 1),
+    tt("tt_general_d2", "一般", "社会人・一般の方", 3000, 200, D2, 10, 2),
+    tt("tt_student_d2", "学生", "学生証を当日ご提示ください", 1000, 100, D2, 10, 3),
+    tt("tt_invite", "招待", "登壇者・スポンサー向け（両日）", 0, null, "", 5, 4),
+  ];
+  const seedOrders: [string, [string, number][], string, "pending" | "paid" | "expired", string, string, string][] = [
+    // [id, [[typeId, 枚数]...], buyer, status, createdAt, 所属, 参加区分]
+    ["ord_008", [["tt_general_d1", 2], ["tt_general_d2", 2]], "山田 太郎", "pending", "2026-10-12T11:20:00.000Z", "北陸テック株式会社", "現地"],
+    ["ord_007", [["tt_student_d1", 1], ["tt_student_d2", 1]], "佐藤 花子", "paid", "2026-10-11T08:05:00.000Z", "金沢工業大学", "現地"],
+    ["ord_006", [["tt_general_d2", 1]], "鈴木 一郎", "paid", "2026-10-10T13:40:00.000Z", "", "オンライン"],
+    ["ord_005", [["tt_invite", 3]], "高橋 美咲", "paid", "2026-10-09T02:15:00.000Z", "スポンサー A 社", "現地"],
+    ["ord_004", [["tt_general_d1", 1]], "田中 健", "expired", "2026-10-07T10:00:00.000Z", "", "現地"],
+    ["ord_003", [["tt_general_d1", 1], ["tt_student_d1", 3]], "伊藤 結衣", "paid", "2026-10-05T06:30:00.000Z", "富山大学", "オンライン"],
+    ["ord_002", [["tt_general_d1", 5]], "渡辺 翔", "paid", "2026-10-03T12:10:00.000Z", "石川システム", "現地"],
+    ["ord_001", [["tt_general_d1", 1], ["tt_general_d2", 1]], "中村 葵", "paid", "2026-10-01T09:45:00.000Z", "福井 IT 協会", "現地"],
+  ];
+  const orders: DemoTicketOrder[] = seedOrders.map(([id, lines, buyerName, status, createdAt, aff, att], i) => {
+    const items = lines.map(([typeId, quantity]) => {
+      const t = types.find((x) => x.id === typeId)!;
+      return { ticketTypeId: t.id, ticketTypeName: t.name, dayLabel: t.dayLabel, unitPriceJpy: t.priceJpy, quantity };
+    });
+    return {
+      id,
+      items,
+      quantity: items.reduce((n, it) => n + it.quantity, 0),
+      amountJpy: items.reduce((n, it) => n + it.unitPriceJpy * it.quantity, 0),
+      status,
+      buyerName,
+      buyerEmail: `buyer${8 - i}@example.com`,
+      answers: [
+        { fieldId: "f_affiliation", label: "所属", value: aff },
+        { fieldId: "f_attendance", label: "参加区分", value: att },
+      ],
+      createdAt,
+      paidAt: status === "paid" ? createdAt : null,
+    };
+  });
+
+  const summary = (t: DemoTicketType) => {
+    let sold = 0;
+    let pending = 0;
+    let revenueJpy = 0;
+    for (const o of orders) {
+      for (const it of o.items) {
+        if (it.ticketTypeId !== t.id) continue;
+        if (o.status === "paid") {
+          sold += it.quantity;
+          revenueJpy += it.unitPriceJpy * it.quantity;
+        } else if (o.status === "pending") pending += it.quantity;
+      }
+    }
+    return {
+      ...t,
+      stats: { sold, pending, revenueJpy, remaining: t.capacity === null ? null : Math.max(0, t.capacity - sold - pending) },
+    };
+  };
+  const state = () => {
+    const list = [...types].sort((a, b) => a.sortOrder - b.sortOrder).map(summary);
+    return {
+      ...settings,
+      fields: settings.fields.map((f) => ({ ...f, options: [...f.options] })),
+      types: list,
+      totals: {
+        sold: list.reduce((n, t) => n + t.stats.sold, 0),
+        revenueJpy: list.reduce((n, t) => n + t.stats.revenueJpy, 0),
+      },
+    };
+  };
+  const touch = (): void => {
+    settings.updatedAt = new Date().toISOString();
+    settings.updatedBy = "デモ 管理者";
+  };
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (!pathname.startsWith("/api/v1/lp/tickets")) return null;
+    const req = (body ?? {}) as Record<string, unknown>;
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets") return json(state());
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/enabled") {
+      if (typeof req.enabled !== "boolean") return problem("VALIDATION_FAILED", "enabled を指定してください", 400);
+      settings.enabled = req.enabled;
+      touch();
+      return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/cta") {
+      if (typeof req.enabled !== "boolean") return problem("VALIDATION_FAILED", "enabled を指定してください", 400);
+      settings.ctaEnabled = req.enabled;
+      touch();
+      return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/fields") {
+      const fields = validDemoFields(req.fields, ["name", "email"]);
+      if (!fields) return problem("VALIDATION_FAILED", "入力項目の形式が正しくありません", 400);
+      settings.fields = fields;
+      touch();
+      return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/types") {
+      const bad = validDemoTicketType(req, false);
+      if (bad) return problem("VALIDATION_FAILED", `券種の入力が正しくありません（${bad}）`, 400);
+      const now = new Date().toISOString();
+      const created: DemoTicketType = {
+        id: `tt_${Math.random().toString(36).slice(2, 10)}`,
+        name: String(req.name).trim(),
+        description: typeof req.description === "string" ? req.description.trim() : "",
+        priceJpy: req.priceJpy as number,
+        capacity: (req.capacity as number | null | undefined) ?? null,
+        dayLabel: typeof req.dayLabel === "string" ? req.dayLabel.trim() : "",
+        maxPerOrder: typeof req.maxPerOrder === "number" ? req.maxPerOrder : 10,
+        active: typeof req.active === "boolean" ? req.active : true,
+        sortOrder: types.length,
+        createdAt: now,
+        updatedAt: now,
+      };
+      types.push(created);
+      return json(summary(created), 201);
+    }
+
+    const typeMatch = /^\/api\/v1\/lp\/tickets\/types\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && typeMatch) {
+      const t = types.find((x) => x.id === decodeURIComponent(typeMatch[1]!));
+      if (!t) return problem("NOT_FOUND", "その券種は見つかりません", 404);
+      const bad = validDemoTicketType(req, true);
+      if (bad) return problem("VALIDATION_FAILED", `券種の入力が正しくありません（${bad}）`, 400);
+      if (typeof req.name === "string") t.name = req.name.trim();
+      if (typeof req.description === "string") t.description = req.description.trim();
+      if (typeof req.priceJpy === "number") t.priceJpy = req.priceJpy;
+      if (req.capacity !== undefined) t.capacity = req.capacity as number | null;
+      if (typeof req.dayLabel === "string") t.dayLabel = req.dayLabel.trim();
+      if (typeof req.maxPerOrder === "number") t.maxPerOrder = req.maxPerOrder;
+      if (typeof req.active === "boolean") t.active = req.active;
+      t.updatedAt = new Date().toISOString();
+      return json(summary(t));
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
+      const cursor = url.searchParams.get("cursor");
+      const sorted = [...orders].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+      const startIdx = cursor ? sorted.findIndex((o) => o.id === cursor) + 1 : 0;
+      const items = sorted.slice(startIdx, startIdx + limit);
+      const nextCursor = startIdx + limit < sorted.length ? (items[items.length - 1]?.id ?? null) : null;
+      return json({ items, nextCursor });
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
+
+// Answers the proposals wire contract in features/lp/lpApi.tsx:
+//   GET   /api/v1/lp/proposals
+//   POST  /api/v1/lp/proposals/enabled           { enabled }
+//   POST  /api/v1/lp/proposals/fields            { fields }   400 on invalid list / fixed ids
+//   GET   /api/v1/lp/proposals/submissions       ?cursor&limit   newest first
+//   PATCH /api/v1/lp/proposals/submissions/:id   { status }
+type DemoProposalStatus = "submitted" | "accepted" | "rejected";
+type DemoProposal = {
+  id: string;
+  speakerName: string;
+  email: string;
+  title: string;
+  abstract: string;
+  answers: { fieldId: string; label: string; value: string }[];
+  status: DemoProposalStatus;
+  reviewedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function createLpProposalsStore() {
+  const settings = {
+    site: "hokuriku-it-conf.com",
+    enabled: false,
+    publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/proposals`,
+    fields: [
+      { id: "format", label: "発表形式", type: "select", required: true, options: ["セッション（30分）", "LT（5分）"] },
+      { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
+      { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
+    ] as DemoTicketField[],
+    updatedAt: null as string | null,
+    updatedBy: null as string | null,
+  };
+  const seed: [string, string, string, string, string, string, DemoProposalStatus, string][] = [
+    ["金沢 花子", "hanako@example.com", "北陸の中小企業で始める生成 AI 活用", "社内の問い合わせ対応を LLM で半自動化した 1 年間の記録。失敗した設計と、続いている運用の工夫を話します。", "セッション（30分）", "株式会社カナザワソフト", "submitted", "2026-10-13T09:12:00Z"],
+    ["富山 次郎", "jiro@example.com", "Cloudflare Workers だけで作るイベントサイト", "無料枠に収めるための D1 / KV の使い分けと、1 Worker に全版を同梱して公開版をフラグで切り替える方法。", "LT（5分）", "", "accepted", "2026-10-12T14:40:00Z"],
+    ["福井 三郎", "saburo@example.com", "学生エンジニアがハッカソンで勝つためのチーム設計", "ハッカソンで 3 回入賞したチームの役割分担と、48 時間の時間配分の実例。", "セッション（30分）", "金沢工業大学", "submitted", "2026-10-11T03:05:00Z"],
+    ["石川 四郎", "shiro@example.com", "レガシー PHP を止めずに TypeScript へ移す", "毎日売上が立つ EC サイトを、止めずに段階移行した手順と計測。", "セッション（30分）", "北陸 EC 株式会社", "rejected", "2026-10-10T08:20:00Z"],
+    ["能登 五月", "satsuki@example.com", "地方からリモートで OSS にコントリビュートする", "初めての PR からメンテナになるまでにやったこと。", "LT（5分）", "フリーランス", "submitted", "2026-10-09T12:00:00Z"],
+  ];
+  const proposals: DemoProposal[] = seed.map(([speakerName, email, title, abstract, format, aff, status, createdAt], i) => ({
+    id: `lpp_demo_${i + 1}`,
+    speakerName,
+    email,
+    title,
+    abstract,
+    answers: [
+      { fieldId: "format", label: "発表形式", value: format },
+      { fieldId: "affiliation", label: "所属", value: aff },
+      { fieldId: "bio", label: "自己紹介", value: "" },
+    ],
+    status,
+    reviewedBy: status === "submitted" ? null : "デモ 管理者",
+    createdAt,
+    updatedAt: createdAt,
+  }));
+  const state = () => ({
+    ...settings,
+    fields: settings.fields.map((f) => ({ ...f, options: [...f.options] })),
+    totals: {
+      total: proposals.length,
+      accepted: proposals.filter((p) => p.status === "accepted").length,
+      rejected: proposals.filter((p) => p.status === "rejected").length,
+    },
+  });
+  const touch = (): void => {
+    settings.updatedAt = new Date().toISOString();
+    settings.updatedBy = "デモ 管理者";
+  };
+
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (!pathname.startsWith("/api/v1/lp/proposals")) return null;
+    const req = (body ?? {}) as Record<string, unknown>;
+
+    if (method === "GET" && pathname === "/api/v1/lp/proposals") return json(state());
+
+    if (method === "POST" && pathname === "/api/v1/lp/proposals/enabled") {
+      if (typeof req.enabled !== "boolean") return problem("VALIDATION_FAILED", "enabled を指定してください", 400);
+      settings.enabled = req.enabled;
+      touch();
+      return json(state());
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/proposals/fields") {
+      const fields = validDemoFields(req.fields, ["name", "email", "title", "abstract"]);
+      if (!fields) return problem("VALIDATION_FAILED", "入力項目の形式が正しくありません", 400);
+      settings.fields = fields;
+      touch();
+      return json(state());
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/proposals/submissions") {
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
+      const cursor = url.searchParams.get("cursor");
+      const sorted = [...proposals].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+      const startIdx = cursor ? sorted.findIndex((p) => p.id === cursor) + 1 : 0;
+      const items = sorted.slice(startIdx, startIdx + limit);
+      const nextCursor = startIdx + limit < sorted.length ? (items[items.length - 1]?.id ?? null) : null;
+      return json({ items, nextCursor });
+    }
+
+    const m = /^\/api\/v1\/lp\/proposals\/submissions\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && m) {
+      const p = proposals.find((x) => x.id === decodeURIComponent(m[1]!));
+      if (!p) return problem("NOT_FOUND", "その応募は見つかりません", 404);
+      if (req.status !== "submitted" && req.status !== "accepted" && req.status !== "rejected") {
+        return problem("VALIDATION_FAILED", "選考状況が正しくありません", 400);
+      }
+      p.status = req.status;
+      p.reviewedBy = "デモ 管理者";
+      p.updatedAt = new Date().toISOString();
+      return json(p);
+    }
+
+    return null;
+  }
+
+  return { handle };
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -3122,12 +4239,18 @@ export function createDemoFetch(): typeof fetch {
   // Mutable Hackit Drive sharing state (grant/change/revoke/link toggle persist).
   const driveShareStore = createDriveShareStore();
   const driveGoogleStore = createDriveGoogleDemoStore();
+  // カレンダー > ミーティング (fake Meet links; nothing reaches Google).
+  const meetingsStore = createMeetingsDemoStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
-  const chatStore = createChatStore();
+  const chatStore = createChatStore({ addUsers: roster.addUsers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
   const lpStore = createLpStore();
+  // LP チケット販売（券種・入力項目・購入者）— LP管理のチケットタブ。
+  const lpTicketsStore = createLpTicketsStore();
+  // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
+  const lpProposalsStore = createLpProposalsStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -3150,14 +4273,54 @@ export function createDemoFetch(): typeof fetch {
     // Nothing is persisted — the demo session is stateless for credentials.
     if (method === "POST" && url.pathname === "/api/v1/me/password") return json(null, 204);
 
+    // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
+    if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));
+
+    // アカウント発行メール (gateway-owned): member Gmail (to) + login (cc). Nothing is sent.
+    {
+      const am = /^\/api\/v1\/admin\/users\/([^/]+)\/account-mail$/.exec(url.pathname);
+      if (am && method === "POST") {
+        const uid = decodeURIComponent(am[1]!);
+        const linked = membersStore.findByIdentity(uid);
+        const gmail = (linked?.gmail ?? "").trim();
+        if (!linked || !gmail) return problem("VALIDATION_FAILED", "運営メンバーの Gmail が登録されていません", 400);
+        const res: authTypes.AdminSendAccountMailResponse = {
+          ok: true,
+          to: gmail,
+          cc: roster.findUser(uid)?.email ?? "",
+          appUrl: "https://app.developershub.jp",
+          passwordSource: "existing",
+          messageId: `demo_msg_${Date.now()}`,
+        };
+        return json(res);
+      }
+      // Admin password issue / view (メール名簿の右ペイン): generated on demand, never stored.
+      const pw = /^\/api\/v1\/admin\/users\/([^/]+)\/password$/.exec(url.pathname);
+      if (pw && method === "POST") {
+        const generated = !(parsedBody as authTypes.AdminSetPasswordRequest | undefined)?.password;
+        const res: authTypes.AdminSetPasswordResponse = generated
+          ? { ok: true, password: `Demo-${Math.random().toString(36).slice(2, 10)}` }
+          : { ok: true };
+        return json(res);
+      }
+      if (pw && method === "GET") {
+        const uid = decodeURIComponent(pw[1]!);
+        const res: authTypes.AdminViewPasswordResponse = { userId: uid, email: roster.findUser(uid)?.email ?? "", password: "Demo-pass-1234" };
+        return json(res);
+      }
+    }
+
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
+      meetingsStore.handle(method, url.pathname, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??
       lpStore.handle(method, url.pathname, url, parsedBody) ??
+      lpTicketsStore.handle(method, url.pathname, url, parsedBody) ??
+      lpProposalsStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.

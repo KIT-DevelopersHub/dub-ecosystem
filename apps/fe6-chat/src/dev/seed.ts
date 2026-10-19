@@ -70,8 +70,8 @@ const channels: Channel[] = [
   ch({ id: C_DEV, type: "topic", name: "dev", topic: "開発・デプロイ・レビュー" }),
   ch({ id: C_DESIGN, type: "topic", visibility: "private", name: "design", topic: "UI/UX・デザインレビュー", memberCount: 4 }),
   ch({ id: C_CONF, type: "event", name: "北陸itカンファレンス", topic: "運営チャネル", eventId: "evt_conf000000000000000000", memberCount: 5 }),
-  ch({ id: C_DM_HANAKO, type: "dm", name: "佐藤 花子", memberCount: 2 }),
-  ch({ id: C_DM_KENICHI, type: "dm", name: "山本 健一", memberCount: 2 }),
+  ch({ id: C_DM_HANAKO, type: "dm", visibility: "private", name: "DM", memberCount: 2, memberIds: [ME, HANAKO] }),
+  ch({ id: C_DM_KENICHI, type: "dm", visibility: "private", name: "DM", memberCount: 2, memberIds: [ME, KENICHI] }),
   ch({ id: C_ARCHIVED, type: "topic", name: "old-topic", archived: true, memberCount: 1, version: 2 }),
 ];
 
@@ -201,7 +201,9 @@ const members: ChannelMember[] = [
   { channelId: C_DESIGN, userId: ME, role: "member", joinedAt: t(1, 0, 0) },
   { channelId: C_CONF, userId: ME, role: "member", joinedAt: t(1, 0, 0) },
   { channelId: C_DM_HANAKO, userId: ME, role: "member", joinedAt: t(1, 0, 0) },
+  { channelId: C_DM_HANAKO, userId: HANAKO, role: "member", joinedAt: t(1, 0, 0) },
   { channelId: C_DM_KENICHI, userId: ME, role: "member", joinedAt: t(1, 0, 0) },
+  { channelId: C_DM_KENICHI, userId: KENICHI, role: "member", joinedAt: t(1, 0, 0) },
 ];
 
 // presence for sidebar dots. DM entries are keyed by channel id (the sidebar row
@@ -219,6 +221,23 @@ setPresence({
 // Pre-pin the bot's daily-schedule post so the pinned-items popover has content.
 const pins = [{ channelId: C_GENERAL, messageId: "msg_00020000000000000000000x" }];
 
+// One personal sidebar section so the feature is visible out of the box.
+const sections = [{ id: "sec_seed_ops", name: "運営", position: 0, createdAt: t(1, 0, 0) }];
+const sectionAssignments = { [C_DEV]: "sec_seed_ops" };
+
 export function demoSeed(): MockSeed {
-  return { currentUserId: ME, channels, messages, members, users, pins, teams, myTeamIds };
+  return {
+    currentUserId: ME,
+    channels,
+    messages,
+    members,
+    users,
+    pins,
+    teams,
+    myTeamIds,
+    sections,
+    sectionAssignments,
+    // Slack import demo: posts by members, KENICHI plays the disabled (退会済み) account.
+    slackAuthors: { me: ME, a: HANAKO, b: DAISUKE, disabled: KENICHI },
+  };
 }

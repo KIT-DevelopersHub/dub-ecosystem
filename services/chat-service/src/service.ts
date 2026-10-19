@@ -11,7 +11,13 @@ import type {
   AppDeps,
   Channel,
   ChannelRow,
+  ChatSection,
+  ChatSectionList,
   CreateChannelRequest,
+  CreateSectionRequest,
+  SectionRow,
+  SetChannelSectionRequest,
+  UpdateSectionRequest,
   UpdateChannelRequest,
   AddMemberRequest,
   DeleteMessageResult,
@@ -60,6 +66,10 @@ const errArchived = (id: string): DubError =>
   new DubError("CHAT_CHANNEL_ARCHIVED", `Channel is archived: ${id}`, { status: 409 });
 const errVersionConflict = (id: string): DubError =>
   new DubError("CHAT_VERSION_CONFLICT", `Version conflict for ${id}`, { status: 409 });
+// A DM is keyed by its participant set (dm_key), so changing members would desync the dedup
+// key. Like Slack, a different set of people is a different DM.
+const errDmMembersFixed = (id: string): DubError =>
+  new DubError("CHAT_DM_MEMBERS_FIXED", `DM members cannot be changed: ${id}`, { status: 409 });
 
 function nonEmptyString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -67,6 +77,16 @@ function nonEmptyString(value: unknown, field: string): string {
   }
   return value;
 }
+const MAX_SECTION_NAME_LEN = 40;
+const MAX_SECTIONS_PER_USER = 50;
+function requireSectionName(value: unknown): string {
+  const s = nonEmptyString(value, "name").trim();
+  if (s.length > MAX_SECTION_NAME_LEN) throw errors.validationFailed([{ field: "name", reason: "too_long" }]);
+  return s;
+}
+
+const toSection = (r: SectionRow): ChatSection => ({ id: r.id, name: r.name, position: r.position, createdAt: r.createdAt });
+
 function requireBody(value: unknown): string {
   const s = nonEmptyString(value, "body");
   if (s.length > MAX_BODY_LEN) throw errors.validationFailed([{ field: "body", reason: "too_long" }]);
@@ -79,6 +99,10 @@ function requireLimit(raw?: number): number {
   }
   return raw;
 }
+
+// Slack caps a group DM at 9 people (8 others + self).
+const DM_MAX_OTHERS = 8;
+const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
 
 const DELETION_MODES: readonly MessageDeletionMode[] = ["hard", "tombstone"];
 function requireMode(value: unknown, field: string): MessageDeletionMode {
@@ -159,15 +183,39 @@ export class ChatService {
     return held.includes("chat:moderate");
   }
 
+  // A DM is labelled by its participants, which differ per viewer, so the wire row carries
+  // them (memberIds) and the FE renders "the other side". Non-DM rows are returned as-is.
+  private async withDmMembers(row: ChannelRow): Promise<Channel> {
+    const channel = toChannel(row);
+    if (row.type !== "dm") return channel;
+    const members = await this.deps.repo.listMembers(row.id);
+    return { ...channel, memberIds: members.map((m) => m.userId) };
+  }
+
+  // The DM for exactly this participant set, if one exists. dm_key is a 32-bit hash, so the
+  // members are compared before the caller is handed an existing conversation — a collision
+  // must never expose someone else's DM.
+  private async findDm(dmKey: string, participants: common.UserId[]): Promise<Channel | null> {
+    const existing = await this.deps.repo.getChannelByDmKey(dmKey);
+    if (!existing) return null;
+    const current = (await this.deps.repo.listMembers(existing.id)).map((m) => m.userId);
+    if (!sameSet(current, participants)) throw new DubError("CHAT_DM_CONFLICT", "DM key collision", { status: 409 });
+    return { ...toChannel(existing), memberIds: current };
+  }
+
   // ---- channels ----
   async createChannel(ctx: ReqCtx, body: CreateChannelRequest): Promise<Channel> {
     const type = body.type;
     if (type !== "event" && type !== "topic" && type !== "dm") {
       throw errors.validationFailed([{ field: "type", reason: "invalid" }]);
     }
-    const visibility = body.visibility === "public" ? "public" : body.visibility === "private" ? "private" : null;
+    // A DM is always private: its content is for its participants only, whatever the caller sent.
+    const visibility =
+      type === "dm" ? "private" : body.visibility === "public" ? "public" : body.visibility === "private" ? "private" : null;
     if (!visibility) throw errors.validationFailed([{ field: "visibility", reason: "invalid" }]);
-    const name = nonEmptyString(body.name, "name");
+    // A DM is labelled per viewer from memberIds. The stored name is a neutral fallback: the
+    // creator's view of "the other side" would show the recipient their own name.
+    const name = type === "dm" ? "DM" : nonEmptyString(body.name, "name");
 
     let eventId: common.EventId | null = null;
     if (type === "event") {
@@ -177,14 +225,20 @@ export class ChatService {
       eventId = body.eventId;
     }
 
-    const initialMembers = [...new Set([ctx.userId, ...(body.memberIds ?? [])])];
+    const memberIds = Array.isArray(body.memberIds) ? body.memberIds.filter((id) => typeof id === "string" && id.length > 0) : [];
+    const initialMembers = [...new Set([ctx.userId, ...memberIds])];
 
     // DM dedup: same participant set returns the existing channel (idempotent).
     let dmKey: string | null = null;
     if (type === "dm") {
+      const others = initialMembers.length - 1;
+      // At least one other person: a self-only key would collide with the system DM channel
+      // (postSystemMessage keys it on [target] alone).
+      if (others < 1) throw errors.validationFailed([{ field: "memberIds", reason: "required" }]);
+      if (others > DM_MAX_OTHERS) throw errors.validationFailed([{ field: "memberIds", reason: "too_many" }]);
       dmKey = deriveDmKey(initialMembers);
-      const existing = await this.deps.repo.getChannelByDmKey(dmKey);
-      if (existing) return toChannel(existing);
+      const existing = await this.findDm(dmKey, initialMembers);
+      if (existing) return existing;
     }
 
     const now = this.deps.now();
@@ -202,14 +256,19 @@ export class ChatService {
       createdAt: now,
       updatedAt: now,
     };
-    await this.deps.repo.createChannel(row);
-    for (const uid of initialMembers) {
-      await this.deps.repo.addMember({
-        channelId: row.id,
-        userId: uid,
-        role: uid === ctx.userId ? "admin" : "member",
-        joinedAt: now,
-      });
+    const members: MemberRow[] = initialMembers.map((uid) => ({
+      channelId: row.id,
+      userId: uid,
+      // DM participants are peers: nobody gets channel-admin over a conversation.
+      role: uid === ctx.userId && type !== "dm" ? "admin" : "member",
+      joinedAt: now,
+    }));
+    if (!(await this.deps.repo.createChannelWithMembers(row, members))) {
+      // Lost a race with the other participant starting the same DM: theirs was written
+      // atomically (row + members), so it is complete and is the conversation to return.
+      const winner = dmKey ? await this.findDm(dmKey, initialMembers) : null;
+      if (!winner) throw new DubError("CHAT_DM_CONFLICT", "DM create conflict", { status: 409 });
+      return winner;
     }
 
     await this.deps.publisher.publish("chat.channel.created", { channelId: row.id, name: row.name }, this.actor(ctx));
@@ -219,12 +278,12 @@ export class ChatService {
       await this.deps.realtime.publishToChannel(row.id, { kind: "member.added", channelId: row.id, userId: uid, at: now });
     }
     await this.audit(ctx, "chat.channel.created", "channel", row.id, { type, visibility });
-    return toChannel(row);
+    return type === "dm" ? { ...toChannel(row), memberIds: initialMembers } : toChannel(row);
   }
 
   async getChannel(ctx: ReqCtx, id: common.ChannelId): Promise<GetChannelResponse> {
     const { channel, membership } = await this.loadReadable(id, ctx.userId);
-    return { channel: toChannel(channel), membership: membership ? toMember(membership) : null };
+    return { channel: await this.withDmMembers(channel), membership: membership ? toMember(membership) : null };
   }
 
   async listChannels(ctx: ReqCtx, q: { cursor?: string; limit?: number; eventId?: common.EventId }): Promise<ListChannelsResponse> {
@@ -240,7 +299,9 @@ export class ChatService {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
-    return { items: page.map(toChannel), nextCursor: hasMore && last ? encodeCursor(last.id) : null };
+    const dmMembers = await this.deps.repo.memberIdsFor(page.filter((r) => r.type === "dm").map((r) => r.id));
+    const items = page.map((r) => (r.type === "dm" ? { ...toChannel(r), memberIds: dmMembers.get(r.id) ?? [] } : toChannel(r)));
+    return { items, nextCursor: hasMore && last ? encodeCursor(last.id) : null };
   }
 
   async updateChannel(ctx: ReqCtx, id: common.ChannelId, body: UpdateChannelRequest): Promise<Channel> {
@@ -282,10 +343,77 @@ export class ChatService {
     return toChannel(next);
   }
 
+  // Physical delete (unlike archive). POLICY_TABLE's `chat:delete_channel` is the whole
+  // authority (no channel-admin fallback); the instance check here is readability only.
+  async deleteChannel(ctx: ReqCtx, id: common.ChannelId): Promise<void> {
+    const { channel } = await this.loadReadable(id, ctx.userId);
+    if (channel.type === "dm") throw errors.validationFailed([{ field: "type", reason: "dm_not_deletable" }]);
+    await this.deps.repo.hardDeleteChannel(id);
+    await this.audit(ctx, "chat.channel.delete", "channel", id, { name: channel.name, type: channel.type });
+  }
+
+  // ---- personal sidebar sections (caller-owned rows only) ----
+  async listSections(ctx: ReqCtx): Promise<ChatSectionList> {
+    const [rows, assignments] = await Promise.all([
+      this.deps.repo.listSections(ctx.userId),
+      this.deps.repo.sectionAssignments(ctx.userId),
+    ]);
+    return { items: rows.map(toSection), assignments: Object.fromEntries(assignments) };
+  }
+
+  async createSection(ctx: ReqCtx, body: CreateSectionRequest): Promise<ChatSection> {
+    const name = requireSectionName(body?.name);
+    const existing = await this.deps.repo.listSections(ctx.userId);
+    if (existing.length >= MAX_SECTIONS_PER_USER) throw errors.validationFailed([{ field: "name", reason: "too_many_sections" }]);
+    const now = this.deps.now();
+    const row: SectionRow = {
+      id: this.deps.newSectionId(),
+      userId: ctx.userId,
+      name,
+      position: existing.reduce((max, s) => Math.max(max, s.position), -1) + 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.deps.repo.createSection(row);
+    return toSection(row);
+  }
+
+  async updateSection(ctx: ReqCtx, id: string, body: UpdateSectionRequest): Promise<ChatSection> {
+    const cur = await this.deps.repo.getSection(ctx.userId, id);
+    if (!cur) throw errors.notFound("section", id);
+    const next: SectionRow = { ...cur, updatedAt: this.deps.now() };
+    if (body?.name !== undefined) next.name = requireSectionName(body.name);
+    if (body?.position !== undefined) {
+      if (!Number.isInteger(body.position) || body.position < 0) {
+        throw errors.validationFailed([{ field: "position", reason: "invalid" }]);
+      }
+      next.position = body.position;
+    }
+    await this.deps.repo.updateSection(next);
+    return toSection(next);
+  }
+
+  async deleteSection(ctx: ReqCtx, id: string): Promise<void> {
+    if (!(await this.deps.repo.deleteSection(ctx.userId, id))) throw errors.notFound("section", id);
+  }
+
+  async setChannelSection(ctx: ReqCtx, channelId: common.ChannelId, body: SetChannelSectionRequest): Promise<void> {
+    const sectionId = body?.sectionId;
+    if (sectionId !== null && typeof sectionId !== "string") {
+      throw errors.validationFailed([{ field: "sectionId", reason: "required" }]);
+    }
+    await this.loadReadable(channelId, ctx.userId);
+    if (sectionId !== null && !(await this.deps.repo.getSection(ctx.userId, sectionId))) {
+      throw errors.notFound("section", sectionId);
+    }
+    await this.deps.repo.setChannelSection(ctx.userId, channelId, sectionId);
+  }
+
   async addMember(ctx: ReqCtx, id: common.ChannelId, body: AddMemberRequest): Promise<void> {
     const userId = nonEmptyString(body.userId, "userId");
     const channel = await this.deps.repo.getChannel(id);
     if (!channel) throw errors.notFound("channel", id);
+    if (channel.type === "dm") throw errDmMembersFixed(id);
     if (!(await this.isChannelAdmin(ctx, channel))) {
       throw new DubError(CommonErrorCodes.FORBIDDEN, "channel admin required", { status: 403 });
     }
@@ -302,6 +430,7 @@ export class ChatService {
   async removeMember(ctx: ReqCtx, id: common.ChannelId, userId: common.UserId): Promise<void> {
     const channel = await this.deps.repo.getChannel(id);
     if (!channel) throw errors.notFound("channel", id);
+    if (channel.type === "dm") throw errDmMembersFixed(id);
     const isSelf = userId === ctx.userId;
     if (!isSelf && !(await this.isChannelAdmin(ctx, channel))) {
       throw new DubError(CommonErrorCodes.FORBIDDEN, "channel admin or self required", { status: 403 });

@@ -269,10 +269,10 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.effectivePermissions(c.req.param("id"), orgId));
   });
 
-  // Role-sharing peers — internal S2S read for mail-gateway's inbound read scope
-  // (`?permission=mail:read_role_shared`). Returns { userIds } excluding :id itself.
-  app.get("/internal/users/:id/role-peers", async (c) => {
-    return c.json(await svc.rolePeers(c.req.param("id"), orgId, c.req.query("permission") ?? ""));
+  // Whose inbound mail :id may also read — same-role sharing + cross-role visibility.
+  // Internal S2S read for mail-gateway's inbound read scope. Returns { userIds } excluding :id.
+  app.get("/internal/users/:id/mail-visible-users", async (c) => {
+    return c.json(await svc.mailVisibleUsers(c.req.param("id"), orgId));
   });
 
   // ---- passkey credential store (internal S2S: auth-service only) ----

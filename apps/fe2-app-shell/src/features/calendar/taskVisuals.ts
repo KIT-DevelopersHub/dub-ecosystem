@@ -1,60 +1,108 @@
-// Presentation mapping for a task's status → calendar chip colors + a JA label.
-// Colors reference @dub/tokens CSS vars so light/dark stay consistent. Kept small
-// and dependency-free so it can be unit-tested and reused by month/week views.
-import type { task } from "@dub/types";
+// Status → event color + JA label. Each status acts like one of Google Calendar's
+// "マイカレンダー" (its own color, toggled from the sidebar). Colors are Google's
+// event palette (ピーコック/ブルーベリー/ミカン/セージ/グラファイト) so blocks read the
+// way users already know; text on them is always white, as in Google.
+import type { identity, task } from "@dub/types";
+import type { IconName } from "@dub/ui";
+import { PERSONAL_LABEL, isMeetingTask, isScheduleTask, kindOf, labelOf, type ItemKind } from "./calendar-model";
+
+export const UNTITLED_TITLE = "（タイトルなし）";
 
 export interface StatusVisual {
   label: string;
-  /** chip background */
-  bg: string;
-  /** chip text/border accent */
-  fg: string;
-  /** status dot color */
-  dot: string;
+  /** solid event color (block / bar / dot / sidebar checkbox) */
+  color: string;
 }
 
 const STATUS_VISUALS: Record<task.TaskStatus, StatusVisual> = {
-  todo: {
-    label: "未着手",
-    bg: "var(--dub-color-surface-sunken, #f1f3f5)",
-    fg: "var(--dub-color-text-secondary, #444)",
-    dot: "var(--dub-color-text-muted, #888)",
-  },
-  in_progress: {
-    label: "進行中",
-    bg: "var(--dub-color-brand-50, #eef2ff)",
-    fg: "var(--dub-color-brand-600, #3b46c4)",
-    dot: "var(--dub-color-brand-500, #4f46e5)",
-  },
-  blocked: {
-    label: "ブロック",
-    bg: "var(--dub-color-warning-50, #fff7e6)",
-    fg: "var(--dub-color-warning-600, #b7791f)",
-    dot: "var(--dub-color-warning-500, #d69e2e)",
-  },
-  done: {
-    label: "完了",
-    bg: "var(--dub-color-success-50, #e9f8ef)",
-    fg: "var(--dub-color-success-600, #2f855a)",
-    dot: "var(--dub-color-success-500, #38a169)",
-  },
-  cancelled: {
-    label: "中止",
-    bg: "var(--dub-color-surface-sunken, #f1f3f5)",
-    fg: "var(--dub-color-text-muted, #888)",
-    dot: "var(--dub-color-text-muted, #888)",
-  },
+  todo: { label: "未着手", color: "#039be5" },
+  in_progress: { label: "進行中", color: "#3f51b5" },
+  blocked: { label: "ブロック", color: "#f4511e" },
+  done: { label: "完了", color: "#33b679" },
+  cancelled: { label: "中止", color: "#616161" },
 };
 
 export function statusVisual(status: task.TaskStatus): StatusVisual {
   return STATUS_VISUALS[status] ?? STATUS_VISUALS.todo;
 }
 
-/** All statuses in a stable order (legend rendering). */
-export const STATUS_ORDER: readonly task.TaskStatus[] = [
-  "todo",
-  "in_progress",
-  "blocked",
-  "done",
-  "cancelled",
-];
+/** All statuses in a stable order (sidebar rendering). */
+export const STATUS_ORDER: readonly task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
+
+export const PRIORITY_LABEL: Record<task.TaskPriority, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+  urgent: "緊急",
+};
+
+/** 予定 are colored by 種類 (Google's ラベンダー/バジル/グレープ/フラミンゴ), タスク by status. */
+export const KIND_VISUALS: Record<ItemKind, StatusVisual> = {
+  event: { label: "予定", color: "#7986cb" },
+  meeting: { label: "ミーティング", color: "#0b8043" },
+  vacation: { label: "休暇", color: "#8e24aa" },
+  rehearsal: { label: "予行練習", color: "#e67c73" },
+};
+
+/** ミーティング (shared-account Google Calendar events) share the ミーティング 種類 color. */
+export const MEETING_VISUAL: StatusVisual = KIND_VISUALS.meeting;
+
+export const KIND_ICON: Record<ItemKind, IconName> = {
+  event: "calendar",
+  meeting: "users",
+  vacation: "sun",
+  rehearsal: "flag",
+};
+
+/** Color/label for a drawn item: a 予定 by its 種類, a タスク by its status. */
+export function itemVisual(t: task.Task): StatusVisual {
+  if (isMeetingTask(t)) return MEETING_VISUAL;
+  return isScheduleTask(t) ? KIND_VISUALS[kindOf(t)] : statusVisual(t.status);
+}
+
+/** タスク lead with a check mark (○ open / ✓ 完了) so they read apart from 予定. */
+export function taskMark(t: task.Task): string | null {
+  if (isScheduleTask(t)) return null;
+  return t.status === "done" ? "✓" : "○";
+}
+
+// ── ラベル ──────────────────────────────────────────────────────────────────
+// 予定のラベル = 「個人」+ the org's roles. Not managed by hand: a role added in
+// ロール管理 shows up here on the next load.
+
+export interface CalendarLabel {
+  /** PERSONAL_LABEL or a role id */
+  key: string;
+  name: string;
+}
+
+export const PERSONAL_LABEL_ENTRY: CalendarLabel = { key: PERSONAL_LABEL, name: "個人" };
+
+export function buildLabels(roles: readonly Pick<identity.Role, "id" | "name">[]): CalendarLabel[] {
+  return [PERSONAL_LABEL_ENTRY, ...roles.map((r) => ({ key: r.id, name: r.name }))];
+}
+
+/** The label for a key; an unknown key (deleted role) falls back to 個人. */
+export function resolveLabel(labels: readonly CalendarLabel[], key: string): CalendarLabel {
+  return labels.find((l) => l.key === key) ?? PERSONAL_LABEL_ENTRY;
+}
+
+/** Who a 予定 belongs to: the role for a labelled one, else the person (担当, or 依頼者). */
+export function ownerOf(
+  t: task.Task,
+  labels: readonly CalendarLabel[],
+  names: ReadonlyMap<string, string>,
+): string | null {
+  const label = resolveLabel(labels, labelOf(t));
+  if (label.key !== PERSONAL_LABEL) return label.name;
+  const person = t.assigneeId ?? t.createdBy;
+  return (person && names.get(person)) || null;
+}
+
+/** "<owner>：<title>" so a month grid shows whose 予定/休暇 it is at a glance; タスク get their mark. */
+export function ownedTitle(t: task.Task, owner: string | null): string {
+  const title = t.title || UNTITLED_TITLE;
+  const owned = owner ? `${owner}：${title}` : title;
+  const mark = taskMark(t);
+  return mark ? `${mark} ${owned}` : owned;
+}

@@ -265,6 +265,94 @@
   color: #ffffff;
 }
 
+/* Row wrapper: the channel button + a hover/focus "⋯" move menu (overlays the badge). */
+.channelRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.rowMenu {
+  position: absolute;
+  top: 50%;
+  right: var(--dub-space-1);
+  transform: translateY(-50%);
+  opacity: 0;
+}
+.channelRow:hover .rowMenu,
+.channelRow:focus-within .rowMenu,
+.rowMenu:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+.channelRow:hover .countBadge,
+.channelRow:hover .mentionBadge,
+.channelRow:focus-within .countBadge,
+.channelRow:focus-within .mentionBadge {
+  visibility: hidden;
+}
+@media (hover: none) {
+  .rowMenu {
+    opacity: 1;
+  }
+}
+/* Compact "⋯" trigger for @dub/ui Menu (iconOnly) inside the dark sidebar. */
+.sidebarMenu {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.sidebarMenu button[aria-haspopup="menu"] {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--dub-radius-sm);
+  color: rgba(255, 255, 255, 0.7);
+}
+.sidebarMenu button[aria-haspopup="menu"]::before {
+  content: "⋯";
+  font-size: var(--dub-font-size-md);
+  line-height: 1;
+}
+.sidebarMenu button[aria-haspopup="menu"]:hover,
+.sidebarMenu button[aria-haspopup="menu"][aria-expanded="true"] {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border-color: transparent;
+}
+.sectionName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sectionEmptyHint {
+  padding: var(--dub-space-1) var(--dub-space-2) var(--dub-space-2) var(--dub-space-6);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: var(--dub-font-size-xs);
+}
+.sectionCreate {
+  display: block;
+  width: 100%;
+  margin-top: var(--dub-space-4);
+  padding: var(--dub-space-2);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: var(--dub-radius-sm);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.sectionCreate:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+.sidebarSkeleton .section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2);
+  opacity: 0.5;
+}
+
 .presenceDot {
   display: inline-block;
   width: 9px;
@@ -884,29 +972,150 @@
   background: var(--dub-color-border-default);
   margin: 0 var(--dub-space-1);
 }
-.composer textarea {
-  width: 100%;
-  box-sizing: border-box;
-  resize: none;
+/* WYSIWYG input (contentEditable). Lines are root > div; list / quote / code lines
+   carry data-block and are drawn here so the draft looks like the sent message. */
+.composerInput {
+  position: relative;
   min-height: 44px;
   max-height: 240px;
+  overflow-y: auto;
+  box-sizing: border-box;
   padding: var(--dub-space-2) var(--dub-space-3);
-  border: none;
-  background: transparent;
   color: var(--dub-color-text-primary);
-  font: inherit;
   font-size: var(--dub-font-size-sm);
   line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   outline: none;
 }
-.composer textarea:disabled {
+.composerInput[aria-disabled="true"] {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+.composerInput[data-empty]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  top: var(--dub-space-2);
+  left: var(--dub-space-3);
+  color: var(--dub-color-text-muted);
+  pointer-events: none;
 }
 /* Touch: 16px so focusing the composer never triggers iOS auto-zoom. */
 @media (pointer: coarse) {
-  .composer textarea {
+  .composerInput {
     font-size: var(--dub-font-size-md);
   }
+}
+.composerInput code {
+  font-family: var(--dub-font-family-mono);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-danger-600);
+  padding: 1px 4px;
+  border-radius: var(--dub-radius-sm);
+  border: 1px solid var(--dub-color-border-default);
+  font-size: 0.85em;
+}
+.composerInput a {
+  color: var(--dub-color-text-link, var(--dub-color-brand-600));
+}
+.composerInput u {
+  text-underline-offset: 2px;
+}
+.composerInput [data-md] {
+  color: var(--dub-color-brand-700);
+  background: var(--dub-color-brand-100);
+  border-radius: var(--dub-radius-sm);
+  padding: 0 2px;
+  font-weight: var(--dub-font-weight-medium);
+}
+.composerInput > div:not([data-block="ordered"]) {
+  counter-reset: dub-composer-ol;
+}
+.composerInput > div[data-block="quote"] {
+  padding-left: var(--dub-space-3);
+  border-left: 3px solid var(--dub-color-border-strong);
+  color: var(--dub-color-text-secondary);
+}
+.composerInput > div[data-block="bullet"],
+.composerInput > div[data-block="ordered"] {
+  position: relative;
+  padding-left: var(--dub-space-5);
+}
+.composerInput > div[data-block="bullet"]::before,
+.composerInput > div[data-block="ordered"]::before {
+  position: absolute;
+  left: var(--dub-space-1);
+  color: var(--dub-color-text-secondary);
+}
+.composerInput > div[data-block="bullet"]::before {
+  content: "\2022";
+}
+.composerInput > div[data-block="ordered"] {
+  counter-increment: dub-composer-ol;
+}
+.composerInput > div[data-block="ordered"]::before {
+  content: counter(dub-composer-ol) ".";
+}
+.composerInput > div[data-block="code"] {
+  font-family: var(--dub-font-family-mono);
+  background: var(--dub-color-surface-sunken);
+  border-left: 1px solid var(--dub-color-border-default);
+  border-right: 1px solid var(--dub-color-border-default);
+  padding: 0 var(--dub-space-2);
+}
+.composerInput > div:not([data-block="code"]) + div[data-block="code"],
+.composerInput > div[data-block="code"]:first-child {
+  border-top: 1px solid var(--dub-color-border-default);
+  border-top-left-radius: var(--dub-radius-md);
+  border-top-right-radius: var(--dub-radius-md);
+  padding-top: var(--dub-space-1);
+}
+.composerInput > div[data-block="code"]:has(+ div:not([data-block="code"])),
+.composerInput > div[data-block="code"]:last-child {
+  border-bottom: 1px solid var(--dub-color-border-default);
+  border-bottom-left-radius: var(--dub-radius-md);
+  border-bottom-right-radius: var(--dub-radius-md);
+  padding-bottom: var(--dub-space-1);
+}
+/* Link URL entry (toolbar → リンク): small inline form above the box. */
+.linkPopover {
+  position: absolute;
+  bottom: 100%;
+  left: var(--dub-space-4);
+  display: flex;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2);
+  margin-bottom: var(--dub-space-1);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-md, 0 4px 12px rgb(0 0 0 / 12%));
+  z-index: 5;
+}
+.linkPopover input {
+  width: 260px;
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-strong, var(--dub-color-border-default));
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-base, transparent);
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+}
+.linkPopover button {
+  padding: var(--dub-space-1) var(--dub-space-3);
+  border: none;
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-brand-500);
+  color: var(--dub-color-text-inverse);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+  cursor: pointer;
+}
+.linkPopover button:disabled {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-muted);
+  cursor: not-allowed;
 }
 .composerBottom {
   display: flex;
@@ -1745,6 +1954,69 @@
   gap: var(--dub-space-2);
 }
 
+/* ── new-DM picker (inside @dub/ui Modal: global --dub-* tokens only) ──────── */
+.dmPicked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-2);
+}
+.dmChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: 1px solid var(--dub-color-brand-400);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+  cursor: pointer;
+}
+.dmResults {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.dmResult {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--dub-radius-md);
+  background: transparent;
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.dmResult:hover:not(:disabled) {
+  background: var(--dub-color-surface-sunken);
+}
+.dmResult:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dmResultOn {
+  border-color: var(--dub-color-brand-400);
+}
+.dmResultName {
+  flex: 1;
+}
+.dmResultCheck {
+  color: var(--dub-color-brand-500);
+  font-weight: var(--dub-font-weight-bold);
+}
+.dmError {
+  margin: 0;
+  color: var(--dub-color-danger-600);
+  font-size: var(--dub-font-size-sm);
+}
+
 /* ── jump-to-message highlight (from search / pins) ──────────────────────── */
 .jumpHighlight {
   animation: jumpPulse 1.6s ease;
@@ -1798,4 +2070,256 @@
   .searchBox input:not(:placeholder-shown) {
     width: 120px;
   }
+}
+
+/* ── channel details modal (Slack "チャンネル詳細": 概要 / メンバー / 設定) ──── */
+/* Fixed height (Slack): switching tabs must not resize/re-center the dialog. */
+.detailsBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  height: min(540px, 70vh);
+}
+.detailsPanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.detailsStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+.detailsCard {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-base);
+  overflow: hidden;
+}
+.detailsCard > * + * {
+  border-top: 1px solid var(--dub-color-border-default);
+}
+.detailsRow,
+.detailsRowEdit {
+  display: flex;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-4);
+}
+.detailsRow {
+  align-items: center;
+  justify-content: space-between;
+}
+.detailsRowEdit {
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.detailsRowMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  min-width: 0;
+}
+.detailsLabel {
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.detailsValue {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.detailsValueEmpty {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+}
+.detailsHelp {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-secondary);
+}
+.detailsNote {
+  margin: 0;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.detailsEditLink,
+.detailsBack {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dub-color-brand-600);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  cursor: pointer;
+}
+.detailsBack {
+  align-self: flex-start;
+  font-weight: var(--dub-font-weight-medium);
+}
+.detailsEditLink:hover,
+.detailsBack:hover {
+  text-decoration: underline;
+}
+.detailsEditFoot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+}
+.detailsCountOver {
+  color: var(--dub-color-danger-600);
+  font-size: var(--dub-font-size-xs);
+}
+.detailsEditActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--dub-space-2);
+}
+.detailsDangerLink {
+  padding: var(--dub-space-4);
+  border: none;
+  background: none;
+  color: var(--dub-color-danger-600);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  text-align: left;
+  cursor: pointer;
+}
+.detailsDangerLink:hover,
+.detailsAction:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.detailsAction {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-4);
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.detailsActionTitle,
+.detailsActionDanger {
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.detailsActionDanger {
+  color: var(--dub-color-danger-600);
+}
+.detailsSelect {
+  flex-shrink: 0;
+  max-width: 50%;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+}
+.detailsMemberList {
+  display: flex;
+  flex-direction: column;
+}
+.detailsMember,
+.detailsMemberAdd {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-2) var(--dub-space-2);
+  border-radius: var(--dub-radius-md);
+}
+.detailsMember:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.detailsMemberAdd {
+  border: none;
+  background: none;
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  text-align: left;
+  cursor: pointer;
+}
+.detailsMemberAdd:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.detailsMemberAddIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-brand-100);
+  color: var(--dub-color-brand-700);
+}
+.detailsMemberName {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detailsMemberSelf {
+  margin-left: var(--dub-space-1);
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.detailsMemberBadge {
+  flex-shrink: 0;
+  padding: 0 var(--dub-space-2);
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-xs);
+}
+.detailsMemberRemove {
+  flex-shrink: 0;
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: none;
+  border-radius: var(--dub-radius-sm);
+  background: none;
+  color: var(--dub-color-danger-600);
+  font: inherit;
+  font-size: var(--dub-font-size-xs);
+  cursor: pointer;
+  opacity: 0;
+}
+.detailsMember:hover .detailsMemberRemove,
+.detailsMemberRemove:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .detailsMemberRemove {
+    opacity: 1;
+  }
+}
+.detailsDeleteText {
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+.detailsCheck {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  cursor: pointer;
 }

@@ -91,9 +91,51 @@ export const LP: AreaSpec = {
       fieldLabels: { active: "有効" },
       verify: { ...LINKS_READ, findBy: ["id", "$params.id"], expect: { active: "$body.active" } },
     },
+    read({
+      id: "lp.publish.get",
+      area: "lp",
+      path: "/lp/publish",
+      service: S,
+      requires: VIEW,
+      description: "本番 LP でいま公開中の版を取得する",
+      hint: "versionId（公開中の版）。期間指定は不要",
+    }),
   ],
-  excluded: [],
-  pending: [],
+  excluded: [
+    {
+      service: S,
+      route: "POST /lp/publish",
+      reason: "本番 LP の公開版を即座に切り替える操作（lp:publish 詳細キー）。依頼範囲（アクセスログ・流入 URL）の外で、入れ替えはオーナーが手で行う",
+    },
+    {
+      service: S,
+      route: "POST /lp/tickets/enabled",
+      reason: "本番 LP のチケット販売ページを即座に公開/停止する操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
+    },
+    {
+      service: S,
+      route: "POST /lp/proposals/enabled",
+      reason: "本番 LP の登壇者募集ページを即座に公開/停止する操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
+    },
+    {
+      service: S,
+      route: "POST /lp/tickets/cta",
+      reason: "本番 LP の参加登録ボタンを即座にチケット購入へ差し替える操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
+    },
+  ],
+  // チケットの設定・購入者一覧は未開放。
+  pending: [
+    { service: S, route: "GET /lp/tickets" },
+    { service: S, route: "POST /lp/tickets/fields" },
+    { service: S, route: "POST /lp/tickets/types" },
+    { service: S, route: "PATCH /lp/tickets/types/:id" },
+    { service: S, route: "GET /lp/tickets/orders" },
+    // 登壇者募集の設定・応募一覧も未開放。
+    { service: S, route: "GET /lp/proposals" },
+    { service: S, route: "POST /lp/proposals/fields" },
+    { service: S, route: "GET /lp/proposals/submissions" },
+    { service: S, route: "PATCH /lp/proposals/submissions/:id" },
+  ],
   ownerOpenedIrreversible: {
     "lp.links.create": "削除 API が無く発行した URL は一覧に残り同じ値も再発行できないが、停止はできる。オーナーが「流入 URL の発行」を名指しで開放",
   },

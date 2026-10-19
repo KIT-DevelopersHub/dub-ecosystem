@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-tickets",
+  "worker": "dub-demo-lp-tickets",
+  "url": "https://dub-demo-lp-tickets.developershub-site.workers.dev",
+  "deployedSha": "58945c0f",
+  "branch": "feat/lp-tickets",
+  "actor": "ko-tarou",
+  "markers": ["1 回の購入上限","lp-tickets-demo.developershub-site.workers.dev"],
+  "live": true,
+  "verifiedAt": "2026-10-13T09:03:22Z",
+  "updatedAt": "2026-10-13T09:03:22Z",
+  "note": "LP チケット v2 (購入ページリンクを LP demo へ)"
+}

@@ -109,6 +109,59 @@ paths:
         '500':
           $ref: '#/components/responses/Internal'
       security: []
+  /api/v1/public/onboarding:
+    get:
+      operationId: getPublicOnboarding
+      summary: Get the public onboarding guide for new members
+      tags:
+        - gateway
+      description: Unauthenticated, read-only. Returns the onboarding items admins manage in the 運営メンバー・名簿 オンボーディング tab (sortOrder ascending), the team choices, and the meeting guide (teamId null = 全体ミーティング). IP rate limited; cacheable for 60 seconds.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, teams, meetings]
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, color]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        color: { type: string, nullable: true }
+                  meetings:
+                    type: array
+                    items:
+                      type: object
+                      required: [teamId, schedule, url, updatedAt]
+                      properties:
+                        teamId: { type: string, nullable: true }
+                        schedule: { type: string }
+                        url: { type: string, nullable: true }
+                        updatedAt: { type: string, format: date-time }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, title, description, url, sortOrder, createdAt, updatedAt]
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        description: { type: string, nullable: true }
+                        url: { type: string, nullable: true }
+                        sortOrder: { type: integer }
+                        createdAt: { type: string, format: date-time }
+                        updatedAt: { type: string, format: date-time }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/Internal'
+      security: []
   /api/v1/{segment}/{path}:
     parameters:
       - name: segment

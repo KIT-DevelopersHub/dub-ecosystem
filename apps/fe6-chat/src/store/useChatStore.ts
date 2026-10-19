@@ -26,6 +26,8 @@ interface ChatStore {
   setTeams: (teams: TeamSummary[], myTeamIds: string[]) => void;
   applyEvent: (event: ChatRealtimeEvent, currentUserId: common.UserId) => void;
   markRead: (channelId: common.ChannelId, lastReadMessageId: common.MessageId) => void;
+  /** Forget a deleted channel's unread entry (nav badge must not count it). */
+  dropChannel: (channelId: common.ChannelId) => void;
 }
 
 export const useChatStore = create<ChatStore>((set) => ({
@@ -41,6 +43,11 @@ export const useChatStore = create<ChatStore>((set) => ({
     set((s) => ({ unread: applyUnreadEvent(s.unread, event, s.activeChannelId, currentUserId, s.myTeamIds) })),
   markRead: (channelId, lastReadMessageId) =>
     set((s) => ({ unread: clearUnread(s.unread, channelId, lastReadMessageId) })),
+  dropChannel: (channelId) =>
+    set((s) => {
+      const { [channelId]: _dropped, ...rest } = s.unread;
+      return { unread: rest };
+    }),
 }));
 
 /** Nav badge source (design §2-3). Selector recomputes on unread changes. */

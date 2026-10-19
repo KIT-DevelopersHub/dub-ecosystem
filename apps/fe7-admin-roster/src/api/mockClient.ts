@@ -3,9 +3,9 @@
 // 実装時の依存先はモックサーバ(契約準拠スタブ)"). NOT shipped to production —
 // FE2 provides the real ResourceClient there.
 import { identity, member } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
-import type { common, auditLog, gateway } from "@dub/types";
+import type { common, auditLog, auth, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
-import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview } from "../contracts/pending";
+import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview, RoleView } from "../contracts/pending";
 import { EMAIL_ROUTING_DOMAIN, MAIL_WORKER_DESTINATION } from "../contracts/pending";
 
 // Mock roster row: the frozen detail model plus provenance (identity-roster exposes it).
@@ -26,7 +26,7 @@ export interface MockSeed {
 
 interface MockState {
   users: Map<string, MockUser>;
-  roles: Map<string, identity.Role>;
+  roles: Map<string, RoleView>;
   assignments: Map<string, RoleAssignment[]>; // userId -> assignments
   audits: auditLog.AuditRecord[];
   emailAddresses: EmailRoutingAddress[];
@@ -41,7 +41,7 @@ interface MockState {
 const ORG = "org_devhub";
 
 function seedState(seed?: MockSeed): MockState {
-  const roles = new Map<string, identity.Role>([
+  const roles = new Map<string, RoleView>([
     ["role_admin", { id: "role_admin", orgId: ORG, name: "admin", permissions: ["identity:read", "identity:admin", "audit:read", "event:read", "mail:admin", "app:admin:view", "app:admin:edit"], isSystem: true }],
     ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read"], isSystem: true }],
     ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
@@ -68,8 +68,8 @@ function seedState(seed?: MockSeed): MockState {
   // 運営メンバー: 佐藤 太郎 is linked to user_bob (#1) so退任 fans out to the org-chart.
   // 山田 花子 / 鈴木 一郎 are UNLINKED so the メール名簿「運営メンバーと紐付け」flow has candidates.
   const members: member.Member[] = [
-    { ...member.emptyPersonProfile(), id: "member_bob", orgId: ORG, name: "佐藤 太郎", roleTitle: "会場リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1024, version: 1, createdAt: now(), updatedAt: now() },
-    { ...member.emptyPersonProfile(), id: "member_hanako", orgId: ORG, name: "山田 花子", roleTitle: "広報担当", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2048, version: 1, createdAt: now(), updatedAt: now() },
+    { ...member.emptyPersonProfile(), gmail: "taro.sato@gmail.com", id: "member_bob", orgId: ORG, name: "佐藤 太郎", roleTitle: "会場リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1024, version: 1, createdAt: now(), updatedAt: now() },
+    { ...member.emptyPersonProfile(), gmail: "hanako.yamada@gmail.com", id: "member_hanako", orgId: ORG, name: "山田 花子", roleTitle: "広報担当", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2048, version: 1, createdAt: now(), updatedAt: now() },
     { ...member.emptyPersonProfile(), id: "member_ichiro", orgId: ORG, name: "鈴木 一郎", roleTitle: "開発リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 3072, version: 1, createdAt: now(), updatedAt: now() },
   ];
   const me: gateway.MeResponse = seed?.me ?? {
@@ -179,11 +179,11 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       return stripDetail(user) as unknown as T;
     }
     if (path.endsWith("/identity/roles")) {
-      const req = body as { name: string; permissions: identity.PermissionKey[] };
+      const req = body as { name: string; permissions: identity.PermissionKey[]; mailVisibleRoleIds?: string[] };
       if (!req.name?.trim()) throw err("VALIDATION_FAILED", "name required", [{ field: "name", reason: "required" }]);
       if ([...s.roles.values()].some((r) => r.name === req.name)) throw err("CONFLICT", "role name exists");
       const id = `role_${Math.random().toString(36).slice(2, 8)}`;
-      const role: identity.Role = { id, orgId: ORG, name: req.name, permissions: req.permissions, isSystem: false };
+      const role: RoleView = { id, orgId: ORG, name: req.name, permissions: req.permissions, isSystem: false, mailVisibleRoleIds: req.mailVisibleRoleIds ?? [] };
       s.roles.set(id, role);
       return role as unknown as T;
     }
@@ -363,6 +363,24 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       const result: OffboardUserResult = { user: stripDetail(disabled), revokedAssignments: assignments.length, alreadyDisabled, steps };
       return result as unknown as T;
     }
+    const accountMailMatch = path.match(/\/admin\/users\/([^/]+)\/account-mail$/);
+    if (accountMailMatch) {
+      // Mirrors the gateway: member Gmail (to) + login (cc); reuse or issue the password.
+      const u = s.users.get(accountMailMatch[1]!);
+      if (!u) throw err("NOT_FOUND", "user not found");
+      const linked = s.members.find((m) => m.identityUserId === u.id);
+      const gmail = (linked?.gmail ?? "").trim();
+      if (!linked || !gmail) {
+        throw err("VALIDATION_FAILED", "運営メンバーの Gmail が登録されていません", [{ field: "gmail", reason: "required" }]);
+      }
+      const existing = s.passwords.has(u.id);
+      if (!existing) s.passwords.set(u.id, `Pw-${Math.random().toString(36).slice(2, 10)}`);
+      const res: auth.AdminSendAccountMailResponse = {
+        ok: true, to: gmail, cc: u.email, appUrl: "https://app.developershub.jp",
+        passwordSource: existing ? "existing" : "generated", messageId: `msg_${Math.random().toString(36).slice(2, 8)}`,
+      };
+      return res as unknown as T;
+    }
     const setPwMatch = path.match(/\/admin\/users\/([^/]+)\/password$/);
     if (setPwMatch) {
       const u = s.users.get(setPwMatch[1]!);
@@ -385,12 +403,20 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     if (roleMatch) {
       const role = s.roles.get(roleMatch[1]!);
       if (!role) throw err("NOT_FOUND", "role not found");
-      const req = body as { name?: string; permissions?: identity.PermissionKey[] };
+      const req = body as { name?: string; permissions?: identity.PermissionKey[]; mailVisibleRoleIds?: string[] };
+      if (req.mailVisibleRoleIds?.some((id) => id === role.id || !s.roles.has(id))) {
+        throw err("VALIDATION_FAILED", "invalid mailVisibleRoleIds", [{ field: "mailVisibleRoleIds", reason: "invalid" }]);
+      }
       // Self-lockout guard (mirrors identity-roster): the admin role must keep identity:admin.
       if (role.isSystem && role.name === "admin" && req.permissions !== undefined && !req.permissions.includes("identity:admin")) {
         throw err("CONFLICT", "cannot remove identity:admin from the admin role");
       }
-      const updated: identity.Role = { ...role, ...(req.name !== undefined ? { name: req.name } : {}), ...(req.permissions !== undefined ? { permissions: req.permissions } : {}) };
+      const updated: RoleView = {
+        ...role,
+        ...(req.name !== undefined ? { name: req.name } : {}),
+        ...(req.permissions !== undefined ? { permissions: req.permissions } : {}),
+        ...(req.mailVisibleRoleIds !== undefined ? { mailVisibleRoleIds: [...req.mailVisibleRoleIds].sort() } : {}),
+      };
       s.roles.set(role.id, updated);
       return updated as unknown as T;
     }
@@ -424,6 +450,9 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       if (!role) throw err("NOT_FOUND", "role not found");
       if (role.isSystem) throw err("CONFLICT", "system role cannot be deleted");
       s.roles.delete(role.id);
+      for (const r of s.roles.values()) {
+        if (r.mailVisibleRoleIds?.includes(role.id)) s.roles.set(r.id, { ...r, mailVisibleRoleIds: r.mailVisibleRoleIds.filter((t) => t !== role.id) });
+      }
       return;
     }
     const asgMatch = path.match(/\/identity\/users\/([^/]+)\/roles\/([^/]+)$/);

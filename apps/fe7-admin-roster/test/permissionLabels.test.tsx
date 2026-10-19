@@ -38,6 +38,10 @@ describe("permissionLabels — localization map", () => {
     }
   });
 
+  it("labels the channel hard-delete key", () => {
+    expect(permissionLabel("chat:delete_channel", "EN")).toBe("チャンネルを削除");
+  });
+
   it("falls back to catalog english text for an unknown key/domain", () => {
     expect(domainLabel("unknown-domain")).toBe("unknown-domain");
     expect(permissionLabel("unknown:key", "English Name")).toBe("English Name");
@@ -289,5 +293,13 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(within(dialog).getByText("Drive共有の設定の閲覧")).toBeInTheDocument();
     await user.click(within(dialog).getByTestId("fe7-app-dialog-toggle-drive:settings_edit"));
     expect(onChange.mock.calls.at(-1)?.[0]).toContain("drive:settings_edit");
+  });
+});
+
+describe("カレンダー > ミーティング labels", () => {
+  it("labels the two meeting keys in Japanese", () => {
+    expect(permissionLabel("calendar:meetings_view", "EN")).toBe("ミーティングを見る");
+    expect(permissionLabel("calendar:meetings_edit", "EN")).toBe("ミーティングを設定");
+    expect(domainLabel("calendar")).toBe("カレンダー");
   });
 });

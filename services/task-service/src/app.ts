@@ -52,6 +52,14 @@ function ctxOf(c: Context): RequestContext {
   return extractContext(c.req.raw.headers, { allowGenerate: true });
 }
 
+/** `:id` of a shared handler (an untyped Context loses the route's param typing). Every
+ *  route it is mounted on has `:id`, so a miss is a wiring bug, not a client error. */
+function taskIdParam(c: Context): string {
+  const id = c.req.param("id");
+  if (!id) throw new Error("task-service: handler mounted on a route without :id");
+  return id;
+}
+
 async function readJson<T>(c: Context): Promise<T> {
   try {
     return (await c.req.json()) as T;
@@ -200,11 +208,26 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     // OWN tasks — assigned to them (担当) or issued by them (依頼), which scope to self so
     // the "My Tasks" hub never leaks other people's lists. Since tasks may be unlinked to
     // any event (判断44), a bare `GET /tasks` from a user for someone else is still gated.
+    // (c) a user listing ONE team's tasks (カレンダーの「チームのタスクを表示」): a team is a
+    // shared grouping, the same tasks every task:read holder already sees per event, so a
+    // team scope is not a per-person list.
+    // (d) a user listing ANOTHER member's tasks (カレンダーの「ユーザーを検索」). That is a
+    // per-person list, so it needs identity:read on top — the key that already lets the
+    // caller look that person up in the roster. Without it the old cross-user 403 holds.
     if (!eventId && !isServiceRole(principal)) {
       const isSelf =
         principal.kind === "user" &&
         (assigneeId === principal.userId || createdById === principal.userId);
-      if (!isSelf) throw errors.validationFailed([{ field: "assigneeId", reason: "required" }]);
+      const isTeam = principal.kind === "user" && !!teamId;
+      const isPerson = principal.kind === "user" && !!(assigneeId || createdById);
+      if (!isSelf && !isTeam && !isPerson) throw errors.validationFailed([{ field: "assigneeId", reason: "required" }]);
+      if (!isSelf && !isTeam && !(await holdsKey(c, "identity:read"))) {
+        throw errors.forbidden("permission denied: identity:read", {
+          reason: "missing_permission",
+          required: ["identity:read"],
+          missing: ["identity:read"],
+        });
+      }
     }
 
     const statusRaw = (c.req.queries("status") ?? []).flatMap((s) => s.split(",")).filter(Boolean);
@@ -229,7 +252,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   });
 
   // ---- POST /tasks (create) ----
-  app.post("/tasks", async (c) => {
+  // Handlers below are shared with the /tasks/calendar-events/* routes (policy-table.ts: the
+  // same write, gated by カレンダー's 「予定を登録」 instead of マイタスク 編集).
+  const createTask = async (c: Context) => {
     const ctx = ctxOf(c);
     const principal = principalOf(c);
     const body = await readJson<Partial<task.CreateTaskRequest>>(c);
@@ -313,7 +338,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     await emit(deps.events, { requestId: ctx.requestId, actorId }, specs);
 
     return c.json(created, 201);
-  });
+  };
+  app.post("/tasks", createTask);
+  app.post("/tasks/calendar-events", createTask);
 
   // ---- GET /tasks/:id ----
   app.get("/tasks/:id", async (c) => {
@@ -324,10 +351,10 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   });
 
   // ---- PATCH /tasks/:id (partial update; optimistic lock) ----
-  app.patch("/tasks/:id", async (c) => {
+  const updateTask = async (c: Context) => {
     const ctx = ctxOf(c);
     const principal = principalOf(c);
-    const id = c.req.param("id");
+    const id = taskIdParam(c);
     const body = await readJson<Partial<task.UpdateTaskRequest>>(c);
 
     if (typeof body.version !== "number") {
@@ -457,13 +484,15 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     await emit(deps.events, { requestId: ctx.requestId, actorId }, specs);
 
     return c.json(updated);
-  });
+  };
+  app.patch("/tasks/:id", updateTask);
+  app.patch("/tasks/calendar-events/:id", updateTask);
 
   // ---- DELETE /tasks/:id (soft delete = archive) ----
-  app.delete("/tasks/:id", async (c) => {
+  const archiveTask = async (c: Context) => {
     const ctx = ctxOf(c);
     const principal = principalOf(c);
-    const id = c.req.param("id");
+    const id = taskIdParam(c);
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
@@ -483,7 +512,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const archived = await deps.repo.getById(id, true);
     return c.json(archived ?? { ok: true });
-  });
+  };
+  app.delete("/tasks/:id", archiveTask);
+  app.delete("/tasks/calendar-events/:id", archiveTask);
 
   // ---- GET /tasks/:id/attachments (list a task's file/url attachments) ----
   app.get("/tasks/:id/attachments", async (c) => {

@@ -8,7 +8,7 @@ import { createInMemoryGoogleAccountStore } from "../src/google-account-store";
 import { importTokenKey, openToken, sealToken } from "../src/google/crypto";
 import type { Env } from "../src/env";
 import { SECRET_ACCOUNT_ID } from "../src/types";
-import { AUTHED, buildRoleGrants, fakeRoster, memAuthzHolding } from "./helpers";
+import { AUTHED, buildRoleGrants, fakeRoster, memAuthzHolding, buildMeetings } from "./helpers";
 
 const ORG = "org_devhub";
 const KEY_B64 = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
@@ -105,7 +105,9 @@ describe("add-account flow", () => {
     expect(u.searchParams.get("prompt")).toBe("consent");
     expect(u.searchParams.get("client_id")).toBe("web-cid");
     expect(u.searchParams.get("redirect_uri")).toBe(REDIRECT);
-    expect(u.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive");
+    expect(u.searchParams.get("scope")).toBe(
+      "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/meetings.space.settings",
+    );
     const row = store.states.get(stateOf(authUrl))!;
     expect(row).toMatchObject({ userId: "usr_admin", redirectUri: REDIRECT, orgId: ORG });
   });
@@ -141,6 +143,8 @@ describe("add-account flow", () => {
           connectedBy: "usr_admin",
           active: true,
           needsReconnect: false,
+          calendarMissing: false,
+          meetMissing: false,
         },
       ],
     });
@@ -302,7 +306,7 @@ describe("status + credential precedence", () => {
     expect(await svc.status()).toEqual({
       canConnect: false,
       accounts: [
-        { id: SECRET_ACCOUNT_ID, kind: "secret", email: "new-owner@gmail.com", connectedAt: null, connectedBy: null, active: true, needsReconnect: false },
+        { id: SECRET_ACCOUNT_ID, kind: "secret", email: "new-owner@gmail.com", connectedAt: null, connectedBy: null, active: true, needsReconnect: false, calendarMissing: false, meetMissing: false },
       ],
     });
     const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key: null });
@@ -338,6 +342,27 @@ describe("status + credential precedence", () => {
     const { accounts } = await svc.status();
     expect(accounts.find((a) => a.id === "dga_1")).toMatchObject({ email: "new-owner@gmail.com", active: true, needsReconnect: true });
     expect(accounts.find((a) => a.id === SECRET_ACCOUNT_ID)).toMatchObject({ needsReconnect: false });
+  });
+
+  it("a grant without the calendar scope surfaces as calendarMissing so the UI offers 再接続", async () => {
+    const env = { ...SECRET_ENV, ...WEB_ENV } as Env;
+    let scope: string | undefined = "https://www.googleapis.com/auth/drive";
+    const google = fakeGoogle(() => json({ access_token: "at", refresh_token: "rt-d1", ...(scope ? { scope } : {}) }));
+    const { svc } = await setup({ env, fetchImpl: google as unknown as typeof fetch });
+    await addAccount(svc);
+    expect((await svc.status()).accounts.find((a) => a.id === "dga_1")).toMatchObject({ needsReconnect: false, calendarMissing: true });
+
+    scope = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar";
+    expect((await svc.status()).accounts.map((a) => a.calendarMissing)).toEqual([false, false]);
+    // Connected before the Meet scope was requested: reconnect to open Meet links.
+    expect((await svc.status()).accounts.map((a) => a.meetMissing)).toEqual([true, true]);
+
+    scope += " https://www.googleapis.com/auth/meetings.space.settings";
+    expect((await svc.status()).accounts.map((a) => a.meetMissing)).toEqual([false, false]);
+
+    // Google did not report scopes: not flagged (same as meetings calendarReady)
+    scope = undefined;
+    expect((await svc.status()).accounts.map((a) => a.calendarMissing)).toEqual([false, false]);
   });
 
   it("a row that no longer opens (rotated key) fails closed and asks to reconnect — never the secret", async () => {
@@ -417,7 +442,7 @@ describe("routes (through policyGate)", () => {
     const service = createDriveShareService({ client, config: { listPageSize: 50 } });
     const { service: roleGrants } = buildRoleGrants({ drive: client, roster: fakeRoster({}) });
     const { svc } = await setup();
-    return createApp({ service, roleGrants, authz: memAuthzHolding(...keys), googleAccount: svc });
+    return createApp({ service, roleGrants, authz: memAuthzHolding(...keys), googleAccount: svc, meetings: async () => buildMeetings().service });
   }
   const HDR = { ...AUTHED, "content-type": "application/json" };
   const ADMIN_KEYS = ["app:driveshare:view", "app:driveshare:edit", "drive:settings_view", "drive:settings_edit"] as Parameters<typeof memAuthzHolding>;

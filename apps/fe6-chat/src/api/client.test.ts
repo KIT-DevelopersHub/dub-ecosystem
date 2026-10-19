@@ -69,3 +69,32 @@ describe("HttpChatClient envelope unwrapping", () => {
     expect(called).toBe(false);
   });
 });
+
+describe("HttpChatClient channel delete + sections", () => {
+  it("hits the contract paths and handles 204 bodies", async () => {
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      calls.push({ method: init.method ?? "GET", url, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      if (init.method === "GET") return new Response(JSON.stringify({ items: [], assignments: {} }), { status: 200 });
+      if (init.method === "POST" || init.method === "PATCH") return new Response(JSON.stringify({ id: "s1" }), { status: 200 });
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const client = new HttpChatClient({ fetchImpl });
+    await client.deleteChannel("ch_1");
+    expect(await client.listSections()).toEqual({ items: [], assignments: {} });
+    await client.createSection("運営");
+    await client.updateSection("s1", { name: "x" });
+    await client.deleteSection("s1");
+    await client.setChannelSection("ch_1", null);
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      "DELETE /api/v1/chat/channels/ch_1",
+      "GET /api/v1/chat/sections",
+      "POST /api/v1/chat/sections",
+      "PATCH /api/v1/chat/sections/s1",
+      "DELETE /api/v1/chat/sections/s1",
+      "PUT /api/v1/chat/channels/ch_1/section",
+    ]);
+    expect(calls[2]!.body).toEqual({ name: "運営" });
+    expect(calls[5]!.body).toEqual({ sectionId: null });
+  });
+});

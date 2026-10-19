@@ -235,6 +235,58 @@ UPDATE member_people SET grade = 'graduate' WHERE grade IN ('院生', '大学院
 `.trim(),
 };
 
+// 0014: オンボーディング案内項目 (新規テーブルのみ・additive)。公開ページ /onboarding が
+// sort_order 昇順で表示する。Mirrors 0014_onboarding_items.sql (schema-lockstep).
+export const MEMBER_ONBOARDING_ITEMS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0014_onboarding_items",
+  up: `
+CREATE TABLE member_onboarding_items (
+  id          TEXT PRIMARY KEY,
+  org_id      TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  description TEXT,
+  url         TEXT,
+  sort_order  INTEGER NOT NULL,
+  created_by  TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX idx_member_onboarding_items_org ON member_onboarding_items(org_id, sort_order);
+`.trim(),
+};
+
+// 0015: オンボーディング案内のミーティング (新規テーブルのみ・additive)。team_id = '' が
+// 全体ミーティング。Mirrors 0015_onboarding_meetings.sql (schema-lockstep).
+export const MEMBER_ONBOARDING_MEETINGS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0015_onboarding_meetings",
+  up: `
+CREATE TABLE member_onboarding_meetings (
+  org_id      TEXT NOT NULL,
+  team_id     TEXT NOT NULL,
+  schedule    TEXT NOT NULL,
+  url         TEXT,
+  updated_by  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (org_id, team_id)
+);
+`.trim(),
+};
+
+// 0016: 学籍番号 (student_number, 例 "1400980") を名簿と参加届に足す additive ALTER
+// (non-destructive)。既存行は全て null。形式検証・正規化はアプリ層。参加届は管理者が
+// 確定すると member_people.student_number へ引き継ぐ。Mirrors 0016_student_number.sql
+// (schema-lockstep).
+export const MEMBER_STUDENT_NUMBER_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0016_student_number",
+  up: `
+ALTER TABLE member_people ADD COLUMN student_number TEXT;
+ALTER TABLE member_participations ADD COLUMN student_number TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -250,4 +302,7 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_PERSON_ROSTER_NUMBER_MIGRATION,
   MEMBER_PARTICIPATION_ROSTER_NUMBER_MIGRATION,
   MEMBER_PERSON_GRADE_NORMALIZE_MIGRATION,
+  MEMBER_ONBOARDING_ITEMS_MIGRATION,
+  MEMBER_ONBOARDING_MEETINGS_MIGRATION,
+  MEMBER_STUDENT_NUMBER_MIGRATION,
 ];

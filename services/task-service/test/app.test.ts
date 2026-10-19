@@ -466,10 +466,27 @@ describe("GET /tasks (list + paging)", () => {
     expect(new Set(collected).size).toBe(ids.length);
   });
 
-  it("400 when eventId is omitted and it is not a self (assignee) query", async () => {
+  it("400 when eventId is omitted and no scope is given at all", async () => {
     const { app } = setup();
-    const res = await app.request(`/tasks?assigneeId=usr_other`, userInit("GET", undefined, { userId: "usr_alice" }));
+    const res = await app.request(`/tasks`, userInit("GET", undefined, { userId: "usr_alice" }));
     expect(res.status).toBe(400);
+  });
+
+  it("403 for another member's tasks without identity:read (no cross-user leak)", async () => {
+    const { h, app } = setup();
+    h.authz.denied.add("identity:read");
+    const res = await app.request(`/tasks?assigneeId=usr_other`, userInit("GET", undefined, { userId: "usr_alice" }));
+    expect(res.status).toBe(403);
+  });
+
+  it("lists another member's tasks with identity:read (カレンダーの「ユーザーを検索」)", async () => {
+    const { app } = setup();
+    await create(app, { assigneeId: "usr_bob" });
+    await create(app, { assigneeId: "usr_carol" });
+    const res = await app.request(`/tasks?assigneeId=usr_bob`, userInit("GET", undefined, { userId: "usr_alice" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.ListTasksResponse;
+    expect(body.items.map((t) => t.assigneeId)).toEqual(["usr_bob"]);
   });
 
   it("allows omitting eventId for the caller's own tasks (/me)", async () => {
@@ -503,13 +520,24 @@ describe("GET /tasks (list + paging)", () => {
     expect(body.items[0]!.createdBy).toBe("usr_alice");
   });
 
-  it("400 when eventId omitted and createdById is another user (no cross-user leak)", async () => {
+  it("allows omitting eventId for one team's tasks, whoever owns them (チームのタスクを表示)", async () => {
     const { app } = setup();
+    await create(app, { assigneeId: "usr_bob", teamId: "team_dev" });
+    await create(app, { assigneeId: "usr_bob", teamId: "team_ops" });
+    const res = await app.request(`/tasks?teamId=team_dev`, userInit("GET", undefined, { userId: "usr_alice" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as task.ListTasksResponse;
+    expect(body.items.map((t) => t.teamId)).toEqual(["team_dev"]);
+  });
+
+  it("403 when eventId omitted and createdById is another user without identity:read", async () => {
+    const { h, app } = setup();
+    h.authz.denied.add("identity:read");
     const res = await app.request(
       `/tasks?createdById=usr_other`,
       userInit("GET", undefined, { userId: "usr_alice" }),
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
   });
 });
 

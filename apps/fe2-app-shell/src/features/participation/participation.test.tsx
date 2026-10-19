@@ -13,9 +13,11 @@ import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { createParticipationApi, type ParticipationApi } from "./participationApi.tsx";
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
-import { ParticipationPage } from "./ParticipationPage.tsx";
+import { ParticipationForm } from "./ParticipationForm.tsx";
+import { OnboardingAdminPage } from "./OnboardingAdminPage.tsx";
 import { ParticipationListPage } from "./ParticipationListPage.tsx";
-import type { Participation, ParticipationCandidate, PublicParticipationResponse, RosterMember } from "./contracts.ts";
+import { PublicOnboardingPage } from "./PublicOnboardingPage.tsx";
+import type { OnboardingGuide, OnboardingItem, OnboardingTeam, Participation, ParticipationCandidate, PublicParticipationResponse, RosterMember } from "./contracts.ts";
 
 /** Minimal roster member fixture for the manual-link search. */
 function rosterMember(over: Partial<RosterMember> & Pick<RosterMember, "id" | "name">): RosterMember {
@@ -39,6 +41,24 @@ function fakeApiClient(result: unknown = undefined): { api: ApiClient; calls: Re
 
 const ACCEPTED: PublicParticipationResponse = { accepted: true };
 
+function onboardingItem(over: Partial<OnboardingItem> & Pick<OnboardingItem, "id">): OnboardingItem {
+  return {
+    title: "項目", description: null, url: null, sortOrder: 1024,
+    createdAt: "2026-10-13T00:00:00.000Z", updatedAt: "2026-10-13T00:00:00.000Z",
+    ...over,
+  };
+}
+
+const TEAMS: OnboardingTeam[] = [
+  { id: "team_dev", name: "開発チーム", color: "#0d9488" },
+  { id: "team_pr", name: "広報チーム", color: null },
+];
+const AT = "2026-10-13T00:00:00.000Z";
+
+function guide(items: OnboardingItem[], over: Partial<OnboardingGuide> = {}): OnboardingGuide {
+  return { items, teams: [], meetings: [], ...over };
+}
+
 function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
   return {
     listTeams: () => Promise.resolve({ teams: [{ id: "t1", key: "venue", name: "会場", color: null, description: null }] }),
@@ -49,6 +69,13 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
     resolve: vi.fn((id: string) =>
       Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const }, member: null }),
     ),
+    listOnboarding: vi.fn(() => Promise.resolve(guide([]))),
+    createOnboarding: vi.fn((input) => Promise.resolve(onboardingItem({ id: "onb_new", ...input }))),
+    updateOnboarding: vi.fn((id, patch) => Promise.resolve(onboardingItem({ id, ...patch }))),
+    deleteOnboarding: vi.fn(() => Promise.resolve()),
+    reorderOnboarding: vi.fn((ids: string[]) => Promise.resolve({ items: ids.map((id) => onboardingItem({ id })) })),
+    saveOnboardingMeeting: vi.fn(() => Promise.resolve({ meetings: [] })),
+    publicOnboarding: vi.fn(() => Promise.resolve(guide([]))),
     ...overrides,
   } as ParticipationApi;
 }
@@ -112,10 +139,10 @@ describe("createParticipationApi", () => {
   });
 });
 
-describe("ParticipationPage", () => {
+describe("ParticipationForm", () => {
   it("blocks submit with an empty 姓/名", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await userEvent.click(screen.getByTestId("participation-submit"));
     expect(screen.getByText("氏名（苗字）を入力してください")).toBeInTheDocument();
     expect(screen.getByText("氏名（名前）を入力してください")).toBeInTheDocument();
@@ -124,7 +151,7 @@ describe("ParticipationPage", () => {
 
   it("requires both the school email and the Gmail address", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await userEvent.type(screen.getByTestId("participation-last-name"), "山田");
     await userEvent.type(screen.getByTestId("participation-first-name"), "太郎");
     await userEvent.click(screen.getByTestId("participation-submit"));
@@ -135,7 +162,7 @@ describe("ParticipationPage", () => {
 
   it("rejects a malformed email", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await userEvent.type(screen.getByTestId("participation-last-name"), "山田");
     await userEvent.type(screen.getByTestId("participation-first-name"), "太郎");
     await userEvent.type(screen.getByTestId("participation-school-email"), "not-an-email");
@@ -147,7 +174,7 @@ describe("ParticipationPage", () => {
 
   it("rejects a malformed phone number", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await fillRequired();
     await userEvent.type(screen.getByTestId("participation-phone"), "not-a-phone");
     await userEvent.click(screen.getByTestId("participation-submit"));
@@ -157,7 +184,7 @@ describe("ParticipationPage", () => {
 
   it("rejects a malformed 名列番号", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await fillRequired();
     await userEvent.type(screen.getByTestId("participation-roster-number"), "3EP2");
     await userEvent.click(screen.getByTestId("participation-submit"));
@@ -167,7 +194,7 @@ describe("ParticipationPage", () => {
 
   it("submits split 姓/名 + both emails and shows a neutral サンクス (no roster claim)", async () => {
     const api = makeApi();
-    render(wrap(<ParticipationPage />, api));
+    render(wrap(<ParticipationForm />, api));
     await fillRequired("新規", "太郎");
     await userEvent.type(screen.getByTestId("participation-phone"), "090-1234-5678");
     await userEvent.type(screen.getByTestId("participation-roster-number"), "3ep2-26");
@@ -186,18 +213,13 @@ describe("ParticipationPage", () => {
     expect(screen.getByText(/運営が内容を確認します/)).toBeInTheDocument();
   });
 
-  it("links to the public form for sharing", () => {
-    render(wrap(<ParticipationPage />, makeApi()));
-    const link = screen.getByTestId("participation-public-link").querySelector("a");
-    expect(link?.getAttribute("href")).toBe("/participate");
-  });
 });
 
 const SUBMISSION: Participation = {
   id: "p_1", orgId: "org", memberId: null, name: "黒川", lastName: "黒川", firstName: null,
   nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
   nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null, grade: "3",
-  department: "情報工学科", rosterNumber: null, contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
+  department: "情報工学科", rosterNumber: null, studentNumber: null, contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
   gmail: "kurokawa.dev@gmail.com", desiredTeamId: "t1", desiredActivity: "both", note: "よろしく",
   status: "submitted", matchKind: "created_new", reviewState: "pending", submittedBy: "u_1",
   submittedAt: "2026-08-15T10:00:00.000Z", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",
@@ -349,5 +371,302 @@ describe("ParticipationListPage", () => {
     await waitFor(() => expect(resolve).toHaveBeenCalledWith("p_1", { action: "unlink" }));
     // 解除後は再び「追加する」で付け直せる。
     expect(await screen.findByTestId("participation-add-p_1")).toBeInTheDocument();
+  });
+});
+
+describe("OnboardingAdminPage", () => {
+  const ITEMS = [
+    onboardingItem({ id: "onb_1", title: "Discord に参加", url: "https://discord.gg/x", sortOrder: 1024 }),
+    onboardingItem({ id: "onb_2", title: "参加届を出す", description: "名前とメールを送る", sortOrder: 2048 }),
+  ];
+
+  it("shows the public URL and the items in order", async () => {
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide(ITEMS))) });
+    render(wrap(<OnboardingAdminPage />, api));
+    expect(screen.getByTestId("onboarding-share-url").textContent).toMatch(/\/onboarding$/);
+    expect(await screen.findByText("Discord に参加")).toBeInTheDocument();
+    const rows = screen.getAllByTestId(/^onboarding-admin-item-/);
+    expect(rows.map((r) => r.dataset.testid)).toEqual(["onboarding-admin-item-onb_1", "onboarding-admin-item-onb_2"]);
+  });
+
+  it("adds an item through the dialog and rejects a non-http link", async () => {
+    const stored: OnboardingItem[] = [];
+    const api = makeApi({
+      listOnboarding: vi.fn(() => Promise.resolve(guide([...stored]))),
+      createOnboarding: vi.fn((input) => {
+        const item = onboardingItem({ id: "onb_new", ...input });
+        stored.push(item);
+        return Promise.resolve(item);
+      }),
+    });
+    render(wrap(<OnboardingAdminPage />, api));
+    await screen.findByTestId("onboarding-admin-empty");
+    await userEvent.click(screen.getByTestId("onboarding-admin-add"));
+    await userEvent.type(screen.getByTestId("onboarding-item-title"), "Slack に参加");
+    await userEvent.type(screen.getByTestId("onboarding-item-url"), "javascript:alert(1)");
+    await userEvent.click(screen.getByTestId("onboarding-item-save"));
+    expect(screen.getByText("http:// または https:// で始まる URL を入力してください")).toBeInTheDocument();
+    expect(api.createOnboarding).not.toHaveBeenCalled();
+
+    await userEvent.clear(screen.getByTestId("onboarding-item-url"));
+    await userEvent.type(screen.getByTestId("onboarding-item-url"), "https://slack.com/x");
+    await userEvent.click(screen.getByTestId("onboarding-item-save"));
+    await waitFor(() => expect(api.createOnboarding).toHaveBeenCalledTimes(1));
+    expect((api.createOnboarding as any).mock.calls[0][0]).toEqual({ title: "Slack に参加", description: null, url: "https://slack.com/x" });
+    expect(await screen.findByText("Slack に参加")).toBeInTheDocument();
+  });
+
+  it("deletes after confirmation", async () => {
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide(ITEMS))) });
+    render(wrap(<OnboardingAdminPage />, api));
+    await userEvent.click(await screen.findByTestId("onboarding-admin-delete-onb_1"));
+    const dialog = screen.getByTestId("onboarding-admin-delete-confirm");
+    await userEvent.click(within(dialog).getByText("削除する"));
+    await waitFor(() => expect(api.deleteOnboarding).toHaveBeenCalledWith("onb_1"));
+  });
+
+  it("is read-only for a 閲覧 subject (no add / edit / delete)", async () => {
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide(ITEMS))) });
+    render(wrap(<OnboardingAdminPage />, api, viewerPermissions("participation")));
+    expect(await screen.findByText("Discord に参加")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-admin-add")).toBeNull();
+    expect(screen.queryByTestId("onboarding-admin-edit-onb_1")).toBeNull();
+    expect(screen.getByTestId("onboarding-readonly-notice")).toBeInTheDocument();
+  });
+});
+
+describe("OnboardingAdminPage meetings", () => {
+  it("lists 全体 + each team and saves a team meeting (schedule required, link optional)", async () => {
+    const api = makeApi({
+      listOnboarding: vi.fn(() =>
+        Promise.resolve(
+          guide([], { teams: TEAMS, meetings: [{ teamId: null, schedule: "10/20(火) 19:00〜", url: "https://meet.google.com/a", updatedAt: AT }] }),
+        ),
+      ),
+    });
+    render(wrap(<OnboardingAdminPage />, api));
+    expect(await screen.findByText("10/20(火) 19:00〜")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-meeting-team_pr").textContent).toContain("未設定");
+
+    await userEvent.click(screen.getByTestId("onboarding-meeting-edit-team_dev"));
+    await userEvent.click(screen.getByTestId("onboarding-meeting-save"));
+    expect(screen.getByText("日時を入力してください")).toBeInTheDocument();
+    await userEvent.type(screen.getByTestId("onboarding-meeting-schedule"), "毎週水曜 20:00〜");
+    await userEvent.type(screen.getByTestId("onboarding-meeting-url"), "https://meet.google.com/dev");
+    await userEvent.click(screen.getByTestId("onboarding-meeting-save"));
+    await waitFor(() =>
+      expect(api.saveOnboardingMeeting).toHaveBeenCalledWith({
+        teamId: "team_dev",
+        schedule: "毎週水曜 20:00〜",
+        url: "https://meet.google.com/dev",
+      }),
+    );
+  });
+
+  it("clears an existing meeting", async () => {
+    const api = makeApi({
+      listOnboarding: vi.fn(() =>
+        Promise.resolve(guide([], { meetings: [{ teamId: null, schedule: "毎週木曜", url: null, updatedAt: AT }] })),
+      ),
+    });
+    render(wrap(<OnboardingAdminPage />, api));
+    await userEvent.click(await screen.findByTestId("onboarding-meeting-edit-all"));
+    await userEvent.click(screen.getByTestId("onboarding-meeting-clear"));
+    await waitFor(() => expect(api.saveOnboardingMeeting).toHaveBeenCalledWith({ teamId: null, schedule: null, url: null }));
+  });
+
+  it("hides meeting editing for a 閲覧 subject", async () => {
+    const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide([], { teams: TEAMS }))) });
+    render(wrap(<OnboardingAdminPage />, api, viewerPermissions("participation")));
+    expect(await screen.findByTestId("onboarding-meeting-team_dev")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-meeting-edit-team_dev")).toBeNull();
+  });
+});
+
+describe("PublicOnboardingPage", () => {
+  const PUBLIC = guide([onboardingItem({ id: "onb_1", title: "Slack に参加する", url: "https://join.slack.com/x" })], {
+    teams: TEAMS,
+    meetings: [
+      { teamId: null, schedule: "10/20(火) 19:00〜", url: "https://meet.google.com/all", updatedAt: AT },
+      { teamId: "team_dev", schedule: "毎週水曜 20:00〜", url: "https://meet.google.com/dev", updatedAt: AT },
+    ],
+  });
+
+  function renderPublic(data: OnboardingGuide): void {
+    const { api } = fakeApiClient(data);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <PublicOnboardingPage api={api} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("asks for the team first, then shows the steps followed by 全体 and the team's meeting time + link", async () => {
+    window.history.replaceState(null, "", "/onboarding");
+    renderPublic(PUBLIC);
+    await screen.findByTestId("onboarding-public-team-picker");
+    expect(screen.queryByTestId("onboarding-public-steps")).toBeNull();
+
+    await userEvent.click(screen.getByTestId("onboarding-public-team-team_dev"));
+    const steps = screen.getAllByTestId(/^onboarding-public-step-/).map((el) => el.dataset.testid);
+    expect(steps).toEqual(["onboarding-public-step-onb_1", "onboarding-public-step-all", "onboarding-public-step-team_dev"]);
+    expect(screen.getByTestId("onboarding-public-when-all").textContent).toBe("10/20(火) 19:00〜");
+    expect(screen.getByTestId("onboarding-public-when-team_dev").textContent).toBe("毎週水曜 20:00〜");
+    expect(screen.getByText("開発チームのチームミーティングに出る")).toBeInTheDocument();
+    expect(window.location.search).toBe("?team=team_dev");
+
+    await userEvent.click(screen.getByTestId("onboarding-public-change-team"));
+    expect(await screen.findByTestId("onboarding-public-team-picker")).toBeInTheDocument();
+    expect(window.location.search).toBe("");
+  });
+
+  it("restores the team from ?team= and says the team meeting is TBD when not set", async () => {
+    window.history.replaceState(null, "", "/onboarding?team=team_pr");
+    renderPublic(PUBLIC);
+    expect(await screen.findByText("広報チームのチームミーティングに出る")).toBeInTheDocument();
+    expect(screen.getByText("日時は運営から追って連絡します。")).toBeInTheDocument();
+  });
+
+  it("「まだ決まっていない」shows only the 全体 meeting", async () => {
+    window.history.replaceState(null, "", "/onboarding");
+    renderPublic(PUBLIC);
+    await userEvent.click(await screen.findByTestId("onboarding-public-team-none"));
+    const steps = screen.getAllByTestId(/^onboarding-public-step-/).map((el) => el.dataset.testid);
+    expect(steps).toEqual(["onboarding-public-step-onb_1", "onboarding-public-step-all"]);
+  });
+});
+
+describe("ParticipationListPage — 追加と同時のメール発行", () => {
+  const ADDED_MEMBER = rosterMember({ id: "m_new", name: "田中 実", status: "added", version: 2 });
+  const TANAKA: Participation = {
+    ...SUBMISSION, id: "p_2", name: "田中 実", lastName: "田中", firstName: "実",
+    lastNameKana: "たなか", firstNameKana: "みのる", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
+  };
+  const ROLES = [
+    { id: "role_sys_admin", orgId: "org", name: "admin", permissions: [], isSystem: true },
+    { id: "role_sys_member", orgId: "org", name: "member", permissions: [], isSystem: true },
+  ];
+  // 参加届・管理・運営メンバーの編集 + identity:admin + mail:admin = 発行まで出来る人。
+  const issuer = [
+    ...editorPermissions("participation", ["identity:read", "identity:admin", "mail:admin"]),
+    ...editorPermissions("admin"),
+    ...editorPermissions("members"),
+  ];
+
+  function issueApi(over: Partial<ParticipationApi> = {}): ParticipationApi {
+    return makeApi({
+      list: vi.fn(() => Promise.resolve({ participations: [TANAKA] })),
+      candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
+      resolve: vi.fn((id: string) =>
+        Promise.resolve({ participation: { ...TANAKA, id, reviewState: "added" as const }, member: ADDED_MEMBER }),
+      ),
+      listRoles: vi.fn(() => Promise.resolve(ROLES)),
+      issueMailAddress: vi.fn((localPart: string) => Promise.resolve({ id: "eml_1", address: `${localPart}@developershub.jp` })),
+      inviteAccount: vi.fn(() => Promise.resolve({ id: "usr_new" } as never)),
+      linkAccount: vi.fn(() => Promise.resolve(ADDED_MEMBER)),
+      ...over,
+    });
+  }
+
+  async function addAsNew(): Promise<void> {
+    await userEvent.click(await screen.findByTestId("participation-add-p_2"));
+    await userEvent.click(await screen.findByTestId("participation-resolve-create"));
+  }
+
+  it("追加後に発行を聞き、ローマ字の案とロールで 発行→アカウント作成→紐付け まで行う", async () => {
+    const api = issueApi();
+    render(wrap(<ParticipationListPage />, api, issuer));
+    await addAsNew();
+    expect(await screen.findByTestId("participation-issue-mail-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("participation-issue-mail-localpart")).toHaveValue("minoru.tanaka");
+    // 一般メンバーのロールが最初から選ばれている。
+    expect(await screen.findByLabelText("member")).toBeChecked();
+    expect(screen.getByLabelText("admin")).not.toBeChecked();
+    await userEvent.click(screen.getByTestId("participation-issue-mail-submit"));
+    await waitFor(() => expect(api.linkAccount).toHaveBeenCalledWith("m_new", { identityUserId: "usr_new", version: 2 }));
+    expect(api.issueMailAddress).toHaveBeenCalledWith("minoru.tanaka");
+    expect(api.inviteAccount).toHaveBeenCalledWith({
+      email: "minoru.tanaka@developershub.jp", displayName: "田中 実", furigana: "たなか みのる", roleIds: ["role_sys_member"],
+    });
+    await waitFor(() => expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument());
+  });
+
+  it("発行→紐付けが済んだら、続けてアカウント発行メールを送るか聞き、送る で API を呼ぶ", async () => {
+    const sendAccountMail = vi.fn(() =>
+      Promise.resolve({ ok: true as const, to: TANAKA.gmail ?? "", cc: "minoru.tanaka@developershub.jp", appUrl: "https://app.developershub.jp", passwordSource: "generated" as const, messageId: "m" }),
+    );
+    const api = issueApi({ sendAccountMail });
+    render(wrap(<ParticipationListPage />, api, issuer));
+    await addAsNew();
+    await userEvent.click(await screen.findByTestId("participation-issue-mail-submit"));
+    const dialog = await screen.findByTestId("account-mail-dialog");
+    expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("account-mail-dialog-to")).toHaveTextContent(TANAKA.gmail ?? "");
+    expect(within(dialog).getByTestId("account-mail-dialog-cc")).toHaveTextContent("minoru.tanaka@developershub.jp");
+    await userEvent.click(within(dialog).getByTestId("account-mail-dialog-send"));
+    await waitFor(() => expect(sendAccountMail).toHaveBeenCalledWith("usr_new"));
+  });
+
+  it("途中で失敗したら、再試行は発行済みのアドレスを作り直さず続きから行う", async () => {
+    const inviteAccount = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce({ id: "usr_new" });
+    const api = issueApi({ inviteAccount });
+    render(wrap(<ParticipationListPage />, api, issuer));
+    await addAsNew();
+    await screen.findByLabelText("member");
+    await userEvent.click(screen.getByTestId("participation-issue-mail-submit"));
+    expect(await screen.findByTestId("participation-issue-mail-error")).toHaveTextContent("minoru.tanaka@developershub.jp は発行済み");
+    await userEvent.click(screen.getByTestId("participation-issue-mail-submit"));
+    await waitFor(() => expect(api.linkAccount).toHaveBeenCalledTimes(1));
+    expect(api.issueMailAddress).toHaveBeenCalledTimes(1);
+    expect(inviteAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it("「今はしない」なら何も発行しない", async () => {
+    const api = issueApi();
+    render(wrap(<ParticipationListPage />, api, issuer));
+    await addAsNew();
+    await userEvent.click(await screen.findByTestId("participation-issue-mail-later"));
+    expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
+    expect(api.issueMailAddress).not.toHaveBeenCalled();
+  });
+
+  it("メール管理の権限が無い人や、既にアカウントのある人には聞かない", async () => {
+    const api = issueApi();
+    const { unmount } = render(wrap(<ParticipationListPage />, api));
+    await addAsNew();
+    await waitFor(() => expect(api.resolve).toHaveBeenCalled());
+    expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
+    unmount();
+
+    const linked = issueApi({
+      resolve: vi.fn((id: string) =>
+        Promise.resolve({ participation: { ...TANAKA, id, reviewState: "added" as const }, member: { ...ADDED_MEMBER, identityUserId: "usr_old" } }),
+      ),
+    });
+    render(wrap(<ParticipationListPage />, linked, issuer));
+    await addAsNew();
+    await waitFor(() => expect(linked.resolve).toHaveBeenCalled());
+    expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("createParticipationApi — メール発行まわり", () => {
+  it("invite は { user } を剥がして返し、紐付けは identity-link に POST する", async () => {
+    const { api, calls } = fakeApiClient({ user: { id: "usr_1" } });
+    const papi = createParticipationApi(api);
+    await expect(papi.inviteAccount({ email: "a@developershub.jp", roleIds: [] })).resolves.toEqual({ id: "usr_1" });
+    await papi.issueMailAddress("a");
+    await papi.linkAccount("m_1", { identityUserId: "usr_1", version: 3 });
+    expect(calls.map((c) => [c.method, c.path])).toEqual([
+      ["POST", "/api/v1/identity/users/invite"],
+      ["POST", "/api/v1/mail/admin/email-routing/issued-addresses"],
+      ["POST", "/api/v1/members/people/m_1/identity-link"],
+    ]);
   });
 });

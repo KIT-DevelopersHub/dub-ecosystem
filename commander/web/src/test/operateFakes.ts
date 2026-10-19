@@ -16,12 +16,13 @@ export const FAKE_CATALOG: CatalogEntry[] = [
   },
 ];
 
-export function makeFakeOperateClient(over: { preview?: Preview; execute?: ExecutionResult; previewError?: Error } = {}) {
+export function makeFakeOperateClient(over: { preview?: Preview; previews?: Preview[]; execute?: ExecutionResult; previewError?: Error } = {}) {
+  let n = 0;
   return {
     catalog: vi.fn(async () => ({ configured: true, environment: "staging", entries: FAKE_CATALOG })),
     preview: vi.fn(async (_plan: unknown) => {
       if (over.previewError) throw over.previewError;
-      return over.preview!;
+      return over.previews ? over.previews[Math.min(n++, over.previews.length - 1)]! : over.preview!;
     }),
     execute: vi.fn(async (_id: string, _skip: string[]) => over.execute!),
   } satisfies OperateClient;

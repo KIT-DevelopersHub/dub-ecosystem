@@ -97,6 +97,19 @@ CHAT_RT_DO_URL_BASE = "wss://dub-chat-service.developershub-site.workers.dev/ws/
 # custom domain, so realtime keeps working across the domain cutover.
 CHAT_RT_ALLOWED_ORIGINS = "https://dub-fe2-app-shell.developershub-site.workers.dev,https://app.developershub.jp"
 
+# Slack channel import (fe6-chat 「チャンネル取り込み」, src/slack-import.ts): attachments go to
+# the same R2 bucket file-meta serves message attachments from.
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "dub-file-attachments"
+
+# NOTE: SLACK_BOT_TOKEN (the LMB Slack bot token, xoxb-…) is a Worker Secret — NEVER in this
+# toml. Set only on the owner's go (staging first):
+#   npx wrangler secret put SLACK_BOT_TOKEN --config services/chat-service/wrangler.free.toml
+# Without it the /chat/slack-import/* routes answer 412 (not configured); nothing else changes.
+# One-time D1 table for the job cursor:
+#   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0005_slack_import_jobs.sql
+#
 # NOTE: WS_TICKET_SECRET is a Worker Secret (never in this toml). Set via
 # `wrangler secret put WS_TICKET_SECRET` at Apply. The ChatRoom DO verifies with
 # the same secret (chat self-owned HMAC, theme11).

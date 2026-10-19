@@ -13,11 +13,16 @@ export interface GoogleCredentials {
 
 export interface TokenProvider {
   getAccessToken(opts?: { forceRefresh?: boolean }): Promise<string>;
+  /** The scopes Google says the refresh token carries (the token response's `scope`), fetching
+   *  a token first if none is cached. null = Google did not say (treat as unknown). */
+  grantedScopes(): Promise<string[] | null>;
 }
 
 interface RefreshResponse {
   access_token?: string;
   expires_in?: number;
+  /** Space-separated scopes granted to the refresh token (Google returns it on refresh). */
+  scope?: string;
 }
 
 export const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -42,6 +47,7 @@ export function isInvalidGrant(err: unknown): boolean {
 interface Cached {
   accessToken: string;
   expiresAtMs: number;
+  scopes: string[] | null;
 }
 
 export function createTokenProvider(deps: {
@@ -82,7 +88,8 @@ export function createTokenProvider(deps: {
     const json = (await res.json().catch(() => null)) as RefreshResponse | null;
     if (!json?.access_token) throw errors.upstreamUnavailable("google:auth");
     const ttlSec = typeof json.expires_in === "number" ? Math.max(1, json.expires_in - 60) : 3540;
-    cache = { accessToken: json.access_token, expiresAtMs: now() + ttlSec * 1000 };
+    const scopes = typeof json.scope === "string" ? json.scope.split(/\s+/).filter((x) => x.length > 0) : null;
+    cache = { accessToken: json.access_token, expiresAtMs: now() + ttlSec * 1000, scopes };
     return json.access_token;
   }
 
@@ -90,6 +97,10 @@ export function createTokenProvider(deps: {
     async getAccessToken(opts): Promise<string> {
       if (!opts?.forceRefresh && cache && cache.expiresAtMs > now()) return cache.accessToken;
       return refresh();
+    },
+    async grantedScopes(): Promise<string[] | null> {
+      if (!cache || cache.expiresAtMs <= now()) await refresh();
+      return cache?.scopes ?? null;
     },
   };
 }

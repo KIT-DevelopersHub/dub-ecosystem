@@ -3,8 +3,9 @@
 // contract of its own. It rides the ONE shell api-client (src/lib/api-client.tsx:
 // session cookie, 401→refresh, requestId, error normalization) and calls the
 // canonical task-service endpoint GET /api/v1/tasks, typed against @dub/types
-// `task` (the API-contract SoT). No schema is added or changed — additive, read-only.
-import type { common, task } from "@dub/types";
+// `task` (the API-contract SoT). No schema is added or changed. Writes (予定の追加/編集/削除) use the same
+// task-service create/update/archive endpoints マイタスク uses.
+import type { common, identity, meeting, member, task } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 const P = "/api/v1";
@@ -40,6 +41,31 @@ export interface CalendarApi {
    * `listAllTasks()` with no scope failed in production ("タスクを取得できませんでした。").
    */
   listMyTasks(currentUserId: common.UserId): Promise<task.Task[]>;
+  /** 予定の追加 — a calendar 予定 is a task with startAt/dueAt (POST /api/v1/tasks). */
+  createTask(req: task.CreateTaskRequest): Promise<task.Task>;
+  updateTask(id: common.TaskId, req: task.UpdateTaskRequest): Promise<task.Task>;
+  /** Archives the task (task-service DELETE is a soft delete). */
+  deleteTask(id: common.TaskId): Promise<void>;
+  /** Every org role (GET /identity/roles, identity:read) — the 予定 label choices. */
+  listRoles(): Promise<identity.Role[]>;
+  /** Display names for the given users (GET /identity/users?ids=, identity:read). */
+  getUsers(ids: readonly common.UserId[]): Promise<identity.UserSummary[]>;
+  /** Every 運営チーム + the caller's own (GET /members/me/mention-teams, any signed-in user). */
+  listTeams(): Promise<{ teams: member.Team[]; myTeamIds: string[] }>;
+  /** Every task of one team, whoever owns it (チームのタスクを表示). */
+  listTeamTasks(teamId: common.TeamId): Promise<task.Task[]>;
+  /** ユーザーを検索: active members whose name/email matches (GET /identity/users?q=, identity:read). */
+  searchUsers(q: string): Promise<identity.UserSummary[]>;
+  /** One member's 担当 + 依頼 tasks (ユーザーを検索 で追加した人の予定). */
+  listUserTasks(userId: common.UserId): Promise<task.Task[]>;
+
+  // カレンダー > ミーティング (drive-share-service /meetings, @dub/types meeting).
+  listMeetings(): Promise<meeting.ListMeetingsResponse>;
+  listMeetingTargets(): Promise<meeting.ListMeetingTargetsResponse>;
+  createMeeting(body: meeting.CreateMeetingRequest): Promise<meeting.Meeting>;
+  updateMeeting(id: string, body: meeting.UpdateMeetingRequest): Promise<meeting.Meeting>;
+  deleteMeeting(id: string): Promise<void>;
+  syncMeetings(): Promise<meeting.SyncMeetingsResponse>;
 }
 
 export function createCalendarApi(api: ApiClient): CalendarApi {
@@ -70,18 +96,94 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
     return all;
   };
 
-  const listMyTasks: CalendarApi["listMyTasks"] = async (currentUserId) => {
-    // Two self-scoped lenses, run in parallel then merged (last write wins on id),
-    // identical to マイタスク's lensQueries("all"). Both satisfy the "/me rule".
+  // Two person-scoped lenses (担当 + 依頼), run in parallel then merged (last write wins
+  // on id), identical to マイタスク's lensQueries("all"). Both satisfy the "/me rule";
+  // for someone else task-service additionally requires identity:read.
+  const listUserTasks: CalendarApi["listUserTasks"] = async (userId) => {
     const [assigned, created] = await Promise.all([
-      listAllTasks({ assigneeId: currentUserId }),
-      listAllTasks({ createdById: currentUserId }),
+      listAllTasks({ assigneeId: userId }),
+      listAllTasks({ createdById: userId }),
     ]);
     const byId = new Map<common.TaskId, task.Task>();
     for (const t of assigned) byId.set(t.id, t);
     for (const t of created) byId.set(t.id, t);
     return [...byId.values()];
   };
+  const listMyTasks: CalendarApi["listMyTasks"] = listUserTasks;
 
-  return { listTasks, listAllTasks, listMyTasks };
+  // Writes use the calendar-events routes: gated by カレンダー 編集 + 「予定を登録」, not
+  // マイタスク 編集 (task-service policy-table.ts).
+  const EV = `${P}/tasks/calendar-events`;
+  const createTask: CalendarApi["createTask"] = (req) =>
+    api.request<task.Task>({ method: "POST", path: EV, body: req });
+
+  const updateTask: CalendarApi["updateTask"] = (id, req) =>
+    api.request<task.Task>({ method: "PATCH", path: `${EV}/${encodeURIComponent(id)}`, body: req });
+
+  const deleteTask: CalendarApi["deleteTask"] = async (id) => {
+    await api.request<unknown>({ method: "DELETE", path: `${EV}/${encodeURIComponent(id)}` });
+  };
+
+  const listRoles: CalendarApi["listRoles"] = async () => {
+    const all: identity.Role[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < MAX_PAGES; i++) {
+      const page = await api.request<common.Paginated<identity.Role>>({
+        method: "GET",
+        path: `${P}/identity/roles`,
+        query: { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+      });
+      all.push(...page.items);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return all;
+  };
+
+  const getUsers: CalendarApi["getUsers"] = async (ids) => {
+    const page = await api.request<common.Paginated<identity.UserSummary>>({
+      method: "GET",
+      path: `${P}/identity/users`,
+      query: { ids: ids.join(","), limit: PAGE_LIMIT },
+    });
+    return page.items;
+  };
+
+  const listTeams: CalendarApi["listTeams"] = () =>
+    api.request<{ teams: member.Team[]; myTeamIds: string[] }>({ method: "GET", path: `${P}/members/me/mention-teams` });
+
+  const listTeamTasks: CalendarApi["listTeamTasks"] = (teamId) => listAllTasks({ teamId });
+
+  const searchUsers: CalendarApi["searchUsers"] = async (q) => {
+    const page = await api.request<common.Paginated<identity.UserSummary>>({
+      method: "GET",
+      path: `${P}/identity/users`,
+      query: { q, status: "active", limit: 8 },
+    });
+    return page.items;
+  };
+
+  const m = (id: string): `/api/v1/${string}` => `${P}/meetings/${encodeURIComponent(id)}`;
+  return {
+    listTasks,
+    listAllTasks,
+    listMyTasks,
+    createTask,
+    updateTask,
+    deleteTask,
+    listRoles,
+    getUsers,
+    listTeams,
+    listTeamTasks,
+    searchUsers,
+    listUserTasks,
+    listMeetings: () => api.request<meeting.ListMeetingsResponse>({ method: "GET", path: `${P}/meetings` }),
+    listMeetingTargets: () => api.request<meeting.ListMeetingTargetsResponse>({ method: "GET", path: `${P}/meetings/targets` }),
+    createMeeting: (body) => api.request<meeting.Meeting>({ method: "POST", path: `${P}/meetings`, body }),
+    updateMeeting: (id, body) => api.request<meeting.Meeting>({ method: "PATCH", path: m(id), body }),
+    deleteMeeting: async (id) => {
+      await api.request<unknown>({ method: "DELETE", path: m(id) });
+    },
+    syncMeetings: () => api.request<meeting.SyncMeetingsResponse>({ method: "POST", path: `${P}/meetings/sync` }),
+  };
 }

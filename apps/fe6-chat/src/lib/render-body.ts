@@ -13,10 +13,11 @@
 
 export type BodySegment =
   | { type: "text"; value: string }
-  | { type: "bold"; value: string }
-  | { type: "italic"; value: string }
-  | { type: "underline"; value: string }
-  | { type: "strike"; value: string }
+  // `children` is set when the styled run nests other styles ("*_x_*" = bold+italic).
+  | { type: "bold"; value: string; children?: BodySegment[] }
+  | { type: "italic"; value: string; children?: BodySegment[] }
+  | { type: "underline"; value: string; children?: BodySegment[] }
+  | { type: "strike"; value: string; children?: BodySegment[] }
   | { type: "link"; href: string; label: string }
   | { type: "mention"; userId: string }
   | { type: "teamMention"; teamId: string }
@@ -36,9 +37,12 @@ const TOKEN_RE = /(`[^`\n]+`)|(<@[A-Za-z0-9_]+>)|(<!team:[A-Za-z0-9_-]+>)/g;
 // pasted link in Japanese text) — the URL alternative sits BEFORE bold/italic/strike so
 // "_" / "~" / "*" inside a URL (wikipedia Foo_bar) can never split it; leftmost match
 // wins, so "*see https://x*" is still bold and "[d](https://x_y)" still a markdown link.
-// Non-nested, single level — matches the toolbar.
+// Styles nest by re-parsing a styled run's inside ("*_x_*" = bold+italic), so a draft
+// that stacks toolbar styles sends exactly as it looked.
 const INLINE_RE =
   /(\[[^\]\n]+\]\((?:https?:\/\/|\/)[^)\s]+\))|(https?:\/\/[^\s<>"'`（）「」『』【】〔〕｛｝〈〉《》、。，！？：；…]+)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\+\+[^+\n]+\+\+)|(~[^~\n]+~)/g;
+// Inside a styled run only styles nest (a URL inside *bold* stays bold text, as before).
+const STYLE_RE = /(\*[^*\n]+\*)|(_[^_\n]+_)|(\+\+[^+\n]+\+\+)|(~[^~\n]+~)/g;
 // Trailing ASCII punctuation that is almost always sentence punctuation, not the URL.
 const URL_TRAIL_RE = /[.,;:!?)\]}]+$/;
 
@@ -57,10 +61,10 @@ function trimBareUrl(match: string): string {
 }
 
 /** Split a plain-text run into text + inline-style segments (no code/mention here). */
-function inlineStyles(text: string): BodySegment[] {
+function inlineStyles(text: string, re: RegExp = INLINE_RE): BodySegment[] {
   const out: BodySegment[] = [];
   let last = 0;
-  for (const m of text.matchAll(INLINE_RE)) {
+  for (const m of text.matchAll(re)) {
     const idx = m.index ?? 0;
     if (idx > last) out.push({ type: "text", value: text.slice(last, idx) });
     let token = m[0];
@@ -70,14 +74,11 @@ function inlineStyles(text: string): BodySegment[] {
     } else if (token.startsWith("http")) {
       token = trimBareUrl(token); // trimmed punctuation flows back into the text run
       out.push({ type: "link", href: token, label: token });
-    } else if (token.startsWith("++")) {
-      out.push({ type: "underline", value: token.slice(2, -2) });
-    } else if (token.startsWith("*")) {
-      out.push({ type: "bold", value: token.slice(1, -1) });
-    } else if (token.startsWith("_")) {
-      out.push({ type: "italic", value: token.slice(1, -1) });
     } else {
-      out.push({ type: "strike", value: token.slice(1, -1) });
+      const type = token.startsWith("++") ? "underline" : token.startsWith("*") ? "bold" : token.startsWith("_") ? "italic" : "strike";
+      const value = type === "underline" ? token.slice(2, -2) : token.slice(1, -1);
+      const inner = inlineStyles(value, STYLE_RE);
+      out.push(inner.length === 1 && inner[0]!.type === "text" ? { type, value } : { type, value, children: inner });
     }
     last = idx + token.length;
   }

@@ -25,10 +25,15 @@ export { ChatRuntimeProvider, chatFeature } from "@dub/fe6-chat/src/feature";
 export type { ChatRuntime } from "@dub/fe6-chat/src/feature";
 export { WsChatClient } from "@dub/fe6-chat/src/realtime/ws-client";
 export { mockUnfurl } from "@dub/fe6-chat/src/lib/unfurl-mock"; // VITE_DEMO link previews
+export { createSlackImportSim } from "@dub/fe6-chat/src/lib/slack-import-demo"; // VITE_DEMO チャンネル取り込み
+export type { ImportedChannel } from "@dub/fe6-chat/src/lib/slack-import-demo";
 export type { ChatApiClient } from "@dub/fe6-chat/src/api/client";
 export type {
   Channel,
   ChannelMember,
+  ChatSection,
+  ChatSectionList,
+  UpdateSectionRequest,
   CreateChannelRequest,
   DeleteMessageResult,
   DeletionPolicyResponse,
@@ -45,6 +50,8 @@ export type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  SlackChannelOption,
+  SlackImportJob,
   TeamSummary,
   UnfurlPreview,
   UnfurlResponse,

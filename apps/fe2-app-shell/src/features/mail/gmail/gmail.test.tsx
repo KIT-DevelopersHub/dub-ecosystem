@@ -7,6 +7,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { mail } from "@dub/types";
 import type { MailApi } from "../mailApi.tsx";
 import { MailApiProvider } from "../MailProvider.tsx";
 import { GmailApp } from "./GmailApp.tsx";
@@ -342,6 +343,130 @@ describe("GmailApp (hydrates from the gateway)", () => {
     expect(sent.subject).toBe("Re: 登壇のご相談");
   });
 
+  it("nudges an unreplied received thread; the banner reply reuses compose and the reply clears it", async () => {
+    // Gateway echo: once we send, GET /sent returns the reply threaded into thr_in_1.
+    let replied = false;
+    const fourDaysAgo = new Date(Date.now() - 4 * 86_400_000).toISOString();
+    const reply: mail.MailSentListItem = {
+      id: "sent_r", to: [{ email: "hanako@example.com" }], subject: "Re: 登壇のご相談", snippet: "了解しました。",
+      sentAt: new Date().toISOString(), provider: "resend", status: "sent", threadId: "thr_in_1",
+    };
+    const api = fakeApi({
+      // Read, received 4 days ago → inside the 3..14 day window (list + opened detail agree).
+      listInbox: vi.fn().mockResolvedValue({ items: [{ ...DEMO_INBOX_ITEMS[0]!, read: true, receivedAt: fourDaysAgo }], nextCursor: null }),
+      getThread: vi.fn().mockResolvedValue({
+        ...DEMO_INBOX_THREAD,
+        messages: DEMO_INBOX_THREAD.messages.map((m) => ({ ...m, read: true, receivedAt: fourDaysAgo })),
+      }),
+      send: vi.fn().mockImplementation(() => {
+        replied = true;
+        return Promise.resolve({ messageId: "m", provider: "resend", acceptedAt: "t" });
+      }),
+      listSent: vi.fn().mockImplementation(() => Promise.resolve({ items: replied ? [reply] : [], nextCursor: null })),
+    });
+    render(wrap(<GmailApp />, api));
+    const row = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    expect(within(row).getByTestId("fe2-mail-reply-nudge")).toHaveTextContent("4日前・未返信");
+    await userEvent.click(row);
+    await waitFor(() => expect(screen.getByText(/相談させてください/)).toBeInTheDocument());
+    expect(screen.getByTestId("fe2-mail-reply-nudge-banner")).toHaveTextContent("4日前に受信したメールにまだ返信していません");
+    await userEvent.click(screen.getByTestId("fe2-mail-reply-nudge-reply"));
+    expect(screen.getByTestId("fe2-mail-compose-window")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    expect((api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0].inReplyTo).toBe("<in1@developershub.jp>");
+    await waitFor(() => expect(screen.queryByTestId("fe2-mail-reply-nudge-banner")).not.toBeInTheDocument());
+  });
+
+  it("pins unreplied mail above newer arrivals so it can't get buried; the group collapses", async () => {
+    const day = 86_400_000;
+    const api = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({
+        items: [
+          { ...DEMO_INBOX_ITEMS[0]!, read: false, receivedAt: new Date(Date.now() - 3_600_000).toISOString() },
+          { ...DEMO_INBOX_ITEMS[1]!, read: true, receivedAt: new Date(Date.now() - 5 * day).toISOString() },
+        ],
+        nextCursor: null,
+      }),
+    });
+    render(wrap(<GmailApp />, api));
+    await screen.findAllByTestId("fe2-mail-inbox-item");
+    expect(screen.getByTestId("fe2-mail-nudge-section")).toHaveTextContent("返信待ち 1件");
+    expect(screen.getByTestId("fe2-mail-rest-section")).toHaveTextContent("その他");
+    const rows = screen.getAllByTestId("fe2-mail-inbox-item");
+    expect(within(rows[0]!).getByText("会場下見の日程")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("登壇のご相談")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("fe2-mail-nudge-section-toggle"));
+    expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(1);
+    expect(screen.queryByText("会場下見の日程")).not.toBeInTheDocument();
+    // Select-all only reaches rows on screen, never the collapsed group.
+    await userEvent.click(screen.getByTestId("fe2-mail-select-all"));
+    expect(screen.getByText("1件を選択中")).toBeInTheDocument();
+
+    // Other folders are never split.
+    await userEvent.click(screen.getByTestId("fe2-mail-folder-sent"));
+    expect(screen.queryByTestId("fe2-mail-nudge-section")).not.toBeInTheDocument();
+  });
+
+  it("返信不要 from the banner drops the thread out of 返信待ち; 元に戻す brings it back (persisted both ways)", async () => {
+    const fourDaysAgo = new Date(Date.now() - 4 * 86_400_000).toISOString();
+    const api = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({ items: [{ ...DEMO_INBOX_ITEMS[0]!, read: true, receivedAt: fourDaysAgo }], nextCursor: null }),
+      getThread: vi.fn().mockResolvedValue({
+        ...DEMO_INBOX_THREAD,
+        messages: DEMO_INBOX_THREAD.messages.map((m) => ({ ...m, read: true, receivedAt: fourDaysAgo })),
+      }),
+    });
+    render(wrap(<GmailApp />, api));
+    await waitFor(() => expect(api.listFlags).toHaveBeenCalled());
+    const row = (await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!;
+    expect(screen.getByTestId("fe2-mail-nudge-section")).toHaveTextContent("返信待ち 1件");
+    await userEvent.click(row);
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-reply-nudge-banner")).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId("fe2-mail-reply-nudge-dismiss"));
+    // Optimistic: the banner vanishes at once (the list's group is covered by the row test).
+    expect(screen.queryByTestId("fe2-mail-reply-nudge-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe2-mail-undo")).toHaveTextContent("返信不要にしました");
+    await waitFor(() =>
+      expect((api.setFlags as ReturnType<typeof vi.fn>).mock.calls.some((c) => (c[1] as { noReply?: boolean }).noReply === true)).toBe(true),
+    );
+    await userEvent.click(within(screen.getByTestId("fe2-mail-undo")).getByText("元に戻す"));
+    expect(screen.getByTestId("fe2-mail-reply-nudge-banner")).toBeInTheDocument();
+    await waitFor(() =>
+      expect((api.setFlags as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1]).toMatchObject({ noReply: false }),
+    );
+  });
+
+  it("返信不要 from a 返信待ち row does not open the thread and survives a reload via listFlags", async () => {
+    const fiveDaysAgo = new Date(Date.now() - 5 * 86_400_000).toISOString();
+    const items = [{ ...DEMO_INBOX_ITEMS[0]!, read: true, receivedAt: fiveDaysAgo }];
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue({ items, nextCursor: null }) });
+    const { unmount } = render(wrap(<GmailApp />, api));
+    await waitFor(() => expect(api.listFlags).toHaveBeenCalled());
+    const btn = await screen.findByTestId("fe2-mail-reply-nudge-dismiss-row");
+    expect(btn).toHaveAttribute("aria-label", "返信不要にする");
+    await userEvent.click(btn);
+    expect(screen.queryByTestId("fe2-mail-thread")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-mail-nudge-section")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(1);
+    expect(screen.queryByTestId("fe2-mail-reply-nudge")).not.toBeInTheDocument();
+    // 元に戻す from the toast puts it back in 返信待ち.
+    await userEvent.click(within(screen.getByTestId("fe2-mail-undo")).getByText("元に戻す"));
+    expect(screen.getByTestId("fe2-mail-nudge-section")).toHaveTextContent("返信待ち 1件");
+    unmount();
+
+    // Reload: the server returns the stamp → still no nudge.
+    const threadId = items[0]!.threadId;
+    const reloaded = fakeApi({
+      listInbox: vi.fn().mockResolvedValue({ items, nextCursor: null }),
+      listFlags: vi.fn().mockResolvedValue([{ threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: new Date().toISOString() }]),
+    });
+    render(wrap(<GmailApp />, reloaded));
+    await waitFor(() => expect(reloaded.listFlags).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("fe2-mail-nudge-section")).not.toBeInTheDocument());
+    expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(1);
+  });
+
   it("toggles a star from a list row", async () => {
     render(wrap(<GmailApp />));
     const firstStar = (await screen.findAllByTestId("fe2-mail-star"))[0]!;
@@ -437,6 +562,83 @@ describe("GmailApp (hydrates from the gateway)", () => {
     const stored = screen.getByRole("button", { name: /資料\.pdf をダウンロード/ });
     await userEvent.click(stored);
     await waitFor(() => expect(api.downloadAttachment).toHaveBeenCalledWith("messages", "mailin_1", "att_ok"));
+  });
+
+  describe("recipient summary + details dialog (Gmail の「詳細を表示」)", () => {
+    const withMeta: mail.MailThread = {
+      ...DEMO_INBOX_THREAD,
+      messages: [
+        {
+          ...DEMO_INBOX_THREAD.messages[0]!,
+          cc: [{ email: "yuki@example.com", name: "伊藤 由紀" }, { email: "office@example.net" }],
+          headerMeta: {
+            replyTo: [{ email: "kanji@example.com", name: "幹事" }],
+            deliveredTo: "info@developershub.jp",
+            mailedBy: "mail.example.com",
+            signedBy: "example.com",
+            tls: true,
+          },
+        },
+      ],
+    };
+    const openFirst = async (api: MailApi): Promise<void> => {
+      render(wrap(<GmailApp />, api));
+      await userEvent.click((await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!);
+    };
+
+    it("summarises To + Cc on one line with the delivered-to address as 自分", async () => {
+      await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
+      const toggle = await screen.findByTestId("fe2-mail-details-toggle");
+      await waitFor(() => expect(toggle).toHaveTextContent("宛先: 自分, 伊藤 由紀, office@example.net"));
+      expect(screen.queryByTestId("fe2-mail-details")).toBeNull();
+    });
+
+    it("opens a dialog with every field, own address marked, without collapsing the message", async () => {
+      await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
+      await waitFor(() => expect(screen.getByTestId("fe2-mail-details-toggle")).toHaveTextContent("自分"));
+      await userEvent.click(screen.getByTestId("fe2-mail-details-toggle"));
+      const dialog = await screen.findByTestId("fe2-mail-details");
+      const row = (label: string): HTMLElement => within(dialog).getByTestId(`fe2-mail-details-row-${label}`);
+      expect(row("差出人")).toHaveTextContent("山田 花子 <hanako@example.com>");
+      expect(row("返信先")).toHaveTextContent("幹事 <kanji@example.com>");
+      expect(row("宛先")).toHaveTextContent("info@developershub.jp（自分）");
+      expect(row("Cc")).toHaveTextContent("伊藤 由紀 <yuki@example.com>");
+      expect(row("Cc")).toHaveTextContent("office@example.net");
+      expect(row("件名")).toHaveTextContent("登壇のご相談");
+      expect(row("送信元")).toHaveTextContent("mail.example.com");
+      expect(row("署名元")).toHaveTextContent("example.com");
+      expect(row("セキュリティ")).toHaveTextContent("標準的な暗号化（TLS）");
+      // The body stays open behind the dialog (the toggle must not fold the message).
+      expect(screen.getByTestId("fe2-mail-body-text")).toBeInTheDocument();
+    });
+
+    it("copies a single Cc address and all Cc addresses at once", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
+      await waitFor(() => expect(screen.getByTestId("fe2-mail-details-toggle")).toHaveTextContent("自分"));
+      await userEvent.click(screen.getByTestId("fe2-mail-details-toggle"));
+      const dialog = await screen.findByTestId("fe2-mail-details");
+      await userEvent.click(within(dialog).getByRole("button", { name: "yuki@example.comをコピー" }));
+      expect(writeText).toHaveBeenLastCalledWith("yuki@example.com");
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "yuki@example.comをコピーしました" })).toBeInTheDocument());
+      await userEvent.click(within(dialog).getByTestId("fe2-mail-details-copy-all-cc"));
+      expect(writeText).toHaveBeenLastCalledWith("yuki@example.com, office@example.net");
+    });
+
+    it("hides rows the message does not carry (pre-0013 mail: no Reply-To / security)", async () => {
+      await openFirst(fakeApi());
+      await userEvent.click(await screen.findByTestId("fe2-mail-details-toggle"));
+      const dialog = await screen.findByTestId("fe2-mail-details");
+      expect(within(dialog).queryByTestId("fe2-mail-details-row-返信先")).toBeNull();
+      expect(within(dialog).queryByTestId("fe2-mail-details-row-セキュリティ")).toBeNull();
+      expect(within(dialog).getByTestId("fe2-mail-details-row-Cc")).toHaveTextContent("伊藤 由紀");
+    });
+
+    it("replies to the Reply-To address (RFC 5322), not the From", async () => {
+      await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
+      await waitFor(() => expect(screen.getByPlaceholderText("幹事 に返信…")).toBeInTheDocument());
+    });
   });
 
   it("surfaces an oversize attachment as a disabled chip instead of dropping it silently (改善#2)", async () => {

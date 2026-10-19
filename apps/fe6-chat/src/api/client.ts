@@ -9,6 +9,8 @@ import { normalizeMessage, reactionsFromWire } from "../store/timeline";
 import type {
   Channel,
   ChannelMember,
+  ChatSection,
+  ChatSectionList,
   CreateChannelRequest,
   DeleteMessageResult,
   DeletionPolicyResponse,
@@ -25,11 +27,14 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  SlackChannelOption,
+  SlackImportJob,
   TeamSummary,
   UnfurlPreview,
   UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateSectionRequest,
   WsTicketResponse,
 } from "./contract";
 
@@ -38,6 +43,15 @@ export interface ChatApiClient {
   createChannel(req: CreateChannelRequest): Promise<Channel>;
   getChannel(id: common.ChannelId): Promise<GetChannelResponse>;
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel>;
+  /** Hard delete (chat:delete_channel). Messages are erased; DMs are rejected. */
+  deleteChannel(id: common.ChannelId): Promise<void>;
+  /** Caller's personal sidebar sections + channel assignments. */
+  listSections(): Promise<ChatSectionList>;
+  createSection(name: string): Promise<ChatSection>;
+  updateSection(id: string, req: UpdateSectionRequest): Promise<ChatSection>;
+  deleteSection(id: string): Promise<void>;
+  /** sectionId null = back to the default group. */
+  setChannelSection(channelId: common.ChannelId, sectionId: string | null): Promise<void>;
   addMember(id: common.ChannelId, userId: common.UserId, role?: ChannelMember["role"]): Promise<ChannelMember>;
   removeMember(id: common.ChannelId, userId: common.UserId): Promise<void>;
   listMembers(id: common.ChannelId): Promise<ChannelMember[]>;
@@ -55,6 +69,8 @@ export interface ChatApiClient {
   listUnread(): Promise<UnreadSummary[]>; // subject from auth header — no ?userId= (chat review #10/#13)
   getWsTicket(id: common.ChannelId): Promise<WsTicketResponse>;
   resolveUsers(ids: common.UserId[]): Promise<identity.UserSummary[]>; // batch ≤50 (theme2 B1)
+  /** Active members matching `q` (name / email) for the new-DM picker. Empty q = first page. */
+  searchUsers(q: string): Promise<identity.UserSummary[]>;
   /**
    * チーム単位メンションに必要なチーム情報 (member-service が単一の真実源):
    * 候補 + チップの表示名に使う `teams` と、自分宛メンション判定に使う `myTeamIds`。
@@ -62,6 +78,15 @@ export interface ChatApiClient {
   listMentionTeams(): Promise<MentionTeams>;
   /** Link preview (OGP) for one URL; null = no card. Best-effort: never rejects. */
   unfurl(url: string): Promise<UnfurlPreview | null>;
+  // ---- Slack channel import (編集 + chat:slack_import) ----
+  /** Channels the Slack bot can see (private ones only once LMB is invited). */
+  listSlackChannels(): Promise<SlackChannelOption[]>;
+  listSlackImportJobs(limit?: number): Promise<SlackImportJob[]>;
+  /** Create, resume (failed) or restart (done) the job for a channel name / id. */
+  startSlackImport(channel: string): Promise<SlackImportJob>;
+  getSlackImportJob(id: string): Promise<SlackImportJob>;
+  /** Advance one bounded step; safe to call repeatedly (server holds a lease). */
+  stepSlackImport(id: string): Promise<SlackImportJob>;
 }
 
 /** GET /api/v1/members/me/mention-teams のレスポンス。 */
@@ -96,7 +121,8 @@ const IDENTITY = `${API}/identity`;
 // 運営チームは member-service が単一の真実源。チームメンションはそこを読むだけで、
 // chat 側にチームを複製しない。
 const MEMBERS = `${API}/members`;
-const IDENTITY_BATCH_MAX = 50;
+export const IDENTITY_BATCH_MAX = 50;
+const USER_SEARCH_LIMIT = 20;
 
 function qs(params: Record<string, string | number | undefined>): string {
   const sp = new URLSearchParams();
@@ -171,6 +197,25 @@ export class HttpChatClient implements ChatApiClient {
   }
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel> {
     return this.request<Channel>("PATCH", `${CHAT}/channels/${id}`, req);
+  }
+  deleteChannel(id: common.ChannelId): Promise<void> {
+    return this.request<void>("DELETE", `${CHAT}/channels/${id}`);
+  }
+  async listSections(): Promise<ChatSectionList> {
+    const res = await this.request<Partial<ChatSectionList> | null>("GET", `${CHAT}/sections`);
+    return { items: res?.items ?? [], assignments: res?.assignments ?? {} };
+  }
+  createSection(name: string): Promise<ChatSection> {
+    return this.request<ChatSection>("POST", `${CHAT}/sections`, { name });
+  }
+  updateSection(id: string, req: UpdateSectionRequest): Promise<ChatSection> {
+    return this.request<ChatSection>("PATCH", `${CHAT}/sections/${id}`, req);
+  }
+  deleteSection(id: string): Promise<void> {
+    return this.request<void>("DELETE", `${CHAT}/sections/${id}`);
+  }
+  setChannelSection(channelId: common.ChannelId, sectionId: string | null): Promise<void> {
+    return this.request<void>("PUT", `${CHAT}/channels/${channelId}/section`, { sectionId });
   }
   addMember(id: common.ChannelId, userId: common.UserId, role: ChannelMember["role"] = "member"): Promise<ChannelMember> {
     return this.request<ChannelMember>("POST", `${CHAT}/channels/${id}/members`, { userId, role });
@@ -248,12 +293,35 @@ export class HttpChatClient implements ChatApiClient {
     const res = await this.request<unknown>("GET", `${IDENTITY}/users${qs({ ids: batch.join(",") })}`);
     return unwrapItems<identity.UserSummary>(res);
   }
+  async searchUsers(q: string): Promise<identity.UserSummary[]> {
+    const res = await this.request<unknown>(
+      "GET",
+      `${IDENTITY}/users${qs({ status: "active", q: q.trim() || undefined, limit: USER_SEARCH_LIMIT })}`,
+    );
+    return unwrapItems<identity.UserSummary>(res);
+  }
   async listMentionTeams(): Promise<MentionTeams> {
     // Self-scoped endpoint: readable by any signed-in user, unlike the roster-gated
     // /members/teams — a plain chat member must still be able to pick @統括チーム and
     // read the chip by name. The caller is taken from the session (no userId in the path).
     const res = await this.request<Partial<MentionTeams>>("GET", `${MEMBERS}/me/mention-teams`);
     return { teams: res?.teams ?? [], myTeamIds: res?.myTeamIds ?? [] };
+  }
+
+  async listSlackChannels(): Promise<SlackChannelOption[]> {
+    return unwrapItems<SlackChannelOption>(await this.request<unknown>("GET", `${CHAT}/slack-import/channels`));
+  }
+  async listSlackImportJobs(limit?: number): Promise<SlackImportJob[]> {
+    return unwrapItems<SlackImportJob>(await this.request<unknown>("GET", `${CHAT}/slack-import/jobs${qs({ limit })}`));
+  }
+  startSlackImport(channel: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("POST", `${CHAT}/slack-import/jobs`, { channel });
+  }
+  getSlackImportJob(id: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("GET", `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}`);
+  }
+  stepSlackImport(id: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("POST", `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}/step`);
   }
 
   async unfurl(url: string): Promise<UnfurlPreview | null> {

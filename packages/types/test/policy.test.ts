@@ -277,3 +277,17 @@ describe("Drive共有 の「設定」ボタン — 細かい権限のトグル",
     expect(policy.normalizeAppAccessKeys(["drive:settings_edit"])).toEqual(["drive:settings_edit", "drive:settings_view"]);
   });
 });
+
+describe("カレンダー — 細かい権限のトグル (予定を登録 + ミーティング)", () => {
+  it("all three keys are plain toggles in カレンダー's 詳細設定 (never in その他)", () => {
+    const toggles = policy.appDetailPermissions("calendar").map((e) => e.key);
+    expect(toggles).toEqual(["calendar:schedule_edit", "calendar:meetings_view", "calendar:meetings_edit"]);
+    const others = policy.otherPermissions().map((e) => e.key);
+    expect(others).not.toContain("calendar:schedule_edit");
+    expect(others).not.toContain("calendar:meetings_edit");
+  });
+
+  it("meetings_edit implies meetings_view after normalisation", () => {
+    expect(policy.normalizeAppAccessKeys(["calendar:meetings_edit"])).toEqual(["calendar:meetings_edit", "calendar:meetings_view"]);
+  });
+});

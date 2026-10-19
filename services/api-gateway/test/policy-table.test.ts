@@ -279,6 +279,7 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 }
 
 const PUBLIC_ROUTES = [
+  "GET /api/v1/public/onboarding",
   "GET /healthz",
   "POST /api/v1/public/inquiries",
   "POST /api/v1/public/lp-visits",
@@ -293,7 +294,11 @@ const SELF_ROUTES = [
   "POST /api/v1/me/password",
   "POST /api/v1/me/profile",
 ];
-const ADMIN_ROUTES = ["GET /api/v1/admin/users/:userId/password", "POST /api/v1/admin/users/:userId/password"];
+const ADMIN_ROUTES = [
+  "GET /api/v1/admin/users/:userId/password",
+  "POST /api/v1/admin/users/:userId/account-mail",
+  "POST /api/v1/admin/users/:userId/password",
+];
 
 const EVERYONE = [...PUBLIC_ROUTES, ...SELF_ROUTES].sort();
 const WITH_ADMIN = [...PUBLIC_ROUTES, ...SELF_ROUTES, ...ADMIN_ROUTES].sort();
@@ -312,7 +317,7 @@ describe("role x endpoint matrix (frozen)", () => {
     expect(WITH_ADMIN).toEqual(protectableRouteKeys(buildApp()).sort());
   });
 
-  it("the password surface is the only key-gated pair, and no /me route takes a subject id", () => {
+  it("the admin user surface (password + account-mail) is the only key-gated set, and no /me route takes a subject id", () => {
     const gated = Object.entries(POLICY_TABLE)
       .filter(([, rule]) => Array.isArray(rule))
       .map(([route]) => route)

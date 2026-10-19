@@ -15,4 +15,12 @@ export interface Env {
   LP_WEB_ANALYTICS_SITE_TAG?: string;
   /** secret: Account Analytics:Read の API トークン。 */
   CF_ANALYTICS_TOKEN?: string;
+  /** secret: Stripe API キー。未設定なら決済準備中（有料券は 503・無料券は動く）。 */
+  STRIPE_SECRET_KEY?: string;
+  /** secret: Stripe webhook の署名シークレット (whsec_...)。 */
+  STRIPE_WEBHOOK_SECRET?: string;
+  /** 1 日 (JST) に作れる checkout の上限（既定 300）。 */
+  LP_DAILY_CHECKOUT_CAP?: string;
+  /** 1 日 (JST) に受け付ける登壇応募の上限（既定 200）。 */
+  LP_DAILY_PROPOSAL_CAP?: string;
 }

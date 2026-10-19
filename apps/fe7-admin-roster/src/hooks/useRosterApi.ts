@@ -18,6 +18,7 @@ import type {
   UpdateRoleRequest,
   AssignRoleRequest,
   RoleAssignment,
+  RoleView,
   RosterUser,
   SyncEmailRoutingResult,
   EmailRoutingSyncPreview,
@@ -51,7 +52,7 @@ export function useUserRoles(userId: common.UserId): UseQueryResult<RoleAssignme
   return useQuery({ queryKey: queryKeys.userRoles(userId), queryFn: () => api.listUserRoles(userId), enabled: !!userId });
 }
 
-export function useRoles(): UseQueryResult<common.Paginated<identity.Role>> {
+export function useRoles(): UseQueryResult<common.Paginated<RoleView>> {
   const { api } = useRosterContext();
   return useQuery({ queryKey: queryKeys.roles(), queryFn: () => api.listRoles() });
 }
@@ -130,6 +131,14 @@ export function useViewUserPassword(userId: common.UserId) {
   const { api } = useRosterContext();
   return useMutation<auth.AdminViewPasswordResponse, unknown, void>({
     mutationFn: () => api.viewUserPassword(userId),
+  });
+}
+
+/** NON-optimistic: send the アカウント発行メール (one-shot; the caller toasts + closes). */
+export function useSendAccountMail() {
+  const { api } = useRosterContext();
+  return useMutation<auth.AdminSendAccountMailResponse, unknown, common.UserId>({
+    mutationFn: (userId) => api.sendAccountMail(userId),
   });
 }
 

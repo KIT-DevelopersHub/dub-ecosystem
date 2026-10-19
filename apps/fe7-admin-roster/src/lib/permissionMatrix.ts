@@ -55,11 +55,15 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
  * domain write/admin — so this never escalates a role to org-admin.
  */
 export function buildRoleUpdate(
-  original: { name: string; permissions: readonly identity.PermissionKey[] },
-  next: { name: string; permissions: readonly identity.PermissionKey[] },
+  original: { name: string; permissions: readonly identity.PermissionKey[]; mailVisibleRoleIds?: readonly string[] },
+  next: { name: string; permissions: readonly identity.PermissionKey[]; mailVisibleRoleIds?: readonly string[] },
 ): UpdateRoleRequest | null {
   const patch: UpdateRoleRequest = {};
   if (next.name !== original.name) patch.name = next.name;
+  // Cross-role mail visibility: sent whole (server replaces the set) only when it changed.
+  if (next.mailVisibleRoleIds !== undefined && !sameSet(original.mailVisibleRoleIds ?? [], next.mailVisibleRoleIds)) {
+    patch.mailVisibleRoleIds = [...next.mailVisibleRoleIds].sort();
+  }
   const originalPerms = appRegistry.withRequiredAppDomainKeys(original.permissions);
   const nextPerms = appRegistry.withRequiredAppDomainKeys(next.permissions);
   if (!sameSet(originalPerms, nextPerms)) {

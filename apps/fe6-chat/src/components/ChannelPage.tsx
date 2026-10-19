@@ -2,10 +2,10 @@
 // Container: wires channel detail + timeline + composer + connection/archived
 // banner + read tracking for one channel, plus the right-hand thread pane, the
 // members/pins popovers, workspace search, message edit, attachments, and the
-// channel-settings modal. The main section and the ThreadPane are returned as
+// Slack-style channel details modal (概要 / メンバー / 設定). The main section and the ThreadPane are returned as
 // sibling fragment children so both land as columns of the ChatApp grid.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConfirmDialog, Drawer, Modal, useToast } from "@dub/ui";
+import { ConfirmDialog, Drawer, useToast } from "@dub/ui";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
 import { useChatStore } from "../store/useChatStore";
@@ -13,16 +13,17 @@ import { useChannelView } from "../hooks/useChannelView";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ReadTracker } from "../store/read-tracker";
 import { mapChatError } from "../lib/errors";
-import { ChatApiError } from "../api/client";
+import { ChatApiError, IDENTITY_BATCH_MAX } from "../api/client";
 import type { Attachment, Channel, ChannelMember, Message, SearchHit, TeamSummary } from "../api/contract";
-import type { MentionCandidate } from "../lib/mentions";
+import { extractMentions, type MentionCandidate } from "../lib/mentions";
 import { ChannelHeader } from "./ChannelHeader";
-import { ChannelSettingsForm } from "./ChannelSettingsForm";
+import { ChannelDetails, type ChannelDetailsSections, type ChannelDetailsTab } from "./ChannelDetails";
 import { MessageTimeline } from "./MessageTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { SearchResults } from "./SearchResults";
 import { ThreadPane } from "./ThreadPane";
+import { channelHandle, channelLabel } from "../lib/dm";
 import styles from "../styles/chat.module.css";
 
 const MAX_MENTION_CANDIDATES = 8;
@@ -33,15 +34,24 @@ export function ChannelPage({
   onThreadOpenChange,
   onSelectChannel,
   onChannelsChanged,
+  onChannelDeleted,
   onOpenMobileNav,
+  sections,
+  initialDetailsTab,
 }: {
   channelId: common.ChannelId;
   onThreadOpenChange?: (open: boolean) => void;
   onSelectChannel?: (channelId: common.ChannelId) => void;
   onChannelsChanged?: () => void;
+  // Fired after a successful hard delete so ChatApp can move off the channel.
+  onChannelDeleted?: (channelId: common.ChannelId) => void;
   // Hamburger callback for the mobile channel-list drawer (P21) — forwarded to
   // ChannelHeader, which only shows the button under the mobile breakpoint.
   onOpenMobileNav?: () => void;
+  // Personal sidebar section picker shown in the details 設定 tab.
+  sections?: ChannelDetailsSections;
+  // Open the details modal on mount (legacy /chat/channels/:id/settings deep link).
+  initialDetailsTab?: ChannelDetailsTab;
 }) {
   const { api, can, currentUserId } = useChatRuntime();
   const view = useChannelView(channelId);
@@ -56,11 +66,12 @@ export function ChannelPage({
   const [channel, setChannel] = useState<Channel | null>(null);
   const [membership, setMembership] = useState<ChannelMember | null>(null);
   const [members, setMembers] = useState<ChannelMember[]>([]);
+  const [membersLoaded, setMembersLoaded] = useState(false);
   const [users, setUsers] = useState<Record<common.UserId, identity.UserSummary>>({});
   const [composerError, setComposerError] = useState<string | null>(null);
   const [thread, setThread] = useState<Message | null>(null);
   const [pinned, setPinned] = useState<Message[]>([]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<ChannelDetailsTab | null>(initialDetailsTab ?? null);
   const [pendingDelete, setPendingDelete] = useState<Message | null>(null);
 
   // search state (workspace-wide)
@@ -69,6 +80,8 @@ export function ChannelPage({
   const [searchLoading, setSearchLoading] = useState(false);
 
   const canModerate = can("chat:moderate") || membership?.role === "admin";
+  // Hard delete is decided by the key alone (no channel-admin fallback); DMs never.
+  const canDelete = can("chat:delete_channel") && channel !== null && channel.type !== "dm";
   const pinnedIds = useMemo(() => new Set(pinned.map((m) => m.id)), [pinned]);
 
   useEffect(() => {
@@ -89,23 +102,32 @@ export function ChannelPage({
       setChannel(res.channel);
       setMembership(res.membership);
     });
-    void api.listMembers(channelId).then((m) => !cancelled && setMembers(m));
+    void api
+      .listMembers(channelId)
+      .then((m) => !cancelled && setMembers(m))
+      .finally(() => !cancelled && setMembersLoaded(true));
     void api.listPinned(channelId).then((p) => !cancelled && setPinned(p));
     return () => {
       cancelled = true;
     };
   }, [api, channelId]);
 
-  // resolve author display names in batch as new authors/members appear
+  // resolve author / member / @-mentioned display names in batch as they appear.
+  // Ids the roster could not return are remembered so they are not refetched forever.
+  const unresolvable = useRef(new Set<common.UserId>());
   useEffect(() => {
     // Drop null authorIds (system posts have no author to resolve).
     const authorIds = view.state.messages.map((m) => m.authorId).filter((id): id is common.UserId => id !== null);
-    const ids = new Set<common.UserId>([...authorIds, ...members.map((m) => m.userId)]);
-    const missing = [...ids].filter((id) => !(id in users));
+    const mentionIds = [...view.state.messages, ...pinned].flatMap((m) => extractMentions(m.body));
+    const ids = new Set<common.UserId>([...authorIds, ...mentionIds, ...members.map((m) => m.userId)]);
+    const missing = [...ids].filter((id) => !(id in users) && !unresolvable.current.has(id));
     if (missing.length === 0) return;
     let cancelled = false;
     void api.resolveUsers(missing).then((summaries) => {
       if (cancelled) return;
+      const batch = missing.slice(0, IDENTITY_BATCH_MAX);
+      const found = new Set(summaries.map((u) => u.id));
+      for (const id of batch) if (!found.has(id)) unresolvable.current.add(id);
       setUsers((prev) => {
         const next = { ...prev };
         for (const u of summaries) next[u.id] = u;
@@ -115,7 +137,7 @@ export function ChannelPage({
     return () => {
       cancelled = true;
     };
-  }, [api, view.state.messages, members, users]);
+  }, [api, view.state.messages, pinned, members, users]);
 
   // debounced workspace search
   useEffect(() => {
@@ -160,6 +182,7 @@ export function ChannelPage({
   }, [newestId]);
 
   const resolveUser = useCallback((id: common.UserId) => users[id], [users]);
+  const searchUsers = useCallback((q: string) => api.searchUsers(q), [api]);
   // 読み込み中は中立の「チーム」表記にして、生の team_01J… が一瞬見える(データ無しと
   // 区別が付かない)状態を避ける。読み込み後も解決できない = 消えたチーム -> id のまま。
   const resolveTeam = useCallback(
@@ -259,42 +282,118 @@ export function ChannelPage({
     [channelId, onSelectChannel, jumpToMessage],
   );
 
-  const onSaveSettings = useCallback(
-    async (patch: { name: string; topic: string | null; version: number }) => {
-      const updated = await api.updateChannel(channelId, patch);
-      setChannel(updated);
-      setSettingsOpen(false);
-      onChannelsChanged?.();
+  const failToast = useCallback(
+    (title: string, err: unknown) => {
+      const code = err instanceof ChatApiError ? err.code : "INTERNAL";
+      show({ kind: "error", title, description: mapChatError(code).message });
     },
-    [api, channelId, onChannelsChanged],
+    [show],
   );
 
-  const onArchiveToggle = useCallback(
-    async (archived: boolean, version: number) => {
-      const updated = await api.updateChannel(channelId, { archived, version });
-      setChannel(updated);
-      setSettingsOpen(false);
-      onChannelsChanged?.();
+  // Optimistic: the modal/header reflect the patch at once; on failure only this
+  // patch is reverted (version conflict included) and the reason is toasted.
+  const onUpdateChannel = useCallback(
+    async (patch: { name?: string; topic?: string | null; archived?: boolean }) => {
+      const prev = channel;
+      if (!prev) return;
+      setChannel({ ...prev, ...patch });
+      try {
+        const updated = await api.updateChannel(channelId, { ...patch, version: prev.version });
+        setChannel(updated);
+        onChannelsChanged?.();
+        if (patch.archived !== undefined) show({ kind: "success", title: patch.archived ? `#${prev.name} をアーカイブしました` : "アーカイブを解除しました" });
+      } catch (err) {
+        setChannel((cur) => (cur ? { ...cur, ...pick(prev, patch) } : cur));
+        failToast("チャンネルを更新できませんでした", err);
+        throw err;
+      }
     },
-    [api, channelId, onChannelsChanged],
+    [api, channel, channelId, onChannelsChanged, show, failToast],
   );
+
+  const onAddMember = useCallback(
+    (user: identity.UserSummary) => {
+      const temp: ChannelMember = { channelId, userId: user.id, role: "member", joinedAt: new Date().toISOString() };
+      setUsers((prev) => ({ ...prev, [user.id]: user }));
+      setMembers((prev) => (prev.some((m) => m.userId === user.id) ? prev : [...prev, temp]));
+      api.addMember(channelId, user.id).then(
+        (added) => setMembers((prev) => prev.map((m) => (m.userId === user.id ? { ...temp, ...added } : m))),
+        (err) => {
+          setMembers((prev) => prev.filter((m) => m.userId !== user.id));
+          failToast(`${user.displayName} さんを追加できませんでした`, err);
+        },
+      );
+    },
+    [api, channelId, failToast],
+  );
+
+  const onRemoveMember = useCallback(
+    (userId: common.UserId) => {
+      const removed = members.find((m) => m.userId === userId);
+      if (!removed) return;
+      setMembers((prev) => prev.filter((m) => m.userId !== userId));
+      api.removeMember(channelId, userId).catch((err) => {
+        setMembers((prev) => (prev.some((m) => m.userId === userId) ? prev : [...prev, removed]));
+        failToast("メンバーを削除できませんでした", err);
+      });
+    },
+    [api, channelId, members, failToast],
+  );
+
+  const onLeave = useCallback(async () => {
+    const name = channel?.name ?? "";
+    try {
+      await api.removeMember(channelId, currentUserId);
+    } catch (err) {
+      failToast("チャンネルから退出できませんでした", err);
+      throw err;
+    }
+    setDetailsTab(null);
+    show({ kind: "success", title: `#${name} から退出しました` });
+    if (channel?.visibility === "private") {
+      onChannelDeleted?.(channelId); // no longer readable: move off it
+    } else {
+      setMembership(null);
+      setMembers((prev) => prev.filter((m) => m.userId !== currentUserId));
+      onChannelsChanged?.();
+    }
+  }, [api, channel, channelId, currentUserId, show, failToast, onChannelDeleted, onChannelsChanged]);
+
+  const onDeleteChannel = useCallback(async () => {
+    const name = channel?.name ?? "";
+    try {
+      await api.deleteChannel(channelId);
+    } catch (err) {
+      failToast("チャンネルを削除できませんでした", err);
+      throw err;
+    }
+    setDetailsTab(null);
+    show({ kind: "success", title: `#${name} を削除しました` });
+    onChannelDeleted?.(channelId);
+  }, [api, channel, channelId, show, failToast, onChannelDeleted]);
 
   const archived = channel?.archived ?? false;
+  // A DM shows "the other side" (resolved from its members), not its stored name.
+  const shownChannel = useMemo(
+    () => (channel ? { ...channel, name: channelLabel(channel, currentUserId, (id) => users[id]) ?? channel.name } : null),
+    [channel, currentUserId, users],
+  );
   const searchOpen = searchQuery.trim().length >= 2;
 
   return (
     <>
       <section className={styles.main}>
-        {channel && (
+        {shownChannel && (
           <ChannelHeader
-            channel={channel}
+            channel={shownChannel}
             canModerate={canModerate}
+            canOpenSettings={shownChannel.type !== "dm"}
             members={members}
             pinned={pinned}
             searchValue={searchQuery}
             resolveUser={resolveUser}
             resolveTeam={resolveTeam}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => setDetailsTab("about")}
             onSearchChange={setSearchQuery}
             onUnpin={onUnpin}
             onJumpToMessage={jumpToMessage}
@@ -342,9 +441,11 @@ export function ChannelPage({
           channelId={channelId}
           disabled={archived}
           disabledReason="アーカイブ済みチャネルには投稿できません"
-          placeholder={channel ? `#${channel.name} へメッセージ` : "メッセージを入力"}
+          placeholder={shownChannel ? `${channelHandle(shownChannel, shownChannel.name)} へメッセージ` : "メッセージを入力"}
           error={composerError}
           resolveMentionCandidates={resolveMentionCandidates}
+          resolveUser={resolveUser}
+          resolveTeam={resolveTeam}
           onSend={onSend}
         />
       </section>
@@ -377,10 +478,25 @@ export function ChannelPage({
           );
         })()}
 
-      {channel && settingsOpen && (
-        <Modal open onClose={() => setSettingsOpen(false)} title={`#${channel.name} の設定`} size="sm">
-          <ChannelSettingsForm channel={channel} onSave={onSaveSettings} onArchiveToggle={onArchiveToggle} />
-        </Modal>
+      {channel && detailsTab && channel.type !== "dm" && (
+        <ChannelDetails
+          open
+          onClose={() => setDetailsTab(null)}
+          channel={channel}
+          currentUserId={currentUserId}
+          members={members}
+          membersLoaded={membersLoaded}
+          resolveUser={resolveUser}
+          canEdit={canModerate}
+          initialTab={detailsTab}
+          onUpdate={onUpdateChannel}
+          searchUsers={searchUsers}
+          onAddMember={onAddMember}
+          onRemoveMember={onRemoveMember}
+          {...(membership ? { onLeave } : {})}
+          {...(canDelete ? { onDelete: onDeleteChannel } : {})}
+          {...(sections ? { sections } : {})}
+        />
       )}
 
       <ConfirmDialog
@@ -395,4 +511,11 @@ export function ChannelPage({
       />
     </>
   );
+}
+
+// The fields of `prev` that `patch` touched — reverts one optimistic patch only.
+function pick(prev: Channel, patch: Partial<Channel>): Partial<Channel> {
+  const out: Partial<Channel> = {};
+  for (const k of Object.keys(patch) as (keyof Channel)[]) (out as Record<string, unknown>)[k] = prev[k];
+  return out;
 }

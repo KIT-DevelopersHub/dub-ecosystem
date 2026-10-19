@@ -24,6 +24,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   audit: "監査ログ",
   github: "GitHub 連携",
   drive: "Google Drive",
+  calendar: "カレンダー",
   webhook: "Webhook",
   app: "アプリのアクセス権",
 };
@@ -77,6 +78,8 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "mail:admin": { label: "メールの管理", description: "メールボックスや受信監視・振り分けルールの設定を管理できるようになります。" },
   "chat:create": { label: "チャンネルの作成", description: "チャットのチャンネルを新規作成できるようになります。" },
   "chat:moderate": { label: "チャットのモデレート", description: "チャンネルの管理や、他人のメッセージの削除ができるようになります。" },
+  "chat:delete_channel": { label: "チャンネルを削除", description: "チャンネルを完全に削除できるようになります（メッセージもすべて消え、元に戻せません）。" },
+  "chat:slack_import": { label: "Slack から取り込み", description: "Slack のチャンネルを選んで、メッセージ・スレッド・リアクション・ファイルごとチャットに取り込めるようになります。" },
   "usage:view": { label: "使用量ダッシュボードの閲覧", description: "無料枠の使用量・課金ガードのダッシュボードを閲覧できるようになります。" },
   "infra:read": { label: "インフラの閲覧", description: "サイト・デプロイ・DNS・ドメインの状態を閲覧できるようになります。" },
   "infra:deploy": { label: "デプロイの実行", description: "サイトのデプロイ（公開・反映）を実行できるようになります。" },
@@ -92,6 +95,9 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "drive:write": { label: "Drive の更新", description: "Google Drive へのファイルのアップロード・更新ができるようになります。" },
   "drive:settings_view": { label: "Drive共有の設定の閲覧", description: "Drive共有の「設定」を開き、使っている Google アカウントを確認できるようになります。" },
   "drive:settings_edit": { label: "Drive共有の設定の変更", description: "Drive共有が使う Google アカウントの追加・切り替え・削除ができるようになります（保存すると閲覧も ON になります）。" },
+  "calendar:schedule_edit": { label: "予定を登録", description: "カレンダーで予定（休暇・ラベル付きの予定など）を追加・変更・削除できるようになります。カレンダーの「編集」と、予定の保存先であるマイタスクの「編集」も必要です。" },
+  "calendar:meetings_view": { label: "ミーティングを見る", description: "カレンダーの「ミーティング」で、共有 Google アカウントに設定した定例・会議の一覧を見られるようになります。" },
+  "calendar:meetings_edit": { label: "ミーティングを設定", description: "共有 Google アカウントで Meet 付きのミーティングを作成・変更・削除し、ロールのメンバーを自動で招待できるようになります（保存すると「見る」も ON になります）。" },
   "webhook:read": { label: "Webhook の閲覧", description: "Webhook の配信履歴を検索・確認できるようになります。" },
   ...Object.fromEntries(
     APP_LABELS.flatMap((a) => [

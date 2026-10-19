@@ -1,0 +1,25 @@
+# lp-tickets-demo — DISPOSABLE demo of the /tickets purchase page. Same Worker code/bundle
+# as wrangler.toml, on *.workers.dev only (NO routes / custom domain). TICKETS_DEMO="1" makes
+# the Worker use an in-memory mock ticket config and skip payment (checkout goes straight to
+# /tickets/thanks), so there is intentionally NO LP_FLAG binding: it never calls lp-analytics
+# or Stripe. The same flag also mocks /proposals (登壇者募集・応募は保存しない).
+# Tear down after the demo review.
+#
+#   https://lp-tickets-demo.developershub-site.workers.dev/tickets
+#
+# Deploy:
+#   pnpm --filter @dub/lp-conference-next build:bundle
+#   npx wrangler deploy --config apps/lp-conference-next/wrangler.tickets-demo.toml
+name = "lp-tickets-demo"
+main = "worker/index.ts"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+[assets]
+directory = "./dist-bundle"
+binding = "ASSETS"
+run_worker_first = ["/*", "!/_v/*"]
+
+[vars]
+DEFAULT_VERSION = "v3.4"
+TICKETS_DEMO = "1"

@@ -1,6 +1,6 @@
 // Pure domain helpers: DTO mappers (row -> canonical @dub/types wire) + slug/validation.
 import type { member } from "@dub/types";
-import type { MemberStatus, ParticipationRow, PersonRow, TeamRow } from "./types";
+import type { MemberStatus, OnboardingItemRow, ParticipationRow, PersonRow, TeamRow } from "./types";
 import { MEMBER_STATUSES } from "./types";
 
 export const SORT_ORDER_GAP = 1024;
@@ -41,6 +41,18 @@ export function toTeam(r: TeamRow): member.Team {
   return { id: r.id, key: r.key, name: r.name, color: r.color, description: r.description };
 }
 
+export function toOnboardingItem(r: OnboardingItemRow): member.OnboardingItem {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    url: r.url,
+    sortOrder: r.sortOrder,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
 export function toMember(r: PersonRow, teamIds: string[]): member.Member {
   return {
     id: r.id,
@@ -52,6 +64,7 @@ export function toMember(r: PersonRow, teamIds: string[]): member.Member {
     department: r.department,
     grade: r.grade,
     rosterNumber: r.rosterNumber,
+    studentNumber: r.studentNumber,
     identityUserId: r.identityUserId,
     leaderId: r.leaderId,
     contact: r.contact,
@@ -90,6 +103,7 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     grade: r.grade,
     department: r.department,
     rosterNumber: r.rosterNumber,
+    studentNumber: r.studentNumber,
     contact: r.contact,
     phone: r.phone,
     schoolEmail: r.schoolEmail,

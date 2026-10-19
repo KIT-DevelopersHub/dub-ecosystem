@@ -138,6 +138,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & {
     now: () => "2026-08-09T00:00:00.000Z",
     newChannelId: () => `chan_${String(seq++).padStart(6, "0")}`,
     newMessageId: () => `msg_${String(seq++).padStart(6, "0")}`,
+    newSectionId: () => `csec_${String(seq++).padStart(6, "0")}`,
     ...overrides,
   };
   // Expose the concrete handles that ended up on deps (respecting overrides).

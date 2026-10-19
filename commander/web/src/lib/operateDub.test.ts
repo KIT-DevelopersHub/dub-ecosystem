@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import type { ChatMessage } from "./commanderApi.ts";
 import {
   buildAnswerPrompt,
+  buildNarrowPrompt,
   buildPlannerPrompt,
   buildTranscript,
   describeCatalog,
   OPERATE_PLANNER_ARGS,
   OPERATE_PLANNER_CWD,
+  DATA_MARKER,
   parsePlannerReply,
   RESULT_PREFIX,
 } from "./operateDub.ts";
@@ -47,6 +49,14 @@ describe("buildPlannerPrompt", () => {
     expect(p.trim().endsWith("# 今回の依頼\n失敗した分だけやり直して")).toBe(true);
   });
 
+  it("teaches filtering by catalog conditions, id reuse and name selectors", () => {
+    const p = buildPlannerPrompt({ catalog: FAKE_CATALOG, history: [], request: "x" });
+    expect(p).toMatch(/条件」（teamId・assigneeId・status・eventId など）があれば、それで API 側で絞る/);
+    expect(p).toMatch(/id（チーム id・イベント id・ユーザー id など）は、そのまま値として再利用する/);
+    expect(p).toContain('"teamId":"{{teams.teams[name~法人].id}}"');
+    expect(p).toMatch(/担当分はチームをまたぐので teamId では絞らず/);
+  });
+
   it("asks for prose, not a plan, when answering from read results", () => {
     expect(buildAnswerPrompt({ catalog: FAKE_CATALOG, history: [] })).toMatch(/計画や JSON は書かないこと/);
   });
@@ -72,7 +82,65 @@ describe("buildTranscript", () => {
   });
 });
 
+describe("buildTranscript keeps read results whole", () => {
+  const rows = Array.from({ length: 300 }, (_, i) => `| task_${i} | タスク${i} | todo |`).join("\n");
+  const note = (i: number) => msg("assistant", `${RESULT_PREFIX.preview}読み取り1件を実行${DATA_MARKER}items（300件）\n${rows}`, i);
+
+  it("never cuts a message mid-text (the old 3000-char cut kept 1-2 rows)", () => {
+    const tr = buildTranscript([msg("user", "タスクある？", 1), note(2)]);
+    expect(tr).toContain("| task_0 |");
+    expect(tr).toContain("| task_299 | タスク299 | todo |");
+  });
+
+  it("an older note that does not fit loses only its tables, never its facts", () => {
+    const history = Array.from({ length: 12 }, (_, i) => note(i + 1));
+    const tr = buildTranscript(history);
+    expect(tr).toContain("（読み取りデータは会話が長いため省略");
+    expect(tr.split("【確認結果】").length - 1).toBe(12);
+    expect(tr.endsWith("| task_299 | タスク299 | todo |")).toBe(true);
+  });
+});
+
+describe("buildAnswerPrompt / buildNarrowPrompt", () => {
+  it("gives the answerer every row once, outside the transcript budget", () => {
+    const data = Array.from({ length: 500 }, (_, i) => `| task_${i} |`).join("\n");
+    const n = msg("assistant", `${RESULT_PREFIX.preview}読み取り1件を実行${DATA_MARKER}${data}`, 5);
+    const p = buildAnswerPrompt({ catalog: FAKE_CATALOG, history: [n], readData: data, noteId: n.id });
+    expect(p).toContain("# 読み取りデータ（全行）");
+    expect(p.split("| task_499 |").length - 1).toBe(1);
+    expect(p).toMatch(/件数で言い切る/);
+  });
+
+  it("tells the planner the size and filters, read ops only, and when it is the last round", () => {
+    const plan = { type: "plan" as const, summary: "", steps: [{ id: "t", op: "tasks.list" }] };
+    const p = buildNarrowPrompt({ catalog: FAKE_CATALOG, history: [], plan, facts: "- 手順 t: 400行・約 30.0 KB・使える絞り込み: teamId", last: true });
+    expect(p).toContain("使える絞り込み: teamId");
+    expect(p).toContain('{"type":"needsFull"');
+    expect(p).toMatch(/書き込み・削除の op は使わない/);
+    expect(p).toMatch(/これが最後の差し戻し/);
+  });
+
+  it("an empty match asks for a corrected read plan only (no needsFull)", () => {
+    const plan = { type: "plan" as const, summary: "", steps: [{ id: "t", op: "tasks.list" }] };
+    const p = buildNarrowPrompt({ catalog: FAKE_CATALOG, history: [], plan, facts: "- 手順 t: 2件中 0件", last: false, why: "empty" });
+    expect(p).toMatch(/対象が見つかりませんでした/);
+    expect(p).not.toContain("needsFull");
+  });
+
+  it("tells the planner never to translate names from the request", () => {
+    expect(buildPlannerPrompt({ catalog: FAKE_CATALOG, history: [], request: "x" })).toMatch(/訳したり言い換えたりせず依頼文の表記のまま/);
+  });
+});
+
 describe("parsePlannerReply", () => {
+  it("parses needsFull with its narrowing options", () => {
+    const r = parsePlannerReply(
+      '```json\n{"type":"needsFull","reason":"全員分が要ります","options":[{"label":"法人チームだけ","plan":{"summary":"s","steps":[{"id":"a","op":"tasks.list"}]}},{"label":"空","plan":{"steps":[]}}]}\n```',
+    );
+    expect(r).toMatchObject({ kind: "needsFull", reason: "全員分が要ります", options: [{ label: "法人チームだけ", plan: { summary: "s" } }] });
+    if (r.kind === "needsFull") expect(r.options).toHaveLength(1);
+  });
+
   it("treats prose as an answer", () => {
     expect(parsePlannerReply("こんにちは。イベントの編集ができます。")).toEqual({ kind: "answer", text: "こんにちは。イベントの編集ができます。" });
   });

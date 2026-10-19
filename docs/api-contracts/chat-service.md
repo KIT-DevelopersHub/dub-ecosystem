@@ -296,6 +296,28 @@ another member. Response `204`. Idempotent — removing a non-member is a no-op 
 self nor admin -> `403 FORBIDDEN`. Emits `chat.member.removed` + a `member.removed` realtime
 event.
 
+### `DELETE /channels/:id`
+
+**Physical** delete (unlike archive): removes the channel and every row that references it
+(members, messages, reactions, pins, read states, section assignments) in one D1 batch.
+Requires the dangerous `chat:delete_channel` key (ロール管理 > チャット > 細かい権限; admin-only
+by default) — channel-admin / `chat:moderate` alone is **not** enough. Response `204`.
+DM -> `400 VALIDATION_FAILED`; missing / hidden private channel -> `404`. Audited as
+`chat.channel.delete`. No realtime event: other open clients see `404` on their next request.
+
+### Sidebar sections (personal)
+
+Each user groups channels into their own named sections (Slack-style; other users never see
+them). A channel is in at most one of the caller's sections; unassigned channels stay in the
+default type groups. All routes are 閲覧-level (caller-owned rows only).
+
+- `GET /sections` -> `{ items: ChatSection[] (by position), assignments: { [channelId]: sectionId } }`
+- `POST /sections` `{ name }` (trimmed, 1-40 chars, max 50 per user) -> `201 ChatSection`, appended last
+- `PATCH /sections/:id` `{ name?, position? }` -> `ChatSection` (`404` if not the caller's)
+- `DELETE /sections/:id` -> `204`; its channels fall back to the default groups
+- `PUT /channels/:id/section` `{ sectionId: string | null }` -> `204` (`null` = unassign;
+  `404` if the channel is unreadable or the section is not the caller's)
+
 ### `POST /channels/:id/read`
 
 Caller must be a member. Sets the caller's read cursor for the channel; the path `:id` is the
@@ -540,7 +562,7 @@ There is no realtime variant for edits, reactions, or system posts.
 
 ### 8.3 Audit records
 
-Recorded via the audit sink: `chat.channel.created`, `chat.channel.archive`,
+Recorded via the audit sink: `chat.channel.created`, `chat.channel.archive`, `chat.channel.delete`,
 `chat.member.add`, `chat.member.remove`, `chat.message.update`, `chat.message.delete`,
 `chat.system.post`. `actorId` is the `userId` (or `null` for system posts).
 

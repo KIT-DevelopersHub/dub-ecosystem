@@ -14,6 +14,7 @@ import { createMembersApi, type MembersApi } from "./membersApi.tsx";
 import { MembersApiProvider } from "./MembersProvider.tsx";
 import { MembersPage } from "./MembersPage.tsx";
 import { MembersOrgChartPage } from "./MembersOrgChartPage.tsx";
+import { MemberRosterPage } from "./MemberRosterPage.tsx";
 import type { MembersOverview } from "./contracts.ts";
 import { member } from "@dub/types";
 import { ListView } from "./ListView.tsx";
@@ -273,6 +274,36 @@ describe("MembersPage", () => {
     expect(within(l2Item as HTMLElement).getByTestId("members-orgchip-R2")).toBeInTheDocument();
     expect(within(l2Item as HTMLElement).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
   });
+
+  // 統括チームは他チームと並ぶ1列になり、上部「代表」には統括チームで役割に代表/副代表を含む人だけを
+  // 代表→副代表の順で出す(統括チームの列にも重複して載る)。統括外の「代表」は上に出さない。
+  it("組織図 shows 代表 on top and 統括チーム as a regular column", async () => {
+    const base = { ...P0, orgId: "o", department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t" };
+    const overview: MembersOverview = {
+      teams: [
+        { id: "hq", key: "soukatsu", name: "統括チーム", color: "#1e3a5f", description: null },
+        { id: "dev", key: "dev", name: "開発チーム", color: "#0d9488", description: null },
+      ],
+      members: [
+        { ...base, id: "K", name: "高岡 己太朗", roleTitle: "副代表", status: "added", teamIds: ["hq"], sortOrder: 1 },
+        { ...base, id: "Y", name: "金井友楽", roleTitle: "代表", status: "added", teamIds: ["hq"], sortOrder: 2 },
+        { ...base, id: "H", name: "統括三郎", roleTitle: "統括リーダー", status: "added", teamIds: ["hq"], sortOrder: 3 },
+        { ...base, id: "D", name: "開発花子", roleTitle: "開発チーム代表", status: "added", teamIds: ["dev"], sortOrder: 4 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+
+    const reps = screen.getByTestId("members-orgchart-reps");
+    expect(reps.textContent).toMatch(/^代表/);
+    expect(within(reps).queryByText("開発花子")).not.toBeInTheDocument();
+    const repIds = [...reps.querySelectorAll("[data-testid^='members-orgrep-']")].map((e) => e.getAttribute("data-testid"));
+    expect(repIds).toEqual(["members-orgrep-Y", "members-orgrep-K"]);
+    const hqCol = screen.getByTestId("members-orgcol-hq");
+    for (const id of ["K", "Y", "H"]) expect(within(hqCol).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    const cols = [...screen.getByTestId("members-orgchart").querySelectorAll("[data-testid^='members-orgcol-']")];
+    expect(cols.map((c) => c.getAttribute("data-testid"))).toEqual(["members-orgcol-dev", "members-orgcol-hq"]);
+  });
 });
 
 describe("ListView (運営名簿の表)", () => {
@@ -293,5 +324,33 @@ describe("ListView (運営名簿の表)", () => {
       .getAllByRole("columnheader")
       .map((h) => h.textContent ?? "");
     for (const c of PROFILE_DISPLAY_COLUMNS) expect(headers.some((h) => h.includes(c.header))).toBe(true);
+  });
+});
+
+describe("MemberRosterPage (運営名簿から編集)", () => {
+  it("行クリックで編集ダイアログが開き、保存で updateMember を呼ぶ", async () => {
+    const api = makeApi();
+    render(wrap(<MemberRosterPage />, api));
+    await userEvent.click(await screen.findByText("山田太郎"));
+    const dialog = await screen.findByTestId("members-form-dialog");
+    expect(within(dialog).getByText("メンバーを編集")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByTestId("members-form-submit"));
+    await waitFor(() => expect(api.updateMember).toHaveBeenCalled());
+    expect(vi.mocked(api.updateMember).mock.calls[0]![0]).toBe("m1");
+  });
+
+  it("行内のボタン (紐付け) は編集ダイアログを開かない", async () => {
+    render(wrap(<MemberRosterPage />, makeApi()));
+    await userEvent.click(await screen.findByTestId("members-link-m1"));
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
+  });
+
+  it("閲覧のみ: 行クリックで編集を開かず、書き込み操作は無効", async () => {
+    render(wrap(<MemberRosterPage />, makeApi(), viewerPermissions("members", ["identity:read"])));
+    await userEvent.click(await screen.findByText("山田太郎"));
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("member-roster-readonly-notice")).toBeInTheDocument();
+    expect(screen.getByTestId("member-roster-add-member")).toBeDisabled();
+    expect(screen.getByTestId("members-edit-m1")).toBeDisabled();
   });
 });

@@ -30,6 +30,7 @@ export interface Channel {
   version: number;
   createdAt: common.ISODateTime;
   updatedAt: common.ISODateTime;
+  memberIds?: common.UserId[]; // type='dm' only: participants, so the FE can label a DM by the other side
 }
 
 export interface ChannelMember {
@@ -171,6 +172,29 @@ export interface SearchRow {
 // WsTicketResponse is frozen in @dub/types (chat); re-export under the local name.
 export type WsTicketResponse = chat.WsTicketResponse;
 
+// Personal sidebar sections (wire).
+export interface ChatSection {
+  id: string;
+  name: string;
+  position: number;
+  createdAt: common.ISODateTime;
+}
+export interface ChatSectionList {
+  items: ChatSection[];
+  /** channelId -> sectionId */
+  assignments: Record<string, string>;
+}
+export interface CreateSectionRequest {
+  name: string;
+}
+export interface UpdateSectionRequest {
+  name?: string;
+  position?: number;
+}
+export interface SetChannelSectionRequest {
+  sectionId: string | null;
+}
+
 // ---- internal persistence rows (superset; carries dmKey, absent from wire) ----
 export interface ChannelRow {
   id: common.ChannelId;
@@ -183,6 +207,14 @@ export interface ChannelRow {
   createdBy: common.UserId;
   archivedAt: common.ISODateTime | null;
   version: number;
+  createdAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
+}
+export interface SectionRow {
+  id: string;
+  userId: common.UserId;
+  name: string;
+  position: number;
   createdAt: common.ISODateTime;
   updatedAt: common.ISODateTime;
 }
@@ -260,6 +292,12 @@ export interface MemberClient {
 export interface ChatRepo {
   // channels
   createChannel(row: ChannelRow): Promise<void>;
+  /**
+   * Channel row + its initial members in ONE transaction. Returns false (nothing written)
+   * when the row's dm_key is already taken, so a racing DM create can re-read the winner,
+   * which is then guaranteed to be complete.
+   */
+  createChannelWithMembers(row: ChannelRow, members: MemberRow[]): Promise<boolean>;
   getChannel(id: common.ChannelId): Promise<ChannelRow | null>;
   getChannelByDmKey(dmKey: string): Promise<ChannelRow | null>;
   listChannelsForUser(q: {
@@ -276,6 +314,8 @@ export interface ChatRepo {
   removeMember(channelId: common.ChannelId, userId: common.UserId): Promise<boolean>;
   getMember(channelId: common.ChannelId, userId: common.UserId): Promise<MemberRow | null>;
   listMembers(channelId: common.ChannelId): Promise<MemberRow[]>;
+  /** Member user ids per channel, one query for many channels (DM labels in the list). */
+  memberIdsFor(channelIds: common.ChannelId[]): Promise<Map<string, common.UserId[]>>;
   membershipsForUser(userId: common.UserId): Promise<MemberRow[]>;
 
   // messages
@@ -333,7 +373,25 @@ export interface ChatRepo {
   /** Physically remove a message and its dependent rows (reactions, pins, and any
    *  thread replies rooted at it) — the `hard` delete path. Idempotent. */
   hardDeleteMessage(id: common.MessageId): Promise<void>;
+
+  /** Physically remove a channel and every row that references it (members, messages,
+   *  reactions, pins, read states, section assignments) in ONE transaction. Idempotent. */
+  hardDeleteChannel(id: common.ChannelId): Promise<void>;
+
+  // personal sidebar sections (always scoped by the owner's userId)
+  listSections(userId: common.UserId): Promise<SectionRow[]>;
+  getSection(userId: common.UserId, id: string): Promise<SectionRow | null>;
+  createSection(row: SectionRow): Promise<void>;
+  updateSection(row: SectionRow): Promise<void>;
+  /** Delete the section and its channel assignments (channels themselves stay). */
+  deleteSection(userId: common.UserId, id: string): Promise<boolean>;
+  /** channelId -> sectionId for the user's assigned channels. */
+  sectionAssignments(userId: common.UserId): Promise<Map<string, string>>;
+  /** sectionId null = unassign. */
+  setChannelSection(userId: common.UserId, channelId: common.ChannelId, sectionId: string | null): Promise<void>;
 }
+
+import type { SlackImporter } from "./slack-import";
 
 export interface AppDeps {
   repo: ChatRepo;
@@ -350,7 +408,11 @@ export interface AppDeps {
   now: () => string;
   newChannelId: () => common.ChannelId;
   newMessageId: () => common.MessageId;
+  newSectionId: () => string;
   // Link preview resolver (GET /chat/unfurl). Optional: absent => the route answers
   // `preview: null` so clients simply render no card (tests / minimal deploys).
   unfurler?: Unfurler;
+  // In-app Slack channel import (src/slack-import.ts). Absent => the /chat/slack-import/*
+  // routes answer 412 (not configured).
+  slackImport?: SlackImporter;
 }

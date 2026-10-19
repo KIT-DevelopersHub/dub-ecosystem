@@ -5,8 +5,10 @@
 import { useState } from "react";
 import { Badge, Button, Checkbox, Skeleton, SkeletonList, TextField } from "@dub/ui";
 import type { ExecutionResult, Preview, PreviewCall, PreviewWrite } from "./lib/operateApi.ts";
+import type { NarrowOption } from "./lib/operateDub.ts";
+import { FULL_READ_BUDGET_BYTES, READ_BUDGET_BYTES, readBytes } from "./lib/operateBudget.ts";
 import { apiPathPrefix, CONFIRM_PHRASE, RISK_LABEL, RISK_TONE, VERDICT_TONE } from "./lib/operateLabels.ts";
-import { writeCount } from "./lib/operateResult.ts";
+import { kb, writeCount } from "./lib/operateResult.ts";
 import { t } from "./lib/theme.ts";
 
 export type ApprovalState =
@@ -17,6 +19,10 @@ export type ApprovalState =
   | { status: "done"; preview: Preview; result: ExecutionResult }
   | { status: "cancelled"; preview: Preview }
   | { status: "readonly" }
+  /** A read over budget, sent back to the planner to narrow (nothing reached the answerer). */
+  | { status: "narrowed"; why: string }
+  /** Still over budget (or needsFull): the operator picks 全部読む or a narrowing. */
+  | { status: "overBudget"; preview: Preview; reason: string; options: NarrowOption[] }
   | { status: "stale"; executedLater: boolean };
 
 const PREVIEW_TARGETS = 3;
@@ -132,16 +138,68 @@ function ApiDetails({ preview }: { preview: Preview }) {
   );
 }
 
+function ReadBudgetCard({
+  preview,
+  reason,
+  options,
+  onReadAll,
+  onNarrow,
+}: {
+  preview: Preview;
+  reason: string;
+  options: NarrowOption[];
+  onReadAll: () => void;
+  onNarrow: (option: NarrowOption) => void;
+}) {
+  const bytes = readBytes(preview);
+  const rows = preview.reads.reduce((n, r) => n + (r.rows ?? r.count ?? 0), 0);
+  const tooBig = bytes > FULL_READ_BUDGET_BYTES || !!preview.readLimit;
+  return (
+    <div data-testid="operate-budget" style={{ display: "flex", flexDirection: "column", gap: t.space4, width: "100%" }}>
+      <div>
+        <Badge tone={preview.environment === "本番" ? "danger" : "info"}>接続先: {preview.environment}</Badge>
+      </div>
+      <p data-testid="operate-budget-size" style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+        {preview.readLimit
+          ? `読み取りが ${preview.readLimit.max}回の上限を超えます（${preview.readLimit.calls}回目で止めました）。絞り込みますか？`
+          : `${rows}行・約 ${kb(bytes)} あります（そのまま答えられるのは ${kb(READ_BUDGET_BYTES)} まで）。全部読むか、絞り込みますか？`}
+      </p>
+      {reason && <p style={{ margin: 0, fontSize: 13, color: t.textMuted }}>{reason}</p>}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: t.space3 }}>
+        {options.map((o, i) => (
+          <Button key={i} variant={i === 0 ? "primary" : "secondary"} onClick={() => onNarrow(o)} testId="operate-narrow-option">
+            絞り込む: {o.label}
+          </Button>
+        ))}
+        <Button variant="secondary" disabled={tooBig} onClick={onReadAll} testId="operate-read-all">
+          {preview.readLimit ? "全部読む" : `全部読む（約 ${kb(bytes)}）`}
+        </Button>
+      </div>
+      {tooBig && (
+        <p style={{ margin: 0, fontSize: 13, color: t.warning }}>
+          {preview.readLimit ? "読み取り回数の上限を超えるため" : `${kb(FULL_READ_BUDGET_BYTES)} を超えるため`}、全部は読めません。絞り込んでください。
+        </p>
+      )}
+      {options.length === 0 && <p style={{ margin: 0, fontSize: 13, color: t.textMuted }}>計画役からの絞り込み案はありません。</p>}
+      <Conclusion text="まだ回答していません。読み取りだけなので、どちらを選んでもデータは変更しません" tone="warning" />
+    </div>
+  );
+}
+
 export function ApprovalCard({
   state,
   onExecute,
   onCancel,
   onRetry,
+  onReadAll = () => {},
+  onNarrow = () => {},
 }: {
   state: ApprovalState;
   onExecute: (skip: string[]) => void;
   onCancel: () => void;
   onRetry: () => void;
+  onReadAll?: () => void;
+  onNarrow?: (option: NarrowOption) => void;
 }) {
   const [narrowing, setNarrowing] = useState(false);
   const [skip, setSkip] = useState<Set<string>>(new Set());
@@ -158,6 +216,14 @@ export function ApprovalCard({
 
   if (state.status === "readonly") {
     return <Conclusion text="読み取りだけを行いました。データは変更していません" tone="neutral" />;
+  }
+
+  if (state.status === "narrowed") {
+    return <Conclusion text={`${state.why}、計画を見直して読み直します。データは変更していません`} tone="neutral" />;
+  }
+
+  if (state.status === "overBudget") {
+    return <ReadBudgetCard preview={state.preview} reason={state.reason} options={state.options} onReadAll={onReadAll} onNarrow={onNarrow} />;
   }
 
   if (state.status === "stale") {

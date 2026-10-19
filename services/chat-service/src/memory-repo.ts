@@ -1,7 +1,7 @@
 // In-memory ChatRepo: backs unit tests and local runs. Mirrors the D1 repo's
 // keyset (by ULID id) so pagination / gap-fill tests are representative.
 import type { common } from "@dub/types";
-import type { ChatRepo, ChannelRow, MemberRow, MessageRow, SearchRow, MessageDeletionPolicy, DeletionPolicyRow } from "./types";
+import type { ChatRepo, ChannelRow, SectionRow, MemberRow, MessageRow, SearchRow, MessageDeletionPolicy, DeletionPolicyRow } from "./types";
 
 function cmpStr(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -21,6 +21,8 @@ export class InMemoryChatRepo implements ChatRepo {
   private reads = new Map<string, { lastReadMessageId: common.MessageId | null }>(); // channelId|userId
   private pins = new Map<common.ChannelId, Map<common.MessageId, string>>(); // channelId -> (messageId -> pinnedAt)
   private settings = new Map<common.OrgId, DeletionPolicyRow>(); // orgId -> policy + version
+  private sections = new Map<string, SectionRow>();
+  private channelSections = new Map<string, string>(); // userId|channelId -> sectionId
 
   private mkey(channelId: string, userId: string): string {
     return `${channelId}|${userId}`;
@@ -42,6 +44,12 @@ export class InMemoryChatRepo implements ChatRepo {
       }
     }
     this.channels.set(row.id, { ...row });
+  }
+  async createChannelWithMembers(row: ChannelRow, members: MemberRow[]): Promise<boolean> {
+    if (row.dmKey && [...this.channels.values()].some((c) => c.dmKey === row.dmKey)) return false;
+    this.channels.set(row.id, { ...row });
+    for (const m of members) this.members.set(this.mkey(m.channelId, m.userId), { ...m });
+    return true;
   }
   async getChannel(id: common.ChannelId): Promise<ChannelRow | null> {
     const r = this.channels.get(id);
@@ -90,6 +98,13 @@ export class InMemoryChatRepo implements ChatRepo {
   }
   async listMembers(channelId: common.ChannelId): Promise<MemberRow[]> {
     return [...this.members.values()].filter((m) => m.channelId === channelId).map((m) => ({ ...m }));
+  }
+  async memberIdsFor(channelIds: common.ChannelId[]): Promise<Map<string, common.UserId[]>> {
+    const out = new Map<string, common.UserId[]>();
+    for (const m of this.members.values()) {
+      if (channelIds.includes(m.channelId)) out.set(m.channelId, [...(out.get(m.channelId) ?? []), m.userId]);
+    }
+    return out;
   }
   async membershipsForUser(userId: common.UserId): Promise<MemberRow[]> {
     return [...this.members.values()].filter((m) => m.userId === userId).map((m) => ({ ...m }));
@@ -181,6 +196,7 @@ export class InMemoryChatRepo implements ChatRepo {
     let n = 0;
     for (const m of this.messages.values()) {
       if (m.channelId !== channelId) continue;
+      if (m.threadRootId !== null) continue; // thread replies are not channel unread (see d1-repo)
       if (m.deletedAt !== null) continue;
       if (m.authorId === userId) continue; // own messages are not unread
       if (lastReadMessageId === null || m.id > lastReadMessageId) n++;
@@ -256,5 +272,57 @@ export class InMemoryChatRepo implements ChatRepo {
       this.reactions.delete(rid);
       for (const set of this.pins.values()) set.delete(rid);
     }
+  }
+
+  async hardDeleteChannel(id: common.ChannelId): Promise<void> {
+    for (const m of [...this.messages.values()]) {
+      if (m.channelId !== id) continue;
+      this.messages.delete(m.id);
+      this.reactions.delete(m.id);
+    }
+    this.pins.delete(id);
+    for (const k of [...this.members.keys()]) if (k.startsWith(`${id}|`)) this.members.delete(k);
+    for (const k of [...this.reads.keys()]) if (k.startsWith(`${id}|`)) this.reads.delete(k);
+    for (const k of [...this.channelSections.keys()]) if (k.endsWith(`|${id}`)) this.channelSections.delete(k);
+    this.channels.delete(id);
+  }
+
+  // ---- personal sidebar sections ----
+  async listSections(userId: common.UserId): Promise<SectionRow[]> {
+    return [...this.sections.values()]
+      .filter((s) => s.userId === userId)
+      .sort((a, b) => a.position - b.position || cmpStr(a.id, b.id))
+      .map((s) => ({ ...s }));
+  }
+  async getSection(userId: common.UserId, id: string): Promise<SectionRow | null> {
+    const s = this.sections.get(id);
+    return s && s.userId === userId ? { ...s } : null;
+  }
+  async createSection(row: SectionRow): Promise<void> {
+    this.sections.set(row.id, { ...row });
+  }
+  async updateSection(row: SectionRow): Promise<void> {
+    const cur = this.sections.get(row.id);
+    if (cur && cur.userId === row.userId) this.sections.set(row.id, { ...row });
+  }
+  async deleteSection(userId: common.UserId, id: string): Promise<boolean> {
+    const cur = this.sections.get(id);
+    if (!cur || cur.userId !== userId) return false;
+    this.sections.delete(id);
+    for (const [k, v] of [...this.channelSections]) if (v === id) this.channelSections.delete(k);
+    return true;
+  }
+  async sectionAssignments(userId: common.UserId): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    for (const [k, v] of this.channelSections) {
+      const [u, channelId] = k.split("|");
+      if (u === userId && channelId) out.set(channelId, v);
+    }
+    return out;
+  }
+  async setChannelSection(userId: common.UserId, channelId: common.ChannelId, sectionId: string | null): Promise<void> {
+    const k = `${userId}|${channelId}`;
+    if (sectionId === null) this.channelSections.delete(k);
+    else this.channelSections.set(k, sectionId);
   }
 }

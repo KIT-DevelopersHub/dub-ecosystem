@@ -15,13 +15,20 @@ import type { identity, common } from "@dub/types";
 export interface CreateRoleRequest {
   name: string;
   permissions: identity.PermissionKey[];
+  /** Roles whose holders' inbound mail this role's holders also see (one-way). */
+  mailVisibleRoleIds?: common.RoleId[];
 }
 
 // PATCH sends only the changed fields (design §2-4 "差分のみ").
 export interface UpdateRoleRequest {
   name?: string;
   permissions?: identity.PermissionKey[];
+  mailVisibleRoleIds?: common.RoleId[];
 }
+
+// identity-roster's role DTO: the frozen identity.Role plus the cross-role mail visibility
+// set. Optional here so an older backend (field absent) reads as "none".
+export type RoleView = identity.Role & { mailVisibleRoleIds?: common.RoleId[] };
 
 // P0: org-wide (no resource fields) or event-scoped. Fields are OMITTED, not null,
 // for org-wide (design test "ScopePicker": undefined, not null).

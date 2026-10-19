@@ -5,7 +5,7 @@ import { Badge, Switch } from "@dub/ui";
 import { permissionLabel, permissionDescription } from "../lib/permissionLabels";
 import { togglePermission } from "../lib/permissionMatrix";
 
-const listStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)" };
+export const toggleListStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)" };
 const rowStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -47,28 +47,28 @@ export function PermissionToggleList({
   const locked = new Set(lockedKeys);
 
   return (
-    <div style={listStyle}>
+    <div style={toggleListStyle}>
       {entries.map((entry) => {
         const key = entry.key as identity.PermissionKey;
-        const on = selected.includes(key);
         const keyLocked = locked.has(key);
         return (
-          <div key={key} style={{ ...rowStyle, ...(on ? rowOnStyle : null) }} data-testid={`${testIdPrefix}-row-${key}`}>
-            <Switch
-              id={`${testIdPrefix}-${key}`}
-              checked={on}
-              disabled={disabled || keyLocked}
-              onChange={() => onChange(togglePermission(selected, key))}
-              testId={`${testIdPrefix}-toggle-${key}`}
-              label={
-                <span style={labelStyle}>
-                  <span style={{ fontWeight: 600 }}>{permissionLabel(key, entry.name)}</span>
-                  <span style={keyStyle}>{key}</span>
-                  {keyLocked ? <Badge tone="neutral">固定</Badge> : null}
-                </span>
-              }
-            />
-            <p style={descStyle}>{permissionDescription(key, entry.description)}</p>
+          <ToggleRow
+            key={key}
+            id={`${testIdPrefix}-${key}`}
+            testIdPrefix={testIdPrefix}
+            testIdKey={key}
+            checked={selected.includes(key)}
+            disabled={disabled || keyLocked}
+            onChange={() => onChange(togglePermission(selected, key))}
+            title={permissionLabel(key, entry.name)}
+            meta={
+              <>
+                <span style={keyStyle}>{key}</span>
+                {keyLocked ? <Badge tone="neutral">固定</Badge> : null}
+              </>
+            }
+            description={permissionDescription(key, entry.description)}
+          >
             {entry.dangerous ? (
               <span style={dangerStyle}>
                 <Badge tone="warning" testId={`${testIdPrefix}-danger-${key}`}>
@@ -76,9 +76,54 @@ export function PermissionToggleList({
                 </Badge>
               </span>
             ) : null}
-          </div>
+          </ToggleRow>
         );
       })}
+    </div>
+  );
+}
+
+/** ON/OFF 1 行。権限キー以外の設定（メールの別ロール閲覧）も同じ見た目にするため共有する. */
+export function ToggleRow({
+  id,
+  testIdPrefix,
+  testIdKey,
+  checked,
+  disabled,
+  onChange,
+  title,
+  meta,
+  description,
+  children,
+}: {
+  id: string;
+  testIdPrefix: string;
+  testIdKey: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+  title: React.ReactNode;
+  meta?: React.ReactNode;
+  description?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div style={{ ...rowStyle, ...(checked ? rowOnStyle : null) }} data-testid={`${testIdPrefix}-row-${testIdKey}`}>
+      <Switch
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onChange={onChange}
+        testId={`${testIdPrefix}-toggle-${testIdKey}`}
+        label={
+          <span style={labelStyle}>
+            <span style={{ fontWeight: 600 }}>{title}</span>
+            {meta}
+          </span>
+        }
+      />
+      {description ? <p style={descStyle}>{description}</p> : null}
+      {children}
     </div>
   );
 }

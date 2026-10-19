@@ -162,6 +162,12 @@ export interface GoogleAccountEntry {
   /** Google answered invalid_grant (revoked / expired), or the stored token can no longer
    *  be opened — add the same account again to reconnect. */
   needsReconnect: boolean;
+  /** The grant lacks the calendar scope (connected before カレンダー > ミーティング, or the box was
+   *  unticked on Google's consent screen) — reconnect to grant it. */
+  calendarMissing: boolean;
+  /** The grant lacks the Meet settings scope, so new Meet links cannot be opened to anyone with
+   *  the link — reconnect to grant it. */
+  meetMissing: boolean;
 }
 
 /** GET /driveshare/google-account (and the result of every change). No active entry =

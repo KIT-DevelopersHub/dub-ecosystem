@@ -31,6 +31,22 @@ export function lpViewUrl(
   return `${base}/?version=${encodeURIComponent(v)}`;
 }
 
+export type LpPreviewMode = "on" | "off";
+
+/**
+ * 「プレビュー」タブの行き先。版は公開中でも番号で指定する（live はプレビュー cookie を消すため）。
+ * tickets: on = 販売停止中でも販売中の見た目（申し込み不可）/ off = 販売中でも出さない。
+ * proposals: on = 募集停止中でも募集中の見た目（応募不可）/ off = 募集中でも出さない。
+ * どれもこの閲覧者にだけ効き、公開中の LP は変わらない。
+ */
+export function lpPreviewUrl(
+  id: string,
+  modes: { tickets: LpPreviewMode; proposals: LpPreviewMode },
+  base: string = LP_PUBLIC_URL,
+): string {
+  return `${base}/?version=${encodeURIComponent(id.replace(/^v/, ""))}&tickets=${modes.tickets}&proposals=${modes.proposals}`;
+}
+
 /** 切り替え日時の表示（"2026/10/12 14:05"）。壊れた値はそのまま返す。 */
 export function formatSwitchedAt(iso: string): string {
   const d = new Date(iso);

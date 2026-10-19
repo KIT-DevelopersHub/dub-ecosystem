@@ -13,7 +13,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, it, expect } from "vitest";
 import { createDbClient, applyMigrations, assertAllApplied } from "@dub/db";
 import { createD1ChatRepo } from "../../src/d1-repo";
-import { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION } from "../../src/schema";
+import { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SECTIONS_MIGRATION } from "../../src/schema";
 import type { ChatRepo, ChannelRow, MemberRow, MessageRow } from "../../src/types";
 
 const AT = "2026-08-10T05:00:00.000Z";
@@ -70,7 +70,7 @@ function message(over: Partial<MessageRow> & Pick<MessageRow, "id" | "channelId"
 
 beforeAll(async () => {
   // Apply the chat DDL to the empty miniflare D1 (idempotent via the ledger).
-  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION]);
+  const results = await applyMigrations(env.DB, [CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SECTIONS_MIGRATION]);
   assertAllApplied(results);
 });
 
@@ -105,6 +105,35 @@ describe("d1-repo: channels", () => {
     // A second channel with the same dm_key must violate the UNIQUE index.
     const dup = channel({ id: id.chan(2), type: "dm", visibility: "private", dmKey: key, createdBy: id.user(1) });
     await expect(repo.createChannel(dup)).rejects.toThrow();
+  });
+
+  it("createChannelWithMembers writes row + members together, and nothing on a dm_key clash", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const key = `dm_${id.evt}`;
+    const a = channel({ id: id.chan(1), type: "dm", visibility: "private", dmKey: key, createdBy: id.user(1) });
+    expect(await repo.createChannelWithMembers(a, [member(a.id, id.user(1)), member(a.id, id.user(2))])).toBe(true);
+    expect((await repo.listMembers(a.id)).map((m) => m.userId)).toEqual([id.user(1), id.user(2)]);
+
+    // The racing loser: same dm_key, different channel id -> no row, no orphan members.
+    const b = channel({ id: id.chan(2), type: "dm", visibility: "private", dmKey: key, createdBy: id.user(2) });
+    expect(await repo.createChannelWithMembers(b, [member(b.id, id.user(2)), member(b.id, id.user(1))])).toBe(false);
+    expect(await repo.getChannel(b.id)).toBeNull();
+    expect(await repo.listMembers(b.id)).toEqual([]);
+  });
+
+  it("memberIdsFor groups members of many channels in one call", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    for (const n of [1, 2]) await repo.createChannel(channel({ id: id.chan(n), createdBy: id.user(1) }));
+    await repo.addMember(member(id.chan(1), id.user(1)));
+    await repo.addMember(member(id.chan(1), id.user(2)));
+    await repo.addMember(member(id.chan(2), id.user(3)));
+    const got = await repo.memberIdsFor([id.chan(1), id.chan(2), id.chan(3)]);
+    expect(got.get(id.chan(1))).toEqual([id.user(1), id.user(2)]);
+    expect(got.get(id.chan(2))).toEqual([id.user(3)]);
+    expect(got.has(id.chan(3))).toBe(false);
+    expect((await repo.memberIdsFor([])).size).toBe(0);
   });
 
   it("listChannelsForUser: public visible to non-members, private only to members", async () => {
@@ -341,6 +370,11 @@ describe("d1-repo: read state + unread", () => {
     await repo.setReadState(chan.id, me, m2.id, AT);
     expect((await repo.getReadState(chan.id, me))?.lastReadMessageId).toBe(m2.id);
     expect(await repo.countUnread(chan.id, me, m2.id)).toBe(0);
+
+    // a thread reply newer than the cursor is not channel unread (the main timeline,
+    // which drives the cursor, never shows replies)
+    await repo.createMessage(message({ id: id.msg(5), channelId: chan.id, authorId: other, threadRootId: m2.id }));
+    expect(await repo.countUnread(chan.id, me, m2.id)).toBe(0);
   });
 });
 
@@ -454,3 +488,63 @@ describe("d1-repo: deletion policy + hard delete", () => {
     expect(list.map((m) => m.id)).toEqual([other.id]);
   });
 });
+
+describe("d1-repo: channel hard delete + sections", () => {
+  it("hardDeleteChannel removes the channel and all dependent rows without FK errors", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const chan = channel({ id: id.chan(1), createdBy: id.user(1) });
+    const keep = channel({ id: id.chan(2), createdBy: id.user(1) });
+    await repo.createChannelWithMembers(chan, [member(chan.id, id.user(1), "admin"), member(chan.id, id.user(2))]);
+    await repo.createChannel(keep);
+    const root = message({ id: id.msg(1), channelId: chan.id, authorId: id.user(1) });
+    const reply = message({ id: id.msg(2), channelId: chan.id, authorId: id.user(2), threadRootId: root.id });
+    const kept = message({ id: id.msg(3), channelId: keep.id, authorId: id.user(1) });
+    for (const m of [root, reply, kept]) await repo.createMessage(m);
+    await repo.addReaction(reply.id, "👍", id.user(1), AT);
+    await repo.addPin(chan.id, root.id, id.user(1), AT);
+    await repo.setReadState(chan.id, id.user(2), reply.id, AT);
+    const sec = { id: `csec_${id.evt}`, userId: id.user(1), name: "s", position: 0, createdAt: AT, updatedAt: AT };
+    await repo.createSection(sec);
+    await repo.setChannelSection(id.user(1), chan.id, sec.id);
+    await repo.setChannelSection(id.user(1), keep.id, sec.id);
+
+    await repo.hardDeleteChannel(chan.id);
+
+    expect(await repo.getChannel(chan.id)).toBeNull();
+    expect(await repo.getMessage(root.id)).toBeNull();
+    expect(await repo.getMessage(reply.id)).toBeNull();
+    expect(await repo.listMembers(chan.id)).toEqual([]);
+    expect(await repo.getReadState(chan.id, id.user(2))).toBeNull();
+    expect((await repo.reactionsFor([reply.id])).size).toBe(0);
+    expect(await repo.getChannel(keep.id)).not.toBeNull();
+    expect(await repo.getMessage(kept.id)).not.toBeNull();
+    expect(Object.fromEntries(await repo.sectionAssignments(id.user(1)))).toEqual({ [keep.id]: sec.id });
+  });
+
+  it("sections are owner-scoped; upsert moves; deleteSection drops assignments only", async () => {
+    const repo = makeRepo();
+    const id = ns();
+    const chan = channel({ id: id.chan(1), createdBy: id.user(1) });
+    await repo.createChannel(chan);
+    const a = { id: `csec_${id.evt}_a`, userId: id.user(1), name: "A", position: 1, createdAt: AT, updatedAt: AT };
+    const b = { id: `csec_${id.evt}_b`, userId: id.user(1), name: "B", position: 0, createdAt: AT, updatedAt: AT };
+    await repo.createSection(a);
+    await repo.createSection(b);
+    expect((await repo.listSections(id.user(1))).map((s) => s.id)).toEqual([b.id, a.id]);
+    expect(await repo.getSection(id.user(2), a.id)).toBeNull();
+
+    await repo.updateSection({ ...a, name: "A2", position: 0, userId: id.user(2) }); // foreign owner: no-op
+    expect((await repo.getSection(id.user(1), a.id))?.name).toBe("A");
+
+    await repo.setChannelSection(id.user(1), chan.id, a.id);
+    await repo.setChannelSection(id.user(1), chan.id, b.id);
+    expect(Object.fromEntries(await repo.sectionAssignments(id.user(1)))).toEqual({ [chan.id]: b.id });
+
+    expect(await repo.deleteSection(id.user(2), b.id)).toBe(false);
+    expect(await repo.deleteSection(id.user(1), b.id)).toBe(true);
+    expect((await repo.sectionAssignments(id.user(1))).size).toBe(0);
+    expect(await repo.getChannel(chan.id)).not.toBeNull();
+  });
+});
+

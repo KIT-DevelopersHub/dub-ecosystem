@@ -4,11 +4,12 @@
 // with postMessage({ threadRootId }); kept local to the pane so opening a thread
 // never disturbs the main timeline. Non-optimistic here (design keeps the main
 // timeline as the optimistic surface) — a reply appears once the server acks.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { common, identity } from "@dub/types";
 import { useChatRuntime } from "../context";
 import type { Message, TeamSummary } from "../api/contract";
-import type { MentionCandidate } from "../lib/mentions";
+import { IDENTITY_BATCH_MAX } from "../api/client";
+import { extractMentions, type MentionCandidate } from "../lib/mentions";
 import { newClientTempId } from "../lib/ulid";
 import { MessageItem } from "./MessageItem";
 import { MessageComposer } from "./MessageComposer";
@@ -52,17 +53,21 @@ export function ThreadPane({
     };
   }, [api, channelId, root.id]);
 
-  // resolve reply authors the parent timeline may not have seen yet
+  // resolve reply authors / @-mentioned users the parent timeline may not have seen yet
+  const unresolvable = useRef(new Set<common.UserId>());
   useEffect(() => {
     // Drop null authorIds (system posts have no author to resolve).
-    const ids = Array.from(new Set([root.authorId, ...replies.map((m) => m.authorId)])).filter(
-      (id): id is common.UserId => id !== null,
-    );
-    const missing = ids.filter((id) => !resolveUser?.(id) && !(id in localUsers));
+    const thread = [root, ...replies];
+    const ids = Array.from(
+      new Set([...thread.map((m) => m.authorId), ...thread.flatMap((m) => extractMentions(m.body))]),
+    ).filter((id): id is common.UserId => id !== null);
+    const missing = ids.filter((id) => !resolveUser?.(id) && !(id in localUsers) && !unresolvable.current.has(id));
     if (missing.length === 0) return;
     let cancelled = false;
     void api.resolveUsers(missing).then((summaries) => {
       if (cancelled) return;
+      const found = new Set(summaries.map((u) => u.id));
+      for (const id of missing.slice(0, IDENTITY_BATCH_MAX)) if (!found.has(id)) unresolvable.current.add(id);
       setLocalUsers((prev) => {
         const next = { ...prev };
         for (const u of summaries) next[u.id] = u;
@@ -72,7 +77,7 @@ export function ThreadPane({
     return () => {
       cancelled = true;
     };
-  }, [api, replies, root.authorId, resolveUser, localUsers]);
+  }, [api, replies, root, resolveUser, localUsers]);
 
   const resolve = (id: common.UserId): identity.UserSummary | undefined => resolveUser?.(id) ?? localUsers[id];
 
@@ -123,6 +128,8 @@ export function ThreadPane({
         channelId={`${channelId}:thread:${root.id}` as common.ChannelId}
         placeholder="スレッドに返信する"
         resolveMentionCandidates={resolveMentionCandidates}
+        resolveUser={resolveUser}
+        resolveTeam={resolveTeam}
         onSend={onSend}
       />
     </aside>

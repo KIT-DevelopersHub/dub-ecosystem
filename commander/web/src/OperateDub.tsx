@@ -4,30 +4,43 @@
 //      over the API catalog;
 //   2) a plan is previewed by the daemon at once (reads run, writes resolved, nothing
 //      written) and rendered as the approval screen; a read-only plan is answered in prose
-//      from the read results instead;
+//      from the compacted read tables instead — over the read budget it is narrowed by
+//      the planner or put to the operator first (lib/operateBudget.ts);
 //   3) ［実行］ executes the approved preview once; the daemon reads every target back and
 //      the verdict lands in the session as 【実行結果】 for the planner's next turn.
 import { useCallback, useEffect, useState } from "react";
 import { Skeleton } from "@dub/ui";
 import type { ChatMessage } from "./lib/commanderApi.ts";
+import type { ChatImage } from "./lib/images.ts";
 import { useChat } from "./lib/chatStore.tsx";
 import { ChatComposer, MessageLog, SessionSidebar } from "./ChatUI.tsx";
 import {
   buildAnswerPrompt,
+  buildNarrowPrompt,
   buildPlannerPrompt,
   OPERATE_PLANNER_ARGS,
   OPERATE_PLANNER_CWD,
   parsePlannerReply,
   RESULT_PREFIX,
+  type NarrowOption,
   type PlannerPlan,
 } from "./lib/operateDub.ts";
-import { HttpOperateClient, OperateError, type CatalogEntry, type OperateClient } from "./lib/operateApi.ts";
-import { CANCEL_NOTE, formatExecutionNote, formatPreviewNote, splitNote } from "./lib/operateResult.ts";
+import { HttpOperateClient, OperateError, type CatalogEntry, type OperateClient, type Preview } from "./lib/operateApi.ts";
+import { describeEmptyMatch, describeOverBudget, FULL_READ_BUDGET_BYTES, readBytes, READ_BUDGET_BYTES, runReadFlow } from "./lib/operateBudget.ts";
+import { CANCEL_NOTE, formatExecutionNote, formatPreviewNote, kb, readData, splitNote } from "./lib/operateResult.ts";
 import { ApprovalCard, type ApprovalState } from "./OperateApproval.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { card, t } from "./lib/theme.ts";
 
 const defaultOperateClient: OperateClient = new HttpOperateClient();
 const PLANNER_OPTS = { cwd: OPERATE_PLANNER_CWD, args: OPERATE_PLANNER_ARGS };
+
+/** First line of every answer: where the data came from (staging = seed data). */
+export function environmentSeed(environment: string): string {
+  if (environment === "staging") return "**接続先: staging**（テスト用の seed データです。本番のデータではありません）\n\n";
+  if (environment === "ローカル") return "**接続先: ローカル**（開発用のデータです）\n\n";
+  return `**接続先: ${environment}**\n\n`;
+}
 
 const errorState = (e: unknown): ApprovalState =>
   e instanceof OperateError
@@ -48,11 +61,16 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
   const chat = useChat();
   const sessionId = chat.activeId("operate");
   const messages = sessionId ? chat.messages(sessionId) : [];
-  const busy = sessionId ? chat.isRunning(sessionId) : false;
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState<Record<string, ApprovalState>>({});
-  const [pending, setPending] = useState(false);
+  // Per session: a preview/execute in one chat must not lock the composer of another.
+  const [pendingBySession, setPendingBySession] = useState<Record<string, number>>({});
+  const setPending = useCallback(
+    (sid: string, on: boolean) => setPendingBySession((prev) => ({ ...prev, [sid]: Math.max(0, (prev[sid] ?? 0) + (on ? 1 : -1)) })),
+    [],
+  );
+  const busy = sessionId ? chat.isRunning(sessionId) || (pendingBySession[sessionId] ?? 0) > 0 : false;
 
   useEffect(() => {
     let alive = true;
@@ -71,34 +89,119 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
 
   const setApproval = useCallback((id: string, s: ApprovalState) => setApprovals((prev) => ({ ...prev, [id]: s })), []);
 
+  /** Persist the read tables and answer from them (they are given whole to the answerer). */
+  const answer = useCallback(
+    async (sid: string, preview: Preview, history: ChatMessage[]) => {
+      if (!catalog) return;
+      const note = await chat.note(sid, formatPreviewNote(preview));
+      await chat.run("operate", sid, {
+        prompt: buildAnswerPrompt({ catalog, history: note ? [...history, note] : history, readData: readData(preview), noteId: note?.id }),
+        opts: PLANNER_OPTS,
+        assistantSeed: environmentSeed(preview.environment),
+      });
+    },
+    [catalog, chat],
+  );
+
+  const fail = useCallback(
+    async (sid: string, msgId: string, e: unknown) => {
+      const s = errorState(e);
+      setApproval(msgId, s);
+      if (s.status === "error") await chat.note(sid, `${RESULT_PREFIX.preview}実行できません: ${[s.message, ...s.blockers].join(" / ")}`);
+    },
+    [chat, setApproval],
+  );
+
+  /** Preview a plan; read-only ones go through the read budget (operateBudget.ts). */
   const previewPlan = useCallback(
-    async (sid: string, planMsgId: string, plan: PlannerPlan, history: ChatMessage[]) => {
+    async (sid: string, planMsgId: string, plan: PlannerPlan, history: ChatMessage[], opts: { rounds?: number } = {}) => {
       if (!catalog) return;
       setApproval(planMsgId, { status: "loading" });
-      setPending(true);
+      setPending(sid, true);
+      // The store snapshot in this closure is stale during the flow: track the turn here.
+      let hist = history;
       try {
-        const preview = await operateClient.preview(plan);
-        const note = await chat.note(sid, formatPreviewNote(preview));
-        if (preview.writes.length === 0 && preview.blockers.length === 0) {
-          setApproval(planMsgId, { status: "readonly" });
-          const withNote = note ? [...history, note] : history;
-          await chat.run("operate", sid, { prompt: buildAnswerPrompt({ catalog, history: withNote }), opts: PLANNER_OPTS });
+        const out = await runReadFlow(
+          { msgId: planMsgId, plan },
+          {
+            catalog,
+            preview: (p) => operateClient.preview(p),
+            onOverBudget: async (turn, preview, kind) => {
+              const why =
+                kind === "empty" ? "条件に合う対象が見つからなかったため"
+                : preview.readLimit ? `読み取り回数が上限（${preview.readLimit.max}回）を超えたため`
+                : `読み取り結果が約 ${kb(readBytes(preview))} あり、上限（${kb(READ_BUDGET_BYTES)}）を超えたため`;
+              setApproval(turn.msgId, { status: "narrowed", why });
+              const note = await chat.note(sid, `${formatPreviewNote(preview, { withData: kind === "empty" })}\n- ${why}、計画を見直して読み直します`);
+              if (note) hist = [...hist, note];
+            },
+            narrow: async ({ plan: p, preview, last, why }) => {
+              const facts = why === "empty" ? describeEmptyMatch(preview, p) : describeOverBudget(preview, catalog);
+              const msg = await chat.run("operate", sid, {
+                prompt: buildNarrowPrompt({ catalog, history: hist, plan: p, facts, last, why }),
+                opts: PLANNER_OPTS,
+              });
+              if (!msg || msg.status !== "done") return null;
+              hist = [...hist, msg];
+              const reply = parsePlannerReply(msg.text);
+              if (reply.kind === "plan") setApproval(msg.id, { status: "loading" });
+              return { msgId: msg.id, reply };
+            },
+          },
+          opts,
+        );
+        if (out.kind === "error") {
+          await fail(sid, out.msgId, out.error);
+        } else if (out.kind === "confirm") {
+          setApproval(out.msgId, { status: "overBudget", preview: out.preview, reason: out.reason, options: out.options });
+        } else if (out.kind === "answer") {
+          setApproval(out.turn.msgId, { status: "readonly" });
+          await answer(sid, out.preview, hist);
         } else {
-          setApproval(planMsgId, { status: "ready", preview });
+          await chat.note(sid, formatPreviewNote(out.preview, { withData: readBytes(out.preview) <= READ_BUDGET_BYTES }));
+          setApproval(out.turn.msgId, { status: "ready", preview: out.preview });
         }
       } catch (e) {
-        const s = errorState(e);
-        setApproval(planMsgId, s);
-        if (s.status === "error") await chat.note(sid, `${RESULT_PREFIX.preview}実行できません: ${[s.message, ...s.blockers].join(" / ")}`);
+        await fail(sid, planMsgId, e);
       } finally {
-        setPending(false);
+        setPending(sid, false);
       }
     },
-    [catalog, chat, operateClient, setApproval],
+    [answer, catalog, chat, fail, operateClient, setApproval, setPending],
+  );
+
+  /** 全部読む: the budget is raised once for the preview already read. */
+  const readAll = useCallback(
+    async (msgId: string) => {
+      const sid = chat.activeId("operate");
+      const s = approvals[msgId];
+      if (!sid || s?.status !== "overBudget" || s.preview.readLimit || readBytes(s.preview) > FULL_READ_BUDGET_BYTES) return;
+      setApproval(msgId, { status: "readonly" });
+      setPending(sid, true);
+      try {
+        await answer(sid, s.preview, messages);
+      } finally {
+        setPending(sid, false);
+      }
+    },
+    [answer, approvals, chat, messages, setApproval, setPending],
+  );
+
+  /** 絞り込む: the chosen narrowing becomes the next plan (no further automatic rounds). */
+  const narrowTo = useCallback(
+    async (msgId: string, option: NarrowOption) => {
+      const sid = chat.activeId("operate");
+      if (!sid || approvals[msgId]?.status !== "overBudget") return;
+      setApproval(msgId, { status: "readonly" });
+      const planNote = await chat.note(sid, `絞り込み「${option.label}」で読み直します。\n\`\`\`json\n${JSON.stringify(option.plan)}\n\`\`\``);
+      if (!planNote) return;
+      await previewPlan(sid, planNote.id, option.plan, [...messages, planNote], { rounds: 0 });
+    },
+    [approvals, chat, messages, previewPlan, setApproval],
   );
 
   const planIntent = useCallback(
-    async (text: string) => {
+    async (text: string, images: ChatImage[] = []) => {
       if (!catalog) return;
       let sid = chat.activeId("operate");
       if (!sid) sid = (await chat.create("operate"))?.id ?? null;
@@ -108,6 +211,7 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
         userText: text,
         prompt: buildPlannerPrompt({ catalog, history, request: text }),
         opts: PLANNER_OPTS,
+        images,
       });
       if (!msg || msg.status !== "done") return;
       const reply = parsePlannerReply(msg.text);
@@ -124,7 +228,7 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
       const s = approvals[planMsgId];
       if (!sid || s?.status !== "ready") return;
       setApproval(planMsgId, { status: "executing", preview: s.preview, skip });
-      setPending(true);
+      setPending(sid, true);
       try {
         const result = await operateClient.execute(s.preview.previewId, skip);
         setApproval(planMsgId, { status: "done", preview: s.preview, result });
@@ -134,10 +238,10 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
         setApproval(planMsgId, err);
         if (err.status === "error") await chat.note(sid, `${RESULT_PREFIX.execution}できませんでした: ${err.message}`);
       } finally {
-        setPending(false);
+        setPending(sid, false);
       }
     },
-    [approvals, chat, operateClient, setApproval],
+    [approvals, chat, operateClient, setApproval, setPending],
   );
 
   const cancel = useCallback(
@@ -182,9 +286,28 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
         );
       }
       const reply = parsePlannerReply(msg.text);
-      if (reply.kind === "answer") return undefined;
+      // Answers carry tables: render them as tables, not as pipes and dashes.
+      if (reply.kind === "answer") {
+        return (
+          <div data-testid="operate-answer" style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, padding: `${t.space3} ${t.space4}`, width: "100%", boxSizing: "border-box" }}>
+            <Markdown text={msg.text} />
+          </div>
+        );
+      }
       if (reply.kind === "invalid") return <p style={{ margin: 0, fontSize: 14, color: t.danger }}>{reply.error}</p>;
       const sid = chat.activeId("operate");
+      const budgetHandlers = { onReadAll: () => void readAll(msg.id), onNarrow: (o: NarrowOption) => void narrowTo(msg.id, o) };
+      if (reply.kind === "needsFull") {
+        const state = approvals[msg.id];
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: t.space4, width: "100%" }} data-testid="operate-needs-full">
+            {reply.intro && <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7 }}>{reply.intro}</p>}
+            {/* The card repeats the reason next to the choices; without one, say it here. */}
+            {!state && <p style={{ margin: 0, fontSize: 14 }}>全件の読み取りが必要と判断しました。{reply.reason}</p>}
+            {state && <ApprovalCard state={state} onExecute={() => {}} onCancel={() => {}} onRetry={() => {}} {...budgetHandlers} />}
+          </div>
+        );
+      }
       const state = approvals[msg.id] ?? { status: "stale", executedLater: executedLater(messages, msg.id) };
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: t.space4, width: "100%" }}>
@@ -194,11 +317,12 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
             onExecute={(skip) => void execute(msg.id, skip)}
             onCancel={() => void cancel(msg.id)}
             onRetry={() => sid && void previewPlan(sid, msg.id, reply.plan, messages)}
+            {...budgetHandlers}
           />
         </div>
       );
     },
-    [approvals, cancel, chat, execute, messages, previewPlan],
+    [approvals, cancel, chat, execute, messages, narrowTo, previewPlan, readAll],
   );
 
   return (
@@ -238,10 +362,10 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
           <ChatComposer
             sessionId={sessionId ?? "none"}
             placeholder="やりたいことを書く（例: 通知『デプロイ完了』を削除して）"
-            disabled={busy || pending || !catalog}
-            busy={busy || pending}
+            disabled={busy || !catalog}
+            busy={busy}
             sendLabel="送信"
-            onSend={(text) => void planIntent(text)}
+            onSend={(text, images) => void planIntent(text, images)}
           />
         </div>
       </div>
@@ -254,6 +378,10 @@ function PlanView({ plan, intro }: { plan: PlannerPlan; intro: string }) {
     <div style={{ display: "flex", flexDirection: "column", gap: t.space2 }} data-testid="operate-plan">
       {intro && <p style={{ margin: 0, fontSize: 14, lineHeight: 1.7 }}>{intro}</p>}
       {plan.summary && <p style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{plan.summary}</p>}
+      <details data-testid="operate-plan-details" style={{ fontSize: 12, color: t.textMuted }}>
+        <summary style={{ cursor: "pointer" }}>詳細（計画の手順）</summary>
+        <pre style={{ fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{JSON.stringify(plan.steps, null, 2)}</pre>
+      </details>
     </div>
   );
 }

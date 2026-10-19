@@ -110,3 +110,62 @@ CREATE TABLE chat_settings (
 );
 `.trim(),
 };
+
+// Forward-only add-on: personal sidebar sections (Slack-style). Each user owns their
+// sections; a channel sits in at most one of the user's sections (PK user_id+channel_id),
+// unassigned channels stay in the default type groups. Additive only. Physical mirror:
+// infra/d1/migrations/chat/0004_sections.sql.
+export const CHAT_SECTIONS_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0004_sections",
+  up: `
+CREATE TABLE chat_sections (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_chat_sections_user ON chat_sections(user_id, position);
+CREATE TABLE chat_channel_sections (
+  user_id    TEXT NOT NULL,
+  channel_id TEXT NOT NULL REFERENCES chat_channels(id),
+  section_id TEXT NOT NULL REFERENCES chat_sections(id),
+  PRIMARY KEY (user_id, channel_id)
+);
+CREATE INDEX idx_chat_channel_sections_section ON chat_channel_sections(section_id);
+`.trim(),
+};
+
+// Forward-only add-on: the in-app Slack channel import job (resumable step engine,
+// src/slack-import.ts). Physical mirror: infra/d1/migrations/chat/0005_slack_import_jobs.sql.
+export const CHAT_SLACK_IMPORT_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0005_slack_import_jobs",
+  up: `
+CREATE TABLE chat_slack_import_jobs (
+  id                 TEXT PRIMARY KEY,
+  org_id             TEXT NOT NULL,
+  slack_channel_id   TEXT NOT NULL,
+  slack_channel_name TEXT NOT NULL,
+  is_private         INTEGER NOT NULL,
+  dub_channel_id     TEXT NOT NULL,
+  status             TEXT NOT NULL CHECK (status IN ('queued','running','done','failed')),
+  phase              TEXT NOT NULL,
+  state              TEXT NOT NULL,
+  counters           TEXT NOT NULL,
+  error_code         TEXT,
+  error_message      TEXT,
+  next_run_at        TEXT,
+  lease_token        TEXT,
+  lease_until        TEXT,
+  created_by         TEXT NOT NULL,
+  created_at         TEXT NOT NULL,
+  updated_at         TEXT NOT NULL,
+  finished_at        TEXT
+);
+CREATE UNIQUE INDEX idx_chat_slack_import_jobs_channel ON chat_slack_import_jobs(org_id, slack_channel_id);
+CREATE INDEX idx_chat_slack_import_jobs_recent ON chat_slack_import_jobs(org_id, updated_at DESC);
+`.trim(),
+};

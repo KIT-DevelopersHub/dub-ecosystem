@@ -6,6 +6,8 @@ import { mentionsMe } from "../lib/mentions";
 import type {
   Channel,
   ChannelMember,
+  ChatSection,
+  ChatSectionList,
   CreateChannelRequest,
   DeleteMessageResult,
   DeletionPolicyResponse,
@@ -22,16 +24,20 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  SlackChannelOption,
+  SlackImportJob,
   TeamSummary,
   UnfurlPreview,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateSectionRequest,
   WsTicketResponse,
 } from "./contract";
 import type { ChatApiClient, MentionTeams } from "./client";
 import { ChatApiError } from "./client";
 import { toggleReactionLocal } from "../store/timeline";
 import { mockUnfurl } from "../lib/unfurl-mock";
+import { createSlackImportSim, type ImportedChannel, type SimResult, type SlackDemoAuthors, type SlackImportSim } from "../lib/slack-import-demo";
 
 const now = (): common.ISODateTime => new Date().toISOString();
 
@@ -46,7 +52,19 @@ export interface MockSeed {
   teams?: TeamSummary[];
   /** currentUserId が所属するチーム — チーム経由の自分宛メンション判定用. */
   myTeamIds?: string[];
+  /** currentUserId の個人サイドバーセクション. */
+  sections?: ChatSection[];
+  /** channelId -> sectionId. */
+  sectionAssignments?: Record<common.ChannelId, string>;
+  /** Seed users the simulated Slack import attributes posts to (default: the caller). */
+  slackAuthors?: SlackDemoAuthors;
 }
+
+const notFound = (what: string) =>
+  new ChatApiError(404, { error: { code: "NOT_FOUND", message: `${what} not found`, retryable: false } });
+const invalid = (message: string) =>
+  new ChatApiError(400, { error: { code: "VALIDATION_FAILED", message, retryable: false } });
+const SECTION_NAME_MAX = 40;
 
 export class MockChatClient implements ChatApiClient {
   private channels = new Map<common.ChannelId, Channel>();
@@ -57,7 +75,12 @@ export class MockChatClient implements ChatApiClient {
   private myTeamIds: string[] = [];
   private readState = new Map<common.ChannelId, common.MessageId>();
   private pins = new Map<common.ChannelId, Set<common.MessageId>>();
+  private sections: ChatSection[] = [];
+  private sectionAssignments = new Map<common.ChannelId, string>();
+  private sectionSeq = 0;
   private readonly me: common.UserId;
+  private readonly slackAuthors: SlackDemoAuthors;
+  private slackSim: SlackImportSim | null = null;
   /** Workspace message-deletion policy (mock default = product default: all hard). */
   private deletionPolicy: MessageDeletionPolicy = { ...chat.DEFAULT_MESSAGE_DELETION_POLICY };
   private deletionPolicyVersion = 0;
@@ -68,12 +91,15 @@ export class MockChatClient implements ChatApiClient {
 
   constructor(seed: MockSeed) {
     this.me = seed.currentUserId;
+    this.slackAuthors = seed.slackAuthors ?? { me: this.me, a: this.me, b: this.me, disabled: this.me };
     for (const c of seed.channels ?? []) this.channels.set(c.id, c);
     this.messages = (seed.messages ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : 1));
     this.members = seed.members ?? [];
     for (const u of seed.users ?? []) this.users.set(u.id, u);
     this.teams = seed.teams ?? [];
     this.myTeamIds = seed.myTeamIds ?? [];
+    this.sections = (seed.sections ?? []).map((x) => ({ ...x }));
+    for (const [c, sec] of Object.entries(seed.sectionAssignments ?? {})) this.sectionAssignments.set(c, sec);
     for (const p of seed.pins ?? []) {
       const set = this.pins.get(p.channelId) ?? new Set<common.MessageId>();
       set.add(p.messageId);
@@ -97,23 +123,36 @@ export class MockChatClient implements ChatApiClient {
   }
 
   async createChannel(req: CreateChannelRequest): Promise<Channel> {
+    const isDm = req.type === "dm";
+    const memberIds = [...new Set([this.me, ...(req.memberIds ?? [])])];
+    if (isDm) {
+      // Mirrors chat-service: same participant set -> the existing DM (idempotent).
+      const key = [...memberIds].sort().join(",");
+      const existing = [...this.channels.values()].find(
+        (c) => c.type === "dm" && [...(c.memberIds ?? [])].sort().join(",") === key,
+      );
+      if (existing) return this.settle(existing);
+    }
     const id = newChannelId();
     const channel: Channel = {
       id,
       orgId: "org_devhub",
       type: req.type,
-      visibility: req.visibility ?? "public",
+      visibility: isDm ? "private" : (req.visibility ?? "public"),
       name: req.name,
       topic: req.topic ?? null,
       eventId: req.eventId ?? null,
       archived: false,
-      memberCount: 1,
+      memberCount: memberIds.length,
       version: 1,
       createdAt: now(),
       updatedAt: now(),
+      ...(isDm ? { memberIds } : {}),
     };
     this.channels.set(id, channel);
-    this.members.push({ channelId: id, userId: this.me, role: "admin", joinedAt: now() });
+    for (const userId of memberIds) {
+      this.members.push({ channelId: id, userId, role: userId === this.me && !isDm ? "admin" : "member", joinedAt: now() });
+    }
     return this.settle(channel);
   }
 
@@ -140,6 +179,63 @@ export class MockChatClient implements ChatApiClient {
     };
     this.channels.set(id, next);
     return this.settle(next);
+  }
+
+  async deleteChannel(id: common.ChannelId): Promise<void> {
+    const channel = this.channels.get(id);
+    if (!channel) throw notFound("channel");
+    if (channel.type === "dm") throw invalid("direct messages cannot be deleted");
+    await this.settle(undefined);
+    // Mirrors chat-service: everything hanging off the channel goes with it.
+    this.channels.delete(id);
+    this.messages = this.messages.filter((m) => m.channelId !== id);
+    this.members = this.members.filter((m) => m.channelId !== id);
+    this.pins.delete(id);
+    this.readState.delete(id);
+    this.sectionAssignments.delete(id);
+  }
+
+  async listSections(): Promise<ChatSectionList> {
+    const items = this.sections.slice().sort((a, b) => a.position - b.position).map((x) => ({ ...x }));
+    return this.settle({ items, assignments: Object.fromEntries(this.sectionAssignments) });
+  }
+
+  async createSection(name: string): Promise<ChatSection> {
+    const trimmed = name.trim();
+    if (trimmed.length === 0 || trimmed.length > SECTION_NAME_MAX) throw invalid("section name must be 1..40 chars");
+    await this.settle(undefined);
+    const position = this.sections.reduce((max, x) => Math.max(max, x.position + 1), 0);
+    const section: ChatSection = { id: `sec_mock${++this.sectionSeq}`, name: trimmed, position, createdAt: now() };
+    this.sections.push(section);
+    return { ...section };
+  }
+
+  async updateSection(id: string, req: UpdateSectionRequest): Promise<ChatSection> {
+    const idx = this.sections.findIndex((x) => x.id === id);
+    if (idx < 0) throw notFound("section");
+    const name = req.name === undefined ? undefined : req.name.trim();
+    if (name !== undefined && (name.length === 0 || name.length > SECTION_NAME_MAX)) {
+      throw invalid("section name must be 1..40 chars");
+    }
+    await this.settle(undefined);
+    const next: ChatSection = { ...this.sections[idx]!, ...(name !== undefined ? { name } : {}), ...(req.position !== undefined ? { position: req.position } : {}) };
+    this.sections[idx] = next;
+    return { ...next };
+  }
+
+  async deleteSection(id: string): Promise<void> {
+    if (!this.sections.some((x) => x.id === id)) throw notFound("section");
+    await this.settle(undefined);
+    this.sections = this.sections.filter((x) => x.id !== id);
+    for (const [c, sec] of [...this.sectionAssignments]) if (sec === id) this.sectionAssignments.delete(c);
+  }
+
+  async setChannelSection(channelId: common.ChannelId, sectionId: string | null): Promise<void> {
+    if (!this.channels.has(channelId)) throw notFound("channel");
+    if (sectionId !== null && !this.sections.some((x) => x.id === sectionId)) throw notFound("section");
+    await this.settle(undefined);
+    if (sectionId === null) this.sectionAssignments.delete(channelId);
+    else this.sectionAssignments.set(channelId, sectionId);
   }
 
   async addMember(id: common.ChannelId, userId: common.UserId, role: ChannelMember["role"] = "member"): Promise<ChannelMember> {
@@ -323,7 +419,11 @@ export class MockChatClient implements ChatApiClient {
     for (const channelId of this.channels.keys()) {
       const lastRead = this.readState.get(channelId) ?? null;
       const unread = this.messages.filter(
-        (m) => m.channelId === channelId && m.authorId !== this.me && (lastRead === null || m.id > lastRead),
+        (m) =>
+          m.channelId === channelId &&
+          m.threadRootId === null &&
+          m.authorId !== this.me &&
+          (lastRead === null || m.id > lastRead),
       );
       out.push({
         channelId,
@@ -352,6 +452,12 @@ export class MockChatClient implements ChatApiClient {
     return this.settle(out);
   }
 
+  async searchUsers(q: string): Promise<identity.UserSummary[]> {
+    const needle = q.trim();
+    const all = [...this.users.values()];
+    return this.settle((needle ? all.filter((u) => u.displayName.includes(needle)) : all).slice(0, 20));
+  }
+
   async listMentionTeams(): Promise<MentionTeams> {
     return this.settle({ teams: this.teams.map((t) => ({ ...t })), myTeamIds: [...this.myTeamIds] });
   }
@@ -363,5 +469,57 @@ export class MockChatClient implements ChatApiClient {
     } catch {
       return null;
     }
+  }
+  // ---- Slack channel import (simulated; created lazily so other tests see the plain seed) ----
+  private sim(): SlackImportSim {
+    this.slackSim ??= createSlackImportSim({ authors: this.slackAuthors, onDone: (c) => this.materializeImport(c) });
+    return this.slackSim;
+  }
+
+  private materializeImport(c: ImportedChannel): void {
+    const ts = now();
+    const prev = this.channels.get(c.id);
+    this.channels.set(c.id, {
+      id: c.id,
+      orgId: "org_devhub",
+      type: "topic",
+      visibility: c.visibility,
+      name: c.name,
+      topic: c.topic,
+      eventId: null,
+      archived: c.archived,
+      memberCount: c.memberCount,
+      version: prev?.version ?? 1,
+      createdAt: prev?.createdAt ?? ts,
+      updatedAt: ts,
+    });
+    if (!this.members.some((m) => m.channelId === c.id && m.userId === this.me)) {
+      this.members.push({ channelId: c.id, userId: this.me, role: "admin", joinedAt: ts });
+    }
+    const ids = new Set(c.messages.map((m) => m.id));
+    this.messages = [...this.messages.filter((m) => !ids.has(m.id)), ...c.messages].sort((a, b) => (a.id < b.id ? -1 : 1));
+    this.pins.set(c.id, new Set(c.pinnedIds));
+    for (const u of c.placeholderUsers) if (!this.users.has(u.id)) this.users.set(u.id, { ...u, avatarUrl: null });
+  }
+
+  private simValue<T>(r: SimResult<T>): Promise<T> {
+    if (r.ok) return this.settle(r.value);
+    return Promise.reject(new ChatApiError(r.status, { error: { code: r.code, message: r.message, retryable: false } }));
+  }
+
+  async listSlackChannels(): Promise<SlackChannelOption[]> {
+    return this.settle(this.sim().listChannels());
+  }
+  async listSlackImportJobs(limit?: number): Promise<SlackImportJob[]> {
+    return this.settle(this.sim().listJobs(limit));
+  }
+  startSlackImport(channel: string): Promise<SlackImportJob> {
+    return this.simValue(this.sim().createJob(channel));
+  }
+  getSlackImportJob(id: string): Promise<SlackImportJob> {
+    return this.simValue(this.sim().getJob(id));
+  }
+  stepSlackImport(id: string): Promise<SlackImportJob> {
+    return this.simValue(this.sim().step(id));
   }
 }

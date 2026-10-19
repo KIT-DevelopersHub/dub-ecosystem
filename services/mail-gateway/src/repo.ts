@@ -44,6 +44,8 @@ export interface InboundRow {
   html_body: string | null; // 0002: HTML part when present (sanitized before render)
   read_at: string | null; // 0002: ISO8601 when first opened; NULL = unread
   owner_user_id: string | null; // 0006: roster user the message was delivered to (Inbox scope); NULL = unassigned
+  cc_json: string | null; // 0012: JSON MailAddress[] of Cc header recipients; NULL = none / pre-0012
+  header_meta_json?: string | null; // 0013: JSON MailHeaderMeta; NULL = nothing known / pre-0013
 }
 
 export interface MailboxRow {
@@ -205,6 +207,16 @@ function sendRowToDetail(r: SendLogRow): mail.MailSentDetail {
   return detail;
 }
 
+function parseHeaderMeta(json: string | null | undefined): mail.MailHeaderMeta | null {
+  if (!json) return null;
+  try {
+    const v = JSON.parse(json) as unknown;
+    return v && typeof v === "object" ? (v as mail.MailHeaderMeta) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Read scope for the account-isolated mail queries. A plain userId string scopes a
  *  query to that owner's own mail (the #169 per-account isolation, fail-closed). The
  *  `{ readAll: true }` variant is the `mail:read_all` OVERSIGHT bypass: an authorized
@@ -218,24 +230,23 @@ function isReadAll(scope: MailScope): scope is { readAll: true } {
   return typeof scope === "object";
 }
 
-/** Read scope for INBOUND mail only. Adds the `mail:read_role_shared` variant: the caller
- *  plus the other holders of a sharing role (`{ userIds }`, resolved by the route). Kept a
+/** Read scope for INBOUND mail only. Adds the shared variant: the caller plus the users whose
+ *  inbound mail they may read — same-role sharing (`mail:read_role_shared`) and cross-role
+ *  visibility (`{ userIds }`, resolved by the route via identity-roster). Kept a
  *  separate type so Sent / Scheduled can never be handed a shared scope. `viewer` is the
  *  caller — it only drives the `mine` flag on the returned items, never the filter. */
 export type InboundScope = MailScope | { userIds: string[] };
 
-// D1 caps bound parameters per statement at 100; leave headroom for the other binds
-// (thread / cursor / limit). Truncation can only HIDE peers' mail, never widen access.
-const MAX_SCOPE_OWNERS = 90;
-
 /** `owner_user_id` predicate for an inbound scope, or null for the read_all bypass. An
- *  empty owner list matches nothing (fail-closed). */
+ *  empty owner list matches nothing (fail-closed). The owner list rides as ONE JSON bind:
+ *  D1 caps bound parameters per statement at 100, and cross-role visibility (e.g. a 統括
+ *  role seeing every role) can exceed that — a per-id `IN (?, ...)` would have to truncate. */
 function inboundOwnerClause(scope: InboundScope): { sql: string; binds: string[] } | null {
   if (typeof scope === "string") return { sql: "owner_user_id = ?", binds: [scope] };
   if ("readAll" in scope) return null;
-  const ids = [...new Set(scope.userIds)].slice(0, MAX_SCOPE_OWNERS);
+  const ids = [...new Set(scope.userIds)];
   if (ids.length === 0) return { sql: "1 = 0", binds: [] };
-  return { sql: `owner_user_id IN (${ids.map(() => "?").join(", ")})`, binds: ids };
+  return { sql: "owner_user_id IN (SELECT value FROM json_each(?))", binds: [JSON.stringify(ids)] };
 }
 
 /** List sent mail (status='sent'), newest first. id-based opaque cursor (like
@@ -349,6 +360,8 @@ export async function insertInbound(
     loopMarker: string | null;
     bodyText: string;
     htmlBody: string | null;
+    cc?: mail.MailAddress[];
+    headerMeta?: mail.MailHeaderMeta;
     // Owner = the roster user this message was delivered to (Inbox scope). NULL when no
     // roster user matches the recipient — invisible to every account until assignable.
     ownerUserId: string | null;
@@ -357,8 +370,8 @@ export async function insertInbound(
   const res = await db.run(
     `INSERT OR IGNORE INTO mail_inbound
        (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
-        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+        auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id, cc_json, header_meta_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
     m.id,
     m.messageId,
     m.threadId,
@@ -374,6 +387,8 @@ export async function insertInbound(
     extra.bodyText,
     extra.htmlBody,
     extra.ownerUserId,
+    extra.cc && extra.cc.length > 0 ? JSON.stringify(extra.cc) : null,
+    extra.headerMeta && Object.keys(extra.headerMeta).length > 0 ? JSON.stringify(extra.headerMeta) : null,
   );
   return res.meta.changes;
 }
@@ -397,6 +412,8 @@ function rowToListItem(r: InboundRow, viewer?: string): mail.MailMessageListItem
   // mine: delivered to the caller (vs visible via read_all / role sharing). Only set when
   // the caller is known so internal callers keep the frozen shape.
   if (viewer !== undefined) item.mine = r.owner_user_id === viewer;
+  const cc = parseAddresses(r.cc_json);
+  if (cc.length > 0) item.cc = cc;
   return item;
 }
 
@@ -404,6 +421,8 @@ function rowToListItem(r: InboundRow, viewer?: string): mail.MailMessageListItem
 function rowToDetail(r: InboundRow, viewer?: string): mail.MailMessageDetail {
   const detail: mail.MailMessageDetail = { ...rowToListItem(r, viewer), textBody: r.body_text ?? "" };
   if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
+  const meta = parseHeaderMeta(r.header_meta_json);
+  if (meta) detail.headerMeta = meta;
   return detail;
 }
 
@@ -599,12 +618,14 @@ export interface UserFlagRow {
   // (0009). Never triggers a physical row delete — only this viewer's list is filtered.
   purged: number;
   purged_at: string | null;
+  // 返信不要 (0011): when the user dismissed the reply nudge; NULL = not dismissed.
+  no_reply_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 function rowToFlags(r: UserFlagRow): mail.MailThreadFlags {
-  return { threadId: r.thread_id, starred: r.starred === 1, archived: r.archived === 1, trashed: r.trashed === 1, purged: r.purged === 1 };
+  return { threadId: r.thread_id, starred: r.starred === 1, archived: r.archived === 1, trashed: r.trashed === 1, purged: r.purged === 1, noReplyAt: r.no_reply_at ?? null };
 }
 
 /** Every flag row for one user (absent thread = all-false default; not returned). Only rows
@@ -632,21 +653,23 @@ export async function upsertUserFlags(
     ownerUserId,
     threadId,
   );
-  const cur = existing ? rowToFlags(existing) : { threadId, starred: false, archived: false, trashed: false, purged: false };
+  const cur = existing ? rowToFlags(existing) : { threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
   const merged: mail.MailThreadFlags = {
     threadId,
     starred: patch.starred ?? cur.starred,
     archived: patch.archived ?? cur.archived,
     trashed: patch.trashed ?? cur.trashed,
     purged: patch.purged ?? cur.purged,
+    // 返信不要: every press re-stamps now (so mail received before it is covered); false clears.
+    noReplyAt: patch.noReply === undefined ? cur.noReplyAt : patch.noReply ? now : null,
   };
   // purged_at: stamp the moment the conversation is first purged; keep the existing stamp on
   // later writes; clear it only if a caller ever un-purges (no UI does, but keep it honest).
   const purgedAt = merged.purged ? (existing?.purged_at ?? now) : null;
   await db.run(
     `INSERT OR REPLACE INTO mail_user_flags
-       (owner_user_id, thread_id, starred, archived, trashed, purged, purged_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (owner_user_id, thread_id, starred, archived, trashed, purged, purged_at, no_reply_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ownerUserId,
     threadId,
     merged.starred ? 1 : 0,
@@ -654,6 +677,7 @@ export async function upsertUserFlags(
     merged.trashed ? 1 : 0,
     merged.purged ? 1 : 0,
     purgedAt,
+    merged.noReplyAt,
     existing?.created_at ?? now,
     now,
   );

@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mail-reply-nudge",
+  "worker": "dub-demo-mail-reply-nudge",
+  "url": "https://dub-demo-mail-reply-nudge.developershub-site.workers.dev",
+  "deployedSha": "a7910961",
+  "branch": "feat/mail-reply-nudge",
+  "actor": "ko-tarou",
+  "markers": ["fe2-mail-reply-nudge","fe2-mail-reply-nudge-pinned","fe2-mail-reply-nudge-dismiss"],
+  "live": true,
+  "verifiedAt": "2026-10-13T09:59:29Z",
+  "updatedAt": "2026-10-13T09:59:29Z",
+  "note": "Gmail風 未返信ナッジ + 返信待ち固定 + 返信不要 (feat/mail-reply-nudge)"
+}

@@ -59,6 +59,9 @@ export interface Channel extends common.Versioned {
   memberCount: number;
   createdAt: common.ISODateTime;
   updatedAt: common.ISODateTime;
+  // type === "dm" only: participants. A DM is labelled by "the other side", which
+  // differs per viewer, so the stored `name` is just a fallback.
+  memberIds?: common.UserId[];
 }
 
 export interface ChannelMember {
@@ -99,6 +102,7 @@ export interface CreateChannelRequest {
   name: string;
   topic?: string;
   eventId?: common.EventId; // required when type === "event"
+  memberIds?: common.UserId[]; // initial members; for a DM, the other participant(s)
 }
 
 export interface UpdateChannelRequest {
@@ -201,4 +205,66 @@ export interface UnfurlPreview {
 export interface UnfurlResponse {
   url: string;
   preview: UnfurlPreview | null;
+}
+
+// Personal sidebar sections (Slack-style): per user, a channel sits in at most one.
+// Unassigned channels stay in the default groups (チャンネル / イベント / ダイレクト).
+export interface ChatSection {
+  id: string;
+  name: string;
+  position: number;
+  createdAt: common.ISODateTime;
+}
+export interface ChatSectionList {
+  items: ChatSection[]; // position asc
+  assignments: Record<common.ChannelId, string>; // channelId -> sectionId
+}
+export interface UpdateSectionRequest {
+  name?: string;
+  position?: number;
+}
+
+// ---- Slack channel import (admin) — mirrors services/chat-service/src/slack-import.ts ----
+// The browser drives a job by POSTing …/step in a loop while the screen is open; a
+// reopened screen resumes from the persisted cursor. 412 = SLACK_BOT_TOKEN not set.
+export type SlackImportJobStatus = "queued" | "running" | "done" | "failed";
+export type SlackImportPhase = "users" | "channel" | "history" | "threads" | "files" | "finalize" | "done";
+
+export interface SlackImportCounters {
+  members: number;
+  messages: number;
+  threadReplies: number;
+  reactions: number;
+  pins: number;
+  files: number;
+  filesSkipped: number;
+}
+
+export interface SlackImportJob {
+  id: string;
+  slackChannelId: string;
+  slackChannelName: string;
+  isPrivate: boolean;
+  dubChannelId: common.ChannelId;
+  status: SlackImportJobStatus;
+  phase: SlackImportPhase;
+  counters: SlackImportCounters;
+  pending: { threads: number; files: number };
+  error: { code: string; message: string } | null;
+  /** >0 while parked on a Slack rate limit: wait this long before the next step. */
+  retryAfterMs: number;
+  createdBy: common.UserId;
+  createdAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
+  finishedAt: common.ISODateTime | null;
+}
+
+export interface SlackChannelOption {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  isArchived: boolean;
+  memberCount: number | null;
+  /** Latest job for this channel, if it was imported before. */
+  job: { id: string; status: SlackImportJobStatus } | null;
 }

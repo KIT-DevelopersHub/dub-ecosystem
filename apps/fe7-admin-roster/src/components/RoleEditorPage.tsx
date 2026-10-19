@@ -14,6 +14,7 @@ import { UnsavedChangesGuard } from "../lib/UnsavedChangesGuard";
 interface RoleDraft {
   name: string;
   permissions: identity.PermissionKey[];
+  mailVisibleRoleIds?: string[];
 }
 
 // roleId omitted -> create mode.
@@ -30,6 +31,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
   const initialDraft = useMemo(() => peekDraft<RoleDraft>(draftKey), [draftKey]);
   const [name, setName] = useState(initialDraft?.name ?? existing?.name ?? "");
   const [perms, setPerms] = useState<identity.PermissionKey[]>(initialDraft?.permissions ?? existing?.permissions ?? []);
+  const [mailVisible, setMailVisible] = useState<string[]>(initialDraft?.mailVisibleRoleIds ?? existing?.mailVisibleRoleIds ?? []);
   const [confirmSave, setConfirmSave] = useState(false);
 
   // Sync once existing loads (create mode stays empty). A restored draft wins over the
@@ -39,6 +41,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
     if (!initialDraft) {
       setName(existing.name);
       setPerms(existing.permissions);
+      setMailVisible(existing.mailVisibleRoleIds ?? []);
     }
     setHydrated(true);
   }
@@ -47,12 +50,14 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
   const readOnly = !canAdminEdit;
 
   // Dirty relative to the pristine baseline (server role, or empty in create mode).
+  const original = existing ? { name: existing.name, permissions: existing.permissions, mailVisibleRoleIds: existing.mailVisibleRoleIds ?? [] } : null;
+  const next = { name, permissions: perms, mailVisibleRoleIds: mailVisible };
   const dirty = roleId
-    ? existing != null && !!buildRoleUpdate({ name: existing.name, permissions: existing.permissions }, { name, permissions: perms })
-    : name.trim() !== "" || perms.length > 0;
+    ? original != null && !!buildRoleUpdate(original, next)
+    : name.trim() !== "" || perms.length > 0 || mailVisible.length > 0;
   const draft = useDraftAutosave<RoleDraft>({
     storageKey: draftKey,
-    value: { name, permissions: perms },
+    value: next,
     dirty,
     enabled: !readOnly,
   });
@@ -66,8 +71,8 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
       toast({ kind: "error", title: "この権限は外せません", description: "admin ロールから identity:admin は削除できません。" });
       return;
     }
-    if (roleId && existing) {
-      const patch = buildRoleUpdate({ name: existing.name, permissions: existing.permissions }, { name, permissions: perms });
+    if (roleId && original) {
+      const patch = buildRoleUpdate(original, next);
       if (!patch) { toast({ kind: "info", title: "変更はありません" }); return; }
       update.mutate(patch, {
         onSuccess: () => { draft.clear(); toast({ kind: "success", title: "ロールを保存しました" }); onDone?.(); },
@@ -77,7 +82,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
       // Bundle the domain read key(s) each granted app needs so the new role's per-app
       // toggles are EFFECTIVE 実効権限 (not front-end-only). Same normalization the update
       // path applies via buildRoleUpdate.
-      create.mutate({ name, permissions: appRegistry.withRequiredAppDomainKeys(perms) }, {
+      create.mutate({ name, permissions: appRegistry.withRequiredAppDomainKeys(perms), ...(mailVisible.length > 0 ? { mailVisibleRoleIds: mailVisible } : {}) }, {
         onSuccess: () => { draft.clear(); toast({ kind: "success", title: "ロールを作成しました" }); onDone?.(); },
         onError: (err) => toast({ kind: "error", title: "作成に失敗しました", description: errorMessage(err) }),
       });
@@ -107,6 +112,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
             draft.clear();
             setName(existing?.name ?? "");
             setPerms(existing?.permissions ?? []);
+            setMailVisible(existing?.mailVisibleRoleIds ?? []);
           }}
           onKeep={draft.acknowledgeRestored}
           testId="fe7-role-draft-notice"
@@ -114,7 +120,13 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
         <FormField label="ロール名" htmlFor="fe7-role-name">
           <TextField id="fe7-role-name" value={name} onChange={(v) => setName(v)} disabled={nameDisabled} testId="fe7-role-name" />
         </FormField>
-        <RolePolicyEditor selected={perms} disabled={readOnly} onChange={setPerms} lockedKeys={lockedKeys} />
+        <RolePolicyEditor
+          selected={perms}
+          disabled={readOnly}
+          onChange={setPerms}
+          lockedKeys={lockedKeys}
+          mailVisibility={{ roleId, value: mailVisible, onChange: setMailVisible }}
+        />
         {!readOnly ? (
           <Button variant="primary" onClick={() => setConfirmSave(true)} disabled={!name.trim()} testId="fe7-role-save">保存</Button>
         ) : (

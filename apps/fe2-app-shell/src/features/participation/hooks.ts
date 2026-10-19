@@ -8,18 +8,30 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useParticipationApi } from "./ParticipationProvider.tsx";
 import type {
+  ListOnboardingItemsResponse,
   ListParticipationsResponse,
+  OnboardingGuide,
+  OnboardingItem,
+  OnboardingItemInput,
   PublicParticipationResponse,
   ResolveParticipationRequest,
   ResolveParticipationResponse,
+  SaveOnboardingMeetingRequest,
+  SaveOnboardingMeetingResponse,
   SubmitParticipationRequest,
+  UpdateOnboardingItemRequest,
 } from "./contracts.ts";
 
 export const TEAMS_KEY: QueryKey = queryKeys.feature("participation", "teams");
 export const LIST_KEY: QueryKey = queryKeys.feature("participation", "list");
 /** 組織図(体制図)/名簿を描く members overview のキー。反映確定後に無効化して再描画する。 */
 export const MEMBERS_OVERVIEW_KEY: QueryKey = queryKeys.feature("members", "overview");
+export const ONBOARDING_KEY: QueryKey = queryKeys.feature("participation", "onboarding");
+export const PUBLIC_ONBOARDING_KEY: QueryKey = queryKeys.feature("participation", "onboarding", "public");
 export const CANDIDATES_KEY = (id: string): QueryKey => queryKeys.feature("participation", "candidates", id);
+export const ROLES_KEY: QueryKey = queryKeys.feature("participation", "roles");
+/** 名簿の「紐付けアカウント」列が引くアカウント一覧のキー (members/hooks.ts と同じ)。 */
+const IDENTITY_USERS_KEY: QueryKey = queryKeys.feature("members", "identity-users");
 
 export function useParticipationTeams() {
   const api = useParticipationApi();
@@ -120,6 +132,91 @@ export function useResolveParticipation() {
   });
 }
 
+/** メール発行ダイアログのロール候補。ダイアログを開いた時だけ取得する。 */
+export function useParticipationRoles(enabled: boolean) {
+  const api = useParticipationApi();
+  return useQuery({ queryKey: ROLES_KEY, queryFn: () => api.listRoles(), enabled, retry: false, staleTime: 60_000 });
+}
+
+/** 発行の途中経過。失敗後の再実行は済んだ段を飛ばす (発行済みアドレスを二重発行しない)。 */
+export interface MailIssueProgress {
+  address?: string;
+  identityUserId?: string;
+  linked?: boolean;
+}
+export type MailIssueStep = "mail" | "account" | "link";
+
+/** どの段で失敗したかと、そこまでに済んだ分を運ぶ。 */
+export class MailIssueError extends Error {
+  readonly step: MailIssueStep;
+  readonly progress: MailIssueProgress;
+  readonly reason: unknown;
+  constructor(step: MailIssueStep, progress: MailIssueProgress, reason: unknown) {
+    super(ApiError.isApiError(reason) ? toDisplayableError(reason).message : "処理に失敗しました");
+    this.step = step;
+    this.progress = progress;
+    this.reason = reason;
+  }
+}
+
+export interface MailIssueInput {
+  memberId: string;
+  memberVersion: number;
+  localPart: string;
+  displayName: string;
+  furigana?: string;
+  roleIds: string[];
+  progress: MailIssueProgress;
+}
+
+/** 参加届から追加したメンバーに、アドレス発行 → アカウント作成(ロール付与) → 名簿と紐付け
+ *  を一続きで行う。後からユーザー名簿で別作業にすると、付けるロールを忘れるため。 */
+export function useIssueParticipationMail() {
+  const api = useParticipationApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<MailIssueProgress, MailIssueError, MailIssueInput>({
+    mutationFn: async (input) => {
+      const progress: MailIssueProgress = { ...input.progress };
+      const step = async <T,>(name: MailIssueStep, fn: () => Promise<T>): Promise<T> => {
+        try {
+          return await fn();
+        } catch (err) {
+          throw new MailIssueError(name, { ...progress }, err);
+        }
+      };
+      if (!progress.address) {
+        progress.address = (await step("mail", () => api.issueMailAddress(input.localPart))).address;
+      }
+      if (!progress.identityUserId) {
+        const address = progress.address;
+        const user = await step("account", () =>
+          api.inviteAccount({
+            email: address,
+            displayName: input.displayName,
+            ...(input.furigana ? { furigana: input.furigana } : {}),
+            roleIds: input.roleIds,
+          }),
+        );
+        progress.identityUserId = user.id;
+      }
+      if (!progress.linked) {
+        const identityUserId = progress.identityUserId;
+        await step("link", () => api.linkAccount(input.memberId, { identityUserId, version: input.memberVersion }));
+        progress.linked = true;
+      }
+      return progress;
+    },
+    onSuccess: (res) => {
+      toast.show({ kind: "success", title: "メールアドレスを発行しました", description: res.address });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: MEMBERS_OVERVIEW_KEY });
+      void qc.invalidateQueries({ queryKey: IDENTITY_USERS_KEY });
+    },
+  });
+}
+
 export function useSubmitParticipation() {
   const api = useParticipationApi();
   const toast = useToast();
@@ -131,6 +228,148 @@ export function useSubmitParticipation() {
     onError: (err) => {
       const msg = ApiError.isApiError(err) ? toDisplayableError(err).message : "参加届を送信できませんでした";
       toast.show({ kind: "error", title: msg });
+    },
+  });
+}
+
+// ---- オンボーディング案内 -----------------------------------------------------------
+
+/** 管理タブの項目一覧。 */
+export function useOnboardingItems() {
+  const api = useParticipationApi();
+  return useQuery({ queryKey: ONBOARDING_KEY, queryFn: () => api.listOnboarding() });
+}
+
+/** 公開ページの項目一覧 (未ログイン)。 */
+export function usePublicOnboardingItems() {
+  const api = useParticipationApi();
+  return useQuery({ queryKey: PUBLIC_ONBOARDING_KEY, queryFn: () => api.publicOnboarding() });
+}
+
+type OnboardingSnapshot = { prev: OnboardingGuide | undefined };
+
+/** 楽観更新の共通部: 一覧を先に書き換え、失敗したら戻してトースト、最後にサーバ値へ同期。 */
+function useOnboardingMutation<TVars, TRes>(
+  mutationFn: (vars: TVars) => Promise<TRes>,
+  patch: (items: OnboardingItem[], vars: TVars) => OnboardingItem[],
+  messages: { success?: string; error: string },
+) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<TRes, unknown, TVars, OnboardingSnapshot>({
+    mutationFn,
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ONBOARDING_KEY });
+      const prev = qc.getQueryData<OnboardingGuide>(ONBOARDING_KEY);
+      qc.setQueryData<OnboardingGuide>(ONBOARDING_KEY, (old) => (old ? { ...old, items: patch(old.items, vars) } : old));
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ONBOARDING_KEY, ctx.prev);
+      const msg = ApiError.isApiError(err) ? toDisplayableError(err).message : messages.error;
+      toast.show({ kind: "error", title: msg });
+    },
+    onSuccess: () => {
+      if (messages.success) toast.show({ kind: "success", title: messages.success });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ONBOARDING_KEY });
+    },
+  });
+}
+
+const PENDING_ID_PREFIX = "pending-";
+
+/** 追加中の仮行か (サーバ id 未確定。編集・並び替えの対象にしない)。 */
+export function isPendingOnboardingItem(item: OnboardingItem): boolean {
+  return item.id.startsWith(PENDING_ID_PREFIX);
+}
+
+export function useCreateOnboardingItem() {
+  const api = useParticipationApi();
+  return useOnboardingMutation<OnboardingItemInput, OnboardingItem>(
+    (input) => api.createOnboarding(input),
+    (items, input) => {
+      const now = new Date().toISOString();
+      const last = items[items.length - 1];
+      return [
+        ...items,
+        {
+          id: `${PENDING_ID_PREFIX}${now}`,
+          title: input.title,
+          description: input.description ?? null,
+          url: input.url ?? null,
+          sortOrder: (last?.sortOrder ?? 0) + 1,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ];
+    },
+    { success: "項目を追加しました", error: "項目を追加できませんでした" },
+  );
+}
+
+export function useUpdateOnboardingItem() {
+  const api = useParticipationApi();
+  return useOnboardingMutation<{ id: string; patch: UpdateOnboardingItemRequest }, OnboardingItem>(
+    ({ id, patch }) => api.updateOnboarding(id, patch),
+    (items, { id, patch }) => items.map((i) => (i.id === id ? { ...i, ...patch } : i)),
+    { success: "項目を更新しました", error: "項目を更新できませんでした" },
+  );
+}
+
+export function useDeleteOnboardingItem() {
+  const api = useParticipationApi();
+  return useOnboardingMutation<string, void>(
+    (id) => api.deleteOnboarding(id),
+    (items, id) => items.filter((i) => i.id !== id),
+    { success: "項目を削除しました", error: "項目を削除できませんでした" },
+  );
+}
+
+export function useReorderOnboardingItems() {
+  const api = useParticipationApi();
+  return useOnboardingMutation<string[], ListOnboardingItemsResponse>(
+    (ids) => api.reorderOnboarding(ids),
+    (items, ids) => {
+      const byId = new Map(items.map((i) => [i.id, i]));
+      return ids.map((id) => byId.get(id)).filter((i): i is OnboardingItem => i !== undefined);
+    },
+    // 並び替えは頻繁なので成功トーストは出さない（見た目がそのまま結果）。
+    { error: "並び順を保存できませんでした" },
+  );
+}
+
+/** ミーティング案内の保存 (全体 / チーム)。楽観的に差し替え、失敗したら戻す。 */
+export function useSaveOnboardingMeeting() {
+  const api = useParticipationApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<SaveOnboardingMeetingResponse, unknown, SaveOnboardingMeetingRequest, OnboardingSnapshot>({
+    mutationFn: (input) => api.saveOnboardingMeeting(input),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: ONBOARDING_KEY });
+      const prev = qc.getQueryData<OnboardingGuide>(ONBOARDING_KEY);
+      qc.setQueryData<OnboardingGuide>(ONBOARDING_KEY, (old) => {
+        if (!old) return old;
+        const rest = old.meetings.filter((m) => m.teamId !== input.teamId);
+        const meetings = input.schedule
+          ? [...rest, { teamId: input.teamId, schedule: input.schedule, url: input.url ?? null, updatedAt: new Date().toISOString() }]
+          : rest;
+        return { ...old, meetings };
+      });
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ONBOARDING_KEY, ctx.prev);
+      const msg = ApiError.isApiError(err) ? toDisplayableError(err).message : "ミーティングを保存できませんでした";
+      toast.show({ kind: "error", title: msg });
+    },
+    onSuccess: (_res, input) => {
+      toast.show({ kind: "success", title: input.schedule ? "ミーティングを保存しました" : "ミーティングの案内を消しました" });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ONBOARDING_KEY });
     },
   });
 }

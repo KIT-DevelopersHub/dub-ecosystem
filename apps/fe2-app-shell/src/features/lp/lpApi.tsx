@@ -127,6 +127,126 @@ export interface LpPublishState {
   updatedBy: string | null;
 }
 
+// ── チケット販売（/tickets）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
+export type LpTicketFieldType = "text" | "textarea" | "select" | "checkbox";
+export interface LpTicketField {
+  id: string;
+  label: string;
+  type: LpTicketFieldType;
+  required: boolean;
+  options: string[];
+}
+export interface LpTicketType {
+  id: string;
+  name: string;
+  description: string;
+  priceJpy: number;
+  capacity: number | null;
+  /** "" = 日付なし（通し/共通）。例 "Day 1 · 9/13(月)"。0..30 字 */
+  dayLabel: string;
+  /** 1 回の購入で買える上限枚数 1..20（既定 10） */
+  maxPerOrder: number;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+/** sold / pending は「枚数」（注文数ではない）。 */
+export interface LpTicketTypeStats {
+  sold: number;
+  pending: number;
+  revenueJpy: number;
+  remaining: number | null;
+}
+export interface LpTicketTypeSummary extends LpTicketType {
+  stats: LpTicketTypeStats;
+}
+export interface LpTicketsState {
+  site: string;
+  enabled: boolean;
+  /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える。効くのは enabled && ctaEnabled のとき。 */
+  ctaEnabled: boolean;
+  paymentReady: boolean;
+  /** LP_BASE_URL + "/tickets" */
+  publicUrl: string;
+  fields: LpTicketField[];
+  types: LpTicketTypeSummary[];
+  totals: { sold: number; revenueJpy: number };
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+export type LpTicketOrderStatus = "pending" | "paid" | "expired";
+export interface LpTicketAnswer {
+  fieldId: string;
+  label: string;
+  value: string;
+}
+export interface LpTicketOrderItem {
+  ticketTypeId: string;
+  ticketTypeName: string;
+  dayLabel: string;
+  unitPriceJpy: number;
+  quantity: number;
+}
+export interface LpTicketOrder {
+  id: string;
+  items: LpTicketOrderItem[];
+  /** 合計枚数 */
+  quantity: number;
+  /** 合計金額 */
+  amountJpy: number;
+  status: LpTicketOrderStatus;
+  buyerName: string;
+  buyerEmail: string;
+  answers: LpTicketAnswer[];
+  createdAt: string;
+  paidAt: string | null;
+}
+export interface LpTicketOrdersPage {
+  items: LpTicketOrder[];
+  nextCursor: string | null;
+}
+export interface LpTicketTypeInput {
+  name: string;
+  description: string;
+  priceJpy: number;
+  capacity: number | null;
+  dayLabel: string;
+  maxPerOrder: number;
+  active: boolean;
+}
+
+// ── 登壇者募集（/proposals）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
+/** submitted = 未対応 / accepted = 採択 / rejected = 見送り。 */
+export type LpProposalStatus = "submitted" | "accepted" | "rejected";
+export interface LpProposalsState {
+  site: string;
+  enabled: boolean;
+  /** LP_BASE_URL + "/proposals" */
+  publicUrl: string;
+  /** 追加の入力項目（氏名・メール・タイトル・概要は固定）。 */
+  fields: LpTicketField[];
+  totals: { total: number; accepted: number; rejected: number };
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+export interface LpProposal {
+  id: string;
+  speakerName: string;
+  email: string;
+  title: string;
+  abstract: string;
+  answers: LpTicketAnswer[];
+  status: LpProposalStatus;
+  reviewedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface LpProposalsPage {
+  items: LpProposal[];
+  nextCursor: string | null;
+}
+
 export interface LpApi {
   /** Aggregated visit counters for a day range (app:lp:view). */
   getStats(query: LpStatsQuery): Promise<LpStats>;
@@ -144,6 +264,30 @@ export interface LpApi {
   getPublish(): Promise<LpPublishState>;
   /** Switch the live version (app:lp:edit + lp:publish). Unknown version → 400. */
   setPublish(input: { versionId: string }): Promise<LpPublishState>;
+  /** チケット販売の設定・券種・売れ行き (app:lp:view)。 */
+  getTickets(): Promise<LpTicketsState>;
+  /** 販売の公開/停止 (app:lp:edit + lp:publish)。 */
+  setTicketsEnabled(input: { enabled: boolean }): Promise<LpTicketsState>;
+  /** LP の参加登録ボタン差し替えの on/off (app:lp:edit + lp:publish)。販売停止中でも保存できる。 */
+  setTicketsCta(input: { enabled: boolean }): Promise<LpTicketsState>;
+  /** 入力項目を丸ごと置き換える (app:lp:edit)。 */
+  saveTicketFields(input: { fields: LpTicketField[] }): Promise<LpTicketsState>;
+  /** 券種を追加 (app:lp:edit)。 */
+  createTicketType(input: LpTicketTypeInput): Promise<LpTicketTypeSummary>;
+  /** 券種を部分更新 (app:lp:edit)。 */
+  updateTicketType(id: string, input: Partial<LpTicketTypeInput>): Promise<LpTicketTypeSummary>;
+  /** 購入者一覧・新しい順 (app:lp:edit = 個人情報)。 */
+  listTicketOrders(query: { cursor?: string; limit?: number }): Promise<LpTicketOrdersPage>;
+  /** 登壇者募集の設定・応募数 (app:lp:view)。 */
+  getProposals(): Promise<LpProposalsState>;
+  /** 募集の公開/停止 (app:lp:edit + lp:publish)。 */
+  setProposalsEnabled(input: { enabled: boolean }): Promise<LpProposalsState>;
+  /** 追加の入力項目を丸ごと置き換える (app:lp:edit)。 */
+  saveProposalFields(input: { fields: LpTicketField[] }): Promise<LpProposalsState>;
+  /** 応募一覧・新しい順 (app:lp:edit = 個人情報)。 */
+  listProposals(query: { cursor?: string; limit?: number }): Promise<LpProposalsPage>;
+  /** 応募の選考状況を変える (app:lp:edit)。 */
+  setProposalStatus(id: string, input: { status: LpProposalStatus }): Promise<LpProposal>;
 }
 
 const BASE = "/api/v1/lp";
@@ -189,5 +333,51 @@ export function createLpApi(api: ApiClient): LpApi {
     getPublish: () => api.request<LpPublishState>({ method: "GET", path: `${BASE}/publish` }),
     setPublish: (input) =>
       api.request<LpPublishState, { versionId: string }>({ method: "POST", path: `${BASE}/publish`, body: input }),
+    getTickets: () => api.request<LpTicketsState>({ method: "GET", path: `${BASE}/tickets` }),
+    setTicketsEnabled: (input) =>
+      api.request<LpTicketsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/tickets/enabled`, body: input }),
+    setTicketsCta: (input) =>
+      api.request<LpTicketsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/tickets/cta`, body: input }),
+    saveTicketFields: (input) =>
+      api.request<LpTicketsState, { fields: LpTicketField[] }>({
+        method: "POST",
+        path: `${BASE}/tickets/fields`,
+        body: input,
+      }),
+    createTicketType: (input) =>
+      api.request<LpTicketTypeSummary, LpTicketTypeInput>({ method: "POST", path: `${BASE}/tickets/types`, body: input }),
+    updateTicketType: (id, input) =>
+      api.request<LpTicketTypeSummary, Partial<LpTicketTypeInput>>({
+        method: "PATCH",
+        path: `${BASE}/tickets/types/${encodeURIComponent(id)}`,
+        body: input,
+      }),
+    listTicketOrders: (query) => {
+      const q: Record<string, string | number | boolean | undefined> = {};
+      if (query.cursor !== undefined) q.cursor = query.cursor;
+      if (query.limit !== undefined) q.limit = query.limit;
+      return api.request<LpTicketOrdersPage>({ method: "GET", path: `${BASE}/tickets/orders`, query: q });
+    },
+    getProposals: () => api.request<LpProposalsState>({ method: "GET", path: `${BASE}/proposals` }),
+    setProposalsEnabled: (input) =>
+      api.request<LpProposalsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/proposals/enabled`, body: input }),
+    saveProposalFields: (input) =>
+      api.request<LpProposalsState, { fields: LpTicketField[] }>({
+        method: "POST",
+        path: `${BASE}/proposals/fields`,
+        body: input,
+      }),
+    listProposals: (query) => {
+      const q: Record<string, string | number | boolean | undefined> = {};
+      if (query.cursor !== undefined) q.cursor = query.cursor;
+      if (query.limit !== undefined) q.limit = query.limit;
+      return api.request<LpProposalsPage>({ method: "GET", path: `${BASE}/proposals/submissions`, query: q });
+    },
+    setProposalStatus: (id, input) =>
+      api.request<LpProposal, { status: LpProposalStatus }>({
+        method: "PATCH",
+        path: `${BASE}/proposals/submissions/${encodeURIComponent(id)}`,
+        body: input,
+      }),
   };
 }

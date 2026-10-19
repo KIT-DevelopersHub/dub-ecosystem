@@ -9,6 +9,8 @@ import type { Context } from "hono";
 import { dubContext, DUB_HEADERS, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
 import { LpService } from "./service";
+import { ProposalService } from "./proposals";
+import { TicketService } from "./tickets";
 import type { AppDeps, IngestVisitRequest, LpDevice, ReqCtx } from "./types";
 
 const DEVICES: ReadonlySet<LpDevice> = new Set(["mobile", "desktop", "bot", "unknown"]);
@@ -54,6 +56,8 @@ function parseIngest(body: unknown): IngestVisitRequest {
 
 export function createApp(deps: AppDeps): Hono {
   const svc = new LpService(deps);
+  const tickets = new TicketService(deps);
+  const proposals = new ProposalService(deps);
   const app = new Hono();
 
   app.onError(dubErrorHandler({ service: "lp-analytics" }));
@@ -73,6 +77,18 @@ export function createApp(deps: AppDeps): Hono {
   // The public LP Worker asks which version to serve (service binding, x-dub-internal only;
   // no user / request id needed). Read-only, one row.
   app.get("/lp/internal/publish", async (c) => c.json({ versionId: (await svc.getPublish()).versionId }));
+  // チケット購入 (public LP Worker → service binding). Webhook reads the raw body first:
+  // the Stripe signature covers the exact bytes.
+  app.get("/lp/internal/tickets", async (c) => c.json(await tickets.getPublic()));
+  app.post("/lp/internal/tickets/checkout", async (c) => c.json(await tickets.checkout(await readJson(c))));
+  app.post("/lp/internal/tickets/confirm", async (c) => c.json(await tickets.confirm(await readJson(c))));
+  app.post("/lp/internal/tickets/stripe-webhook", async (c) => {
+    const raw = await c.req.text();
+    return c.json(await tickets.webhook(raw, c.req.header("stripe-signature")));
+  });
+  // 登壇者募集 (public LP Worker → service binding).
+  app.get("/lp/internal/proposals", async (c) => c.json(await proposals.getPublic()));
+  app.post("/lp/internal/proposals/submit", async (c) => c.json(await proposals.submit(await readJson(c)), 201));
 
   // ---- user routes (signed-in + LP管理 policy gate) ----
   app.use("/lp/*", async (c, next) => {
@@ -94,6 +110,26 @@ export function createApp(deps: AppDeps): Hono {
   );
   app.get("/lp/publish", view, async (c) => c.json(await svc.getPublish()));
   app.post("/lp/publish", publish, async (c) => c.json(await svc.setPublish(reqCtx(c), await readJson(c))));
+
+  // チケット: 販売 on/off は公開切り替えと同じ lp:publish。購入者一覧は個人情報なので edit。
+  app.get("/lp/tickets", view, async (c) => c.json(await tickets.getState()));
+  app.post("/lp/tickets/enabled", publish, async (c) => c.json(await tickets.setEnabled(reqCtx(c), await readJson(c))));
+  app.post("/lp/tickets/cta", publish, async (c) => c.json(await tickets.setCta(reqCtx(c), await readJson(c))));
+  app.post("/lp/tickets/fields", edit, async (c) => c.json(await tickets.setFields(reqCtx(c), await readJson(c))));
+  app.post("/lp/tickets/types", edit, async (c) => c.json(await tickets.createType(await readJson(c)), 201));
+  app.patch("/lp/tickets/types/:id", edit, async (c) =>
+    c.json(await tickets.patchType(c.req.param("id"), await readJson(c))),
+  );
+  app.get("/lp/tickets/orders", edit, async (c) => c.json(await tickets.listOrders(c.req.query())));
+
+  // 登壇者募集: 募集 on/off はチケット販売と同じ lp:publish。応募一覧は個人情報なので edit。
+  app.get("/lp/proposals", view, async (c) => c.json(await proposals.getState()));
+  app.post("/lp/proposals/enabled", publish, async (c) => c.json(await proposals.setEnabled(reqCtx(c), await readJson(c))));
+  app.post("/lp/proposals/fields", edit, async (c) => c.json(await proposals.setFields(reqCtx(c), await readJson(c))));
+  app.get("/lp/proposals/submissions", edit, async (c) => c.json(await proposals.list(c.req.query())));
+  app.patch("/lp/proposals/submissions/:id", edit, async (c) =>
+    c.json(await proposals.setStatus(reqCtx(c), c.req.param("id"), await readJson(c))),
+  );
 
   return app;
 }
