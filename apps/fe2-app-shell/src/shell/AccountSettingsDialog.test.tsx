@@ -129,11 +129,11 @@ describe("AccountSettingsDialog", () => {
     await userEvent.type(dept, "電気電子工学科");
     await userEvent.click(screen.getByTestId("fe2-account-settings-save"));
 
-    // The 参加届 update carries the edited field (full patched set from the single-source form).
+    // The 参加届 update carries the edited field.
     await waitFor(() => expect(updateSelfParticipation).toHaveBeenCalled());
     const arg = (updateSelfParticipation as unknown as { mock: { calls: Array<[Partial<SelfParticipation>]> } }).mock.calls[0]![0];
-    expect(arg.department).toBe("電気電子工学科");
-    expect(arg.lastName).toBe("高岡"); // unchanged fields still sent
+    // Only the edited field is sent (an admin's concurrent roster edit is not overwritten).
+    expect(arg).toEqual({ department: "電気電子工学科" });
     // Profile was untouched → updateProfile not called.
     expect(updateProfile).not.toHaveBeenCalled();
   });
@@ -155,10 +155,8 @@ describe("AccountSettingsDialog", () => {
 
     await waitFor(() => expect(updateSelfParticipation).toHaveBeenCalled());
     const arg = (updateSelfParticipation as unknown as { mock: { calls: Array<[Record<string, unknown>]> } }).mock.calls[0]![0];
-    expect(arg.contact).toBe("@kota");
-    // 運営の項目は送らない (名簿で管理者が設定する)。
-    expect(arg).not.toHaveProperty("operations");
-    expect(arg).not.toHaveProperty("roleTitle");
+    // 連絡先だけ送る (運営の項目・触っていない項目は送らない)。
+    expect(arg).toEqual({ contact: "@kota" });
   });
 
   it("fills 姓/名 from the roster name for legacy entries without the split", async () => {

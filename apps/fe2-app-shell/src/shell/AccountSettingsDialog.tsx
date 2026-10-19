@@ -25,7 +25,7 @@ import {
   showBrowserNotice,
   type BrowserNotifyPermission,
 } from "@dub/fe5-notification-inbox";
-import type { gateway } from "@dub/types";
+import type { gateway, member } from "@dub/types";
 import { ApiError, toDisplayableError, type ApiClient, type SelfParticipation } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
 import {
@@ -188,15 +188,22 @@ export function AccountSettingsDialog({
 
   async function save() {
     if (!canSubmit) return;
-    const { profile: nextProfile, errors: partErrs } = parseProfileDraft(part);
+    // 変えた項目だけ送る (開いている間に管理者が名簿で直した値を古い値で上書きしない・
+    // 旧データの姓/名を埋めただけで書き込まない)。検証も変えた項目だけ。
+    const base = loadedPart ? selfDraftOf(loadedPart) : emptyProfileDraft();
+    const changed = (k: keyof PersonProfileDraft) => part[k].trim() !== base[k].trim();
+    const { profile: nextProfile, errors: allErrs } = parseProfileDraft(part);
+    const partErrs = Object.fromEntries(
+      Object.entries(allErrs).filter(([k]) => changed(k as keyof PersonProfileDraft)),
+    ) as PersonProfileErrors;
     setPartErrors(partErrs);
     if (participationDirty && Object.keys(partErrs).length > 0) return;
+    const partPatch: member.SelfParticipationUpdateRequest = Object.fromEntries(
+      Object.entries(nextProfile).filter(([k]) => changed(k as keyof PersonProfileDraft)),
+    );
     const nextContact = contact.trim() || null;
-    const nextPart: SelfParticipation = {
-      ...nextProfile,
-      contact: nextContact,
-      operations: loadedPart?.operations ?? null,
-    };
+    if (nextContact !== (loadedPart?.contact ?? null)) partPatch.contact = nextContact;
+    const nextPart: SelfParticipation | undefined = loadedPart ? { ...loadedPart, ...partPatch } : undefined;
     setSubmitting(true);
     setError(null);
     const prevMe = qc.getQueryData<MeResponse>(queryKeys.me);
@@ -207,7 +214,7 @@ export function AccountSettingsDialog({
         old ? { ...old, user: { ...old.user, displayName: trimmed, avatarUrl: avatar } } : old,
       );
     }
-    if (participationDirty) qc.setQueryData<SelfParticipation>(PARTICIPATION_KEY, nextPart);
+    if (participationDirty && nextPart) qc.setQueryData<SelfParticipation>(PARTICIPATION_KEY, nextPart);
     try {
       const ops: Promise<unknown>[] = [];
       if (profileDirty) {
@@ -220,11 +227,7 @@ export function AccountSettingsDialog({
         );
       }
       if (participationDirty) {
-        ops.push(
-          api.auth
-            .updateSelfParticipation({ ...nextProfile, contact: nextContact })
-            .then((res) => qc.setQueryData(PARTICIPATION_KEY, res)),
-        );
+        ops.push(api.auth.updateSelfParticipation(partPatch).then((res) => qc.setQueryData(PARTICIPATION_KEY, res)));
       }
       await Promise.all(ops);
       toast.show({ kind: "success", title: "アカウント設定を保存しました" });
@@ -348,7 +351,7 @@ export function AccountSettingsDialog({
           {/* ── 本人の情報（参加届と同じ項目） ── */}
           <div className="fe2-account-section" data-testid="fe2-account-participation">
             <div className="fe2-account-section-title">本人の情報（参加届と同じ項目）</div>
-            <div className="fe2-account-section-help">運営名簿に載っている自分の情報です。参加届で入力した項目もここで直せます。</div>
+            <div className="fe2-account-section-help">運営名簿に載っている自分の情報です。直すと名簿にも反映されます。</div>
             {partQuery.isPending ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-3)" }}>
                 <Skeleton width="100%" height={40} />

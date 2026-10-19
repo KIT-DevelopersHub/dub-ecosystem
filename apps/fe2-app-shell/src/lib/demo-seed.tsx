@@ -3464,7 +3464,7 @@ function createMembersStore() {
       }
       Object.assign(mem, r.value);
       if (body?.contact !== undefined) mem.contact = typeof body.contact === "string" && body.contact.trim() ? body.contact.trim() : null;
-      mem.name = [mem.lastName, mem.firstName].filter((x) => !!x).join(" ") || mem.name || "メンバー";
+      mem.name = [mem.lastName, mem.firstName].filter((x) => !!x).join(" ") || mem.name || (mem.gmail ?? mem.schoolEmail ?? "").split("@")[0] || "メンバー";
       mem.version += 1;
       mem.updatedAt = isoNow();
     }
