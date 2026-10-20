@@ -6,8 +6,8 @@
 // 公開 URL を新規タブで開ける（外部リンクは rel でハードニング）。
 //
 // 「公開中」バッジはサーバーの公開フラグ（GET /api/v1/lp/publish）が正で、lpVersions.ts の
-// status ではない。lp:publish を持つ編集者だけが「この版を公開」で切り替えられる（確認ダイアログ
-// → 楽観的にバッジを移動 → 失敗でロールバック）。ビルド/デプロイはしない。
+// status ではない。公開する版の切り替えは「本番公開」タブに集約したので、ここは状態の表示と
+// そのタブへの導線だけを持つ。
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -17,20 +17,18 @@ import {
   EmptyState,
   ErrorState,
   Icon,
-  Modal,
   PageHeader,
   Skeleton,
   SkeletonLoader,
   Stack,
 } from "@dub/ui";
 import type { BadgeTone } from "@dub/ui";
-import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { listLpVersions, type LpVersion } from "./lpVersions.ts";
 import type { LpPublishState } from "./lpApi.tsx";
-import { useLpPublish, useSetLpPublish } from "./lpHooks.ts";
-import { formatSwitchedAt, lpViewUrl, PUBLISH_SUCCESS_MARKER } from "./lpPublish.ts";
+import { useLpPublish } from "./lpHooks.ts";
+import { formatSwitchedAt, lpViewUrl } from "./lpPublish.ts";
 import { LpViewer } from "./LpViewer.tsx";
-import { LpTabs } from "./LpTabs.tsx";
+import { GotoPublishButton, LpTabs } from "./LpTabs.tsx";
 import styles from "./lp.module.css";
 
 const LP_VERSIONS_KEY = ["lp", "versions"] as const;
@@ -53,38 +51,20 @@ function VersionRow({
   version,
   publish,
   publishLoading,
-  canPublish,
   onView,
-  onPublish,
 }: {
   version: LpVersion;
   publish: LpPublishState | undefined;
   publishLoading: boolean;
-  canPublish: boolean;
   onView: (version: LpVersion) => void;
-  onPublish: (version: LpVersion) => void;
 }): JSX.Element {
   const status = badgeFor(version, publish?.versionId);
-  const publishable = canPublish && !!publish && publish.versions.includes(version.id) && publish.versionId !== version.id;
   const [open, setOpen] = useState(false);
   return (
     <div className={styles.versionRow} data-testid={`fe2-lp-version-${version.id}`}>
       <div className={styles.versionLine}>
         <Icon name="megaphone" />
         <strong className={styles.versionName}>{version.name}</strong>
-        {/* 空でもセルは残す（行ごとに右側のバッジ/ボタン位置を揃えるため）。 */}
-        <span className={styles.versionPublish}>
-          {publishable ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => onPublish(version)}
-              testId={`fe2-lp-publish-${version.id}`}
-            >
-              この版を公開
-            </Button>
-          ) : null}
-        </span>
         {publishLoading ? (
           <span className={styles.versionBadgeSkeleton} role="status" aria-label="公開状態を読み込み中">
             <Skeleton width={56} height={20} testId={`fe2-lp-status-loading-${version.id}`} />
@@ -135,14 +115,8 @@ export function LpManagementScreen(): JSX.Element {
   // 表示中の LP（null = 一覧表示）。「見る」でセットしてフルスクリーン閲覧に入り、
   // 「アプリに戻る」で null に戻して通常の管理画面(=アプリ)へ復帰する。
   const [viewing, setViewing] = useState<LpVersion | null>(null);
-  const [confirming, setConfirming] = useState<LpVersion | null>(null);
-  const [announce, setAnnounce] = useState("");
 
   const publishQuery = useLpPublish();
-  const setPublish = useSetLpPublish();
-  const { canEdit } = useAppCapability("lp");
-  const { can } = usePermissions();
-  const canPublish = canEdit && can("lp:publish");
   const publish = publishQuery.data;
 
   // 「見る」の行き先は公開フラグ次第（公開対象の版 = 公開サイトのプレビュー URL）。
@@ -151,17 +125,6 @@ export function LpManagementScreen(): JSX.Element {
     [query.data, publish],
   );
   const nameOf = (id: string): string => query.data?.find((v) => v.id === id)?.name ?? id;
-
-  const confirmPublish = (): void => {
-    if (!confirming) return;
-    const target = confirming;
-    setConfirming(null);
-    setAnnounce("");
-    setPublish.mutate(
-      { versionId: target.id, name: target.name },
-      { onSuccess: () => setAnnounce(PUBLISH_SUCCESS_MARKER) },
-    );
-  };
 
   const header = (
     <PageHeader
@@ -212,9 +175,7 @@ export function LpManagementScreen(): JSX.Element {
               version={v}
               publish={publish}
               publishLoading={publishQuery.isLoading}
-              canPublish={canPublish && !setPublish.isPending}
               onView={setViewing}
-              onPublish={setConfirming}
             />
           ))}
         </Card>
@@ -229,19 +190,6 @@ export function LpManagementScreen(): JSX.Element {
       <LpTabs active="versions" />
       {body}
       {viewing ? <LpViewer version={viewing} onBack={() => setViewing(null)} /> : null}
-      {confirming && publish ? (
-        <PublishConfirmDialog
-          site={publish.site}
-          currentName={nameOf(publish.versionId)}
-          target={confirming}
-          onConfirm={confirmPublish}
-          onCancel={() => setConfirming(null)}
-        />
-      ) : null}
-      {/* 読み上げ用。切り替え完了をスクリーンリーダーにも伝える。 */}
-      <span className={styles.srOnly} role="status" aria-live="polite" data-testid="fe2-lp-publish-live">
-        {announce}
-      </span>
     </Stack>
   );
 }
@@ -284,67 +232,7 @@ function PublishSummary({
         <strong>公開中: {nameOf(publish.versionId)}</strong>
         {publish.updatedAt ? `（${formatSwitchedAt(publish.updatedAt)} に切り替え）` : null}
       </span>
+      <GotoPublishButton testId="fe2-lp-versions-goto-publish" />
     </div>
-  );
-}
-
-/** 切り替え前の確認。Modal は body へ portal されるので、ボタンは @dub/ui の variant だけで描く。 */
-function PublishConfirmDialog({
-  site,
-  currentName,
-  target,
-  onConfirm,
-  onCancel,
-}: {
-  site: string;
-  currentName: string;
-  target: LpVersion;
-  onConfirm: () => void;
-  onCancel: () => void;
-}): JSX.Element {
-  return (
-    <Modal
-      open
-      onClose={onCancel}
-      title="公開する版を切り替えます"
-      size="sm"
-      testId="fe2-lp-publish-dialog"
-      footer={
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--dub-space-2)" }}>
-          <Button variant="secondary" onClick={onCancel} testId="fe2-lp-publish-cancel">
-            キャンセル
-          </Button>
-          <Button variant="primary" onClick={onConfirm} testId="fe2-lp-publish-confirm">
-            切り替える
-          </Button>
-        </div>
-      }
-    >
-      <div style={{ display: "grid", gap: "var(--dub-space-4)" }}>
-        <dl
-          style={{
-            display: "grid",
-            gridTemplateColumns: "auto minmax(0, 1fr)",
-            gap: "var(--dub-space-2) var(--dub-space-4)",
-            margin: 0,
-          }}
-          data-testid="fe2-lp-publish-diff"
-        >
-          <dt>現在</dt>
-          <dd style={{ margin: 0 }}>{currentName}</dd>
-          <dt>切り替え後</dt>
-          <dd style={{ margin: 0 }}>
-            <strong>{target.name}</strong>
-          </dd>
-        </dl>
-        <ul style={{ margin: 0, paddingLeft: "var(--dub-space-5)", display: "grid", gap: "var(--dub-space-1)" }}>
-          <li>
-            {site} を開いた全員に「{target.name}」が表示されます。
-          </li>
-          <li>ビルドやデプロイは行いません。反映まで最大 1 分ほどかかります。</li>
-          <li>いつでも元の版に戻せます。</li>
-        </ul>
-      </div>
-    </Modal>
   );
 }

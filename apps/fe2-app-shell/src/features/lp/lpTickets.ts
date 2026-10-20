@@ -197,3 +197,13 @@ export function moveItem<T>(list: T[], index: number, delta: -1 | 1): T[] {
   next.splice(to, 0, item!);
   return next;
 }
+
+/** 「参加登録」ボタン差し替えの実際の効き具合（効くのは販売公開中だけ）。本番公開タブとチケットタブで共用。 */
+export function ctaBadge(state: { enabled: boolean; ctaEnabled: boolean }): {
+  tone: "success" | "warning" | "neutral";
+  label: string;
+} {
+  if (state.enabled && state.ctaEnabled) return { tone: "success", label: "LP に反映中" };
+  if (state.ctaEnabled) return { tone: "warning", label: "販売の公開待ち" };
+  return { tone: "neutral", label: "元の表示" };
+}

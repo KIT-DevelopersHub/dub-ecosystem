@@ -144,30 +144,12 @@ describe("LpProposalsScreen", () => {
     expect(screen.getByTestId("fe2-lp-proposal-field-format")).toBeInTheDocument();
   });
 
-  it("publishing needs the acknowledgement check, then flips optimistically", async () => {
-    const setProposalsEnabled = vi.fn(({ enabled }: { enabled: boolean }) => Promise.resolve(baseState({ enabled })));
-    renderScreen(fakeApi({ setProposalsEnabled }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-proposals-enabled"));
-    const dialog = await screen.findByTestId("fe2-lp-proposals-enabled-dialog");
-    expect(within(dialog).getByTestId("fe2-lp-proposals-enabled-warning")).toHaveTextContent("全ユーザーに公開");
-    expect(screen.getByTestId("fe2-lp-proposals-enabled-confirm")).toBeDisabled();
-    fireEvent.click(screen.getByTestId("fe2-lp-proposals-enabled-ack"));
-    fireEvent.click(screen.getByTestId("fe2-lp-proposals-enabled-confirm"));
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-proposals-enabled-state")).toHaveTextContent("募集中"));
-    expect(setProposalsEnabled).toHaveBeenCalledWith({ enabled: true });
-  });
-
-  it("rolls the toggle back when the server refuses", async () => {
-    renderScreen(fakeApi({ setProposalsEnabled: () => Promise.reject(new Error("nope")) }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-proposals-enabled"));
-    fireEvent.click(await screen.findByTestId("fe2-lp-proposals-enabled-ack"));
-    fireEvent.click(screen.getByTestId("fe2-lp-proposals-enabled-confirm"));
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-proposals-enabled-state")).toHaveTextContent("停止中"));
-  });
-
-  it("disables the publish toggle without lp:publish", async () => {
-    renderScreen(fakeApi(), EDITOR);
-    expect(await screen.findByTestId("fe2-lp-proposals-enabled-hint")).toHaveTextContent("lp:publish");
+  it("shows the call state with a link to 本番公開, and no switch here", async () => {
+    renderScreen(fakeApi());
+    expect(await screen.findByTestId("fe2-lp-proposals-enabled-state")).toHaveTextContent("停止中");
+    expect(screen.getByTestId("fe2-lp-proposals-enabled-hint")).toHaveTextContent("本番公開");
+    expect(screen.getByTestId("fe2-lp-proposals-goto-publish")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-proposals-enabled")).not.toBeInTheDocument();
   });
 
   it("keeps the submissions (personal data) away from viewers", async () => {

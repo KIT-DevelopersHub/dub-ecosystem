@@ -2,8 +2,8 @@
 // 届いた応募を読んで選考状況（未対応 / 採択 / 見送り）を付ける。
 //
 // 設計メモ:
-//  - 募集の公開/停止は LP 全体に効くので lp:publish 必須 + 確認ダイアログ（チケット販売と同じ扱い）。
-//    公開すると LP の「登壇に応募する」ボタン（いまは「準備中」）が押せるようになり /proposals へ進む。
+//  - 募集の公開/停止は本番の LP に効くので、スイッチは「本番公開」タブ（LpPublishScreen）に集約した。
+//    ここは状態バッジとそのタブへの導線だけを出す。
 //  - 公開前の見た目は「プレビュー」タブ（登壇者募集あり/なしを選んで開く・応募不可）で確かめる。
 //  - 発表タイトル・概要・氏名・メールは固定項目。発表形式などは入力項目カードで足し引きする。
 //  - 応募一覧は個人情報なので app:lp:edit のときだけ取得・表示する（閲覧者には件数だけ）。
@@ -13,30 +13,26 @@ import {
   Badge,
   Button,
   Card,
-  Checkbox,
   EmptyState,
   ErrorState,
   Icon,
   LoadMore,
-  Modal,
   PageHeader,
   Select,
   SkeletonLoader,
   Stack,
-  Switch,
 } from "@dub/ui";
-import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
+import { useAppCapability } from "../../auth/AuthProvider.tsx";
 import type { LpProposal, LpProposalStatus, LpProposalsState } from "./lpApi.tsx";
 import {
   useLpProposalSubmissions,
   useLpProposals,
   useSaveProposalFields,
   useSetProposalStatus,
-  useSetProposalsEnabled,
 } from "./lpProposalsHooks.ts";
 import { TICKET_FIELDS_MAX, formatDateTime } from "./lpTickets.ts";
 import { LpFieldsEditorCard } from "./LpTicketFields.tsx";
-import { LpTabs } from "./LpTabs.tsx";
+import { GotoPublishButton, LpTabs } from "./LpTabs.tsx";
 import styles from "./lp.module.css";
 
 export const PROPOSAL_STATUS_LABELS: Record<LpProposalStatus, string> = {
@@ -57,8 +53,6 @@ const LOCKED_SPEAKER = ["氏名", "メールアドレス"] as const;
 export function LpProposalsScreen(): JSX.Element {
   const proposals = useLpProposals();
   const { canEdit } = useAppCapability("lp");
-  const { can } = usePermissions();
-  const canToggle = canEdit && can("lp:publish");
   const saveFields = useSaveProposalFields();
 
   let body: JSX.Element;
@@ -85,7 +79,7 @@ export function LpProposalsScreen(): JSX.Element {
     const open = state.totals.total - state.totals.accepted - state.totals.rejected;
     body = (
       <Stack gap={6}>
-        <StatusCard state={state} canToggle={canToggle} />
+        <StatusCard state={state} />
         <div className={styles.kpiGrid}>
           <SummaryTile testId="fe2-lp-proposals-total" label="応募数" value={`${state.totals.total.toLocaleString("ja-JP")} 件`} />
           <SummaryTile testId="fe2-lp-proposals-open" label="未対応" value={`${open.toLocaleString("ja-JP")} 件`} />
@@ -146,40 +140,22 @@ function SummaryTile({ testId, label, value }: { testId: string; label: string; 
   );
 }
 
-function StatusCard({ state, canToggle }: { state: LpProposalsState; canToggle: boolean }): JSX.Element {
-  const setEnabled = useSetProposalsEnabled();
-  const [confirming, setConfirming] = useState<boolean | null>(null);
-  const [acknowledged, setAcknowledged] = useState(false);
-  const openConfirm = (next: boolean): void => {
-    setAcknowledged(false);
-    setConfirming(next);
-  };
-
+function StatusCard({ state }: { state: LpProposalsState }): JSX.Element {
   return (
     <Card testId="fe2-lp-proposals-status" header={<span className={styles.sectionTitle}>登壇者募集</span>}>
       <Stack gap={5}>
-        <div className={styles.statusRow}>
-          <Switch
-            id="fe2-lp-proposals-enabled"
-            testId="fe2-lp-proposals-enabled"
-            checked={state.enabled}
-            disabled={!canToggle || setEnabled.isPending}
-            label="登壇者の募集を公開"
-            onChange={openConfirm}
-          />
+        <div className={styles.gotoPublish}>
+          <span className={styles.kpiLabel}>募集</span>
           <Badge tone={state.enabled ? "success" : "neutral"} testId="fe2-lp-proposals-enabled-state">
             {state.enabled ? "募集中" : "停止中"}
           </Badge>
+          <GotoPublishButton testId="fe2-lp-proposals-goto-publish" />
         </div>
-        {!canToggle ? (
-          <span className={styles.note} data-testid="fe2-lp-proposals-enabled-hint">
-            切り替えには lp:publish 権限が必要です
-          </span>
-        ) : null}
-        <span className={styles.note}>
+        <span className={styles.note} data-testid="fe2-lp-proposals-enabled-hint">
           {state.enabled
             ? "LP の「登壇に応募する」ボタンから応募ページ（/proposals）へ進めます。"
-            : "停止中は LP の「登壇に応募する」ボタンが「準備中」のまま押せません。公開前の見た目は「プレビュー」タブで確かめられます。"}
+            : "停止中は LP の「登壇に応募する」ボタンが「準備中」のまま押せません。"}
+          募集の公開・停止は「本番公開」タブで行います。
         </span>
         <div className={styles.statusRow}>
           <span className={styles.kpiLabel}>応募ページ</span>
@@ -195,65 +171,6 @@ function StatusCard({ state, canToggle }: { state: LpProposalsState; canToggle: 
           <Icon name="external-link" />
         </div>
       </Stack>
-      {confirming !== null ? (
-        <Modal
-          open
-          onClose={() => setConfirming(null)}
-          title={confirming ? "登壇者の募集を全員に公開しますか？" : "登壇者の募集を停止します"}
-          size="sm"
-          testId="fe2-lp-proposals-enabled-dialog"
-          footer={
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--dub-space-3)" }}>
-              <Button variant="secondary" onClick={() => setConfirming(null)} testId="fe2-lp-proposals-enabled-cancel">
-                キャンセル
-              </Button>
-              <Button
-                variant={confirming ? "primary" : "danger"}
-                disabled={confirming && !acknowledged}
-                onClick={() => {
-                  const next = confirming;
-                  setConfirming(null);
-                  setEnabled.mutate({ enabled: next });
-                }}
-                testId="fe2-lp-proposals-enabled-confirm"
-              >
-                {confirming ? "公開する" : "停止する"}
-              </Button>
-            </div>
-          }
-        >
-          {confirming ? (
-            <p className={styles.publishWarning} role="alert" data-testid="fe2-lp-proposals-enabled-warning">
-              {"本当に全ユーザーに公開されますがよろしいですか？公開すると、ログインしていない一般の方を含むインターネット上の誰でも、応募ページを開いて登壇に応募できるようになります。"}
-            </p>
-          ) : null}
-          <ul style={{ margin: 0, paddingLeft: "var(--dub-space-5)", display: "grid", gap: "var(--dub-space-2)" }}>
-            {confirming ? (
-              <>
-                <li>公開すると LP の「登壇に応募する」ボタンが押せるようになり、/proposals の応募ページが出ます。</li>
-                <li>公開前の見た目は「プレビュー」タブで確かめられます。</li>
-              </>
-            ) : (
-              <>
-                <li>停止すると LP の「登壇に応募する」ボタンは「準備中」に戻り、/proposals ページは表示されなくなります。</li>
-                <li>これまでの応募は消えません。</li>
-              </>
-            )}
-            <li>反映まで最大 1 分ほどかかります。</li>
-          </ul>
-          {confirming ? (
-            <div className={styles.publishAck}>
-              <Checkbox
-                id="fe2-lp-proposals-enabled-ack"
-                testId="fe2-lp-proposals-enabled-ack"
-                checked={acknowledged}
-                label="全ユーザーに公開されることを理解しました"
-                onChange={setAcknowledged}
-              />
-            </div>
-          ) : null}
-        </Modal>
-      ) : null}
     </Card>
   );
 }
