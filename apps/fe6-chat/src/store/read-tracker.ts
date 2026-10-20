@@ -51,6 +51,12 @@ export class ReadTracker {
     this.deps.send(id);
   }
 
+  /** Drop a queued read (「未読にする」 must not be overwritten by a debounce in flight). */
+  cancel(): void {
+    this.dispose();
+    this.pendingId = null;
+  }
+
   dispose(): void {
     if (this.timer !== null) this.deps.clearTimer(this.timer);
     this.timer = null;

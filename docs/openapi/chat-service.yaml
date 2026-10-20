@@ -182,8 +182,8 @@ paths:
   /chat/channels/{id}/section:
     put:
       operationId: setChannelSection
-      summary: Put a channel into one of the caller's sidebar sections
-      description: Personal (per-user) sidebar organization. sectionId null removes the channel from its section.
+      summary: Put a channel into one of the org-wide sidebar sections
+      description: Requires chat:manage_sections. Org-wide (shared) sidebar organization. sectionId null removes the channel from its section.
       tags:
         - chat
       parameters:
@@ -203,12 +203,14 @@ paths:
           description: Updated.
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /chat/sections:
     get:
       operationId: listSections
-      summary: List the caller's sidebar sections
+      summary: List the org-wide sidebar sections
       tags:
         - chat
       responses:
@@ -223,6 +225,7 @@ paths:
     post:
       operationId: createSection
       summary: Create a sidebar section (appended last)
+      description: Requires chat:manage_sections.
       tags:
         - chat
       requestBody:
@@ -242,10 +245,13 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /chat/sections/{id}:
     patch:
       operationId: updateSection
-      summary: Rename or reorder one of the caller's sections
+      summary: Rename or reorder a sidebar section
+      description: Requires chat:manage_sections.
       tags:
         - chat
       parameters:
@@ -271,11 +277,14 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteSection
-      summary: Delete one of the caller's sections (its channels return to the default groups)
+      summary: Delete a sidebar section (its channels return to the default groups)
+      description: Requires chat:manage_sections.
       tags:
         - chat
       parameters:
@@ -289,6 +298,8 @@ paths:
           description: Deleted.
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /chat/channels/{id}/members:
@@ -931,7 +942,7 @@ components:
             $ref: '#/components/schemas/ChatSection'
         assignments:
           type: object
-          description: channelId -> sectionId
+          description: channelId -> sectionId (only channels the caller can read)
           additionalProperties:
             type: string
     CreateSectionRequest:

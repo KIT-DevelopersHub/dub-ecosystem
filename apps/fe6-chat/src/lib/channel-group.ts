@@ -43,12 +43,12 @@ export interface SectionGroup {
 }
 
 export interface SidebarLayout {
-  sections: SectionGroup[]; // user sections first, by position (empty ones kept)
+  sections: SectionGroup[]; // org-wide sections first, by position (empty ones kept)
   groups: ChannelGroup[]; // default groups for unassigned channels
 }
 
 /**
- * Sidebar = the user's own sections (any channel type) then the default type groups
+ * Sidebar = the org-wide sections (any channel type) then the default type groups
  * for everything unassigned. An assignment to an unknown section falls back to the
  * default group so a stale map never hides a channel.
  */

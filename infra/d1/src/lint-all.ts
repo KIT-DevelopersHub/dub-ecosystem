@@ -51,6 +51,7 @@ export function lintAll(migrations: readonly Migration[] = collectMigrations()):
  */
 const FORBIDDEN_STATEMENT_EXEMPTIONS: ReadonlySet<string> = new Set([
   "task/0003_event_id_nullable", // NOT NULL removal via FK-safe table rebuild
+  "mobile/0002_reconcile_with_mo3", // drop the empty 0001 stub, recreate as mo3 queries it
 ]);
 
 /** Error-level issues that gate CI — draft namespaces excluded (theme-12). */

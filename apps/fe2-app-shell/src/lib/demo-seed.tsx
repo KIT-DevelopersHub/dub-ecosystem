@@ -25,7 +25,7 @@ import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
-import { createSlackImportSim, mockUnfurl, type ImportedChannel } from "../composition/featureEntries";
+import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -54,6 +54,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:moderate",
   "chat:delete_channel",
   "chat:slack_import",
+  "chat:emoji_import",
+  "chat:manage_sections",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -716,9 +718,13 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
   "mail:read",
 ];
 
+// チャット 編集 but NOT chat:manage_sections (the default for every non-admin role): sees the
+// org-wide sidebar sections without any organizing UI. ?demo_account=usr_bob previews it.
+const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "chat:manage_sections");
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
-  { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
+  { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: CHAT_EDITOR_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
@@ -1196,6 +1202,11 @@ const SEED_USERS: DemoRosterUser[] = [
   { id: "usr_lead", orgId: ORG, displayName: "統括 山本", email: "lead@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "manual", roleIds: ["role_lead"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_mana", orgId: ORG, displayName: "加藤 真名", email: "mana@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_noa", orgId: ORG, displayName: "吉田 乃愛", email: "noa@developershub.jp", githubLogin: "noa-y", avatarUrl: null, status: "disabled", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  // Bulk Email Routing addresses so the 名簿 spans several 20-row pages in the demo.
+  ...Array.from({ length: 30 }, (_, i): DemoRosterUser => {
+    const n = String(i + 1).padStart(2, "0");
+    return { id: `usr_mail${n}`, orgId: ORG, displayName: `メンバー ${n}`, email: `member${n}@developershub.jp`, githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() };
+  }),
 ];
 
 // identity-roster's role DTO carries the cross-role mail visibility set (fe7 RoleView).
@@ -1588,22 +1599,21 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
     return c.roster;
   };
 
-  // Personal sidebar sections, per signed-in account (account switcher). The demo
+  // Org-wide sidebar sections: ONE shared set every account sees (chat/0007). Writes need
+  // 編集 + chat:manage_sections like chat-service's POLICY_TABLE (403 otherwise). The demo
   // admin starts with one 「運営」 section holding #admin so the feature shows at once.
   interface DemoSection { id: string; name: string; position: number; createdAt: string }
-  const sectionsByUser = new Map<string, { items: DemoSection[]; assignments: Record<string, string> }>([
-    [ME_ID, { items: [{ id: "sec_demo_ops", name: "運営", position: 0, createdAt: CH_TS }], assignments: { chn_admin: "sec_demo_ops" } }],
-  ]);
-  let sectionSeq = 0;
-  const mySections = () => {
-    const me = currentAccount().id;
-    let entry = sectionsByUser.get(me);
-    if (!entry) {
-      entry = { items: [], assignments: {} };
-      sectionsByUser.set(me, entry);
-    }
-    return entry;
+  const shared: { items: DemoSection[]; assignments: Record<string, string> } = {
+    items: [{ id: "sec_demo_ops", name: "運営", position: 0, createdAt: CH_TS }],
+    assignments: { chn_admin: "sec_demo_ops" },
   };
+  let sectionSeq = 0;
+  const canManageSections = () => {
+    const perms = currentAccount().permissions;
+    return perms.includes("app:chat:edit") && perms.includes("chat:manage_sections");
+  };
+  const sectionsForbidden = (): Response =>
+    json({ error: { code: "FORBIDDEN", message: "chat:manage_sections required", retryable: false } } satisfies ErrorResponse, 403);
   const sectionName = (raw: unknown): string | null => {
     const name = typeof raw === "string" ? raw.trim() : "";
     return name.length >= 1 && name.length <= 40 ? name : null;
@@ -1628,7 +1638,19 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
   // unfurl for known hosts; none for unknown) is visible without typing anything.
   const generalMessages = [
     msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
-    msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+    // Custom emoji reactions: :kit-dev: is registered from the start (image), :partyparrot:
+    // only after an admin runs 「Slack の絵文字を取り込む」 (text until then — the before/after).
+    msg({
+      id: "msg_01SEEDGEN0000000000000WEL",
+      authorId: ME_ID,
+      body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉",
+      createdAt: "2026-08-01T00:05:00.000Z",
+      reactions: [
+        { emoji: "🎉", userIds: ["usr_bob", "usr_emi"] },
+        { emoji: ":kit-dev:", userIds: ["usr_bob", ME_ID] },
+        { emoji: ":partyparrot:", userIds: ["usr_emi"] },
+      ],
+    }),
     msg({
       id: "msg_01SEEDGEN0000000000000URL",
       authorId: "usr_bob",
@@ -1649,7 +1671,44 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       body: "<!team:team_hq> 明日の定例は 10:00 開始に変更します。<!team:team_corp> 契約書のレビューもお願いします 🙏",
       createdAt: "2026-08-01T00:14:00.000Z",
     }),
+    // メッセージリンクの展開 (Slack unfurl): 同じチャンネル / DM / 読めないメッセージへのリンク。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZUL",
+      authorId: "usr_emi",
+      body: `LP の場所はこのメッセージにまとまっています ${demoMessageLink("chn_general", "msg_01SEEDGEN0000000000000URL")}`,
+      createdAt: "2026-08-01T00:16:00.000Z",
+    }),
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZUM",
+      authorId: ME_ID,
+      body: `DM で相談された件です ${demoMessageLink("chn_dm_bob", "msg_01SEEDDMB0000000000000001")} 削除されたメッセージへのリンクはこう見えます ${demoMessageLink("chn_general", "msg_01SEEDGEN000000000000GONE")}`,
+      createdAt: "2026-08-01T00:18:00.000Z",
+    }),
+    // 転送 (Slack の「メッセージを転送する」): 引用カードで表示される。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZVF",
+      authorId: "usr_bob",
+      body: buildForwardBody({
+        comment: "定例の変更、全体にも共有しておきます",
+        text: "明日の定例は 10:00 開始に変更します。",
+        authorName: "佐藤 太郎",
+        sourceChannelName: "#team-soukatsu",
+      }),
+      createdAt: "2026-08-01T00:20:00.000Z",
+    }),
   ];
+  // 「後で」: the demo admin starts with saved items, reminders and one 完了 (this device only).
+  seedLaterDemoPrefs(ME_ID, {
+    saved: [
+      { messageId: "msg_01SEEDGEN0000000000000URL", channelId: "chn_general", authorId: "usr_bob", excerpt: "LP の最新版はこちらです https://developershub.jp/conf/2026" },
+      { messageId: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", excerpt: "LP の文言、確認してもらえますか？急ぎではないです 🙏" },
+    ],
+    reminders: [
+      { messageId: "msg_01SEEDGEN0000000000000ZTM", channelId: "chn_general", authorId: "usr_bob", excerpt: "@統括チーム 明日の定例は 10:00 開始に変更します。", inMinutes: 180 },
+      { messageId: "msg_01SEEDGEN0000000000000UR2", channelId: "chn_general", authorId: ME_ID, excerpt: "こっちは画像なしのサイトです https://example.com/", inMinutes: 60 * 24 * 3 },
+    ],
+    completed: [{ messageId: "msg_01SEEDGEN0000000000000WEL", channelId: "chn_general", authorId: ME_ID, excerpt: "北陸ITカンファレンス運営チャンネルへようこそ 🎉" }],
+  });
   // Posted messages persist for the session (per channel) so a sent URL renders
   // its card in place; ids are minted ascending so they sort after the seed.
   const posted = new Map<string, ReturnType<typeof msg>[]>();
@@ -1678,6 +1737,8 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
     authors: { me: ME_ID, a: "usr_bob", b: "usr_emi", disabled: "usr_ken" },
     onDone: materializeImport,
   });
+  // カスタム絵文字 (Slack): the shared fe6 simulator (two pre-imported, the rest on import).
+  const customEmoji = createCustomEmojiSim();
   const simResponse = (r: ReturnType<typeof slackImport.step>): Response =>
     r.ok ? json(r.value, r.status) : json({ error: { code: r.code, message: r.message, retryable: false } } satisfies ErrorResponse, r.status);
 
@@ -1689,6 +1750,40 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
   ];
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (pathname.startsWith("/api/v1/chat/custom-emojis")) {
+      if (method === "GET" && pathname === "/api/v1/chat/custom-emojis") return json({ items: customEmoji.list() });
+      if (method === "POST" && pathname === "/api/v1/chat/custom-emojis/slack-import") {
+        const after = (body as { after?: unknown } | null)?.after;
+        return json(customEmoji.importStep(typeof after === "string" ? after : null));
+      }
+      const img = /^\/api\/v1\/chat\/custom-emojis\/([^/]+)\/image$/.exec(pathname);
+      if (img && method === "GET") {
+        const found = customEmoji.image(decodeURIComponent(img[1]!));
+        if (!found) return notFound(`GET ${pathname}`);
+        return new Response(found.body, { status: 200, headers: { "content-type": found.contentType, "cache-control": "private, max-age=86400" } });
+      }
+      return null;
+    }
+    {
+      // Reaction toggle (Slack-parity, incl. custom ":name:") on any demo message — mutated in
+      // place so the reaction survives a timeline refetch for the session.
+      const m = /^\/api\/v1\/chat\/messages\/([^/]+)\/reactions$/.exec(pathname);
+      if (m && method === "POST") {
+        const id = decodeURIComponent(m[1]!);
+        const emoji = (body as { emoji?: unknown } | null)?.emoji;
+        if (typeof emoji !== "string" || !emoji) return validationFailed("emoji is required");
+        const all = [...generalMessages, ...dmMessages, ...[...imported.values()].flatMap((x) => x.messages), ...[...posted.values()].flat()] as DemoMessage[];
+        const target = all.find((x) => x.id === id);
+        if (!target) return notFound(`POST ${pathname}`);
+        const me = currentAccount().id;
+        const reactions = ((target.reactions as { emoji: string; userIds: string[] }[] | undefined) ?? []).map((r) => ({ ...r, userIds: [...r.userIds] }));
+        const r = reactions.find((x) => x.emoji === emoji);
+        if (!r) reactions.push({ emoji, userIds: [me] });
+        else r.userIds = r.userIds.includes(me) ? r.userIds.filter((u) => u !== me) : [...r.userIds, me];
+        target.reactions = reactions.filter((x) => x.userIds.length > 0);
+        return json({ messageId: id, reactions: target.reactions });
+      }
+    }
     if (pathname.startsWith("/api/v1/chat/slack-import/")) {
       if (method === "GET" && pathname === "/api/v1/chat/slack-import/channels") return json({ items: slackImport.listChannels() });
       if (method === "GET" && pathname === "/api/v1/chat/slack-import/jobs") {
@@ -1756,11 +1851,12 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       return json([]); // no unread badges in demo
     }
     if (pathname === "/api/v1/chat/sections") {
-      const mine = mySections();
+      const mine = shared;
       if (method === "GET") {
         return json({ items: [...mine.items].sort((a, b) => a.position - b.position), assignments: { ...mine.assignments } });
       }
       if (method === "POST") {
+        if (!canManageSections()) return sectionsForbidden();
         const name = sectionName((body as { name?: unknown } | null)?.name);
         if (!name) return validationFailed("section name must be 1..40 chars");
         const position = mine.items.reduce((max, x) => Math.max(max, x.position + 1), 0);
@@ -1772,7 +1868,8 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
     {
       const m = /^\/api\/v1\/chat\/sections\/([^/]+)$/.exec(pathname);
       if (m && (method === "PATCH" || method === "DELETE")) {
-        const mine = mySections();
+        if (!canManageSections()) return sectionsForbidden();
+        const mine = shared;
         const id = decodeURIComponent(m[1]!);
         const idx = mine.items.findIndex((x) => x.id === id);
         if (idx < 0) return notFound(`${method} ${pathname}`);
@@ -1797,8 +1894,9 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/section$/.exec(pathname);
       if (m && method === "PUT") {
         const channelId = decodeURIComponent(m[1]!);
+        if (!canManageSections()) return sectionsForbidden();
         const sectionId = (body as { sectionId?: string | null } | null)?.sectionId ?? null;
-        const mine = mySections();
+        const mine = shared;
         if (!byId.has(channelId)) return notFound(`PUT ${pathname}`);
         if (sectionId !== null && !mine.items.some((x) => x.id === sectionId)) return notFound(`PUT ${pathname} (section)`);
         if (sectionId === null) delete mine.assignments[channelId];
@@ -1835,7 +1933,7 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
         return json(toWire(c));
       }
       if (m && method === "DELETE") {
-        // Hard delete: the channel, its posts and every user's section assignment go.
+        // Hard delete: the channel, its posts and its (shared) section assignment go.
         const id = decodeURIComponent(m[1]!);
         const c = byId.get(id);
         if (!c) return notFound(`DELETE ${pathname}`);
@@ -1843,7 +1941,7 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
         all.splice(all.indexOf(c), 1);
         byId.delete(id);
         posted.delete(id);
-        for (const entry of sectionsByUser.values()) delete entry.assignments[id];
+        delete shared.assignments[id];
         return json(null, 204);
       }
     }
@@ -3444,7 +3542,46 @@ function createMembersStore() {
     return members.find((x) => x.identityUserId === identityUserId);
   }
 
-  return { handle, findByIdentity };
+  // アカウント設定 (GET/POST /api/v1/me/participation): ログイン中アカウントに紐付いた名簿の
+  // 行そのものを読み書きする (member-service と同じく 本人の情報 + 連絡先 だけ編集可)。
+  function selfEntry(identityUserId: string, method: string, body: any): Response {
+    let mem = findByIdentity(identityUserId);
+    if (method === "POST") {
+      const r = memberValues.parsePersonProfilePatch((body ?? {}) as Record<string, unknown>);
+      if (r.errors.length > 0) {
+        return json({ error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } } satisfies ErrorResponse, 400);
+      }
+      if (!mem) {
+        mem = {
+          ...memberValues.emptyPersonProfile(),
+          id: nid("member"), orgId: ORG, name: "", roleTitle: null, status: "added", teamIds: [],
+          identityUserId, leaderId: null, contact: null,
+          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+        };
+        members.push(mem);
+      }
+      Object.assign(mem, r.value);
+      if (body?.contact !== undefined) mem.contact = typeof body.contact === "string" && body.contact.trim() ? body.contact.trim() : null;
+      mem.name = [mem.lastName, mem.firstName].filter((x) => !!x).join(" ") || mem.name || (mem.gmail ?? mem.schoolEmail ?? "").split("@")[0] || "メンバー";
+      mem.version += 1;
+      mem.updatedAt = isoNow();
+    }
+    if (!mem) return json({ ...memberValues.emptyPersonProfile(), contact: null, operations: null });
+    const leader = mem.leaderId ? members.find((x) => x.id === mem!.leaderId) : undefined;
+    return json({
+      ...memberValues.pickPersonProfile(mem),
+      contact: mem.contact,
+      operations: {
+        name: mem.name,
+        roleTitle: mem.roleTitle,
+        status: mem.status,
+        teams: teams.filter((t) => mem!.teamIds.includes(t.id)).map((t) => ({ id: t.id, name: t.name, color: t.color })),
+        leaderName: leader?.name ?? null,
+      },
+    });
+  }
+
+  return { handle, findByIdentity, selfEntry };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -4272,6 +4409,10 @@ export function createDemoFetch(): typeof fetch {
     // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
     // Nothing is persisted — the demo session is stateless for credentials.
     if (method === "POST" && url.pathname === "/api/v1/me/password") return json(null, 204);
+    // アカウント設定の「本人の情報 / 運営での情報」= 名簿の自分の行。
+    if ((method === "GET" || method === "POST") && url.pathname === "/api/v1/me/participation") {
+      return membersStore.selfEntry(currentMe().user.id, method, parsedBody);
+    }
 
     // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
     if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));

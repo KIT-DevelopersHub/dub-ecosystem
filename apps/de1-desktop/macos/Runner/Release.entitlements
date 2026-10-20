@@ -7,5 +7,8 @@
 	<!-- Required: the desktop client makes outbound HTTPS calls to the api-gateway. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- APNs (FCM-over-APNs). Developer ID distribution uses the production gateway. -->
+	<key>com.apple.developer.aps-environment</key>
+	<string>production</string>
 </dict>
 </plist>

@@ -4,6 +4,31 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UserListPage } from "../src/components/UserListPage";
 import { renderWithProviders, makeMe } from "./renderWithProviders";
+import { createMockClient } from "../src/api/mockClient";
+import type { ResourceClient } from "../src/shell/contract";
+
+/** 45 users served in cursor pages of `limit` (like identity-roster), others via the mock. */
+function manyUsersClient(): { client: ResourceClient; pageCalls: number[] } {
+  const base = createMockClient({ me: makeMe(["identity:read", "identity:admin"]) });
+  const users = Array.from({ length: 45 }, (_, i) => {
+    const n = String(i + 1).padStart(2, "0");
+    return { id: `u${n}`, orgId: "org_devhub", displayName: `User ${n}`, email: `u${n}@developershub.jp`, githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  });
+  const pageCalls: number[] = [];
+  const client: ResourceClient = {
+    ...base,
+    get: async <T,>(path: string, query?: Record<string, unknown>) => {
+      if (!path.endsWith("/identity/users")) return base.get<T>(path, query);
+      const limit = Math.min(Number(query?.limit ?? 50), 30); // pretend the server caps at 30
+      const from = query?.cursor ? users.findIndex((u) => u.id === query.cursor) + 1 : 0;
+      const items = users.slice(from, from + limit);
+      pageCalls.push(from);
+      const nextCursor = from + limit < users.length ? items[items.length - 1]!.id : null;
+      return { items, nextCursor } as T;
+    },
+  };
+  return { client, pageCalls };
+}
 
 describe("UserListPage", () => {
   it("renders seeded users with testids and shows invite for admin", async () => {
@@ -210,5 +235,41 @@ describe("UserListPage", () => {
     await waitFor(() =>
       expect(screen.getByTestId("fe7-users-furigana-user_carol")).toHaveTextContent("キャロル ゲスト"),
     );
+  });
+
+  it("pages the roster 20 rows at a time with numbered pages (no「さらに読み込む」)", async () => {
+    const user = userEvent.setup();
+    const { client, pageCalls } = manyUsersClient();
+    renderWithProviders(<UserListPage />, { client });
+
+    // Every server cursor page is fetched, so the count covers all 45 rows.
+    await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("全 45件（1〜20件目）"));
+    expect(pageCalls).toContain(30);
+    expect(screen.queryByTestId("fe7-users-loadmore")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe7-users-row-u01")).toBeInTheDocument();
+    expect(screen.getByTestId("fe7-users-row-u20")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-users-row-u21")).not.toBeInTheDocument();
+
+    const pager = screen.getByTestId("fe7-users-pagination");
+    expect(pager).toHaveTextContent("1 / 3");
+    await user.click(within(pager).getByLabelText("次のページ"));
+    expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("（21〜40件目）");
+    expect(screen.getByTestId("fe7-users-row-u21")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-users-row-u01")).not.toBeInTheDocument();
+
+    await user.click(within(pager).getByLabelText("次のページ"));
+    expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("（41〜45件目）");
+    expect(within(pager).getByLabelText("次のページ")).toBeDisabled();
+
+    // Narrowing the list returns to page 1.
+    await user.type(screen.getByTestId("fe7-users-search"), "User");
+    await waitFor(() => expect(screen.getByTestId("fe7-users-row-u01")).toBeInTheDocument());
+    window.history.replaceState(null, "", "/"); // the search is mirrored into the URL
+  });
+
+  it("hides the pager when everything fits on one page", async () => {
+    renderWithProviders(<UserListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("全 3件"));
+    expect(screen.queryByTestId("fe7-users-pagination")).not.toBeInTheDocument();
   });
 });
