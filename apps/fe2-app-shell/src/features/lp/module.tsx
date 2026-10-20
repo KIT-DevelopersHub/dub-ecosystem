@@ -2,6 +2,7 @@
 // composition (featureModules.tsx) が nav の順序を束ね、withAppAccessGate が
 // app:lp:view を各ルート/タイルに AND する（実際の per-app ゲート）。ルートは 3 つ:
 //   /lp        → LP バージョン一覧（各行の「見る」で公開 LP を新規タブ表示・静的カタログ）
+//   /lp/publish → 本番公開（公開する版・チケット販売・登壇者募集の切り替えを 1 か所に集約）
 //   /lp/preview → プレビュー（版とチケット販売あり/なしを選んで LP を開く・確認用で公開はしない）
 //   /lp/links  → 流入URL（計測つき URL の発行と流入元別の実績・api を読む/書く）
 //   /lp/visits → ログ管理（流入ログのダッシュボード・LpProvider 経由で api を読む）
@@ -15,6 +16,7 @@ import type { IconName } from "@dub/ui";
 import { LpManagementScreen } from "./LpManagementScreen.tsx";
 import { LpLinksScreen } from "./LpLinksScreen.tsx";
 import { LpPreviewScreen } from "./LpPreviewScreen.tsx";
+import { LpPublishScreen } from "./LpPublishScreen.tsx";
 import { LpVisitLogScreen } from "./LpVisitLogScreen.tsx";
 import { LpTicketsScreen } from "./LpTicketsScreen.tsx";
 import { LpProposalsScreen } from "./LpProposalsScreen.tsx";
@@ -32,6 +34,7 @@ export interface LpNavEntry {
 
 export const lpRoutes: LpSourceRoute[] = [
   { path: "/lp", lazy: () => Promise.resolve({ Component: LpManagementScreen }), auth: "required" },
+  { path: "/lp/publish", lazy: () => Promise.resolve({ Component: LpPublishScreen }), auth: "required" },
   { path: "/lp/preview", lazy: () => Promise.resolve({ Component: LpPreviewScreen }), auth: "required" },
   { path: "/lp/links", lazy: () => Promise.resolve({ Component: LpLinksScreen }), auth: "required" },
   { path: "/lp/visits", lazy: () => Promise.resolve({ Component: LpVisitLogScreen }), auth: "required" },

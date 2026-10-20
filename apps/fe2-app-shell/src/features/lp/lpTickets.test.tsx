@@ -274,69 +274,13 @@ describe("LpTicketsScreen", () => {
     await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-orders-list")).toBeInTheDocument());
   });
 
-  it("disables the publish toggle without lp:publish", async () => {
-    renderScreen(fakeApi(), EDITOR);
-    const toggle = await screen.findByTestId("fe2-lp-tickets-enabled");
-    expect(toggle).toBeDisabled();
-    expect(screen.getByTestId("fe2-lp-tickets-enabled-hint")).toHaveTextContent("lp:publish");
-  });
-
-  it("confirms, flips optimistically and rolls back when the server refuses", async () => {
-    let reject: (e: Error) => void = () => undefined;
-    const api = fakeApi({
-      setTicketsEnabled: () =>
-        new Promise((_res, rej) => {
-          reject = rej;
-        }),
-    });
-    renderScreen(api);
-    const toggle = await screen.findByTestId("fe2-lp-tickets-enabled");
-    expect(toggle).not.toBeChecked();
-    fireEvent.click(toggle);
-    const dialog = await screen.findByTestId("fe2-lp-tickets-enabled-dialog");
-    expect(dialog).toHaveTextContent("チケットを購入");
-    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-ack"));
-    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-confirm"));
-
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-tickets-enabled")).toBeChecked());
-    reject(new Error("boom"));
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-tickets-enabled")).not.toBeChecked());
-    expect(await screen.findByText("販売状態を切り替えられませんでした")).toBeInTheDocument();
-  });
-
-  it("publishing warns it goes public to everyone and needs the acknowledgement", async () => {
-    const setEnabled = vi.fn(({ enabled }: { enabled: boolean }) => Promise.resolve(baseState({ enabled })));
-    renderScreen(fakeApi({ setTicketsEnabled: setEnabled }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-tickets-enabled"));
-    const dialog = await screen.findByTestId("fe2-lp-tickets-enabled-dialog");
-    expect(within(dialog).getByTestId("fe2-lp-tickets-enabled-warning")).toHaveTextContent(
-      "本当に全ユーザーに公開されますがよろしいですか？",
-    );
-    const confirm = within(dialog).getByTestId("fe2-lp-tickets-enabled-confirm");
-    expect(confirm).toBeDisabled();
-    fireEvent.click(confirm);
-    expect(setEnabled).not.toHaveBeenCalled();
-
-    // Cancel resets the acknowledgement for the next attempt.
-    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-ack"));
-    expect(confirm).toBeEnabled();
-    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-cancel"));
-    fireEvent.click(screen.getByTestId("fe2-lp-tickets-enabled"));
-    const again = await screen.findByTestId("fe2-lp-tickets-enabled-dialog");
-    expect(within(again).getByTestId("fe2-lp-tickets-enabled-confirm")).toBeDisabled();
-    fireEvent.click(within(again).getByTestId("fe2-lp-tickets-enabled-ack"));
-    fireEvent.click(within(again).getByTestId("fe2-lp-tickets-enabled-confirm"));
-    await waitFor(() => expect(setEnabled).toHaveBeenCalledWith({ enabled: true }));
-  });
-
-  it("stopping sales needs no acknowledgement", async () => {
-    const setEnabled = vi.fn(({ enabled }: { enabled: boolean }) => Promise.resolve(baseState({ enabled })));
-    renderScreen(fakeApi({ getTickets: () => Promise.resolve(baseState({ enabled: true })), setTicketsEnabled: setEnabled }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-tickets-enabled"));
-    const dialog = await screen.findByTestId("fe2-lp-tickets-enabled-dialog");
-    expect(within(dialog).queryByTestId("fe2-lp-tickets-enabled-ack")).toBeNull();
-    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-enabled-confirm"));
-    await waitFor(() => expect(setEnabled).toHaveBeenCalledWith({ enabled: false }));
+  it("shows the sales / CTA state with a link to 本番公開, and no switches here", async () => {
+    renderScreen(fakeApi({ getTickets: () => Promise.resolve(baseState({ enabled: false, ctaEnabled: true })) }));
+    expect(await screen.findByTestId("fe2-lp-tickets-enabled-state")).toHaveTextContent("停止中");
+    expect(screen.getByTestId("fe2-lp-tickets-cta-state")).toHaveTextContent("販売の公開待ち");
+    expect(screen.getByTestId("fe2-lp-tickets-goto-publish")).toHaveTextContent("本番公開タブで切り替え");
+    expect(screen.queryByTestId("fe2-lp-tickets-enabled")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-tickets-cta")).not.toBeInTheDocument();
   });
 
   it("blocks a 30 yen type before calling the api", async () => {
@@ -383,47 +327,6 @@ describe("LpTicketsScreen", () => {
     expect(screen.queryByTestId("fe2-lp-ticket-type-add")).not.toBeInTheDocument();
     expect(screen.queryByTestId("fe2-lp-ticket-fields-save")).not.toBeInTheDocument();
     expect(orders).not.toHaveBeenCalled();
-  });
-
-  it("explains that the CTA swap waits for sales, and saves it without a dialog while sales are off", async () => {
-    const cta = vi.fn(({ enabled }: { enabled: boolean }) => Promise.resolve(baseState({ ctaEnabled: enabled })));
-    renderScreen(fakeApi({ setTicketsCta: cta }));
-    expect(await screen.findByTestId("fe2-lp-tickets-cta-hint")).toHaveTextContent("販売を公開すると有効になります");
-    const toggle = screen.getByTestId("fe2-lp-tickets-cta");
-    expect(toggle).not.toBeDisabled();
-    fireEvent.click(toggle);
-    expect(screen.queryByTestId("fe2-lp-tickets-cta-dialog")).not.toBeInTheDocument();
-    await waitFor(() => expect(cta).toHaveBeenCalledWith({ enabled: true }));
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-tickets-cta-state")).toHaveTextContent("販売の公開待ち"));
-  });
-
-  it("confirms the CTA swap while on sale, flips optimistically and rolls back on failure", async () => {
-    let reject: (e: Error) => void = () => undefined;
-    const api = fakeApi({
-      getTickets: () => Promise.resolve(baseState({ enabled: true })),
-      setTicketsCta: () =>
-        new Promise((_res, rej) => {
-          reject = rej;
-        }),
-    });
-    renderScreen(api);
-    const toggle = await screen.findByTestId("fe2-lp-tickets-cta");
-    expect(screen.getByTestId("fe2-lp-tickets-cta-state")).toHaveTextContent("元の表示");
-    fireEvent.click(toggle);
-    const dialog = await screen.findByTestId("fe2-lp-tickets-cta-dialog");
-    expect(dialog).toHaveTextContent("参加チケットを購入");
-    fireEvent.click(within(dialog).getByTestId("fe2-lp-tickets-cta-confirm"));
-
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-tickets-cta")).toBeChecked());
-    expect(screen.getByTestId("fe2-lp-tickets-cta-state")).toHaveTextContent("LP に反映中");
-    reject(new Error("boom"));
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-tickets-cta")).not.toBeChecked());
-    expect(await screen.findByText("参加登録ボタンの設定を切り替えられませんでした")).toBeInTheDocument();
-  });
-
-  it("disables the CTA toggle without lp:publish", async () => {
-    renderScreen(fakeApi(), EDITOR);
-    expect(await screen.findByTestId("fe2-lp-tickets-cta")).toBeDisabled();
   });
 
   it("lists each order as type x quantity with the total tickets and amount", async () => {

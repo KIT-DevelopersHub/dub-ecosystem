@@ -3,6 +3,7 @@ export { LpManagementScreen } from "./LpManagementScreen.tsx";
 export { LpVisitLogScreen } from "./LpVisitLogScreen.tsx";
 export { LpLinksScreen } from "./LpLinksScreen.tsx";
 export { LpPreviewScreen } from "./LpPreviewScreen.tsx";
+export { LpPublishScreen } from "./LpPublishScreen.tsx";
 export { LpTicketsScreen } from "./LpTicketsScreen.tsx";
 export { LpProposalsScreen } from "./LpProposalsScreen.tsx";
 export { lpRoutes, lpNav } from "./module.tsx";

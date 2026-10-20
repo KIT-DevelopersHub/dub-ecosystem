@@ -31,6 +31,18 @@ export function lpViewUrl(
   return `${base}/?version=${encodeURIComponent(v)}`;
 }
 
+/**
+ * 「本番公開」タブの下部に出す、一般の人に見えている LP。?version=live は LP Worker が
+ * プレビュー用 cookie（版・チケット・登壇者募集）を全部消して素の / へリダイレクトするので、
+ * 以前「プレビュー」タブで開いた条件が残らず、パラメータ無しの本番の見え方になる。
+ */
+export function lpLiveUrl(base: string = LP_PUBLIC_URL): string {
+  return `${base}/?version=live`;
+}
+
+/** LP Worker が公開フラグ（版・販売・募集）をキャッシュする秒数（worker/index.ts FLAG_TTL_MS）。 */
+export const LP_FLAG_CACHE_SECONDS = 30;
+
 export type LpPreviewMode = "on" | "off";
 
 /**

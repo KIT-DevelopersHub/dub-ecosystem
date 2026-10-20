@@ -1,18 +1,18 @@
 // LP管理 → バージョン一覧 tests.
 // 説明文は畳んで 1 行表示し、「詳細」を押した版だけ説明と PR リンクを出す。
-// 「公開中」バッジはサーバーの公開フラグが正で、lp:publish 保持者だけが版を切り替えられる。
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+// 「公開中」バッジはサーバーの公開フラグが正。版の切り替えは「本番公開」タブ（lpPublishTab.test.tsx）。
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { identity } from "@dub/types";
 import { describe, expect, it, vi } from "vitest";
-import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
-import { ApiError, createApiClient } from "../../lib/api-client.tsx";
+import { editorPermissions, FakeAuthProvider } from "../../auth/test-support.tsx";
+import { createApiClient } from "../../lib/api-client.tsx";
 import { createDemoFetch } from "../../lib/demo-seed.tsx";
 import { LpManagementScreen } from "./LpManagementScreen.tsx";
 import { createLpApi, type LpApi, type LpPublishState } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
-import { lpViewUrl, PUBLISH_SUCCESS_MARKER } from "./lpPublish.ts";
+import { lpViewUrl } from "./lpPublish.ts";
 import { LP_VERSIONS } from "./lpVersions.ts";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
@@ -105,69 +105,11 @@ describe("公開中の版の切り替え", () => {
     expect(screen.getByTestId("fe2-lp-publish-summary")).toHaveTextContent("公開中: v3.1");
   });
 
-  it("offers 「この版を公開」 only on publishable, non-live versions", async () => {
+  it("has no publish buttons; switching lives in the 本番公開 tab", async () => {
     renderScreen();
-    expect(await screen.findByTestId("fe2-lp-publish-v3.1")).toHaveTextContent("この版を公開");
-    expect(screen.queryByTestId("fe2-lp-publish-v3.4")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("fe2-lp-publish-v1.0")).not.toBeInTheDocument();
-  });
-
-  it("hides the button for editors without lp:publish", async () => {
-    renderScreen(fakeApi(), editorPermissions("lp"));
     await screen.findByTestId("fe2-lp-publish-summary");
     expect(screen.queryByTestId("fe2-lp-publish-v3.1")).not.toBeInTheDocument();
-  });
-
-  it("hides the button for viewers even with lp:publish", async () => {
-    renderScreen(fakeApi(), viewerPermissions("lp", ["lp:publish"]));
-    await screen.findByTestId("fe2-lp-publish-summary");
-    expect(screen.queryByTestId("fe2-lp-publish-v3.1")).not.toBeInTheDocument();
-  });
-
-  it("confirms, then moves the badge optimistically and toasts on success", async () => {
-    let finish!: (s: LpPublishState) => void;
-    const setPublish = vi.fn((_input: { versionId: string }) => new Promise<LpPublishState>((r) => (finish = r)));
-    renderScreen(fakeApi({ setPublish }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-publish-v3.1"));
-
-    const dialog = screen.getByTestId("fe2-lp-publish-dialog");
-    expect(within(dialog).getByText("公開する版を切り替えます")).toBeInTheDocument();
-    const diff = within(dialog).getByTestId("fe2-lp-publish-diff");
-    expect(diff).toHaveTextContent("v3.4 SEO対策版");
-    expect(diff).toHaveTextContent("v3.1 ヒーロー立体強化版");
-    expect(dialog).toHaveTextContent("ビルドやデプロイは行いません");
-
-    fireEvent.click(screen.getByTestId("fe2-lp-publish-confirm"));
-    // サーバー応答前にバッジが移る（楽観的 UI）。
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-status-v3.1")).toHaveTextContent("公開中"));
-    expect(screen.getByTestId("fe2-lp-status-v3.4")).toHaveTextContent("非公開");
-    expect(setPublish).toHaveBeenCalledWith({ versionId: "v3.1" });
-
-    await act(async () => finish(state("v3.1")));
-    expect(await screen.findByText("公開中の版を v3.1 ヒーロー立体強化版 に切り替えました")).toBeInTheDocument();
-    expect(screen.getByTestId("fe2-lp-publish-live")).toHaveTextContent(PUBLISH_SUCCESS_MARKER);
-  });
-
-  it("rolls the badge back and shows an error toast when the switch fails", async () => {
-    const setPublish = () =>
-      Promise.reject(new ApiError(500, { error: { code: "INTERNAL", message: "boom", retryable: true } }));
-    renderScreen(fakeApi({ setPublish }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-publish-v3.1"));
-    fireEvent.click(screen.getByTestId("fe2-lp-publish-confirm"));
-
-    await waitFor(() => expect(screen.getByTestId("fe2-lp-status-v3.4")).toHaveTextContent("公開中"));
-    expect(screen.getByTestId("fe2-lp-status-v3.1")).toHaveTextContent("非公開");
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.getByTestId("fe2-lp-publish-live")).toHaveTextContent("");
-  });
-
-  it("cancel closes the dialog without calling the api", async () => {
-    const setPublish = vi.fn();
-    renderScreen(fakeApi({ setPublish }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-publish-v3.1"));
-    fireEvent.click(screen.getByTestId("fe2-lp-publish-cancel"));
-    await waitFor(() => expect(screen.queryByTestId("fe2-lp-publish-dialog")).not.toBeInTheDocument());
-    expect(setPublish).not.toHaveBeenCalled();
+    expect(screen.getByTestId("fe2-lp-versions-goto-publish")).toHaveTextContent("本番公開タブで切り替え");
   });
 });
 
