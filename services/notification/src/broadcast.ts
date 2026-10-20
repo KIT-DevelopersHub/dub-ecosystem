@@ -36,7 +36,7 @@ export function buildBroadcastInput(
     body: source.body,
     priority: "normal",
     audience: AUDIENCE_MEMBERS,
-    channels: ["in_app"], // forced on regardless of prefs (broadcast type)
+    channels: ["in_app"], // in_app forced on (broadcast type); ingest adds push (per prefs)
     dedupKey: `${BROADCAST_FROM_PREFIX}${source.id}`,
     resourceType: "notification",
     resourceId: source.id,

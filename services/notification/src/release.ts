@@ -1,7 +1,7 @@
 // Release notes — broadcast a "🎉 new feature" announcement to every active user's
 // inbox. One publish path (publishRelease) is shared by the admin endpoint
 // (POST /release) and the internal seed route (POST /internal/seed-releases), so
-// ad-hoc and curated releases deliver identically (in_app, forced, org-wide fan-out).
+// ad-hoc and curated releases deliver identically (in_app forced, push per prefs, org-wide fan-out).
 import type { RequestContext } from "@dub/http";
 import { ingest, type IngestDeps } from "./ingest";
 import type { IngestInput, IngestResult } from "./types";
@@ -23,7 +23,7 @@ function shortHash(input: string): string {
   return h.toString(36);
 }
 
-/** Build the broadcast IngestInput for a release note (in_app only, all active users). */
+/** Build the broadcast IngestInput for a release note (inbox + push, all active users). */
 export function buildReleaseInput(input: ReleaseInput, requestId: string, actorId: string | null): IngestInput {
   const app = input.app?.trim() || undefined;
   const dedupKey = input.dedupKey ?? `release:${shortHash(`${app ?? ""}|${input.title}`)}`;
@@ -37,7 +37,7 @@ export function buildReleaseInput(input: ReleaseInput, requestId: string, actorI
     body: input.body,
     priority: "normal",
     audience: "members", // release notes are member-facing (everyone sees them)
-    channels: ["in_app"], // release notes live in the inbox; forced on regardless of prefs
+    channels: ["in_app"], // inbox forced on regardless of prefs; ingest adds push (per prefs)
     dedupKey,
     resourceType: "release",
     resourceId: null,

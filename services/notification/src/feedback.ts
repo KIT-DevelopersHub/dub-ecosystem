@@ -74,7 +74,7 @@ export async function notifyAdminOfFeedback(
 
 /**
  * Build the in-app notification for a stored feedback item, fanned out to admin /
- * maintainer users. in_app channel only (Slack / chat / email are not targeted here);
+ * maintainer users. in_app (+ push added by ingest; Slack / chat / email are not targeted);
  * the dedupKey is namespaced to the feedback id so retries never create duplicates.
  */
 export function buildFeedbackNotifyInput(item: notification.FeedbackItem, requestId: string): IngestInput {
