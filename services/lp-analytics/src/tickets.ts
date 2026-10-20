@@ -42,7 +42,9 @@ export const FIELD_OPTIONS_MAX = 20;
 export const FIELD_OPTION_MAX = 60;
 const FIELD_ID_RE = /^[a-z0-9_-]{1,40}$/;
 /** 氏名・メールは固定項目なのでカスタム項目の id に使わせない。 */
-const RESERVED_FIELD_IDS: ReadonlySet<string> = new Set(["name", "email"]);
+const RESERVED_FIELD_IDS: ReadonlySet<string> = new Set(["name", "email", "_preview"]);
+/** Marks an order made from the LP管理 preview (test-mode Stripe only). No schema change: answers JSON. */
+export const PREVIEW_ANSWER: LpTicketAnswer = { fieldId: "_preview", label: "プレビュー（テスト決済）", value: "はい" };
 const FIELD_TYPES: ReadonlySet<LpTicketFieldType> = new Set(["text", "textarea", "select", "checkbox"]);
 export const CHECKBOX_YES = "はい";
 
@@ -264,6 +266,16 @@ export const soldOut = (ticketTypeId: string): DubError =>
 export function orderSummary(items: readonly LpTicketOrderItem[]): string {
   return items.map((i) => `${i.dayLabel ? `${i.ticketTypeName} ${i.dayLabel}` : i.ticketTypeName} ×${i.quantity}`).join("、");
 }
+/**
+ * 403: preview checkout (sales off) with a live / missing Stripe key. Only a sk_test_ / rk_test_
+ * key may sell while sales are off, so the Worker's preview flag can never open real sales.
+ */
+export const previewNotAllowed = (): DubError =>
+  new DubError("LP_TICKET_PREVIEW_NOT_ALLOWED", "プレビューではテスト決済のみ利用できます", {
+    status: 403,
+    retryable: false,
+    details: { reason: "preview_requires_test_mode" },
+  });
 /** 503: STRIPE_SECRET_KEY not configured (contract: payment_not_configured). */
 export const paymentNotConfigured = (): DubError =>
   new DubError("LP_PAYMENT_NOT_CONFIGURED", "決済は準備中です", {
@@ -394,6 +406,8 @@ export class TicketService {
     enabled: boolean;
     ctaEnabled: boolean;
     paymentReady: boolean;
+    /** Sales-off preview may run a real checkout (test-mode Stripe key only). */
+    previewCheckout: boolean;
     fields: LpTicketField[];
     types: PublicTicketType[];
   }> {
@@ -402,6 +416,7 @@ export class TicketService {
       enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
+      previewCheckout: this.deps.stripe?.testMode === true,
       fields: settings?.fields ?? [],
       types: types
         .filter((t) => t.active)
@@ -420,8 +435,11 @@ export class TicketService {
 
   async checkout(body: unknown): Promise<{ redirectUrl: string }> {
     const settings = await this.repo.getTicketSettings(TICKET_SITE);
-    if (!settings?.enabled) throw errors.notFound("lp_tickets");
-    const input = parseCheckout(body, settings.fields);
+    // preview = LP管理「プレビュー」(?tickets=on) while sales are off: test-mode Stripe only.
+    const preview = !settings?.enabled && (body as { preview?: unknown } | null)?.preview === true;
+    if (!settings?.enabled && !preview) throw errors.notFound("lp_tickets");
+    if (preview && this.deps.stripe?.testMode !== true) throw previewNotAllowed();
+    const input = parseCheckout(body, settings?.fields ?? []);
     const types = new Map((await this.repo.listTicketTypes(TICKET_SITE)).map((t) => [t.id, t]));
     const bad: FieldError[] = [];
     const items: LpTicketOrderItem[] = [];
@@ -458,7 +476,7 @@ export class TicketService {
       status: free ? "paid" : "pending",
       buyerName: input.name,
       buyerEmail: input.email,
-      answers: input.answers,
+      answers: preview ? [...input.answers, PREVIEW_ANSWER] : input.answers,
       stripeSessionId: null,
       createdAt: now,
       paidAt: free ? now : null,
@@ -466,7 +484,9 @@ export class TicketService {
     const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
     const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
     if (!held.ok) throw soldOut(held.ticketTypeId);
-    if (free || !stripe) return { redirectUrl: `${input.origin}/tickets/thanks?order=${encodeURIComponent(row.id)}` };
+    // The thanks / cancel pages only exist under ?tickets=on while sales are off.
+    const pv = preview ? "&tickets=on" : "";
+    if (free || !stripe) return { redirectUrl: `${input.origin}/tickets/thanks?order=${encodeURIComponent(row.id)}${pv}` };
 
     let session: CheckoutSession;
     try {
@@ -480,9 +500,10 @@ export class TicketService {
             quantity: i.quantity,
           })),
         customerEmail: input.email,
-        successUrl: `${input.origin}/tickets/thanks?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${input.origin}/tickets?canceled=1`,
+        successUrl: `${input.origin}/tickets/thanks?session_id={CHECKOUT_SESSION_ID}${pv}`,
+        cancelUrl: `${input.origin}/tickets?canceled=1${pv}`,
         expiresAt: Math.floor(Date.parse(now) / 1000) + CHECKOUT_TTL_SEC,
+        preview,
       });
       if (!session.id || !session.url) throw errors.upstreamUnavailable("stripe", new Error("session without id/url"));
     } catch (e) {

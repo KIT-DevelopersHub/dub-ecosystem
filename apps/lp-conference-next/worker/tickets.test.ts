@@ -265,6 +265,7 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
     preview: false,
     ctaEnabled: true,
     paymentReady: false,
+    previewCheckout: false,
     fields: [{ id: "a", label: "A", type: "text", required: false, options: [] }],
     types: [
       { id: "t", name: "T", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: null, soldOut: false },
@@ -274,6 +275,7 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
   assert.equal(parseConfig({ enabled: true, fields: [], types: [] })?.ctaEnabled, false);
   // preview is decided by the Worker, never taken from the response.
   assert.equal(parseConfig({ enabled: true, preview: true, fields: [], types: [] })?.preview, false);
+  assert.equal(parseConfig({ enabled: false, previewCheckout: true, fields: [], types: [] })?.previewCheckout, true);
 });
 
 test("previewConfig: ?tickets=on shows sales as a preview, off hides them, none keeps the real state", () => {
@@ -300,6 +302,35 @@ test("handler: preview shows the page with a notice but never checks out", async
   assert.equal(d.calls.length, 0);
   // Public page has no preview notice.
   assert.doesNotMatch(await (await handleTickets(new Request("https://lp.example/tickets"), deps()))!.text(), /data-lp-tk-preview/);
+});
+
+test("handler: preview with a test-mode key checks out via lp-analytics (preview flag, new tab)", async () => {
+  const d = deps({ getConfig: async () => ({ ...CFG, preview: true, previewCheckout: true }) });
+  const html = await (await handleTickets(new Request("https://lp.example/tickets?tickets=on"), d))!.text();
+  assert.match(html, /テスト決済で処理され、実際の請求は発生しません/);
+  assert.match(html, /action="\/tickets\/checkout" target="_blank"/);
+  const res = await handleTickets(post("/tickets/checkout", VALID, { origin: "https://lp.example" }), d);
+  assert.equal(res?.status, 303);
+  assert.equal(d.calls.length, 1);
+  assert.equal(d.calls[0]!.path, "/lp/internal/tickets/checkout");
+  assert.equal(JSON.parse(String(d.calls[0]!.init.body)).preview, true);
+});
+
+test("handler: live-key refusal (403) from lp-analytics shows the preview message", async () => {
+  const d = deps({
+    getConfig: async () => ({ ...CFG, preview: true, previewCheckout: true }),
+    internal: async () => Response.json({ error: { code: "LP_TICKET_PREVIEW_NOT_ALLOWED" } }, { status: 403 }),
+  });
+  const res = await handleTickets(post("/tickets/checkout", VALID, { origin: "https://lp.example" }), d);
+  assert.equal(res?.status, 403);
+  assert.match(await res!.text(), /プレビュー表示中のため、お申し込みはできません/);
+});
+
+test("handler: real sale never sends the preview flag; page has no target", async () => {
+  const d = deps();
+  assert.doesNotMatch(await (await handleTickets(new Request("https://lp.example/tickets"), d))!.text(), /target="_blank"/);
+  await handleTickets(post("/tickets/checkout", VALID, { origin: "https://lp.example" }), d);
+  assert.equal(JSON.parse(String(d.calls[0]!.init.body)).preview, undefined);
 });
 
 test("handler: non-tickets path / flag off / config failure -> not handled", async () => {

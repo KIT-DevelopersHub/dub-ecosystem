@@ -1,11 +1,17 @@
 // Pure routing logic for the multi-version LP Worker (worker/index.ts).
 // No runtime imports so it runs under both workerd and `node --test` (strip-only TS).
 
-export const VERSION_COOKIE = "lp_version";
+/**
+ * Preview is decided by the URL only (?version= / ?tickets= / ?proposals=). Nothing is stored in
+ * the browser, so opening the LP without params always shows what is public. Cookies from the
+ * old cookie-based preview are cleared on sight (see staleCookieClears).
+ */
+export const PREVIEW_PARAMS = ["version", "tickets", "proposals"] as const;
+export const LEGACY_COOKIES = ["lp_version", "lp_tickets", "lp_proposals"] as const;
 
 export type Resolution =
-  | { kind: "redirect"; location: string; setCookie: string }
-  | { kind: "serve"; version: string; preview: boolean; assetPath: string; setCookie: string | null };
+  | { kind: "redirect"; location: string }
+  | { kind: "serve"; version: string; preview: boolean; assetPath: string };
 
 /** "3.1" / "v3.1" -> "v3.1" when bundled, else null. */
 export function normalizeVersion(raw: string | null | undefined, bundled: readonly string[]): string | null {
@@ -24,43 +30,56 @@ export function readCookie(header: string | null, name: string): string | null {
   return null;
 }
 
-export function sessionCookie(version: string): string {
-  return `${VERSION_COOKIE}=${version}; Path=/; SameSite=None; Secure; HttpOnly`;
+/** Max-Age=0 Set-Cookie for every legacy preview cookie the browser still sends. */
+export function staleCookieClears(cookieHeader: string | null): string[] {
+  return LEGACY_COOKIES.filter((n) => readCookie(cookieHeader, n) !== null).map(
+    (n) => `${n}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`,
+  );
 }
 
-export function clearCookie(): string {
-  return `${VERSION_COOKIE}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`;
+/**
+ * Same-origin referer fallback, for subresources only (JS/CSS/images of a previewed page, whose
+ * own URL has no params). A navigation (link click, form post, reload) never inherits it: it must
+ * carry the params itself (link rewriting), so a plain visit is never a preview.
+ */
+export function refererFallback(referer: string | null, origin: string, navigation: boolean): URLSearchParams | null {
+  if (!referer || navigation) return null;
+  try {
+    const u = new URL(referer);
+    return u.origin === origin ? u.searchParams : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Sec-Fetch-Mode: navigate / Sec-Fetch-Dest: document|iframe|frame. Unknown (old browser) = not. */
+export function isNavigation(headers: { get(name: string): string | null }): boolean {
+  if (headers.get("sec-fetch-mode") === "navigate") return true;
+  const dest = headers.get("sec-fetch-dest");
+  return dest === "document" || dest === "iframe" || dest === "frame";
 }
 
 export function resolveRequest(
   url: URL,
-  cookieHeader: string | null,
   published: string,
   bundled: readonly string[],
-  referer: string | null = null,
+  fallback: URLSearchParams | null = null,
 ): Resolution {
   const param = url.searchParams.get("version");
   if (param !== null && param.trim().toLowerCase() === "live") {
+    // Old 解除 links: drop every preview param.
     const clean = new URL(url.toString());
-    clean.searchParams.delete("version");
-    return { kind: "redirect", location: clean.pathname + clean.search, setCookie: clearCookie() };
+    for (const p of PREVIEW_PARAMS) clean.searchParams.delete(p);
+    return { kind: "redirect", location: clean.pathname + clean.search };
   }
-  const fromParam = normalizeVersion(param, bundled);
-  const fromCookie = normalizeVersion(readCookie(cookieHeader, VERSION_COOKIE), bundled);
-  // Inside the LP管理 iframe the cookie is third-party and may be blocked, so a same-origin
-  // subresource falls back to the ?version= of the page that requested it.
-  const version = fromParam ?? fromCookie ?? versionFromReferer(referer, url.origin, bundled) ?? published;
+  const version = normalizeVersion(param, bundled) ?? normalizeVersion(fallback?.get("version"), bundled) ?? published;
   return {
     kind: "serve",
     version,
     preview: version !== published,
     assetPath: `/versions/${version}${url.pathname}`,
-    setCookie: fromParam ? sessionCookie(fromParam) : null,
   };
 }
-
-export const TICKETS_COOKIE = "lp_tickets";
-export const PROPOSALS_COOKIE = "lp_proposals";
 
 /** LP管理「プレビュー」タブの あり/なし。null = 指定なし（実際の公開状態のまま）。 */
 export type TicketsPreview = "on" | "off";
@@ -71,66 +90,57 @@ function normalizeMode(raw: string | null | undefined): FeaturePreview | null {
   return v === "on" || v === "off" ? v : null;
 }
 
-/** ?<param>= > cookie > same-origin referer (LP管理 iframe). ?version=live clears it. */
-function featurePreview(
-  param: string,
-  cookie: string,
-  url: URL,
-  cookieHeader: string | null,
-  referer: string | null,
-): FeaturePreview | null {
+/** ?<param>= > referer fallback (subresources only). ?version=live clears it. */
+function featurePreview(param: string, url: URL, fallback: URLSearchParams | null): FeaturePreview | null {
   if (url.searchParams.get("version")?.trim().toLowerCase() === "live") return null;
-  const fromParam = normalizeMode(url.searchParams.get(param));
-  if (fromParam) return fromParam;
-  const fromCookie = normalizeMode(readCookie(cookieHeader, cookie));
-  if (fromCookie) return fromCookie;
-  if (!referer) return null;
-  try {
-    const u = new URL(referer);
-    return u.origin === url.origin ? normalizeMode(u.searchParams.get(param)) : null;
-  } catch {
-    return null;
-  }
-}
-
-// A session cookie survives browser restarts and kept a 「なし」 preview hiding the real /tickets for days.
-const FEATURE_PREVIEW_MAX_AGE = 3600;
-
-/** Set-Cookie for ?<param>= (1 h) or ?version=live (clear); null otherwise. */
-function featureCookie(param: string, cookie: string, url: URL): string | null {
-  if (url.searchParams.get("version")?.trim().toLowerCase() === "live") {
-    return `${cookie}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`;
-  }
-  const v = normalizeMode(url.searchParams.get(param));
-  return v ? `${cookie}=${v}; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=${FEATURE_PREVIEW_MAX_AGE}` : null;
+  return normalizeMode(url.searchParams.get(param)) ?? normalizeMode(fallback?.get(param));
 }
 
 /** チケット販売あり/なし (?tickets=on|off)。 */
-export function ticketsPreview(url: URL, cookieHeader: string | null, referer: string | null = null): TicketsPreview | null {
-  return featurePreview("tickets", TICKETS_COOKIE, url, cookieHeader, referer);
-}
-
-export function ticketsCookie(url: URL): string | null {
-  return featureCookie("tickets", TICKETS_COOKIE, url);
+export function ticketsPreview(url: URL, fallback: URLSearchParams | null = null): TicketsPreview | null {
+  return featurePreview("tickets", url, fallback);
 }
 
 /** 登壇者募集あり/なし (?proposals=on|off)。 */
-export function proposalsPreview(url: URL, cookieHeader: string | null, referer: string | null = null): FeaturePreview | null {
-  return featurePreview("proposals", PROPOSALS_COOKIE, url, cookieHeader, referer);
+export function proposalsPreview(url: URL, fallback: URLSearchParams | null = null): FeaturePreview | null {
+  return featurePreview("proposals", url, fallback);
 }
 
-export function proposalsCookie(url: URL): string | null {
-  return featureCookie("proposals", PROPOSALS_COOKIE, url);
+/** The valid preview params of this request URL (what links / redirects must carry on). */
+export function previewQuery(url: URL, bundled: readonly string[]): URLSearchParams {
+  const q = new URLSearchParams();
+  const v = normalizeVersion(url.searchParams.get("version"), bundled);
+  if (v) q.set("version", v);
+  const t = ticketsPreview(url);
+  if (t) q.set("tickets", t);
+  const p = proposalsPreview(url);
+  if (p) q.set("proposals", p);
+  return q;
 }
 
-function versionFromReferer(referer: string | null, origin: string, bundled: readonly string[]): string | null {
-  if (!referer) return null;
+/**
+ * Adds the preview params to a same-origin URL (href / action / Location). Cross-origin, hash-only,
+ * non-http(s) and already-specified params are left alone. Returns the input when unchanged.
+ */
+export function withPreview(raw: string, origin: string, preview: URLSearchParams): string {
+  const s = raw.trim();
+  if (!s || s.startsWith("#") || [...preview.keys()].length === 0) return raw;
+  let u: URL;
   try {
-    const u = new URL(referer);
-    return u.origin === origin ? normalizeVersion(u.searchParams.get("version"), bundled) : null;
+    u = new URL(s, `${origin}/`);
   } catch {
-    return null;
+    return raw;
   }
+  if (u.origin !== origin || (u.protocol !== "https:" && u.protocol !== "http:")) return raw;
+  let changed = false;
+  for (const [k, v] of preview) {
+    if (!u.searchParams.has(k)) {
+      u.searchParams.set(k, v);
+      changed = true;
+    }
+  }
+  if (!changed) return raw;
+  return /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("//") ? u.toString() : u.pathname + u.search + u.hash;
 }
 
 /** Maps an assets redirect (e.g. trailing slash) back to the public path. */
@@ -141,6 +151,9 @@ export function rewriteLocation(location: string, version: string, origin: strin
   return (u.pathname.slice(prefix.length) || "/") + u.search + u.hash;
 }
 
+/** 解除 links go to the bare URL; link rewriting must not add the params back. */
+export const EXIT_ATTR = "data-lp-preview-exit";
+
 export function previewBanner(version: string, published: string): string {
   return (
     '<div id="lp-preview-banner" role="status" style="position:fixed;left:16px;bottom:16px;' +
@@ -148,6 +161,6 @@ export function previewBanner(version: string, published: string): string {
     "background:rgba(17,17,17,.92);color:#fff;font:600 13px/1.4 system-ui,-apple-system,sans-serif;" +
     'box-shadow:0 4px 16px rgba(0,0,0,.25);white-space:nowrap">' +
     `<span>${version} をプレビュー中（公開中は ${published}）</span>` +
-    '<a href="/?version=live" style="color:#fff;text-decoration:underline">解除</a></div>'
+    `<a href="/" ${EXIT_ATTR} style="color:#fff;text-decoration:underline">解除</a></div>`
   );
 }

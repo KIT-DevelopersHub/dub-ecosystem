@@ -17,7 +17,7 @@ import {
   type ProposalsDeps,
 } from "./proposals.ts";
 import { previewBar } from "./tickets.ts";
-import { proposalsCookie, proposalsPreview, ticketsPreview } from "./route.ts";
+import { proposalsPreview, ticketsPreview } from "./route.ts";
 
 const XSS = '<script>alert("x")</script>';
 const CFG: ProposalConfig = { ...DEMO_PROPOSAL_CONFIG, enabled: true, preview: false };
@@ -191,18 +191,15 @@ test("previewBar lists every previewed feature in one bar", () => {
 test("previewBar explains a live feature hidden by the 「なし」 preview", () => {
   const bar = previewBar([], ["チケット販売"]);
   assert.match(bar, /チケット販売を「なし」にしたプレビュー表示中です/);
-  assert.match(bar, /href="\/\?version=live"/);
+  assert.match(bar, /href="\/" data-lp-preview-exit/);
   assert.doesNotMatch(bar, /一般には公開されていません/);
 });
 
-test("proposalsPreview / proposalsCookie mirror the tickets preview, independently", () => {
+test("proposalsPreview mirrors the tickets preview, independently (URL only)", () => {
   const u = new URL("https://lp.example/?version=3.5&proposals=on");
-  assert.equal(proposalsPreview(u, null), "on");
-  assert.equal(ticketsPreview(u, null), null);
-  assert.match(proposalsCookie(u)!, /^lp_proposals=on;/);
-  assert.equal(proposalsPreview(new URL("https://lp.example/x"), "lp_proposals=off"), "off");
-  assert.equal(proposalsPreview(new URL("https://lp.example/_next/a.js"), null, "https://lp.example/?proposals=on"), "on");
-  const live = new URL("https://lp.example/?version=live");
-  assert.equal(proposalsPreview(live, "lp_proposals=on"), null);
-  assert.match(proposalsCookie(live)!, /Max-Age=0/);
+  assert.equal(proposalsPreview(u), "on");
+  assert.equal(ticketsPreview(u), null);
+  assert.equal(proposalsPreview(new URL("https://lp.example/x")), null);
+  assert.equal(proposalsPreview(new URL("https://lp.example/_next/a.js"), new URLSearchParams("proposals=on")), "on");
+  assert.equal(proposalsPreview(new URL("https://lp.example/?version=live&proposals=on")), null);
 });
