@@ -17,6 +17,8 @@ export interface Env {
   CF_ANALYTICS_TOKEN?: string;
   /** secret: Stripe API キー。未設定なら決済準備中（有料券は 503・無料券は動く）。 */
   STRIPE_SECRET_KEY?: string;
+  /** "1" の時だけ本番キー (sk_live_) を使う。それ以外で本番キーなら決済準備中扱い。 */
+  STRIPE_ALLOW_LIVE?: string;
   /** secret: Stripe webhook の署名シークレット (whsec_...)。 */
   STRIPE_WEBHOOK_SECRET?: string;
   /** 1 日 (JST) に作れる checkout の上限（既定 300）。 */

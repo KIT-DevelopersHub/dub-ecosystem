@@ -107,10 +107,11 @@ test("handleProposals: closed / unavailable fall through to the 404 page", async
   assert.equal(await handleProposals(new Request("https://lp.example/other"), deps()), null);
 });
 
-test("handleProposals: page has noindex + DENY framing", async () => {
+test("handleProposals: page has noindex + own-Workers-only framing", async () => {
   const res = (await handleProposals(new Request("https://lp.example/proposals"), deps()))!;
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("x-robots-tag"), "noindex");
+  assert.match(res.headers.get("content-security-policy") ?? "", /^frame-ancestors 'self' /);
   assert.match(await res.text(), /この内容で応募する/);
 });
 
@@ -185,6 +186,13 @@ test("proposalsInjection: speaker button swap only while open", () => {
 test("previewBar lists every previewed feature in one bar", () => {
   assert.equal(previewBar([]), "");
   assert.match(previewBar(["チケット販売", "登壇者募集"]), /チケット販売・登壇者募集のプレビュー表示中です/);
+});
+
+test("previewBar explains a live feature hidden by the 「なし」 preview", () => {
+  const bar = previewBar([], ["チケット販売"]);
+  assert.match(bar, /チケット販売を「なし」にしたプレビュー表示中です/);
+  assert.match(bar, /href="\/\?version=live"/);
+  assert.doesNotMatch(bar, /一般には公開されていません/);
 });
 
 test("proposalsPreview / proposalsCookie mirror the tickets preview, independently", () => {

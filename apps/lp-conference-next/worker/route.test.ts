@@ -84,8 +84,8 @@ test("ticketsPreview: param > cookie > same-origin referer; live clears; public 
   assert.equal(ticketsPreview(at("/?version=live"), "lp_tickets=on"), null);
 });
 
-test("ticketsCookie: session cookie for ?tickets=, cleared by ?version=live", () => {
-  assert.equal(ticketsCookie(at("/?tickets=on")), "lp_tickets=on; Path=/; SameSite=None; Secure; HttpOnly");
+test("ticketsCookie: 1 h cookie for ?tickets=, cleared by ?version=live", () => {
+  assert.equal(ticketsCookie(at("/?tickets=on")), "lp_tickets=on; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=3600");
   assert.match(ticketsCookie(at("/?version=live")) ?? "", /^lp_tickets=; .*Max-Age=0$/);
   assert.equal(ticketsCookie(at("/?version=3.4")), null);
 });

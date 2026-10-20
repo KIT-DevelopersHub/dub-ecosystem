@@ -38,6 +38,18 @@ export interface StripeClient {
   getCheckoutSession(id: string): Promise<CheckoutSession>;
 }
 
+/** sk_live_ / rk_live_ = real charges. sk_test_ / rk_test_ = sandbox. */
+export function isLiveStripeKey(key: string): boolean {
+  return /^(sk|rk)_live_/.test(key);
+}
+
+/** Live keys are refused unless STRIPE_ALLOW_LIVE="1" (fail-closed: no real charges by accident). */
+export function usableStripeKey(key: string | undefined, allowLive: string | undefined): string | null {
+  if (!key) return null;
+  if (isLiveStripeKey(key) && allowLive !== "1") return null;
+  return key;
+}
+
 type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
 export function toCheckoutSession(raw: unknown): CheckoutSession {
@@ -75,9 +87,8 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
     createCheckoutSession(i) {
       const f = new URLSearchParams();
       f.set("mode", "payment");
-      // Card only: delayed methods (e.g. konbini) complete with payment_status=unpaid and pay
-      // after the 35-min seat hold, which would oversell and leave the order pending.
-      f.set("payment_method_types[0]", "card");
+      // Payment methods come from the Dashboard (API 2026-09-30+ rejects payment_method_types).
+      // Keep delayed methods (e.g. konbini) disabled there: they settle after the 35-min seat hold.
       i.lineItems.forEach((l, n) => {
         f.set(`line_items[${n}][price_data][currency]`, "jpy");
         f.set(`line_items[${n}][price_data][unit_amount]`, String(l.unitAmountJpy));

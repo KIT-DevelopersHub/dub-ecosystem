@@ -1192,15 +1192,22 @@ export function previewConfig(cfg: TicketConfig | null, mode: "on" | "off" | nul
   return cfg;
 }
 
-/** Bottom bar on LP pages while previewing (keeps the LP header visible). `features` e.g. ["チケット販売"]. */
-export function previewBar(features: readonly string[]): string {
-  if (features.length === 0) return "";
+/**
+ * Bottom bar on LP pages while previewing (keeps the LP header visible). `features` e.g. ["チケット販売"].
+ * `hidden` = live features this viewer's 「なし」 preview hides (otherwise /tickets is a bare 404).
+ */
+export function previewBar(features: readonly string[], hidden: readonly string[] = []): string {
+  if (features.length === 0 && hidden.length === 0) return "";
+  const notes = [
+    features.length > 0 ? `${features.join("・")}のプレビュー表示中です（一般には公開されていません）` : null,
+    hidden.length > 0 ? `${hidden.join("・")}を「なし」にしたプレビュー表示中です（公開中のページは表示されません）` : null,
+  ].filter((x): x is string => x !== null);
   return (
     "<style>#lp-tickets-cta,#lp-preview-banner{bottom:56px!important}</style>" +
     '<div id="lp-tickets-preview" role="note" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;' +
     "padding:8px 16px;background:#fff4d6;color:#7a4b00;text-align:center;" +
     "font:700 13px/1.5 'Zen Kaku Gothic New',system-ui,-apple-system,sans-serif;box-shadow:0 -2px 8px rgba(0,0,0,.12)\">" +
-    `${features.join("・")}のプレビュー表示中です（一般には公開されていません）` +
+    notes.join(" / ") +
     '<a href="/?version=live" style="margin-left:12px;color:inherit;text-decoration:underline">解除</a></div>'
   );
 }
@@ -1225,10 +1232,20 @@ export const BASE_HEADERS: Record<string, string> = {
   "x-robots-tag": "noindex",
 };
 
+/**
+ * Framing allowlist: only our own Workers (Dub app LpViewer, fe2-demo) may embed the
+ * payment pages; any other site stays blocked (clickjacking).
+ */
+export const FRAME_ANCESTORS = "frame-ancestors 'self' https://*.developershub-site.workers.dev";
+
 export function htmlResponse(html: string, status = 200): Response {
   return new Response(html, {
     status,
-    headers: { ...BASE_HEADERS, "content-type": "text/html; charset=utf-8", "x-frame-options": "DENY" },
+    headers: {
+      ...BASE_HEADERS,
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": FRAME_ANCESTORS,
+    },
   });
 }
 

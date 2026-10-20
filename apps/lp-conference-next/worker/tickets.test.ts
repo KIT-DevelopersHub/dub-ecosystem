@@ -317,6 +317,15 @@ test("handler: GET /tickets renders with no-store + noindex", async () => {
   assert.match(await res.text(), /お支払いはキャンセルされました/);
 });
 
+test("handler: GET /tickets is frameable only by our own Workers", async () => {
+  const res = (await handleTickets(new Request("https://lp.example/tickets"), deps()))!;
+  assert.equal(res.headers.get("x-frame-options"), null);
+  assert.equal(
+    res.headers.get("content-security-policy"),
+    "frame-ancestors 'self' https://*.developershub-site.workers.dev",
+  );
+});
+
 test("handler: demo checkout validates locally then redirects to thanks with summary", async () => {
   const d = deps({ demo: true, getConfig: async () => DEMO_CONFIG, internal: null });
   const bad = await handleTickets(post("/tickets/checkout", { "qty_demo-general-d1": "1", name: "", email: "" }), d);
