@@ -21,6 +21,8 @@ export interface CheckoutSessionInput {
   cancelUrl: string;
   /** unix seconds */
   expiresAt: number;
+  /** LP管理「プレビュー」からのテスト購入 (metadata[preview]=1)。 */
+  preview?: boolean;
 }
 
 export interface CheckoutSession {
@@ -34,6 +36,8 @@ export interface CheckoutSession {
 }
 
 export interface StripeClient {
+  /** sk_test_ / rk_test_ key: sandbox only, never a real charge. */
+  readonly testMode: boolean;
   createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSession>;
   getCheckoutSession(id: string): Promise<CheckoutSession>;
 }
@@ -41,6 +45,11 @@ export interface StripeClient {
 /** sk_live_ / rk_live_ = real charges. sk_test_ / rk_test_ = sandbox. */
 export function isLiveStripeKey(key: string): boolean {
   return /^(sk|rk)_live_/.test(key);
+}
+
+/** sk_test_ / rk_test_ only (fail-closed: anything else counts as live). */
+export function isTestStripeKey(key: string): boolean {
+  return /^(sk|rk)_test_/.test(key);
 }
 
 /** Live keys are refused unless STRIPE_ALLOW_LIVE="1" (fail-closed: no real charges by accident). */
@@ -84,6 +93,7 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
   };
 
   return {
+    testMode: isTestStripeKey(secretKey),
     createCheckoutSession(i) {
       const f = new URLSearchParams();
       f.set("mode", "payment");
@@ -98,6 +108,7 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
       f.set("customer_email", i.customerEmail);
       f.set("client_reference_id", i.orderId);
       f.set("metadata[order_id]", i.orderId);
+      if (i.preview) f.set("metadata[preview]", "1");
       f.set("success_url", i.successUrl);
       f.set("cancel_url", i.cancelUrl);
       f.set("expires_at", String(i.expiresAt));

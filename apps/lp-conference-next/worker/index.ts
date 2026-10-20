@@ -5,13 +5,17 @@
 // NOTE: only `export default` here — workerd treats named exports as entrypoints.
 import manifest from "../versions.json";
 import {
+  EXIT_ATTR,
+  isNavigation,
   previewBanner,
-  proposalsCookie,
+  previewQuery,
   proposalsPreview,
+  refererFallback,
   resolveRequest,
   rewriteLocation,
-  ticketsCookie,
+  staleCookieClears,
   ticketsPreview,
+  withPreview,
 } from "./route.ts";
 import {
   DEMO_CONFIG,
@@ -42,8 +46,14 @@ interface Env {
   DEFAULT_VERSION?: string;
   TICKETS_DEMO?: string;
 }
+interface RewriterElement {
+  append(content: string, opts: { html: boolean }): void;
+  getAttribute(name: string): string | null;
+  setAttribute(name: string, value: string): void;
+  hasAttribute(name: string): boolean;
+}
 declare class HTMLRewriter {
-  on(selector: string, handler: { element(el: { append(content: string, opts: { html: boolean }): void }): void }): HTMLRewriter;
+  on(selector: string, handler: { element(el: RewriterElement): void }): HTMLRewriter;
   transform(res: Response): Response;
 }
 
@@ -150,89 +160,117 @@ async function notFound(env: Env, origin: string, version: string, req: Request)
   return new Response(res.ok ? res.body : "Not Found", { status: 404, headers: res.ok ? res.headers : undefined });
 }
 
+/**
+ * Final touch on every response: clears legacy preview cookies, and while previewing keeps the
+ * preview params on same-origin links / form actions / redirects so in-page navigation stays in
+ * the preview (the URL is the only state).
+ */
+function finish(res: Response, url: URL, cookieHeader: string | null): Response {
+  const clears = staleCookieClears(cookieHeader);
+  const pq = previewQuery(url, BUNDLED);
+  const carry = [...pq.keys()].length > 0;
+  const loc = res.headers.get("location");
+  const newLoc = carry && loc ? withPreview(loc, url.origin, pq) : loc;
+  const isHtml = (res.headers.get("content-type") ?? "").includes("text/html");
+  if (clears.length === 0 && newLoc === loc && !(carry && isHtml)) return res;
+  const headers = new Headers(res.headers);
+  for (const c of clears) headers.append("set-cookie", c);
+  if (newLoc && newLoc !== loc) headers.set("location", newLoc);
+  if (carry && isHtml) headers.delete("etag");
+  const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  if (!carry || !isHtml) return out;
+  const rewrite = (attr: string) => (el: RewriterElement) => {
+    if (el.hasAttribute(EXIT_ATTR)) return;
+    const v = el.getAttribute(attr);
+    if (v === null) return;
+    const next = withPreview(v, url.origin, pq);
+    if (next !== v) el.setAttribute(attr, next);
+  };
+  return new HTMLRewriter()
+    .on("a[href]", { element: rewrite("href") })
+    .on("form[action]", { element: rewrite("action") })
+    .transform(out);
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    const ticketsPath = isTicketsPath(url.pathname);
-    // LP管理「プレビュー」タブの ?tickets=on|off はこの閲覧者にだけ効く（公開中の LP は不変）。
-    const mode = ticketsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
-    const getConfig = async (): Promise<TicketConfig | null> => previewConfig(await ticketConfig(env), mode);
-    const tkCookie = ticketsCookie(url);
-    // 登壇者募集も同じ流儀（?proposals=on|off はこの閲覧者にだけ効く）。
-    const proposalsPath = isProposalsPath(url.pathname);
-    const spMode = proposalsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
-    const getProposals = async (): Promise<ProposalConfig | null> => previewProposals(await proposalConfig(env), spMode);
-    const spCookie = proposalsCookie(url);
-    if (proposalsPath) {
-      const handled = await handleProposals(req, {
-        demo: env.TICKETS_DEMO === "1",
-        getConfig: getProposals,
-        internal: ticketsInternal(env),
-      });
-      if (handled) return handled;
-    }
-    if (ticketsPath) {
-      const handled = await handleTickets(req, {
-        demo: env.TICKETS_DEMO === "1",
-        getConfig,
-        invalidate: () => {
-          ticketsCache = null;
-        },
-        internal: ticketsInternal(env),
-      });
-      if (handled) return handled;
-    }
-    // Started in parallel; only awaited for HTML pages (CTA injection).
-    const tickets = ticketsPath ? null : getConfig();
-    const proposals = proposalsPath ? null : getProposals();
-    const published = await publishedVersion(env);
-    const r = resolveRequest(url, req.headers.get("cookie"), published, BUNDLED, req.headers.get("referer"));
-
-    if (r.kind === "redirect") {
-      const headers = new Headers({ location: r.location, vary: "Cookie", "cache-control": "no-store" });
-      headers.append("set-cookie", r.setCookie);
-      if (tkCookie) headers.append("set-cookie", tkCookie);
-      if (spCookie) headers.append("set-cookie", spCookie);
-      return new Response(null, { status: 302, headers });
-    }
-
-    let res = await env.ASSETS.fetch(new Request(url.origin + r.assetPath, req));
-    if (res.status === 404) res = await notFound(env, url.origin, r.version, req);
-
-    const headers = new Headers(res.headers);
-    headers.append("vary", "Cookie");
-    if (r.setCookie) headers.append("set-cookie", r.setCookie);
-    if (tkCookie) headers.append("set-cookie", tkCookie);
-    if (spCookie) headers.append("set-cookie", spCookie);
-    const loc = headers.get("location");
-    if (loc) headers.set("location", rewriteLocation(loc, r.version, url.origin));
-    if (r.preview || mode || spMode) headers.set("x-robots-tag", "noindex");
-
-    const isHtml = (headers.get("content-type") ?? "").includes("text/html");
-    const page = isHtml && res.status === 200;
-    const cfg = page && tickets ? await tickets : null;
-    const spCfg = page && proposals ? await proposals : null;
-    const previewing = [
-      cfg?.enabled && cfg.preview ? "チケット販売" : null,
-      spCfg?.enabled && spCfg.preview ? "登壇者募集" : null,
-    ].filter((x): x is string => x !== null);
-    // 「なし」preview hiding a live feature: say so (incl. the /tickets 404) or it looks broken.
-    const hidden = isHtml
-      ? [
-          mode === "off" && (await ticketConfig(env))?.enabled ? "チケット販売" : null,
-          spMode === "off" && (await proposalConfig(env))?.enabled ? "登壇者募集" : null,
-        ].filter((x): x is string => x !== null)
-      : [];
-    const inject =
-      (r.preview ? previewBanner(r.version, published) : "") +
-      previewBar(previewing, hidden) +
-      ticketsInjection(cfg, false) +
-      proposalsInjection(spCfg);
-    if (inject) headers.delete("etag");
-    const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-    if (!inject || !isHtml) return out;
-    return new HTMLRewriter()
-      .on("body", { element: (el) => el.append(inject, { html: true }) })
-      .transform(out);
+    return finish(await serve(req, env, url), url, req.headers.get("cookie"));
   },
 };
+
+async function serve(req: Request, env: Env, url: URL): Promise<Response> {
+  const ticketsPath = isTicketsPath(url.pathname);
+  // Preview = URL params only. Same-origin referer only for subresources of a previewed page.
+  const fallback = refererFallback(req.headers.get("referer"), url.origin, isNavigation(req.headers));
+  // LP管理「プレビュー」タブの ?tickets=on|off はこの閲覧者にだけ効く（公開中の LP は不変）。
+  const mode = ticketsPreview(url, fallback);
+  const getConfig = async (): Promise<TicketConfig | null> => previewConfig(await ticketConfig(env), mode);
+  // 登壇者募集も同じ流儀（?proposals=on|off はこの閲覧者にだけ効く）。
+  const proposalsPath = isProposalsPath(url.pathname);
+  const spMode = proposalsPreview(url, fallback);
+  const getProposals = async (): Promise<ProposalConfig | null> => previewProposals(await proposalConfig(env), spMode);
+  if (proposalsPath) {
+    const handled = await handleProposals(req, {
+      demo: env.TICKETS_DEMO === "1",
+      getConfig: getProposals,
+      internal: ticketsInternal(env),
+    });
+    if (handled) return handled;
+  }
+  if (ticketsPath) {
+    const handled = await handleTickets(req, {
+      demo: env.TICKETS_DEMO === "1",
+      getConfig,
+      invalidate: () => {
+        ticketsCache = null;
+      },
+      internal: ticketsInternal(env),
+    });
+    if (handled) return handled;
+  }
+  // Started in parallel; only awaited for HTML pages (CTA injection).
+  const tickets = ticketsPath ? null : getConfig();
+  const proposals = proposalsPath ? null : getProposals();
+  const published = await publishedVersion(env);
+  const r = resolveRequest(url, published, BUNDLED, fallback);
+
+  if (r.kind === "redirect") {
+    return new Response(null, { status: 302, headers: { location: r.location, "cache-control": "no-store" } });
+  }
+
+  let res = await env.ASSETS.fetch(new Request(url.origin + r.assetPath, req));
+  if (res.status === 404) res = await notFound(env, url.origin, r.version, req);
+
+  const headers = new Headers(res.headers);
+  const loc = headers.get("location");
+  if (loc) headers.set("location", rewriteLocation(loc, r.version, url.origin));
+  if (r.preview || mode || spMode) headers.set("x-robots-tag", "noindex");
+
+  const isHtml = (headers.get("content-type") ?? "").includes("text/html");
+  const page = isHtml && res.status === 200;
+  const cfg = page && tickets ? await tickets : null;
+  const spCfg = page && proposals ? await proposals : null;
+  const previewing = [
+    cfg?.enabled && cfg.preview ? "チケット販売" : null,
+    spCfg?.enabled && spCfg.preview ? "登壇者募集" : null,
+  ].filter((x): x is string => x !== null);
+  // 「なし」preview hiding a live feature: say so (incl. the /tickets 404) or it looks broken.
+  const hidden = isHtml
+    ? [
+        mode === "off" && (await ticketConfig(env))?.enabled ? "チケット販売" : null,
+        spMode === "off" && (await proposalConfig(env))?.enabled ? "登壇者募集" : null,
+      ].filter((x): x is string => x !== null)
+    : [];
+  const inject =
+    (r.preview ? previewBanner(r.version, published) : "") +
+    previewBar(previewing, hidden) +
+    ticketsInjection(cfg, false) +
+    proposalsInjection(spCfg);
+  if (inject) headers.delete("etag");
+  const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  if (!inject || !isHtml) return out;
+  return new HTMLRewriter()
+    .on("body", { element: (el) => el.append(inject, { html: true }) })
+    .transform(out);
+}

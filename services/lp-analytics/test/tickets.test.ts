@@ -346,6 +346,57 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(stripe.calls).toHaveLength(1);
   });
 
+  it("preview checkout (sales off): test-mode Stripe sells, marked + returns under ?tickets=on", async () => {
+    const stripe = fakeStripe();
+    const { app } = await setup(kind, { stripe });
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    // Without the flag, sales off stays 404.
+    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(404);
+    const pub = await body<{ previewCheckout: boolean }>(await app.fetch(get("/lp/internal/tickets", INTERNAL)));
+    expect(pub.previewCheckout).toBe(true);
+
+    const res = await app.fetch(checkout({ ticketTypeId: t.id, preview: true }));
+    expect(res.status).toBe(200);
+    const f = stripe.calls[0]!.form!;
+    expect(f.get("metadata[preview]")).toBe("1");
+    expect(f.get("success_url")).toBe("https://hokuriku-it-conf.com/tickets/thanks?session_id={CHECKOUT_SESSION_ID}&tickets=on");
+    expect(f.get("cancel_url")).toBe("https://hokuriku-it-conf.com/tickets?canceled=1&tickets=on");
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items[0]!.answers).toEqual([{ fieldId: "_preview", label: "プレビュー（テスト決済）", value: "はい" }]);
+
+    // Free preview order also stays on ?tickets=on.
+    const free = await addType(app, { name: "招待", priceJpy: 0 });
+    const fr = await body<{ redirectUrl: string }>(await app.fetch(checkout({ ticketTypeId: free.id, preview: true })));
+    expect(fr.redirectUrl).toMatch(/\/tickets\/thanks\?order=tko_\w+&tickets=on$/);
+  });
+
+  it("preview checkout is refused with a live key or no Stripe; preview flag is ignored when on sale", async () => {
+    const live = fakeStripe();
+    const liveClient = { ...live.client, testMode: false };
+    const { app } = await makeApp(kind, "edit", 5000, null, ["lp:publish"], { stripe: liveClient, stripeWebhookSecret: WHSEC });
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    const free = await addType(app, { name: "招待", priceJpy: 0 });
+    const pub = await body<{ previewCheckout: boolean }>(await app.fetch(get("/lp/internal/tickets", INTERNAL)));
+    expect(pub.previewCheckout).toBe(false);
+    for (const id of [t.id, free.id]) {
+      const res = await app.fetch(checkout({ ticketTypeId: id, preview: true }));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: { code: "LP_TICKET_PREVIEW_NOT_ALLOWED" } });
+    }
+    expect(live.calls).toHaveLength(0);
+    expect((await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")))).items).toHaveLength(0);
+
+    const none = await setup(kind);
+    const nt = await addType(none.app, { name: "招待", priceJpy: 0 });
+    expect((await none.app.fetch(checkout({ ticketTypeId: nt.id, preview: true }))).status).toBe(403);
+
+    // On sale: a stray preview flag is a normal (unmarked) live sale.
+    await enable(app);
+    expect((await app.fetch(checkout({ ticketTypeId: t.id, preview: true }))).status).toBe(200);
+    expect(live.calls[0]!.form!.has("metadata[preview]")).toBe(false);
+    expect(live.calls[0]!.form!.get("cancel_url")).toBe("https://hokuriku-it-conf.com/tickets?canceled=1");
+  });
+
   it("one order buys several types x quantity: Stripe line items, stats count tickets, summary", async () => {
     const stripe = fakeStripe({ payment_status: "paid" });
     const { app } = await setup(kind, { stripe });
@@ -607,6 +658,12 @@ describe("tickets gate", () => {
 });
 
 describe("usableStripeKey (no real charges unless STRIPE_ALLOW_LIVE=1)", () => {
+  it("client testMode is true only for sk_test_ / rk_test_", () => {
+    expect(createStripeClient("sk_test_x").testMode).toBe(true);
+    expect(createStripeClient("rk_test_x").testMode).toBe(true);
+    expect(createStripeClient("sk_live_x").testMode).toBe(false);
+    expect(createStripeClient("whatever").testMode).toBe(false);
+  });
   it("accepts sandbox keys", () => {
     expect(usableStripeKey("sk_test_abc", undefined)).toBe("sk_test_abc");
     expect(usableStripeKey("rk_test_abc", undefined)).toBe("rk_test_abc");

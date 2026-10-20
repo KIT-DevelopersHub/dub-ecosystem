@@ -26,8 +26,13 @@ export interface PublicTicketType {
 }
 export interface TicketConfig {
   enabled: boolean;
-  /** Set by the Worker (previewConfig), never by lp-analytics: shown as on sale, never sells. */
+  /**
+   * Set by the Worker (previewConfig), never by lp-analytics: shown as on sale while sales are off.
+   * Sells only when previewCheckout (lp-analytics re-checks the key on its side).
+   */
   preview: boolean;
+  /** lp-analytics has a test-mode Stripe key: a preview may run a test checkout. */
+  previewCheckout: boolean;
   /** Swap the LP's 参加登録 buttons for 参加チケットを購入 (effective only with enabled). */
   ctaEnabled: boolean;
   paymentReady: boolean;
@@ -68,6 +73,7 @@ const DAY2 = "Day 2 - 9/14(火)";
 export const DEMO_CONFIG: TicketConfig = {
   enabled: true,
   preview: false,
+  previewCheckout: false,
   ctaEnabled: true,
   paymentReady: true,
   fields: [
@@ -214,6 +220,7 @@ export function parseConfig(raw: unknown): TicketConfig | null {
     preview: false,
     ctaEnabled: o.ctaEnabled === true,
     paymentReady: o.paymentReady === true,
+    previewCheckout: o.previewCheckout === true,
     fields,
     types,
   };
@@ -322,6 +329,9 @@ export function mapCheckoutError(status: number, body: unknown, config: TicketCo
     if (id && config.types.some((t) => t.id === id)) errors[qtyInputName(id)] = "残数が足りません（売り切れ）";
     else errors.items = "選択された券種の残数が足りません";
     errors._form = "選択されたチケットの残数が足りなくなりました。枚数を減らすか、別の券種をお選びください。";
+  } else if (status === 403) {
+    // lp-analytics refused a preview checkout (live key): never sells while sales are off.
+    errors._form = "プレビュー表示中のため、お申し込みはできません。";
   } else if (status === 429) {
     errors._form = "ただいまお申し込みが集中しています。しばらく時間をおいて再度お試しください。";
   } else if (status === 503) {
@@ -806,6 +816,8 @@ export function hero(o: {
 }
 
 export const PREVIEW_NOTE = "プレビュー表示中です。このページはまだ一般公開されていません（お申し込みはできません）。";
+export const PREVIEW_TEST_NOTE =
+  "プレビュー表示中です（一般公開前）。お申し込みは Stripe のテスト決済で処理され、実際の請求は発生しません。";
 
 export function shell(
   title: string,
@@ -1035,8 +1047,10 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
 
   const hasPaid = config.types.some((t) => t.priceJpy > 0);
   const extra = config.fields.map((f) => renderField(f, values, errors)).join("");
+  // Stripe Checkout refuses to be framed (LP管理 iframe): the test checkout opens in a new tab.
+  const target = config.preview && config.previewCheckout ? ' target="_blank"' : "";
   const form =
-    `<form class="buy grid" method="post" action="/tickets/checkout" novalidate data-max="${ORDER_MAX}"><div>` +
+    `<form class="buy grid" method="post" action="/tickets/checkout"${target} novalidate data-max="${ORDER_MAX}"><div>` +
     alerts +
     `<section class="card rv"><fieldset class="${errors.items ? "bad" : ""}"><legend>券種と枚数（必須）</legend>` +
     `<div class="shead"><span class="no">01</span><h2>券種と枚数を選ぶ</h2><p>1 回のお申し込みで合計 ${ORDER_MAX} 枚まで</p></div>` +
@@ -1059,7 +1073,14 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
       ? '<p class="note">有料チケットは Stripe の決済画面に移動してお支払いいただきます。無料チケットはそのままお申し込みが完了します。</p>'
       : "") +
     "</aside></form>";
-  return shell("チケット購入", top + `<div class="body"><div class="wrap">${form}</div></div>`, !!o.demo, config.preview);
+  return shell(
+    "チケット購入",
+    top + `<div class="body"><div class="wrap">${form}</div></div>`,
+    !!o.demo,
+    config.preview,
+    undefined,
+    config.previewCheckout ? PREVIEW_TEST_NOTE : PREVIEW_NOTE,
+  );
 }
 
 export type ThanksStatus = "paid" | "free" | "pending" | "expired" | "unknown";
@@ -1160,6 +1181,9 @@ export function ctaSwapScript(o: { attr: string; label: string; href: string; se
     ",SEL=" +
     JSON.stringify(o.selector) +
     ",n=0;" +
+    // Preview lives in the URL only: carry ?version/tickets/proposals over to the swapped link.
+    'var Q=new URLSearchParams(location.search),P=[];["version","tickets","proposals"].forEach(function(k){var v=Q.get(k);if(v)P.push(k+"="+encodeURIComponent(v))});' +
+    'if(P.length)HREF+=(HREF.indexOf("?")<0?"?":"&")+P.join("&");' +
     'function hyd(el){return Object.keys(el).some(function(k){return k.indexOf("__reactFiber$")===0})}' +
     "function txt(el){for(var c=el.firstChild;c;c=c.nextSibling){if(c.nodeType===3&&c.nodeValue.trim()){c.nodeValue=LB;return}}}" +
     "function go(e){if(e)e.preventDefault();location.href=HREF}" +
@@ -1182,7 +1206,8 @@ export function ticketsCtaSwap(): string {
 
 /**
  * LP管理「プレビュー」タブの指定 (?tickets=on|off) を、この閲覧者にだけ当てる。
- * on: 販売停止中でも販売中の見た目 (preview: true = 申し込み不可)。off: 販売中でも出さない。
+ * on: 販売停止中でも販売中の見た目 (preview: true = テストキー時のみテスト決済、ライブキー時は申し込み不可)。
+ * off: 販売中でも出さない。
  * 指定なしは実際の販売状態のまま（公開中の LP は不変）。
  */
 export function previewConfig(cfg: TicketConfig | null, mode: "on" | "off" | null): TicketConfig | null {
@@ -1208,7 +1233,7 @@ export function previewBar(features: readonly string[], hidden: readonly string[
     "padding:8px 16px;background:#fff4d6;color:#7a4b00;text-align:center;" +
     "font:700 13px/1.5 'Zen Kaku Gothic New',system-ui,-apple-system,sans-serif;box-shadow:0 -2px 8px rgba(0,0,0,.12)\">" +
     notes.join(" / ") +
-    '<a href="/?version=live" style="margin-left:12px;color:inherit;text-decoration:underline">解除</a></div>'
+    '<a href="/" data-lp-preview-exit style="margin-left:12px;color:inherit;text-decoration:underline">解除</a></div>'
   );
 }
 
@@ -1339,7 +1364,7 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     if (parsed.spam) return redirect("/tickets/thanks");
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: parsed.errors, demo: deps.demo }), 400);
   }
-  if (config.preview) {
+  if (config.preview && !config.previewCheckout) {
     const errors: FormErrors = { _form: "プレビュー表示中のため、お申し込みはできません。" };
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors, demo: deps.demo }), 403);
   }
@@ -1356,7 +1381,8 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     res = await deps.internal("/lp/internal/tickets/checkout", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...parsed.input, origin: url.origin }),
+      // preview: lp-analytics sells only with a test-mode key while sales are off (else 403).
+      body: JSON.stringify({ ...parsed.input, origin: url.origin, ...(config.preview ? { preview: true } : {}) }),
     });
   } catch {
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(502, null, config) }), 502);
