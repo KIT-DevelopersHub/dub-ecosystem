@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { DbClient } from "@dub/db";
 import { createApp } from "../src/app";
 import { parseNotifyRequest } from "../src/validation";
-import { ingest, type IngestDeps } from "../src/ingest";
+import { ingest, withInboxPush, type IngestDeps } from "../src/ingest";
 import { consumeEventQueue } from "../src/queue";
 import { mappingToIngest } from "../src/queue";
 import { EVENT_MAPPINGS } from "../src/mapping";
@@ -105,7 +105,11 @@ describe("ingest — recipients & dedup", () => {
     const res = await ingest(coreDeps(h), baseInput({ type: "system.announcement", recipients: { userIds: ["u1"] }, channels: ["in_app"] }));
     expect(res.deduplicated).toBe(false);
     const rows = await deliveries(h.db, res.notificationId);
-    expect(rows).toEqual([{ channel: "in_app", status: "sent", attempts: 1 }]);
+    // inbox => push policy: push rides along (skipped here only because no port is wired).
+    expect(rows).toEqual([
+      { channel: "in_app", status: "sent", attempts: 1 },
+      { channel: "push", status: "skipped", attempts: 0 },
+    ]);
     expect(await unreadCount(h.db, "u1")).toBe(1);
   });
 
@@ -191,6 +195,7 @@ describe("preferences", () => {
     expect(rows).toEqual([
       { channel: "email", status: "skipped", attempts: 0 },
       { channel: "in_app", status: "sent", attempts: 1 },
+      { channel: "push", status: "skipped", attempts: 0 },
     ]);
   });
 });
@@ -290,6 +295,80 @@ describe("push adapter (stub swap)", () => {
   });
 });
 
+describe("inbox => push policy (in_app targets also push)", () => {
+  async function pushRow(db: DbClient, notificationId: string) {
+    return db.first<{ status: string; detail: string | null }>(
+      `SELECT status, last_error AS detail FROM notif_deliveries WHERE notification_id = ? AND channel = 'push'`,
+      notificationId,
+    );
+  }
+
+  it("withInboxPush adds push only when in_app is present and push is absent", () => {
+    expect(withInboxPush(["in_app"])).toEqual(["in_app", "push"]);
+    expect(withInboxPush(["in_app", "email"])).toEqual(["in_app", "email", "push"]);
+    expect(withInboxPush(["in_app", "push"])).toEqual(["in_app", "push"]);
+    expect(withInboxPush(["email"])).toEqual(["email"]);
+    expect(withInboxPush(["push"])).toEqual(["push"]);
+  });
+
+  it("channels: in_app only -> push is also dispatched (default on)", async () => {
+    const h = makeTestEnv();
+    const push = fakePush();
+    const res = await ingest(
+      coreDeps(h, { push }),
+      baseInput({ type: "task.assigned", recipients: { userIds: ["u1", "u2"] }, channels: ["in_app"], title: "Assigned" }),
+    );
+    expect(push.calls.map((c) => c.userId).sort()).toEqual(["u1", "u2"]);
+    expect(push.calls[0]!.notificationId).toBe(res.notificationId);
+    expect(await pushRow(h.db, res.notificationId)).toMatchObject({ status: "sent" });
+    expect(await unreadCount(h.db, "u1")).toBe(1);
+  });
+
+  it("user turned push off -> push skipped as preference_off, inbox still delivered", async () => {
+    const h = makeTestEnv();
+    await upsertPreference(h.db, "u1", "task.", "push", false);
+    const push = fakePush();
+    const res = await ingest(
+      coreDeps(h, { push }),
+      baseInput({ type: "task.assigned", recipients: { userIds: ["u1"] }, channels: ["in_app"] }),
+    );
+    expect(push.calls).toEqual([]);
+    expect(await pushRow(h.db, res.notificationId)).toEqual({ status: "skipped", detail: "preference_off" });
+    expect(await unreadCount(h.db, "u1")).toBe(1);
+  });
+
+  it("forced-in_app type (release): inbox forced even if in_app off, but push obeys prefs", async () => {
+    const h = makeTestEnv();
+    await upsertPreference(h.db, "u1", "*", "in_app", false);
+    await upsertPreference(h.db, "u1", "release", "push", false);
+    const push = fakePush();
+    const res = await ingest(
+      coreDeps(h, { push }),
+      baseInput({ type: "release", recipients: { userIds: ["u1", "u2"] }, channels: ["in_app"] }),
+    );
+    // u1: inbox forced, push off by pref. u2: defaults -> inbox + push.
+    expect(await unreadCount(h.db, "u1")).toBe(1);
+    expect(await unreadCount(h.db, "u2")).toBe(1);
+    expect(push.calls.map((c) => c.userId)).toEqual(["u2"]);
+    const u1Push = await h.db.first<{ status: string; detail: string | null }>(
+      `SELECT status, last_error AS detail FROM notif_deliveries WHERE notification_id = ? AND channel = 'push' AND user_id = 'u1'`,
+      res.notificationId,
+    );
+    expect(u1Push).toEqual({ status: "skipped", detail: "preference_off" });
+  });
+
+  it("push-only / email-only targets are untouched (no in_app -> no implicit push)", async () => {
+    const h = makeTestEnv();
+    const push = fakePush();
+    const res = await ingest(
+      coreDeps(h, { push, mail: fakeMail() }),
+      baseInput({ type: "task.due_soon", recipients: { userIds: ["u1"] }, priority: "urgent", channels: ["email"] }),
+    );
+    expect(push.calls).toEqual([]);
+    expect((await deliveries(h.db, res.notificationId)).map((r) => r.channel)).toEqual(["email"]);
+  });
+});
+
 describe("delivery runner failure", () => {
   it("#13 adapter throws -> retried to the cap, failed, one delivery-failed audit", async () => {
     const h = makeTestEnv();
@@ -310,7 +389,10 @@ describe("delivery runner failure", () => {
       baseInput({ type: "system.announcement", recipients: { userIds: ["u1"] }, channels: ["in_app"] }),
     );
     const rows = await deliveries(h.db, res.notificationId);
-    expect(rows).toEqual([{ channel: "in_app", status: "failed", attempts: 3 }]);
+    expect(rows).toEqual([
+      { channel: "in_app", status: "failed", attempts: 3 },
+      { channel: "push", status: "skipped", attempts: 0 },
+    ]);
     expect(h.audit.sends).toHaveLength(1);
     expect(h.audit.sends[0]!.payload.action).toBe("notif.delivery.failed");
     expect(h.audit.sends[0]!.payload.result).toBe("failure");

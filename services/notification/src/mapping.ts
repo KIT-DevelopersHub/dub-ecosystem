@@ -156,8 +156,8 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
   // `mentions` rides the event (chat-service parses the body at post time, author
   // already excluded) so notification never reads chat D1. No mentions -> empty
   // recipients -> a legitimate no-op (design test #3): a plain channel message does NOT
-  // ring the bell (the in-app unread badge covers that), only mentions do. in_app only
-  // (no email/push storm for every mention).
+  // ring the bell (the in-app unread badge covers that), only mentions do. Declared
+  // in_app; ingest adds push (inbox => push policy), gated by the user's push prefs.
   "chat.message.created": {
     type: CHAT_MENTION_NOTIFY_TYPE,
     channels: ["in_app"],
