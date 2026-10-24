@@ -68,6 +68,10 @@ staging_review→prod_shipped と Web ボードが担う)。
 - **確認依頼は必ず live URL + 確認項目表 + Before/After + verify:live PASS 証跡**をセットで。
 - **`確認した`ラベルは 1 タスク 1 本**。main 向け PR は 1 本に絞り(分割分はそのブランチに積む)、
   付けてほしい時は最終報告に `これに付けて: <PR URL>` を 1 行書く。
+- **タスクの PR を cwd のブランチから推測しない**。cwd は別タスクと共有の worktree のことがあり、
+  そのブランチの PR はこのタスクと無関係(マージ済みのこともある)。対象 PR はプロンプトの
+  `対象 PR:` 行かこのタスクの run 出力で特定し、「main マージ済み」等の判定は必ずその PR 番号の
+  `gh pr view <番号> --json state,mergedAt` で裏取りしてから書く。
 - 詳細: [[rules/dub-development-flow]] / [[rules/review-and-workflow]]。
 
 ## 自己承認の禁止(最重要ゲート)

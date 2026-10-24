@@ -129,6 +129,29 @@ export const PROD_DEPLOY_PROMPT =
   "(3) deploy.yml の完了を `gh run watch` で待ち、`bash scripts/verify-live.sh prod \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
   "(4) 完了したら本番 URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
 
+// Pin the deploy run to the task's own PR. Without it the agent guessed the PR from the
+// cwd's branch — a shared worktree whose branch belonged to another, already-merged PR —
+// and reported this task as "already merged to main" when it never was.
+export function withTargetPr(prompt: string, item: { prUrl: string | null; prUrls: string[] }): string {
+  const pr = item.prUrl ?? item.prUrls.at(-1);
+  const line = pr
+    ? `対象 PR: ${pr} (作業ディレクトリのブランチの PR と取り違えない。マージ済みかどうかは必ず \`gh pr view ${pr} --json state,mergedAt\` で確かめる)`
+    : "対象 PR: 未記録。作業ディレクトリのブランチから推測せず、このタスクの run 出力に出た PR を確かめてから進める。";
+  return prompt.trimEnd().endsWith(line) ? prompt : `${prompt}\n\n${line}`;
+}
+
+// 再実行 / 却下 re-inject the prior prompt, so a deploy run's follow-up must re-pin the PR
+// too (its prior may predate withTargetPr). Other follow-ups get it once a PR is recorded.
+export function followUpPrompt(
+  prior: string | null,
+  addition: string,
+  item: { prUrl: string | null; prUrls: string[] },
+): string {
+  const prompt = composePrompt(prior, addition);
+  const isDeploy = !!prior && (prior.startsWith(STAGING_DEPLOY_PROMPT) || prior.startsWith(PROD_DEPLOY_PROMPT));
+  return isDeploy || item.prUrl || item.prUrls.length > 0 ? withTargetPr(prompt, item) : prompt;
+}
+
 // Phases a 追加指示 must rewind to demo_building before the follow-up run starts
 // (却下済み =「直して再 demo」). Every other phase keeps its phase: the follow-up run is
 // just added to the same task. Moving back is the explicit 「フェーズを戻す」 action.
@@ -422,7 +445,7 @@ export function Board({
       const prior = await priorPrompt(item.latestRun?.id);
       await startRunWithImages(
         client,
-        composePrompt(prior, addition),
+        followUpPrompt(prior, addition, item),
         { taskId: item.taskId, ...(item.latestRun?.cwd ? { cwd: item.latestRun.cwd } : {}) },
         images,
       );
@@ -443,7 +466,7 @@ export function Board({
         await api.transition(selected.featureId, to, { approvedByUser: true });
         deployingRef.current.add(selected.featureId);
         try {
-          await client.startRun(STAGING_DEPLOY_PROMPT, { taskId: selected.taskId, ...cwdOpt });
+          await client.startRun(withTargetPr(STAGING_DEPLOY_PROMPT, selected), { taskId: selected.taskId, ...cwdOpt });
         } catch {
           // daemon down: can't run the reflect now. Fall back to the phase-only advance so
           // the task still leaves 確認待ち instead of getting stuck; the shield is released.
@@ -456,7 +479,7 @@ export function Board({
         // deriveLane が古い run の結果で「本番確認中」に一瞬飛ぶ flash が起きる）。
         // これで prod_shipped + 走行中 run = 「本番反映中」→ 終われば「本番確認中」(失敗は要修正表示)。
         try {
-          await client.startRun(PROD_DEPLOY_PROMPT, { taskId: selected.taskId, ...cwdOpt });
+          await client.startRun(withTargetPr(PROD_DEPLOY_PROMPT, selected), { taskId: selected.taskId, ...cwdOpt });
         } catch {
           // daemon down: no progress run possible — fall through to the phase-only ship so
           // the approval still registers (本番反映済) instead of getting stuck in 確認待ち.

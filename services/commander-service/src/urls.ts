@@ -111,6 +111,18 @@ export function authoredText(payload: unknown): string {
     .join("\n");
 }
 
+/**
+ * The URLs one run event contributes to its task. Deploy URLs come from the whole event
+ * (a deploy log in tool output is where they show up), but the PR only from what the agent
+ * itself said: a `gh pr view` / `gh pr list` result names the PR of the cwd's branch, which
+ * is often NOT this task's PR (that is how a merged, unrelated PR became a task's PR).
+ */
+export function extractEventUrls(payload: unknown): ExtractedUrls {
+  const { prUrl: _toolPr, ...deploys } = extractArtifactUrls(eventText(payload));
+  const { prUrl } = extractArtifactUrls(authoredText(payload));
+  return prUrl ? { ...deploys, prUrl } : deploys;
+}
+
 /** Flatten a run event's payload to the text we scan for URLs (line/message/result/raw). */
 export function eventText(payload: unknown): string {
   if (payload == null) return "";

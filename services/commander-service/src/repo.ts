@@ -14,8 +14,7 @@ import {
 } from "@dub/commander-phases";
 import {
   authoredText,
-  eventText,
-  extractArtifactUrls,
+  extractEventUrls,
   extractPrUrls,
   mergePrUrls,
   mergeUrls,
@@ -452,7 +451,7 @@ export async function backfillTaskUrls(db: D1Database): Promise<{ updated: numbe
     } catch {
       payload = row.payload;
     }
-    const found = extractArtifactUrls(eventText(payload));
+    const found = extractEventUrls(payload);
     const prs = extractPrUrls(authoredText(payload));
     if (!found.demoUrl && !found.stagingUrl && !found.prUrl && prs.length === 0) continue;
     const prior = perTask.get(row.task_id) ?? {};
@@ -681,7 +680,7 @@ export async function appendRunEvent(
   // P1-2: harvest artifact URLs from this event and fold them onto the owning task,
   // in the same batch so the run event and its extracted URLs commit atomically.
   if (run.taskId) {
-    const found = extractArtifactUrls(eventText(payload));
+    const found = extractEventUrls(payload);
     const urlSets: string[] = [];
     const urlVals: string[] = [];
     if (found.demoUrl) {
