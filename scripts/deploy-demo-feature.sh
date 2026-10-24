@@ -33,6 +33,9 @@
 #   --note      optional free-text stored in the manifest.
 #   --no-build  skip the Vite build (reuse the existing apps/fe2-app-shell/dist).
 #   --dry-run   resolve names/URL and print the plan; do NOT build, deploy, or write anything.
+#   --no-sync-main  skip the latest-main check below (offline only). By default the script
+#               fetches origin/main and, if HEAD does not contain it yet, merges it in first
+#               (aborts on conflict / dirty tree) — so the demo never shows a stale UI.
 #   --self-test offline assertions (slugify / worker name / manifest JSON); no network.
 #
 # Requires (real run): CLOUDFLARE_API_TOKEN in env
@@ -48,6 +51,8 @@ SUBDOMAIN_DEFAULT="developershub-site"
 # Cloudflare free plan caps Worker scripts per account (~100); each disposable demo eats one
 # until torn down. This keeps parallel demos from silently exhausting the account.
 DEMO_SOFT_LIMIT="${DEMO_SOFT_LIMIT:-20}"
+# shellcheck source=lib/demo-main-sync.sh
+source "${ROOT}/scripts/lib/demo-main-sync.sh"
 
 resolve_subdomain() {
   local envfile="${ROOT}/infra/deploy/staging-resources.env" sub=""
@@ -125,12 +130,14 @@ if [ "${1:-}" = "--self-test" ]; then
   write_manifest "$tmp/m.json" foo dub-demo-foo https://x abc123 br me true "note \"q\""
   grep -q '"slug": "foo"' "$tmp/m.json" && grep -q '"live": true' "$tmp/m.json" || { echo "  FAIL manifest write"; fail=1; }
   grep -q '"kind": "demo-feature"' "$tmp/m.json" || { echo "  FAIL manifest kind"; fail=1; }
+  demo_main_sync_self_test || fail=1
   if [ "$fail" = 0 ]; then echo "deploy-demo-feature self-test: PASS"; exit 0
   else echo "deploy-demo-feature self-test: FAIL"; exit 1; fi
 fi
 
 # ---- args --------------------------------------------------------------------------
-SLUG_RAW=""; MARKERS_CSV=""; NOTE=""; DO_BUILD=1; DRY_RUN=0
+SLUG_RAW=""; MARKERS_CSV=""; NOTE=""; DO_BUILD=1; DRY_RUN=0; SYNC_MAIN=1
+[ "${DEMO_SKIP_MAIN_SYNC:-0}" = 1 ] && SYNC_MAIN=0
 declare -a MARKERS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -139,7 +146,8 @@ while [ $# -gt 0 ]; do
     --note)     NOTE="${2:-}"; shift 2 ;;
     --no-build) DO_BUILD=0; shift ;;
     --dry-run)  DRY_RUN=1; shift ;;
-    -h|--help)  sed -n '2,48p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    --no-sync-main) SYNC_MAIN=0; shift ;;
+    -h|--help)  sed -n '2,45p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "::error::unknown arg '$1'" >&2; exit 2 ;;
   esac
 done
@@ -157,6 +165,13 @@ fi
 URL="$(url_for "$SLUG")"
 MANIFEST="$(manifest_path_for "$SLUG")"
 parse_markers "$MARKERS_CSV"
+
+# Build from "latest main + this feature" — merge origin/main in if the branch lacks it.
+if [ "$SYNC_MAIN" = 1 ]; then
+  ensure_main_merged "$ROOT" "$([ "$DRY_RUN" = 1 ] && echo check || echo apply)" || exit 1
+else
+  echo "::warning::--no-sync-main: deploying without checking for the latest main — the surrounding UI may be stale."
+fi
 
 SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 BRANCH="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
