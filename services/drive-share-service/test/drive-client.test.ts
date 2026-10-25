@@ -114,6 +114,42 @@ describe("real Google client — request shape", () => {
     expect(url).toContain("includeItemsFromAllDrives=true");
     expect(url).toContain("corpora=allDrives");
   });
+
+  it("root listing returns only items whose parent is not visible (no nested items at top level)", async () => {
+    const folder = "application/vnd.google-apps.folder";
+    const pages = [
+      {
+        files: [
+          { id: "top", name: "Hackit", mimeType: folder, parents: ["myDriveRoot"] },
+          { id: "child", name: "子フォルダ", mimeType: folder, parents: ["top"] },
+          { id: "shared", name: "共有されたフォルダ", mimeType: folder },
+        ],
+        nextPageToken: "p2",
+      },
+      { files: [{ id: "grandchild", name: "孫.pdf", mimeType: "application/pdf", parents: ["child"] }] },
+    ];
+    const urls: string[] = [];
+    const impl = vi.fn(async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify(pages[urls.length - 1]), { status: 200 });
+    }) as unknown as typeof fetch;
+    const client = createGoogleDriveShareClient({ token: staticToken, fetchImpl: impl });
+    const res = await client.listFiles({ pageSize: 50 });
+    expect(res.files.map((f) => f.id)).toEqual(["top", "shared"]);
+    expect(res.nextCursor).toBeNull();
+    expect(urls).toHaveLength(2);
+    expect(decodeURIComponent(urls[0]!)).toContain("parents");
+    expect(urls[1]).toContain("pageToken=p2");
+  });
+
+  it("folder and search listings stay a single page query", async () => {
+    const { impl, urls } = fetchStub(new Response(JSON.stringify({ files: [], nextPageToken: "n" }), { status: 200 }));
+    const client = createGoogleDriveShareClient({ token: staticToken, fetchImpl: impl });
+    const res = await client.listFiles({ pageSize: 10, folderId: "top" });
+    expect(res.nextCursor).toBe("n");
+    expect(urls).toHaveLength(1);
+    expect(new URL(urls[0]!).searchParams.get("q")).toContain("'top' in parents");
+  });
 });
 
 describe("mapGoogleError — 400 reason translation", () => {
