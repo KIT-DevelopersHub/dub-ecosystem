@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "campfire-cheer",
+  "worker": "dub-demo-campfire-cheer",
+  "url": "https://dub-demo-campfire-cheer.developershub-site.workers.dev",
+  "deployedSha": "e1e4897b",
+  "branch": "feat/campfire-cheer-button",
+  "actor": "ko-tarou",
+  "markers": ["fe2-home-campfire-cheer","camp-fire.jp/projects/975088"],
+  "live": true,
+  "verifiedAt": "2026-10-25T12:57:58Z",
+  "updatedAt": "2026-10-25T12:57:58Z",
+  "note": "ホーム右レール: 北陸ITカンファCAMPFIRE応援♡カード。管理者は一覧、?demo_account=usr_member で一般メンバー表示"
+}
