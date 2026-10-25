@@ -1182,6 +1182,51 @@ svg {
   max-height: 220px;
   overflow-y: auto;
 }
+/* 北陸ITカンファ CAMPFIRE 応援♡ カード（2タップ導線の1タップ目）。 */
+.fe2-cheer-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.fe2-cheer-lead {
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+.fe2-cheer-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2) var(--dub-space-4);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-brand-500);
+  color: #fff;
+  font-weight: var(--dub-font-weight-bold);
+  text-decoration: none;
+}
+.fe2-cheer-cta:hover {
+  filter: brightness(1.08);
+}
+.fe2-cheer-cta:focus-visible {
+  outline: 2px solid var(--dub-color-brand-500);
+  outline-offset: 2px;
+}
+.fe2-cheer-cta > svg {
+  width: 16px;
+  height: 16px;
+}
+.fe2-cheer-admin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+  padding-top: var(--dub-space-3);
+  border-top: 1px solid var(--dub-color-border-default);
+}
+.fe2-cheer-note {
+  margin: 0 0 var(--dub-space-3);
+}
 /* 最近開いた (P3-1): compact jump-back list; caps its own height so the rail stays
  * within the one-viewport dashboard. */
 .fe2-home-recent-scroll {

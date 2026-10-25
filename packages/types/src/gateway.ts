@@ -125,3 +125,33 @@ export interface PublicParticipationResponse {
    *  常に省略/undefined（後方互換のためフィールドは残置）。 */
   matchKind?: "linked_existing" | "created_new";
 }
+
+// ---- CAMPFIRE クラファン応援 (2タップ導線) ----------------------------------------
+// メンバーが Dub の「応援♡」ボタンを押すと CAMPFIRE のプロジェクトページを本人のブラウザで
+// 新しいタブに開き、その「押した」事実だけを記録する。CAMPFIRE 側の操作(ログイン/♡)は本人が行い、
+// Dub は CAMPFIRE に一切アクセスしない。記録は「押した」= 応援ページを開いた、であり ♡ 済みの証明ではない。
+// GET  /api/v1/cheer/campfire/me            — 自分の状態 (AUTHENTICATED)
+// POST /api/v1/cheer/campfire/clicks        — 押した記録 (AUTHENTICATED・本人のみ)
+// GET  /api/v1/admin/cheer/campfire/clicks  — 押した人の一覧 (identity:admin)
+export interface CheerStatusResponse {
+  cheeredByMe: boolean;
+  /** 自分が最後に押した日時 (ISO)。未押下なら null。 */
+  myLastClickedAt: string | null;
+  /** 押したことがあるメンバーの人数。 */
+  totalCheerers: number;
+}
+export interface CheerClickResponse {
+  ok: true;
+  clickedAt: string;
+}
+export interface CheerClickRow {
+  userId: string;
+  displayName: string;
+  email: string;
+  firstClickedAt: string;
+  lastClickedAt: string;
+  clickCount: number;
+}
+export interface CheerClicksAdminResponse {
+  items: CheerClickRow[];
+}

@@ -25,6 +25,7 @@ import { useRecentVisits } from "../useVisitTracker.tsx";
 import { saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
+import { CampfireCheerCard } from "./dashboard/CampfireCheerCard.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
   CONFERENCE,
@@ -207,9 +208,12 @@ export function HomeScreen({
   homeWidgets = [],
   onOpenNotifications,
   onNavigate,
+  canViewCheerers = false,
 }: {
   api: ApiClient;
   homeWidgets?: HomeWidget[];
+  // 管理者だけ「クラファン応援を押した人」の一覧を見られる（router が identity:admin で判定）。
+  canViewCheerers?: boolean;
   // When provided, the "未読の通知" card becomes a button that opens the shared
   // notification dialog — the SAME modal the header bell opens.
   onOpenNotifications?: () => void;
@@ -464,6 +468,8 @@ export function HomeScreen({
 
         {/* ── right: live BFF panels (unchanged testIds/behavior) ───────────────── */}
         <aside className="fe2-home-side">
+          {/* 北陸ITカンファ CAMPFIRE 応援♡（全メンバー共通の入口なので右レール最上段）。 */}
+          <CampfireCheerCard api={api} canViewCheerers={canViewCheerers} />
           {/* 最近開いた (P3-1): client-side jump-back, above the live panels. */}
           <RecentOpenedCard {...(onNavigate ? { onNavigate } : {})} />
           <Card

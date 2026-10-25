@@ -14,7 +14,7 @@ import type { ComponentType } from "react";
 import type { ApiClient } from "../lib/api-client.tsx";
 import type { Registry, ResolvedRoute } from "../modules/types.tsx";
 import { RequireAuth, RequirePermission, usePermissions } from "../auth/AuthProvider.tsx";
-import { isReleaseGatedFor } from "../lib/releaseGate.ts";
+import { isPrivilegedViewer, isReleaseGatedFor } from "../lib/releaseGate.ts";
 import type { FeatureModuleId, NavEntry } from "../modules/types.tsx";
 import { AppShellLayout } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
@@ -187,14 +187,19 @@ export function createShellRouter(
   const homeRoute = createRoute({
     getParentRoute: () => shellRoute,
     path: "/",
-    component: () => (
-      <HomeScreen
-        api={api}
-        homeWidgets={registry.homeWidgets}
-        onOpenNotifications={openNotificationDialog}
-        {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
-      />
-    ),
+    component: function HomeRoute() {
+      // 管理者判定はホーム内カード（クラファン応援の押した人一覧）用。AuthProvider 配下なので安全。
+      const { can } = usePermissions();
+      return (
+        <HomeScreen
+          api={api}
+          canViewCheerers={isPrivilegedViewer(can)}
+          homeWidgets={registry.homeWidgets}
+          onOpenNotifications={openNotificationDialog}
+          {...(opts?.onNavigate ? { onNavigate: opts.onNavigate } : {})}
+        />
+      );
+    },
   });
 
   const featureRoutes = registry.routes.map((r) => {

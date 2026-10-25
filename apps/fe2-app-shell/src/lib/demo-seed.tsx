@@ -4336,6 +4336,49 @@ function createLpProposalsStore() {
 
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
+// ── 北陸ITカンファ CAMPFIRE 応援♡（押した記録）────────────────────────────────
+// 「押した」= CAMPFIRE ページを開いた記録だけ。セッション内メモリ（リロードで初期化）。
+function createCampfireCheerStore() {
+  const rows = new Map<string, gateway.CheerClickRow>();
+  const seed = (userId: string, displayName: string, email: string, daysAgo: number, count: number): void => {
+    const at = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+    rows.set(userId, { userId, displayName, email, firstClickedAt: at, lastClickedAt: at, clickCount: count });
+  };
+  seed("usr_bob", "佐藤 太郎", "taro@developershub.jp", 2, 1);
+  seed("usr_sponsor", "鈴木 一郎", "suzuki@developershub.jp", 1, 2);
+  seed("usr_lead", "統括 山本", "lead@developershub.jp", 0.2, 1);
+  return {
+    handle(method: string, pathname: string): Response | null {
+      if (method === "GET" && pathname === "/api/v1/cheer/campfire/me") {
+        const me = rows.get(currentMe().user.id);
+        const res: gateway.CheerStatusResponse = {
+          cheeredByMe: Boolean(me),
+          myLastClickedAt: me?.lastClickedAt ?? null,
+          totalCheerers: rows.size,
+        };
+        return json(res);
+      }
+      if (method === "POST" && pathname === "/api/v1/cheer/campfire/clicks") {
+        const u = currentMe().user;
+        const at = new Date().toISOString();
+        const prev = rows.get(u.id);
+        rows.set(u.id, prev
+          ? { ...prev, lastClickedAt: at, clickCount: prev.clickCount + 1 }
+          : { userId: u.id, displayName: u.displayName, email: u.email ?? "", firstClickedAt: at, lastClickedAt: at, clickCount: 1 });
+        const res: gateway.CheerClickResponse = { ok: true, clickedAt: at };
+        return json(res);
+      }
+      if (method === "GET" && pathname === "/api/v1/admin/cheer/campfire/clicks") {
+        if (!currentAccount().permissions.includes("identity:admin")) return problem("FORBIDDEN", "権限がありません", 403);
+        const items = [...rows.values()].sort((a, b) => b.lastClickedAt.localeCompare(a.lastClickedAt));
+        const res: gateway.CheerClicksAdminResponse = { items };
+        return json(res);
+      }
+      return null;
+    },
+  };
+}
+
 export function createDemoFetch(): typeof fetch {
   const boot = createMockFetch({
     me: DEMO_ME,
@@ -4388,6 +4431,8 @@ export function createDemoFetch(): typeof fetch {
   const lpTicketsStore = createLpTicketsStore();
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
+  // 北陸ITカンファ CAMPFIRE 応援♡ — 押した記録（ホームのカード / 管理者の一覧）。
+  const campfireCheerStore = createCampfireCheerStore();
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -4462,6 +4507,7 @@ export function createDemoFetch(): typeof fetch {
       lpStore.handle(method, url.pathname, url, parsedBody) ??
       lpTicketsStore.handle(method, url.pathname, url, parsedBody) ??
       lpProposalsStore.handle(method, url.pathname, url, parsedBody) ??
+      campfireCheerStore.handle(method, url.pathname) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.
