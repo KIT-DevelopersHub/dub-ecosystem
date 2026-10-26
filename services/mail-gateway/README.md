@@ -206,7 +206,7 @@ required ONLY if you want the Queue-based event/audit fan-out.**
 |---|---|---|
 | Worker `fetch` (`POST /send`) | Free | Yes — works |
 | D1 (send-log, inbound, mailboxes) | Free tier | Yes — works |
-| Cron trigger (retention purge) | Free | No (housekeeping) |
+| Cron trigger (予約送信 drain) | Free | No (scheduled send only) |
 | Email Routing (inbound) | Free | No (only for inbound) |
 | **Cloudflare Queues** (`EVT_*`, `AUDIT_QUEUE` producers) | **Paid ($5/mo)** | **No** |
 
@@ -257,8 +257,8 @@ Supports `resend`, `mailchannels`, and `ses` (full SigV4). Env knobs: `MAIL_FROM
   domain, `2xx`-without-id, bad signing key) fail fast. See `src/retry.ts`.
 - **Per-attempt timeout**: each provider call is aborted after `MAIL_SEND_TIMEOUT_MS`
   (default 15s) so a hung upstream can't wedge the Worker; the abort is treated as retryable.
-- **Send log** (`mail_send_log`): every attempt is persisted (`pending → sent | failed`),
-  purged after 30 days by the daily cron.
+- **Send log** (`mail_send_log`): every attempt is persisted (`pending → sent | failed`)
+  and kept indefinitely (no retention purge).
 - **Readiness**: `GET /internal/health/ready` (internal-only) reports the selected provider,
   whether its credentials are present, the effective From, and the tuning — `200 ready:true`
   or `503` with a secret-free issue list.
