@@ -45,8 +45,7 @@ service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/aud
 
 # --- Cron: every 5 minutes (ONE trigger). The scheduled handler runs the 予約送信
 # (scheduled-send) drain on EVERY tick — a "send later" mail has ~5-minute delivery
-# granularity — and runs the daily retention purge only on the ~03:20 UTC tick (gated in
-# code). The Workers FREE plan caps the account at 5 cron triggers, so we keep mail-gateway's
+# granularity. Mail is kept indefinitely (no retention purge). The Workers FREE plan caps the account at 5 cron triggers, so we keep mail-gateway's
 # single existing trigger and just tick more often — no new trigger, no paid Queue. ---
 [triggers]
 crons = ["*/5 * * * *"]
