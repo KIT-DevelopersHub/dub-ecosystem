@@ -26,6 +26,10 @@ bucket_name = "dub-mail-attachments"
 binding = "SVC_IDENTITY"
 service = "identity-roster"      # POST /authz/check (mail:send / mail:read / mail:admin)
 
+[[services]]
+binding = "SVC_MEMBER"
+service = "member-service"       # Gmail safety-net forward: userId -> 名簿 Gmail (README §3.4)
+
 # --- Queue producers ---
 # Domain events (frozen catalog): mail.message.received -> mail-automation,
 # mail.message.sent / send_failed -> notification.
