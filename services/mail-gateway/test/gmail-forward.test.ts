@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Fetcher, ForwardableEmailMessage } from "@cloudflare/workers-types";
 import handler from "../src/index";
-import { FORWARDED_HEADER, forwardToLinkedGmail, gmailForwardEnabled, maskEmail, type GmailForwardDeps } from "../src/gmail-forward";
+import { FORWARDED_HEADER, ORIGINAL_RCPT_HEADER, forwardToArchive, forwardToLinkedGmail, gmailForwardEnabled, maskEmail, type GmailForwardDeps } from "../src/gmail-forward";
 import type { RawInbound } from "../src/mime";
 import { ctx, fakeIdentityFetcher, makeEnv, makeHarness } from "./helpers";
 
@@ -164,20 +164,19 @@ describe("forwardToLinkedGmail", () => {
 
 // ---- Worker email() handler: store-then-forward wiring ----
 
-function fakeMessage(to: string, fail?: Error) {
-  const text =
-    "Message-ID: <wire-1@outside.com>\r\nFrom: Sender <sender@outside.com>\r\nTo: alice@developershub.jp\r\nSubject: wire\r\n\r\nbody";
+function fakeMessage(to: string, fail?: Error | ((rcpt: string) => Error | undefined), opts: { messageId?: string | null; from?: string } = {}) {
+  const messageId = opts.messageId === undefined ? "<wire-1@outside.com>" : opts.messageId;
+  const from = opts.from ?? "sender@outside.com";
+  const text = `${messageId ? `Message-ID: ${messageId}\r\n` : ""}From: ${from}\r\nTo: alice@developershub.jp\r\nSubject: wire\r\n\r\nbody`;
   const bytes = new TextEncoder().encode(text);
   const calls: string[] = [];
+  const sentHeaders: (Headers | undefined)[] = [];
+  const headers = new Headers({ from, to: "alice@developershub.jp", subject: "wire" });
+  if (messageId) headers.set("message-id", messageId);
   const msg = {
-    from: "sender@outside.com",
+    from,
     to,
-    headers: new Headers({
-      "message-id": "<wire-1@outside.com>",
-      from: "Sender <sender@outside.com>",
-      to: "alice@developershub.jp",
-      subject: "wire",
-    }),
+    headers,
     raw: new ReadableStream({
       start(c) {
         c.enqueue(bytes);
@@ -185,14 +184,16 @@ function fakeMessage(to: string, fail?: Error) {
       },
     }),
     rawSize: bytes.byteLength,
-    async forward(rcpt: string) {
+    async forward(rcpt: string, h?: Headers) {
       calls.push(rcpt);
-      if (fail) throw fail;
+      sentHeaders.push(h);
+      const err = typeof fail === "function" ? fail(rcpt) : fail;
+      if (err) throw err;
     },
     setReject() {},
     async reply() {},
   };
-  return { msg: msg as unknown as ForwardableEmailMessage, calls };
+  return { msg: msg as unknown as ForwardableEmailMessage, calls, sentHeaders };
 }
 
 function inboundCount(raw: ReturnType<typeof makeEnv>["raw"]): number {
@@ -235,5 +236,85 @@ describe("email() handler", () => {
     expect(inboundCount(raw)).toBe(1); // deduped by Message-ID (existing behaviour)
     expect(a.calls).toEqual(["alice.personal@gmail.com"]);
     expect(b.calls).toEqual(["bob.personal@gmail.com"]);
+  });
+});
+
+// ---- Archive forward (MAIL_ARCHIVE_FORWARD_TO) ----
+
+const ARCHIVE = "dub.developershub@gmail.com";
+
+describe("email() handler: archive forward", () => {
+  const services = { SVC_IDENTITY: fakeIdentityFetcher(true, ROSTER), SVC_MEMBER: memberFetcher() };
+
+  it("forwards once per Message-ID across recipient invocations, with MAIL_GMAIL_FORWARD off", async () => {
+    const { env, raw } = makeEnv({ ...services, MAIL_ARCHIVE_FORWARD_TO: ARCHIVE });
+    const a = fakeMessage("alice@developershub.jp");
+    const b = fakeMessage("bob@developershub.jp");
+    await handler.email(a.msg, env);
+    await handler.email(b.msg, env);
+    expect(inboundCount(raw)).toBe(1);
+    expect(a.calls).toEqual([ARCHIVE]); // no Gmail forward: flag off
+    expect(b.calls).toEqual([]); // same Message-ID -> no second archive copy
+    expect(a.sentHeaders[0]?.get(ORIGINAL_RCPT_HEADER)).toBe("alice@developershub.jp");
+    expect(a.sentHeaders[0]?.get(FORWARDED_HEADER)).toBe("archive");
+  });
+
+  it("forwards every invocation when the Message-ID is missing", async () => {
+    const { env } = makeEnv({ ...services, MAIL_ARCHIVE_FORWARD_TO: ARCHIVE });
+    const a = fakeMessage("alice@developershub.jp", undefined, { messageId: null });
+    const b = fakeMessage("bob@developershub.jp", undefined, { messageId: null });
+    await handler.email(a.msg, env);
+    await handler.email(b.msg, env);
+    expect(a.calls).toEqual([ARCHIVE]);
+    expect(b.calls).toEqual([ARCHIVE]);
+  });
+
+  it("unverified archive (forward rejects): stored, audited as failure, email() resolves", async () => {
+    const { env, raw, sends } = makeEnv({ ...services, MAIL_ARCHIVE_FORWARD_TO: ARCHIVE });
+    const m = fakeMessage("alice@developershub.jp", new Error("destination address not verified"));
+    await expect(handler.email(m.msg, env)).resolves.toBeUndefined();
+    expect(inboundCount(raw)).toBe(1);
+    const rec = sends.audit.map((e) => e.payload).find((p) => p.action === "mail.message.forward_archive");
+    expect(rec).toMatchObject({ result: "failure", resourceId: "wire-1@outside.com", details: { target: "d***@gmail.com" } });
+    expect(JSON.stringify(sends.audit)).not.toContain(ARCHIVE);
+  });
+
+  it("archive and Gmail forwards are independent (one failing does not stop the other)", async () => {
+    const { env } = makeEnv({ ...services, MAIL_ARCHIVE_FORWARD_TO: ARCHIVE, MAIL_GMAIL_FORWARD: "on" });
+    const m = fakeMessage("alice@developershub.jp", (rcpt) => (rcpt === ARCHIVE ? new Error("not verified") : undefined));
+    await handler.email(m.msg, env);
+    expect(m.calls).toEqual([ARCHIVE, "alice.personal@gmail.com"]);
+  });
+
+  it("unset = no archive forward", async () => {
+    const { env } = makeEnv(services);
+    const m = fakeMessage("alice@developershub.jp");
+    await handler.email(m.msg, env);
+    expect(m.calls).toEqual([]);
+  });
+});
+
+describe("forwardToArchive loop guard", () => {
+  const deps = () => ({ audit: makeHarness().audit, orgId: "org_devhub", ctx: ctx("req_arc"), archiveTo: ARCHIVE });
+
+  it("skips a copy already carrying X-Dub-Forwarded", async () => {
+    const r = recorder();
+    const out = await forwardToArchive(deps(), r.forwarder, rawFor("alice@developershub.jp", {}, { "x-dub-forwarded": "1" }), { firstCopy: true });
+    expect(out).toEqual({ status: "skipped", reason: "already_forwarded" });
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("skips mail sent from the archive address itself", async () => {
+    const r = recorder();
+    const out = await forwardToArchive(deps(), r.forwarder, rawFor("alice@developershub.jp", { from: ARCHIVE }, { from: `Archive <${ARCHIVE}>` }), { firstCopy: true });
+    expect(out).toEqual({ status: "skipped", reason: "from_target" });
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("skips a later recipient's copy of an already-archived Message-ID", async () => {
+    const r = recorder();
+    const out = await forwardToArchive(deps(), r.forwarder, rawFor("bob@developershub.jp"), { firstCopy: false });
+    expect(out).toEqual({ status: "skipped", reason: "duplicate_recipient_copy" });
+    expect(r.calls).toHaveLength(0);
   });
 });

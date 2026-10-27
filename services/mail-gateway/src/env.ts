@@ -33,6 +33,10 @@ export interface Env {
   // else (default: unset) = OFF. Each Gmail must first be a VERIFIED Email Routing
   // destination address, or forward() fails (recorded, never blocks ingest).
   MAIL_GMAIL_FORWARD?: string;
+  // Every inbound mail is also forwarded (once per Message-ID) to this single address.
+  // Unset/empty = off. Independent of MAIL_GMAIL_FORWARD. Must be a VERIFIED Email Routing
+  // destination, or forward() fails (logged + audited, storage unaffected).
+  MAIL_ARCHIVE_FORWARD_TO?: string;
 
   // --- outbound provider config (Workers Secrets; real send credentials) ---
   MAIL_OUTBOUND_PROVIDER?: string; // "resend" (default, ADR-0001) | "ses" | "mailchannels" | "mock"

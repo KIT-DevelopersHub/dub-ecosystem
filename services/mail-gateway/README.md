@@ -239,6 +239,27 @@ addresses. Adding one sends a verification mail to that member, so each step nee
 
 Disable: remove the var (or set anything other than `on`) and redeploy.
 
+## 3.5 Archive forward (`MAIL_ARCHIVE_FORWARD_TO`)
+
+Independent of §3.4: when `MAIL_ARCHIVE_FORWARD_TO` is set (prod: `dub.developershub@gmail.com`
+in `wrangler.free.toml`), every inbound mail is stored first and then forwarded to that one
+address.
+
+- **Once per Message-ID**: Email Routing invokes `email()` once per Dub recipient. Only the
+  invocation that newly stored the `mail_inbound` row forwards (later recipients dedup to
+  `processed=false` and skip). Ingest failure → forward anyway. A mail without Message-ID
+  gets a unique synthetic id, so it forwards on every invocation.
+- **Headers**: `X-Dub-Forwarded: archive` and `X-Dub-Original-Rcpt: <envelope recipient of
+  the forwarding invocation>`. Other recipients of the same mail are visible in its To/CC.
+- **Loop guards**: skip if `X-Dub-Forwarded` is present or the sender is the archive address.
+- **Failure isolation**: a rejected forward (e.g. the address is not yet verified) is logged
+  (`archive forward failed`) and audited as `mail.message.forward_archive` (`failure`, masked
+  address); storage and the Gmail forward are unaffected.
+
+One-time setup: Cloudflare dashboard → developershub.jp → Email → Email Routing →
+**Destination addresses** → *Add destination address* → `dub.developershub@gmail.com`, then
+open the verification mail in that Gmail and click the link (status → *Verified*).
+
 ## 4. Workers free-tier verdict (9-E: is a paid plan required?)
 
 **Conclusion: the outbound send endpoint runs on the Workers FREE plan. A paid plan is

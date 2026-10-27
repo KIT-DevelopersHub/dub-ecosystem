@@ -84,8 +84,8 @@ export async function forwardToLinkedGmail(
   } catch (err) {
     outcome = { status: "skipped", reason: `lookup_error: ${err instanceof Error ? err.message : String(err)}` };
   }
-  record(deps, outcome, target);
-  if (outcome.status !== "skipped") await audit(deps, outcome, target);
+  record(deps, "gmail", outcome, target);
+  if (outcome.status !== "skipped") await audit(deps, "gmail", outcome, target);
   return outcome;
 }
 
@@ -123,10 +123,13 @@ async function decideAndForward(
   }
 }
 
-function record(deps: GmailForwardDeps, outcome: ForwardOutcome, target: string | null): void {
+type ForwardKind = "gmail" | "archive";
+type RecordDeps = Pick<GmailForwardDeps, "audit" | "orgId" | "ctx">;
+
+function record(deps: RecordDeps, kind: ForwardKind, outcome: ForwardOutcome | ArchiveOutcome, target: string | null): void {
   consoleSink({
     level: outcome.status === "failed" ? "error" : "info",
-    message: `mail-gateway: gmail forward ${outcome.status}`,
+    message: `mail-gateway: ${kind} forward ${outcome.status}`,
     service: SERVICE_NAME,
     requestId: deps.ctx.requestId,
     fields: {
@@ -136,15 +139,21 @@ function record(deps: GmailForwardDeps, outcome: ForwardOutcome, target: string 
   });
 }
 
-async function audit(deps: GmailForwardDeps, outcome: ForwardOutcome, target: string | null): Promise<void> {
+async function audit(
+  deps: RecordDeps,
+  kind: ForwardKind,
+  outcome: ForwardOutcome | ArchiveOutcome,
+  target: string | null,
+  messageId?: string,
+): Promise<void> {
   try {
     await publishAudit(deps.audit, {
-      action: "mail.message.forward_gmail",
+      action: kind === "gmail" ? "mail.message.forward_gmail" : "mail.message.forward_archive",
       actorId: null,
       orgId: deps.orgId,
       result: outcome.status === "forwarded" ? "success" : "failure",
-      resourceType: "user",
-      resourceId: "userId" in outcome ? outcome.userId : null,
+      resourceType: kind === "gmail" ? "user" : "mail_message",
+      resourceId: "userId" in outcome ? outcome.userId : (messageId ?? null),
       details: {
         ...(target ? { target: maskEmail(target) } : {}),
         ...(outcome.status === "failed" ? { error: outcome.reason } : {}),
@@ -155,4 +164,49 @@ async function audit(deps: GmailForwardDeps, outcome: ForwardOutcome, target: st
   } catch {
     // audit is best-effort; the console record above already captured the outcome.
   }
+}
+
+// ---- Archive forward (MAIL_ARCHIVE_FORWARD_TO) ----
+// Every inbound mail is also forwarded to ONE fixed archive address, independent of
+// MAIL_GMAIL_FORWARD. Email Routing invokes email() once per Dub recipient, so the caller
+// passes `firstCopy` (this invocation newly stored the Message-ID, or ingest failed) and
+// later recipient invocations of the same Message-ID are skipped -> one archive copy.
+
+/** Envelope recipient of the invocation that forwarded the archive copy. */
+export const ORIGINAL_RCPT_HEADER = "X-Dub-Original-Rcpt";
+
+export type ArchiveOutcome = { status: "forwarded" } | { status: "skipped"; reason: string } | { status: "failed"; reason: string };
+
+export interface ArchiveForwardDeps extends RecordDeps {
+  archiveTo: string;
+}
+
+/** Forward `raw` to the archive address once per Message-ID. NEVER throws. */
+export async function forwardToArchive(
+  deps: ArchiveForwardDeps,
+  message: MailForwarder,
+  raw: RawInbound,
+  opts: { firstCopy: boolean; messageId?: string },
+): Promise<ArchiveOutcome> {
+  const target = lower(deps.archiveTo);
+  let outcome: ArchiveOutcome;
+  if (!target.includes("@")) outcome = { status: "skipped", reason: "no_target" };
+  else if (raw.headers[FORWARDED_HEADER.toLowerCase()] !== undefined) outcome = { status: "skipped", reason: "already_forwarded" };
+  else if ([lower(parseAddress(raw.from).email), lower(parseAddress(raw.headers["from"] ?? "").email)].includes(target))
+    outcome = { status: "skipped", reason: "from_target" };
+  else if (!opts.firstCopy) outcome = { status: "skipped", reason: "duplicate_recipient_copy" };
+  else {
+    try {
+      const headers = new Headers({ [FORWARDED_HEADER]: "archive" });
+      const rcpt = lower(parseAddress(raw.to).email);
+      if (rcpt) headers.set(ORIGINAL_RCPT_HEADER, rcpt);
+      await message.forward(target, headers);
+      outcome = { status: "forwarded" };
+    } catch (err) {
+      outcome = { status: "failed", reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  record(deps, "archive", outcome, target);
+  if (outcome.status !== "skipped") await audit(deps, "archive", outcome, target, opts.messageId);
+  return outcome;
 }

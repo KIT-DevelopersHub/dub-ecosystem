@@ -3,8 +3,8 @@
 import type { ExecutionContext, ForwardableEmailMessage, ReadableStream, ScheduledController } from "@cloudflare/workers-types";
 import { newRequestId } from "@dub/http";
 import { createApp } from "./app";
-import { buildGmailForwardDeps, buildInboundDeps } from "./deps";
-import { forwardToLinkedGmail, gmailForwardEnabled } from "./gmail-forward";
+import { buildArchiveForwardDeps, buildGmailForwardDeps, buildInboundDeps } from "./deps";
+import { forwardToArchive, forwardToLinkedGmail, gmailForwardEnabled } from "./gmail-forward";
 import { handleInbound } from "./inbound";
 import { headersToMap, type RawInbound } from "./mime";
 import { runScheduledSendDrain } from "./scheduled-send";
@@ -80,17 +80,25 @@ const handler = {
     // since that is exactly when the Gmail copy matters — and never throws itself, so it can
     // neither drop nor block storage. The ingest error is re-thrown afterwards as before.
     let ingestError: unknown = null;
+    let ingest: Awaited<ReturnType<typeof handleInbound>> | null = null;
     try {
-      await handleInbound(buildInboundDeps(env, ctx), raw);
+      ingest = await handleInbound(buildInboundDeps(env, ctx), raw);
     } catch (err) {
       ingestError = err;
     }
+    const forwarder = { forward: (to: string, headers?: Headers) => message.forward(to, headers as never) };
+    const archiveTo = env.MAIL_ARCHIVE_FORWARD_TO?.trim();
+    if (archiveTo) {
+      // One archive copy per Message-ID: only the invocation that newly stored the row (a
+      // later recipient's invocation dedups to processed=false). Ingest failed -> forward
+      // anyway. A missing Message-ID gets a unique synthetic id, so it always forwards.
+      await forwardToArchive(buildArchiveForwardDeps(env, ctx, archiveTo), forwarder, raw, {
+        firstCopy: ingest === null || ingest.processed,
+        ...(ingest ? { messageId: ingest.message.messageId } : {}),
+      });
+    }
     if (gmailForwardEnabled(env.MAIL_GMAIL_FORWARD)) {
-      await forwardToLinkedGmail(
-        buildGmailForwardDeps(env, ctx),
-        { forward: (to, headers) => message.forward(to, headers as never) },
-        raw,
-      );
+      await forwardToLinkedGmail(buildGmailForwardDeps(env, ctx), forwarder, raw);
     }
     if (ingestError) throw ingestError;
   },
