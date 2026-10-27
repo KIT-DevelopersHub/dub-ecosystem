@@ -11,6 +11,7 @@ import type { mail } from "@dub/types";
 import type { MailApi } from "../mailApi.tsx";
 import { MailApiProvider } from "../MailProvider.tsx";
 import { GmailApp } from "./GmailApp.tsx";
+import { MAIL_POLL_MS } from "./useMailSync.tsx";
 import { reducer, initialMailState, type MailState } from "./useMailStore.tsx";
 import { hasSharedMail, inFolder, sharedRecipientLabel, threadMine, threadUnread, type MailThreadModel } from "./mailModel.ts";
 import {
@@ -225,6 +226,39 @@ describe("GmailApp (hydrates from the gateway)", () => {
     render(wrap(<GmailApp />, api));
     expect(await screen.findByTestId("fe2-mail-inbox-empty")).toBeInTheDocument();
     expect(screen.queryAllByTestId("fe2-mail-inbox-item")).toHaveLength(0);
+  });
+
+  // Regression: mail that arrives after the inbox loaded never appeared until a full page
+  // reload (the 更新 button only cleared checks, and nothing re-fetched).
+  it("更新 re-fetches the inbox so newly arrived mail appears without a reload", async () => {
+    const listInbox = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+      .mockResolvedValue({ items: DEMO_INBOX_ITEMS, nextCursor: null });
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: vi.fn().mockResolvedValue({ items: [], nextCursor: null }) })));
+    expect(await screen.findByTestId("fe2-mail-inbox-empty")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("fe2-mail-refresh"));
+    await waitFor(() => expect(screen.getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0));
+    expect(listInbox).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-fetches the inbox in the background on an interval and when the tab becomes visible", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const listInbox = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+      render(wrap(<GmailApp />, fakeApi({ listInbox })));
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        vi.advanceTimersByTime(MAIL_POLL_MS);
+      });
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(3));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("opens a floating compose window from the compose button", async () => {
