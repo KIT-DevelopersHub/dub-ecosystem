@@ -421,11 +421,13 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             <HeaderButton label="削除" icon="trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })} />
           </>
         )}
-        <HeaderButton
-          label={threadUnread(thread) ? "既読にする" : "未読にする"}
-          icon="mail-open"
-          onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: threadUnread(thread) })}
-        />
+        {threadMine(thread) ? (
+          <HeaderButton
+            label={threadUnread(thread) ? "既読にする" : "未読にする"}
+            icon="mail-open"
+            onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: threadUnread(thread) })}
+          />
+        ) : null}
       </div>
 
       <div style={{ flex: 1, overflowY: "auto" }}>

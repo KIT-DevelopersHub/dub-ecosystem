@@ -466,21 +466,17 @@ export async function listThread(db: DbClient, threadId: string, scope: InboundS
 }
 
 /** Mark a message read (idempotent): stamps read_at only on the first open. Returns
- *  whether the message exists FOR THIS OWNER so the route can 404 an unknown/foreign id
- *  (a user can never flip another account's read state). */
-export async function markInboundRead(db: DbClient, id: string, scope: InboundScope): Promise<{ found: boolean }> {
-  // Oversight (mail:read_all) may open (and thus mark read) any message. A role-shared
-  // scope may OPEN a peer's message but only flips read_at on the viewer's own mail
-  // (userIds[0] = self): read_at is per message, so a peer opening it would otherwise clear
-  // the owner's unread badge.
+ *  whether the message is visible in `scope` so the route can 404 an unknown/foreign id.
+ *  read_at is only ever flipped on `self`'s own mail: anyone else's is view-only. */
+export async function markInboundRead(db: DbClient, id: string, scope: InboundScope, self: string): Promise<{ found: boolean }> {
+  // Oversight (mail:read_all) and role sharing may OPEN another account's message, but
+  // read_at is per message — flipping it would clear the owner's unread state.
   const owner = inboundOwnerClause(scope);
   const ownerSql = owner ? ` AND ${owner.sql}` : "";
   const ownerBinds = owner ? owner.binds : [];
   const row = await db.first<{ id: string }>(`SELECT id FROM mail_inbound WHERE id = ?${ownerSql}`, id, ...ownerBinds);
   if (!row) return { found: false };
-  const write = typeof scope === "object" && "userIds" in scope ? inboundOwnerClause(scope.userIds[0] ?? "") : owner;
-  const writeSql = write ? ` AND ${write.sql}` : "";
-  await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ?${writeSql} AND read_at IS NULL`, nowIso(), id, ...(write ? write.binds : []));
+  await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND owner_user_id = ? AND read_at IS NULL`, nowIso(), id, self);
   return { found: true };
 }
 

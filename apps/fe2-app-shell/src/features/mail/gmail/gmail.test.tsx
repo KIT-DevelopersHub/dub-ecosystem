@@ -90,6 +90,19 @@ describe("mail store reducer", () => {
     expect(next.threads.find((t) => t.id === other.id)!.folder).toBe("archive");
   });
 
+  it("never changes the read state of another account's mail (view-only)", () => {
+    const s = base();
+    const t = s.threads.find((x) => threadUnread(x))!;
+    const others: MailState = {
+      ...s,
+      threads: s.threads.map((x) => (x.id === t.id ? { ...x, messages: x.messages.map((m) => ({ ...m, read: false, mine: false })) } : x)),
+    };
+    expect(threadUnread(others.threads.find((x) => x.id === t.id)!)).toBe(false);
+    const opened = reducer(others, { type: "OPEN_THREAD", id: t.id });
+    const read = reducer(opened, { type: "SET_READ", ids: [t.id], read: true });
+    expect(read.threads.find((x) => x.id === t.id)!.messages.every((m) => !m.read)).toBe(true);
+  });
+
   it("marks every message read when a thread is opened", () => {
     const s = base();
     const unread = s.threads.find((t) => threadUnread(t))!;

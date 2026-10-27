@@ -126,13 +126,13 @@ export function useMailSync(): void {
           // we mark every received message read server-side (markRead is idempotent, and a
           // maillog id would 404). Best-effort — a failure never blocks opening the thread.
           const known = thread.messages;
-          for (const m of known) if (!m.outbound) void api.markRead(m.id).catch(() => undefined);
+          for (const m of known) if (!m.outbound && m.mine !== false) void api.markRead(m.id).catch(() => undefined);
           const full = await api.getThread(thread.id);
           // getThread returns RECEIVED messages only. Preserve our own replies (folded Sent
           // rows, outbound=true) that it omits, so a sent reply stays visible in the thread
           // instead of vanishing on refresh. Dedup by id, order by date. Force read=true so a
           // racing getThread (server not yet reflecting markRead) can't revert to unread.
-          const inbound = threadDetailToMessages(full).map((m) => ({ ...m, read: true }));
+          const inbound = threadDetailToMessages(full).map((m) => (m.mine === false ? m : { ...m, read: true }));
           const ours = known.filter((m) => m.outbound && !inbound.some((i) => i.id === m.id));
           const messages = [...inbound, ...ours].sort((a, b) => a.date.localeCompare(b.date));
           if (alive) dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages });
