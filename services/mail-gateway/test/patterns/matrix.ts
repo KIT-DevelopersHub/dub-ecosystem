@@ -2,7 +2,7 @@
 // today and run as it.fails (CI turns red once the behaviour changes — then drop the field).
 import { A, B, C, INFO, UNKNOWN, X, Y, Z, type KnownIssue, type MailPattern } from "./types";
 
-const TRACKING = "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/NNN";
+const TRACKING = "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/698";
 const SINGLE_OWNER: KnownIssue = {
   ref: `${TRACKING}#known-single-owner`,
   why: "mail_inbound = 1 row per Message-ID with one owner_user_id; the 2nd internal copy is dropped by seenInbound()",
