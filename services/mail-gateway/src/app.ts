@@ -248,10 +248,10 @@ export function createApp() {
   });
 
   // Mark a message read (opened in the inbox). Idempotent: re-opening is a no-op.
-  // メール閲覧 + mail:read is sufficient — reading a message you can see also flips its own
-  // read flag, and `scopeOf` keeps it to a message this account may see.
+  // メール閲覧 + mail:read is sufficient. Only the caller's own mail is flipped; another
+  // account's (read_all / role sharing) is view-only and answers 200 unchanged.
   ext.post("/messages/:id/read", async (c) => {
-    const { found } = await markInboundRead(dbOf(c), c.req.param("id"), await inboundScopeOf(c));
+    const { found } = await markInboundRead(dbOf(c), c.req.param("id"), await inboundScopeOf(c), ownerOf(c));
     if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     return c.json({ read: true } satisfies mail.MailMessageState);
   });

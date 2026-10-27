@@ -394,12 +394,14 @@ function ThreadRow({
                 </StopClick>
               </>
             )}
-            <StopClick
-              label={unread ? "既読にする" : "未読にする"}
-              onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: unread })}
-            >
-              <MailIcon name={unread ? "mail-open" : "inbox"} size={18} />
-            </StopClick>
+            {threadMine(thread) ? (
+              <StopClick
+                label={unread ? "既読にする" : "未読にする"}
+                onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: unread })}
+              >
+                <MailIcon name={unread ? "mail-open" : "inbox"} size={18} />
+              </StopClick>
+            ) : null}
           </span>
         ) : (
           <span

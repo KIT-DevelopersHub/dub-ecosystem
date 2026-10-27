@@ -87,7 +87,8 @@ const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${(seq++).to
 
 function setRead(threads: MailThreadModel[], ids: Set<string>, read: boolean): MailThreadModel[] {
   return threads.map((t) =>
-    ids.has(t.id) ? { ...t, messages: t.messages.map((m) => ({ ...m, read })) } : t,
+    // Another account's mail is view-only: its read state belongs to its owner.
+    ids.has(t.id) ? { ...t, messages: t.messages.map((m) => (m.mine === false ? m : { ...m, read })) } : t,
   );
 }
 

@@ -742,6 +742,18 @@ describe("oversight — mail:read_all bypasses account scope", () => {
     expect(thread.status).toBe(200);
   });
 
+  it("Mark read: a mail:read_all holder can open another account's message but never flips its read state", async () => {
+    const { env, raw } = oversightEnv();
+    seedOwned(raw, { id: "in_alice", ownerUserId: "usr_alice" });
+    seedOwned(raw, { id: "in_super", ownerUserId: "usr_super" });
+    const mark = (id: string) => app.fetch(new Request(`https://svc/mail/messages/${id}/read`, { method: "POST", headers: asUser("usr_super") }), env);
+    expect((await mark("in_alice")).status).toBe(200);
+    expect((await mark("in_super")).status).toBe(200);
+    const readAt = (id: string) => (raw.prepare(`SELECT read_at FROM mail_inbound WHERE id = ?`).get(id) as { read_at: string | null }).read_at;
+    expect(readAt("in_alice")).toBeNull();
+    expect(readAt("in_super")).not.toBeNull();
+  });
+
   it("Sent: a mail:read_all holder sees another user's sent mail", async () => {
     const { env } = oversightEnv();
     await app.fetch(
