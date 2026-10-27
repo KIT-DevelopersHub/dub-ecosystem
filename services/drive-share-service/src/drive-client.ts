@@ -14,7 +14,8 @@ import type {
 } from "./types";
 
 export interface ListFilesParams {
-  /** Restrict to direct children of this folder id. Omit for "My Drive" root scope. */
+  /** Restrict to direct children of this folder id. Omit (without q) for the tree's
+   *  top level: visible items whose parent is not itself visible. */
   folderId?: string;
   /** Substring name filter. */
   q?: string;
