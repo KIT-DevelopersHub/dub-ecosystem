@@ -56,16 +56,36 @@ export async function resolveInboundOwner(
     seen.add(email);
     if (looked >= MAX_LOOKUPS) break;
     looked++;
-    try {
-      const res = await client.post<{ user: identity.IdentityUser | null }, { email: string }>(
-        ctx,
-        "/internal/users/lookup",
-        { email },
-      );
-      if (res?.user?.id) return res.user.id;
-    } catch {
-      // identity failure for this address — try the next recipient, else fall through null.
-    }
+    const id = await lookupWith(client, ctx, email);
+    if (id) return id;
   }
   return null;
+}
+
+type IdentityClient = ReturnType<typeof createServiceClient>;
+
+/** userId for one address, or null (no roster user / identity failure). Never throws. */
+async function lookupWith(client: IdentityClient, ctx: RequestContext, email: string): Promise<string | null> {
+  try {
+    const res = await client.post<{ user: identity.IdentityUser | null }, { email: string }>(
+      ctx,
+      "/internal/users/lookup",
+      { email },
+    );
+    return res?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve exactly one address to a roster userId (null when unknown). Never throws. */
+export async function lookupRosterUserId(
+  identityBinding: Fetcher | undefined,
+  ctx: RequestContext,
+  email: string,
+): Promise<string | null> {
+  const e = email.trim().toLowerCase();
+  if (!identityBinding || !e) return null;
+  const client = createServiceClient(identityBinding, { service: "identity-roster", caller: SERVICE_NAME });
+  return lookupWith(client, ctx, e);
 }

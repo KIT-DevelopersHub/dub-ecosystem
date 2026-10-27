@@ -595,18 +595,6 @@ export async function getAttachment(db: DbClient, kind: "sent" | "inbound", mess
   );
 }
 
-/** R2 keys of attachments whose rows are about to be purged (so the caller can delete the
- *  bytes too). Uses the retention cutoffs for the owning message kind. */
-export async function attachmentKeysOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<string[]> {
-  const rows = await db.all<{ r2_key: string }>(
-    `SELECT r2_key FROM mail_attachments
-       WHERE (message_kind = 'sent' AND created_at < ?) OR (message_kind = 'inbound' AND created_at < ?)`,
-    sendCutoff,
-    inboundCutoff,
-  );
-  return rows.map((r) => r.r2_key);
-}
-
 // ---- per-user thread flags (改善#8: star/archive/trash persisted server-side) ----
 export interface UserFlagRow {
   owner_user_id: string;
@@ -682,21 +670,6 @@ export async function upsertUserFlags(
     now,
   );
   return merged;
-}
-
-// ---- retention purge (scheduled) ----
-export async function purgeOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<{ sendLog: number; inbound: number; attachments: number }> {
-  const sendLog = (await db.run(`DELETE FROM mail_send_log WHERE created_at < ?`, sendCutoff)).meta.changes;
-  const inbound = (await db.run(`DELETE FROM mail_inbound WHERE created_at < ?`, inboundCutoff)).meta.changes;
-  const attachments = (
-    await db.run(
-      `DELETE FROM mail_attachments
-         WHERE (message_kind = 'sent' AND created_at < ?) OR (message_kind = 'inbound' AND created_at < ?)`,
-      sendCutoff,
-      inboundCutoff,
-    )
-  ).meta.changes;
-  return { sendLog, inbound, attachments };
 }
 
 // ---- scheduled send (予約送信) ----
@@ -920,17 +893,6 @@ export async function markScheduledAttemptFailed(db: DbClient, id: string, error
     nowIso(),
     id,
   );
-}
-
-/** Retention purge for terminal scheduled rows (sent/canceled/failed) older than cutoff.
- *  'scheduled' rows are never purged (a far-future schedule must survive). */
-export async function purgeScheduledOlderThan(db: DbClient, cutoff: string): Promise<number> {
-  return (
-    await db.run(
-      `DELETE FROM mail_scheduled WHERE status IN ('sent','canceled','failed') AND updated_at < ?`,
-      cutoff,
-    )
-  ).meta.changes;
 }
 
 // ---- id mints ----

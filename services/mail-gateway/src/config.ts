@@ -1,4 +1,4 @@
-// mail-gateway service constants. Centralized so retention windows and the default
+// mail-gateway service constants. Centralized so limits and the default
 // mailbox stay in one place (they cross the app / inbound / cron boundaries).
 
 export const SERVICE_NAME = "mail-gateway";
@@ -14,10 +14,6 @@ export const DEFAULT_FROM_ADDRESS = "info@developershub.jp";
 // Email Routing forwards archive@ back into this Worker — is ingested like any inbound
 // and surfaced to mail:read_all (oversight) holders. Overridable via MAIL_ARCHIVE_CC.
 export const DEFAULT_ARCHIVE_CC_ADDRESS = "archive@developershub.jp";
-
-// Retention windows (days) — purged by the daily scheduled handler (design §3).
-export const SEND_LOG_RETENTION_DAYS = 30;
-export const INBOUND_RETENTION_DAYS = 30;
 
 // Validation limits.
 export const SUBJECT_MAX = 998; // RFC 5322 line-length ceiling for a header value

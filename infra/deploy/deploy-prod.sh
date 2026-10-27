@@ -103,7 +103,7 @@ deploy file-meta       services/file-meta/wrangler.free.toml
 deploy drive-proxy     services/drive-proxy/wrangler.free.toml
 # member-service (運営メンバー管理) binds only SVC_IDENTITY (step 1), but chat-service and
 # drive-share-service now bind IT (SVC_MEMBER = チーム単位メンションの展開 / ミーティング招待先の名簿
-# Gmail) and api-gateway binds it too (step 4) — so it must land BEFORE both: binding a Worker
+# Gmail), mail-gateway binds it (Gmail safety-net forward) and api-gateway binds it too (step 4) — so it must land BEFORE both: binding a Worker
 # that does not exist yet fails the deploy (CF 10143).
 deploy member-service  services/member-service/wrangler.free.toml
 # drive-share-service binds SVC_IDENTITY (step 1) + SVC_MEMBER (just above); api-gateway binds it

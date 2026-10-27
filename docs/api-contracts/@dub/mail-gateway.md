@@ -475,12 +475,11 @@ identical to mail-automation's mirror; the HTTP read routes (§5.2–5.4) return
 
 ---
 
-## 8. Retention purge (`scheduled()` — Cron)
+## 8. Retention (`scheduled()` — Cron)
 
-Cron `20 3 * * *` (03:20 UTC daily). Deletes `mail_send_log` rows older than 30 days and
-`mail_inbound` rows older than 30 days (`SEND_LOG_RETENTION_DAYS` /
-`INBOUND_RETENTION_DAYS`). Returns `{ sendLog, inbound }` deleted counts (logged, not a
-wire response).
+Mail is kept **indefinitely**. Cron `*/5 * * * *` runs only the 予約送信 (scheduled-send)
+drain; there is no retention purge of `mail_send_log` / `mail_inbound` /
+`mail_attachments` / `mail_scheduled` or their R2 blobs.
 
 ---
 

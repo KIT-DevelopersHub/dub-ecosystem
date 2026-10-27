@@ -197,6 +197,69 @@ token value is never echoed).
 
 ---
 
+## 3.4 Gmail safety-net forward (`MAIL_GMAIL_FORWARD`)
+
+Every inbound copy is stored first; then, when `MAIL_GMAIL_FORWARD = "on"`, the Worker also
+calls `message.forward(<名簿 Gmail>)` for the **envelope recipient** (`src/gmail-forward.ts`).
+
+- **Who**: the roster user of the envelope address (`identity-roster /internal/users/lookup`)
+  whose 運営メンバー row is linked (`member_people.identity_user_id`) and has a `gmail`
+  (`member-service /members/internal/google-emails`). No link / no Gmail = skipped.
+- **Multi-recipient**: Email Routing invokes `email()` once per envelope recipient, so a mail
+  To/CC'd to several Dub users forwards to each one's own Gmail once. Header To/CC are never
+  used (would double-forward and could leak a BCC).
+- **Loop guards**: a copy carrying `X-Dub-Forwarded` is never re-forwarded (we stamp it);
+  a target on our own zone and mail sent *from* the target Gmail are skipped; the archive
+  address is never forwarded.
+- **Failure isolation**: a forward failure (e.g. unverified destination) is caught, logged
+  (`gmail forward failed`, masked address) and audited as `mail.message.forward_gmail`
+  (`failure`). It never drops or blocks storage. The forward also runs when ingest threw
+  (the ingest error is re-thrown afterwards, as before).
+- **Default OFF**: the var is unset in `wrangler.free.toml`, so merging/deploying changes nothing.
+
+### Enabling (manual, owner approval required)
+
+`message.forward()` only delivers to addresses **verified** as Email Routing destination
+addresses. Adding one sends a verification mail to that member, so each step needs approval.
+
+1. List targets (read-only): `SELECT p.gmail FROM member_people p JOIN identity_users u ON
+   u.id = p.identity_user_id WHERE TRIM(COALESCE(p.gmail,'')) <> ''`.
+2. Add each as a destination address — either
+   - Dashboard: Cloudflare → developershub.jp → Email → Email Routing → **Destination
+     addresses** → *Add destination address*; or
+   - API (token with **Account › Email Routing Addresses › Edit**):
+     `POST /accounts/{account_id}/email/routing/addresses` body `{"email":"<gmail>"}`.
+3. Each member clicks the verification link Cloudflare mails them (status becomes
+   *Verified*; check via `GET /accounts/{account_id}/email/routing/addresses`).
+   Unverified members simply get `failed` audit rows until they verify — no data impact.
+4. Set `MAIL_GMAIL_FORWARD = "on"` in `[vars]` of `wrangler.free.toml` and deploy through the
+   normal flow (or `wrangler secret put MAIL_GMAIL_FORWARD` for an out-of-band toggle).
+5. Verify: send a test mail to a verified member, confirm it is in the Dub inbox and in the
+   Gmail (check Spam), and that the Worker log shows `gmail forward forwarded`.
+
+Disable: remove the var (or set anything other than `on`) and redeploy.
+
+## 3.5 Archive forward (`MAIL_ARCHIVE_FORWARD_TO`)
+
+Independent of §3.4: when `MAIL_ARCHIVE_FORWARD_TO` is set (prod: `dub.developershub@gmail.com`
+in `wrangler.free.toml`), every inbound mail is stored first and then forwarded to that one
+address.
+
+- **Once per Message-ID**: Email Routing invokes `email()` once per Dub recipient. Only the
+  invocation that newly stored the `mail_inbound` row forwards (later recipients dedup to
+  `processed=false` and skip). Ingest failure → forward anyway. A mail without Message-ID
+  gets a unique synthetic id, so it forwards on every invocation.
+- **Headers**: `X-Dub-Forwarded: archive` and `X-Dub-Original-Rcpt: <envelope recipient of
+  the forwarding invocation>`. Other recipients of the same mail are visible in its To/CC.
+- **Loop guards**: skip if `X-Dub-Forwarded` is present or the sender is the archive address.
+- **Failure isolation**: a rejected forward (e.g. the address is not yet verified) is logged
+  (`archive forward failed`) and audited as `mail.message.forward_archive` (`failure`, masked
+  address); storage and the Gmail forward are unaffected.
+
+One-time setup: Cloudflare dashboard → developershub.jp → Email → Email Routing →
+**Destination addresses** → *Add destination address* → `dub.developershub@gmail.com`, then
+open the verification mail in that Gmail and click the link (status → *Verified*).
+
 ## 4. Workers free-tier verdict (9-E: is a paid plan required?)
 
 **Conclusion: the outbound send endpoint runs on the Workers FREE plan. A paid plan is
@@ -206,7 +269,7 @@ required ONLY if you want the Queue-based event/audit fan-out.**
 |---|---|---|
 | Worker `fetch` (`POST /send`) | Free | Yes — works |
 | D1 (send-log, inbound, mailboxes) | Free tier | Yes — works |
-| Cron trigger (retention purge) | Free | No (housekeeping) |
+| Cron trigger (予約送信 drain) | Free | No (scheduled send only) |
 | Email Routing (inbound) | Free | No (only for inbound) |
 | **Cloudflare Queues** (`EVT_*`, `AUDIT_QUEUE` producers) | **Paid ($5/mo)** | **No** |
 
@@ -257,8 +320,8 @@ Supports `resend`, `mailchannels`, and `ses` (full SigV4). Env knobs: `MAIL_FROM
   domain, `2xx`-without-id, bad signing key) fail fast. See `src/retry.ts`.
 - **Per-attempt timeout**: each provider call is aborted after `MAIL_SEND_TIMEOUT_MS`
   (default 15s) so a hung upstream can't wedge the Worker; the abort is treated as retryable.
-- **Send log** (`mail_send_log`): every attempt is persisted (`pending → sent | failed`),
-  purged after 30 days by the daily cron.
+- **Send log** (`mail_send_log`): every attempt is persisted (`pending → sent | failed`)
+  and kept indefinitely (no retention purge).
 - **Readiness**: `GET /internal/health/ready` (internal-only) reports the selected provider,
   whether its credentials are present, the effective From, and the tuning — `200 ready:true`
   or `503` with a secret-free issue list.
