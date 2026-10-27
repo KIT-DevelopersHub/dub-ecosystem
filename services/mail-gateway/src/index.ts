@@ -3,7 +3,8 @@
 import type { ExecutionContext, ForwardableEmailMessage, ReadableStream, ScheduledController } from "@cloudflare/workers-types";
 import { newRequestId } from "@dub/http";
 import { createApp } from "./app";
-import { buildInboundDeps } from "./deps";
+import { buildGmailForwardDeps, buildInboundDeps } from "./deps";
+import { forwardToLinkedGmail, gmailForwardEnabled } from "./gmail-forward";
 import { handleInbound } from "./inbound";
 import { headersToMap, type RawInbound } from "./mime";
 import { runScheduledSendDrain } from "./scheduled-send";
@@ -75,7 +76,23 @@ const handler = {
       ...(hasR2 ? { rawFull: decoder.decode(bytes) } : {}),
       ...(truncated ? { truncated: true } : {}),
     };
-    await handleInbound(buildInboundDeps(env, ctx), raw);
+    // Store first. The Gmail forward runs after the ingest attempt — also when ingest threw,
+    // since that is exactly when the Gmail copy matters — and never throws itself, so it can
+    // neither drop nor block storage. The ingest error is re-thrown afterwards as before.
+    let ingestError: unknown = null;
+    try {
+      await handleInbound(buildInboundDeps(env, ctx), raw);
+    } catch (err) {
+      ingestError = err;
+    }
+    if (gmailForwardEnabled(env.MAIL_GMAIL_FORWARD)) {
+      await forwardToLinkedGmail(
+        buildGmailForwardDeps(env, ctx),
+        { forward: (to, headers) => message.forward(to, headers as never) },
+        raw,
+      );
+    }
+    if (ingestError) throw ingestError;
   },
 
   // Business cron: scheduled-send drain on EVERY tick (*/5 → ~5m 予約送信 granularity).

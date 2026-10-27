@@ -43,6 +43,13 @@ service = "dub-identity-roster"   # POST /authz/check (mail:send / mail:read / m
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 
+# Gmail safety-net forward: userId -> 名簿 Gmail (POST /members/internal/google-emails).
+# member-service deploys before mail-gateway (infra/deploy/deploy-prod.sh), so the binding
+# target exists. Inert while MAIL_GMAIL_FORWARD is unset (README §3.4).
+[[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"
+
 # --- Cron: every 5 minutes (ONE trigger). The scheduled handler runs the 予約送信
 # (scheduled-send) drain on EVERY tick — a "send later" mail has ~5-minute delivery
 # granularity. Mail is kept indefinitely (no retention purge). The Workers FREE plan caps the account at 5 cron triggers, so we keep mail-gateway's
@@ -71,3 +78,6 @@ MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
 # for issued receiving addresses); it defaults to dub-mail-gateway in code when unset.
 CF_EMAIL_ROUTING_ZONE_NAME = "developershub.jp"
 CF_EMAIL_ROUTING_WORKER_NAME = "dub-mail-gateway"
+# Gmail safety-net forward (README §3.4). Intentionally NOT set = OFF. Enable with
+# MAIL_GMAIL_FORWARD = "on" only after every target Gmail is a verified Email Routing
+# destination address.

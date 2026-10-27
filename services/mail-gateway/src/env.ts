@@ -26,6 +26,13 @@ export interface Env {
   // --- service bindings ---
   SVC_IDENTITY: Fetcher; // POST /authz/check (mail:* permissions)
   SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain skips audit
+  SVC_MEMBER?: Fetcher; // member-service: userId -> 名簿 Gmail (Gmail safety-net forward); absent => no forward
+
+  // --- Gmail safety-net forward (gmail-forward.ts) ---
+  // "on" forwards each inbound copy to the envelope recipient's linked 名簿 Gmail. Anything
+  // else (default: unset) = OFF. Each Gmail must first be a VERIFIED Email Routing
+  // destination address, or forward() fails (recorded, never blocks ingest).
+  MAIL_GMAIL_FORWARD?: string;
 
   // --- outbound provider config (Workers Secrets; real send credentials) ---
   MAIL_OUTBOUND_PROVIDER?: string; // "resend" (default, ADR-0001) | "ses" | "mailchannels" | "mock"
