@@ -816,9 +816,43 @@ function createMailStore() {
   function inboxOf(id: string): mail.MailMessageDetail[] {
     if (!received[id]) {
       const acct = DEMO_ACCOUNTS.find((a) => a.id === id);
-      received[id] = (acct?.inbox ?? []).map((m) => ({ ...m }));
+      received[id] = [...(acct?.inbox ?? []).map((m) => ({ ...m })), ...bulkMail(id)];
     }
     return received[id]!;
+  }
+  // ?demo_mail_bulk=<n> appends n older read mails to the default account's inbox so list
+  // paging (50/page) can be previewed. Opt-in: the normal demo inbox stays small.
+  function bulkMail(id: string): mail.MailMessageDetail[] {
+    if (id !== ME_ID) return [];
+    let n = 0;
+    try {
+      n = Math.min(500, Number(new URLSearchParams(globalThis.location?.search ?? "").get("demo_mail_bulk") ?? 0) || 0);
+    } catch {
+      n = 0;
+    }
+    return Array.from({ length: n }, (_, i) => ({
+      id: `msg_bulk_${i + 1}`,
+      messageId: `<bulk-${i + 1}@demo>`,
+      threadId: `thr_bulk_${i + 1}`,
+      from: { email: "news@example.com", name: "お知らせ配信" },
+      to: [{ email: "demo@developershub.jp" }],
+      subject: `過去のお知らせ #${i + 1}`,
+      snippet: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
+      receivedAt: daysAgoIso(10 + i),
+      read: true,
+      textBody: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
+    }));
+  }
+  // Gateway parity: honour ?limit/&cursor (id cursor, newest first as stored) when a limit
+  // is given; without one the whole list is returned as before.
+  function pageBy<T extends { id: string }>(items: T[], url: URL): { items: T[]; nextCursor: string | null } {
+    const limitRaw = url.searchParams.get("limit");
+    if (limitRaw === null) return page(items);
+    const limit = Math.max(1, Number(limitRaw) || 50);
+    const cursor = url.searchParams.get("cursor");
+    const start = cursor ? items.findIndex((it) => it.id === cursor) + 1 : 0;
+    const slice = items.slice(start, start + limit);
+    return { items: slice, nextCursor: start + limit < items.length ? (slice[slice.length - 1]?.id ?? null) : null };
   }
   // Mirrors the gateway's send-time resolveThreadId: a reply's In-Reply-To is matched
   // (angle brackets ignored) against received Message-Ids so the sent row carries the
@@ -899,7 +933,7 @@ function createMailStore() {
     saveScheduled(accountId, list.filter((s) => !due.includes(s)));
   }
 
-  function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
+  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
       const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
@@ -935,7 +969,7 @@ function createMailStore() {
         void htmlBody;
         return li;
       });
-      return json(page(items));
+      return json(pageBy(items, url));
     }
     {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)$/.exec(pathname);
@@ -1005,7 +1039,7 @@ function createMailStore() {
         void htmlBody;
         return hideArchiveCc(listItem);
       });
-      return json(page(items));
+      return json(pageBy(items, url));
     }
     if (method === "GET") {
       const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);

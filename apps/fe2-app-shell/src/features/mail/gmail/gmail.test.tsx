@@ -849,3 +849,95 @@ describe("自分宛て / 自分宛て以外 (role-shared mail)", () => {
     expect(within(screen.getByTestId("fe2-mail-inbox")).getAllByTestId("fe2-mail-inbox-item")).toHaveLength(DEMO_INBOX_ITEMS.length);
   });
 });
+
+describe("Gmail-style pagination (cursor-paged folder list)", () => {
+  // n received items whose ids/subjects encode the page, so assertions can tell pages apart.
+  const pageItems = (page: number, n: number): mail.MailMessageListItem[] =>
+    Array.from({ length: n }, (_, i) => ({
+      ...DEMO_INBOX_ITEMS[1]!,
+      id: `p${page}_${i}`,
+      threadId: `thr_p${page}_${i}`,
+      subject: `page${page}-${i}`,
+    }));
+  // Page 1 (no cursor) → 50 items + cursor "c2"; page 2 ("c2") → 3 items, end of list.
+  const pagedInbox = () =>
+    vi.fn().mockImplementation((q?: { cursor?: string }) =>
+      Promise.resolve(q?.cursor === "c2" ? { items: pageItems(2, 3), nextCursor: null } : { items: pageItems(1, 50), nextCursor: "c2" }),
+    );
+  const noSent = () => vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+
+  it("shows the 1–50 range, pages forward/back via the cursor stack, and disables at both ends", async () => {
+    const listInbox = pagedInbox();
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: noSent() })));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("1–50"));
+    expect(screen.getByTestId("fe2-mail-page-prev")).toBeDisabled();
+    expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled();
+
+    await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
+    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, cursor: "c2" });
+    expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(3);
+    expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
+    expect(screen.getByTestId("fe2-mail-page-prev")).toBeEnabled();
+
+    await userEvent.click(screen.getByTestId("fe2-mail-page-prev"));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("1–50"));
+    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50 });
+    expect(screen.getByTestId("fe2-mail-page-prev")).toBeDisabled();
+  });
+
+  it("shows a skeleton (not the empty state) while a page loads", async () => {
+    let release: (v: unknown) => void = () => undefined;
+    const listInbox = vi.fn().mockImplementation((q?: { cursor?: string }) =>
+      q?.cursor === "c2" ? new Promise((r) => (release = r)) : Promise.resolve({ items: pageItems(1, 50), nextCursor: "c2" }),
+    );
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: noSent() })));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
+    expect(screen.getByTestId("fe2-mail-list-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-mail-inbox-empty")).toBeNull();
+    expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
+    await act(async () => release({ items: pageItems(2, 3), nextCursor: null }));
+    await waitFor(() => expect(screen.queryByTestId("fe2-mail-list-loading")).toBeNull());
+  });
+
+  it("background refetch refreshes the CURRENT page (keeps the cursor)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const listInbox = pagedInbox();
+      render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: noSent() })));
+      await waitFor(() => expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled());
+      await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
+      await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
+      const calls = listInbox.mock.calls.length;
+      await act(async () => {
+        vi.advanceTimersByTime(MAIL_POLL_MS);
+      });
+      await waitFor(() => expect(listInbox.mock.calls.length).toBe(calls + 1));
+      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, cursor: "c2" });
+      expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53");
+      expect(screen.queryByTestId("fe2-mail-list-loading")).toBeNull(); // no skeleton flicker
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("switching folders returns to page 1; Sent pages its own list", async () => {
+    const listInbox = pagedInbox();
+    const listSent = vi.fn().mockResolvedValue({ items: DEMO_SENT_ITEMS, nextCursor: null });
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent })));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
+    await userEvent.click(screen.getByTestId("fe2-mail-folder-sent"));
+    await waitFor(() => expect(listInbox).toHaveBeenLastCalledWith({ limit: 50 }));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent(`1–${DEMO_SENT_ITEMS.length}`));
+    expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
+  });
+
+  it("reducer ignores next at the last page and prev at the first page", () => {
+    const s = { ...initialMailState, listLoading: false };
+    expect(reducer(s, { type: "PAGE_NEXT", source: "inbox" })).toBe(s);
+    expect(reducer(s, { type: "PAGE_PREV", source: "inbox" })).toBe(s);
+  });
+});

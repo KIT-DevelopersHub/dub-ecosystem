@@ -33,6 +33,22 @@ export interface UndoState {
   prevThreads: MailThreadModel[];
 }
 
+/** Which server list a folder pages through: Sent pages GET /mail/sent, every other
+ *  thread folder pages GET /mail/messages. */
+export type PageSource = "inbox" | "sent";
+export const PAGE_SIZE = 50;
+
+/** Cursor pager for one server list. `stack` holds the cursors of pages after the first
+ *  ([] = page 1), so "previous" is a pop. `next`/`count` come from the last fetch. */
+export interface PagerState {
+  stack: string[];
+  next: string | null;
+  count: number;
+}
+const FIRST_PAGE: PagerState = { stack: [], next: null, count: 0 };
+
+export const pageSourceOf = (folder: FolderId): PageSource => (folder === "sent" ? "sent" : "inbox");
+
 export interface MailState {
   me: MailPerson;
   threads: MailThreadModel[];
@@ -49,6 +65,10 @@ export interface MailState {
   /** Parked future sends (予約送信) — the Scheduled folder's list, loaded from the gateway
    *  (GET /mail/scheduled) by useMailSync. Not thread-backed: rendered by ScheduledList. */
   scheduled: mail.ScheduledSendListItem[];
+  pager: Record<PageSource, PagerState>;
+  /** True while the list is (re)loading for a page change or the first load — shows the
+   *  skeleton. Background refetches leave it false so the list never flickers. */
+  listLoading: boolean;
 }
 
 export type MailAction =
@@ -76,7 +96,10 @@ export type MailAction =
   | { type: "UNDO" }
   | { type: "DISMISS_UNDO" }
   // ---- server sync ----
-  | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson } // replace threads from the gateway
+  | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson; pages?: Record<PageSource, { next: string | null; count: number }> } // replace threads from the gateway
+  | { type: "PAGE_NEXT"; source: PageSource }
+  | { type: "PAGE_PREV"; source: PageSource }
+  | { type: "LIST_FAILED" } // a list fetch failed: drop the skeleton, keep current threads
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
   | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean; purged: boolean; noReplyAt?: string | null }[] } // restore server-persisted star/archive/trash/purge/返信不要
   | { type: "HYDRATE_SCHEDULED"; scheduled: mail.ScheduledSendListItem[] } // replace the Scheduled folder list
@@ -94,8 +117,45 @@ function setRead(threads: MailThreadModel[], ids: Set<string>, read: boolean): M
 
 export function reducer(state: MailState, action: MailAction): MailState {
   switch (action.type) {
-    case "SET_FOLDER":
-      return { ...state, folder: action.folder, labelFilter: null, openThreadId: null, search: "", checked: new Set() };
+    case "SET_FOLDER": {
+      // Gmail resets to page 1 on a folder switch; only a non-first page needs a reload.
+      const paged = state.pager.inbox.stack.length > 0 || state.pager.sent.stack.length > 0;
+      return {
+        ...state,
+        folder: action.folder,
+        labelFilter: null,
+        openThreadId: null,
+        search: "",
+        checked: new Set(),
+        ...(paged
+          ? { pager: { inbox: { ...state.pager.inbox, stack: [] }, sent: { ...state.pager.sent, stack: [] } }, listLoading: true }
+          : {}),
+      };
+    }
+    case "PAGE_NEXT": {
+      const p = state.pager[action.source];
+      if (!p.next || state.listLoading) return state;
+      return {
+        ...state,
+        pager: { ...state.pager, [action.source]: { ...p, stack: [...p.stack, p.next] } },
+        listLoading: true,
+        openThreadId: null,
+        checked: new Set(),
+      };
+    }
+    case "PAGE_PREV": {
+      const p = state.pager[action.source];
+      if (p.stack.length === 0 || state.listLoading) return state;
+      return {
+        ...state,
+        pager: { ...state.pager, [action.source]: { ...p, stack: p.stack.slice(0, -1) } },
+        listLoading: true,
+        openThreadId: null,
+        checked: new Set(),
+      };
+    }
+    case "LIST_FAILED":
+      return { ...state, listLoading: false };
     case "SET_LABEL":
       return { ...state, labelFilter: action.label, openThreadId: null, search: "", checked: new Set() };
     case "SET_SEARCH":
@@ -293,6 +353,15 @@ export function reducer(state: MailState, action: MailAction): MailState {
         ...state,
         threads: action.threads,
         ...(action.me ? { me: action.me } : {}),
+        ...(action.pages
+          ? {
+              pager: {
+                inbox: { ...state.pager.inbox, ...action.pages.inbox },
+                sent: { ...state.pager.sent, ...action.pages.sent },
+              },
+            }
+          : {}),
+        listLoading: false,
         checked: new Set(),
         undo: null,
         openThreadId: action.threads.some((t) => t.id === state.openThreadId) ? state.openThreadId : null,
@@ -343,6 +412,8 @@ export const initialMailState: MailState = {
   undo: null,
   syncNonce: 0,
   scheduled: [],
+  pager: { inbox: FIRST_PAGE, sent: FIRST_PAGE },
+  listLoading: true,
 };
 
 const MailStoreCtx = createContext<{ state: MailState; dispatch: Dispatch<MailAction> } | null>(null);
