@@ -31,6 +31,7 @@ import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } f
 import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin } from "./email-routing-routes";
+import { canaryConfig, listProbes, toProbeView } from "./canary";
 import { buildBlobs, buildDb, buildSendDeps } from "./deps";
 import { attachmentsFor } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
@@ -437,6 +438,15 @@ export function createApp() {
   // admin console. Every one of its 12 routes is listed individually in POLICY_TABLE, so a
   // route added in that file without a table line is denied and turns coverage red.
   registerEmailRoutingAdmin(ext);
+
+  // ---- production canary results (read-only; `mail:admin` in the table). Recent synthetic
+  // mail probes, newest first, plus the effective config (null = disabled).
+  ext.get("/admin/canary/probes", async (c) => {
+    const n = Number.parseInt(c.req.query("limit") ?? "", 10);
+    const limit = Number.isFinite(n) && n >= 1 && n <= 200 ? n : 50;
+    const rows = await listProbes(dbOf(c), limit);
+    return c.json({ config: canaryConfig(c.env), items: rows.map(toProbeView) });
+  });
 
   app.route("/mail", ext);
 

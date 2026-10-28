@@ -8,6 +8,7 @@ import { forwardToArchive, forwardToLinkedGmail, gmailForwardEnabled } from "./g
 import { handleInbound } from "./inbound";
 import { headersToMap, type RawInbound } from "./mime";
 import { runScheduledSendDrain } from "./scheduled-send";
+import { isCanaryInbound, runCanary } from "./canary";
 import { INBOUND_ATTACHMENT_READ_BYTES, INBOUND_RAW_READ_BYTES, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
 
@@ -88,7 +89,8 @@ const handler = {
     }
     const forwarder = { forward: (to: string, headers?: Headers) => message.forward(to, headers as never) };
     const archiveTo = env.MAIL_ARCHIVE_FORWARD_TO?.trim();
-    if (archiveTo) {
+    // Our own synthetic canary is not archived (it would add a copy every probe).
+    if (archiveTo && !isCanaryInbound(env, message.to, raw.headers["subject"])) {
       // One archive copy per Message-ID: only the invocation that newly stored the row (a
       // later recipient's invocation dedups to processed=false). Ingest failed -> forward
       // anyway. A missing Message-ID gets a unique synthetic id, so it always forwards.
@@ -107,8 +109,11 @@ const handler = {
   // $0: the schedule row is the durable timer, this cron is the ticker. Mail is kept
   // indefinitely — there is intentionally NO retention purge here.
   // The freeq outbox drain stays OUT of here (it moved to the standalone freeq-drain DO).
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  // The production canary (canary.ts) rides the same tick: it checks pending probes every
+  // tick and sends a new one on MAIL_CANARY_INTERVAL_MIN slots. Disabled by default; never throws.
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     await runScheduledSendDrain(env);
+    await runCanary(env, controller.scheduledTime);
   },
 };
 

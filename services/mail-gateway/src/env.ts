@@ -76,6 +76,15 @@ export interface Env {
   MAIL_SEND_MAX_ATTEMPTS?: string; // integer 1..6 (default 3)
   MAIL_SEND_TIMEOUT_MS?: string; // per-attempt upstream timeout ms (default 15000)
   MAIL_RATE_LIMIT_COOLDOWN_SEC?: string; // "recently rate-limited" window, 5..86400 (default 60)
+
+  // --- production synthetic mail monitor (canary.ts; non-secret [vars]) ---
+  // OFF unless MAIL_CANARY_ENABLED="true" AND both QA addresses are set (and differ).
+  MAIL_CANARY_ENABLED?: string;
+  MAIL_CANARY_TO?: string; // dedicated QA address (To) — must route to this Worker, NOT a roster user
+  MAIL_CANARY_CC?: string; // second QA address (Cc)
+  MAIL_CANARY_EXPECT_CC?: string; // "true" = a missing Cc copy fails the probe (default: recorded only)
+  MAIL_CANARY_INTERVAL_MIN?: string; // send every N minutes, multiple of 5 (default 15)
+  MAIL_CANARY_DEADLINE_MIN?: string; // arrival deadline per probe (default 10)
 }
 
 // Hono per-request variables.

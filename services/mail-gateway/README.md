@@ -260,6 +260,30 @@ One-time setup: Cloudflare dashboard → developershub.jp → Email → Email Ro
 **Destination addresses** → *Add destination address* → `dub.developershub@gmail.com`, then
 open the verification mail in that Gmail and click the link (status → *Verified*).
 
+## 3.6 本番の合成メール監視 (canary)
+
+本番と同じ経路で「送って・届いたか」を定期確認する外形監視（`src/canary.ts`）。**既定は OFF**。
+
+- 動作: 既存の 5 分 cron に相乗り（新しい trigger は無し）。`MAIL_CANARY_INTERVAL_MIN`（既定 15）分ごとに
+  件名 `[dub-canary] <uuid>` のメールを通常の送信コア（Resend）で To=`MAIL_CANARY_TO` / Cc=`MAIL_CANARY_CC`
+  に送り、以降の tick で `mail_inbound` を Message-ID か件名トークンで探す。宛先ごとの到着は
+  `header_meta_json.deliveredTo` で判定し、`MAIL_CANARY_DEADLINE_MIN`（既定 10）分で確定する。
+  結果は `mail_canary_probe`（migration 0014）に1行ずつ記録。
+- 隔離: QA アドレス2つだけに送る / archive の自動 CC を付けない / system 送信（owner なし）なので、
+  メンバーの受信箱・送信済みには出ない（`mail:read_all` の全件表示には出る）。受信コピーは archive 転送もしない。
+  QA アドレスは名簿（roster）に登録しないこと。
+- 判定: 既定は「どちらかのコピーが `mail_inbound` に入れば OK」。現状は Message-ID ごとに1行しか持てず
+  2通目（多くは Cc）が捨てられるため `cc_ok=0` が記録されるが、それではアラートしない。
+  Cc の修正後に `MAIL_CANARY_EXPECT_CC="true"` にすると To と Cc の両方を必須にする。
+- 通知: 2回連続で失敗した時点で audit `mail.canary.alert`（+ error ログ）を1回だけ、その後の最初の成功で
+  `mail.canary.recovered` を出す。
+- 確認: `GET /api/v1/mail/admin/canary/probes?limit=50`（`mail:admin`、読み取り専用）。
+- 有効化: (1) Email Routing で QA アドレス2つを「Worker に送る（dub-mail-gateway）」ルールで作成
+  (2) migration `0014_mail_canary_probe.sql` を適用 (3) `MAIL_CANARY_ENABLED="true"` /
+  `MAIL_CANARY_TO` / `MAIL_CANARY_CC` を vars に設定してデプロイ。
+- コスト注意: 15 分間隔だと 1日 96 送信 ≒ 月 2,880 送信。Resend 無料枠（100/日・3,000/月）をほぼ使い切るので、
+  無料枠のままなら間隔を 60 分などに延ばす。
+
 ## 4. Workers free-tier verdict (9-E: is a paid plan required?)
 
 **Conclusion: the outbound send endpoint runs on the Workers FREE plan. A paid plan is
