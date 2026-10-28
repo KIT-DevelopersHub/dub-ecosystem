@@ -28,6 +28,22 @@ export interface ComposeState {
   inReplyTo?: string;
 }
 
+/** One outbound send/schedule, kept until the gateway answers so a failure can restore
+ *  the compose and retry the exact request. */
+export interface PendingSend {
+  kind: "send" | "schedule";
+  req: mail.SendMailRequest | mail.ScheduleMailRequest;
+  /** Compose snapshot reopened on failure (same id, so its draft key is reused). */
+  compose: ComposeState;
+  /** Optimistic Sent entry to drop on failure. */
+  threadId?: string;
+}
+
+export interface SendNotice {
+  status: "sending" | "sent" | "failed";
+  pending: PendingSend;
+}
+
 export interface UndoState {
   label: string;
   prevThreads: MailThreadModel[];
@@ -60,6 +76,8 @@ export interface MailState {
   search: string;
   composes: ComposeState[];
   undo: UndoState | null;
+  /** Bottom-left send status bar (送信中… / 送信しました / 送信できませんでした). */
+  sendNotice: SendNotice | null;
   /** Bumped to ask the hydration hook to re-fetch inbox+sent (e.g. after a send). */
   syncNonce: number;
   /** Parked future sends (予約送信) — the Scheduled folder's list, loaded from the gateway
@@ -89,7 +107,11 @@ export type MailAction =
   | { type: "CHECK_ALL"; ids: string[] }
   | { type: "CLEAR_CHECKS" }
   | { type: "ADD_MESSAGE"; threadId: string; body: string; to: MailPerson[]; subject: string }
-  | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; subject: string; body: string }
+  | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; subject: string; body: string; threadId?: string }
+  | { type: "SEND_STARTED"; pending: PendingSend }
+  | { type: "SEND_OK"; pending: PendingSend }
+  | { type: "SEND_FAILED"; pending: PendingSend }
+  | { type: "DISMISS_SEND_NOTICE" }
   | { type: "OPEN_COMPOSE"; compose: Partial<ComposeState> }
   | { type: "UPDATE_COMPOSE"; id: string; patch: Partial<ComposeState> }
   | { type: "CLOSE_COMPOSE"; id: string }
@@ -106,7 +128,7 @@ export type MailAction =
   | { type: "REQUEST_SYNC" }; // ask the hydration hook to re-fetch (post-send)
 
 let seq = 0;
-const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
+export const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
 function setRead(threads: MailThreadModel[], ids: Set<string>, read: boolean): MailThreadModel[] {
   return threads.map((t) =>
@@ -289,7 +311,7 @@ export function reducer(state: MailState, action: MailAction): MailState {
     }
     case "SEND": {
       const thread: MailThreadModel = {
-        id: uid("thread"),
+        id: action.threadId ?? uid("thread"),
         subject: action.subject || "(件名なし)",
         folder: "sent",
         starred: false,
@@ -309,6 +331,27 @@ export function reducer(state: MailState, action: MailAction): MailState {
       };
       return { ...state, threads: [thread, ...state.threads] };
     }
+    case "SEND_STARTED":
+      return { ...state, sendNotice: { status: "sending", pending: action.pending } };
+    case "SEND_OK":
+      // A retry from the bar succeeded: close the restored compose too.
+      return {
+        ...state,
+        composes: state.composes.filter((c) => c.id !== action.pending.compose.id),
+        sendNotice: { status: "sent", pending: action.pending },
+      };
+    case "SEND_FAILED": {
+      const { pending } = action;
+      const reopened = state.composes.some((c) => c.id === pending.compose.id);
+      return {
+        ...state,
+        threads: pending.threadId ? state.threads.filter((t) => t.id !== pending.threadId) : state.threads,
+        composes: reopened ? state.composes : [...state.composes, { ...pending.compose, minimized: false }],
+        sendNotice: { status: "failed", pending },
+      };
+    }
+    case "DISMISS_SEND_NOTICE":
+      return { ...state, sendNotice: null };
     case "OPEN_COMPOSE": {
       const base: ComposeState = {
         id: uid("compose"),
@@ -410,6 +453,7 @@ export const initialMailState: MailState = {
   search: "",
   composes: [],
   undo: null,
+  sendNotice: null,
   syncNonce: 0,
   scheduled: [],
   pager: { inbox: FIRST_PAGE, sent: FIRST_PAGE },
