@@ -377,6 +377,12 @@ export function createApp() {
     if (!blobs) throw new DubError("MAIL_ATTACHMENTS_UNCONFIGURED", "attachment storage not configured", { status: 503 });
     const messageId = c.req.param("id") ?? "";
     const attId = c.req.param("attId") ?? "";
+    // Same account scope as the message detail: an attachment of mail you cannot open is 404.
+    const visible =
+      kind === "inbound"
+        ? await getInboundDetail(dbOf(c), messageId, await inboundScopeOf(c), ownerOf(c))
+        : await getSentDetail(dbOf(c), messageId, await scopeOf(c), ownerOf(c));
+    if (!visible) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `attachment not found: ${attId}`, { status: 404 });
     const row = await getAttachment(dbOf(c), kind, messageId, attId);
     if (!row) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `attachment not found: ${attId}`, { status: 404 });
     // A 'dropped_*' stub (改善#2: too large / truncated) has no R2 body — never fetch it.

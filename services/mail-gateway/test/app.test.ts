@@ -230,6 +230,7 @@ describe("read routes (/mail/messages)", () => {
     // A fake R2 bucket so buildBlobs is non-null (the route must 409 BEFORE touching it).
     const bucket = { get: async () => null, put: async () => undefined, delete: async () => undefined };
     const { env, raw } = makeEnv({ R2_MAIL: bucket as never });
+    seedInboundOwned(raw, "mailin_x", "usr_alice");
     // Seed a dropped stub directly (r2_key='' — no bytes were ever stored).
     raw
       .prepare(
@@ -245,7 +246,35 @@ describe("read routes (/mail/messages)", () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("MAIL_ATTACHMENT_NOT_STORED");
   });
+
+  it("404s downloading an attachment of another account's message (same scope as the detail)", async () => {
+    const bucket = { get: async () => ({ arrayBuffer: async () => new TextEncoder().encode("x").buffer, size: 1, httpMetadata: { contentType: "text/plain" } }), put: async () => undefined, delete: async () => undefined };
+    const { env, raw } = makeEnv({ R2_MAIL: bucket as never });
+    seedInboundOwned(raw, "mailin_a", "usr_alice");
+    raw
+      .prepare(
+        `INSERT INTO mail_attachments (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status)
+         VALUES (?, 'inbound', ?, 'a.txt', 'text/plain', 1, 'k', ?, 'stored')`,
+      )
+      .run("mailatt_a", "mailin_a", "2026-08-10T00:00:00.000Z");
+    const get = (user: string) =>
+      app.fetch(new Request("https://svc/mail/messages/mailin_a/attachments/mailatt_a", { headers: headers({ "x-dub-user-id": user }) }), env);
+    expect((await get("usr_bob")).status).toBe(404);
+    expect((await get("usr_alice")).status).toBe(200);
+  });
 });
+
+function seedInboundOwned(raw: ReturnType<typeof makeEnv>["raw"], id: string, owner: string): void {
+  raw
+    .prepare(
+      `INSERT INTO mail_inbound
+         (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+          auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
+       VALUES (?, ?, ?, 'info', ?, ?, 'Hi', 'snip', NULL, NULL, ?, ?, 'body', NULL, NULL, ?)`,
+    )
+    .run(id, `<${id}@x>`, `thr_${id}`, JSON.stringify({ email: "sender@x.com" }), JSON.stringify([{ email: "info@developershub.jp" }]),
+      "2026-08-10T00:00:00.000Z", "2026-08-10T00:00:00.000Z", owner);
+}
 
 describe("per-user thread flags (/mail/flags — 改善#8)", () => {
   it("401s without a trusted user header", async () => {
