@@ -8,7 +8,7 @@
 import { useEffect, useRef } from "react";
 import { useMailApi } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
-import { useMailStore } from "./useMailStore.tsx";
+import { PAGE_SIZE, useMailStore } from "./useMailStore.tsx";
 
 /** What the server last knew per thread. noReplyAt is compared as-is; the POST sends only the
  *  boolean `noReply` (the server stamps its own time). */
@@ -28,6 +28,10 @@ export function useMailSync(): void {
   const api = useMailApi();
   const { state, dispatch } = useMailStore();
   const { syncNonce, me, openThreadId, threads } = state;
+  // Current page cursor per list (undefined = page 1). A page change re-runs the load
+  // below; a background/manual sync re-fetches the SAME page, so page 1 picks up new mail.
+  const inboxCursor = state.pager.inbox.stack.at(-1);
+  const sentCursor = state.pager.sent.stack.at(-1);
 
   // Tracks which threads have had their full bodies fetched (list APIs carry only a
   // snippet). Cleared on every sync so a post-send re-sync re-fetches the OPEN thread —
@@ -51,14 +55,21 @@ export function useMailSync(): void {
     void (async () => {
       try {
         const [inbox, sent, scheduled] = await Promise.all([
-          api.listInbox({ limit: 50 }),
-          api.listSent({ limit: 50 }),
+          api.listInbox({ limit: PAGE_SIZE, ...(inboxCursor ? { cursor: inboxCursor } : {}) }),
+          api.listSent({ limit: PAGE_SIZE, ...(sentCursor ? { cursor: sentCursor } : {}) }),
           // Scheduled (予約送信) is best-effort: an older gateway without the endpoint yields
           // an empty list rather than blanking inbox+sent.
           api.listScheduled({ limit: 50 }).catch(() => ({ items: [], nextCursor: null })),
         ]);
         if (!alive) return;
-        dispatch({ type: "HYDRATE", threads: combineThreads(inbox.items, sent.items, me) });
+        dispatch({
+          type: "HYDRATE",
+          threads: combineThreads(inbox.items, sent.items, me),
+          pages: {
+            inbox: { next: inbox.nextCursor, count: inbox.items.length },
+            sent: { next: sent.nextCursor, count: sent.items.length },
+          },
+        });
         dispatch({ type: "HYDRATE_SCHEDULED", scheduled: scheduled.items });
         loaded.current.clear(); // force the open thread to re-fetch its full body (+ any new reply)
         // Restore persisted flags on top of the freshly hydrated threads, then arm the
@@ -73,13 +84,14 @@ export function useMailSync(): void {
         flagBaseline.current = base;
         flagsReady.current = true;
       } catch {
-        /* keep existing state; the list simply stays as-is */
+        // keep existing threads; just drop the skeleton
+        if (alive) dispatch({ type: "LIST_FAILED" });
       }
     })();
     return () => {
       alive = false;
     };
-  }, [api, dispatch, syncNonce, me]);
+  }, [api, dispatch, syncNonce, me, inboxCursor, sentCursor]);
 
   // Pick up newly arrived mail without a full reload: re-sync on an interval while the tab
   // is visible and whenever it regains visibility. HYDRATE drops selections/undo, so a

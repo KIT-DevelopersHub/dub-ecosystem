@@ -3,7 +3,7 @@
 // subject + inline snippet, label chips, and a timestamp that swaps to row
 // actions (archive / delete / mark-read) on hover. Bulk selection lifts a toolbar.
 import { useEffect, useRef, useState } from "react";
-import { Badge, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
+import { Badge, NARROW_VIEWPORT_QUERY, SkeletonList, useMediaQuery } from "@dub/ui";
 import {
   avatarColor,
   displayName,
@@ -23,7 +23,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
-import { useMailStore } from "./useMailStore.tsx";
+import { PAGE_SIZE, pageSourceOf, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
 
 // P25: exit-animation two-phase pattern (mirrors fe1 Toast.tsx's `leaving` + EXIT_MS).
 // Archive/trash marks the row `leaving` (slide-out + collapse plays via inline styles),
@@ -89,6 +89,44 @@ function StopClick({ children, onClick, label, testId }: { children: JSX.Element
     >
       {children}
     </button>
+  );
+}
+
+/** Gmail-style "1–50" range with < > at the toolbar's right edge. Cursor-paged, so there is
+ *  no total: the range is (page index × size) + rows fetched on this page. */
+function PageNav({ pager, source, loading }: { pager: PagerState; source: PageSource; loading: boolean }): JSX.Element | null {
+  const { dispatch } = useMailStore();
+  if (pager.count === 0 && pager.stack.length === 0) return null;
+  const start = pager.stack.length * PAGE_SIZE + 1;
+  const end = start + pager.count - 1;
+  const btn = (dir: "prev" | "next", disabled: boolean): JSX.Element => (
+    <button
+      type="button"
+      aria-label={dir === "prev" ? "前へ" : "次へ"}
+      data-testid={`fe2-mail-page-${dir}`}
+      disabled={disabled}
+      onClick={() => dispatch({ type: dir === "prev" ? "PAGE_PREV" : "PAGE_NEXT", source })}
+      style={{
+        all: "unset",
+        display: "inline-flex",
+        padding: 6,
+        borderRadius: "var(--dub-radius-full)",
+        cursor: disabled ? "default" : "pointer",
+        color: "var(--dub-color-text-secondary)",
+        opacity: disabled ? 0.35 : 1,
+      }}
+    >
+      <MailIcon name={dir === "prev" ? "chevron-left" : "chevron-right"} size={18} />
+    </button>
+  );
+  return (
+    <nav aria-label="ページ移動" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
+      <span data-testid="fe2-mail-page-range" aria-live="polite" style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-secondary)", marginRight: 4 }}>
+        {pager.count > 0 ? `${start}–${end}` : `${start - 1}`}
+      </span>
+      {btn("prev", loading || pager.stack.length === 0)}
+      {btn("next", loading || pager.next === null)}
+    </nav>
   );
 }
 
@@ -589,9 +627,14 @@ export function ThreadList(): JSX.Element {
             <MailIcon name="refresh" size={18} />
           </button>
         )}
+        <PageNav pager={state.pager[pageSourceOf(state.folder)]} source={pageSourceOf(state.folder)} loading={state.listLoading} />
       </div>
 
-      {visible.length === 0 ? (
+      {state.listLoading ? (
+        <div data-testid="fe2-mail-list-loading" style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
+          <SkeletonList rows={8} avatar />
+        </div>
+      ) : visible.length === 0 ? (
         <div
           data-testid="fe2-mail-inbox-empty"
           style={{

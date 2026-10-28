@@ -607,3 +607,22 @@ describe("チャンネル取り込み (Slack import demo)", () => {
     await expect(api().request({ method: "POST", path: "/api/v1/chat/slack-import/jobs", body: { channel: "nope" } })).rejects.toMatchObject({ status: 404 });
   });
 });
+
+describe("demo mail list paging (?demo_mail_bulk)", () => {
+  it("pages the inbox by limit + id cursor when bulk mail is seeded", async () => {
+    globalThis.history.replaceState(null, "", "/?demo_mail_bulk=60");
+    try {
+      const a = api();
+      type Page = { items: { id: string }[]; nextCursor: string | null };
+      const p1 = await a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { limit: 50 } });
+      expect(p1.items).toHaveLength(50);
+      expect(p1.nextCursor).not.toBeNull();
+      const p2 = await a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { limit: 50, cursor: p1.nextCursor! } });
+      expect(p2.items.length).toBeGreaterThan(0);
+      expect(p2.items.some((m) => p1.items.some((x) => x.id === m.id))).toBe(false);
+      expect(p2.nextCursor).toBeNull();
+    } finally {
+      globalThis.history.replaceState(null, "", "/");
+    }
+  });
+});
