@@ -29,6 +29,9 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0011_user_flags_no_reply.sql"),
   join(HERE, "../db/0012_inbound_cc.sql"),
   join(HERE, "../db/0013_inbound_header_meta.sql"),
+  join(HERE, "../db/0014_inbound_raw_eml.sql"),
+  join(HERE, "../db/0015_row_count_snapshot.sql"),
+  join(HERE, "../db/0016_soft_delete.sql"),
   join(HERE, "../db/0017_mail_canary_probe.sql"),
 ];
 

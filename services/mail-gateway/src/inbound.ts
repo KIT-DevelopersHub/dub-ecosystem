@@ -21,6 +21,7 @@ import { insertInbound, newInboundId, resolveThreadId, seenInbound } from "./rep
 import { persistAttachments, persistDroppedAttachments, type DroppedReason } from "./attachments";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
+import { archiveRawEml } from "./raw-eml";
 import type { InboundDeps, OwnerAddressPolicy, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
 
@@ -228,6 +229,12 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   if (changes === 0) {
     // lost the race with a concurrent redelivery — already persisted, do not re-publish.
     return { processed: false, message };
+  }
+
+  // Raw .eml archive (データ保全): the untruncated original, so a parser bug or data loss
+  // can be repaired later. Best-effort — archiveRawEml logs and never throws.
+  if (deps.blobs && raw.rawBytes) {
+    await archiveRawEml({ db: deps.db, blobs: deps.blobs, ctx: deps.ctx }, message.id, raw.rawBytes);
   }
 
   // Attachments: extract from the full raw MIME (buffered by the email() handler when R2
