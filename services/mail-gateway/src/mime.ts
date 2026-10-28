@@ -201,6 +201,7 @@ export interface RawInbound {
   rawSize: number;
   rawFull?: string; // full (capped) RFC822 buffer for attachment extraction (R2-bound only)
   truncated?: boolean; // true when rawSize exceeded the buffer cap (tail attachments lost, #2)
+  rawBytes?: Uint8Array; // the complete, untruncated RFC822 bytes (R2-bound only) -> raw .eml archive
 }
 
 function stripAngle(id: string): string {

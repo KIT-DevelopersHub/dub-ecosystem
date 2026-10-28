@@ -72,6 +72,11 @@ export interface Env {
   // Default dub-mail-gateway (the free-tier prod name). Non-secret [vars].
   CF_EMAIL_ROUTING_WORKER_NAME?: string;
 
+  // --- destructive-operation guard (destructive.ts) ---
+  // "on" permits guardedBulkDelete (soft-delete -> grace -> purge). Anything else (default:
+  // unset) refuses every bulk delete. Turn on only for an owner-approved, one-off operation.
+  MAIL_DESTRUCTIVE_OPS?: string;
+
   // --- send resilience tuning (non-secret [vars]; optional, sane defaults) ---
   MAIL_SEND_MAX_ATTEMPTS?: string; // integer 1..6 (default 3)
   MAIL_SEND_TIMEOUT_MS?: string; // per-attempt upstream timeout ms (default 15000)
