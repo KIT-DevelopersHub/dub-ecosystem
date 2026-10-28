@@ -27,11 +27,15 @@ export interface OutboundMail {
   from: string;
   to: mail.MailAddress[];
   cc: mail.MailAddress[];
+  /** Envelope-only recipients (e.g. the compliance archive). Never written to a header. */
+  bcc?: mail.MailAddress[];
   subject: string;
   textBody: string;
   htmlBody: string | null;
   messageId: string; // RFC Message-Id we minted (stamped into the MIME)
   inReplyTo: string | null;
+  /** RFC 5322 §3.6.4 References chain (root..parent); empty/absent = [inReplyTo]. */
+  references?: string[];
   mime: string;
   // Attachments (attachments slice). Already in the raw `mime` (multipart/mixed) for the
   // raw-MIME providers (SES/MailChannels); structured providers (Resend) read this list.

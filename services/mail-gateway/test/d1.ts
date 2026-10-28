@@ -32,6 +32,7 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0014_inbound_raw_eml.sql"),
   join(HERE, "../db/0015_row_count_snapshot.sql"),
   join(HERE, "../db/0016_soft_delete.sql"),
+  join(HERE, "../db/0017_mail_canary_probe.sql"),
 ];
 
 function norm(v: unknown): unknown {

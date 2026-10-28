@@ -24,23 +24,72 @@ function b64decodeUtf8(b64: string): string {
 
 // ---- RFC2047 ----
 const ASCII_PRINTABLE = /^[\x20-\x7e]*$/;
+// Raw UTF-8 bytes per encoded-word. 39 bytes -> 52 base64 chars + 12 for "=?UTF-8?B?" and
+// "?=" = 64 chars, under the 75-char cap (RFC 2047 §2) with room for "Subject: " on line 1.
+const WORD_BYTES = 39;
 
-/** Encode a header value as a single RFC2047 base64 word iff it contains non-ASCII. */
-export function encodeHeaderWord(value: string): string {
-  if (ASCII_PRINTABLE.test(value)) return value;
-  return `=?UTF-8?B?${b64encodeUtf8(value)}?=`;
+/** Unicode NFC: macOS input can be decomposed (か + ゛), which some clients render as two
+ *  glyphs. Composed form is what every MUA expects. */
+export function nfc(s: string): string {
+  return s.normalize("NFC");
 }
 
-/** Decode RFC2047 encoded-words (B and Q, UTF-8/latin1) embedded in a header value. */
+/** RFC2047 B encoded-words for a non-ASCII value, each <= 75 chars and never splitting a
+ *  character (chunks break on code-point boundaries, by UTF-8 byte budget). ASCII -> [value]. */
+export function encodeHeaderWords(value: string): string[] {
+  const v = nfc(value);
+  if (ASCII_PRINTABLE.test(v)) return [v];
+  const enc = new TextEncoder();
+  const words: string[] = [];
+  let cur = "";
+  let curBytes = 0;
+  for (const ch of v) {
+    const n = enc.encode(ch).length;
+    if (curBytes + n > WORD_BYTES && cur) {
+      words.push(`=?UTF-8?B?${b64encodeUtf8(cur)}?=`);
+      cur = "";
+      curBytes = 0;
+    }
+    cur += ch;
+    curBytes += n;
+  }
+  if (cur) words.push(`=?UTF-8?B?${b64encodeUtf8(cur)}?=`);
+  return words;
+}
+
+/** Encode a header value as RFC2047 word(s) iff it contains non-ASCII. Adjacent words are
+ *  space-separated (decoders drop that whitespace, RFC 2047 §6.2). */
+export function encodeHeaderWord(value: string): string {
+  return encodeHeaderWords(value).join(" ");
+}
+
+/** Header-folded form of a non-ASCII value: one encoded-word per physical line. */
+function foldedWords(value: string): string {
+  return encodeHeaderWords(value).join("\r\n ");
+}
+
+/** Decode bytes under an RFC2047 charset label; unknown labels fall back to UTF-8. */
+function decodeWordBytes(bytes: Uint8Array, charset: string): string {
+  try {
+    return new TextDecoder(charset.split("*")[0]!.trim().toLowerCase()).decode(bytes);
+  } catch {
+    return new TextDecoder().decode(bytes);
+  }
+}
+
+/** Decode RFC2047 encoded-words (B and Q) honoring their charset (UTF-8, ISO-2022-JP,
+ *  Shift_JIS, ...). Whitespace between adjacent encoded-words is dropped (RFC 2047 §6.2). */
 export function decodeHeaderWord(value: string): string {
   if (!value.includes("=?")) return value;
-  return value.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_m, _charset, enc, text) => {
+  const WORD = /=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g;
+  const joined = value.replace(/(=\?[^?]+\?[BbQq]\?[^?]*\?=)\s+(?==\?[^?]+\?[BbQq]\?[^?]*\?=)/g, "$1");
+  return joined.replace(WORD, (_m, charset: string, enc: string, text: string) => {
     try {
-      if (enc.toUpperCase() === "B") return b64decodeUtf8(text);
+      if (enc.toUpperCase() === "B") return decodeWordBytes(b64decodeToBytes(text), charset);
       // Q-encoding: "_" -> space, "=XX" -> byte.
       const bytes: number[] = [];
       for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
+        const ch = text[i]!;
         if (ch === "_") {
           bytes.push(0x20);
         } else if (ch === "=") {
@@ -50,7 +99,7 @@ export function decodeHeaderWord(value: string): string {
           bytes.push(ch.charCodeAt(0));
         }
       }
-      return new TextDecoder().decode(new Uint8Array(bytes));
+      return decodeWordBytes(new Uint8Array(bytes), charset);
     } catch {
       return text;
     }
@@ -90,8 +139,59 @@ export function parseAddressList(raw: string | null | undefined): mail.MailAddre
   return parts.map(parseAddress);
 }
 
+// RFC 5322 §3.2.3 specials: an ASCII display name containing any must be quoted.
+const SPECIALS = /[()<>\[\]:;@\\,."]/;
+
+/** Display name as a phrase: non-ASCII -> encoded-words (never inside quotes), ASCII with
+ *  specials -> quoted-string, else as-is. */
+export function formatDisplayName(name: string): string {
+  const n = nfc(name).replace(/[\r\n]+/g, " ").trim();
+  if (!ASCII_PRINTABLE.test(n)) return encodeHeaderWord(n);
+  return SPECIALS.test(n) ? `"${n.replace(/(["\\])/g, "\\$1")}"` : n;
+}
+
 export function formatAddress(a: mail.MailAddress): string {
-  return a.name ? `${encodeHeaderWord(a.name)} <${a.email}>` : a.email;
+  return a.name ? `${formatDisplayName(a.name)} <${a.email}>` : a.email;
+}
+
+/** Address-list header, folded one address per line once it would exceed 78 chars. */
+function addressHeader(name: string, list: mail.MailAddress[]): string {
+  const items = list.map(formatAddress);
+  const flat = `${name}: ${items.join(", ")}`;
+  return flat.length <= 78 && !flat.includes("\r\n") ? flat : `${name}: ${items.join(",\r\n ")}`;
+}
+
+/** RFC 5322 §3.6.4 References: parent's chain + parent id, deduped, angle-bracketed and
+ *  folded one id per line. Long chains keep the root plus the most recent ids. */
+export function referencesHeader(ids: string[], max = 20): string | null {
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const raw of ids) {
+    const id = raw.trim().replace(/^<|>$/g, "").trim();
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      clean.push(id);
+    }
+  }
+  if (clean.length === 0) return null;
+  const kept = clean.length > max ? [clean[0]!, ...clean.slice(clean.length - (max - 1))] : clean;
+  return kept.map((id) => `<${id}>`).join("\r\n ");
+}
+
+/** Canonical text for the wire: NFC, CRLF line endings (RFC 2045 §6.8 canonical form). */
+export function canonicalText(s: string): string {
+  return nfc(s).replace(/\r\n|\r|\n/g, "\r\n");
+}
+
+/** Text for JSON-API providers (Resend/MailChannels build their own MIME): NFC + LF only.
+ *  A stray CR ("\r\n" from a Windows paste) must not reach an ESP that adds its own CR. */
+export function apiText(s: string): string {
+  return nfc(s).replace(/\r\n|\r/g, "\n");
+}
+
+/** RFC 5322 date with a numeric zone ("+0000"), not the obsolete "GMT". */
+export function rfc5322Date(d: Date = new Date()): string {
+  return d.toUTCString().replace(/GMT$/, "+0000");
 }
 
 // ---- outbound MIME assembly ----
@@ -111,13 +211,19 @@ export interface AssembleInput {
   htmlBody: string | null;
   messageId: string; // without angle brackets
   inReplyTo: string | null; // without angle brackets
+  /** Full References chain (root..parent). Defaults to [inReplyTo] when omitted. */
+  references?: string[];
   date?: string; // RFC822 date; defaults to now
   loopHeaders?: mail.MailLoopHeaders;
   attachments?: OutboundAttachment[]; // wrapped in multipart/mixed when present
 }
 
 function part(mime: string, body: string): string {
-  return `Content-Type: ${mime}; charset="UTF-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n${chunk76(b64encodeUtf8(body))}`;
+  return `Content-Type: ${mime}; charset="UTF-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n${chunk76(b64encodeUtf8(canonicalText(body)))}`;
+}
+/** RFC 2046 §5.1.1 boundary chars exclude "@" (present in every Message-ID): keep alnum. */
+function boundaryToken(messageId: string): string {
+  return messageId.replace(/[^A-Za-z0-9]/g, "").slice(0, 50);
 }
 function chunk76(b64: string): string {
   return (b64.match(/.{1,76}/g) ?? [b64]).join("\r\n");
@@ -125,12 +231,15 @@ function chunk76(b64: string): string {
 
 /** One attachment part (base64, Content-Disposition: attachment). */
 function attachmentPart(a: OutboundAttachment): string {
-  const name = encodeHeaderWord(a.filename).replace(/"/g, "");
+  const filename = nfc(a.filename).replace(/[\r\n"\\]/g, "");
+  const name = encodeHeaderWord(filename);
   const ct = a.contentType || "application/octet-stream";
+  // RFC 2231 filename* for spec-compliant clients + the legacy encoded-word form.
+  const ext = ASCII_PRINTABLE.test(filename) ? "" : `;\r\n filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
   return (
     `Content-Type: ${ct}; name="${name}"\r\n` +
     `Content-Transfer-Encoding: base64\r\n` +
-    `Content-Disposition: attachment; filename="${name}"\r\n\r\n` +
+    `Content-Disposition: attachment; filename="${name}"${ext}\r\n\r\n` +
     `${chunk76(a.contentBase64.replace(/\s+/g, ""))}`
   );
 }
@@ -139,7 +248,7 @@ function attachmentPart(a: OutboundAttachment): string {
  *  multipart/mixed when attachments are present; otherwise inlined by assembleMime. */
 function bodySection(input: AssembleInput): string {
   if (input.htmlBody) {
-    const alt = `--_dubalt_${input.messageId}`;
+    const alt = `_dubalt_${boundaryToken(input.messageId)}`;
     return (
       `Content-Type: multipart/alternative; boundary="${alt}"\r\n\r\n` +
       `--${alt}\r\n${part("text/plain", input.textBody)}\r\n` +
@@ -150,20 +259,26 @@ function bodySection(input: AssembleInput): string {
   return part("text/plain", input.textBody);
 }
 
+/** A From given as "Name <addr>" / bare addr, re-emitted with a properly encoded name. */
+function formatFrom(from: string): string {
+  return formatAddress(parseAddress(from));
+}
+
 /** Assemble an RFC822 message. multipart/alternative when htmlBody is present, wrapped in
  *  multipart/mixed when attachments are present (body part first, then each file). */
 export function assembleMime(input: AssembleInput): string {
   const h: string[] = [];
-  h.push(`From: ${input.from}`);
-  h.push(`To: ${input.to.map(formatAddress).join(", ")}`);
-  if (input.cc.length > 0) h.push(`Cc: ${input.cc.map(formatAddress).join(", ")}`);
-  h.push(`Subject: ${encodeHeaderWord(input.subject)}`);
+  h.push(`From: ${formatFrom(input.from)}`);
+  h.push(addressHeader("To", input.to));
+  if (input.cc.length > 0) h.push(addressHeader("Cc", input.cc));
+  h.push(`Subject: ${foldedWords(input.subject)}`);
   h.push(`Message-ID: <${input.messageId}>`);
-  h.push(`Date: ${input.date ?? new Date().toUTCString()}`);
+  h.push(`Date: ${input.date ?? rfc5322Date()}`);
   h.push("MIME-Version: 1.0");
   if (input.inReplyTo) {
     h.push(`In-Reply-To: <${input.inReplyTo}>`);
-    h.push(`References: <${input.inReplyTo}>`);
+    const refs = referencesHeader(input.references && input.references.length > 0 ? input.references : [input.inReplyTo]);
+    if (refs) h.push(`References: ${refs}`);
   }
   const loopMarker = input.loopHeaders?.["x-dub-mail-loop"];
   if (loopMarker) h.push(`X-Dub-Mail-Loop: ${loopMarker}`);
@@ -172,7 +287,7 @@ export function assembleMime(input: AssembleInput): string {
 
   const atts = input.attachments ?? [];
   if (atts.length > 0) {
-    const mixed = `--_dubmix_${input.messageId}`;
+    const mixed = `_dubmix_${boundaryToken(input.messageId)}`;
     h.push(`Content-Type: multipart/mixed; boundary="${mixed}"`);
     let body = `--${mixed}\r\n${bodySection(input)}\r\n`;
     for (const a of atts) body += `--${mixed}\r\n${attachmentPart(a)}\r\n`;
@@ -181,7 +296,7 @@ export function assembleMime(input: AssembleInput): string {
   }
 
   if (input.htmlBody) {
-    const boundary = `--_dub_${input.messageId}`;
+    const boundary = `_dub_${boundaryToken(input.messageId)}`;
     h.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
     const body =
       `--${boundary}\r\n${part('text/plain', input.textBody)}\r\n` +

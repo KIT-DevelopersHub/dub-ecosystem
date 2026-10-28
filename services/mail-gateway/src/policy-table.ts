@@ -111,6 +111,8 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /mail/admin/email-routing/rules": ["mail:admin"],
   "PATCH /mail/admin/email-routing/rules/:id": ["mail:admin"],
   "DELETE /mail/admin/email-routing/rules/:id": ["mail:admin"],
+  // Production canary probe results (read-only operational data, same admin console).
+  "GET /mail/admin/canary/probes": ["mail:admin"],
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────
