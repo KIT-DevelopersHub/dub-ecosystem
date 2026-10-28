@@ -19,7 +19,10 @@ interface FlagState {
   purged: boolean;
   noReplyAt: string | null;
 }
-const NO_FLAGS: FlagState = { starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
+/** Background re-sync interval for new inbound mail. */
+export const MAIL_POLL_MS = 60_000;
+
+const NO_FLAGS: FlagState ={ starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
 
 export function useMailSync(): void {
   const api = useMailApi();
@@ -77,6 +80,24 @@ export function useMailSync(): void {
       alive = false;
     };
   }, [api, dispatch, syncNonce, me]);
+
+  // Pick up newly arrived mail without a full reload: re-sync on an interval while the tab
+  // is visible and whenever it regains visibility. HYDRATE drops selections/undo, so a
+  // background sync is skipped while either is active.
+  const busy = useRef(false);
+  busy.current = state.checked.size > 0 || state.undo !== null;
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const sync = () => {
+      if (document.visibilityState === "visible" && !busy.current) dispatch({ type: "REQUEST_SYNC" });
+    };
+    const timer = setInterval(sync, MAIL_POLL_MS);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [dispatch]);
 
   // Persist flag changes (optimistic): whenever a thread's derived star/archive/trash state
   // diverges from what the server last knew, POST the new state and advance the baseline.

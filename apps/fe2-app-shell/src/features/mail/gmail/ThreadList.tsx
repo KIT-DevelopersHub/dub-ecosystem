@@ -582,7 +582,8 @@ export function ThreadList(): JSX.Element {
           <button
             type="button"
             aria-label="更新"
-            onClick={() => dispatch({ type: "CLEAR_CHECKS" })}
+            data-testid="fe2-mail-refresh"
+            onClick={() => dispatch({ type: "REQUEST_SYNC" })}
             style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-secondary)", padding: 4 }}
           >
             <MailIcon name="refresh" size={18} />
