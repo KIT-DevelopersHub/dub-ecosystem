@@ -46,6 +46,8 @@ export interface InboundRow {
   owner_user_id: string | null; // 0006: roster user the message was delivered to (Inbox scope); NULL = unassigned
   cc_json: string | null; // 0012: JSON MailAddress[] of Cc header recipients; NULL = none / pre-0012
   header_meta_json?: string | null; // 0013: JSON MailHeaderMeta; NULL = nothing known / pre-0013
+  raw_r2_key?: string | null; // 0014: R2 key of the untruncated raw .eml; NULL = not archived / pre-0014
+  deleted_at?: string | null; // 0016: soft-delete stamp (destructive.ts); NULL = live
 }
 
 export interface MailboxRow {
@@ -391,6 +393,11 @@ export async function insertInbound(
     extra.headerMeta && Object.keys(extra.headerMeta).length > 0 ? JSON.stringify(extra.headerMeta) : null,
   );
   return res.meta.changes;
+}
+
+/** Record where the raw .eml of an inbound row was archived (raw-eml.ts). */
+export async function setInboundRawKey(db: DbClient, inboundId: string, key: string): Promise<void> {
+  await db.run(`UPDATE mail_inbound SET raw_r2_key = ? WHERE id = ?`, key, inboundId);
 }
 
 function rowToMailMessage(r: InboundRow): mail.MailMessage {

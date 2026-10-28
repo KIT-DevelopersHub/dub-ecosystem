@@ -8,6 +8,9 @@ import { forwardToArchive, forwardToLinkedGmail, gmailForwardEnabled } from "./g
 import { handleInbound } from "./inbound";
 import { headersToMap, type RawInbound } from "./mime";
 import { runScheduledSendDrain } from "./scheduled-send";
+import { runRowCountSnapshot } from "./row-count";
+import { common } from "@dub/types";
+import { buildAuditEnv, buildDb } from "./deps";
 import { INBOUND_ATTACHMENT_READ_BYTES, INBOUND_RAW_READ_BYTES, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
 
@@ -58,9 +61,12 @@ const handler = {
     // When R2 is bound, buffer more of the message so attachment parts can be extracted;
     // otherwise keep the original headers-only cap. rawText (snippet/body) stays the first
     // INBOUND_RAW_READ_BYTES so existing body/snippet extraction is byte-for-byte unchanged.
+    // With R2 the WHOLE message is read (no cap) so the raw .eml archive is complete; the
+    // attachment parser still only sees the first INBOUND_ATTACHMENT_READ_BYTES of it.
     const hasR2 = Boolean(env.R2_MAIL);
     const cap = hasR2 ? INBOUND_ATTACHMENT_READ_BYTES : INBOUND_RAW_READ_BYTES;
-    const bytes = await readRawBytes(message.raw, cap);
+    const fullBytes = await readRawBytes(message.raw, hasR2 ? Number.POSITIVE_INFINITY : cap);
+    const bytes = fullBytes.byteLength > cap ? fullBytes.subarray(0, cap) : fullBytes;
     const decoder = new TextDecoder();
     const rawText = decoder.decode(bytes.subarray(0, INBOUND_RAW_READ_BYTES));
     // The message was larger than the buffer we read: any attachment past the cap was cut
@@ -73,7 +79,7 @@ const handler = {
       headers: headersToMap(message.headers),
       rawText,
       rawSize: message.rawSize,
-      ...(hasR2 ? { rawFull: decoder.decode(bytes) } : {}),
+      ...(hasR2 ? { rawFull: decoder.decode(bytes), rawBytes: fullBytes } : {}),
       ...(truncated ? { truncated: true } : {}),
     };
     // Store first. The Gmail forward runs after the ingest attempt — also when ingest threw,
@@ -107,8 +113,14 @@ const handler = {
   // $0: the schedule row is the durable timer, this cron is the ticker. Mail is kept
   // indefinitely — there is intentionally NO retention purge here.
   // The freeq outbox drain stays OUT of here (it moved to the standalone freeq-drain DO).
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  // Also: the once-a-UTC-day row-count snapshot + decrease alert (row-count.ts; never throws).
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     await runScheduledSendDrain(env);
+    const ctx = { requestId: newRequestId(), caller: SERVICE_NAME };
+    await runRowCountSnapshot(
+      { db: buildDb(env, ctx.requestId), audit: buildAuditEnv(env), orgId: common.DUB_DEFAULT_ORG_ID, ctx },
+      controller.scheduledTime,
+    );
   },
 };
 
