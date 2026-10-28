@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy fixes applied to EVERY archived version before it is built (build-bundle.mjs). Each `from` must occur in `file` of every archived ref, or the build aborts.",
+  "fixes": [
+    {
+      "file": "src/config/snapshot.json",
+      "from": "どなたでも無料でご参加いただけます。",
+      "to": "どなたでも参加申込が可能です。"
+    }
+  ]
+}
