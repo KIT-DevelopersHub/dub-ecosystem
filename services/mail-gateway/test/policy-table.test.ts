@@ -1,5 +1,5 @@
 // The tests that make the policy layer self-enforcing for mail-gateway — the largest table
-// in the fleet (35 routes), so the four properties below are what stand between it and a
+// in the fleet (36 routes), so the four properties below are what stand between it and a
 // silent hole:
 //
 //  1. ROUTE COVERAGE — the router's endpoint set and POLICY_TABLE's key set must match
@@ -143,7 +143,7 @@ const EMAIL_ROUTING_ADMIN = [
   "POST /mail/admin/email-routing/rules",
 ];
 // Everything `mail:admin` guards: the routing proxy plus the shared-mailbox definitions.
-const ADMIN = [...EMAIL_ROUTING_ADMIN, "GET /mail/mailboxes", "POST /mail/mailboxes/:id"].sort();
+const ADMIN = [...EMAIL_ROUTING_ADMIN, "GET /mail/mailboxes", "POST /mail/mailboxes/:id", "GET /mail/admin/canary/probes"].sort();
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/status", "POST /send"];
 // The one PUBLIC route, hence in EVERY row below including the empty-key one. Stated rather
@@ -180,7 +180,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(35);
+    expect(everyRoute).toHaveLength(36);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing
@@ -197,6 +197,7 @@ describe("role x endpoint matrix (frozen)", () => {
       // Same key, same conclusion for the shared-mailbox definitions.
       expect(reachable).not.toContain("GET /mail/mailboxes");
       expect(reachable).not.toContain("POST /mail/mailboxes/:id");
+      expect(reachable).not.toContain("GET /mail/admin/canary/probes");
     }
     // ...and the holder does reach all of them, so the assertion above is not vacuous.
     expect(allowedRoutes(["mail:admin"])).toEqual(ADMIN_ONLY);

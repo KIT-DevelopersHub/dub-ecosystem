@@ -102,6 +102,16 @@ CF_EMAIL_ROUTING_ZONE_NAME = "developershub.jp"  # anti-spoof matcher check
 # service's deployed Worker name AND be enabled as an email Worker on the zone.
 CF_EMAIL_ROUTING_WORKER_NAME = "dub-mail-gateway"
 
+# --- Production synthetic mail monitor (src/canary.ts). OFF unless all three are set.
+# Sends a real mail To=MAIL_CANARY_TO, Cc=MAIL_CANARY_CC every MAIL_CANARY_INTERVAL_MIN on the
+# cron below and checks mail_inbound for it. See README "本番の合成メール監視 (canary)".
+# MAIL_CANARY_ENABLED = "true"
+# MAIL_CANARY_TO = "qa-a@developershub.jp"
+# MAIL_CANARY_CC = "qa-b@developershub.jp"
+# MAIL_CANARY_EXPECT_CC = "false"     # "true" once the per-recipient (Cc) ingest fix ships
+# MAIL_CANARY_INTERVAL_MIN = "15"     # multiple of 5; each probe = 1 Resend send
+# MAIL_CANARY_DEADLINE_MIN = "10"
+
 # Cron: every 5 minutes (ONE trigger — the Workers Free plan caps the account at 5 cron
 # triggers, so we keep mail-gateway's single trigger and just make it tick more often).
 # The scheduled() handler runs the 予約送信 (scheduled-send) drain on EVERY tick — giving a
