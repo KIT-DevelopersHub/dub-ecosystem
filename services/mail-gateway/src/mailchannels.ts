@@ -10,6 +10,7 @@
 import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
 import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
+import { apiText, referencesHeader } from "./mime";
 import type { Env } from "./env";
 import { retryableStatus, safeErrorDetail } from "./provider-error";
 import { rateLimitError } from "./rate-limit";
@@ -44,12 +45,12 @@ export class MailChannelsMailProvider implements MailProvider {
     // diverge from SES — the exact break this must guards against.
     const headers: Record<string, string> = { "Message-ID": `<${msg.messageId}>` };
     if (msg.inReplyTo) {
-      const ref = `<${msg.inReplyTo}>`;
-      headers["In-Reply-To"] = ref;
-      headers["References"] = ref;
+      headers["In-Reply-To"] = `<${msg.inReplyTo}>`;
+      const refs = referencesHeader(msg.references && msg.references.length > 0 ? msg.references : [msg.inReplyTo]);
+      if (refs) headers["References"] = refs.replace(/\r\n /g, " ");
     }
 
-    const content: Array<{ type: string; value: string }> = [{ type: "text/plain", value: msg.textBody }];
+    const content: Array<{ type: string; value: string }> = [{ type: "text/plain", value: apiText(msg.textBody) }];
     if (msg.htmlBody) content.push({ type: "text/html", value: msg.htmlBody });
 
     const body = JSON.stringify({
@@ -57,6 +58,7 @@ export class MailChannelsMailProvider implements MailProvider {
         {
           to: msg.to.map(recipient),
           ...(msg.cc.length > 0 ? { cc: msg.cc.map(recipient) } : {}),
+          ...(msg.bcc && msg.bcc.length > 0 ? { bcc: msg.bcc.map(recipient) } : {}),
         },
       ],
       from: fromName ? { email: fromEmail, name: fromName } : { email: fromEmail },

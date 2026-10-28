@@ -258,7 +258,8 @@ async function assertInvariants(p: MailPattern, results: StepResult[], call: Cal
         if (JSON.stringify(files) !== JSON.stringify(want)) problems.push(`${tag}: Sent attachments ${files} != ${want}`);
       }
       // 3) BCC never appears in the outgoing headers.
-      const head = r.outbound!.mime.slice(0, r.outbound!.mime.search(/\r?\n\r?\n/)).toLowerCase();
+      // Unfolded (RFC 5322 §2.2.3) so a folded References/To is read as one logical line.
+      const head = r.outbound!.mime.slice(0, r.outbound!.mime.search(/\r?\n\r?\n/)).replace(/\r?\n[ \t]+/g, " ").toLowerCase();
       if (/^bcc:/m.test(head)) problems.push(`${tag}: outbound MIME carries a Bcc header`);
       for (const b of bccSet) if (head.includes(b)) problems.push(`${tag}: BCC ${b} leaked into outbound headers`);
       // 4) RFC 5322 §3.6.4: References = parent's References + parent id.

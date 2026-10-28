@@ -5,7 +5,7 @@
 // failure -> mail.message.send_failed (notification) + publishAudit failure + 502.
 import { DubError } from "@dub/errors";
 import { publishAudit, publishEvent, createEvent } from "@dub/events";
-import { nowIso } from "@dub/db";
+import { nowIso, type DbClient } from "@dub/db";
 import { consoleSink } from "@dub/observability";
 import type { auditLog, mail } from "@dub/types";
 import { DEFAULT_SEND_BASE_DELAY_MS, DEFAULT_SEND_MAX_ATTEMPTS, SERVICE_NAME } from "./config";
@@ -62,6 +62,56 @@ export function withArchiveCc(req: mail.SendMailRequest, archiveCc: string | nul
   const already = [...req.to, ...(req.cc ?? [])].some((a) => a.email.trim().toLowerCase() === target);
   if (already) return req;
   return { ...req, cc: [...(req.cc ?? []), { email: addr }] };
+}
+
+/** Split the auto-added archive address off the visible Cc into an envelope-only Bcc.
+ *  `req` = withArchiveCc(rawReq) (kept for hash/persistence so idempotency + stored rows are
+ *  unchanged); the wire copy shows only what the user addressed. An archive address the
+ *  caller CC'd explicitly stays visible (they asked for it). */
+export function splitArchive(
+  rawReq: mail.SendMailRequest,
+  req: mail.SendMailRequest,
+): { cc: mail.MailAddress[]; bcc: mail.MailAddress[] } {
+  const rawCc = rawReq.cc ?? [];
+  const cc = req.cc ?? [];
+  if (cc.length === rawCc.length) return { cc, bcc: [] };
+  return { cc: rawCc, bcc: cc.slice(rawCc.length) };
+}
+
+/**
+ * RFC 5322 §3.6.4 References for a reply: the parent's References followed by the parent's
+ * id. The parent's raw References is not stored, so the chain is rebuilt from the thread we
+ * already know: root first, the thread's other received/sent messages by arrival, parent
+ * last. Best-effort — a lookup failure degrades to [parent] (the old behaviour).
+ */
+export async function buildReferences(
+  db: DbClient,
+  inReplyTo: string,
+  threadId: string | null,
+  fallbackFrom: string,
+): Promise<string[]> {
+  const parent = inReplyTo.trim().replace(/^<|>$/g, "").trim();
+  if (!threadId) return [parent];
+  try {
+    const inbound = await db.all<{ message_id: string; created_at: string }>(
+      `SELECT message_id, created_at FROM mail_inbound WHERE thread_id = ?`,
+      threadId,
+    );
+    const sent = await db.all<{ id: string; from_address: string | null; created_at: string }>(
+      `SELECT id, from_address, created_at FROM mail_send_log WHERE thread_id = ? AND status = 'sent'`,
+      threadId,
+    );
+    const middle = [
+      ...inbound.map((r) => ({ id: r.message_id, at: r.created_at })),
+      ...sent.map((r) => ({ id: rfcMessageId(r.id, r.from_address ?? fallbackFrom), at: r.created_at })),
+    ]
+      .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+      .map((r) => r.id)
+      .filter((id) => id !== threadId && id !== parent);
+    return [...new Set([threadId, ...middle, parent])];
+  } catch {
+    return [parent];
+  }
 }
 
 /** Stable RFC Message-Id reconstructed from the send-log id, so a replay reproduces
@@ -147,6 +197,10 @@ export async function sendMail(
 
   // 2) assemble + hand to the provider.
   const messageId = rfcMessageId(ownedId, fromAddress);
+  // The archive copy rides the envelope (Bcc), not a visible Cc: recipients never see it and
+  // a reply-all no longer drags archive@ into the conversation (doc 8.1).
+  const { cc: wireCc, bcc: wireBcc } = splitArchive(rawReq, req);
+  const references = req.inReplyTo ? await buildReferences(db, req.inReplyTo, threadId, fromAddress) : [];
   const outAttachments = (req.attachments ?? []).map((a) => ({
     filename: a.filename,
     contentType: a.contentType,
@@ -155,21 +209,24 @@ export async function sendMail(
   const outbound: OutboundMail = {
     from: fromAddress,
     to: req.to,
-    cc: req.cc ?? [],
+    cc: wireCc,
+    ...(wireBcc.length > 0 ? { bcc: wireBcc } : {}),
     subject: req.subject,
     textBody: req.textBody,
     htmlBody: req.htmlBody ?? null,
     messageId,
     inReplyTo: req.inReplyTo ?? null,
+    ...(references.length > 0 ? { references } : {}),
     mime: assembleMime({
       from: fromAddress,
       to: req.to,
-      cc: req.cc ?? [],
+      cc: wireCc,
       subject: req.subject,
       textBody: req.textBody,
       htmlBody: req.htmlBody ?? null,
       messageId,
       inReplyTo: req.inReplyTo ?? null,
+      ...(references.length > 0 ? { references } : {}),
       ...(req.loopHeaders ? { loopHeaders: req.loopHeaders } : {}),
       ...(outAttachments.length > 0 ? { attachments: outAttachments } : {}),
     }),
