@@ -101,9 +101,10 @@ export function initial(p: MailPerson): string {
   return src.slice(0, 1).toUpperCase();
 }
 
-/** A thread is unread when any of its messages is unread. */
+/** A thread is unread when any of the viewer's own messages is unread (others' mail is
+ *  view-only, so it never counts). */
 export function threadUnread(t: MailThreadModel): boolean {
-  return t.messages.some((m) => !m.read);
+  return t.messages.some((m) => !m.read && m.mine !== false);
 }
 
 /** A thread is "mine" when any received message was delivered to the viewer (absent = mine).
