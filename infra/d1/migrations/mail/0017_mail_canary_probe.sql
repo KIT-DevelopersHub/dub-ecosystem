@@ -1,5 +1,5 @@
 -- mail-gateway (本番の合成メール監視 / canary) — one row per synthetic probe.
--- Mirror of services/mail-gateway/db/0014_mail_canary_probe.sql (kept byte-identical;
+-- Mirror of services/mail-gateway/db/0017_mail_canary_probe.sql (kept byte-identical;
 -- infra is the 正本 / runner, the service copy backs the in-memory test schema).
 -- Additive, forward-only; a new table only (no existing table is touched).
 --

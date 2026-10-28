@@ -279,7 +279,7 @@ open the verification mail in that Gmail and click the link (status → *Verifie
   `mail.canary.recovered` を出す。
 - 確認: `GET /api/v1/mail/admin/canary/probes?limit=50`（`mail:admin`、読み取り専用）。
 - 有効化: (1) Email Routing で QA アドレス2つを「Worker に送る（dub-mail-gateway）」ルールで作成
-  (2) migration `0014_mail_canary_probe.sql` を適用 (3) `MAIL_CANARY_ENABLED="true"` /
+  (2) migration `0017_mail_canary_probe.sql` を適用 (3) `MAIL_CANARY_ENABLED="true"` /
   `MAIL_CANARY_TO` / `MAIL_CANARY_CC` を vars に設定してデプロイ。
 - コスト注意: 15 分間隔だと 1日 96 送信 ≒ 月 2,880 送信。Resend 無料枠（100/日・3,000/月）をほぼ使い切るので、
   無料枠のままなら間隔を 60 分などに延ばす。
