@@ -11,14 +11,6 @@ const BCC_DROPPED: KnownIssue = {
   ref: `${TRACKING}#known-bcc-dropped`,
   why: "SendMailRequest has no bcc; parseSendMailRequest silently drops it, so BCC recipients never get the mail",
 };
-const REFERENCES_CHAIN: KnownIssue = {
-  ref: `${TRACKING}#known-references-chain`,
-  why: "assembleMime writes References: <inReplyTo> only, not parent References + parent id (RFC 5322 §3.6.4)",
-};
-const RFC2047: KnownIssue = {
-  ref: `${TRACKING}#known-rfc2047`,
-  why: "decodeHeaderWord ignores the charset (always UTF-8) and keeps whitespace between adjacent encoded-words",
-};
 
 export const MATRIX: MailPattern[] = [
   // ---- inbound from an external sender: To / CC / BCC x internal counts ----
@@ -54,8 +46,8 @@ export const MATRIX: MailPattern[] = [
   { id: "in/subject-utf8-b", title: "Japanese subject, UTF-8 B encoded-word", steps: [{ from: X, to: [A], subject: "utf8-b" }] },
   { id: "in/subject-utf8-q", title: "UTF-8 Q encoded-word subject", steps: [{ from: X, to: [A], subject: "utf8-q" }] },
   { id: "in/subject-utf8-raw", title: "raw UTF-8 subject (SMTPUTF8)", steps: [{ from: X, to: [A], subject: "utf8-raw" }] },
-  { id: "in/subject-split-words", title: "subject split across adjacent encoded-words", steps: [{ from: X, to: [A], subject: "split-words" }], knownIssue: RFC2047 },
-  { id: "in/subject-iso-2022-jp", title: "ISO-2022-JP encoded subject", steps: [{ from: X, to: [A], subject: "iso-2022-jp" }], knownIssue: RFC2047 },
+  { id: "in/subject-split-words", title: "subject split across adjacent encoded-words", steps: [{ from: X, to: [A], subject: "split-words" }] },
+  { id: "in/subject-iso-2022-jp", title: "ISO-2022-JP encoded subject", steps: [{ from: X, to: [A], subject: "iso-2022-jp" }] },
 
   // ---- attachments ----
   { id: "in/attachment-small", title: "small attachment", steps: [{ from: X, to: [A], attachments: ["small"] }] },
@@ -116,6 +108,5 @@ export const MATRIX: MailPattern[] = [
     title: "our 2nd reply carries the full References chain",
     steps: [{ from: X, to: [A] }, { from: A, to: [X], kind: "reply", parent: 0 }, { from: X, to: [A], kind: "reply", parent: 1 }, { from: A, to: [X], kind: "reply", parent: 2 }],
     rfcReferences: true,
-    knownIssue: REFERENCES_CHAIN,
   },
 ];

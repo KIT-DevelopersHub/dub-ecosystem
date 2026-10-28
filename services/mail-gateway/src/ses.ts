@@ -48,6 +48,8 @@ export class SesMailProvider implements MailProvider {
       Destination: {
         ToAddresses: msg.to.map((a) => a.email),
         ...(msg.cc.length > 0 ? { CcAddresses: msg.cc.map((a) => a.email) } : {}),
+        // Raw MIME has no Bcc header; SES delivers envelope-only recipients from here.
+        ...(msg.bcc && msg.bcc.length > 0 ? { BccAddresses: msg.bcc.map((a) => a.email) } : {}),
       },
       Content: { Raw: { Data: base64Utf8(msg.mime) } },
     });
