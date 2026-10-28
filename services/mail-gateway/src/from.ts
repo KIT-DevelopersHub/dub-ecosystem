@@ -12,7 +12,7 @@ import type { DbClient } from "@dub/db";
 import type { identity, mail } from "@dub/types";
 import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS, SERVICE_NAME } from "./config";
-import { findInboundByMessageId } from "./repo";
+import { findDeliveryEnvelope, findInboundByMessageId } from "./repo";
 
 /** Verified sending domain (Resend). Only addresses on this domain may be a From. */
 export const COMPANY_MAIL_DOMAIN = "developershub.jp";
@@ -73,6 +73,10 @@ export async function resolveReplyFromAddress(
   try {
     const parent = await findInboundByMessageId(db, bareMessageId(inReplyTo));
     if (parent) {
+      // The replier's OWN copy wins: a colleague who was Cc'd (or Bcc'd) replies as the
+      // address it reached them at, never as the To: recipient's address.
+      const own = userId ? await findDeliveryEnvelope(db, parent.id, userId) : null;
+      if (isCompanyAddress(own)) return own.trim();
       const recipients = JSON.parse(parent.to_json) as mail.MailAddress[];
       const mailbox = recipients.map((r) => r.email).find(isCompanyAddress);
       if (mailbox) return mailbox.trim();

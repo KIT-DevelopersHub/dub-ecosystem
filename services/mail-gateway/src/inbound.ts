@@ -17,7 +17,7 @@ import {
   parseAddress,
   parseAddressList,
 } from "./mime";
-import { insertInbound, newInboundId, resolveThreadId, seenInbound } from "./repo";
+import { claimInboundOwnerIfUnset, findInboundByMessageId, insertDelivery, insertInbound, newInboundId, resolveThreadId } from "./repo";
 import { persistAttachments, persistDroppedAttachments, type DroppedReason } from "./attachments";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
@@ -163,8 +163,10 @@ function normAddr(value: string | null | undefined): string | null {
  *   2. the To: header addresses, in order — the archive address filtered out
  *   3. the envelope recipient when it IS the shared system address (last resort)
  *
- * The archive address never appears: the auto-CC'd copy of every outbound send is
- * delivered there, and it is read_all-only oversight material, not an owned inbox.
+ * The archive address never appears, and an archive@ COPY gets no candidates at all: the
+ * auto-copy of every outbound send is delivered there, and it is read_all-only oversight
+ * material, not an owned inbox. Each other recipient gets their own envelope copy (and
+ * their own delivery row), so the archive copy never needs to stand in for one.
  */
 function ownerCandidatesFor(
   envelope: mail.MailAddress,
@@ -178,7 +180,8 @@ function ownerCandidatesFor(
   const isShared = !!shared && envelopeEmail === shared;
 
   const candidates: mail.MailAddress[] = [];
-  if (envelopeEmail && !isArchive && !isShared) candidates.push(envelope);
+  if (isArchive) return candidates;
+  if (envelopeEmail && !isShared) candidates.push(envelope);
   for (const a of headerTo) {
     if (archive && normAddr(a.email) === archive) continue;
     candidates.push(a);
@@ -190,8 +193,11 @@ function ownerCandidatesFor(
 }
 
 /**
- * Ingest one inbound message: dedup by Message-Id, persist the normalized row, then
- * publish mail.message.received. Returns whether it was newly processed.
+ * Ingest one envelope copy of an inbound message. The body row is stored once per
+ * Message-Id; EVERY copy (one Email Routing call per RCPT TO — To, Cc, Bcc, archive@)
+ * records its own delivery so each internal recipient sees it in their inbox. Attachments,
+ * the raw .eml archive and mail.message.received happen only for the first copy.
+ * `processed` = this call stored the body row (the first copy).
  */
 export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
   const parsed = parseInbound(raw, {
@@ -207,14 +213,11 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   const resolvedThread = await resolveThreadId(deps.db, references);
   if (resolvedThread) message.threadId = resolvedThread;
 
-  if (await seenInbound(deps.db, message.messageId)) {
-    return { processed: false, message };
-  }
-
-  // Per-account Inbox scope: resolve the owning roster user from the delivery address(es),
-  // envelope recipient first (see parseInbound). null when no roster user matches
-  // (fail-closed: invisible to all).
+  // Per-account Inbox scope: resolve the owning roster user of THIS copy from its delivery
+  // address(es), envelope recipient first (see parseInbound). null when no roster user
+  // matches, or for the archive@ copy (fail-closed: visible to mail:read_all only).
   const ownerUserId = await resolveInboundOwner(deps.identity, deps.ctx, ownerCandidates);
+  const envelopeTo = parseAddress(raw.to).email.trim().toLowerCase();
 
   const changes = await insertInbound(deps.db, message, {
     mailbox,
@@ -227,9 +230,17 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     ownerUserId,
   });
   if (changes === 0) {
-    // lost the race with a concurrent redelivery — already persisted, do not re-publish.
+    // Body already stored: another recipient's copy, or a redelivery. Record this copy's
+    // delivery (a redelivery of the same copy is an INSERT OR IGNORE no-op), never re-publish.
+    const existing = await findInboundByMessageId(deps.db, message.messageId);
+    if (!existing) return { processed: false, message };
+    message.id = existing.id;
+    message.threadId = existing.thread_id;
+    await insertDelivery(deps.db, { inboundId: existing.id, ownerUserId, envelopeTo });
+    if (ownerUserId) await claimInboundOwnerIfUnset(deps.db, existing.id, ownerUserId);
     return { processed: false, message };
   }
+  await insertDelivery(deps.db, { inboundId: message.id, ownerUserId, envelopeTo });
 
   // Raw .eml archive (データ保全): the untruncated original, so a parser bug or data loss
   // can be repaired later. Best-effort — archiveRawEml logs and never throws.

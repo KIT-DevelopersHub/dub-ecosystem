@@ -181,7 +181,7 @@ export async function runPattern(p: MailPattern): Promise<void> {
           body: JSON.stringify({
             to: step.to.map((email) => ({ email })),
             ...(cc.length > 0 ? { cc: cc.map((email) => ({ email })) } : {}),
-            // Not in the frozen SendMailRequest — sent the way a Bcc field in the UI would.
+            // SendMailRequest.bcc: envelope-only recipients (never a header).
             ...(bcc.length > 0 ? { bcc: bcc.map((email) => ({ email })) } : {}),
             subject: prefix + subj.decoded,
             textBody: `Hello from the matrix.\n${marker}`,
@@ -195,8 +195,8 @@ export async function runPattern(p: MailPattern): Promise<void> {
         const outbound = captured[before];
         expect(outbound, `${p.id} step ${i}: provider received the send`).toBeDefined();
         rawMime = outbound!.mime;
-        // Envelope = exactly what the provider was asked to deliver (OutboundMail has no bcc).
-        envelope = [...outbound!.to, ...outbound!.cc, ...((outbound as { bcc?: mail.MailAddress[] }).bcc ?? [])].map((a) => a.email);
+        // Envelope = exactly what the provider was asked to deliver (To + Cc + Bcc).
+        envelope = [...outbound!.to, ...outbound!.cc, ...(outbound!.bcc ?? [])].map((a) => a.email);
         res = { step, messageId, subject: prefix + subj.decoded, marker, atts, outbound, sentId: messageId.split("@")[0]!, ancestry };
       } else {
         const messageId = `${p.id.replace(/\W+/g, "-")}-${i}@${step.from.split("@")[1]}`;

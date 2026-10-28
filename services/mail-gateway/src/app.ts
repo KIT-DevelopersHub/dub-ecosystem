@@ -261,14 +261,14 @@ export function createApp() {
   // detail. Only delivered (status='sent') rows are listed; pending/failed never show.
   ext.get("/sent", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
-    const page = await listSent(dbOf(c), { ownerUserId: await scopeOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
+    const page = await listSent(dbOf(c), { ownerUserId: await scopeOf(c), viewer: ownerOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
     for (const m of page.items) hideArchiveCc(m, archiveOf(c));
     return c.json(page satisfies common.Paginated<mail.MailSentListItem>);
   });
 
   ext.get("/sent/:id", async (c) => {
     const db = dbOf(c);
-    const msg = await getSentDetail(db, c.req.param("id"), await scopeOf(c));
+    const msg = await getSentDetail(db, c.req.param("id"), await scopeOf(c), ownerOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `sent message not found: ${c.req.param("id")}`, { status: 404 });
     hideArchiveCc(msg, archiveOf(c));
     const attachments = await attachmentsFor(db, "sent", msg.id);

@@ -119,7 +119,16 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
   let cc: mail.MailAddress[] | undefined;
   if (b.cc !== undefined) {
     const parsed = parseAddressField(b.cc, "cc", fe);
-    if (parsed) cc = parsed;
+    if (parsed && parsed.length > MAX_RECIPIENTS) fe.push({ field: "cc", reason: "too_long", message: `<= ${MAX_RECIPIENTS}` });
+    else if (parsed) cc = parsed;
+  }
+
+  // Bcc: validated exactly like cc. Envelope-only — it never reaches a MIME header.
+  let bcc: mail.MailAddress[] | undefined;
+  if (b.bcc !== undefined) {
+    const parsed = parseAddressField(b.bcc, "bcc", fe);
+    if (parsed && parsed.length > MAX_RECIPIENTS) fe.push({ field: "bcc", reason: "too_long", message: `<= ${MAX_RECIPIENTS}` });
+    else if (parsed && parsed.length > 0) bcc = parsed;
   }
 
   const subject = b.subject;
@@ -173,6 +182,7 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
     textBody: textBody as string,
   };
   if (cc !== undefined) out.cc = cc;
+  if (bcc !== undefined) out.bcc = bcc;
   if (htmlBody !== undefined) out.htmlBody = htmlBody;
   if (inReplyTo !== undefined) out.inReplyTo = inReplyTo;
   if (loopHeaders !== undefined) out.loopHeaders = loopHeaders;
@@ -206,6 +216,10 @@ export function parseScheduleMailRequest(body: unknown, now: number = Date.now()
   if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
   if (Array.isArray((body as Record<string, unknown>).attachments) && ((body as Record<string, unknown>).attachments as unknown[]).length > 0) {
     throw mailInvalid([{ field: "attachments", reason: "unsupported", message: "attachments are not supported on a scheduled send" }]);
+  }
+  // Bcc is not persisted on a schedule yet: reject it loudly rather than drop recipients.
+  if (Array.isArray((body as Record<string, unknown>).bcc) && ((body as Record<string, unknown>).bcc as unknown[]).length > 0) {
+    throw mailInvalid([{ field: "bcc", reason: "unsupported", message: "bcc is not supported on a scheduled send" }]);
   }
   // Reuse the full send-request validation (to/cc/subject/body/inReplyTo/loopHeaders).
   const base = parseSendMailRequest(body);

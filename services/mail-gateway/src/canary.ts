@@ -12,11 +12,10 @@
 // roster user (keep them out of the roster).
 //
 // Health per probe:
-//   - default:              some copy reached mail_inbound (to_ok OR cc_ok). Known bug:
-//     mail_inbound keeps ONE row per Message-ID, so the second recipient's copy is dropped
-//     and which recipient "wins" is nondeterministic — requiring to_ok alone would flap.
-//   - MAIL_CANARY_EXPECT_CC="true": both to_ok AND cc_ok (turn on once the per-recipient
-//     ingest fix ships). cc_ok is recorded either way.
+//   - default:              some copy reached mail_inbound (to_ok OR cc_ok).
+//   - MAIL_CANARY_EXPECT_CC="true": both to_ok AND cc_ok. Each envelope copy now has its own
+//     mail_inbound_delivery row (0018), so both recipients are observable — turn this on
+//     once that fix is deployed. cc_ok is recorded either way.
 // Alerting (audit + error log): the 2nd consecutive failed probe raises `mail.canary.alert`;
 // the first ok probe after an alerted streak raises `mail.canary.recovered`.
 import { publishAudit } from "@dub/events";
@@ -147,24 +146,39 @@ export async function listProbes(db: DbClient, limit: number): Promise<ProbeRow[
 interface InboundHit {
   created_at: string;
   header_meta_json: string | null;
+  /** Envelope recipient of this copy (mail_inbound_delivery, 0018). Wins over header_meta. */
+  delivered_to?: string | null;
 }
 
 /** mail_inbound rows for a probe: by Message-ID (indexed) or by the exact subject token
  *  within the probe's window (Resend may replace our Message-ID). */
 async function findInbound(db: DbClient, p: ProbeRow): Promise<InboundHit[]> {
   const byId = p.message_id
-    ? await db.all<InboundHit>(`SELECT created_at, header_meta_json FROM mail_inbound WHERE message_id = ?`, p.message_id)
+    ? await db.all<InboundHit & { id: string }>(`SELECT id, created_at, header_meta_json FROM mail_inbound WHERE message_id = ?`, p.message_id)
     : [];
   const since = new Date(Date.parse(p.sent_at) - MINUTE).toISOString();
-  const bySubject = await db.all<InboundHit & { message_id: string }>(
-    `SELECT message_id, created_at, header_meta_json FROM mail_inbound WHERE created_at >= ? AND subject = ?`,
+  const bySubject = await db.all<InboundHit & { id: string; message_id: string }>(
+    `SELECT id, message_id, created_at, header_meta_json FROM mail_inbound WHERE created_at >= ? AND subject = ?`,
     since,
     p.subject,
   );
-  return [...byId, ...bySubject.filter((r) => r.message_id !== p.message_id)];
+  const rows = [...byId, ...bySubject.filter((r) => r.message_id !== p.message_id)];
+  // One hit per envelope copy (each recipient's delivery); a body row with no delivery
+  // rows (pre-0018 shape) falls back to its own header_meta deliveredTo.
+  const hits: InboundHit[] = [];
+  for (const r of rows) {
+    const deliveries = await db.all<{ envelope_to: string; created_at: string }>(
+      `SELECT envelope_to, created_at FROM mail_inbound_delivery WHERE inbound_id = ?`,
+      r.id,
+    );
+    if (deliveries.length === 0) hits.push({ created_at: r.created_at, header_meta_json: r.header_meta_json });
+    for (const d of deliveries) hits.push({ created_at: d.created_at, header_meta_json: null, delivered_to: d.envelope_to || null });
+  }
+  return hits;
 }
 
 function deliveredTo(hit: InboundHit): string | null {
+  if (hit.delivered_to) return hit.delivered_to.trim().toLowerCase();
   if (!hit.header_meta_json) return null;
   try {
     const meta = JSON.parse(hit.header_meta_json) as mail.MailHeaderMeta;

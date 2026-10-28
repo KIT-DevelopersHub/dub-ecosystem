@@ -749,6 +749,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MailAddress'
+        bcc:
+          type: array
+          description: Envelope-only recipients (max 100). Never written to a header; shown in Sent to the sender only. Rejected on a scheduled send.
+          items:
+            $ref: '#/components/schemas/MailAddress'
         subject:
           type: string
         textBody:
