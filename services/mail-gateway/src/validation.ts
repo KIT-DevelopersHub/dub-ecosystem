@@ -211,18 +211,11 @@ function parseFutureIso(v: unknown, field: string, fe: FieldError[], now: number
 }
 
 /** Validate POST /mail/scheduled body: a SendMailRequest + a future `scheduledAt`.
- *  Attachments are NOT supported on a scheduled send in this slice — reject them loudly
- *  rather than silently dropping the files at delivery. */
+ *  Attachments and Bcc go through the SAME validation/limits as an immediate send
+ *  (per-file / per-message / count) and are persisted with the schedule (0020). */
 export function parseScheduleMailRequest(body: unknown, now: number = Date.now()): mail.ScheduleMailRequest {
   if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
-  if (Array.isArray((body as Record<string, unknown>).attachments) && ((body as Record<string, unknown>).attachments as unknown[]).length > 0) {
-    throw mailInvalid([{ field: "attachments", reason: "unsupported", message: "attachments are not supported on a scheduled send" }]);
-  }
-  // Bcc is not persisted on a schedule yet: reject it loudly rather than drop recipients.
-  if (Array.isArray((body as Record<string, unknown>).bcc) && ((body as Record<string, unknown>).bcc as unknown[]).length > 0) {
-    throw mailInvalid([{ field: "bcc", reason: "unsupported", message: "bcc is not supported on a scheduled send" }]);
-  }
-  // Reuse the full send-request validation (to/cc/subject/body/inReplyTo/loopHeaders).
+  // Reuse the full send-request validation (to/cc/bcc/subject/body/inReplyTo/loopHeaders/attachments).
   const base = parseSendMailRequest(body);
   const fe: FieldError[] = [];
   const scheduledAt = parseFutureIso((body as Record<string, unknown>).scheduledAt, "scheduledAt", fe, now);

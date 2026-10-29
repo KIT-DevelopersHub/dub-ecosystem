@@ -10,8 +10,16 @@ import type { mail } from "@dub/types";
 import type { DbClient } from "@dub/db";
 import type { RequestContext } from "@dub/http";
 import { SERVICE_NAME } from "./config";
-import { b64decodeToBytes } from "./mime";
-import { insertAttachment, listAttachments, newAttachmentId, type AttachmentRow } from "./repo";
+import { b64decodeToBytes, b64encodeBytes } from "./mime";
+import { DubError } from "@dub/errors";
+import {
+  insertAttachment,
+  insertScheduledAttachment,
+  listAttachments,
+  listScheduledAttachments,
+  newAttachmentId,
+  type AttachmentRow,
+} from "./repo";
 
 /** Minimal blob interface (R2 in prod, an in-memory fake in tests). */
 export interface MailBlobStore {
@@ -164,3 +172,83 @@ export async function persistDroppedAttachments(
 }
 
 export type DroppedReason = "dropped_too_large" | "dropped_truncated";
+
+// ---- scheduled send (予約送信) attachments (migration 0020) ----
+// Unlike the send/receive persist paths these are NOT best-effort: the files are the only
+// copy until delivery, so a failed park fails the POST (no schedule row is written) and a
+// missing blob at delivery fails the drain attempt (retried, then 'failed') instead of
+// silently sending the mail without its attachment.
+
+/** R2 key for a parked file: org / scheduled / schedule-id / attachment-id. */
+export function scheduledAttachmentR2Key(orgId: string, scheduledId: string, attId: string): string {
+  return `${orgId}/scheduled/${scheduledId}/${attId}`;
+}
+
+/** Park a schedule's files (R2 bytes + metadata). All-or-nothing: on any failure the blobs
+ *  already written are removed and MAIL_ATTACHMENT_NOT_STORED (503) is thrown. */
+export async function parkScheduledAttachments(
+  deps: { db: DbClient; blobs: MailBlobStore; orgId: string },
+  scheduledId: string,
+  inputs: mail.MailAttachmentInput[],
+): Promise<void> {
+  const written: string[] = [];
+  try {
+    for (const input of inputs) {
+      const item = decodeInputAttachment(input);
+      const id = newAttachmentId();
+      const key = scheduledAttachmentR2Key(deps.orgId, scheduledId, id);
+      await deps.blobs.put({ key, body: item.bytes, contentType: item.contentType });
+      written.push(key);
+      await insertScheduledAttachment(deps.db, {
+        id,
+        scheduledId,
+        filename: item.filename,
+        mimeType: item.contentType,
+        sizeBytes: item.bytes.byteLength,
+        r2Key: key,
+      });
+    }
+  } catch (err) {
+    await Promise.all(written.map((k) => deps.blobs.delete(k).catch(() => undefined)));
+    throw new DubError("MAIL_ATTACHMENT_NOT_STORED", "failed to store scheduled attachments", { status: 503, cause: err });
+  }
+}
+
+/** Rebuild a schedule's attachment inputs (base64) for the send core. Throws when a parked
+ *  file cannot be read so the drain retries rather than dropping it. */
+export async function loadScheduledAttachments(
+  deps: { db: DbClient; blobs: MailBlobStore | undefined },
+  scheduledId: string,
+): Promise<mail.MailAttachmentInput[]> {
+  const rows = await listScheduledAttachments(deps.db, [scheduledId]);
+  if (rows.length === 0) return [];
+  if (!deps.blobs) throw new DubError("MAIL_ATTACHMENTS_UNCONFIGURED", "attachment storage not configured", { status: 503 });
+  const out: mail.MailAttachmentInput[] = [];
+  for (const r of rows) {
+    const obj = await deps.blobs.get(r.r2_key);
+    if (!obj) throw new DubError("MAIL_ATTACHMENT_NOT_STORED", `scheduled attachment body missing: ${r.id}`, { status: 503 });
+    out.push({ filename: r.filename, contentType: r.mime_type, contentBase64: b64encodeBytes(new Uint8Array(obj.body)) });
+  }
+  return out;
+}
+
+/** Drop a schedule's parked blobs once they are no longer needed (sent / canceled). The
+ *  metadata rows stay as history. Best-effort: a leftover blob is only storage. */
+export async function releaseScheduledAttachments(
+  deps: { db: DbClient; blobs: MailBlobStore | undefined; ctx?: RequestContext },
+  scheduledId: string,
+): Promise<void> {
+  if (!deps.blobs) return;
+  try {
+    const rows = await listScheduledAttachments(deps.db, [scheduledId]);
+    for (const r of rows) await deps.blobs.delete(r.r2_key);
+  } catch (err) {
+    consoleSink({
+      level: "warn",
+      message: "mail-gateway: failed to release scheduled attachments",
+      service: SERVICE_NAME,
+      ...(deps.ctx ? { requestId: deps.ctx.requestId } : {}),
+      fields: { scheduledId, error: err instanceof Error ? err.message : String(err) },
+    });
+  }
+}

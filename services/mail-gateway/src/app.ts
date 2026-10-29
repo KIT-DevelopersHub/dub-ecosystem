@@ -34,7 +34,7 @@ import { registerEmailRoutingAdmin } from "./email-routing-routes";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
 import { handleResendWebhook } from "./resend-webhook";
 import { buildBlobs, buildDb, buildSendDeps } from "./deps";
-import { attachmentsFor } from "./attachments";
+import { attachmentsFor, parkScheduledAttachments, releaseScheduledAttachments } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
@@ -292,17 +292,25 @@ export function createApp() {
     const ctx = ctxOf(c);
     const userId = ownerOf(c);
     const req = parseScheduleMailRequest(await c.req.json().catch(() => null));
+    assertAttachmentsSupported(c, req);
     // Resolve the envelope From now (same rules as /outbox) so the Scheduled list shows the
     // real From and the drain need not resolve later.
     const fromAddress = req.inReplyTo
       ? await resolveReplyFromAddress(c.env, ctx, dbOf(c), req.inReplyTo, userId)
       : await resolveUserFromAddress(c.env, ctx, userId);
     const id = newScheduledId();
+    // Park the files FIRST (R2 bytes + metadata keyed to the pre-minted id): a storage
+    // failure 503s before any row exists, so a schedule can never go out file-less.
+    const blobs = buildBlobs(c.env);
+    if (blobs && req.attachments && req.attachments.length > 0) {
+      await parkScheduledAttachments({ db: dbOf(c), blobs, orgId: common.DUB_DEFAULT_ORG_ID }, id, req.attachments);
+    }
     await insertScheduled(dbOf(c), {
       id,
       ownerUserId: userId,
       toJson: JSON.stringify(req.to),
       ccJson: JSON.stringify(req.cc ?? []),
+      bccJson: req.bcc && req.bcc.length > 0 ? JSON.stringify(req.bcc) : null,
       subject: req.subject,
       textBody: req.textBody,
       htmlBody: req.htmlBody ?? null,
@@ -360,6 +368,7 @@ export function createApp() {
       if (!existing) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `scheduled send not found: ${id}`, { status: 404 });
       throw new DubError("MAIL_INVALID_REQUEST", `scheduled send is no longer cancelable (status=${existing.status})`, { status: 409 });
     }
+    await releaseScheduledAttachments({ db: dbOf(c), blobs: buildBlobs(c.env), ctx: ctxOf(c) }, id);
     return c.json({ id, status: "canceled" });
   });
 

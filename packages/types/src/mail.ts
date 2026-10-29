@@ -46,7 +46,7 @@ export interface SendMailRequest {
   cc?: MailAddress[];
   // ADDITIVE (Bcc): envelope-only recipients. Delivered by the provider as real Bcc, never
   // written to any header; stored on the send log and shown in Sent to the sender only.
-  // Same validation/limits as cc. Not supported on a scheduled send (rejected there).
+  // Same validation/limits as cc. Also persisted on a scheduled send (mail_scheduled.bcc_json).
   bcc?: MailAddress[];
   subject: string;
   textBody: string;
@@ -194,8 +194,8 @@ export interface MailSentDetail extends MailSentListItem {
 // full payload is stored in mail_scheduled with status='scheduled' and a due time; a
 // free-tier drain claims due rows and hands each to the SAME send core as an immediate
 // send (so 二重送信ゼロ / Sent-folder / archive-CC all hold). List / edit / cancel act on
-// still-'scheduled' rows only. Attachments are NOT carried on a scheduled send in this
-// slice (schedule an attachment-less body; a later slice may persist bytes to R2).
+// still-'scheduled' rows only. Attachments + Bcc ride along (ADDITIVE, migration 0020):
+// the bytes are parked in R2 and re-attached by the drain at delivery time.
 
 /** Terminal + live states of a scheduled send. */
 export type ScheduledSendStatus = "scheduled" | "sent" | "canceled" | "failed";
@@ -225,11 +225,15 @@ export interface ScheduledSendListItem {
   inReplyTo?: string; // set when the scheduled send is a reply
   sentMessageId?: string; // set once delivered (status='sent')
   errorCode?: string; // set when the drain gave up (status='failed')
+  // ADDITIVE (0020): metadata of the files parked with the schedule (bytes in R2). Absent
+  // when none, so an attachment-less row is byte-identical to the 0010 shape.
+  attachments?: MailAttachment[];
 }
 /** Scheduled-folder detail: list row plus the full editable body. */
 export interface ScheduledSendDetail extends ScheduledSendListItem {
   textBody: string;
   htmlBody?: string;
+  bcc?: MailAddress[]; // ADDITIVE (0020): envelope-only Bcc, shown to the owner only
 }
 /** PATCH /mail/scheduled/:id — edit fields and/or reschedule. All optional; only the
  *  provided fields change. Allowed only while the row is still 'scheduled'. */
