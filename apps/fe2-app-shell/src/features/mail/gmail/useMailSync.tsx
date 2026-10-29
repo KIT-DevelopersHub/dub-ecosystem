@@ -198,11 +198,15 @@ export function useMailSync(): void {
     const id = openThreadId;
     loaded.current.add(id);
     let alive = true;
+    let done = false;
     void (async () => {
       try {
         if (thread.folder === "sent") {
           const detail = await api.getSent(thread.id);
-          if (alive) dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages: [sentDetailToMessage(detail, me)] });
+          if (alive) {
+            done = true;
+            dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages: [sentDetailToMessage(detail, me)] });
+          }
         } else {
           // Persist read-state on the server so it survives a reload (mirrors InboxScreen).
           // Opening reads the whole thread; OPEN_THREAD already flipped the local flags, so
@@ -220,7 +224,10 @@ export function useMailSync(): void {
             known.filter((m) => m.outbound && !inbound.some((i) => i.id === m.id)).map((m) => withFullSentBody(api, m)),
           );
           const messages = [...inbound, ...ours].sort((a, b) => a.date.localeCompare(b.date));
-          if (alive) dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages });
+          if (alive) {
+            done = true;
+            dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages });
+          }
         }
       } catch {
         loaded.current.delete(id); // allow a retry on the next open
@@ -228,6 +235,10 @@ export function useMailSync(): void {
     })();
     return () => {
       alive = false;
+      // Any `threads` change (e.g. APPLY_FLAGS right after a post-send HYDRATE) re-runs this
+      // effect and cancels the in-flight fill. Un-mark it so the re-run fetches again;
+      // otherwise the result was dropped and the thread kept list snippets for good.
+      if (!done) loaded.current.delete(id);
     };
   }, [api, dispatch, openThreadId, threads, me]);
 }
