@@ -20,6 +20,8 @@ import type { member } from "@dub/types";
 import type { AppDeps } from "./types";
 import { POLICY_TABLE } from "./policy-table";
 import { MemberService, type ReqCtx } from "./service";
+import { HrService } from "./hr-service";
+import type { hr } from "@dub/types";
 
 // Actor stamped on a 参加届 that arrives through the public (unauthenticated) path.
 // The gateway forwards it as a genuine service-to-service call (x-dub-internal), but
@@ -64,6 +66,7 @@ async function readJson<T>(c: Context): Promise<T> {
 
 export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const svc = new MemberService(deps);
+  const hrSvc = new HrService(deps, svc);
   const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "member-service" }));
@@ -238,6 +241,41 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.delete("/members/onboarding/:id", async (c) => {
     await svc.deleteOnboardingItem(reqCtx(c), c.req.param("id"));
     return c.json({ ok: true });
+  });
+
+  // ---- 人事 (応募 → 選考 → 内定 → 参加 → オンボーディング) ----
+  // 認可は表 (人事アプリの 閲覧/編集 + hr:read / hr:write / hr:admin)。参加確定は名簿に行を
+  // 足すので hr:admin。どの名簿行に結ぶか・段階遷移の妥当性・楽観ロックはハンドラ (hr-service)。
+  app.get("/members/hr/applicants", async (c) => c.json(await hrSvc.list(reqCtx(c))));
+  app.post("/members/hr/applicants", async (c) => {
+    const body = await readJson<hr.CreateApplicantRequest>(c);
+    return c.json(await hrSvc.create(reqCtx(c), body), 201);
+  });
+  app.get("/members/hr/applicants/:id", async (c) => c.json(await hrSvc.get(reqCtx(c), c.req.param("id"))));
+  app.patch("/members/hr/applicants/:id", async (c) => {
+    const body = await readJson<hr.UpdateApplicantRequest>(c);
+    return c.json(await hrSvc.update(reqCtx(c), c.req.param("id"), body));
+  });
+  app.delete("/members/hr/applicants/:id", async (c) => {
+    await hrSvc.remove(reqCtx(c), c.req.param("id"));
+    return c.json({ ok: true });
+  });
+  app.post("/members/hr/applicants/:id/stage", async (c) => {
+    const body = await readJson<hr.MoveApplicantStageRequest>(c);
+    return c.json(await hrSvc.moveStage(reqCtx(c), c.req.param("id"), body));
+  });
+  app.post("/members/hr/applicants/:id/notes", async (c) => {
+    const body = await readJson<hr.AddApplicantNoteRequest>(c);
+    return c.json(await hrSvc.addNote(reqCtx(c), c.req.param("id"), body), 201);
+  });
+  app.post("/members/hr/applicants/:id/join", async (c) => {
+    const body = await readJson<hr.JoinApplicantRequest>(c);
+    return c.json(await hrSvc.join(reqCtx(c), c.req.param("id"), body));
+  });
+  app.get("/members/hr/onboarding", async (c) => c.json(await hrSvc.onboarding(reqCtx(c))));
+  app.put("/members/hr/onboarding/:memberId/items/:itemId", async (c) => {
+    const body = await readJson<hr.SetOnboardingCheckRequest>(c);
+    return c.json(await hrSvc.setOnboardingCheck(reqCtx(c), c.req.param("memberId"), c.req.param("itemId"), body));
   });
 
   return app;
