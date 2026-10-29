@@ -310,7 +310,7 @@ Resend は宛先が Suppressions（送信停止リスト）に載っていると
    - Endpoint URL: `https://dub-api-gateway.developershub-site.workers.dev/api/v1/public/webhooks/resend`
    - Events: `email.bounced` / `email.complained` / `email.delivery_delayed` / `email.failed` / `email.suppressed`
    - 作成後の **Signing Secret**（`whsec_...`）をコピー。
-3. `npx wrangler secret put RESEND_WEBHOOK_SECRET --config services/mail-gateway/wrangler.free.toml` に貼り付け。
+3. `pnpm dlx wrangler@4 secret put RESEND_WEBHOOK_SECRET --config services/mail-gateway/wrangler.free.toml` に貼り付け（repo 内の `npx` は pnpm ワークスペースのため wrangler を解決できない。`CLOUDFLARE_API_TOKEN` が別アカウント用なら `env -u CLOUDFLARE_API_TOKEN` を前に付けて DevHub の OAuth ログインで実行）。
 4. mail-gateway / api-gateway をデプロイ（`SVC_NOTIFICATION` binding は wrangler.free.toml に追加済み）。
 5. Resend の webhook 画面の *Send test* で 200 を確認（`email.delivered` 等は無視されて `ignored: true`）。
 
