@@ -2,8 +2,8 @@
 // To rendered as removable chips with a Cc/Bcc toggle, subject and body, and a
 // send button. Recipient entry uses the shared @dub/app-ui EmailAddressSelect
 // (chips + autocomplete), fed the feature's parseRecipients and correspondent
-// candidates from the store. On send it appends to the Sent folder via the store
-// and best-effort posts through the real MailApi (ignored under the demo mock).
+// candidates from the store. On send it appends to the Sent folder optimistically and
+// posts via sendMail.deliver(); a failure restores this window and shows 再試行.
 //
 // P1-2 follow-up: this — NOT ComposeScreen (/mail/compose, a standalone route kept
 // only for deep-links) — is the compose surface a real user actually reaches (the
@@ -27,7 +27,11 @@ import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { UnsavedChangesGuard } from "../../../lib/UnsavedChangesGuard.tsx";
 import { MailIcon } from "./icons.tsx";
-import { useMailStore, type ComposeState } from "./useMailStore.tsx";
+import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
+import { deliver } from "./sendMail.ts";
+
+// TODO(SendMailRequest.bcc): wire compose.bcc once @dub/types SendMailRequest has `bcc`.
+const BCC_SUPPORTED = false;
 
 /** Format a Date as a `datetime-local` input value (YYYY-MM-DDTHH:mm) in LOCAL time —
  *  the picker shows and returns local wall-clock; we convert to an absolute ISO on submit. */
@@ -144,23 +148,18 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     // Don't drop a file that is still being read: wait for the read to finish (Gmail keeps
     // Send disabled until the upload settles). The button is disabled while hasPending.
     if (att.hasPending) return;
-    draft.clear(); // sent — nothing left to warn about or restore
-    // Optimistic: show it in Sent immediately. The real send follows; once the gateway
-    // confirms, REQUEST_SYNC re-fetches GET /mail/sent so the entry is server-backed and
-    // survives a reload (the From is the gateway-resolved <user>@developershub.jp).
-    dispatch({ type: "SEND", to, cc, subject: compose.subject, body: compose.body });
+    draft.clear(); // restored from the PendingSend snapshot if the send fails
+    // Optimistic: show it in Sent immediately; deliver() drops it again on failure.
+    const threadId = uid("thread");
+    dispatch({ type: "SEND", to, cc, subject: compose.subject, body: compose.body, threadId });
     const req: mail.SendMailRequest = { to, subject: compose.subject || "(件名なし)", textBody: compose.body };
     if (cc.length > 0) req.cc = cc;
-    // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/
-    // References (recipient threads the conversation; a further reply chains back to us).
+    // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/References.
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
-    void mailApi
-      .send(req)
-      .then(() => dispatch({ type: "REQUEST_SYNC" }))
-      .catch(() => undefined);
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
+    void deliver(mailApi, dispatch, { kind: "send", req, compose, threadId });
   };
 
   // Park the compose for a future time. Recipients must be present and the time must be in
@@ -182,12 +181,9 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     if (cc.length > 0) req.cc = cc;
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
     draft.clear();
-    void mailApi
-      .schedule(req)
-      .then(() => dispatch({ type: "REQUEST_SYNC" }))
-      .catch(() => undefined);
     setScheduleOpen(false);
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
+    void deliver(mailApi, dispatch, { kind: "schedule", req, compose });
   };
 
   const maximized = compose.maximized;
@@ -294,7 +290,9 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
                 {!compose.showCc ? (
                   <button type="button" onClick={() => patch({ showCc: true })} style={ccBtn}>Cc</button>
                 ) : null}
-                {!compose.showBcc ? (
+                {!BCC_SUPPORTED ? (
+                  <button type="button" disabled data-testid="fe2-mail-compose-bcc-toggle" title="Bcc は近日対応" aria-label="Bcc（近日対応）" style={{ ...ccBtn, cursor: "not-allowed", opacity: 0.5 }}>Bcc</button>
+                ) : !compose.showBcc ? (
                   <button type="button" onClick={() => patch({ showBcc: true })} style={ccBtn}>Bcc</button>
                 ) : null}
               </span>
@@ -303,7 +301,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
           {compose.showCc ? (
             <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-cc" />
           ) : null}
-          {compose.showBcc ? (
+          {BCC_SUPPORTED && compose.showBcc ? (
             <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-bcc" />
           ) : null}
           <input
