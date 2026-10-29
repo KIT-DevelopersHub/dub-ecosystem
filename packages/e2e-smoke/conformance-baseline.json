@@ -4,12 +4,14 @@
       "GET /api/v1/admin/users/{}/password",
       "GET /api/v1/me/participation",
       "GET /api/v1/me/profile",
+      "POST /api/v1/admin/users/{}/account-mail",
       "POST /api/v1/admin/users/{}/password",
       "POST /api/v1/me/participation",
       "POST /api/v1/me/password",
       "POST /api/v1/me/profile",
       "POST /api/v1/public/lp-visits",
-      "POST /api/v1/public/participation"
+      "POST /api/v1/public/participation",
+      "POST /api/v1/public/webhooks/resend"
     ],
     "missingInCode": [
       "GET /api/v1/{}/{}"
@@ -28,6 +30,19 @@
       "POST /auth/passkey/register/verify",
       "POST /auth/password",
       "POST /internal/admin/users/{}/password"
+    ],
+    "missingInCode": []
+  },
+  "chat-service": {
+    "missingInSpec": [
+      "GET /chat/custom-emojis",
+      "GET /chat/custom-emojis/{}/image",
+      "GET /chat/slack-import/channels",
+      "GET /chat/slack-import/jobs",
+      "GET /chat/slack-import/jobs/{}",
+      "POST /chat/custom-emojis/slack-import",
+      "POST /chat/slack-import/jobs",
+      "POST /chat/slack-import/jobs/{}/step"
     ],
     "missingInCode": []
   },
@@ -98,7 +113,10 @@
   },
   "mail-gateway": {
     "missingInSpec": [
+      "DELETE /mail/blocks/{}",
       "DELETE /mail/scheduled/{}",
+      "GET /mail/admin/canary/probes",
+      "GET /mail/blocks",
       "GET /mail/flags",
       "GET /mail/mailboxes",
       "GET /mail/messages",
@@ -109,6 +127,8 @@
       "GET /mail/sent/{}",
       "GET /mail/threads/{}",
       "PATCH /mail/scheduled/{}",
+      "POST /internal/webhooks/resend",
+      "POST /mail/blocks",
       "POST /mail/flags/{}",
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
@@ -161,6 +181,14 @@
       "POST /notifications/manage/{}/unpublish",
       "POST /notifications/notify",
       "POST /notifications/release"
+    ],
+    "missingInCode": []
+  },
+  "task-service": {
+    "missingInSpec": [
+      "DELETE /tasks/calendar-events/{}",
+      "PATCH /tasks/calendar-events/{}",
+      "POST /tasks/calendar-events"
     ],
     "missingInCode": []
   }

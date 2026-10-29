@@ -8,7 +8,7 @@
 // mutations stay optimistic and in-memory (server persistence is a later slice).
 import { createContext, useContext, useMemo, useReducer, type Dispatch, type ReactNode } from "react";
 import type { mail } from "@dub/types";
-import { SELF, inFolder, matchesQuery, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
+import { SELF, inFolder, matchesQuery, senderMatcher, threadBlocked, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 export interface ComposeState {
   id: string;
@@ -103,6 +103,21 @@ export interface MailState {
    *  skeleton. Background refetches leave it false so the list never flickers. */
   listLoading: boolean;
   searchResults: SearchState;
+  /** The viewer's sender block list (GET /mail/blocks), newest first. Mutated optimistically
+   *  by useSenderBlocks; `threads[].blocked` is re-derived from it on every change. */
+  blocks: mail.MailSenderBlock[];
+  /** "loading" until the first GET /mail/blocks answers (management list shows a skeleton);
+   *  until then thread placement falls back to the server's per-message `blocked` flag. */
+  blocksStatus: "loading" | "ready" | "failed";
+  /** Bottom-left notice for block/unblock (success with 元に戻す, or a rollback error). */
+  blockNotice: BlockNotice | null;
+}
+
+export interface BlockNotice {
+  status: "blocked" | "unblocked" | "failed";
+  text: string;
+  /** The entry the notice is about — 元に戻す reverses it. */
+  block?: mail.MailSenderBlock;
 }
 
 export type MailAction =
@@ -144,7 +159,12 @@ export type MailAction =
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
   | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean; purged: boolean; noReplyAt?: string | null }[] } // restore server-persisted star/archive/trash/purge/返信不要
   | { type: "HYDRATE_SCHEDULED"; scheduled: mail.ScheduledSendListItem[] } // replace the Scheduled folder list
-  | { type: "REQUEST_SYNC" }; // ask the hydration hook to re-fetch (post-send)
+  | { type: "REQUEST_SYNC" } // ask the hydration hook to re-fetch (post-send)
+  // ---- sender block list ----
+  | { type: "HYDRATE_BLOCKS"; blocks: mail.MailSenderBlock[] }
+  | { type: "BLOCKS_FAILED" }
+  | { type: "SET_BLOCKS"; blocks: mail.MailSenderBlock[] } // optimistic apply / reconcile / rollback
+  | { type: "BLOCK_NOTICE"; notice: BlockNotice | null };
 
 let seq = 0;
 export const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
@@ -174,14 +194,40 @@ export function selectVisible(state: MailState): MailThreadModel[] {
     state.labelFilter ? t.labels.includes(state.labelFilter) && t.folder !== "trash" : inFolder(t, state.folder);
   if (q.length === 0) return state.threads.filter((t) => !t.purged && scoped(t));
   const ids = state.searchResults.query === q ? state.searchResults.ids : new Set<string>();
+  // Search spans every folder except Trash and ブロック済み (each stays scoped to itself).
   const inScope = (t: MailThreadModel): boolean =>
-    state.labelFilter ? scoped(t) : state.folder === "trash" ? t.folder === "trash" : t.folder !== "trash";
+    state.labelFilter
+      ? scoped(t)
+      : state.folder === "trash"
+        ? t.folder === "trash"
+        : state.folder === "blocked"
+          ? inFolder(t, "blocked")
+          : t.folder !== "trash" && !t.blocked;
   return state.threads
     .filter((t) => !t.purged && inScope(t) && (ids.has(t.id) || matchesQuery(t, q)))
     .sort((a, b) => latest(b).localeCompare(latest(a)));
 }
 
+/** Re-derive `threads[].blocked` after any change to the threads or the block list. Keeps
+ *  thread identity when nothing changed so memoized consumers don't re-render needlessly. */
+function withBlocked(prev: MailState, next: MailState): MailState {
+  if (next.threads === prev.threads && next.blocks === prev.blocks && next.blocksStatus === prev.blocksStatus) return next;
+  const match = next.blocksStatus === "ready" ? senderMatcher(next.blocks) : null;
+  let changed = false;
+  const threads = next.threads.map((t) => {
+    const blocked = threadBlocked(t, match);
+    if ((t.blocked === true) === blocked) return t;
+    changed = true;
+    return { ...t, blocked };
+  });
+  return changed ? { ...next, threads } : next;
+}
+
 export function reducer(state: MailState, action: MailAction): MailState {
+  return withBlocked(state, baseReducer(state, action));
+}
+
+function baseReducer(state: MailState, action: MailAction): MailState {
   switch (action.type) {
     case "SET_FOLDER": {
       // Gmail resets to page 1 on a folder switch; only a non-first page needs a reload.
@@ -518,6 +564,17 @@ export function reducer(state: MailState, action: MailAction): MailState {
       return { ...state, scheduled: action.scheduled };
     case "REQUEST_SYNC":
       return { ...state, syncNonce: state.syncNonce + 1 };
+    case "HYDRATE_BLOCKS":
+      return { ...state, blocks: action.blocks, blocksStatus: "ready" };
+    case "BLOCKS_FAILED":
+      return state.blocksStatus === "ready" ? state : { ...state, blocksStatus: "failed" };
+    case "SET_BLOCKS": {
+      // An open blocked thread stays open (its banner offers ブロックを解除); the list views
+      // re-filter through inFolder on the re-derived `blocked` flag.
+      return { ...state, blocks: action.blocks, blocksStatus: "ready" };
+    }
+    case "BLOCK_NOTICE":
+      return { ...state, blockNotice: action.notice };
     default:
       return state;
   }
@@ -542,6 +599,9 @@ export const initialMailState: MailState = {
   pager: { inbox: FIRST_PAGE, sent: FIRST_PAGE },
   listLoading: true,
   searchResults: NO_SEARCH,
+  blocks: [],
+  blocksStatus: "loading",
+  blockNotice: null,
 };
 
 const MailStoreCtx = createContext<{ state: MailState; dispatch: Dispatch<MailAction> } | null>(null);

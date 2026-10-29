@@ -671,8 +671,12 @@ export function ThreadList(): JSX.Element {
           }}
         >
           <MailIcon name="mail-open" size={48} style={{ opacity: 0.4 }} />
-          <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>メールはありません</div>
-          <div style={{ fontSize: "var(--dub-font-size-sm)" }}>該当するスレッドが見つかりませんでした。</div>
+          <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>
+            {state.folder === "blocked" ? "ブロック済みのメールはありません" : "メールはありません"}
+          </div>
+          <div style={{ fontSize: "var(--dub-font-size-sm)" }}>
+            {state.folder === "blocked" ? "ブロックした送信者からのメールはここに表示されます。" : "該当するスレッドが見つかりませんでした。"}
+          </div>
         </div>
       ) : (
         <div role="rowgroup" style={{ flex: 1, overflowY: "auto" }}>

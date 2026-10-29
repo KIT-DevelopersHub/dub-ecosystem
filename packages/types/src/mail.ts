@@ -129,6 +129,11 @@ export interface MailMessageListItem extends MailMessage, MailMessageState {
   // ADDITIVE: Cc recipients of a received message (mail_inbound.cc_json, 0012). Omitted when
   // the message had none or was stored before 0012.
   cc?: MailAddress[];
+  // ADDITIVE: true when the sender matches the VIEWER's own block list (mail_sender_blocks,
+  // 0021). Derived per request, never stored on the message, so unblocking restores it.
+  // Clients keep blocked mail out of the inbox / unread counts (ブロック済み view only).
+  // Absent from older gateways — treat absent as false.
+  blocked?: boolean;
 }
 /** Detail view: list item plus the full body. Inbound persists text; htmlBody is
  *  optional (present only when a message carried an HTML part) and MUST be sanitized
@@ -274,6 +279,25 @@ export interface MailThreadFlagsPatch {
    *  false = clear it (undo). Absent = leave noReplyAt unchanged. */
   noReply?: boolean;
 }
+
+// ---- sender block list (この送信者をブロック, 0021) ----
+// Personal (per mailbox owner) list of blocked sender addresses / whole domains. Blocking
+// never deletes mail: blocked messages stay stored and are only flagged `blocked` on read.
+export type MailSenderBlockKind = "address" | "domain";
+/** One entry of the signed-in user's block list. `value` is lowercased: a full address for
+ *  kind "address", a bare domain ("example.com") for kind "domain". */
+export interface MailSenderBlock {
+  value: string;
+  kind: MailSenderBlockKind;
+  createdAt: ISODateTime;
+}
+/** POST /mail/blocks body. `kind` defaults from the value ("@" present -> address). */
+export interface MailSenderBlockRequest {
+  value: string;
+  kind?: MailSenderBlockKind;
+}
+/** Per-user cap on block-list entries (the API answers 409 beyond it). */
+export const MAIL_SENDER_BLOCK_LIMIT = 500;
 
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----
 export interface Mailbox {

@@ -99,6 +99,19 @@ export function useMailSync(): void {
     };
   }, [api, dispatch, syncNonce, me, inboxCursor, sentCursor]);
 
+  // Sender block list: loaded once per mount (mutations are optimistic in the store and
+  // persisted by useSenderBlocks, so a background re-sync must not clobber an in-flight one).
+  useEffect(() => {
+    let alive = true;
+    api
+      .listBlocks()
+      .then((blocks) => alive && dispatch({ type: "HYDRATE_BLOCKS", blocks }))
+      .catch(() => alive && dispatch({ type: "BLOCKS_FAILED" }));
+    return () => {
+      alive = false;
+    };
+  }, [api, dispatch]);
+
   // Server-side search: once the box settles (SEARCH_DEBOUNCE_MS) fetch matches from inbox +
   // Sent (the loaded page is only 50 rows with snippet bodies, so older mail and body text
   // need the server). Results merge into the store via SEARCH_RESULTS; a stale response

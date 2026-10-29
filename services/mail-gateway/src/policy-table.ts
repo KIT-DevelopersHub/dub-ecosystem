@@ -95,6 +95,11 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /mail/threads/:id": appLevel("mail", "view", "mail:read"),
   "GET /mail/flags": appLevel("mail", "view", "mail:read"),
   "POST /mail/flags/:threadId": appLevel("mail", "view", "mail:read"),
+  // Personal sender block list (0021): like flags, it only changes how the caller's OWN view
+  // files mail they can already see — nothing is deleted, bounced or hidden from anyone else.
+  "GET /mail/blocks": appLevel("mail", "view", "mail:read"),
+  "POST /mail/blocks": appLevel("mail", "view", "mail:read"),
+  "DELETE /mail/blocks/:value": appLevel("mail", "view", "mail:read"),
 
   // ---- mail administration: the bare `mail:admin` key, no app tier ----
   // WHY no `appLevel("mail", ...)` here: these are not the メール app's own surface. The
