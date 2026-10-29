@@ -41,6 +41,7 @@ const CFG: TicketConfig = {
   preview: false,
   ctaEnabled: false,
   paymentReady: true,
+  paymentMethods: ["card"],
   fields: [
     { id: "org", label: "所属", type: "text", required: false, options: [] },
     { id: "mode", label: "参加区分", type: "select", required: true, options: ["現地", "オンライン"] },
@@ -265,6 +266,7 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
     preview: false,
     ctaEnabled: true,
     paymentReady: false,
+    paymentMethods: ["card"],
     fields: [{ id: "a", label: "A", type: "text", required: false, options: [] }],
     types: [
       { id: "t", name: "T", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: null, soldOut: false },
@@ -496,4 +498,21 @@ test("page inline script parses", () => {
   const html = renderTicketsPage({ config: CFG });
   const js = /<script>([\s\S]*)<\/script><\/body>/.exec(html)![1];
   assert.doesNotThrow(() => new Function(js));
+});
+
+test("payment copy: カード only by default, カード・PayPay when lp-analytics advertises PayPay", () => {
+  const card = renderTicketsPage({ config: CFG });
+  assert.match(card, /カード決済は Stripe で安全に処理されます/);
+  assert.doesNotMatch(card, /PayPay/);
+  const pp = renderTicketsPage({ config: { ...CFG, paymentMethods: ["card", "paypay"] } });
+  assert.match(pp, /Stripe で安全に決済（カード・PayPay）/);
+  const free = renderTicketsPage({ config: { ...CFG, paymentMethods: ["card", "paypay"], types: [tt({ id: "inv", name: "招待", priceJpy: 0 })] } });
+  assert.doesNotMatch(free, /PayPay/);
+});
+
+test("parseConfig: paymentMethods only accepts paypay on top of card", () => {
+  const base = { enabled: true, paymentReady: true, fields: [], types: [] };
+  assert.deepEqual(parseConfig({ ...base, paymentMethods: ["card", "paypay"] })?.paymentMethods, ["card", "paypay"]);
+  assert.deepEqual(parseConfig({ ...base, paymentMethods: ["bitcoin"] })?.paymentMethods, ["card"]);
+  assert.deepEqual(parseConfig(base)?.paymentMethods, ["card"]);
 });

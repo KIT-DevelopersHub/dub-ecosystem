@@ -31,7 +31,12 @@ export interface CheckoutSession {
   /** "paid" | "unpaid" | "no_payment_required" */
   paymentStatus: string | null;
   clientReferenceId: string | null;
+  /** PaymentMethod.type actually used ("card" | "paypay" | ...). Only when payment_intent.payment_method is expanded. */
+  paymentMethodType: string | null;
 }
+
+/** Expansion that exposes the used payment method type on a retrieved session. */
+export const SESSION_EXPAND = "payment_intent.payment_method";
 
 export interface StripeClient {
   createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSession>;
@@ -61,7 +66,16 @@ export function toCheckoutSession(raw: unknown): CheckoutSession {
     status: s(r.status),
     paymentStatus: s(r.payment_status),
     clientReferenceId: s(r.client_reference_id),
+    paymentMethodType: usedPaymentMethodType(r.payment_intent),
   };
+}
+
+function usedPaymentMethodType(pi: unknown): string | null {
+  if (!pi || typeof pi !== "object") return null;
+  const pm = (pi as Record<string, unknown>).payment_method;
+  if (!pm || typeof pm !== "object") return null;
+  const t = (pm as Record<string, unknown>).type;
+  return typeof t === "string" && t ? t : null;
 }
 
 export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, init) => fetch(i, init)): StripeClient {
@@ -87,8 +101,10 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
     createCheckoutSession(i) {
       const f = new URLSearchParams();
       f.set("mode", "payment");
-      // Payment methods come from the Dashboard (API 2026-09-30+ rejects payment_method_types).
-      // Keep delayed methods (e.g. konbini) disabled there: they settle after the 35-min seat hold.
+      // Payment methods come from the Dashboard (dynamic payment methods; API 2026-09-30+ rejects
+      // payment_method_types). Card and PayPay (JPY, one-time, 50..1,000,000, immediate) are enabled
+      // there; Stripe hides PayPay when a session is ineligible. Keep delayed methods (e.g. konbini)
+      // disabled: they settle after the 35-min seat hold.
       i.lineItems.forEach((l, n) => {
         f.set(`line_items[${n}][price_data][currency]`, "jpy");
         f.set(`line_items[${n}][price_data][unit_amount]`, String(l.unitAmountJpy));
@@ -105,7 +121,8 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
       return call("POST", "/checkout/sessions", f);
     },
     getCheckoutSession(id) {
-      return call("GET", `/checkout/sessions/${encodeURIComponent(id)}`);
+      const q = new URLSearchParams({ "expand[]": SESSION_EXPAND });
+      return call("GET", `/checkout/sessions/${encodeURIComponent(id)}?${q.toString()}`);
     },
   };
 }

@@ -4152,6 +4152,7 @@ type DemoTicketOrder = {
   answers: { fieldId: string; label: string; value: string }[];
   createdAt: string;
   paidAt: string | null;
+  paymentMethod: string | null;
 };
 
 function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
@@ -4210,6 +4211,7 @@ function createLpTicketsStore() {
     enabled: false,
     ctaEnabled: false,
     paymentReady: false,
+    paymentMethods: ["card", "paypay"] as ("card" | "paypay")[],
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
     fields: [
@@ -4268,6 +4270,8 @@ function createLpTicketsStore() {
       ],
       createdAt,
       paidAt: status === "paid" ? createdAt : null,
+      // 有料で支払い済みだけ手段あり（カードと PayPay を交互に）。無料・未確定は null。
+      paymentMethod: status === "paid" && items.some((it) => it.unitPriceJpy > 0) ? (i % 2 === 0 ? "paypay" : "card") : null,
     };
   });
 

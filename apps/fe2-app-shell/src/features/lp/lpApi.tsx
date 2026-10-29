@@ -161,12 +161,15 @@ export interface LpTicketTypeStats {
 export interface LpTicketTypeSummary extends LpTicketType {
   stats: LpTicketTypeStats;
 }
+export type LpTicketPaymentMethod = "card" | "paypay";
 export interface LpTicketsState {
   site: string;
   enabled: boolean;
   /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える。効くのは enabled && ctaEnabled のとき。 */
   ctaEnabled: boolean;
   paymentReady: boolean;
+  /** LP に表示する決済手段（PayPay は lp-analytics の LP_PAYPAY_ENABLED=1 の時だけ）。古い API では無い。 */
+  paymentMethods?: LpTicketPaymentMethod[];
   /** LP_BASE_URL + "/tickets" */
   publicUrl: string;
   fields: LpTicketField[];
@@ -201,6 +204,8 @@ export interface LpTicketOrder {
   answers: LpTicketAnswer[];
   createdAt: string;
   paidAt: string | null;
+  /** 実際に使われた Stripe の決済手段（"card" / "paypay" など）。無料・未確定・不明は null。古い API では無い。 */
+  paymentMethod?: string | null;
 }
 export interface LpTicketOrdersPage {
   items: LpTicketOrder[];

@@ -491,6 +491,13 @@
   gap: var(--dub-space-1);
 }
 
+/* 状態バッジ + 支払い方法（カード / PayPay） */
+.orderStatus {
+  display: grid;
+  justify-items: start;
+  gap: var(--dub-space-1);
+}
+
 .orderEmail {
   color: var(--dub-color-text-secondary);
   overflow-wrap: anywhere;
