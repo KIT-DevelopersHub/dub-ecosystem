@@ -3313,52 +3313,70 @@ function createMembersStore() {
 
 
   // ── 人事 (member-service /members/hr/* の demo) ─────────────────────────────
-  // 段階遷移の規則は @dub/types hr (STAGE_TRANSITIONS) をそのまま使う (本番と同じ判定)。参加確定は
-  // この members 配列に在籍メンバーを足し、オンボーディングは上の onboarding 項目をチェックリストにする。
-  const hrAt = (daysAgo: number): string => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+  // ステータスの規則は @dub/types hr (canTransition / requiresJoin) をそのまま使う (本番と同じ判定)。
+  // 採用はこの members 配列に在籍メンバーを足し、オンボーディングは上の onboarding 項目をチェックリストに
+  // する。全 8 ステータスに 1 人以上いるよう seed する。
+  const hrAt = (daysAgo: number, hour = 10): string => {
+    const d = new Date(Date.now() - daysAgo * 86_400_000);
+    d.setHours(hour, 0, 0, 0);
+    return d.toISOString();
+  };
   type DemoApplicant = hr.Applicant;
   const applicant = (
     id: string, name: string, stage: hr.ApplicantStage, daysAgo: number,
     extra: Partial<DemoApplicant> = {},
   ): DemoApplicant => ({
     id, name, nameKana: null, email: null, department: null, grade: null, desiredTeamId: null, source: "公開フォーム",
-    motivation: null, stage, memberId: null, participationId: null, version: 1, createdBy: ME_ID,
-    createdAt: hrAt(daysAgo), updatedAt: hrAt(daysAgo), ...extra,
+    motivation: null, interviewAt: null, stage, memberId: null, participationId: null, version: 1, createdBy: ME_ID,
+    createdAt: hrAt(daysAgo + 3), updatedAt: hrAt(daysAgo), ...extra,
   });
-  // 参加確定済み (オンボーディング中) の新メンバー。名簿にも在籍として入っている。
+  // 採用済み (名簿にも在籍として入っている) の 3 人: 採用 / オンボーディング調整 / オンボーディング完了。
   members.push(mk("member_hr1", "小林 葵", "メンバー", "added", ["team_dev"], members.length, "aoi@example.com", "情報工学科", "1年"));
+  members.push(mk("member_hr2", "佐野 陸", "メンバー", "added", ["team_pr"], members.length, "riku@example.com", "メディア情報学科", "2年"));
+  members.push(mk("member_hr3", "高橋 美咲", "メンバー", "added", ["team_venue"], members.length, "misaki@example.com", "建築学科", "1年"));
   const applicants: DemoApplicant[] = [
-    applicant("app_demo_1", "青木 陽向", "applied", 1, { nameKana: "あおき ひなた", email: "hinata@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", motivation: "運営ツールの開発に関わりたいです。" }),
-    applicant("app_demo_2", "井上 さくら", "applied", 2, { department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", source: "紹介" }),
-    applicant("app_demo_3", "宇野 蒼", "screening", 4, { department: "機械工学科", grade: "1年", desiredTeamId: "team_ops", email: "sou@example.com" }),
-    applicant("app_demo_4", "江口 結衣", "interview", 6, { department: "建築学科", grade: "2年", desiredTeamId: "team_venue", source: "説明会" }),
-    applicant("app_demo_5", "大西 湊", "offered", 9, { nameKana: "おおにし みなと", email: "minato@example.com", department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", motivation: "ハッカソンの運営をやってみたい。" }),
-    applicant("app_demo_6", "川村 樹", "rejected", 12, { department: "経営情報学科", grade: "3年" }),
-    applicant("app_demo_7", "小林 葵", "joined", 14, { email: "aoi@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", memberId: "member_hr1", version: 5 }),
+    applicant("app_demo_1", "青木 陽向", "scheduling", 1, { nameKana: "あおき ひなた", email: "hinata@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", motivation: "運営ツールの開発に関わりたいです。" }),
+    applicant("app_demo_2", "井上 さくら", "scheduling", 2, { nameKana: "いのうえ さくら", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", source: "紹介" }),
+    applicant("app_demo_3", "宇野 蒼", "interview_set", 2, { nameKana: "うの そう", department: "機械工学科", grade: "1年", desiredTeamId: "team_ops", email: "sou@example.com", interviewAt: hrAt(-3, 18) }),
+    applicant("app_demo_4", "江口 結衣", "interviewed", 4, { nameKana: "えぐち ゆい", department: "建築学科", grade: "2年", desiredTeamId: "team_venue", source: "説明会", interviewAt: hrAt(5, 17) }),
+    applicant("app_demo_5", "大西 湊", "interviewed", 3, { nameKana: "おおにし みなと", email: "minato@example.com", department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", motivation: "ハッカソンの運営をやってみたい。", interviewAt: hrAt(4, 19) }),
+    applicant("app_demo_6", "川村 樹", "rejected", 8, { nameKana: "かわむら いつき", department: "経営情報学科", grade: "3年", interviewAt: hrAt(10, 18) }),
+    applicant("app_demo_7", "小林 葵", "hired", 2, { nameKana: "こばやし あおい", email: "aoi@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", memberId: "member_hr1", version: 4, interviewAt: hrAt(7, 18) }),
+    applicant("app_demo_8", "佐野 陸", "onboarding", 3, { nameKana: "さの りく", email: "riku@example.com", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", memberId: "member_hr2", version: 5, interviewAt: hrAt(12, 18) }),
+    applicant("app_demo_9", "高橋 美咲", "onboarded", 6, { nameKana: "たかはし みさき", email: "misaki@example.com", department: "建築学科", grade: "1年", desiredTeamId: "team_venue", memberId: "member_hr3", version: 6, interviewAt: hrAt(20, 18) }),
+    applicant("app_demo_10", "千葉 拓海", "withdrawn", 5, { nameKana: "ちば たくみ", department: "電気電子工学科", grade: "1年", source: "紹介" }),
   ];
   const hrEvents: hr.ApplicantEvent[] = [];
   let hrSeq = 0;
   const hrEvent = (applicantId: string, kind: hr.ApplicantEventKind, fromStage: hr.ApplicantStage | null, toStage: hr.ApplicantStage | null, bodyText: string | null, at: string) =>
     hrEvents.push({ id: `hre_demo_${++hrSeq}`, applicantId, kind, fromStage, toStage, body: bodyText, actorId: ME_ID, createdAt: at });
+  const PATH: hr.ApplicantStage[] = ["scheduling", "interview_set", "interviewed"];
   for (const a of applicants) {
-    hrEvent(a.id, "created", null, "applied", null, a.createdAt);
-    const path = ["applied", "screening", "interview", "offered"] as hr.ApplicantStage[];
-    const upto = a.stage === "joined" ? 4 : path.indexOf(a.stage);
-    for (let i = 1; i <= upto && i < path.length; i++) hrEvent(a.id, "stage", path[i - 1]!, path[i]!, null, a.createdAt);
-    if (a.stage === "rejected") hrEvent(a.id, "stage", "applied", "rejected", "今回は見送り", a.createdAt);
-    if (a.stage === "joined") hrEvent(a.id, "joined", "offered", "joined", "名簿に新規追加", a.createdAt);
+    hrEvent(a.id, "created", null, "scheduling", null, a.createdAt);
+    const reached = PATH.indexOf(a.stage) >= 0 ? PATH.indexOf(a.stage) : a.stage === "withdrawn" ? 0 : 2;
+    for (let i = 1; i <= reached; i++) hrEvent(a.id, "stage", PATH[i - 1]!, PATH[i]!, null, a.createdAt);
+    if (a.stage === "rejected") hrEvent(a.id, "stage", "interviewed", "rejected", "今回は見送り", a.updatedAt);
+    if (a.stage === "withdrawn") hrEvent(a.id, "stage", "scheduling", "withdrawn", "本人より辞退の連絡", a.updatedAt);
+    if (a.memberId) hrEvent(a.id, "joined", "interviewed", "hired", "名簿に新規追加", a.updatedAt);
+    if (a.stage === "onboarding") hrEvent(a.id, "stage", "hired", "onboarding", "オンボーディングのチェックで自動更新", a.updatedAt);
+    if (a.stage === "onboarded") hrEvent(a.id, "stage", "onboarding", "onboarded", "オンボーディングのチェックで自動更新", a.updatedAt);
   }
-  hrEvent("app_demo_4", "note", null, null, "面談日: 来週火曜 18:00（オンライン）", hrAt(5));
-  const obChecks = new Set<string>(["member_hr1|onb_demo_1", "member_hr1|onb_demo_2"]);
+  hrEvent("app_demo_2", "note", null, null, "日程候補を 3 つ送付済み・返信待ち", hrAt(1, 12));
+  hrEvent("app_demo_3", "note", null, null, "オンライン面談（Meet）で確定", hrAt(2, 12));
+  hrEvent("app_demo_5", "note", null, null, "面談: 意欲高い。開発チームで受け入れたい", hrAt(3, 20));
+  // 佐野 = 一部チェック済み / 高橋 = 全部チェック済み (完了)。
+  const obChecks = new Set<string>(["member_hr2|onb_demo_1", "member_hr2|onb_demo_2"]);
+  for (const o of onboarding) obChecks.add(`member_hr3|${o.id}`);
 
   function hrProgress(memberId: string): hr.OnboardingProgress | null {
-    const a = applicants.find((x) => x.memberId === memberId && x.stage === "joined");
+    const a = applicants.find((x) => x.memberId === memberId && hr.ROSTER_STAGES.includes(x.stage)) ?? null;
     const person = members.find((m) => m.id === memberId);
     if (!person) return null;
     const checked = onboarding.filter((o) => obChecks.has(`${memberId}|${o.id}`)).map((o) => o.id);
     return {
-      memberId, name: person.name, applicantId: a?.id ?? null, joinedAt: a?.updatedAt ?? null, checkedItemIds: checked,
-      total: onboarding.length, done: checked.length, completed: onboarding.length > 0 && checked.length === onboarding.length,
+      memberId, name: person.name, applicantId: a?.id ?? null, stage: a?.stage ?? null, joinedAt: a?.updatedAt ?? null,
+      checkedItemIds: checked, total: onboarding.length, done: checked.length,
+      completed: onboarding.length > 0 && checked.length === onboarding.length,
     };
   }
 
@@ -3366,27 +3384,34 @@ function createMembersStore() {
     if (!pathname.startsWith("/api/v1/members/hr/")) return null;
     const err = (code: string, status: number) => json({ error: { code, message: code, retryable: false } }, status);
     const detail = (a: DemoApplicant) => ({ applicant: { ...a }, events: hrEvents.filter((e) => e.applicantId === a.id).map((e) => ({ ...e })) });
-    const bump = (a: DemoApplicant) => { a.version += 1; a.updatedAt = isoNow(); };
+    const bump = (a: DemoApplicant) => { a.version += 1; a.updatedAt = new Date().toISOString(); };
+    const nowIso = () => new Date().toISOString();
     if (method === "GET" && pathname === "/api/v1/members/hr/applicants") {
-      return json({ applicants: [...applicants].sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1)).map((a) => ({ ...a })) });
+      return json({
+        applicants: [...applicants].map((a) => {
+          const latest = hrEvents.filter((e) => e.applicantId === a.id && e.body).at(-1);
+          return { ...a, latestNote: latest?.body ?? null };
+        }),
+      });
     }
     if (method === "POST" && pathname === "/api/v1/members/hr/applicants") {
       const name = String(body?.name ?? "").trim();
       if (!name) return err("VALIDATION_FAILED", 400);
-      const a = applicant(nid("app"), name, "applied", 0, {
+      const a = applicant(nid("app"), name, "scheduling", 0, {
         nameKana: body?.nameKana ?? null, email: body?.email ?? null, department: body?.department ?? null, grade: body?.grade ?? null,
         desiredTeamId: body?.desiredTeamId ?? null, source: body?.source ?? null, motivation: body?.motivation ?? null,
+        interviewAt: body?.interviewAt ?? null,
       });
-      a.createdAt = isoNow(); a.updatedAt = a.createdAt;
+      a.createdAt = nowIso(); a.updatedAt = a.createdAt;
       applicants.push(a);
-      hrEvent(a.id, "created", null, "applied", null, a.createdAt);
+      hrEvent(a.id, "created", null, "scheduling", null, a.createdAt);
       return json(detail(a), 201);
     }
     if (method === "GET" && pathname === "/api/v1/members/hr/onboarding") {
-      const joined = applicants.filter((a) => a.stage === "joined" && a.memberId);
+      const hired = applicants.filter((a) => a.memberId && hr.ROSTER_STAGES.includes(a.stage));
       return json({
         items: onboarding.map((o) => ({ id: o.id, title: o.title, description: o.description, url: o.url })),
-        members: joined.map((a) => hrProgress(a.memberId!)).filter((p): p is hr.OnboardingProgress => p !== null),
+        members: hired.map((a) => hrProgress(a.memberId!)).filter((p): p is hr.OnboardingProgress => p !== null),
       });
     }
     const check = /^\/api\/v1\/members\/hr\/onboarding\/([^/]+)\/items\/([^/]+)$/.exec(pathname);
@@ -3395,6 +3420,20 @@ function createMembersStore() {
       if (!onboarding.some((o) => o.id === itemId)) return err("MEMBER_ONBOARDING_ITEM_NOT_FOUND", 404);
       if (body?.checked) obChecks.add(`${memberId}|${itemId}`);
       else obChecks.delete(`${memberId}|${itemId}`);
+      // 本番と同じ自動ステータス: 1 つ以上で 採用→調整 / 全部で 完了 / 完了から外れたら 調整。
+      const before = hrProgress(memberId);
+      const a = applicants.find((x) => x.memberId === memberId && hr.ROSTER_STAGES.includes(x.stage));
+      if (before && a) {
+        const target: hr.ApplicantStage | null = before.completed
+          ? a.stage !== "onboarded" ? "onboarded" : null
+          : a.stage === "onboarded" || (a.stage === "hired" && before.done > 0) ? "onboarding" : null;
+        if (target) {
+          const from = a.stage;
+          a.stage = target;
+          bump(a);
+          hrEvent(a.id, "stage", from, target, "オンボーディングのチェックで自動更新", nowIso());
+        }
+      }
       const p = hrProgress(memberId);
       return p ? json(p) : err("MEMBER_NOT_FOUND", 404);
     }
@@ -3416,21 +3455,23 @@ function createMembersStore() {
     }
     if (action === "stage" && method === "POST") {
       if (body?.expectedVersion !== a.version) return err("HR_VERSION_CONFLICT", 409);
-      if (!hr.isApplicantStage(body?.stage) || !hr.canTransition(a.stage, body.stage)) return err("HR_INVALID_TRANSITION", 409);
+      if (!hr.isApplicantStage(body?.stage)) return err("VALIDATION_FAILED", 400);
+      if (hr.requiresJoin(body.stage, a.memberId !== null)) return err("HR_JOIN_REQUIRED", 409);
+      if (!hr.canTransition(a.stage, body.stage, a.memberId !== null)) return err("HR_INVALID_TRANSITION", 409);
       const from = a.stage;
       a.stage = body.stage;
       bump(a);
-      hrEvent(a.id, "stage", from, a.stage, body?.note ?? null, isoNow());
+      hrEvent(a.id, "stage", from, a.stage, body?.note ?? null, nowIso());
       return json(detail(a));
     }
     if (action === "notes" && method === "POST") {
       const text = String(body?.body ?? "").trim();
       if (!text) return err("VALIDATION_FAILED", 400);
-      hrEvent(a.id, "note", null, null, text, isoNow());
+      hrEvent(a.id, "note", null, null, text, nowIso());
       return json(detail(a), 201);
     }
     if (action === "join" && method === "POST") {
-      if (a.stage !== "offered") return err("HR_INVALID_TRANSITION", 409);
+      if (a.memberId !== null) return err("HR_INVALID_TRANSITION", 409);
       if (body?.expectedVersion !== a.version) return err("HR_VERSION_CONFLICT", 409);
       let memberId = body?.memberId as string | undefined;
       if (memberId) {
@@ -3442,10 +3483,11 @@ function createMembersStore() {
         members.push(created);
         memberId = created.id;
       }
-      a.stage = "joined";
+      const from = a.stage;
+      a.stage = "hired";
       a.memberId = memberId;
       bump(a);
-      hrEvent(a.id, "joined", "offered", "joined", body?.memberId ? "既存の名簿に紐付け" : "名簿に新規追加", isoNow());
+      hrEvent(a.id, "joined", from, "hired", body?.memberId ? "既存の名簿に紐付け" : "名簿に新規追加", nowIso());
       return json({ applicant: { ...a }, memberId });
     }
     return null;

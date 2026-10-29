@@ -1,12 +1,11 @@
-// 人事のタブ帯 (パイプライン ⇄ 一覧 ⇄ オンボーディング)。LpTabs と同じく URL に紐づける。
+// 人事のタブ帯 (応募者 ⇄ オンボーディング)。LpTabs と同じく URL に紐づける。
 import { useNavigate } from "@tanstack/react-router";
 import { Tabs } from "@dub/ui";
 
-export type HrTabId = "pipeline" | "list" | "onboarding";
+export type HrTabId = "applicants" | "onboarding";
 
 const TABS = [
-  { id: "pipeline", label: "パイプライン", path: "/hr" },
-  { id: "list", label: "応募者一覧", path: "/hr/list" },
+  { id: "applicants", label: "応募者", path: "/hr" },
   { id: "onboarding", label: "オンボーディング", path: "/hr/onboarding" },
 ] as const;
 

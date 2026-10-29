@@ -1,9 +1,10 @@
 // 人事アプリのテスト。
-//   (1) demo transport が /members/hr/* の契約に応答する (REAL api-client 経由): 段階遷移の規則・
-//       参加確定で名簿に在籍が増える・オンボーディングのチェック
-//   (2) 画面: パイプラインの描画 / 「次へ」で楽観的に列移動・失敗でロールバック / 閲覧者は操作不可 /
-//       オンボーディングのチェック
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+//   (1) demo transport が /members/hr/* の契約に応答する (REAL api-client 経由): 全ステータスの seed・
+//       寛容な遷移と /join 必須・採用で名簿に在籍が増える・チェックでステータスが自動で進む
+//   (2) 表: 全員表示 / 絞り込みと件数 (オンボーディング前 含む) / 並べ替え / 検索 / その場でステータス変更
+//       (楽観的・失敗で戻る) / 採用は確認ダイアログ経由 / 閲覧者はプルダウンなし
+//   (3) オンボーディング: チェックが一瞬も外れない (押した値を即座に表示) / 進捗バーが埋まる
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { hr, identity } from "@dub/types";
@@ -13,7 +14,7 @@ import { createApiClient } from "../../lib/api-client.tsx";
 import { createDemoFetch } from "../../lib/demo-seed.tsx";
 import { createHrApi, type HrApi } from "./hrApi.tsx";
 import { HrApiProvider } from "./HrProvider.tsx";
-import { HrPipelineScreen } from "./HrPipelineScreen.tsx";
+import { HrApplicantsScreen } from "./HrApplicantsScreen.tsx";
 import { HrOnboardingScreen } from "./HrOnboardingScreen.tsx";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
@@ -21,24 +22,33 @@ vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter
 const EDITOR = editorPermissions("hr", ["hr:read", "hr:write", "hr:admin"]);
 const VIEWER = viewerPermissions("hr", ["hr:read"]);
 
-function demoApi(): HrApi {
-  return createHrApi(createApiClient({ baseUrl: "https://demo.local", fetchImpl: createDemoFetch() }));
+function demoApi(fetchImpl = createDemoFetch()): HrApi {
+  return createHrApi(createApiClient({ baseUrl: "https://demo.local", fetchImpl }));
 }
 
-function applicant(over: Partial<hr.Applicant> = {}): hr.Applicant {
+function applicant(over: Partial<hr.ApplicantListItem> = {}): hr.ApplicantListItem {
   return {
-    id: "app_1", name: "青木 陽向", nameKana: null, email: null, department: "情報工学科", grade: "1年", desiredTeamId: null,
-    source: null, motivation: null, stage: "applied", memberId: null, participationId: null, version: 1, createdBy: "usr_1",
-    createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z", ...over,
+    id: "app_1", name: "青木 陽向", nameKana: "あおき ひなた", email: null, department: "情報工学科", grade: "1年", desiredTeamId: null,
+    source: null, motivation: null, interviewAt: null, stage: "scheduling", memberId: null, participationId: null, version: 1,
+    createdBy: "usr_1", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z", latestNote: null, ...over,
   };
 }
+
+const ROWS: hr.ApplicantListItem[] = [
+  applicant(),
+  applicant({ id: "app_2", name: "井上 さくら", nameKana: "いのうえ さくら", stage: "interview_set", latestNote: "Meet で確定", updatedAt: "2026-10-03T00:00:00Z" }),
+  applicant({ id: "app_3", name: "小林 葵", nameKana: "こばやし あおい", stage: "hired", memberId: "m1", updatedAt: "2026-10-02T00:00:00Z" }),
+  applicant({ id: "app_4", name: "佐野 陸", nameKana: "さの りく", stage: "onboarding", memberId: "m2", updatedAt: "2026-10-04T00:00:00Z" }),
+  applicant({ id: "app_5", name: "高橋 美咲", nameKana: "たかはし みさき", stage: "onboarded", memberId: "m3" }),
+];
 
 function fakeApi(overrides: Partial<HrApi> = {}): HrApi {
   const unused = () => Promise.reject(new Error("unused"));
   return {
-    list: () => Promise.resolve({ applicants: [applicant()] }),
+    list: () => Promise.resolve({ applicants: ROWS.map((r) => ({ ...r })) }),
     get: unused,
     create: unused,
+    update: unused,
     moveStage: unused,
     addNote: unused,
     join: unused,
@@ -63,95 +73,157 @@ function renderWith(node: JSX.Element, api: HrApi, permissions: readonly identit
   );
 }
 
+const countOf = (id: string) => screen.getByTestId(`fe2-hr-filter-${id}-count`).textContent;
+const rowNames = () => screen.queryAllByTestId(/^fe2-hr-row-app_\d+$/).map((el) => el.textContent);
+const statusSelect = (id: string) => screen.getByTestId(`fe2-hr-row-${id}-status`) as HTMLSelectElement;
+
 describe("demo transport (人事)", () => {
-  it("serves the seeded pipeline and enforces the stage rules", async () => {
+  it("seeds every status and enforces the rules (permissive, /join required for roster statuses)", async () => {
     const api = demoApi();
     const { applicants } = await api.list();
     expect(new Set(applicants.map((a) => a.stage))).toEqual(
-      new Set(["applied", "screening", "interview", "offered", "rejected", "joined"]),
+      new Set(["scheduling", "interview_set", "interviewed", "hired", "rejected", "onboarding", "onboarded", "withdrawn"]),
     );
-    const first = applicants.find((a) => a.stage === "applied")!;
-    await expect(api.moveStage(first.id, { stage: "offered", expectedVersion: first.version })).rejects.toMatchObject({ status: 409 });
-    const moved = await api.moveStage(first.id, { stage: "screening", expectedVersion: first.version });
-    expect(moved.applicant.stage).toBe("screening");
-    expect(moved.events.at(-1)).toMatchObject({ kind: "stage", fromStage: "applied", toStage: "screening" });
+    const first = applicants.find((a) => a.stage === "scheduling" && a.memberId === null)!;
+    await expect(api.moveStage(first.id, { stage: "hired", expectedVersion: first.version })).rejects.toMatchObject({ status: 409 });
+    const moved = await api.moveStage(first.id, { stage: "interviewed", expectedVersion: first.version });
+    const back = await api.moveStage(first.id, { stage: "scheduling", expectedVersion: moved.applicant.version });
+    expect(back.events.at(-1)).toMatchObject({ kind: "stage", fromStage: "interviewed", toStage: "scheduling" });
   });
 
-  it("join adds a 在籍 roster member and the new member appears in onboarding", async () => {
+  it("採用 adds a 在籍 roster member; checking every onboarding item → オンボーディング完了", async () => {
     const fetchImpl = createDemoFetch();
-    const api = createHrApi(createApiClient({ baseUrl: "https://demo.local", fetchImpl }));
-    const offered = (await api.list()).applicants.find((a) => a.stage === "offered")!;
-    const res = await api.join(offered.id, { expectedVersion: offered.version });
-    expect(res.applicant.stage).toBe("joined");
-
+    const api = demoApi(fetchImpl);
+    const target = (await api.list()).applicants.find((a) => a.stage === "interviewed")!;
+    const res = await api.join(target.id, { expectedVersion: target.version });
+    expect(res.applicant.stage).toBe("hired");
     const overview = (await (await fetchImpl("https://demo.local/api/v1/members/overview")).json()) as {
       members: Array<{ id: string; status: string; name: string }>;
     };
-    expect(overview.members.find((m) => m.id === res.memberId)).toMatchObject({ name: offered.name, status: "added" });
+    expect(overview.members.find((m) => m.id === res.memberId)).toMatchObject({ name: target.name, status: "added" });
 
     const ob = await api.onboarding();
-    const mine = ob.members.find((m) => m.memberId === res.memberId)!;
-    expect(mine).toMatchObject({ done: 0, total: ob.items.length });
-    const p = await api.setCheck(res.memberId, ob.items[0]!.id, true);
-    expect(p.done).toBe(1);
+    let p = ob.members.find((m) => m.memberId === res.memberId)!;
+    expect(p).toMatchObject({ done: 0, stage: "hired" });
+    for (const it of ob.items) p = await api.setCheck(res.memberId, it.id, true);
+    expect(p).toMatchObject({ completed: true, stage: "onboarded" });
+    expect((await api.get(target.id)).applicant.stage).toBe("onboarded");
   });
 });
 
-describe("HrPipelineScreen", () => {
-  it("renders stage columns with cards", async () => {
-    renderWith(<HrPipelineScreen />, fakeApi());
-    const col = await screen.findByTestId("fe2-hr-column-applied");
-    expect(within(col).getByText("青木 陽向")).toBeTruthy();
-    expect(screen.getByTestId("fe2-hr-column-offered")).toBeTruthy();
+describe("HrApplicantsScreen (表)", () => {
+  it("lists everyone with filter counts, and each filter narrows the rows", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi());
+    await screen.findByTestId("fe2-hr-row-app_1");
+    expect(rowNames()).toHaveLength(5);
+    expect(countOf("all")).toBe("5");
+    expect(countOf("before_onboarding")).toBe("2");
+    expect(countOf("scheduling")).toBe("1");
+    expect(countOf("withdrawn")).toBe("0");
+
+    fireEvent.click(screen.getByTestId("fe2-hr-filter-before_onboarding"));
+    expect(rowNames().sort()).toEqual(["佐野 陸", "小林 葵"].sort());
+    fireEvent.click(screen.getByTestId("fe2-hr-filter-onboarded"));
+    expect(rowNames()).toEqual(["高橋 美咲"]);
+    fireEvent.click(screen.getByTestId("fe2-hr-filter-all"));
+    expect(rowNames()).toHaveLength(5);
   });
 
-  it("moves a card to the next stage optimistically", async () => {
+  it("sorts by a column and searches by name / kana", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi());
+    await screen.findByTestId("fe2-hr-row-app_1");
+    // 既定 = 更新日の新しい順。
+    expect(rowNames()[0]).toBe("佐野 陸");
+    fireEvent.click(within(screen.getByTestId("fe2-hr-table")).getByRole("button", { name: /氏名/ }));
+    expect(rowNames()[0]).toBe("青木 陽向"); // あおき が先頭 (昇順)
+    fireEvent.change(screen.getByTestId("fe2-hr-search"), { target: { value: "こばやし" } });
+    expect(rowNames()).toEqual(["小林 葵"]);
+  });
+
+  it("changes status inline optimistically (no flicker) and rolls back on failure", async () => {
     let resolve!: (d: hr.ApplicantDetail) => void;
     const moveStage = vi.fn(() => new Promise<hr.ApplicantDetail>((r) => (resolve = r)));
-    renderWith(<HrPipelineScreen />, fakeApi({ moveStage }));
-    fireEvent.click(await screen.findByTestId("fe2-hr-card-app_1-next"));
-    // 応答前にもう書類選考の列にいる (楽観的)。
-    await waitFor(() => expect(within(screen.getByTestId("fe2-hr-column-screening")).getByText("青木 陽向")).toBeTruthy());
-    expect(moveStage).toHaveBeenCalledWith("app_1", { stage: "screening", expectedVersion: 1 });
-    resolve({ applicant: applicant({ stage: "screening", version: 2 }), events: [] });
+    renderWith(<HrApplicantsScreen />, fakeApi({ moveStage }));
+    await screen.findByTestId("fe2-hr-row-app_1");
+    fireEvent.change(statusSelect("app_1"), { target: { value: "interview_set" } });
+    // 応答前・同じ描画でもう新しい値。
+    expect(statusSelect("app_1").value).toBe("interview_set");
+    await waitFor(() => expect(moveStage).toHaveBeenCalledWith("app_1", { stage: "interview_set", expectedVersion: 1 }));
+    expect(statusSelect("app_1").value).toBe("interview_set");
+    await act(async () => resolve({ applicant: applicant({ stage: "interview_set", version: 2 }), events: [] }));
+    expect(statusSelect("app_1").value).toBe("interview_set");
   });
 
-  it("rolls the card back when the move fails", async () => {
+  it("rolls the status back when the move fails", async () => {
     const moveStage = vi.fn(() => Promise.reject(new Error("boom")));
-    renderWith(<HrPipelineScreen />, fakeApi({ moveStage }));
-    fireEvent.click(await screen.findByTestId("fe2-hr-card-app_1-next"));
+    renderWith(<HrApplicantsScreen />, fakeApi({ moveStage }));
+    await screen.findByTestId("fe2-hr-row-app_1");
+    fireEvent.change(statusSelect("app_1"), { target: { value: "rejected" } });
     await waitFor(() => expect(moveStage).toHaveBeenCalled());
-    await waitFor(() => expect(within(screen.getByTestId("fe2-hr-column-applied")).getByText("青木 陽向")).toBeTruthy());
+    await waitFor(() => expect(statusSelect("app_1").value).toBe("scheduling"));
   });
 
-  it("a viewer sees the board but no move buttons or register action", async () => {
-    renderWith(<HrPipelineScreen />, fakeApi(), VIEWER);
-    await screen.findByTestId("fe2-hr-card-app_1");
-    expect(screen.queryByTestId("fe2-hr-card-app_1-next")).toBeNull();
+  it("採用 for a non-member goes through the confirm dialog (→ 名簿に追加), not silently", async () => {
+    const join = vi.fn(() => Promise.resolve<hr.JoinApplicantResponse>({ applicant: applicant({ stage: "hired", memberId: "m9", version: 2 }), memberId: "m9" }));
+    const moveStage = vi.fn();
+    renderWith(<HrApplicantsScreen />, fakeApi({ join, moveStage: moveStage as unknown as HrApi["moveStage"] }));
+    await screen.findByTestId("fe2-hr-row-app_1");
+    fireEvent.change(statusSelect("app_1"), { target: { value: "hired" } });
+    expect(join).not.toHaveBeenCalled();
+    const dialog = await screen.findByTestId("fe2-hr-join-confirm");
+    fireEvent.click(within(dialog).getByRole("button", { name: "採用して名簿に追加" }));
+    await waitFor(() => expect(join).toHaveBeenCalledWith("app_1", { expectedVersion: 1 }));
+    expect(moveStage).not.toHaveBeenCalled();
+  });
+
+  it("a viewer sees badges instead of dropdowns and no register action", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi(), VIEWER);
+    await screen.findByTestId("fe2-hr-row-app_1");
+    expect(screen.queryByTestId("fe2-hr-row-app_1-status")).toBeNull();
     expect(screen.queryByTestId("fe2-hr-new")).toBeNull();
   });
 });
 
 describe("HrOnboardingScreen", () => {
-  it("ticks an onboarding item optimistically and shows 完了 when all are done", async () => {
-    const setCheck = vi.fn((memberId: string, _itemId: string, _checked: boolean) =>
-      Promise.resolve<hr.OnboardingProgress>({
-        memberId, name: "小林 葵", applicantId: "app_7", joinedAt: null, checkedItemIds: ["i1", "i2"], total: 2, done: 2, completed: true,
-      }),
-    );
-    const onboarding = () =>
-      Promise.resolve<hr.ListOnboardingProgressResponse>({
-        items: [
-          { id: "i1", title: "Slack に参加", description: null, url: null },
-          { id: "i2", title: "アイコン設定", description: null, url: null },
-        ],
-        members: [{ memberId: "m1", name: "小林 葵", applicantId: "app_7", joinedAt: null, checkedItemIds: ["i1"], total: 2, done: 1, completed: false }],
-      });
-    renderWith(<HrOnboardingScreen />, fakeApi({ onboarding, setCheck }));
-    const box = await screen.findByTestId("fe2-hr-ob-m1-i2");
-    fireEvent.click(box.querySelector("input") ?? box);
+  const onboarding = (checked: string[]) => () =>
+    Promise.resolve<hr.ListOnboardingProgressResponse>({
+      items: [
+        { id: "i1", title: "Slack に参加", description: null, url: null },
+        { id: "i2", title: "アイコン設定", description: null, url: null },
+      ],
+      members: [
+        {
+          memberId: "m1", name: "小林 葵", applicantId: "app_7", stage: checked.length === 2 ? "onboarded" : "onboarding", joinedAt: null,
+          checkedItemIds: checked, total: 2, done: checked.length, completed: checked.length === 2,
+        },
+      ],
+    });
+
+  it("shows the checked state immediately (no revert) and fills the progress bar when complete", async () => {
+    let resolve!: (p: hr.OnboardingProgress) => void;
+    const setCheck = vi.fn(() => new Promise<hr.OnboardingProgress>((r) => (resolve = r)));
+    renderWith(<HrOnboardingScreen />, fakeApi({ onboarding: onboarding(["i1"]), setCheck }));
+    const box = (await screen.findByTestId("fe2-hr-ob-m1-i2")) as HTMLInputElement;
+    expect(screen.getByTestId("fe2-hr-ob-m1-progress").getAttribute("aria-valuenow")).toBe("50");
+    fireEvent.click(box);
+    // サーバ応答前・同じ描画でチェック済み＆バーが 100%。
+    expect(box.checked).toBe(true);
+    expect(screen.getByTestId("fe2-hr-ob-m1-progress").getAttribute("aria-valuenow")).toBe("100");
+    expect(screen.getByTestId("fe2-hr-ob-m1-done")).toBeTruthy();
     await waitFor(() => expect(setCheck).toHaveBeenCalledWith("m1", "i2", true));
-    expect(await screen.findByTestId("fe2-hr-ob-m1-done")).toBeTruthy();
+    expect(box.checked).toBe(true);
+    await act(async () =>
+      resolve({ memberId: "m1", name: "小林 葵", applicantId: "app_7", stage: "onboarded", joinedAt: null, checkedItemIds: ["i1", "i2"], total: 2, done: 2, completed: true }),
+    );
+    expect(box.checked).toBe(true);
+    expect(screen.getByTestId("fe2-hr-stage-onboarded")).toBeTruthy();
+  });
+
+  it("a completed member renders a full progress bar", async () => {
+    renderWith(<HrOnboardingScreen />, fakeApi({ onboarding: onboarding(["i1", "i2"]) }));
+    const bar = await screen.findByTestId("fe2-hr-ob-m1-progress");
+    expect(bar.getAttribute("aria-valuenow")).toBe("100");
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe("100%");
   });
 
   it("shows an empty state when nobody is onboarding", async () => {

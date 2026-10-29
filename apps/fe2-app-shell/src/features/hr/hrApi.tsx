@@ -8,6 +8,7 @@ export interface HrApi {
   list(): Promise<hr.ListApplicantsResponse>;
   get(id: string): Promise<hr.ApplicantDetail>;
   create(input: hr.CreateApplicantRequest): Promise<hr.ApplicantDetail>;
+  update(id: string, body: hr.UpdateApplicantRequest): Promise<hr.Applicant>;
   moveStage(id: string, body: hr.MoveApplicantStageRequest): Promise<hr.ApplicantDetail>;
   addNote(id: string, body: hr.AddApplicantNoteRequest): Promise<hr.ApplicantDetail>;
   join(id: string, body: hr.JoinApplicantRequest): Promise<hr.JoinApplicantResponse>;
@@ -27,6 +28,8 @@ export function createHrApi(api: ApiClient): HrApi {
     get: (id) => api.request<hr.ApplicantDetail>({ method: "GET", path: `${BASE}/applicants/${enc(id)}` }),
     create: (input) =>
       api.request<hr.ApplicantDetail, hr.CreateApplicantRequest>({ method: "POST", path: `${BASE}/applicants`, body: input }),
+    update: (id, body) =>
+      api.request<hr.Applicant, hr.UpdateApplicantRequest>({ method: "PATCH", path: `${BASE}/applicants/${enc(id)}`, body }),
     moveStage: (id, body) =>
       api.request<hr.ApplicantDetail, hr.MoveApplicantStageRequest>({
         method: "POST",
