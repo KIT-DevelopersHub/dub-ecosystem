@@ -27,6 +27,7 @@ import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { UnsavedChangesGuard } from "../../../lib/UnsavedChangesGuard.tsx";
 import { MailIcon } from "./icons.tsx";
+import { addressCandidates } from "./mailModel.ts";
 import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { deliver } from "./sendMail.ts";
 
@@ -60,19 +61,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const mailApi = useMailApi();
 
   // Address-book candidates: everyone the user has corresponded with (excluding self).
-  const candidates: EmailToken[] = useMemo(() => {
-    const byEmail = new Map<string, EmailToken>();
-    for (const t of state.threads) {
-      for (const m of t.messages) {
-        for (const p of [m.from, ...m.to, ...(m.cc ?? [])]) {
-          if (p.email && p.email !== state.me.email && !byEmail.has(p.email)) {
-            byEmail.set(p.email, p.name ? { email: p.email, name: p.name } : { email: p.email });
-          }
-        }
-      }
-    }
-    return [...byEmail.values()];
-  }, [state.threads, state.me.email]);
+  const candidates: EmailToken[] = useMemo(() => addressCandidates(state.threads, state.me.email), [state.threads, state.me.email]);
 
   const removeIcon = <MailIcon name="x" size={12} />;
   const patch = (p: Partial<ComposeState>): void => dispatch({ type: "UPDATE_COMPOSE", id: compose.id, patch: p });

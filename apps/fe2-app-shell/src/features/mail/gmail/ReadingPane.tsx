@@ -3,11 +3,13 @@
 // subject, star and archive/delete actions; each message shows a round initial
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { EmailAddressSelect } from "@dub/app-ui";
 import { Badge, Button } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { isImageType } from "../attach.ts";
 import {
+  addressCandidates,
   avatarColor,
   displayName,
   fullDate,
@@ -30,7 +32,7 @@ import { confirmPurge } from "./ThreadList.tsx";
 import { useMailStore } from "./useMailStore.tsx";
 import styles from "./replyNudge.module.css";
 import { useMailApi } from "../MailProvider.tsx";
-import { formatBytes, saveBlob } from "../mailApi.tsx";
+import { formatBytes, parseRecipients, saveBlob } from "../mailApi.tsx";
 
 function Avatar({ p, size = 36 }: { p: MailPerson; size?: number }): JSX.Element {
   return (
@@ -331,6 +333,19 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const { dispatch, state } = useMailStore();
   const mailApi = useMailApi();
   const [reply, setReply] = useState("");
+  const [replyCc, setReplyCc] = useState("");
+  const [replyBcc, setReplyBcc] = useState("");
+  const [showCcBcc, setShowCcBcc] = useState(false);
+  const replyRef = useRef<HTMLTextAreaElement>(null);
+  const candidates = useMemo(() => addressCandidates(state.threads, state.me.email), [state.threads, state.me.email]);
+  // Grow the inline reply with its content (capped; scrolls beyond) so a long reply is
+  // readable to the end instead of being squeezed into a fixed 4-row box.
+  useLayoutEffect(() => {
+    const el = replyRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    if (el.scrollHeight > 0) el.style.height = `${el.scrollHeight}px`;
+  }, [reply]);
   const lastIdx = thread.messages.length - 1;
   const own = ownAddresses(thread, state.me);
   const last = thread.messages[lastIdx]!;
@@ -373,13 +388,20 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     // happened — the reply never reached the gateway, so nothing was delivered. Now we
     // also POST it (with In-Reply-To via the parent Message-Id) and re-sync so the sent
     // reply is server-backed and survives a reload.
-    dispatch({ type: "ADD_MESSAGE", threadId: thread.id, body, to: replyRecipients, subject: thread.subject });
+    const cc = parseRecipients(replyCc).recipients;
+    const bcc = parseRecipients(replyBcc).recipients;
+    dispatch({ type: "ADD_MESSAGE", threadId: thread.id, body, to: replyRecipients, cc, bcc, subject: thread.subject });
     setReply("");
+    setReplyCc("");
+    setReplyBcc("");
+    setShowCcBcc(false);
     const req: mail.SendMailRequest = {
       to: replyRecipients,
       subject: /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`,
       textBody: body,
     };
+    if (cc.length > 0) req.cc = cc;
+    if (bcc.length > 0) req.bcc = bcc;
     if (replyTo.messageId) req.inReplyTo = replyTo.messageId;
     void mailApi
       .send(req)
@@ -502,8 +524,25 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
         <div style={{ padding: "0 24px 24px" }}>
           <div style={{ display: "flex", gap: 12, border: "1px solid var(--dub-color-border-strong)", borderRadius: "var(--dub-radius-lg)", padding: 12 }}>
             <Avatar p={state.me} size={32} />
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-2, 8px)", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  宛先: {replyRecipients.map((p) => displayName(p)).join(", ")}
+                </span>
+                {!showCcBcc ? (
+                  <button type="button" data-testid="fe2-mail-inline-ccbcc-toggle" onClick={() => setShowCcBcc(true)} style={ccBccBtn}>
+                    Cc/Bcc
+                  </button>
+                ) : null}
+              </div>
+              {showCcBcc ? (
+                <div style={{ marginBottom: "var(--dub-space-2, 8px)" }}>
+                  <EmailAddressSelect variant="flush" label="Cc" value={replyCc} onChange={setReplyCc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} testId="fe2-mail-inline-cc" />
+                  <EmailAddressSelect variant="flush" label="Bcc" value={replyBcc} onChange={setReplyBcc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} testId="fe2-mail-inline-bcc" />
+                </div>
+              ) : null}
               <textarea
+                ref={replyRef}
                 data-testid="fe2-mail-inline-reply"
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
@@ -511,7 +550,13 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                 rows={reply ? 4 : 1}
                 style={{
                   width: "100%",
-                  resize: "vertical",
+                  resize: "none",
+                  minHeight: reply ? 96 : undefined,
+                  maxHeight: "60vh",
+                  overflowY: "auto",
+                  lineHeight: 1.6,
+                  whiteSpace: "pre-wrap",
+                  boxSizing: "border-box",
                   border: "none",
                   outline: "none",
                   background: "transparent",
@@ -561,4 +606,13 @@ const actionBtn: CSSProperties = {
   color: "var(--dub-color-text-secondary)",
   fontSize: "var(--dub-font-size-sm)",
   fontWeight: 500,
+};
+
+const ccBccBtn: CSSProperties = {
+  all: "unset",
+  cursor: "pointer",
+  flexShrink: 0,
+  fontSize: "var(--dub-font-size-xs)",
+  fontWeight: 600,
+  color: "var(--dub-color-text-muted)",
 };
