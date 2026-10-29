@@ -6,8 +6,10 @@
 // plain effects (no react-query) so it works anywhere the store is mounted, including
 // unit tests that provide only a fake MailApi.
 import { useEffect, useRef } from "react";
+import type { MailApi } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
+import type { MailMsg } from "./mailModel.ts";
 import { PAGE_SIZE, useMailStore } from "./useMailStore.tsx";
 
 /** What the server last knew per thread. noReplyAt is compared as-is; the POST sends only the
@@ -214,7 +216,9 @@ export function useMailSync(): void {
           // instead of vanishing on refresh. Dedup by id, order by date. Force read=true so a
           // racing getThread (server not yet reflecting markRead) can't revert to unread.
           const inbound = threadDetailToMessages(full).map((m) => (m.mine === false ? m : { ...m, read: true }));
-          const ours = known.filter((m) => m.outbound && !inbound.some((i) => i.id === m.id));
+          const ours = await Promise.all(
+            known.filter((m) => m.outbound && !inbound.some((i) => i.id === m.id)).map((m) => withFullSentBody(api, m)),
+          );
           const messages = [...inbound, ...ours].sort((a, b) => a.date.localeCompare(b.date));
           if (alive) dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages });
         }
@@ -226,4 +230,18 @@ export function useMailSync(): void {
       alive = false;
     };
   }, [api, dispatch, openThreadId, threads, me]);
+}
+
+/** A folded Sent reply arrives from the list endpoint with body = snippet (whitespace
+ *  collapsed to one line, cut at 140 chars), so a long reply rendered jumbled and truncated.
+ *  Fetch its full detail to restore the real text (newlines intact). Optimistic local rows
+ *  (no server id yet) and failures keep what we have. */
+async function withFullSentBody(api: MailApi, m: MailMsg): Promise<MailMsg> {
+  if (m.id.startsWith("msg-")) return m;
+  try {
+    const detail = await api.getSent(m.id);
+    return detail.id === m.id ? { ...m, body: detail.textBody } : m;
+  } catch {
+    return m;
+  }
 }
