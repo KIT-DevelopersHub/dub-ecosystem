@@ -39,6 +39,10 @@ export interface MailAddress {
 export interface SendMailRequest {
   to: MailAddress[];
   cc?: MailAddress[];
+  // ADDITIVE (Bcc): envelope-only recipients. Delivered by the provider as real Bcc, never
+  // written to any header; stored on the send log and shown in Sent to the sender only.
+  // Same validation/limits as cc. Not supported on a scheduled send (rejected there).
+  bcc?: MailAddress[];
   subject: string;
   textBody: string;
   htmlBody?: string;
@@ -161,6 +165,7 @@ export interface MailSentListItem {
   from?: MailAddress; // envelope From used for the send (when recorded)
   to: MailAddress[];
   cc?: MailAddress[];
+  bcc?: MailAddress[]; // ADDITIVE: present only for the sender's own view (never read_all)
   subject: string;
   snippet: string;
   sentAt: ISODateTime;

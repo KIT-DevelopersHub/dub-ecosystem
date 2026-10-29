@@ -29,6 +29,8 @@ export function hashRequest(req: mail.SendMailRequest): string {
   const canonical = JSON.stringify({
     to: req.to,
     cc: req.cc ?? [],
+    // Only when present, so the hash of every bcc-less request (in-flight claims) is unchanged.
+    ...(req.bcc && req.bcc.length > 0 ? { bcc: req.bcc } : {}),
     subject: req.subject,
     textBody: req.textBody,
     htmlBody: req.htmlBody ?? null,
@@ -59,7 +61,7 @@ export function withArchiveCc(req: mail.SendMailRequest, archiveCc: string | nul
   const addr = archiveCc?.trim();
   if (!addr) return req;
   const target = addr.toLowerCase();
-  const already = [...req.to, ...(req.cc ?? [])].some((a) => a.email.trim().toLowerCase() === target);
+  const already = [...req.to, ...(req.cc ?? []), ...(req.bcc ?? [])].some((a) => a.email.trim().toLowerCase() === target);
   if (already) return req;
   return { ...req, cc: [...(req.cc ?? []), { email: addr }] };
 }
@@ -182,6 +184,7 @@ export async function sendMail(
       textBody: req.textBody,
       htmlBody: req.htmlBody ?? null,
       ccJson: JSON.stringify(req.cc ?? []),
+      bccJson: req.bcc && req.bcc.length > 0 ? JSON.stringify(req.bcc) : null,
       fromAddress,
       // Owner = the human sender (Sent-folder account scope); null for system sends.
       ownerUserId: deps.ownerUserId ?? null,
@@ -199,7 +202,10 @@ export async function sendMail(
   const messageId = rfcMessageId(ownedId, fromAddress);
   // The archive copy rides the envelope (Bcc), not a visible Cc: recipients never see it and
   // a reply-all no longer drags archive@ into the conversation (doc 8.1).
-  const { cc: wireCc, bcc: wireBcc } = splitArchive(rawReq, req);
+  const { cc: wireCc, bcc: archiveBcc } = splitArchive(rawReq, req);
+  // The caller's Bcc rides the envelope too (provider bcc field) — assembleMime never sees it,
+  // so no Bcc header is ever written.
+  const wireBcc = [...(req.bcc ?? []), ...archiveBcc];
   const references = req.inReplyTo ? await buildReferences(db, req.inReplyTo, threadId, fromAddress) : [];
   const outAttachments = (req.attachments ?? []).map((a) => ({
     filename: a.filename,

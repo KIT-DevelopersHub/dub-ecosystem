@@ -261,14 +261,14 @@ export function createApp() {
   // detail. Only delivered (status='sent') rows are listed; pending/failed never show.
   ext.get("/sent", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
-    const page = await listSent(dbOf(c), { ownerUserId: await scopeOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
+    const page = await listSent(dbOf(c), { ownerUserId: await scopeOf(c), viewer: ownerOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
     for (const m of page.items) hideArchiveCc(m, archiveOf(c));
     return c.json(page satisfies common.Paginated<mail.MailSentListItem>);
   });
 
   ext.get("/sent/:id", async (c) => {
     const db = dbOf(c);
-    const msg = await getSentDetail(db, c.req.param("id"), await scopeOf(c));
+    const msg = await getSentDetail(db, c.req.param("id"), await scopeOf(c), ownerOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `sent message not found: ${c.req.param("id")}`, { status: 404 });
     hideArchiveCc(msg, archiveOf(c));
     const attachments = await attachmentsFor(db, "sent", msg.id);
@@ -377,6 +377,12 @@ export function createApp() {
     if (!blobs) throw new DubError("MAIL_ATTACHMENTS_UNCONFIGURED", "attachment storage not configured", { status: 503 });
     const messageId = c.req.param("id") ?? "";
     const attId = c.req.param("attId") ?? "";
+    // Same account scope as the message detail: an attachment of mail you cannot open is 404.
+    const visible =
+      kind === "inbound"
+        ? await getInboundDetail(dbOf(c), messageId, await inboundScopeOf(c), ownerOf(c))
+        : await getSentDetail(dbOf(c), messageId, await scopeOf(c), ownerOf(c));
+    if (!visible) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `attachment not found: ${attId}`, { status: 404 });
     const row = await getAttachment(dbOf(c), kind, messageId, attId);
     if (!row) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `attachment not found: ${attId}`, { status: 404 });
     // A 'dropped_*' stub (改善#2: too large / truncated) has no R2 body — never fetch it.

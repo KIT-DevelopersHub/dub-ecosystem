@@ -101,6 +101,23 @@ describe("canary probes", () => {
     }
   });
 
+  it("per-recipient deliveries (0018): one body row, To + Cc deliveries -> both ok", async () => {
+    const { env, raw } = makeEnv({ ...QA, MAIL_CANARY_EXPECT_CC: "true" });
+    await runCanary(env, T0, T0);
+    const p = probes(raw)[0]!;
+    arrive(raw, p, QA.MAIL_CANARY_TO, T0 + 30_000);
+    const dlv = raw.prepare(
+      `INSERT INTO mail_inbound_delivery (id, inbound_id, owner_user_id, envelope_to, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?)`,
+    );
+    const inboundId = `mailin_${QA.MAIL_CANARY_TO}_${T0 + 30_000}`;
+    for (const [rcpt, at] of [[QA.MAIL_CANARY_TO, T0 + 30_000], [QA.MAIL_CANARY_CC, T0 + 45_000]] as const) {
+      const ts = new Date(at).toISOString();
+      dlv.run(`dlv_${rcpt}`, inboundId, rcpt, ts, ts);
+    }
+    await runCanary(env, T0 + 5 * MIN, T0 + 5 * MIN);
+    expect(probes(raw)[0]).toMatchObject({ status: "ok", to_ok: 1, cc_ok: 1, to_latency_ms: 30_000, cc_latency_ms: 45_000 });
+  });
+
   it("timeout: nothing arrives within the deadline -> failed", async () => {
     const { env, raw } = makeEnv(QA);
     await runCanary(env, T0, T0);
