@@ -226,7 +226,10 @@ function parseHeaderMeta(json: string | null | undefined): mail.MailHeaderMeta |
   if (!json) return null;
   try {
     const v = JSON.parse(json) as unknown;
-    return v && typeof v === "object" ? (v as mail.MailHeaderMeta) : null;
+    if (!v || typeof v !== "object") return null;
+    // Internal local-delivery marker (see claimRealArrival) — never part of the API.
+    const { [LOCAL_DELIVERY_MARKER]: _local, ...meta } = v as Record<string, unknown>;
+    return Object.keys(meta).length > 0 ? (meta as mail.MailHeaderMeta) : null;
   } catch {
     return null;
   }
@@ -441,8 +444,11 @@ export async function insertInbound(
     // Owner = the roster user this message was delivered to (Inbox scope). NULL when no
     // roster user matches the recipient — invisible to every account until assignable.
     ownerUserId: string | null;
+    // Stored by the send path's local delivery (local-delivery.ts), not Email Routing.
+    localDelivery?: boolean;
   },
 ): Promise<number> {
+  const meta = extra.localDelivery ? { ...(extra.headerMeta ?? {}), [LOCAL_DELIVERY_MARKER]: true } : extra.headerMeta;
   const res = await db.run(
     `INSERT OR IGNORE INTO mail_inbound
        (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
@@ -464,7 +470,22 @@ export async function insertInbound(
     extra.htmlBody,
     extra.ownerUserId,
     extra.cc && extra.cc.length > 0 ? JSON.stringify(extra.cc) : null,
-    extra.headerMeta && Object.keys(extra.headerMeta).length > 0 ? JSON.stringify(extra.headerMeta) : null,
+    meta && Object.keys(meta).length > 0 ? JSON.stringify(meta) : null,
+  );
+  return res.meta.changes;
+}
+
+/** header_meta_json key flagging a body row stored by local delivery (no migration). */
+export const LOCAL_DELIVERY_MARKER = "localDelivery";
+
+/** First Email Routing arrival of a locally-delivered message: swap in the real delivery
+ *  details (TLS / DKIM) and clear the marker. 1 = this call won the claim (exactly once). */
+export async function claimRealArrival(db: DbClient, inboundId: string, headerMeta: mail.MailHeaderMeta): Promise<number> {
+  const res = await db.run(
+    `UPDATE mail_inbound SET header_meta_json = ?
+       WHERE id = ? AND json_extract(header_meta_json, '$.${LOCAL_DELIVERY_MARKER}') = 1`,
+    Object.keys(headerMeta).length > 0 ? JSON.stringify(headerMeta) : null,
+    inboundId,
   );
   return res.meta.changes;
 }

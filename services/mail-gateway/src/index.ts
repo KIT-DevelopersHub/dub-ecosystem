@@ -101,7 +101,9 @@ const handler = {
       // later recipient's invocation dedups to processed=false). Ingest failed -> forward
       // anyway. A missing Message-ID gets a unique synthetic id, so it always forwards.
       await forwardToArchive(buildArchiveForwardDeps(env, ctx, archiveTo), forwarder, raw, {
-        firstCopy: ingest === null || ingest.processed,
+        // firstArrival: the body row came from the send path's local delivery, so this is
+        // the first copy Email Routing actually handed us.
+        firstCopy: ingest === null || ingest.processed || ingest.firstArrival === true,
         ...(ingest ? { messageId: ingest.message.messageId } : {}),
       });
     }

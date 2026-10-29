@@ -61,6 +61,7 @@ export function buildSendDeps(
     archiveCc: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     retry: sendRetryOptions(env),
     ...(blobs ? { blobs } : {}),
+    localDelivery: { inbound: buildInboundDeps(env, ctx), domain: env.CF_EMAIL_ROUTING_ZONE_NAME || "developershub.jp" },
   };
 }
 

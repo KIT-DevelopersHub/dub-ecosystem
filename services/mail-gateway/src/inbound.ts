@@ -17,7 +17,7 @@ import {
   parseAddress,
   parseAddressList,
 } from "./mime";
-import { claimInboundOwnerIfUnset, findInboundByMessageId, insertDelivery, insertInbound, newInboundId, resolveThreadId } from "./repo";
+import { claimInboundOwnerIfUnset, claimRealArrival, findInboundByMessageId, insertDelivery, insertInbound, newInboundId, resolveThreadId } from "./repo";
 import { persistAttachments, persistDroppedAttachments, type DroppedReason } from "./attachments";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
@@ -198,8 +198,16 @@ function ownerCandidatesFor(
  * records its own delivery so each internal recipient sees it in their inbox. Attachments,
  * the raw .eml archive and mail.message.received happen only for the first copy.
  * `processed` = this call stored the body row (the first copy).
+ *
+ * `opts.local` = the send path delivering an internal recipient's copy itself
+ * (local-delivery.ts). The row is marked so the later real Email Routing arrival reports
+ * `firstArrival` once (the archive forward keeps firing exactly once per Message-ID).
  */
-export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
+export async function handleInbound(
+  deps: InboundDeps,
+  raw: RawInbound,
+  opts: { local?: boolean } = {},
+): Promise<{ processed: boolean; message: mail.MailMessage; firstArrival?: boolean }> {
   const parsed = parseInbound(raw, {
     archiveAddress: deps.archiveAddress ?? null,
     sharedAddress: deps.sharedAddress ?? null,
@@ -228,6 +236,7 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     cc,
     headerMeta,
     ownerUserId,
+    ...(opts.local ? { localDelivery: true } : {}),
   });
   if (changes === 0) {
     // Body already stored: another recipient's copy, or a redelivery. Record this copy's
@@ -238,7 +247,8 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     message.threadId = existing.thread_id;
     await insertDelivery(deps.db, { inboundId: existing.id, ownerUserId, envelopeTo });
     if (ownerUserId) await claimInboundOwnerIfUnset(deps.db, existing.id, ownerUserId);
-    return { processed: false, message };
+    const firstArrival = !opts.local && (await claimRealArrival(deps.db, existing.id, headerMeta)) > 0;
+    return { processed: false, message, ...(firstArrival ? { firstArrival } : {}) };
   }
   await insertDelivery(deps.db, { inboundId: message.id, ownerUserId, envelopeTo });
 

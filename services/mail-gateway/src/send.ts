@@ -12,6 +12,7 @@ import { DEFAULT_SEND_BASE_DELAY_MS, DEFAULT_SEND_MAX_ATTEMPTS, SERVICE_NAME } f
 import { assembleMime } from "./mime";
 import { decodeInputAttachment, persistAttachments } from "./attachments";
 import { withRetry } from "./retry";
+import { deliverLocally } from "./local-delivery";
 import {
   findSendByKey,
   insertSendClaim,
@@ -257,6 +258,17 @@ export async function sendMail(
         ownedId,
         req.attachments.map(decodeInputAttachment),
       );
+    }
+    // Internal recipients (To/Cc/Bcc/archive on our domain) are ingested directly from the
+    // MIME we just sent, so they no longer depend on the provider round trip (a suppressed
+    // address used to drop the copy silently). Never throws.
+    if (deps.localDelivery) {
+      await deliverLocally(deps.localDelivery, {
+        from: fromAddress,
+        mime: outbound.mime,
+        envelope: [...outbound.to, ...outbound.cc, ...(outbound.bcc ?? [])],
+        messageId,
+      });
     }
     await publishSent(deps, messageId, requester);
     await audit(deps, "success", messageId, requester, null);

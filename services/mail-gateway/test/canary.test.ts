@@ -73,6 +73,10 @@ describe("canary probes", () => {
     expect(JSON.parse(log[0]!.cc_json)).toEqual([{ email: QA.MAIL_CANARY_CC }]); // archive@ NOT added
     expect(log[0]!.owner_user_id).toBeNull();
     expect(log[0]!.status).toBe("sent");
+    // Own-domain QA addresses are NOT delivered locally: the probe must prove the real
+    // provider -> MX -> Email Routing round trip, so nothing is in mail_inbound yet.
+    expect((raw.prepare(`SELECT COUNT(*) AS c FROM mail_inbound`).get() as { c: number }).c).toBe(0);
+    expect((raw.prepare(`SELECT COUNT(*) AS c FROM mail_inbound_delivery`).get() as { c: number }).c).toBe(0);
   });
 
   it("success: both copies arrive -> ok with per-recipient latency", async () => {

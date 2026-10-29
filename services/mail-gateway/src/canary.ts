@@ -7,9 +7,9 @@
 // OFF unless MAIL_CANARY_ENABLED="true" AND both addresses are set.
 //
 // Isolation: the canary is addressed ONLY to the two QA addresses, the archive auto-CC is
-// suppressed and the send is a system send (owner NULL), so it never reaches a member's
-// inbox or Sent folder. Inbound copies resolve an owner only if a QA address is itself a
-// roster user (keep them out of the roster).
+// suppressed, local delivery is off and the send is a system send (owner NULL), so it
+// never reaches a member's inbox or Sent folder. Inbound copies resolve an owner only if a
+// QA address is itself a roster user (keep them out of the roster).
 //
 // Health per probe:
 //   - default:              some copy reached mail_inbound (to_ok OR cc_ok).
@@ -272,6 +272,8 @@ async function sendProbe(env: Env, ctx: RequestContext, db: DbClient, cfg: Canar
   // System send: default From, no owner (no member's Sent folder), archive CC suppressed.
   const deps = buildSendDeps(env, ctx, undefined, undefined, null);
   deps.archiveCc = "";
+  // The probe must prove the real provider -> MX -> Email Routing path: no local shortcut.
+  delete deps.localDelivery;
   let messageId: string | null = null;
   let sendError: string | null = null;
   try {

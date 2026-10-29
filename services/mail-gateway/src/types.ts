@@ -9,6 +9,7 @@ import type { RequestContext } from "@dub/http";
 import type { MailProvider } from "./provider";
 import type { MailBlobStore } from "./attachments";
 import type { RetryOptions } from "./retry";
+import type { LocalDeliveryDeps } from "./local-delivery";
 
 // The publish targets publishEvent(env, ...) needs: keyed by the frozen queue binding
 // names in @dub/events CONSUMER_QUEUE_BINDINGS. The string index signature keeps it
@@ -45,6 +46,9 @@ export interface SendDeps {
   /** Attachment body store (R2). Absent => attachments are rejected at validation and
    *  never stored (feature degrades loudly, never silently drops a file). */
   blobs?: MailBlobStore;
+  /** Ingest internal recipients' copies directly after a successful send (local-delivery.ts).
+   *  Absent = provider round trip only (the canary, which must test exactly that). */
+  localDelivery?: LocalDeliveryDeps;
 }
 
 export interface InboundDeps {

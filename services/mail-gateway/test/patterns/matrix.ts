@@ -54,6 +54,9 @@ export const MATRIX: MailPattern[] = [
   { id: "out/to-external-cc-internal", title: "internal -> To: external, Cc: internal", steps: [{ from: A, to: [X], cc: [B] }] },
   { id: "out/to-external-cc-internal-archive-first", title: "same, archive@ copy delivered first", steps: [{ from: A, to: [X], cc: [B], order: "archive-first" }] },
   { id: "out/mixed", title: "internal -> To: int + ext, Cc: ext", steps: [{ from: A, to: [B, X], cc: [Y] }] },
+  // Provider suppressed every internal copy (Resend hard-bounce list): no email() call at all.
+  { id: "out/to-external-cc-internal-suppressed", title: "same, internal copies never come back (local delivery only)", steps: [{ from: A, to: [X], cc: [B], deliveries: 0 }] },
+  { id: "out/bcc-internal-suppressed", title: "internal -> To: external, Bcc: internal, no round trip", steps: [{ from: A, to: [X], bcc: [B], deliveries: 0 }] },
   { id: "out/bcc-internal", title: "internal -> To: external, Bcc: internal", steps: [{ from: A, to: [X], bcc: [B] }] },
   { id: "out/self", title: "self-addressed (To: me)", steps: [{ from: A, to: [A] }] },
   { id: "out/self-cc-plus-other", title: "internal -> To: other internal, Cc: me", steps: [{ from: A, to: [B], cc: [A] }] },
