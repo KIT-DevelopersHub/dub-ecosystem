@@ -131,6 +131,15 @@ paths:
           schema:
             type: string
             maxLength: 200
+        - name: folder
+          in: query
+          description: >-
+            Mailbox view (inbox, mine, others, starred, archive, trash, blocked, all). When
+            set, pages by conversation with blocked senders and the caller's flags applied
+            before the limit, and the response adds `total` (conversations in the view).
+          schema:
+            type: string
+            enum: [inbox, mine, others, starred, archive, trash, blocked, all]
       responses:
         '200':
           description: Page of messages

@@ -117,6 +117,7 @@
       "DELETE /mail/scheduled/{}",
       "GET /mail/admin/canary/probes",
       "GET /mail/blocks",
+      "GET /mail/counts",
       "GET /mail/flags",
       "GET /mail/mailboxes",
       "GET /mail/messages",
