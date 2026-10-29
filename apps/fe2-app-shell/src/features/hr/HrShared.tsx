@@ -1,5 +1,6 @@
 // 人事の共通部品: 権限フラグ・段階バッジ・新規登録モーダル・応募者詳細ドロワー。
 import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Badge,
   Button,
@@ -179,6 +180,7 @@ function eventLabel(e: hr.ApplicantEvent): string {
 /** 応募者の詳細 + 段階変更 + メモ + 履歴 + 参加確定。 */
 export function ApplicantDrawer({ applicantId, onClose }: { applicantId: string | null; onClose: () => void }): JSX.Element {
   const detail = useApplicantDetail(applicantId);
+  const navigate = useNavigate();
   const teams = useHrTeams();
   const { canWrite, canAdmin } = useHrCapability();
   const move = useMoveStage();
@@ -231,9 +233,9 @@ export function ApplicantDrawer({ applicantId, onClose }: { applicantId: string 
             <>
               <dt>名簿</dt>
               <dd>
-                <a href="/members" data-testid="fe2-hr-member-link">
-                  運営メンバー・名簿で見る
-                </a>
+                <Button variant="ghost" size="sm" testId="fe2-hr-member-link" onClick={() => void navigate({ to: "/members" })}>
+                  運営メンバー・名簿で見る →
+                </Button>
               </dd>
             </>
           ) : null}
