@@ -289,7 +289,7 @@ open the verification mail in that Gmail and click the link (status → *Verifie
 Resend は宛先が Suppressions（送信停止リスト）に載っていると **送信 API には 200 を返したまま黙って捨てる**。
 これを拾うため、Resend の webhook を受けて管理者に通知する（`src/resend-webhook.ts`）。
 
-- 経路: Resend → api-gateway `POST https://api.developershub.jp/api/v1/public/webhooks/resend`（PUBLIC・本文をバイト列のまま転送）
+- 経路: Resend → api-gateway `POST https://dub-api-gateway.developershub-site.workers.dev/api/v1/public/webhooks/resend`（PUBLIC・本文をバイト列のまま転送）
   → mail-gateway `POST /internal/webhooks/resend`（INTERNAL）。Svix 署名（`svix-id` / `svix-timestamp` / `svix-signature`、
   HMAC-SHA256、±5分）をここで検証。`RESEND_WEBHOOK_SECRET` 未設定なら **503**（fail closed・error ログ）、
   `/internal/health/ready` の `deliveryWebhook` にも出る。
@@ -307,7 +307,7 @@ Resend は宛先が Suppressions（送信停止リスト）に載っていると
 
 1. migration `0019_mail_provider_event.sql` を dub-core に適用。
 2. Resend ダッシュボード → **Webhooks** → *Add Webhook*
-   - Endpoint URL: `https://api.developershub.jp/api/v1/public/webhooks/resend`
+   - Endpoint URL: `https://dub-api-gateway.developershub-site.workers.dev/api/v1/public/webhooks/resend`
    - Events: `email.bounced` / `email.complained` / `email.delivery_delayed` / `email.failed` / `email.suppressed`
    - 作成後の **Signing Secret**（`whsec_...`）をコピー。
 3. `npx wrangler secret put RESEND_WEBHOOK_SECRET --config services/mail-gateway/wrangler.free.toml` に貼り付け。
