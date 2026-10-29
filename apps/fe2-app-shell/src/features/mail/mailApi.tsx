@@ -71,6 +71,12 @@ export interface MailApi {
   updateScheduled(id: string, patch: ScheduleMailPatch): Promise<ScheduledSendDetail>;
   /** Cancel (取消) a still-scheduled send (mail:send). */
   cancelScheduled(id: string): Promise<{ id: string; status: "canceled" }>;
+  /** The signed-in user's sender block list, newest first (mail:read). */
+  listBlocks(): Promise<mail.MailSenderBlock[]>;
+  /** Block a sender address or a whole domain (idempotent). Mail is never deleted. */
+  addBlock(req: mail.MailSenderBlockRequest): Promise<mail.MailSenderBlock>;
+  /** Unblock (address or domain value as listed). */
+  removeBlock(value: string): Promise<{ value: string; blocked: false }>;
 }
 
 const MAIL = "/api/v1/mail";
@@ -118,6 +124,9 @@ export function createMailApi(api: ApiClient): MailApi {
     getScheduled: (id) => api.request<ScheduledSendDetail>({ method: "GET", path: `${MAIL}/scheduled/${encodeURIComponent(id)}` }),
     updateScheduled: (id, patch) => api.request<ScheduledSendDetail, ScheduleMailPatch>({ method: "PATCH", path: `${MAIL}/scheduled/${encodeURIComponent(id)}`, body: patch }),
     cancelScheduled: (id) => api.request<{ id: string; status: "canceled" }>({ method: "DELETE", path: `${MAIL}/scheduled/${encodeURIComponent(id)}` }),
+    listBlocks: () => api.request<{ items: mail.MailSenderBlock[] }>({ method: "GET", path: `${MAIL}/blocks` }).then((r) => r.items),
+    addBlock: (req) => api.request<mail.MailSenderBlock, mail.MailSenderBlockRequest>({ method: "POST", path: `${MAIL}/blocks`, body: req }),
+    removeBlock: (value) => api.request<{ value: string; blocked: false }>({ method: "DELETE", path: `${MAIL}/blocks/${encodeURIComponent(value)}` }),
   };
 }
 

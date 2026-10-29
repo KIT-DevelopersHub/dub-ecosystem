@@ -38,7 +38,8 @@ export type MailIconName =
   | "download"
   | "clock"
   | "person"
-  | "people";
+  | "people"
+  | "block";
 
 const PATHS: Record<MailIconName, JSX.Element> = {
   inbox: (
@@ -204,6 +205,12 @@ const PATHS: Record<MailIconName, JSX.Element> = {
       <path d="M3 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" />
       <path d="M15.5 5.6a3 3 0 0 1 0 5.8" />
       <path d="M17.5 14.3c2 .7 3.5 2.6 3.5 5.2" />
+    </>
+  ),
+  block: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M6 6l12 12" />
     </>
   ),
 };

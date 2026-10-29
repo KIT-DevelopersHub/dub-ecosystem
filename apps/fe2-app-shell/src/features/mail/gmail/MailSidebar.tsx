@@ -64,7 +64,9 @@ export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boole
         const unread =
           f.id === "scheduled"
             ? state.scheduled.length // 予約済み is not thread-backed: count the parked sends
-            : f.id === "drafts"
+            : f.id === "blocked"
+              ? 0 // blocked mail never counts as unread (no badge, no nudge)
+              : f.id === "drafts"
               ? count(f.id, state.threads, false)
               : count(f.id, state.threads, true);
         return (
