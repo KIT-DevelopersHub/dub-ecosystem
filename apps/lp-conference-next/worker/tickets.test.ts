@@ -516,3 +516,89 @@ test("parseConfig: paymentMethods only accepts paypay on top of card", () => {
   assert.deepEqual(parseConfig({ ...base, paymentMethods: ["bitcoin"] })?.paymentMethods, ["card"]);
   assert.deepEqual(parseConfig(base)?.paymentMethods, ["card"]);
 });
+
+// ---------- LP管理 preview test purchase (sales off + token verified by lp-analytics) ----------
+
+const TOKEN = `${"1".repeat(10)}.${"a".repeat(64)}`;
+const OFF: TicketConfig = { ...CFG, enabled: false };
+function stubbed(valid: boolean, over: Partial<TicketsDeps> = {}) {
+  const calls: { path: string; init: RequestInit }[] = [];
+  const d = deps({
+    getConfig: async () => OFF,
+    previewToken: TOKEN,
+    internal: async (path, init) => {
+      calls.push({ path, init });
+      if (path === "/lp/internal/tickets/preview") return Response.json({ valid });
+      if (path === "/lp/internal/tickets/confirm") return Response.json({ status: "paid", summary: "一般 ×2" });
+      return Response.json({ redirectUrl: "https://checkout.stripe.com/c/pay/cs_test_1" });
+    },
+    ...over,
+  });
+  return Object.assign(d, { calls });
+}
+
+test("preview token honored: sales off → real purchase form in test mode (token in a hidden field, new tab)", async () => {
+  const d = stubbed(true);
+  const res = await handleTickets(new Request("https://lp.example/tickets"), d);
+  assert.equal(res?.status, 200);
+  const html = await res!.text();
+  assert.match(html, /<form class="buy grid"[^>]* target="_blank" data-lp-tk-test>/);
+  assert.match(html, new RegExp(`name="tickets_preview" value="${TOKEN}"`));
+  assert.match(html, /テスト購入モード/);
+  assert.doesNotMatch(html, /受付準備中/);
+  assert.deepEqual(d.calls.map((c) => c.path), ["/lp/internal/tickets/preview"]);
+  assert.deepEqual(JSON.parse(String(d.calls[0].init.body)), { token: TOKEN });
+});
+
+test("preview token honored: checkout forwards previewToken (from the form, without cookie/referer)", async () => {
+  const d = stubbed(true, { previewToken: null });
+  const res = await handleTickets(post("/tickets/checkout", { ...VALID, tickets_preview: TOKEN }, { origin: "https://lp.example" }), d);
+  assert.equal(res?.status, 303);
+  assert.equal(res?.headers.get("location"), "https://checkout.stripe.com/c/pay/cs_test_1");
+  assert.deepEqual(d.calls.map((c) => c.path), ["/lp/internal/tickets/preview", "/lp/internal/tickets/checkout"]);
+  assert.equal(JSON.parse(String(d.calls[1].init.body)).previewToken, TOKEN);
+});
+
+test("preview token honored: thanks page confirms and shows the test banner", async () => {
+  const d = stubbed(true);
+  const res = await handleTickets(new Request(`https://lp.example/tickets/thanks?session_id=cs_test_1&tickets_preview=${TOKEN}`), d);
+  const html = await res!.text();
+  assert.match(html, /お申し込みが完了しました/);
+  assert.match(html, /テスト購入モード/);
+});
+
+test("no token: sales off stays a 404 (public unchanged) and lp-analytics is not asked", async () => {
+  const d = stubbed(true, { previewToken: null });
+  assert.equal(await handleTickets(new Request("https://lp.example/tickets"), d), null);
+  assert.equal(await handleTickets(post("/tickets/checkout", VALID), d), null);
+  assert.equal(d.calls.length, 0);
+});
+
+test("token rejected by lp-analytics (live key / expired / forged): 404, no checkout", async () => {
+  const d = stubbed(false);
+  assert.equal(await handleTickets(new Request("https://lp.example/tickets"), d), null);
+  assert.equal(await handleTickets(post("/tickets/checkout", { ...VALID, tickets_preview: TOKEN }), d), null);
+  assert.ok(d.calls.every((c) => c.path === "/lp/internal/tickets/preview"));
+  // look-only 「あり」 preview + rejected token: still cannot buy
+  const look = stubbed(false, { getConfig: async () => ({ ...CFG, enabled: true, preview: true }) });
+  const res = await handleTickets(post("/tickets/checkout", { ...VALID, tickets_preview: TOKEN }, { origin: "https://lp.example" }), look);
+  assert.equal(res?.status, 403);
+  assert.ok(!look.calls.some((c) => c.path === "/lp/internal/tickets/checkout"));
+});
+
+test("live sales: the token is ignored (no verify call, normal page)", async () => {
+  const d = stubbed(true, { getConfig: async () => CFG });
+  const html = await (await handleTickets(new Request("https://lp.example/tickets"), d))!.text();
+  assert.doesNotMatch(html, /テスト購入モード|data-lp-tk-test/);
+  assert.equal(d.calls.length, 0);
+});
+
+test("preview with nothing selectable explains why (public just sees 受付準備中)", () => {
+  const html = renderTicketsPage({ config: { ...CFG, preview: true, paymentReady: false, types: [CFG.types[0]] } });
+  assert.match(html, /受付準備中/);
+  assert.match(html, /決済（Stripe）が未設定/);
+  const empty = renderTicketsPage({ config: { ...CFG, preview: true, types: [] } });
+  assert.match(empty, /有効）の券種がありません/);
+  const pub = renderTicketsPage({ config: { ...CFG, paymentReady: false, types: [CFG.types[0]] } });
+  assert.doesNotMatch(pub, /data-lp-tk-preview-reason/);
+});
