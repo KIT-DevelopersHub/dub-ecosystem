@@ -146,10 +146,10 @@ export const POLICY_TABLE = definePolicyTable({
   "PATCH /members/onboarding/:id": appLevel("participation", "edit"),
   "DELETE /members/onboarding/:id": appLevel("participation", "edit"),
   "PUT /members/onboarding/meetings": appLevel("participation", "edit"),
-  // ---- 人事 (人事アプリ: 応募 → 選考 → 内定 → 参加 → オンボーディング) ----
+  // ---- 人事 (人事アプリ: 面談 → 採用 → オンボーディング) ----
   // 人事アプリ自身の 無効/閲覧/編集 行で出し分ける (運営メンバー・参加届の行とは独立)。応募者は
   // 個人情報なので、閲覧にも人事の詳細権限 hr:read を重ねる (参加届一覧が identity:read を重ねるのと同じ)。
-  // 段階移動・メモ・チェックは 編集 + hr:write、名簿に行を足す参加確定と削除は 編集 + hr:admin。
+  // ステータス変更・面談日・メモ・チェックは 編集 + hr:write、名簿に行を足す採用 (join) と削除は 編集 + hr:admin。
   // 名簿 (member_people) を直接書く唯一のルートは join で、どの行に結ぶかはハンドラが判定する。
   "GET /members/hr/applicants": appLevel("hr", "view", "hr:read"),
   "GET /members/hr/applicants/:id": appLevel("hr", "view", "hr:read"),

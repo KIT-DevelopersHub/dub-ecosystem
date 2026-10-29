@@ -73,7 +73,7 @@ export interface Applicant {
   /** 面談日時 (任意)。 */
   interviewAt: ISODateTime | null;
   stage: ApplicantStage;
-  /** 参加確定後の名簿行 (member_people.id)。 */
+  /** 採用後の名簿行 (member_people.id)。 */
   memberId: string | null;
   /** 元になった参加届 (member_participations.id) があれば。 */
   participationId: string | null;
@@ -85,7 +85,7 @@ export interface Applicant {
 
 export type ApplicantEventKind = "created" | "stage" | "note" | "joined";
 
-/** 応募者の履歴 (段階変更・メモ・参加確定)。追記のみ。 */
+/** 応募者の履歴 (ステータス変更・メモ・採用)。追記のみ。 */
 export interface ApplicantEvent {
   id: string;
   applicantId: string;

@@ -243,9 +243,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json({ ok: true });
   });
 
-  // ---- 人事 (応募 → 選考 → 内定 → 参加 → オンボーディング) ----
-  // 認可は表 (人事アプリの 閲覧/編集 + hr:read / hr:write / hr:admin)。参加確定は名簿に行を
-  // 足すので hr:admin。どの名簿行に結ぶか・段階遷移の妥当性・楽観ロックはハンドラ (hr-service)。
+  // ---- 人事 (面談 → 採用 → オンボーディング) ----
+  // 認可は表 (人事アプリの 閲覧/編集 + hr:read / hr:write / hr:admin)。採用 (join) は名簿に行を
+  // 足すので hr:admin。どの名簿行に結ぶか・ステータス遷移の妥当性・楽観ロックはハンドラ (hr-service)。
   app.get("/members/hr/applicants", async (c) => c.json(await hrSvc.list(reqCtx(c))));
   app.post("/members/hr/applicants", async (c) => {
     const body = await readJson<hr.CreateApplicantRequest>(c);

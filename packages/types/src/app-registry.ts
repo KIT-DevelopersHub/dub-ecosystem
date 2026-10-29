@@ -127,8 +127,8 @@ export const APP_MANIFEST = [
   // app), so Commander — like ロール管理 — has no knob beyond 無効/閲覧/編集.
   { id: "commander", label: "Commander", navPath: "/commander", domain: "identity", permissions: ["identity:admin"], access: { view: "app:commander:view", edit: "app:commander:edit" },
     detailPermissions: [] },
-  // 人事: 応募 → 選考 → 内定 → 参加 → オンボーディング (member-service /members/hr/*)。名簿は複製せず、
-  // 参加確定で既存の名簿 (member_people) に入り、オンボーディングは参加届アプリの案内項目を読む。
+  // 人事: 面談 → 採用 → オンボーディング (member-service /members/hr/*)。名簿は複製せず、
+  // 採用で既存の名簿 (member_people) に入り、オンボーディングは参加届アプリの案内項目を読む。
   // 未公開アプリ (releaseGate PUBLISHED_APPS 外) なので admin 以外はグレー表示 (identity/0025 で admin のみ付与)。
   { id: "hr", label: "人事", navPath: "/hr", domain: "hr", permissions: ["hr:read"], access: { view: "app:hr:view", edit: "app:hr:edit" },
     detailPermissions: ["hr:read", "hr:write", "hr:admin"] },

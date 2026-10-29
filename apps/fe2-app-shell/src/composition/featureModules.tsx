@@ -368,7 +368,7 @@ function adaptLp(api: ApiClient): FeatureModule {
 }
 
 // ── hr (FE2-local feature) ────────────────────────────────────────────────────
-// 人事: 応募 → 選考 → 内定 → 参加 → オンボーディング。member-service /members/hr/* を読む/書くので
+// 人事: 面談 → 採用 → オンボーディング。member-service /members/hr/* を読む/書くので
 // HrProvider で包む。nav は LP管理 の後 (order 50)。per-app ゲートは withAppAccessGate が
 // app:hr:view を AND する。未公開 (PUBLISHED_APPS 外) なので admin 以外はグレー。
 function adaptHr(api: ApiClient): FeatureModule {

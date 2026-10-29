@@ -15,7 +15,7 @@ export const HR_LIST_KEY = queryKeys.feature("hr", "applicants");
 export const HR_DETAIL_KEY = (id: string) => queryKeys.feature("hr", "applicant", id);
 export const HR_ONBOARDING_KEY = queryKeys.feature("hr", "onboarding");
 export const HR_TEAMS_KEY = queryKeys.feature("hr", "teams");
-/** 参加確定で名簿が変わるので、運営メンバーの overview も無効化する。 */
+/** 採用で名簿が変わるので、運営メンバーの overview も無効化する。 */
 const MEMBERS_OVERVIEW_KEY = queryKeys.feature("members", "overview");
 
 function messageFor(err: unknown, fallback: string): string {
@@ -85,7 +85,7 @@ export function useMoveStage() {
     },
     onError: (err, _v, ctx) => {
       if (ctx?.prev) qc.setQueryData(HR_LIST_KEY, ctx.prev);
-      toast.show({ kind: "error", title: messageFor(err, "段階を変更できませんでした") });
+      toast.show({ kind: "error", title: messageFor(err, "ステータスを変更できませんでした") });
     },
     onSuccess: (detail) => {
       qc.setQueryData<hr.ListApplicantsResponse>(HR_LIST_KEY, (prev) =>
