@@ -4153,6 +4153,8 @@ type DemoTicketOrder = {
   createdAt: string;
   paidAt: string | null;
   paymentMethod: string | null;
+  preview: boolean;
+  test: boolean;
 };
 
 function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
@@ -4212,6 +4214,8 @@ function createLpTicketsStore() {
     ctaEnabled: false,
     paymentReady: false,
     paymentMethods: ["card", "paypay"] as ("card" | "paypay")[],
+    // demo には Stripe も lp-analytics も無いので、プレビューのテスト購入は出せない。
+    previewCheckout: false,
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
     fields: [
@@ -4272,6 +4276,9 @@ function createLpTicketsStore() {
       paidAt: status === "paid" ? createdAt : null,
       // 有料で支払い済みだけ手段あり（カードと PayPay を交互に）。無料・未確定は null。
       paymentMethod: status === "paid" && items.some((it) => it.unitPriceJpy > 0) ? (i % 2 === 0 ? "paypay" : "card") : null,
+      // 最新の支払い済み 1 件は LP管理プレビューからのテスト購入（「テスト（プレビュー）」表示の見本）。
+      preview: id === "ord_007",
+      test: id === "ord_007",
     };
   });
 
@@ -4374,6 +4381,10 @@ function createLpTicketsStore() {
       if (typeof req.active === "boolean") t.active = req.active;
       t.updatedAt = new Date().toISOString();
       return json(summary(t));
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/preview-token") {
+      return problem("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", 409);
     }
 
     if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
