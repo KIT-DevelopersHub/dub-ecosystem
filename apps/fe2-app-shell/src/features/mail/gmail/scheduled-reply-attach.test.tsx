@@ -182,3 +182,34 @@ describe("予約済み folder — reply / attachment rows", () => {
     expect(api.getScheduled).not.toHaveBeenCalled();
   });
 });
+
+describe("delivered reply with attachments in its conversation", () => {
+  it("shows the folded reply's files (fetched from its Sent detail)", async () => {
+    const item: mail.MailSentListItem = {
+      id: "sent_sched_reply",
+      from: { email: "info@developershub.jp" },
+      to: [{ email: "hanako@example.com", name: "山田 花子" }],
+      subject: "Re: 登壇のご相談",
+      snippet: "予約した返信",
+      sentAt: "2099-08-10T02:00:00.000Z",
+      provider: "resend",
+      status: "sent",
+      threadId: "thr_in_1",
+    };
+    const detail = {
+      ...item,
+      textBody: "予約した返信",
+      attachments: [{ id: "att_1", filename: "agenda.txt", contentType: "text/plain", sizeBytes: 5 }],
+    } as mail.MailSentDetail;
+    const getSent = vi.fn().mockResolvedValue(detail);
+    await openThread(
+      fakeApi({
+        listInbox: vi.fn().mockResolvedValue({ items: [DEMO_INBOX_ITEMS[0]!], nextCursor: null }),
+        listSent: vi.fn().mockResolvedValue({ items: [item], nextCursor: null }),
+        getSent,
+      }),
+    );
+    await waitFor(() => expect(getSent).toHaveBeenCalledWith("sent_sched_reply"));
+    expect(await screen.findByText("agenda.txt")).toBeInTheDocument();
+  });
+});

@@ -265,12 +265,15 @@ export function useMailSync(): void {
 /** A folded Sent reply arrives from the list endpoint with body = snippet (whitespace
  *  collapsed to one line, cut at 140 chars), so a long reply rendered jumbled and truncated.
  *  Fetch its full detail to restore the real text (newlines intact). Optimistic local rows
- *  (no server id yet) and failures keep what we have. */
+ *  (no server id yet) and failures keep what we have. Attachment metadata rides along. */
 async function withFullSentBody(api: MailApi, m: MailMsg): Promise<MailMsg> {
   if (m.id.startsWith("msg-")) return m;
   try {
     const detail = await api.getSent(m.id);
-    return detail.id === m.id ? { ...m, body: detail.textBody } : m;
+    if (detail.id !== m.id) return m;
+    // Carry the reply's files too (list rows omit them), so a reply sent — or scheduled and
+    // later delivered — with attachments shows them inside the conversation.
+    return { ...m, body: detail.textBody, ...(detail.attachments && detail.attachments.length > 0 ? { attachments: detail.attachments } : {}) };
   } catch {
     return m;
   }
