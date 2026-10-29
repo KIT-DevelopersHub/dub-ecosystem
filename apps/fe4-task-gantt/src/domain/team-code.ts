@@ -28,9 +28,9 @@ export interface CanonicalTeam {
   code: string;
 }
 
-// The 9 official teams. Codes are contractual and must not be re-lettered casually:
+// The 10 official teams. Codes are contractual and must not be re-lettered casually:
 // 統括=TK / 法務会計=HK / セッション=SE / 当日運営=TU / スポンサー=SP / 集客広報=SK /
-// デザイン=DS / 法人メンバー=HM / 開発=KH (開発 is its OWN team/code — it is no longer
+// デザイン=DS / 法人メンバー=HM / 開発=KH / ネットワーク=NW (開発 is its OWN team/code — it is no longer
 // folded into 統括; see LEGACY_ALIAS's history note below).
 export const CANONICAL_TEAMS: readonly CanonicalTeam[] = [
   { key: "exec", name: "統括チーム", code: "TK" },
@@ -41,6 +41,9 @@ export const CANONICAL_TEAMS: readonly CanonicalTeam[] = [
   { key: "finance", name: "法務会計チーム", code: "HK" },
   { key: "pr", name: "集客広報チーム", code: "SK" },
   { key: "design", name: "デザインチーム", code: "DS" },
+  // Added 2026-10-29 (参加届 にネットワークチームが無い件). Prod row is created via
+  // 運営メンバー → チームを追加; Japanese names slugify to an opaque key, so the name match carries it.
+  { key: "network", name: "ネットワークチーム", code: "NW" },
   // Not yet in prod (no member_teams row as of 2026-09-16) — placeholder key.
   { key: "houjinmember", name: "法人メンバー", code: "HM" },
 ] as const;
