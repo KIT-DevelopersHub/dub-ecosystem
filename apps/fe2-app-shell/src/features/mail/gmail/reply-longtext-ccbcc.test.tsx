@@ -30,6 +30,9 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getScheduled: vi.fn(),
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn(),
+    listBlocks: vi.fn().mockResolvedValue([]),
+    addBlock: vi.fn().mockImplementation((req: { value: string; kind?: "address" | "domain" }) => Promise.resolve({ value: req.value.toLowerCase(), kind: req.kind ?? "address", createdAt: "2026-01-01T00:00:00.000Z" })),
+    removeBlock: vi.fn().mockImplementation((value: string) => Promise.resolve({ value, blocked: false })),
     ...over,
   };
 }
