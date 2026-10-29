@@ -20,6 +20,11 @@ export {
   type UseEmailAddressInputArgs,
   type EmailAddressInput,
 } from "./hooks/useEmailAddressInput";
+export {
+  useListKeyboardNav,
+  type UseListKeyboardNavArgs,
+  type ListKeyboardNav,
+} from "./hooks/useListKeyboardNav";
 
 export { RolePicker, type RolePickerProps, type RoleOption } from "./components/RolePicker";
 export { DialogActions, type DialogActionsProps } from "./components/DialogActions";

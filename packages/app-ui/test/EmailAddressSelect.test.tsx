@@ -87,4 +87,106 @@ describe("EmailAddressSelect", () => {
     fireEvent.change(input, { target: { value: "x" } });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  describe("keyboard selection of suggestions", () => {
+    const people = [
+      { email: "sato@dev.jp", name: "Sato" },
+      { email: "suzuki@dev.jp", name: "Suzuki" },
+      { email: "sasaki@dev.jp", name: "Sasaki" },
+    ];
+    const open = (q = "s") => {
+      render(<Harness candidates={people} />);
+      const input = screen.getByTestId("to");
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: q } });
+      return input;
+    };
+    const activeName = () =>
+      within(screen.getByRole("listbox")).getAllByRole("option").find((o) => o.getAttribute("aria-selected") === "true")?.textContent;
+
+    it("highlights the first match by default and exposes combobox aria", () => {
+      const input = open();
+      expect(input).toHaveAttribute("role", "combobox");
+      expect(input).toHaveAttribute("aria-expanded", "true");
+      expect(activeName()).toContain("Sato");
+      const first = within(screen.getByRole("listbox")).getAllByRole("option")[0]!;
+      expect(input).toHaveAttribute("aria-activedescendant", first.id);
+    });
+
+    it("ArrowDown/ArrowUp move the highlight with wrap-around", () => {
+      const input = open();
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      expect(activeName()).toContain("Suzuki");
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      expect(activeName()).toContain("Sato"); // wrapped past the end
+      fireEvent.keyDown(input, { key: "ArrowUp" });
+      expect(activeName()).toContain("Sasaki"); // wrapped past the start
+    });
+
+    it("Enter picks the highlighted suggestion as a chip and closes the list", () => {
+      const input = open();
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(screen.getByText("Suzuki")).toBeInTheDocument();
+      expect((input as HTMLInputElement).value).toBe("");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("Tab also picks the highlighted suggestion", () => {
+      const input = open();
+      fireEvent.keyDown(input, { key: "Tab" });
+      expect(screen.getByText("Sato")).toBeInTheDocument();
+    });
+
+    it("Escape closes the list but keeps the typed text", () => {
+      const input = open("su");
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect((input as HTMLInputElement).value).toBe("su");
+      expect(input).toHaveAttribute("aria-expanded", "false");
+      // Typing again reopens it.
+      fireEvent.change(input, { target: { value: "suz" } });
+      expect(screen.getByRole("listbox")).toBeInTheDocument();
+    });
+
+    it("mouse hover syncs the highlight", () => {
+      open();
+      const options = within(screen.getByRole("listbox")).getAllByRole("option");
+      fireEvent.mouseEnter(options[2]!);
+      expect(activeName()).toContain("Sasaki");
+    });
+
+    it("ignores arrows/Enter while an IME is composing", () => {
+      const input = open();
+      fireEvent.compositionStart(input);
+      fireEvent.keyDown(input, { key: "ArrowDown", isComposing: true });
+      fireEvent.keyDown(input, { key: "Enter", keyCode: 229, isComposing: true });
+      expect(activeName()).toContain("Sato");
+      expect(screen.queryByLabelText("sato@dev.jp を削除")).not.toBeInTheDocument();
+      expect(screen.getByRole("listbox")).toBeInTheDocument();
+      expect((input as HTMLInputElement).value).toBe("s");
+    });
+
+    it("Enter on a complete new address adds the typed address, not a suggestion", () => {
+      render(<Harness candidates={[{ email: "sato@dev.jp.example", name: "Sato" }]} />);
+      const input = screen.getByTestId("to");
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "sato@dev.jp" } });
+      expect(screen.getByRole("listbox")).toBeInTheDocument();
+      expect(activeName()).toBeUndefined();
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(screen.getByText("sato@dev.jp")).toBeInTheDocument();
+      expect(screen.queryByText("Sato")).not.toBeInTheDocument();
+    });
+
+    it("an exactly-matching suggestion is still highlighted and picked with its name", () => {
+      render(<Harness candidates={[{ email: "sato@dev.jp", name: "Sato" }]} />);
+      const input = screen.getByTestId("to");
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "sato@dev.jp" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(screen.getByText("Sato")).toBeInTheDocument();
+    });
+  });
 });
