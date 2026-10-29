@@ -23,6 +23,8 @@ interface FlagState {
 }
 /** Background re-sync interval for new inbound mail. */
 export const MAIL_POLL_MS = 60_000;
+/** Delay after a scheduled send's due time before re-syncing (lets the drain run). */
+export const SCHEDULED_DUE_GRACE_MS = 3_000;
 /** Quiet period after the last keystroke before the server search fires. */
 export const SEARCH_DEBOUNCE_MS = 300;
 
@@ -160,6 +162,23 @@ export function useMailSync(): void {
       document.removeEventListener("visibilitychange", sync);
     };
   }, [dispatch]);
+
+  // 予約送信: re-sync shortly after the soonest parked send falls due, so a scheduled
+  // reply/compose moves 予約済み → 送信済み (and folds into its thread) without waiting for
+  // the next poll. Capped so a far-future schedule never arms a huge timer.
+  const nextDue = state.scheduled.reduce<number>((min, s) => {
+    const t = s.status === "scheduled" ? Date.parse(s.scheduledAt) : NaN;
+    return Number.isNaN(t) ? min : Math.min(min, t);
+  }, Number.POSITIVE_INFINITY);
+  useEffect(() => {
+    if (!Number.isFinite(nextDue)) return;
+    const wait = Math.max(0, nextDue - Date.now()) + SCHEDULED_DUE_GRACE_MS;
+    if (wait > MAIL_POLL_MS * 10) return;
+    const timer = setTimeout(() => {
+      if (!busy.current) dispatch({ type: "REQUEST_SYNC" });
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [nextDue, dispatch]);
 
   // Persist flag changes (optimistic): whenever a thread's derived star/archive/trash state
   // diverges from what the server last knew, POST the new state and advance the baseline.
