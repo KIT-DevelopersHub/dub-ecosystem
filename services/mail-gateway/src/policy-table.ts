@@ -48,6 +48,14 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /internal/status": INTERNAL,
   "GET /health/quota": INTERNAL,
 
+  // ---- Resend delivery-problem webhook (bounce / suppressed / complained / failed / delayed)
+  // INTERNAL, not PUBLIC: this Worker has no public hostname. Resend calls api-gateway's
+  // gateway-owned PUBLIC `POST /api/v1/public/webhooks/resend`, which forwards the raw bytes
+  // + svix-* headers here over the Service Binding. The handler AUTHENTICATES the payload
+  // with the Svix HMAC (RESEND_WEBHOOK_SECRET, 5-min replay window; unset -> 503) — that is
+  // authentication of a sessionless sender, not a permission check, so it stays handler-side.
+  "POST /internal/webhooks/resend": INTERNAL,
+
   // ---- POST /send: the SYSTEM send port (open-relay guard) ----
   // INTERNAL, and this is the single most important line in the table: a reachable-from-
   // outside mail send endpoint is an open relay. The only legitimate callers are our own
