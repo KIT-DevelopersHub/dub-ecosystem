@@ -916,21 +916,30 @@ function createMailStore() {
   // no cron, so `sweepDue` SIMULATES the gateway drain — any parked row whose scheduledAt has
   // passed is moved into Sent and dropped from the scheduled list. That lets a reviewer pick a
   // near time and watch the mail move 予約済み → 送信済み on the next refresh.
+  // `parked` = the attachment bytes (base64) held until delivery — the demo stand-in for the
+  // gateway's R2 park (migration 0020). Never returned by the API (stripped in `publicSched`).
+  type DemoScheduled = mail.ScheduledSendDetail & { parked?: mail.MailAttachmentInput[] };
   const schedKey = (id: string): string => `dub_demo_scheduled_${id}`;
-  function scheduledOf(id: string): mail.ScheduledSendDetail[] {
+  function scheduledOf(id: string): DemoScheduled[] {
     try {
       const raw = globalThis.localStorage?.getItem(schedKey(id));
-      return raw ? (JSON.parse(raw) as mail.ScheduledSendDetail[]) : [];
+      return raw ? (JSON.parse(raw) as DemoScheduled[]) : [];
     } catch {
       return [];
     }
   }
-  function saveScheduled(id: string, list: mail.ScheduledSendDetail[]): void {
+  function saveScheduled(id: string, list: DemoScheduled[]): boolean {
     try {
       globalThis.localStorage?.setItem(schedKey(id), JSON.stringify(list));
+      return true;
     } catch {
-      /* storage unavailable — Scheduled is best-effort in the demo */
+      return false; // storage unavailable / quota — callers that create rows must surface it
     }
+  }
+  function publicSched(s: DemoScheduled): mail.ScheduledSendDetail {
+    const { parked, ...rest } = s;
+    void parked;
+    return rest;
   }
   function sweepDue(accountId: string): void {
     const list = scheduledOf(accountId);
@@ -942,6 +951,14 @@ function createMailStore() {
     const sent = sentOf(accountId);
     for (const s of due) {
       const pmid = `<demo-${Date.now()}@developershub.jp>`;
+      // Deliver the parked files: register their bytes under the ids the schedule listed so
+      // the Sent copy downloads/previews exactly like an immediate send's attachments.
+      const attachments: mail.MailAttachment[] = (s.parked ?? []).map((a, i) => {
+        const attId = s.attachments?.[i]?.id ?? `mailatt_demo_${Date.now().toString(36)}_${attSeq++}`;
+        const bytes = b64ToBytes(a.contentBase64);
+        DEMO_MAIL_BLOBS.set(attId, { filename: a.filename, contentType: a.contentType, bytes });
+        return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
+      });
       sent.unshift({
         id: `sent_demo_${Date.now().toString(36)}_${seq++}`,
         from: s.from ?? (acct ? { email: acct.email, name: acct.displayName } : undefined),
@@ -956,6 +973,8 @@ function createMailStore() {
         textBody: s.textBody,
         ...(s.htmlBody ? { htmlBody: s.htmlBody } : {}),
         ...(s.inReplyTo ? { threadId: replyThreadId(s.inReplyTo) } : {}),
+        ...(s.bcc && s.bcc.length > 0 ? { bcc: s.bcc } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
       } as mail.MailSentDetail);
     }
     saveSent(accountId, sent);
@@ -1086,12 +1105,16 @@ function createMailStore() {
       if (Number.isNaN(at) || at <= Date.now()) {
         return json({ error: { code: "MAIL_INVALID_REQUEST", message: "scheduledAt must be in the future" } }, 400);
       }
-      if (Array.isArray(req.attachments) && req.attachments.length > 0) {
-        return json({ error: { code: "MAIL_INVALID_REQUEST", message: "attachments are not supported on a scheduled send" } }, 400);
-      }
+      const parked = Array.isArray(req.attachments) ? req.attachments : [];
+      const attMeta: mail.MailAttachment[] = parked.map((a) => ({
+        id: `mailatt_demo_${Date.now().toString(36)}_${attSeq++}`,
+        filename: a.filename,
+        contentType: a.contentType,
+        sizeBytes: b64ToBytes(a.contentBase64).byteLength,
+      }));
       const id = `mailsch_demo_${Date.now().toString(36)}_${seq++}`;
       const nowIso = new Date().toISOString();
-      const detail: mail.ScheduledSendDetail = {
+      const detail: DemoScheduled = {
         id,
         from: { email: me.email, name: me.displayName },
         to: req.to ?? [],
@@ -1102,12 +1125,16 @@ function createMailStore() {
         createdAt: nowIso,
         status: "scheduled",
         ...(req.inReplyTo ? { inReplyTo: req.inReplyTo } : {}),
+        ...(req.bcc && req.bcc.length > 0 ? { bcc: req.bcc } : {}),
+        ...(attMeta.length > 0 ? { attachments: attMeta, parked } : {}),
         textBody: req.textBody ?? "",
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
       };
       const list = scheduledOf(me.id);
       list.unshift(detail);
-      saveScheduled(me.id, list);
+      if (!saveScheduled(me.id, list)) {
+        return json({ error: { code: "MAIL_ATTACHMENT_NOT_STORED", message: "demo storage is full (attachments too large for the demo)" } }, 503);
+      }
       return json({ id, scheduledAt: detail.scheduledAt, status: "scheduled" } satisfies mail.ScheduleMailResponse, 202);
     }
     if (method === "GET" && pathname === "/api/v1/mail/scheduled") {
@@ -1115,9 +1142,11 @@ function createMailStore() {
       const items: mail.ScheduledSendListItem[] = all
         .filter((s) => s.status === "scheduled")
         .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
-        .map(({ textBody, htmlBody, ...li }) => {
+        .map((s) => {
+          const { textBody, htmlBody, bcc, ...li } = publicSched(s);
           void textBody;
           void htmlBody;
+          void bcc;
           return li;
         });
       return json(page(items));
@@ -1129,7 +1158,7 @@ function createMailStore() {
         const list = scheduledOf(me.id);
         const idx = list.findIndex((s) => s.id === id);
         if (method === "GET") {
-          return idx >= 0 ? json(list[idx]!) : notFound(`GET ${pathname}`);
+          return idx >= 0 ? json(publicSched(list[idx]!)) : notFound(`GET ${pathname}`);
         }
         if (method === "PATCH") {
           if (idx < 0) return notFound(`PATCH ${pathname}`);
@@ -1143,7 +1172,7 @@ function createMailStore() {
           if (p.htmlBody !== undefined) cur.htmlBody = p.htmlBody;
           if (p.scheduledAt !== undefined) cur.scheduledAt = p.scheduledAt;
           saveScheduled(me.id, list);
-          return json(cur);
+          return json(publicSched(cur));
         }
         if (method === "DELETE") {
           if (idx < 0) return notFound(`DELETE ${pathname}`);
