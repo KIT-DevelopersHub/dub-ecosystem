@@ -682,3 +682,33 @@ describe("demo sender block list", () => {
     expect(await blocked()).toEqual(["msg_2"]);
   });
 });
+
+describe("demo folder views (?folder=, gateway parity)", () => {
+  it("excludes blocked senders BEFORE the limit: inbox pages 1 and 2 are full; ブロック済み pages the rest", async () => {
+    globalThis.localStorage.clear();
+    globalThis.history.replaceState(null, "", "/?demo_mail_bulk=180");
+    try {
+      const a = api();
+      type Page = { items: { threadId: string; blocked?: boolean; from: { email: string } }[]; nextCursor: string | null; total?: number };
+      const get = (folder: string, cursor?: string) =>
+        a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { folder, limit: 50, ...(cursor ? { cursor } : {}) } });
+      const before = (await get("inbox")).total!;
+      await a.request({ method: "POST", path: "/api/v1/mail/blocks", body: { value: "sale@shop-a.example" } });
+      await a.request({ method: "POST", path: "/api/v1/mail/blocks", body: { value: "spam-b.example", kind: "domain" } });
+      const p1 = await get("inbox");
+      const p2 = await get("inbox", p1.nextCursor!);
+      const threads = (p: Page) => new Set(p.items.map((m) => m.threadId)).size;
+      expect(threads(p1)).toBe(50);
+      expect(threads(p2)).toBe(50);
+      expect([...p1.items, ...p2.items].some((m) => /shop-a|spam-b/.test(m.from.email))).toBe(false);
+      const blocked = await get("blocked");
+      expect(blocked.items.every((m) => m.blocked)).toBe(true);
+      expect(p1.total! + blocked.total!).toBe(before);
+      const counts = await a.request<Record<string, { total: number; unread: number }>>({ method: "GET", path: "/api/v1/mail/counts" });
+      expect(counts.inbox!.total).toBe(p1.total);
+      expect(counts.blocked!.unread).toBe(0);
+    } finally {
+      globalThis.history.replaceState(null, "", "/");
+    }
+  });
+});

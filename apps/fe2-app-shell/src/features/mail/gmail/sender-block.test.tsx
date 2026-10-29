@@ -55,6 +55,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
       Promise.resolve({ value: req.kind === "domain" ? req.value.split("@").pop()! : req.value, kind: req.kind ?? "address", createdAt: "2026-10-30T00:00:00.000Z" }),
     ),
     removeBlock: vi.fn().mockImplementation((value: string) => Promise.resolve({ value, blocked: false })),
+    counts: vi.fn().mockRejectedValue(new Error("no counts")),
     ...over,
   };
 }
