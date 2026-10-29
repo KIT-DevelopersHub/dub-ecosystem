@@ -3081,6 +3081,7 @@ function createMembersStore() {
     { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
     { id: "team_corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: "法人設立・契約・会計／規程" },
+    { id: "team_network", key: "network", name: "ネットワークチーム", color: "#0891b2", description: "会場ネットワーク・Wi-Fi・配信回線" },
   ];
   const mk = (
     id: string,

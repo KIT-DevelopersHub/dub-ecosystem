@@ -4,15 +4,15 @@ import { CANONICAL_TEAMS, teamCode, teamCodeById } from "../src/domain/team-code
 
 const mkTeam = (key: string, name: string): team.Team => ({ id: key, key, name });
 
-describe("teamCode — the 9 official teams each get their own code (regression for the all-AA bug)", () => {
+describe("teamCode — the official teams each get their own code (regression for the all-AA bug)", () => {
   it.each(CANONICAL_TEAMS)("%s -> %s", ({ key, name, code }) => {
     expect(teamCode(mkTeam(key, name))).toBe(code);
   });
 
-  it("resolves every one of the 9 teams to a DIFFERENT code (no collapsing to a shared default, incl. 開発=KH being independent from 統括=TK)", () => {
+  it("resolves every official team to a DIFFERENT code (no collapsing to a shared default, incl. 開発=KH being independent from 統括=TK)", () => {
     const codes = CANONICAL_TEAMS.map((t) => teamCode(mkTeam(t.key, t.name)));
     expect(new Set(codes).size).toBe(CANONICAL_TEAMS.length);
-    expect(codes).toEqual(["TK", "KH", "TU", "SP", "SE", "HK", "SK", "DS", "HM"]);
+    expect(codes).toEqual(["TK", "KH", "TU", "SP", "SE", "HK", "SK", "DS", "NW", "HM"]);
   });
 
   it("matches the EXACT prod team rows verbatim (member_teams, org_devhub, read 2026-09-16)", () => {
@@ -24,6 +24,9 @@ describe("teamCode — the 9 official teams each get their own code (regression 
     expect(teamCode(mkTeam("finance", "法務会計チーム"))).toBe("HK");
     expect(teamCode(mkTeam("pr", "集客広報チーム"))).toBe("SK");
     expect(teamCode(mkTeam("design", "デザインチーム"))).toBe("DS");
+    expect(teamCode(mkTeam("network", "ネットワークチーム"))).toBe("NW");
+    // 本番は管理画面から作成 → 日本語名は不透明 key になるので名前一致で NW になること。
+    expect(teamCode(mkTeam("team-x9y8z7", "ネットワークチーム"))).toBe("NW");
   });
 
   it("matches by name even without the prod \"チーム\" suffix, or with an opaque/random key (real prod teams slugify Japanese names to \"\")", () => {
