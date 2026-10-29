@@ -24,6 +24,8 @@ export interface PublicTicketType {
   remaining: number | null;
   soldOut: boolean;
 }
+export type PaymentMethod = "card" | "paypay";
+
 export interface TicketConfig {
   enabled: boolean;
   /** Set by the Worker (previewConfig), never by lp-analytics: shown as on sale, never sells. */
@@ -31,6 +33,8 @@ export interface TicketConfig {
   /** Swap the LP's 参加登録 buttons for 参加チケットを購入 (effective only with enabled). */
   ctaEnabled: boolean;
   paymentReady: boolean;
+  /** Advertised methods (lp-analytics LP_PAYPAY_ENABLED). Stripe still decides per session. */
+  paymentMethods: PaymentMethod[];
   fields: TicketField[];
   types: PublicTicketType[];
 }
@@ -70,6 +74,7 @@ export const DEMO_CONFIG: TicketConfig = {
   preview: false,
   ctaEnabled: true,
   paymentReady: true,
+  paymentMethods: ["card", "paypay"],
   fields: [
     { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
     { id: "attendance", label: "参加区分", type: "select", required: true, options: ["現地", "オンライン"] },
@@ -214,6 +219,7 @@ export function parseConfig(raw: unknown): TicketConfig | null {
     preview: false,
     ctaEnabled: o.ctaEnabled === true,
     paymentReady: o.paymentReady === true,
+    paymentMethods: Array.isArray(o.paymentMethods) && o.paymentMethods.includes("paypay") ? ["card", "paypay"] : ["card"],
     fields,
     types,
   };
@@ -1005,6 +1011,11 @@ export interface TicketsPageOptions {
 const LOCK =
   '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 
+/** The lock line under the submit button: card only keeps the original copy. */
+export function securePaymentCopy(config: Pick<TicketConfig, "paymentMethods">): string {
+  return config.paymentMethods.includes("paypay") ? "Stripe で安全に決済（カード・PayPay）" : "カード決済は Stripe で安全に処理されます";
+}
+
 export function renderTicketsPage(o: TicketsPageOptions): string {
   const { config } = o;
   const values = o.values ?? {};
@@ -1053,7 +1064,7 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
     `<p class="sum-ev">${CONF_NAME}<br>${EVENT_DATE}</p>` +
     renderSummary(config, values) +
     '<button class="submit" type="submit">購入手続きへ<span class="ar" aria-hidden="true">→</span></button>' +
-    (hasPaid ? `<p class="secure">${LOCK}カード決済は Stripe で安全に処理されます</p>` : "") +
+    (hasPaid ? `<p class="secure">${LOCK}${securePaymentCopy(config)}</p>` : "") +
     "</div>" +
     (hasPaid
       ? '<p class="note">有料チケットは Stripe の決済画面に移動してお支払いいただきます。無料チケットはそのままお申し込みが完了します。</p>'
