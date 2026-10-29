@@ -85,6 +85,7 @@ interface ApplicantDbRow {
   desired_team_id: string | null;
   source: string | null;
   motivation: string | null;
+  interview_at: string | null;
   stage: string;
   member_id: string | null;
   participation_id: string | null;
@@ -121,7 +122,8 @@ function toApplicantRow(r: ApplicantDbRow): ApplicantRow {
     desiredTeamId: r.desired_team_id,
     source: r.source,
     motivation: r.motivation,
-    stage: stageOf(r.stage) ?? "applied",
+    interviewAt: r.interview_at,
+    stage: stageOf(r.stage) ?? "scheduling",
     memberId: r.member_id,
     participationId: r.participation_id,
     version: r.version,
@@ -150,10 +152,10 @@ export function createD1HrRepo(db: DbClient): HrRepo {
     async createApplicant(a) {
       await db.run(
         `INSERT INTO member_hr_applicants (id, org_id, name, name_kana, email, department, grade, desired_team_id, source,
-           motivation, stage, member_id, participation_id, version, archived_at, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           motivation, interview_at, stage, member_id, participation_id, version, archived_at, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         a.id, a.orgId, a.name, a.nameKana, a.email, a.department, a.grade, a.desiredTeamId, a.source,
-        a.motivation, a.stage, a.memberId, a.participationId, a.version, a.archivedAt, a.createdBy, a.createdAt, a.updatedAt,
+        a.motivation, a.interviewAt, a.stage, a.memberId, a.participationId, a.version, a.archivedAt, a.createdBy, a.createdAt, a.updatedAt,
       );
     },
     async getApplicant(id) {
@@ -170,10 +172,10 @@ export function createD1HrRepo(db: DbClient): HrRepo {
     async updateApplicant(a, expectedVersion) {
       const res = await db.run(
         `UPDATE member_hr_applicants SET name = ?, name_kana = ?, email = ?, department = ?, grade = ?, desired_team_id = ?,
-           source = ?, motivation = ?, stage = ?, member_id = ?, participation_id = ?, version = ?, archived_at = ?, updated_at = ?
+           source = ?, motivation = ?, interview_at = ?, stage = ?, member_id = ?, participation_id = ?, version = ?, archived_at = ?, updated_at = ?
          WHERE id = ? AND version = ?`,
         a.name, a.nameKana, a.email, a.department, a.grade, a.desiredTeamId,
-        a.source, a.motivation, a.stage, a.memberId, a.participationId, a.version, a.archivedAt, a.updatedAt,
+        a.source, a.motivation, a.interviewAt, a.stage, a.memberId, a.participationId, a.version, a.archivedAt, a.updatedAt,
         a.id, expectedVersion,
       );
       return res.meta.changes > 0;

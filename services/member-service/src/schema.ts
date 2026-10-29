@@ -287,7 +287,7 @@ ALTER TABLE member_participations ADD COLUMN student_number TEXT;
 `.trim(),
 };
 
-// 0017: 人事アプリ (応募者・履歴・オンボーディングのチェック状態) の新規テーブル (additive)。
+// 0017: 人事アプリ (応募者・面談日・履歴・オンボーディングのチェック状態) の新規テーブル (additive)。
 // 名簿は複製せず member_id で結ぶ。チェックリストの項目は member_onboarding_items を流用。
 // Mirrors 0017_hr.sql (schema-lockstep).
 export const MEMBER_HR_MIGRATION: Migration = {
@@ -305,6 +305,7 @@ CREATE TABLE member_hr_applicants (
   desired_team_id   TEXT,
   source            TEXT,
   motivation        TEXT,
+  interview_at      TEXT,
   stage             TEXT NOT NULL,
   member_id         TEXT,
   participation_id  TEXT,

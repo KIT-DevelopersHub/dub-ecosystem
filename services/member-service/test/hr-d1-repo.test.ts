@@ -6,7 +6,7 @@ import { createD1HrRepo, type ApplicantRow } from "../src/hr-repo";
 const row: ApplicantRow = {
   id: "app_1", orgId: "org_x", name: "山本 花", nameKana: "やまもと はな", email: "h@example.com",
   department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", source: "紹介", motivation: "やりたい",
-  stage: "interview", memberId: null, participationId: "part_1", version: 3, archivedAt: null,
+  interviewAt: "2026-10-10T10:00:00.000Z", stage: "interview_set", memberId: null, participationId: "part_1", version: 3, archivedAt: null,
   createdBy: "usr_1", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z",
 };
 

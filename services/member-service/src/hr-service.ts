@@ -1,7 +1,8 @@
-// 人事 (応募 → 選考 → 内定 → 参加 → オンボーディング) のビジネスロジック。HTTP 非依存。
+// 人事 (面談日程調整中 → 面談確定 → 面談済み → 採用/不採用 → オンボーディング調整 → オンボーディング完了、
+// 辞退はどこからでも) のビジネスロジック。HTTP 非依存。遷移規則は @dub/types hr が SoT。
 //
 // 名簿との関係 (重複させない):
-//  - 参加確定 (join) は名簿 (member_people) を唯一の実体として扱う。新規なら既存の
+//  - 採用 (join) は名簿 (member_people) を唯一の実体として扱う。新規なら既存の
 //    MemberService.createMember で在籍 (added) の名簿行を作り、既存行 (招待中など) なら結ぶだけ。
 //  - オンボーディングのチェックリストは 参加届アプリの案内項目 (member_onboarding_items) を
 //    テンプレートとして読み、人事側はチェック状態 (member_hr_onboarding_checks) だけを持つ。
@@ -20,6 +21,17 @@ const errVersionConflict = (id: string): DubError =>
   new DubError("HR_VERSION_CONFLICT", `Version conflict for ${id}`, { status: 409 });
 const errBadTransition = (from: string, to: string): DubError =>
   new DubError("HR_INVALID_TRANSITION", `Cannot move applicant from ${from} to ${to}`, { status: 409 });
+const errJoinRequired = (id: string): DubError =>
+  new DubError("HR_JOIN_REQUIRED", `Applicant ${id} is not on the roster yet; use POST /join (採用) first`, { status: 409 });
+
+/** ISO 日時 (面談日)。空/null は未設定。 */
+function isoOrNull(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
+    throw errors.validationFailed([{ field, reason: "invalid" }]);
+  }
+  return new Date(value).toISOString();
+}
 
 function text(value: unknown, field: string, max = MAX_TEXT): string | null {
   if (value === undefined || value === null) return null;
@@ -92,7 +104,14 @@ export class HrService {
 
   async list(_ctx: ReqCtx): Promise<hr.ListApplicantsResponse> {
     const rows = await this.deps.hrRepo.listApplicants(this.deps.orgId);
-    return { applicants: rows.map(toApplicant) };
+    const applicants = await Promise.all(
+      rows.map(async (r) => {
+        const events = await this.deps.hrRepo.listEvents(r.id);
+        const latest = [...events].reverse().find((e) => e.body);
+        return { ...toApplicant(r), latestNote: latest?.body ?? null };
+      }),
+    );
+    return { applicants };
   }
 
   async get(_ctx: ReqCtx, id: string): Promise<hr.ApplicantDetail> {
@@ -113,7 +132,8 @@ export class HrService {
       desiredTeamId: await this.teamId(body.desiredTeamId),
       source: text(body.source, "source", MAX_NAME),
       motivation: text(body.motivation, "motivation"),
-      stage: "applied",
+      interviewAt: isoOrNull(body.interviewAt, "interviewAt"),
+      stage: "scheduling",
       memberId: null,
       participationId: text(body.participationId, "participationId", 200),
       version: 1,
@@ -123,7 +143,7 @@ export class HrService {
       updatedAt: now,
     };
     await this.deps.hrRepo.createApplicant(row);
-    await this.event(ctx, row.id, "created", { toStage: "applied" });
+    await this.event(ctx, row.id, "created", { toStage: "scheduling" });
     return this.get(ctx, row.id);
   }
 
@@ -140,6 +160,7 @@ export class HrService {
       ...(body.desiredTeamId !== undefined ? { desiredTeamId: await this.teamId(body.desiredTeamId) } : {}),
       ...(body.source !== undefined ? { source: text(body.source, "source", MAX_NAME) } : {}),
       ...(body.motivation !== undefined ? { motivation: text(body.motivation, "motivation") } : {}),
+      ...(body.interviewAt !== undefined ? { interviewAt: isoOrNull(body.interviewAt, "interviewAt") } : {}),
       version: cur.version + 1,
       updatedAt: this.deps.now(),
     };
@@ -148,12 +169,13 @@ export class HrService {
     return toApplicant(next);
   }
 
-  /** 段階移動。joined へは join() だけが進める (名簿への追加を伴うため)。 */
+  /** ステータス変更。寛容 (戻すのも可)。名簿にいない人を採用系にするのは join() 専用。 */
   async moveStage(ctx: ReqCtx, id: string, body: hr.MoveApplicantStageRequest): Promise<hr.ApplicantDetail> {
     const cur = await this.load(id);
     const expected = version(body.expectedVersion);
     if (!hr.isApplicantStage(body.stage)) throw errors.validationFailed([{ field: "stage", reason: "invalid" }]);
-    if (!hr.canTransition(cur.stage, body.stage)) throw errBadTransition(cur.stage, body.stage);
+    if (hr.requiresJoin(body.stage, cur.memberId !== null)) throw errJoinRequired(id);
+    if (!hr.canTransition(cur.stage, body.stage, cur.memberId !== null)) throw errBadTransition(cur.stage, body.stage);
     const next: ApplicantRow = { ...cur, stage: body.stage, version: cur.version + 1, updatedAt: this.deps.now() };
     if (!(await this.deps.hrRepo.updateApplicant(next, expected))) throw errVersionConflict(id);
     await this.event(ctx, id, "stage", { fromStage: cur.stage, toStage: body.stage, body: text(body.note, "note") });
@@ -169,14 +191,15 @@ export class HrService {
   }
 
   /**
-   * 参加確定 (内定 → 参加)。名簿に在籍メンバーとして入れる:
+   * 採用 (→ hired)。名簿に在籍メンバーとして入れる (UI は確認ダイアログの後ろで呼ぶ):
    *  - memberId 指定: 既存の名簿行 (招待中/検討中など) に結ぶ。招待中/検討中なら在籍に上げる。
    *  - 省略: 応募内容から在籍 (added) の名簿行を MemberService.createMember で作る。
    */
   async join(ctx: ReqCtx, id: string, body: hr.JoinApplicantRequest): Promise<hr.JoinApplicantResponse> {
     const cur = await this.load(id);
     const expected = version(body.expectedVersion);
-    if (cur.stage !== "offered") throw errBadTransition(cur.stage, "joined");
+    // 既に名簿に結ばれている人は /stage で採用に戻せばよい (二重追加しない)。
+    if (cur.memberId !== null) throw errBadTransition(cur.stage, "hired");
     if (cur.version !== expected) throw errVersionConflict(id);
 
     let memberId: string;
@@ -204,9 +227,9 @@ export class HrService {
       memberId = created.id;
     }
 
-    const next: ApplicantRow = { ...cur, stage: "joined", memberId, version: cur.version + 1, updatedAt: this.deps.now() };
+    const next: ApplicantRow = { ...cur, stage: "hired", memberId, version: cur.version + 1, updatedAt: this.deps.now() };
     if (!(await this.deps.hrRepo.updateApplicant(next, expected))) throw errVersionConflict(id);
-    await this.event(ctx, id, "joined", { fromStage: cur.stage, toStage: "joined", body: linkTo ? "既存の名簿に紐付け" : "名簿に新規追加" });
+    await this.event(ctx, id, "joined", { fromStage: cur.stage, toStage: "hired", body: linkTo ? "既存の名簿に紐付け" : "名簿に新規追加" });
     return { applicant: toApplicant(next), memberId };
   }
 
@@ -218,32 +241,22 @@ export class HrService {
     void ctx;
   }
 
-  /** 参加済み応募者ごとのオンボーディング進捗。項目は参加届アプリの案内項目。 */
+  /** 採用済み (採用 / オンボーディング調整 / オンボーディング完了) の人ごとのオンボーディング進捗。 */
   async onboarding(_ctx: ReqCtx): Promise<hr.ListOnboardingProgressResponse> {
     const orgId = this.deps.orgId;
     const [items, applicants] = await Promise.all([
       this.deps.repo.listOnboardingItems(orgId),
       this.deps.hrRepo.listApplicants(orgId),
     ]);
-    const joined = applicants.filter((a) => a.stage === "joined" && a.memberId);
-    const personIds = joined.map((a) => a.memberId as string);
-    const checks = await this.deps.hrRepo.listOnboardingChecks(personIds);
+    const hired = applicants.filter((a) => a.memberId && hr.ROSTER_STAGES.includes(a.stage));
+    const checks = await this.deps.hrRepo.listOnboardingChecks(hired.map((a) => a.memberId as string));
     const itemIds = new Set(items.map((i) => i.id));
     const members: hr.OnboardingProgress[] = [];
-    for (const a of joined) {
+    for (const a of hired) {
       const person = await this.deps.repo.getPerson(a.memberId as string);
       if (!person || person.archivedAt !== null) continue;
       const checked = checks.filter((c) => c.personId === person.id && itemIds.has(c.itemId)).map((c) => c.itemId);
-      members.push({
-        memberId: person.id,
-        name: person.name,
-        applicantId: a.id,
-        joinedAt: a.updatedAt,
-        checkedItemIds: checked,
-        total: items.length,
-        done: checked.length,
-        completed: items.length > 0 && checked.length === items.length,
-      });
+      members.push(progressOf(person.id, person.name, a, checked, items.length));
     }
     return {
       items: items.map((i) => ({ id: i.id, title: i.title, description: i.description, url: i.url })),
@@ -251,6 +264,11 @@ export class HrService {
     };
   }
 
+  /**
+   * チェックのオン/オフ。チェック後の状況でステータスを自動で進める/戻す:
+   *   1 つ以上チェック & 採用 → オンボーディング調整 / 全部チェック → オンボーディング完了 /
+   *   完了から外れた → オンボーディング調整。
+   */
   async setOnboardingCheck(
     ctx: ReqCtx,
     personId: string,
@@ -270,20 +288,45 @@ export class HrService {
       { personId, itemId, checkedBy: ctx.userId, checkedAt: this.deps.now() },
       body.checked,
     );
-    const progress = (await this.onboarding(ctx)).members.find((m) => m.memberId === personId);
-    if (progress) return progress;
-    // 人事経由でない名簿行にもチェックは付けられる (進捗一覧には出ない)。
     const items = await this.deps.repo.listOnboardingItems(this.deps.orgId);
-    const checked = (await this.deps.hrRepo.listOnboardingChecks([personId])).map((c) => c.itemId);
-    return {
-      memberId: personId,
-      name: person.name,
-      applicantId: null,
-      joinedAt: null,
-      checkedItemIds: checked,
-      total: items.length,
-      done: checked.length,
-      completed: items.length > 0 && checked.length === items.length,
-    };
+    const itemIds = new Set(items.map((i) => i.id));
+    const checked = (await this.deps.hrRepo.listOnboardingChecks([personId]))
+      .map((c) => c.itemId)
+      .filter((x) => itemIds.has(x));
+    const applicants = await this.deps.hrRepo.listApplicants(this.deps.orgId);
+    let a = applicants.find((x) => x.memberId === personId && hr.ROSTER_STAGES.includes(x.stage)) ?? null;
+    if (a) {
+      const all = items.length > 0 && checked.length === items.length;
+      const target: hr.ApplicantStage | null = all
+        ? a.stage !== "onboarded" ? "onboarded" : null
+        : a.stage === "onboarded" || (a.stage === "hired" && checked.length > 0) ? "onboarding" : null;
+      if (target) {
+        const next: ApplicantRow = { ...a, stage: target, version: a.version + 1, updatedAt: this.deps.now() };
+        if (!(await this.deps.hrRepo.updateApplicant(next, a.version))) throw errVersionConflict(a.id);
+        await this.event(ctx, a.id, "stage", { fromStage: a.stage, toStage: target, body: "オンボーディングのチェックで自動更新" });
+        a = next;
+      }
+    }
+    return progressOf(personId, person.name, a, checked, items.length);
   }
+}
+
+function progressOf(
+  memberId: string,
+  name: string,
+  a: ApplicantRow | null,
+  checked: string[],
+  total: number,
+): hr.OnboardingProgress {
+  return {
+    memberId,
+    name,
+    applicantId: a?.id ?? null,
+    stage: a?.stage ?? null,
+    joinedAt: a?.updatedAt ?? null,
+    checkedItemIds: checked,
+    total,
+    done: checked.length,
+    completed: total > 0 && checked.length === total,
+  };
 }
