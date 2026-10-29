@@ -36,4 +36,8 @@ LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
 # sk_live_ は STRIPE_ALLOW_LIVE = "1" を足すまで拒否される（決済準備中扱い）。本物の決済開始時だけ足す。
 #   npx wrangler secret put STRIPE_WEBHOOK_SECRET   (whsec_... 公開 LP の /tickets/stripe-webhook 用)
 # migration: npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0003_tickets.sql
+#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0005_ticket_payment_method.sql
+# PayPay: 決済手段は Stripe ダッシュボード管理（コードは payment_method_types を送らない）。
+#   ダッシュボードで PayPay を有効化し審査が通ったら、LP / LP管理 の表記を出すために:
+# LP_PAYPAY_ENABLED = "1"
 # LP_DAILY_CHECKOUT_CAP = "300"   # 1 日 (JST) の checkout 作成上限（既定 300）

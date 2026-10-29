@@ -160,12 +160,17 @@ export interface LpTicketTypeStats {
 export interface LpTicketTypeSummary extends LpTicketType {
   stats: LpTicketTypeStats;
 }
+/** Methods we advertise. Orders store Stripe's raw PaymentMethod.type (may be others, e.g. "link"). */
+export type LpTicketPaymentMethod = "card" | "paypay";
+
 export interface LpTicketsState {
   site: string;
   enabled: boolean;
   /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える（enabled の間だけ効く）。 */
   ctaEnabled: boolean;
   paymentReady: boolean;
+  /** Payment methods the LP advertises (Dashboard-managed on Stripe). PayPay only with LP_PAYPAY_ENABLED=1. */
+  paymentMethods: LpTicketPaymentMethod[];
   publicUrl: string;
   fields: LpTicketField[];
   types: LpTicketTypeSummary[];
@@ -199,6 +204,8 @@ export interface LpTicketOrder {
   answers: LpTicketAnswer[];
   createdAt: string;
   paidAt: string | null;
+  /** Stripe PaymentMethod.type used ("card" | "paypay" | ...). null = free / unknown / not yet paid. */
+  paymentMethod: string | null;
 }
 export interface LpTicketOrdersPage {
   items: LpTicketOrder[];
@@ -267,6 +274,7 @@ export interface LpTicketRepo {
   /** WHERE status='pending'. true = this call made the transition. */
   markOrderPaid(id: string, paidAt: string, sessionId: string | null): Promise<boolean>;
   markOrderExpired(id: string): Promise<boolean>;
+  setOrderPaymentMethod(id: string, method: string): Promise<void>;
   /** Newest first, keyset by (created_at, id). */
   listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
 }
@@ -391,6 +399,8 @@ export interface AppDeps {
   stripe: StripeClient | null;
   /** STRIPE_WEBHOOK_SECRET。null なら webhook は常に 400。 */
   stripeWebhookSecret: string | null;
+  /** LP_PAYPAY_ENABLED="1": PayPay is on in the Stripe Dashboard, so the LP / LP管理 advertise it. */
+  paypayEnabled: boolean;
   newProposalId: () => string;
   /** 1 日 (JST) に受け付ける登壇応募の上限。公開フォームからの書き込み濫用の天井。 */
   dailyProposalCap: number;
