@@ -272,3 +272,19 @@ export function replyAllRecipients(msg: MailMsg, own: ReadonlySet<string>): { to
   const cc = dedupPeople(msg.cc ?? [], new Set([...own, ...to.map((p) => normEmail(p.email))]));
   return { to, cc };
 }
+
+/** Address-book candidates for recipient fields: everyone the user has corresponded with
+ *  (From/To/Cc across loaded threads), excluding self, deduped by email. */
+export function addressCandidates(threads: MailThreadModel[], meEmail: string): Array<{ email: string; name?: string }> {
+  const byEmail = new Map<string, { email: string; name?: string }>();
+  for (const t of threads) {
+    for (const m of t.messages) {
+      for (const p of [m.from, ...m.to, ...(m.cc ?? [])]) {
+        if (p.email && p.email !== meEmail && !byEmail.has(p.email)) {
+          byEmail.set(p.email, p.name ? { email: p.email, name: p.name } : { email: p.email });
+        }
+      }
+    }
+  }
+  return [...byEmail.values()];
+}
