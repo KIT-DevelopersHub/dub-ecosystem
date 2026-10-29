@@ -78,6 +78,14 @@ MAIL_ARCHIVE_CC = "archive@developershub.jp"
 MAIL_SEND_MAX_ATTEMPTS = "3"
 MAIL_SEND_TIMEOUT_MS = "15000"
 MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
+# 外形監視（canary）: qa-a / qa-b の受け口は Email Routing で dub-mail-gateway 宛に作成済み（2026-10-30）。
+# Resend 無料枠（100通/日）を圧迫しないよう 60 分おき（24通/日）。
+MAIL_CANARY_ENABLED = "true"
+MAIL_CANARY_TO = "qa-a@developershub.jp"
+MAIL_CANARY_CC = "qa-b@developershub.jp"
+MAIL_CANARY_EXPECT_CC = "true"
+MAIL_CANARY_INTERVAL_MIN = "60"
+MAIL_CANARY_DEADLINE_MIN = "10"
 # Email Routing admin (address issuance). The token is a Workers Secret set out-of-band
 # (wrangler secret put CF_EMAIL_ROUTING_TOKEN); the ids/zone/worker below are non-secret.
 # CF_EMAIL_ROUTING_ZONE_ID / CF_EMAIL_ROUTING_ACCOUNT_ID are provisioned on the worker
