@@ -90,7 +90,7 @@ describe("POST /api/v1/admin/users/:id/account-mail", () => {
       ok: true,
       to: "taro.yamada@gmail.com",
       cc: "taro@developershub.jp",
-      appUrl: "https://app.developershub.jp",
+      appUrl: "https://dub-fe2-app-shell.developershub-site.workers.dev",
       passwordSource: "existing",
       messageId: "msg_1",
     });
