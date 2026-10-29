@@ -50,6 +50,8 @@ export interface MailMsg {
   from: MailPerson;
   to: MailPerson[];
   cc?: MailPerson[];
+  /** Bcc recipients — only on our own sent messages (the gateway returns them to the sender only). */
+  bcc?: MailPerson[];
   date: string; // ISO
   body: string; // plain text (pre-wrap)
   read: boolean;

@@ -109,6 +109,7 @@ function SentDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
             </Stack>
             <small>宛先: {m.to.map(addressLabel).join(", ") || "(宛先なし)"}</small>
             {m.cc && m.cc.length > 0 ? <small>Cc: {m.cc.map(addressLabel).join(", ")}</small> : null}
+            {m.bcc && m.bcc.length > 0 ? <small data-testid="fe2-mail-sent-bcc">Bcc: {m.bcc.map(addressLabel).join(", ")}</small> : null}
             <small>{formatSent(m.sentAt)}</small>
             <Divider />
             <SentBody message={m} />

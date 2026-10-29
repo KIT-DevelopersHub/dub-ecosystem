@@ -30,9 +30,6 @@ import { MailIcon } from "./icons.tsx";
 import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { deliver } from "./sendMail.ts";
 
-// TODO(SendMailRequest.bcc): wire compose.bcc once @dub/types SendMailRequest has `bcc`.
-const BCC_SUPPORTED = false;
-
 /** Format a Date as a `datetime-local` input value (YYYY-MM-DDTHH:mm) in LOCAL time —
  *  the picker shows and returns local wall-clock; we convert to an absolute ISO on submit. */
 function toDatetimeLocal(d: Date): string {
@@ -144,6 +141,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const send = (): void => {
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
+    const bcc = parseRecipients(compose.bcc).recipients;
     if (to.length === 0) return;
     // Don't drop a file that is still being read: wait for the read to finish (Gmail keeps
     // Send disabled until the upload settles). The button is disabled while hasPending.
@@ -151,9 +149,10 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     draft.clear(); // restored from the PendingSend snapshot if the send fails
     // Optimistic: show it in Sent immediately; deliver() drops it again on failure.
     const threadId = uid("thread");
-    dispatch({ type: "SEND", to, cc, subject: compose.subject, body: compose.body, threadId });
+    dispatch({ type: "SEND", to, cc, bcc, subject: compose.subject, body: compose.body, threadId });
     const req: mail.SendMailRequest = { to, subject: compose.subject || "(件名なし)", textBody: compose.body };
     if (cc.length > 0) req.cc = cc;
+    if (bcc.length > 0) req.bcc = bcc;
     // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/References.
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
     const inputs = att.readyInputs();
@@ -172,6 +171,8 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     const when = new Date(scheduleAt);
     if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) { setScheduleErr("未来の日時を選んでください"); return; }
     if (att.items.length > 0) { setScheduleErr("予約送信では添付ファイルは使えません"); return; }
+    // The gateway rejects bcc on a scheduled send; never silently drop recipients.
+    if (parseRecipients(compose.bcc).recipients.length > 0) { setScheduleErr("予約送信では Bcc は使えません"); return; }
     const req: mail.ScheduleMailRequest = {
       to,
       subject: compose.subject || "(件名なし)",
@@ -290,10 +291,8 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
                 {!compose.showCc ? (
                   <button type="button" onClick={() => patch({ showCc: true })} style={ccBtn}>Cc</button>
                 ) : null}
-                {!BCC_SUPPORTED ? (
-                  <button type="button" disabled data-testid="fe2-mail-compose-bcc-toggle" title="Bcc は近日対応" aria-label="Bcc（近日対応）" style={{ ...ccBtn, cursor: "not-allowed", opacity: 0.5 }}>Bcc</button>
-                ) : !compose.showBcc ? (
-                  <button type="button" onClick={() => patch({ showBcc: true })} style={ccBtn}>Bcc</button>
+                {!compose.showBcc ? (
+                  <button type="button" data-testid="fe2-mail-compose-bcc-toggle" onClick={() => patch({ showBcc: true })} style={ccBtn}>Bcc</button>
                 ) : null}
               </span>
             }
@@ -301,7 +300,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
           {compose.showCc ? (
             <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-cc" />
           ) : null}
-          {BCC_SUPPORTED && compose.showBcc ? (
+          {compose.showBcc ? (
             <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-bcc" />
           ) : null}
           <input
