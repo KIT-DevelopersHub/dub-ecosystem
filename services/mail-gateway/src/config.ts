@@ -22,6 +22,8 @@ export const MAX_RECIPIENTS = 100;
 // Paging (common.CursorQuery: default 50 / max 200).
 export const DEFAULT_QUERY_LIMIT = 50;
 export const MAX_QUERY_LIMIT = 200;
+/** Max length (chars) of the free-text `q` search on GET /messages and GET /sent. */
+export const MAX_SEARCH_QUERY = 200;
 
 // Inbound raw read cap — we only need the snippet, never persist the body.
 export const INBOUND_RAW_READ_BYTES = 64 * 1024;

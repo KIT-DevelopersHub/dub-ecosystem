@@ -830,18 +830,47 @@ function createMailStore() {
     } catch {
       n = 0;
     }
-    return Array.from({ length: n }, (_, i) => ({
-      id: `msg_bulk_${i + 1}`,
-      messageId: `<bulk-${i + 1}@demo>`,
-      threadId: `thr_bulk_${i + 1}`,
-      from: { email: "news@example.com", name: "お知らせ配信" },
-      to: [{ email: "demo@developershub.jp" }],
-      subject: `過去のお知らせ #${i + 1}`,
-      snippet: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
-      receivedAt: daysAgoIso(10 + i),
-      read: true,
-      textBody: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
-    }));
+    return Array.from({ length: n }, (_, i) =>
+      // The OLDEST bulk mail (past page 1) carries a keyword only in its body, so server-side
+      // search (?q=) can be tried in the demo: e.g. 「全力エージェンシー」 or 「ZR-2026-0042」.
+      i === n - 1 && n > 50
+        ? {
+            id: `msg_bulk_${i + 1}`,
+            messageId: `<bulk-${i + 1}@demo>`,
+            threadId: `thr_bulk_${i + 1}`,
+            from: { email: "info@zenryoku-agency.example", name: "全力エージェンシー" },
+            to: [{ email: "demo@developershub.jp" }],
+            subject: "お見積りのご案内",
+            snippet: "いつもお世話になっております。先日ご相談いただいた件について",
+            receivedAt: daysAgoIso(10 + i),
+            read: true,
+            textBody: `いつもお世話になっております。先日ご相談いただいた件について${"、詳細をご案内いたします".repeat(10)}。\n見積番号 ZR-2026-0042 をご確認ください。`,
+          }
+        : {
+            id: `msg_bulk_${i + 1}`,
+            messageId: `<bulk-${i + 1}@demo>`,
+            threadId: `thr_bulk_${i + 1}`,
+            from: { email: "news@example.com", name: "お知らせ配信" },
+            to: [{ email: "demo@developershub.jp" }],
+            subject: `過去のお知らせ #${i + 1}`,
+            snippet: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
+            receivedAt: daysAgoIso(10 + i),
+            read: true,
+            textBody: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
+          },
+    );
+  }
+  // Gateway parity for ?q= (server-side search): case-insensitive substring over subject /
+  // snippet / body / From / To / Cc (Sent: no From, never Bcc), applied before paging.
+  function searchBy<T extends mail.MailMessageDetail | mail.MailSentDetail>(items: T[], url: URL): T[] {
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    if (!q) return items;
+    const hit = (v: string | undefined) => (v ?? "").toLowerCase().includes(q);
+    const addr = (a: mail.MailAddress | undefined) => !!a && (hit(a.name) || hit(a.email));
+    return items.filter((m) => {
+      const from = "receivedAt" in m ? m.from : undefined;
+      return hit(m.subject) || hit(m.snippet) || hit(m.textBody) || addr(from) || m.to.some(addr) || (m.cc ?? []).some(addr);
+    });
   }
   // Gateway parity: honour ?limit/&cursor (id cursor, newest first as stored) when a limit
   // is given; without one the whole list is returned as before.
@@ -964,7 +993,7 @@ function createMailStore() {
     // received: list / detail / mark-read (read state persists in-session). Scoped to the
     // account, or every account under oversight (mail:read_all).
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
-      const items: mail.MailMessageListItem[] = readInbox.map(({ textBody, htmlBody, ...li }) => {
+      const items: mail.MailMessageListItem[] = searchBy(readInbox, url).map(({ textBody, htmlBody, ...li }) => {
         void textBody;
         void htmlBody;
         return li;
@@ -1034,7 +1063,7 @@ function createMailStore() {
       return json(res);
     }
     if (method === "GET" && pathname === "/api/v1/mail/sent") {
-      const items: mail.MailSentListItem[] = readSent.map(({ textBody, htmlBody, ...listItem }) => {
+      const items: mail.MailSentListItem[] = searchBy(readSent, url).map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
         return hideArchiveCc(listItem);

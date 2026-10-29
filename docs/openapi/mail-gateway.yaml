@@ -121,6 +121,16 @@ paths:
           in: query
           schema:
             type: string
+        - name: q
+          in: query
+          description: >-
+            Free-text search (case-insensitive for ASCII, substring) over subject, snippet,
+            body, From, To and Cc. Trimmed; blank means no search; max 200 chars (400
+            otherwise). Only narrows the caller's account scope. GET /sent accepts the same
+            parameter (subject, snippet, body, To, Cc).
+          schema:
+            type: string
+            maxLength: 200
       responses:
         '200':
           description: Page of messages

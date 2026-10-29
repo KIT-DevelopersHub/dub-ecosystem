@@ -262,7 +262,13 @@ export function createApp() {
   // detail. Only delivered (status='sent') rows are listed; pending/failed never show.
   ext.get("/sent", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
-    const page = await listSent(dbOf(c), { ownerUserId: await scopeOf(c), viewer: ownerOf(c), limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) });
+    const page = await listSent(dbOf(c), {
+      ownerUserId: await scopeOf(c),
+      viewer: ownerOf(c),
+      limit: q.limit,
+      ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
+      ...(q.q !== undefined ? { q: q.q } : {}),
+    });
     for (const m of page.items) hideArchiveCc(m, archiveOf(c));
     return c.json(page satisfies common.Paginated<mail.MailSentListItem>);
   });

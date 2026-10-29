@@ -10,6 +10,7 @@ import {
   MAX_ATTACHMENTS_TOTAL_BYTES,
   MAX_ATTACHMENT_BYTES,
   MAX_QUERY_LIMIT,
+  MAX_SEARCH_QUERY,
   MAX_RECIPIENTS,
   OUTBOUND_HEADER_ALLOWLIST,
   SUBJECT_MAX,
@@ -272,13 +273,19 @@ export function parseScheduleMailPatch(body: unknown, now: number = Date.now()):
   return out;
 }
 
-/** Validate GET /messages query params (threadId? / cursor? / limit). */
-export function parseListMessagesQuery(q: Record<string, string | undefined>): { threadId?: string; cursor?: string; limit: number } {
+/** Validate GET /messages + GET /sent query params (threadId? / cursor? / limit / q?).
+ *  `q` is a free-text search (trimmed; blank = no search; <= MAX_SEARCH_QUERY chars). */
+export function parseListMessagesQuery(q: Record<string, string | undefined>): { threadId?: string; cursor?: string; limit: number; q?: string } {
   const fe: FieldError[] = [];
-  const out: { threadId?: string; cursor?: string; limit: number } = { limit: DEFAULT_QUERY_LIMIT };
+  const out: { threadId?: string; cursor?: string; limit: number; q?: string } = { limit: DEFAULT_QUERY_LIMIT };
 
   if (q.threadId !== undefined && q.threadId !== "") out.threadId = q.threadId;
   if (q.cursor !== undefined && q.cursor !== "") out.cursor = q.cursor;
+  if (q.q !== undefined) {
+    const needle = q.q.trim();
+    if (needle.length > MAX_SEARCH_QUERY) fe.push({ field: "q", reason: "too_large", message: `<= ${MAX_SEARCH_QUERY} chars` });
+    else if (needle !== "") out.q = needle;
+  }
 
   if (q.limit !== undefined && q.limit !== "") {
     const n = Number(q.limit);
