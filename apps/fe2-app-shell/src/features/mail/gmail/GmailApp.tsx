@@ -14,6 +14,8 @@ import { MailIcon } from "./icons.tsx";
 import { SHARED_FOLDERS, hasSharedMail, inFolder, matchesQuery, threadUnread } from "./mailModel.ts";
 import { MailStoreProvider, useMailStore } from "./useMailStore.tsx";
 import { useMailSync } from "./useMailSync.tsx";
+import { deliver } from "./sendMail.ts";
+import { useMailApi } from "../MailProvider.tsx";
 
 /** P1-2 follow-up: floating compose windows are pure client state (useMailStore starts
  *  with composes: [] on every mount/reload) — a reload while typing loses the OPEN
@@ -159,6 +161,70 @@ function UndoToast(): JSX.Element | null {
   );
 }
 
+const SEND_LABELS = {
+  send: { sending: "送信中…", sent: "送信しました", failed: "送信できませんでした" },
+  schedule: { sending: "予約中…", sent: "送信を予約しました", failed: "予約できませんでした" },
+} as const;
+
+/** Gmail-style send status bar. A failure stays until retried/closed; the compose is
+ *  already restored by SEND_FAILED so the text is never lost. */
+function SendNoticeBar(): JSX.Element | null {
+  const { state, dispatch } = useMailStore();
+  const mailApi = useMailApi();
+  const notice = state.sendNotice;
+  useEffect(() => {
+    if (notice?.status !== "sent") return;
+    const t = setTimeout(() => dispatch({ type: "DISMISS_SEND_NOTICE" }), 5000);
+    return () => clearTimeout(t);
+  }, [notice, dispatch]);
+  if (!notice) return null;
+  const failed = notice.status === "failed";
+  return (
+    <div
+      data-testid="fe2-mail-send-notice"
+      data-status={notice.status}
+      role={failed ? "alert" : "status"}
+      style={{
+        position: "fixed",
+        left: 24,
+        bottom: state.undo ? 80 : 24,
+        display: "flex",
+        alignItems: "center",
+        gap: 16,
+        padding: "12px 16px",
+        borderRadius: "var(--dub-radius-md)",
+        background: "var(--dub-color-text-primary)",
+        color: "var(--dub-color-surface-base)",
+        boxShadow: "var(--dub-shadow-lg)",
+        zIndex: 1400,
+        fontSize: "var(--dub-font-size-sm)",
+      }}
+    >
+      <span>{SEND_LABELS[notice.pending.kind][notice.status]}</span>
+      {failed ? (
+        <>
+          <button
+            type="button"
+            data-testid="fe2-mail-send-retry"
+            onClick={() => void deliver(mailApi, dispatch, notice.pending)}
+            style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-info-300)", fontWeight: 700 }}
+          >
+            再試行
+          </button>
+          <button
+            type="button"
+            aria-label="閉じる"
+            onClick={() => dispatch({ type: "DISMISS_SEND_NOTICE" })}
+            style={{ all: "unset", cursor: "pointer", display: "inline-flex" }}
+          >
+            <MailIcon name="x" size={16} />
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function Shortcuts(): null {
   const { state, dispatch } = useMailStore();
   useEffect(() => {
@@ -239,6 +305,7 @@ function GmailBody(): JSX.Element {
         <ComposeWindow key={c.id} compose={c} offset={i} />
       ))}
       <UndoToast />
+      <SendNoticeBar />
       <Shortcuts />
     </main>
   );

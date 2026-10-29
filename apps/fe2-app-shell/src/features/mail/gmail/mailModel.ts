@@ -246,3 +246,27 @@ export function partitionNudged(
   for (const t of threads) (replyNudge(t, now, pendingReplies) ? nudged : rest).push(t);
   return { nudged, rest };
 }
+
+const normEmail = (email: string): string => email.trim().toLowerCase();
+
+/** Case-insensitive dedupe by email; first occurrence wins. Drops empty addresses. */
+export function dedupPeople(ps: readonly MailPerson[], skip: ReadonlySet<string> = new Set()): MailPerson[] {
+  const seen = new Set(skip);
+  const out: MailPerson[] = [];
+  for (const p of ps) {
+    const key = normEmail(p.email);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  return out;
+}
+
+/** Reply-all (Gmail/RFC 5322 §3.6.3): To = reply target (Reply-To else From) + original To,
+ *  Cc = original Cc. `own` (lowercased) is dropped from both; an address in To never repeats in Cc. */
+export function replyAllRecipients(msg: MailMsg, own: ReadonlySet<string>): { to: MailPerson[]; cc: MailPerson[] } {
+  const target = msg.headerMeta?.replyTo?.length ? msg.headerMeta.replyTo : [msg.from];
+  const to = dedupPeople([...target, ...msg.to], own);
+  const cc = dedupPeople(msg.cc ?? [], new Set([...own, ...to.map((p) => normEmail(p.email))]));
+  return { to, cc };
+}

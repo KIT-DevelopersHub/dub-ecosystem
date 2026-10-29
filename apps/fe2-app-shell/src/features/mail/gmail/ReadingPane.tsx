@@ -13,6 +13,7 @@ import {
   fullDate,
   initial,
   pendingReplyIds,
+  replyAllRecipients,
   replyNudge,
   sharedRecipientLabel,
   snippet,
@@ -343,24 +344,22 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const replyTo = [...thread.messages].reverse().find((m) => !m.outbound) ?? last;
   // A Reply-To header redirects replies (RFC 5322 §3.6.2), as Gmail does.
   const sender = replyTo.headerMeta?.replyTo?.length ? replyTo.headerMeta.replyTo : [replyTo.from];
-  const dedupPeople = (ps: MailPerson[]): MailPerson[] => {
-    const m = new Map<string, MailPerson>();
-    for (const p of ps) if (p.email && !m.has(p.email)) m.set(p.email, p);
-    return [...m.values()];
-  };
   const replyRecipients = replyTo.outbound ? replyTo.to.filter(notUs) : sender;
-  const allRecipients = dedupPeople([...sender, ...replyTo.to, ...(replyTo.cc ?? [])].filter(notUs));
+  const all = replyAllRecipients(replyTo, own);
 
   const openCompose = (mode: "reply" | "replyAll" | "forward"): void => {
-    const to = mode === "forward" ? [] : mode === "replyAll" ? allRecipients : replyRecipients;
+    const to = mode === "forward" ? [] : mode === "replyAll" ? all.to : replyRecipients;
+    const cc = mode === "replyAll" ? all.cc : [];
+    const fmt = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
     dispatch({
       type: "OPEN_COMPOSE",
       compose: {
         mode,
-        to: to.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", "),
+        to: fmt(to),
+        cc: fmt(cc),
         subject: `${mode === "forward" ? "Fwd" : "Re"}: ${thread.subject.replace(/^(Re|Fwd):\s*/i, "")}`,
         body: quote(replyTo),
-        showCc: mode === "replyAll",
+        showCc: cc.length > 0,
         // Reply/replyAll thread against the correspondent's Message-Id; a forward is new.
         ...(mode !== "forward" && replyTo.messageId ? { inReplyTo: replyTo.messageId } : {}),
       },
