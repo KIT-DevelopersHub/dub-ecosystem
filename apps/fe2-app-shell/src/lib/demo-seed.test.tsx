@@ -641,3 +641,13 @@ describe("demo mail list paging (?demo_mail_bulk)", () => {
     }
   });
 });
+
+describe("demo 運営チーム (参加届 / オンボーディングのチーム選択)", () => {
+  it("includes ネットワークチーム in /members/teams and the public onboarding team picker", async () => {
+    const a = api();
+    const { teams } = await a.request<{ teams: { name: string; color: string | null }[] }>({ method: "GET", path: "/api/v1/members/teams" });
+    expect(teams.find((t) => t.name === "ネットワークチーム")?.color).toBe("#0891b2");
+    const guide = await a.request<{ teams: { name: string }[] }>({ method: "GET", path: "/api/v1/public/onboarding" });
+    expect(guide.teams.map((t) => t.name)).toContain("ネットワークチーム");
+  });
+});
