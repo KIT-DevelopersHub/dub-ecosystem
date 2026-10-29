@@ -11,8 +11,8 @@ import { ScheduledList } from "./ScheduledList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
-import { SHARED_FOLDERS, hasSharedMail, inFolder, matchesQuery, threadUnread } from "./mailModel.ts";
-import { MailStoreProvider, useMailStore } from "./useMailStore.tsx";
+import { SHARED_FOLDERS, hasSharedMail, inFolder, threadUnread } from "./mailModel.ts";
+import { MailStoreProvider, selectVisible, useMailStore } from "./useMailStore.tsx";
 import { useMailSync } from "./useMailSync.tsx";
 import { deliver } from "./sendMail.ts";
 import { useMailApi } from "../MailProvider.tsx";
@@ -238,9 +238,7 @@ function Shortcuts(): null {
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const visible = state.threads.filter(
-        (t) => (state.labelFilter ? t.labels.includes(state.labelFilter) && t.folder !== "trash" : inFolder(t, state.folder)) && matchesQuery(t, state.search),
-      );
+      const visible = selectVisible(state);
       const open = state.openThreadId;
 
       if (e.key === "c") dispatch({ type: "OPEN_COMPOSE", compose: {} });
@@ -255,7 +253,7 @@ function Shortcuts(): null {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.threads, state.folder, state.labelFilter, state.search, state.openThreadId, dispatch]);
+  }, [state, dispatch]);
   return null;
 }
 
@@ -293,7 +291,7 @@ function GmailBody(): JSX.Element {
         ) : (
           <MailSidebar />
         )}
-        {state.folder === "scheduled" && !state.labelFilter ? (
+        {state.folder === "scheduled" && !state.labelFilter && state.search.trim() === "" ? (
           <ScheduledList />
         ) : openThread ? (
           <ReadingPane thread={openThread} labels={state.labels} />

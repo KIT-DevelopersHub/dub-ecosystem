@@ -625,4 +625,19 @@ describe("demo mail list paging (?demo_mail_bulk)", () => {
       globalThis.history.replaceState(null, "", "/");
     }
   });
+  it("filters by ?q= (server-search parity) across body text, beyond page 1", async () => {
+    globalThis.history.replaceState(null, "", "/?demo_mail_bulk=60");
+    try {
+      const a = api();
+      type Page = { items: { id: string; subject: string }[]; nextCursor: string | null };
+      const byBody = await a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { limit: 50, q: "ZR-2026-0042" } });
+      expect(byBody.items.map((m) => m.subject)).toEqual(["お見積りのご案内"]);
+      const byName = await a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { limit: 50, q: "全力エージェンシー" } });
+      expect(byName.items).toHaveLength(1);
+      const none = await a.request<Page>({ method: "GET", path: "/api/v1/mail/sent", query: { limit: 50, q: "全力エージェンシー" } });
+      expect(none.items).toHaveLength(0);
+    } finally {
+      globalThis.history.replaceState(null, "", "/");
+    }
+  });
 });

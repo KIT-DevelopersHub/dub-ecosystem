@@ -25,11 +25,14 @@ export interface InboxQuery {
   limit?: number;
   cursor?: string;
   threadId?: string;
+  /** Server-side free-text search (mail.ListMailMessagesQuery.q). */
+  q?: string;
 }
 
 export interface SentQuery {
   limit?: number;
   cursor?: string;
+  q?: string;
 }
 
 export interface ScheduledQuery {
@@ -81,6 +84,7 @@ export function createMailApi(api: ApiClient): MailApi {
       if (query?.limit !== undefined) q.limit = query.limit;
       if (query?.cursor !== undefined) q.cursor = query.cursor;
       if (query?.threadId !== undefined) q.threadId = query.threadId;
+      if (query?.q !== undefined) q.q = query.q;
       const hasQuery = Object.keys(q).length > 0;
       return api.request<Paginated<MailMessageListItem>>({ method: "GET", path: `${MAIL}/messages`, ...(hasQuery ? { query: q } : {}) });
     },
@@ -91,6 +95,7 @@ export function createMailApi(api: ApiClient): MailApi {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query?.limit !== undefined) q.limit = query.limit;
       if (query?.cursor !== undefined) q.cursor = query.cursor;
+      if (query?.q !== undefined) q.q = query.q;
       const hasQuery = Object.keys(q).length > 0;
       return api.request<Paginated<MailSentListItem>>({ method: "GET", path: `${MAIL}/sent`, ...(hasQuery ? { query: q } : {}) });
     },

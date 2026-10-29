@@ -291,11 +291,40 @@ function inboundSelect(viewer: string | undefined): { sql: string; binds: string
   };
 }
 
+/** Escape LIKE wildcards so a user's `%` / `_` / `\\` match literally (paired with ESCAPE '\\'). */
+export function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/** Free-text search predicate (Gmail-style substring match). SQLite LIKE is ASCII
+ *  case-insensitive and matches UTF-8 substrings, so Japanese works as-is. Address
+ *  columns are matched per element (name + email) via json_each, never on the raw JSON,
+ *  so a needle like "email" does not hit every row's keys; malformed JSON reads as empty.
+ *  ANDed onto the caller's scope clause — it can only narrow, never widen, visibility. */
+function searchClause(q: string, text: string[], single: string[], lists: string[]): { sql: string; binds: string[] } {
+  const pat = `%${escapeLike(q)}%`;
+  const like = (expr: string) => `${expr} LIKE ? ESCAPE '\\'`;
+  const safe = (col: string, empty: string) => `CASE WHEN json_valid(${col}) THEN ${col} ELSE '${empty}' END`;
+  const parts: string[] = [];
+  for (const c of text) parts.push(like(`COALESCE(${c}, '')`));
+  for (const c of single) {
+    parts.push(like(`COALESCE(json_extract(${safe(c, "{}")}, '$.name'), '')`));
+    parts.push(like(`COALESCE(json_extract(${safe(c, "{}")}, '$.email'), '')`));
+  }
+  for (const c of lists) {
+    parts.push(
+      `EXISTS (SELECT 1 FROM json_each(${safe(c, "[]")}) je WHERE ${like("COALESCE(json_extract(je.value, '$.name'), '')")} OR ${like("COALESCE(json_extract(je.value, '$.email'), '')")})`,
+    );
+  }
+  const binds = parts.flatMap((p) => Array<string>((p.match(/LIKE \?/g) ?? []).length).fill(pat));
+  return { sql: `(${parts.join(" OR ")})`, binds };
+}
+
 /** List sent mail (status='sent'), newest first. id-based opaque cursor (like
  *  listInbound); ULID ids sort in creation order so the id cursor tracks created_at. */
 export async function listSent(
   db: DbClient,
-  q: { ownerUserId: MailScope; viewer?: string; cursor?: string; limit: number },
+  q: { ownerUserId: MailScope; viewer?: string; cursor?: string; limit: number; q?: string },
 ): Promise<common.Paginated<mail.MailSentListItem>> {
   // Fail-closed account scope: only the signed-in user's own delivered sends. A NULL
   // owner_user_id (system send / legacy row) never matches `= ?`, so it is invisible.
@@ -305,6 +334,13 @@ export async function listSent(
   if (!isReadAll(q.ownerUserId)) {
     where.push("owner_user_id = ?");
     binds.push(q.ownerUserId);
+  }
+  if (q.q !== undefined) {
+    // Bcc is deliberately NOT searched: it is sender-only, and a read_all viewer must not
+    // learn a hidden recipient by probing.
+    const s = searchClause(q.q, ["subject", "snippet", "text_body"], [], ["to_json", "cc_json"]);
+    where.push(s.sql);
+    binds.push(...s.binds);
   }
   if (q.cursor !== undefined) {
     where.push("id < ?");
@@ -581,7 +617,7 @@ export async function markInboundRead(db: DbClient, id: string, scope: InboundSc
 
 export async function listInbound(
   db: DbClient,
-  q: { ownerUserId: InboundScope; viewer?: string; threadId?: string; cursor?: string; limit: number },
+  q: { ownerUserId: InboundScope; viewer?: string; threadId?: string; cursor?: string; limit: number; q?: string },
 ): Promise<common.Paginated<mail.MailMessageListItem>> {
   // Fail-closed account scope: only messages delivered to the signed-in user (plus role-
   // sharing peers). A NULL owner_user_id (unassigned / legacy row) never matches, so it
@@ -596,6 +632,11 @@ export async function listInbound(
   if (q.threadId !== undefined) {
     where.push("thread_id = ?");
     binds.push(q.threadId);
+  }
+  if (q.q !== undefined) {
+    const s = searchClause(q.q, ["subject", "snippet", "body_text"], ["from_json"], ["to_json", "cc_json"]);
+    where.push(s.sql);
+    binds.push(...s.binds);
   }
   if (q.cursor !== undefined) {
     where.push("id < ?");

@@ -8,9 +8,7 @@ import {
   avatarColor,
   displayName,
   initial,
-  inFolder,
   latest,
-  matchesQuery,
   partitionNudged,
   pendingReplyIds,
   relativeDate,
@@ -23,7 +21,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
-import { PAGE_SIZE, pageSourceOf, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
+import { PAGE_SIZE, pageSourceOf, selectVisible, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
 
 // P25: exit-animation two-phase pattern (mirrors fe1 Toast.tsx's `leaving` + EXIT_MS).
 // Archive/trash marks the row `leaving` (slide-out + collapse plays via inline styles),
@@ -503,17 +501,17 @@ export function ThreadList(): JSX.Element {
     fresh.forEach((id) => leaveTimers.current.set(id, timer));
   }
 
-  const visible = state.threads.filter((t) => {
-    if (t.purged) return false; // 完全に削除: hidden from every folder for this viewer
-    const scope = state.labelFilter
-      ? t.labels.includes(state.labelFilter) && t.folder !== "trash"
-      : inFolder(t, state.folder);
-    return scope && matchesQuery(t, state.search);
-  });
+  // 完全に削除 (purged) threads never show. With a search active this is the client
+  // pre-filter plus the server matches (see selectVisible / useMailSync).
+  const visible = selectVisible(state);
+  const searching = state.search.trim().length > 0;
+  const search = state.searchResults;
+  const searchPending = searching && (search.status === "loading" || search.status === "loadingMore");
+  const canLoadMore = searching && search.status === "done" && (search.next.inbox !== null || search.next.sent !== null);
 
   // Inbox only: unanswered mail is pinned on top so it can't sink under newer arrivals.
   const { nudged, rest } =
-    state.folder === "inbox" && !state.labelFilter
+    state.folder === "inbox" && !state.labelFilter && !searching
       ? partitionNudged(visible, now, pendingReplies)
       : { nudged: [], rest: visible };
   const renderRow = (t: MailThreadModel, pinned = false): JSX.Element => (
@@ -627,12 +625,36 @@ export function ThreadList(): JSX.Element {
             <MailIcon name="refresh" size={18} />
           </button>
         )}
-        <PageNav pager={state.pager[pageSourceOf(state.folder)]} source={pageSourceOf(state.folder)} loading={state.listLoading} />
+        {searching ? null : <PageNav pager={state.pager[pageSourceOf(state.folder)]} source={pageSourceOf(state.folder)} loading={state.listLoading} />}
       </div>
 
-      {state.listLoading ? (
+      {state.listLoading && !searching ? (
         <div data-testid="fe2-mail-list-loading" style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
           <SkeletonList rows={8} avatar />
+        </div>
+      ) : searching && visible.length === 0 && searchPending ? (
+        <div data-testid="fe2-mail-search-loading" aria-busy="true" style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
+          <SkeletonList rows={6} avatar />
+        </div>
+      ) : searching && visible.length === 0 ? (
+        <div
+          data-testid="fe2-mail-search-empty"
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            color: "var(--dub-color-text-muted)",
+            padding: 48,
+          }}
+        >
+          <MailIcon name="search" size={48} style={{ opacity: 0.4 }} />
+          <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>見つかりませんでした</div>
+          <div style={{ fontSize: "var(--dub-font-size-sm)" }}>
+            {search.status === "failed" ? "検索に失敗しました。時間をおいてもう一度お試しください。" : `「${state.search.trim()}」に一致するメールはありません。`}
+          </div>
         </div>
       ) : visible.length === 0 ? (
         <div
@@ -670,6 +692,30 @@ export function ThreadList(): JSX.Element {
             </div>
           ) : null}
           {rest.map((t) => renderRow(t))}
+          {searchPending ? (
+            <div data-testid="fe2-mail-search-loading" aria-busy="true" style={{ padding: "8px 12px" }}>
+              <SkeletonList rows={3} avatar />
+            </div>
+          ) : canLoadMore ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+              <button
+                type="button"
+                data-testid="fe2-mail-search-more"
+                onClick={() => dispatch({ type: "SEARCH_MORE" })}
+                style={{
+                  all: "unset",
+                  cursor: "pointer",
+                  padding: "8px 16px",
+                  borderRadius: "var(--dub-radius-full)",
+                  border: "1px solid var(--dub-color-border-default)",
+                  color: "var(--dub-color-text-secondary)",
+                  fontSize: "var(--dub-font-size-sm)",
+                }}
+              >
+                さらに読み込む
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
     </section>
