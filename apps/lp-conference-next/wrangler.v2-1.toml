@@ -1,0 +1,18 @@
+# lp-conference-next-v2-1 — the old v2.1 preview URL. v2.1's build came from an
+# uncommitted tree (not in versions.json), so its 「無料」 copy cannot be rebuilt/fixed.
+# This Worker replaces it with a permanent redirect (301, path + query kept) to the
+# current public LP:
+#   https://lp-conference-next-v2-1.developershub-site.workers.dev/* -> https://hokuriku-it-conf.com/*
+#
+# Deploy (only with explicit owner approval):
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/DubVault/secrets/cf-token.txt)
+#   npx wrangler deploy --config apps/lp-conference-next/wrangler.v2-1.toml
+# NOTE: the existing Worker has static assets; deploying this script-only config
+# replaces them (intended).
+name = "lp-conference-next-v2-1"
+main = "worker/legacy-redirect-worker.ts"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+[observability]
+enabled = true
