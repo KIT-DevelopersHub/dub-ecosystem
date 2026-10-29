@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 import type { MailApi } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
-import type { MailMsg } from "./mailModel.ts";
+import { dedupeLoopback, type MailMsg } from "./mailModel.ts";
 import { PAGE_SIZE, useMailStore } from "./useMailStore.tsx";
 
 /** What the server last knew per thread. noReplyAt is compared as-is; the POST sends only the
@@ -242,7 +242,7 @@ export function useMailSync(): void {
           const ours = await Promise.all(
             known.filter((m) => m.outbound && !inbound.some((i) => i.id === m.id)).map((m) => withFullSentBody(api, m)),
           );
-          const messages = [...inbound, ...ours].sort((a, b) => a.date.localeCompare(b.date));
+          const messages = dedupeLoopback([...inbound, ...ours].sort((a, b) => a.date.localeCompare(b.date)));
           if (alive) {
             done = true;
             dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages });

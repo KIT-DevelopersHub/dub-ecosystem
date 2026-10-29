@@ -41,8 +41,9 @@ export interface ScheduledQuery {
 }
 
 export interface MailApi {
-  /** Compose + send via the gateway (session-authorized, mail:send). */
-  send(req: SendMailRequest): Promise<SendMailResponse>;
+  /** Compose + send via the gateway (session-authorized, mail:send). `idempotencyKey`
+   *  (x-dub-idempotency-key) collapses a repeated submit of the same send into one mail. */
+  send(req: SendMailRequest, opts?: { idempotencyKey?: string }): Promise<SendMailResponse>;
   /** List received messages with their read flag (mail:read). */
   listInbox(query?: InboxQuery): Promise<Paginated<MailMessageListItem>>;
   /** Fetch one message's full detail — body + read state (mail:read). */
@@ -74,11 +75,23 @@ export interface MailApi {
 }
 
 const MAIL = "/api/v1/mail";
+const IDEMPOTENCY_HEADER = "x-dub-idempotency-key";
+
+/** Fresh idempotency key for one user send (reused by its retries). */
+export function newIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 /** Build the mail api from the shell ApiClient (fed in composition, faked in tests). */
 export function createMailApi(api: ApiClient): MailApi {
   return {
-    send: (req) => api.request<SendMailResponse, SendMailRequest>({ method: "POST", path: `${MAIL}/outbox`, body: req }),
+    send: (req, opts) =>
+      api.request<SendMailResponse, SendMailRequest>({
+        method: "POST",
+        path: `${MAIL}/outbox`,
+        body: req,
+        ...(opts?.idempotencyKey ? { headers: { [IDEMPOTENCY_HEADER]: opts.idempotencyKey } } : {}),
+      }),
     listInbox: (query) => {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query?.limit !== undefined) q.limit = query.limit;

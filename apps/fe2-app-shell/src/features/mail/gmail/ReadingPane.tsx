@@ -15,7 +15,7 @@ import {
   fullDate,
   initial,
   pendingReplyIds,
-  replyAllRecipients,
+  replyPlan,
   replyNudge,
   sharedRecipientLabel,
   snippet,
@@ -38,7 +38,7 @@ import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
 import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
-import { formatBytes, parseRecipients, saveBlob } from "../mailApi.tsx";
+import { formatBytes, newIdempotencyKey, parseRecipients, saveBlob } from "../mailApi.tsx";
 
 function Avatar({ p, size = 36 }: { p: MailPerson; size?: number }): JSX.Element {
   return (
@@ -343,6 +343,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const [replyBcc, setReplyBcc] = useState("");
   const [showCcBcc, setShowCcBcc] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement>(null);
+  const inFlight = useRef<string | null>(null);
   // Inline-reply attachments: same shared hook/tray/preview as the floating compose.
   const att = useComposeAttachments();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -358,19 +359,19 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   }, [reply]);
   const lastIdx = thread.messages.length - 1;
   const own = ownAddresses(thread, state.me);
-  const last = thread.messages[lastIdx]!;
   const nudge = replyNudge(thread, new Date(), pendingReplyIds(state.scheduled));
   const chips = thread.labels.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => Boolean(l));
 
-  // Reply targets the last message that ISN'T ours — the external correspondent — never
-  // our own reply (which is now folded into the conversation). `ourAddresses` are the From
-  // addresses we sent as plus the address mail was delivered to us at, so reply-all drops them.
-  const notUs = (p: MailPerson): boolean => p.email.length > 0 && !own.has(p.email.trim().toLowerCase());
-  const replyTo = [...thread.messages].reverse().find((m) => !m.outbound) ?? last;
-  // A Reply-To header redirects replies (RFC 5322 §3.6.2), as Gmail does.
-  const sender = replyTo.headerMeta?.replyTo?.length ? replyTo.headerMeta.replyTo : [replyTo.from];
-  const replyRecipients = replyTo.outbound ? replyTo.to.filter(notUs) : sender;
-  const all = replyAllRecipients(replyTo, own);
+  // Gmail addressing (replyPlan): answer the last message — its sender (Reply-To if set) when
+  // it was received, its original recipients when WE sent it (incl. a looped-back copy of our
+  // own send). Previously the target was "the last row not flagged outbound", so the received
+  // copy of our own reply (or another account's Sent row seen via oversight) was answered as
+  // if someone else had written it, addressing the reply back to ourselves / the wrong party.
+  const plan = replyPlan(thread.messages, own);
+  const replyTo = plan.target;
+  const replyRecipients = plan.reply;
+  const all = plan.all;
+  const parentId = plan.parentId;
 
   const openCompose = (mode: "reply" | "replyAll" | "forward"): void => {
     const to = mode === "forward" ? [] : mode === "replyAll" ? all.to : replyRecipients;
@@ -386,7 +387,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
         body: quote(replyTo),
         showCc: cc.length > 0,
         // Reply/replyAll thread against the correspondent's Message-Id; a forward is new.
-        ...(mode !== "forward" && replyTo.messageId ? { inReplyTo: replyTo.messageId } : {}),
+        ...(mode !== "forward" && parentId ? { inReplyTo: parentId } : {}),
       },
     });
   };
@@ -404,6 +405,9 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     const body = reply.trim();
     if (body.length === 0 || replyRecipients.length === 0) return;
     if (att.hasPending) return;
+    // Double click / click + shortcut can fire twice before the cleared box re-renders.
+    if (inFlight.current === body) return;
+    inFlight.current = body;
     // Optimistic: append to the open thread immediately. Previously this was ALL that
     // happened — the reply never reached the gateway, so nothing was delivered. Now we
     // also POST it (with In-Reply-To via the parent Message-Id) and re-sync so the sent
@@ -420,12 +424,15 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     };
     if (cc.length > 0) req.cc = cc;
     if (bcc.length > 0) req.bcc = bcc;
-    if (replyTo.messageId) req.inReplyTo = replyTo.messageId;
+    if (parentId) req.inReplyTo = parentId;
     if (inputs.length > 0) req.attachments = inputs;
     void mailApi
-      .send(req)
+      .send(req, { idempotencyKey: newIdempotencyKey() })
       .then(() => dispatch({ type: "REQUEST_SYNC" }))
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (inFlight.current === body) inFlight.current = null;
+      });
   };
 
   // 予約送信 for the inline reply: same picker as the compose window. The reply keeps its
@@ -442,7 +449,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     const req: mail.ScheduleMailRequest = { to: replyRecipients, subject: replySubject, textBody: body, scheduledAt: when.toISOString() };
     if (cc.length > 0) req.cc = cc;
     if (bcc.length > 0) req.bcc = bcc;
-    if (replyTo.messageId) req.inReplyTo = replyTo.messageId;
+    if (parentId) req.inReplyTo = parentId;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
     const fmt = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
@@ -458,16 +465,18 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
       showBcc: bcc.length > 0,
       minimized: false,
       maximized: false,
-      ...(replyTo.messageId ? { inReplyTo: replyTo.messageId } : {}),
+      ...(parentId ? { inReplyTo: parentId } : {}),
     };
     resetInline();
     void deliver(mailApi, dispatch, { kind: "schedule", req, compose });
     return null;
   };
   // Scheduled replies still waiting to go out for THIS thread (any message in it).
-  const threadMessageIds = new Set(thread.messages.map((m) => (m.messageId ?? "").trim().replace(/^<|>$/g, "")).filter(Boolean));
+  // Compared with and without the domain: a reply to our own Sent row carries `<log id>@domain`.
+  const bareRef = (id: string): string => id.trim().replace(/^<|>$/g, "");
+  const threadMessageIds = new Set(thread.messages.flatMap((m) => (m.messageId ? [bareRef(m.messageId), bareRef(m.messageId).split("@")[0]!] : [])).filter(Boolean));
   const scheduledHere = state.scheduled.filter(
-    (s) => s.status === "scheduled" && s.inReplyTo && threadMessageIds.has(s.inReplyTo.trim().replace(/^<|>$/g, "")),
+    (s) => s.status === "scheduled" && s.inReplyTo && (threadMessageIds.has(bareRef(s.inReplyTo)) || threadMessageIds.has(bareRef(s.inReplyTo).split("@")[0]!)),
   );
 
   return (

@@ -368,11 +368,13 @@ describe("GmailApp (hydrates from the gateway)", () => {
     // getThread returns received-only; the folded reply must survive the refresh.
     await waitFor(() => expect(screen.getByText("了解しました。")).toBeInTheDocument());
     // Replying targets the external correspondent (hanako), never our own info@ reply.
+    // Gmail answers the newest message: ours, so it re-addresses its recipients and
+    // threads against our sent Message-Id (`<send-log id>@domain`).
     await userEvent.click(screen.getByTestId("fe2-mail-reply"));
     await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
     const sent = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sent.to).toEqual([{ email: "hanako@example.com", name: "山田 花子" }]);
-    expect(sent.inReplyTo).toBe("<in1@developershub.jp>");
+    expect(sent.inReplyTo).toBe("sent_r@developershub.jp");
   });
 
   it("reply button opens a compose that sends In-Reply-To", async () => {
@@ -633,10 +635,10 @@ describe("GmailApp (hydrates from the gateway)", () => {
       await userEvent.click((await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!);
     };
 
-    it("summarises To + Cc on one line with the delivered-to address as 自分", async () => {
+    it("summarises To, then a labelled Cc, with the delivered-to address as 自分", async () => {
       await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
       const toggle = await screen.findByTestId("fe2-mail-details-toggle");
-      await waitFor(() => expect(toggle).toHaveTextContent("宛先: 自分, 伊藤 由紀, office@example.net"));
+      await waitFor(() => expect(toggle).toHaveTextContent("宛先: 自分 Cc: 伊藤 由紀, office@example.net"));
       expect(screen.queryByTestId("fe2-mail-details")).toBeNull();
     });
 
