@@ -98,7 +98,9 @@
   },
   "mail-gateway": {
     "missingInSpec": [
+      "DELETE /mail/blocks/{}",
       "DELETE /mail/scheduled/{}",
+      "GET /mail/blocks",
       "GET /mail/flags",
       "GET /mail/mailboxes",
       "GET /mail/messages",
@@ -109,6 +111,7 @@
       "GET /mail/sent/{}",
       "GET /mail/threads/{}",
       "PATCH /mail/scheduled/{}",
+      "POST /mail/blocks",
       "POST /mail/flags/{}",
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
