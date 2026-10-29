@@ -27,6 +27,7 @@ export interface Env {
   SVC_IDENTITY: Fetcher; // POST /authz/check (mail:* permissions)
   SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain skips audit
   SVC_MEMBER?: Fetcher; // member-service: userId -> 名簿 Gmail (Gmail safety-net forward); absent => no forward
+  SVC_NOTIFICATION?: Fetcher; // notification POST /notify: in-app admin alert for Resend delivery problems; absent => audit + log only
 
   // --- Gmail safety-net forward (gmail-forward.ts) ---
   // "on" forwards each inbound copy to the envelope recipient's linked 名簿 Gmail. Anything
@@ -53,6 +54,9 @@ export interface Env {
   // Resend / MailChannels (Bearer / X-Api-Key). Secrets, never committed.
   RESEND_API_KEY?: string;
   MAILCHANNELS_API_KEY?: string;
+  // Resend webhook signing secret ("whsec_..."; Svix). Unset => POST /internal/webhooks/resend
+  // answers 503 (fail closed) and config-check reports it. See resend-webhook.ts.
+  RESEND_WEBHOOK_SECRET?: string;
 
   // --- Cloudflare Email Routing admin (address issuance + forwarding rules) ---
   // The proxy behind /mail/admin/email-routing/*. The API token is a Workers Secret
