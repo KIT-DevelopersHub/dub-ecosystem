@@ -50,6 +50,9 @@
 - **Linux（CI が比較する正）**: Actions → **Visual Screens Baselines (seed/update)** → `Run workflow`、`ref` に自分のブランチ名。
   pinned イメージ内で `*-linux.png` を再生成してそのブランチにコミットする（`[skip ci]`）。その後 PR を更新するか
   **Visual Screens** を再実行すると比較が有効になる。
+- `workflow_dispatch` は **main にあるワークフローしか起動できない**。main 未導入の段階（このワークフローを足した PR 自体など）は、
+  比較ワークフローの初回実行が出す artifact `visual-screens-seed`（pinned イメージ内で生成済み）を
+  `apps/fe2-app-shell/visual/__screenshots__/` に展開してコミットすれば同じ結果になる（初期ベースラインはこの方法で seed 済み）。
 - Docker があればローカルでも同じことができる:
 
   ```bash
