@@ -8,7 +8,7 @@
 // mutations stay optimistic and in-memory (server persistence is a later slice).
 import { createContext, useContext, useMemo, useReducer, type Dispatch, type ReactNode } from "react";
 import type { mail } from "@dub/types";
-import { SELF, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
+import { SELF, inFolder, matchesQuery, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 export interface ComposeState {
   id: string;
@@ -65,6 +65,21 @@ const FIRST_PAGE: PagerState = { stack: [], next: null, count: 0 };
 
 export const pageSourceOf = (folder: FolderId): PageSource => (folder === "sent" ? "sent" : "inbox");
 
+/** Server-side search (GET /mail/messages?q= + GET /mail/sent?q=). The list endpoints are
+ *  paginated and carry only a snippet, so the client filter alone can't find older mail or
+ *  body text; useMailSync fetches matches (debounced) and SEARCH_RESULTS merges them into
+ *  `threads`. `ids` = threads the server matched for `query`; `added` = the subset that was
+ *  NOT in the hydrated list (dropped again when the search is cleared/changed, and carried
+ *  over a background HYDRATE while the search stays active). */
+export interface SearchState {
+  query: string;
+  status: "idle" | "loading" | "loadingMore" | "done" | "failed";
+  ids: Set<string>;
+  added: Set<string>;
+  next: Record<PageSource, string | null>;
+}
+const NO_SEARCH: SearchState = { query: "", status: "idle", ids: new Set(), added: new Set(), next: { inbox: null, sent: null } };
+
 export interface MailState {
   me: MailPerson;
   threads: MailThreadModel[];
@@ -87,12 +102,16 @@ export interface MailState {
   /** True while the list is (re)loading for a page change or the first load — shows the
    *  skeleton. Background refetches leave it false so the list never flickers. */
   listLoading: boolean;
+  searchResults: SearchState;
 }
 
 export type MailAction =
   | { type: "SET_FOLDER"; folder: FolderId }
   | { type: "SET_LABEL"; label: string }
   | { type: "SET_SEARCH"; search: string }
+  | { type: "SEARCH_RESULTS"; query: string; threads: MailThreadModel[]; next: Record<PageSource, string | null>; append?: boolean }
+  | { type: "SEARCH_FAILED"; query: string }
+  | { type: "SEARCH_MORE" } // ask useMailSync for the next page of search results
   | { type: "OPEN_THREAD"; id: string }
   | { type: "CLOSE_THREAD" }
   | { type: "TOGGLE_STAR"; id: string }
@@ -137,6 +156,31 @@ function setRead(threads: MailThreadModel[], ids: Set<string>, read: boolean): M
   );
 }
 
+/** Drop the threads a search merged in (not part of the hydrated list) and reset it. */
+function clearSearch(state: MailState, next: SearchState = NO_SEARCH): Pick<MailState, "threads" | "searchResults"> {
+  const added = state.searchResults.added;
+  return { threads: added.size > 0 ? state.threads.filter((t) => !added.has(t.id)) : state.threads, searchResults: next };
+}
+
+const latest = (t: MailThreadModel): string => t.messages.reduce((m, x) => (x.date > m ? x.date : m), "");
+
+/** Threads the list shows for the current view. With a search active it spans every folder
+ *  except Trash (Gmail-style; inside Trash/a label it stays scoped there) and shows the
+ *  client pre-filter (matchesQuery over loaded threads, instant) plus the server matches,
+ *  newest first. Purged threads never show. */
+export function selectVisible(state: MailState): MailThreadModel[] {
+  const q = state.search.trim();
+  const scoped = (t: MailThreadModel): boolean =>
+    state.labelFilter ? t.labels.includes(state.labelFilter) && t.folder !== "trash" : inFolder(t, state.folder);
+  if (q.length === 0) return state.threads.filter((t) => !t.purged && scoped(t));
+  const ids = state.searchResults.query === q ? state.searchResults.ids : new Set<string>();
+  const inScope = (t: MailThreadModel): boolean =>
+    state.labelFilter ? scoped(t) : state.folder === "trash" ? t.folder === "trash" : t.folder !== "trash";
+  return state.threads
+    .filter((t) => !t.purged && inScope(t) && (ids.has(t.id) || matchesQuery(t, q)))
+    .sort((a, b) => latest(b).localeCompare(latest(a)));
+}
+
 export function reducer(state: MailState, action: MailAction): MailState {
   switch (action.type) {
     case "SET_FOLDER": {
@@ -144,6 +188,7 @@ export function reducer(state: MailState, action: MailAction): MailState {
       const paged = state.pager.inbox.stack.length > 0 || state.pager.sent.stack.length > 0;
       return {
         ...state,
+        ...clearSearch(state),
         folder: action.folder,
         labelFilter: null,
         openThreadId: null,
@@ -179,9 +224,37 @@ export function reducer(state: MailState, action: MailAction): MailState {
     case "LIST_FAILED":
       return { ...state, listLoading: false };
     case "SET_LABEL":
-      return { ...state, labelFilter: action.label, openThreadId: null, search: "", checked: new Set() };
-    case "SET_SEARCH":
-      return { ...state, search: action.search, openThreadId: null };
+      return { ...state, ...clearSearch(state), labelFilter: action.label, openThreadId: null, search: "", checked: new Set() };
+    case "SET_SEARCH": {
+      const q = action.search.trim();
+      if (q === state.searchResults.query) return { ...state, search: action.search, openThreadId: null };
+      // New (or cleared) query: forget the previous matches; useMailSync fetches the new ones.
+      const next: SearchState = q.length === 0 ? NO_SEARCH : { ...NO_SEARCH, query: q, status: "loading" };
+      return { ...state, ...clearSearch(state, next), search: action.search, openThreadId: null };
+    }
+    case "SEARCH_RESULTS": {
+      const cur = state.searchResults;
+      if (action.query !== state.search.trim() || action.query !== cur.query) return state; // stale response
+      const base = action.append ? state : { ...state, ...clearSearch(state, cur) };
+      const have = new Set(base.threads.map((t) => t.id));
+      const fresh = action.threads.filter((t) => !have.has(t.id));
+      const ids = new Set(action.append ? cur.ids : []);
+      for (const t of action.threads) ids.add(t.id);
+      const added = new Set(action.append ? cur.added : []);
+      for (const t of fresh) added.add(t.id);
+      return {
+        ...base,
+        threads: [...base.threads, ...fresh],
+        searchResults: { query: cur.query, status: "done", ids, added, next: action.next },
+      };
+    }
+    case "SEARCH_FAILED":
+      return action.query === state.searchResults.query ? { ...state, searchResults: { ...state.searchResults, status: "failed" } } : state;
+    case "SEARCH_MORE": {
+      const cur = state.searchResults;
+      if (cur.status !== "done" || (!cur.next.inbox && !cur.next.sent)) return state;
+      return { ...state, searchResults: { ...cur, status: "loadingMore" } };
+    }
     case "OPEN_THREAD":
       return {
         ...state,
@@ -389,13 +462,19 @@ export function reducer(state: MailState, action: MailAction): MailState {
       return state.undo ? { ...state, threads: state.undo.prevThreads, undo: null } : state;
     case "DISMISS_UNDO":
       return { ...state, undo: null };
-    case "HYDRATE":
+    case "HYDRATE": {
       // Replace threads with the server view. Drop selections/undo that referenced the
       // now-stale set; keep the open thread if it still exists (so an open reading pane
       // survives a post-send re-hydrate) and its body-load is preserved.
+      // Search-merged threads outside the hydrated page survive a background re-sync while
+      // the search is active (otherwise a poll would blank the results).
+      const hydrated = new Set(action.threads.map((t) => t.id));
+      const keep = state.threads.filter((t) => state.searchResults.added.has(t.id) && !hydrated.has(t.id));
+      const threads = keep.length > 0 ? [...action.threads, ...keep] : action.threads;
       return {
         ...state,
-        threads: action.threads,
+        threads,
+        searchResults: { ...state.searchResults, added: new Set(keep.map((t) => t.id)) },
         ...(action.me ? { me: action.me } : {}),
         ...(action.pages
           ? {
@@ -408,8 +487,9 @@ export function reducer(state: MailState, action: MailAction): MailState {
         listLoading: false,
         checked: new Set(),
         undo: null,
-        openThreadId: action.threads.some((t) => t.id === state.openThreadId) ? state.openThreadId : null,
+        openThreadId: threads.some((t) => t.id === state.openThreadId) ? state.openThreadId : null,
       };
+    }
     case "SET_THREAD_MESSAGES":
       return {
         ...state,
@@ -459,6 +539,7 @@ export const initialMailState: MailState = {
   scheduled: [],
   pager: { inbox: FIRST_PAGE, sent: FIRST_PAGE },
   listLoading: true,
+  searchResults: NO_SEARCH,
 };
 
 const MailStoreCtx = createContext<{ state: MailState; dispatch: Dispatch<MailAction> } | null>(null);

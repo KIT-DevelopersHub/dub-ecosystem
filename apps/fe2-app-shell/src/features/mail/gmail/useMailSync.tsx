@@ -21,6 +21,8 @@ interface FlagState {
 }
 /** Background re-sync interval for new inbound mail. */
 export const MAIL_POLL_MS = 60_000;
+/** Quiet period after the last keystroke before the server search fires. */
+export const SEARCH_DEBOUNCE_MS = 300;
 
 const NO_FLAGS: FlagState ={ starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
 
@@ -92,6 +94,52 @@ export function useMailSync(): void {
       alive = false;
     };
   }, [api, dispatch, syncNonce, me, inboxCursor, sentCursor]);
+
+  // Server-side search: once the box settles (SEARCH_DEBOUNCE_MS) fetch matches from inbox +
+  // Sent (the loaded page is only 50 rows with snippet bodies, so older mail and body text
+  // need the server). Results merge into the store via SEARCH_RESULTS; a stale response
+  // (query changed meanwhile) is dropped by the reducer. "さらに読み込む" (SEARCH_MORE) pages
+  // both lists by their cursors.
+  const search = state.searchResults;
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
+  useEffect(() => {
+    const q = search.query;
+    const more = search.status === "loadingMore";
+    if (q.length === 0 || (search.status !== "loading" && !more)) return;
+    let alive = true;
+    const run = async (): Promise<void> => {
+      try {
+        const inboxCur = more ? search.next.inbox : undefined;
+        const sentCur = more ? search.next.sent : undefined;
+        const empty = { items: [], nextCursor: null };
+        const [inbox, sent] = await Promise.all([
+          !more || inboxCur ? api.listInbox({ q, limit: PAGE_SIZE, ...(inboxCur ? { cursor: inboxCur } : {}) }) : Promise.resolve(empty),
+          !more || sentCur ? api.listSent({ q, limit: PAGE_SIZE, ...(sentCur ? { cursor: sentCur } : {}) }) : Promise.resolve(empty),
+        ]);
+        if (!alive) return;
+        const found = combineThreads(inbox.items, sent.items, me);
+        const known = new Set(threadsRef.current.map((t) => t.id));
+        dispatch({ type: "SEARCH_RESULTS", query: q, threads: found, next: { inbox: inbox.nextCursor, sent: sent.nextCursor }, append: more });
+        // Merged-in threads come from outside the hydrated page, so they never got their
+        // persisted flags (star/archive/trash/purge). Apply only to those — already-loaded
+        // threads keep their optimistic local state.
+        const fresh = new Set(found.filter((t) => !known.has(t.id)).map((t) => t.id));
+        if (fresh.size === 0) return;
+        const flags = await api.listFlags().catch(() => []);
+        if (alive) dispatch({ type: "APPLY_FLAGS", flags: flags.filter((f) => fresh.has(f.threadId)) });
+      } catch {
+        if (alive) dispatch({ type: "SEARCH_FAILED", query: q });
+      }
+    };
+    const timer = setTimeout(() => void run(), more ? 0 : SEARCH_DEBOUNCE_MS);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+    // search.next is read only for "loadingMore", which is entered fresh each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, dispatch, me, search.query, search.status]);
 
   // Pick up newly arrived mail without a full reload: re-sync on an interval while the tab
   // is visible and whenever it regains visibility. HYDRATE drops selections/undo, so a

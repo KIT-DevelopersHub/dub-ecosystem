@@ -8,6 +8,11 @@ import type { ISODateTime, CursorQuery } from "./common";
 // ---- query contract (GET /messages, GET /sent — same shape) ----
 export interface ListMailMessagesQuery extends CursorQuery {
   threadId?: string;
+  // ADDITIVE (server-side search): free-text, case-insensitive (ASCII) substring match over
+  // subject / snippet / body / From / To / Cc (Sent: subject / snippet / body / To / Cc).
+  // Trimmed; blank = no search; max 200 chars. Narrows within the caller's account scope
+  // only (never widens visibility). Combines with cursor/limit for paging the results.
+  q?: string;
 }
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
@@ -19,7 +24,7 @@ export interface ListMailMessagesQuery extends CursorQuery {
 // separately spec'd — documenting it is a noted follow-up). See
 // docs/api-contracts/_wire-contract-enforcement.md.
 export const MAIL_WIRE = {
-  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "limit", "threadId"] },
+  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "limit", "q", "threadId"] },
 } as const;
 
 // Compile-time tie: every query key the descriptor lists must be a real key of the typed
