@@ -50,6 +50,13 @@ service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/aud
 binding = "SVC_MEMBER"
 service = "dub-member-service"
 
+# Resend delivery-problem webhook -> in-app admin alert (POST /notify, role fan-out).
+# notification deploys before mail-gateway (infra/deploy/deploy-prod.sh). Optional: absent
+# => audit + error log only. Signing secret: `wrangler secret put RESEND_WEBHOOK_SECRET`.
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
+
 # --- Cron: every 5 minutes (ONE trigger). The scheduled handler runs the 予約送信
 # (scheduled-send) drain on EVERY tick — a "send later" mail has ~5-minute delivery
 # granularity. Mail is kept indefinitely (no retention purge). The Workers FREE plan caps the account at 5 cron triggers, so we keep mail-gateway's

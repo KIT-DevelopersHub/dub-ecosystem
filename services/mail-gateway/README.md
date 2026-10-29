@@ -284,6 +284,36 @@ open the verification mail in that Gmail and click the link (status → *Verifie
 - コスト注意: 15 分間隔だと 1日 96 送信 ≒ 月 2,880 送信。Resend 無料枠（100/日・3,000/月）をほぼ使い切るので、
   無料枠のままなら間隔を 60 分などに延ばす。
 
+## 3.7 Resend の配送エラー → 管理者アラート（webhook）
+
+Resend は宛先が Suppressions（送信停止リスト）に載っていると **送信 API には 200 を返したまま黙って捨てる**。
+これを拾うため、Resend の webhook を受けて管理者に通知する（`src/resend-webhook.ts`）。
+
+- 経路: Resend → api-gateway `POST https://api.developershub.jp/api/v1/public/webhooks/resend`（PUBLIC・本文をバイト列のまま転送）
+  → mail-gateway `POST /internal/webhooks/resend`（INTERNAL）。Svix 署名（`svix-id` / `svix-timestamp` / `svix-signature`、
+  HMAC-SHA256、±5分）をここで検証。`RESEND_WEBHOOK_SECRET` 未設定なら **503**（fail closed・error ログ）、
+  `/internal/health/ready` の `deliveryWebhook` にも出る。
+- 対象イベント: `email.bounced` / `email.suppressed` / `email.failed` / `email.complained` / `email.delivery_delayed`（それ以外は 200 で無視）。
+- 記録: `mail_provider_event`（migration 0019）に svix-id を主キーで1行。再送は 200 の no-op（二重通知なし）。
+  `provider_message_id`（= Resend の email_id）で `mail_send_log` と突合し、件名・送信ログ id を補う。
+- 通知: 自ドメイン（`CF_EMAIL_ROUTING_ZONE_NAME`、既定 developershub.jp）宛ては **毎回**、外部宛ては同じ宛先につき **24時間に1回**。
+  チャネルは canary と同じ audit（`mail.delivery.alert`）+ error ログ、さらに `SVC_NOTIFICATION` があれば
+  `role_sys_admin` / `role_sys_maintainer` へアプリ内通知（`POST /notify`、type `mail.delivery_alert`）。
+  メール通知はしない（壊れている経路そのものに乗るため）。
+- 本文（日本語）: 宛先 / イベント / 理由（例: 宛先が存在しない・送信停止リスト）/ 件名 / 日時(JST) /
+  対処「Cloudflare Email Routing の受け口を確認 → Resend の Suppressions から外す」。
+
+### セットアップ手順（運用者）
+
+1. migration `0019_mail_provider_event.sql` を dub-core に適用。
+2. Resend ダッシュボード → **Webhooks** → *Add Webhook*
+   - Endpoint URL: `https://api.developershub.jp/api/v1/public/webhooks/resend`
+   - Events: `email.bounced` / `email.complained` / `email.delivery_delayed` / `email.failed` / `email.suppressed`
+   - 作成後の **Signing Secret**（`whsec_...`）をコピー。
+3. `npx wrangler secret put RESEND_WEBHOOK_SECRET --config services/mail-gateway/wrangler.free.toml` に貼り付け。
+4. mail-gateway / api-gateway をデプロイ（`SVC_NOTIFICATION` binding は wrangler.free.toml に追加済み）。
+5. Resend の webhook 画面の *Send test* で 200 を確認（`email.delivered` 等は無視されて `ignored: true`）。
+
 ## 4. Workers free-tier verdict (9-E: is a paid plan required?)
 
 **Conclusion: the outbound send endpoint runs on the Workers FREE plan. A paid plan is

@@ -32,6 +32,7 @@ import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin } from "./email-routing-routes";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
+import { handleResendWebhook } from "./resend-webhook";
 import { buildBlobs, buildDb, buildSendDeps } from "./deps";
 import { attachmentsFor } from "./attachments";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
@@ -475,6 +476,15 @@ export function createApp() {
   // model).
   app.get("/health/quota", (c) => {
     return c.json({ service: SERVICE_NAME, provider: c.env.MAIL_OUTBOUND_PROVIDER ?? DEFAULT_OUTBOUND_PROVIDER, inboundTransport: "cf-email-routing" });
+  });
+
+  // ---- Resend delivery-problem webhook (INTERNAL in the table: api-gateway's PUBLIC
+  // /api/v1/public/webhooks/resend forwards the raw body here). Svix signature is verified
+  // in the handler over the exact bytes — see src/resend-webhook.ts.
+  app.post("/internal/webhooks/resend", async (c) => {
+    const raw = new Uint8Array(await c.req.arrayBuffer());
+    const out = await handleResendWebhook(c.env, c.req.raw.headers, raw);
+    return c.json(out.body, out.status as 200);
   });
 
   return app;
