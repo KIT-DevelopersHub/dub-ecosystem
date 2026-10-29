@@ -145,7 +145,7 @@ const EMAIL_ROUTING_ADMIN = [
 // Everything `mail:admin` guards: the routing proxy plus the shared-mailbox definitions.
 const ADMIN = [...EMAIL_ROUTING_ADMIN, "GET /mail/mailboxes", "POST /mail/mailboxes/:id", "GET /mail/admin/canary/probes"].sort();
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
-const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/status", "POST /send"];
+const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/status", "POST /internal/webhooks/resend", "POST /send"];
 // The one PUBLIC route, hence in EVERY row below including the empty-key one. Stated rather
 // than hidden: that is the fact a matrix is for.
 const PUBLIC_ROUTES = ["GET /internal/health"];
@@ -180,7 +180,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(36);
+    expect(everyRoute).toHaveLength(37);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing

@@ -284,6 +284,7 @@ const PUBLIC_ROUTES = [
   "POST /api/v1/public/inquiries",
   "POST /api/v1/public/lp-visits",
   "POST /api/v1/public/participation",
+  "POST /api/v1/public/webhooks/resend",
 ];
 const SELF_ROUTES = [
   "GET /api/v1/bff/home",

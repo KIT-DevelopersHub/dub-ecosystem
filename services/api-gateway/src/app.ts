@@ -20,6 +20,7 @@ import { createPublicInquiryHandler } from "./handlers/public-inquiry";
 import { createPublicParticipationHandler } from "./handlers/public-participation";
 import { publicOnboardingHandler } from "./handlers/public-onboarding";
 import { publicLpVisitHandler } from "./handlers/public-lp-visit";
+import { publicResendWebhookHandler } from "./handlers/public-resend-webhook";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
 import { adminSendAccountMailHandler } from "./handlers/account-mail";
 import { getSelfProfileHandler, updateSelfProfileHandler } from "./handlers/self-profile";
@@ -85,6 +86,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.get(`${API_PREFIX}/public/onboarding`, publicOnboardingHandler);
   // Public LP pageview beacon (sendBeacon from the conference LP) → lp-analytics internal route.
   app.post(`${API_PREFIX}/public/lp-visits`, publicLpVisitHandler);
+  // Resend delivery-event webhook (Svix-signed) → mail-gateway internal route, raw bytes.
+  app.post(`${API_PREFIX}/public/webhooks/resend`, publicResendWebhookHandler);
 
   // Password management (themes #5a/#5b/#5c). Gateway-owned because auth-service's admin
   // routes are internal-only and the `auth` proxy segment strips tokens: these compose
