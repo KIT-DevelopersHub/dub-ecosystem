@@ -67,6 +67,9 @@ import {
   Monitor,
   // カラー設定 (fe2 設定メニュー → カラー設定ダイアログ)
   Palette,
+  // メール: 送信者ブロック (fe2) + kebab menu trigger
+  Ban,
+  EllipsisVertical,
   type LucideIcon,
 } from "lucide-react";
 import type { IconName } from "./types";
@@ -74,6 +77,8 @@ import type { IconName } from "./types";
 export type { LucideIcon };
 
 export const iconRegistry: Record<IconName, LucideIcon> = {
+  ban: Ban,
+  "more-vertical": EllipsisVertical,
   home: Home,
   calendar: Calendar,
   "check-square": CheckSquare,

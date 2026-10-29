@@ -1,6 +1,6 @@
 // LP チケット購入: LP管理 API (/lp/tickets*) + 公開 LP Worker 向け内部 API (/lp/internal/tickets*).
 import { describe, it, expect } from "vitest";
-import { createStripeClient, signStripePayload, usableStripeKey } from "../src/stripe";
+import { createStripeClient, signStripePayload, toCheckoutSession, usableStripeKey } from "../src/stripe";
 import type { LpTicketOrdersPage, LpTicketsState, LpTicketTypeSummary } from "../src/types";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
@@ -17,7 +17,9 @@ interface StripeCall {
   form: URLSearchParams | null;
 }
 
-function fakeStripe(session: { payment_status?: string; status?: string } = {}) {
+function fakeStripe(
+  session: { payment_status?: string; status?: string; payment_method_type?: string; failGet?: boolean } = {},
+) {
   const calls: StripeCall[] = [];
   let n = 0;
   const fetchFn = async (url: string, init?: RequestInit): Promise<Response> => {
@@ -40,19 +42,30 @@ function fakeStripe(session: { payment_status?: string; status?: string } = {}) 
         client_reference_id: form.get("client_reference_id"),
       });
     }
-    const id = url.split("/").pop()!;
-    return Response.json({ id, status: session.status ?? "complete", payment_status: session.payment_status ?? "paid" });
+    if (session.failGet) return new Response("boom", { status: 500 });
+    const u = new URL(url);
+    const id = u.pathname.split("/").pop()!;
+    const expanded = u.searchParams.getAll("expand[]").includes("payment_intent.payment_method");
+    return Response.json({
+      id,
+      status: session.status ?? "complete",
+      payment_status: session.payment_status ?? "paid",
+      payment_intent: expanded
+        ? { id: "pi_1", payment_method: { id: "pm_1", type: session.payment_method_type ?? "card" } }
+        : "pi_1",
+    });
   };
   return { calls, client: createStripeClient("sk_test_123", fetchFn) };
 }
 
 async function setup(
   kind: RepoKind,
-  opts: { stripe?: ReturnType<typeof fakeStripe> | null; cap?: number; publish?: boolean } = {},
+  opts: { stripe?: ReturnType<typeof fakeStripe> | null; cap?: number; publish?: boolean; paypay?: boolean } = {},
 ) {
   const h = await makeApp(kind, "edit", 5000, null, opts.publish === false ? [] : ["lp:publish"], {
     stripe: opts.stripe ? opts.stripe.client : null,
     stripeWebhookSecret: WHSEC,
+    paypayEnabled: opts.paypay === true,
     ...(opts.cap !== undefined ? { dailyCheckoutCap: opts.cap } : {}),
   });
   return h;
@@ -109,6 +122,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       enabled: false,
       ctaEnabled: false,
       paymentReady: false,
+      paymentMethods: ["card"],
       publicUrl: "https://hokuriku-it-conf.com/tickets",
       fields: [],
       types: [],
@@ -549,7 +563,10 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
     expect(await res.json()).toEqual({ status: "paid", summary: "一般 ×1" });
-    expect(stripe.calls[1]).toMatchObject({ method: "GET", url: "https://api.stripe.com/v1/checkout/sessions/cs_test_0" });
+    expect(stripe.calls[1]).toMatchObject({
+      method: "GET",
+      url: "https://api.stripe.com/v1/checkout/sessions/cs_test_0?expand%5B%5D=payment_intent.payment_method",
+    });
     // already paid: no second Stripe call
     await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
     expect(stripe.calls).toHaveLength(2);
@@ -584,6 +601,114 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     );
     expect(p2.items.map((o) => o.buyerName)).toEqual(["n0"]);
     expect(p2.nextCursor).toBeNull();
+  });
+
+  it("PayPay flag: advertised methods in LP管理 state and the public config", async () => {
+    const off = await setup(kind, { stripe: fakeStripe() });
+    expect((await body<LpTicketsState>(await off.app.fetch(get("/lp/tickets")))).paymentMethods).toEqual(["card"]);
+    const on = await setup(kind, { stripe: fakeStripe(), paypay: true });
+    expect((await body<LpTicketsState>(await on.app.fetch(get("/lp/tickets")))).paymentMethods).toEqual(["card", "paypay"]);
+    const pub = await body<{ paymentMethods: string[] }>(await on.app.fetch(get("/lp/internal/tickets", INTERNAL)));
+    expect(pub.paymentMethods).toEqual(["card", "paypay"]);
+  });
+
+  it("PayPay session params: one-time JPY payment, Dashboard-managed methods (no payment_method_types)", async () => {
+    const stripe = fakeStripe();
+    const { app } = await setup(kind, { stripe, paypay: true });
+    await enable(app);
+    const a = await addType(app, { name: "一般", priceJpy: 3000 });
+    const b = await addType(app, { name: "学生", priceJpy: 1000 });
+    await app.fetch(checkout({ items: [{ ticketTypeId: a.id, quantity: 2 }, { ticketTypeId: b.id, quantity: 1 }] }));
+    const f = stripe.calls[0]!.form!;
+    // PayPay via Stripe needs mode=payment and every line item in jpy; Stripe picks it per session.
+    expect(f.get("mode")).toBe("payment");
+    expect(f.getAll("line_items[0][price_data][currency]").concat(f.getAll("line_items[1][price_data][currency]"))).toEqual([
+      "jpy",
+      "jpy",
+    ]);
+    expect([...f.keys()].some((k) => k.startsWith("payment_method_types") || k.startsWith("subscription_data"))).toBe(false);
+  });
+
+  it("webhook completed via PayPay → paid with paymentMethod from the expanded session", async () => {
+    const stripe = fakeStripe({ payment_method_type: "paypay" });
+    const { app } = await setup(kind, { stripe, paypay: true });
+    await enable(app);
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    const orderId = stripe.calls[0]!.form!.get("client_reference_id");
+    const event = {
+      id: "evt_pp",
+      type: "checkout.session.completed",
+      data: { object: { id: "cs_test_0", client_reference_id: orderId, payment_status: "paid", status: "complete", payment_intent: "pi_1" } },
+    };
+    expect((await webhook(app, event)).status).toBe(200);
+    expect(stripe.calls[1]!.url).toContain("expand%5B%5D=payment_intent.payment_method");
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items[0]).toMatchObject({ status: "paid", paymentMethod: "paypay" });
+  });
+
+  it("webhook async: unpaid completion stays pending (no method); async success records method; failure → expired", async () => {
+    const stripe = fakeStripe({ payment_method_type: "paypay" });
+    const { app } = await setup(kind, { stripe, paypay: true });
+    await enable(app);
+    const t = await addType(app, { name: "一般", priceJpy: 3000, capacity: 2 });
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    const [a, b] = [0, 1].map((i) => stripe.calls[i]!.form!.get("client_reference_id"));
+    const obj = (id: string, ref: string | null | undefined, ps: string) => ({ id, client_reference_id: ref, payment_status: ps, status: "complete" });
+    await webhook(app, { id: "e1", type: "checkout.session.completed", data: { object: obj("cs_test_0", a, "unpaid") } });
+    let orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.find((o) => o.id === a)).toMatchObject({ status: "pending", paidAt: null, paymentMethod: null });
+    expect(stripe.calls).toHaveLength(2); // unpaid: no extra Stripe call
+    await webhook(app, { id: "e2", type: "checkout.session.async_payment_succeeded", data: { object: obj("cs_test_0", a, "paid") } });
+    await webhook(app, { id: "e3", type: "checkout.session.async_payment_failed", data: { object: obj("cs_test_1", b, "unpaid") } });
+    orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.find((o) => o.id === a)).toMatchObject({ status: "paid", paymentMethod: "paypay" });
+    expect(orders.items.find((o) => o.id === b)).toMatchObject({ status: "expired", paidAt: null, paymentMethod: null });
+    const s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
+    expect(s.types[0]!.stats).toMatchObject({ sold: 1, pending: 0, remaining: 1 });
+  });
+
+  it("webhook paid but Stripe retrieve fails → still paid, method unknown", async () => {
+    const stripe = fakeStripe({ failGet: true });
+    const { app } = await setup(kind, { stripe });
+    await enable(app);
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    const orderId = stripe.calls[0]!.form!.get("client_reference_id");
+    const event = {
+      id: "evt_f",
+      type: "checkout.session.completed",
+      data: { object: { id: "cs_test_0", client_reference_id: orderId, payment_status: "paid", status: "complete" } },
+    };
+    expect((await webhook(app, event)).status).toBe(200);
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items[0]).toMatchObject({ status: "paid", paymentMethod: null });
+  });
+
+  it("confirm (thanks page) records the card method; free orders have none", async () => {
+    const stripe = fakeStripe({ payment_status: "paid", payment_method_type: "card" });
+    const { app } = await setup(kind, { stripe });
+    await enable(app);
+    const paid = await addType(app, { name: "一般", priceJpy: 3000 });
+    const free = await addType(app, { name: "招待", priceJpy: 0 });
+    await app.fetch(checkout({ ticketTypeId: paid.id }));
+    await app.fetch(checkout({ ticketTypeId: free.id }));
+    await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.map((o) => [o.amountJpy, o.status, o.paymentMethod])).toEqual([
+      [0, "paid", null],
+      [3000, "paid", "card"],
+    ]);
+  });
+});
+
+describe("toCheckoutSession: used payment method", () => {
+  it("reads payment_intent.payment_method.type only when expanded", () => {
+    expect(toCheckoutSession({ id: "cs", payment_intent: { payment_method: { type: "paypay" } } }).paymentMethodType).toBe("paypay");
+    expect(toCheckoutSession({ id: "cs", payment_intent: "pi_1" }).paymentMethodType).toBeNull();
+    expect(toCheckoutSession({ id: "cs", payment_intent: { payment_method: "pm_1" } }).paymentMethodType).toBeNull();
+    expect(toCheckoutSession({ id: "cs", payment_intent: null }).paymentMethodType).toBeNull();
   });
 });
 

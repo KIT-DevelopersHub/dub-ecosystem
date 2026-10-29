@@ -23,8 +23,10 @@ import { createServiceClient, dubContext } from "@dub/http";
 import type { RequestContext } from "@dub/http";
 import { createAuthClient } from "@dub/auth-client";
 import { policyGate, sharedAuthzGranter } from "@dub/policy-gate";
-import { HEADERS } from "@dub/observability";
-import { common, type mail } from "@dub/types";
+import { HEADERS, consoleSink } from "@dub/observability";
+import { publishAudit } from "@dub/events";
+import { nowIso } from "@dub/db";
+import { common, type identity, type mail } from "@dub/types";
 import type { AppBindings } from "./env";
 import { POLICY_TABLE } from "./policy-table";
 import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
@@ -33,13 +35,14 @@ import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin } from "./email-routing-routes";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
 import { handleResendWebhook } from "./resend-webhook";
-import { buildBlobs, buildDb, buildSendDeps } from "./deps";
+import { buildAuditEnv, buildBlobs, buildDb, buildSendDeps } from "./deps";
 import { attachmentsFor, parkScheduledAttachments, releaseScheduledAttachments } from "./attachments";
-import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
+import { isCompanyAddress, resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
 import { parseListMessagesQuery, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
+import { addBlock, assertBlockAllowed, listBlocks, loadMatcher, markBlocked, normalizeBlockValue, parseBlockRequest, removeBlock } from "./blocks";
 
 /** Drop the compliance archive address (auto-CC'd on every send) from a DTO's Cc for
  *  display. It is an internal storage mailbox, not a person the user CC'd — showing it on
@@ -236,6 +239,9 @@ export function createApp() {
     const q = parseListMessagesQuery(c.req.query());
     const page = await listInbound(dbOf(c), { ...q, ownerUserId: await inboundScopeOf(c), viewer: ownerOf(c) });
     for (const m of page.items) hideArchiveCc(m, archiveOf(c));
+    // Sender block list (0021): flag, never filter — the client files blocked mail under
+    // ブロック済み, and unblocking restores it because nothing was hidden server-side.
+    markBlocked(page.items, await loadMatcher(dbOf(c), ownerOf(c)));
     return c.json(page satisfies common.Paginated<mail.MailMessageListItem>);
   });
 
@@ -244,6 +250,7 @@ export function createApp() {
     const msg = await getInboundDetail(db, c.req.param("id"), await inboundScopeOf(c), ownerOf(c));
     if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
     hideArchiveCc(msg, archiveOf(c));
+    markBlocked([msg], await loadMatcher(db, ownerOf(c)));
     const attachments = await attachmentsFor(db, "inbound", msg.id);
     if (attachments.length > 0) msg.attachments = attachments;
     return c.json(msg satisfies mail.MailMessageDetail);
@@ -377,6 +384,7 @@ export function createApp() {
     const threadId = c.req.param("id");
     const messages = await listThread(db, threadId, await inboundScopeOf(c), ownerOf(c));
     if (messages.length === 0) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `thread not found: ${threadId}`, { status: 404 });
+    markBlocked(messages, await loadMatcher(db, ownerOf(c)));
     for (const m of messages) {
       hideArchiveCc(m, archiveOf(c));
       const attachments = await attachmentsFor(db, "inbound", m.id);
@@ -436,6 +444,37 @@ export function createApp() {
     const patch = parseFlagsPatch(await c.req.json().catch(() => null));
     const flags = await upsertUserFlags(dbOf(c), ownerOf(c), threadId, patch);
     return c.json(flags satisfies mail.MailThreadFlags);
+  });
+
+  // ---- sender block list (この送信者をブロック, 0021). PERSONAL like flags: `ownerOf`, never
+  // read_all — an admin's block list is their own. メール閲覧 + mail:read (it only changes how
+  // the caller's own view files mail they can already see; nothing is deleted or bounced).
+  // Mutations are audited (success / failure) like the email-routing admin routes.
+  ext.get("/blocks", async (c) => {
+    const items = await listBlocks(dbOf(c), ownerOf(c));
+    return c.json({ items } satisfies { items: mail.MailSenderBlock[] });
+  });
+
+  ext.post("/blocks", async (c) => {
+    const owner = ownerOf(c);
+    const body: unknown = await c.req.json().catch(() => null);
+    const resourceId = typeof (body as { value?: unknown } | null)?.value === "string" ? String((body as { value: string }).value).trim().toLowerCase() : "";
+    return auditedBlock(c, "mail.sender_block.create", resourceId, async () => {
+      const req = parseBlockRequest(body);
+      assertBlockAllowed(req, await ownAddressOf(c, owner));
+      const { block, created } = await addBlock(dbOf(c), owner, req);
+      return c.json(block satisfies mail.MailSenderBlock, created ? 201 : 200);
+    });
+  });
+
+  ext.delete("/blocks/:value", async (c) => {
+    const owner = ownerOf(c);
+    const value = normalizeBlockValue(c.req.param("value"));
+    return auditedBlock(c, "mail.sender_block.delete", value, async () => {
+      const removed = await removeBlock(dbOf(c), owner, value);
+      if (!removed) throw new DubError("MAIL_BLOCK_NOT_FOUND", `not blocked: ${value}`, { status: 404 });
+      return c.json({ value, blocked: false });
+    });
   });
 
   // ---- mailbox admin: the bare `mail:admin` key in the table (org infrastructure, not the
@@ -503,6 +542,57 @@ export function createApp() {
   });
 
   return app;
+}
+
+/** The caller's own roster address (lowercased), or null when unknown. Unlike
+ *  resolveUserFromAddress there is NO info@ fallback: guarding "don't block yourself" must
+ *  not accidentally forbid blocking the shared mailbox. */
+async function ownAddressOf(c: Context<AppBindings>, userId: string): Promise<string | null> {
+  try {
+    const client = createServiceClient(c.env.SVC_IDENTITY, { service: "identity-roster", caller: SERVICE_NAME });
+    const user = await client.get<identity.IdentityUser>(c.get("dubCtx"), `/users/${encodeURIComponent(userId)}`);
+    return isCompanyAddress(user?.email) ? user.email.trim().toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Run a block-list mutation, emitting a success/failure audit record either way. The audit
+ *  publish never masks the outcome (a publish error is logged, not thrown). */
+async function auditedBlock(c: Context<AppBindings>, action: string, resourceId: string, fn: () => Promise<Response>): Promise<Response> {
+  const ctx = c.get("dubCtx");
+  const actorId = c.get("userId") ?? null;
+  const emit = async (result: "success" | "failure", errorCode: string | null): Promise<void> => {
+    try {
+      await publishAudit(buildAuditEnv(c.env), {
+        action,
+        actorId,
+        orgId: common.DUB_DEFAULT_ORG_ID,
+        result,
+        resourceType: "mail_sender_block",
+        resourceId: resourceId || "(invalid)",
+        details: errorCode ? { errorCode } : null,
+        requestId: ctx.requestId,
+        occurredAt: nowIso(),
+      });
+    } catch (err) {
+      consoleSink({
+        level: "error",
+        message: "mail-gateway: failed to publish sender-block audit",
+        service: SERVICE_NAME,
+        requestId: ctx.requestId,
+        fields: { error: err instanceof Error ? err.message : String(err) },
+      });
+    }
+  };
+  try {
+    const res = await fn();
+    await emit("success", null);
+    return res;
+  } catch (err) {
+    await emit("failure", (err as { code?: string } | null)?.code ?? "MAIL_INTERNAL");
+    throw err;
+  }
 }
 
 /** Reject a send carrying attachments when the R2 bucket is not bound (feature off) —

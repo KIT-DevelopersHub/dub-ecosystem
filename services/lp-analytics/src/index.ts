@@ -49,6 +49,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
       Number(env.LP_DAILY_CHECKOUT_CAP) > 0 ? Number(env.LP_DAILY_CHECKOUT_CAP) : DEFAULT_DAILY_CHECKOUT_CAP,
     stripe: stripeKey ? createStripeClient(stripeKey) : null,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
+    paypayEnabled: env.LP_PAYPAY_ENABLED === "1",
     newProposalId: () => newId("lpp"),
     dailyProposalCap:
       Number(env.LP_DAILY_PROPOSAL_CAP) > 0 ? Number(env.LP_DAILY_PROPOSAL_CAP) : DEFAULT_DAILY_PROPOSAL_CAP,

@@ -9,6 +9,8 @@ import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
 import { ScheduledList } from "./ScheduledList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
+import { BlockNoticeBar, BlockedSendersPanel } from "./BlockedSenders.tsx";
+import blockStyles from "./blocks.module.css";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
 import { SHARED_FOLDERS, hasSharedMail, inFolder, threadUnread } from "./mailModel.ts";
@@ -295,6 +297,11 @@ function GmailBody(): JSX.Element {
           <ScheduledList />
         ) : openThread ? (
           <ReadingPane thread={openThread} labels={state.labels} />
+        ) : state.folder === "blocked" && !state.labelFilter ? (
+          <div className={blockStyles.blockedColumn}>
+            <BlockedSendersPanel />
+            <ThreadList />
+          </div>
         ) : (
           <ThreadList />
         )}
@@ -304,6 +311,7 @@ function GmailBody(): JSX.Element {
       ))}
       <UndoToast />
       <SendNoticeBar />
+      <BlockNoticeBar />
       <Shortcuts />
     </main>
   );
