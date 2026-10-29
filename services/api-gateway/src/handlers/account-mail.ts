@@ -25,7 +25,7 @@ type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
 
 /** The cc / login must be a Developers Hub address — otherwise the three are not linked yet. */
 export const DEVHUB_MAIL_DOMAIN = "developershub.jp";
-export const DEFAULT_APP_BASE_URL = "https://app.developershub.jp";
+export const DEFAULT_APP_BASE_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev";
 export const ACCOUNT_MAIL_SUBJECT = "【Developers Hub】アカウント発行のお知らせ";
 /** auth-service: no decryptable copy of the password exists (never set / legacy hash). */
 const PASSWORD_NOT_VIEWABLE = "AUTH_PASSWORD_NOT_VIEWABLE";

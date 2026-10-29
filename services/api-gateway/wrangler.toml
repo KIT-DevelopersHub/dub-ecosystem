@@ -16,7 +16,7 @@ FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8
 RATE_LIMIT_MAX = "100"
 RATE_LIMIT_WINDOW_MS = "60000"
 # Login URL written into the account-issue mail (handlers/account-mail.ts).
-APP_BASE_URL = "https://app.developershub.jp"
+APP_BASE_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev"
 
 # ---- secrets (set via `wrangler secret put`, never committed) ----
 # TURNSTILE_SECRET  -> public inquiry siteverify
