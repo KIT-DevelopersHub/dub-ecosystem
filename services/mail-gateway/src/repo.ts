@@ -816,6 +816,7 @@ export interface ScheduledRow {
   owner_user_id: string | null;
   to_json: string;
   cc_json: string | null;
+  bcc_json: string | null; // 0020: envelope-only Bcc (NULL when none)
   subject: string;
   text_body: string;
   html_body: string | null;
@@ -853,7 +854,62 @@ function scheduledRowToListItem(r: ScheduledRow): mail.ScheduledSendListItem {
 function scheduledRowToDetail(r: ScheduledRow): mail.ScheduledSendDetail {
   const detail: mail.ScheduledSendDetail = { ...scheduledRowToListItem(r), textBody: r.text_body };
   if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
+  const bcc = parseAddresses(r.bcc_json);
+  if (bcc.length > 0) detail.bcc = bcc;
   return detail;
+}
+
+// ---- scheduled-send attachments (0020; metadata here, bytes in R2) ----
+export interface ScheduledAttachmentRow {
+  id: string;
+  scheduled_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  r2_key: string;
+  created_at: string;
+}
+
+export async function insertScheduledAttachment(
+  db: DbClient,
+  row: { id: string; scheduledId: string; filename: string; mimeType: string; sizeBytes: number; r2Key: string },
+): Promise<void> {
+  await db.run(
+    `INSERT INTO mail_scheduled_attachments (id, scheduled_id, filename, mime_type, size_bytes, r2_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    row.id,
+    row.scheduledId,
+    row.filename,
+    row.mimeType,
+    row.sizeBytes,
+    row.r2Key,
+    nowIso(),
+  );
+}
+
+/** Parked files of one or more schedules, in attach order (rowid = insert order). */
+export async function listScheduledAttachments(db: DbClient, scheduledIds: readonly string[]): Promise<ScheduledAttachmentRow[]> {
+  if (scheduledIds.length === 0) return [];
+  const marks = scheduledIds.map(() => "?").join(", ");
+  return db.all<ScheduledAttachmentRow>(
+    `SELECT * FROM mail_scheduled_attachments WHERE scheduled_id IN (${marks}) ORDER BY rowid ASC`,
+    ...scheduledIds,
+  );
+}
+
+function scheduledAttachmentMeta(r: ScheduledAttachmentRow): mail.MailAttachment {
+  return { id: r.id, filename: r.filename, contentType: r.mime_type, sizeBytes: r.size_bytes };
+}
+
+/** Decorate list/detail items with their parked-file metadata (absent when none). */
+async function withScheduledAttachments<T extends mail.ScheduledSendListItem>(db: DbClient, items: T[]): Promise<T[]> {
+  const rows = await listScheduledAttachments(db, items.map((i) => i.id));
+  if (rows.length === 0) return items;
+  for (const item of items) {
+    const mine = rows.filter((r) => r.scheduled_id === item.id).map(scheduledAttachmentMeta);
+    if (mine.length > 0) item.attachments = mine;
+  }
+  return items;
 }
 
 /** Park a compose for future delivery. status='scheduled'. */
@@ -864,6 +920,7 @@ export async function insertScheduled(
     ownerUserId: string | null;
     toJson: string;
     ccJson: string | null;
+    bccJson?: string | null;
     subject: string;
     textBody: string;
     htmlBody: string | null;
@@ -875,14 +932,15 @@ export async function insertScheduled(
   const now = nowIso();
   await db.run(
     `INSERT INTO mail_scheduled
-       (id, owner_user_id, to_json, cc_json, subject, text_body, html_body, in_reply_to,
+       (id, owner_user_id, to_json, cc_json, bcc_json, subject, text_body, html_body, in_reply_to,
         from_address, scheduled_at, status, sent_message_id, error_code, attempts, snippet,
         created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', NULL, NULL, 0, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', NULL, NULL, 0, ?, ?, ?)`,
     row.id,
     row.ownerUserId,
     row.toJson,
     row.ccJson,
+    row.bccJson ?? null,
     row.subject,
     row.textBody,
     row.htmlBody,
@@ -920,7 +978,7 @@ export async function listScheduled(
   const page = hasMore ? rows.slice(0, q.limit) : rows;
   const last = page[page.length - 1];
   return {
-    items: page.map(scheduledRowToListItem),
+    items: await withScheduledAttachments(db, page.map(scheduledRowToListItem)),
     nextCursor: hasMore && last ? encodeCursor(last.id) : null,
   };
 }
@@ -934,7 +992,9 @@ export async function getScheduledDetail(db: DbClient, id: string, scope: MailSc
     binds.push(scope);
   }
   const row = await db.first<ScheduledRow>(sql, ...binds);
-  return row ? scheduledRowToDetail(row) : null;
+  if (!row) return null;
+  const [detail] = await withScheduledAttachments(db, [scheduledRowToDetail(row)]);
+  return detail ?? null;
 }
 
 /** Raw scheduled row (owner-scoped) — used by edit/cancel to check current status. */

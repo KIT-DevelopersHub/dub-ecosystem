@@ -12,6 +12,12 @@ export function b64encodeUtf8(s: string): string {
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
 }
+export function b64encodeBytes(bytes: Uint8Array): string {
+  // Chunked so a multi-MB file never overflows String.fromCharCode's argument limit.
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
 export function b64decodeToBytes(b64: string): Uint8Array {
   const bin = atob(b64.replace(/\s+/g, ""));
   const bytes = new Uint8Array(bin.length);
@@ -276,7 +282,8 @@ export function assembleMime(input: AssembleInput): string {
   h.push(`Date: ${input.date ?? rfc5322Date()}`);
   h.push("MIME-Version: 1.0");
   if (input.inReplyTo) {
-    h.push(`In-Reply-To: <${input.inReplyTo}>`);
+    // Tolerate a bracketed id (`<id>`) from a client so the header never becomes `<<id>>`.
+    h.push(`In-Reply-To: <${input.inReplyTo.trim().replace(/^<|>$/g, "").trim()}>`);
     const refs = referencesHeader(input.references && input.references.length > 0 ? input.references : [input.inReplyTo]);
     if (refs) h.push(`References: ${refs}`);
   }

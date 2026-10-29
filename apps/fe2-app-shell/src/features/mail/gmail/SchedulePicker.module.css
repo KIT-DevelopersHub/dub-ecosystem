@@ -1,0 +1,68 @@
+/* 予約送信 picker shared by the floating compose and the inline reply (SchedulePicker.tsx). */
+.anchor {
+  position: relative;
+  display: inline-flex;
+}
+.trigger {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--dub-radius-full);
+  color: var(--dub-color-brand-600);
+  border: 1px solid var(--dub-color-border-default);
+}
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.trigger:focus-visible {
+  outline: 2px solid var(--dub-color-brand-500);
+  outline-offset: 2px;
+}
+.popover {
+  position: absolute;
+  bottom: calc(100% + var(--dub-space-2));
+  left: 0;
+  width: 280px;
+  padding: var(--dub-space-4);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-strong);
+  box-shadow: var(--dub-shadow-overlay);
+  z-index: var(--dub-zIndex-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.title {
+  font-weight: var(--dub-font-weight-bold);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+.input {
+  height: 36px;
+  padding: 0 var(--dub-space-3);
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  font-family: inherit;
+}
+.hint {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.error {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-danger-600);
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--dub-space-2);
+}

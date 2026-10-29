@@ -177,15 +177,15 @@ describe("0018 backfill", () => {
 });
 
 describe("outbound Bcc", () => {
-  it("validates bcc like cc and rejects it on a scheduled send", () => {
+  it("validates bcc like cc, including on a scheduled send", () => {
     const base = { to: [{ email: "x@partner.example" }], subject: "s", textBody: "b" };
     expect(parseSendMailRequest({ ...base, bcc: [{ email: B }] }).bcc).toEqual([{ email: B }]);
     expect(() => parseSendMailRequest({ ...base, bcc: [{ email: "not-an-email" }] })).toThrow();
     const many = Array.from({ length: 101 }, (_, i) => ({ email: `u${i}@x.example` }));
     expect(() => parseSendMailRequest({ ...base, bcc: many })).toThrow();
-    expect(() =>
-      parseScheduleMailRequest({ ...base, bcc: [{ email: B }], scheduledAt: new Date(Date.now() + 3_600_000).toISOString() }),
-    ).toThrow();
+    const at = new Date(Date.now() + 3_600_000).toISOString();
+    expect(parseScheduleMailRequest({ ...base, bcc: [{ email: B }], scheduledAt: at }).bcc).toEqual([{ email: B }]);
+    expect(() => parseScheduleMailRequest({ ...base, bcc: [{ email: "not-an-email" }], scheduledAt: at })).toThrow();
   });
 
   it("delivers Bcc on the envelope only, never in headers, and shows it in Sent to the sender only", async () => {

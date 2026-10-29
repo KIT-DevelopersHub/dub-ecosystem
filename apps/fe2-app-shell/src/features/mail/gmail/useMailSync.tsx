@@ -23,6 +23,8 @@ interface FlagState {
 }
 /** Background re-sync interval for new inbound mail. */
 export const MAIL_POLL_MS = 60_000;
+/** Delay after a scheduled send's due time before re-syncing (lets the drain run). */
+export const SCHEDULED_DUE_GRACE_MS = 3_000;
 /** Quiet period after the last keystroke before the server search fires. */
 export const SEARCH_DEBOUNCE_MS = 300;
 
@@ -161,6 +163,23 @@ export function useMailSync(): void {
     };
   }, [dispatch]);
 
+  // 予約送信: re-sync shortly after the soonest parked send falls due, so a scheduled
+  // reply/compose moves 予約済み → 送信済み (and folds into its thread) without waiting for
+  // the next poll. Capped so a far-future schedule never arms a huge timer.
+  const nextDue = state.scheduled.reduce<number>((min, s) => {
+    const t = s.status === "scheduled" ? Date.parse(s.scheduledAt) : NaN;
+    return Number.isNaN(t) ? min : Math.min(min, t);
+  }, Number.POSITIVE_INFINITY);
+  useEffect(() => {
+    if (!Number.isFinite(nextDue)) return;
+    const wait = Math.max(0, nextDue - Date.now()) + SCHEDULED_DUE_GRACE_MS;
+    if (wait > MAIL_POLL_MS * 10) return;
+    const timer = setTimeout(() => {
+      if (!busy.current) dispatch({ type: "REQUEST_SYNC" });
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [nextDue, dispatch]);
+
   // Persist flag changes (optimistic): whenever a thread's derived star/archive/trash state
   // diverges from what the server last knew, POST the new state and advance the baseline.
   // Covers EVERY mutation path uniformly (row/toolbar/reading-pane/keyboard/undo) with no
@@ -246,12 +265,15 @@ export function useMailSync(): void {
 /** A folded Sent reply arrives from the list endpoint with body = snippet (whitespace
  *  collapsed to one line, cut at 140 chars), so a long reply rendered jumbled and truncated.
  *  Fetch its full detail to restore the real text (newlines intact). Optimistic local rows
- *  (no server id yet) and failures keep what we have. */
+ *  (no server id yet) and failures keep what we have. Attachment metadata rides along. */
 async function withFullSentBody(api: MailApi, m: MailMsg): Promise<MailMsg> {
   if (m.id.startsWith("msg-")) return m;
   try {
     const detail = await api.getSent(m.id);
-    return detail.id === m.id ? { ...m, body: detail.textBody } : m;
+    if (detail.id !== m.id) return m;
+    // Carry the reply's files too (list rows omit them), so a reply sent — or scheduled and
+    // later delivered — with attachments shows them inside the conversation.
+    return { ...m, body: detail.textBody, ...(detail.attachments && detail.attachments.length > 0 ? { attachments: detail.attachments } : {}) };
   } catch {
     return m;
   }

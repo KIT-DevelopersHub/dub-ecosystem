@@ -29,8 +29,14 @@ import {
 import { MailIcon } from "./icons.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
-import { useMailStore } from "./useMailStore.tsx";
+import { uid, useMailStore } from "./useMailStore.tsx";
 import styles from "./replyNudge.module.css";
+import inlineStyles from "./InlineReply.module.css";
+import { SchedulePicker } from "./SchedulePicker.tsx";
+import { deliver } from "./sendMail.ts";
+import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
+import { AttachmentPreview } from "../AttachmentPreview.tsx";
+import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { formatBytes, parseRecipients, saveBlob } from "../mailApi.tsx";
 
@@ -337,6 +343,10 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const [replyBcc, setReplyBcc] = useState("");
   const [showCcBcc, setShowCcBcc] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement>(null);
+  // Inline-reply attachments: same shared hook/tray/preview as the floating compose.
+  const att = useComposeAttachments();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const candidates = useMemo(() => addressCandidates(state.threads, state.me.email), [state.threads, state.me.email]);
   // Grow the inline reply with its content (capped; scrolls beyond) so a long reply is
   // readable to the end instead of being squeezed into a fixed 4-row box.
@@ -381,9 +391,19 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     });
   };
 
+  const replySubject = /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`;
+  const resetInline = (): void => {
+    setReply("");
+    setReplyCc("");
+    setReplyBcc("");
+    setShowCcBcc(false);
+    att.clear();
+  };
+
   const sendInline = (): void => {
     const body = reply.trim();
     if (body.length === 0 || replyRecipients.length === 0) return;
+    if (att.hasPending) return;
     // Optimistic: append to the open thread immediately. Previously this was ALL that
     // happened — the reply never reached the gateway, so nothing was delivered. Now we
     // also POST it (with In-Reply-To via the parent Message-Id) and re-sync so the sent
@@ -391,23 +411,64 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     const cc = parseRecipients(replyCc).recipients;
     const bcc = parseRecipients(replyBcc).recipients;
     dispatch({ type: "ADD_MESSAGE", threadId: thread.id, body, to: replyRecipients, cc, bcc, subject: thread.subject });
-    setReply("");
-    setReplyCc("");
-    setReplyBcc("");
-    setShowCcBcc(false);
+    const inputs = att.readyInputs();
+    resetInline();
     const req: mail.SendMailRequest = {
       to: replyRecipients,
-      subject: /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`,
+      subject: replySubject,
       textBody: body,
     };
     if (cc.length > 0) req.cc = cc;
     if (bcc.length > 0) req.bcc = bcc;
     if (replyTo.messageId) req.inReplyTo = replyTo.messageId;
+    if (inputs.length > 0) req.attachments = inputs;
     void mailApi
       .send(req)
       .then(() => dispatch({ type: "REQUEST_SYNC" }))
       .catch(() => undefined);
   };
+
+  // 予約送信 for the inline reply: same picker as the compose window. The reply keeps its
+  // thread (inReplyTo), Cc/Bcc and attachments; it is NOT appended to the thread now — it
+  // shows in 予約済み (and below, as a pending chip) and folds into the thread once delivered.
+  // A failed schedule reopens the reply as a floating compose (deliver()), never lost.
+  const scheduleInline = (when: Date): string | null => {
+    const body = reply.trim();
+    if (body.length === 0) return "本文を入力してください";
+    if (replyRecipients.length === 0) return "宛先がありません";
+    if (att.hasPending) return "添付ファイルを処理中です…";
+    const cc = parseRecipients(replyCc).recipients;
+    const bcc = parseRecipients(replyBcc).recipients;
+    const req: mail.ScheduleMailRequest = { to: replyRecipients, subject: replySubject, textBody: body, scheduledAt: when.toISOString() };
+    if (cc.length > 0) req.cc = cc;
+    if (bcc.length > 0) req.bcc = bcc;
+    if (replyTo.messageId) req.inReplyTo = replyTo.messageId;
+    const inputs = att.readyInputs();
+    if (inputs.length > 0) req.attachments = inputs;
+    const fmt = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
+    const compose = {
+      id: uid("compose"),
+      mode: "reply" as const,
+      to: fmt(replyRecipients),
+      cc: fmt(cc),
+      bcc: fmt(bcc),
+      subject: replySubject,
+      body,
+      showCc: cc.length > 0,
+      showBcc: bcc.length > 0,
+      minimized: false,
+      maximized: false,
+      ...(replyTo.messageId ? { inReplyTo: replyTo.messageId } : {}),
+    };
+    resetInline();
+    void deliver(mailApi, dispatch, { kind: "schedule", req, compose });
+    return null;
+  };
+  // Scheduled replies still waiting to go out for THIS thread (any message in it).
+  const threadMessageIds = new Set(thread.messages.map((m) => (m.messageId ?? "").trim().replace(/^<|>$/g, "")).filter(Boolean));
+  const scheduledHere = state.scheduled.filter(
+    (s) => s.status === "scheduled" && s.inReplyTo && threadMessageIds.has(s.inReplyTo.trim().replace(/^<|>$/g, "")),
+  );
 
   return (
     <section
@@ -521,6 +582,25 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           </button>
         </div>
 
+        {scheduledHere.length > 0 ? (
+          <ul className={inlineStyles.scheduledList} data-testid="fe2-mail-thread-scheduled">
+            {scheduledHere.map((s) => (
+              <li key={s.id} className={inlineStyles.scheduledItem} data-testid="fe2-mail-thread-scheduled-item">
+                <MailIcon name="clock" size={14} />
+                <span>{fullDate(s.scheduledAt)} に返信を送信予定</span>
+                {s.attachments && s.attachments.length > 0 ? (
+                  <span className={inlineStyles.scheduledAttach}>
+                    <MailIcon name="paperclip" size={12} /> {s.attachments.length}
+                  </span>
+                ) : null}
+                <button type="button" className={inlineStyles.linkBtn} onClick={() => dispatch({ type: "SET_FOLDER", folder: "scheduled" })}>
+                  予約済みを開く
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
         <div style={{ padding: "0 24px 24px" }}>
           <div style={{ display: "flex", gap: 12, border: "1px solid var(--dub-color-border-strong)", borderRadius: "var(--dub-radius-lg)", padding: 12 }}>
             <Avatar p={state.me} size={32} />
@@ -565,15 +645,35 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                   fontFamily: "inherit",
                 }}
               />
-              {reply ? (
-                <div style={{ marginTop: 8 }}>
+              {att.errors.length > 0 || att.items.length > 0 ? (
+                <div className={inlineStyles.attachments}>
+                  <AttachmentErrors errors={att.errors} onDismiss={att.dismissErrors} />
+                  <AttachmentTray items={att.items} onRemove={att.remove} onOpen={setPreviewId} testId="fe2-mail-inline-attach-tray" />
+                </div>
+              ) : null}
+              <AttachmentPreview items={att.items} openId={previewId} onClose={() => setPreviewId(null)} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                data-testid="fe2-mail-inline-attach-input"
+                onChange={(e) => {
+                  att.addFiles(e.target.files);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+              />
+              {reply || att.items.length > 0 ? (
+                <div className={inlineStyles.actions}>
                   <button
                     type="button"
                     data-testid="fe2-mail-inline-send"
                     onClick={sendInline}
+                    disabled={att.hasPending}
                     style={{
                       all: "unset",
-                      cursor: "pointer",
+                      cursor: att.hasPending ? "not-allowed" : "pointer",
+                      opacity: att.hasPending ? 0.6 : 1,
                       padding: "8px 20px",
                       borderRadius: "var(--dub-radius-full)",
                       background: "var(--dub-color-brand-500)",
@@ -583,6 +683,22 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                     }}
                   >
                     送信
+                  </button>
+                  <SchedulePicker
+                    testIdPrefix="fe2-mail-inline-schedule"
+                    onSchedule={scheduleInline}
+                    disabled={att.hasPending}
+                    disabledReason="添付ファイルを処理中です…"
+                    {...(att.items.length > 0 ? { hint: `添付ファイル ${att.items.length} 件も一緒に予約されます` } : {})}
+                  />
+                  <button
+                    type="button"
+                    aria-label="ファイルを添付"
+                    data-testid="fe2-mail-inline-attach"
+                    className={inlineStyles.iconBtn}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <MailIcon name="paperclip" size={18} />
                   </button>
                 </div>
               ) : null}
