@@ -107,7 +107,7 @@ export type MailAction =
   | { type: "CHECK_ALL"; ids: string[] }
   | { type: "CLEAR_CHECKS" }
   | { type: "ADD_MESSAGE"; threadId: string; body: string; to: MailPerson[]; subject: string }
-  | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; subject: string; body: string; threadId?: string }
+  | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; bcc?: MailPerson[]; subject: string; body: string; threadId?: string }
   | { type: "SEND_STARTED"; pending: PendingSend }
   | { type: "SEND_OK"; pending: PendingSend }
   | { type: "SEND_FAILED"; pending: PendingSend }
@@ -322,6 +322,7 @@ export function reducer(state: MailState, action: MailAction): MailState {
             from: state.me,
             to: action.to,
             ...(action.cc.length > 0 ? { cc: action.cc } : {}),
+            ...(action.bcc && action.bcc.length > 0 ? { bcc: action.bcc } : {}),
             date: new Date().toISOString(),
             body: action.body,
             read: true,

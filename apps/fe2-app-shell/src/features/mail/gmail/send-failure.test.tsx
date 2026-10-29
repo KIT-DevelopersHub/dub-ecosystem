@@ -1,5 +1,5 @@
 // Send failure is visible (送信できませんでした + 再試行), the compose is restored, and the
-// optimistic Sent entry is dropped. Bcc is disabled until SendMailRequest supports it.
+// optimistic Sent entry is dropped. Bcc is sent as an envelope-only recipient list.
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -96,16 +96,58 @@ describe("send failure", () => {
 });
 
 describe("Bcc", () => {
-  it("is disabled (近日対応) and no Bcc field is rendered", async () => {
+  it("opens the Bcc field and includes bcc in the send payload", async () => {
+    const send = vi.fn().mockResolvedValue({ messageId: "m", provider: "resend", acceptedAt: "t" });
     render(
-      <MailApiProvider value={fakeApi()}>
+      <MailApiProvider value={fakeApi({ send })}>
         <GmailApp />
       </MailApiProvider>,
     );
     await userEvent.click(await screen.findByTestId("fe2-mail-compose-open"));
     const toggle = await screen.findByTestId("fe2-mail-compose-bcc-toggle");
-    expect(toggle).toBeDisabled();
-    expect(toggle).toHaveAttribute("title", "Bcc は近日対応");
+    expect(toggle).toBeEnabled();
     expect(screen.queryByTestId("fe2-mail-compose-bcc")).toBeNull();
+    await userEvent.click(toggle);
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-to"), "bob@example.com,");
+    await userEvent.type(await screen.findByTestId("fe2-mail-compose-bcc"), "secret@example.com,");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-subject"), "件名B");
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0]![0]).toMatchObject({
+      to: [{ email: "bob@example.com" }],
+      bcc: [{ email: "secret@example.com" }],
+      subject: "件名B",
+    });
+    expect(send.mock.calls[0]![0].cc).toBeUndefined();
+  });
+
+  it("omits bcc from the payload when the field is empty", async () => {
+    const send = vi.fn().mockResolvedValue({ messageId: "m", provider: "resend", acceptedAt: "t" });
+    render(
+      <MailApiProvider value={fakeApi({ send })}>
+        <GmailApp />
+      </MailApiProvider>,
+    );
+    await composeAndSend();
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0]![0].bcc).toBeUndefined();
+  });
+
+  it("restores the Bcc recipients when the send fails", async () => {
+    const send = vi.fn().mockRejectedValueOnce(new Error("502"));
+    render(
+      <MailApiProvider value={fakeApi({ send })}>
+        <GmailApp />
+      </MailApiProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-mail-compose-open"));
+    await userEvent.click(await screen.findByTestId("fe2-mail-compose-bcc-toggle"));
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-to"), "bob@example.com,");
+    await userEvent.type(await screen.findByTestId("fe2-mail-compose-bcc"), "secret@example.com,");
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    const bar = await screen.findByTestId("fe2-mail-send-notice");
+    await waitFor(() => expect(bar).toHaveAttribute("data-status", "failed"));
+    const win = await screen.findByTestId("fe2-mail-compose-window");
+    expect(within(win).getByTestId("fe2-mail-compose-bcc-field")).toHaveTextContent("secret@example.com");
   });
 });

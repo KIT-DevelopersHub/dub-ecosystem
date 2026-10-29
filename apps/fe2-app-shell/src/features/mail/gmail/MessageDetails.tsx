@@ -20,11 +20,11 @@ export function ownAddresses(thread: MailThreadModel, me: MailPerson): Set<strin
   return own;
 }
 
-/** "自分, 伊藤 由紀, office@example.net" — To then Cc, deduped, own address as 自分. */
+/** "自分, 伊藤 由紀, office@example.net" — To, Cc, then Bcc (sender's own view only), deduped, own address as 自分. */
 export function recipientSummary(msg: MailMsg, own: ReadonlySet<string>): string {
   const seen = new Set<string>();
   const names: string[] = [];
-  for (const p of [...msg.to, ...(msg.cc ?? [])]) {
+  for (const p of [...msg.to, ...(msg.cc ?? []), ...(msg.bcc ?? [])]) {
     const key = norm(p.email);
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -128,6 +128,7 @@ export function MessageDetailsDialog({
     ["返信先", meta?.replyTo && meta.replyTo.length > 0 ? <AddressList people={meta.replyTo} own={own} field="返信先" /> : null],
     ["宛先", msg.to.length > 0 ? <AddressList people={msg.to} own={own} field="To" /> : null],
     ["Cc", msg.cc && msg.cc.length > 0 ? <AddressList people={msg.cc} own={own} field="Cc" /> : null],
+    ["Bcc", msg.bcc && msg.bcc.length > 0 ? <AddressList people={msg.bcc} own={own} field="Bcc" /> : null],
     ["日付", fullDate(msg.date)],
     ["件名", subject],
     ["送信元", meta?.mailedBy ?? null],
