@@ -22,7 +22,7 @@ ALLOWED_ORIGINS = "https://app.developershub.jp,https://dub-fe2-app-shell.develo
 DEFAULT_MAX_BODY_BYTES = "10485760"
 FILES_MAX_BODY_BYTES = "26214400"
 # Login URL written into the account-issue mail (handlers/account-mail.ts).
-APP_BASE_URL = "https://app.developershub.jp"
+APP_BASE_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev"
 
 [[services]]
 binding = "SVC_AUTH"

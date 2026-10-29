@@ -48,7 +48,7 @@ export interface GatewayEnv {
   // production conference LP (handlers/public-lp-visit.ts DEFAULT_LP_ORIGINS).
   LP_BEACON_ORIGINS?: string;
   // Login URL written into the account-issue mail (handlers/account-mail.ts). Default
-  // https://app.developershub.jp.
+  // https://dub-fe2-app-shell.developershub-site.workers.dev (app.developershub.jp has no DNS yet).
   APP_BASE_URL?: string;
   // Rate-limit policy tuning (both optional; defaults 100 / 60_000 ms). Env-tunable
   // without a contract change — clients depend only on the wire signals (§7).
