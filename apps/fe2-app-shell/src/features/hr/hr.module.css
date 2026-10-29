@@ -1,0 +1,222 @@
+/* 人事アプリのローカルスタイル。色・余白・字は @dub/tokens の CSS 変数だけを使う。
+   要素同士は十分な余白を取る (UI spacing principle)。 */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+}
+
+/* ── パイプライン (カンバン) ─────────────────────────────── */
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 1fr);
+  gap: var(--dub-space-4);
+  overflow-x: auto;
+  padding-bottom: var(--dub-space-2);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  min-height: 240px;
+  padding: var(--dub-space-4);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+  border: 1px solid var(--dub-color-border-default);
+}
+
+.columnDrop {
+  border-color: var(--dub-color-border-focus);
+}
+
+.columnHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.columnCount {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  cursor: pointer;
+  text-align: left;
+}
+
+.card:hover,
+.card:focus-visible {
+  border-color: var(--dub-color-border-strong);
+  box-shadow: var(--dub-shadow-md);
+}
+
+.cardName {
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+
+.cardMeta {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+
+.cardActions {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  margin-top: var(--dub-space-1);
+}
+
+.empty {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  padding: var(--dub-space-2) 0;
+}
+
+.closedRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-3);
+}
+
+/* ── 一覧 ─────────────────────────────────────────────── */
+.listRow {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--dub-space-4);
+  width: 100%;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.listRow + .listRow {
+  border-top: 1px solid var(--dub-color-border-default);
+}
+
+.listRow:hover {
+  background: var(--dub-color-surface-sunken);
+}
+
+/* ── 詳細 (ドロワー) ─────────────────────────────────────── */
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+  padding: var(--dub-space-2) 0;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--dub-space-2) var(--dub-space-4);
+  font-size: var(--dub-font-size-sm);
+}
+
+.fields dt {
+  color: var(--dub-color-text-muted);
+}
+
+.fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sectionTitle {
+  font-weight: var(--dub-font-weight-bold);
+  font-size: var(--dub-font-size-sm);
+}
+
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+
+.historyItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  padding-left: var(--dub-space-4);
+  border-left: 2px solid var(--dub-color-border-default);
+}
+
+.historyWhen {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.historyBody {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--dub-space-4);
+}
+
+/* ── オンボーディング ───────────────────────────────────── */
+.obGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--dub-space-5);
+}
+
+.obHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+}
+
+.progress {
+  height: 6px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-sunken);
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  background: var(--dub-color-brand-6);
+  transition: width 0.2s ease;
+}
+
+.obItems {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+
+.note {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}

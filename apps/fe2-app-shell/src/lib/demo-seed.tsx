@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
+import { identity as identityValues, appRegistry, member as memberValues, hr } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
@@ -70,6 +70,10 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
   "calendar:meetings_view",
   "calendar:meetings_edit",
+  // 人事: 応募者の閲覧・選考の操作・参加確定 (admin は identity/0025 で全部持つ)。
+  "hr:read",
+  "hr:write",
+  "hr:admin",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -3307,11 +3311,153 @@ function createMembersStore() {
     },
   ];
 
+
+  // ── 人事 (member-service /members/hr/* の demo) ─────────────────────────────
+  // 段階遷移の規則は @dub/types hr (STAGE_TRANSITIONS) をそのまま使う (本番と同じ判定)。参加確定は
+  // この members 配列に在籍メンバーを足し、オンボーディングは上の onboarding 項目をチェックリストにする。
+  const hrAt = (daysAgo: number): string => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+  type DemoApplicant = hr.Applicant;
+  const applicant = (
+    id: string, name: string, stage: hr.ApplicantStage, daysAgo: number,
+    extra: Partial<DemoApplicant> = {},
+  ): DemoApplicant => ({
+    id, name, nameKana: null, email: null, department: null, grade: null, desiredTeamId: null, source: "公開フォーム",
+    motivation: null, stage, memberId: null, participationId: null, version: 1, createdBy: ME_ID,
+    createdAt: hrAt(daysAgo), updatedAt: hrAt(daysAgo), ...extra,
+  });
+  // 参加確定済み (オンボーディング中) の新メンバー。名簿にも在籍として入っている。
+  members.push(mk("member_hr1", "小林 葵", "メンバー", "added", ["team_dev"], members.length, "aoi@example.com", "情報工学科", "1年"));
+  const applicants: DemoApplicant[] = [
+    applicant("app_demo_1", "青木 陽向", "applied", 1, { nameKana: "あおき ひなた", email: "hinata@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", motivation: "運営ツールの開発に関わりたいです。" }),
+    applicant("app_demo_2", "井上 さくら", "applied", 2, { department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", source: "紹介" }),
+    applicant("app_demo_3", "宇野 蒼", "screening", 4, { department: "機械工学科", grade: "1年", desiredTeamId: "team_ops", email: "sou@example.com" }),
+    applicant("app_demo_4", "江口 結衣", "interview", 6, { department: "建築学科", grade: "2年", desiredTeamId: "team_venue", source: "説明会" }),
+    applicant("app_demo_5", "大西 湊", "offered", 9, { nameKana: "おおにし みなと", email: "minato@example.com", department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", motivation: "ハッカソンの運営をやってみたい。" }),
+    applicant("app_demo_6", "川村 樹", "rejected", 12, { department: "経営情報学科", grade: "3年" }),
+    applicant("app_demo_7", "小林 葵", "joined", 14, { email: "aoi@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", memberId: "member_hr1", version: 5 }),
+  ];
+  const hrEvents: hr.ApplicantEvent[] = [];
+  let hrSeq = 0;
+  const hrEvent = (applicantId: string, kind: hr.ApplicantEventKind, fromStage: hr.ApplicantStage | null, toStage: hr.ApplicantStage | null, bodyText: string | null, at: string) =>
+    hrEvents.push({ id: `hre_demo_${++hrSeq}`, applicantId, kind, fromStage, toStage, body: bodyText, actorId: ME_ID, createdAt: at });
+  for (const a of applicants) {
+    hrEvent(a.id, "created", null, "applied", null, a.createdAt);
+    const path = ["applied", "screening", "interview", "offered"] as hr.ApplicantStage[];
+    const upto = a.stage === "joined" ? 4 : path.indexOf(a.stage);
+    for (let i = 1; i <= upto && i < path.length; i++) hrEvent(a.id, "stage", path[i - 1]!, path[i]!, null, a.createdAt);
+    if (a.stage === "rejected") hrEvent(a.id, "stage", "applied", "rejected", "今回は見送り", a.createdAt);
+    if (a.stage === "joined") hrEvent(a.id, "joined", "offered", "joined", "名簿に新規追加", a.createdAt);
+  }
+  hrEvent("app_demo_4", "note", null, null, "面談日: 来週火曜 18:00（オンライン）", hrAt(5));
+  const obChecks = new Set<string>(["member_hr1|onb_demo_1", "member_hr1|onb_demo_2"]);
+
+  function hrProgress(memberId: string): hr.OnboardingProgress | null {
+    const a = applicants.find((x) => x.memberId === memberId && x.stage === "joined");
+    const person = members.find((m) => m.id === memberId);
+    if (!person) return null;
+    const checked = onboarding.filter((o) => obChecks.has(`${memberId}|${o.id}`)).map((o) => o.id);
+    return {
+      memberId, name: person.name, applicantId: a?.id ?? null, joinedAt: a?.updatedAt ?? null, checkedItemIds: checked,
+      total: onboarding.length, done: checked.length, completed: onboarding.length > 0 && checked.length === onboarding.length,
+    };
+  }
+
+  function hrHandle(method: string, pathname: string, body: any): Response | null {
+    if (!pathname.startsWith("/api/v1/members/hr/")) return null;
+    const err = (code: string, status: number) => json({ error: { code, message: code, retryable: false } }, status);
+    const detail = (a: DemoApplicant) => ({ applicant: { ...a }, events: hrEvents.filter((e) => e.applicantId === a.id).map((e) => ({ ...e })) });
+    const bump = (a: DemoApplicant) => { a.version += 1; a.updatedAt = isoNow(); };
+    if (method === "GET" && pathname === "/api/v1/members/hr/applicants") {
+      return json({ applicants: [...applicants].sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1)).map((a) => ({ ...a })) });
+    }
+    if (method === "POST" && pathname === "/api/v1/members/hr/applicants") {
+      const name = String(body?.name ?? "").trim();
+      if (!name) return err("VALIDATION_FAILED", 400);
+      const a = applicant(nid("app"), name, "applied", 0, {
+        nameKana: body?.nameKana ?? null, email: body?.email ?? null, department: body?.department ?? null, grade: body?.grade ?? null,
+        desiredTeamId: body?.desiredTeamId ?? null, source: body?.source ?? null, motivation: body?.motivation ?? null,
+      });
+      a.createdAt = isoNow(); a.updatedAt = a.createdAt;
+      applicants.push(a);
+      hrEvent(a.id, "created", null, "applied", null, a.createdAt);
+      return json(detail(a), 201);
+    }
+    if (method === "GET" && pathname === "/api/v1/members/hr/onboarding") {
+      const joined = applicants.filter((a) => a.stage === "joined" && a.memberId);
+      return json({
+        items: onboarding.map((o) => ({ id: o.id, title: o.title, description: o.description, url: o.url })),
+        members: joined.map((a) => hrProgress(a.memberId!)).filter((p): p is hr.OnboardingProgress => p !== null),
+      });
+    }
+    const check = /^\/api\/v1\/members\/hr\/onboarding\/([^/]+)\/items\/([^/]+)$/.exec(pathname);
+    if (check && method === "PUT") {
+      const [, memberId, itemId] = check as unknown as [string, string, string];
+      if (!onboarding.some((o) => o.id === itemId)) return err("MEMBER_ONBOARDING_ITEM_NOT_FOUND", 404);
+      if (body?.checked) obChecks.add(`${memberId}|${itemId}`);
+      else obChecks.delete(`${memberId}|${itemId}`);
+      const p = hrProgress(memberId);
+      return p ? json(p) : err("MEMBER_NOT_FOUND", 404);
+    }
+    const m = /^\/api\/v1\/members\/hr\/applicants\/([^/]+)(?:\/(stage|notes|join))?$/.exec(pathname);
+    if (!m) return null;
+    const a = applicants.find((x) => x.id === m[1]);
+    if (!a) return err("HR_APPLICANT_NOT_FOUND", 404);
+    const action = m[2];
+    if (!action && method === "GET") return json(detail(a));
+    if (!action && method === "DELETE") {
+      applicants.splice(applicants.indexOf(a), 1);
+      return json({ ok: true });
+    }
+    if (!action && method === "PATCH") {
+      if (body?.expectedVersion !== a.version) return err("HR_VERSION_CONFLICT", 409);
+      Object.assign(a, Object.fromEntries(Object.entries(body ?? {}).filter(([k]) => k !== "expectedVersion")));
+      bump(a);
+      return json({ ...a });
+    }
+    if (action === "stage" && method === "POST") {
+      if (body?.expectedVersion !== a.version) return err("HR_VERSION_CONFLICT", 409);
+      if (!hr.isApplicantStage(body?.stage) || !hr.canTransition(a.stage, body.stage)) return err("HR_INVALID_TRANSITION", 409);
+      const from = a.stage;
+      a.stage = body.stage;
+      bump(a);
+      hrEvent(a.id, "stage", from, a.stage, body?.note ?? null, isoNow());
+      return json(detail(a));
+    }
+    if (action === "notes" && method === "POST") {
+      const text = String(body?.body ?? "").trim();
+      if (!text) return err("VALIDATION_FAILED", 400);
+      hrEvent(a.id, "note", null, null, text, isoNow());
+      return json(detail(a), 201);
+    }
+    if (action === "join" && method === "POST") {
+      if (a.stage !== "offered") return err("HR_INVALID_TRANSITION", 409);
+      if (body?.expectedVersion !== a.version) return err("HR_VERSION_CONFLICT", 409);
+      let memberId = body?.memberId as string | undefined;
+      if (memberId) {
+        const p = members.find((x) => x.id === memberId);
+        if (!p) return err("VALIDATION_FAILED", 400);
+        if (p.status === "invited" || p.status === "considering") p.status = "added";
+      } else {
+        const created = mk(nid("member"), a.name, "メンバー", "added", a.desiredTeamId ? [a.desiredTeamId] : [], members.length, a.email, a.department, a.grade);
+        members.push(created);
+        memberId = created.id;
+      }
+      a.stage = "joined";
+      a.memberId = memberId;
+      bump(a);
+      hrEvent(a.id, "joined", "offered", "joined", body?.memberId ? "既存の名簿に紐付け" : "名簿に新規追加", isoNow());
+      return json({ applicant: { ...a }, memberId });
+    }
+    return null;
+  }
+
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
 
   const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
   function handle(method: string, pathname: string, _url: URL, body: any): Response | null {
+    const hrRes = hrHandle(method, pathname, body);
+    if (hrRes) return hrRes;
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
     // canonical team list other apps read
     if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
