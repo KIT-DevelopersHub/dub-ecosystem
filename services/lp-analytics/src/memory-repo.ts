@@ -112,6 +112,10 @@ export class InMemoryLpRepo implements LpRepo {
     Object.assign(o, { status: "paid", paidAt, stripeSessionId: o.stripeSessionId ?? sessionId });
     return true;
   }
+  async markOrderPreview(id: string) {
+    const o = this.orders.find((x) => x.id === id);
+    if (o) o.preview = true;
+  }
   async setOrderPaymentMethod(id: string, method: string) {
     const o = this.orders.find((x) => x.id === id);
     if (o) o.paymentMethod = method;
