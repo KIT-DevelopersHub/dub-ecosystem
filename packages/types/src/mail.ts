@@ -13,7 +13,34 @@ export interface ListMailMessagesQuery extends CursorQuery {
   // Trimmed; blank = no search; max 200 chars. Narrows within the caller's account scope
   // only (never widens visibility). Combines with cursor/limit for paging the results.
   q?: string;
+  // ADDITIVE (folder views): page by CONVERSATION for one mailbox view, with every filter
+  // (blocked senders, the viewer's archive/trash/star/purge flags, mine/others) applied in
+  // SQL BEFORE the limit, so each page holds exactly `limit` conversations (last page
+  // excepted). The response then carries `total` (conversations in the view). Absent = the
+  // legacy message-level list (no folder filtering), kept for older clients.
+  folder?: MailFolderView;
 }
+
+/** Server-side mailbox views for GET /mail/messages?folder=. `all` = every view except
+ *  Trash and ブロック済み (the search scope). */
+export type MailFolderView = "inbox" | "mine" | "others" | "starred" | "archive" | "trash" | "blocked" | "all";
+export const MAIL_FOLDER_VIEWS: readonly MailFolderView[] = ["inbox", "mine", "others", "starred", "archive", "trash", "blocked", "all"];
+
+/** GET /mail/messages?folder= response: a conversation page. `items` are the in-scope
+ *  messages of the page's conversations; `total` counts conversations in the whole view. */
+export interface MailMessagePage {
+  items: MailMessageListItem[];
+  nextCursor: string | null;
+  total?: number;
+}
+
+/** GET /mail/counts: conversations per view, and how many have unread mail for the viewer
+ *  (ブロック済み never counts as unread). */
+export interface MailFolderCount {
+  total: number;
+  unread: number;
+}
+export type MailFolderCounts = Record<Exclude<MailFolderView, "all">, MailFolderCount>;
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
 // SINGLE source of truth for the query-parameter *names* mail-gateway's messages list
@@ -24,7 +51,7 @@ export interface ListMailMessagesQuery extends CursorQuery {
 // separately spec'd — documenting it is a noted follow-up). See
 // docs/api-contracts/_wire-contract-enforcement.md.
 export const MAIL_WIRE = {
-  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "limit", "q", "threadId"] },
+  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "folder", "limit", "q", "threadId"] },
 } as const;
 
 // Compile-time tie: every query key the descriptor lists must be a real key of the typed
@@ -129,6 +156,11 @@ export interface MailMessageListItem extends MailMessage, MailMessageState {
   // ADDITIVE: Cc recipients of a received message (mail_inbound.cc_json, 0012). Omitted when
   // the message had none or was stored before 0012.
   cc?: MailAddress[];
+  // ADDITIVE: true when the sender matches the VIEWER's own block list (mail_sender_blocks,
+  // 0021). Derived per request, never stored on the message, so unblocking restores it.
+  // Clients keep blocked mail out of the inbox / unread counts (ブロック済み view only).
+  // Absent from older gateways — treat absent as false.
+  blocked?: boolean;
 }
 /** Detail view: list item plus the full body. Inbound persists text; htmlBody is
  *  optional (present only when a message carried an HTML part) and MUST be sanitized
@@ -278,6 +310,25 @@ export interface MailThreadFlagsPatch {
    *  false = clear it (undo). Absent = leave noReplyAt unchanged. */
   noReply?: boolean;
 }
+
+// ---- sender block list (この送信者をブロック, 0021) ----
+// Personal (per mailbox owner) list of blocked sender addresses / whole domains. Blocking
+// never deletes mail: blocked messages stay stored and are only flagged `blocked` on read.
+export type MailSenderBlockKind = "address" | "domain";
+/** One entry of the signed-in user's block list. `value` is lowercased: a full address for
+ *  kind "address", a bare domain ("example.com") for kind "domain". */
+export interface MailSenderBlock {
+  value: string;
+  kind: MailSenderBlockKind;
+  createdAt: ISODateTime;
+}
+/** POST /mail/blocks body. `kind` defaults from the value ("@" present -> address). */
+export interface MailSenderBlockRequest {
+  value: string;
+  kind?: MailSenderBlockKind;
+}
+/** Per-user cap on block-list entries (the API answers 409 beyond it). */
+export const MAIL_SENDER_BLOCK_LIMIT = 500;
 
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----
 export interface Mailbox {

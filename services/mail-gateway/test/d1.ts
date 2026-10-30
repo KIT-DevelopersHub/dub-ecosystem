@@ -36,6 +36,8 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0018_inbound_delivery.sql"),
   join(HERE, "../db/0019_mail_provider_event.sql"),
   join(HERE, "../db/0020_scheduled_attachments_bcc.sql"),
+  join(HERE, "../db/0021_sender_blocks.sql"),
+  join(HERE, "../db/0022_sender_blocks_kind_index.sql"),
 ];
 
 function norm(v: unknown): unknown {

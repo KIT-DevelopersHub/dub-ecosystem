@@ -22,6 +22,7 @@ export function inboxItemsToThreads(items: mail.MailMessageListItem[]): MailThre
       body: it.snippet,
       read: it.read,
       ...(it.mine === false ? { mine: false } : {}),
+      ...(it.blocked ? { blocked: true } : {}),
     };
     const existing = byThread.get(it.threadId);
     if (existing) {
@@ -118,6 +119,7 @@ export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
     body: m.textBody,
     read: m.read,
     ...(m.mine === false ? { mine: false } : {}),
+    ...(m.blocked ? { blocked: true } : {}),
     ...(m.attachments && m.attachments.length > 0 ? { attachments: m.attachments } : {}),
     ...(m.headerMeta ? { headerMeta: m.headerMeta } : {}),
   }));

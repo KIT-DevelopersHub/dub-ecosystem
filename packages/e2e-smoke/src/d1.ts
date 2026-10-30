@@ -40,7 +40,27 @@ export function allSchemas(): string[] {
     sqlFile("../../../services/mail-gateway/db/0002_inbound_body_read.sql"),
     sqlFile("../../../services/mail-gateway/db/0003_freeq_outbox.sql"),
     sqlFile("../../../services/mail-gateway/db/0004_send_body.sql"),
+    // Every forward-only mail migration, in id order (same list as
+    // services/mail-gateway/test/d1.ts): the real send core now writes columns added after
+    // 0006 (e.g. 0018 bcc_json), so a partial schema fails the smoke's outbox step.
+    sqlFile("../../../services/mail-gateway/db/0005_attachments.sql"),
     sqlFile("../../../services/mail-gateway/db/0006_owner_scope.sql"),
+    sqlFile("../../../services/mail-gateway/db/0007_attachment_status.sql"),
+    sqlFile("../../../services/mail-gateway/db/0008_user_flags.sql"),
+    sqlFile("../../../services/mail-gateway/db/0009_user_flags_purged.sql"),
+    sqlFile("../../../services/mail-gateway/db/0010_scheduled_send.sql"),
+    sqlFile("../../../services/mail-gateway/db/0011_user_flags_no_reply.sql"),
+    sqlFile("../../../services/mail-gateway/db/0012_inbound_cc.sql"),
+    sqlFile("../../../services/mail-gateway/db/0013_inbound_header_meta.sql"),
+    sqlFile("../../../services/mail-gateway/db/0014_inbound_raw_eml.sql"),
+    sqlFile("../../../services/mail-gateway/db/0015_row_count_snapshot.sql"),
+    sqlFile("../../../services/mail-gateway/db/0016_soft_delete.sql"),
+    sqlFile("../../../services/mail-gateway/db/0017_mail_canary_probe.sql"),
+    sqlFile("../../../services/mail-gateway/db/0018_inbound_delivery.sql"),
+    sqlFile("../../../services/mail-gateway/db/0019_mail_provider_event.sql"),
+    sqlFile("../../../services/mail-gateway/db/0020_scheduled_attachments_bcc.sql"),
+    sqlFile("../../../services/mail-gateway/db/0021_sender_blocks.sql"),
+    sqlFile("../../../services/mail-gateway/db/0022_sender_blocks_kind_index.sql"),
   ];
 }
 

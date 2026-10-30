@@ -90,8 +90,9 @@ function StopClick({ children, onClick, label, testId }: { children: JSX.Element
   );
 }
 
-/** Gmail-style "1–50" range with < > at the toolbar's right edge. Cursor-paged, so there is
- *  no total: the range is (page index × size) + rows fetched on this page. */
+/** Gmail-style "1–50 / 123" range with < > at the toolbar's right edge. Cursor-paged by
+ *  conversation: the range is (page index × size) + conversations on this page, and the
+ *  total is the server view's conversation count when the gateway reports it. */
 function PageNav({ pager, source, loading }: { pager: PagerState; source: PageSource; loading: boolean }): JSX.Element | null {
   const { dispatch } = useMailStore();
   if (pager.count === 0 && pager.stack.length === 0) return null;
@@ -121,6 +122,7 @@ function PageNav({ pager, source, loading }: { pager: PagerState; source: PageSo
     <nav aria-label="ページ移動" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
       <span data-testid="fe2-mail-page-range" aria-live="polite" style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-secondary)", marginRight: 4 }}>
         {pager.count > 0 ? `${start}–${end}` : `${start - 1}`}
+        {typeof pager.total === "number" ? ` / ${pager.total.toLocaleString("ja-JP")}` : null}
       </span>
       {btn("prev", loading || pager.stack.length === 0)}
       {btn("next", loading || pager.next === null)}
@@ -671,8 +673,12 @@ export function ThreadList(): JSX.Element {
           }}
         >
           <MailIcon name="mail-open" size={48} style={{ opacity: 0.4 }} />
-          <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>メールはありません</div>
-          <div style={{ fontSize: "var(--dub-font-size-sm)" }}>該当するスレッドが見つかりませんでした。</div>
+          <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>
+            {state.folder === "blocked" ? "ブロック済みのメールはありません" : "メールはありません"}
+          </div>
+          <div style={{ fontSize: "var(--dub-font-size-sm)" }}>
+            {state.folder === "blocked" ? "ブロックした送信者からのメールはここに表示されます。" : "該当するスレッドが見つかりませんでした。"}
+          </div>
         </div>
       ) : (
         <div role="rowgroup" style={{ flex: 1, overflowY: "auto" }}>

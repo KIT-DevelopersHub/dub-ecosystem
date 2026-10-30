@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
+import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
@@ -584,6 +584,12 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
     subject: "懇親会会場の候補（CC共有）", snippet: "懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。",
     receivedAt: daysAgoIso(2), read: false, mine: true,
   },
+  {
+    // Promotional sender to try 送信者ブロック on in the preview (この送信者をブロック).
+    id: "msg_5", messageId: "<m5@demo>", threadId: "thr_5", from: { email: "news@deals-mail.example", name: "お得情報配信" },
+    to: [{ email: "demo@developershub.jp" }], subject: "【期間限定】今だけ全品50%オフのご案内", snippet: "いつもご利用ありがとうございます。今週末限定のセール情報をお届けします。",
+    receivedAt: daysAgoIso(0.1), read: false, mine: true,
+  },
 ];
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
@@ -617,11 +623,17 @@ const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
   },
 };
 
+MAIL_DETAIL.msg_5 = {
+  ...MAIL_LIST[4]!,
+  textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
+};
+
 const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
   thr_4: { id: "thr_4", messages: [MAIL_DETAIL.msg_4!] },
+  thr_5: { id: "thr_5", messages: [MAIL_DETAIL.msg_5!] },
 };
 
 // ── demo accounts (per-account mail scope) ────────────────────────────────────
@@ -797,6 +809,12 @@ function firstLine(text: string, max = 140): string {
   return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
 }
 
+const BULK_SENDERS: mail.MailAddress[] = [
+  { email: "news@example.com", name: "お知らせ配信" },
+  { email: "sale@shop-a.example", name: "ショップA セール情報" },
+  { email: "weekly@mag.spam-b.example", name: "マガジンB 週刊号" },
+];
+
 function createMailStore() {
   // Per-account Inbox + Sent, mirroring the server's owner scope: each account sees ONLY
   // its own mail. received[accountId] is seeded (cloned) from the account's inbox so the
@@ -850,7 +868,9 @@ function createMailStore() {
             id: `msg_bulk_${i + 1}`,
             messageId: `<bulk-${i + 1}@demo>`,
             threadId: `thr_bulk_${i + 1}`,
-            from: { email: "news@example.com", name: "お知らせ配信" },
+            // Every 3rd / 5th bulk mail comes from one of two promotional senders, so blocking
+            // them (この送信者をブロック / ドメインごとブロック) can be tried against paging.
+            from: BULK_SENDERS[i % 3 === 1 ? 1 : i % 5 === 2 ? 2 : 0]!,
             to: [{ email: "demo@developershub.jp" }],
             subject: `過去のお知らせ #${i + 1}`,
             snippet: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
@@ -1017,13 +1037,92 @@ function createMailStore() {
     const readInbox: mail.MailMessageDetail[] = readable.flatMap((a) => inboxOf(a.id).map((m) => Object.assign(m, { mine: a.id === me.id })));
     const readSent: mail.MailSentDetail[] = (oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id).map((m) => ({ ...m, mine: a.id === me.id }))) : outbox.map((m) => ({ ...m, mine: true })));
 
+    // Sender block list (0021): the gateway flags (never filters) mail whose sender is on
+    // the VIEWER's list. Copies only — the stored rows stay untouched, so unblocking restores.
+    const isBlocked = demoBlockMatcher(loadBlocks());
+    const stampBlocked = <T extends mail.MailMessageListItem>(m: T): T => (isBlocked(m.from.email) ? { ...m, blocked: true } : m);
+
     // received: list / detail / mark-read (read state persists in-session). Scoped to the
     // account, or every account under oversight (mail:read_all).
+    // Folder views (gateway parity with GET /mail/messages?folder= + GET /mail/counts): paged by
+    // CONVERSATION with blocked senders and this account's flags applied BEFORE the limit, so
+    // every page is full. Same rules as services/mail-gateway/src/folders.ts.
+    const folderThreads = (source: mail.MailMessageDetail[]) => {
+      const flags = new Map(loadFlags().map((f) => [f.threadId, f]));
+      const byThread = new Map<string, mail.MailMessageDetail[]>();
+      for (const m of source) byThread.set(m.threadId, [...(byThread.get(m.threadId) ?? []), m]);
+      return [...byThread.entries()].map(([threadId, msgs]) => {
+        const f = flags.get(threadId);
+        return {
+          threadId,
+          msgs,
+          last: msgs.reduce((a, m) => (m.receivedAt > a ? m.receivedAt : a), ""),
+          blocked: msgs.every((m) => isBlocked(m.from.email)),
+          mine: msgs.some((m) => m.mine !== false),
+          unread: msgs.some((m) => !m.read && m.mine !== false),
+          starred: f?.starred ?? false,
+          archived: f?.archived ?? false,
+          trashed: f?.trashed ?? false,
+          purged: f?.purged ?? false,
+        };
+      });
+    };
+    type FolderThread = ReturnType<typeof folderThreads>[number];
+    const inView = (t: FolderThread, view: string): boolean => {
+      if (t.purged) return false;
+      const inbox = !t.trashed && !t.archived && !t.blocked;
+      switch (view) {
+        case "inbox":
+          return inbox;
+        case "mine":
+          return inbox && t.mine;
+        case "others":
+          return inbox && !t.mine;
+        case "starred":
+          return !t.trashed && t.starred && !t.blocked;
+        case "archive":
+          return !t.trashed && t.archived && !t.blocked;
+        case "trash":
+          return t.trashed;
+        case "blocked":
+          return !t.trashed && t.blocked;
+        default:
+          return !t.trashed && !t.blocked; // all
+      }
+    };
+    if (method === "GET" && pathname === "/api/v1/mail/counts") {
+      const ts = folderThreads(readInbox);
+      const views = ["inbox", "mine", "others", "starred", "archive", "trash", "blocked"] as const;
+      const out = {} as mail.MailFolderCounts;
+      for (const v of views) {
+        const hit = ts.filter((t) => inView(t, v));
+        out[v] = { total: hit.length, unread: v === "blocked" ? 0 : hit.filter((t) => t.unread).length };
+      }
+      return json(out);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/messages" && url.searchParams.get("folder")) {
+      const view = url.searchParams.get("folder")!;
+      const limit = Math.max(1, Number(url.searchParams.get("limit")) || 50);
+      const cursor = url.searchParams.get("cursor");
+      const ts = folderThreads(searchBy(readInbox, url))
+        .filter((t) => inView(t, view))
+        .sort((a, b) => b.last.localeCompare(a.last) || b.threadId.localeCompare(a.threadId));
+      const start = cursor ? ts.findIndex((t) => t.threadId === cursor) + 1 : 0;
+      const slice = ts.slice(start, start + limit);
+      const items = slice.flatMap((t) =>
+        t.msgs.map(({ textBody, htmlBody, ...li }) => {
+          void textBody;
+          void htmlBody;
+          return stampBlocked(li);
+        }),
+      );
+      return json({ items, nextCursor: start + limit < ts.length ? (slice.at(-1)?.threadId ?? null) : null, total: ts.length } satisfies mail.MailMessagePage);
+    }
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
       const items: mail.MailMessageListItem[] = searchBy(readInbox, url).map(({ textBody, htmlBody, ...li }) => {
         void textBody;
         void htmlBody;
-        return li;
+        return stampBlocked(li);
       });
       return json(pageBy(items, url));
     }
@@ -1031,7 +1130,7 @@ function createMailStore() {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
-        return found ? json(found) : notFound(`GET ${pathname}`);
+        return found ? json(stampBlocked(found)) : notFound(`GET ${pathname}`);
       }
     }
     if (method === "POST") {
@@ -1048,7 +1147,7 @@ function createMailStore() {
       const m = /^\/api\/v1\/mail\/threads\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const threadId = decodeURIComponent(m[1]!);
-        const messages = readInbox.filter((r) => r.threadId === threadId);
+        const messages = readInbox.filter((r) => r.threadId === threadId).map(stampBlocked);
         return messages.length > 0 ? json({ id: threadId, messages } satisfies mail.MailThread) : notFound(`GET ${pathname}`);
       }
     }
@@ -1196,6 +1295,39 @@ function createMailStore() {
       }
     }
 
+    // 送信者ブロック (0021): per-account block list in localStorage, with the gateway's
+    // validation (lowercase, no own address / org domain, cap) so the preview behaves alike.
+    if (method === "GET" && pathname === "/api/v1/mail/blocks") {
+      return json({ items: loadBlocks() });
+    }
+    if (method === "POST" && pathname === "/api/v1/mail/blocks") {
+      const req = (body ?? {}) as Partial<mail.MailSenderBlockRequest>;
+      const raw = typeof req.value === "string" ? req.value.trim().toLowerCase() : "";
+      const kind: mail.MailSenderBlockKind = req.kind ?? (raw.includes("@") && !raw.startsWith("@") ? "address" : "domain");
+      const value = kind === "domain" ? raw.slice(raw.lastIndexOf("@") + 1) : raw;
+      const invalid = (msg: string) => json({ error: { code: "MAIL_INVALID_REQUEST", message: msg, retryable: false } }, 400);
+      if (!value || (kind === "address" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) || (kind === "domain" && !value.includes("."))) return invalid("invalid address or domain");
+      if (kind === "domain" && (value === "developershub.jp" || value.endsWith(".developershub.jp"))) return invalid("cannot block the organization domain");
+      if (kind === "address" && value === me.email.toLowerCase()) return invalid("cannot block your own address");
+      const list = loadBlocks();
+      const existing = list.find((b) => b.value === value);
+      if (existing) return json(existing);
+      if (list.length >= mailValues.MAIL_SENDER_BLOCK_LIMIT) return json({ error: { code: "MAIL_BLOCK_LIMIT", message: "block list is full", retryable: false } }, 409);
+      const created: mail.MailSenderBlock = { value, kind, createdAt: new Date().toISOString() };
+      saveBlocks([created, ...list]);
+      return json(created, 201);
+    }
+    if (method === "DELETE") {
+      const m = /^\/api\/v1\/mail\/blocks\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const value = decodeURIComponent(m[1]!).trim().toLowerCase().replace(/^@/, "");
+        const list = loadBlocks();
+        if (!list.some((b) => b.value === value)) return json({ error: { code: "MAIL_BLOCK_NOT_FOUND", message: `not blocked: ${value}`, retryable: false } }, 404);
+        saveBlocks(list.filter((b) => b.value !== value));
+        return json({ value, blocked: false });
+      }
+    }
+
     // 改善#8: per-user thread flags (star/archive/trash), persisted in localStorage so they
     // SURVIVE a reload in the demo (mirrors the real gateway persisting them server-side).
     if (method === "GET" && pathname === "/api/v1/mail/flags") {
@@ -1252,6 +1384,37 @@ function saveFlags(flags: mail.MailThreadFlags[]): void {
   } catch {
     /* ignore */
   }
+}
+
+// Sender block list for the demo (localStorage, per account — mirrors mail_sender_blocks'
+// per-owner scope). Matching mirrors the gateway: exact address, or domain / parent domain.
+const BLOCKS_KEY = "dub-demo-mail-blocks";
+function loadBlocks(): mail.MailSenderBlock[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(`${BLOCKS_KEY}:${currentAccount().id}`);
+    return raw ? (JSON.parse(raw) as mail.MailSenderBlock[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveBlocks(blocks: mail.MailSenderBlock[]): void {
+  try {
+    globalThis.localStorage?.setItem(`${BLOCKS_KEY}:${currentAccount().id}`, JSON.stringify(blocks));
+  } catch {
+    /* ignore */
+  }
+}
+function demoBlockMatcher(blocks: readonly mail.MailSenderBlock[]): (email: string) => boolean {
+  return (email) => {
+    const e = email.trim().toLowerCase();
+    if (blocks.some((b) => b.kind === "address" && b.value === e)) return true;
+    let d = e.slice(e.lastIndexOf("@") + 1);
+    while (d.includes(".")) {
+      if (blocks.some((b) => b.kind === "domain" && b.value === d)) return true;
+      d = d.slice(d.indexOf(".") + 1);
+    }
+    return false;
+  };
 }
 
 // ── identity / roster (admin RBAC console) ────────────────────────────────────
@@ -4084,6 +4247,7 @@ type DemoTicketOrder = {
   answers: { fieldId: string; label: string; value: string }[];
   createdAt: string;
   paidAt: string | null;
+  paymentMethod: string | null;
 };
 
 function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
@@ -4142,6 +4306,7 @@ function createLpTicketsStore() {
     enabled: false,
     ctaEnabled: false,
     paymentReady: false,
+    paymentMethods: ["card", "paypay"] as ("card" | "paypay")[],
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
     fields: [
@@ -4200,6 +4365,8 @@ function createLpTicketsStore() {
       ],
       createdAt,
       paidAt: status === "paid" ? createdAt : null,
+      // 有料で支払い済みだけ手段あり（カードと PayPay を交互に）。無料・未確定は null。
+      paymentMethod: status === "paid" && items.some((it) => it.unitPriceJpy > 0) ? (i % 2 === 0 ? "paypay" : "card") : null,
     };
   });
 

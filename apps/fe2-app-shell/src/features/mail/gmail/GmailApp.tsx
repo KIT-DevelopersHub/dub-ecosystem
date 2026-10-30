@@ -9,10 +9,12 @@ import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
 import { ScheduledList } from "./ScheduledList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
+import { BlockNoticeBar, BlockedSendersPanel } from "./BlockedSenders.tsx";
+import blockStyles from "./blocks.module.css";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
-import { SHARED_FOLDERS, hasSharedMail, inFolder, threadUnread } from "./mailModel.ts";
-import { MailStoreProvider, selectVisible, useMailStore } from "./useMailStore.tsx";
+import { SHARED_FOLDERS } from "./mailModel.ts";
+import { MailStoreProvider, folderUnread, selectVisible, showSharedFolders, useMailStore } from "./useMailStore.tsx";
 import { useMailSync } from "./useMailSync.tsx";
 import { deliver } from "./sendMail.ts";
 import { useMailApi } from "../MailProvider.tsx";
@@ -264,9 +266,10 @@ function GmailBody(): JSX.Element {
   // A purged (完全に削除) thread is never shown, even if it was the open one when a reload's
   // APPLY_FLAGS marked it purged — fall back to the list.
   const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId && !t.purged) : undefined;
-  const unreadInbox = state.threads.filter((t) => inFolder(t, "inbox") && threadUnread(t)).length;
+  const unreadInbox = folderUnread(state, "inbox");
   // The sidebar hides 自分宛て / 自分宛て以外 once no shared mail remains — don't strand the view on one.
-  const sharedHidden = state.labelFilter === null && SHARED_FOLDERS.has(state.folder) && !hasSharedMail(state.threads);
+  // Only once the server counts are in: a 自分宛て page alone never contains shared mail.
+  const sharedHidden = state.counts !== null && state.labelFilter === null && SHARED_FOLDERS.has(state.folder) && !showSharedFolders(state);
   useEffect(() => {
     if (sharedHidden) dispatch({ type: "SET_FOLDER", folder: "inbox" });
   }, [sharedHidden, dispatch]);
@@ -295,6 +298,11 @@ function GmailBody(): JSX.Element {
           <ScheduledList />
         ) : openThread ? (
           <ReadingPane thread={openThread} labels={state.labels} />
+        ) : state.folder === "blocked" && !state.labelFilter ? (
+          <div className={blockStyles.blockedColumn}>
+            <BlockedSendersPanel />
+            <ThreadList />
+          </div>
         ) : (
           <ThreadList />
         )}
@@ -304,6 +312,7 @@ function GmailBody(): JSX.Element {
       ))}
       <UndoToast />
       <SendNoticeBar />
+      <BlockNoticeBar />
       <Shortcuts />
     </main>
   );

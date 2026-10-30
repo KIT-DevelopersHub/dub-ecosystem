@@ -261,7 +261,7 @@ export type InboundScope = MailScope | { userIds: string[] };
  *  by an older Worker during rollout) never disappears. An empty owner list matches nothing
  *  (fail-closed). The owner list rides as ONE JSON bind: D1 caps bound parameters per
  *  statement at 100, and cross-role visibility can exceed that. */
-function inboundOwnerClause(scope: InboundScope): { sql: string; binds: string[] } | null {
+export function inboundOwnerClause(scope: InboundScope): { sql: string; binds: string[] } | null {
   if (typeof scope === "string") {
     return {
       sql: "(owner_user_id = ? OR id IN (SELECT inbound_id FROM mail_inbound_delivery WHERE owner_user_id = ?))",
@@ -283,7 +283,7 @@ function inboundOwnerClause(scope: InboundScope): { sql: string; binds: string[]
 /** SELECT list for inbound reads: the message row plus the VIEWER's own delivery state
  *  (count / read stamp / envelope), so `read` and `mine` are per recipient. Binds the viewer
  *  three times ('' when unknown, which matches no delivery). */
-function inboundSelect(viewer: string | undefined): { sql: string; binds: string[] } {
+export function inboundSelect(viewer: string | undefined): { sql: string; binds: string[] } {
   const v = viewer ?? "";
   const sub = (expr: string) =>
     `(SELECT ${expr} FROM mail_inbound_delivery vd WHERE vd.inbound_id = mail_inbound.id AND vd.owner_user_id = ?)`;
@@ -320,6 +320,11 @@ function searchClause(q: string, text: string[], single: string[], lists: string
   }
   const binds = parts.flatMap((p) => Array<string>((p.match(/LIKE \?/g) ?? []).length).fill(pat));
   return { sql: `(${parts.join(" OR ")})`, binds };
+}
+
+/** The inbound free-text search predicate (subject / snippet / body / From / To / Cc). */
+export function inboundSearchClause(q: string): { sql: string; binds: string[] } {
+  return searchClause(q, ["subject", "snippet", "body_text"], ["from_json"], ["to_json", "cc_json"]);
 }
 
 /** List sent mail (status='sent'), newest first. id-based opaque cursor (like
@@ -528,7 +533,7 @@ function rowToMailMessage(r: InboundRow): mail.MailMessage {
 /** List item = frozen message + read flag. `read` is the VIEWER's own state when they hold
  *  a delivery of it (per recipient, 0018); otherwise (read_all / role sharing / legacy row)
  *  it is the primary owner's mail_inbound.read_at as before. */
-function rowToListItem(r: InboundRow, viewer?: string): mail.MailMessageListItem {
+export function rowToListItem(r: InboundRow, viewer?: string): mail.MailMessageListItem {
   const own = (r.viewer_deliveries ?? 0) > 0;
   const item: mail.MailMessageListItem = { ...rowToMailMessage(r), read: own ? r.viewer_read_at != null : r.read_at !== null };
   // mine: delivered to the caller (vs visible via read_all / role sharing). Only set when
@@ -636,7 +641,7 @@ export async function listInbound(
     binds.push(q.threadId);
   }
   if (q.q !== undefined) {
-    const s = searchClause(q.q, ["subject", "snippet", "body_text"], ["from_json"], ["to_json", "cc_json"]);
+    const s = inboundSearchClause(q.q);
     where.push(s.sql);
     binds.push(...s.binds);
   }

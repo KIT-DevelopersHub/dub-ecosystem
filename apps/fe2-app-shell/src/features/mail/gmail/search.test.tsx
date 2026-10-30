@@ -44,6 +44,10 @@ function fakeApi(listInbox: MailApi["listInbox"], over: Partial<MailApi> = {}): 
     getScheduled: vi.fn(),
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn(),
+    listBlocks: vi.fn().mockResolvedValue([]),
+    addBlock: vi.fn().mockImplementation((req: { value: string; kind?: "address" | "domain" }) => Promise.resolve({ value: req.value.toLowerCase(), kind: req.kind ?? "address", createdAt: "2026-01-01T00:00:00.000Z" })),
+    removeBlock: vi.fn().mockImplementation((value: string) => Promise.resolve({ value, blocked: false })),
+    counts: vi.fn().mockRejectedValue(new Error("no counts")),
     ...over,
   };
 }
@@ -70,7 +74,7 @@ describe("server-side mail search", () => {
     await userEvent.type(screen.getByTestId("fe2-mail-search"), "全力エージェンシー");
     expect(await screen.findByText("お見積りのご案内")).toBeInTheDocument();
     // Only the settled query hit the server (no per-keystroke calls).
-    expect(searchCalls(listInbox)).toEqual([{ q: "全力エージェンシー", limit: 50 }]);
+    expect(searchCalls(listInbox)).toEqual([{ q: "全力エージェンシー", folder: "all", limit: 50 }]);
     expect(searchCalls(listSent)).toEqual([{ q: "全力エージェンシー", limit: 50 }]);
     expect(screen.queryByText("最近のメール")).toBeNull(); // pre-filter drops the non-match
   });
@@ -110,7 +114,7 @@ describe("server-side mail search", () => {
     await screen.findByText("お見積りのご案内");
     await userEvent.click(await screen.findByTestId("fe2-mail-search-more"));
     expect(await screen.findByText("さらに古い見積")).toBeInTheDocument();
-    expect(searchCalls(listInbox).at(-1)).toEqual({ q: "全力", limit: 50, cursor: "cur_1" });
+    expect(searchCalls(listInbox).at(-1)).toEqual({ q: "全力", folder: "all", limit: 50, cursor: "cur_1" });
     await waitFor(() => expect(screen.queryByTestId("fe2-mail-search-more")).toBeNull());
 
     await userEvent.click(screen.getByLabelText("検索をクリア"));

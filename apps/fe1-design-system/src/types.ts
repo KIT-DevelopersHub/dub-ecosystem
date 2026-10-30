@@ -23,6 +23,8 @@ export interface TestableProps {
  * `IconName`, never `string`. Extend (keep closed) as P1 needs more.
  */
 export type IconName =
+  | "ban"
+  | "more-vertical"
   | "home"
   | "calendar"
   | "check-square"

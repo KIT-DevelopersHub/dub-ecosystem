@@ -8,7 +8,7 @@
 // (mailModel.fixtures.ts).
 import type { mail } from "@dub/types";
 
-export type FolderId = "inbox" | "mine" | "others" | "starred" | "sent" | "scheduled" | "drafts" | "trash" | "archive";
+export type FolderId = "inbox" | "mine" | "others" | "starred" | "sent" | "scheduled" | "drafts" | "trash" | "archive" | "blocked";
 
 /** Folders that appear in the left nav (archive is Gmail's "All Mail"-ish sink).
  *  `scheduled` (予約済み) is NOT thread-backed — it lists parked future sends from a
@@ -24,6 +24,7 @@ export const NAV_FOLDERS: { id: FolderId; label: string; icon: string }[] = [
   { id: "scheduled", label: "予約済み", icon: "clock" },
   { id: "drafts", label: "下書き", icon: "draft" },
   { id: "trash", label: "ゴミ箱", icon: "trash" },
+  { id: "blocked", label: "ブロック済み", icon: "block" },
 ];
 
 /** Inbox filter views that only make sense when some mail is NOT addressed to the viewer. */
@@ -72,6 +73,9 @@ export interface MailMsg {
   /** False when this received message reached the viewer only via oversight (mail:read_all)
    *  or role sharing (mail:read_role_shared), not their own mailbox. Absent = mine. */
   mine?: boolean;
+  /** Server verdict (GET /mail/messages etc.): the sender is on the viewer's block list.
+   *  Only consulted until the client has the block list itself (see threadBlocked). */
+  blocked?: boolean;
 }
 
 export interface MailThreadModel {
@@ -89,6 +93,11 @@ export interface MailThreadModel {
   /** 返信不要: when the viewer dismissed the reply nudge (ISO). Covers only mail received up
    *  to then — a newer received message brings the nudge back. Absent/null = not dismissed. */
   noReplyAt?: string | null;
+  /** Derived (never persisted): every received message is from a sender on the viewer's
+   *  block list. Recomputed by the store whenever threads or the block list change. Blocked
+   *  threads leave 受信トレイ / 自分宛て / スター付き / unread counts and show only under
+   *  ブロック済み — nothing is deleted, so unblocking puts them straight back. */
+  blocked?: boolean;
 }
 
 // ---- pure helpers ----
@@ -164,6 +173,9 @@ export function avatarColor(p: MailPerson): string {
 
 /** Does a thread belong to the given folder view? */
 export function inFolder(t: MailThreadModel, folder: FolderId): boolean {
+  // Blocked mail lives only under ブロック済み (Trash/Sent keep their own semantics).
+  if (folder === "blocked") return t.blocked === true && t.folder !== "trash" && t.folder !== "sent";
+  if (t.blocked && folder !== "trash" && folder !== "sent" && folder !== "drafts") return false;
   if (folder === "starred") return t.starred && t.folder !== "trash";
   if (folder === "mine") return t.folder === "inbox" && threadMine(t);
   if (folder === "others") return t.folder === "inbox" && !threadMine(t);
@@ -224,7 +236,7 @@ export function replyNudge(
   days: number = NUDGE_DAYS,
   maxDays: number = NUDGE_MAX_DAYS,
 ): { days: number } | null {
-  if (t.purged || t.folder !== "inbox" || t.messages.length === 0 || threadUnread(t)) return null;
+  if (t.purged || t.blocked || t.folder !== "inbox" || t.messages.length === 0 || threadUnread(t)) return null;
   const last = latest(t);
   if (last.outbound || last.mine === false) return null;
   if (AUTOMATED_SENDER.test(last.from.email.split("@")[0] ?? "")) return null;
@@ -377,4 +389,63 @@ export function addressCandidates(threads: MailThreadModel[], meEmail: string): 
     }
   }
   return [...byEmail.values()];
+}
+
+// ---- sender block list (この送信者をブロック) ----
+
+/** Our own organization domain: blocking it domain-wide is refused (server enforces too). */
+export const ORG_MAIL_DOMAIN = "developershub.jp";
+
+export type BlockKind = mail.MailSenderBlockKind;
+
+/** Lowercased domain part of an address ("" when there is none). */
+export function domainOf(email: string): string {
+  const e = normEmail(email);
+  const at = e.lastIndexOf("@");
+  return at < 0 ? "" : e.slice(at + 1);
+}
+
+/** Mirrors the gateway's matcher: exact address, or the sender's domain / any parent domain. */
+export function senderMatcher(blocks: readonly Pick<mail.MailSenderBlock, "value" | "kind">[]): (email: string) => boolean {
+  const addresses = new Set<string>();
+  const domains = new Set<string>();
+  for (const b of blocks) (b.kind === "domain" ? domains : addresses).add(b.value);
+  return (email) => {
+    const e = normEmail(email);
+    if (!e) return false;
+    if (addresses.has(e)) return true;
+    let d = domainOf(e);
+    while (d.includes(".")) {
+      if (domains.has(d)) return true;
+      d = d.slice(d.indexOf(".") + 1);
+    }
+    return false;
+  };
+}
+
+/** True when the thread has received mail and ALL of it comes from blocked senders. A mixed
+ *  conversation (someone unblocked also wrote) stays in the inbox so their mail isn't hidden.
+ *  `match` = the client's block list; without it (not loaded yet) the server verdict is used. */
+export function threadBlocked(t: MailThreadModel, match: ((email: string) => boolean) | null): boolean {
+  const inbound = t.messages.filter((m) => !m.outbound);
+  if (inbound.length === 0) return false;
+  return inbound.every((m) => (match ? match(m.from.email) : m.blocked === true));
+}
+
+/** The external sender a block action in the reading pane targets: the newest received
+ *  message's From. null for a sent-only conversation. */
+export function blockTarget(t: MailThreadModel): MailPerson | null {
+  const last = [...t.messages].reverse().find((m) => !m.outbound && m.from.email.trim() !== "");
+  return last ? last.from : null;
+}
+
+/** The block entry (address or domain) that currently hides this sender, if any. */
+export function matchingBlock(
+  email: string,
+  blocks: readonly mail.MailSenderBlock[],
+): mail.MailSenderBlock | null {
+  const e = normEmail(email);
+  const exact = blocks.find((b) => b.kind === "address" && b.value === e);
+  if (exact) return exact;
+  return blocks.find((b) => b.kind === "domain" && senderMatcher([b])(e)) ?? null;
 }

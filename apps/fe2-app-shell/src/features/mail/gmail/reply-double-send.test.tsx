@@ -28,6 +28,10 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getScheduled: vi.fn(),
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn(),
+    listBlocks: vi.fn().mockResolvedValue([]),
+    addBlock: vi.fn(),
+    removeBlock: vi.fn(),
+    counts: vi.fn().mockRejectedValue(new Error("no counts")),
     ...over,
   };
 }

@@ -16,7 +16,13 @@ import { createDemoFetch } from "../../lib/demo-seed.tsx";
 import { createLpApi, type LpApi, type LpTicketOrder, type LpTicketsState, type LpTicketTypeSummary } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
 import { LpTicketsScreen } from "./LpTicketsScreen.tsx";
-import { groupTicketTypesByDay, validateTicketFields, validateTicketType } from "./lpTickets.ts";
+import {
+  groupTicketTypesByDay,
+  paymentMethodLabel,
+  paymentMethodsLabel,
+  validateTicketFields,
+  validateTicketType,
+} from "./lpTickets.ts";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
 
@@ -148,6 +154,17 @@ describe("lpTickets (pure)", () => {
     expect(
       validateTicketFields([{ id: "f_d", label: "区分", type: "select", required: true, options: ["現地", "現地"] }]).f_d,
     ).toMatch(/重複/);
+  });
+});
+
+describe("payment method labels", () => {
+  it("maps Stripe types to display names; older APIs default to card", () => {
+    expect(paymentMethodLabel("paypay")).toBe("PayPay");
+    expect(paymentMethodLabel("card")).toBe("カード");
+    expect(paymentMethodLabel("konbini")).toBe("konbini");
+    expect(paymentMethodLabel(null)).toBe("");
+    expect(paymentMethodsLabel(["card", "paypay"])).toBe("カード / PayPay");
+    expect(paymentMethodsLabel(undefined)).toBe("カード");
   });
 });
 
@@ -451,6 +468,34 @@ describe("LpTicketsScreen", () => {
     expect(screen.getByTestId("fe2-lp-ticket-order-total-ord_x")).toHaveTextContent("計 3 枚");
     fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-details-ord_x"));
     expect(screen.getByTestId("fe2-lp-ticket-order-answers-ord_x")).toHaveTextContent("¥3,000 × 2 枚 = ¥6,000");
+    // older API without paymentMethod: no method label
+    expect(screen.queryByTestId("fe2-lp-ticket-order-method-ord_x")).not.toBeInTheDocument();
+  });
+
+  it("shows the payment method of a paid order (PayPay / カード)", async () => {
+    const base: LpTicketOrder = {
+      id: "ord_pp",
+      items: [{ ticketTypeId: "g1", ticketTypeName: "一般", dayLabel: "", unitPriceJpy: 3000, quantity: 1 }],
+      quantity: 1,
+      amountJpy: 3000,
+      status: "paid",
+      buyerName: "山田 太郎",
+      buyerEmail: "y@example.com",
+      answers: [],
+      createdAt: "2026-10-12T11:20:00.000Z",
+      paidAt: "2026-10-12T11:21:00.000Z",
+      paymentMethod: "paypay",
+    };
+    const items = [base, { ...base, id: "ord_card", paymentMethod: "card" }, { ...base, id: "ord_pend", status: "pending" as const, paidAt: null, paymentMethod: null }];
+    renderScreen(fakeApi({ listTicketOrders: () => Promise.resolve({ items, nextCursor: null }) }));
+    expect(await screen.findByTestId("fe2-lp-ticket-order-method-ord_pp")).toHaveTextContent("PayPay");
+    expect(screen.getByTestId("fe2-lp-ticket-order-method-ord_card")).toHaveTextContent("カード");
+    expect(screen.queryByTestId("fe2-lp-ticket-order-method-ord_pend")).not.toBeInTheDocument();
+  });
+
+  it("lists the advertised payment methods once Stripe is connected", async () => {
+    renderScreen(fakeApi({ getTickets: () => Promise.resolve(baseState({ paymentReady: true, paymentMethods: ["card", "paypay"] })) }));
+    expect(await screen.findByTestId("fe2-lp-tickets-payment-methods")).toHaveTextContent("支払い方法: カード / PayPay");
   });
 
   it("shows a retryable error state when loading fails", async () => {

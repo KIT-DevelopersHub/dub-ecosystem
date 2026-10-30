@@ -1,0 +1,144 @@
+name: Visual Screens (warning-only)
+
+# App-SCREEN visual regression for the fe2 admin SPA (backend-free demo build,
+# VITE_DEMO=1). Complements the component-level `visual-regression.yml`.
+# PHASE 1 = WARNING ONLY: diffs never fail this workflow; they surface as a single
+# upserted PR comment + job summary + the `visual-screens-diff` artifact.
+# Not a required check. Docs: docs/runbooks/08-visual-screens.md
+on:
+  pull_request:
+    paths:
+      - "apps/fe2-app-shell/**"
+      - "apps/fe1-design-system/**"
+      - "apps/fe3-event-action/**"
+      - "apps/fe4-task-gantt/**"
+      - "apps/fe5-notification-inbox/**"
+      - "apps/fe6-chat/**"
+      - "apps/fe7-admin-roster/**"
+      - "packages/tokens/**"
+      - "packages/app-ui/**"
+      - ".github/workflows/visual-screens.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: visual-screens-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  DO_NOT_TRACK: 1
+
+jobs:
+  screens:
+    name: fe2 screens · toHaveScreenshot (warning-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # SAME pinned image as visual-regression.yml (= installed @playwright/test 1.62.1)
+    # so fonts/OS match the committed *-linux baselines. Bump + re-seed together.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-jammy
+    defaults:
+      run:
+        working-directory: apps/fe2-app-shell
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build demo bundle (VITE_DEMO=1)
+        run: pnpm run visual:build
+
+      - name: Detect Linux baselines
+        id: base
+        run: |
+          n=$(find visual/__screenshots__ -name '*-linux.png' 2>/dev/null | wc -l | tr -d ' ')
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          if [ "$n" -gt 0 ]; then echo "seeded=true" >> "$GITHUB_OUTPUT"; else echo "seeded=false" >> "$GITHUB_OUTPUT"; fi
+          echo "linux baselines: $n"
+
+      - name: Run screen visual regression
+        id: run
+        # Warning-only: a diff must never fail the job.
+        continue-on-error: true
+        run: |
+          if [ "${{ steps.base.outputs.seeded }}" = "true" ]; then
+            pnpm run visual
+          else
+            # First run: generate Linux baselines so they can be inspected/seeded.
+            pnpm run visual:update
+          fi
+
+      - name: Summarize
+        id: sum
+        if: ${{ always() }}
+        run: |
+          node visual/summarize.mjs visual/results.json visual/summary.md \
+            --seeded=${{ steps.base.outputs.seeded }} \
+            --run-url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          cat visual/summary.md >> "$GITHUB_STEP_SUMMARY"
+          ch=$(grep -o '^changed=.*' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2 || true)
+          if [ "${ch:-0}" != "0" ] || [ "${{ steps.run.outcome }}" != "success" ]; then
+            echo "::warning title=Visual screens::画面差分あり（警告のみ・PRはブロックしません）。PRコメント / artifact visual-screens-diff を確認"
+          fi
+
+      - name: Upload diff report
+        if: ${{ always() && steps.run.outcome != 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-screens-diff
+          path: |
+            apps/fe2-app-shell/visual/.report
+            apps/fe2-app-shell/visual/.output
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload generated Linux baselines (first run)
+        if: ${{ always() && steps.base.outputs.seeded == 'false' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-screens-seed
+          path: apps/fe2-app-shell/visual/__screenshots__/**/*-linux.png
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upsert PR comment
+        # Same-repo PRs only (fork tokens are read-only).
+        if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/github-script@v7
+        env:
+          CHANGED: ${{ steps.sum.outputs.changed }}
+          ERRORED: ${{ steps.sum.outputs.errored }}
+          SEEDED: ${{ steps.base.outputs.seeded }}
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- visual-screens-report -->";
+            const path = "apps/fe2-app-shell/visual/summary.md";
+            const body = fs.existsSync(path) ? fs.readFileSync(path, "utf8") : `${marker}\n画面ビジュアル差分: サマリ生成に失敗しました。ジョブログを確認してください。`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const mine = comments.find((c) => c.user?.type === "Bot" && c.body?.includes(marker));
+            const notable = process.env.CHANGED !== "0" || process.env.ERRORED !== "0" || process.env.SEEDED !== "true";
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else if (notable) {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            } else {
+              core.info("No diffs and no prior comment — not posting.");
+            }

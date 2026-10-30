@@ -13,6 +13,7 @@ import type {
   LpTicketOrderItem,
   LpTicketOrderStatus,
   LpTicketOrdersPage,
+  LpTicketPaymentMethod,
   LpTicketsState,
   LpTicketType,
   LpTicketTypeInput,
@@ -63,6 +64,14 @@ const SESSION_EVENTS: ReadonlySet<string> = new Set([
   "checkout.session.async_payment_failed",
   "checkout.session.expired",
 ]);
+
+/**
+ * What the LP / LP管理 advertise. Stripe decides per session (dynamic payment methods): PayPay is
+ * JPY one-time only, 50..1,000,000 JPY per payment, and is hidden by Stripe outside that.
+ */
+export function advertisedPaymentMethods(paypayEnabled: boolean): LpTicketPaymentMethod[] {
+  return paypayEnabled ? ["card", "paypay"] : ["card"];
+}
 
 const DEFAULT_ORDERS_PAGE = 50;
 const MAX_ORDERS_PAGE = 200;
@@ -321,6 +330,7 @@ export class TicketService {
       enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
+      paymentMethods: advertisedPaymentMethods(this.deps.paypayEnabled),
       publicUrl: `${this.deps.lpBaseUrl.replace(/\/+$/, "")}/tickets`,
       fields: settings?.fields ?? [],
       types,
@@ -394,6 +404,7 @@ export class TicketService {
     enabled: boolean;
     ctaEnabled: boolean;
     paymentReady: boolean;
+    paymentMethods: LpTicketPaymentMethod[];
     fields: LpTicketField[];
     types: PublicTicketType[];
   }> {
@@ -402,6 +413,7 @@ export class TicketService {
       enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
+      paymentMethods: advertisedPaymentMethods(this.deps.paypayEnabled),
       fields: settings?.fields ?? [],
       types: types
         .filter((t) => t.active)
@@ -462,6 +474,7 @@ export class TicketService {
       stripeSessionId: null,
       createdAt: now,
       paidAt: free ? now : null,
+      paymentMethod: null,
     };
     const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
     const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
@@ -517,9 +530,28 @@ export class TicketService {
     return { status: order.status, summary: orderSummary(order.items) };
   }
 
+  /** Only payment_status "paid" settles: a completed-but-unpaid (async) session stays pending. */
   private async applySession(orderId: string, s: CheckoutSession): Promise<void> {
-    if (s.paymentStatus === "paid") await this.repo.markOrderPaid(orderId, this.deps.now(), s.id || null);
-    else if (s.status === "expired") await this.repo.markOrderExpired(orderId);
+    if (s.paymentStatus === "paid") {
+      await this.repo.markOrderPaid(orderId, this.deps.now(), s.id || null);
+      if (s.paymentMethodType) {
+        try {
+          await this.repo.setOrderPaymentMethod(orderId, s.paymentMethodType);
+        } catch {
+          // Display-only (e.g. 0005 migration not applied yet): never block settling the order.
+        }
+      }
+    } else if (s.status === "expired") await this.repo.markOrderExpired(orderId);
+  }
+
+  /** Webhook payloads don't expand payment_intent: fetch the used method (best effort, display only). */
+  private async withPaymentMethod(s: CheckoutSession): Promise<CheckoutSession> {
+    if (s.paymentMethodType || !this.deps.stripe || !s.id) return s;
+    try {
+      return { ...s, paymentMethodType: (await this.deps.stripe.getCheckoutSession(s.id)).paymentMethodType };
+    } catch {
+      return s;
+    }
   }
 
   /** Stripe webhook (raw body). Bad / missing signature → 400. Unknown events / orders → ignored. */
@@ -547,7 +579,7 @@ export class TicketService {
     if (event.type === "checkout.session.expired" || event.type === "checkout.session.async_payment_failed") {
       await this.repo.markOrderExpired(order.id);
     }
-    else await this.applySession(order.id, session);
+    else await this.applySession(order.id, session.paymentStatus === "paid" ? await this.withPaymentMethod(session) : session);
     return { received: true };
   }
 }

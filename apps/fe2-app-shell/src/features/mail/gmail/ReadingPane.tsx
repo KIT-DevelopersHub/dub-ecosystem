@@ -29,6 +29,7 @@ import {
 import { MailIcon } from "./icons.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
+import { BlockSenderMenu, BlockedBanner } from "./BlockedSenders.tsx";
 import { uid, useMailStore } from "./useMailStore.tsx";
 import styles from "./replyNudge.module.css";
 import inlineStyles from "./InlineReply.module.css";
@@ -519,6 +520,8 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: threadUnread(thread) })}
           />
         ) : null}
+        <span style={{ flex: 1 }} />
+        <BlockSenderMenu thread={thread} />
       </div>
 
       <div style={{ flex: 1, overflowY: "auto" }}>
@@ -552,6 +555,8 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             ))}
           </div>
         ) : null}
+
+        <BlockedBanner thread={thread} />
 
         {nudge ? (
           <div className={styles.banner} data-reply-nudge="fe2-mail-reply-nudge" data-testid="fe2-mail-reply-nudge-banner">

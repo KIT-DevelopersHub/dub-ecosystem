@@ -1,0 +1,72 @@
+name: Visual Screens Baselines (seed/update)
+
+# Regenerates the committed fe2 app-screen baselines (*-linux.png) INSIDE the same
+# pinned Playwright image that `visual-screens.yml` compares against, then commits
+# them to the given branch. Run it: first time (seed), after an intentional UI
+# change, or after bumping @playwright/test / the image tag.
+# Docs: docs/runbooks/08-visual-screens.md
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to update baselines on (must be a branch, not a tag)."
+        required: true
+        default: ""
+
+concurrency:
+  group: visual-screens-baselines-${{ github.event.inputs.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  DO_NOT_TRACK: 1
+
+jobs:
+  update:
+    name: regenerate + commit screen baselines
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-jammy
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build demo bundle (VITE_DEMO=1)
+        run: pnpm --filter @dub/fe2-app-shell visual:build
+
+      - name: Regenerate baselines (Linux)
+        run: pnpm --filter @dub/fe2-app-shell visual:update
+
+      - name: Commit updated baselines
+        env:
+          TARGET_REF: ${{ github.event.inputs.ref }}
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/fe2-app-shell/visual/__screenshots__
+          if git diff --cached --quiet; then
+            echo "No baseline changes."
+            exit 0
+          fi
+          git commit -m "chore(visual): regenerate fe2 screen Linux baselines [skip ci]"
+          git push origin "HEAD:${TARGET_REF}"

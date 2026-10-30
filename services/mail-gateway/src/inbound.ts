@@ -22,6 +22,7 @@ import { persistAttachments, persistDroppedAttachments, type DroppedReason } fro
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
 import { archiveRawEml } from "./raw-eml";
+import { loadMatcher } from "./blocks";
 import type { InboundDeps, OwnerAddressPolicy, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
 
@@ -276,6 +277,29 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
     }
     if (stubs.length > 0) {
       await persistDroppedAttachments({ db: deps.db, ctx: deps.ctx }, "inbound", message.id, stubs);
+    }
+  }
+
+  // Sender block list (0021): the message is STORED like any other (no-silent-delete, #696)
+  // and reads file it under ブロック済み, but a sender the owning account blocked must not
+  // trigger the downstream pipeline (auto-reply / new-mail notification). Fail-open on a
+  // lookup error: a broken block list must never cost a delivery its normal handling.
+  if (ownerUserId) {
+    let blocked = false;
+    try {
+      blocked = (await loadMatcher(deps.db, ownerUserId)).matches(message.from.email);
+    } catch {
+      blocked = false;
+    }
+    if (blocked) {
+      consoleSink({
+        level: "info",
+        message: "mail-gateway: inbound from blocked sender stored; mail.message.received suppressed",
+        service: SERVICE_NAME,
+        requestId: deps.ctx.requestId,
+        fields: { inboundId: message.id, ownerUserId },
+      });
+      return { processed: true, message };
     }
   }
 
