@@ -10,7 +10,7 @@ import type { MailApi } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
 import type { MailMsg } from "./mailModel.ts";
-import { PAGE_SIZE, useMailStore } from "./useMailStore.tsx";
+import { PAGE_SIZE, pageSourceOf, searchViewOf, selectVisible, serverViewOf, useMailStore } from "./useMailStore.tsx";
 
 /** What the server last knew per thread. noReplyAt is compared as-is; the POST sends only the
  *  boolean `noReply` (the server stamps its own time). */
@@ -25,6 +25,8 @@ interface FlagState {
 export const MAIL_POLL_MS = 60_000;
 /** Delay after a scheduled send's due time before re-syncing (lets the drain run). */
 export const SCHEDULED_DUE_GRACE_MS = 3_000;
+/** Delay before re-fetching a page that a local action left short (see the refill effect). */
+export const REFILL_DELAY_MS = 600;
 /** Quiet period after the last keystroke before the server search fires. */
 export const SEARCH_DEBOUNCE_MS = 300;
 
@@ -38,6 +40,9 @@ export function useMailSync(): void {
   // below; a background/manual sync re-fetches the SAME page, so page 1 picks up new mail.
   const inboxCursor = state.pager.inbox.stack.at(-1);
   const sentCursor = state.pager.sent.stack.at(-1);
+  // The server view backing the current folder (blocked senders + flags filtered in SQL
+  // before the limit, so the page is already exactly this folder's conversations).
+  const view = serverViewOf(state.folder, state.labelFilter);
 
   // Tracks which threads have had their full bodies fetched (list APIs carry only a
   // snippet). Cleared on every sync so a post-send re-sync re-fetches the OPEN thread —
@@ -60,19 +65,23 @@ export function useMailSync(): void {
     flagsReady.current = false; // pause flag persistence while we (re)load
     void (async () => {
       try {
-        const [inbox, sent, scheduled] = await Promise.all([
-          api.listInbox({ limit: PAGE_SIZE, ...(inboxCursor ? { cursor: inboxCursor } : {}) }),
+        const [inbox, sent, scheduled, flags] = await Promise.all([
+          api.listInbox({ limit: PAGE_SIZE, folder: view, ...(inboxCursor ? { cursor: inboxCursor } : {}) }),
           api.listSent({ limit: PAGE_SIZE, ...(sentCursor ? { cursor: sentCursor } : {}) }),
           // Scheduled (予約送信) is best-effort: an older gateway without the endpoint yields
           // an empty list rather than blanking inbox+sent.
           api.listScheduled({ limit: 50 }).catch(() => ({ items: [], nextCursor: null })),
+          // Fetched WITH the page and applied in the same tick, so a Trash / Archive page is
+          // never momentarily filed under the inbox (which would blank the view).
+          api.listFlags().catch(() => []),
         ]);
         if (!alive) return;
         dispatch({
           type: "HYDRATE",
           threads: combineThreads(inbox.items, sent.items, me),
           pages: {
-            inbox: { next: inbox.nextCursor, count: inbox.items.length },
+            // A page is N conversations (the gateway pages by conversation), not N messages.
+            inbox: { next: inbox.nextCursor, count: new Set(inbox.items.map((m) => m.threadId)).size, total: inbox.total ?? null },
             sent: { next: sent.nextCursor, count: sent.items.length },
           },
         });
@@ -81,9 +90,13 @@ export function useMailSync(): void {
         // Restore persisted flags on top of the freshly hydrated threads, then arm the
         // persist effect with the server's flag-state as the baseline (so applying them is
         // not itself seen as a change to push back).
-        const flags = await api.listFlags().catch(() => []);
-        if (!alive) return;
         dispatch({ type: "APPLY_FLAGS", flags });
+        // Sidebar badges (exact, whole mailbox). Best-effort: without them the sidebar
+        // falls back to the loaded threads.
+        void api
+          .counts()
+          .then((counts) => alive && dispatch({ type: "HYDRATE_COUNTS", counts }))
+          .catch(() => undefined);
         const base = new Map<string, FlagState>();
         for (const f of flags)
           base.set(f.threadId, { starred: f.starred, archived: f.archived, trashed: f.trashed, purged: f.purged, noReplyAt: f.noReplyAt ?? null });
@@ -97,7 +110,7 @@ export function useMailSync(): void {
     return () => {
       alive = false;
     };
-  }, [api, dispatch, syncNonce, me, inboxCursor, sentCursor]);
+  }, [api, dispatch, syncNonce, me, inboxCursor, sentCursor, view]);
 
   // Sender block list: loaded once per mount (mutations are optimistic in the store and
   // persisted by useSenderBlocks, so a background re-sync must not clobber an in-flight one).
@@ -118,6 +131,7 @@ export function useMailSync(): void {
   // (query changed meanwhile) is dropped by the reducer. "さらに読み込む" (SEARCH_MORE) pages
   // both lists by their cursors.
   const search = state.searchResults;
+  const searchView = searchViewOf(state.folder, state.labelFilter);
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
   useEffect(() => {
@@ -131,7 +145,7 @@ export function useMailSync(): void {
         const sentCur = more ? search.next.sent : undefined;
         const empty = { items: [], nextCursor: null };
         const [inbox, sent] = await Promise.all([
-          !more || inboxCur ? api.listInbox({ q, limit: PAGE_SIZE, ...(inboxCur ? { cursor: inboxCur } : {}) }) : Promise.resolve(empty),
+          !more || inboxCur ? api.listInbox({ q, folder: searchView, limit: PAGE_SIZE, ...(inboxCur ? { cursor: inboxCur } : {}) }) : Promise.resolve(empty),
           !more || sentCur ? api.listSent({ q, limit: PAGE_SIZE, ...(sentCur ? { cursor: sentCur } : {}) }) : Promise.resolve(empty),
         ]);
         if (!alive) return;
@@ -175,6 +189,28 @@ export function useMailSync(): void {
       document.removeEventListener("visibilitychange", sync);
     };
   }, [dispatch]);
+
+  // Keep the page full: the server returns exactly PAGE_SIZE conversations of this view, but
+  // a local action (archive / trash / block / …) files one out of the view optimistically.
+  // Once the viewer is idle (no undo toast / selection), re-fetch the same page so the next
+  // conversation moves up and the page is full again. `fullAt` is the visible count right
+  // after the last hydrate; it only fires on a DROP below it, once per hydrate (no loop).
+  const visibleNow = state.search.trim() === "" && pageSourceOf(state.folder) === "inbox" ? selectVisible(state).length : -1;
+  const fullAt = useRef(-1);
+  const pagerInbox = state.pager.inbox;
+  useEffect(() => {
+    fullAt.current = state.listLoading ? -1 : visibleNow;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagerInbox, state.listLoading, state.folder, state.labelFilter]);
+  const idle = state.checked.size === 0 && state.undo === null && !state.listLoading;
+  useEffect(() => {
+    if (visibleNow < 0 || fullAt.current < 0 || visibleNow >= fullAt.current || !idle) return;
+    const t = setTimeout(() => {
+      fullAt.current = visibleNow;
+      dispatch({ type: "REQUEST_SYNC" });
+    }, REFILL_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [visibleNow, idle, dispatch]);
 
   // 予約送信: re-sync shortly after the soonest parked send falls due, so a scheduled
   // reply/compose moves 予約済み → 送信済み (and folds into its thread) without waiting for
