@@ -591,6 +591,61 @@ export interface SegmentedControlProps<V extends string = string> extends Testab
   className?: string; // extra class on the tablist (composition escape hatch)
 }
 
+// ── Filter bar (chip-style filters) ────────────────────────────────────────
+// A bordered bar (funnel + label + active-count badge + optional クリア) holding
+// pill chips. One look for every list/table filter across apps.
+export interface FilterBarProps extends TestableProps {
+  children: ReactNode;
+  label?: ReactNode; // lead label next to the funnel (default "フィルタ")
+  activeCount?: number; // >0 → brand badge after the label
+  activeCountTestId?: string;
+  onClear?: () => void; // shown (as クリア) only while activeCount > 0
+  clearLabel?: ReactNode; // default "クリア"
+  clearTestId?: string;
+  disabled?: boolean; // disables クリア (chips take their own `disabled`)
+  "aria-label"?: string; // labels the role="group" bar
+  className?: string;
+}
+
+export interface FilterChipProps extends TestableProps {
+  selected: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+  count?: ReactNode; // optional trailing count (e.g. matching rows)
+  countTestId?: string;
+  disabled?: boolean;
+  // "pressed" = independent toggle (aria-pressed, default); "radio" = one of a set.
+  role?: "pressed" | "radio";
+}
+
+export interface FilterChipOption<V extends string = string> {
+  value: V;
+  label: ReactNode;
+  count?: ReactNode;
+  disabled?: boolean;
+  testId?: string; // data-testid on the chip button
+  countTestId?: string; // data-testid on the count
+}
+
+interface FilterChipsBase<V extends string> extends TestableProps {
+  options: readonly FilterChipOption<V>[];
+  disabled?: boolean;
+  "aria-label"?: string;
+}
+// Multiple: toggles values in/out of the array (an empty array = no filter).
+export interface FilterChipsMultipleProps<V extends string = string> extends FilterChipsBase<V> {
+  multiple: true;
+  value: readonly V[];
+  onChange: (next: V[]) => void;
+}
+// Single: exactly one option is selected (e.g. "すべて" + statuses).
+export interface FilterChipsSingleProps<V extends string = string> extends FilterChipsBase<V> {
+  multiple?: false;
+  value: V;
+  onChange: (next: V) => void;
+}
+export type FilterChipsProps<V extends string = string> = FilterChipsMultipleProps<V> | FilterChipsSingleProps<V>;
+
 export interface DividerProps extends TestableProps {
   orientation?: "horizontal" | "vertical";
 }

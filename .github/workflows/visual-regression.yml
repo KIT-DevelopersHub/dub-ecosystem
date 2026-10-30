@@ -74,3 +74,4 @@ jobs:
             apps/fe1-design-system/visual/.output
           retention-days: 14
           if-no-files-found: ignore
+          include-hidden-files: true

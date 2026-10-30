@@ -66,6 +66,7 @@ const APP_TILES: AppTile[] = [
   { id: "driveshare", label: "Drive共有", desc: "共有ファイルと権限", icon: "file", path: "/driveshare" },
   // LP管理 はランチャーシート経由でしか開けず「どこにあるか分からない」状態だったのでタイルを出す。
   { id: "lp", label: "LP管理", desc: "LPの版・流入URL・流入ログ", icon: "megaphone", path: "/lp" },
+  { id: "hr", label: "人事", desc: "面談・採用・オンボーディング", icon: "user", path: "/hr" },
 ];
 
 /** One clickable app tile. Renders as an anchor (real href for accessibility /

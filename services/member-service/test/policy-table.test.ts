@@ -68,6 +68,11 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
     "app:members:edit",
     "app:participation:view",
     "app:participation:edit",
+    "app:hr:view",
+    "app:hr:edit",
+    "hr:read",
+    "hr:write",
+    "hr:admin",
   ],
   maintainer: ["identity:read", "app:members:view", "app:participation:view"],
   organizer: ["identity:read", "app:members:view", "app:participation:view"],
@@ -75,6 +80,10 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "delegated-roster-editor": ["app:members:view", "app:members:edit"],
   "participation-reviewer": ["identity:read", "app:participation:view", "app:participation:edit"],
   "disabled-tiers-with-legacy-identity-keys": ["identity:read", "identity:admin"],
+  // 人事: 閲覧だけの面接官 / 段階を動かせるが参加確定はできない担当 / 人事アプリ無効で詳細キーだけ持つ形。
+  "hr-viewer": ["app:hr:view", "hr:read"],
+  "hr-recruiter": ["app:hr:view", "app:hr:edit", "hr:read", "hr:write"],
+  "hr-keys-but-app-disabled": ["hr:read", "hr:write", "hr:admin"],
 };
 
 /**
@@ -122,6 +131,16 @@ const ONBOARDING_WRITES = [
   "POST /members/onboarding/reorder",
   "PUT /members/onboarding/meetings",
 ];
+// 人事: 閲覧 (+hr:read) / 段階・メモ・チェック (編集 +hr:write) / 参加確定・削除 (編集 +hr:admin).
+const HR_READS = ["GET /members/hr/applicants", "GET /members/hr/applicants/:id", "GET /members/hr/onboarding"];
+const HR_WRITES = [
+  "PATCH /members/hr/applicants/:id",
+  "POST /members/hr/applicants",
+  "POST /members/hr/applicants/:id/notes",
+  "POST /members/hr/applicants/:id/stage",
+  "PUT /members/hr/onboarding/:memberId/items/:itemId",
+];
+const HR_ADMIN = ["DELETE /members/hr/applicants/:id", "POST /members/hr/applicants/:id/join"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
 const SELF = ["GET /members/me/mention-teams"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
@@ -143,6 +162,9 @@ const FULL = [
   ...PARTICIPATION_RESOLVE,
   ...ONBOARDING_READ,
   ...ONBOARDING_WRITES,
+  ...HR_READS,
+  ...HR_WRITES,
+  ...HR_ADMIN,
   ...SELF,
 ].sort();
 
@@ -167,6 +189,10 @@ describe("role x endpoint matrix (frozen)", () => {
     ].sort(),
     // 両アプリ 無効 + レガシーなドメインキー: 表以前は identity:admin で書けていた形。
     "disabled-tiers-with-legacy-identity-keys": [...SELF].sort(),
+    "hr-viewer": [...HR_READS, ...SELF].sort(),
+    "hr-recruiter": [...HR_READS, ...HR_WRITES, ...SELF].sort(),
+    // 人事アプリが無効なら詳細キーだけでは何も触れない (ロール管理の 無効 が本当に効く)。
+    "hr-keys-but-app-disabled": [...SELF].sort(),
   };
 
   it("matches the committed matrix for every role", () => {
