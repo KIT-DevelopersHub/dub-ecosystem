@@ -58,6 +58,8 @@ jobs:
         run: pnpm --filter @dub/ui visual:update
 
       - name: Commit updated baselines
+        # container default shell is sh (no pipefail)
+        shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
