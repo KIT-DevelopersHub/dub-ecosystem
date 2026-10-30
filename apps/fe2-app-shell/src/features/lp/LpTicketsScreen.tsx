@@ -382,6 +382,11 @@ function OrderRow({ order: o }: { order: LpTicketOrder }): JSX.Element {
         </span>
         <span className={styles.orderStatus}>
           <Badge tone={status.tone}>{status.label}</Badge>
+          {o.test ? (
+            <Badge tone="warning" testId={`fe2-lp-ticket-order-test-${o.id}`}>
+              {o.preview ? "テスト（プレビュー）" : "テスト"}
+            </Badge>
+          ) : null}
           {o.paymentMethod ? (
             <small className={styles.kpiHint} data-testid={`fe2-lp-ticket-order-method-${o.id}`}>
               {paymentMethodLabel(o.paymentMethod)}

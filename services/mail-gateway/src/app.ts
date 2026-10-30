@@ -42,6 +42,7 @@ import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
 import { parseListMessagesQuery, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
+import { countFolders, listInboundFolder } from "./folders";
 import { addBlock, assertBlockAllowed, listBlocks, loadMatcher, markBlocked, normalizeBlockValue, parseBlockRequest, removeBlock } from "./blocks";
 
 /** Drop the compliance archive address (auto-CC'd on every send) from a DTO's Cc for
@@ -212,10 +213,13 @@ export function createApp() {
   // Shares the exact send core, so 二重送信ゼロ still holds per key.
   ext.post("/outbox", async (c) => {
     const ctx = ctxOf(c);
-    const idempotencyKey = c.req.header(HEADERS.idempotencyKey) ?? crypto.randomUUID();
+    const userId = c.req.header(HEADERS.userId) ?? null;
+    // A browser-supplied key (passed through api-gateway) is scoped to the session user so
+    // one account can never collide with — or replay — another account's send.
+    const clientKey = c.req.header(HEADERS.idempotencyKey);
+    const idempotencyKey = clientKey ? `outbox:${userId ?? "anon"}:${clientKey}` : crypto.randomUUID();
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
     assertAttachmentsSupported(c, req);
-    const userId = c.req.header(HEADERS.userId) ?? null;
     const requester = userId ?? "unknown";
     // From resolution:
     //  - a REPLY (inReplyTo present) goes out as the shared mailbox the parent was
@@ -237,6 +241,23 @@ export function createApp() {
   // caller may see — which the table cannot answer.
   ext.get("/messages", async (c) => {
     const q = parseListMessagesQuery(c.req.query());
+    if (q.folder !== undefined) {
+      // Folder view: conversation-paged with blocked senders + the viewer's flags applied in
+      // SQL before the limit, so every page is full (see folders.ts). Blocked items only ever
+      // appear in folder=blocked (or trash), already flagged.
+      const viewer = ownerOf(c);
+      const folderPage = await listInboundFolder(dbOf(c), {
+        scope: await inboundScopeOf(c),
+        viewer,
+        folder: q.folder,
+        limit: q.limit,
+        ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
+        ...(q.q !== undefined ? { q: q.q } : {}),
+      });
+      for (const m of folderPage.items) hideArchiveCc(m, archiveOf(c));
+      markBlocked(folderPage.items, await loadMatcher(dbOf(c), viewer));
+      return c.json(folderPage satisfies mail.MailMessagePage);
+    }
     const page = await listInbound(dbOf(c), { ...q, ownerUserId: await inboundScopeOf(c), viewer: ownerOf(c) });
     for (const m of page.items) hideArchiveCc(m, archiveOf(c));
     // Sender block list (0021): flag, never filter — the client files blocked mail under
@@ -254,6 +275,13 @@ export function createApp() {
     const attachments = await attachmentsFor(db, "inbound", msg.id);
     if (attachments.length > 0) msg.attachments = attachments;
     return c.json(msg satisfies mail.MailMessageDetail);
+  });
+
+  // Conversations + unread per folder view for the sidebar badges (same SQL predicates as the
+  // folder list, so a badge and the list it opens can never disagree). メール閲覧 + mail:read.
+  ext.get("/counts", async (c) => {
+    const counts = await countFolders(dbOf(c), await inboundScopeOf(c), ownerOf(c));
+    return c.json(counts satisfies mail.MailFolderCounts);
   });
 
   // Mark a message read (opened in the inbox). Idempotent: re-opening is a no-op.

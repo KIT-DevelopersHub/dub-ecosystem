@@ -86,6 +86,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: () => Promise.resolve({ items: [], nextCursor: null }),
+    createTicketPreviewToken: unused,
     getProposals: unused,
     setProposalsEnabled: unused,
     saveProposalFields: unused,
@@ -491,6 +492,28 @@ describe("LpTicketsScreen", () => {
     expect(await screen.findByTestId("fe2-lp-ticket-order-method-ord_pp")).toHaveTextContent("PayPay");
     expect(screen.getByTestId("fe2-lp-ticket-order-method-ord_card")).toHaveTextContent("カード");
     expect(screen.queryByTestId("fe2-lp-ticket-order-method-ord_pend")).not.toBeInTheDocument();
+  });
+
+  it("marks test orders (preview / Stripe test mode) so they are not mistaken for real sales", async () => {
+    const base: LpTicketOrder = {
+      id: "ord_t1",
+      items: [{ ticketTypeId: "g1", ticketTypeName: "一般", dayLabel: "", unitPriceJpy: 3000, quantity: 1 }],
+      quantity: 1,
+      amountJpy: 3000,
+      status: "paid",
+      buyerName: "テスト",
+      buyerEmail: "t@example.com",
+      answers: [],
+      createdAt: "2026-10-12T11:20:00.000Z",
+      paidAt: "2026-10-12T11:21:00.000Z",
+      preview: true,
+      test: true,
+    };
+    const items = [base, { ...base, id: "ord_t2", preview: false }, { ...base, id: "ord_real", preview: false, test: false }];
+    renderScreen(fakeApi({ listTicketOrders: () => Promise.resolve({ items, nextCursor: null }) }));
+    expect(await screen.findByTestId("fe2-lp-ticket-order-test-ord_t1")).toHaveTextContent("テスト（プレビュー）");
+    expect(screen.getByTestId("fe2-lp-ticket-order-test-ord_t2")).toHaveTextContent(/^テスト$/);
+    expect(screen.queryByTestId("fe2-lp-ticket-order-test-ord_real")).not.toBeInTheDocument();
   });
 
   it("lists the advertised payment methods once Stripe is connected", async () => {

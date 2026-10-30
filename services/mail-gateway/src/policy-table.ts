@@ -85,6 +85,7 @@ export const POLICY_TABLE = definePolicyTable({
   // what makes 閲覧 the right tier rather than 編集 — it is reading, with a bookmark.
   "GET /mail/messages": appLevel("mail", "view", "mail:read"),
   "GET /mail/messages/:id": appLevel("mail", "view", "mail:read"),
+  "GET /mail/counts": appLevel("mail", "view", "mail:read"),
   "POST /mail/messages/:id/read": appLevel("mail", "view", "mail:read"),
   "GET /mail/messages/:id/attachments/:attId": appLevel("mail", "view", "mail:read"),
   "GET /mail/sent": appLevel("mail", "view", "mail:read"),

@@ -43,6 +43,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: unused,
+    createTicketPreviewToken: unused,
     getProposals: () => Promise.resolve({ enabled: true } as LpProposalsState),
     setProposalsEnabled: unused,
     saveProposalFields: unused,
@@ -76,6 +77,15 @@ describe("lpPreviewUrl", () => {
     );
     expect(lpPreviewUrl("v3.5", { tickets: "off", proposals: "off" }, "https://lp.example")).toBe(
       "https://lp.example/?version=3.5&tickets=off&proposals=off",
+    );
+  });
+
+  it("adds the test-purchase token only with tickets=on", () => {
+    expect(lpPreviewUrl("v3.4", { tickets: "on", proposals: "on", previewToken: "1.ab" }, "https://lp.example")).toBe(
+      "https://lp.example/?version=3.4&tickets=on&proposals=on&tickets_preview=1.ab",
+    );
+    expect(lpPreviewUrl("v3.4", { tickets: "off", proposals: "on", previewToken: "1.ab" }, "https://lp.example")).toBe(
+      "https://lp.example/?version=3.4&tickets=off&proposals=on",
     );
   });
 });
@@ -160,6 +170,48 @@ describe("LpPreviewScreen", () => {
     } finally {
       nav.searchStr = "";
     }
+  });
+
+  it("Stripe test mode + sales off: issues a test-purchase token and opens the preview with it", async () => {
+    const createTicketPreviewToken = vi.fn(() => Promise.resolve({ token: "1800000000.abc", expiresAt: "2027-01-01T00:00:00Z" }));
+    renderScreen(
+      fakeApi({
+        getTickets: () => Promise.resolve({ enabled: false, previewCheckout: true } as LpTicketsState),
+        createTicketPreviewToken,
+      }),
+    );
+    await screen.findByTestId("fe2-lp-preview-sales-state");
+    expect(screen.getByText(/テスト購入まで試せます/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("fe2-lp-preview-open"));
+    const frame = await screen.findByTestId("fe2-lp-viewer-frame");
+    expect(createTicketPreviewToken).toHaveBeenCalledTimes(1);
+    expect(frame).toHaveAttribute(
+      "src",
+      lpPreviewUrl("v3.4", { tickets: "on", proposals: "on", previewToken: "1800000000.abc" }),
+    );
+    expect(screen.getByTestId("fe2-lp-viewer")).toHaveAccessibleName(/テスト購入可/);
+  });
+
+  it("falls back to the look-only preview when the token is refused (view role / live key)", async () => {
+    renderScreen(
+      fakeApi({
+        getTickets: () => Promise.resolve({ enabled: false, previewCheckout: true } as LpTicketsState),
+        createTicketPreviewToken: () => Promise.reject(new Error("409")),
+      }),
+    );
+    await screen.findByTestId("fe2-lp-preview-sales-state");
+    fireEvent.click(screen.getByTestId("fe2-lp-preview-open"));
+    expect(await screen.findByTestId("fe2-lp-viewer-frame")).toHaveAttribute(
+      "src",
+      lpPreviewUrl("v3.4", { tickets: "on", proposals: "on" }),
+    );
+  });
+
+  it("does not ask for a token when Stripe is not in test mode", async () => {
+    const createTicketPreviewToken = vi.fn();
+    renderScreen(fakeApi({ createTicketPreviewToken }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-preview-open"));
+    expect(createTicketPreviewToken).not.toHaveBeenCalled();
   });
 
   it("shows an error with retry when the publish state fails", async () => {

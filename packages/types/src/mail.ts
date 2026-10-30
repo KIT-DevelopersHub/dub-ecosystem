@@ -13,7 +13,34 @@ export interface ListMailMessagesQuery extends CursorQuery {
   // Trimmed; blank = no search; max 200 chars. Narrows within the caller's account scope
   // only (never widens visibility). Combines with cursor/limit for paging the results.
   q?: string;
+  // ADDITIVE (folder views): page by CONVERSATION for one mailbox view, with every filter
+  // (blocked senders, the viewer's archive/trash/star/purge flags, mine/others) applied in
+  // SQL BEFORE the limit, so each page holds exactly `limit` conversations (last page
+  // excepted). The response then carries `total` (conversations in the view). Absent = the
+  // legacy message-level list (no folder filtering), kept for older clients.
+  folder?: MailFolderView;
 }
+
+/** Server-side mailbox views for GET /mail/messages?folder=. `all` = every view except
+ *  Trash and ブロック済み (the search scope). */
+export type MailFolderView = "inbox" | "mine" | "others" | "starred" | "archive" | "trash" | "blocked" | "all";
+export const MAIL_FOLDER_VIEWS: readonly MailFolderView[] = ["inbox", "mine", "others", "starred", "archive", "trash", "blocked", "all"];
+
+/** GET /mail/messages?folder= response: a conversation page. `items` are the in-scope
+ *  messages of the page's conversations; `total` counts conversations in the whole view. */
+export interface MailMessagePage {
+  items: MailMessageListItem[];
+  nextCursor: string | null;
+  total?: number;
+}
+
+/** GET /mail/counts: conversations per view, and how many have unread mail for the viewer
+ *  (ブロック済み never counts as unread). */
+export interface MailFolderCount {
+  total: number;
+  unread: number;
+}
+export type MailFolderCounts = Record<Exclude<MailFolderView, "all">, MailFolderCount>;
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
 // SINGLE source of truth for the query-parameter *names* mail-gateway's messages list
@@ -24,7 +51,7 @@ export interface ListMailMessagesQuery extends CursorQuery {
 // separately spec'd — documenting it is a noted follow-up). See
 // docs/api-contracts/_wire-contract-enforcement.md.
 export const MAIL_WIRE = {
-  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "limit", "q", "threadId"] },
+  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "folder", "limit", "q", "threadId"] },
 } as const;
 
 // Compile-time tie: every query key the descriptor lists must be a real key of the typed
@@ -183,6 +210,10 @@ export interface MailSentListItem {
   providerMessageId?: string;
   status: "sent";
   threadId?: string; // set for a reply (= parent message id); lets a client thread the reply into its conversation
+  // ADDITIVE: false when this row is another account's send, visible only via oversight
+  // (mail:read_all). Absent/true = the viewer sent it. Lets a client keep someone else's
+  // From out of "my addresses" (自分 labelling, reply-all exclusion, reply addressing).
+  mine?: boolean;
 }
 /** Sent-folder detail: the list row plus the full body. htmlBody optional (present
  *  only when the send carried an HTML part) and MUST be sanitized before rendering. */

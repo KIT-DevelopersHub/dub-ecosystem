@@ -1,12 +1,12 @@
 // Left navigation pane: compose button, primary folders with unread badges, and
 // user labels. Layout/behaviour follows Gmail; all visuals are @dub/tokens +
 // our own line icons (no Google assets).
-import { NAV_FOLDERS, SHARED_FOLDERS, hasSharedMail, inFolder, threadUnread, type FolderId } from "./mailModel.ts";
+import { NAV_FOLDERS, SHARED_FOLDERS, inFolder, type FolderId } from "./mailModel.ts";
 import { MailIcon, type MailIconName } from "./icons.tsx";
-import { useMailStore } from "./useMailStore.tsx";
+import { folderUnread, showSharedFolders, useMailStore } from "./useMailStore.tsx";
 
-function count(folder: FolderId, threads: ReturnType<typeof useMailStore>["state"]["threads"], unreadOnly: boolean): number {
-  return threads.filter((t) => inFolder(t, folder) && (!unreadOnly || threadUnread(t))).length;
+function count(folder: FolderId, threads: ReturnType<typeof useMailStore>["state"]["threads"]): number {
+  return threads.filter((t) => inFolder(t, folder)).length;
 }
 
 /** `inDrawer`: rendered inside the phone nav drawer — fills it, rows grow to a
@@ -15,7 +15,7 @@ export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boole
   const { state, dispatch } = useMailStore();
   const rowHeight = inDrawer ? 44 : 32;
   // 自分宛て / 自分宛て以外 only appear for viewers who can see someone else's mail.
-  const showShared = hasSharedMail(state.threads);
+  const showShared = showSharedFolders(state);
 
   return (
     <nav
@@ -64,11 +64,11 @@ export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boole
         const unread =
           f.id === "scheduled"
             ? state.scheduled.length // 予約済み is not thread-backed: count the parked sends
-            : f.id === "blocked"
-              ? 0 // blocked mail never counts as unread (no badge, no nudge)
-              : f.id === "drafts"
-              ? count(f.id, state.threads, false)
-              : count(f.id, state.threads, true);
+            : f.id === "drafts"
+              ? count(f.id, state.threads)
+              : // Server counts (whole mailbox, same SQL as the folder list) + local changes;
+                // ブロック済み never shows unread.
+                folderUnread(state, f.id);
         return (
           <button
             key={f.id}

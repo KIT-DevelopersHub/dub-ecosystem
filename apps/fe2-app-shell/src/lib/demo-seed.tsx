@@ -813,6 +813,12 @@ function firstLine(text: string, max = 140): string {
   return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
 }
 
+const BULK_SENDERS: mail.MailAddress[] = [
+  { email: "news@example.com", name: "お知らせ配信" },
+  { email: "sale@shop-a.example", name: "ショップA セール情報" },
+  { email: "weekly@mag.spam-b.example", name: "マガジンB 週刊号" },
+];
+
 function createMailStore() {
   // Per-account Inbox + Sent, mirroring the server's owner scope: each account sees ONLY
   // its own mail. received[accountId] is seeded (cloned) from the account's inbox so the
@@ -866,7 +872,9 @@ function createMailStore() {
             id: `msg_bulk_${i + 1}`,
             messageId: `<bulk-${i + 1}@demo>`,
             threadId: `thr_bulk_${i + 1}`,
-            from: { email: "news@example.com", name: "お知らせ配信" },
+            // Every 3rd / 5th bulk mail comes from one of two promotional senders, so blocking
+            // them (この送信者をブロック / ドメインごとブロック) can be tried against paging.
+            from: BULK_SENDERS[i % 3 === 1 ? 1 : i % 5 === 2 ? 2 : 0]!,
             to: [{ email: "demo@developershub.jp" }],
             subject: `過去のお知らせ #${i + 1}`,
             snippet: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
@@ -906,7 +914,11 @@ function createMailStore() {
   function replyThreadId(inReplyTo: string): string {
     const ref = bare(inReplyTo);
     const parent = DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)).find((m) => m.messageId && bare(m.messageId) === ref);
-    return parent?.threadId ?? inReplyTo;
+    if (parent?.threadId) return parent.threadId;
+    // A reply to one of OUR sends ("<sent id>@domain") joins that send's conversation.
+    const local = ref.split("@")[0] ?? "";
+    const ours = DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)).find((m) => m.id === local);
+    return ours?.threadId ?? inReplyTo;
   }
   // Sent is PERSISTED per account (localStorage) so it survives a reload and stays
   // strictly account-scoped: a mail account A sent lives under A's key and is therefore
@@ -997,7 +1009,11 @@ function createMailStore() {
     saveScheduled(accountId, list.filter((s) => !due.includes(s)));
   }
 
-  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+  // Idempotency (x-dub-idempotency-key, scoped per account like the gateway): a repeated
+  // submit returns the first send's ack instead of appending a second Sent row.
+  const idemAcks = new Map<string, mail.SendMailResponse>();
+
+  function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
       const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
@@ -1023,7 +1039,7 @@ function createMailStore() {
     const oversight = isOversight(me);
     const readable = oversight ? DEMO_ACCOUNTS : DEMO_ACCOUNTS.filter((a) => a.id === me.id || (me.roleShareWith ?? []).includes(a.id));
     const readInbox: mail.MailMessageDetail[] = readable.flatMap((a) => inboxOf(a.id).map((m) => Object.assign(m, { mine: a.id === me.id })));
-    const readSent: mail.MailSentDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)) : outbox;
+    const readSent: mail.MailSentDetail[] = (oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id).map((m) => ({ ...m, mine: a.id === me.id }))) : outbox.map((m) => ({ ...m, mine: true })));
 
     // Sender block list (0021): the gateway flags (never filters) mail whose sender is on
     // the VIEWER's list. Copies only — the stored rows stay untouched, so unblocking restores.
@@ -1032,6 +1048,80 @@ function createMailStore() {
 
     // received: list / detail / mark-read (read state persists in-session). Scoped to the
     // account, or every account under oversight (mail:read_all).
+    // Folder views (gateway parity with GET /mail/messages?folder= + GET /mail/counts): paged by
+    // CONVERSATION with blocked senders and this account's flags applied BEFORE the limit, so
+    // every page is full. Same rules as services/mail-gateway/src/folders.ts.
+    const folderThreads = (source: mail.MailMessageDetail[]) => {
+      const flags = new Map(loadFlags().map((f) => [f.threadId, f]));
+      const byThread = new Map<string, mail.MailMessageDetail[]>();
+      for (const m of source) byThread.set(m.threadId, [...(byThread.get(m.threadId) ?? []), m]);
+      return [...byThread.entries()].map(([threadId, msgs]) => {
+        const f = flags.get(threadId);
+        return {
+          threadId,
+          msgs,
+          last: msgs.reduce((a, m) => (m.receivedAt > a ? m.receivedAt : a), ""),
+          blocked: msgs.every((m) => isBlocked(m.from.email)),
+          mine: msgs.some((m) => m.mine !== false),
+          unread: msgs.some((m) => !m.read && m.mine !== false),
+          starred: f?.starred ?? false,
+          archived: f?.archived ?? false,
+          trashed: f?.trashed ?? false,
+          purged: f?.purged ?? false,
+        };
+      });
+    };
+    type FolderThread = ReturnType<typeof folderThreads>[number];
+    const inView = (t: FolderThread, view: string): boolean => {
+      if (t.purged) return false;
+      const inbox = !t.trashed && !t.archived && !t.blocked;
+      switch (view) {
+        case "inbox":
+          return inbox;
+        case "mine":
+          return inbox && t.mine;
+        case "others":
+          return inbox && !t.mine;
+        case "starred":
+          return !t.trashed && t.starred && !t.blocked;
+        case "archive":
+          return !t.trashed && t.archived && !t.blocked;
+        case "trash":
+          return t.trashed;
+        case "blocked":
+          return !t.trashed && t.blocked;
+        default:
+          return !t.trashed && !t.blocked; // all
+      }
+    };
+    if (method === "GET" && pathname === "/api/v1/mail/counts") {
+      const ts = folderThreads(readInbox);
+      const views = ["inbox", "mine", "others", "starred", "archive", "trash", "blocked"] as const;
+      const out = {} as mail.MailFolderCounts;
+      for (const v of views) {
+        const hit = ts.filter((t) => inView(t, v));
+        out[v] = { total: hit.length, unread: v === "blocked" ? 0 : hit.filter((t) => t.unread).length };
+      }
+      return json(out);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/messages" && url.searchParams.get("folder")) {
+      const view = url.searchParams.get("folder")!;
+      const limit = Math.max(1, Number(url.searchParams.get("limit")) || 50);
+      const cursor = url.searchParams.get("cursor");
+      const ts = folderThreads(searchBy(readInbox, url))
+        .filter((t) => inView(t, view))
+        .sort((a, b) => b.last.localeCompare(a.last) || b.threadId.localeCompare(a.threadId));
+      const start = cursor ? ts.findIndex((t) => t.threadId === cursor) + 1 : 0;
+      const slice = ts.slice(start, start + limit);
+      const items = slice.flatMap((t) =>
+        t.msgs.map(({ textBody, htmlBody, ...li }) => {
+          void textBody;
+          void htmlBody;
+          return stampBlocked(li);
+        }),
+      );
+      return json({ items, nextCursor: start + limit < ts.length ? (slice.at(-1)?.threadId ?? null) : null, total: ts.length } satisfies mail.MailMessagePage);
+    }
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
       const items: mail.MailMessageListItem[] = searchBy(readInbox, url).map(({ textBody, htmlBody, ...li }) => {
         void textBody;
@@ -1067,6 +1157,10 @@ function createMailStore() {
     }
     // sent: outbox append + list + detail — this account only
     if (method === "POST" && pathname === "/api/v1/mail/outbox") {
+      const idemKey = headers?.get("x-dub-idempotency-key");
+      const idemScoped = idemKey ? `${me.id}:${idemKey}` : null;
+      const replay = idemScoped ? idemAcks.get(idemScoped) : undefined;
+      if (replay) return json(replay);
       const req = (body ?? {}) as Partial<mail.SendMailRequest>;
       const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
       const sentAt = new Date().toISOString();
@@ -1100,6 +1194,7 @@ function createMailStore() {
       outbox.unshift(detail);
       saveSent(me.id, outbox);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
+      if (idemScoped) idemAcks.set(idemScoped, res);
       return json(res);
     }
     if (method === "GET" && pathname === "/api/v1/mail/sent") {
@@ -4341,6 +4436,8 @@ type DemoTicketOrder = {
   createdAt: string;
   paidAt: string | null;
   paymentMethod: string | null;
+  preview: boolean;
+  test: boolean;
 };
 
 function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
@@ -4400,6 +4497,8 @@ function createLpTicketsStore() {
     ctaEnabled: false,
     paymentReady: false,
     paymentMethods: ["card", "paypay"] as ("card" | "paypay")[],
+    // demo には Stripe も lp-analytics も無いので、プレビューのテスト購入は出せない。
+    previewCheckout: false,
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
     fields: [
@@ -4460,6 +4559,9 @@ function createLpTicketsStore() {
       paidAt: status === "paid" ? createdAt : null,
       // 有料で支払い済みだけ手段あり（カードと PayPay を交互に）。無料・未確定は null。
       paymentMethod: status === "paid" && items.some((it) => it.unitPriceJpy > 0) ? (i % 2 === 0 ? "paypay" : "card") : null,
+      // 最新の支払い済み 1 件は LP管理プレビューからのテスト購入（「テスト（プレビュー）」表示の見本）。
+      preview: id === "ord_007",
+      test: id === "ord_007",
     };
   });
 
@@ -4562,6 +4664,10 @@ function createLpTicketsStore() {
       if (typeof req.active === "boolean") t.active = req.active;
       t.updatedAt = new Date().toISOString();
       return json(summary(t));
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/preview-token") {
+      return problem("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", 409);
     }
 
     if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
@@ -4819,7 +4925,7 @@ export function createDemoFetch(): typeof fetch {
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
-      mailStore.handle(method, url.pathname, url, parsedBody) ??
+      mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
       meetingsStore.handle(method, url.pathname, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??

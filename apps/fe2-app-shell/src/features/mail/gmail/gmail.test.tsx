@@ -46,6 +46,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     listBlocks: vi.fn().mockResolvedValue([]),
     addBlock: vi.fn().mockImplementation((req: { value: string; kind?: "address" | "domain" }) => Promise.resolve({ value: req.value.toLowerCase(), kind: req.kind ?? "address", createdAt: "2026-01-01T00:00:00.000Z" })),
     removeBlock: vi.fn().mockImplementation((value: string) => Promise.resolve({ value, blocked: false })),
+    counts: vi.fn().mockRejectedValue(new Error("no counts")),
     ...over,
   };
 }
@@ -371,11 +372,13 @@ describe("GmailApp (hydrates from the gateway)", () => {
     // getThread returns received-only; the folded reply must survive the refresh.
     await waitFor(() => expect(screen.getByText("了解しました。")).toBeInTheDocument());
     // Replying targets the external correspondent (hanako), never our own info@ reply.
+    // Gmail answers the newest message: ours, so it re-addresses its recipients and
+    // threads against our sent Message-Id (`<send-log id>@domain`).
     await userEvent.click(screen.getByTestId("fe2-mail-reply"));
     await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
     const sent = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sent.to).toEqual([{ email: "hanako@example.com", name: "山田 花子" }]);
-    expect(sent.inReplyTo).toBe("<in1@developershub.jp>");
+    expect(sent.inReplyTo).toBe("sent_r@developershub.jp");
   });
 
   it("reply button opens a compose that sends In-Reply-To", async () => {
@@ -636,10 +639,10 @@ describe("GmailApp (hydrates from the gateway)", () => {
       await userEvent.click((await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!);
     };
 
-    it("summarises To + Cc on one line with the delivered-to address as 自分", async () => {
+    it("summarises To, then a labelled Cc, with the delivered-to address as 自分", async () => {
       await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
       const toggle = await screen.findByTestId("fe2-mail-details-toggle");
-      await waitFor(() => expect(toggle).toHaveTextContent("宛先: 自分, 伊藤 由紀, office@example.net"));
+      await waitFor(() => expect(toggle).toHaveTextContent("宛先: 自分 Cc: 伊藤 由紀, office@example.net"));
       expect(screen.queryByTestId("fe2-mail-details")).toBeNull();
     });
 
@@ -878,14 +881,14 @@ describe("Gmail-style pagination (cursor-paged folder list)", () => {
 
     await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
-    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, cursor: "c2" });
+    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", cursor: "c2" });
     expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(3);
     expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
     expect(screen.getByTestId("fe2-mail-page-prev")).toBeEnabled();
 
     await userEvent.click(screen.getByTestId("fe2-mail-page-prev"));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("1–50"));
-    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50 });
+    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox" });
     expect(screen.getByTestId("fe2-mail-page-prev")).toBeDisabled();
   });
 
@@ -917,7 +920,7 @@ describe("Gmail-style pagination (cursor-paged folder list)", () => {
         vi.advanceTimersByTime(MAIL_POLL_MS);
       });
       await waitFor(() => expect(listInbox.mock.calls.length).toBe(calls + 1));
-      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, cursor: "c2" });
+      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", cursor: "c2" });
       expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53");
       expect(screen.queryByTestId("fe2-mail-list-loading")).toBeNull(); // no skeleton flicker
     } finally {
@@ -933,7 +936,7 @@ describe("Gmail-style pagination (cursor-paged folder list)", () => {
     await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
     await userEvent.click(screen.getByTestId("fe2-mail-folder-sent"));
-    await waitFor(() => expect(listInbox).toHaveBeenLastCalledWith({ limit: 50 }));
+    await waitFor(() => expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox" }));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent(`1–${DEMO_SENT_ITEMS.length}`));
     expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
   });

@@ -108,6 +108,7 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 const READS = [
   "DELETE /mail/blocks/:value",
   "GET /mail/blocks",
+  "GET /mail/counts",
   "GET /mail/flags",
   "GET /mail/messages",
   "GET /mail/messages/:id",
@@ -183,7 +184,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(40);
+    expect(everyRoute).toHaveLength(41);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing
