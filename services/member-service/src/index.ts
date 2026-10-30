@@ -8,6 +8,7 @@ import { common } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1MemberRepo } from "./d1-repo";
+import { createD1HrRepo } from "./hr-repo";
 import { notifyAdminsOfParticipation } from "./participationNotify";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
@@ -38,6 +39,8 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newMemberId: () => newId("member"),
     newParticipationId: () => newId("part"),
     newOnboardingItemId: () => newId("onb"),
+    hrRepo: createD1HrRepo(db),
+    newHrId: (prefix) => newId(prefix),
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
     notifyParticipationSubmitted: (ctx, participation) =>
       notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),

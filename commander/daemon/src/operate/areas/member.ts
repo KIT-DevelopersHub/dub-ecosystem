@@ -306,7 +306,19 @@ export const MEMBER: AreaSpec = {
     { service: I, route: "POST /identity/users/sync-email-routing", reason: "名簿全体を一括で作成・無効化する一括操作（件数上限と1件ずつの読み直しが効かない）" },
     { service: MAIL, route: "DELETE /mail/admin/email-routing/issued-addresses/:id", reason: "転送ルールを物理削除する。再発行は別 id になり確認メールが再送される（不可逆）" },
   ],
-  pending: [],
+  // 人事アプリ (/members/hr/*) は新設したばかり。Commander から操作させるかはフェーズ2で決める。
+  pending: [
+    { service: "member-service", route: "GET /members/hr/applicants" },
+    { service: "member-service", route: "GET /members/hr/applicants/:id" },
+    { service: "member-service", route: "POST /members/hr/applicants" },
+    { service: "member-service", route: "PATCH /members/hr/applicants/:id" },
+    { service: "member-service", route: "POST /members/hr/applicants/:id/stage" },
+    { service: "member-service", route: "POST /members/hr/applicants/:id/notes" },
+    { service: "member-service", route: "POST /members/hr/applicants/:id/join" },
+    { service: "member-service", route: "DELETE /members/hr/applicants/:id" },
+    { service: "member-service", route: "GET /members/hr/onboarding" },
+    { service: "member-service", route: "PUT /members/hr/onboarding/:memberId/items/:itemId" },
+  ],
   ownerOpenedIrreversible: {
     "mail.issued.create": "確認メールの送信は取り消せないが、受信は mail.issued.setEnabled で停止できる",
     "members.people.create": "依頼表の「招待」。名簿の行は消せないが、在籍状況（辞退など）や内容は members.people.update で直せる",

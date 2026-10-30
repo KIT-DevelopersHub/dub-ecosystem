@@ -318,6 +318,7 @@ Self-service keys carry a `:self` scope segment. Every entry declares `dangerous
 | chat | `chat:create`, `chat:moderate` ⚠, `chat:delete_channel` ⚠, `chat:slack_import` ⚠, `chat:emoji_import` ⚠, `chat:manage_sections` |
 | infra | `infra:read`, `infra:deploy` ⚠, `infra:dns` ⚠, `infra:admin` ⚠ |
 | audit | `audit:read` |
+| hr | `hr:read`, `hr:write`, `hr:admin` ⚠ |
 | github | `github:read`, `github:write`, `github:sync`, `github:admin` ⚠ |
 | drive | `drive:read`, `drive:write` |
 | webhook | `webhook:read` |
