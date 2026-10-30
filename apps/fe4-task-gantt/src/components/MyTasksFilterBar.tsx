@@ -1,5 +1,5 @@
-import type { task, identity, team, common } from "@dub/types";
-import { TextField, Select, Button } from "@dub/ui";
+import type { identity, team, common } from "@dub/types";
+import { TextField, Select, Button, FilterChips } from "@dub/ui";
 import {
   type MyTasksFilter,
   type DueBucket,
@@ -48,11 +48,6 @@ export function MyTasksFilterBar({ value, onChange, onClear, people, teams, disa
     ...people.map((p) => ({ value: p.id, label: p.displayName })),
   ];
   const teamOptions = [{ value: "", label: "全チーム" }, ...teams.map((t) => ({ value: t.id, label: t.name }))];
-
-  const toggleStatus = (s: task.TaskStatus) => {
-    const has = value.status.includes(s);
-    onChange({ ...value, status: has ? value.status.filter((x) => x !== s) : [...value.status, s] });
-  };
 
   return (
     <div className={styles.myFilterBar} data-testid="fe4-mytasks-filter" role="group" aria-label="タスクの絞り込み">
@@ -114,44 +109,22 @@ export function MyTasksFilterBar({ value, onChange, onClear, people, teams, disa
       </div>
 
       <div className={styles.filterRow}>
-        <span className={styles.chipGroup}>
-          {BOARD_COLUMNS.map((s) => {
-            const on = value.status.includes(s);
-            return (
-              <button
-                key={s}
-                type="button"
-                disabled={disabled}
-                aria-pressed={on}
-                className={`${styles.chip} ${on ? styles.chipActive : ""}`}
-                onClick={() => toggleStatus(s)}
-                data-testid={`fe4-mytasks-status-${s}`}
-              >
-                {on && <span className={styles.chipCheck} aria-hidden>✓</span>}
-                {STATUS_LABEL[s]}
-              </button>
-            );
-          })}
-        </span>
+        <FilterChips
+          multiple
+          aria-label="ステータスで絞り込み"
+          value={value.status}
+          onChange={(status) => onChange({ ...value, status })}
+          disabled={disabled}
+          options={BOARD_COLUMNS.map((s) => ({ value: s, label: STATUS_LABEL[s], testId: `fe4-mytasks-status-${s}` }))}
+        />
 
-        <span className={styles.chipGroup} aria-label="期限で絞り込み">
-          {DUE_OPTIONS.map((d) => {
-            const on = value.due === d.value;
-            return (
-              <button
-                key={d.value}
-                type="button"
-                disabled={disabled}
-                aria-pressed={on}
-                className={`${styles.chip} ${on ? styles.chipActive : ""}`}
-                onClick={() => onChange({ ...value, due: d.value })}
-                data-testid={`fe4-mytasks-due-${d.value}`}
-              >
-                {d.label}
-              </button>
-            );
-          })}
-        </span>
+        <FilterChips
+          aria-label="期限で絞り込み"
+          value={value.due}
+          onChange={(due) => onChange({ ...value, due })}
+          disabled={disabled}
+          options={DUE_OPTIONS.map((d) => ({ ...d, testId: `fe4-mytasks-due-${d.value}` }))}
+        />
 
         {activeCount > 0 && (
           <Button variant="ghost" onClick={onClear} disabled={disabled} testId="fe4-mytasks-clear">

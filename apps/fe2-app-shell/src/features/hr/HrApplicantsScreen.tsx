@@ -12,6 +12,8 @@ import {
   DataTable,
   EmptyState,
   ErrorState,
+  FilterBar,
+  FilterChips,
   PageHeader,
   SkeletonTable,
   Stack,
@@ -194,24 +196,26 @@ export function HrApplicantsScreen(): JSX.Element {
     <HrFrame active="applicants">
       <>
         <div className={styles.toolbar}>
-          <div className={styles.filters} role="tablist" aria-label="ステータスで絞り込み" data-testid="fe2-hr-filters">
-            {FILTERS.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                role="tab"
-                aria-selected={filter === f.id}
-                className={`${styles.filterChip} ${filter === f.id ? styles.filterChipActive : ""}`}
-                data-testid={`fe2-hr-filter-${f.id}`}
-                onClick={() => setFilter(f.id)}
-              >
-                {f.label}
-                <span className={styles.filterCount} data-testid={`fe2-hr-filter-${f.id}-count`}>
-                  {list.data ? counts.get(f.id) ?? 0 : "–"}
-                </span>
-              </button>
-            ))}
-          </div>
+          <FilterBar
+            testId="fe2-hr-filters"
+            aria-label="ステータスで絞り込み"
+            activeCount={filter === "all" ? 0 : 1}
+            onClear={() => setFilter("all")}
+            clearTestId="fe2-hr-filter-clear"
+          >
+            <FilterChips
+              aria-label="ステータス"
+              value={filter}
+              onChange={setFilter}
+              options={FILTERS.map((f) => ({
+                value: f.id,
+                label: f.label,
+                count: list.data ? counts.get(f.id) ?? 0 : "–",
+                testId: `fe2-hr-filter-${f.id}`,
+                countTestId: `fe2-hr-filter-${f.id}-count`,
+              }))}
+            />
+          </FilterBar>
           <div className={styles.search}>
             <TextField id="hr-search" testId="fe2-hr-search" value={query} onChange={setQuery} placeholder="氏名・フリガナ・学科で検索" />
           </div>

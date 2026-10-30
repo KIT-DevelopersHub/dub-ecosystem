@@ -59,6 +59,12 @@ export type {
   TabsProps,
   SegmentedOption,
   SegmentedControlProps,
+  FilterBarProps,
+  FilterChipProps,
+  FilterChipOption,
+  FilterChipsProps,
+  FilterChipsSingleProps,
+  FilterChipsMultipleProps,
   DividerProps,
   EmptyStateProps,
   DisplayableError,
@@ -109,6 +115,8 @@ export { AppLauncher } from "./components/AppLauncher";
 export { Sidebar } from "./components/Sidebar";
 export { Tabs } from "./components/Tabs";
 export { SegmentedControl } from "./components/SegmentedControl";
+// Chip-style list/table filters — every filter UI should use this (FRONTEND_GUIDE).
+export { FilterBar, FilterChip, FilterChips } from "./components/FilterBar";
 export { EmptyState, ErrorState, SkeletonLoader } from "./components/States";
 export { Skeleton, SkeletonList, SkeletonTable, SkeletonCard } from "./components/Skeleton";
 export { RateLimitNotice, formatRecoveryText } from "./components/RateLimitNotice";

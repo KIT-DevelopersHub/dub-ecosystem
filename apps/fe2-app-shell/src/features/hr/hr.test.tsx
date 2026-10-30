@@ -129,6 +129,19 @@ describe("HrApplicantsScreen (表)", () => {
     expect(rowNames()).toHaveLength(5);
   });
 
+  it("uses the shared FilterBar: one status at a time, クリア returns to すべて", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi());
+    await screen.findByTestId("fe2-hr-row-app_1");
+    expect(screen.getByTestId("fe2-hr-filter-all")).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByTestId("fe2-hr-filter-clear")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe2-hr-filter-onboarded"));
+    expect(screen.getByTestId("fe2-hr-filter-onboarded")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("fe2-hr-filter-all")).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(screen.getByTestId("fe2-hr-filter-clear"));
+    expect(screen.getByTestId("fe2-hr-filter-all")).toHaveAttribute("aria-checked", "true");
+    expect(rowNames()).toHaveLength(5);
+  });
+
   it("sorts by a column and searches by name / kana", async () => {
     renderWith(<HrApplicantsScreen />, fakeApi());
     await screen.findByTestId("fe2-hr-row-app_1");
