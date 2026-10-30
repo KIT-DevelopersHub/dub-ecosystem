@@ -46,6 +46,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     listBlocks: vi.fn().mockResolvedValue([]),
     addBlock: vi.fn().mockImplementation((req: { value: string; kind?: "address" | "domain" }) => Promise.resolve({ value: req.value.toLowerCase(), kind: req.kind ?? "address", createdAt: "2026-01-01T00:00:00.000Z" })),
     removeBlock: vi.fn().mockImplementation((value: string) => Promise.resolve({ value, blocked: false })),
+    counts: vi.fn().mockRejectedValue(new Error("no counts")),
     ...over,
   };
 }
@@ -878,14 +879,14 @@ describe("Gmail-style pagination (cursor-paged folder list)", () => {
 
     await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
-    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, cursor: "c2" });
+    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", cursor: "c2" });
     expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(3);
     expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
     expect(screen.getByTestId("fe2-mail-page-prev")).toBeEnabled();
 
     await userEvent.click(screen.getByTestId("fe2-mail-page-prev"));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("1–50"));
-    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50 });
+    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox" });
     expect(screen.getByTestId("fe2-mail-page-prev")).toBeDisabled();
   });
 
@@ -917,7 +918,7 @@ describe("Gmail-style pagination (cursor-paged folder list)", () => {
         vi.advanceTimersByTime(MAIL_POLL_MS);
       });
       await waitFor(() => expect(listInbox.mock.calls.length).toBe(calls + 1));
-      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, cursor: "c2" });
+      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", cursor: "c2" });
       expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53");
       expect(screen.queryByTestId("fe2-mail-list-loading")).toBeNull(); // no skeleton flicker
     } finally {
@@ -933,7 +934,7 @@ describe("Gmail-style pagination (cursor-paged folder list)", () => {
     await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
     await userEvent.click(screen.getByTestId("fe2-mail-folder-sent"));
-    await waitFor(() => expect(listInbox).toHaveBeenLastCalledWith({ limit: 50 }));
+    await waitFor(() => expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox" }));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent(`1–${DEMO_SENT_ITEMS.length}`));
     expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
   });

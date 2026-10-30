@@ -809,6 +809,12 @@ function firstLine(text: string, max = 140): string {
   return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
 }
 
+const BULK_SENDERS: mail.MailAddress[] = [
+  { email: "news@example.com", name: "お知らせ配信" },
+  { email: "sale@shop-a.example", name: "ショップA セール情報" },
+  { email: "weekly@mag.spam-b.example", name: "マガジンB 週刊号" },
+];
+
 function createMailStore() {
   // Per-account Inbox + Sent, mirroring the server's owner scope: each account sees ONLY
   // its own mail. received[accountId] is seeded (cloned) from the account's inbox so the
@@ -862,7 +868,9 @@ function createMailStore() {
             id: `msg_bulk_${i + 1}`,
             messageId: `<bulk-${i + 1}@demo>`,
             threadId: `thr_bulk_${i + 1}`,
-            from: { email: "news@example.com", name: "お知らせ配信" },
+            // Every 3rd / 5th bulk mail comes from one of two promotional senders, so blocking
+            // them (この送信者をブロック / ドメインごとブロック) can be tried against paging.
+            from: BULK_SENDERS[i % 3 === 1 ? 1 : i % 5 === 2 ? 2 : 0]!,
             to: [{ email: "demo@developershub.jp" }],
             subject: `過去のお知らせ #${i + 1}`,
             snippet: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
@@ -1028,6 +1036,80 @@ function createMailStore() {
 
     // received: list / detail / mark-read (read state persists in-session). Scoped to the
     // account, or every account under oversight (mail:read_all).
+    // Folder views (gateway parity with GET /mail/messages?folder= + GET /mail/counts): paged by
+    // CONVERSATION with blocked senders and this account's flags applied BEFORE the limit, so
+    // every page is full. Same rules as services/mail-gateway/src/folders.ts.
+    const folderThreads = (source: mail.MailMessageDetail[]) => {
+      const flags = new Map(loadFlags().map((f) => [f.threadId, f]));
+      const byThread = new Map<string, mail.MailMessageDetail[]>();
+      for (const m of source) byThread.set(m.threadId, [...(byThread.get(m.threadId) ?? []), m]);
+      return [...byThread.entries()].map(([threadId, msgs]) => {
+        const f = flags.get(threadId);
+        return {
+          threadId,
+          msgs,
+          last: msgs.reduce((a, m) => (m.receivedAt > a ? m.receivedAt : a), ""),
+          blocked: msgs.every((m) => isBlocked(m.from.email)),
+          mine: msgs.some((m) => m.mine !== false),
+          unread: msgs.some((m) => !m.read && m.mine !== false),
+          starred: f?.starred ?? false,
+          archived: f?.archived ?? false,
+          trashed: f?.trashed ?? false,
+          purged: f?.purged ?? false,
+        };
+      });
+    };
+    type FolderThread = ReturnType<typeof folderThreads>[number];
+    const inView = (t: FolderThread, view: string): boolean => {
+      if (t.purged) return false;
+      const inbox = !t.trashed && !t.archived && !t.blocked;
+      switch (view) {
+        case "inbox":
+          return inbox;
+        case "mine":
+          return inbox && t.mine;
+        case "others":
+          return inbox && !t.mine;
+        case "starred":
+          return !t.trashed && t.starred && !t.blocked;
+        case "archive":
+          return !t.trashed && t.archived && !t.blocked;
+        case "trash":
+          return t.trashed;
+        case "blocked":
+          return !t.trashed && t.blocked;
+        default:
+          return !t.trashed && !t.blocked; // all
+      }
+    };
+    if (method === "GET" && pathname === "/api/v1/mail/counts") {
+      const ts = folderThreads(readInbox);
+      const views = ["inbox", "mine", "others", "starred", "archive", "trash", "blocked"] as const;
+      const out = {} as mail.MailFolderCounts;
+      for (const v of views) {
+        const hit = ts.filter((t) => inView(t, v));
+        out[v] = { total: hit.length, unread: v === "blocked" ? 0 : hit.filter((t) => t.unread).length };
+      }
+      return json(out);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/messages" && url.searchParams.get("folder")) {
+      const view = url.searchParams.get("folder")!;
+      const limit = Math.max(1, Number(url.searchParams.get("limit")) || 50);
+      const cursor = url.searchParams.get("cursor");
+      const ts = folderThreads(searchBy(readInbox, url))
+        .filter((t) => inView(t, view))
+        .sort((a, b) => b.last.localeCompare(a.last) || b.threadId.localeCompare(a.threadId));
+      const start = cursor ? ts.findIndex((t) => t.threadId === cursor) + 1 : 0;
+      const slice = ts.slice(start, start + limit);
+      const items = slice.flatMap((t) =>
+        t.msgs.map(({ textBody, htmlBody, ...li }) => {
+          void textBody;
+          void htmlBody;
+          return stampBlocked(li);
+        }),
+      );
+      return json({ items, nextCursor: start + limit < ts.length ? (slice.at(-1)?.threadId ?? null) : null, total: ts.length } satisfies mail.MailMessagePage);
+    }
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
       const items: mail.MailMessageListItem[] = searchBy(readInbox, url).map(({ textBody, htmlBody, ...li }) => {
         void textBody;

@@ -3,7 +3,7 @@
 // churn across the parallel unit build). Each failure -> a FieldError with the
 // MAIL_INVALID_REQUEST envelope (design §6).
 import { DubError, type FieldError } from "@dub/errors";
-import type { mail } from "@dub/types";
+import { mail } from "@dub/types";
 import {
   DEFAULT_QUERY_LIMIT,
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -268,9 +268,20 @@ export function parseScheduleMailPatch(body: unknown, now: number = Date.now()):
 
 /** Validate GET /messages + GET /sent query params (threadId? / cursor? / limit / q?).
  *  `q` is a free-text search (trimmed; blank = no search; <= MAX_SEARCH_QUERY chars). */
-export function parseListMessagesQuery(q: Record<string, string | undefined>): { threadId?: string; cursor?: string; limit: number; q?: string } {
+export function parseListMessagesQuery(q: Record<string, string | undefined>): {
+  threadId?: string;
+  cursor?: string;
+  limit: number;
+  q?: string;
+  folder?: mail.MailFolderView;
+} {
   const fe: FieldError[] = [];
-  const out: { threadId?: string; cursor?: string; limit: number; q?: string } = { limit: DEFAULT_QUERY_LIMIT };
+  const out: { threadId?: string; cursor?: string; limit: number; q?: string; folder?: mail.MailFolderView } = { limit: DEFAULT_QUERY_LIMIT };
+
+  if (q.folder !== undefined && q.folder !== "") {
+    if ((mail.MAIL_FOLDER_VIEWS as readonly string[]).includes(q.folder)) out.folder = q.folder as mail.MailFolderView;
+    else fe.push({ field: "folder", reason: "invalid_enum", message: mail.MAIL_FOLDER_VIEWS.join("|") });
+  }
 
   if (q.threadId !== undefined && q.threadId !== "") out.threadId = q.threadId;
   if (q.cursor !== undefined && q.cursor !== "") out.cursor = q.cursor;
