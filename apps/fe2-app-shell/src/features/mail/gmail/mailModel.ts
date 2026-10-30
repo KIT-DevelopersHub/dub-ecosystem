@@ -285,6 +285,96 @@ export function replyAllRecipients(msg: MailMsg, own: ReadonlySet<string>): { to
   return { to, cc };
 }
 
+/** Did the viewer send this message? Our own Sent row, or a received copy whose From is one
+ *  of our addresses (a Dub send that looped back through Email Routing, e.g. a Cc to self).
+ *  Another account's Sent row seen via oversight (mine === false) is NOT ours. */
+export function sentByMe(msg: MailMsg, own: ReadonlySet<string>): boolean {
+  if (msg.outbound) return msg.mine !== false;
+  return own.has(normEmail(msg.from.email));
+}
+
+export interface ReplyPlan {
+  /** The message being answered (its Message-Id threads the reply). */
+  target: MailMsg;
+  /** 返信: Reply-To else From of a received message; the original To of our own message. */
+  reply: MailPerson[];
+  /** 全員に返信. */
+  all: { to: MailPerson[]; cc: MailPerson[] };
+  /** In-Reply-To for the reply: the target's Message-Id, else the newest message that has one. */
+  parentId?: string;
+}
+
+/** RFC Message-Id to reply against. A folded Sent row carries the bare send-log id; give it
+ *  the `<id>@domain` form the gateway stamped on the wire. */
+function parentMessageId(messages: readonly MailMsg[], target: MailMsg): string | undefined {
+  const withId = target.messageId ? target : [...messages].reverse().find((m) => m.messageId);
+  const id = withId?.messageId?.trim();
+  if (!withId || !id) return undefined;
+  if (id.includes("@")) return id;
+  const domain = withId.from.email.split("@")[1];
+  return domain ? `${id}@${domain}` : id;
+}
+
+/** Gmail reply addressing for a conversation: answer the LAST message. If we sent it,
+ *  re-address its original recipients (To → To, Cc → Cc, minus us); otherwise reply to its
+ *  sender (Reply-To if present) and reply-all adds every To/Cc minus us. */
+export function replyPlan(messages: readonly MailMsg[], own: ReadonlySet<string>): ReplyPlan {
+  const target = messages[messages.length - 1]!;
+  if (sentByMe(target, own)) {
+    const to = dedupPeople(target.to, own);
+    // Mail we sent only to ourselves: Gmail still addresses it to the original recipients.
+    const reply = to.length > 0 ? to : dedupPeople(target.to);
+    const cc = dedupPeople(target.cc ?? [], new Set([...own, ...reply.map((p) => normEmail(p.email))]));
+    return withParent({ target, reply, all: { to: reply, cc } }, messages);
+  }
+  const sender = target.headerMeta?.replyTo?.length ? target.headerMeta.replyTo : [target.from];
+  return withParent({ target, reply: dedupPeople(sender), all: replyAllRecipients(target, own) }, messages);
+}
+
+function withParent(plan: ReplyPlan, messages: readonly MailMsg[]): ReplyPlan {
+  const parentId = parentMessageId(messages, plan.target);
+  return parentId ? { ...plan, parentId } : plan;
+}
+
+/** RFC Message-Id local part ("<id@host>" -> "id"); our sends stamp `<send-log id>@domain`. */
+function messageIdLocal(id: string | undefined): string {
+  return (id ?? "").trim().replace(/^<|>$/g, "").split("@")[0] ?? "";
+}
+
+const LOOPBACK_WINDOW_MS = 5 * 60_000;
+const addrKey = (ps: readonly MailPerson[]): string => ps.map((p) => normEmail(p.email)).sort().join(",");
+const bodyKey = (b: string): string => b.replace(/\s+/g, " ").trim().slice(0, 80);
+
+/** Same message seen twice: same From and To, same body start, a few minutes apart at most. */
+function sameSend(sent: MailMsg, copy: MailMsg): boolean {
+  if (normEmail(sent.from.email) !== normEmail(copy.from.email)) return false;
+  if (addrKey(sent.to) !== addrKey(copy.to)) return false;
+  const dt = Math.abs(new Date(copy.date).getTime() - new Date(sent.date).getTime());
+  if (!(dt <= LOOPBACK_WINDOW_MS)) return false;
+  const a = bodyKey(sent.body);
+  const b = bodyKey(copy.body);
+  return a.length > 0 && b.length > 0 && (a.startsWith(b) || b.startsWith(a));
+}
+
+/** A Dub send addressed to a Dub-routed mailbox (info@, a Cc to a colleague, …) comes back
+ *  as a received copy with the same Message-Id, so the conversation showed it twice (our
+ *  Sent row + the copy, a second apart). Keep one: our own Sent row when we sent it,
+ *  otherwise the received copy (it carries delivery details and `mine`). */
+export function dedupeLoopback(messages: readonly MailMsg[]): MailMsg[] {
+  const sentRows = messages.filter((m) => m.outbound);
+  if (sentRows.length === 0) return [...messages];
+  const byId = new Map(sentRows.map((m) => [m.id, m]));
+  const drop = new Set<MailMsg>();
+  for (const m of messages) {
+    if (m.outbound) continue;
+    // Our stamped Message-Id is best-effort on Resend, so also match by content.
+    const sent = byId.get(messageIdLocal(m.messageId)) ?? sentRows.find((s) => !drop.has(s) && sameSend(s, m));
+    if (!sent || drop.has(sent)) continue;
+    drop.add(sent.mine !== false ? m : sent);
+  }
+  return drop.size === 0 ? [...messages] : messages.filter((m) => !drop.has(m));
+}
+
 /** Address-book candidates for recipient fields: everyone the user has corresponded with
  *  (From/To/Cc across loaded threads), excluding self, deduped by email. */
 export function addressCandidates(threads: MailThreadModel[], meEmail: string): Array<{ email: string; name?: string }> {

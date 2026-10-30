@@ -10,7 +10,7 @@ export async function deliver(api: MailApi, dispatch: Dispatch<MailAction>, pend
   dispatch({ type: "SEND_STARTED", pending });
   try {
     if (pending.kind === "schedule") await api.schedule(pending.req as mail.ScheduleMailRequest);
-    else await api.send(pending.req);
+    else await api.send(pending.req, pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : undefined);
   } catch {
     dispatch({ type: "SEND_FAILED", pending });
     return;

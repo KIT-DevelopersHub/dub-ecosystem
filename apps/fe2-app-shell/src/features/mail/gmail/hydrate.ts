@@ -5,7 +5,7 @@
 // message(s) (getThread / getSent) to fill real bodies (threadDetailToMessages /
 // sentDetailToMessage).
 import type { mail } from "@dub/types";
-import type { MailMsg, MailPerson, MailThreadModel } from "./mailModel.ts";
+import { dedupeLoopback, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 /** Received messages -> inbox threads, grouped by threadId, messages oldest→newest. */
 export function inboxItemsToThreads(items: mail.MailMessageListItem[]): MailThreadModel[] {
@@ -68,12 +68,15 @@ export function combineThreads(
         body: s.snippet,
         read: true,
         outbound: true,
+        ...(s.mine === false ? { mine: false } : {}),
       });
       parent.messages.sort((a, b) => a.date.localeCompare(b.date));
     } else {
       standalone.push(s);
     }
   }
+  // A send to a Dub-routed mailbox also arrives as a received copy: show it once.
+  for (const t of inboxThreads) t.messages = dedupeLoopback(t.messages);
   return [...inboxThreads, ...sentItemsToThreads(standalone, me)];
 }
 
@@ -96,6 +99,7 @@ export function sentItemsToThreads(items: mail.MailSentListItem[], me: MailPerso
         body: it.snippet,
         read: true,
         outbound: true,
+        ...(it.mine === false ? { mine: false } : {}),
       },
     ],
   }));
@@ -134,6 +138,7 @@ export function sentDetailToMessage(detail: mail.MailSentDetail, me: MailPerson)
     body: detail.textBody,
     read: true,
     outbound: true,
+    ...(detail.mine === false ? { mine: false } : {}),
     ...(detail.attachments && detail.attachments.length > 0 ? { attachments: detail.attachments } : {}),
   };
 }

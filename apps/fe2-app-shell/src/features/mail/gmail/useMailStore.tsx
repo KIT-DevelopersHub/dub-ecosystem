@@ -37,6 +37,9 @@ export interface PendingSend {
   compose: ComposeState;
   /** Optimistic Sent entry to drop on failure. */
   threadId?: string;
+  /** Idempotency key for a send: the retry bar re-sends with the SAME key, so a request
+   *  that actually went out before failing on the wire is not delivered twice. */
+  idempotencyKey?: string;
 }
 
 export interface SendNotice {
