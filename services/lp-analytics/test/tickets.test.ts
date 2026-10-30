@@ -1,5 +1,6 @@
 // LP チケット購入: LP管理 API (/lp/tickets*) + 公開 LP Worker 向け内部 API (/lp/internal/tickets*).
 import { describe, it, expect } from "vitest";
+import { issuePreviewToken, verifyPreviewToken } from "../src/preview-token";
 import { createStripeClient, signStripePayload, toCheckoutSession, usableStripeKey } from "../src/stripe";
 import type { LpTicketOrdersPage, LpTicketsState, LpTicketTypeSummary } from "../src/types";
 import { get, makeApp, send, type RepoKind } from "./harness";
@@ -7,6 +8,7 @@ import { get, makeApp, send, type RepoKind } from "./harness";
 const body = async <T>(res: Response): Promise<T> => (await res.json()) as T;
 const INTERNAL = { "x-dub-internal": "1" };
 const WHSEC = "whsec_test";
+const PREVIEW_KEY = "sk_test_preview_key";
 const NOW = "2026-10-07T03:00:00.000Z";
 const NOW_SEC = Math.floor(Date.parse(NOW) / 1000);
 
@@ -60,12 +62,20 @@ function fakeStripe(
 
 async function setup(
   kind: RepoKind,
-  opts: { stripe?: ReturnType<typeof fakeStripe> | null; cap?: number; publish?: boolean; paypay?: boolean } = {},
+  opts: {
+    stripe?: ReturnType<typeof fakeStripe> | null;
+    cap?: number;
+    publish?: boolean;
+    paypay?: boolean;
+    previewKey?: string | null;
+    level?: "view" | "edit";
+  } = {},
 ) {
-  const h = await makeApp(kind, "edit", 5000, null, opts.publish === false ? [] : ["lp:publish"], {
+  const h = await makeApp(kind, opts.level ?? "edit", 5000, null, opts.publish === false ? [] : ["lp:publish"], {
     stripe: opts.stripe ? opts.stripe.client : null,
     stripeWebhookSecret: WHSEC,
     paypayEnabled: opts.paypay === true,
+    ticketPreviewKey: opts.previewKey ?? null,
     ...(opts.cap !== undefined ? { dailyCheckoutCap: opts.cap } : {}),
   });
   return h;
@@ -122,6 +132,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       enabled: false,
       ctaEnabled: false,
       paymentReady: false,
+      previewCheckout: false,
       paymentMethods: ["card"],
       publicUrl: "https://hokuriku-it-conf.com/tickets",
       fields: [],
@@ -700,6 +711,103 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       [0, "paid", null],
       [3000, "paid", "card"],
     ]);
+  });
+
+  it("preview token: issued only with a Stripe test key and lp edit; verified by the internal route", async () => {
+    const none = await setup(kind, { stripe: fakeStripe() });
+    const refused = await none.app.fetch(send("POST", "/lp/tickets/preview-token", {}));
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: { code: "LP_TICKET_PREVIEW_UNAVAILABLE" } });
+    expect((await body<LpTicketsState>(await none.app.fetch(get("/lp/tickets")))).previewCheckout).toBe(false);
+
+    const viewer = await setup(kind, { stripe: fakeStripe(), previewKey: PREVIEW_KEY, level: "view" });
+    expect((await viewer.app.fetch(send("POST", "/lp/tickets/preview-token", {}))).status).toBe(403);
+
+    const { app } = await setup(kind, { stripe: fakeStripe(), previewKey: PREVIEW_KEY });
+    expect((await body<LpTicketsState>(await app.fetch(get("/lp/tickets")))).previewCheckout).toBe(true);
+    const res = await app.fetch(send("POST", "/lp/tickets/preview-token", {}));
+    expect(res.status).toBe(200);
+    const { token, expiresAt } = await body<{ token: string; expiresAt: string }>(res);
+    expect(Date.parse(expiresAt) - Date.parse(NOW)).toBe(3600_000);
+    const check = (t: unknown) => app.fetch(send("POST", "/lp/internal/tickets/preview", { token: t }, INTERNAL));
+    expect(await (await check(token)).json()).toEqual({ valid: true });
+    expect(await (await check(`${token.slice(0, -1)}0`)).json()).toEqual({ valid: false });
+    expect(await (await check("nope")).json()).toEqual({ valid: false });
+    expect(await (await check(undefined)).json()).toEqual({ valid: false });
+    // internal route is s2s only
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/preview", { token }))).status).toBe(404);
+  });
+
+  it("preview checkout while sales are off: needs a valid token; order marked preview/test; token rides the return URLs", async () => {
+    const stripe = fakeStripe();
+    const { app } = await setup(kind, { stripe, previewKey: PREVIEW_KEY });
+    // sales stay OFF (no enable())
+    const paid = await addType(app, { name: "一般", priceJpy: 3000 });
+    const free = await addType(app, { name: "招待", priceJpy: 0 });
+    expect((await app.fetch(checkout({ ticketTypeId: paid.id }))).status).toBe(404);
+    expect((await app.fetch(checkout({ ticketTypeId: paid.id, previewToken: "123.abc" }))).status).toBe(404);
+    expect(stripe.calls).toHaveLength(0);
+
+    const { token } = await body<{ token: string }>(await app.fetch(send("POST", "/lp/tickets/preview-token", {})));
+    const res = await app.fetch(checkout({ ticketTypeId: paid.id, previewToken: token }));
+    expect(res.status).toBe(200);
+    const f = stripe.calls[0]!.form!;
+    const q = `&tickets_preview=${encodeURIComponent(token)}`;
+    expect(f.get("success_url")).toBe(`https://hokuriku-it-conf.com/tickets/thanks?session_id={CHECKOUT_SESSION_ID}${q}`);
+    expect(f.get("cancel_url")).toBe(`https://hokuriku-it-conf.com/tickets?canceled=1${q}`);
+
+    const freeRes = await body<{ redirectUrl: string }>(
+      await app.fetch(checkout({ ticketTypeId: free.id, previewToken: token })),
+    );
+    expect(freeRes.redirectUrl).toMatch(/^https:\/\/hokuriku-it-conf\.com\/tickets\/thanks\?order=tko_\w+&tickets_preview=/);
+
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.map((o) => [o.amountJpy, o.status, o.preview, o.test])).toEqual([
+      [0, "paid", true, true],
+      [3000, "pending", true, true],
+    ]);
+  });
+
+  it("a token stops working once the key is no longer a test key (live / unset)", async () => {
+    const issuer = await setup(kind, { stripe: fakeStripe(), previewKey: PREVIEW_KEY });
+    const { token } = await body<{ token: string }>(await issuer.app.fetch(send("POST", "/lp/tickets/preview-token", {})));
+    const stripe = fakeStripe();
+    const live = await setup(kind, { stripe, previewKey: null });
+    const t = await addType(live.app, { name: "一般", priceJpy: 3000 });
+    expect((await live.app.fetch(checkout({ ticketTypeId: t.id, previewToken: token }))).status).toBe(404);
+    const check = await live.app.fetch(send("POST", "/lp/internal/tickets/preview", { token }, INTERNAL));
+    expect(await check.json()).toEqual({ valid: false });
+    expect(stripe.calls).toHaveLength(0);
+  });
+
+  it("normal (non-preview) orders: test only when Stripe ran in test mode (cs_test_)", async () => {
+    const stripe = fakeStripe();
+    const { app } = await setup(kind, { stripe });
+    await enable(app);
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    const f = await addType(app, { name: "招待", priceJpy: 0 });
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    await app.fetch(checkout({ ticketTypeId: f.id }));
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.map((o) => [o.amountJpy, o.preview, o.test])).toEqual([
+      [0, false, false],
+      [3000, false, true],
+    ]);
+  });
+});
+
+describe("preview token", () => {
+  it("rejects expired, over-long, tampered and other-key tokens", async () => {
+    const now = 1_800_000_000;
+    const { token, expiresAt } = await issuePreviewToken(PREVIEW_KEY, now);
+    expect(await verifyPreviewToken(PREVIEW_KEY, token, now)).toBe(true);
+    expect(await verifyPreviewToken(PREVIEW_KEY, token, expiresAt)).toBe(false);
+    expect(await verifyPreviewToken("sk_test_other", token, now)).toBe(false);
+    expect(await verifyPreviewToken(null, token, now)).toBe(false);
+    const sig = token.split(".")[1];
+    expect(await verifyPreviewToken(PREVIEW_KEY, `${expiresAt + 10}.${sig}`, now)).toBe(false);
+    const long = await issuePreviewToken(PREVIEW_KEY, now, 24 * 3600);
+    expect(await verifyPreviewToken(PREVIEW_KEY, long.token, now)).toBe(false);
   });
 });
 

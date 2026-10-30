@@ -7,7 +7,7 @@ import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1LpRepo } from "./d1-repo";
 import { createCfSiteTrafficSource } from "./site-traffic";
-import { createStripeClient, usableStripeKey } from "./stripe";
+import { createStripeClient, isLiveStripeKey, usableStripeKey } from "./stripe";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -50,6 +50,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     stripe: stripeKey ? createStripeClient(stripeKey) : null,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     paypayEnabled: env.LP_PAYPAY_ENABLED === "1",
+    ticketPreviewKey: stripeKey && !isLiveStripeKey(stripeKey) ? stripeKey : null,
     newProposalId: () => newId("lpp"),
     dailyProposalCap:
       Number(env.LP_DAILY_PROPOSAL_CAP) > 0 ? Number(env.LP_DAILY_PROPOSAL_CAP) : DEFAULT_DAILY_PROPOSAL_CAP,
