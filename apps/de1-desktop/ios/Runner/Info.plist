@@ -28,6 +28,16 @@
 	     prompt before revealing the app and auto-filling saved login credentials. -->
 	<key>NSFaceIDUsageDescription</key>
 	<string>Dub のログイン情報を Face ID で自動入力するために使用します。</string>
+	<!-- Web file input (<input type=file>) in the WebView: "Take Photo or Video" /
+	     photo library / "Save to Photos". Missing keys crash the app (App Review 2.1(a)). -->
+	<key>NSCameraUsageDescription</key>
+	<string>チャットやメールに写真・動画を添付するためにカメラを使用します。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>チャットやメールに添付する動画の音声を録音するためにマイクを使用します。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>チャットやメールに写真・動画を添付するために写真ライブラリを使用します。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>チャットやメールで受け取った画像を写真ライブラリに保存するために使用します。</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

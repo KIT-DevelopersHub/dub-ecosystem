@@ -11,6 +11,9 @@
 	<!-- Required: the desktop client makes outbound HTTPS calls to the api-gateway. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- Web file input (<input type=file>) opens NSOpenPanel; the sandbox needs this or the picker fails. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
 	<!-- APNs (FCM-over-APNs, see lib/push/fcm_push.dart). macOS uses the
 	     com.apple.developer.* key; the bare `aps-environment` key is iOS-only. -->
 	<key>com.apple.developer.aps-environment</key>
