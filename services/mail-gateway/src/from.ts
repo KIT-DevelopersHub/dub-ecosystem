@@ -12,7 +12,7 @@ import type { DbClient } from "@dub/db";
 import type { identity, mail } from "@dub/types";
 import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS, SERVICE_NAME } from "./config";
-import { findDeliveryEnvelope, findInboundByMessageId } from "./repo";
+import { findDeliveryEnvelope, findInboundByMessageId, findSendLogById } from "./repo";
 
 /** Verified sending domain (Resend). Only addresses on this domain may be a From. */
 export const COMPANY_MAIL_DOMAIN = "developershub.jp";
@@ -71,6 +71,13 @@ export async function resolveReplyFromAddress(
   userId: string | null,
 ): Promise<string> {
   try {
+    // Replying to OUR OWN earlier send ("<send-log id>@domain"): keep the identity we sent
+    // as, so the conversation does not switch From mid-thread (e.g. info@ -> personal).
+    const localPart = bareMessageId(inReplyTo).split("@")[0] ?? "";
+    if (userId && localPart.startsWith("maillog_")) {
+      const ours = await findSendLogById(db, localPart);
+      if (ours && ours.owner_user_id === userId && isCompanyAddress(ours.from_address)) return ours.from_address.trim();
+    }
     const parent = await findInboundByMessageId(db, bareMessageId(inReplyTo));
     if (parent) {
       // The replier's OWN copy wins: a colleague who was Cc'd (or Bcc'd) replies as the

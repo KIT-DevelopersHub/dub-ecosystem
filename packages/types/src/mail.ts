@@ -210,6 +210,10 @@ export interface MailSentListItem {
   providerMessageId?: string;
   status: "sent";
   threadId?: string; // set for a reply (= parent message id); lets a client thread the reply into its conversation
+  // ADDITIVE: false when this row is another account's send, visible only via oversight
+  // (mail:read_all). Absent/true = the viewer sent it. Lets a client keep someone else's
+  // From out of "my addresses" (自分 labelling, reply-all exclusion, reply addressing).
+  mine?: boolean;
 }
 /** Sent-folder detail: the list row plus the full body. htmlBody optional (present
  *  only when the send carried an HTML part) and MUST be sanitized before rendering. */

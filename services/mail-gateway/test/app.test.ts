@@ -195,6 +195,55 @@ describe("POST /mail/outbox (user-facing compose)", () => {
     expect(page.items[0]!.from?.email).toBe("info@developershub.jp");
     expect(page.items[0]!.threadId).toBe("ext-1@gmail.com");
   });
+
+  it("an Idempotency-Key is scoped to the user: the same key from two accounts sends twice, a repeat from one dedupes", async () => {
+    const { env, sends } = makeEnv();
+    const send = (user: string) =>
+      app.fetch(
+        new Request("https://svc/mail/outbox", { method: "POST", headers: headers({ "x-dub-user-id": user, "x-dub-idempotency-key": "same-key" }), body: JSON.stringify(sendBody) }),
+        env,
+      );
+    expect((await send("usr_alice")).status).toBe(202);
+    expect((await send("usr_alice")).status).toBe(200); // double-submit -> one mail
+    expect((await send("usr_bob")).status).toBe(202); // another account is not deduped against alice
+    expect(sends.notif).toHaveLength(2);
+  });
+
+  it("a reply to the user's OWN earlier send keeps the From it went out as (no mid-thread identity switch)", async () => {
+    const { env, raw } = makeEnv({
+      SVC_IDENTITY: fakeIdentityFetcher(true, { usr_admin: { email: "admin@developershub.jp" }, usr_bob: { email: "bob@developershub.jp" } }),
+    });
+    raw
+      .prepare(
+        `INSERT INTO mail_inbound
+           (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at)
+         VALUES ('mailin_r', 'ext-1@gmail.com', 'ext-1@gmail.com', 'info', ?, ?, 'Hi', 'snip', NULL, NULL, '2026-08-10T00:00:00.000Z', '2026-08-10T00:00:00.000Z', 'hello', NULL, NULL)`,
+      )
+      .run(JSON.stringify({ email: "outsider@gmail.com" }), JSON.stringify([{ email: "info@developershub.jp" }]));
+    const post = (user: string, inReplyTo: string, text: string) =>
+      app.fetch(
+        new Request("https://svc/mail/outbox", {
+          method: "POST",
+          headers: headers({ "x-dub-user-id": user }),
+          body: JSON.stringify({ to: [{ email: "outsider@gmail.com" }], subject: "Re: Hi", textBody: text, inReplyTo }),
+        }),
+        env,
+      );
+    const first = await post("usr_admin", "ext-1@gmail.com", "first"); // -> as info@
+    expect(first.status).toBe(202);
+    const { messageId } = (await first.json()) as mail.SendMailResponse; // "maillog_…@developershub.jp"
+    expect((await post("usr_admin", messageId, "follow-up")).status).toBe(202);
+    expect((await post("usr_bob", messageId, "bob")).status).toBe(202);
+    const mineSent = async (user: string) =>
+      ((await (await app.fetch(new Request("https://svc/mail/sent", { headers: headers({ "x-dub-user-id": user }) }), env)).json()) as { items: mail.MailSentListItem[] }).items.filter(
+        (i) => i.mine === true,
+      );
+    // Before: the follow-up fell back to the per-user address (admin@) mid-thread.
+    expect((await mineSent("usr_admin")).map((i) => i.from?.email)).toEqual(["info@developershub.jp", "info@developershub.jp"]);
+    // Someone else replying to admin's send does NOT inherit it.
+    expect((await mineSent("usr_bob")).map((i) => i.from?.email)).toEqual(["bob@developershub.jp"]);
+  });
 });
 
 describe("read routes (/mail/messages)", () => {

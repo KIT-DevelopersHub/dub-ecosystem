@@ -169,6 +169,8 @@ export interface LpTicketsState {
   /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える（enabled の間だけ効く）。 */
   ctaEnabled: boolean;
   paymentReady: boolean;
+  /** Stripe がテストキーで動いていて、プレビューからテスト購入できる（本番キーなら false）。 */
+  previewCheckout: boolean;
   /** Payment methods the LP advertises (Dashboard-managed on Stripe). PayPay only with LP_PAYPAY_ENABLED=1. */
   paymentMethods: LpTicketPaymentMethod[];
   publicUrl: string;
@@ -206,6 +208,10 @@ export interface LpTicketOrder {
   paidAt: string | null;
   /** Stripe PaymentMethod.type used ("card" | "paypay" | ...). null = free / unknown / not yet paid. */
   paymentMethod: string | null;
+  /** LP管理のプレビュー（テスト購入トークン）から作られた注文。 */
+  preview: boolean;
+  /** テスト注文（プレビュー由来、または Stripe テストモードの決済 cs_test_）。実際の請求はない。 */
+  test: boolean;
 }
 export interface LpTicketOrdersPage {
   items: LpTicketOrder[];
@@ -233,7 +239,7 @@ export interface TicketSettingsRow {
 export interface TicketTypeRow extends LpTicketType {
   site: string;
 }
-export interface TicketOrderRow extends LpTicketOrder {
+export interface TicketOrderRow extends Omit<LpTicketOrder, "test"> {
   site: string;
   stripeSessionId: string | null;
 }
@@ -275,6 +281,8 @@ export interface LpTicketRepo {
   markOrderPaid(id: string, paidAt: string, sessionId: string | null): Promise<boolean>;
   markOrderExpired(id: string): Promise<boolean>;
   setOrderPaymentMethod(id: string, method: string): Promise<void>;
+  /** 0006 migration. Display-only marker; callers swallow failures. */
+  markOrderPreview(id: string): Promise<void>;
   /** Newest first, keyset by (created_at, id). */
   listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
 }
@@ -399,6 +407,11 @@ export interface AppDeps {
   stripe: StripeClient | null;
   /** STRIPE_WEBHOOK_SECRET。null なら webhook は常に 400。 */
   stripeWebhookSecret: string | null;
+  /**
+   * LP管理「プレビュー」のテスト購入トークンの鍵（Stripe のテストキー sk_test_ / rk_test_）。
+   * 未設定・本番キーなら null = テスト購入トークンを発行も検証もしない。
+   */
+  ticketPreviewKey: string | null;
   /** LP_PAYPAY_ENABLED="1": PayPay is on in the Stripe Dashboard, so the LP / LP管理 advertise it. */
   paypayEnabled: boolean;
   newProposalId: () => string;

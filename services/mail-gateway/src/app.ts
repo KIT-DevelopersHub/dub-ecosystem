@@ -213,10 +213,13 @@ export function createApp() {
   // Shares the exact send core, so 二重送信ゼロ still holds per key.
   ext.post("/outbox", async (c) => {
     const ctx = ctxOf(c);
-    const idempotencyKey = c.req.header(HEADERS.idempotencyKey) ?? crypto.randomUUID();
+    const userId = c.req.header(HEADERS.userId) ?? null;
+    // A browser-supplied key (passed through api-gateway) is scoped to the session user so
+    // one account can never collide with — or replay — another account's send.
+    const clientKey = c.req.header(HEADERS.idempotencyKey);
+    const idempotencyKey = clientKey ? `outbox:${userId ?? "anon"}:${clientKey}` : crypto.randomUUID();
     const req = parseSendMailRequest(await c.req.json().catch(() => null));
     assertAttachmentsSupported(c, req);
-    const userId = c.req.header(HEADERS.userId) ?? null;
     const requester = userId ?? "unknown";
     // From resolution:
     //  - a REPLY (inReplyTo present) goes out as the shared mailbox the parent was

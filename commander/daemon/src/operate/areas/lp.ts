@@ -122,6 +122,11 @@ export const LP: AreaSpec = {
       route: "POST /lp/tickets/cta",
       reason: "本番 LP の参加登録ボタンを即座にチケット購入へ差し替える操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
     },
+    {
+      service: S,
+      route: "POST /lp/tickets/preview-token",
+      reason: "LP管理プレビューでテスト購入するための一時トークン発行で、Dub のデータではない",
+    },
   ],
   // チケットの設定・購入者一覧は未開放。
   pending: [

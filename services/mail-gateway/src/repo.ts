@@ -203,6 +203,8 @@ function sendRowToListItem(r: SendLogRow, viewer?: string): mail.MailSentListIte
   const cc = parseAddresses(r.cc_json);
   if (cc.length > 0) item.cc = cc;
   if (r.from_address) item.from = { email: r.from_address };
+  // mine: the viewer sent it (vs another account's send seen via read_all oversight).
+  if (viewer !== undefined) item.mine = r.owner_user_id !== null && r.owner_user_id === viewer;
   // Bcc is the sender's private knowledge: only the owner sees it (never read_all oversight).
   if (viewer !== undefined && r.owner_user_id !== null && r.owner_user_id === viewer) {
     const bcc = parseAddresses(r.bcc_json ?? null);

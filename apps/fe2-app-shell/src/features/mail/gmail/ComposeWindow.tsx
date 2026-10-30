@@ -20,7 +20,7 @@
 import { useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { mail } from "@dub/types";
 import { EmailAddressSelect, type EmailToken, DraftRestoredNotice, useDraftAutosave } from "@dub/app-ui";
-import { parseRecipients } from "../mailApi.tsx";
+import { newIdempotencyKey, parseRecipients } from "../mailApi.tsx";
 import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
 import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
@@ -69,6 +69,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const [dragOver, setDragOver] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const dragDepth = useRef(0);
+  const submitted = useRef(false);
 
   // Dirty = there is text worth keeping/warning about (matches ComposeScreen's rule;
   // attachments alone still warn on leave since they'd otherwise vanish silently).
@@ -117,6 +118,9 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   };
 
   const send = (): void => {
+    // One send per window: a double click / repeated shortcut before the window closes
+    // must not post the same mail twice.
+    if (submitted.current) return;
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
     const bcc = parseRecipients(compose.bcc).recipients;
@@ -135,8 +139,9 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
+    submitted.current = true;
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
-    void deliver(mailApi, dispatch, { kind: "send", req, compose, threadId });
+    void deliver(mailApi, dispatch, { kind: "send", req, compose, threadId, idempotencyKey: newIdempotencyKey() });
   };
 
   // Park the compose for a future time (SchedulePicker validated it is in the future).

@@ -114,6 +114,44 @@ export function ticketsCookie(url: URL): string | null {
   return featureCookie("tickets", TICKETS_COOKIE, url);
 }
 
+export const TICKETS_PREVIEW_PARAM = "tickets_preview";
+export const TICKETS_PREVIEW_COOKIE = "lp_tickets_preview";
+/** Shape only ("<exp>.<hmac>"); lp-analytics verifies the signature. */
+const PREVIEW_TOKEN_RE = /^\d{1,12}\.[0-9a-f]{64}$/;
+
+function previewToken(raw: string | null | undefined): string | null {
+  const v = raw?.trim();
+  return v && PREVIEW_TOKEN_RE.test(v) ? v : null;
+}
+
+/**
+ * LP管理「プレビュー」(販売あり) のテスト購入トークン（未検証）。?tickets_preview= > cookie > 同一オリジンの
+ * referer（LP管理の iframe では cookie が third-party で落ちることがある）。?version=live で解除。
+ */
+export function ticketsPreviewToken(url: URL, cookieHeader: string | null, referer: string | null = null): string | null {
+  if (url.searchParams.get("version")?.trim().toLowerCase() === "live") return null;
+  const fromParam = previewToken(url.searchParams.get(TICKETS_PREVIEW_PARAM));
+  if (fromParam) return fromParam;
+  const fromCookie = previewToken(readCookie(cookieHeader, TICKETS_PREVIEW_COOKIE));
+  if (fromCookie) return fromCookie;
+  if (!referer) return null;
+  try {
+    const u = new URL(referer);
+    return u.origin === url.origin ? previewToken(u.searchParams.get(TICKETS_PREVIEW_PARAM)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set-Cookie for ?tickets_preview= (1 h, same as the token) or ?version=live (clear); null otherwise. */
+export function ticketsPreviewCookie(url: URL): string | null {
+  if (url.searchParams.get("version")?.trim().toLowerCase() === "live") {
+    return `${TICKETS_PREVIEW_COOKIE}=; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=0`;
+  }
+  const v = previewToken(url.searchParams.get(TICKETS_PREVIEW_PARAM));
+  return v ? `${TICKETS_PREVIEW_COOKIE}=${v}; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=${FEATURE_PREVIEW_MAX_AGE}` : null;
+}
+
 /** 登壇者募集あり/なし (?proposals=on|off)。 */
 export function proposalsPreview(url: URL, cookieHeader: string | null, referer: string | null = null): FeaturePreview | null {
   return featurePreview("proposals", PROPOSALS_COOKIE, url, cookieHeader, referer);

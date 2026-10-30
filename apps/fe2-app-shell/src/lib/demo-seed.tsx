@@ -910,7 +910,11 @@ function createMailStore() {
   function replyThreadId(inReplyTo: string): string {
     const ref = bare(inReplyTo);
     const parent = DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)).find((m) => m.messageId && bare(m.messageId) === ref);
-    return parent?.threadId ?? inReplyTo;
+    if (parent?.threadId) return parent.threadId;
+    // A reply to one of OUR sends ("<sent id>@domain") joins that send's conversation.
+    const local = ref.split("@")[0] ?? "";
+    const ours = DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)).find((m) => m.id === local);
+    return ours?.threadId ?? inReplyTo;
   }
   // Sent is PERSISTED per account (localStorage) so it survives a reload and stays
   // strictly account-scoped: a mail account A sent lives under A's key and is therefore
@@ -1001,7 +1005,11 @@ function createMailStore() {
     saveScheduled(accountId, list.filter((s) => !due.includes(s)));
   }
 
-  function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+  // Idempotency (x-dub-idempotency-key, scoped per account like the gateway): a repeated
+  // submit returns the first send's ack instead of appending a second Sent row.
+  const idemAcks = new Map<string, mail.SendMailResponse>();
+
+  function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
       const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
@@ -1027,7 +1035,7 @@ function createMailStore() {
     const oversight = isOversight(me);
     const readable = oversight ? DEMO_ACCOUNTS : DEMO_ACCOUNTS.filter((a) => a.id === me.id || (me.roleShareWith ?? []).includes(a.id));
     const readInbox: mail.MailMessageDetail[] = readable.flatMap((a) => inboxOf(a.id).map((m) => Object.assign(m, { mine: a.id === me.id })));
-    const readSent: mail.MailSentDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)) : outbox;
+    const readSent: mail.MailSentDetail[] = (oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id).map((m) => ({ ...m, mine: a.id === me.id }))) : outbox.map((m) => ({ ...m, mine: true })));
 
     // Sender block list (0021): the gateway flags (never filters) mail whose sender is on
     // the VIEWER's list. Copies only — the stored rows stay untouched, so unblocking restores.
@@ -1145,6 +1153,10 @@ function createMailStore() {
     }
     // sent: outbox append + list + detail — this account only
     if (method === "POST" && pathname === "/api/v1/mail/outbox") {
+      const idemKey = headers?.get("x-dub-idempotency-key");
+      const idemScoped = idemKey ? `${me.id}:${idemKey}` : null;
+      const replay = idemScoped ? idemAcks.get(idemScoped) : undefined;
+      if (replay) return json(replay);
       const req = (body ?? {}) as Partial<mail.SendMailRequest>;
       const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
       const sentAt = new Date().toISOString();
@@ -1178,6 +1190,7 @@ function createMailStore() {
       outbox.unshift(detail);
       saveSent(me.id, outbox);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
+      if (idemScoped) idemAcks.set(idemScoped, res);
       return json(res);
     }
     if (method === "GET" && pathname === "/api/v1/mail/sent") {
@@ -4235,6 +4248,8 @@ type DemoTicketOrder = {
   createdAt: string;
   paidAt: string | null;
   paymentMethod: string | null;
+  preview: boolean;
+  test: boolean;
 };
 
 function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
@@ -4294,6 +4309,8 @@ function createLpTicketsStore() {
     ctaEnabled: false,
     paymentReady: false,
     paymentMethods: ["card", "paypay"] as ("card" | "paypay")[],
+    // demo には Stripe も lp-analytics も無いので、プレビューのテスト購入は出せない。
+    previewCheckout: false,
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
     fields: [
@@ -4354,6 +4371,9 @@ function createLpTicketsStore() {
       paidAt: status === "paid" ? createdAt : null,
       // 有料で支払い済みだけ手段あり（カードと PayPay を交互に）。無料・未確定は null。
       paymentMethod: status === "paid" && items.some((it) => it.unitPriceJpy > 0) ? (i % 2 === 0 ? "paypay" : "card") : null,
+      // 最新の支払い済み 1 件は LP管理プレビューからのテスト購入（「テスト（プレビュー）」表示の見本）。
+      preview: id === "ord_007",
+      test: id === "ord_007",
     };
   });
 
@@ -4456,6 +4476,10 @@ function createLpTicketsStore() {
       if (typeof req.active === "boolean") t.active = req.active;
       t.updatedAt = new Date().toISOString();
       return json(summary(t));
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/preview-token") {
+      return problem("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", 409);
     }
 
     if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
@@ -4713,7 +4737,7 @@ export function createDemoFetch(): typeof fetch {
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
-      mailStore.handle(method, url.pathname, url, parsedBody) ??
+      mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
       meetingsStore.handle(method, url.pathname, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??

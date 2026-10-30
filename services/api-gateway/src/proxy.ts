@@ -4,6 +4,7 @@
 // for genuine service-to-service calls and gates internal-only endpoints.
 import type { Fetcher } from "@cloudflare/workers-types";
 import { DUB_HEADERS } from "@dub/http";
+import { HDR_IDEMPOTENCY_KEY } from "@dub/observability";
 import { errors } from "@dub/errors";
 
 const FORWARD_BASE = "https://svc";
@@ -28,7 +29,10 @@ function sanitizeHeaders(incoming: Headers, params: ForwardParams): Headers {
   const out = new Headers();
   incoming.forEach((value, key) => {
     const k = key.toLowerCase();
-    if (k.startsWith("x-dub-")) return; // strip all trusted headers (spoof defense)
+    // Strip all trusted headers (spoof defense). The idempotency key is the one x-dub-*
+    // header a browser legitimately sends (CORS allows it): it carries no identity, and the
+    // mail send scopes it to the session user, so it passes through to dedupe a re-submit.
+    if (k.startsWith("x-dub-") && k !== HDR_IDEMPOTENCY_KEY) return;
     if (k === "host") return; // the binding re-targets the origin
     // Token stays at the edge unless the route is explicitly credential-forwarding.
     if ((k === "authorization" || k === "cookie") && !params.forwardCredentials) return;

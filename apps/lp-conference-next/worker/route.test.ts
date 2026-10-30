@@ -1,7 +1,16 @@
 // Run: node --test worker/route.test.ts (Node >= 22.18 strips TS types natively).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeVersion, readCookie, resolveRequest, rewriteLocation, ticketsCookie, ticketsPreview } from "./route.ts";
+import {
+  normalizeVersion,
+  readCookie,
+  resolveRequest,
+  rewriteLocation,
+  ticketsCookie,
+  ticketsPreview,
+  ticketsPreviewCookie,
+  ticketsPreviewToken,
+} from "./route.ts";
 
 const BUNDLED = ["v3.4", "v3.3", "v3.1"];
 const at = (path: string) => new URL(path, "https://lp.example");
@@ -88,4 +97,18 @@ test("ticketsCookie: 1 h cookie for ?tickets=, cleared by ?version=live", () => 
   assert.equal(ticketsCookie(at("/?tickets=on")), "lp_tickets=on; Path=/; SameSite=None; Secure; HttpOnly; Max-Age=3600");
   assert.match(ticketsCookie(at("/?version=live")) ?? "", /^lp_tickets=; .*Max-Age=0$/);
   assert.equal(ticketsCookie(at("/?version=3.4")), null);
+});
+
+test("ticketsPreviewToken: param > cookie > same-origin referer; shape-checked; live clears", () => {
+  const T = `1800000000.${"b".repeat(64)}`;
+  assert.equal(ticketsPreviewToken(at("/tickets"), null), null);
+  assert.equal(ticketsPreviewToken(at(`/?tickets_preview=${T}`), null), T);
+  assert.equal(ticketsPreviewToken(at("/tickets"), `lp_tickets_preview=${T}`), T);
+  assert.equal(ticketsPreviewToken(at("/tickets"), null, `https://lp.example/?version=3.4&tickets=on&tickets_preview=${T}`), T);
+  assert.equal(ticketsPreviewToken(at("/tickets"), null, `https://evil.example/?tickets_preview=${T}`), null);
+  assert.equal(ticketsPreviewToken(at("/?tickets_preview=<script>"), null), null);
+  assert.equal(ticketsPreviewToken(at(`/?version=live&tickets_preview=${T}`), `lp_tickets_preview=${T}`), null);
+  assert.match(ticketsPreviewCookie(at(`/?tickets_preview=${T}`))!, /^lp_tickets_preview=1800000000\.b+; Path=\/; SameSite=None; Secure; HttpOnly; Max-Age=3600$/);
+  assert.match(ticketsPreviewCookie(at("/?version=live"))!, /Max-Age=0/);
+  assert.equal(ticketsPreviewCookie(at("/")), null);
 });
