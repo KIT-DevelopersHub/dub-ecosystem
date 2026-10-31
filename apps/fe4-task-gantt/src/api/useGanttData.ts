@@ -66,11 +66,32 @@ export function useGanttData(eventId: common.EventId) {
         : old,
     );
   };
-  /** Optimistically drop a bar (optimistic delete, or discarding a provisional bar). */
+  /** Optimistically insert/replace a bar AND its connector lines the same tick — used
+   *  by optimistic create so a new task with 依存(先行タスク) draws its bar and its
+   *  dependency arrows before the POST + deps persist resolve. Rows go through the same
+   *  hasChildren recompute as {@link upsertRowOptimistic}; each dep line is appended (or
+   *  replaced by id, so a re-paint is idempotent). */
+  const addRowOptimistic = (row: gantt.GanttRow, deps: readonly gantt.GanttDependencyLine[] = []) => {
+    qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) => {
+      if (!old) return old;
+      const rows = withRecomputedHasChildren([...old.rows.filter((r) => r.taskId !== row.taskId), row]);
+      const newIds = new Set(deps.map((d) => d.id));
+      const dependencies = [...old.dependencies.filter((d) => !newIds.has(d.id)), ...deps];
+      return { ...old, rows, dependencies };
+    });
+  };
+  /** Optimistically drop a bar AND every connector line touching it (optimistic delete,
+   *  or rolling back a provisional bar) so a stale arrow never lingers past the row. */
   const removeRowOptimistic = (taskId: common.TaskId) => {
     qc.setQueryData<gantt.GanttChartDTO>(ganttQueryKey(eventId), (old) =>
-      // recompute hasChildren so a parent that just lost its last child drops its toggle
-      old ? { ...old, rows: withRecomputedHasChildren(old.rows.filter((r) => r.taskId !== taskId)) } : old,
+      old
+        ? {
+            ...old,
+            // recompute hasChildren so a parent that just lost its last child drops its toggle
+            rows: withRecomputedHasChildren(old.rows.filter((r) => r.taskId !== taskId)),
+            dependencies: old.dependencies.filter((d) => d.fromTaskId !== taskId && d.toTaskId !== taskId),
+          }
+        : old,
     );
   };
   /** Optimistically re-parent (or detach with null) a row so the tree reflects the
@@ -119,6 +140,7 @@ export function useGanttData(eventId: common.EventId) {
     refetchFresh,
     setRowScheduleOptimistic,
     upsertRowOptimistic,
+    addRowOptimistic,
     removeRowOptimistic,
     setRowParentOptimistic,
     setDependenciesOptimistic,
