@@ -10,6 +10,18 @@
   cursor: pointer;
   font: inherit;
   color: inherit;
+  /* P22: trigger wraps arbitrary (often icon-sized) content — expand the
+   * tappable area via ::after without touching the wrapped content's own size. */
+  position: relative;
+}
+.trigger::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
 }
 .bubble {
   position: absolute;

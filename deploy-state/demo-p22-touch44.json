@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p22-touch44",
+  "worker": "dub-demo-p22-touch44",
+  "url": "https://dub-demo-p22-touch44.developershub-site.workers.dev",
+  "deployedSha": "c0c4bb70",
+  "branch": "feat/p22-touch-target-44",
+  "actor": "kota",
+  "markers": ["max(44px","100%)"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:47:29Z",
+  "updatedAt": "2026-09-13T16:47:29Z",
+  "note": ""
+}

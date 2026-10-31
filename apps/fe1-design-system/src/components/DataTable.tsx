@@ -230,13 +230,17 @@ export function DataTable<Row>({
             <tr>
               {selection && (
                 <th className={cx(styles.checkCell)}>
-                  <input
-                    type="checkbox"
-                    aria-label="全選択"
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    data-testid={testId ? `${testId}-select-all` : undefined}
-                  />
+                  {/* P22: label wraps the native checkbox so tapping the invisible
+                      44x44 ::after hit-slop toggles it, without resizing the checkbox. */}
+                  <label className={cx(styles.checkboxHit)}>
+                    <input
+                      type="checkbox"
+                      aria-label="全選択"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      data-testid={testId ? `${testId}-select-all` : undefined}
+                    />
+                  </label>
                 </th>
               )}
               {visibleColumns.map((col) => {
@@ -285,12 +289,14 @@ export function DataTable<Row>({
                   >
                     {selection && (
                       <td className={cx(styles.checkCell)} onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          aria-label="行を選択"
-                          checked={selection.selectedKeys.includes(key)}
-                          onChange={() => toggleOne(key)}
-                        />
+                        <label className={cx(styles.checkboxHit)}>
+                          <input
+                            type="checkbox"
+                            aria-label="行を選択"
+                            checked={selection.selectedKeys.includes(key)}
+                            onChange={() => toggleOne(key)}
+                          />
+                        </label>
                       </td>
                     )}
                     {visibleColumns.map((col) => (
