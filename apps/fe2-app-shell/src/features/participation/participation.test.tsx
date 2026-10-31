@@ -192,6 +192,47 @@ describe("ParticipationForm", () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
+  it("asks 所属チーム from the roster teams and sends it as desiredTeamId", async () => {
+    const teams: OnboardingTeam[] = [
+      { id: "team_dev", name: "開発チーム", color: null },
+      { id: "team_network", name: "ネットワークチーム", color: null },
+    ];
+    const api = makeApi({ publicOnboarding: vi.fn(() => Promise.resolve(guide([], { teams }))) });
+    render(wrap(<ParticipationForm />, api));
+    const select = await screen.findByTestId("participation-team");
+    expect(within(select).getByRole("option", { name: "ネットワークチーム" })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: "まだ決まっていない" })).toBeInTheDocument();
+    await fillRequired();
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    expect(screen.getByText("所属チームを選択してください")).toBeInTheDocument();
+    expect(api.submit).not.toHaveBeenCalled();
+    await userEvent.selectOptions(select, "team_network");
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
+    expect((api.submit as any).mock.calls[0][0]).toMatchObject({ desiredTeamId: "team_network" });
+  });
+
+  it("sends desiredTeamId = null for 「まだ決まっていない」", async () => {
+    const teams: OnboardingTeam[] = [{ id: "team_dev", name: "開発チーム", color: null }];
+    const api = makeApi({ publicOnboarding: vi.fn(() => Promise.resolve(guide([], { teams }))) });
+    render(wrap(<ParticipationForm />, api));
+    await userEvent.selectOptions(await screen.findByTestId("participation-team"), "__none__");
+    await fillRequired();
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
+    expect((api.submit as any).mock.calls[0][0]).toMatchObject({ desiredTeamId: null });
+  });
+
+  it("shows a skeleton while the teams load and omits the field when there are no teams", async () => {
+    let resolve: (g: OnboardingGuide) => void = () => {};
+    const api = makeApi({ publicOnboarding: vi.fn(() => new Promise<OnboardingGuide>((r) => (resolve = r))) });
+    render(wrap(<ParticipationForm />, api));
+    expect(await screen.findByTestId("participation-team-loading")).toBeInTheDocument();
+    resolve(guide([]));
+    await waitFor(() => expect(screen.queryByTestId("participation-team-loading")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("participation-team")).not.toBeInTheDocument();
+  });
+
   it("submits split 姓/名 + both emails and shows a neutral サンクス (no roster claim)", async () => {
     const api = makeApi();
     render(wrap(<ParticipationForm />, api));
@@ -251,7 +292,7 @@ describe("ParticipationListPage", () => {
     expect(await screen.findByTestId("participation-list-table")).toBeInTheDocument();
     expect(screen.getByText("kurokawa@school.ac.jp")).toBeInTheDocument();
     expect(screen.getByText("kurokawa.dev@gmail.com")).toBeInTheDocument();
-    // 希望チーム resolves via the canonical team list (t1 → 会場).
+    // 所属チーム resolves via the canonical team list (t1 → 会場).
     expect(screen.getByText("会場")).toBeInTheDocument();
     // 未処理は「未処理」バッジ + 「追加する」ボタンが出る。
     expect(screen.getByTestId("participation-add-p_1")).toBeInTheDocument();

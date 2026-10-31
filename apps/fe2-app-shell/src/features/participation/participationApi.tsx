@@ -30,7 +30,7 @@ export interface IssuedMailAddress {
 }
 
 export interface ParticipationApi {
-  /** Canonical team list, to populate the 希望チーム select (identity:read). */
+  /** Canonical team list, to resolve 所属チーム names (identity:read). */
   listTeams(): Promise<{ teams: MemberTeam[] }>;
   /** Submit a 参加届 via the PUBLIC (unauthenticated) endpoint. 提出は 参加届 を記録する
    *  だけで名簿へは反映しない（管理者が一覧で確定する）。応答は最小（accepted のみ）。 */

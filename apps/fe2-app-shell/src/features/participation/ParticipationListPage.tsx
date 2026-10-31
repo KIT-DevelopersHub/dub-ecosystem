@@ -164,7 +164,7 @@ export function ParticipationListPage(): JSX.Element {
     ...PROFILE_DISPLAY_COLUMNS.map(
       (c): ColumnDef<Participation> => ({ key: c.id, header: c.header, noWrap: true, minWidth: "7rem", cell: (p) => c.value(p) || "—" }),
     ),
-    { key: "team", header: "希望チーム", noWrap: true, minWidth: "8rem", cell: (p) => teamName(p.desiredTeamId) },
+    { key: "team", header: "所属チーム", noWrap: true, minWidth: "8rem", cell: (p) => teamName(p.desiredTeamId) },
     { key: "submittedAt", header: "提出日時", noWrap: true, minWidth: "11rem", cell: (p) => fmtDateTime(p.submittedAt) },
   ];
 
@@ -487,7 +487,7 @@ function DetailBody({ p, teamName }: { p: Participation; teamName: (id: string |
     // 人物プロフィール項目は運営名簿と共通 (PROFILE_DISPLAY_COLUMNS)。
     ...PROFILE_DISPLAY_COLUMNS.map((c) => ({ label: c.header, value: c.value(p) || "—" })),
     { label: "メールアドレス素案", value: (() => { const c = emailCandidate(p); return c ? `${c}@…` : "—"; })() },
-    { label: "希望チーム", value: teamName(p.desiredTeamId) },
+    { label: "所属チーム", value: teamName(p.desiredTeamId) },
     { label: "運営メンバー反映", value: reviewLabel(p) },
     { label: "提出日時", value: fmtDateTime(p.submittedAt) },
   ];
