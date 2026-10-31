@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient } from "@tanstack/react-query";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
+import { createGlobalContentSearch } from "./globalContentSearch.ts";
+import type { ApiClient } from "../lib/api-client.tsx";
 
 function makeCommands(over: Partial<Record<string, () => void>> = {}): PaletteCommand[] {
   return [
@@ -195,5 +198,42 @@ describe("CommandPalette — content search (①グローバル検索)", () => {
     await openPalette();
     await userEvent.type(await screen.findByTestId("fe2-cmdk-input"), "会場");
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("1件見つかりました"));
+  });
+});
+
+// P1: wired to the real globalContentSearch, typing more never re-hits the API.
+describe("CommandPalette + globalContentSearch — no request per keystroke", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("fetches events/tasks once, then filters every later keystroke from the cache", async () => {
+    const request = vi.fn().mockImplementation((input: { path: string }) =>
+      Promise.resolve(
+        input.path === "/api/v1/events"
+          ? { items: [{ id: "evt_1", title: "北陸ITカンファレンス", phase: "preparing", startsAt: null }], nextCursor: null }
+          : { items: [], nextCursor: null },
+      ),
+    );
+    const search = createGlobalContentSearch({
+      api: { request } as unknown as ApiClient,
+      queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+      currentUserId: "usr_me",
+      onNavigate: vi.fn(),
+    });
+    render(<CommandPalette commands={makeCommands()} contentSearch={search} />);
+    await openPalette();
+    const input = await screen.findByTestId("fe2-cmdk-input");
+
+    await userEvent.type(input, "か");
+    expect(await screen.findByTestId("fe2-cmdk-item-content-event-evt-1")).toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(2);
+
+    await userEvent.type(input, "んふぁ");
+    await waitFor(() => expect(input).toHaveValue("かんふぁ"));
+    expect(await screen.findByTestId("fe2-cmdk-item-content-event-evt-1")).toBeInTheDocument();
+    await userEvent.type(input, "x");
+    await waitFor(() => expect(screen.queryByTestId("fe2-cmdk-item-content-event-evt-1")).not.toBeInTheDocument());
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });
