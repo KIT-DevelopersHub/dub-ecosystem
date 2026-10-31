@@ -51,6 +51,9 @@ export function ChangePasswordDialog({
       setDone(true);
     } catch (e) {
       setError(ApiError.isApiError(e) ? toDisplayableError(e).message : "パスワードの変更に失敗しました。");
+      // a11y: サーバー側エラー(多くは現在のパスワード不一致)は「現在のパスワード」欄に
+      // 紐付けてフォーカスを戻す。エラー文言自体は role="alert" で独立してSRに読み上げられる。
+      requestAnimationFrame(() => document.getElementById("fe2-cp-current")?.focus());
     } finally {
       setSubmitting(false);
     }
@@ -83,25 +86,28 @@ export function ChangePasswordDialog({
         <p data-testid="fe2-change-password-done">パスワードを変更しました。次回のログインから新しいパスワードを使用してください。</p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <FormField label="現在のパスワード" htmlFor="fe2-cp-current">
+          <FormField
+            label="現在のパスワード"
+            htmlFor="fe2-cp-current"
+            {...(error ? { error } : {})}
+          >
             <TextField id="fe2-cp-current" type="password" value={current} onChange={setCurrent} testId="fe2-cp-current" />
           </FormField>
-          <FormField label="新しいパスワード" help={`${MIN_LENGTH}文字以上で設定してください`} htmlFor="fe2-cp-next">
-            <TextField id="fe2-cp-next" type="password" value={next} onChange={setNext} invalid={tooShort} testId="fe2-cp-next" />
+          <FormField
+            label="新しいパスワード"
+            htmlFor="fe2-cp-next"
+            help={`${MIN_LENGTH}文字以上で設定してください`}
+            {...(tooShort ? { error: `${MIN_LENGTH}文字以上で入力してください。` } : {})}
+          >
+            <TextField id="fe2-cp-next" type="password" value={next} onChange={setNext} testId="fe2-cp-next" />
           </FormField>
-          <FormField label="新しいパスワード（確認）" htmlFor="fe2-cp-confirm">
-            <TextField id="fe2-cp-confirm" type="password" value={confirm} onChange={setConfirm} invalid={mismatch} testId="fe2-cp-confirm" />
+          <FormField
+            label="新しいパスワード（確認）"
+            htmlFor="fe2-cp-confirm"
+            {...(mismatch ? { error: "新しいパスワードが一致しません。" } : {})}
+          >
+            <TextField id="fe2-cp-confirm" type="password" value={confirm} onChange={setConfirm} testId="fe2-cp-confirm" />
           </FormField>
-          {mismatch ? (
-            <p role="alert" style={{ color: "var(--dub-color-fg-danger, #cf222e)", fontSize: 13, margin: 0 }}>
-              新しいパスワードが一致しません。
-            </p>
-          ) : null}
-          {error ? (
-            <p role="alert" data-testid="fe2-change-password-error" style={{ color: "var(--dub-color-fg-danger, #cf222e)", fontSize: 13, margin: 0 }}>
-              {error}
-            </p>
-          ) : null}
         </div>
       )}
     </Modal>
