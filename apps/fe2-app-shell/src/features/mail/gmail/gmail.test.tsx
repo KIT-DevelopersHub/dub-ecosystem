@@ -694,6 +694,42 @@ describe("GmailApp (hydrates from the gateway)", () => {
     });
   });
 
+  // Keyboard shortcuts must not reach the thread behind an open modal (e/# on a dialog).
+  describe("keyboard shortcuts vs open modal", () => {
+    const openThread = async (api: MailApi): Promise<void> => {
+      render(wrap(<GmailApp />, api));
+      await userEvent.click((await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!);
+      await screen.findByTestId("fe2-mail-details-toggle");
+    };
+    const archivedCalls = (api: MailApi): unknown[] =>
+      (api.setFlags as ReturnType<typeof vi.fn>).mock.calls.filter(([, p]) => (p as { archived?: boolean }).archived === true);
+    const trashedCalls = (api: MailApi): unknown[] =>
+      (api.setFlags as ReturnType<typeof vi.fn>).mock.calls.filter(([, p]) => (p as { trashed?: boolean }).trashed === true);
+
+    it("e archives the open thread when no modal is open (control)", async () => {
+      const api = fakeApi();
+      await openThread(api);
+      (document.activeElement as HTMLElement | null)?.blur();
+      fireEvent.keyDown(document.body, { key: "e" });
+      await waitFor(() => expect(archivedCalls(api)).toHaveLength(1));
+    });
+
+    it("e / # do nothing while the details dialog is open", async () => {
+      const api = fakeApi();
+      await openThread(api);
+      await userEvent.click(screen.getByTestId("fe2-mail-details-toggle"));
+      const dialog = await screen.findByTestId("fe2-mail-details");
+      fireEvent.keyDown(within(dialog).getByRole("button", { name: "閉じる" }), { key: "e" });
+      fireEvent.keyDown(document.body, { key: "e" });
+      fireEvent.keyDown(document.body, { key: "#" });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(archivedCalls(api)).toHaveLength(0);
+      expect(trashedCalls(api)).toHaveLength(0);
+      expect(screen.getByTestId("fe2-mail-thread")).toBeInTheDocument();
+      expect(screen.getByTestId("fe2-mail-details")).toBeInTheDocument();
+    });
+  });
+
   it("surfaces an oversize attachment as a disabled chip instead of dropping it silently (改善#2)", async () => {
     const api = fakeApi();
     render(wrap(<GmailApp />, api));
