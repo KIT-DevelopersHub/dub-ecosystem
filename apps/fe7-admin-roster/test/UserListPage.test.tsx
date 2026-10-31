@@ -267,6 +267,35 @@ describe("UserListPage", () => {
     window.history.replaceState(null, "", "/"); // the search is mirrored into the URL
   });
 
+  it("filters search in memory: typing sends no request and no `q`", async () => {
+    const user = userEvent.setup();
+    const { client, pageCalls } = manyUsersClient();
+    const seen: Record<string, unknown>[] = [];
+    const spy: ResourceClient = {
+      ...client,
+      get: <T,>(path: string, query?: Record<string, unknown>) => {
+        if (path.endsWith("/identity/users")) seen.push(query ?? {});
+        return client.get<T>(path, query);
+      },
+    };
+    renderWithProviders(<UserListPage />, { client: spy });
+    await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("全 45件"));
+    const callsAfterLoad = pageCalls.length;
+
+    // Full-width + lowercase still matches (NFKC + case folding).
+    await user.type(screen.getByTestId("fe7-users-search"), "ｕｓｅｒ 0");
+    await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("45件中 9件を表示"));
+    expect(screen.getByTestId("fe7-users-row-u01")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-users-row-u10")).not.toBeInTheDocument();
+    expect(pageCalls.length).toBe(callsAfterLoad);
+    expect(seen.some((q) => "q" in q || "search" in q)).toBe(false);
+
+    await user.clear(screen.getByTestId("fe7-users-search"));
+    await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("全 45件"));
+    expect(pageCalls.length).toBe(callsAfterLoad);
+    window.history.replaceState(null, "", "/");
+  });
+
   it("hides the pager when everything fits on one page", async () => {
     renderWithProviders(<UserListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("全 3件"));

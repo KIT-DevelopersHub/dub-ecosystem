@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useClientFilter } from "@dub/app-ui";
 import {
   PageHeader,
   DataTable,
@@ -43,6 +44,10 @@ import { displayError } from "../lib/errorDisplay";
 import { sortUsers } from "../lib/sortUsers";
 import { readRosterViewFromUrl, writeRosterViewToUrl } from "../lib/urlFilters";
 import type { RosterUser } from "../contracts/pending";
+
+const NO_USERS: RosterUser[] = [];
+/** Same fields the server `q` matched: 表示名 / フリガナ / メール. */
+const userSearchText = (u: RosterUser) => `${u.displayName} ${u.furigana ?? ""} ${u.email}`;
 
 const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
   { value: "all", label: "すべて" },
@@ -118,9 +123,12 @@ export function UserListPage() {
   const { can } = usePermissions();
   const canAdminEdit = useCanAdminEdit();
   const { me } = useRosterContext();
-  const query = useUsers(filters);
+  // Free-text search filters in memory (below); only status goes to the server, so typing
+  // never refetches the whole roster.
+  const query = useUsers({ ...filters, search: "" });
   // ⑤ Unfiltered total for the「X件中Y件」summary (cached; same query when not narrowed).
   const totalQuery = useUsers(DEFAULT_USER_FILTERS);
+  const { results: items } = useClientFilter(query.data?.items ?? NO_USERS, filters.search, userSearchText);
 
   // ⑧ Mirror the active filter + sort into the URL query (replace, not push).
   useEffect(() => {
@@ -162,7 +170,6 @@ export function UserListPage() {
     });
   }
 
-  const items = query.data?.items ?? [];
   // ⑤ Client-side sort over the whole filtered set, then slice the current page.
   const sortedItems = useMemo(() => sortUsers(items, sort), [items, sort]);
   const totalPages = Math.max(1, Math.ceil(sortedItems.length / PAGE_SIZE));
