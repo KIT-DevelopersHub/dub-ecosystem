@@ -12,7 +12,7 @@ mkdirSync(SHOTS, { recursive: true });
 const fail = (m) => { throw new Error(m); };
 
 // 参加届の回答一覧のうち人物項目ではない列 (残りが PersonProfile 由来の列)。
-const PARTICIPATION_ONLY = ["運営メンバー反映", "氏名", "希望チーム", "提出日時"];
+const PARTICIPATION_ONLY = ["運営メンバー反映", "氏名", "所属チーム", "提出日時"];
 const headersOf = async (page, testId) =>
   (await page.getByTestId(testId).locator("th").allTextContents()).map((t) => t.trim());
 
