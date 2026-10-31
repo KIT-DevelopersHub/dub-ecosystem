@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "p20-taskcard-gantt",
+  "worker": "dub-demo-p20-taskcard-gantt",
+  "url": "https://dub-demo-p20-taskcard-gantt.developershub-site.workers.dev",
+  "deployedSha": "9ca47193",
+  "branch": "feat/p20-taskcard-gantt-mobile",
+  "actor": "kota",
+  "markers": ["[data-label]"],
+  "live": true,
+  "verifiedAt": "2026-09-13T16:39:58Z",
+  "updatedAt": "2026-09-13T16:39:58Z",
+  "note": "P20: マイタスク一覧モバイルカード積層"
+}
