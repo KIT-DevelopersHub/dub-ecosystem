@@ -22,6 +22,8 @@
 #   --note     optional free-text stored in the manifest.
 #   --no-build skip the Vite build (use the existing apps/fe2-app-shell/dist).
 #   --lock-timeout <s>  how long to wait for the slot lock (default 600).
+#   --no-sync-main skip the latest-main check (offline only). By default origin/main is
+#              fetched and merged into HEAD first when missing (aborts on conflict / dirty tree).
 #
 # Requires: CLOUDFLARE_API_TOKEN in env (e.g. `export CLOUDFLARE_API_TOKEN=$(cat ~/Desktop/cf-token.txt)`).
 #
@@ -29,15 +31,19 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=lib/demo-main-sync.sh
+source "${ROOT}/scripts/lib/demo-main-sync.sh"
 
-MARKERS_CSV=""; NOTE=""; DO_BUILD=1; LOCK_TIMEOUT=600
+MARKERS_CSV=""; NOTE=""; DO_BUILD=1; LOCK_TIMEOUT=600; SYNC_MAIN=1
+[ "${DEMO_SKIP_MAIN_SYNC:-0}" = 1 ] && SYNC_MAIN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --markers)      MARKERS_CSV="${2:?}"; shift 2 ;;
     --note)         NOTE="${2:-}"; shift 2 ;;
     --no-build)     DO_BUILD=0; shift ;;
     --lock-timeout) LOCK_TIMEOUT="${2:?}"; shift 2 ;;
-    -h|--help)      sed -n '2,34p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    --no-sync-main) SYNC_MAIN=0; shift ;;
+    -h|--help)      sed -n '2,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "::error::unknown arg '$1'" >&2; exit 2 ;;
   esac
 done
@@ -54,6 +60,13 @@ fi
 # markers CSV -> array (trim spaces around commas)
 IFS=',' read -r -a MARKERS <<< "$MARKERS_CSV"
 for i in "${!MARKERS[@]}"; do MARKERS[$i]="$(printf '%s' "${MARKERS[$i]}" | sed 's/^ *//;s/ *$//')"; done
+
+# Build from "latest main + this feature" — merge origin/main in if the branch lacks it.
+if [ "$SYNC_MAIN" = 1 ]; then
+  ensure_main_merged "$ROOT" apply || exit 1
+else
+  echo "::warning::--no-sync-main: deploying without checking for the latest main — the surrounding UI may be stale."
+fi
 
 SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
