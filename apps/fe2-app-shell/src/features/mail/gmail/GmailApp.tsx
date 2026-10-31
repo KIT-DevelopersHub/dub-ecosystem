@@ -227,10 +227,18 @@ function SendNoticeBar(): JSX.Element | null {
   );
 }
 
+// An open modal (@dub/ui Modal/Drawer render aria-modal while open) owns the keyboard:
+// shortcuts must not act on the thread behind it.
+function modalOpen(target: EventTarget | null): boolean {
+  if (target instanceof Element && target.closest('[role="dialog"], [aria-modal="true"]')) return true;
+  return document.querySelector('[aria-modal="true"]') !== null;
+}
+
 function Shortcuts(): null {
   const { state, dispatch } = useMailStore();
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (modalOpen(e.target)) return;
       const el = e.target as HTMLElement | null;
       const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
       if (e.key === "/" && !typing) {
