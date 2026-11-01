@@ -81,6 +81,7 @@ export function createApp(deps: AppDeps): Hono {
   // the Stripe signature covers the exact bytes.
   app.get("/lp/internal/tickets", async (c) => c.json(await tickets.getPublic()));
   app.post("/lp/internal/tickets/checkout", async (c) => c.json(await tickets.checkout(await readJson(c))));
+  app.post("/lp/internal/tickets/preview", async (c) => c.json(await tickets.checkPreview(await readJson(c))));
   app.post("/lp/internal/tickets/confirm", async (c) => c.json(await tickets.confirm(await readJson(c))));
   app.post("/lp/internal/tickets/stripe-webhook", async (c) => {
     const raw = await c.req.text();
@@ -120,6 +121,8 @@ export function createApp(deps: AppDeps): Hono {
   app.patch("/lp/tickets/types/:id", edit, async (c) =>
     c.json(await tickets.patchType(c.req.param("id"), await readJson(c))),
   );
+  // プレビューのテスト購入トークン（Stripe テストキーの時だけ・1 時間）。
+  app.post("/lp/tickets/preview-token", edit, async (c) => c.json(await tickets.issuePreview()));
   app.get("/lp/tickets/orders", edit, async (c) => c.json(await tickets.listOrders(c.req.query())));
 
   // 登壇者募集: 募集 on/off はチケット販売と同じ lp:publish。応募一覧は個人情報なので edit。

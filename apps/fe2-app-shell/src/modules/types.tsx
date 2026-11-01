@@ -7,7 +7,7 @@ import type { IconName } from "@dub/ui";
 
 type PermissionKey = identity.PermissionKey;
 
-export type FeatureModuleId = "events" | "tasks" | "gantt" | "calendar" | "notifications" | "chat" | "mail" | "usage" | "members" | "participation" | "driveshare" | "lp" | "admin" | "commander";
+export type FeatureModuleId = "events" | "tasks" | "gantt" | "calendar" | "notifications" | "chat" | "mail" | "usage" | "members" | "participation" | "driveshare" | "lp" | "hr" | "admin" | "commander";
 
 export interface FeatureRoute {
   path: `/${string}`;

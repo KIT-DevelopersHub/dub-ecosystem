@@ -97,6 +97,8 @@ export interface ChatMessage {
   status: ChatMessageStatus;
   seq: number;
   createdAt: string;
+  /** Preview URLs of images pasted with this (user) message. Client-only, never persisted. */
+  images?: string[];
 }
 
 export type TaskStatus = "todo" | "doing" | "done";

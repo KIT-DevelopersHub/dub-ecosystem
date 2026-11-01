@@ -3,16 +3,19 @@
 // subject, star and archive/delete actions; each message shows a round initial
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { EmailAddressSelect } from "@dub/app-ui";
 import { Badge, Button } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { isImageType } from "../attach.ts";
 import {
+  addressCandidates,
   avatarColor,
   displayName,
   fullDate,
   initial,
   pendingReplyIds,
+  replyPlan,
   replyNudge,
   sharedRecipientLabel,
   snippet,
@@ -26,10 +29,17 @@ import {
 import { MailIcon } from "./icons.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
-import { useMailStore } from "./useMailStore.tsx";
+import { BlockSenderMenu, BlockedBanner } from "./BlockedSenders.tsx";
+import { uid, useMailStore } from "./useMailStore.tsx";
 import styles from "./replyNudge.module.css";
+import inlineStyles from "./InlineReply.module.css";
+import { SchedulePicker } from "./SchedulePicker.tsx";
+import { deliver } from "./sendMail.ts";
+import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
+import { AttachmentPreview } from "../AttachmentPreview.tsx";
+import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
-import { formatBytes, saveBlob } from "../mailApi.tsx";
+import { formatBytes, newIdempotencyKey, parseRecipients, saveBlob } from "../mailApi.tsx";
 
 function Avatar({ p, size = 36 }: { p: MailPerson; size?: number }): JSX.Element {
   return (
@@ -330,63 +340,145 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const { dispatch, state } = useMailStore();
   const mailApi = useMailApi();
   const [reply, setReply] = useState("");
+  const [replyCc, setReplyCc] = useState("");
+  const [replyBcc, setReplyBcc] = useState("");
+  const [showCcBcc, setShowCcBcc] = useState(false);
+  const replyRef = useRef<HTMLTextAreaElement>(null);
+  const inFlight = useRef<string | null>(null);
+  // Inline-reply attachments: same shared hook/tray/preview as the floating compose.
+  const att = useComposeAttachments();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const candidates = useMemo(() => addressCandidates(state.threads, state.me.email), [state.threads, state.me.email]);
+  // Grow the inline reply with its content (capped; scrolls beyond) so a long reply is
+  // readable to the end instead of being squeezed into a fixed 4-row box.
+  useLayoutEffect(() => {
+    const el = replyRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    if (el.scrollHeight > 0) el.style.height = `${el.scrollHeight}px`;
+  }, [reply]);
   const lastIdx = thread.messages.length - 1;
   const own = ownAddresses(thread, state.me);
-  const last = thread.messages[lastIdx]!;
   const nudge = replyNudge(thread, new Date(), pendingReplyIds(state.scheduled));
   const chips = thread.labels.map((id) => labels.find((l) => l.id === id)).filter((l): l is Label => Boolean(l));
 
-  // Reply targets the last message that ISN'T ours — the external correspondent — never
-  // our own reply (which is now folded into the conversation). `ourAddresses` are the From
-  // addresses we sent as plus the address mail was delivered to us at, so reply-all drops them.
-  const notUs = (p: MailPerson): boolean => p.email.length > 0 && !own.has(p.email.trim().toLowerCase());
-  const replyTo = [...thread.messages].reverse().find((m) => !m.outbound) ?? last;
-  // A Reply-To header redirects replies (RFC 5322 §3.6.2), as Gmail does.
-  const sender = replyTo.headerMeta?.replyTo?.length ? replyTo.headerMeta.replyTo : [replyTo.from];
-  const dedupPeople = (ps: MailPerson[]): MailPerson[] => {
-    const m = new Map<string, MailPerson>();
-    for (const p of ps) if (p.email && !m.has(p.email)) m.set(p.email, p);
-    return [...m.values()];
-  };
-  const replyRecipients = replyTo.outbound ? replyTo.to.filter(notUs) : sender;
-  const allRecipients = dedupPeople([...sender, ...replyTo.to, ...(replyTo.cc ?? [])].filter(notUs));
+  // Gmail addressing (replyPlan): answer the last message — its sender (Reply-To if set) when
+  // it was received, its original recipients when WE sent it (incl. a looped-back copy of our
+  // own send). Previously the target was "the last row not flagged outbound", so the received
+  // copy of our own reply (or another account's Sent row seen via oversight) was answered as
+  // if someone else had written it, addressing the reply back to ourselves / the wrong party.
+  const plan = replyPlan(thread.messages, own);
+  const replyTo = plan.target;
+  const replyRecipients = plan.reply;
+  const all = plan.all;
+  const parentId = plan.parentId;
 
   const openCompose = (mode: "reply" | "replyAll" | "forward"): void => {
-    const to = mode === "forward" ? [] : mode === "replyAll" ? allRecipients : replyRecipients;
+    const to = mode === "forward" ? [] : mode === "replyAll" ? all.to : replyRecipients;
+    const cc = mode === "replyAll" ? all.cc : [];
+    const fmt = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
     dispatch({
       type: "OPEN_COMPOSE",
       compose: {
         mode,
-        to: to.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", "),
+        to: fmt(to),
+        cc: fmt(cc),
         subject: `${mode === "forward" ? "Fwd" : "Re"}: ${thread.subject.replace(/^(Re|Fwd):\s*/i, "")}`,
         body: quote(replyTo),
-        showCc: mode === "replyAll",
+        showCc: cc.length > 0,
         // Reply/replyAll thread against the correspondent's Message-Id; a forward is new.
-        ...(mode !== "forward" && replyTo.messageId ? { inReplyTo: replyTo.messageId } : {}),
+        ...(mode !== "forward" && parentId ? { inReplyTo: parentId } : {}),
       },
     });
+  };
+
+  const replySubject = /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`;
+  const resetInline = (): void => {
+    setReply("");
+    setReplyCc("");
+    setReplyBcc("");
+    setShowCcBcc(false);
+    att.clear();
   };
 
   const sendInline = (): void => {
     const body = reply.trim();
     if (body.length === 0 || replyRecipients.length === 0) return;
+    if (att.hasPending) return;
+    // Double click / click + shortcut can fire twice before the cleared box re-renders.
+    if (inFlight.current === body) return;
+    inFlight.current = body;
     // Optimistic: append to the open thread immediately. Previously this was ALL that
     // happened — the reply never reached the gateway, so nothing was delivered. Now we
     // also POST it (with In-Reply-To via the parent Message-Id) and re-sync so the sent
     // reply is server-backed and survives a reload.
-    dispatch({ type: "ADD_MESSAGE", threadId: thread.id, body, to: replyRecipients, subject: thread.subject });
-    setReply("");
+    const cc = parseRecipients(replyCc).recipients;
+    const bcc = parseRecipients(replyBcc).recipients;
+    dispatch({ type: "ADD_MESSAGE", threadId: thread.id, body, to: replyRecipients, cc, bcc, subject: thread.subject });
+    const inputs = att.readyInputs();
+    resetInline();
     const req: mail.SendMailRequest = {
       to: replyRecipients,
-      subject: /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`,
+      subject: replySubject,
       textBody: body,
     };
-    if (replyTo.messageId) req.inReplyTo = replyTo.messageId;
+    if (cc.length > 0) req.cc = cc;
+    if (bcc.length > 0) req.bcc = bcc;
+    if (parentId) req.inReplyTo = parentId;
+    if (inputs.length > 0) req.attachments = inputs;
     void mailApi
-      .send(req)
+      .send(req, { idempotencyKey: newIdempotencyKey() })
       .then(() => dispatch({ type: "REQUEST_SYNC" }))
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (inFlight.current === body) inFlight.current = null;
+      });
   };
+
+  // 予約送信 for the inline reply: same picker as the compose window. The reply keeps its
+  // thread (inReplyTo), Cc/Bcc and attachments; it is NOT appended to the thread now — it
+  // shows in 予約済み (and below, as a pending chip) and folds into the thread once delivered.
+  // A failed schedule reopens the reply as a floating compose (deliver()), never lost.
+  const scheduleInline = (when: Date): string | null => {
+    const body = reply.trim();
+    if (body.length === 0) return "本文を入力してください";
+    if (replyRecipients.length === 0) return "宛先がありません";
+    if (att.hasPending) return "添付ファイルを処理中です…";
+    const cc = parseRecipients(replyCc).recipients;
+    const bcc = parseRecipients(replyBcc).recipients;
+    const req: mail.ScheduleMailRequest = { to: replyRecipients, subject: replySubject, textBody: body, scheduledAt: when.toISOString() };
+    if (cc.length > 0) req.cc = cc;
+    if (bcc.length > 0) req.bcc = bcc;
+    if (parentId) req.inReplyTo = parentId;
+    const inputs = att.readyInputs();
+    if (inputs.length > 0) req.attachments = inputs;
+    const fmt = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
+    const compose = {
+      id: uid("compose"),
+      mode: "reply" as const,
+      to: fmt(replyRecipients),
+      cc: fmt(cc),
+      bcc: fmt(bcc),
+      subject: replySubject,
+      body,
+      showCc: cc.length > 0,
+      showBcc: bcc.length > 0,
+      minimized: false,
+      maximized: false,
+      ...(parentId ? { inReplyTo: parentId } : {}),
+    };
+    resetInline();
+    void deliver(mailApi, dispatch, { kind: "schedule", req, compose });
+    return null;
+  };
+  // Scheduled replies still waiting to go out for THIS thread (any message in it).
+  // Compared with and without the domain: a reply to our own Sent row carries `<log id>@domain`.
+  const bareRef = (id: string): string => id.trim().replace(/^<|>$/g, "");
+  const threadMessageIds = new Set(thread.messages.flatMap((m) => (m.messageId ? [bareRef(m.messageId), bareRef(m.messageId).split("@")[0]!] : [])).filter(Boolean));
+  const scheduledHere = state.scheduled.filter(
+    (s) => s.status === "scheduled" && s.inReplyTo && (threadMessageIds.has(bareRef(s.inReplyTo)) || threadMessageIds.has(bareRef(s.inReplyTo).split("@")[0]!)),
+  );
 
   return (
     <section
@@ -421,11 +513,15 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             <HeaderButton label="削除" icon="trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })} />
           </>
         )}
-        <HeaderButton
-          label={threadUnread(thread) ? "既読にする" : "未読にする"}
-          icon="mail-open"
-          onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: threadUnread(thread) })}
-        />
+        {threadMine(thread) ? (
+          <HeaderButton
+            label={threadUnread(thread) ? "既読にする" : "未読にする"}
+            icon="mail-open"
+            onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: threadUnread(thread) })}
+          />
+        ) : null}
+        <span style={{ flex: 1 }} />
+        <BlockSenderMenu thread={thread} />
       </div>
 
       <div style={{ flex: 1, overflowY: "auto" }}>
@@ -459,6 +555,8 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             ))}
           </div>
         ) : null}
+
+        <BlockedBanner thread={thread} />
 
         {nudge ? (
           <div className={styles.banner} data-reply-nudge="fe2-mail-reply-nudge" data-testid="fe2-mail-reply-nudge-banner">
@@ -498,11 +596,47 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           </button>
         </div>
 
+        {scheduledHere.length > 0 ? (
+          <ul className={inlineStyles.scheduledList} data-testid="fe2-mail-thread-scheduled">
+            {scheduledHere.map((s) => (
+              <li key={s.id} className={inlineStyles.scheduledItem} data-testid="fe2-mail-thread-scheduled-item">
+                <MailIcon name="clock" size={14} />
+                <span>{fullDate(s.scheduledAt)} に返信を送信予定</span>
+                {s.attachments && s.attachments.length > 0 ? (
+                  <span className={inlineStyles.scheduledAttach}>
+                    <MailIcon name="paperclip" size={12} /> {s.attachments.length}
+                  </span>
+                ) : null}
+                <button type="button" className={inlineStyles.linkBtn} onClick={() => dispatch({ type: "SET_FOLDER", folder: "scheduled" })}>
+                  予約済みを開く
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
         <div style={{ padding: "0 24px 24px" }}>
           <div style={{ display: "flex", gap: 12, border: "1px solid var(--dub-color-border-strong)", borderRadius: "var(--dub-radius-lg)", padding: 12 }}>
             <Avatar p={state.me} size={32} />
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-2, 8px)", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  宛先: {replyRecipients.map((p) => displayName(p)).join(", ")}
+                </span>
+                {!showCcBcc ? (
+                  <button type="button" data-testid="fe2-mail-inline-ccbcc-toggle" onClick={() => setShowCcBcc(true)} style={ccBccBtn}>
+                    Cc/Bcc
+                  </button>
+                ) : null}
+              </div>
+              {showCcBcc ? (
+                <div style={{ marginBottom: "var(--dub-space-2, 8px)" }}>
+                  <EmailAddressSelect variant="flush" label="Cc" value={replyCc} onChange={setReplyCc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} testId="fe2-mail-inline-cc" />
+                  <EmailAddressSelect variant="flush" label="Bcc" value={replyBcc} onChange={setReplyBcc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} testId="fe2-mail-inline-bcc" />
+                </div>
+              ) : null}
               <textarea
+                ref={replyRef}
                 data-testid="fe2-mail-inline-reply"
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
@@ -510,7 +644,13 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                 rows={reply ? 4 : 1}
                 style={{
                   width: "100%",
-                  resize: "vertical",
+                  resize: "none",
+                  minHeight: reply ? 96 : undefined,
+                  maxHeight: "60vh",
+                  overflowY: "auto",
+                  lineHeight: 1.6,
+                  whiteSpace: "pre-wrap",
+                  boxSizing: "border-box",
                   border: "none",
                   outline: "none",
                   background: "transparent",
@@ -519,15 +659,35 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                   fontFamily: "inherit",
                 }}
               />
-              {reply ? (
-                <div style={{ marginTop: 8 }}>
+              {att.errors.length > 0 || att.items.length > 0 ? (
+                <div className={inlineStyles.attachments}>
+                  <AttachmentErrors errors={att.errors} onDismiss={att.dismissErrors} />
+                  <AttachmentTray items={att.items} onRemove={att.remove} onOpen={setPreviewId} testId="fe2-mail-inline-attach-tray" />
+                </div>
+              ) : null}
+              <AttachmentPreview items={att.items} openId={previewId} onClose={() => setPreviewId(null)} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                data-testid="fe2-mail-inline-attach-input"
+                onChange={(e) => {
+                  att.addFiles(e.target.files);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+              />
+              {reply || att.items.length > 0 ? (
+                <div className={inlineStyles.actions}>
                   <button
                     type="button"
                     data-testid="fe2-mail-inline-send"
                     onClick={sendInline}
+                    disabled={att.hasPending}
                     style={{
                       all: "unset",
-                      cursor: "pointer",
+                      cursor: att.hasPending ? "not-allowed" : "pointer",
+                      opacity: att.hasPending ? 0.6 : 1,
                       padding: "8px 20px",
                       borderRadius: "var(--dub-radius-full)",
                       background: "var(--dub-color-brand-500)",
@@ -537,6 +697,22 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                     }}
                   >
                     送信
+                  </button>
+                  <SchedulePicker
+                    testIdPrefix="fe2-mail-inline-schedule"
+                    onSchedule={scheduleInline}
+                    disabled={att.hasPending}
+                    disabledReason="添付ファイルを処理中です…"
+                    {...(att.items.length > 0 ? { hint: `添付ファイル ${att.items.length} 件も一緒に予約されます` } : {})}
+                  />
+                  <button
+                    type="button"
+                    aria-label="ファイルを添付"
+                    data-testid="fe2-mail-inline-attach"
+                    className={inlineStyles.iconBtn}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <MailIcon name="paperclip" size={18} />
                   </button>
                 </div>
               ) : null}
@@ -560,4 +736,13 @@ const actionBtn: CSSProperties = {
   color: "var(--dub-color-text-secondary)",
   fontSize: "var(--dub-font-size-sm)",
   fontWeight: 500,
+};
+
+const ccBccBtn: CSSProperties = {
+  all: "unset",
+  cursor: "pointer",
+  flexShrink: 0,
+  fontSize: "var(--dub-font-size-xs)",
+  fontWeight: 600,
+  color: "var(--dub-color-text-muted)",
 };

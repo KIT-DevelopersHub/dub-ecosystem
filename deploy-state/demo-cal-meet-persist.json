@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "cal-meet-persist",
+  "worker": "dub-demo-cal-meet-persist",
+  "url": "https://dub-demo-cal-meet-persist.developershub-site.workers.dev",
+  "deployedSha": "f39e857b",
+  "branch": "fix/calendar-meetings-vanish-and-prefs",
+  "actor": "ko-tarou",
+  "markers": ["dub.calendar.prefs"],
+  "live": true,
+  "verifiedAt": "2026-10-15T05:26:39Z",
+  "updatedAt": "2026-10-15T05:26:39Z",
+  "note": "PR fix/calendar-meetings-vanish-and-prefs"
+}

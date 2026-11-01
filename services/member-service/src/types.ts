@@ -4,6 +4,7 @@
 // injected-dependency interfaces. Distinct from identity_* (RBAC login accounts).
 import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
+import type { HrRepo } from "./hr-repo";
 
 export type MemberStatus = member.MemberStatus;
 export const MEMBER_STATUSES = ["added", "invited", "considering", "on_leave", "declined"] as const;
@@ -32,6 +33,8 @@ export interface PersonRow extends member.PersonProfile {
   grade: member.Grade | null;
   /** 名列番号 (例 "3EP2-26")。正規化済み (0011 additive column)。 */
   rosterNumber: string | null;
+  /** 学籍番号 (例 "1400980")。正規化済み (0016 additive column)。 */
+  studentNumber: string | null;
   /** Linked identity-roster account (identity userId), or null when unlinked. */
   identityUserId: string | null;
   /** 配下につくリーダーの member id（＝上長）。null は直属リーダー無し。組織図の親子関係
@@ -79,6 +82,8 @@ export interface ParticipationRow extends member.PersonProfile {
   department: string | null;
   /** 名列番号 (例 "3EP2-26")。正規化済み (0012 additive column)。 */
   rosterNumber: string | null;
+  /** 学籍番号 (例 "1400980")。正規化済み (0016 additive column)。 */
+  studentNumber: string | null;
   contact: string | null;
   phone: string | null;
   schoolEmail: string;
@@ -175,6 +180,10 @@ export interface AppDeps {
   newMemberId: () => string;
   newParticipationId: () => string;
   newOnboardingItemId: () => string;
+  /** 人事 (member_hr_*) の永続化。名簿リポジトリとは分けてある (hr-repo.ts)。 */
+  hrRepo: HrRepo;
+  /** 人事の id 採番 (app = 応募者 / hre = 履歴)。 */
+  newHrId: (prefix: "app" | "hre") => string;
   /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
    *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
    *  without the binding, in which case the submission simply skips the notify. Must

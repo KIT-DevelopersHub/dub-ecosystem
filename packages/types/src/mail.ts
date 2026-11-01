@@ -8,7 +8,39 @@ import type { ISODateTime, CursorQuery } from "./common";
 // ---- query contract (GET /messages, GET /sent — same shape) ----
 export interface ListMailMessagesQuery extends CursorQuery {
   threadId?: string;
+  // ADDITIVE (server-side search): free-text, case-insensitive (ASCII) substring match over
+  // subject / snippet / body / From / To / Cc (Sent: subject / snippet / body / To / Cc).
+  // Trimmed; blank = no search; max 200 chars. Narrows within the caller's account scope
+  // only (never widens visibility). Combines with cursor/limit for paging the results.
+  q?: string;
+  // ADDITIVE (folder views): page by CONVERSATION for one mailbox view, with every filter
+  // (blocked senders, the viewer's archive/trash/star/purge flags, mine/others) applied in
+  // SQL BEFORE the limit, so each page holds exactly `limit` conversations (last page
+  // excepted). The response then carries `total` (conversations in the view). Absent = the
+  // legacy message-level list (no folder filtering), kept for older clients.
+  folder?: MailFolderView;
 }
+
+/** Server-side mailbox views for GET /mail/messages?folder=. `all` = every view except
+ *  Trash and ブロック済み (the search scope). */
+export type MailFolderView = "inbox" | "mine" | "others" | "starred" | "archive" | "trash" | "blocked" | "all";
+export const MAIL_FOLDER_VIEWS: readonly MailFolderView[] = ["inbox", "mine", "others", "starred", "archive", "trash", "blocked", "all"];
+
+/** GET /mail/messages?folder= response: a conversation page. `items` are the in-scope
+ *  messages of the page's conversations; `total` counts conversations in the whole view. */
+export interface MailMessagePage {
+  items: MailMessageListItem[];
+  nextCursor: string | null;
+  total?: number;
+}
+
+/** GET /mail/counts: conversations per view, and how many have unread mail for the viewer
+ *  (ブロック済み never counts as unread). */
+export interface MailFolderCount {
+  total: number;
+  unread: number;
+}
+export type MailFolderCounts = Record<Exclude<MailFolderView, "all">, MailFolderCount>;
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
 // SINGLE source of truth for the query-parameter *names* mail-gateway's messages list
@@ -19,7 +51,7 @@ export interface ListMailMessagesQuery extends CursorQuery {
 // separately spec'd — documenting it is a noted follow-up). See
 // docs/api-contracts/_wire-contract-enforcement.md.
 export const MAIL_WIRE = {
-  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "limit", "threadId"] },
+  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "folder", "limit", "q", "threadId"] },
 } as const;
 
 // Compile-time tie: every query key the descriptor lists must be a real key of the typed
@@ -39,6 +71,10 @@ export interface MailAddress {
 export interface SendMailRequest {
   to: MailAddress[];
   cc?: MailAddress[];
+  // ADDITIVE (Bcc): envelope-only recipients. Delivered by the provider as real Bcc, never
+  // written to any header; stored on the send log and shown in Sent to the sender only.
+  // Same validation/limits as cc. Also persisted on a scheduled send (mail_scheduled.bcc_json).
+  bcc?: MailAddress[];
   subject: string;
   textBody: string;
   htmlBody?: string;
@@ -120,6 +156,11 @@ export interface MailMessageListItem extends MailMessage, MailMessageState {
   // ADDITIVE: Cc recipients of a received message (mail_inbound.cc_json, 0012). Omitted when
   // the message had none or was stored before 0012.
   cc?: MailAddress[];
+  // ADDITIVE: true when the sender matches the VIEWER's own block list (mail_sender_blocks,
+  // 0021). Derived per request, never stored on the message, so unblocking restores it.
+  // Clients keep blocked mail out of the inbox / unread counts (ブロック済み view only).
+  // Absent from older gateways — treat absent as false.
+  blocked?: boolean;
 }
 /** Detail view: list item plus the full body. Inbound persists text; htmlBody is
  *  optional (present only when a message carried an HTML part) and MUST be sanitized
@@ -161,6 +202,7 @@ export interface MailSentListItem {
   from?: MailAddress; // envelope From used for the send (when recorded)
   to: MailAddress[];
   cc?: MailAddress[];
+  bcc?: MailAddress[]; // ADDITIVE: present only for the sender's own view (never read_all)
   subject: string;
   snippet: string;
   sentAt: ISODateTime;
@@ -168,6 +210,10 @@ export interface MailSentListItem {
   providerMessageId?: string;
   status: "sent";
   threadId?: string; // set for a reply (= parent message id); lets a client thread the reply into its conversation
+  // ADDITIVE: false when this row is another account's send, visible only via oversight
+  // (mail:read_all). Absent/true = the viewer sent it. Lets a client keep someone else's
+  // From out of "my addresses" (自分 labelling, reply-all exclusion, reply addressing).
+  mine?: boolean;
 }
 /** Sent-folder detail: the list row plus the full body. htmlBody optional (present
  *  only when the send carried an HTML part) and MUST be sanitized before rendering. */
@@ -184,8 +230,8 @@ export interface MailSentDetail extends MailSentListItem {
 // full payload is stored in mail_scheduled with status='scheduled' and a due time; a
 // free-tier drain claims due rows and hands each to the SAME send core as an immediate
 // send (so 二重送信ゼロ / Sent-folder / archive-CC all hold). List / edit / cancel act on
-// still-'scheduled' rows only. Attachments are NOT carried on a scheduled send in this
-// slice (schedule an attachment-less body; a later slice may persist bytes to R2).
+// still-'scheduled' rows only. Attachments + Bcc ride along (ADDITIVE, migration 0020):
+// the bytes are parked in R2 and re-attached by the drain at delivery time.
 
 /** Terminal + live states of a scheduled send. */
 export type ScheduledSendStatus = "scheduled" | "sent" | "canceled" | "failed";
@@ -215,11 +261,15 @@ export interface ScheduledSendListItem {
   inReplyTo?: string; // set when the scheduled send is a reply
   sentMessageId?: string; // set once delivered (status='sent')
   errorCode?: string; // set when the drain gave up (status='failed')
+  // ADDITIVE (0020): metadata of the files parked with the schedule (bytes in R2). Absent
+  // when none, so an attachment-less row is byte-identical to the 0010 shape.
+  attachments?: MailAttachment[];
 }
 /** Scheduled-folder detail: list row plus the full editable body. */
 export interface ScheduledSendDetail extends ScheduledSendListItem {
   textBody: string;
   htmlBody?: string;
+  bcc?: MailAddress[]; // ADDITIVE (0020): envelope-only Bcc, shown to the owner only
 }
 /** PATCH /mail/scheduled/:id — edit fields and/or reschedule. All optional; only the
  *  provided fields change. Allowed only while the row is still 'scheduled'. */
@@ -260,6 +310,25 @@ export interface MailThreadFlagsPatch {
    *  false = clear it (undo). Absent = leave noReplyAt unchanged. */
   noReply?: boolean;
 }
+
+// ---- sender block list (この送信者をブロック, 0021) ----
+// Personal (per mailbox owner) list of blocked sender addresses / whole domains. Blocking
+// never deletes mail: blocked messages stay stored and are only flagged `blocked` on read.
+export type MailSenderBlockKind = "address" | "domain";
+/** One entry of the signed-in user's block list. `value` is lowercased: a full address for
+ *  kind "address", a bare domain ("example.com") for kind "domain". */
+export interface MailSenderBlock {
+  value: string;
+  kind: MailSenderBlockKind;
+  createdAt: ISODateTime;
+}
+/** POST /mail/blocks body. `kind` defaults from the value ("@" present -> address). */
+export interface MailSenderBlockRequest {
+  value: string;
+  kind?: MailSenderBlockKind;
+}
+/** Per-user cap on block-list entries (the API answers 409 beyond it). */
+export const MAIL_SENDER_BLOCK_LIMIT = 500;
 
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----
 export interface Mailbox {

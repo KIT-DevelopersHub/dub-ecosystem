@@ -11,6 +11,7 @@ import { r2Blobs, type MailBlobStore } from "./attachments";
 import { sendRetryOptions } from "./resilience";
 import { AUDIT_TOPIC, TOPIC_MAIL_AUTOMATION, TOPIC_NOTIFICATION, outboxQueue } from "./outbox";
 import type { AuditEnv, EventPublishEnv, InboundDeps, SendDeps } from "./types";
+import type { ArchiveForwardDeps, GmailForwardDeps } from "./gmail-forward";
 
 export function buildDb(env: Env, requestId: string): DbClient {
   return createDbClient(env.DB, { namespace: "mail", requestId });
@@ -80,4 +81,20 @@ export function buildInboundDeps(env: Env, ctx: RequestContext): InboundDeps {
     archiveAddress: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     sharedAddress: env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
   };
+}
+
+export function buildGmailForwardDeps(env: Env, ctx: RequestContext): GmailForwardDeps {
+  return {
+    identity: env.SVC_IDENTITY,
+    member: env.SVC_MEMBER,
+    audit: buildAuditEnv(env),
+    orgId: common.DUB_DEFAULT_ORG_ID,
+    ctx,
+    archiveAddress: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
+    internalDomain: env.CF_EMAIL_ROUTING_ZONE_NAME || "developershub.jp",
+  };
+}
+
+export function buildArchiveForwardDeps(env: Env, ctx: RequestContext, archiveTo: string): ArchiveForwardDeps {
+  return { audit: buildAuditEnv(env), orgId: common.DUB_DEFAULT_ORG_ID, ctx, archiveTo };
 }

@@ -195,6 +195,55 @@ describe("POST /mail/outbox (user-facing compose)", () => {
     expect(page.items[0]!.from?.email).toBe("info@developershub.jp");
     expect(page.items[0]!.threadId).toBe("ext-1@gmail.com");
   });
+
+  it("an Idempotency-Key is scoped to the user: the same key from two accounts sends twice, a repeat from one dedupes", async () => {
+    const { env, sends } = makeEnv();
+    const send = (user: string) =>
+      app.fetch(
+        new Request("https://svc/mail/outbox", { method: "POST", headers: headers({ "x-dub-user-id": user, "x-dub-idempotency-key": "same-key" }), body: JSON.stringify(sendBody) }),
+        env,
+      );
+    expect((await send("usr_alice")).status).toBe(202);
+    expect((await send("usr_alice")).status).toBe(200); // double-submit -> one mail
+    expect((await send("usr_bob")).status).toBe(202); // another account is not deduped against alice
+    expect(sends.notif).toHaveLength(2);
+  });
+
+  it("a reply to the user's OWN earlier send keeps the From it went out as (no mid-thread identity switch)", async () => {
+    const { env, raw } = makeEnv({
+      SVC_IDENTITY: fakeIdentityFetcher(true, { usr_admin: { email: "admin@developershub.jp" }, usr_bob: { email: "bob@developershub.jp" } }),
+    });
+    raw
+      .prepare(
+        `INSERT INTO mail_inbound
+           (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+            auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at)
+         VALUES ('mailin_r', 'ext-1@gmail.com', 'ext-1@gmail.com', 'info', ?, ?, 'Hi', 'snip', NULL, NULL, '2026-08-10T00:00:00.000Z', '2026-08-10T00:00:00.000Z', 'hello', NULL, NULL)`,
+      )
+      .run(JSON.stringify({ email: "outsider@gmail.com" }), JSON.stringify([{ email: "info@developershub.jp" }]));
+    const post = (user: string, inReplyTo: string, text: string) =>
+      app.fetch(
+        new Request("https://svc/mail/outbox", {
+          method: "POST",
+          headers: headers({ "x-dub-user-id": user }),
+          body: JSON.stringify({ to: [{ email: "outsider@gmail.com" }], subject: "Re: Hi", textBody: text, inReplyTo }),
+        }),
+        env,
+      );
+    const first = await post("usr_admin", "ext-1@gmail.com", "first"); // -> as info@
+    expect(first.status).toBe(202);
+    const { messageId } = (await first.json()) as mail.SendMailResponse; // "maillog_…@developershub.jp"
+    expect((await post("usr_admin", messageId, "follow-up")).status).toBe(202);
+    expect((await post("usr_bob", messageId, "bob")).status).toBe(202);
+    const mineSent = async (user: string) =>
+      ((await (await app.fetch(new Request("https://svc/mail/sent", { headers: headers({ "x-dub-user-id": user }) }), env)).json()) as { items: mail.MailSentListItem[] }).items.filter(
+        (i) => i.mine === true,
+      );
+    // Before: the follow-up fell back to the per-user address (admin@) mid-thread.
+    expect((await mineSent("usr_admin")).map((i) => i.from?.email)).toEqual(["info@developershub.jp", "info@developershub.jp"]);
+    // Someone else replying to admin's send does NOT inherit it.
+    expect((await mineSent("usr_bob")).map((i) => i.from?.email)).toEqual(["bob@developershub.jp"]);
+  });
 });
 
 describe("read routes (/mail/messages)", () => {
@@ -230,6 +279,7 @@ describe("read routes (/mail/messages)", () => {
     // A fake R2 bucket so buildBlobs is non-null (the route must 409 BEFORE touching it).
     const bucket = { get: async () => null, put: async () => undefined, delete: async () => undefined };
     const { env, raw } = makeEnv({ R2_MAIL: bucket as never });
+    seedInboundOwned(raw, "mailin_x", "usr_alice");
     // Seed a dropped stub directly (r2_key='' — no bytes were ever stored).
     raw
       .prepare(
@@ -245,7 +295,35 @@ describe("read routes (/mail/messages)", () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("MAIL_ATTACHMENT_NOT_STORED");
   });
+
+  it("404s downloading an attachment of another account's message (same scope as the detail)", async () => {
+    const bucket = { get: async () => ({ arrayBuffer: async () => new TextEncoder().encode("x").buffer, size: 1, httpMetadata: { contentType: "text/plain" } }), put: async () => undefined, delete: async () => undefined };
+    const { env, raw } = makeEnv({ R2_MAIL: bucket as never });
+    seedInboundOwned(raw, "mailin_a", "usr_alice");
+    raw
+      .prepare(
+        `INSERT INTO mail_attachments (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status)
+         VALUES (?, 'inbound', ?, 'a.txt', 'text/plain', 1, 'k', ?, 'stored')`,
+      )
+      .run("mailatt_a", "mailin_a", "2026-08-10T00:00:00.000Z");
+    const get = (user: string) =>
+      app.fetch(new Request("https://svc/mail/messages/mailin_a/attachments/mailatt_a", { headers: headers({ "x-dub-user-id": user }) }), env);
+    expect((await get("usr_bob")).status).toBe(404);
+    expect((await get("usr_alice")).status).toBe(200);
+  });
 });
+
+function seedInboundOwned(raw: ReturnType<typeof makeEnv>["raw"], id: string, owner: string): void {
+  raw
+    .prepare(
+      `INSERT INTO mail_inbound
+         (id, message_id, thread_id, mailbox, from_json, to_json, subject, snippet,
+          auto_submitted, loop_marker, received_at, created_at, body_text, html_body, read_at, owner_user_id)
+       VALUES (?, ?, ?, 'info', ?, ?, 'Hi', 'snip', NULL, NULL, ?, ?, 'body', NULL, NULL, ?)`,
+    )
+    .run(id, `<${id}@x>`, `thr_${id}`, JSON.stringify({ email: "sender@x.com" }), JSON.stringify([{ email: "info@developershub.jp" }]),
+      "2026-08-10T00:00:00.000Z", "2026-08-10T00:00:00.000Z", owner);
+}
 
 describe("per-user thread flags (/mail/flags — 改善#8)", () => {
   it("401s without a trusted user header", async () => {
@@ -740,6 +818,18 @@ describe("oversight — mail:read_all bypasses account scope", () => {
     expect((await app.fetch(new Request("https://svc/mail/messages/in_a", { headers: asUser("usr_super") }), env)).status).toBe(200);
     const thread = await app.fetch(new Request("https://svc/mail/threads/thr_a", { headers: asUser("usr_super") }), env);
     expect(thread.status).toBe(200);
+  });
+
+  it("Mark read: a mail:read_all holder can open another account's message but never flips its read state", async () => {
+    const { env, raw } = oversightEnv();
+    seedOwned(raw, { id: "in_alice", ownerUserId: "usr_alice" });
+    seedOwned(raw, { id: "in_super", ownerUserId: "usr_super" });
+    const mark = (id: string) => app.fetch(new Request(`https://svc/mail/messages/${id}/read`, { method: "POST", headers: asUser("usr_super") }), env);
+    expect((await mark("in_alice")).status).toBe(200);
+    expect((await mark("in_super")).status).toBe(200);
+    const readAt = (id: string) => (raw.prepare(`SELECT read_at FROM mail_inbound WHERE id = ?`).get(id) as { read_at: string | null }).read_at;
+    expect(readAt("in_alice")).toBeNull();
+    expect(readAt("in_super")).not.toBeNull();
   });
 
   it("Sent: a mail:read_all holder sees another user's sent mail", async () => {

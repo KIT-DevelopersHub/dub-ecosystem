@@ -36,6 +36,20 @@ export const ORDER_STATUS: Record<LpTicketOrderStatus, { label: string; tone: "s
   expired: { label: "期限切れ", tone: "neutral" },
 };
 
+const PAYMENT_METHOD_LABELS: Record<string, string> = { card: "カード", paypay: "PayPay", link: "Link" };
+
+/** Stripe の PaymentMethod.type → 表示名。未知の手段はそのまま、null/空は ""。 */
+export function paymentMethodLabel(method: string | null | undefined): string {
+  if (!method) return "";
+  return PAYMENT_METHOD_LABELS[method] ?? method;
+}
+
+/** LP に出している決済手段（例「カード / PayPay」）。未指定の古い API はカードのみ。 */
+export function paymentMethodsLabel(methods: readonly string[] | undefined): string {
+  const list = methods && methods.length > 0 ? methods : ["card"];
+  return list.map(paymentMethodLabel).join(" / ");
+}
+
 export function formatYen(n: number): string {
   return `¥${n.toLocaleString("ja-JP")}`;
 }

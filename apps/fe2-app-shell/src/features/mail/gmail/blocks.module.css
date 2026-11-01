@@ -1,0 +1,120 @@
+/* Sender block list UI (reading-pane banner, ブロック中のアドレス panel, notice bar). */
+
+/* Reading-pane banner on a conversation whose sender is blocked. */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2) var(--dub-space-3);
+  margin: var(--dub-space-2) var(--dub-space-6);
+  padding: var(--dub-space-2) var(--dub-space-3) var(--dub-space-2) var(--dub-space-4);
+  border-radius: var(--dub-radius-md);
+  border-left: 4px solid var(--dub-color-danger-500);
+  background: var(--dub-color-surface-raised);
+}
+.bannerText {
+  flex: 1 1 14em;
+  min-width: 0;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+
+/* ブロック済み folder: management list above the blocked threads. */
+.blockedColumn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.panel {
+  flex-shrink: 0;
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  overflow: hidden;
+}
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-3) var(--dub-space-5);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.panelTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-md);
+  font-weight: 700;
+  color: var(--dub-color-text-primary);
+}
+.panelCount {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+}
+.panelBody {
+  overflow-y: auto;
+  padding: var(--dub-space-2) var(--dub-space-3);
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-2) var(--dub-space-2);
+  border-radius: var(--dub-radius-md);
+}
+.rowValue {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+.rowMeta {
+  flex-shrink: 0;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+
+/* Bottom-left notice (same placement as the send status bar). */
+.notice {
+  position: fixed;
+  left: var(--dub-space-6);
+  bottom: var(--dub-space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-text-primary);
+  color: var(--dub-color-surface-base);
+  box-shadow: var(--dub-shadow-lg);
+  z-index: 1400;
+  font-size: var(--dub-font-size-sm);
+}
+.noticeRaised {
+  bottom: calc(var(--dub-space-6) + var(--dub-space-16));
+}
+.noticeAction {
+  all: unset;
+  cursor: pointer;
+  color: var(--dub-color-info-300);
+  font-weight: 700;
+}
+.noticeClose {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+}

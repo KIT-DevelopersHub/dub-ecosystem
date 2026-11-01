@@ -48,7 +48,11 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
   { ns: "webhook", ownerUnit: "webhook-ingest#13", tables: ["webhook_deliveries"] },
   { ns: "deploy", ownerUnit: "deploy-service#14", tables: ["deploy_sites", "deploy_deployments", "deploy_allowed_zones", "deploy_dns_changes"] },
   { ns: "audit", ownerUnit: "audit-log#10", tables: ["audit_logs"] },
-  { ns: "mobile", ownerUnit: "mobile-bff MO3#31", tables: ["mobile_devices"] },
+  {
+    ns: "mobile",
+    ownerUnit: "mobile-bff MO3#31",
+    tables: ["mobile_devices", "mobile_push_deliveries", "mobile_change_log", "mobile_mutations"],
+  },
   { ns: "seed", ownerUnit: "infra-d1-seed#28", tables: ["seed_runs"] },
   { ns: "usage", ownerUnit: "usage-meter", tables: ["usage_snapshot"] },
   { ns: "member", ownerUnit: "member-service", tables: ["member_teams", "member_people", "member_team_links"] },

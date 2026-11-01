@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -49,9 +50,19 @@ class CredentialStore {
   }
 
   /// Read the saved credentials, or null when nothing (complete) is stored.
+  ///
+  /// A keychain error (e.g. the user cancels the access prompt macOS shows
+  /// after the app's signing identity changes) is treated as "nothing saved"
+  /// so launch falls through to the normal web login instead of hanging.
   Future<Credentials?> read() async {
-    final email = await _storage.read(key: _kEmail);
-    final password = await _storage.read(key: _kPassword);
+    final String? email;
+    final String? password;
+    try {
+      email = await _storage.read(key: _kEmail);
+      password = await _storage.read(key: _kPassword);
+    } on PlatformException {
+      return null;
+    }
     if (email == null || password == null) return null;
     final c = Credentials(email: email, password: password);
     return c.isComplete ? c : null;

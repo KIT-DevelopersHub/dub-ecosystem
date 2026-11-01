@@ -74,6 +74,11 @@ export const POLICY_TABLE = definePolicyTable({
   // LP visit beacon. The handler drops non-LP origins and forwards only a sanitized row to
   // lp-analytics s2s; there is no session to check and nothing readable comes back (204).
   "POST /api/v1/public/lp-visits": PUBLIC,
+  // Resend delivery-event webhook. Resend has no session, so PUBLIC is the only possible
+  // rule. What authenticates it is the Svix HMAC over the raw body, checked downstream in
+  // mail-gateway (/internal/webhooks/resend) — the gateway forwards bytes verbatim and makes
+  // no decision. Secret unset there => 503 (fail closed).
+  "POST /api/v1/public/webhooks/resend": PUBLIC,
 
   // ---- AUTHENTICATED: the /me family (7) ----
   // Self-scoped in the strict sense rule.ts requires: not one of these paths has a subject
@@ -109,4 +114,7 @@ export const POLICY_TABLE = definePolicyTable({
   // returns a user's plaintext password, which auth-service audits on every view).
   "POST /api/v1/admin/users/:userId/password": ["identity:admin"],
   "GET /api/v1/admin/users/:userId/password": ["identity:admin"],
+  // Same subject shape (`:userId` from the caller) and the same secret: the account-issue
+  // mail carries that user's password to their Gmail, so it needs exactly the view right.
+  "POST /api/v1/admin/users/:userId/account-mail": ["identity:admin"],
 });

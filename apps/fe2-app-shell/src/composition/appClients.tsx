@@ -41,6 +41,10 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  SlackChannelOption,
+  SlackImportJob,
+  CustomEmoji,
+  EmojiImportResult,
   TeamSummary,
   UnfurlPreview,
   UnfurlResponse,
@@ -287,6 +291,32 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
           path: `${MEMBERS}/me/mention-teams` as ApiPath,
         })
         .then((r) => ({ teams: r?.teams ?? [], myTeamIds: r?.myTeamIds ?? [] })),
+    // Slack channel import (admin) — mirrors HttpChatClient; the screen drives …/step.
+    listSlackChannels: () =>
+      api
+        .request<unknown>({ method: "GET", path: `${CHAT}/slack-import/channels` as ApiPath })
+        .then((r) => unwrapItems<SlackChannelOption>(r)),
+    listSlackImportJobs: (limit?: number) =>
+      api
+        .request<unknown>({
+          method: "GET",
+          path: `${CHAT}/slack-import/jobs` as ApiPath,
+          ...(limit !== undefined ? { query: { limit: String(limit) } } : {}),
+        })
+        .then((r) => unwrapItems<SlackImportJob>(r)),
+    startSlackImport: (channel: string) =>
+      api.request<SlackImportJob>({ method: "POST", path: `${CHAT}/slack-import/jobs` as ApiPath, body: { channel } }),
+    getSlackImportJob: (id: string) =>
+      api.request<SlackImportJob>({ method: "GET", path: `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}` as ApiPath }),
+    stepSlackImport: (id: string) =>
+      api.request<SlackImportJob>({ method: "POST", path: `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}/step` as ApiPath }),
+    // Custom emoji: list (閲覧), image bytes via the download path (cookie session + refresh),
+    // and the admin Slack import batch (編集 + chat:emoji_import) — mirrors HttpChatClient.
+    listCustomEmojis: () =>
+      api.request<unknown>({ method: "GET", path: `${CHAT}/custom-emojis` as ApiPath }).then((r) => unwrapItems<CustomEmoji>(r)),
+    customEmojiImage: (name: string) => api.download(`${CHAT}/custom-emojis/${encodeURIComponent(name)}/image` as `/api/v1/${string}`),
+    importSlackEmojis: (after: string | null) =>
+      api.request<EmojiImportResult>({ method: "POST", path: `${CHAT}/custom-emojis/slack-import` as ApiPath, body: { after } }),
     // Link preview is best-effort: a blocked URL (400) or a network error simply
     // means "no card" — never surface it as a chat error.
     unfurl: (url: string): Promise<UnfurlPreview | null> =>

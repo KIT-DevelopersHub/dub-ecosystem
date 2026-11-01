@@ -47,6 +47,10 @@ interface TicketOrderDbRow {
   stripe_session_id: string | null;
   created_at: string;
   paid_at: string | null;
+  /** 0005 migration. Absent (undefined) before it is applied. */
+  payment_method?: string | null;
+  /** 0006 migration. 1 = created from an LP管理 preview. */
+  preview?: number | null;
 }
 interface TicketItemDbRow {
   order_id: string;
@@ -102,6 +106,8 @@ const toTicketOrder = (r: TicketOrderDbRow, items: LpTicketOrderItem[]): TicketO
   stripeSessionId: r.stripe_session_id,
   createdAt: r.created_at,
   paidAt: r.paid_at,
+  paymentMethod: r.payment_method ?? null,
+  preview: r.preview === 1,
 });
 
 // Seats held = items of paid orders + of pending orders still inside the hold window (alias o).
@@ -310,6 +316,12 @@ function ticketRepo(db: DbClient): LpTicketRepo {
         id,
       );
       return res.meta.changes > 0;
+    },
+    async markOrderPreview(id) {
+      await db.run("UPDATE lp_ticket_orders SET preview = 1 WHERE id = ?", id);
+    },
+    async setOrderPaymentMethod(id, method) {
+      await db.run("UPDATE lp_ticket_orders SET payment_method = ? WHERE id = ?", method, id);
     },
     async markOrderExpired(id) {
       const res = await db.run("UPDATE lp_ticket_orders SET status = 'expired' WHERE id = ? AND status = 'pending'", id);

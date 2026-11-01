@@ -135,7 +135,7 @@ describe("MockChatClient", () => {
     await expect(api.deleteChannel(dm.id)).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
   });
 
-  it("manages personal sections: create appends, rename, assign, delete falls back", async () => {
+  it("manages sections: create appends, rename, assign, delete falls back", async () => {
     const seeded = await api.listSections();
     expect(seeded.items.map((x) => x.name)).toEqual(["運営"]);
     const created = await api.createSection("  広報  ");

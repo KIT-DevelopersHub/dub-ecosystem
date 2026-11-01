@@ -12,7 +12,7 @@ import { ApiError } from "../../lib/api-client.tsx";
 import type { CalendarApi } from "./calendarApi.tsx";
 import { CalendarApiProvider } from "./CalendarProvider.tsx";
 import { CalendarScreen } from "./CalendarScreen.tsx";
-import { MEETING_FILTER_STORAGE_KEY } from "./meeting-form";
+import { userPrefKey } from "./calendar-prefs";
 import { findCreatedMeeting } from "./useMeetings.tsx";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
@@ -51,7 +51,10 @@ const TARGETS: meeting.MeetingTarget[] = [
 ];
 
 function fakeApi(over: Partial<CalendarApi> = {}, account: meeting.MeetingAccountState = { email: "hackit.dub@gmail.com", calendarReady: true }) {
-  const items = [mtg({}), mtg({ id: "mtg_member", title: "メンバー会", targetId: "role_member", targetName: "member" })];
+  const items = [
+    mtg({}),
+    mtg({ id: "mtg_member", title: "メンバー会", targetId: "role_member", targetName: "member", createdBy: "user_other" as meeting.Meeting["createdBy"] }),
+  ];
   const api: CalendarApi = {
     listTasks: vi.fn(),
     listAllTasks: vi.fn(),
@@ -255,6 +258,36 @@ describe("サイドバー ミーティング", () => {
 
     await userEvent.click(screen.getByTestId("calendar-meeting-filter-role_member"));
     await waitFor(() => expect(chipsOf("mtg_member").length).toBeGreaterThan(0));
-    expect(JSON.parse(localStorage.getItem(MEETING_FILTER_STORAGE_KEY)!)).toEqual(["all", "role_lead", "role_member"]);
+    expect(JSON.parse(localStorage.getItem(userPrefKey("meetingTargets", ME))!)).toEqual({
+      all: true,
+      role_lead: true,
+      role_member: true,
+    });
+  });
+
+  it("a meeting I created for a role I am not in still shows by default", async () => {
+    const mine = mtg({ id: "mtg_mine", title: "統括外の会", targetId: "role_member", targetName: "member" });
+    render(wrap(<CalendarScreen />, fakeApi({ listMeetings: vi.fn(async () => ({ items: [mine], account: { email: "hackit.dub@gmail.com", calendarReady: true } })) }), VIEW));
+    await waitFor(() => expect(chipsOf("mtg_mine").length).toBeGreaterThan(0));
+  });
+
+  it("a choice survives a reload and is drawn before the target list arrives", async () => {
+    localStorage.setItem(userPrefKey("meetingTargets", ME), JSON.stringify({ all: false, role_member: true }));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const api = fakeApi({ listMeetingTargets: vi.fn(() => gate.then(() => ({ items: TARGETS }))) });
+    render(wrap(<CalendarScreen />, api, VIEW));
+    await waitFor(() => expect(chipsOf("mtg_member").length).toBeGreaterThan(0));
+    expect(chipsOf("mtg_all")).toHaveLength(0);
+    release();
+    await screen.findByTestId("calendar-meeting-filter-role_member");
+    expect(chipsOf("mtg_member").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("calendar-meeting-filter-all")).not.toBeChecked();
+  });
+
+  it("another user's choice on the same browser does not apply", async () => {
+    localStorage.setItem(userPrefKey("meetingTargets", "usr_other"), JSON.stringify({ all: false }));
+    render(wrap(<CalendarScreen />, fakeApi(), VIEW));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
   });
 });

@@ -64,6 +64,14 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "disabled-tier-with-legacy-task-keys": ["task:read", "task:write", "task:delete"],
   // マイタスク = 閲覧 holding legacy write keys. Reads only — the tier is authoritative.
   "view-tier-with-legacy-write-keys": ["app:tasks:view", "task:read", "task:write", "task:delete"],
+  // マイタスク = 閲覧, カレンダー = 編集 + 「予定を登録」 ON (the prod 一般メンバー shape that could
+  // not add a 予定). Writes only through the calendar-events routes; no archive (no task:delete).
+  "calendar-scheduler-with-tasks-view": [
+    "app:tasks:view", "task:read", "task:write",
+    "app:calendar:view", "app:calendar:edit", "calendar:schedule_edit",
+  ],
+  // 「予定を登録」 held but カレンダー only 閲覧: the toggle is capped by the tier.
+  "schedule-toggle-on-calendar-view-tier": ["app:tasks:view", "task:read", "app:calendar:view", "calendar:schedule_edit"],
 };
 
 /**
@@ -94,10 +102,14 @@ const WRITES = [
 ];
 // Archiving is the one write behind the higher fine-grained key (task:delete).
 const ARCHIVE = ["DELETE /tasks/:id"];
+// カレンダーの予定 writes, gated by カレンダー 編集 + 「予定を登録」 instead of マイタスク 編集.
+const CALENDAR_WRITES = ["PATCH /tasks/calendar-events/:id", "POST /tasks/calendar-events"];
+const CALENDAR_ARCHIVE = ["DELETE /tasks/calendar-events/:id"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /health", "POST /internal/events-async"];
 // The whole external surface — what a caller can reach through api-gateway at most.
 const FULL = [...READS, ...WRITES, ...ARCHIVE].sort();
+const EVERY_EXTERNAL = [...FULL, ...CALENDAR_WRITES, ...CALENDAR_ARCHIVE].sort();
 const NO_ARCHIVE = [...READS, ...WRITES].sort();
 const READ_ONLY = [...READS].sort();
 const NONE: string[] = [];
@@ -111,6 +123,8 @@ describe("role x endpoint matrix (frozen)", () => {
     member: NO_ARCHIVE,
     "disabled-tier-with-legacy-task-keys": NONE,
     "view-tier-with-legacy-write-keys": READ_ONLY,
+    "calendar-scheduler-with-tasks-view": [...READS, ...CALENDAR_WRITES].sort(),
+    "schedule-toggle-on-calendar-view-tier": READ_ONLY,
   };
 
   it("matches the committed matrix for every role", () => {
@@ -121,7 +135,7 @@ describe("role x endpoint matrix (frozen)", () => {
   });
 
   it("the matrix covers the whole table (no route omitted from the snapshot)", () => {
-    const everyRoute = [...INTERNAL_ROUTES, ...FULL].sort();
+    const everyRoute = [...INTERNAL_ROUTES, ...EVERY_EXTERNAL].sort();
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(buildTestApp()).sort());
   });
@@ -212,5 +226,40 @@ describe("instance layer: includeArchived demands task:delete on top of the tabl
     const res = await buildTestApp().request("/tasks?eventId=evt_1&includeArchived=true", userInit("GET"));
     expect(res.status).toBe(200);
     expect(((await res.json()) as task.ListTasksResponse).items).toEqual([]);
+  });
+});
+
+// The 一般メンバー shape that reported 「予定を登録 を ON にしても予定が登録できない」:
+// マイタスク = 閲覧 (no app:tasks:edit), カレンダー = 編集 + 「予定を登録」.
+describe("カレンダーの予定: the calendar-events routes, end to end", () => {
+  function memberWithTasksView() {
+    const h = makeHarness();
+    h.authz.denied.add("app:tasks:edit");
+    h.authz.denied.add("task:delete");
+    return h;
+  }
+
+  it("lets 予定を登録 add, move and keeps archive behind task:delete — /tasks stays refused", async () => {
+    const app = buildApp(memberWithTasksView().deps);
+    const created = await app.request("/tasks/calendar-events", userInit("POST", { title: "定例", startAt: "2026-10-20T01:00:00Z" }));
+    expect(created.status).toBe(201);
+    const t = (await created.json()) as task.Task;
+
+    const moved = await app.request(
+      `/tasks/calendar-events/${t.id}`,
+      userInit("PATCH", { version: t.version, startAt: "2026-10-21T01:00:00Z" }),
+    );
+    expect(moved.status).toBe(200);
+    expect(((await moved.json()) as task.Task).startAt).toBe("2026-10-21T01:00:00Z");
+
+    expect((await app.request(`/tasks/calendar-events/${t.id}`, userInit("DELETE"))).status).toBe(403);
+    expect((await app.request("/tasks", userInit("POST", { title: "x" }))).status).toBe(403);
+  });
+
+  it("refuses without the 「予定を登録」 toggle", async () => {
+    const h = memberWithTasksView();
+    h.authz.denied.add("calendar:schedule_edit");
+    const res = await buildApp(h.deps).request("/tasks/calendar-events", userInit("POST", { title: "x" }));
+    expect(res.status).toBe(403);
   });
 });

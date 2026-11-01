@@ -89,11 +89,11 @@ export const APP_MANIFEST = [
   // カレンダー rides マイタスク's task:* keys (see gantt); its own 詳細 knobs are the ミーティング
   // pair (meetings on the shared Google account, drive-share-service /meetings).
   { id: "calendar", label: "カレンダー", navPath: "/calendar", domain: "task", permissions: ["task:read"], access: { view: "app:calendar:view", edit: "app:calendar:edit" },
-    detailPermissions: ["calendar:meetings_view", "calendar:meetings_edit"] },
+    detailPermissions: ["calendar:schedule_edit", "calendar:meetings_view", "calendar:meetings_edit"] },
   { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" },
     detailPermissions: ["notif:inbox:self", "notif:prefs:self", "notif:send", "notif:admin", "notif:broadcast_publish"] },
   { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" },
-    detailPermissions: ["chat:create", "chat:moderate", "chat:delete_channel"] },
+    detailPermissions: ["chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections"] },
   { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" },
     detailPermissions: ["mail:read", "mail:send", "mail:read_all", "mail:read_role_shared", "mail:admin"] },
   { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true,
@@ -127,6 +127,11 @@ export const APP_MANIFEST = [
   // app), so Commander — like ロール管理 — has no knob beyond 無効/閲覧/編集.
   { id: "commander", label: "Commander", navPath: "/commander", domain: "identity", permissions: ["identity:admin"], access: { view: "app:commander:view", edit: "app:commander:edit" },
     detailPermissions: [] },
+  // 人事: 面談 → 採用 → オンボーディング (member-service /members/hr/*)。名簿は複製せず、
+  // 採用で既存の名簿 (member_people) に入り、オンボーディングは参加届アプリの案内項目を読む。
+  // 未公開アプリ (releaseGate PUBLISHED_APPS 外) なので admin 以外はグレー表示 (identity/0025 で admin のみ付与)。
+  { id: "hr", label: "人事", navPath: "/hr", domain: "hr", permissions: ["hr:read"], access: { view: "app:hr:view", edit: "app:hr:edit" },
+    detailPermissions: ["hr:read", "hr:write", "hr:admin"] },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */

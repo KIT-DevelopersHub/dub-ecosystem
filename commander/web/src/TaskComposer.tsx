@@ -5,12 +5,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Drawer } from "./Drawer.tsx";
 import { btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
+import type { ChatImage } from "./lib/images.ts";
+import { AttachButton, AttachmentTray, dropOutline, useImageAttachments } from "./ImageAttach.tsx";
 
 export interface ComposerSubmit {
   title: string;
   cwd: string;
   prompt: string;
   ledgerRef: string;
+  /** Pasted / dropped screenshots sent with the first run. */
+  images: ChatImage[];
 }
 
 interface TaskComposerProps {
@@ -42,6 +46,7 @@ export function TaskComposer({
   const [prompt, setPrompt] = useState("");
   const [ledgerRef, setLedgerRef] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
+  const att = useImageAttachments();
 
   // Latest suggestions kept in a ref so the reset effect can seed the cwd default without
   // depending on the array's identity — the board rebuilds cwdSuggestions on every poll
@@ -57,10 +62,11 @@ export function TaskComposer({
       setCwd(cwdSuggestionsRef.current[0] ?? "");
       setPrompt("");
       setLedgerRef("");
+      att.clear();
     }
   }, [open]);
 
-  const canSubmit = title.trim() !== "" && prompt.trim() !== "" && !submitting;
+  const canSubmit = title.trim() !== "" && prompt.trim() !== "" && !submitting && att.preparing === 0;
 
   const submit = () => {
     if (!canSubmit) return;
@@ -69,6 +75,7 @@ export function TaskComposer({
       cwd: cwd.trim(),
       prompt: prompt.trim(),
       ledgerRef: ledgerRef.trim(),
+      images: att.images,
     });
   };
 
@@ -116,18 +123,25 @@ export function TaskComposer({
           </datalist>
         </div>
 
-        <div>
+        <div {...att.dropProps} data-testid="composer-prompt-drop" style={dropOutline(att.dragging)}>
           <label style={label} htmlFor="composer-prompt">
             指示（prompt）
           </label>
           <textarea
             id="composer-prompt"
             aria-label="task-prompt"
-            placeholder="Claude Code に投げる指示を書く"
+            placeholder="Claude Code に投げる指示を書く（画像は貼り付け・ドロップでも添付できます）"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onPaste={att.onPaste}
             style={{ ...input, minHeight: 120, resize: "vertical" }}
           />
+          <div style={{ display: "flex", flexDirection: "column", gap: t.space2, marginTop: t.space2 }}>
+            <AttachmentTray att={att} testIdPrefix="composer" />
+            <div>
+              <AttachButton att={att} testIdPrefix="composer" label="📎 画像を添付" />
+            </div>
+          </div>
         </div>
 
         <div>

@@ -76,6 +76,9 @@ export interface RosterApi {
   /** Admin: view a user's current password (#5c). Sensitive — decrypted on demand and
    *  audited server-side; never cache the result. */
   viewUserPassword(userId: common.UserId): Promise<auth.AdminViewPasswordResponse>;
+  /** Admin: アカウント発行メール — login + password to the linked member's Gmail (cc the
+   *  @developershub.jp address). Reuses the current password or issues one server-side. */
+  sendAccountMail(userId: common.UserId): Promise<auth.AdminSendAccountMailResponse>;
   permissionCatalog(): Promise<identity.PermissionCatalogEntry[]>;
   auditLogs(filters: AuditFilters): Promise<auditLog.AuditLogPage>;
   /** Mail-gateway rate-limit status, via the gateway boundary (proxied to /internal/status). */
@@ -126,6 +129,8 @@ export function createRosterApi(client: ResourceClient): RosterApi {
       client.post<auth.AdminSetPasswordResponse>(`${ADMIN}/users/${userId}/password`, req),
     viewUserPassword: (userId) =>
       client.get<auth.AdminViewPasswordResponse>(`${ADMIN}/users/${userId}/password`),
+    sendAccountMail: (userId) =>
+      client.post<auth.AdminSendAccountMailResponse>(`${ADMIN}/users/${userId}/account-mail`, {}),
     permissionCatalog: () =>
       client.get<identity.PermissionCatalogEntry[]>(`${IDENTITY}/permissions/catalog`),
     auditLogs: (filters) =>

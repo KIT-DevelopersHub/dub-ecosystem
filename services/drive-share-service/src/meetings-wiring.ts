@@ -10,7 +10,7 @@ import { createGoogleCalendarClient, type CalendarClient } from "./google/calend
 import { createTokenProvider, isInvalidGrant } from "./google/token";
 import { importTokenKey } from "./google/crypto";
 import { createD1GoogleAccountStore } from "./google-account-store";
-import { CALENDAR_SCOPE, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
+import { CALENDAR_SCOPE, MEET_SCOPE, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
 import { createMemberDirectory } from "./member-directory";
 import { createD1MeetingStore } from "./meetings-store";
 import { createMeetingsService, type MeetingAccount, type MeetingsService } from "./meetings-service";
@@ -20,6 +20,8 @@ import { mockForced, type Env } from "./env";
 
 /** Per isolate, so a mocked deployment keeps its calendars between requests. */
 const mockCalendarState = createMockCalendarState();
+/** Per isolate: Meet links already confirmed open, so the sync checks each one once. */
+const openedMeets = new Set<string>();
 
 export const MOCK_ACCOUNT_ID = "mock";
 
@@ -36,30 +38,35 @@ function failingCalendar(): CalendarClient {
     getEvent: fail,
     patchEvent: fail,
     deleteEvent: fail,
+    openMeet: fail,
   };
 }
 
 export async function resolveMeetingAccount(env: Env, resolved: ResolvedCredentials, fetchImpl?: typeof fetch): Promise<MeetingAccount> {
   if (mockForced(env) || resolved.source === "none") {
-    return { accountId: MOCK_ACCOUNT_ID, email: null, calendarReady: true, calendar: createMockCalendarClient(mockCalendarState) };
+    return { accountId: MOCK_ACCOUNT_ID, email: null, calendarReady: true, meetReady: true, calendar: createMockCalendarClient(mockCalendarState) };
   }
   if (resolved.source === "unusable") {
-    return { accountId: resolved.row.id, email: resolved.row.email, calendarReady: false, calendar: failingCalendar() };
+    return { accountId: resolved.row.id, email: resolved.row.email, calendarReady: false, meetReady: false, calendar: failingCalendar() };
   }
   const token = createTokenProvider({ credentials: resolved.credentials, ...(fetchImpl ? { fetchImpl } : {}) });
   let calendarReady = true;
+  let meetReady = true;
   try {
     const scopes = await token.grantedScopes();
     // Google reports the granted scopes on refresh; unknown (null) is given the benefit of the doubt.
     calendarReady = scopes === null || scopes.includes(CALENDAR_SCOPE);
+    meetReady = scopes === null || scopes.includes(MEET_SCOPE);
   } catch (err) {
     // A revoked grant needs the same reconnect; a network blip is not the account's fault.
     calendarReady = !isInvalidGrant(err);
+    meetReady = calendarReady;
   }
   return {
     accountId: resolved.source === "connected" ? resolved.row.id : SECRET_ACCOUNT_ID,
     email: resolved.source === "connected" ? resolved.row.email : null,
     calendarReady,
+    meetReady,
     calendar: createGoogleCalendarClient({ token, ...(fetchImpl ? { fetchImpl } : {}) }),
   };
 }
@@ -94,6 +101,7 @@ export async function buildMeetingsService(
     orgId,
     now: nowIso,
     newId: () => newId("dsm"),
+    openedMeets,
     // The alarm reschedules itself; only request-path writes kick it.
     ...(opts.system ? {} : { kick: (soonMs?: number) => kickMeetingSync(env, soonMs) }),
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),

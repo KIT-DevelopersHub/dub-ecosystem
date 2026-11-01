@@ -20,11 +20,24 @@ export {
   type UseEmailAddressInputArgs,
   type EmailAddressInput,
 } from "./hooks/useEmailAddressInput";
+export {
+  useListKeyboardNav,
+  type UseListKeyboardNavArgs,
+  type ListKeyboardNav,
+} from "./hooks/useListKeyboardNav";
 
 export { RolePicker, type RolePickerProps, type RoleOption } from "./components/RolePicker";
 export { DialogActions, type DialogActionsProps } from "./components/DialogActions";
 export { FormError, type FormErrorProps } from "./components/FormError";
 export { DraftRestoredNotice, type DraftRestoredNoticeProps } from "./components/DraftRestoredNotice";
+
+export { useDebouncedValue } from "./hooks/useDebouncedValue";
+export {
+  useClientFilter,
+  normalizeSearchText,
+  matchesSearch,
+  type ClientFilter,
+} from "./hooks/useClientFilter";
 
 export {
   useDraftAutosave,
@@ -41,3 +54,10 @@ export {
   type UseUndoRedoOptions,
   type UndoRedoHotkeysOptions,
 } from "./hooks/useUndoRedo";
+
+export {
+  AccountMailDialog,
+  ACCOUNT_MAIL_APP_URL,
+  isDevhubAddress,
+  type AccountMailDialogProps,
+} from "./components/AccountMailDialog";

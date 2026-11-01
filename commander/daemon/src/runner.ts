@@ -10,8 +10,21 @@ import { randomUUID } from "node:crypto";
 import { buildSpawnEnv } from "./env.ts";
 import type { DaemonConfig, Run, RunEvent, StartRunInput } from "./types.ts";
 import { nullSink, type RunSink } from "./sink.ts";
+import type { StagedImage } from "./uploads.ts";
 
 type Listener = (event: RunEvent) => void;
+
+/** One stream-json input line: a user turn with the images first, then the prompt text. */
+export function imageMessageLine(prompt: string, images: StagedImage[]): string {
+  const content = [
+    ...images.map((img) => ({
+      type: "image",
+      source: { type: "base64", media_type: img.mediaType, data: img.data },
+    })),
+    { type: "text", text: prompt },
+  ];
+  return JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n";
+}
 
 interface Active {
   child: ChildProcess;
@@ -86,13 +99,14 @@ export class RunStore {
       prompt: input.prompt,
       cwd: input.cwd ?? this.config.defaultCwd,
       ...(input.taskId ? { taskId: input.taskId } : {}),
+      ...(input.images?.length ? { imageCount: input.images.length } : {}),
       status: "pending",
       startedAt: now,
       events: [],
     };
     this.runs.set(id, run);
     this.sink.runStarted(run);
-    this.spawnClaude(run, input.args ?? []);
+    this.spawnClaude(run, input.args ?? [], input.images ?? []);
     return run;
   }
 
@@ -114,10 +128,13 @@ export class RunStore {
     this.emit(run, { type: "status", status, at: new Date().toISOString() });
   }
 
-  private spawnClaude(run: Run, runArgs: string[] = []): void {
+  private spawnClaude(run: Run, runArgs: string[] = [], images: StagedImage[] = []): void {
+    // With images the prompt goes on stdin as a stream-json user message (image blocks
+    // + text), which `-p` cannot carry; claude exits once stdin closes.
+    const viaStdin = images.length > 0;
     const args = [
       "-p",
-      run.prompt,
+      ...(viaStdin ? ["--input-format", "stream-json"] : [run.prompt]),
       "--output-format",
       "stream-json",
       "--verbose",
@@ -145,8 +162,13 @@ export class RunStore {
           isolateEnv: this.config.isolateEnv,
           claudeConfigDir: this.config.claudeConfigDir || undefined,
         }),
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [viaStdin ? "pipe" : "ignore", "pipe", "pipe"],
       });
+      if (viaStdin) {
+        // A child that dies early closes stdin; the close handler reports the failure.
+        child.stdin!.on("error", () => {});
+        child.stdin!.end(imageMessageLine(run.prompt, images));
+      }
     } catch (err) {
       this.emit(run, {
         type: "error",
