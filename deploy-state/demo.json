@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "0c61db3c",
-  "branch": "feat/hackit-drive-google-account",
+  "deployedSha": "b0ceeea9",
+  "branch": "feat/chat-shared-sections",
   "actor": "ko-tarou",
-  "markers": ["fe7:oauth-return-app", "dub-demo:drive-google", "fe7:oauth-return-role"],
+  "markers": ["fe6-shared-sections-v1"],
   "live": true,
-  "verifiedAt": "2026-10-09T19:13:03Z",
-  "updatedAt": "2026-10-09T19:13:03Z",
-  "note": "Hackit Drive の Google アカウント切替(ロール管理 > Drive共有 詳細ダイアログ)"
+  "verifiedAt": "2026-10-19T06:52:04Z",
+  "updatedAt": "2026-10-19T06:52:04Z",
+  "note": "chat: サイドバーのセクションを全員共通 + chat:manage_sections(admin のみ既定ON)。?demo_account=usr_bob で管理権限なし表示"
 }

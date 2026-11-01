@@ -1,6 +1,7 @@
 // LP チケット購入: LP管理 API (/lp/tickets*) + 公開 LP Worker 向け内部 API (/lp/internal/tickets*).
 import { describe, it, expect } from "vitest";
-import { createStripeClient, signStripePayload } from "../src/stripe";
+import { issuePreviewToken, verifyPreviewToken } from "../src/preview-token";
+import { createStripeClient, signStripePayload, toCheckoutSession, usableStripeKey } from "../src/stripe";
 import type { LpTicketOrdersPage, LpTicketsState, LpTicketTypeSummary } from "../src/types";
 import { stripeFrom } from "../src/index";
 import { TicketService } from "../src/tickets";
@@ -9,6 +10,7 @@ import { get, makeApp, send, type RepoKind } from "./harness";
 const body = async <T>(res: Response): Promise<T> => (await res.json()) as T;
 const INTERNAL = { "x-dub-internal": "1" };
 const WHSEC = "whsec_test";
+const PREVIEW_KEY = "sk_test_preview_key";
 const NOW = "2026-10-07T03:00:00.000Z";
 const NOW_SEC = Math.floor(Date.parse(NOW) / 1000);
 
@@ -20,10 +22,21 @@ interface StripeCall {
   form: URLSearchParams | null;
 }
 
-type SessionOverride = { payment_status?: string; status?: string; amount_total?: number; currency?: string; livemode?: boolean };
+type SessionOverride = {
+  payment_status?: string;
+  status?: string;
+  amount_total?: number;
+  currency?: string;
+  livemode?: boolean;
+  /** PaymentMethod.type returned when payment_intent.payment_method is expanded. */
+  payment_method_type?: string;
+  /** Every GET answers 500. */
+  failGet?: boolean;
+};
 
 /** Remembers each created session's real total so GET answers like Stripe; `session` overrides fields, `failGet` ids 500. */
 function fakeStripe(session: SessionOverride = {}, opts: { key?: string; failGet?: Set<string> } = {}) {
+  const { payment_method_type, failGet, ...overrides } = session;
   const calls: StripeCall[] = [];
   const totals = new Map<string, { amount: number; ref: string | null }>();
   let n = 0;
@@ -54,8 +67,10 @@ function fakeStripe(session: SessionOverride = {}, opts: { key?: string; failGet
         livemode: false,
       });
     }
-    const id = url.split("/").pop()!;
-    if (opts.failGet?.has(id)) return new Response("boom", { status: 500 });
+    const u = new URL(url);
+    const id = u.pathname.split("/").pop()!;
+    if (failGet || opts.failGet?.has(id)) return new Response("boom", { status: 500 });
+    const expanded = u.searchParams.getAll("expand[]").includes("payment_intent.payment_method");
     return Response.json({
       id,
       status: "complete",
@@ -63,9 +78,11 @@ function fakeStripe(session: SessionOverride = {}, opts: { key?: string; failGet
       amount_total: totals.get(id)?.amount ?? 0,
       currency: "jpy",
       livemode: false,
-      payment_intent: `pi_${id}`,
+      payment_intent: expanded
+        ? { id: `pi_${id}`, payment_method: { id: "pm_1", type: payment_method_type ?? "card" } }
+        : `pi_${id}`,
       client_reference_id: totals.get(id)?.ref ?? null,
-      ...session,
+      ...overrides,
     });
   };
   return { calls, client: createStripeClient(opts.key ?? "sk_test_123", fetchFn) };
@@ -76,11 +93,20 @@ const cs = (o: Record<string, unknown>) => ({ livemode: false, currency: "jpy", 
 
 async function setup(
   kind: RepoKind,
-  opts: { stripe?: ReturnType<typeof fakeStripe> | null; cap?: number; publish?: boolean } = {},
+  opts: {
+    stripe?: ReturnType<typeof fakeStripe> | null;
+    cap?: number;
+    publish?: boolean;
+    paypay?: boolean;
+    previewKey?: string | null;
+    level?: "view" | "edit";
+  } = {},
 ) {
-  const h = await makeApp(kind, "edit", 5000, null, opts.publish === false ? [] : ["lp:publish"], {
+  const h = await makeApp(kind, opts.level ?? "edit", 5000, null, opts.publish === false ? [] : ["lp:publish"], {
     stripe: opts.stripe ? opts.stripe.client : null,
     stripeWebhookSecret: WHSEC,
+    paypayEnabled: opts.paypay === true,
+    ticketPreviewKey: opts.previewKey ?? null,
     ...(opts.cap !== undefined ? { dailyCheckoutCap: opts.cap } : {}),
   });
   return h;
@@ -138,6 +164,8 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       enabled: false,
       ctaEnabled: false,
       paymentReady: false,
+      previewCheckout: false,
+      paymentMethods: ["card"],
       publicUrl: "https://hokuriku-it-conf.com/tickets",
       fields: [],
       types: [],
@@ -360,8 +388,8 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       success_url: "https://hokuriku-it-conf.com/tickets/thanks?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://hokuriku-it-conf.com/tickets?canceled=1",
       locale: "ja",
-      "payment_method_types[0]": "card",
     });
+    expect(c.form!.has("payment_method_types[0]")).toBe(false);
     const orderId = c.form!.get("client_reference_id");
     expect(c.form!.get("metadata[order_id]")).toBe(orderId);
     expect(Number(c.form!.get("expires_at")) - NOW_SEC).toBeGreaterThanOrEqual(1800);
@@ -575,7 +603,10 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
     expect(await res.json()).toEqual({ status: "paid", summary: "一般 ×1" });
-    expect(stripe.calls[1]).toMatchObject({ method: "GET", url: "https://api.stripe.com/v1/checkout/sessions/cs_test_0" });
+    expect(stripe.calls[1]).toMatchObject({
+      method: "GET",
+      url: "https://api.stripe.com/v1/checkout/sessions/cs_test_0?expand%5B%5D=payment_intent.payment_method",
+    });
     // already paid: no second Stripe call
     await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
     expect(stripe.calls).toHaveLength(2);
@@ -731,6 +762,8 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       paymentIntentId: null,
       refundedAt: null,
       reviewReason: null,
+      paymentMethod: null,
+      preview: false,
     };
     expect((await repo.insertOrderIfAvailable(orphan, new Map(), "2026-10-07T00:00:00.000Z")).ok).toBe(true);
     clock.set("2026-10-07T03:38:00.000Z");
@@ -779,14 +812,223 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     });
     expect(await repo.getOrder("hokuriku-it-conf.com", a)).toMatchObject({ status: "needs_review", reviewReason: "dispute" });
   });
+
+  it("PayPay flag: advertised methods in LP管理 state and the public config", async () => {
+    const off = await setup(kind, { stripe: fakeStripe() });
+    expect((await body<LpTicketsState>(await off.app.fetch(get("/lp/tickets")))).paymentMethods).toEqual(["card"]);
+    const on = await setup(kind, { stripe: fakeStripe(), paypay: true });
+    expect((await body<LpTicketsState>(await on.app.fetch(get("/lp/tickets")))).paymentMethods).toEqual(["card", "paypay"]);
+    const pub = await body<{ paymentMethods: string[] }>(await on.app.fetch(get("/lp/internal/tickets", INTERNAL)));
+    expect(pub.paymentMethods).toEqual(["card", "paypay"]);
+  });
+
+  it("PayPay session params: one-time JPY payment, Dashboard-managed methods (no payment_method_types)", async () => {
+    const stripe = fakeStripe();
+    const { app } = await setup(kind, { stripe, paypay: true });
+    await enable(app);
+    const a = await addType(app, { name: "一般", priceJpy: 3000 });
+    const b = await addType(app, { name: "学生", priceJpy: 1000 });
+    await app.fetch(checkout({ items: [{ ticketTypeId: a.id, quantity: 2 }, { ticketTypeId: b.id, quantity: 1 }] }));
+    const f = stripe.calls[0]!.form!;
+    // PayPay via Stripe needs mode=payment and every line item in jpy; Stripe picks it per session.
+    expect(f.get("mode")).toBe("payment");
+    expect(f.getAll("line_items[0][price_data][currency]").concat(f.getAll("line_items[1][price_data][currency]"))).toEqual([
+      "jpy",
+      "jpy",
+    ]);
+    expect([...f.keys()].some((k) => k.startsWith("payment_method_types") || k.startsWith("subscription_data"))).toBe(false);
+  });
+
+  it("webhook completed via PayPay → paid with paymentMethod from the expanded session", async () => {
+    const stripe = fakeStripe({ payment_method_type: "paypay" });
+    const { app } = await setup(kind, { stripe, paypay: true });
+    await enable(app);
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    const orderId = stripe.calls[0]!.form!.get("client_reference_id");
+    const event = {
+      id: "evt_pp",
+      type: "checkout.session.completed",
+      data: { object: cs({ id: "cs_test_0", client_reference_id: orderId, payment_status: "paid", status: "complete", payment_intent: "pi_1", amount_total: 3000 }) },
+    };
+    expect((await webhook(app, event)).status).toBe(200);
+    expect(stripe.calls[1]!.url).toContain("expand%5B%5D=payment_intent.payment_method");
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items[0]).toMatchObject({ status: "paid", paymentMethod: "paypay" });
+  });
+
+  it("webhook async: unpaid completion stays pending (no method); async success records method; failure → expired", async () => {
+    const stripe = fakeStripe({ payment_method_type: "paypay" });
+    const { app } = await setup(kind, { stripe, paypay: true });
+    await enable(app);
+    const t = await addType(app, { name: "一般", priceJpy: 3000, capacity: 2 });
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    const [a, b] = [0, 1].map((i) => stripe.calls[i]!.form!.get("client_reference_id"));
+    const obj = (id: string, ref: string | null | undefined, ps: string) =>
+      cs({ id, client_reference_id: ref, payment_status: ps, status: "complete", amount_total: 3000 });
+    await webhook(app, { id: "e1", type: "checkout.session.completed", data: { object: obj("cs_test_0", a, "unpaid") } });
+    let orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.find((o) => o.id === a)).toMatchObject({ status: "pending", paidAt: null, paymentMethod: null });
+    expect(stripe.calls).toHaveLength(2); // unpaid: no extra Stripe call
+    await webhook(app, { id: "e2", type: "checkout.session.async_payment_succeeded", data: { object: obj("cs_test_0", a, "paid") } });
+    await webhook(app, { id: "e3", type: "checkout.session.async_payment_failed", data: { object: obj("cs_test_1", b, "unpaid") } });
+    orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.find((o) => o.id === a)).toMatchObject({ status: "paid", paymentMethod: "paypay" });
+    expect(orders.items.find((o) => o.id === b)).toMatchObject({ status: "expired", paidAt: null, paymentMethod: null });
+    const s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
+    expect(s.types[0]!.stats).toMatchObject({ sold: 1, pending: 0, remaining: 1 });
+  });
+
+  it("webhook paid but Stripe retrieve fails → still paid, method unknown", async () => {
+    const stripe = fakeStripe({ failGet: true });
+    const { app } = await setup(kind, { stripe });
+    await enable(app);
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    const orderId = stripe.calls[0]!.form!.get("client_reference_id");
+    const event = {
+      id: "evt_f",
+      type: "checkout.session.completed",
+      data: { object: cs({ id: "cs_test_0", client_reference_id: orderId, payment_status: "paid", status: "complete", amount_total: 3000 }) },
+    };
+    expect((await webhook(app, event)).status).toBe(200);
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items[0]).toMatchObject({ status: "paid", paymentMethod: null });
+  });
+
+  it("confirm (thanks page) records the card method; free orders have none", async () => {
+    const stripe = fakeStripe({ payment_status: "paid", payment_method_type: "card" });
+    const { app } = await setup(kind, { stripe });
+    await enable(app);
+    const paid = await addType(app, { name: "一般", priceJpy: 3000 });
+    const free = await addType(app, { name: "招待", priceJpy: 0 });
+    await app.fetch(checkout({ ticketTypeId: paid.id }));
+    await app.fetch(checkout({ ticketTypeId: free.id }));
+    await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.map((o) => [o.amountJpy, o.status, o.paymentMethod])).toEqual([
+      [0, "paid", null],
+      [3000, "paid", "card"],
+    ]);
+  });
+
+  it("preview token: issued only with a Stripe test key and lp edit; verified by the internal route", async () => {
+    const none = await setup(kind, { stripe: fakeStripe() });
+    const refused = await none.app.fetch(send("POST", "/lp/tickets/preview-token", {}));
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: { code: "LP_TICKET_PREVIEW_UNAVAILABLE" } });
+    expect((await body<LpTicketsState>(await none.app.fetch(get("/lp/tickets")))).previewCheckout).toBe(false);
+
+    const viewer = await setup(kind, { stripe: fakeStripe(), previewKey: PREVIEW_KEY, level: "view" });
+    expect((await viewer.app.fetch(send("POST", "/lp/tickets/preview-token", {}))).status).toBe(403);
+
+    const { app } = await setup(kind, { stripe: fakeStripe(), previewKey: PREVIEW_KEY });
+    expect((await body<LpTicketsState>(await app.fetch(get("/lp/tickets")))).previewCheckout).toBe(true);
+    const res = await app.fetch(send("POST", "/lp/tickets/preview-token", {}));
+    expect(res.status).toBe(200);
+    const { token, expiresAt } = await body<{ token: string; expiresAt: string }>(res);
+    expect(Date.parse(expiresAt) - Date.parse(NOW)).toBe(3600_000);
+    const check = (t: unknown) => app.fetch(send("POST", "/lp/internal/tickets/preview", { token: t }, INTERNAL));
+    expect(await (await check(token)).json()).toEqual({ valid: true });
+    expect(await (await check(`${token.slice(0, -1)}0`)).json()).toEqual({ valid: false });
+    expect(await (await check("nope")).json()).toEqual({ valid: false });
+    expect(await (await check(undefined)).json()).toEqual({ valid: false });
+    // internal route is s2s only
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/preview", { token }))).status).toBe(404);
+  });
+
+  it("preview checkout while sales are off: needs a valid token; order marked preview/test; token rides the return URLs", async () => {
+    const stripe = fakeStripe();
+    const { app } = await setup(kind, { stripe, previewKey: PREVIEW_KEY });
+    // sales stay OFF (no enable())
+    const paid = await addType(app, { name: "一般", priceJpy: 3000 });
+    const free = await addType(app, { name: "招待", priceJpy: 0 });
+    expect((await app.fetch(checkout({ ticketTypeId: paid.id }))).status).toBe(404);
+    expect((await app.fetch(checkout({ ticketTypeId: paid.id, previewToken: "123.abc" }))).status).toBe(404);
+    expect(stripe.calls).toHaveLength(0);
+
+    const { token } = await body<{ token: string }>(await app.fetch(send("POST", "/lp/tickets/preview-token", {})));
+    const res = await app.fetch(checkout({ ticketTypeId: paid.id, previewToken: token }));
+    expect(res.status).toBe(200);
+    const f = stripe.calls[0]!.form!;
+    const q = `&tickets_preview=${encodeURIComponent(token)}`;
+    expect(f.get("success_url")).toBe(`https://hokuriku-it-conf.com/tickets/thanks?session_id={CHECKOUT_SESSION_ID}${q}`);
+    expect(f.get("cancel_url")).toBe(`https://hokuriku-it-conf.com/tickets?canceled=1${q}`);
+
+    const freeRes = await body<{ redirectUrl: string }>(
+      await app.fetch(checkout({ ticketTypeId: free.id, previewToken: token })),
+    );
+    expect(freeRes.redirectUrl).toMatch(/^https:\/\/hokuriku-it-conf\.com\/tickets\/thanks\?order=tko_\w+&tickets_preview=/);
+
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.map((o) => [o.amountJpy, o.status, o.preview, o.test])).toEqual([
+      [0, "paid", true, true],
+      [3000, "pending", true, true],
+    ]);
+  });
+
+  it("a token stops working once the key is no longer a test key (live / unset)", async () => {
+    const issuer = await setup(kind, { stripe: fakeStripe(), previewKey: PREVIEW_KEY });
+    const { token } = await body<{ token: string }>(await issuer.app.fetch(send("POST", "/lp/tickets/preview-token", {})));
+    const stripe = fakeStripe();
+    const live = await setup(kind, { stripe, previewKey: null });
+    const t = await addType(live.app, { name: "一般", priceJpy: 3000 });
+    expect((await live.app.fetch(checkout({ ticketTypeId: t.id, previewToken: token }))).status).toBe(404);
+    const check = await live.app.fetch(send("POST", "/lp/internal/tickets/preview", { token }, INTERNAL));
+    expect(await check.json()).toEqual({ valid: false });
+    expect(stripe.calls).toHaveLength(0);
+  });
+
+  it("normal (non-preview) orders: test only when Stripe ran in test mode (cs_test_)", async () => {
+    const stripe = fakeStripe();
+    const { app } = await setup(kind, { stripe });
+    await enable(app);
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    const f = await addType(app, { name: "招待", priceJpy: 0 });
+    await app.fetch(checkout({ ticketTypeId: t.id }));
+    await app.fetch(checkout({ ticketTypeId: f.id }));
+    const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
+    expect(orders.items.map((o) => [o.amountJpy, o.preview, o.test])).toEqual([
+      [0, false, false],
+      [3000, false, true],
+    ]);
+  });
+});
+
+describe("preview token", () => {
+  it("rejects expired, over-long, tampered and other-key tokens", async () => {
+    const now = 1_800_000_000;
+    const { token, expiresAt } = await issuePreviewToken(PREVIEW_KEY, now);
+    expect(await verifyPreviewToken(PREVIEW_KEY, token, now)).toBe(true);
+    expect(await verifyPreviewToken(PREVIEW_KEY, token, expiresAt)).toBe(false);
+    expect(await verifyPreviewToken("sk_test_other", token, now)).toBe(false);
+    expect(await verifyPreviewToken(null, token, now)).toBe(false);
+    const sig = token.split(".")[1];
+    expect(await verifyPreviewToken(PREVIEW_KEY, `${expiresAt + 10}.${sig}`, now)).toBe(false);
+    const long = await issuePreviewToken(PREVIEW_KEY, now, 24 * 3600);
+    expect(await verifyPreviewToken(PREVIEW_KEY, long.token, now)).toBe(false);
+  });
+});
+
+describe("toCheckoutSession: used payment method", () => {
+  it("reads payment_intent.payment_method.type only when expanded", () => {
+    expect(toCheckoutSession({ id: "cs", payment_intent: { payment_method: { type: "paypay" } } }).paymentMethodType).toBe("paypay");
+    expect(toCheckoutSession({ id: "cs", payment_intent: "pi_1" }).paymentMethodType).toBeNull();
+    expect(toCheckoutSession({ id: "cs", payment_intent: { payment_method: "pm_1" } }).paymentMethodType).toBeNull();
+    expect(toCheckoutSession({ id: "cs", payment_intent: null }).paymentMethodType).toBeNull();
+  });
 });
 
 describe("stripeFrom", () => {
-  it("needs BOTH secrets; mode follows the key", () => {
+  it("needs BOTH secrets and a usable key; mode follows the key", () => {
     expect(stripeFrom({ STRIPE_SECRET_KEY: "sk_test_1" })).toBeNull();
     expect(stripeFrom({ STRIPE_WEBHOOK_SECRET: "whsec_1" })).toBeNull();
     expect(stripeFrom({ STRIPE_SECRET_KEY: "sk_test_1", STRIPE_WEBHOOK_SECRET: "whsec_1" })!.livemode).toBe(false);
-    expect(stripeFrom({ STRIPE_SECRET_KEY: "sk_live_1", STRIPE_WEBHOOK_SECRET: "whsec_1" })!.livemode).toBe(true);
+    expect(stripeFrom({ STRIPE_SECRET_KEY: "sk_live_1", STRIPE_WEBHOOK_SECRET: "whsec_1" })).toBeNull();
+    expect(
+      stripeFrom({ STRIPE_SECRET_KEY: "sk_live_1", STRIPE_WEBHOOK_SECRET: "whsec_1", STRIPE_ALLOW_LIVE: "1" })!.livemode,
+    ).toBe(true);
   });
 });
 
@@ -806,5 +1048,23 @@ describe("tickets gate", () => {
     const { app } = await makeApp("memory");
     expect((await app.fetch(send("POST", "/lp/internal/tickets/checkout", {}, {}))).status).toBe(404);
     expect((await app.fetch(send("POST", "/lp/internal/tickets/stripe-webhook", {}, {}))).status).toBe(404);
+  });
+});
+
+describe("usableStripeKey (no real charges unless STRIPE_ALLOW_LIVE=1)", () => {
+  it("accepts sandbox keys", () => {
+    expect(usableStripeKey("sk_test_abc", undefined)).toBe("sk_test_abc");
+    expect(usableStripeKey("rk_test_abc", undefined)).toBe("rk_test_abc");
+  });
+  it("refuses live keys without the flag", () => {
+    expect(usableStripeKey("sk_live_abc", undefined)).toBeNull();
+    expect(usableStripeKey("rk_live_abc", "0")).toBeNull();
+  });
+  it("accepts live keys only with STRIPE_ALLOW_LIVE=1", () => {
+    expect(usableStripeKey("sk_live_abc", "1")).toBe("sk_live_abc");
+  });
+  it("treats a missing key as not configured", () => {
+    expect(usableStripeKey(undefined, "1")).toBeNull();
+    expect(usableStripeKey("", undefined)).toBeNull();
   });
 });

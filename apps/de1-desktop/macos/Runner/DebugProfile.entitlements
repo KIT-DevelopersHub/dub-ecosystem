@@ -11,11 +11,12 @@
 	<!-- Required: the desktop client makes outbound HTTPS calls to the api-gateway. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
-	<!-- Required for NSApplication.registerForRemoteNotifications() (APNs / FCM-over-APNs
-	     token registration — see native_push.dart / fcm_push.dart). "development" matches
-	     a local `flutter run -d macos` build signed with an Apple Development identity;
-	     a distribution build needs "production" here instead. -->
-	<key>aps-environment</key>
+	<!-- Web file input (<input type=file>) opens NSOpenPanel; the sandbox needs this or the picker fails. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
+	<!-- APNs (FCM-over-APNs, see lib/push/fcm_push.dart). macOS uses the
+	     com.apple.developer.* key; the bare `aps-environment` key is iOS-only. -->
+	<key>com.apple.developer.aps-environment</key>
 	<string>development</string>
 </dict>
 </plist>

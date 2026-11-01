@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "privacy-policy",
+  "worker": "dub-demo-privacy-policy",
+  "url": "https://dub-demo-privacy-policy.developershub-site.workers.dev",
+  "deployedSha": "2c1bc574",
+  "branch": "fix/fe8-publish-privacy",
+  "actor": "ko-tarou",
+  "markers": ["dub-privacy-2026-10-19"],
+  "live": false,
+  "verifiedAt": "2026-10-19T03:31:48Z",
+  "updatedAt": "2026-10-19T03:31:48Z",
+  "note": "PR#685 privacy.html (/privacy)"
+}

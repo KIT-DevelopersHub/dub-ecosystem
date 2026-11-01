@@ -63,14 +63,21 @@ describe("parseInbound", () => {
   });
 
   it("never offers the archive address as an owner candidate (read_all 専用の控え)", () => {
+    // archive@ copy: no candidates at all (each real recipient gets its own envelope copy).
+    const archiveCopy = parseInbound(
+      rawMessage({ to: "archive@developershub.jp" }, { to: "client@outside.com", cc: "archive@developershub.jp" }),
+      POLICY,
+    );
+    expect(archiveCopy.ownerCandidates).toEqual([]);
+    // archive@ in the To:/Cc: header of a copy delivered elsewhere is filtered out.
     const parsed = parseInbound(
       rawMessage(
-        { to: "archive@developershub.jp" },
-        { to: "client@outside.com", cc: "archive@developershub.jp" },
+        { to: "makoto.yoshioka@developershub.jp" },
+        { to: "client@outside.com, archive@developershub.jp" },
       ),
       POLICY,
     );
-    expect(parsed.ownerCandidates.map((a) => a.email)).toEqual(["client@outside.com"]);
+    expect(parsed.ownerCandidates.map((a) => a.email)).toEqual(["makoto.yoshioka@developershub.jp", "client@outside.com"]);
   });
 
   it("demotes the shared system address below the To: header", () => {

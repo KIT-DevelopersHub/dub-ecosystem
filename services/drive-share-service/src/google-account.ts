@@ -34,6 +34,9 @@ const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 /** カレンダー > ミーティング (calendars + events with Meet links on the shared account). Accounts
  *  connected before this was requested lack it until reconnected (see meetings calendarReady). */
 export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
+/** Meet REST: make a meeting's Meet open to anyone with the link (Calendar cannot). Accounts
+ *  connected before this was requested lack it until reconnected (see meetings meetReady). */
+export const MEET_SCOPE = "https://www.googleapis.com/auth/meetings.space.settings";
 const STATE_TTL_MS = 10 * 60 * 1000;
 /** Google sends the admin back here; the SPA page that finishes the round-trip. */
 export const OAUTH_RETURN_PATH = "/driveshare";
@@ -178,15 +181,16 @@ export function createGoogleAccountService(deps: {
    *  invalid_grant => reconnect; other failures (network) are not the account's fault. */
   async function probe(
     credentials: GoogleCredentials,
-  ): Promise<{ accessToken: string | null; invalid: boolean; calendarMissing: boolean }> {
+  ): Promise<{ accessToken: string | null; invalid: boolean; calendarMissing: boolean; meetMissing: boolean }> {
     try {
       const token = createTokenProvider({ credentials, fetchImpl: doFetch, now });
       const accessToken = await token.getAccessToken();
       // Granted on the refresh just made (cached). Unknown (null) is given the benefit of the doubt.
       const scopes = await token.grantedScopes();
-      return { accessToken, invalid: false, calendarMissing: scopes !== null && !scopes.includes(CALENDAR_SCOPE) };
+      const missing = (scope: string) => scopes !== null && !scopes.includes(scope);
+      return { accessToken, invalid: false, calendarMissing: missing(CALENDAR_SCOPE), meetMissing: missing(MEET_SCOPE) };
     } catch (err) {
-      return { accessToken: null, invalid: isInvalidGrant(err), calendarMissing: false };
+      return { accessToken: null, invalid: isInvalidGrant(err), calendarMissing: false, meetMissing: false };
     }
   }
 
@@ -207,12 +211,13 @@ export function createGoogleAccountService(deps: {
         active: row.id === activeRow?.id,
         needsReconnect: probed ? probed.invalid : true,
         calendarMissing: probed?.calendarMissing ?? false,
+        meetMissing: probed?.meetMissing ?? false,
       };
     });
     const secret = secretCredentials(env);
     if (secret) {
       entries.unshift(
-        probe(secret).then(async ({ accessToken, invalid, calendarMissing }): Promise<GoogleAccountEntry> => ({
+        probe(secret).then(async ({ accessToken, invalid, calendarMissing, meetMissing }): Promise<GoogleAccountEntry> => ({
           id: SECRET_ACCOUNT_ID,
           kind: "secret",
           email: accessToken ? await accountEmail(accessToken) : null,
@@ -221,6 +226,7 @@ export function createGoogleAccountService(deps: {
           active: !activeRow,
           needsReconnect: invalid,
           calendarMissing,
+          meetMissing,
         })),
       );
     }
@@ -254,7 +260,7 @@ export function createGoogleAccountService(deps: {
         client_id: client.clientId,
         redirect_uri: redirectUri,
         response_type: "code",
-        scope: `${DRIVE_SCOPE} ${CALENDAR_SCOPE}`,
+        scope: `${DRIVE_SCOPE} ${CALENDAR_SCOPE} ${MEET_SCOPE}`,
         access_type: "offline",
         prompt: "consent",
         state,

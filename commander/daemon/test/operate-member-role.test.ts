@@ -1,6 +1,8 @@
 // メンバー管理 / ロール writes against a fake api-gateway that mimics member-service and
 // identity-roster: each write previews, executes and is read back (done), a write the
 // service drops is reported as unverified, and protected owner/bot ids are blocked.
+import { member } from "@dub/types";
+import { findEntry } from "../src/operate/catalog.ts";
 import { OperateExecutor } from "../src/operate/executor.ts";
 import { GatewayClient } from "../src/operate/gateway.ts";
 import { parsePlan } from "../src/operate/plan.ts";
@@ -175,6 +177,18 @@ describe("メンバー管理 / ロール writes", () => {
   it("never sends roleIds with an invite (granting goes through roles.assign)", () => {
     const p = parsePlan({ summary: "", steps: [{ id: "i", op: "users.invite", body: { email: "x@example.com", roleIds: ["role_x"] } }] });
     expect(p).toEqual({ ok: false, errors: ["手順1: 本文の「roleIds」は変更できません"] });
+  });
+
+  it("accepts every shared profile field (e.g. 学籍番号) on member writes, with its label", () => {
+    for (const op of ["members.people.create", "members.people.update"]) {
+      const entry = findEntry(op)!;
+      for (const key of member.PERSON_PROFILE_KEYS) {
+        expect(entry.body?.allowed, `${op} ${key}`).toContain(key);
+        expect(entry.fieldLabels?.[key], `${op} ${key}`).toBe(member.PERSON_PROFILE_LABEL[key]);
+      }
+    }
+    const p = parsePlan({ summary: "", steps: [{ id: "u", op: "members.people.update", params: { id: "mem_1" }, body: { studentNumber: "1400980", version: 4 } }] });
+    expect(p.ok).toBe(true);
   });
 
   it.each([

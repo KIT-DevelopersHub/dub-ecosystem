@@ -4,6 +4,9 @@
 //  - 何も保存しない。選んだ条件は URL（?version=<番号>&tickets=on|off&proposals=on|off）に載り、LP Worker が
 //    その閲覧者にだけ当てる。公開中の LP・販売状態・公開中の版は一切変わらない。
 //  - チケット「あり」は販売停止中でも販売中の見た目にするだけで、申し込みは LP Worker が 403 で拒否する。
+//    ただし Stripe がテストキーの時（previewCheckout）は、開く時にテスト購入トークン（app:lp:edit・1 時間）を
+//    発行して URL に載せ、この閲覧者だけテスト購入（実際の請求なし・LP管理で「テスト」表示）まで試せる。
+//    トークンを発行できない（view 権限・本番キー）時は従来どおり見た目だけで開く。
 //    登壇者募集「あり」も同じ（「登壇に応募する」ボタンと /proposals が出るが、応募は 403）。
 //  - 選べるのは LP Worker に同梱された版（公開フラグの versions）だけ。それ以外は別 URL の版なので
 //    チケットを差し込めず、選択肢には出すが選べない。
@@ -29,6 +32,7 @@ import {
 import { listLpVersions, type LpVersion } from "./lpVersions.ts";
 import { useLpPublish } from "./lpHooks.ts";
 import { useLpTickets } from "./lpTicketsHooks.ts";
+import { useLpApi } from "./LpProvider.tsx";
 import { useLpProposals } from "./lpProposalsHooks.ts";
 import { lpPreviewUrl, type LpPreviewMode } from "./lpPublish.ts";
 import { LpViewer } from "./LpViewer.tsx";
@@ -49,6 +53,8 @@ export function LpPreviewScreen(): JSX.Element {
   const versionsQuery = useQuery({ queryKey: ["lp", "versions"], queryFn: listLpVersions });
   const publishQuery = useLpPublish();
   const tickets = useLpTickets();
+  const lpApi = useLpApi();
+  const [opening, setOpening] = useState(false);
   const proposals = useLpProposals();
   const publish = publishQuery.data;
 
@@ -123,13 +129,25 @@ export function LpPreviewScreen(): JSX.Element {
   } else {
     const sales = tickets.data ? (tickets.data.enabled ? "公開中" : "停止中") : null;
     const call = proposals.data ? (proposals.data.enabled ? "募集中" : "停止中") : null;
-    const open = (): void => {
+    const testPurchase = mode === "on" && tickets.data?.enabled === false && tickets.data.previewCheckout === true;
+    const open = async (): Promise<void> => {
       if (!version) return;
-      const label = `${mode === "on" ? "チケット販売あり" : "チケット販売なし"}・${proposalsMode === "on" ? "登壇者募集あり" : "登壇者募集なし"}`;
+      let previewToken: string | undefined;
+      if (testPurchase) {
+        setOpening(true);
+        try {
+          previewToken = (await lpApi.createTicketPreviewToken()).token;
+        } catch {
+          // view 権限 / 本番キーに切り替わった等: 見た目だけのプレビューで開く。
+        } finally {
+          setOpening(false);
+        }
+      }
+      const label = `${mode === "on" ? (previewToken ? "チケット販売あり（テスト購入可）" : "チケット販売あり") : "チケット販売なし"}・${proposalsMode === "on" ? "登壇者募集あり" : "登壇者募集なし"}`;
       setViewing({
         ...version,
         name: `${version.name}（${label}・プレビュー）`,
-        url: lpPreviewUrl(version.id, { tickets: mode, proposals: proposalsMode }),
+        url: lpPreviewUrl(version.id, { tickets: mode, proposals: proposalsMode, previewToken }),
       });
       void navigate({ to: "/lp/preview", search: { open: 1 } });
     };
@@ -142,8 +160,8 @@ export function LpPreviewScreen(): JSX.Element {
             <Button
               variant="primary"
               iconRight={<Icon name="external-link" />}
-              disabled={!version}
-              onClick={open}
+              disabled={!version || opening}
+              onClick={() => void open()}
               testId="fe2-lp-preview-open"
             >
               プレビューを開く
@@ -184,6 +202,8 @@ export function LpPreviewScreen(): JSX.Element {
             <span className={styles.note}>
               {mode === "on" && tickets.data?.enabled
                 ? "販売を公開中のため、実際の購入ページがそのまま開きます（申し込むと本物の購入になります）。"
+                : testPurchase
+                ? "販売を停止していても、購入ページからテスト購入まで試せます（Stripe のテスト環境・実際の請求なし・1 時間有効）。テスト注文は「チケット」タブの購入者に「テスト」と表示されます。"
                 : mode === "on"
                 ? "販売を停止していても、購入ボタンとチケット購入ページが出た状態で開きます。プレビュー中はお申し込みできません。券種などの設定は「チケット」タブで行います。"
                 : "販売を公開していても、チケットの表示が無い状態で開きます。"}

@@ -331,7 +331,7 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
       // GET/POST /me/participation reads/persists the caller's own 参加届.
       case "GET /api/v1/me/participation":
       case "POST /api/v1/me/participation":
-        return json(member.emptyPersonProfile(), 200);
+        return json({ ...member.emptyPersonProfile(), contact: null, operations: null }, 200);
       // Passkeys: a real WebAuthn ceremony needs the real auth-service (rpId/origin are
       // checked server-side), so offline builds report "disabled" — the login screen then
       // falls back to the password form — and list an empty set in アカウント設定.

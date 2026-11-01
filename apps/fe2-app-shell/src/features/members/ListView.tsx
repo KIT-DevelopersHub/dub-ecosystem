@@ -9,6 +9,10 @@
 // DataTable の「表示列」ピッカー(columnHiding)で列を隠せる。既定は全列 on。
 // 人物プロフィール列(参加届と共通)も既定で全部出し、参加届の回答一覧と同じ項目が並ぶようにする。
 // 選択は localStorage にユーザー単位で保存される。
+//
+// 編集: 行クリックで編集ダイアログを開く（操作列は右端で横スクロールしないと見えないため）。
+// 行内のボタンは stopPropagation で行クリックと分ける。readOnly(閲覧のみ)では書き込み操作を無効化する。
+import type { MouseEvent, ReactNode } from "react";
 import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
@@ -36,15 +40,30 @@ function Truncate({ text, max = "16rem" }: { text: string; max?: string }): JSX.
   );
 }
 
+/** 行内ボタンのクリックを行クリック(編集)に伝播させない. */
+function StopRowClick({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <span
+      style={{ display: "inline-flex", gap: "var(--dub-space-1)", alignItems: "center" }}
+      onClick={(e: MouseEvent) => e.stopPropagation()}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function ListView({
   members,
   teamsById,
   accountLabels,
   leaderNames,
+  readOnly = false,
   onEdit,
   onDelete,
   onLink,
   onUnlink,
+  onSendAccountMail,
+  canSendAccountMail,
 }: {
   members: OrgMember[];
   teamsById: Map<string, MemberTeam>;
@@ -52,10 +71,16 @@ export function ListView({
   accountLabels: Map<string, string>;
   /** member id -> 氏名: リーダー列で leaderId を氏名表示する。省略時は列を出さない。 */
   leaderNames?: Map<string, string>;
+  /** 閲覧のみの権限 — 編集/削除/紐付けは押せず、行クリックでも編集を開かない. */
+  readOnly?: boolean;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
   onLink: (m: OrgMember) => void;
   onUnlink: (m: OrgMember) => void;
+  /** アカウント発行メールの手動送信 (canSendAccountMail が true の行だけ表示). */
+  onSendAccountMail?: (m: OrgMember) => void;
+  /** Gmail・ログイン・@developershub.jp の3つが揃った行か。 */
+  canSendAccountMail?: (m: OrgMember) => boolean;
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
@@ -95,12 +120,16 @@ export function ListView({
             <Tag tone="success">
               <Truncate text={accountLabels.get(m.identityUserId) ?? m.identityUserId} max="9rem" />
             </Tag>
-            <IconButton name="x" aria-label={`${m.name} のアカウント紐付けを解除`} onClick={() => onUnlink(m)} testId={`members-unlink-${m.id}`} />
+            <StopRowClick>
+              <IconButton name="x" aria-label={`${m.name} のアカウント紐付けを解除`} disabled={readOnly} onClick={() => onUnlink(m)} testId={`members-unlink-${m.id}`} />
+            </StopRowClick>
           </span>
         ) : (
-          <Button variant="ghost" size="sm" onClick={() => onLink(m)} testId={`members-link-${m.id}`}>
-            未設定・紐付け
-          </Button>
+          <StopRowClick>
+            <Button variant="ghost" size="sm" disabled={readOnly} onClick={() => onLink(m)} testId={`members-link-${m.id}`}>
+              未設定・紐付け
+            </Button>
+          </StopRowClick>
         ),
     },
     {
@@ -125,20 +154,30 @@ export function ListView({
       key: "actions",
       header: "操作",
       align: "right",
-      minWidth: "6rem",
+      minWidth: "8rem",
       noWrap: true,
       hideable: false,
       cell: (m) => (
-        <span style={{ display: "inline-flex", gap: "var(--dub-space-1)", justifyContent: "flex-end" }}>
-          <IconButton name="edit" aria-label={`${m.name} を編集`} onClick={() => onEdit(m)} testId={`members-edit-${m.id}`} />
+        <StopRowClick>
+          {onSendAccountMail && canSendAccountMail?.(m) ? (
+            <IconButton
+              name="send"
+              aria-label={`${m.name} にアカウント発行メールを送る`}
+              disabled={readOnly}
+              onClick={() => onSendAccountMail(m)}
+              testId={`members-account-mail-${m.id}`}
+            />
+          ) : null}
+          <IconButton name="edit" aria-label={`${m.name} を編集`} disabled={readOnly} onClick={() => onEdit(m)} testId={`members-edit-${m.id}`} />
           <IconButton
             name="trash"
             aria-label={`${m.name} を削除`}
             variant="danger"
+            disabled={readOnly}
             onClick={() => onDelete(m)}
             testId={`members-delete-${m.id}`}
           />
-        </span>
+        </StopRowClick>
       ),
     },
   ];
@@ -148,6 +187,7 @@ export function ListView({
       columns={columns}
       rows={members}
       rowKey={(m) => m.id}
+      onRowClick={readOnly ? undefined : onEdit}
       testId="members-table"
       columnHiding={{ storageKey: "dub.members.roster.columns.v2" }}
       emptyState={<EmptyState title="メンバーがいません" description="「メンバーを追加」から登録してください" icon="users" />}

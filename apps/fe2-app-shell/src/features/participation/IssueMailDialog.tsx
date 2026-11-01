@@ -29,11 +29,14 @@ export function IssueMailDialog({
   member,
   defaultLocalPart,
   onClose,
+  onIssued,
 }: {
   participation: Participation;
   member: RosterMember;
   defaultLocalPart: string;
   onClose: () => void;
+  /** 3段すべて済んだ後 (このダイアログを閉じる代わりに呼ぶ)。アカウント発行メールへ続ける。 */
+  onIssued?: (progress: MailIssueProgress) => void;
 }): JSX.Element {
   const [localPart, setLocalPart] = useState(defaultLocalPart);
   const [roleIds, setRoleIds] = useState<string[] | null>(null);
@@ -62,7 +65,7 @@ export function IssueMailDialog({
         progress,
       },
       {
-        onSuccess: () => onClose(),
+        onSuccess: (res) => (onIssued ? onIssued(res) : onClose()),
         onError: (err) => {
           setProgress(err.progress);
           setFailed({ step: err.step, message: err.message });

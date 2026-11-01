@@ -9,10 +9,15 @@
 // Design: sensitive values stay collapsed by default (控えめ), every reveal is
 // confirm-gated, and revealed plaintext is visually flagged so it is never mistaken
 // for ambient UI. The plaintext is held only in local state and dropped on unmount.
+//
+// アカウント発行メール: a send button (disabled + 足りない情報 when the linked member's Gmail /
+// @developershub.jp login are not both there) and the same 送信確認 right after a password
+// is issued or set — so bulk 発行・紐付け work can still mail each person from here.
 import { useState } from "react";
 import type { identity } from "@dub/types";
-import { Button, TextField, ConfirmDialog, FormField, Divider } from "@dub/ui";
-import { useSetUserPassword, useViewUserPassword } from "../hooks/useRosterApi";
+import { Button, TextField, ConfirmDialog, FormField, Divider, SkeletonLoader } from "@dub/ui";
+import { useSetUserPassword, useViewUserPassword, useMembersOverview } from "../hooks/useRosterApi";
+import { AccountMailPrompt, accountMailMissing, accountMailTargetOf, type AccountMailTarget } from "./AccountMailPrompt";
 import { useToast } from "../hooks/useToast";
 import { errorMessage } from "../lib/errorDisplay";
 
@@ -41,6 +46,15 @@ const secretValueStyle: React.CSSProperties = {
   wordBreak: "break-all",
 };
 const warnLabelStyle: React.CSSProperties = { color: "var(--dub-color-fg-warning, #9a6700)", fontSize: 12, fontWeight: 600 };
+const missingListStyle: React.CSSProperties = {
+  color: "var(--dub-color-fg-danger, #cf222e)",
+  fontSize: 13,
+  margin: 0,
+  paddingLeft: 20,
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
 
 async function copy(text: string): Promise<boolean> {
   try {
@@ -60,6 +74,18 @@ export function UserPasswordSection({ user }: { user: identity.IdentityUser }) {
   const [issued, setIssued] = useState<string | null>(null); // one-time generated password
   const [revealed, setRevealed] = useState<string | null>(null); // viewed current password
   const [viewConfirm, setViewConfirm] = useState(false);
+  const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
+
+  const overview = useMembersOverview();
+  const linkedMember = overview.data?.members.find((m) => m.identityUserId === user.id) ?? null;
+  const mailMissing = overview.isError
+    ? ["運営メンバー情報を読み込めませんでした"]
+    : accountMailMissing(linkedMember, user);
+
+  /** After a password is issued/set, offer the mail when everything is linked. */
+  function promptMail() {
+    if (overview.data) setMailTarget(accountMailTargetOf(linkedMember, user));
+  }
 
   async function onCopy(value: string) {
     const ok = await copy(value);
@@ -74,6 +100,7 @@ export function UserPasswordSection({ user }: { user: identity.IdentityUser }) {
         onSuccess: (res) => {
           setIssued(res.password ?? null);
           toast({ kind: "success", title: "初期パスワードを発行しました" });
+          promptMail();
         },
         onError: (err) => toast({ kind: "error", title: "発行に失敗しました", description: errorMessage(err) }),
       },
@@ -94,6 +121,7 @@ export function UserPasswordSection({ user }: { user: identity.IdentityUser }) {
           setIssued(null);
           setSpecify("");
           toast({ kind: "success", title: "パスワードを設定しました" });
+          promptMail();
         },
         onError: (err) => toast({ kind: "error", title: "設定に失敗しました", description: errorMessage(err) }),
       },
@@ -190,6 +218,41 @@ export function UserPasswordSection({ user }: { user: identity.IdentityUser }) {
         )}
       </div>
 
+      {/* アカウント発行メール */}
+      <Divider />
+      <span style={titleStyle}>アカウント発行メール</span>
+      <p style={helpStyle}>
+        運営メンバーの Gmail に、アプリ URL・ログインメール・パスワードを 1 通で送ります（ログインメールに CC）。
+        パスワードが未設定なら新しく発行して送ります。
+      </p>
+      {overview.isPending ? (
+        <SkeletonLoader testId="fe7-user-account-mail-loading" />
+      ) : (
+        <>
+          <div style={actionsStyle}>
+            <Button
+              variant="secondary"
+              onClick={() => setMailTarget(accountMailTargetOf(linkedMember, user))}
+              disabled={mailMissing.length > 0}
+              testId="fe7-user-account-mail-open"
+            >
+              アカウント発行メールを送る
+            </Button>
+          </div>
+          {mailMissing.length > 0 ? (
+            <div data-testid="fe7-user-account-mail-missing">
+              <p style={helpStyle}>送るには次の情報が足りません:</p>
+              <ul style={missingListStyle}>
+                {mailMissing.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </>
+      )}
+
+      <AccountMailPrompt target={mailTarget} onClose={() => setMailTarget(null)} />
       <ConfirmDialog
         open={viewConfirm}
         title="パスワードを表示"

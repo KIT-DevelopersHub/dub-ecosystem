@@ -68,7 +68,9 @@ const DAEMON_ROUTES: { method: string; re: RegExp }[] = [
   { method: "GET", re: /^\/runs\/[A-Za-z0-9_-]+$/ },
   { method: "DELETE", re: /^\/runs\/[A-Za-z0-9_-]+$/ },
   { method: "POST", re: /^\/runs$/ },
+  { method: "POST", re: /^\/uploads$/ },
 ];
+const UPLOAD_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 const EVENTS_RE = /^\/runs\/[A-Za-z0-9_-]+\/events$/;
 
 /**
@@ -125,7 +127,23 @@ export function sanitizeRunBody(raw: string | undefined, cwdRoots: string[]): st
     }
     out.args = b.args;
   }
+  if (b.images !== undefined) {
+    if (!Array.isArray(b.images) || !b.images.every((x) => typeof x === "string" && UPLOAD_ID_RE.test(x))) return null;
+    out.images = b.images;
+  }
   return JSON.stringify(out);
+}
+
+/** Rebuild a relayed POST /uploads body (one image); the daemon validates type/size. */
+export function sanitizeUploadBody(raw: string | undefined): string | null {
+  let b: Record<string, unknown>;
+  try {
+    b = JSON.parse(raw ?? "") as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (!b || typeof b.mediaType !== "string" || typeof b.data !== "string") return null;
+  return JSON.stringify({ mediaType: b.mediaType, data: b.data });
 }
 
 /** Split a response body into relay frames under the per-message cap. */
@@ -302,9 +320,11 @@ export class RelayAgent {
         return;
       }
       if (method === "POST") {
-        const clean = sanitizeRunBody(body, this.config.cwdRoots);
+        const isUpload = f.path.split("?")[0] === "/uploads";
+        const clean = isUpload ? sanitizeUploadBody(body) : sanitizeRunBody(body, this.config.cwdRoots);
         if (clean === null) {
-          for (const frame of chunkResponse(id, 403, JSON.stringify({ error: "run_options_not_allowed" }))) this.send(frame);
+          const error = isUpload ? "invalid_upload" : "run_options_not_allowed";
+          for (const frame of chunkResponse(id, 403, JSON.stringify({ error }))) this.send(frame);
           return;
         }
         body = clean;

@@ -5,16 +5,18 @@
 //   • 基本情報      — login email (read-only) + password change (nested dialog)
 //   • ブラウザ通知  — per-device opt-in for OS notifications on chat @mentions (applies
 //                     immediately; not part of 保存する since it needs a permission prompt)
-//   • 参加情報      — the fields the user entered in the 参加届 (participation form),
+//   • 本人の情報    — the fields the user entered in the 参加届 (participation form),
 //                     rendered by the shared PersonProfileFields (運営名簿・参加届と共通の
 //                     PersonProfile) so the set never drifts from the roster / submit contract.
+//   • 運営での情報  — the rest of the roster Member: 連絡先 is editable, 役割/ステータス/
+//                     チーム/リーダー are shown read-only (管理者が名簿で設定する項目).
 //
 // Save is OPTIMISTIC ([[optimistic-ui-principle]]): the /me and 参加届 caches are patched
 // immediately (header avatar + name update at once) and a success toast shows; on failure
 // both caches roll back to their pre-save snapshots and an error toast explains.
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Modal, Button, TextField, FormField, Avatar, Skeleton, Switch, useToast } from "@dub/ui";
+import { Modal, Button, TextField, FormField, Avatar, Badge, Skeleton, Switch, useToast } from "@dub/ui";
 import {
   getBrowserNotifyEnabled,
   getBrowserNotifyPermission,
@@ -23,17 +25,19 @@ import {
   showBrowserNotice,
   type BrowserNotifyPermission,
 } from "@dub/fe5-notification-inbox";
-import type { gateway } from "@dub/types";
+import type { gateway, member } from "@dub/types";
 import { ApiError, toDisplayableError, type ApiClient, type SelfParticipation } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
 import {
   PersonProfileFields,
   emptyProfileDraft,
   parseProfileDraft,
+  splitDisplayName,
   toProfileDraft,
   type PersonProfileDraft,
   type PersonProfileErrors,
 } from "../lib/personProfile.tsx";
+import { statusLabel } from "../features/members/memberStatus.ts";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
 import { PasskeysDialog } from "./PasskeysDialog.tsx";
 
@@ -69,6 +73,13 @@ function draftEquals(a: PersonProfileDraft, b: PersonProfileDraft): boolean {
   return (Object.keys(a) as (keyof PersonProfileDraft)[]).every((k) => a[k].trim() === b[k].trim());
 }
 
+/** 名簿と同じ初期値: 姓/名 が無い旧データは名簿の氏名を分けて埋める (MemberFormDialog と同じ)。 */
+function selfDraftOf(p: SelfParticipation): PersonProfileDraft {
+  const d = toProfileDraft(p);
+  if (!p.lastName && !p.firstName && p.operations?.name) Object.assign(d, splitDisplayName(p.operations.name));
+  return d;
+}
+
 export function AccountSettingsDialog({
   api,
   open,
@@ -88,6 +99,7 @@ export function AccountSettingsDialog({
   const [name, setName] = useState(currentName);
   const [avatar, setAvatar] = useState<string | null>(currentAvatar);
   const [part, setPart] = useState<PersonProfileDraft>(emptyProfileDraft);
+  const [contact, setContact] = useState("");
   const [partErrors, setPartErrors] = useState<PersonProfileErrors>({});
   const [submitting, setSubmitting] = useState(false);
   // P12 delight UX: the save button flashes a checkmark in place before the dialog
@@ -130,7 +142,8 @@ export function AccountSettingsDialog({
   // by a background refetch).
   useEffect(() => {
     if (open && !partSeeded.current && loadedPart) {
-      setPart(toProfileDraft(loadedPart));
+      setPart(selfDraftOf(loadedPart));
+      setContact(loadedPart.contact ?? "");
       setPartErrors({});
       partSeeded.current = true;
     }
@@ -140,7 +153,10 @@ export function AccountSettingsDialog({
   const tooLong = trimmed.length > MAX_NAME_LENGTH;
   const nameEmpty = trimmed.length === 0;
   const profileDirty = trimmed !== currentName || avatar !== currentAvatar;
-  const participationDirty = loadedPart != null && partSeeded.current && !draftEquals(part, toProfileDraft(loadedPart));
+  const participationDirty =
+    loadedPart != null &&
+    partSeeded.current &&
+    (!draftEquals(part, selfDraftOf(loadedPart)) || contact.trim() !== (loadedPart.contact ?? ""));
   const dirty = profileDirty || participationDirty;
   const canSubmit = dirty && !nameEmpty && !tooLong && !submitting && !saveSuccess;
 
@@ -172,9 +188,22 @@ export function AccountSettingsDialog({
 
   async function save() {
     if (!canSubmit) return;
-    const { profile: nextPart, errors: partErrs } = parseProfileDraft(part);
+    // 変えた項目だけ送る (開いている間に管理者が名簿で直した値を古い値で上書きしない・
+    // 旧データの姓/名を埋めただけで書き込まない)。検証も変えた項目だけ。
+    const base = loadedPart ? selfDraftOf(loadedPart) : emptyProfileDraft();
+    const changed = (k: keyof PersonProfileDraft) => part[k].trim() !== base[k].trim();
+    const { profile: nextProfile, errors: allErrs } = parseProfileDraft(part);
+    const partErrs = Object.fromEntries(
+      Object.entries(allErrs).filter(([k]) => changed(k as keyof PersonProfileDraft)),
+    ) as PersonProfileErrors;
     setPartErrors(partErrs);
     if (participationDirty && Object.keys(partErrs).length > 0) return;
+    const partPatch: member.SelfParticipationUpdateRequest = Object.fromEntries(
+      Object.entries(nextProfile).filter(([k]) => changed(k as keyof PersonProfileDraft)),
+    );
+    const nextContact = contact.trim() || null;
+    if (nextContact !== (loadedPart?.contact ?? null)) partPatch.contact = nextContact;
+    const nextPart: SelfParticipation | undefined = loadedPart ? { ...loadedPart, ...partPatch } : undefined;
     setSubmitting(true);
     setError(null);
     const prevMe = qc.getQueryData<MeResponse>(queryKeys.me);
@@ -185,7 +214,7 @@ export function AccountSettingsDialog({
         old ? { ...old, user: { ...old.user, displayName: trimmed, avatarUrl: avatar } } : old,
       );
     }
-    if (participationDirty) qc.setQueryData<SelfParticipation>(PARTICIPATION_KEY, nextPart);
+    if (participationDirty && nextPart) qc.setQueryData<SelfParticipation>(PARTICIPATION_KEY, nextPart);
     try {
       const ops: Promise<unknown>[] = [];
       if (profileDirty) {
@@ -198,7 +227,7 @@ export function AccountSettingsDialog({
         );
       }
       if (participationDirty) {
-        ops.push(api.auth.updateSelfParticipation(nextPart).then((res) => qc.setQueryData(PARTICIPATION_KEY, res)));
+        ops.push(api.auth.updateSelfParticipation(partPatch).then((res) => qc.setQueryData(PARTICIPATION_KEY, res)));
       }
       await Promise.all(ops);
       toast.show({ kind: "success", title: "アカウント設定を保存しました" });
@@ -319,10 +348,10 @@ export function AccountSettingsDialog({
 
           <BrowserNotifySetting open={open} />
 
-          {/* ── 参加情報（参加届） ── */}
+          {/* ── 本人の情報（参加届と同じ項目） ── */}
           <div className="fe2-account-section" data-testid="fe2-account-participation">
-            <div className="fe2-account-section-title">参加情報（参加届）</div>
-            <div className="fe2-account-section-help">イベント参加登録フォームで入力した項目を編集できます。</div>
+            <div className="fe2-account-section-title">本人の情報（参加届と同じ項目）</div>
+            <div className="fe2-account-section-help">運営名簿に載っている自分の情報です。直すと名簿にも反映されます。</div>
             {partQuery.isPending ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-3)" }}>
                 <Skeleton width="100%" height={40} />
@@ -341,6 +370,49 @@ export function AccountSettingsDialog({
                 idPrefix="fe2-part"
                 idFor={(k) => `fe2-part-${k}`}
               />
+            )}
+          </div>
+
+          {/* ── 運営での情報（名簿の運営項目） ── */}
+          <div className="fe2-account-section" data-testid="fe2-account-operations">
+            <div className="fe2-account-section-title">運営での情報</div>
+            <div className="fe2-account-section-help">担当・ステータス・チーム・リーダーは管理者が名簿で設定します（ここでは確認のみ）。</div>
+            {partQuery.isPending ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-3)" }}>
+                <Skeleton width="60%" height={20} />
+                <Skeleton width="60%" height={20} />
+                <Skeleton width="100%" height={40} />
+              </div>
+            ) : partQuery.isError ? null : (
+              <>
+                {loadedPart?.operations ? (
+                  <dl className="fe2-account-ops" data-testid="fe2-account-ops">
+                    <dt>担当・役割</dt>
+                    <dd data-testid="fe2-account-ops-role">{loadedPart.operations.roleTitle ?? "未設定"}</dd>
+                    <dt>ステータス</dt>
+                    <dd data-testid="fe2-account-ops-status">{statusLabel(loadedPart.operations.status) || "通常メンバー"}</dd>
+                    <dt>所属チーム</dt>
+                    <dd data-testid="fe2-account-ops-teams">
+                      {loadedPart.operations.teams.length === 0
+                        ? "未所属"
+                        : loadedPart.operations.teams.map((t) => (
+                            <Badge key={t.id} tone="neutral">
+                              {t.name}
+                            </Badge>
+                          ))}
+                    </dd>
+                    <dt>リーダー（上長）</dt>
+                    <dd data-testid="fe2-account-ops-leader">{loadedPart.operations.leaderName ?? "なし"}</dd>
+                  </dl>
+                ) : (
+                  <p className="fe2-account-password-help" data-testid="fe2-account-ops-unlinked">
+                    まだ運営名簿に登録されていません。保存すると名簿に追加されます。
+                  </p>
+                )}
+                <FormField label="連絡先" htmlFor="fe2-account-contact" help="メール / Slack など（運営用）">
+                  <TextField id="fe2-account-contact" value={contact} onChange={setContact} testId="fe2-account-contact" />
+                </FormField>
+              </>
             )}
           </div>
 

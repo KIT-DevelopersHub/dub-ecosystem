@@ -11,6 +11,7 @@
 // Builds run sequentially (low-power PC). Any failed build aborts the whole bundle.
 //
 // Usage: node scripts/build-bundle.mjs [--no-cache]
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,6 +25,20 @@ const APP_REL = "apps/lp-conference-next";
 const noCache = process.argv.includes("--no-cache");
 
 const manifest = JSON.parse(readFileSync(join(APP, "versions.json"), "utf8"));
+// Copy fixes re-applied to every archived version (e.g. wording that must change on
+// all versions at once). Part of the cache key so editing it forces a rebuild.
+const fixesRaw = readFileSync(join(APP, "content-fixes.json"), "utf8");
+const fixes = JSON.parse(fixesRaw).fixes;
+const fixesHash = createHash("sha256").update(fixesRaw).digest("hex").slice(0, 8);
+
+function applyFixes(src, id) {
+  for (const f of fixes) {
+    const p = join(src, f.file);
+    const text = readFileSync(p, "utf8");
+    if (!text.includes(f.from)) throw new Error(`${id}: content fix not applicable in ${f.file}: ${f.from}`);
+    writeFileSync(p, text.split(f.from).join(f.to));
+  }
+}
 const repo = run("git", ["rev-parse", "--show-toplevel"], { cwd: APP, capture: true }).trim();
 
 function run(cmd, args, { cwd, env, capture } = {}) {
@@ -59,7 +74,7 @@ function depsAvailable(pkg) {
 
 function buildArchived(id, ref) {
   const sha = run("git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd: repo, capture: true }).trim();
-  const cached = join(CACHE, `${id}-${sha}`);
+  const cached = join(CACHE, `${id}-${sha}-${fixesHash}`);
   if (!noCache && existsSync(join(cached, ".complete"))) {
     console.log(`[bundle] ${id}: cache hit (${sha.slice(0, 12)})`);
     return cached;
@@ -69,6 +84,7 @@ function buildArchived(id, ref) {
     const tar = execFileSync("git", ["archive", sha, APP_REL], { cwd: repo, maxBuffer: 1 << 30 });
     execFileSync("tar", ["-x", "-C", tmp], { input: tar });
     const src = join(tmp, APP_REL);
+    applyFixes(src, id);
     const pkg = JSON.parse(readFileSync(join(src, "package.json"), "utf8"));
     if (depsAvailable(pkg)) {
       symlinkSync(join(APP, "node_modules"), join(src, "node_modules"), "dir");

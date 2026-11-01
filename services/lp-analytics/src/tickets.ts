@@ -4,6 +4,7 @@ import { DubError, errors, type FieldError } from "@dub/errors";
 import { consoleSink, type LogLevel } from "@dub/observability";
 import { lp } from "@dub/types";
 import { dayJst } from "./domain";
+import { issuePreviewToken, verifyPreviewToken } from "./preview-token";
 import { stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
 import type {
   AppDeps,
@@ -14,6 +15,7 @@ import type {
   LpTicketOrderItem,
   LpTicketOrderStatus,
   LpTicketOrdersPage,
+  LpTicketPaymentMethod,
   LpTicketsState,
   LpTicketType,
   LpTicketTypeInput,
@@ -88,6 +90,14 @@ export interface ReconcileSummary {
 
 function log(level: LogLevel, message: string, fields: Record<string, unknown>): void {
   consoleSink({ level, message, service: "lp-analytics", fields });
+}
+
+/**
+ * What the LP / LP管理 advertise. Stripe decides per session (dynamic payment methods): PayPay is
+ * JPY one-time only, 50..1,000,000 JPY per payment, and is hidden by Stripe outside that.
+ */
+export function advertisedPaymentMethods(paypayEnabled: boolean): LpTicketPaymentMethod[] {
+  return paypayEnabled ? ["card", "paypay"] : ["card"];
 }
 
 const DEFAULT_ORDERS_PAGE = 50;
@@ -277,14 +287,12 @@ const sortTypes = (a: TicketTypeRow, b: TicketTypeRow): number =>
   a.sortOrder - b.sortOrder || (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
 
 const toType = ({ site: _s, ...t }: TicketTypeRow): LpTicketType => t;
-const toOrder = ({
-  site: _s,
-  stripeSessionId: _ss,
-  paymentIntentId: _pi,
-  refundedAt: _ra,
-  reviewReason: _rr,
-  ...o
-}: TicketOrderRow): LpTicketOrder => o;
+/** Preview orders, or paid through Stripe test mode (cs_test_): no real charge. */
+const isTestOrder = (o: TicketOrderRow): boolean => o.preview || (o.stripeSessionId?.startsWith("cs_test_") ?? false);
+const toOrder = (row: TicketOrderRow): LpTicketOrder => {
+  const { site: _s, stripeSessionId: _ss, paymentIntentId: _pi, refundedAt: _ra, reviewReason: _rr, ...o } = row;
+  return { ...o, test: isTestOrder(row) };
+};
 
 /** 409: not enough seats left for one of the items (contract: sold_out). */
 export const soldOut = (ticketTypeId: string): DubError =>
@@ -297,6 +305,14 @@ export const soldOut = (ticketTypeId: string): DubError =>
 export function orderSummary(items: readonly LpTicketOrderItem[]): string {
   return items.map((i) => `${i.dayLabel ? `${i.ticketTypeName} ${i.dayLabel}` : i.ticketTypeName} ×${i.quantity}`).join("、");
 }
+/** 409: no Stripe test key (unset or live), so the preview cannot buy (contract: preview_checkout_unavailable). */
+export const previewCheckoutUnavailable = (): DubError =>
+  new DubError("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", {
+    status: 409,
+    retryable: false,
+    details: { reason: "preview_checkout_unavailable" },
+  });
+
 /** 503: STRIPE_SECRET_KEY not configured (contract: payment_not_configured). */
 export const paymentNotConfigured = (): DubError =>
   new DubError("LP_PAYMENT_NOT_CONFIGURED", "決済は準備中です", {
@@ -354,6 +370,8 @@ export class TicketService {
       enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
+      previewCheckout: this.deps.ticketPreviewKey !== null,
+      paymentMethods: advertisedPaymentMethods(this.deps.paypayEnabled),
       publicUrl: `${this.deps.lpBaseUrl.replace(/\/+$/, "")}/tickets`,
       fields: settings?.fields ?? [],
       types,
@@ -421,12 +439,34 @@ export class TicketService {
     };
   }
 
+  private nowSec(): number {
+    return Math.floor(Date.parse(this.deps.now()) / 1000);
+  }
+
+  /** LP管理「プレビュー」(販売あり) のテスト購入トークン。Stripe テストキーの時だけ。 */
+  async issuePreview(): Promise<{ token: string; expiresAt: string }> {
+    const key = this.deps.ticketPreviewKey;
+    if (!key) throw previewCheckoutUnavailable();
+    const t = await issuePreviewToken(key, this.nowSec());
+    return { token: t.token, expiresAt: new Date(t.expiresAt * 1000).toISOString() };
+  }
+
+  private previewValid(token: unknown): Promise<boolean> {
+    return verifyPreviewToken(this.deps.ticketPreviewKey, token, this.nowSec());
+  }
+
+  /** LP Worker: may this viewer open /tickets as a test purchase? */
+  async checkPreview(body: unknown): Promise<{ valid: boolean }> {
+    return { valid: await this.previewValid((body as { token?: unknown } | null)?.token) };
+  }
+
   // ---- internal (public LP Worker) ----
 
   async getPublic(): Promise<{
     enabled: boolean;
     ctaEnabled: boolean;
     paymentReady: boolean;
+    paymentMethods: LpTicketPaymentMethod[];
     fields: LpTicketField[];
     types: PublicTicketType[];
   }> {
@@ -435,6 +475,7 @@ export class TicketService {
       enabled: settings?.enabled ?? false,
       ctaEnabled: settings?.ctaEnabled ?? false,
       paymentReady: this.deps.stripe !== null,
+      paymentMethods: advertisedPaymentMethods(this.deps.paypayEnabled),
       fields: settings?.fields ?? [],
       types: types
         .filter((t) => t.active)
@@ -453,8 +494,11 @@ export class TicketService {
 
   async checkout(body: unknown): Promise<{ redirectUrl: string }> {
     const settings = await this.repo.getTicketSettings(TICKET_SITE);
-    if (!settings?.enabled) throw errors.notFound("lp_tickets");
-    const input = parseCheckout(body, settings.fields);
+    const previewToken = (body as { previewToken?: unknown } | null)?.previewToken;
+    // Sales off: only a valid LP管理 preview token (Stripe test key only) may buy, as a test order.
+    const preview = !settings?.enabled && previewToken !== undefined && (await this.previewValid(previewToken));
+    if (!settings?.enabled && !preview) throw errors.notFound("lp_tickets");
+    const input = parseCheckout(body, settings?.fields ?? []);
     const types = new Map((await this.repo.listTicketTypes(TICKET_SITE)).map((t) => [t.id, t]));
     const bad: FieldError[] = [];
     const items: LpTicketOrderItem[] = [];
@@ -498,11 +542,22 @@ export class TicketService {
       paymentIntentId: null,
       refundedAt: null,
       reviewReason: null,
+      paymentMethod: null,
+      preview,
     };
     const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
     const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
     if (!held.ok) throw soldOut(held.ticketTypeId);
-    if (free || !stripe) return { redirectUrl: `${input.origin}/tickets/thanks?order=${encodeURIComponent(row.id)}` };
+    if (preview) {
+      try {
+        await this.repo.markOrderPreview(row.id);
+      } catch {
+        // Display-only (0006 migration not applied yet): paid test orders still show as test via cs_test_.
+      }
+    }
+    // Preview: the thanks / cancel pages need the token too (sales are off for everyone else).
+    const pv = preview ? `&tickets_preview=${encodeURIComponent(previewToken as string)}` : "";
+    if (free || !stripe) return { redirectUrl: `${input.origin}/tickets/thanks?order=${encodeURIComponent(row.id)}${pv}` };
 
     let session: CheckoutSession;
     try {
@@ -516,8 +571,8 @@ export class TicketService {
             quantity: i.quantity,
           })),
         customerEmail: input.email,
-        successUrl: `${input.origin}/tickets/thanks?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${input.origin}/tickets?canceled=1`,
+        successUrl: `${input.origin}/tickets/thanks?session_id={CHECKOUT_SESSION_ID}${pv}`,
+        cancelUrl: `${input.origin}/tickets?canceled=1${pv}`,
         expiresAt: Math.floor(Date.parse(now) / 1000) + CHECKOUT_TTL_SEC,
       });
       if (!session.id || !session.url) throw errors.upstreamUnavailable("stripe", new Error("session without id/url"));
@@ -566,6 +621,16 @@ export class TicketService {
     });
   }
 
+  /** Webhook payloads don't expand payment_intent: fetch the used method (best effort, display only). */
+  private async withPaymentMethod(s: CheckoutSession): Promise<CheckoutSession> {
+    if (s.paymentMethodType || !this.deps.stripe || !s.id) return s;
+    try {
+      return { ...s, paymentMethodType: (await this.deps.stripe.getCheckoutSession(s.id)).paymentMethodType };
+    } catch {
+      return s;
+    }
+  }
+
   /**
    * The ONE settlement rule for webhook / confirm / reconcile.
    * - session mode must match the key mode (test never touches live and vice versa)
@@ -609,6 +674,13 @@ export class TicketService {
         ...(oversold ? { reviewReason: "oversold" } : {}),
       });
       if (!changed) return "unchanged";
+      if (s.paymentMethodType) {
+        try {
+          await this.repo.setOrderPaymentMethod(order.id, s.paymentMethodType);
+        } catch {
+          // Display-only (e.g. 0005 migration not applied yet): never block settling the order.
+        }
+      }
       if (oversold) {
         log("error", "lp ticket paid after hold lapsed and over capacity", { ...ctx, reason: "oversold" });
         return "needs_review";
@@ -722,7 +794,8 @@ export class TicketService {
       (orderId ? await this.repo.getOrder(TICKET_SITE, orderId) : null) ??
       (session.id ? await this.repo.getOrderBySession(session.id) : null);
     if (!order) return { received: true };
-    await this.settle(order, session, { source: "webhook", release: RELEASE_EVENTS.has(type) });
+    const settled = session.paymentStatus === "paid" ? await this.withPaymentMethod(session) : session;
+    await this.settle(order, settled, { source: "webhook", release: RELEASE_EVENTS.has(type) });
     return { received: true };
   }
 }

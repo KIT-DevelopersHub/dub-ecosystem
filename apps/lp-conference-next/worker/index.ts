@@ -12,6 +12,8 @@ import {
   rewriteLocation,
   ticketsCookie,
   ticketsPreview,
+  ticketsPreviewCookie,
+  ticketsPreviewToken,
 } from "./route.ts";
 import {
   DEMO_CONFIG,
@@ -158,6 +160,9 @@ export default {
     const mode = ticketsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
     const getConfig = async (): Promise<TicketConfig | null> => previewConfig(await ticketConfig(env), mode);
     const tkCookie = ticketsCookie(url);
+    // LP管理「プレビュー」(販売あり) のテスト購入トークン。検証は lp-analytics（Stripe テストキーの時だけ有効）。
+    const tkToken = ticketsPreviewToken(url, req.headers.get("cookie"), req.headers.get("referer"));
+    const tkTokenCookie = ticketsPreviewCookie(url);
     // 登壇者募集も同じ流儀（?proposals=on|off はこの閲覧者にだけ効く）。
     const proposalsPath = isProposalsPath(url.pathname);
     const spMode = proposalsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
@@ -179,8 +184,14 @@ export default {
           ticketsCache = null;
         },
         internal: ticketsInternal(env),
+        previewToken: tkToken,
       });
-      if (handled) return handled;
+      if (handled) {
+        if (!tkTokenCookie) return handled;
+        const h = new Headers(handled.headers);
+        h.append("set-cookie", tkTokenCookie);
+        return new Response(handled.body, { status: handled.status, statusText: handled.statusText, headers: h });
+      }
     }
     // Started in parallel; only awaited for HTML pages (CTA injection).
     const tickets = ticketsPath ? null : getConfig();
@@ -193,6 +204,7 @@ export default {
       headers.append("set-cookie", r.setCookie);
       if (tkCookie) headers.append("set-cookie", tkCookie);
       if (spCookie) headers.append("set-cookie", spCookie);
+      if (tkTokenCookie) headers.append("set-cookie", tkTokenCookie);
       return new Response(null, { status: 302, headers });
     }
 
@@ -204,6 +216,7 @@ export default {
     if (r.setCookie) headers.append("set-cookie", r.setCookie);
     if (tkCookie) headers.append("set-cookie", tkCookie);
     if (spCookie) headers.append("set-cookie", spCookie);
+    if (tkTokenCookie) headers.append("set-cookie", tkTokenCookie);
     const loc = headers.get("location");
     if (loc) headers.set("location", rewriteLocation(loc, r.version, url.origin));
     if (r.preview || mode || spMode) headers.set("x-robots-tag", "noindex");
@@ -216,9 +229,16 @@ export default {
       cfg?.enabled && cfg.preview ? "チケット販売" : null,
       spCfg?.enabled && spCfg.preview ? "登壇者募集" : null,
     ].filter((x): x is string => x !== null);
+    // 「なし」preview hiding a live feature: say so (incl. the /tickets 404) or it looks broken.
+    const hidden = isHtml
+      ? [
+          mode === "off" && (await ticketConfig(env))?.enabled ? "チケット販売" : null,
+          spMode === "off" && (await proposalConfig(env))?.enabled ? "登壇者募集" : null,
+        ].filter((x): x is string => x !== null)
+      : [];
     const inject =
       (r.preview ? previewBanner(r.version, published) : "") +
-      previewBar(previewing) +
+      previewBar(previewing, hidden) +
       ticketsInjection(cfg, false) +
       proposalsInjection(spCfg);
     if (inject) headers.delete("etag");

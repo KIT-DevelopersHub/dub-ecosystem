@@ -8,7 +8,7 @@
 // (mailModel.fixtures.ts).
 import type { mail } from "@dub/types";
 
-export type FolderId = "inbox" | "mine" | "others" | "starred" | "sent" | "scheduled" | "drafts" | "trash" | "archive";
+export type FolderId = "inbox" | "mine" | "others" | "starred" | "sent" | "scheduled" | "drafts" | "trash" | "archive" | "blocked";
 
 /** Folders that appear in the left nav (archive is Gmail's "All Mail"-ish sink).
  *  `scheduled` (予約済み) is NOT thread-backed — it lists parked future sends from a
@@ -24,6 +24,7 @@ export const NAV_FOLDERS: { id: FolderId; label: string; icon: string }[] = [
   { id: "scheduled", label: "予約済み", icon: "clock" },
   { id: "drafts", label: "下書き", icon: "draft" },
   { id: "trash", label: "ゴミ箱", icon: "trash" },
+  { id: "blocked", label: "ブロック済み", icon: "block" },
 ];
 
 /** Inbox filter views that only make sense when some mail is NOT addressed to the viewer. */
@@ -50,6 +51,8 @@ export interface MailMsg {
   from: MailPerson;
   to: MailPerson[];
   cc?: MailPerson[];
+  /** Bcc recipients — only on our own sent messages (the gateway returns them to the sender only). */
+  bcc?: MailPerson[];
   date: string; // ISO
   body: string; // plain text (pre-wrap)
   read: boolean;
@@ -70,6 +73,9 @@ export interface MailMsg {
   /** False when this received message reached the viewer only via oversight (mail:read_all)
    *  or role sharing (mail:read_role_shared), not their own mailbox. Absent = mine. */
   mine?: boolean;
+  /** Server verdict (GET /mail/messages etc.): the sender is on the viewer's block list.
+   *  Only consulted until the client has the block list itself (see threadBlocked). */
+  blocked?: boolean;
 }
 
 export interface MailThreadModel {
@@ -87,6 +93,11 @@ export interface MailThreadModel {
   /** 返信不要: when the viewer dismissed the reply nudge (ISO). Covers only mail received up
    *  to then — a newer received message brings the nudge back. Absent/null = not dismissed. */
   noReplyAt?: string | null;
+  /** Derived (never persisted): every received message is from a sender on the viewer's
+   *  block list. Recomputed by the store whenever threads or the block list change. Blocked
+   *  threads leave 受信トレイ / 自分宛て / スター付き / unread counts and show only under
+   *  ブロック済み — nothing is deleted, so unblocking puts them straight back. */
+  blocked?: boolean;
 }
 
 // ---- pure helpers ----
@@ -101,9 +112,10 @@ export function initial(p: MailPerson): string {
   return src.slice(0, 1).toUpperCase();
 }
 
-/** A thread is unread when any of its messages is unread. */
+/** A thread is unread when any of the viewer's own messages is unread (others' mail is
+ *  view-only, so it never counts). */
 export function threadUnread(t: MailThreadModel): boolean {
-  return t.messages.some((m) => !m.read);
+  return t.messages.some((m) => !m.read && m.mine !== false);
 }
 
 /** A thread is "mine" when any received message was delivered to the viewer (absent = mine).
@@ -161,6 +173,9 @@ export function avatarColor(p: MailPerson): string {
 
 /** Does a thread belong to the given folder view? */
 export function inFolder(t: MailThreadModel, folder: FolderId): boolean {
+  // Blocked mail lives only under ブロック済み (Trash/Sent keep their own semantics).
+  if (folder === "blocked") return t.blocked === true && t.folder !== "trash" && t.folder !== "sent";
+  if (t.blocked && folder !== "trash" && folder !== "sent" && folder !== "drafts") return false;
   if (folder === "starred") return t.starred && t.folder !== "trash";
   if (folder === "mine") return t.folder === "inbox" && threadMine(t);
   if (folder === "others") return t.folder === "inbox" && !threadMine(t);
@@ -221,7 +236,7 @@ export function replyNudge(
   days: number = NUDGE_DAYS,
   maxDays: number = NUDGE_MAX_DAYS,
 ): { days: number } | null {
-  if (t.purged || t.folder !== "inbox" || t.messages.length === 0 || threadUnread(t)) return null;
+  if (t.purged || t.blocked || t.folder !== "inbox" || t.messages.length === 0 || threadUnread(t)) return null;
   const last = latest(t);
   if (last.outbound || last.mine === false) return null;
   if (AUTOMATED_SENDER.test(last.from.email.split("@")[0] ?? "")) return null;
@@ -244,4 +259,193 @@ export function partitionNudged(
   const rest: MailThreadModel[] = [];
   for (const t of threads) (replyNudge(t, now, pendingReplies) ? nudged : rest).push(t);
   return { nudged, rest };
+}
+
+const normEmail = (email: string): string => email.trim().toLowerCase();
+
+/** Case-insensitive dedupe by email; first occurrence wins. Drops empty addresses. */
+export function dedupPeople(ps: readonly MailPerson[], skip: ReadonlySet<string> = new Set()): MailPerson[] {
+  const seen = new Set(skip);
+  const out: MailPerson[] = [];
+  for (const p of ps) {
+    const key = normEmail(p.email);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  return out;
+}
+
+/** Reply-all (Gmail/RFC 5322 §3.6.3): To = reply target (Reply-To else From) + original To,
+ *  Cc = original Cc. `own` (lowercased) is dropped from both; an address in To never repeats in Cc. */
+export function replyAllRecipients(msg: MailMsg, own: ReadonlySet<string>): { to: MailPerson[]; cc: MailPerson[] } {
+  const target = msg.headerMeta?.replyTo?.length ? msg.headerMeta.replyTo : [msg.from];
+  const to = dedupPeople([...target, ...msg.to], own);
+  const cc = dedupPeople(msg.cc ?? [], new Set([...own, ...to.map((p) => normEmail(p.email))]));
+  return { to, cc };
+}
+
+/** Did the viewer send this message? Our own Sent row, or a received copy whose From is one
+ *  of our addresses (a Dub send that looped back through Email Routing, e.g. a Cc to self).
+ *  Another account's Sent row seen via oversight (mine === false) is NOT ours. */
+export function sentByMe(msg: MailMsg, own: ReadonlySet<string>): boolean {
+  if (msg.outbound) return msg.mine !== false;
+  return own.has(normEmail(msg.from.email));
+}
+
+export interface ReplyPlan {
+  /** The message being answered (its Message-Id threads the reply). */
+  target: MailMsg;
+  /** 返信: Reply-To else From of a received message; the original To of our own message. */
+  reply: MailPerson[];
+  /** 全員に返信. */
+  all: { to: MailPerson[]; cc: MailPerson[] };
+  /** In-Reply-To for the reply: the target's Message-Id, else the newest message that has one. */
+  parentId?: string;
+}
+
+/** RFC Message-Id to reply against. A folded Sent row carries the bare send-log id; give it
+ *  the `<id>@domain` form the gateway stamped on the wire. */
+function parentMessageId(messages: readonly MailMsg[], target: MailMsg): string | undefined {
+  const withId = target.messageId ? target : [...messages].reverse().find((m) => m.messageId);
+  const id = withId?.messageId?.trim();
+  if (!withId || !id) return undefined;
+  if (id.includes("@")) return id;
+  const domain = withId.from.email.split("@")[1];
+  return domain ? `${id}@${domain}` : id;
+}
+
+/** Gmail reply addressing for a conversation: answer the LAST message. If we sent it,
+ *  re-address its original recipients (To → To, Cc → Cc, minus us); otherwise reply to its
+ *  sender (Reply-To if present) and reply-all adds every To/Cc minus us. */
+export function replyPlan(messages: readonly MailMsg[], own: ReadonlySet<string>): ReplyPlan {
+  const target = messages[messages.length - 1]!;
+  if (sentByMe(target, own)) {
+    const to = dedupPeople(target.to, own);
+    // Mail we sent only to ourselves: Gmail still addresses it to the original recipients.
+    const reply = to.length > 0 ? to : dedupPeople(target.to);
+    const cc = dedupPeople(target.cc ?? [], new Set([...own, ...reply.map((p) => normEmail(p.email))]));
+    return withParent({ target, reply, all: { to: reply, cc } }, messages);
+  }
+  const sender = target.headerMeta?.replyTo?.length ? target.headerMeta.replyTo : [target.from];
+  return withParent({ target, reply: dedupPeople(sender), all: replyAllRecipients(target, own) }, messages);
+}
+
+function withParent(plan: ReplyPlan, messages: readonly MailMsg[]): ReplyPlan {
+  const parentId = parentMessageId(messages, plan.target);
+  return parentId ? { ...plan, parentId } : plan;
+}
+
+/** RFC Message-Id local part ("<id@host>" -> "id"); our sends stamp `<send-log id>@domain`. */
+function messageIdLocal(id: string | undefined): string {
+  return (id ?? "").trim().replace(/^<|>$/g, "").split("@")[0] ?? "";
+}
+
+const LOOPBACK_WINDOW_MS = 5 * 60_000;
+const addrKey = (ps: readonly MailPerson[]): string => ps.map((p) => normEmail(p.email)).sort().join(",");
+const bodyKey = (b: string): string => b.replace(/\s+/g, " ").trim().slice(0, 80);
+
+/** Same message seen twice: same From and To, same body start, a few minutes apart at most. */
+function sameSend(sent: MailMsg, copy: MailMsg): boolean {
+  if (normEmail(sent.from.email) !== normEmail(copy.from.email)) return false;
+  if (addrKey(sent.to) !== addrKey(copy.to)) return false;
+  const dt = Math.abs(new Date(copy.date).getTime() - new Date(sent.date).getTime());
+  if (!(dt <= LOOPBACK_WINDOW_MS)) return false;
+  const a = bodyKey(sent.body);
+  const b = bodyKey(copy.body);
+  return a.length > 0 && b.length > 0 && (a.startsWith(b) || b.startsWith(a));
+}
+
+/** A Dub send addressed to a Dub-routed mailbox (info@, a Cc to a colleague, …) comes back
+ *  as a received copy with the same Message-Id, so the conversation showed it twice (our
+ *  Sent row + the copy, a second apart). Keep one: our own Sent row when we sent it,
+ *  otherwise the received copy (it carries delivery details and `mine`). */
+export function dedupeLoopback(messages: readonly MailMsg[]): MailMsg[] {
+  const sentRows = messages.filter((m) => m.outbound);
+  if (sentRows.length === 0) return [...messages];
+  const byId = new Map(sentRows.map((m) => [m.id, m]));
+  const drop = new Set<MailMsg>();
+  for (const m of messages) {
+    if (m.outbound) continue;
+    // Our stamped Message-Id is best-effort on Resend, so also match by content.
+    const sent = byId.get(messageIdLocal(m.messageId)) ?? sentRows.find((s) => !drop.has(s) && sameSend(s, m));
+    if (!sent || drop.has(sent)) continue;
+    drop.add(sent.mine !== false ? m : sent);
+  }
+  return drop.size === 0 ? [...messages] : messages.filter((m) => !drop.has(m));
+}
+
+/** Address-book candidates for recipient fields: everyone the user has corresponded with
+ *  (From/To/Cc across loaded threads), excluding self, deduped by email. */
+export function addressCandidates(threads: MailThreadModel[], meEmail: string): Array<{ email: string; name?: string }> {
+  const byEmail = new Map<string, { email: string; name?: string }>();
+  for (const t of threads) {
+    for (const m of t.messages) {
+      for (const p of [m.from, ...m.to, ...(m.cc ?? [])]) {
+        if (p.email && p.email !== meEmail && !byEmail.has(p.email)) {
+          byEmail.set(p.email, p.name ? { email: p.email, name: p.name } : { email: p.email });
+        }
+      }
+    }
+  }
+  return [...byEmail.values()];
+}
+
+// ---- sender block list (この送信者をブロック) ----
+
+/** Our own organization domain: blocking it domain-wide is refused (server enforces too). */
+export const ORG_MAIL_DOMAIN = "developershub.jp";
+
+export type BlockKind = mail.MailSenderBlockKind;
+
+/** Lowercased domain part of an address ("" when there is none). */
+export function domainOf(email: string): string {
+  const e = normEmail(email);
+  const at = e.lastIndexOf("@");
+  return at < 0 ? "" : e.slice(at + 1);
+}
+
+/** Mirrors the gateway's matcher: exact address, or the sender's domain / any parent domain. */
+export function senderMatcher(blocks: readonly Pick<mail.MailSenderBlock, "value" | "kind">[]): (email: string) => boolean {
+  const addresses = new Set<string>();
+  const domains = new Set<string>();
+  for (const b of blocks) (b.kind === "domain" ? domains : addresses).add(b.value);
+  return (email) => {
+    const e = normEmail(email);
+    if (!e) return false;
+    if (addresses.has(e)) return true;
+    let d = domainOf(e);
+    while (d.includes(".")) {
+      if (domains.has(d)) return true;
+      d = d.slice(d.indexOf(".") + 1);
+    }
+    return false;
+  };
+}
+
+/** True when the thread has received mail and ALL of it comes from blocked senders. A mixed
+ *  conversation (someone unblocked also wrote) stays in the inbox so their mail isn't hidden.
+ *  `match` = the client's block list; without it (not loaded yet) the server verdict is used. */
+export function threadBlocked(t: MailThreadModel, match: ((email: string) => boolean) | null): boolean {
+  const inbound = t.messages.filter((m) => !m.outbound);
+  if (inbound.length === 0) return false;
+  return inbound.every((m) => (match ? match(m.from.email) : m.blocked === true));
+}
+
+/** The external sender a block action in the reading pane targets: the newest received
+ *  message's From. null for a sent-only conversation. */
+export function blockTarget(t: MailThreadModel): MailPerson | null {
+  const last = [...t.messages].reverse().find((m) => !m.outbound && m.from.email.trim() !== "");
+  return last ? last.from : null;
+}
+
+/** The block entry (address or domain) that currently hides this sender, if any. */
+export function matchingBlock(
+  email: string,
+  blocks: readonly mail.MailSenderBlock[],
+): mail.MailSenderBlock | null {
+  const e = normEmail(email);
+  const exact = blocks.find((b) => b.kind === "address" && b.value === e);
+  if (exact) return exact;
+  return blocks.find((b) => b.kind === "domain" && senderMatcher([b])(e)) ?? null;
 }

@@ -4,7 +4,7 @@
 //
 // AUTHZ: none in this file or in any handler. `gatewayPolicyGate` is the single
 // authorization layer and derives every decision from POLICY_TABLE (src/policy-table.ts),
-// which lists all 12 gateway-owned routes. Do NOT add a permission check to a route or a
+// which lists all 13 gateway-owned routes. Do NOT add a permission check to a route or a
 // handler — add the route to the table (test/policy-table.test.ts fails if you forget).
 // Proxied /api/v1/* routes are authorized by the service that owns them (see policy-table.ts
 // for why the catch-all is deliberately not a table entry).
@@ -20,7 +20,9 @@ import { createPublicInquiryHandler } from "./handlers/public-inquiry";
 import { createPublicParticipationHandler } from "./handlers/public-participation";
 import { publicOnboardingHandler } from "./handlers/public-onboarding";
 import { publicLpVisitHandler } from "./handlers/public-lp-visit";
+import { publicResendWebhookHandler } from "./handlers/public-resend-webhook";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
+import { adminSendAccountMailHandler } from "./handlers/account-mail";
 import { getSelfProfileHandler, updateSelfProfileHandler } from "./handlers/self-profile";
 import { getSelfParticipationHandler, updateSelfParticipationHandler } from "./handlers/self-participation";
 import { gatewayRouteHandler } from "./gateway-route";
@@ -84,6 +86,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.get(`${API_PREFIX}/public/onboarding`, publicOnboardingHandler);
   // Public LP pageview beacon (sendBeacon from the conference LP) → lp-analytics internal route.
   app.post(`${API_PREFIX}/public/lp-visits`, publicLpVisitHandler);
+  // Resend delivery-event webhook (Svix-signed) → mail-gateway internal route, raw bytes.
+  app.post(`${API_PREFIX}/public/webhooks/resend`, publicResendWebhookHandler);
 
   // Password management (themes #5a/#5b/#5c). Gateway-owned because auth-service's admin
   // routes are internal-only and the `auth` proxy segment strips tokens: these compose
@@ -91,6 +95,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.post(`${API_PREFIX}/me/password`, selfPasswordHandler);
   app.post(`${API_PREFIX}/admin/users/:userId/password`, adminSetPasswordHandler);
   app.get(`${API_PREFIX}/admin/users/:userId/password`, adminViewPasswordHandler);
+  // アカウント発行メール: member Gmail <- login + password, cc the devhub address.
+  app.post(`${API_PREFIX}/admin/users/:userId/account-mail`, adminSendAccountMailHandler);
 
   // Self service (アカウント設定): the signed-in user reads/edits their OWN profile (表示名/
   // アバター → identity-roster) and 参加届 (参加情報 → member-service). Gateway-owned because

@@ -354,6 +354,7 @@ export async function seedScenario(db: D1Database, name: SeedScenarioName, opts:
       { id: `member_team_venue${sfx}`, key: `venue${sfx}`, name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
       { id: `member_team_pr${sfx}`, key: `pr${sfx}`, name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
       { id: `member_team_corp${sfx}`, key: `houjin${sfx}`, name: "法人チーム", color: "#7c3aed", description: "法人設立・契約・会計／規程" },
+      { id: `member_team_network${sfx}`, key: `network${sfx}`, name: "ネットワークチーム", color: "#0891b2", description: "会場ネットワーク・Wi-Fi・配信回線" },
     ];
     for (let i = 0; i < memberTeams.length; i++) {
       const t = memberTeams[i]!;

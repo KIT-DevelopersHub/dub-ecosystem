@@ -14,6 +14,7 @@ import { createMembersApi, type MembersApi } from "./membersApi.tsx";
 import { MembersApiProvider } from "./MembersProvider.tsx";
 import { MembersPage } from "./MembersPage.tsx";
 import { MembersOrgChartPage } from "./MembersOrgChartPage.tsx";
+import { MemberRosterPage } from "./MemberRosterPage.tsx";
 import type { MembersOverview } from "./contracts.ts";
 import { member } from "@dub/types";
 import { ListView } from "./ListView.tsx";
@@ -323,5 +324,33 @@ describe("ListView (運営名簿の表)", () => {
       .getAllByRole("columnheader")
       .map((h) => h.textContent ?? "");
     for (const c of PROFILE_DISPLAY_COLUMNS) expect(headers.some((h) => h.includes(c.header))).toBe(true);
+  });
+});
+
+describe("MemberRosterPage (運営名簿から編集)", () => {
+  it("行クリックで編集ダイアログが開き、保存で updateMember を呼ぶ", async () => {
+    const api = makeApi();
+    render(wrap(<MemberRosterPage />, api));
+    await userEvent.click(await screen.findByText("山田太郎"));
+    const dialog = await screen.findByTestId("members-form-dialog");
+    expect(within(dialog).getByText("メンバーを編集")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByTestId("members-form-submit"));
+    await waitFor(() => expect(api.updateMember).toHaveBeenCalled());
+    expect(vi.mocked(api.updateMember).mock.calls[0]![0]).toBe("m1");
+  });
+
+  it("行内のボタン (紐付け) は編集ダイアログを開かない", async () => {
+    render(wrap(<MemberRosterPage />, makeApi()));
+    await userEvent.click(await screen.findByTestId("members-link-m1"));
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
+  });
+
+  it("閲覧のみ: 行クリックで編集を開かず、書き込み操作は無効", async () => {
+    render(wrap(<MemberRosterPage />, makeApi(), viewerPermissions("members", ["identity:read"])));
+    await userEvent.click(await screen.findByText("山田太郎"));
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("member-roster-readonly-notice")).toBeInTheDocument();
+    expect(screen.getByTestId("member-roster-add-member")).toBeDisabled();
+    expect(screen.getByTestId("members-edit-m1")).toBeDisabled();
   });
 });

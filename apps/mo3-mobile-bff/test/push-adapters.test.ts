@@ -162,7 +162,12 @@ describe("sendFcm", () => {
     expect(nth(calls, 0).url).toBe("https://fcm.googleapis.com/v1/projects/proj_1/messages:send");
     expect(headerOf(nth(calls, 0).init, "authorization")).toBe("Bearer at_123");
     expect(JSON.parse(String(nth(calls, 0).init?.body))).toEqual({
-      message: { token: "fcm_tok", notification: { title: "Hi", body: "There" }, data: { k: "v" } },
+      message: {
+        token: "fcm_tok",
+        notification: { title: "Hi", body: "There" },
+        apns: { payload: { aps: { sound: "default" } } },
+        data: { k: "v" },
+      },
     });
   });
 

@@ -6,7 +6,8 @@
 // The persistent left sidebar is gone: tools now live behind the header AppLauncher
 // (Chrome-waffle style), so mail (Gmail 3-pane) and chat (Slack) render full-width
 // with no nested/double sidebar.
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppShell, PageHeader, AppLauncher, Menu } from "@dub/ui";
 import type { AppLauncherItem, MenuItem } from "@dub/ui";
 import type { identity } from "@dub/types";
@@ -208,6 +209,9 @@ export function AppShellLayout({
   children,
 }: AppShellLayoutProps): JSX.Element {
   const auth = useAuth();
+  const queryClient = useQueryClient();
+  const navigateRef = useRef(onNavigate);
+  navigateRef.current = onNavigate;
   const { can } = usePermissions();
   const [acctOpen, setAcctOpen] = useState(false);
   // カラー設定 (表示設定) dialog — theme lives inside it, not directly in the ⚙ menu.
@@ -336,14 +340,22 @@ export function AppShellLayout({
   // both a live api-client and the viewer's own id (task search is self-scoped).
   // Undefined (not wired) when either is missing, which keeps the palette in its
   // existing app/action-only mode instead of erroring.
-  const contentSearch =
-    api && onNavigate
-      ? createGlobalContentSearch({
-          api,
-          currentUserId: auth.status === "authenticated" ? auth.me.user.id : null,
-          onNavigate,
-        })
-      : undefined;
+  // Memoized (onNavigate via a ref) so a re-render never hands the palette a new
+  // function, which would re-run its search effect.
+  const currentUserId = auth.status === "authenticated" ? auth.me.user.id : null;
+  const hasNavigate = Boolean(onNavigate);
+  const contentSearch = useMemo(
+    () =>
+      api && hasNavigate
+        ? createGlobalContentSearch({
+            api,
+            queryClient,
+            currentUserId,
+            onNavigate: (path) => navigateRef.current?.(path),
+          })
+        : undefined,
+    [api, hasNavigate, queryClient, currentUserId],
+  );
 
   // No `sidebar` prop -> @dub/ui AppShell renders no left rail; main spans full width.
   return (

@@ -12,9 +12,11 @@ import type {
   ChatSection,
   ChatSectionList,
   CreateChannelRequest,
+  CustomEmoji,
   DeleteMessageResult,
   DeletionPolicyResponse,
   EditMessageRequest,
+  EmojiImportResult,
   GetChannelResponse,
   ListMessagesRequest,
   ListMessagesResponse,
@@ -27,6 +29,8 @@ import type {
   ReadStateUpdateRequest,
   SearchHit,
   SearchMessagesRequest,
+  SlackChannelOption,
+  SlackImportJob,
   TeamSummary,
   UnfurlPreview,
   UnfurlResponse,
@@ -43,7 +47,7 @@ export interface ChatApiClient {
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel>;
   /** Hard delete (chat:delete_channel). Messages are erased; DMs are rejected. */
   deleteChannel(id: common.ChannelId): Promise<void>;
-  /** Caller's personal sidebar sections + channel assignments. */
+  /** Org-wide sidebar sections + channel assignments (writes need chat:manage_sections). */
   listSections(): Promise<ChatSectionList>;
   createSection(name: string): Promise<ChatSection>;
   updateSection(id: string, req: UpdateSectionRequest): Promise<ChatSection>;
@@ -76,6 +80,21 @@ export interface ChatApiClient {
   listMentionTeams(): Promise<MentionTeams>;
   /** Link preview (OGP) for one URL; null = no card. Best-effort: never rejects. */
   unfurl(url: string): Promise<UnfurlPreview | null>;
+  // ---- Slack channel import (編集 + chat:slack_import) ----
+  /** Channels the Slack bot can see (private ones only once LMB is invited). */
+  listSlackChannels(): Promise<SlackChannelOption[]>;
+  listSlackImportJobs(limit?: number): Promise<SlackImportJob[]>;
+  /** Create, resume (failed) or restart (done) the job for a channel name / id. */
+  startSlackImport(channel: string): Promise<SlackImportJob>;
+  getSlackImportJob(id: string): Promise<SlackImportJob>;
+  /** Advance one bounded step; safe to call repeatedly (server holds a lease). */
+  stepSlackImport(id: string): Promise<SlackImportJob>;
+  // ---- custom emoji (list + image: 閲覧 / Slack import: 編集 + chat:emoji_import) ----
+  listCustomEmojis(): Promise<CustomEmoji[]>;
+  /** Image bytes of `name` (an alias resolves server-side). Rejects on 404 / network. */
+  customEmojiImage(name: string): Promise<Blob>;
+  /** One bounded import batch after `after` (null = from the top). */
+  importSlackEmojis(after: string | null): Promise<EmojiImportResult>;
 }
 
 /** GET /api/v1/members/me/mention-teams のレスポンス。 */
@@ -110,7 +129,7 @@ const IDENTITY = `${API}/identity`;
 // 運営チームは member-service が単一の真実源。チームメンションはそこを読むだけで、
 // chat 側にチームを複製しない。
 const MEMBERS = `${API}/members`;
-const IDENTITY_BATCH_MAX = 50;
+export const IDENTITY_BATCH_MAX = 50;
 const USER_SEARCH_LIMIT = 20;
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -295,6 +314,34 @@ export class HttpChatClient implements ChatApiClient {
     // read the chip by name. The caller is taken from the session (no userId in the path).
     const res = await this.request<Partial<MentionTeams>>("GET", `${MEMBERS}/me/mention-teams`);
     return { teams: res?.teams ?? [], myTeamIds: res?.myTeamIds ?? [] };
+  }
+
+  async listSlackChannels(): Promise<SlackChannelOption[]> {
+    return unwrapItems<SlackChannelOption>(await this.request<unknown>("GET", `${CHAT}/slack-import/channels`));
+  }
+  async listSlackImportJobs(limit?: number): Promise<SlackImportJob[]> {
+    return unwrapItems<SlackImportJob>(await this.request<unknown>("GET", `${CHAT}/slack-import/jobs${qs({ limit })}`));
+  }
+  startSlackImport(channel: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("POST", `${CHAT}/slack-import/jobs`, { channel });
+  }
+  getSlackImportJob(id: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("GET", `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}`);
+  }
+  stepSlackImport(id: string): Promise<SlackImportJob> {
+    return this.request<SlackImportJob>("POST", `${CHAT}/slack-import/jobs/${encodeURIComponent(id)}/step`);
+  }
+
+  async listCustomEmojis(): Promise<CustomEmoji[]> {
+    return unwrapItems<CustomEmoji>(await this.request<unknown>("GET", `${CHAT}/custom-emojis`));
+  }
+  async customEmojiImage(name: string): Promise<Blob> {
+    const res = await this.fetchImpl(`${this.base}${CHAT}/custom-emojis/${encodeURIComponent(name)}/image`, { credentials: "include" });
+    if (!res.ok) throw new ChatApiError(res.status, null);
+    return res.blob();
+  }
+  importSlackEmojis(after: string | null): Promise<EmojiImportResult> {
+    return this.request<EmojiImportResult>("POST", `${CHAT}/custom-emojis/slack-import`, { after });
   }
 
   async unfurl(url: string): Promise<UnfurlPreview | null> {

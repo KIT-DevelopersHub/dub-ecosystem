@@ -131,6 +131,14 @@ export class InMemoryLpRepo implements LpRepo {
       reviewReason: p.reviewReason ?? null,
     });
   }
+  async markOrderPreview(id: string) {
+    const o = this.orders.find((x) => x.id === id);
+    if (o) o.preview = true;
+  }
+  async setOrderPaymentMethod(id: string, method: string) {
+    const o = this.orders.find((x) => x.id === id);
+    if (o) o.paymentMethod = method;
+  }
   async markOrderExpired(id: string) {
     return this.transition(id, ["pending"], { status: "expired" });
   }

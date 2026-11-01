@@ -43,10 +43,23 @@ service = "dub-identity-roster"   # POST /authz/check (mail:send / mail:read / m
 binding = "SVC_AUDIT"
 service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/audit-async
 
+# Gmail safety-net forward: userId -> 名簿 Gmail (POST /members/internal/google-emails).
+# member-service deploys before mail-gateway (infra/deploy/deploy-prod.sh), so the binding
+# target exists. Inert while MAIL_GMAIL_FORWARD is unset (README §3.4).
+[[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"
+
+# Resend delivery-problem webhook -> in-app admin alert (POST /notify, role fan-out).
+# notification deploys before mail-gateway (infra/deploy/deploy-prod.sh). Optional: absent
+# => audit + error log only. Signing secret: `wrangler secret put RESEND_WEBHOOK_SECRET`.
+[[services]]
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
+
 # --- Cron: every 5 minutes (ONE trigger). The scheduled handler runs the 予約送信
 # (scheduled-send) drain on EVERY tick — a "send later" mail has ~5-minute delivery
-# granularity — and runs the daily retention purge only on the ~03:20 UTC tick (gated in
-# code). The Workers FREE plan caps the account at 5 cron triggers, so we keep mail-gateway's
+# granularity. Mail is kept indefinitely (no retention purge). The Workers FREE plan caps the account at 5 cron triggers, so we keep mail-gateway's
 # single existing trigger and just tick more often — no new trigger, no paid Queue. ---
 [triggers]
 crons = ["*/5 * * * *"]
@@ -65,6 +78,14 @@ MAIL_ARCHIVE_CC = "archive@developershub.jp"
 MAIL_SEND_MAX_ATTEMPTS = "3"
 MAIL_SEND_TIMEOUT_MS = "15000"
 MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
+# 外形監視（canary）: qa-a / qa-b の受け口は Email Routing で dub-mail-gateway 宛に作成済み（2026-10-30）。
+# Resend 無料枠（100通/日）を圧迫しないよう 60 分おき（24通/日）。
+MAIL_CANARY_ENABLED = "true"
+MAIL_CANARY_TO = "qa-a@developershub.jp"
+MAIL_CANARY_CC = "qa-b@developershub.jp"
+MAIL_CANARY_EXPECT_CC = "true"
+MAIL_CANARY_INTERVAL_MIN = "60"
+MAIL_CANARY_DEADLINE_MIN = "10"
 # Email Routing admin (address issuance). The token is a Workers Secret set out-of-band
 # (wrangler secret put CF_EMAIL_ROUTING_TOKEN); the ids/zone/worker below are non-secret.
 # CF_EMAIL_ROUTING_ZONE_ID / CF_EMAIL_ROUTING_ACCOUNT_ID are provisioned on the worker
@@ -72,3 +93,10 @@ MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
 # for issued receiving addresses); it defaults to dub-mail-gateway in code when unset.
 CF_EMAIL_ROUTING_ZONE_NAME = "developershub.jp"
 CF_EMAIL_ROUTING_WORKER_NAME = "dub-mail-gateway"
+# Archive forward (README §3.5): every inbound mail is ALSO forwarded, once per Message-ID,
+# to this address (after storage; failures are logged + audited, never block ingest). The
+# address must be a VERIFIED Email Routing destination, or every forward just fails.
+MAIL_ARCHIVE_FORWARD_TO = "dub.developershub@gmail.com"
+# Gmail safety-net forward (README §3.4). Intentionally NOT set = OFF. Enable with
+# MAIL_GMAIL_FORWARD = "on" only after every target Gmail is a verified Email Routing
+# destination address.

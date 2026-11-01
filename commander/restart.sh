@@ -58,23 +58,60 @@ case "$MODE" in
     ;;
 
   relaunch)
-    # Re-exec once in the background so this process is no longer a child of the
-    # daemon: dev-up's cleanup kills the daemon's whole child tree, which would
-    # otherwise take the relauncher down with it.
+    # Re-exec once in a BRAND-NEW SESSION so this process is neither a child nor a
+    # process-group member of the daemon. dev-up's cleanup kills the daemon's whole
+    # child tree (kill_tree = a pgrep -P walk) and a plain `nohup ... &` relauncher
+    # stayed close enough to that tree/group to be taken down with it mid-stop: the
+    # stack stopped but never restarted (seen 3x). A new session detaches us from
+    # the daemon's PPID chain, process group, and controlling terminal, so the stop
+    # can never reach us before we start the stack again. macOS ships no setsid(1);
+    # perl's POSIX::setsid() is always present at /usr/bin/perl. We detach FIRST,
+    # then stop the old stack below, so "stop" is always followed by "start".
     if [[ -z "${COMMANDER_RESTART_DETACHED:-}" ]]; then
-      COMMANDER_RESTART_DETACHED=1 nohup bash "$0" relaunch "$DAEMON_PID" >/dev/null 2>&1 &
+      COMMANDER_RESTART_DETACHED=1 /usr/bin/perl -MPOSIX -e '
+        POSIX::setsid();
+        open(STDIN,  "<", "/dev/null");
+        open(STDOUT, ">", "/dev/null");
+        open(STDERR, ">&", STDOUT);
+        exec(@ARGV) or die "exec failed: $!";
+      ' bash "$0" relaunch "$DAEMON_PID" &
       exit 0
     fi
     mkdir -p "$LOG_DIR"
     exec >>"$LOG_DIR/restart.log" 2>&1
+    # setsid severs our SESSION, but kill_tree walks by PPID (`pgrep -P`), not session:
+    # until our spawner (the detached outer shell) exits we are still a transient child
+    # of the daemon, so dev-up's stop could reach us before our detach completed. That
+    # race made the stop kill us between "stop" and "start" on ~every other restart.
+    # Block until we are reparented to init (PPID==1): then no `pgrep -P` walk rooted at
+    # the daemon can ever include us, so the stop below can never take us down.
+    for _ in $(seq 1 100); do
+      [[ "$(ps -o ppid= -p "$$" 2>/dev/null | tr -d ' ')" == "1" ]] && break
+      sleep 0.1
+    done
     DEV_UP="$(find_dev_up "$DAEMON_PID")" || { log "dev-up.sh not found above daemon $DAEMON_PID - abort"; exit 1; }
+    STACK_PGID="$(ps -o pgid= -p "$DEV_UP" 2>/dev/null | tr -d ' ')"
     sleep 1 # let the daemon finish answering the button's request
-    log "stopping stack (dev-up $DEV_UP)"
-    kill -TERM "$DEV_UP" 2>/dev/null || true
+    log "stopping stack (dev-up $DEV_UP, pgid ${STACK_PGID:-?})"
+    # Deterministic teardown by PROCESS GROUP. The whole stack (dev-up -> subshells ->
+    # wrangler -> workerd, pnpm -> vite, relay) shares dev-up's process group, so one
+    # group signal reaps every grandchild at once. The old per-pid pgrep walk raced
+    # wrangler's re-forking and left orphaned wrangler/workerd holding on. Our own group
+    # differs (setsid), so a group signal to the stack can never hit us. Guarded against
+    # the degenerate case where the pgid could not be read or equals ours.
+    if [[ -n "$STACK_PGID" && "$STACK_PGID" =~ ^[0-9]+$ && "$STACK_PGID" != "$$" ]]; then
+      kill -TERM "-$STACK_PGID" 2>/dev/null || true
+    else
+      kill -TERM "$DEV_UP" 2>/dev/null || true
+    fi
     for _ in $(seq 1 30); do
       kill -0 "$DEV_UP" 2>/dev/null || break
       sleep 1
     done
+    if [[ -n "$STACK_PGID" && "$STACK_PGID" =~ ^[0-9]+$ && "$STACK_PGID" != "$$" ]]; then
+      kill -KILL "-$STACK_PGID" 2>/dev/null || true
+    fi
+    # Backstop: anything still listening on our ports (e.g. an escaped grandchild).
     for sig in TERM KILL; do
       for port in "$DAEMON_PORT" "$SERVICE_PORT" "$WEB_PORT"; do
         for pid in $(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null); do
@@ -82,7 +119,17 @@ case "$MODE" in
           kill "-$sig" "$pid" 2>/dev/null || true
         done
       done
-      sleep 3
+      sleep 2
+    done
+    # Do not re-bind until every port is actually free, or dev-up's vite --strictPort /
+    # wrangler would abort with EADDRINUSE and the restart would "stop but not start".
+    for _ in $(seq 1 30); do
+      busy=""
+      for port in "$DAEMON_PORT" "$SERVICE_PORT" "$WEB_PORT"; do
+        lsof -ti "tcp:$port" -sTCP:LISTEN >/dev/null 2>&1 && busy=1
+      done
+      [[ -z "$busy" ]] && break
+      sleep 1
     done
     log "starting stack at $(git -C "$REPO_ROOT" rev-parse --short HEAD)"
     cd "$REPO_ROOT"

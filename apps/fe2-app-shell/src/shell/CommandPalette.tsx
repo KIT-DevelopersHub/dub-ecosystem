@@ -198,7 +198,7 @@ export function CommandPalette({ commands, testId = "fe2-cmdk", contentSearch }:
 
   // With an empty query, float recently-used commands to the top (most-recent first),
   // so the palette opens onto "what you just did" — the common re-navigation path.
-  // With a query, CONTENT matches (already query-matched server/API-side) lead, then
+  // With a query, CONTENT matches (already query-matched by the provider) lead, then
   // the app/action matches — the whole point of typing is usually to find a specific
   // task/event, so its result should not be buried below every matching app tile.
   const ordered = useMemo(() => {

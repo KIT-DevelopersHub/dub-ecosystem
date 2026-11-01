@@ -221,10 +221,23 @@ setPresence({
 // Pre-pin the bot's daily-schedule post so the pinned-items popover has content.
 const pins = [{ channelId: C_GENERAL, messageId: "msg_00020000000000000000000x" }];
 
-// One personal sidebar section so the feature is visible out of the box.
+// One org-wide sidebar section so the feature is visible out of the box.
 const sections = [{ id: "sec_seed_ops", name: "運営", position: 0, createdAt: t(1, 0, 0) }];
 const sectionAssignments = { [C_DEV]: "sec_seed_ops" };
 
 export function demoSeed(): MockSeed {
-  return { currentUserId: ME, channels, messages, members, users, pins, teams, myTeamIds, sections, sectionAssignments };
+  return {
+    currentUserId: ME,
+    channels,
+    messages,
+    members,
+    users,
+    pins,
+    teams,
+    myTeamIds,
+    sections,
+    sectionAssignments,
+    // Slack import demo: posts by members, KENICHI plays the disabled (退会済み) account.
+    slackAuthors: { me: ME, a: HANAKO, b: DAISUKE, disabled: KENICHI },
+  };
 }

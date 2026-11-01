@@ -21,11 +21,11 @@
 // boot mock and surface as a normal NOT_FOUND (in-frame fallback, never a white
 // screen), so "what is seeded vs. still stubbed" stays honest.
 import type { ErrorResponse } from "@dub/errors";
-import type { auditLog, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
+import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, member as memberValues } from "@dub/types";
+import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
-import { mockUnfurl } from "../composition/featureEntries";
+import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -53,6 +53,9 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   // members in the channel details modal. Hard delete is its own key (admin only by default).
   "chat:moderate",
   "chat:delete_channel",
+  "chat:slack_import",
+  "chat:emoji_import",
+  "chat:manage_sections",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -62,9 +65,15 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
+  // カレンダー: 予定の登録（予定を作成ボタン）。
+  "calendar:schedule_edit",
   // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
   "calendar:meetings_view",
   "calendar:meetings_edit",
+  // 人事: 応募者の閲覧・選考の操作・参加確定 (admin は identity/0025 で全部持つ)。
+  "hr:read",
+  "hr:write",
+  "hr:admin",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -579,6 +588,12 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
     subject: "懇親会会場の候補（CC共有）", snippet: "懇親会の会場候補を共有します。伊藤さんと事務局にも CC しています。",
     receivedAt: daysAgoIso(2), read: false, mine: true,
   },
+  {
+    // Promotional sender to try 送信者ブロック on in the preview (この送信者をブロック).
+    id: "msg_5", messageId: "<m5@demo>", threadId: "thr_5", from: { email: "news@deals-mail.example", name: "お得情報配信" },
+    to: [{ email: "demo@developershub.jp" }], subject: "【期間限定】今だけ全品50%オフのご案内", snippet: "いつもご利用ありがとうございます。今週末限定のセール情報をお届けします。",
+    receivedAt: daysAgoIso(0.1), read: false, mine: true,
+  },
 ];
 
 const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
@@ -612,11 +627,17 @@ const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
   },
 };
 
+MAIL_DETAIL.msg_5 = {
+  ...MAIL_LIST[4]!,
+  textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
+};
+
 const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
   thr_4: { id: "thr_4", messages: [MAIL_DETAIL.msg_4!] },
+  thr_5: { id: "thr_5", messages: [MAIL_DETAIL.msg_5!] },
 };
 
 // ── demo accounts (per-account mail scope) ────────────────────────────────────
@@ -713,9 +734,13 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
   "mail:read",
 ];
 
+// チャット 編集 but NOT chat:manage_sections (the default for every non-admin role): sees the
+// org-wide sidebar sections without any organizing UI. ?demo_account=usr_bob previews it.
+const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "chat:manage_sections");
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
-  { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
+  { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: CHAT_EDITOR_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
@@ -788,6 +813,12 @@ function firstLine(text: string, max = 140): string {
   return oneLine.length > max ? oneLine.slice(0, max) : oneLine;
 }
 
+const BULK_SENDERS: mail.MailAddress[] = [
+  { email: "news@example.com", name: "お知らせ配信" },
+  { email: "sale@shop-a.example", name: "ショップA セール情報" },
+  { email: "weekly@mag.spam-b.example", name: "マガジンB 週刊号" },
+];
+
 function createMailStore() {
   // Per-account Inbox + Sent, mirroring the server's owner scope: each account sees ONLY
   // its own mail. received[accountId] is seeded (cloned) from the account's inbox so the
@@ -807,9 +838,74 @@ function createMailStore() {
   function inboxOf(id: string): mail.MailMessageDetail[] {
     if (!received[id]) {
       const acct = DEMO_ACCOUNTS.find((a) => a.id === id);
-      received[id] = (acct?.inbox ?? []).map((m) => ({ ...m }));
+      received[id] = [...(acct?.inbox ?? []).map((m) => ({ ...m })), ...bulkMail(id)];
     }
     return received[id]!;
+  }
+  // ?demo_mail_bulk=<n> appends n older read mails to the default account's inbox so list
+  // paging (50/page) can be previewed. Opt-in: the normal demo inbox stays small.
+  function bulkMail(id: string): mail.MailMessageDetail[] {
+    if (id !== ME_ID) return [];
+    let n = 0;
+    try {
+      n = Math.min(500, Number(new URLSearchParams(globalThis.location?.search ?? "").get("demo_mail_bulk") ?? 0) || 0);
+    } catch {
+      n = 0;
+    }
+    return Array.from({ length: n }, (_, i) =>
+      // The OLDEST bulk mail (past page 1) carries a keyword only in its body, so server-side
+      // search (?q=) can be tried in the demo: e.g. 「全力エージェンシー」 or 「ZR-2026-0042」.
+      i === n - 1 && n > 50
+        ? {
+            id: `msg_bulk_${i + 1}`,
+            messageId: `<bulk-${i + 1}@demo>`,
+            threadId: `thr_bulk_${i + 1}`,
+            from: { email: "info@zenryoku-agency.example", name: "全力エージェンシー" },
+            to: [{ email: "demo@developershub.jp" }],
+            subject: "お見積りのご案内",
+            snippet: "いつもお世話になっております。先日ご相談いただいた件について",
+            receivedAt: daysAgoIso(10 + i),
+            read: true,
+            textBody: `いつもお世話になっております。先日ご相談いただいた件について${"、詳細をご案内いたします".repeat(10)}。\n見積番号 ZR-2026-0042 をご確認ください。`,
+          }
+        : {
+            id: `msg_bulk_${i + 1}`,
+            messageId: `<bulk-${i + 1}@demo>`,
+            threadId: `thr_bulk_${i + 1}`,
+            // Every 3rd / 5th bulk mail comes from one of two promotional senders, so blocking
+            // them (この送信者をブロック / ドメインごとブロック) can be tried against paging.
+            from: BULK_SENDERS[i % 3 === 1 ? 1 : i % 5 === 2 ? 2 : 0]!,
+            to: [{ email: "demo@developershub.jp" }],
+            subject: `過去のお知らせ #${i + 1}`,
+            snippet: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
+            receivedAt: daysAgoIso(10 + i),
+            read: true,
+            textBody: `ページ送り確認用の過去メール（${i + 1}通目）です。`,
+          },
+    );
+  }
+  // Gateway parity for ?q= (server-side search): case-insensitive substring over subject /
+  // snippet / body / From / To / Cc (Sent: no From, never Bcc), applied before paging.
+  function searchBy<T extends mail.MailMessageDetail | mail.MailSentDetail>(items: T[], url: URL): T[] {
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    if (!q) return items;
+    const hit = (v: string | undefined) => (v ?? "").toLowerCase().includes(q);
+    const addr = (a: mail.MailAddress | undefined) => !!a && (hit(a.name) || hit(a.email));
+    return items.filter((m) => {
+      const from = "receivedAt" in m ? m.from : undefined;
+      return hit(m.subject) || hit(m.snippet) || hit(m.textBody) || addr(from) || m.to.some(addr) || (m.cc ?? []).some(addr);
+    });
+  }
+  // Gateway parity: honour ?limit/&cursor (id cursor, newest first as stored) when a limit
+  // is given; without one the whole list is returned as before.
+  function pageBy<T extends { id: string }>(items: T[], url: URL): { items: T[]; nextCursor: string | null } {
+    const limitRaw = url.searchParams.get("limit");
+    if (limitRaw === null) return page(items);
+    const limit = Math.max(1, Number(limitRaw) || 50);
+    const cursor = url.searchParams.get("cursor");
+    const start = cursor ? items.findIndex((it) => it.id === cursor) + 1 : 0;
+    const slice = items.slice(start, start + limit);
+    return { items: slice, nextCursor: start + limit < items.length ? (slice[slice.length - 1]?.id ?? null) : null };
   }
   // Mirrors the gateway's send-time resolveThreadId: a reply's In-Reply-To is matched
   // (angle brackets ignored) against received Message-Ids so the sent row carries the
@@ -818,7 +914,11 @@ function createMailStore() {
   function replyThreadId(inReplyTo: string): string {
     const ref = bare(inReplyTo);
     const parent = DEMO_ACCOUNTS.flatMap((a) => inboxOf(a.id)).find((m) => m.messageId && bare(m.messageId) === ref);
-    return parent?.threadId ?? inReplyTo;
+    if (parent?.threadId) return parent.threadId;
+    // A reply to one of OUR sends ("<sent id>@domain") joins that send's conversation.
+    const local = ref.split("@")[0] ?? "";
+    const ours = DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)).find((m) => m.id === local);
+    return ours?.threadId ?? inReplyTo;
   }
   // Sent is PERSISTED per account (localStorage) so it survives a reload and stays
   // strictly account-scoped: a mail account A sent lives under A's key and is therefore
@@ -844,21 +944,30 @@ function createMailStore() {
   // no cron, so `sweepDue` SIMULATES the gateway drain — any parked row whose scheduledAt has
   // passed is moved into Sent and dropped from the scheduled list. That lets a reviewer pick a
   // near time and watch the mail move 予約済み → 送信済み on the next refresh.
+  // `parked` = the attachment bytes (base64) held until delivery — the demo stand-in for the
+  // gateway's R2 park (migration 0020). Never returned by the API (stripped in `publicSched`).
+  type DemoScheduled = mail.ScheduledSendDetail & { parked?: mail.MailAttachmentInput[] };
   const schedKey = (id: string): string => `dub_demo_scheduled_${id}`;
-  function scheduledOf(id: string): mail.ScheduledSendDetail[] {
+  function scheduledOf(id: string): DemoScheduled[] {
     try {
       const raw = globalThis.localStorage?.getItem(schedKey(id));
-      return raw ? (JSON.parse(raw) as mail.ScheduledSendDetail[]) : [];
+      return raw ? (JSON.parse(raw) as DemoScheduled[]) : [];
     } catch {
       return [];
     }
   }
-  function saveScheduled(id: string, list: mail.ScheduledSendDetail[]): void {
+  function saveScheduled(id: string, list: DemoScheduled[]): boolean {
     try {
       globalThis.localStorage?.setItem(schedKey(id), JSON.stringify(list));
+      return true;
     } catch {
-      /* storage unavailable — Scheduled is best-effort in the demo */
+      return false; // storage unavailable / quota — callers that create rows must surface it
     }
+  }
+  function publicSched(s: DemoScheduled): mail.ScheduledSendDetail {
+    const { parked, ...rest } = s;
+    void parked;
+    return rest;
   }
   function sweepDue(accountId: string): void {
     const list = scheduledOf(accountId);
@@ -870,6 +979,14 @@ function createMailStore() {
     const sent = sentOf(accountId);
     for (const s of due) {
       const pmid = `<demo-${Date.now()}@developershub.jp>`;
+      // Deliver the parked files: register their bytes under the ids the schedule listed so
+      // the Sent copy downloads/previews exactly like an immediate send's attachments.
+      const attachments: mail.MailAttachment[] = (s.parked ?? []).map((a, i) => {
+        const attId = s.attachments?.[i]?.id ?? `mailatt_demo_${Date.now().toString(36)}_${attSeq++}`;
+        const bytes = b64ToBytes(a.contentBase64);
+        DEMO_MAIL_BLOBS.set(attId, { filename: a.filename, contentType: a.contentType, bytes });
+        return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
+      });
       sent.unshift({
         id: `sent_demo_${Date.now().toString(36)}_${seq++}`,
         from: s.from ?? (acct ? { email: acct.email, name: acct.displayName } : undefined),
@@ -884,13 +1001,19 @@ function createMailStore() {
         textBody: s.textBody,
         ...(s.htmlBody ? { htmlBody: s.htmlBody } : {}),
         ...(s.inReplyTo ? { threadId: replyThreadId(s.inReplyTo) } : {}),
+        ...(s.bcc && s.bcc.length > 0 ? { bcc: s.bcc } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
       } as mail.MailSentDetail);
     }
     saveSent(accountId, sent);
     saveScheduled(accountId, list.filter((s) => !due.includes(s)));
   }
 
-  function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
+  // Idempotency (x-dub-idempotency-key, scoped per account like the gateway): a repeated
+  // submit returns the first send's ack instead of appending a second Sent row.
+  const idemAcks = new Map<string, mail.SendMailResponse>();
+
+  function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
       const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
@@ -916,23 +1039,102 @@ function createMailStore() {
     const oversight = isOversight(me);
     const readable = oversight ? DEMO_ACCOUNTS : DEMO_ACCOUNTS.filter((a) => a.id === me.id || (me.roleShareWith ?? []).includes(a.id));
     const readInbox: mail.MailMessageDetail[] = readable.flatMap((a) => inboxOf(a.id).map((m) => Object.assign(m, { mine: a.id === me.id })));
-    const readSent: mail.MailSentDetail[] = oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id)) : outbox;
+    const readSent: mail.MailSentDetail[] = (oversight ? DEMO_ACCOUNTS.flatMap((a) => sentOf(a.id).map((m) => ({ ...m, mine: a.id === me.id }))) : outbox.map((m) => ({ ...m, mine: true })));
+
+    // Sender block list (0021): the gateway flags (never filters) mail whose sender is on
+    // the VIEWER's list. Copies only — the stored rows stay untouched, so unblocking restores.
+    const isBlocked = demoBlockMatcher(loadBlocks());
+    const stampBlocked = <T extends mail.MailMessageListItem>(m: T): T => (isBlocked(m.from.email) ? { ...m, blocked: true } : m);
 
     // received: list / detail / mark-read (read state persists in-session). Scoped to the
     // account, or every account under oversight (mail:read_all).
+    // Folder views (gateway parity with GET /mail/messages?folder= + GET /mail/counts): paged by
+    // CONVERSATION with blocked senders and this account's flags applied BEFORE the limit, so
+    // every page is full. Same rules as services/mail-gateway/src/folders.ts.
+    const folderThreads = (source: mail.MailMessageDetail[]) => {
+      const flags = new Map(loadFlags().map((f) => [f.threadId, f]));
+      const byThread = new Map<string, mail.MailMessageDetail[]>();
+      for (const m of source) byThread.set(m.threadId, [...(byThread.get(m.threadId) ?? []), m]);
+      return [...byThread.entries()].map(([threadId, msgs]) => {
+        const f = flags.get(threadId);
+        return {
+          threadId,
+          msgs,
+          last: msgs.reduce((a, m) => (m.receivedAt > a ? m.receivedAt : a), ""),
+          blocked: msgs.every((m) => isBlocked(m.from.email)),
+          mine: msgs.some((m) => m.mine !== false),
+          unread: msgs.some((m) => !m.read && m.mine !== false),
+          starred: f?.starred ?? false,
+          archived: f?.archived ?? false,
+          trashed: f?.trashed ?? false,
+          purged: f?.purged ?? false,
+        };
+      });
+    };
+    type FolderThread = ReturnType<typeof folderThreads>[number];
+    const inView = (t: FolderThread, view: string): boolean => {
+      if (t.purged) return false;
+      const inbox = !t.trashed && !t.archived && !t.blocked;
+      switch (view) {
+        case "inbox":
+          return inbox;
+        case "mine":
+          return inbox && t.mine;
+        case "others":
+          return inbox && !t.mine;
+        case "starred":
+          return !t.trashed && t.starred && !t.blocked;
+        case "archive":
+          return !t.trashed && t.archived && !t.blocked;
+        case "trash":
+          return t.trashed;
+        case "blocked":
+          return !t.trashed && t.blocked;
+        default:
+          return !t.trashed && !t.blocked; // all
+      }
+    };
+    if (method === "GET" && pathname === "/api/v1/mail/counts") {
+      const ts = folderThreads(readInbox);
+      const views = ["inbox", "mine", "others", "starred", "archive", "trash", "blocked"] as const;
+      const out = {} as mail.MailFolderCounts;
+      for (const v of views) {
+        const hit = ts.filter((t) => inView(t, v));
+        out[v] = { total: hit.length, unread: v === "blocked" ? 0 : hit.filter((t) => t.unread).length };
+      }
+      return json(out);
+    }
+    if (method === "GET" && pathname === "/api/v1/mail/messages" && url.searchParams.get("folder")) {
+      const view = url.searchParams.get("folder")!;
+      const limit = Math.max(1, Number(url.searchParams.get("limit")) || 50);
+      const cursor = url.searchParams.get("cursor");
+      const ts = folderThreads(searchBy(readInbox, url))
+        .filter((t) => inView(t, view))
+        .sort((a, b) => b.last.localeCompare(a.last) || b.threadId.localeCompare(a.threadId));
+      const start = cursor ? ts.findIndex((t) => t.threadId === cursor) + 1 : 0;
+      const slice = ts.slice(start, start + limit);
+      const items = slice.flatMap((t) =>
+        t.msgs.map(({ textBody, htmlBody, ...li }) => {
+          void textBody;
+          void htmlBody;
+          return stampBlocked(li);
+        }),
+      );
+      return json({ items, nextCursor: start + limit < ts.length ? (slice.at(-1)?.threadId ?? null) : null, total: ts.length } satisfies mail.MailMessagePage);
+    }
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
-      const items: mail.MailMessageListItem[] = readInbox.map(({ textBody, htmlBody, ...li }) => {
+      const items: mail.MailMessageListItem[] = searchBy(readInbox, url).map(({ textBody, htmlBody, ...li }) => {
         void textBody;
         void htmlBody;
-        return li;
+        return stampBlocked(li);
       });
-      return json(page(items));
+      return json(pageBy(items, url));
     }
     {
       const m = /^\/api\/v1\/mail\/messages\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
-        return found ? json(found) : notFound(`GET ${pathname}`);
+        return found ? json(stampBlocked(found)) : notFound(`GET ${pathname}`);
       }
     }
     if (method === "POST") {
@@ -949,12 +1151,16 @@ function createMailStore() {
       const m = /^\/api\/v1\/mail\/threads\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const threadId = decodeURIComponent(m[1]!);
-        const messages = readInbox.filter((r) => r.threadId === threadId);
+        const messages = readInbox.filter((r) => r.threadId === threadId).map(stampBlocked);
         return messages.length > 0 ? json({ id: threadId, messages } satisfies mail.MailThread) : notFound(`GET ${pathname}`);
       }
     }
     // sent: outbox append + list + detail — this account only
     if (method === "POST" && pathname === "/api/v1/mail/outbox") {
+      const idemKey = headers?.get("x-dub-idempotency-key");
+      const idemScoped = idemKey ? `${me.id}:${idemKey}` : null;
+      const replay = idemScoped ? idemAcks.get(idemScoped) : undefined;
+      if (replay) return json(replay);
       const req = (body ?? {}) as Partial<mail.SendMailRequest>;
       const id = `sent_demo_${Date.now().toString(36)}_${seq++}`;
       const sentAt = new Date().toISOString();
@@ -988,15 +1194,16 @@ function createMailStore() {
       outbox.unshift(detail);
       saveSent(me.id, outbox);
       const res: mail.SendMailResponse = { messageId: providerMessageId, provider: "resend", acceptedAt: sentAt };
+      if (idemScoped) idemAcks.set(idemScoped, res);
       return json(res);
     }
     if (method === "GET" && pathname === "/api/v1/mail/sent") {
-      const items: mail.MailSentListItem[] = readSent.map(({ textBody, htmlBody, ...listItem }) => {
+      const items: mail.MailSentListItem[] = searchBy(readSent, url).map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
         return hideArchiveCc(listItem);
       });
-      return json(page(items));
+      return json(pageBy(items, url));
     }
     if (method === "GET") {
       const m = /^\/api\/v1\/mail\/sent\/([^/]+)$/.exec(pathname);
@@ -1014,12 +1221,16 @@ function createMailStore() {
       if (Number.isNaN(at) || at <= Date.now()) {
         return json({ error: { code: "MAIL_INVALID_REQUEST", message: "scheduledAt must be in the future" } }, 400);
       }
-      if (Array.isArray(req.attachments) && req.attachments.length > 0) {
-        return json({ error: { code: "MAIL_INVALID_REQUEST", message: "attachments are not supported on a scheduled send" } }, 400);
-      }
+      const parked = Array.isArray(req.attachments) ? req.attachments : [];
+      const attMeta: mail.MailAttachment[] = parked.map((a) => ({
+        id: `mailatt_demo_${Date.now().toString(36)}_${attSeq++}`,
+        filename: a.filename,
+        contentType: a.contentType,
+        sizeBytes: b64ToBytes(a.contentBase64).byteLength,
+      }));
       const id = `mailsch_demo_${Date.now().toString(36)}_${seq++}`;
       const nowIso = new Date().toISOString();
-      const detail: mail.ScheduledSendDetail = {
+      const detail: DemoScheduled = {
         id,
         from: { email: me.email, name: me.displayName },
         to: req.to ?? [],
@@ -1030,12 +1241,16 @@ function createMailStore() {
         createdAt: nowIso,
         status: "scheduled",
         ...(req.inReplyTo ? { inReplyTo: req.inReplyTo } : {}),
+        ...(req.bcc && req.bcc.length > 0 ? { bcc: req.bcc } : {}),
+        ...(attMeta.length > 0 ? { attachments: attMeta, parked } : {}),
         textBody: req.textBody ?? "",
         ...(req.htmlBody ? { htmlBody: req.htmlBody } : {}),
       };
       const list = scheduledOf(me.id);
       list.unshift(detail);
-      saveScheduled(me.id, list);
+      if (!saveScheduled(me.id, list)) {
+        return json({ error: { code: "MAIL_ATTACHMENT_NOT_STORED", message: "demo storage is full (attachments too large for the demo)" } }, 503);
+      }
       return json({ id, scheduledAt: detail.scheduledAt, status: "scheduled" } satisfies mail.ScheduleMailResponse, 202);
     }
     if (method === "GET" && pathname === "/api/v1/mail/scheduled") {
@@ -1043,9 +1258,11 @@ function createMailStore() {
       const items: mail.ScheduledSendListItem[] = all
         .filter((s) => s.status === "scheduled")
         .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
-        .map(({ textBody, htmlBody, ...li }) => {
+        .map((s) => {
+          const { textBody, htmlBody, bcc, ...li } = publicSched(s);
           void textBody;
           void htmlBody;
+          void bcc;
           return li;
         });
       return json(page(items));
@@ -1057,7 +1274,7 @@ function createMailStore() {
         const list = scheduledOf(me.id);
         const idx = list.findIndex((s) => s.id === id);
         if (method === "GET") {
-          return idx >= 0 ? json(list[idx]!) : notFound(`GET ${pathname}`);
+          return idx >= 0 ? json(publicSched(list[idx]!)) : notFound(`GET ${pathname}`);
         }
         if (method === "PATCH") {
           if (idx < 0) return notFound(`PATCH ${pathname}`);
@@ -1071,7 +1288,7 @@ function createMailStore() {
           if (p.htmlBody !== undefined) cur.htmlBody = p.htmlBody;
           if (p.scheduledAt !== undefined) cur.scheduledAt = p.scheduledAt;
           saveScheduled(me.id, list);
-          return json(cur);
+          return json(publicSched(cur));
         }
         if (method === "DELETE") {
           if (idx < 0) return notFound(`DELETE ${pathname}`);
@@ -1079,6 +1296,39 @@ function createMailStore() {
           saveScheduled(me.id, list.filter((s) => s.id !== id));
           return json({ id, status: "canceled" });
         }
+      }
+    }
+
+    // 送信者ブロック (0021): per-account block list in localStorage, with the gateway's
+    // validation (lowercase, no own address / org domain, cap) so the preview behaves alike.
+    if (method === "GET" && pathname === "/api/v1/mail/blocks") {
+      return json({ items: loadBlocks() });
+    }
+    if (method === "POST" && pathname === "/api/v1/mail/blocks") {
+      const req = (body ?? {}) as Partial<mail.MailSenderBlockRequest>;
+      const raw = typeof req.value === "string" ? req.value.trim().toLowerCase() : "";
+      const kind: mail.MailSenderBlockKind = req.kind ?? (raw.includes("@") && !raw.startsWith("@") ? "address" : "domain");
+      const value = kind === "domain" ? raw.slice(raw.lastIndexOf("@") + 1) : raw;
+      const invalid = (msg: string) => json({ error: { code: "MAIL_INVALID_REQUEST", message: msg, retryable: false } }, 400);
+      if (!value || (kind === "address" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) || (kind === "domain" && !value.includes("."))) return invalid("invalid address or domain");
+      if (kind === "domain" && (value === "developershub.jp" || value.endsWith(".developershub.jp"))) return invalid("cannot block the organization domain");
+      if (kind === "address" && value === me.email.toLowerCase()) return invalid("cannot block your own address");
+      const list = loadBlocks();
+      const existing = list.find((b) => b.value === value);
+      if (existing) return json(existing);
+      if (list.length >= mailValues.MAIL_SENDER_BLOCK_LIMIT) return json({ error: { code: "MAIL_BLOCK_LIMIT", message: "block list is full", retryable: false } }, 409);
+      const created: mail.MailSenderBlock = { value, kind, createdAt: new Date().toISOString() };
+      saveBlocks([created, ...list]);
+      return json(created, 201);
+    }
+    if (method === "DELETE") {
+      const m = /^\/api\/v1\/mail\/blocks\/([^/]+)$/.exec(pathname);
+      if (m) {
+        const value = decodeURIComponent(m[1]!).trim().toLowerCase().replace(/^@/, "");
+        const list = loadBlocks();
+        if (!list.some((b) => b.value === value)) return json({ error: { code: "MAIL_BLOCK_NOT_FOUND", message: `not blocked: ${value}`, retryable: false } }, 404);
+        saveBlocks(list.filter((b) => b.value !== value));
+        return json({ value, blocked: false });
       }
     }
 
@@ -1140,6 +1390,37 @@ function saveFlags(flags: mail.MailThreadFlags[]): void {
   }
 }
 
+// Sender block list for the demo (localStorage, per account — mirrors mail_sender_blocks'
+// per-owner scope). Matching mirrors the gateway: exact address, or domain / parent domain.
+const BLOCKS_KEY = "dub-demo-mail-blocks";
+function loadBlocks(): mail.MailSenderBlock[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(`${BLOCKS_KEY}:${currentAccount().id}`);
+    return raw ? (JSON.parse(raw) as mail.MailSenderBlock[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveBlocks(blocks: mail.MailSenderBlock[]): void {
+  try {
+    globalThis.localStorage?.setItem(`${BLOCKS_KEY}:${currentAccount().id}`, JSON.stringify(blocks));
+  } catch {
+    /* ignore */
+  }
+}
+function demoBlockMatcher(blocks: readonly mail.MailSenderBlock[]): (email: string) => boolean {
+  return (email) => {
+    const e = email.trim().toLowerCase();
+    if (blocks.some((b) => b.kind === "address" && b.value === e)) return true;
+    let d = e.slice(e.lastIndexOf("@") + 1);
+    while (d.includes(".")) {
+      if (blocks.some((b) => b.kind === "domain" && b.value === d)) return true;
+      d = d.slice(d.indexOf(".") + 1);
+    }
+    return false;
+  };
+}
+
 // ── identity / roster (admin RBAC console) ────────────────────────────────────
 // The admin console (FE7 @dub/admin-roster) is fully INTERACTIVE in the demo:
 // permission-matrix edit, role add and user role assignment all persist in an
@@ -1193,6 +1474,11 @@ const SEED_USERS: DemoRosterUser[] = [
   { id: "usr_lead", orgId: ORG, displayName: "統括 山本", email: "lead@developershub.jp", githubLogin: null, avatarUrl: null, status: "active", source: "manual", roleIds: ["role_lead"], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_mana", orgId: ORG, displayName: "加藤 真名", email: "mana@developershub.jp", githubLogin: null, avatarUrl: null, status: "invited", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
   { id: "usr_noa", orgId: ORG, displayName: "吉田 乃愛", email: "noa@developershub.jp", githubLogin: "noa-y", avatarUrl: null, status: "disabled", source: "email-routing", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() },
+  // Bulk Email Routing addresses so the 名簿 spans several 20-row pages in the demo.
+  ...Array.from({ length: 30 }, (_, i): DemoRosterUser => {
+    const n = String(i + 1).padStart(2, "0");
+    return { id: `usr_mail${n}`, orgId: ORG, displayName: `メンバー ${n}`, email: `member${n}@developershub.jp`, githubLogin: null, avatarUrl: null, status: "active", source: "email-routing", roleIds: ["role_member"], createdAt: isoNow(), updatedAt: isoNow() };
+  }),
 ];
 
 // identity-roster's role DTO carries the cross-role mail visibility set (fe7 RoleView).
@@ -1478,7 +1764,21 @@ function createRosterStore() {
     return null;
   }
 
-  return { handle };
+  // Slack import (チャンネル取り込み) creates disabled placeholder users for bots /
+  // unmatched authors, exactly like the real importer writes identity_users.
+  function addUsers(list: { id: string; displayName: string }[]): void {
+    for (const u of list) {
+      if (users.some((x) => x.id === u.id)) continue;
+      users.push({ id: u.id, orgId: ORG, displayName: u.displayName, email: `${u.id}@slack-import.invalid`, githubLogin: null, avatarUrl: null, status: "disabled", source: "manual", roleIds: [], createdAt: isoNow(), updatedAt: isoNow() });
+    }
+  }
+
+  /** Login account by id (アカウント発行メールの CC 解決用). */
+  function findUser(id: string): DemoRosterUser | undefined {
+    return users.find((u) => u.id === id);
+  }
+
+  return { handle, addUsers, findUser };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -1501,9 +1801,12 @@ interface DemoChatChannel {
   archived?: boolean;
   version?: number;
   roster?: { userId: string; role: "admin" | "member"; joinedAt: string }[];
+  visibility?: "public" | "private"; // default: dm -> private, else public
 }
 
-function createChatStore() {
+type DemoMessage = Record<string, unknown> & { id: string; channelId: string; threadRootId: string | null };
+
+function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayName: string }[]) => void }) {
   const CH_TS = "2026-08-01T00:00:00.000Z";
   // 全体: everyone. announcements is the read-mostly 全体周知 channel.
   const overall: DemoChatChannel[] = [
@@ -1546,7 +1849,7 @@ function createChatStore() {
     name: c.name,
     topic: c.topic,
     eventId: c.eventId,
-    visibility: c.type === "dm" ? "private" : "public",
+    visibility: c.visibility ?? (c.type === "dm" ? "private" : "public"),
     archived: c.archived ?? false,
     memberCount: c.roster?.length ?? c.memberCount,
     ...(c.memberIds ? { memberIds: c.memberIds } : {}),
@@ -1568,22 +1871,21 @@ function createChatStore() {
     return c.roster;
   };
 
-  // Personal sidebar sections, per signed-in account (account switcher). The demo
+  // Org-wide sidebar sections: ONE shared set every account sees (chat/0007). Writes need
+  // 編集 + chat:manage_sections like chat-service's POLICY_TABLE (403 otherwise). The demo
   // admin starts with one 「運営」 section holding #admin so the feature shows at once.
   interface DemoSection { id: string; name: string; position: number; createdAt: string }
-  const sectionsByUser = new Map<string, { items: DemoSection[]; assignments: Record<string, string> }>([
-    [ME_ID, { items: [{ id: "sec_demo_ops", name: "運営", position: 0, createdAt: CH_TS }], assignments: { chn_admin: "sec_demo_ops" } }],
-  ]);
-  let sectionSeq = 0;
-  const mySections = () => {
-    const me = currentAccount().id;
-    let entry = sectionsByUser.get(me);
-    if (!entry) {
-      entry = { items: [], assignments: {} };
-      sectionsByUser.set(me, entry);
-    }
-    return entry;
+  const shared: { items: DemoSection[]; assignments: Record<string, string> } = {
+    items: [{ id: "sec_demo_ops", name: "運営", position: 0, createdAt: CH_TS }],
+    assignments: { chn_admin: "sec_demo_ops" },
   };
+  let sectionSeq = 0;
+  const canManageSections = () => {
+    const perms = currentAccount().permissions;
+    return perms.includes("app:chat:edit") && perms.includes("chat:manage_sections");
+  };
+  const sectionsForbidden = (): Response =>
+    json({ error: { code: "FORBIDDEN", message: "chat:manage_sections required", retryable: false } } satisfies ErrorResponse, 403);
   const sectionName = (raw: unknown): string | null => {
     const name = typeof raw === "string" ? raw.trim() : "";
     return name.length >= 1 && name.length <= 40 ? name : null;
@@ -1608,7 +1910,19 @@ function createChatStore() {
   // unfurl for known hosts; none for unknown) is visible without typing anything.
   const generalMessages = [
     msg({ id: "msg_01SEEDGEN0000000000000SYS", authorId: null, body: "Channel #general created.", createdAt: "2026-08-01T00:00:00.000Z" }),
-    msg({ id: "msg_01SEEDGEN0000000000000WEL", authorId: ME_ID, body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉", createdAt: "2026-08-01T00:05:00.000Z" }),
+    // Custom emoji reactions: :kit-dev: is registered from the start (image), :partyparrot:
+    // only after an admin runs 「Slack の絵文字を取り込む」 (text until then — the before/after).
+    msg({
+      id: "msg_01SEEDGEN0000000000000WEL",
+      authorId: ME_ID,
+      body: "北陸ITカンファレンス運営チャンネルへようこそ 🎉",
+      createdAt: "2026-08-01T00:05:00.000Z",
+      reactions: [
+        { emoji: "🎉", userIds: ["usr_bob", "usr_emi"] },
+        { emoji: ":kit-dev:", userIds: ["usr_bob", ME_ID] },
+        { emoji: ":partyparrot:", userIds: ["usr_emi"] },
+      ],
+    }),
     msg({
       id: "msg_01SEEDGEN0000000000000URL",
       authorId: "usr_bob",
@@ -1629,7 +1943,44 @@ function createChatStore() {
       body: "<!team:team_hq> 明日の定例は 10:00 開始に変更します。<!team:team_corp> 契約書のレビューもお願いします 🙏",
       createdAt: "2026-08-01T00:14:00.000Z",
     }),
+    // メッセージリンクの展開 (Slack unfurl): 同じチャンネル / DM / 読めないメッセージへのリンク。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZUL",
+      authorId: "usr_emi",
+      body: `LP の場所はこのメッセージにまとまっています ${demoMessageLink("chn_general", "msg_01SEEDGEN0000000000000URL")}`,
+      createdAt: "2026-08-01T00:16:00.000Z",
+    }),
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZUM",
+      authorId: ME_ID,
+      body: `DM で相談された件です ${demoMessageLink("chn_dm_bob", "msg_01SEEDDMB0000000000000001")} 削除されたメッセージへのリンクはこう見えます ${demoMessageLink("chn_general", "msg_01SEEDGEN000000000000GONE")}`,
+      createdAt: "2026-08-01T00:18:00.000Z",
+    }),
+    // 転送 (Slack の「メッセージを転送する」): 引用カードで表示される。
+    msg({
+      id: "msg_01SEEDGEN0000000000000ZVF",
+      authorId: "usr_bob",
+      body: buildForwardBody({
+        comment: "定例の変更、全体にも共有しておきます",
+        text: "明日の定例は 10:00 開始に変更します。",
+        authorName: "佐藤 太郎",
+        sourceChannelName: "#team-soukatsu",
+      }),
+      createdAt: "2026-08-01T00:20:00.000Z",
+    }),
   ];
+  // 「後で」: the demo admin starts with saved items, reminders and one 完了 (this device only).
+  seedLaterDemoPrefs(ME_ID, {
+    saved: [
+      { messageId: "msg_01SEEDGEN0000000000000URL", channelId: "chn_general", authorId: "usr_bob", excerpt: "LP の最新版はこちらです https://developershub.jp/conf/2026" },
+      { messageId: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", excerpt: "LP の文言、確認してもらえますか？急ぎではないです 🙏" },
+    ],
+    reminders: [
+      { messageId: "msg_01SEEDGEN0000000000000ZTM", channelId: "chn_general", authorId: "usr_bob", excerpt: "@統括チーム 明日の定例は 10:00 開始に変更します。", inMinutes: 180 },
+      { messageId: "msg_01SEEDGEN0000000000000UR2", channelId: "chn_general", authorId: ME_ID, excerpt: "こっちは画像なしのサイトです https://example.com/", inMinutes: 60 * 24 * 3 },
+    ],
+    completed: [{ messageId: "msg_01SEEDGEN0000000000000WEL", channelId: "chn_general", authorId: ME_ID, excerpt: "北陸ITカンファレンス運営チャンネルへようこそ 🎉" }],
+  });
   // Posted messages persist for the session (per channel) so a sent URL renders
   // its card in place; ids are minted ascending so they sort after the seed.
   const posted = new Map<string, ReturnType<typeof msg>[]>();
@@ -1638,13 +1989,87 @@ function createChatStore() {
     msg({ id: "msg_01SEEDDMB0000000000000001", channelId: "chn_dm_bob", authorId: "usr_bob", body: "LP の文言、確認してもらえますか？急ぎではないです 🙏", createdAt: "2026-08-01T01:00:00.000Z" }),
     msg({ id: "msg_01SEEDDMB0000000000000002", channelId: "chn_dm_bob", authorId: ME_ID, body: "了解です、今日中に見ます！", createdAt: "2026-08-01T01:03:00.000Z" }),
   ];
-  const messagesOf = (channelId: string | null) => [
+  // チャンネル取り込み (Slack): the shared fe6 simulator drives the jobs; a finished job
+  // materializes its Dub channel (thread, reactions, placeholder authors, pins, files).
+  const imported = new Map<string, { messages: DemoMessage[]; pinnedIds: string[] }>();
+  const materializeImport = (c: ImportedChannel) => {
+    const existing = byId.get(c.id);
+    if (existing) {
+      existing.archived = c.archived;
+    } else {
+      const created: DemoChatChannel = { id: c.id, type: "topic", name: c.name, topic: c.topic, eventId: null, memberCount: c.memberCount, visibility: c.visibility, archived: c.archived };
+      all.push(created);
+      byId.set(created.id, created);
+    }
+    imported.set(c.id, { messages: c.messages as unknown as DemoMessage[], pinnedIds: [...c.pinnedIds] });
+    addUsers(c.placeholderUsers);
+  };
+  const slackImport = createSlackImportSim({
+    // usr_ken is a disabled (退会済み) roster account — still matched by email.
+    authors: { me: ME_ID, a: "usr_bob", b: "usr_emi", disabled: "usr_ken" },
+    onDone: materializeImport,
+  });
+  // カスタム絵文字 (Slack): the shared fe6 simulator (two pre-imported, the rest on import).
+  const customEmoji = createCustomEmojiSim();
+  const simResponse = (r: ReturnType<typeof slackImport.step>): Response =>
+    r.ok ? json(r.value, r.status) : json({ error: { code: r.code, message: r.message, retryable: false } } satisfies ErrorResponse, r.status);
+
+  const messagesOf = (channelId: string | null): DemoMessage[] => [
     ...(channelId === "chn_general" ? generalMessages : []),
     ...(channelId === "chn_dm_bob" ? dmMessages : []),
+    ...(channelId ? (imported.get(channelId)?.messages ?? []) : []),
     ...(channelId ? (posted.get(channelId) ?? []) : []),
   ];
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    if (pathname.startsWith("/api/v1/chat/custom-emojis")) {
+      if (method === "GET" && pathname === "/api/v1/chat/custom-emojis") return json({ items: customEmoji.list() });
+      if (method === "POST" && pathname === "/api/v1/chat/custom-emojis/slack-import") {
+        const after = (body as { after?: unknown } | null)?.after;
+        return json(customEmoji.importStep(typeof after === "string" ? after : null));
+      }
+      const img = /^\/api\/v1\/chat\/custom-emojis\/([^/]+)\/image$/.exec(pathname);
+      if (img && method === "GET") {
+        const found = customEmoji.image(decodeURIComponent(img[1]!));
+        if (!found) return notFound(`GET ${pathname}`);
+        return new Response(found.body, { status: 200, headers: { "content-type": found.contentType, "cache-control": "private, max-age=86400" } });
+      }
+      return null;
+    }
+    {
+      // Reaction toggle (Slack-parity, incl. custom ":name:") on any demo message — mutated in
+      // place so the reaction survives a timeline refetch for the session.
+      const m = /^\/api\/v1\/chat\/messages\/([^/]+)\/reactions$/.exec(pathname);
+      if (m && method === "POST") {
+        const id = decodeURIComponent(m[1]!);
+        const emoji = (body as { emoji?: unknown } | null)?.emoji;
+        if (typeof emoji !== "string" || !emoji) return validationFailed("emoji is required");
+        const all = [...generalMessages, ...dmMessages, ...[...imported.values()].flatMap((x) => x.messages), ...[...posted.values()].flat()] as DemoMessage[];
+        const target = all.find((x) => x.id === id);
+        if (!target) return notFound(`POST ${pathname}`);
+        const me = currentAccount().id;
+        const reactions = ((target.reactions as { emoji: string; userIds: string[] }[] | undefined) ?? []).map((r) => ({ ...r, userIds: [...r.userIds] }));
+        const r = reactions.find((x) => x.emoji === emoji);
+        if (!r) reactions.push({ emoji, userIds: [me] });
+        else r.userIds = r.userIds.includes(me) ? r.userIds.filter((u) => u !== me) : [...r.userIds, me];
+        target.reactions = reactions.filter((x) => x.userIds.length > 0);
+        return json({ messageId: id, reactions: target.reactions });
+      }
+    }
+    if (pathname.startsWith("/api/v1/chat/slack-import/")) {
+      if (method === "GET" && pathname === "/api/v1/chat/slack-import/channels") return json({ items: slackImport.listChannels() });
+      if (method === "GET" && pathname === "/api/v1/chat/slack-import/jobs") {
+        return json({ items: slackImport.listJobs(Number(url.searchParams.get("limit") ?? 20) || 20) });
+      }
+      if (method === "POST" && pathname === "/api/v1/chat/slack-import/jobs") {
+        return simResponse(slackImport.createJob((body as { channel?: unknown } | null)?.channel));
+      }
+      const step = /^\/api\/v1\/chat\/slack-import\/jobs\/([^/]+)\/step$/.exec(pathname);
+      if (step && method === "POST") return simResponse(slackImport.step(decodeURIComponent(step[1]!)));
+      const one = /^\/api\/v1\/chat\/slack-import\/jobs\/([^/]+)$/.exec(pathname);
+      if (one && method === "GET") return simResponse(slackImport.getJob(decodeURIComponent(one[1]!)));
+      return null;
+    }
     if (method === "POST" && pathname === "/api/v1/chat/messages") {
       const req = (body ?? {}) as { channelId?: string; body?: string; threadRootId?: string | null };
       if (!req.channelId || typeof req.body !== "string") return notFound(`POST ${pathname}`);
@@ -1698,11 +2123,12 @@ function createChatStore() {
       return json([]); // no unread badges in demo
     }
     if (pathname === "/api/v1/chat/sections") {
-      const mine = mySections();
+      const mine = shared;
       if (method === "GET") {
         return json({ items: [...mine.items].sort((a, b) => a.position - b.position), assignments: { ...mine.assignments } });
       }
       if (method === "POST") {
+        if (!canManageSections()) return sectionsForbidden();
         const name = sectionName((body as { name?: unknown } | null)?.name);
         if (!name) return validationFailed("section name must be 1..40 chars");
         const position = mine.items.reduce((max, x) => Math.max(max, x.position + 1), 0);
@@ -1714,7 +2140,8 @@ function createChatStore() {
     {
       const m = /^\/api\/v1\/chat\/sections\/([^/]+)$/.exec(pathname);
       if (m && (method === "PATCH" || method === "DELETE")) {
-        const mine = mySections();
+        if (!canManageSections()) return sectionsForbidden();
+        const mine = shared;
         const id = decodeURIComponent(m[1]!);
         const idx = mine.items.findIndex((x) => x.id === id);
         if (idx < 0) return notFound(`${method} ${pathname}`);
@@ -1739,8 +2166,9 @@ function createChatStore() {
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/section$/.exec(pathname);
       if (m && method === "PUT") {
         const channelId = decodeURIComponent(m[1]!);
+        if (!canManageSections()) return sectionsForbidden();
         const sectionId = (body as { sectionId?: string | null } | null)?.sectionId ?? null;
-        const mine = mySections();
+        const mine = shared;
         if (!byId.has(channelId)) return notFound(`PUT ${pathname}`);
         if (sectionId !== null && !mine.items.some((x) => x.id === sectionId)) return notFound(`PUT ${pathname} (section)`);
         if (sectionId === null) delete mine.assignments[channelId];
@@ -1777,7 +2205,7 @@ function createChatStore() {
         return json(toWire(c));
       }
       if (m && method === "DELETE") {
-        // Hard delete: the channel, its posts and every user's section assignment go.
+        // Hard delete: the channel, its posts and its (shared) section assignment go.
         const id = decodeURIComponent(m[1]!);
         const c = byId.get(id);
         if (!c) return notFound(`DELETE ${pathname}`);
@@ -1785,7 +2213,7 @@ function createChatStore() {
         all.splice(all.indexOf(c), 1);
         byId.delete(id);
         posted.delete(id);
-        for (const entry of sectionsByUser.values()) delete entry.assignments[id];
+        delete shared.assignments[id];
         return json(null, 204);
       }
     }
@@ -1796,8 +2224,10 @@ function createChatStore() {
     if (method === "GET" && pathname === "/api/v1/chat/messages") {
       const channelId = url.searchParams.get("channelId");
       // #general opens to a seeded timeline (incl. a system post); others start empty
-      // and grow with posts made during the session.
-      return json(page(messagesOf(channelId)));
+      // and grow with posts made during the session. Like chat-service: the channel
+      // timeline holds top-level posts only; ?threadRootId= returns that thread's replies.
+      const threadRootId = url.searchParams.get("threadRootId");
+      return json(page(messagesOf(channelId).filter((m) => (m.threadRootId ?? null) === (threadRootId || null))));
     }
     {
       // Members / pins: demo returns a small roster and no pins (bare arrays per the
@@ -1833,7 +2263,11 @@ function createChatStore() {
         return json(null, 204);
       }
       const pin = /^\/api\/v1\/chat\/channels\/([^/]+)\/pins$/.exec(pathname);
-      if (pin && method === "GET") return json([]);
+      if (pin && method === "GET") {
+        const channelId = decodeURIComponent(pin[1]!);
+        const imp = imported.get(channelId);
+        return json(imp ? imp.messages.filter((m) => imp.pinnedIds.includes(m.id)) : []);
+      }
     }
     return null;
   }
@@ -2021,7 +2455,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   if (method === "POST") {
     // task create (カレンダーの予定追加 / マイタスク). Appended to the in-memory seed so
     // the new 予定 survives a refetch within the session.
-    if (pathname === "/api/v1/tasks") {
+    if (pathname === "/api/v1/tasks" || pathname === "/api/v1/tasks/calendar-events") {
       const b = (body ?? {}) as Partial<task.CreateTaskRequest>;
       if (typeof b.title !== "string" || !b.title.trim()) return notFound(`POST ${pathname}`);
       const now = new Date().toISOString();
@@ -2144,7 +2578,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     // Detail-panel edit (title/status/priority/担当/チーム/開始日/期日). Updates the task and,
     // when the dates change, mirrors them onto the gantt row so the BAR moves immediately.
     {
-      const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+      const id = seg(/^\/api\/v1\/tasks\/(?:calendar-events\/)?([^/]+)$/);
       if (id) {
         const t = TASKS.find((x) => x.id === id);
         if (!t) return notFound(`PATCH ${pathname}`);
@@ -2172,7 +2606,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
   // task archive (カレンダーの予定削除). task-service soft-deletes; the demo drops the row
   // so every list (calendar / マイタスク) stops showing it.
   if (method === "DELETE") {
-    const id = seg(/^\/api\/v1\/tasks\/([^/]+)$/);
+    const id = seg(/^\/api\/v1\/tasks\/(?:calendar-events\/)?([^/]+)$/);
     if (id) {
       const i = TASKS.findIndex((x) => x.id === id);
       if (i < 0) return notFound(`DELETE ${pathname}`);
@@ -2230,6 +2664,7 @@ interface DemoDriveGoogleAccount {
   active: boolean;
   needsReconnect: boolean;
   calendarMissing?: boolean;
+  meetMissing?: boolean;
 }
 interface DemoDriveGoogleStatus {
   accounts: DemoDriveGoogleAccount[];
@@ -2322,7 +2757,7 @@ function createDriveGoogleDemoStore() {
         return write({
           ...cur,
           accounts: cur.accounts.map((a) =>
-            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, connectedAt: new Date().toISOString() } : a,
+            a.id === known.id ? { ...a, needsReconnect: false, calendarMissing: false, meetMissing: false, connectedAt: new Date().toISOString() } : a,
           ),
         });
       }
@@ -2505,6 +2940,10 @@ function createMeetingsDemoStore() {
         updatedAt: now,
       };
       write([...read(), created]);
+      // ?meetingCreate=timeout: saved, but the answer is lost like the gateway's 504.
+      if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("meetingCreate") === "timeout") {
+        return problem("UPSTREAM_TIMEOUT", "Gateway Timeout", 504);
+      }
       return json(created, 201);
     }
     const one = /^\/api\/v1\/meetings\/([^/]+)$/.exec(pathname);
@@ -2851,6 +3290,7 @@ function createMembersStore() {
     { id: "team_venue", key: "venue", name: "会場チーム", color: "#16a34a", description: "会場・設営・ネットワーク／配信" },
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
     { id: "team_corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: "法人設立・契約・会計／規程" },
+    { id: "team_network", key: "network", name: "ネットワークチーム", color: "#0891b2", description: "会場ネットワーク・Wi-Fi・配信回線" },
   ];
   const mk = (
     id: string,
@@ -2953,8 +3393,16 @@ function createMembersStore() {
     member_5: ["やまだ", "さぶろう"],
     member_6: ["たむら", "み"],
   };
+  // Gmail (参加届から流入) の seed。アカウント発行メールの確認用: 高岡 は紐付け済み(行から再送)、
+  // 鈴木 一郎 / 黒川 誠 は未紐付け(紐付け直後に送信確認が出る)。
+  const GMAIL: Record<string, string> = {
+    member_1: "takaoka.demo@gmail.com",
+    member_3: "suzuki.ichiro@gmail.com",
+    member_h2: "kurokawa.dev@gmail.com",
+  };
   for (const mem of members) {
     const kana = KANA[mem.id];
+    if (GMAIL[mem.id]) mem.gmail = GMAIL[mem.id]!;
     if (kana) {
       mem.lastNameKana = kana[0];
       mem.firstNameKana = kana[1];
@@ -2968,6 +3416,8 @@ function createMembersStore() {
     const year = mem.grade && mem.grade !== "graduate" ? mem.grade : undefined;
     const code = mem.department ? DEPT_CODE[mem.department] : undefined;
     if (year && code) mem.rosterNumber = `${year}${code}${(i % 3) + 1}-${String(10 + i).padStart(2, "0")}`;
+    // 学籍番号の seed (例 "1400980")。半角数字 7 桁の仮番号。
+    if (year) mem.studentNumber = `13${String(100 + i * 37).padStart(5, "0")}`;
   });
 
   // オンボーディング案内の初期項目 (公開ページ /onboarding に並ぶ)。実際の受け入れの流れ:
@@ -3009,7 +3459,7 @@ function createMembersStore() {
       id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
-      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
+      grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", studentNumber: "1401123", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
       schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -3019,7 +3469,7 @@ function createMembersStore() {
       id: "part_seed_3", orgId: ORG, memberId: null, name: "田村 未", normalizedName: "田村未",
       lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
       nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
-      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
+      grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", studentNumber: "1500456", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
       schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
@@ -3037,11 +3487,195 @@ function createMembersStore() {
     },
   ];
 
+
+  // ── 人事 (member-service /members/hr/* の demo) ─────────────────────────────
+  // ステータスの規則は @dub/types hr (canTransition / requiresJoin) をそのまま使う (本番と同じ判定)。
+  // 採用はこの members 配列に在籍メンバーを足し、オンボーディングは上の onboarding 項目をチェックリストに
+  // する。全 8 ステータスに 1 人以上いるよう seed する。
+  const hrAt = (daysAgo: number, hour = 10): string => {
+    const d = new Date(Date.now() - daysAgo * 86_400_000);
+    d.setHours(hour, 0, 0, 0);
+    return d.toISOString();
+  };
+  type DemoApplicant = hr.Applicant;
+  const applicant = (
+    id: string, name: string, stage: hr.ApplicantStage, daysAgo: number,
+    extra: Partial<DemoApplicant> = {},
+  ): DemoApplicant => ({
+    id, name, nameKana: null, email: null, department: null, grade: null, desiredTeamId: null, source: "公開フォーム",
+    motivation: null, interviewAt: null, stage, memberId: null, participationId: null, version: 1, createdBy: ME_ID,
+    createdAt: hrAt(daysAgo + 3), updatedAt: hrAt(daysAgo), ...extra,
+  });
+  // 採用済み (名簿にも在籍として入っている) の 3 人: 採用 / オンボーディング調整 / オンボーディング完了。
+  members.push(mk("member_hr1", "小林 葵", "メンバー", "added", ["team_dev"], members.length, "aoi@example.com", "情報工学科", "1年"));
+  members.push(mk("member_hr2", "佐野 陸", "メンバー", "added", ["team_pr"], members.length, "riku@example.com", "メディア情報学科", "2年"));
+  members.push(mk("member_hr3", "高橋 美咲", "メンバー", "added", ["team_venue"], members.length, "misaki@example.com", "建築学科", "1年"));
+  const applicants: DemoApplicant[] = [
+    applicant("app_demo_1", "青木 陽向", "scheduling", 1, { nameKana: "あおき ひなた", email: "hinata@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", motivation: "運営ツールの開発に関わりたいです。" }),
+    applicant("app_demo_2", "井上 さくら", "scheduling", 2, { nameKana: "いのうえ さくら", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", source: "紹介" }),
+    applicant("app_demo_3", "宇野 蒼", "interview_set", 2, { nameKana: "うの そう", department: "機械工学科", grade: "1年", desiredTeamId: "team_ops", email: "sou@example.com", interviewAt: hrAt(-3, 18) }),
+    applicant("app_demo_4", "江口 結衣", "interviewed", 4, { nameKana: "えぐち ゆい", department: "建築学科", grade: "2年", desiredTeamId: "team_venue", source: "説明会", interviewAt: hrAt(5, 17) }),
+    applicant("app_demo_5", "大西 湊", "interviewed", 3, { nameKana: "おおにし みなと", email: "minato@example.com", department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", motivation: "ハッカソンの運営をやってみたい。", interviewAt: hrAt(4, 19) }),
+    applicant("app_demo_6", "川村 樹", "rejected", 8, { nameKana: "かわむら いつき", department: "経営情報学科", grade: "3年", interviewAt: hrAt(10, 18) }),
+    applicant("app_demo_7", "小林 葵", "hired", 2, { nameKana: "こばやし あおい", email: "aoi@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", memberId: "member_hr1", version: 4, interviewAt: hrAt(7, 18) }),
+    applicant("app_demo_8", "佐野 陸", "onboarding", 3, { nameKana: "さの りく", email: "riku@example.com", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", memberId: "member_hr2", version: 5, interviewAt: hrAt(12, 18) }),
+    applicant("app_demo_9", "高橋 美咲", "onboarded", 6, { nameKana: "たかはし みさき", email: "misaki@example.com", department: "建築学科", grade: "1年", desiredTeamId: "team_venue", memberId: "member_hr3", version: 6, interviewAt: hrAt(20, 18) }),
+    applicant("app_demo_10", "千葉 拓海", "withdrawn", 5, { nameKana: "ちば たくみ", department: "電気電子工学科", grade: "1年", source: "紹介" }),
+  ];
+  const hrEvents: hr.ApplicantEvent[] = [];
+  let hrSeq = 0;
+  const hrEvent = (applicantId: string, kind: hr.ApplicantEventKind, fromStage: hr.ApplicantStage | null, toStage: hr.ApplicantStage | null, bodyText: string | null, at: string) =>
+    hrEvents.push({ id: `hre_demo_${++hrSeq}`, applicantId, kind, fromStage, toStage, body: bodyText, actorId: ME_ID, createdAt: at });
+  const PATH: hr.ApplicantStage[] = ["scheduling", "interview_set", "interviewed"];
+  for (const a of applicants) {
+    hrEvent(a.id, "created", null, "scheduling", null, a.createdAt);
+    const reached = PATH.indexOf(a.stage) >= 0 ? PATH.indexOf(a.stage) : a.stage === "withdrawn" ? 0 : 2;
+    for (let i = 1; i <= reached; i++) hrEvent(a.id, "stage", PATH[i - 1]!, PATH[i]!, null, a.createdAt);
+    if (a.stage === "rejected") hrEvent(a.id, "stage", "interviewed", "rejected", "今回は見送り", a.updatedAt);
+    if (a.stage === "withdrawn") hrEvent(a.id, "stage", "scheduling", "withdrawn", "本人より辞退の連絡", a.updatedAt);
+    if (a.memberId) hrEvent(a.id, "joined", "interviewed", "hired", "名簿に新規追加", a.updatedAt);
+    if (a.stage === "onboarding") hrEvent(a.id, "stage", "hired", "onboarding", "オンボーディングのチェックで自動更新", a.updatedAt);
+    if (a.stage === "onboarded") hrEvent(a.id, "stage", "onboarding", "onboarded", "オンボーディングのチェックで自動更新", a.updatedAt);
+  }
+  hrEvent("app_demo_2", "note", null, null, "日程候補を 3 つ送付済み・返信待ち", hrAt(1, 12));
+  hrEvent("app_demo_3", "note", null, null, "オンライン面談（Meet）で確定", hrAt(2, 12));
+  hrEvent("app_demo_5", "note", null, null, "面談: 意欲高い。開発チームで受け入れたい", hrAt(3, 20));
+  // 佐野 = 一部チェック済み / 高橋 = 全部チェック済み (完了)。
+  const obChecks = new Set<string>(["member_hr2|onb_demo_1", "member_hr2|onb_demo_2"]);
+  for (const o of onboarding) obChecks.add(`member_hr3|${o.id}`);
+
+  function hrProgress(memberId: string): hr.OnboardingProgress | null {
+    const a = applicants.find((x) => x.memberId === memberId && hr.ROSTER_STAGES.includes(x.stage)) ?? null;
+    const person = members.find((m) => m.id === memberId);
+    if (!person) return null;
+    const checked = onboarding.filter((o) => obChecks.has(`${memberId}|${o.id}`)).map((o) => o.id);
+    return {
+      memberId, name: person.name, applicantId: a?.id ?? null, stage: a?.stage ?? null, joinedAt: a?.updatedAt ?? null,
+      checkedItemIds: checked, total: onboarding.length, done: checked.length,
+      completed: onboarding.length > 0 && checked.length === onboarding.length,
+    };
+  }
+
+  function hrHandle(method: string, pathname: string, body: any): Response | null {
+    if (!pathname.startsWith("/api/v1/members/hr/")) return null;
+    const err = (code: string, status: number) => json({ error: { code, message: code, retryable: false } }, status);
+    const detail = (a: DemoApplicant) => ({ applicant: { ...a }, events: hrEvents.filter((e) => e.applicantId === a.id).map((e) => ({ ...e })) });
+    const bump = (a: DemoApplicant) => { a.version += 1; a.updatedAt = new Date().toISOString(); };
+    const nowIso = () => new Date().toISOString();
+    if (method === "GET" && pathname === "/api/v1/members/hr/applicants") {
+      return json({
+        applicants: [...applicants].map((a) => {
+          const latest = hrEvents.filter((e) => e.applicantId === a.id && e.body).at(-1);
+          return { ...a, latestNote: latest?.body ?? null };
+        }),
+      });
+    }
+    if (method === "POST" && pathname === "/api/v1/members/hr/applicants") {
+      const name = String(body?.name ?? "").trim();
+      if (!name) return err("VALIDATION_FAILED", 400);
+      const a = applicant(nid("app"), name, "scheduling", 0, {
+        nameKana: body?.nameKana ?? null, email: body?.email ?? null, department: body?.department ?? null, grade: body?.grade ?? null,
+        desiredTeamId: body?.desiredTeamId ?? null, source: body?.source ?? null, motivation: body?.motivation ?? null,
+        interviewAt: body?.interviewAt ?? null,
+      });
+      a.createdAt = nowIso(); a.updatedAt = a.createdAt;
+      applicants.push(a);
+      hrEvent(a.id, "created", null, "scheduling", null, a.createdAt);
+      return json(detail(a), 201);
+    }
+    if (method === "GET" && pathname === "/api/v1/members/hr/onboarding") {
+      const hired = applicants.filter((a) => a.memberId && hr.ROSTER_STAGES.includes(a.stage));
+      return json({
+        items: onboarding.map((o) => ({ id: o.id, title: o.title, description: o.description, url: o.url })),
+        members: hired.map((a) => hrProgress(a.memberId!)).filter((p): p is hr.OnboardingProgress => p !== null),
+      });
+    }
+    const check = /^\/api\/v1\/members\/hr\/onboarding\/([^/]+)\/items\/([^/]+)$/.exec(pathname);
+    if (check && method === "PUT") {
+      const [, memberId, itemId] = check as unknown as [string, string, string];
+      if (!onboarding.some((o) => o.id === itemId)) return err("MEMBER_ONBOARDING_ITEM_NOT_FOUND", 404);
+      if (body?.checked) obChecks.add(`${memberId}|${itemId}`);
+      else obChecks.delete(`${memberId}|${itemId}`);
+      // 本番と同じ自動ステータス: 1 つ以上で 採用→調整 / 全部で 完了 / 完了から外れたら 調整。
+      const before = hrProgress(memberId);
+      const a = applicants.find((x) => x.memberId === memberId && hr.ROSTER_STAGES.includes(x.stage));
+      if (before && a) {
+        const target: hr.ApplicantStage | null = before.completed
+          ? a.stage !== "onboarded" ? "onboarded" : null
+          : a.stage === "onboarded" || (a.stage === "hired" && before.done > 0) ? "onboarding" : null;
+        if (target) {
+          const from = a.stage;
+          a.stage = target;
+          bump(a);
+          hrEvent(a.id, "stage", from, target, "オンボーディングのチェックで自動更新", nowIso());
+        }
+      }
+      const p = hrProgress(memberId);
+      return p ? json(p) : err("MEMBER_NOT_FOUND", 404);
+    }
+    const m = /^\/api\/v1\/members\/hr\/applicants\/([^/]+)(?:\/(stage|notes|join))?$/.exec(pathname);
+    if (!m) return null;
+    const a = applicants.find((x) => x.id === m[1]);
+    if (!a) return err("HR_APPLICANT_NOT_FOUND", 404);
+    const action = m[2];
+    if (!action && method === "GET") return json(detail(a));
+    if (!action && method === "DELETE") {
+      applicants.splice(applicants.indexOf(a), 1);
+      return json({ ok: true });
+    }
+    if (!action && method === "PATCH") {
+      if (body?.expectedVersion !== a.version) return err("HR_VERSION_CONFLICT", 409);
+      Object.assign(a, Object.fromEntries(Object.entries(body ?? {}).filter(([k]) => k !== "expectedVersion")));
+      bump(a);
+      return json({ ...a });
+    }
+    if (action === "stage" && method === "POST") {
+      if (body?.expectedVersion !== a.version) return err("HR_VERSION_CONFLICT", 409);
+      if (!hr.isApplicantStage(body?.stage)) return err("VALIDATION_FAILED", 400);
+      if (hr.requiresJoin(body.stage, a.memberId !== null)) return err("HR_JOIN_REQUIRED", 409);
+      if (!hr.canTransition(a.stage, body.stage, a.memberId !== null)) return err("HR_INVALID_TRANSITION", 409);
+      const from = a.stage;
+      a.stage = body.stage;
+      bump(a);
+      hrEvent(a.id, "stage", from, a.stage, body?.note ?? null, nowIso());
+      return json(detail(a));
+    }
+    if (action === "notes" && method === "POST") {
+      const text = String(body?.body ?? "").trim();
+      if (!text) return err("VALIDATION_FAILED", 400);
+      hrEvent(a.id, "note", null, null, text, nowIso());
+      return json(detail(a), 201);
+    }
+    if (action === "join" && method === "POST") {
+      if (a.memberId !== null) return err("HR_INVALID_TRANSITION", 409);
+      if (body?.expectedVersion !== a.version) return err("HR_VERSION_CONFLICT", 409);
+      let memberId = body?.memberId as string | undefined;
+      if (memberId) {
+        const p = members.find((x) => x.id === memberId);
+        if (!p) return err("VALIDATION_FAILED", 400);
+        if (p.status === "invited" || p.status === "considering") p.status = "added";
+      } else {
+        const created = mk(nid("member"), a.name, "メンバー", "added", a.desiredTeamId ? [a.desiredTeamId] : [], members.length, a.email, a.department, a.grade);
+        members.push(created);
+        memberId = created.id;
+      }
+      const from = a.stage;
+      a.stage = "hired";
+      a.memberId = memberId;
+      bump(a);
+      hrEvent(a.id, "joined", from, "hired", body?.memberId ? "既存の名簿に紐付け" : "名簿に新規追加", nowIso());
+      return json({ applicant: { ...a }, memberId });
+    }
+    return null;
+  }
+
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
 
   const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
   function handle(method: string, pathname: string, _url: URL, body: any): Response | null {
+    const hrRes = hrHandle(method, pathname, body);
+    if (hrRes) return hrRes;
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
     // canonical team list other apps read
     if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
@@ -3360,7 +3994,51 @@ function createMembersStore() {
     return null;
   }
 
-  return { handle };
+  /** 運営メンバー linked to a login (アカウント発行メールの宛先解決用). */
+  function findByIdentity(identityUserId: string): DemoMember | undefined {
+    return members.find((x) => x.identityUserId === identityUserId);
+  }
+
+  // アカウント設定 (GET/POST /api/v1/me/participation): ログイン中アカウントに紐付いた名簿の
+  // 行そのものを読み書きする (member-service と同じく 本人の情報 + 連絡先 だけ編集可)。
+  function selfEntry(identityUserId: string, method: string, body: any): Response {
+    let mem = findByIdentity(identityUserId);
+    if (method === "POST") {
+      const r = memberValues.parsePersonProfilePatch((body ?? {}) as Record<string, unknown>);
+      if (r.errors.length > 0) {
+        return json({ error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } } satisfies ErrorResponse, 400);
+      }
+      if (!mem) {
+        mem = {
+          ...memberValues.emptyPersonProfile(),
+          id: nid("member"), orgId: ORG, name: "", roleTitle: null, status: "added", teamIds: [],
+          identityUserId, leaderId: null, contact: null,
+          sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
+        };
+        members.push(mem);
+      }
+      Object.assign(mem, r.value);
+      if (body?.contact !== undefined) mem.contact = typeof body.contact === "string" && body.contact.trim() ? body.contact.trim() : null;
+      mem.name = [mem.lastName, mem.firstName].filter((x) => !!x).join(" ") || mem.name || (mem.gmail ?? mem.schoolEmail ?? "").split("@")[0] || "メンバー";
+      mem.version += 1;
+      mem.updatedAt = isoNow();
+    }
+    if (!mem) return json({ ...memberValues.emptyPersonProfile(), contact: null, operations: null });
+    const leader = mem.leaderId ? members.find((x) => x.id === mem!.leaderId) : undefined;
+    return json({
+      ...memberValues.pickPersonProfile(mem),
+      contact: mem.contact,
+      operations: {
+        name: mem.name,
+        roleTitle: mem.roleTitle,
+        status: mem.status,
+        teams: teams.filter((t) => mem!.teamIds.includes(t.id)).map((t) => ({ id: t.id, name: t.name, color: t.color })),
+        leaderName: leader?.name ?? null,
+      },
+    });
+  }
+
+  return { handle, findByIdentity, selfEntry };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -3757,6 +4435,9 @@ type DemoTicketOrder = {
   answers: { fieldId: string; label: string; value: string }[];
   createdAt: string;
   paidAt: string | null;
+  paymentMethod: string | null;
+  preview: boolean;
+  test: boolean;
 };
 
 function validDemoTicketType(input: Record<string, unknown>, partial: boolean): string | null {
@@ -3815,6 +4496,9 @@ function createLpTicketsStore() {
     enabled: false,
     ctaEnabled: false,
     paymentReady: false,
+    paymentMethods: ["card", "paypay"] as ("card" | "paypay")[],
+    // demo には Stripe も lp-analytics も無いので、プレビューのテスト購入は出せない。
+    previewCheckout: false,
     // 機能 demo では VITE_LP_PUBLIC_URL で LP の demo Worker に向ける。
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/tickets`,
     fields: [
@@ -3873,6 +4557,11 @@ function createLpTicketsStore() {
       ],
       createdAt,
       paidAt: status === "paid" ? createdAt : null,
+      // 有料で支払い済みだけ手段あり（カードと PayPay を交互に）。無料・未確定は null。
+      paymentMethod: status === "paid" && items.some((it) => it.unitPriceJpy > 0) ? (i % 2 === 0 ? "paypay" : "card") : null,
+      // 最新の支払い済み 1 件は LP管理プレビューからのテスト購入（「テスト（プレビュー）」表示の見本）。
+      preview: id === "ord_007",
+      test: id === "ord_007",
     };
   });
 
@@ -3975,6 +4664,10 @@ function createLpTicketsStore() {
       if (typeof req.active === "boolean") t.active = req.active;
       t.updatedAt = new Date().toISOString();
       return json(summary(t));
+    }
+
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/preview-token") {
+      return problem("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", 409);
     }
 
     if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
@@ -4160,7 +4853,7 @@ export function createDemoFetch(): typeof fetch {
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
-  const chatStore = createChatStore();
+  const chatStore = createChatStore({ addUsers: roster.addUsers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
   const lpStore = createLpStore();
   // LP チケット販売（券種・入力項目・購入者）— LP管理のチケットタブ。
@@ -4188,10 +4881,51 @@ export function createDemoFetch(): typeof fetch {
     // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
     // Nothing is persisted — the demo session is stateless for credentials.
     if (method === "POST" && url.pathname === "/api/v1/me/password") return json(null, 204);
+    // アカウント設定の「本人の情報 / 運営での情報」= 名簿の自分の行。
+    if ((method === "GET" || method === "POST") && url.pathname === "/api/v1/me/participation") {
+      return membersStore.selfEntry(currentMe().user.id, method, parsedBody);
+    }
+
+    // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
+    if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));
+
+    // アカウント発行メール (gateway-owned): member Gmail (to) + login (cc). Nothing is sent.
+    {
+      const am = /^\/api\/v1\/admin\/users\/([^/]+)\/account-mail$/.exec(url.pathname);
+      if (am && method === "POST") {
+        const uid = decodeURIComponent(am[1]!);
+        const linked = membersStore.findByIdentity(uid);
+        const gmail = (linked?.gmail ?? "").trim();
+        if (!linked || !gmail) return problem("VALIDATION_FAILED", "運営メンバーの Gmail が登録されていません", 400);
+        const res: authTypes.AdminSendAccountMailResponse = {
+          ok: true,
+          to: gmail,
+          cc: roster.findUser(uid)?.email ?? "",
+          appUrl: "https://app.developershub.jp",
+          passwordSource: "existing",
+          messageId: `demo_msg_${Date.now()}`,
+        };
+        return json(res);
+      }
+      // Admin password issue / view (メール名簿の右ペイン): generated on demand, never stored.
+      const pw = /^\/api\/v1\/admin\/users\/([^/]+)\/password$/.exec(url.pathname);
+      if (pw && method === "POST") {
+        const generated = !(parsedBody as authTypes.AdminSetPasswordRequest | undefined)?.password;
+        const res: authTypes.AdminSetPasswordResponse = generated
+          ? { ok: true, password: `Demo-${Math.random().toString(36).slice(2, 10)}` }
+          : { ok: true };
+        return json(res);
+      }
+      if (pw && method === "GET") {
+        const uid = decodeURIComponent(pw[1]!);
+        const res: authTypes.AdminViewPasswordResponse = { userId: uid, email: roster.findUser(uid)?.email ?? "", password: "Demo-pass-1234" };
+        return json(res);
+      }
+    }
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
-      mailStore.handle(method, url.pathname, url, parsedBody) ??
+      mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
       meetingsStore.handle(method, url.pathname, parsedBody) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??

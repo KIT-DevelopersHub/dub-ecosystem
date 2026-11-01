@@ -11,6 +11,7 @@ import type { mail } from "@dub/types";
 import type { MailApi } from "../mailApi.tsx";
 import { MailApiProvider } from "../MailProvider.tsx";
 import { GmailApp } from "./GmailApp.tsx";
+import { MAIL_POLL_MS } from "./useMailSync.tsx";
 import { reducer, initialMailState, type MailState } from "./useMailStore.tsx";
 import { hasSharedMail, inFolder, sharedRecipientLabel, threadMine, threadUnread, type MailThreadModel } from "./mailModel.ts";
 import {
@@ -42,6 +43,10 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getScheduled: vi.fn().mockResolvedValue({ id: "sch", to: [], subject: "s", snippet: "", scheduledAt: "2099-01-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z", status: "scheduled", textBody: "b" }),
     updateScheduled: vi.fn().mockResolvedValue({ id: "sch", to: [], subject: "s", snippet: "", scheduledAt: "2099-01-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z", status: "scheduled", textBody: "b" }),
     cancelScheduled: vi.fn().mockResolvedValue({ id: "sch", status: "canceled" }),
+    listBlocks: vi.fn().mockResolvedValue([]),
+    addBlock: vi.fn().mockImplementation((req: { value: string; kind?: "address" | "domain" }) => Promise.resolve({ value: req.value.toLowerCase(), kind: req.kind ?? "address", createdAt: "2026-01-01T00:00:00.000Z" })),
+    removeBlock: vi.fn().mockImplementation((value: string) => Promise.resolve({ value, blocked: false })),
+    counts: vi.fn().mockRejectedValue(new Error("no counts")),
     ...over,
   };
 }
@@ -88,6 +93,19 @@ describe("mail store reducer", () => {
     });
     expect(next.threads.find((t) => t.id === inbox.id)!.starred).toBe(true);
     expect(next.threads.find((t) => t.id === other.id)!.folder).toBe("archive");
+  });
+
+  it("never changes the read state of another account's mail (view-only)", () => {
+    const s = base();
+    const t = s.threads.find((x) => threadUnread(x))!;
+    const others: MailState = {
+      ...s,
+      threads: s.threads.map((x) => (x.id === t.id ? { ...x, messages: x.messages.map((m) => ({ ...m, read: false, mine: false })) } : x)),
+    };
+    expect(threadUnread(others.threads.find((x) => x.id === t.id)!)).toBe(false);
+    const opened = reducer(others, { type: "OPEN_THREAD", id: t.id });
+    const read = reducer(opened, { type: "SET_READ", ids: [t.id], read: true });
+    expect(read.threads.find((x) => x.id === t.id)!.messages.every((m) => !m.read)).toBe(true);
   });
 
   it("marks every message read when a thread is opened", () => {
@@ -227,6 +245,39 @@ describe("GmailApp (hydrates from the gateway)", () => {
     expect(screen.queryAllByTestId("fe2-mail-inbox-item")).toHaveLength(0);
   });
 
+  // Regression: mail that arrives after the inbox loaded never appeared until a full page
+  // reload (the 更新 button only cleared checks, and nothing re-fetched).
+  it("更新 re-fetches the inbox so newly arrived mail appears without a reload", async () => {
+    const listInbox = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+      .mockResolvedValue({ items: DEMO_INBOX_ITEMS, nextCursor: null });
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: vi.fn().mockResolvedValue({ items: [], nextCursor: null }) })));
+    expect(await screen.findByTestId("fe2-mail-inbox-empty")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("fe2-mail-refresh"));
+    await waitFor(() => expect(screen.getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0));
+    expect(listInbox).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-fetches the inbox in the background on an interval and when the tab becomes visible", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const listInbox = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+      render(wrap(<GmailApp />, fakeApi({ listInbox })));
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        vi.advanceTimersByTime(MAIL_POLL_MS);
+      });
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(3));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens a floating compose window from the compose button", async () => {
     render(wrap(<GmailApp />));
     await userEvent.click(screen.getByTestId("fe2-mail-compose-open"));
@@ -321,11 +372,13 @@ describe("GmailApp (hydrates from the gateway)", () => {
     // getThread returns received-only; the folded reply must survive the refresh.
     await waitFor(() => expect(screen.getByText("了解しました。")).toBeInTheDocument());
     // Replying targets the external correspondent (hanako), never our own info@ reply.
+    // Gmail answers the newest message: ours, so it re-addresses its recipients and
+    // threads against our sent Message-Id (`<send-log id>@domain`).
     await userEvent.click(screen.getByTestId("fe2-mail-reply"));
     await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
     const sent = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sent.to).toEqual([{ email: "hanako@example.com", name: "山田 花子" }]);
-    expect(sent.inReplyTo).toBe("<in1@developershub.jp>");
+    expect(sent.inReplyTo).toBe("sent_r@developershub.jp");
   });
 
   it("reply button opens a compose that sends In-Reply-To", async () => {
@@ -586,10 +639,10 @@ describe("GmailApp (hydrates from the gateway)", () => {
       await userEvent.click((await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!);
     };
 
-    it("summarises To + Cc on one line with the delivered-to address as 自分", async () => {
+    it("summarises To, then a labelled Cc, with the delivered-to address as 自分", async () => {
       await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
       const toggle = await screen.findByTestId("fe2-mail-details-toggle");
-      await waitFor(() => expect(toggle).toHaveTextContent("宛先: 自分, 伊藤 由紀, office@example.net"));
+      await waitFor(() => expect(toggle).toHaveTextContent("宛先: 自分 Cc: 伊藤 由紀, office@example.net"));
       expect(screen.queryByTestId("fe2-mail-details")).toBeNull();
     });
 
@@ -638,6 +691,42 @@ describe("GmailApp (hydrates from the gateway)", () => {
     it("replies to the Reply-To address (RFC 5322), not the From", async () => {
       await openFirst(fakeApi({ getThread: vi.fn().mockResolvedValue(withMeta) }));
       await waitFor(() => expect(screen.getByPlaceholderText("幹事 に返信…")).toBeInTheDocument());
+    });
+  });
+
+  // Keyboard shortcuts must not reach the thread behind an open modal (e/# on a dialog).
+  describe("keyboard shortcuts vs open modal", () => {
+    const openThread = async (api: MailApi): Promise<void> => {
+      render(wrap(<GmailApp />, api));
+      await userEvent.click((await screen.findAllByTestId("fe2-mail-inbox-item"))[0]!);
+      await screen.findByTestId("fe2-mail-details-toggle");
+    };
+    const archivedCalls = (api: MailApi): unknown[] =>
+      (api.setFlags as ReturnType<typeof vi.fn>).mock.calls.filter(([, p]) => (p as { archived?: boolean }).archived === true);
+    const trashedCalls = (api: MailApi): unknown[] =>
+      (api.setFlags as ReturnType<typeof vi.fn>).mock.calls.filter(([, p]) => (p as { trashed?: boolean }).trashed === true);
+
+    it("e archives the open thread when no modal is open (control)", async () => {
+      const api = fakeApi();
+      await openThread(api);
+      (document.activeElement as HTMLElement | null)?.blur();
+      fireEvent.keyDown(document.body, { key: "e" });
+      await waitFor(() => expect(archivedCalls(api)).toHaveLength(1));
+    });
+
+    it("e / # do nothing while the details dialog is open", async () => {
+      const api = fakeApi();
+      await openThread(api);
+      await userEvent.click(screen.getByTestId("fe2-mail-details-toggle"));
+      const dialog = await screen.findByTestId("fe2-mail-details");
+      fireEvent.keyDown(within(dialog).getByRole("button", { name: "閉じる" }), { key: "e" });
+      fireEvent.keyDown(document.body, { key: "e" });
+      fireEvent.keyDown(document.body, { key: "#" });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(archivedCalls(api)).toHaveLength(0);
+      expect(trashedCalls(api)).toHaveLength(0);
+      expect(screen.getByTestId("fe2-mail-thread")).toBeInTheDocument();
+      expect(screen.getByTestId("fe2-mail-details")).toBeInTheDocument();
     });
   });
 
@@ -800,5 +889,97 @@ describe("自分宛て / 自分宛て以外 (role-shared mail)", () => {
 
     await userEvent.click(screen.getByTestId("fe2-mail-folder-mine"));
     expect(within(screen.getByTestId("fe2-mail-inbox")).getAllByTestId("fe2-mail-inbox-item")).toHaveLength(DEMO_INBOX_ITEMS.length);
+  });
+});
+
+describe("Gmail-style pagination (cursor-paged folder list)", () => {
+  // n received items whose ids/subjects encode the page, so assertions can tell pages apart.
+  const pageItems = (page: number, n: number): mail.MailMessageListItem[] =>
+    Array.from({ length: n }, (_, i) => ({
+      ...DEMO_INBOX_ITEMS[1]!,
+      id: `p${page}_${i}`,
+      threadId: `thr_p${page}_${i}`,
+      subject: `page${page}-${i}`,
+    }));
+  // Page 1 (no cursor) → 50 items + cursor "c2"; page 2 ("c2") → 3 items, end of list.
+  const pagedInbox = () =>
+    vi.fn().mockImplementation((q?: { cursor?: string }) =>
+      Promise.resolve(q?.cursor === "c2" ? { items: pageItems(2, 3), nextCursor: null } : { items: pageItems(1, 50), nextCursor: "c2" }),
+    );
+  const noSent = () => vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+
+  it("shows the 1–50 range, pages forward/back via the cursor stack, and disables at both ends", async () => {
+    const listInbox = pagedInbox();
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: noSent() })));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("1–50"));
+    expect(screen.getByTestId("fe2-mail-page-prev")).toBeDisabled();
+    expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled();
+
+    await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
+    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", cursor: "c2" });
+    expect(screen.getAllByTestId("fe2-mail-inbox-item")).toHaveLength(3);
+    expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
+    expect(screen.getByTestId("fe2-mail-page-prev")).toBeEnabled();
+
+    await userEvent.click(screen.getByTestId("fe2-mail-page-prev"));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("1–50"));
+    expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox" });
+    expect(screen.getByTestId("fe2-mail-page-prev")).toBeDisabled();
+  });
+
+  it("shows a skeleton (not the empty state) while a page loads", async () => {
+    let release: (v: unknown) => void = () => undefined;
+    const listInbox = vi.fn().mockImplementation((q?: { cursor?: string }) =>
+      q?.cursor === "c2" ? new Promise((r) => (release = r)) : Promise.resolve({ items: pageItems(1, 50), nextCursor: "c2" }),
+    );
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: noSent() })));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
+    expect(screen.getByTestId("fe2-mail-list-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-mail-inbox-empty")).toBeNull();
+    expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
+    await act(async () => release({ items: pageItems(2, 3), nextCursor: null }));
+    await waitFor(() => expect(screen.queryByTestId("fe2-mail-list-loading")).toBeNull());
+  });
+
+  it("background refetch refreshes the CURRENT page (keeps the cursor)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const listInbox = pagedInbox();
+      render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: noSent() })));
+      await waitFor(() => expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled());
+      await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
+      await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
+      const calls = listInbox.mock.calls.length;
+      await act(async () => {
+        vi.advanceTimersByTime(MAIL_POLL_MS);
+      });
+      await waitFor(() => expect(listInbox.mock.calls.length).toBe(calls + 1));
+      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", cursor: "c2" });
+      expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53");
+      expect(screen.queryByTestId("fe2-mail-list-loading")).toBeNull(); // no skeleton flicker
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("switching folders returns to page 1; Sent pages its own list", async () => {
+    const listInbox = pagedInbox();
+    const listSent = vi.fn().mockResolvedValue({ items: DEMO_SENT_ITEMS, nextCursor: null });
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent })));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53"));
+    await userEvent.click(screen.getByTestId("fe2-mail-folder-sent"));
+    await waitFor(() => expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox" }));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent(`1–${DEMO_SENT_ITEMS.length}`));
+    expect(screen.getByTestId("fe2-mail-page-next")).toBeDisabled();
+  });
+
+  it("reducer ignores next at the last page and prev at the first page", () => {
+    const s = { ...initialMailState, listLoading: false };
+    expect(reducer(s, { type: "PAGE_NEXT", source: "inbox" })).toBe(s);
+    expect(reducer(s, { type: "PAGE_PREV", source: "inbox" })).toBe(s);
   });
 });
