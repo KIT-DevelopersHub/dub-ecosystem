@@ -6,6 +6,8 @@ import type { ChatKind, ChatMessage, ChatSession } from "./lib/commanderApi.ts";
 import { loadDraft, saveDraft, TITLE_MAX, useChat } from "./lib/chatStore.tsx";
 import { btnGhost, btnPrimary, card, input, t } from "./lib/theme.ts";
 import { isSubmitEnter } from "./lib/keyboard.ts";
+import type { ChatImage } from "./lib/images.ts";
+import { AttachButton, AttachmentTray, dropOutline, thumb, useImageAttachments } from "./ImageAttach.tsx";
 
 export function SessionSidebar({ kind }: { kind: ChatKind }) {
   const chat = useChat();
@@ -205,8 +207,13 @@ function SessionNameInput({
   );
 }
 
+/** Prompt used when the operator sends images without typing anything. */
+export const IMAGE_ONLY_TEXT = "この画像を見てください。";
+
 /** A composer whose draft is stored per session in localStorage. Remounts (via `key`)
- *  and a sessionId effect both re-seed it, so navigating away and back keeps the text. */
+ *  and a sessionId effect both re-seed it, so navigating away and back keeps the text.
+ *  Images can be pasted (Cmd/Ctrl+V), dropped, or picked with 📎, like Claude Code;
+ *  they stay in memory only and are dropped on a session switch. */
 export function ChatComposer({
   sessionId,
   placeholder,
@@ -220,9 +227,10 @@ export function ChatComposer({
   disabled?: boolean;
   busy?: boolean;
   sendLabel: string;
-  onSend: (text: string) => void;
+  onSend: (text: string, images: ChatImage[]) => void;
 }) {
   const [draft, setDraft] = useState(() => loadDraft(sessionId));
+  const att = useImageAttachments({ scope: sessionId, disabled });
   const sidRef = useRef(sessionId);
 
   // Re-seed when the active session changes (component may stay mounted across switches).
@@ -238,11 +246,13 @@ export function ChatComposer({
     saveDraft(sessionId, text);
   };
 
+  const canSend = (draft.trim() !== "" || att.images.length > 0) && !disabled && att.preparing === 0;
+
   const submit = () => {
-    const text = draft.trim();
-    if (!text || disabled) return;
-    onSend(text);
+    if (!canSend) return;
+    onSend(draft.trim() || IMAGE_ONLY_TEXT, att.images);
     update("");
+    att.clear();
   };
 
   return (
@@ -251,32 +261,81 @@ export function ChatComposer({
         e.preventDefault();
         submit();
       }}
-      style={{ display: "flex", gap: t.space3, alignItems: "flex-end" }}
+      {...att.dropProps}
+      data-testid="chat-composer"
+      data-dragging={att.dragging ? "1" : "0"}
+      style={{ display: "flex", flexDirection: "column", gap: t.space3, ...dropOutline(att.dragging) }}
     >
-      <textarea
-        data-testid="chat-input"
-        value={draft}
-        onChange={(e) => update(e.target.value)}
-        onKeyDown={(e) => {
-          if (isSubmitEnter(e)) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        placeholder={placeholder}
-        rows={2}
-        style={{ ...input, resize: "vertical", fontFamily: "inherit" }}
-        disabled={disabled}
-      />
-      <button
-        type="submit"
-        style={{ ...btnPrimary, whiteSpace: "nowrap", opacity: disabled || !draft.trim() ? 0.5 : 1 }}
-        disabled={disabled || !draft.trim()}
-        data-testid="chat-send"
-      >
-        {busy ? "実行中…" : sendLabel}
-      </button>
+      <AttachmentTray att={att} />
+      <div style={{ display: "flex", gap: t.space3, alignItems: "flex-end" }}>
+        <AttachButton att={att} disabled={disabled} />
+        <textarea
+          data-testid="chat-input"
+          value={draft}
+          onChange={(e) => update(e.target.value)}
+          onPaste={att.onPaste}
+          onKeyDown={(e) => {
+            if (isSubmitEnter(e)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder={placeholder}
+          rows={2}
+          style={{ ...input, resize: "vertical", fontFamily: "inherit" }}
+          disabled={disabled}
+        />
+        <button
+          type="submit"
+          style={{ ...btnPrimary, whiteSpace: "nowrap", opacity: canSend ? 1 : 0.5 }}
+          disabled={!canSend}
+          data-testid="chat-send"
+        >
+          {busy ? "実行中…" : sendLabel}
+        </button>
+      </div>
     </form>
+  );
+}
+
+/** Thumbnails of the images a user message was sent with; click to view full size. */
+function MessageImages({ urls }: { urls: string[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <div data-testid="chat-msg-images" style={{ display: "flex", flexWrap: "wrap", gap: t.space2, justifyContent: "flex-end" }}>
+      {urls.map((url, i) => (
+        <button
+          key={i}
+          type="button"
+          aria-label={`添付画像 ${i + 1} を拡大`}
+          onClick={() => setOpen(url)}
+          style={{ padding: 0, border: 0, background: "transparent", cursor: "zoom-in" }}
+        >
+          <img src={url} alt={`添付画像 ${i + 1}`} style={{ ...thumb, width: 120, height: 90 }} />
+        </button>
+      ))}
+      {open && (
+        <div
+          data-testid="chat-image-viewer"
+          role="dialog"
+          aria-label="添付画像"
+          onClick={() => setOpen(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: t.space6,
+            cursor: "zoom-out",
+          }}
+        >
+          <img src={open} alt="添付画像（拡大）" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: t.radius }} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -304,6 +363,7 @@ export function MessageBubble({
         gap: t.space2,
       }}
     >
+      {isUser && msg.images && msg.images.length > 0 && <MessageImages urls={msg.images} />}
       {bodyOverride ?? (
         <div
           style={{

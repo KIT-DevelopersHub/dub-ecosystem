@@ -20,6 +20,7 @@
     "@dub/freeq": "workspace:*",
     "@dub/http": "workspace:*",
     "@dub/observability": "workspace:*",
+    "@dub/slack-import": "workspace:*",
     "@dub/types": "workspace:*",
     "hono": "^4.6.14"
   },

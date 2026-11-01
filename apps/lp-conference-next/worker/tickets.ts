@@ -24,13 +24,22 @@ export interface PublicTicketType {
   remaining: number | null;
   soldOut: boolean;
 }
+export type PaymentMethod = "card" | "paypay";
+
 export interface TicketConfig {
   enabled: boolean;
   /** Set by the Worker (previewConfig), never by lp-analytics: shown as on sale, never sells. */
   preview: boolean;
+  /**
+   * Set by the Worker only after lp-analytics verified an LP管理 preview token (Stripe test key only):
+   * sales off for everyone else, but this viewer can buy as a test order. Carried in the form.
+   */
+  testPurchaseToken?: string;
   /** Swap the LP's 参加登録 buttons for 参加チケットを購入 (effective only with enabled). */
   ctaEnabled: boolean;
   paymentReady: boolean;
+  /** Advertised methods (lp-analytics LP_PAYPAY_ENABLED). Stripe still decides per session. */
+  paymentMethods: PaymentMethod[];
   fields: TicketField[];
   types: PublicTicketType[];
 }
@@ -52,6 +61,8 @@ export type FormValues = Record<string, string>;
 export type FormErrors = Record<string, string>;
 
 export const HONEYPOT = "website";
+/** Hidden form field carrying the verified preview token (same name as the URL param). */
+export const TICKETS_PREVIEW_FIELD = "tickets_preview";
 export const CHECKBOX_YES = "はい";
 const NAME_MAX = 100;
 const EMAIL_MAX = 254;
@@ -70,6 +81,7 @@ export const DEMO_CONFIG: TicketConfig = {
   preview: false,
   ctaEnabled: true,
   paymentReady: true,
+  paymentMethods: ["card", "paypay"],
   fields: [
     { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
     { id: "attendance", label: "参加区分", type: "select", required: true, options: ["現地", "オンライン"] },
@@ -214,6 +226,7 @@ export function parseConfig(raw: unknown): TicketConfig | null {
     preview: false,
     ctaEnabled: o.ctaEnabled === true,
     paymentReady: o.paymentReady === true,
+    paymentMethods: Array.isArray(o.paymentMethods) && o.paymentMethods.includes("paypay") ? ["card", "paypay"] : ["card"],
     fields,
     types,
   };
@@ -831,6 +844,22 @@ export function hero(o: {
 }
 
 export const PREVIEW_NOTE = "プレビュー表示中です。このページはまだ一般公開されていません（お申し込みはできません）。";
+export const TEST_PURCHASE_NOTE =
+  "テスト購入モード（LP管理のプレビュー）です。Stripe のテスト環境で決済され、実際の請求は発生しません。一般には公開されていません。";
+
+/** Shell args for the preview / test-purchase banner. */
+function previewBanner(config: TicketConfig): [boolean, string | undefined, string] {
+  return config.testPurchaseToken ? [true, undefined, TEST_PURCHASE_NOTE] : [config.preview, undefined, PREVIEW_NOTE];
+}
+
+/** Preview-only: why nothing can be bought (the public just sees 受付準備中). */
+function previewEmptyReason(config: TicketConfig): string {
+  if (config.types.length === 0) return "販売中（有効）の券種がありません。LP管理 → チケットで券種を追加・有効にしてください。";
+  if (!config.paymentReady && config.types.every((t) => t.priceJpy > 0)) {
+    return "決済（Stripe）が未設定のため、有料のチケットを選べません。";
+  }
+  return "すべての券種が売り切れです。";
+}
 
 export function shell(
   title: string,
@@ -1030,6 +1059,11 @@ export interface TicketsPageOptions {
 const LOCK =
   '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 
+/** The lock line under the submit button: card only keeps the original copy. */
+export function securePaymentCopy(config: Pick<TicketConfig, "paymentMethods">): string {
+  return config.paymentMethods.includes("paypay") ? "Stripe で安全に決済（カード・PayPay）" : "カード決済は Stripe で安全に処理されます";
+}
+
 export function renderTicketsPage(o: TicketsPageOptions): string {
   const { config } = o;
   const values = o.values ?? {};
@@ -1052,16 +1086,25 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
         `<div class="body"><div class="wrap">${alerts}<section class="card done rv">` +
         '<div class="ico wait"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="4 4"/></svg></div>' +
         '<h2>受付準備中</h2><p class="lead">現在お申し込みいただけるチケットはありません。公開までしばらくお待ちください。</p>' +
+        (config.preview || config.testPurchaseToken
+          ? `<p class="lead" data-lp-tk-preview-reason>（プレビュー）${escapeHtml(previewEmptyReason(config))}</p>`
+          : "") +
         '<div class="acts"><a class="btn1" href="/">トップへ戻る</a></div></section></div></div>',
       !!o.demo,
-      config.preview,
+      ...previewBanner(config),
     );
   }
 
   const hasPaid = config.types.some((t) => t.priceJpy > 0);
   const extra = config.fields.map((f) => renderField(f, values, errors)).join("");
   const form =
-    `<form class="buy grid" method="post" action="/tickets/checkout" novalidate data-max="${ORDER_MAX}"><div>` +
+    `<form class="buy grid" method="post" action="/tickets/checkout" novalidate data-max="${ORDER_MAX}"` +
+    // Test purchase: Stripe Checkout can't run inside the LP管理 iframe, so pay in a new tab.
+    (config.testPurchaseToken ? ' target="_blank" data-lp-tk-test' : "") +
+    "><div>" +
+    (config.testPurchaseToken
+      ? `<input type="hidden" name="${TICKETS_PREVIEW_FIELD}" value="${escapeHtml(config.testPurchaseToken)}">`
+      : "") +
     alerts +
     `<section class="card rv"><fieldset class="${errors.items ? "bad" : ""}"><legend>券種と枚数（必須）</legend>` +
     `<div class="shead"><span class="no">01</span><h2>券種と枚数を選ぶ</h2><p>1 回のお申し込みで合計 ${ORDER_MAX} 枚まで</p></div>` +
@@ -1078,13 +1121,13 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
     `<p class="sum-ev">${CONF_NAME}<br>${EVENT_DATE}</p>` +
     renderSummary(config, values) +
     '<button class="submit" type="submit">購入手続きへ<span class="ar" aria-hidden="true">→</span></button>' +
-    (hasPaid ? `<p class="secure">${LOCK}カード決済は Stripe で安全に処理されます</p>` : "") +
+    (hasPaid ? `<p class="secure">${LOCK}${securePaymentCopy(config)}</p>` : "") +
     "</div>" +
     (hasPaid
       ? '<p class="note">有料チケットは Stripe の決済画面に移動してお支払いいただきます。無料チケットはそのままお申し込みが完了します。</p>'
       : "") +
     "</aside></form>";
-  return shell("チケット購入", top + `<div class="body"><div class="wrap">${form}</div></div>`, !!o.demo, config.preview);
+  return shell("チケット購入", top + `<div class="body"><div class="wrap">${form}</div></div>`, !!o.demo, ...previewBanner(config));
 }
 
 export type ThanksStatus = "paid" | "free" | "pending" | "expired" | "unknown";
@@ -1093,7 +1136,7 @@ const ICON_OK = '<div class="ico pop"><svg viewBox="0 0 24 24" aria-hidden="true
 const ICON_WAIT = '<div class="ico wait pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>';
 const ICON_WARN = '<div class="ico warn pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6M12 17h.01"/></svg></div>';
 
-export function renderThanksPage(o: { status: ThanksStatus; summary?: string; demo?: boolean }): string {
+export function renderThanksPage(o: { status: ThanksStatus; summary?: string; demo?: boolean; test?: boolean }): string {
   let inner: string;
   let acts = '<a class="btn1" href="/">トップへ戻る</a>';
   let step = 3;
@@ -1128,6 +1171,9 @@ export function renderThanksPage(o: { status: ThanksStatus; summary?: string; de
     hero({ title: ok ? 'Thank <span class="g">you!</span>' : "お申し込み", ghost: ok ? "THANKS" : "TICKETS", step, small: true }) +
       `<div class="body"><div class="wrap"><section class="card done rv">${inner}<div class="acts">${acts}</div></section></div></div>`,
     !!o.demo,
+    !!o.test,
+    undefined,
+    TEST_PURCHASE_NOTE,
   );
 }
 
@@ -1217,15 +1263,22 @@ export function previewConfig(cfg: TicketConfig | null, mode: "on" | "off" | nul
   return cfg;
 }
 
-/** Bottom bar on LP pages while previewing (keeps the LP header visible). `features` e.g. ["チケット販売"]. */
-export function previewBar(features: readonly string[]): string {
-  if (features.length === 0) return "";
+/**
+ * Bottom bar on LP pages while previewing (keeps the LP header visible). `features` e.g. ["チケット販売"].
+ * `hidden` = live features this viewer's 「なし」 preview hides (otherwise /tickets is a bare 404).
+ */
+export function previewBar(features: readonly string[], hidden: readonly string[] = []): string {
+  if (features.length === 0 && hidden.length === 0) return "";
+  const notes = [
+    features.length > 0 ? `${features.join("・")}のプレビュー表示中です（一般には公開されていません）` : null,
+    hidden.length > 0 ? `${hidden.join("・")}を「なし」にしたプレビュー表示中です（公開中のページは表示されません）` : null,
+  ].filter((x): x is string => x !== null);
   return (
     "<style>#lp-tickets-cta,#lp-preview-banner{bottom:56px!important}</style>" +
     '<div id="lp-tickets-preview" role="note" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;' +
     "padding:8px 16px;background:#fff4d6;color:#7a4b00;text-align:center;" +
     "font:700 13px/1.5 'Zen Kaku Gothic New',system-ui,-apple-system,sans-serif;box-shadow:0 -2px 8px rgba(0,0,0,.12)\">" +
-    `${features.join("・")}のプレビュー表示中です（一般には公開されていません）` +
+    notes.join(" / ") +
     '<a href="/?version=live" style="margin-left:12px;color:inherit;text-decoration:underline">解除</a></div>'
   );
 }
@@ -1250,10 +1303,20 @@ export const BASE_HEADERS: Record<string, string> = {
   "x-robots-tag": "noindex",
 };
 
+/**
+ * Framing allowlist: only our own Workers (Dub app LpViewer, fe2-demo) may embed the
+ * payment pages; any other site stays blocked (clickjacking).
+ */
+export const FRAME_ANCESTORS = "frame-ancestors 'self' https://*.developershub-site.workers.dev";
+
 export function htmlResponse(html: string, status = 200): Response {
   return new Response(html, {
     status,
-    headers: { ...BASE_HEADERS, "content-type": "text/html; charset=utf-8", "x-frame-options": "DENY" },
+    headers: {
+      ...BASE_HEADERS,
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": FRAME_ANCESTORS,
+    },
   });
 }
 
@@ -1269,6 +1332,27 @@ export interface TicketsDeps {
   invalidate(): void;
   /** Calls lp-analytics (path like "/lp/internal/tickets/checkout"); null when no binding. */
   internal: ((path: string, init: RequestInit) => Promise<Response>) | null;
+  /** Unverified LP管理 preview token from the URL / cookie / referer (route.ts ticketsPreviewToken). */
+  previewToken?: string | null;
+}
+
+/**
+ * Sales off (or a 「あり」 look-only preview) + a preview token lp-analytics accepts (it only signs and
+ * verifies with a Stripe TEST key) → this viewer may buy as a test order. Anything else: config as is.
+ */
+async function withTestPurchase(config: TicketConfig, token: string | null, deps: TicketsDeps): Promise<TicketConfig> {
+  if (!token || deps.demo || !deps.internal || (config.enabled && !config.preview)) return config;
+  try {
+    const res = await deps.internal("/lp/internal/tickets/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok || ((await res.json()) as { valid?: unknown }).valid !== true) return config;
+  } catch {
+    return config;
+  }
+  return { ...config, enabled: true, preview: false, testPurchaseToken: token };
 }
 
 /**
@@ -1297,6 +1381,13 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     });
   }
 
+  const base = await deps.getConfig();
+  // The checkout POST carries the token in the form (the iframe may drop the cookie and referer).
+  const formText = route === "checkout" && req.method === "POST" ? await req.text() : null;
+  const formToken = formText !== null ? new URLSearchParams(formText).get(TICKETS_PREVIEW_FIELD) : null;
+  const config = base ? await withTestPurchase(base, deps.previewToken ?? formToken, deps) : null;
+  const test = !!config?.testPurchaseToken;
+
   // Before the sales gate: a buyer already on Stripe must still get confirmed if sales are turned off meanwhile.
   if (route === "thanks") {
     if (req.method !== "GET" && req.method !== "HEAD") return null;
@@ -1306,7 +1397,7 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
       // Demo only (no real orders): the mock checkout passes its summary along in the URL.
       const summary = deps.demo && order ? (url.searchParams.get("summary") ?? "").slice(0, 300) : "";
       return htmlResponse(
-        renderThanksPage({ status: deps.demo && order ? "free" : "unknown", summary: summary || undefined, demo: deps.demo }),
+        renderThanksPage({ status: deps.demo && order ? "free" : "unknown", summary: summary || undefined, demo: deps.demo, test }),
       );
     }
     // Never trust the query string: both paid (session_id) and free (order) are confirmed server-side.
@@ -1326,10 +1417,9 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     } catch {
       // fall through to the generic message
     }
-    return htmlResponse(renderThanksPage({ status, summary: status === "paid" ? summary : undefined, demo: deps.demo }));
+    return htmlResponse(renderThanksPage({ status, summary: status === "paid" ? summary : undefined, demo: deps.demo, test }));
   }
 
-  const config = await deps.getConfig();
   if (!config || !config.enabled) return null;
 
   if (route === "page") {
@@ -1341,7 +1431,7 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
   if (req.method !== "POST") return redirect("/tickets");
   const origin = req.headers.get("origin");
   if (origin && origin !== url.origin) return new Response("Forbidden", { status: 403, headers: BASE_HEADERS });
-  const text = await req.text();
+  const text = formText ?? "";
   if (text.length > BODY_MAX) return new Response("Payload Too Large", { status: 413, headers: BASE_HEADERS });
   const parsed = parseCheckoutForm(new URLSearchParams(text), config);
   if (!parsed.ok) {
@@ -1365,7 +1455,12 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     res = await deps.internal("/lp/internal/tickets/checkout", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...parsed.input, origin: url.origin, clientKey: await senderKeyFor(req, "lp-tickets") }),
+      body: JSON.stringify({
+        ...parsed.input,
+        origin: url.origin,
+        clientKey: await senderKeyFor(req, "lp-tickets"),
+        ...(config.testPurchaseToken ? { previewToken: config.testPurchaseToken } : {}),
+      }),
     });
   } catch {
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(502, null, config) }), 502);

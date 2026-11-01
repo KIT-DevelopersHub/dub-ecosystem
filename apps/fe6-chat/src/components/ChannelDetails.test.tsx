@@ -119,7 +119,7 @@ describe("ChannelDetails", () => {
     expect(props.onAddMember).toHaveBeenCalledWith(carol);
   });
 
-  it("moves the channel to a personal section", async () => {
+  it("moves the channel to a section", async () => {
     const onMove = vi.fn();
     setup({ sections: { items: [{ id: "sec_1", name: "運営", position: 0, createdAt: "t" }], currentSectionId: null, onMove } });
     await openTab(/設定/);

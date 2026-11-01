@@ -38,13 +38,16 @@ export type LpPreviewMode = "on" | "off";
  * tickets: on = 販売停止中でも販売中の見た目（申し込み不可）/ off = 販売中でも出さない。
  * proposals: on = 募集停止中でも募集中の見た目（応募不可）/ off = 募集中でも出さない。
  * どれもこの閲覧者にだけ効き、公開中の LP は変わらない。
+ * previewToken: LP管理が発行したテスト購入トークン（Stripe テストキーの時だけ）。あると販売停止中でも
+ * この閲覧者だけテスト購入できる。
  */
 export function lpPreviewUrl(
   id: string,
-  modes: { tickets: LpPreviewMode; proposals: LpPreviewMode },
+  modes: { tickets: LpPreviewMode; proposals: LpPreviewMode; previewToken?: string },
   base: string = LP_PUBLIC_URL,
 ): string {
-  return `${base}/?version=${encodeURIComponent(id.replace(/^v/, ""))}&tickets=${modes.tickets}&proposals=${modes.proposals}`;
+  const token = modes.tickets === "on" && modes.previewToken ? `&tickets_preview=${encodeURIComponent(modes.previewToken)}` : "";
+  return `${base}/?version=${encodeURIComponent(id.replace(/^v/, ""))}&tickets=${modes.tickets}&proposals=${modes.proposals}${token}`;
 }
 
 /** 切り替え日時の表示（"2026/10/12 14:05"）。壊れた値はそのまま返す。 */

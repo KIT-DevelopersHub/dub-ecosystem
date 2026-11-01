@@ -179,6 +179,9 @@ All external paths are under the gateway mount `/api/v1/chat` (native: `/m/v1/ch
 | `DELETE /api/v1/chat/messages/:id` | session + author or admin | Soft-delete a message (idempotent) |
 | `POST /api/v1/chat/messages/:id/reactions` | session + member | Toggle the caller's reaction |
 | `GET /api/v1/chat/unread` | session | Per-channel unread summary for the caller |
+| `GET /api/v1/chat/custom-emojis` | session + チャット閲覧 | Workspace custom emoji (`{ items: CustomEmoji[] }`) |
+| `GET /api/v1/chat/custom-emojis/:name/image` | session + チャット閲覧 | Image bytes (alias -> target), original content type, `private, max-age=86400` + ETag |
+| `POST /api/v1/chat/custom-emojis/slack-import` | session + チャット編集 + `chat:emoji_import` ⚠ | One resumable Slack import batch (body `{ after }` -> `nextAfter`) |
 | `POST /internal/system-messages` | `x-dub-internal: 1` (notification only) | Deliver a system post to a channel or a user's DM |
 | `GET /health` | none | Liveness (`{ "status": "ok", "service": "chat-service" }`) |
 
@@ -305,18 +308,21 @@ by default) — channel-admin / `chat:moderate` alone is **not** enough. Respons
 DM -> `400 VALIDATION_FAILED`; missing / hidden private channel -> `404`. Audited as
 `chat.channel.delete`. No realtime event: other open clients see `404` on their next request.
 
-### Sidebar sections (personal)
+### Sidebar sections (org-wide)
 
-Each user groups channels into their own named sections (Slack-style; other users never see
-them). A channel is in at most one of the caller's sections; unassigned channels stay in the
-default type groups. All routes are 閲覧-level (caller-owned rows only).
+One shared set of named sections for the whole org (Slack-style); every member sees the same
+sections and the same channel placement. A channel is in at most one section; unassigned
+channels stay in the default type groups. Reading is 閲覧-level; every write needs 編集 +
+`chat:manage_sections` (ロール管理 > チャット > 細かい権限; admin-only by default). The old
+per-user sections (chat/0004) are no longer read — their rows are simply not shown.
 
 - `GET /sections` -> `{ items: ChatSection[] (by position), assignments: { [channelId]: sectionId } }`
-- `POST /sections` `{ name }` (trimmed, 1-40 chars, max 50 per user) -> `201 ChatSection`, appended last
-- `PATCH /sections/:id` `{ name?, position? }` -> `ChatSection` (`404` if not the caller's)
+  (assignments only for channels the caller can read — private channels need membership)
+- `POST /sections` `{ name }` (trimmed, 1-40 chars, max 50 in the org) -> `201 ChatSection`, appended last
+- `PATCH /sections/:id` `{ name?, position? }` -> `ChatSection` (`404` if missing)
 - `DELETE /sections/:id` -> `204`; its channels fall back to the default groups
 - `PUT /channels/:id/section` `{ sectionId: string | null }` -> `204` (`null` = unassign;
-  `404` if the channel is unreadable or the section is not the caller's)
+  `404` if the channel is unreadable or the section is missing)
 
 ### `POST /channels/:id/read`
 
@@ -433,6 +439,9 @@ Request (`ReactionToggleRequest`):
 ```json
 { "emoji": "👍" }
 ```
+
+A custom emoji is reacted with its shortcode (`":partyparrot:"`); when a `chat_custom_emojis`
+row of that name exists, clients render it as the image (see `GET /custom-emojis`).
 
 Empty emoji -> `VALIDATION_FAILED` (`required`). A missing / deleted message -> `404`.
 Response `200` (`ReactionToggleResponse`) — the message's full reaction map after the toggle:

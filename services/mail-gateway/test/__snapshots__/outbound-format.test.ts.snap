@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`assembleMime wire format > matches the golden text-only message 1`] = `
+"From: info@developershub.jp
+To: =?UTF-8?B?5bGx55SwIOWkqumDjg==?= <a@x.com>
+Subject: =?UTF-8?B?44CQ6YeN6KaB44CR5YyX6Zm4SVTjgqvjg7Pjg5XjgqHjg6zjg7M=?=
+ =?UTF-8?B?44K5MjAyNiDljZTos5vjga7jgZTmoYjlhoXjgajlvZPml6Xjga4=?=
+ =?UTF-8?B?6YCy6KGM44K544Kx44K444Ol44O844Or44Gr44Gk44GE44Gm44Gu?=
+ =?UTF-8?B?44GU56K66KqN44Gu44GK6aGY44GE8J+Zjw==?=
+Message-ID: <maillog_01ABC@developershub.jp>
+Date: Wed, 28 Oct 2026 09:00:00 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: base64
+
+44GK5LiW6Kmx44Gr44Gq44Gj44Gm44GK44KK44G+44GZ44CCDQoNCj4g5byV55So6KGMDQotLSAN
+Cue9suWQjQ0KV2luZG93c+ihjA0K5pyr5bC+
+"
+`;

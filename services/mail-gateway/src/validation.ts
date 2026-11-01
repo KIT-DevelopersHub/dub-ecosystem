@@ -3,13 +3,14 @@
 // churn across the parallel unit build). Each failure -> a FieldError with the
 // MAIL_INVALID_REQUEST envelope (design §6).
 import { DubError, type FieldError } from "@dub/errors";
-import type { mail } from "@dub/types";
+import { mail } from "@dub/types";
 import {
   DEFAULT_QUERY_LIMIT,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_ATTACHMENTS_TOTAL_BYTES,
   MAX_ATTACHMENT_BYTES,
   MAX_QUERY_LIMIT,
+  MAX_SEARCH_QUERY,
   MAX_RECIPIENTS,
   OUTBOUND_HEADER_ALLOWLIST,
   SUBJECT_MAX,
@@ -119,7 +120,16 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
   let cc: mail.MailAddress[] | undefined;
   if (b.cc !== undefined) {
     const parsed = parseAddressField(b.cc, "cc", fe);
-    if (parsed) cc = parsed;
+    if (parsed && parsed.length > MAX_RECIPIENTS) fe.push({ field: "cc", reason: "too_long", message: `<= ${MAX_RECIPIENTS}` });
+    else if (parsed) cc = parsed;
+  }
+
+  // Bcc: validated exactly like cc. Envelope-only — it never reaches a MIME header.
+  let bcc: mail.MailAddress[] | undefined;
+  if (b.bcc !== undefined) {
+    const parsed = parseAddressField(b.bcc, "bcc", fe);
+    if (parsed && parsed.length > MAX_RECIPIENTS) fe.push({ field: "bcc", reason: "too_long", message: `<= ${MAX_RECIPIENTS}` });
+    else if (parsed && parsed.length > 0) bcc = parsed;
   }
 
   const subject = b.subject;
@@ -173,6 +183,7 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
     textBody: textBody as string,
   };
   if (cc !== undefined) out.cc = cc;
+  if (bcc !== undefined) out.bcc = bcc;
   if (htmlBody !== undefined) out.htmlBody = htmlBody;
   if (inReplyTo !== undefined) out.inReplyTo = inReplyTo;
   if (loopHeaders !== undefined) out.loopHeaders = loopHeaders;
@@ -200,14 +211,11 @@ function parseFutureIso(v: unknown, field: string, fe: FieldError[], now: number
 }
 
 /** Validate POST /mail/scheduled body: a SendMailRequest + a future `scheduledAt`.
- *  Attachments are NOT supported on a scheduled send in this slice — reject them loudly
- *  rather than silently dropping the files at delivery. */
+ *  Attachments and Bcc go through the SAME validation/limits as an immediate send
+ *  (per-file / per-message / count) and are persisted with the schedule (0020). */
 export function parseScheduleMailRequest(body: unknown, now: number = Date.now()): mail.ScheduleMailRequest {
   if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
-  if (Array.isArray((body as Record<string, unknown>).attachments) && ((body as Record<string, unknown>).attachments as unknown[]).length > 0) {
-    throw mailInvalid([{ field: "attachments", reason: "unsupported", message: "attachments are not supported on a scheduled send" }]);
-  }
-  // Reuse the full send-request validation (to/cc/subject/body/inReplyTo/loopHeaders).
+  // Reuse the full send-request validation (to/cc/bcc/subject/body/inReplyTo/loopHeaders/attachments).
   const base = parseSendMailRequest(body);
   const fe: FieldError[] = [];
   const scheduledAt = parseFutureIso((body as Record<string, unknown>).scheduledAt, "scheduledAt", fe, now);
@@ -258,13 +266,30 @@ export function parseScheduleMailPatch(body: unknown, now: number = Date.now()):
   return out;
 }
 
-/** Validate GET /messages query params (threadId? / cursor? / limit). */
-export function parseListMessagesQuery(q: Record<string, string | undefined>): { threadId?: string; cursor?: string; limit: number } {
+/** Validate GET /messages + GET /sent query params (threadId? / cursor? / limit / q?).
+ *  `q` is a free-text search (trimmed; blank = no search; <= MAX_SEARCH_QUERY chars). */
+export function parseListMessagesQuery(q: Record<string, string | undefined>): {
+  threadId?: string;
+  cursor?: string;
+  limit: number;
+  q?: string;
+  folder?: mail.MailFolderView;
+} {
   const fe: FieldError[] = [];
-  const out: { threadId?: string; cursor?: string; limit: number } = { limit: DEFAULT_QUERY_LIMIT };
+  const out: { threadId?: string; cursor?: string; limit: number; q?: string; folder?: mail.MailFolderView } = { limit: DEFAULT_QUERY_LIMIT };
+
+  if (q.folder !== undefined && q.folder !== "") {
+    if ((mail.MAIL_FOLDER_VIEWS as readonly string[]).includes(q.folder)) out.folder = q.folder as mail.MailFolderView;
+    else fe.push({ field: "folder", reason: "invalid_enum", message: mail.MAIL_FOLDER_VIEWS.join("|") });
+  }
 
   if (q.threadId !== undefined && q.threadId !== "") out.threadId = q.threadId;
   if (q.cursor !== undefined && q.cursor !== "") out.cursor = q.cursor;
+  if (q.q !== undefined) {
+    const needle = q.q.trim();
+    if (needle.length > MAX_SEARCH_QUERY) fe.push({ field: "q", reason: "too_large", message: `<= ${MAX_SEARCH_QUERY} chars` });
+    else if (needle !== "") out.q = needle;
+  }
 
   if (q.limit !== undefined && q.limit !== "") {
     const n = Number(q.limit);

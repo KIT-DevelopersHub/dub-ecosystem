@@ -160,12 +160,19 @@ export interface LpTicketTypeStats {
 export interface LpTicketTypeSummary extends LpTicketType {
   stats: LpTicketTypeStats;
 }
+/** Methods we advertise. Orders store Stripe's raw PaymentMethod.type (may be others, e.g. "link"). */
+export type LpTicketPaymentMethod = "card" | "paypay";
+
 export interface LpTicketsState {
   site: string;
   enabled: boolean;
   /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える（enabled の間だけ効く）。 */
   ctaEnabled: boolean;
   paymentReady: boolean;
+  /** Stripe がテストキーで動いていて、プレビューからテスト購入できる（本番キーなら false）。 */
+  previewCheckout: boolean;
+  /** Payment methods the LP advertises (Dashboard-managed on Stripe). PayPay only with LP_PAYPAY_ENABLED=1. */
+  paymentMethods: LpTicketPaymentMethod[];
   publicUrl: string;
   fields: LpTicketField[];
   types: LpTicketTypeSummary[];
@@ -202,6 +209,12 @@ export interface LpTicketOrder {
   paidAt: string | null;
   /** Why it is / was needs_review (amount_mismatch / currency_mismatch / oversold / dispute). Kept after approval. */
   reviewReason: string | null;
+  /** Stripe PaymentMethod.type used ("card" | "paypay" | ...). null = free / unknown / not yet paid. */
+  paymentMethod: string | null;
+  /** LP管理のプレビュー（テスト購入トークン）から作られた注文。 */
+  preview: boolean;
+  /** テスト注文（プレビュー由来、または Stripe テストモードの決済 cs_test_）。実際の請求はない。 */
+  test: boolean;
 }
 export interface LpTicketOrdersPage {
   items: LpTicketOrder[];
@@ -229,7 +242,7 @@ export interface TicketSettingsRow {
 export interface TicketTypeRow extends LpTicketType {
   site: string;
 }
-export interface TicketOrderRow extends LpTicketOrder {
+export interface TicketOrderRow extends Omit<LpTicketOrder, "test"> {
   site: string;
   stripeSessionId: string | null;
   paymentIntentId: string | null;
@@ -300,12 +313,15 @@ export interface LpTicketRepo {
   approveOrder(id: string, resolvedBy: string, resolvedAt: string, onlyReason?: string): Promise<boolean>;
   /** Fills payment_intent_id only where it is still NULL. */
   setOrderPaymentIntent(id: string, paymentIntentId: string): Promise<void>;
-  /** Backfill: paid / needs_review orders with a session but no payment_intent_id (pre-0005), oldest first. */
+  /** Backfill: paid / needs_review orders with a session but no payment_intent_id (pre-0007), oldest first. */
   listMissingPaymentIntent(site: string, livemode: boolean, limit: number): Promise<TicketOrderRow[]>;
   /** Reconcile: pending orders with a Stripe session, from <= created_at < to, oldest first. */
   listPendingWithSession(site: string, from: string, to: string, limit: number): Promise<TicketOrderRow[]>;
   /** Reconcile: pending orders without a session created before `before` -> expired. Returns count. */
   expireSessionlessPending(site: string, before: string): Promise<number>;
+  setOrderPaymentMethod(id: string, method: string): Promise<void>;
+  /** 0006 migration. Display-only marker; callers swallow failures. */
+  markOrderPreview(id: string): Promise<void>;
   /** Newest first, keyset by (created_at, id). */
   listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
 }
@@ -432,6 +448,13 @@ export interface AppDeps {
   stripeWebhookSecret: string | null;
   /** Free plan: arms the reconcile alarm loop (TicketReconcileDO). null = cron drives reconcile (paid) / tests. */
   armReconcile: (() => Promise<void>) | null;
+  /**
+   * LP管理「プレビュー」のテスト購入トークンの鍵（Stripe のテストキー sk_test_ / rk_test_）。
+   * 未設定・本番キーなら null = テスト購入トークンを発行も検証もしない。
+   */
+  ticketPreviewKey: string | null;
+  /** LP_PAYPAY_ENABLED="1": PayPay is on in the Stripe Dashboard, so the LP / LP管理 advertise it. */
+  paypayEnabled: boolean;
   newProposalId: () => string;
   /** 1 日 (JST) に受け付ける登壇応募の上限。公開フォームからの書き込み濫用の天井。 */
   dailyProposalCap: number;

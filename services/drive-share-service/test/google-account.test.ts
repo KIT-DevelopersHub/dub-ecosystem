@@ -105,7 +105,9 @@ describe("add-account flow", () => {
     expect(u.searchParams.get("prompt")).toBe("consent");
     expect(u.searchParams.get("client_id")).toBe("web-cid");
     expect(u.searchParams.get("redirect_uri")).toBe(REDIRECT);
-    expect(u.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar");
+    expect(u.searchParams.get("scope")).toBe(
+      "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/meetings.space.settings",
+    );
     const row = store.states.get(stateOf(authUrl))!;
     expect(row).toMatchObject({ userId: "usr_admin", redirectUri: REDIRECT, orgId: ORG });
   });
@@ -142,6 +144,7 @@ describe("add-account flow", () => {
           active: true,
           needsReconnect: false,
           calendarMissing: false,
+          meetMissing: false,
         },
       ],
     });
@@ -303,7 +306,7 @@ describe("status + credential precedence", () => {
     expect(await svc.status()).toEqual({
       canConnect: false,
       accounts: [
-        { id: SECRET_ACCOUNT_ID, kind: "secret", email: "new-owner@gmail.com", connectedAt: null, connectedBy: null, active: true, needsReconnect: false, calendarMissing: false },
+        { id: SECRET_ACCOUNT_ID, kind: "secret", email: "new-owner@gmail.com", connectedAt: null, connectedBy: null, active: true, needsReconnect: false, calendarMissing: false, meetMissing: false },
       ],
     });
     const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key: null });
@@ -351,6 +354,11 @@ describe("status + credential precedence", () => {
 
     scope = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar";
     expect((await svc.status()).accounts.map((a) => a.calendarMissing)).toEqual([false, false]);
+    // Connected before the Meet scope was requested: reconnect to open Meet links.
+    expect((await svc.status()).accounts.map((a) => a.meetMissing)).toEqual([true, true]);
+
+    scope += " https://www.googleapis.com/auth/meetings.space.settings";
+    expect((await svc.status()).accounts.map((a) => a.meetMissing)).toEqual([false, false]);
 
     // Google did not report scopes: not flagged (same as meetings calendarReady)
     scope = undefined;

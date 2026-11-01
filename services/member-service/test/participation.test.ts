@@ -126,6 +126,25 @@ describe("member-service 参加届 (participation)", () => {
     expect(res.json.member.rosterNumber).toBe("3EP2-26");
   });
 
+  it("学籍番号: submit normalizes it, rejects a malformed one, and resolve create carries it to the member", async () => {
+    const app = createApp(makeDeps());
+    const bad = await call(app, "POST", "/members/participation", {
+      body: { lastName: "山田", firstName: "太郎", studentNumber: "140098", ...EMAILS },
+    });
+    expect(bad.status).toBe(400);
+
+    const sub = await call(app, "POST", "/members/participation", {
+      body: { lastName: "山田", firstName: "太郎", studentNumber: " １４００９８０ ", ...EMAILS },
+    });
+    expect(sub.status).toBe(201);
+    expect(sub.json.participation.studentNumber).toBe("1400980");
+
+    const pid = sub.json.participation.id as string;
+    const res = await call(app, "POST", `/members/participation/${pid}/resolve`, { body: { action: "create" } });
+    expect(res.status).toBe(200);
+    expect(res.json.member.studentNumber).toBe("1400980");
+  });
+
   it("resolve create -> makes a new 追加済 member from the submission, retaining both emails", async () => {
     const app = createApp(makeDeps());
     const t = await call(app, "POST", "/members/teams", { body: { name: "開発" } });

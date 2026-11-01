@@ -1,4 +1,5 @@
-// Personal sidebar sections: load + optimistic create / rename / delete / move.
+// Org-wide sidebar sections (one shared set): load for everyone; the optimistic create /
+// rename / delete / move below are only wired to UI for chat:manage_sections holders.
 // Every mutation applies locally first and reverts only its own change on failure
 // (targeted rollback, so a concurrent edit is not clobbered), then toasts.
 import { useCallback, useEffect, useRef, useState } from "react";

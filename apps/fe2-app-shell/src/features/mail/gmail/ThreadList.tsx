@@ -3,14 +3,12 @@
 // subject + inline snippet, label chips, and a timestamp that swaps to row
 // actions (archive / delete / mark-read) on hover. Bulk selection lifts a toolbar.
 import { useEffect, useRef, useState } from "react";
-import { Badge, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
+import { Badge, NARROW_VIEWPORT_QUERY, SkeletonList, useMediaQuery } from "@dub/ui";
 import {
   avatarColor,
   displayName,
   initial,
-  inFolder,
   latest,
-  matchesQuery,
   partitionNudged,
   pendingReplyIds,
   relativeDate,
@@ -23,7 +21,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
-import { useMailStore } from "./useMailStore.tsx";
+import { PAGE_SIZE, pageSourceOf, selectVisible, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
 
 // P25: exit-animation two-phase pattern (mirrors fe1 Toast.tsx's `leaving` + EXIT_MS).
 // Archive/trash marks the row `leaving` (slide-out + collapse plays via inline styles),
@@ -89,6 +87,46 @@ function StopClick({ children, onClick, label, testId }: { children: JSX.Element
     >
       {children}
     </button>
+  );
+}
+
+/** Gmail-style "1–50 / 123" range with < > at the toolbar's right edge. Cursor-paged by
+ *  conversation: the range is (page index × size) + conversations on this page, and the
+ *  total is the server view's conversation count when the gateway reports it. */
+function PageNav({ pager, source, loading }: { pager: PagerState; source: PageSource; loading: boolean }): JSX.Element | null {
+  const { dispatch } = useMailStore();
+  if (pager.count === 0 && pager.stack.length === 0) return null;
+  const start = pager.stack.length * PAGE_SIZE + 1;
+  const end = start + pager.count - 1;
+  const btn = (dir: "prev" | "next", disabled: boolean): JSX.Element => (
+    <button
+      type="button"
+      aria-label={dir === "prev" ? "前へ" : "次へ"}
+      data-testid={`fe2-mail-page-${dir}`}
+      disabled={disabled}
+      onClick={() => dispatch({ type: dir === "prev" ? "PAGE_PREV" : "PAGE_NEXT", source })}
+      style={{
+        all: "unset",
+        display: "inline-flex",
+        padding: 6,
+        borderRadius: "var(--dub-radius-full)",
+        cursor: disabled ? "default" : "pointer",
+        color: "var(--dub-color-text-secondary)",
+        opacity: disabled ? 0.35 : 1,
+      }}
+    >
+      <MailIcon name={dir === "prev" ? "chevron-left" : "chevron-right"} size={18} />
+    </button>
+  );
+  return (
+    <nav aria-label="ページ移動" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
+      <span data-testid="fe2-mail-page-range" aria-live="polite" style={{ fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-secondary)", marginRight: 4 }}>
+        {pager.count > 0 ? `${start}–${end}` : `${start - 1}`}
+        {typeof pager.total === "number" ? ` / ${pager.total.toLocaleString("ja-JP")}` : null}
+      </span>
+      {btn("prev", loading || pager.stack.length === 0)}
+      {btn("next", loading || pager.next === null)}
+    </nav>
   );
 }
 
@@ -394,12 +432,14 @@ function ThreadRow({
                 </StopClick>
               </>
             )}
-            <StopClick
-              label={unread ? "既読にする" : "未読にする"}
-              onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: unread })}
-            >
-              <MailIcon name={unread ? "mail-open" : "inbox"} size={18} />
-            </StopClick>
+            {threadMine(thread) ? (
+              <StopClick
+                label={unread ? "既読にする" : "未読にする"}
+                onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: unread })}
+              >
+                <MailIcon name={unread ? "mail-open" : "inbox"} size={18} />
+              </StopClick>
+            ) : null}
           </span>
         ) : (
           <span
@@ -463,17 +503,17 @@ export function ThreadList(): JSX.Element {
     fresh.forEach((id) => leaveTimers.current.set(id, timer));
   }
 
-  const visible = state.threads.filter((t) => {
-    if (t.purged) return false; // 完全に削除: hidden from every folder for this viewer
-    const scope = state.labelFilter
-      ? t.labels.includes(state.labelFilter) && t.folder !== "trash"
-      : inFolder(t, state.folder);
-    return scope && matchesQuery(t, state.search);
-  });
+  // 完全に削除 (purged) threads never show. With a search active this is the client
+  // pre-filter plus the server matches (see selectVisible / useMailSync).
+  const visible = selectVisible(state);
+  const searching = state.search.trim().length > 0;
+  const search = state.searchResults;
+  const searchPending = searching && (search.status === "loading" || search.status === "loadingMore");
+  const canLoadMore = searching && search.status === "done" && (search.next.inbox !== null || search.next.sent !== null);
 
   // Inbox only: unanswered mail is pinned on top so it can't sink under newer arrivals.
   const { nudged, rest } =
-    state.folder === "inbox" && !state.labelFilter
+    state.folder === "inbox" && !state.labelFilter && !searching
       ? partitionNudged(visible, now, pendingReplies)
       : { nudged: [], rest: visible };
   const renderRow = (t: MailThreadModel, pinned = false): JSX.Element => (
@@ -580,15 +620,45 @@ export function ThreadList(): JSX.Element {
           <button
             type="button"
             aria-label="更新"
-            onClick={() => dispatch({ type: "CLEAR_CHECKS" })}
+            data-testid="fe2-mail-refresh"
+            onClick={() => dispatch({ type: "REQUEST_SYNC" })}
             style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-secondary)", padding: 4 }}
           >
             <MailIcon name="refresh" size={18} />
           </button>
         )}
+        {searching ? null : <PageNav pager={state.pager[pageSourceOf(state.folder)]} source={pageSourceOf(state.folder)} loading={state.listLoading} />}
       </div>
 
-      {visible.length === 0 ? (
+      {state.listLoading && !searching ? (
+        <div data-testid="fe2-mail-list-loading" style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
+          <SkeletonList rows={8} avatar />
+        </div>
+      ) : searching && visible.length === 0 && searchPending ? (
+        <div data-testid="fe2-mail-search-loading" aria-busy="true" style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
+          <SkeletonList rows={6} avatar />
+        </div>
+      ) : searching && visible.length === 0 ? (
+        <div
+          data-testid="fe2-mail-search-empty"
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            color: "var(--dub-color-text-muted)",
+            padding: 48,
+          }}
+        >
+          <MailIcon name="search" size={48} style={{ opacity: 0.4 }} />
+          <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>見つかりませんでした</div>
+          <div style={{ fontSize: "var(--dub-font-size-sm)" }}>
+            {search.status === "failed" ? "検索に失敗しました。時間をおいてもう一度お試しください。" : `「${state.search.trim()}」に一致するメールはありません。`}
+          </div>
+        </div>
+      ) : visible.length === 0 ? (
         <div
           data-testid="fe2-mail-inbox-empty"
           style={{
@@ -603,8 +673,12 @@ export function ThreadList(): JSX.Element {
           }}
         >
           <MailIcon name="mail-open" size={48} style={{ opacity: 0.4 }} />
-          <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>メールはありません</div>
-          <div style={{ fontSize: "var(--dub-font-size-sm)" }}>該当するスレッドが見つかりませんでした。</div>
+          <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>
+            {state.folder === "blocked" ? "ブロック済みのメールはありません" : "メールはありません"}
+          </div>
+          <div style={{ fontSize: "var(--dub-font-size-sm)" }}>
+            {state.folder === "blocked" ? "ブロックした送信者からのメールはここに表示されます。" : "該当するスレッドが見つかりませんでした。"}
+          </div>
         </div>
       ) : (
         <div role="rowgroup" style={{ flex: 1, overflowY: "auto" }}>
@@ -624,6 +698,30 @@ export function ThreadList(): JSX.Element {
             </div>
           ) : null}
           {rest.map((t) => renderRow(t))}
+          {searchPending ? (
+            <div data-testid="fe2-mail-search-loading" aria-busy="true" style={{ padding: "8px 12px" }}>
+              <SkeletonList rows={3} avatar />
+            </div>
+          ) : canLoadMore ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+              <button
+                type="button"
+                data-testid="fe2-mail-search-more"
+                onClick={() => dispatch({ type: "SEARCH_MORE" })}
+                style={{
+                  all: "unset",
+                  cursor: "pointer",
+                  padding: "8px 16px",
+                  borderRadius: "var(--dub-radius-full)",
+                  border: "1px solid var(--dub-color-border-default)",
+                  color: "var(--dub-color-text-secondary)",
+                  fontSize: "var(--dub-font-size-sm)",
+                }}
+              >
+                さらに読み込む
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
     </section>

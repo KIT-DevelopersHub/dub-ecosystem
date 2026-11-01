@@ -1,4 +1,4 @@
--- lp-analytics service — lp_ namespace. チケット決済の「要確認」を人が確定できるようにする + 送信元ごとの席の押さえ上限（0005 の lp_ticket_orders を拡張）。
+-- lp-analytics service — lp_ namespace. チケット決済の「要確認」を人が確定できるようにする + 送信元ごとの席の押さえ上限（0007 の lp_ticket_orders を拡張）。
 --   遷移の追加: needs_review -> paid（LP管理で lp:publish を持つ人が確定 / チャージバックに勝った時は自動）。
 --               paid|needs_review -> refunded にチャージバックの敗北（charge.dispute.closed status=lost）も含める。
 --   resolved_by / resolved_at = needs_review を paid に確定した人（自動なら 'stripe'）と時刻。review_reason は履歴として残す。

@@ -37,7 +37,16 @@ import {
   useSetTicketsCta,
   useSetTicketsEnabled,
 } from "./lpTicketsHooks.ts";
-import { ORDER_STATUS, formatDateTime, formatPrice, formatYen, orderItemLabel, reviewReasonLabel } from "./lpTickets.ts";
+import {
+  ORDER_STATUS,
+  formatDateTime,
+  formatPrice,
+  formatYen,
+  orderItemLabel,
+  paymentMethodLabel,
+  paymentMethodsLabel,
+  reviewReasonLabel,
+} from "./lpTickets.ts";
 import { LpTicketTypesCard } from "./LpTicketTypes.tsx";
 import { LpTicketFieldsCard } from "./LpTicketFields.tsx";
 import { LpTabs } from "./LpTabs.tsx";
@@ -162,7 +171,11 @@ function SalesStatusCard({ state, canToggle }: { state: LpTicketsState; canToggl
             <span className={styles.note}>
               Stripe の鍵を登録するまで有料のチケットは購入できません（無料のチケットは申し込めます）。
             </span>
-          ) : null}
+          ) : (
+            <span className={styles.note} data-testid="fe2-lp-tickets-payment-methods">
+              支払い方法: {paymentMethodsLabel(state.paymentMethods)}
+            </span>
+          )}
         </div>
       </Stack>
       {confirming !== null ? (
@@ -425,7 +438,19 @@ function OrderRow({
           <span className={styles.num}>{formatPrice(o.amountJpy)}</span>
           <small className={styles.kpiHint}>計 {o.quantity.toLocaleString("ja-JP")} 枚</small>
         </span>
-        <Badge tone={status.tone}>{status.label}</Badge>
+        <span className={styles.orderStatus}>
+          <Badge tone={status.tone}>{status.label}</Badge>
+          {o.test ? (
+            <Badge tone="warning" testId={`fe2-lp-ticket-order-test-${o.id}`}>
+              {o.preview ? "テスト（プレビュー）" : "テスト"}
+            </Badge>
+          ) : null}
+          {o.paymentMethod ? (
+            <small className={styles.kpiHint} data-testid={`fe2-lp-ticket-order-method-${o.id}`}>
+              {paymentMethodLabel(o.paymentMethod)}
+            </small>
+          ) : null}
+        </span>
         <small className={styles.versionDate}>{formatDateTime(o.createdAt)}</small>
         <Button
           variant="ghost"

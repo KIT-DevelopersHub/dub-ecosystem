@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "calendar-schedule-perm",
+  "worker": "dub-demo-calendar-schedule-perm",
+  "url": "https://dub-demo-calendar-schedule-perm.developershub-site.workers.dev",
+  "deployedSha": "d7c6067e",
+  "branch": "fix/calendar-schedule-without-tasks-edit",
+  "actor": "ko-tarou",
+  "markers": ["tasks/calendar-events"],
+  "live": true,
+  "verifiedAt": "2026-10-18T08:52:15Z",
+  "updatedAt": "2026-10-18T08:52:15Z",
+  "note": "PR#682 予定を登録をマイタスク編集なしで"
+}

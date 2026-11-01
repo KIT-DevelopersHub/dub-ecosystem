@@ -4,6 +4,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Icon, IconButton, Select, SkeletonLoader } from "@dub/ui";
 import { useQuery } from "@tanstack/react-query";
+import { useDebouncedValue } from "@dub/app-ui";
 import type { identity } from "@dub/types";
 import styles from "./calendar.module.css";
 
@@ -191,16 +192,6 @@ export function RemoveTeamButton({ name, onRemove }: { name: string; onRemove: (
   return <IconButton name="x" size="sm" aria-label={`${name}の表示をやめる`} onClick={onRemove} />;
 }
 
-/** Debounce a fast-changing value (search-as-you-type without a request per key). */
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
 /**
  * ユーザーを検索 (Google Calendar's "Search for people"): type a name or email, pick a
  * member, and their 予定・タスク are added to the calendar. `exclude` hides people who
@@ -219,7 +210,7 @@ export function PeopleSearch({
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const q = useDebounced(text.trim(), 250);
+  const q = useDebouncedValue(text.trim(), 250);
   const { data, isFetching, isError } = useQuery({
     queryKey: ["calendar", "people-search", q],
     queryFn: () => search(q),

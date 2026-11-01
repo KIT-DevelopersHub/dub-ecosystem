@@ -3,6 +3,7 @@ import {
   authoredText,
   eventText,
   extractArtifactUrls,
+  extractLabelTarget,
   extractPrUrls,
   mergePrUrls,
   mergeUrls,
@@ -52,6 +53,32 @@ describe("extractArtifactUrls", () => {
 
   it("returns nothing for plain text", () => {
     expect(extractArtifactUrls("just some log output, no urls here")).toEqual({});
+  });
+
+  it("prefers the `これに付けて:` PR over later PR links", () => {
+    const out = extractArtifactUrls(`
+      これに付けて: https://github.com/o/r/pull/20
+      分割 PR: https://github.com/o/r/pull/21 , https://github.com/o/r/pull/22
+    `);
+    expect(out.prUrl).toBe("https://github.com/o/r/pull/20");
+  });
+});
+
+describe("extractLabelTarget", () => {
+  it("tolerates markdown emphasis, full-width colon and <> wrapping", () => {
+    expect(extractLabelTarget("**これに付けて**： <https://github.com/o/r/pull/7>")).toBe(
+      "https://github.com/o/r/pull/7",
+    );
+  });
+
+  it("last declaration wins", () => {
+    expect(
+      extractLabelTarget("これに付けて: https://github.com/o/r/pull/1\nこれに付けて: https://github.com/o/r/pull/2."),
+    ).toBe("https://github.com/o/r/pull/2");
+  });
+
+  it("ignores the placeholder and plain PR links", () => {
+    expect(extractLabelTarget("これに付けて: <PR URL>\nPR: https://github.com/o/r/pull/3")).toBeUndefined();
   });
 });
 

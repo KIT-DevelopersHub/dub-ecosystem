@@ -6,6 +6,7 @@ import type { common, identity } from "@dub/types";
 import { policy } from "@dub/types";
 import { createApp } from "../src/app";
 import { InMemoryMemberRepo } from "../src/memory-repo";
+import { InMemoryHrRepo } from "../src/hr-repo";
 import type { AppDeps } from "../src/types";
 
 /**
@@ -27,6 +28,10 @@ export function adminGrants(): Set<identity.PermissionKey> {
     "identity:admin",
     ...policy.keysForAppLevel("members", "edit"),
     ...policy.keysForAppLevel("participation", "edit"),
+    ...policy.keysForAppLevel("hr", "edit"),
+    "hr:read",
+    "hr:write",
+    "hr:admin",
   ]);
 }
 
@@ -42,6 +47,8 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     newMemberId: () => `member_${String(seq++).padStart(6, "0")}`,
     newParticipationId: () => `part_${String(seq++).padStart(6, "0")}`,
     newOnboardingItemId: () => `onb_${String(seq++).padStart(6, "0")}`,
+    hrRepo: new InMemoryHrRepo(),
+    newHrId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
     ...overrides,
   };
   return Object.assign(deps, { repo });

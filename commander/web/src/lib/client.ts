@@ -23,10 +23,14 @@ export interface StartRunOptions {
    * `--max-turns` so a Q&A stays conversational instead of crawling the whole repo.
    */
   args?: string[];
+  /** Upload ids from uploadImage(); claude receives them as image blocks with the prompt. */
+  images?: string[];
 }
 
 export interface CommanderClient {
   startRun(prompt: string, opts?: StartRunOptions): Promise<{ runId: string }>;
+  /** Stage one image on the daemon (POST /uploads); pass the id in StartRunOptions.images. */
+  uploadImage(image: { mediaType: string; data: string }): Promise<{ uploadId: string }>;
   /** Cancel a running run (best-effort). Resolves once the daemon acknowledges. */
   cancelRun(runId: string): Promise<void>;
   /** Liveness probe (GET /health). False when the daemon is unreachable. */
@@ -80,6 +84,7 @@ export class HttpCommanderClient implements CommanderClient {
     if (opts.cwd) body.cwd = opts.cwd;
     if (opts.taskId) body.taskId = opts.taskId;
     if (opts.args && opts.args.length > 0) body.args = opts.args;
+    if (opts.images && opts.images.length > 0) body.images = opts.images;
     const res = await this.fetchImpl(`${this.baseUrl}/runs`, {
       method: "POST",
       headers: this.headers({ "content-type": "application/json" }),
@@ -87,6 +92,16 @@ export class HttpCommanderClient implements CommanderClient {
     });
     if (!res.ok) throw new Error(`daemon returned ${res.status}`);
     return (await res.json()) as { runId: string };
+  }
+
+  async uploadImage(image: { mediaType: string; data: string }): Promise<{ uploadId: string }> {
+    const res = await this.fetchImpl(`${this.baseUrl}/uploads`, {
+      method: "POST",
+      headers: this.headers({ "content-type": "application/json" }),
+      body: JSON.stringify({ mediaType: image.mediaType, data: image.data }),
+    });
+    if (!res.ok) throw new Error(`画像のアップロードに失敗しました (${res.status})`);
+    return (await res.json()) as { uploadId: string };
   }
 
   async health(): Promise<boolean> {

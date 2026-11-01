@@ -4,6 +4,7 @@
 import type { common, identity } from "@dub/types";
 import type { TeamSummary } from "../api/contract";
 import { parseBlocks, type BodySegment } from "../lib/render-body";
+import { UNKNOWN_USER_NAME } from "../lib/mentions";
 import styles from "../styles/chat.module.css";
 
 /** Display-name resolvers for the two mention kinds (person / 運営チーム). */
@@ -13,7 +14,7 @@ export interface MentionResolvers {
 }
 
 function nameOf(userId: string, resolve?: (id: common.UserId) => identity.UserSummary | undefined): string {
-  return resolve?.(userId as common.UserId)?.displayName ?? userId;
+  return resolve?.(userId as common.UserId)?.displayName ?? UNKNOWN_USER_NAME;
 }
 
 // An unresolved team falls back to the raw id — never to an empty chip, so a

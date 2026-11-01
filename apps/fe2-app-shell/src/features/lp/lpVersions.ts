@@ -94,7 +94,7 @@ export const LP_VERSIONS: readonly LpVersion[] = [
     id: "v2.1",
     name: "v2.1 磨き上げ版",
     description:
-      "v2.0 をさらに磨いた版。クラウドファンディングを CAMPFIRE の支援ページへ直接リンク、受付前の「参加登録」「登壇応募」を準備中表示に、本文の改行を整え、スクロール連動アニメーションを追加。v3.0 へ差し替え済みのため参照用アーカイブとして保存。",
+      "v2.0 をさらに磨いた版。クラウドファンディングを CAMPFIRE の支援ページへ直接リンク、受付前の「参加登録」「登壇応募」を準備中表示に、本文の改行を整え、スクロール連動アニメーションを追加。v3.0 へ差し替え済み。ビルド元がリポジトリに無く文言修正を反映できないため、旧URLは現行LP(hokuriku-it-conf.com)へ 301 リダイレクトする(wrangler.v2-1.toml)。",
     url: "https://lp-conference-next-v2-1.developershub-site.workers.dev",
     updatedAt: "2026-09-17",
     status: "archived",

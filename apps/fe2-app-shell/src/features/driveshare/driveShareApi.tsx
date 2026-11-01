@@ -119,6 +119,8 @@ export interface DriveGoogleAccount {
   needsReconnect: boolean;
   /** The grant lacks Google カレンダー access (カレンダー > ミーティング): reconnect to grant it. */
   calendarMissing?: boolean;
+  /** The grant lacks Meet settings access (Meet を誰でも参加可にする): reconnect to grant it. */
+  meetMissing?: boolean;
 }
 
 export interface DriveGoogleAccountsStatus {

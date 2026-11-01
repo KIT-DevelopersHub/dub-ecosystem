@@ -26,6 +26,18 @@ export interface Env {
   // --- service bindings ---
   SVC_IDENTITY: Fetcher; // POST /authz/check (mail:* permissions)
   SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain skips audit
+  SVC_MEMBER?: Fetcher; // member-service: userId -> 名簿 Gmail (Gmail safety-net forward); absent => no forward
+  SVC_NOTIFICATION?: Fetcher; // notification POST /notify: in-app admin alert for Resend delivery problems; absent => audit + log only
+
+  // --- Gmail safety-net forward (gmail-forward.ts) ---
+  // "on" forwards each inbound copy to the envelope recipient's linked 名簿 Gmail. Anything
+  // else (default: unset) = OFF. Each Gmail must first be a VERIFIED Email Routing
+  // destination address, or forward() fails (recorded, never blocks ingest).
+  MAIL_GMAIL_FORWARD?: string;
+  // Every inbound mail is also forwarded (once per Message-ID) to this single address.
+  // Unset/empty = off. Independent of MAIL_GMAIL_FORWARD. Must be a VERIFIED Email Routing
+  // destination, or forward() fails (logged + audited, storage unaffected).
+  MAIL_ARCHIVE_FORWARD_TO?: string;
 
   // --- outbound provider config (Workers Secrets; real send credentials) ---
   MAIL_OUTBOUND_PROVIDER?: string; // "resend" (default, ADR-0001) | "ses" | "mailchannels" | "mock"
@@ -42,6 +54,9 @@ export interface Env {
   // Resend / MailChannels (Bearer / X-Api-Key). Secrets, never committed.
   RESEND_API_KEY?: string;
   MAILCHANNELS_API_KEY?: string;
+  // Resend webhook signing secret ("whsec_..."; Svix). Unset => POST /internal/webhooks/resend
+  // answers 503 (fail closed) and config-check reports it. See resend-webhook.ts.
+  RESEND_WEBHOOK_SECRET?: string;
 
   // --- Cloudflare Email Routing admin (address issuance + forwarding rules) ---
   // The proxy behind /mail/admin/email-routing/*. The API token is a Workers Secret
@@ -61,10 +76,24 @@ export interface Env {
   // Default dub-mail-gateway (the free-tier prod name). Non-secret [vars].
   CF_EMAIL_ROUTING_WORKER_NAME?: string;
 
+  // --- destructive-operation guard (destructive.ts) ---
+  // "on" permits guardedBulkDelete (soft-delete -> grace -> purge). Anything else (default:
+  // unset) refuses every bulk delete. Turn on only for an owner-approved, one-off operation.
+  MAIL_DESTRUCTIVE_OPS?: string;
+
   // --- send resilience tuning (non-secret [vars]; optional, sane defaults) ---
   MAIL_SEND_MAX_ATTEMPTS?: string; // integer 1..6 (default 3)
   MAIL_SEND_TIMEOUT_MS?: string; // per-attempt upstream timeout ms (default 15000)
   MAIL_RATE_LIMIT_COOLDOWN_SEC?: string; // "recently rate-limited" window, 5..86400 (default 60)
+
+  // --- production synthetic mail monitor (canary.ts; non-secret [vars]) ---
+  // OFF unless MAIL_CANARY_ENABLED="true" AND both QA addresses are set (and differ).
+  MAIL_CANARY_ENABLED?: string;
+  MAIL_CANARY_TO?: string; // dedicated QA address (To) — must route to this Worker, NOT a roster user
+  MAIL_CANARY_CC?: string; // second QA address (Cc)
+  MAIL_CANARY_EXPECT_CC?: string; // "true" = a missing Cc copy fails the probe (default: recorded only)
+  MAIL_CANARY_INTERVAL_MIN?: string; // send every N minutes, multiple of 5 (default 15)
+  MAIL_CANARY_DEADLINE_MIN?: string; // arrival deadline per probe (default 10)
 }
 
 // Hono per-request variables.

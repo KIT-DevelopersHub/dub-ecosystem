@@ -4,6 +4,7 @@
 // その画面向けの見た目 (並び・2 列配置・プレースホルダ・入力種別) だけを持つ。
 // 参加届フォーム・アカウント設定 (参加情報)・メンバー追加/編集の 3 画面がこの部品を
 // 共有するので、項目を足すときは型と下の PERSON_PROFILE_FIELDS を直せば全画面に出る。
+import { Fragment, type ReactNode } from "react";
 import { FormField, Select, TextField, Textarea } from "@dub/ui";
 import { member } from "@dub/types";
 import { kanaToRomaji } from "./romaji.ts";
@@ -39,6 +40,7 @@ const FIELD_UI: Record<PersonProfileKey, FieldUi> = {
   schoolEmail: { kind: "email", half: true, help: "学校から配布されたアドレス", placeholder: "you@school.ac.jp" },
   gmail: { kind: "email", half: true, help: "連絡・共有に使う Gmail", placeholder: "you@gmail.com" },
   phone: { kind: "text", half: true, help: "緊急連絡用", placeholder: "090-1234-5678" },
+  studentNumber: { kind: "text", half: true, help: "半角数字 7 桁", placeholder: "1400980" },
   rosterNumber: { kind: "text", half: true, help: "例: 3EP2-26", placeholder: "3EP2-26" },
   grade: {
     kind: "select",
@@ -63,10 +65,11 @@ const FIELD_ORDER: readonly PersonProfileKey[] = [
   "firstNameRomaji",
   "schoolEmail",
   "gmail",
-  "phone",
+  "studentNumber",
   "rosterNumber",
   "grade",
   "department",
+  "phone",
   "desiredActivity",
   "note",
 ];
@@ -144,6 +147,7 @@ export const PROFILE_DISPLAY_COLUMNS: readonly ProfileDisplayColumn[] = [
     keys: ["lastNameKana", "firstNameKana"],
     value: (p) => joinParts([p.lastNameKana, p.firstNameKana]) || (p.nameKana ?? ""),
   },
+  single("studentNumber"),
   single("rosterNumber"),
   {
     id: "nameRomaji",
@@ -180,6 +184,7 @@ export function PersonProfileFields({
   required = [],
   idPrefix,
   idFor,
+  after = {},
 }: {
   draft: PersonProfileDraft;
   onChange: (next: PersonProfileDraft) => void;
@@ -188,6 +193,8 @@ export function PersonProfileFields({
   idPrefix: string;
   /** id の付け方を変えたい画面用 (既定は `${idPrefix}-${kebab(key)}`)。 */
   idFor?: (key: PersonProfileKey) => string;
+  /** 指定項目の行の直後に差し込む画面固有の欄 (例: 参加届の所属チーム)。 */
+  after?: Partial<Record<PersonProfileKey, ReactNode>>;
 }): JSX.Element {
   const id = (k: PersonProfileKey) => (idFor ? idFor(k) : `${idPrefix}-${toKebab(k)}`);
 
@@ -269,15 +276,12 @@ export function PersonProfileFields({
 
   return (
     <div className={styles.stack}>
-      {rows.map((row) =>
-        row.length > 1 ? (
-          <div key={row[0]!.key} className={styles.row}>
-            {row.map(field)}
-          </div>
-        ) : (
-          field(row[0]!)
-        ),
-      )}
+      {rows.map((row) => (
+        <Fragment key={row[0]!.key}>
+          {row.length > 1 ? <div className={styles.row}>{row.map(field)}</div> : field(row[0]!)}
+          {row.map((f) => after[f.key] ?? null)}
+        </Fragment>
+      ))}
     </div>
   );
 }

@@ -53,6 +53,23 @@ describe("read state + unread", () => {
     expect(row2.lastReadMessageId).toBe(last.json.id);
   });
 
+  it("a thread reply newer than the last top-level message does not stay unread after reading", async () => {
+    const app = createApp(makeDeps());
+    const c = await call(app, "POST", "/chat/channels", { body: { ...topic, visibility: "private", memberIds: ["user_b"] } });
+    const channelId = c.json.id as string;
+
+    const root = await call(app, "POST", "/chat/messages", { userId: "user_b", body: { channelId, body: "root" } });
+    await call(app, "POST", "/chat/messages", { userId: "user_b", body: { channelId, body: "reply", threadRootId: root.json.id } });
+
+    // The FE reads up to the newest message of the main timeline (= the root).
+    const read = await call(app, "POST", `/chat/channels/${channelId}/read`, { body: { lastReadMessageId: root.json.id } });
+    expect(read.json.unreadCount).toBe(0);
+
+    // Reload: the read must persist (the reply must not resurrect the badge).
+    const unread = await call(app, "GET", "/chat/unread");
+    expect(unread.json.items.find((x: any) => x.channelId === channelId).unreadCount).toBe(0);
+  });
+
   it("unread only includes channels the caller is a member of", async () => {
     const app = createApp(makeDeps());
     // caller is NOT a member of this one (created by user_b, private)

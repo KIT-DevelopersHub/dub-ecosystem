@@ -3,7 +3,9 @@
 // 編集 (reschedule: reopens a prefilled compose and cancels the parked row so the user
 // re-schedules) or 取消 (cancel). Not thread-backed — it reads the store's `scheduled`
 // slice, which useMailSync hydrates. Visuals are @dub/tokens; icons are our own.
+import { useState } from "react";
 import type { mail } from "@dub/types";
+import { Badge, ConfirmDialog } from "@dub/ui";
 import { useMailApi } from "../MailProvider.tsx";
 import { fullDate } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
@@ -17,11 +19,19 @@ export function ScheduledList(): JSX.Element {
   const { state, dispatch } = useMailStore();
   const api = useMailApi();
   const items = state.scheduled;
+  // Editing reopens a compose and cancels the parked row; parked files cannot ride back
+  // into the compose, so a row with attachments asks first (they must be re-attached).
+  const [confirmEdit, setConfirmEdit] = useState<mail.ScheduledSendListItem | null>(null);
 
   const cancel = (id: string): void => {
     // Optimistic: drop it from the list now; the DELETE follows.
     dispatch({ type: "HYDRATE_SCHEDULED", scheduled: items.filter((s) => s.id !== id) });
     void api.cancelScheduled(id).then(() => dispatch({ type: "REQUEST_SYNC" })).catch(() => dispatch({ type: "REQUEST_SYNC" }));
+  };
+
+  const requestEdit = (item: mail.ScheduledSendListItem): void => {
+    if (item.attachments && item.attachments.length > 0) setConfirmEdit(item);
+    else edit(item);
   };
 
   const edit = (item: mail.ScheduledSendListItem): void => {
@@ -36,6 +46,8 @@ export function ScheduledList(): JSX.Element {
             to: addressLine(detail.to),
             cc: detail.cc && detail.cc.length > 0 ? addressLine(detail.cc) : "",
             showCc: Boolean(detail.cc && detail.cc.length > 0),
+            bcc: detail.bcc && detail.bcc.length > 0 ? addressLine(detail.bcc) : "",
+            showBcc: Boolean(detail.bcc && detail.bcc.length > 0),
             subject: detail.subject,
             body: detail.textBody,
             ...(detail.inReplyTo ? { inReplyTo: detail.inReplyTo, mode: "reply" as const } : {}),
@@ -81,6 +93,17 @@ export function ScheduledList(): JSX.Element {
                   <span style={{ fontWeight: 600, color: "var(--dub-color-text-primary)", fontSize: "var(--dub-font-size-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {item.subject || "(件名なし)"}
                   </span>
+                  {item.inReplyTo ? <Badge tone="info" testId="fe2-mail-scheduled-reply-badge">返信</Badge> : null}
+                  {item.attachments && item.attachments.length > 0 ? (
+                    <span
+                      data-testid="fe2-mail-scheduled-attach"
+                      title={item.attachments.map((a) => a.filename).join(", ")}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0, color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-xs)" }}
+                    >
+                      <MailIcon name="paperclip" size={12} />
+                      {item.attachments.length}
+                    </span>
+                  ) : null}
                 </div>
                 <span style={{ color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   宛先: {addressLine(item.to)}
@@ -93,7 +116,7 @@ export function ScheduledList(): JSX.Element {
                 <button
                   type="button"
                   data-testid="fe2-mail-scheduled-edit"
-                  onClick={() => edit(item)}
+                  onClick={() => requestEdit(item)}
                   style={{ all: "unset", cursor: "pointer", padding: "6px 12px", borderRadius: "var(--dub-radius-md)", border: "1px solid var(--dub-color-border-default)", color: "var(--dub-color-text-secondary)", fontSize: "var(--dub-font-size-xs)", fontWeight: 600 }}
                 >
                   編集
@@ -111,6 +134,18 @@ export function ScheduledList(): JSX.Element {
           ))}
         </ul>
       )}
+      <ConfirmDialog
+        open={confirmEdit !== null}
+        title="予約を編集しますか？"
+        message="編集すると予約は取り消され、作成画面で開き直します。添付ファイルは作成画面でもう一度添付してください。"
+        confirmLabel="編集する"
+        onConfirm={() => {
+          if (confirmEdit) edit(confirmEdit);
+          setConfirmEdit(null);
+        }}
+        onCancel={() => setConfirmEdit(null)}
+        testId="fe2-mail-scheduled-edit-confirm"
+      />
     </section>
   );
 }

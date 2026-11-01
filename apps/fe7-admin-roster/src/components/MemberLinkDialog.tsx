@@ -31,11 +31,14 @@ export function MemberLinkDialog({
   open,
   onClose,
   account,
+  onLinked,
 }: {
   open: boolean;
   onClose: () => void;
   /** The メール名簿 row (developershub.jp/identity account) being linked. */
   account: RosterUser | null;
+  /** Fired after the server confirmed the link and this dialog closed (アカウント発行メール). */
+  onLinked?: (member: member.Member, account: RosterUser) => void;
 }): JSX.Element {
   const overview = useMembersOverview();
   const link = useLinkMemberIdentity();
@@ -74,7 +77,12 @@ export function MemberLinkDialog({
     if (!target) return;
     link.mutate(
       { member: target, identityUserId: account.id },
-      { onSuccess: () => close() },
+      {
+        onSuccess: () => {
+          close();
+          onLinked?.(target, account);
+        },
+      },
     );
   };
 

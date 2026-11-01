@@ -283,6 +283,10 @@
 .rowMenu:has([aria-expanded="true"]) {
   opacity: 1;
 }
+/* The open dropdown must sit above the rows that follow; otherwise they take its clicks. */
+.channelRow:has(.rowMenu [aria-expanded="true"]) {
+  z-index: 1;
+}
 .channelRow:hover .countBadge,
 .channelRow:hover .mentionBadge,
 .channelRow:focus-within .countBadge,
@@ -831,7 +835,9 @@
   box-shadow: var(--dub-shadow-md);
   z-index: 2;
 }
-.messageRow:hover .hoverActions {
+.messageRow:hover .hoverActions,
+.messageRow:focus-within .hoverActions,
+.hoverActions:has([aria-expanded="true"]) {
   display: flex;
 }
 .hoverAction {
@@ -851,7 +857,80 @@
   background: var(--dub-color-surface-sunken);
   color: var(--dub-color-text-primary);
 }
+/* forward = the reply arrow mirrored (no dedicated icon in @dub/ui) */
+.forwardIcon {
+  transform: scaleX(-1);
+}
 
+/* Slack-style 「その他」 menu */
+.msgMenuWrap {
+  position: relative;
+  display: inline-flex;
+}
+.msgMenuPanel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 260px;
+  max-height: min(480px, 70vh);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: var(--dub-space-2) 0;
+  background: var(--dub-color-surface-overlay);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-lg, var(--dub-shadow-md));
+  z-index: var(--dub-zIndex-dropdown);
+}
+.msgMenuUp {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+.msgMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--dub-space-2) var(--dub-space-4);
+  border: none;
+  background: transparent;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.msgMenuItem:hover,
+.msgMenuItem:focus-visible {
+  background: var(--dub-color-brand-600);
+  color: var(--dub-color-text-inverse);
+  outline: none;
+}
+.msgMenuSubItem {
+  padding-left: var(--dub-space-6);
+}
+.msgMenuDanger {
+  color: var(--dub-color-danger-600);
+}
+.msgMenuDanger:hover,
+.msgMenuDanger:focus-visible {
+  background: var(--dub-color-danger-600);
+}
+.msgMenuChevron {
+  opacity: 0.7;
+}
+.msgMenuSeparator {
+  height: 1px;
+  margin: var(--dub-space-2) 0;
+  background: var(--dub-color-border-default);
+}
+
+/* forward dialog */
+.forwardForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
 /* optimistic pending / failed rows */
 .pending {
   opacity: 0.55;
@@ -1623,10 +1702,10 @@
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
-  width: 264px;
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 2px;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
   padding: var(--dub-space-2);
   background: var(--dub-color-surface-overlay);
   border: 1px solid var(--dub-color-border-default);
@@ -1648,6 +1727,7 @@
   justify-content: center;
   width: 30px;
   height: 30px;
+  padding: 0;
   border: none;
   border-radius: var(--dub-radius-sm);
   background: transparent;
@@ -1657,6 +1737,63 @@
 }
 .emojiOption:hover {
   background: var(--dub-color-surface-sunken);
+}
+.emojiGrid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+/* ── custom emoji (reaction chips + picker カスタム tab) ─────────────────── */
+/* Sized in em so a custom image sits at the same visual size as the Unicode glyph
+   next to it (reaction chip font-size), whatever the source image's pixel size. */
+.customEmoji {
+  display: inline-block;
+  flex: none; /* never squeezed by the inline-flex chip / grid cell */
+  max-width: none; /* the global img reset (max-width: 100%) would clamp it to a padded cell */
+  width: 1.4em;
+  height: 1.4em;
+  object-fit: contain;
+  vertical-align: -0.3em;
+}
+.customEmojiLoading {
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+}
+.customEmojiPick {
+  width: 24px;
+  height: 24px;
+}
+.customEmojiTab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+.customEmojiGrid {
+  max-height: 216px;
+  overflow-y: auto;
+}
+.customEmojiEmpty {
+  margin: 0;
+  padding: var(--dub-space-3) var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  text-align: center;
+}
+.customEmojiImport {
+  align-self: stretch;
+  padding: var(--dub-space-2);
+  border: 1px dashed var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  background: transparent;
+  color: var(--dub-color-text-secondary);
+  font: inherit;
+  font-size: var(--dub-font-size-xs);
+  cursor: pointer;
+}
+.customEmojiImport:hover {
+  border-color: var(--dub-color-brand-400);
+  color: var(--dub-color-brand-700);
 }
 
 /* ── channel-header dropdowns (members / pins) ───────────────────────────── */
@@ -2322,4 +2459,274 @@
   font-weight: var(--dub-font-weight-bold);
   color: var(--dub-color-text-primary);
   cursor: pointer;
+}
+
+
+
+/* ── Slack 「後で」 / saved + pinned labels / message link cards ───────────── */
+.sidebarShortcuts {
+  padding-bottom: var(--dub-space-2);
+  margin-bottom: var(--dub-space-1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* line above a saved / pinned message (spans both grid columns) */
+.msgLabels {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: var(--dub-space-1);
+}
+.msgLabel {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: var(--dub-space-2);
+  align-items: center;
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+}
+.msgLabelIcon {
+  text-align: right;
+  font-size: var(--dub-font-size-xs);
+}
+.msgLabelSaved {
+  color: var(--dub-color-danger-600);
+}
+.msgLabelPinned {
+  color: var(--dub-color-warning-700);
+}
+.savedRow {
+  background: color-mix(in srgb, var(--dub-color-warning-100) 28%, transparent);
+}
+
+.quoteCards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  margin-top: var(--dub-space-2);
+  white-space: normal;
+}
+.quoteCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  max-width: 520px;
+  padding: var(--dub-space-1) var(--dub-space-3);
+  border-left: 4px solid var(--dub-color-border-strong, var(--dub-color-border-default));
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  text-decoration: none;
+}
+.quoteCardLink {
+  cursor: pointer;
+}
+.quoteCardLink:hover {
+  border-left-color: var(--dub-color-brand-600);
+}
+.quoteCardMuted {
+  color: var(--dub-color-text-muted);
+  font-style: italic;
+}
+.quoteCardAuthor {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+.quoteCardAuthor > :first-child {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+.quoteCardName {
+  font-weight: var(--dub-font-weight-bold);
+}
+.quoteCardBody {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.46;
+}
+.quoteCardFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+.quoteCardView {
+  color: var(--dub-color-text-link, var(--dub-color-brand-600));
+  text-decoration: none;
+}
+.quoteCardView:hover {
+  text-decoration: underline;
+}
+
+/* reminder submenu: resolved time on the right + 「カスタム…」 picker */
+.msgMenuHint {
+  font-size: var(--dub-font-size-xs);
+  opacity: 0.7;
+}
+.reminderCustom {
+  display: flex;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2) var(--dub-space-4) var(--dub-space-2) var(--dub-space-6);
+}
+.reminderCustomInput {
+  flex: 1;
+  min-width: 0;
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  font-size: var(--dub-font-size-xs);
+}
+.reminderCustomSave {
+  padding: var(--dub-space-1) var(--dub-space-3);
+  border: none;
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-brand-500);
+  color: var(--dub-color-text-inverse);
+  font: inherit;
+  font-size: var(--dub-font-size-xs);
+  cursor: pointer;
+}
+.reminderCustomSave:disabled {
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-muted);
+  cursor: not-allowed;
+}
+
+/* 後で view */
+.laterTabs {
+  padding: 0 var(--dub-space-4);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+.laterList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--dub-space-2) 0;
+  list-style: none;
+}
+.laterRow {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--dub-color-border-subtle, var(--dub-color-border-default));
+}
+.laterRow:hover,
+.laterRow:focus-within {
+  background: var(--dub-color-surface-sunken);
+}
+.laterRowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.laterAvatar {
+  flex-shrink: 0;
+}
+.laterText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+.laterHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dub-space-2);
+}
+.laterAuthor {
+  font-weight: var(--dub-font-weight-bold);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+.laterChannel {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.laterExcerpt {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+.laterMeta {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.laterDue {
+  color: var(--dub-color-warning-700);
+  font-weight: var(--dub-font-weight-medium);
+}
+.laterActions {
+  position: absolute;
+  top: var(--dub-space-2);
+  right: var(--dub-space-4);
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-base);
+  box-shadow: var(--dub-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
+}
+.laterRow:hover .laterActions,
+.laterRow:focus-within .laterActions,
+.laterActions:has([aria-expanded="true"]) {
+  display: flex;
+}
+.laterCustom {
+  flex-basis: 100%;
+  padding: 0 var(--dub-space-4) var(--dub-space-3) 52px;
+}
+.laterCustom .reminderCustom {
+  max-width: 360px;
+  padding: 0;
+}
+.laterEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-8, 48px) var(--dub-space-6);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  text-align: center;
+}
+.laterEmpty strong {
+  color: var(--dub-color-text-primary);
+}
+.laterEmptyIcon {
+  font-size: 32px;
+}
+@media (max-width: 768px) {
+  /* no hover on touch: keep the row actions visible */
+  .laterActions {
+    position: static;
+    display: flex;
+    margin: 0 var(--dub-space-4) var(--dub-space-3) 64px;
+  }
 }

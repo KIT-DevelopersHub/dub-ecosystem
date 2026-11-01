@@ -18,6 +18,7 @@ import {
 import { HttpCommanderApi, type ChatKind, type ChatMessage, type ChatSession, type CommanderApi } from "./commanderApi.ts";
 import { HttpCommanderClient, type CommanderClient, type StartRunOptions } from "./client.ts";
 import { parseClaudeEvent } from "./askDub.ts";
+import type { ChatImage } from "./images.ts";
 
 /** How a run's stream maps onto the assistant message: a plain answer, an operate plan,
  *  or a single op execution result. Used only for the assistant seed text. */
@@ -30,7 +31,12 @@ export interface RunSpec {
   opts: StartRunOptions;
   /** Prefixed onto the assistant message text (e.g. "▶ 実行: <cmd>\n"). */
   assistantSeed?: string;
+  /** Pasted images sent with the prompt (uploaded to the daemon right before the run). */
+  images?: ChatImage[];
 }
+
+/** What the persisted user message says about its images (the bytes stay client-side). */
+export const imageNote = (n: number): string => `[画像 ${n} 枚を添付]`;
 
 export interface ChatStore {
   ready: boolean;
@@ -262,9 +268,17 @@ export function ChatProvider({
       // Record the user message + auto-title the session from the first one — but ONLY
       // while it is still unnamed. A name the operator typed (this visit or a previous
       // one, see the hydration seed) must never be overwritten by the first question.
+      const images = spec.images ?? [];
       if (spec.userText != null && spec.userText.trim()) {
-        const userMsg = await api.addChatMessage(sessionId, { role: "user", text: spec.userText, status: "done" });
-        if (userMsg) appendMessage(sessionId, userMsg);
+        // D1 keeps only a note; the thumbnails live on the in-memory message.
+        const stored = images.length ? `${spec.userText}\n${imageNote(images.length)}` : spec.userText;
+        const userMsg = await api.addChatMessage(sessionId, { role: "user", text: stored, status: "done" });
+        if (userMsg) {
+          appendMessage(
+            sessionId,
+            images.length ? { ...userMsg, text: spec.userText, images: images.map((i) => i.previewUrl) } : userMsg,
+          );
+        }
         if (!(titles.current.get(sessionId) ?? "").trim()) {
           const title = titleFrom(spec.userText);
           applyTitle(kind, sessionId, title);
@@ -290,8 +304,13 @@ export function ChatProvider({
           resolve({ ...asst, text, tools, status });
         };
 
-        client
-          .startRun(spec.prompt, spec.opts)
+        Promise.all(images.map((img) => client.uploadImage(img)))
+          .then((uploaded) =>
+            client.startRun(
+              spec.prompt,
+              uploaded.length ? { ...spec.opts, images: uploaded.map((u) => u.uploadId) } : spec.opts,
+            ),
+          )
           .then(({ runId }) => {
             let acc = seed;
             const tools: string[] = [];

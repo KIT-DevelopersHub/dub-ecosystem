@@ -65,7 +65,7 @@ export function InboxScreen({ onCompose }: { onCompose?: () => void }): JSX.Elem
 
   const openMessage = (m: mail.MailMessageListItem): void => {
     setSelected({ id: m.id, threadId: m.threadId });
-    if (!m.read) markRead.mutate(m.id);
+    if (!m.read && m.mine !== false) markRead.mutate(m.id);
   };
 
   // Detail takes over the surface; "back" returns to the list (already invalidated).

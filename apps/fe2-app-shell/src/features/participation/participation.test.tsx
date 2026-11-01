@@ -192,6 +192,47 @@ describe("ParticipationForm", () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
+  it("asks 所属チーム from the roster teams and sends it as desiredTeamId", async () => {
+    const teams: OnboardingTeam[] = [
+      { id: "team_dev", name: "開発チーム", color: null },
+      { id: "team_network", name: "ネットワークチーム", color: null },
+    ];
+    const api = makeApi({ publicOnboarding: vi.fn(() => Promise.resolve(guide([], { teams }))) });
+    render(wrap(<ParticipationForm />, api));
+    const select = await screen.findByTestId("participation-team");
+    expect(within(select).getByRole("option", { name: "ネットワークチーム" })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: "まだ決まっていない" })).toBeInTheDocument();
+    await fillRequired();
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    expect(screen.getByText("所属チームを選択してください")).toBeInTheDocument();
+    expect(api.submit).not.toHaveBeenCalled();
+    await userEvent.selectOptions(select, "team_network");
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
+    expect((api.submit as any).mock.calls[0][0]).toMatchObject({ desiredTeamId: "team_network" });
+  });
+
+  it("sends desiredTeamId = null for 「まだ決まっていない」", async () => {
+    const teams: OnboardingTeam[] = [{ id: "team_dev", name: "開発チーム", color: null }];
+    const api = makeApi({ publicOnboarding: vi.fn(() => Promise.resolve(guide([], { teams }))) });
+    render(wrap(<ParticipationForm />, api));
+    await userEvent.selectOptions(await screen.findByTestId("participation-team"), "__none__");
+    await fillRequired();
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
+    expect((api.submit as any).mock.calls[0][0]).toMatchObject({ desiredTeamId: null });
+  });
+
+  it("shows a skeleton while the teams load and omits the field when there are no teams", async () => {
+    let resolve: (g: OnboardingGuide) => void = () => {};
+    const api = makeApi({ publicOnboarding: vi.fn(() => new Promise<OnboardingGuide>((r) => (resolve = r))) });
+    render(wrap(<ParticipationForm />, api));
+    expect(await screen.findByTestId("participation-team-loading")).toBeInTheDocument();
+    resolve(guide([]));
+    await waitFor(() => expect(screen.queryByTestId("participation-team-loading")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("participation-team")).not.toBeInTheDocument();
+  });
+
   it("submits split 姓/名 + both emails and shows a neutral サンクス (no roster claim)", async () => {
     const api = makeApi();
     render(wrap(<ParticipationForm />, api));
@@ -219,7 +260,7 @@ const SUBMISSION: Participation = {
   id: "p_1", orgId: "org", memberId: null, name: "黒川", lastName: "黒川", firstName: null,
   nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
   nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null, grade: "3",
-  department: "情報工学科", rosterNumber: null, contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
+  department: "情報工学科", rosterNumber: null, studentNumber: null, contact: "kurokawa@school.ac.jp", phone: "090-1111-2222", schoolEmail: "kurokawa@school.ac.jp",
   gmail: "kurokawa.dev@gmail.com", desiredTeamId: "t1", desiredActivity: "both", note: "よろしく",
   status: "submitted", matchKind: "created_new", reviewState: "pending", submittedBy: "u_1",
   submittedAt: "2026-08-15T10:00:00.000Z", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z",
@@ -251,7 +292,7 @@ describe("ParticipationListPage", () => {
     expect(await screen.findByTestId("participation-list-table")).toBeInTheDocument();
     expect(screen.getByText("kurokawa@school.ac.jp")).toBeInTheDocument();
     expect(screen.getByText("kurokawa.dev@gmail.com")).toBeInTheDocument();
-    // 希望チーム resolves via the canonical team list (t1 → 会場).
+    // 所属チーム resolves via the canonical team list (t1 → 会場).
     expect(screen.getByText("会場")).toBeInTheDocument();
     // 未処理は「未処理」バッジ + 「追加する」ボタンが出る。
     expect(screen.getByTestId("participation-add-p_1")).toBeInTheDocument();
@@ -592,6 +633,22 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
       email: "minoru.tanaka@developershub.jp", displayName: "田中 実", furigana: "たなか みのる", roleIds: ["role_sys_member"],
     });
     await waitFor(() => expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument());
+  });
+
+  it("発行→紐付けが済んだら、続けてアカウント発行メールを送るか聞き、送る で API を呼ぶ", async () => {
+    const sendAccountMail = vi.fn(() =>
+      Promise.resolve({ ok: true as const, to: TANAKA.gmail ?? "", cc: "minoru.tanaka@developershub.jp", appUrl: "https://app.developershub.jp", passwordSource: "generated" as const, messageId: "m" }),
+    );
+    const api = issueApi({ sendAccountMail });
+    render(wrap(<ParticipationListPage />, api, issuer));
+    await addAsNew();
+    await userEvent.click(await screen.findByTestId("participation-issue-mail-submit"));
+    const dialog = await screen.findByTestId("account-mail-dialog");
+    expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("account-mail-dialog-to")).toHaveTextContent(TANAKA.gmail ?? "");
+    expect(within(dialog).getByTestId("account-mail-dialog-cc")).toHaveTextContent("minoru.tanaka@developershub.jp");
+    await userEvent.click(within(dialog).getByTestId("account-mail-dialog-send"));
+    await waitFor(() => expect(sendAccountMail).toHaveBeenCalledWith("usr_new"));
   });
 
   it("途中で失敗したら、再試行は発行済みのアドレスを作り直さず続きから行う", async () => {

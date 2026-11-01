@@ -12,7 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "visual:build": "pnpm exec turbo run build --filter=@dub/fe2-app-shell^... && VITE_DEMO=1 vite build",
+    "visual": "playwright test -c visual/playwright.config.ts",
+    "visual:update": "playwright test -c visual/playwright.config.ts --update-snapshots",
+    "visual:report": "playwright show-report visual/.report"
   },
   "dependencies": {
     "@dub/admin-roster": "workspace:*",
