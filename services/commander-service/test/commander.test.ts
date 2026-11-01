@@ -394,6 +394,28 @@ describe("commander-service run persistence", () => {
     expect(item2.prUrls).toEqual(["https://github.com/o/r/pull/10", "https://github.com/o/r/pull/11"]);
   });
 
+  it("a PR seen only in tool output never becomes the task's prUrl", async () => {
+    const created = await call(app, env, "POST", "/tasks", { title: "cwdのPR" });
+    const taskId = created.json.task.id;
+    await call(app, env, "POST", "/runs", { id: "run_cwdpr", prompt: "p", cwd: "/wt", taskId, status: "running" });
+    const ev = (data: unknown) =>
+      call(app, env, "POST", "/runs/run_cwdpr/events", { type: "claude", payload: { data } });
+
+    await ev({ type: "result", result: "PR: https://github.com/o/r/pull/676" });
+    // a later `gh pr view` in the cwd reports the cwd branch's (unrelated, merged) PR
+    await ev({ type: "user", message: { content: [{ type: "tool_result", content: "https://github.com/o/r/pull/670 MERGED" }] } });
+
+    const board = await call(app, env, "GET", "/tasks");
+    const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item.prUrl).toBe("https://github.com/o/r/pull/676");
+
+    await call(app, env, "POST", "/tasks/backfill-urls");
+    const again = await call(app, env, "GET", "/tasks");
+    expect(again.json.items.find((i: { taskId: string }) => i.taskId === taskId).prUrl).toBe(
+      "https://github.com/o/r/pull/676",
+    );
+  });
+
   it("POST /tasks/backfill-urls recovers URLs from pre-existing run events", async () => {
     const created = await call(app, env, "POST", "/tasks", { title: "バックフィル" });
     const taskId = created.json.task.id;
