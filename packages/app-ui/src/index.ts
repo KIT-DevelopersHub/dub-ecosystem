@@ -31,6 +31,14 @@ export { DialogActions, type DialogActionsProps } from "./components/DialogActio
 export { FormError, type FormErrorProps } from "./components/FormError";
 export { DraftRestoredNotice, type DraftRestoredNoticeProps } from "./components/DraftRestoredNotice";
 
+export { useDebouncedValue } from "./hooks/useDebouncedValue";
+export {
+  useClientFilter,
+  normalizeSearchText,
+  matchesSearch,
+  type ClientFilter,
+} from "./hooks/useClientFilter";
+
 export {
   useDraftAutosave,
   peekDraft,
