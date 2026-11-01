@@ -34,6 +34,8 @@ export const ORDER_STATUS: Record<LpTicketOrderStatus, { label: string; tone: "s
   paid: { label: "支払い済み", tone: "success" },
   pending: { label: "決済待ち", tone: "warning" },
   expired: { label: "期限切れ", tone: "neutral" },
+  refunded: { label: "返金済み", tone: "neutral" },
+  needs_review: { label: "要確認", tone: "warning" },
 };
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = { card: "カード", paypay: "PayPay", link: "Link" };

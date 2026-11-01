@@ -1357,19 +1357,13 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
   }
 
   const base = await deps.getConfig();
-  if (!base) return null;
   // The checkout POST carries the token in the form (the iframe may drop the cookie and referer).
   const formText = route === "checkout" && req.method === "POST" ? await req.text() : null;
   const formToken = formText !== null ? new URLSearchParams(formText).get(TICKETS_PREVIEW_FIELD) : null;
-  const config = await withTestPurchase(base, deps.previewToken ?? formToken, deps);
-  if (!config.enabled) return null;
-  const test = !!config.testPurchaseToken;
+  const config = base ? await withTestPurchase(base, deps.previewToken ?? formToken, deps) : null;
+  const test = !!config?.testPurchaseToken;
 
-  if (route === "page") {
-    if (req.method !== "GET" && req.method !== "HEAD") return null;
-    return htmlResponse(renderTicketsPage({ config, canceled: url.searchParams.get("canceled") === "1", demo: deps.demo }));
-  }
-
+  // Before the sales gate: a buyer already on Stripe must still get confirmed if sales are turned off meanwhile.
   if (route === "thanks") {
     if (req.method !== "GET" && req.method !== "HEAD") return null;
     const sessionId = url.searchParams.get("session_id");
@@ -1399,6 +1393,13 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
       // fall through to the generic message
     }
     return htmlResponse(renderThanksPage({ status, summary: status === "paid" ? summary : undefined, demo: deps.demo, test }));
+  }
+
+  if (!config || !config.enabled) return null;
+
+  if (route === "page") {
+    if (req.method !== "GET" && req.method !== "HEAD") return null;
+    return htmlResponse(renderTicketsPage({ config, canceled: url.searchParams.get("canceled") === "1", demo: deps.demo }));
   }
 
   // route === "checkout"
