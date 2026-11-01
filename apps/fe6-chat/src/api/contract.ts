@@ -207,7 +207,7 @@ export interface UnfurlResponse {
   preview: UnfurlPreview | null;
 }
 
-// Personal sidebar sections (Slack-style): per user, a channel sits in at most one.
+// Org-wide sidebar sections (Slack-style): one shared set, a channel sits in at most one.
 // Unassigned channels stay in the default groups (チャンネル / イベント / ダイレクト).
 export interface ChatSection {
   id: string;
@@ -222,4 +222,78 @@ export interface ChatSectionList {
 export interface UpdateSectionRequest {
   name?: string;
   position?: number;
+}
+
+// ---- Slack channel import (admin) — mirrors services/chat-service/src/slack-import.ts ----
+// The browser drives a job by POSTing …/step in a loop while the screen is open; a
+// reopened screen resumes from the persisted cursor. 412 = SLACK_BOT_TOKEN not set.
+export type SlackImportJobStatus = "queued" | "running" | "done" | "failed";
+export type SlackImportPhase = "users" | "channel" | "history" | "threads" | "files" | "finalize" | "done";
+
+export interface SlackImportCounters {
+  members: number;
+  messages: number;
+  threadReplies: number;
+  reactions: number;
+  pins: number;
+  files: number;
+  filesSkipped: number;
+}
+
+export interface SlackImportJob {
+  id: string;
+  slackChannelId: string;
+  slackChannelName: string;
+  isPrivate: boolean;
+  dubChannelId: common.ChannelId;
+  status: SlackImportJobStatus;
+  phase: SlackImportPhase;
+  counters: SlackImportCounters;
+  pending: { threads: number; files: number };
+  error: { code: string; message: string } | null;
+  /** >0 while parked on a Slack rate limit: wait this long before the next step. */
+  retryAfterMs: number;
+  createdBy: common.UserId;
+  createdAt: common.ISODateTime;
+  updatedAt: common.ISODateTime;
+  finishedAt: common.ISODateTime | null;
+}
+
+export interface SlackChannelOption {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  isArchived: boolean;
+  memberCount: number | null;
+  /** Latest job for this channel, if it was imported before. */
+  job: { id: string; status: SlackImportJobStatus } | null;
+}
+
+// ---- Custom emoji — mirrors services/chat-service/src/custom-emoji.ts ----
+// A reaction stores the literal ":name:"; when a custom emoji of that name exists it renders
+// as its image (an alias renders its target's image). The Slack import is a resumable batch:
+// POST { after } -> nextAfter until null. 412 = SLACK_BOT_TOKEN / R2 not configured.
+export interface CustomEmoji {
+  name: string;
+  aliasOf: string | null;
+  contentType: string | null;
+  source: "slack" | "upload";
+  createdAt: common.ISODateTime;
+}
+
+export interface EmojiImportResult {
+  /** Importable custom emoji in Slack (images + their aliases); null = Slack not reached. */
+  total: number | null;
+  /** Of `total`, how many are registered now. */
+  imported: number;
+  /** Rows registered by this call. */
+  added: number;
+  /** Never importable (aliases of standard emoji, unsafe names). */
+  skipped: number;
+  /** Images this call could not store. */
+  failed: string[];
+  /** Cursor for the next call; null = finished. */
+  nextAfter: string | null;
+  /** >0: Slack rate limit — call again with the same cursor after this long. */
+  retryAfterMs: number;
 }

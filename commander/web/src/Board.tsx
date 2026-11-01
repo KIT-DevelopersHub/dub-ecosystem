@@ -40,6 +40,8 @@ import { DoneList } from "./DoneList.tsx";
 import { TaskComposer, type ComposerSubmit } from "./TaskComposer.tsx";
 import { TaskDrawer } from "./TaskDrawer.tsx";
 import { btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
+import type { ChatImage } from "./lib/images.ts";
+import { imageNote } from "./lib/chatStore.tsx";
 
 // ホバー表現はインラインstyleで書けないので、ボード内だけに効くクラスを1つの<style>で持つ。
 const BOARD_CSS = `
@@ -83,6 +85,22 @@ function composePrompt(prior: string | null, addition: string): string {
   return `${prior}\n\n---\n[前回の実行へのフィードバック / 追加指示]\n${addition}`;
 }
 
+/** Start a run with pasted screenshots: stage each on the daemon, then pass the ids. The
+ *  prompt notes the count so later follow-ups (which re-inject it) know images were sent. */
+async function startRunWithImages(
+  client: CommanderClient,
+  prompt: string,
+  opts: { taskId?: string; cwd?: string },
+  images: ChatImage[],
+): Promise<{ runId: string }> {
+  if (images.length === 0) return client.startRun(prompt, opts);
+  const uploaded = await Promise.all(images.map((img) => client.uploadImage(img)));
+  return client.startRun(`${prompt}\n${imageNote(images.length)}`, {
+    ...opts,
+    images: uploaded.map((u) => u.uploadId),
+  });
+}
+
 // Instruction the staging反映 run carries when the user approves demo → staging. This is
 // what makes 「stgに進む」 do real work (not just flip the phase): the daemon spawns a run
 // in the task's worktree that merges the demo-approved版そのもの into staging and deploys,
@@ -94,17 +112,21 @@ export const STAGING_DEPLOY_PROMPT =
   "(2) `bash scripts/staging-pick-slot.sh --pr <PR番号>` で空いている staging 枠を選び、" +
   "出力の label (`staging2へ` か `stagingへ`) を PR に付けて staging.yml で反映 (両方埋まっていれば待つ)、" +
   "(3) `bash scripts/verify-live.sh <出力の verify_env> \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
-  "(4) 完了したら staging URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
+  "(4) 完了したら staging URL を1行で出力し、最終行に `これに付けて: <PR URL>` を1行書く。反映が確認できるまで完了扱いにしないでください。" +
+  "この run は staging までです。`確認した` ラベルは絶対に付けない (オーナーだけが付ける)。main へのマージ・本番デプロイもしない。";
 
 // Instruction the本番反映 run carries when the user approves staging → prod. Mirrors the
 // staging反映 run so 本番承認 も同じ進行UI（本番反映中 → 完了/失敗）に繋がる: the daemon
 // spawns a real run that ships the staging-approved版そのもの to 本番, and its live progress
-// is what the board shows as 「本番反映中」 until it settles (→本番確認中).
+// is what the board shows as 「本番反映中」 until it settles (→本番確認中). The run never
+// applies 「確認した」 itself — only the owner does; without it the run stops and asks.
 export const PROD_DEPLOY_PROMPT =
   "[commander] このタスクの staging で承認された版そのものを本番に反映してください。" +
-  "手順: (1) staging承認版を main にマージ (別物を混ぜない・diff照合)、" +
-  "(2) `pnpm deploy` で本番に反映、" +
-  "(3) `pnpm verify:live prod \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
+  "手順: (1) `gh pr view <PR> --json labels,baseRefName` で対象 PR に `確認した` ラベルが付いているか確かめる。" +
+  "`確認した` はオーナーだけが付けるラベルなので、自分では絶対に付けない。付いていなければ何もマージせず、最終行に `これに付けて: <PR URL>` を1行書いて終了する。" +
+  "(2) 付いていれば staging 承認版と同じであること (別物を混ぜない・diff照合) を確かめ、`gh pr merge <PR> --merge` で main にマージする (`--admin` 禁止)。" +
+  "本番デプロイは main マージで deploy.yml が自動で行う。手元からの `wrangler deploy` や `gh workflow run` で本番に出さない。" +
+  "(3) deploy.yml の完了を `gh run watch` で待ち、`bash scripts/verify-live.sh prod \"<マーカー>\"` で配信物にマーカーが実在することを実測、" +
   "(4) 完了したら本番 URL を1行で出力。反映が確認できるまで完了扱いにしないでください。";
 
 // Phases a 追加指示 must rewind to demo_building before the follow-up run starts
@@ -301,10 +323,12 @@ export function Board({
           setOptimistic((prev) => prev.filter((o) => o.taskId !== placeholder.taskId));
           return;
         }
-        await client.startRun(v.prompt, {
-          taskId: res.value.task.id,
-          ...(v.cwd ? { cwd: v.cwd } : {}),
-        });
+        await startRunWithImages(
+          client,
+          v.prompt,
+          { taskId: res.value.task.id, ...(v.cwd ? { cwd: v.cwd } : {}) },
+          v.images,
+        );
         await load();
       } catch {
         setOptimistic((prev) => prev.filter((o) => o.taskId !== placeholder.taskId));
@@ -394,12 +418,14 @@ export function Board({
   );
 
   const startFollowUpRun = useCallback(
-    async (item: BoardItem, addition: string) => {
+    async (item: BoardItem, addition: string, images: ChatImage[] = []) => {
       const prior = await priorPrompt(item.latestRun?.id);
-      await client.startRun(composePrompt(prior, addition), {
-        taskId: item.taskId,
-        ...(item.latestRun?.cwd ? { cwd: item.latestRun.cwd } : {}),
-      });
+      await startRunWithImages(
+        client,
+        composePrompt(prior, addition),
+        { taskId: item.taskId, ...(item.latestRun?.cwd ? { cwd: item.latestRun.cwd } : {}) },
+        images,
+      );
     },
     [client, priorPrompt],
   );
@@ -446,12 +472,12 @@ export function Board({
   );
 
   const handleReject = useCallback(
-    async (to: FeaturePhase, feedback: string) => {
+    async (to: FeaturePhase, feedback: string, images: ChatImage[] = []) => {
       if (!selected) return;
       await api.transition(selected.featureId, to, { approvedByUser: false, note: feedback });
       // reject → back to building, then spawn the fix run (feedback carried into the prompt).
       await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
-      await startFollowUpRun(selected, feedback);
+      await startFollowUpRun(selected, feedback, images);
       await leaveBundle(selected.taskId);
       await refreshAfterAction();
     },
@@ -459,7 +485,7 @@ export function Board({
   );
 
   const handleRerun = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, images: ChatImage[] = []) => {
       if (!selected) return;
       // A rejected feature is reset to demo_building so a successful fix run returns it to
       // 確認待ち. Any other phase (本番反映済 included) stays where it is.
@@ -472,7 +498,7 @@ export function Board({
         if (needsReset) {
           await api.transition(selected.featureId, "demo_building", { approvedByUser: false });
         }
-        await startFollowUpRun(selected, prompt);
+        await startFollowUpRun(selected, prompt, images);
       } catch (e) {
         deployingRef.current.delete(selected.featureId);
         throw e;

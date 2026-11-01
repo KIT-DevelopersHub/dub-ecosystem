@@ -159,6 +159,25 @@ describe("CalendarScreen", () => {
     expect(screen.getByTestId("calendar-section-status")).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("remembers the 表示/非表示 checkboxes per user across a reload", async () => {
+    // Another account's choice on this browser must not leak in.
+    localStorage.setItem("dub.calendar.prefs.hidden.usr_other", JSON.stringify(["kind:event"]));
+    const user = userEvent.setup();
+    const { unmount } = renderScreen(memoryApi([]));
+    await screen.findByTestId("calendar-timegrid");
+    expect(screen.getByTestId("calendar-filter-kind:event")).toBeChecked();
+    await user.click(screen.getByTestId("calendar-filter-group:task"));
+    await user.click(screen.getByTestId("calendar-filter-kind:vacation"));
+    expect(JSON.parse(localStorage.getItem(`dub.calendar.prefs.hidden.${ME}`)!)).toEqual(["group:task", "kind:vacation"]);
+
+    unmount();
+    renderScreen(memoryApi([]));
+    await screen.findByTestId("calendar-timegrid");
+    expect(screen.getByTestId("calendar-filter-group:task")).not.toBeChecked();
+    expect(screen.getByTestId("calendar-filter-kind:vacation")).not.toBeChecked();
+    expect(screen.getByTestId("calendar-filter-kind:event")).toBeChecked();
+  });
+
   it("opens on the week view with today's header and the week's 予定", async () => {
     renderScreen(
       memoryApi([

@@ -3,7 +3,7 @@
 // (useEmailAddressInput) + token-driven CSS. Domain-free: the caller injects the
 // address `parse` fn and any `candidates` (e.g. from the roster / Email Routing),
 // so the same component serves FE2 mail compose and FE7 roster address fields.
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { isImeComposing } from "@dub/ui";
 import {
   useEmailAddressInput,
@@ -11,6 +11,7 @@ import {
   type EmailToken,
   type EmailParseResult,
 } from "../hooks/useEmailAddressInput";
+import { useListKeyboardNav } from "../hooks/useListKeyboardNav";
 import styles from "./EmailAddressSelect.module.css";
 
 export interface EmailAddressSelectProps {
@@ -71,8 +72,37 @@ export function EmailAddressSelect({
     const q = draft.trim();
     return candidates.filter((c) => !selected.has(c.email) && matches(c, q)).slice(0, 6);
   }, [candidates, draft, selected]);
-  const showList = focused && suggestions.length > 0;
-  const listId = id ? `${id}-listbox` : undefined;
+  // Escape hides the list until the draft changes again.
+  const [dismissedFor, setDismissedFor] = useState<string | null>(null);
+  const showList = focused && suggestions.length > 0 && dismissedFor !== draft;
+  const autoId = useId();
+  const listId = `${id ?? autoId}-listbox`;
+  const optionId = (i: number): string => `${listId}-opt-${i}`;
+
+  // Gmail-style: highlight the first match by default, except when the draft is
+  // already a complete address of its own — then Enter keeps the typed address.
+  const draftIsOwnAddress = useMemo(() => {
+    const q = draft.trim();
+    if (q.length === 0) return false;
+    const r = parse(q);
+    return r.invalid.length === 0 && r.recipients.length === 1 && !suggestions.some((s) => s.email.toLowerCase() === r.recipients[0]!.email.toLowerCase());
+  }, [draft, parse, suggestions]);
+  const { activeIndex, setActiveIndex, move } = useListKeyboardNav({
+    count: showList ? suggestions.length : 0,
+    resetKey: draft,
+    defaultIndex: draftIsOwnAddress ? -1 : 0,
+  });
+
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`);
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex]);
+
+  const pick = (c: EmailToken): void => {
+    add(c);
+  };
 
   return (
     <div className={styles.field} data-variant={variant} data-testid={testId ? `${testId}-field` : undefined}>
@@ -114,6 +144,8 @@ export function EmailAddressSelect({
         role={candidates ? "combobox" : undefined}
         aria-expanded={candidates ? showList : undefined}
         aria-controls={showList ? listId : undefined}
+        aria-autocomplete={candidates ? "list" : undefined}
+        aria-activedescendant={showList && activeIndex >= 0 ? optionId(activeIndex) : undefined}
         autoComplete="off"
         onChange={(e) => setDraft(e.target.value)}
         onFocus={() => setFocused(true)}
@@ -130,6 +162,26 @@ export function EmailAddressSelect({
         }}
         onKeyDown={(e) => {
           if (composingRef.current || isImeComposing(e)) return;
+          if (showList) {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              move(e.key === "ArrowDown" ? 1 : -1);
+              return;
+            }
+            if (e.key === "Escape") {
+              // Close the list only; keep the draft and don't close the host dialog.
+              e.preventDefault();
+              e.stopPropagation();
+              setDismissedFor(draft);
+              return;
+            }
+            const active = activeIndex >= 0 ? suggestions[activeIndex] : undefined;
+            if (active && (e.key === "Enter" || e.key === "Tab")) {
+              e.preventDefault();
+              pick(active);
+              return;
+            }
+          }
           if (e.key === "Enter" || e.key === "," || e.key === ";") {
             e.preventDefault();
             commit();
@@ -140,18 +192,23 @@ export function EmailAddressSelect({
       {extra}
 
       {showList ? (
-        <ul className={styles.listbox} id={listId} role="listbox">
-          {suggestions.map((c) => (
-            <li key={c.email}>
+        <ul ref={listRef} className={styles.listbox} id={listId} role="listbox">
+          {suggestions.map((c, i) => (
+            <li key={c.email} role="presentation">
               <button
                 type="button"
+                id={optionId(i)}
                 role="option"
-                aria-selected={false}
+                tabIndex={-1}
+                data-index={i}
+                aria-selected={i === activeIndex}
+                data-active={i === activeIndex ? "true" : undefined}
                 className={styles.option}
+                onMouseEnter={() => setActiveIndex(i)}
                 // onMouseDown (not onClick) so it fires before the input's blur.
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  add(c);
+                  pick(c);
                 }}
               >
                 {c.name ? <span className={styles.optionName}>{c.name}</span> : null}

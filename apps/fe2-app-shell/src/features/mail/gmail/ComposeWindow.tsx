@@ -2,8 +2,8 @@
 // To rendered as removable chips with a Cc/Bcc toggle, subject and body, and a
 // send button. Recipient entry uses the shared @dub/app-ui EmailAddressSelect
 // (chips + autocomplete), fed the feature's parseRecipients and correspondent
-// candidates from the store. On send it appends to the Sent folder via the store
-// and best-effort posts through the real MailApi (ignored under the demo mock).
+// candidates from the store. On send it appends to the Sent folder optimistically and
+// posts via sendMail.deliver(); a failure restores this window and shows 再試行.
 //
 // P1-2 follow-up: this — NOT ComposeScreen (/mail/compose, a standalone route kept
 // only for deep-links) — is the compose surface a real user actually reaches (the
@@ -20,21 +20,17 @@
 import { useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { mail } from "@dub/types";
 import { EmailAddressSelect, type EmailToken, DraftRestoredNotice, useDraftAutosave } from "@dub/app-ui";
-import { parseRecipients } from "../mailApi.tsx";
+import { newIdempotencyKey, parseRecipients } from "../mailApi.tsx";
 import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
 import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { UnsavedChangesGuard } from "../../../lib/UnsavedChangesGuard.tsx";
 import { MailIcon } from "./icons.tsx";
-import { useMailStore, type ComposeState } from "./useMailStore.tsx";
-
-/** Format a Date as a `datetime-local` input value (YYYY-MM-DDTHH:mm) in LOCAL time —
- *  the picker shows and returns local wall-clock; we convert to an absolute ISO on submit. */
-function toDatetimeLocal(d: Date): string {
-  const pad = (n: number): string => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+import { addressCandidates } from "./mailModel.ts";
+import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
+import { deliver } from "./sendMail.ts";
+import { SchedulePicker } from "./SchedulePicker.tsx";
 
 /** localStorage key prefix for a floating compose window's draft — one per compose.id
  *  (several windows can be open at once, Gmail-style). Exported so GmailApp can scan
@@ -59,19 +55,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const mailApi = useMailApi();
 
   // Address-book candidates: everyone the user has corresponded with (excluding self).
-  const candidates: EmailToken[] = useMemo(() => {
-    const byEmail = new Map<string, EmailToken>();
-    for (const t of state.threads) {
-      for (const m of t.messages) {
-        for (const p of [m.from, ...m.to, ...(m.cc ?? [])]) {
-          if (p.email && p.email !== state.me.email && !byEmail.has(p.email)) {
-            byEmail.set(p.email, p.name ? { email: p.email, name: p.name } : { email: p.email });
-          }
-        }
-      }
-    }
-    return [...byEmail.values()];
-  }, [state.threads, state.me.email]);
+  const candidates: EmailToken[] = useMemo(() => addressCandidates(state.threads, state.me.email), [state.threads, state.me.email]);
 
   const removeIcon = <MailIcon name="x" size={12} />;
   const patch = (p: Partial<ComposeState>): void => dispatch({ type: "UPDATE_COMPOSE", id: compose.id, patch: p });
@@ -85,11 +69,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const [dragOver, setDragOver] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const dragDepth = useRef(0);
-  // Scheduled send (予約送信): a popover with a datetime-local picker. Confirming a future
-  // time parks the compose via POST /mail/scheduled instead of sending it now.
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [scheduleAt, setScheduleAt] = useState("");
-  const [scheduleErr, setScheduleErr] = useState<string | null>(null);
+  const submitted = useRef(false);
 
   // Dirty = there is text worth keeping/warning about (matches ComposeScreen's rule;
   // attachments alone still warn on leave since they'd otherwise vanish silently).
@@ -138,41 +118,41 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   };
 
   const send = (): void => {
+    // One send per window: a double click / repeated shortcut before the window closes
+    // must not post the same mail twice.
+    if (submitted.current) return;
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
+    const bcc = parseRecipients(compose.bcc).recipients;
     if (to.length === 0) return;
     // Don't drop a file that is still being read: wait for the read to finish (Gmail keeps
     // Send disabled until the upload settles). The button is disabled while hasPending.
     if (att.hasPending) return;
-    draft.clear(); // sent — nothing left to warn about or restore
-    // Optimistic: show it in Sent immediately. The real send follows; once the gateway
-    // confirms, REQUEST_SYNC re-fetches GET /mail/sent so the entry is server-backed and
-    // survives a reload (the From is the gateway-resolved <user>@developershub.jp).
-    dispatch({ type: "SEND", to, cc, subject: compose.subject, body: compose.body });
+    draft.clear(); // restored from the PendingSend snapshot if the send fails
+    // Optimistic: show it in Sent immediately; deliver() drops it again on failure.
+    const threadId = uid("thread");
+    dispatch({ type: "SEND", to, cc, bcc, subject: compose.subject, body: compose.body, threadId });
     const req: mail.SendMailRequest = { to, subject: compose.subject || "(件名なし)", textBody: compose.body };
     if (cc.length > 0) req.cc = cc;
-    // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/
-    // References (recipient threads the conversation; a further reply chains back to us).
+    if (bcc.length > 0) req.bcc = bcc;
+    // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/References.
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
-    void mailApi
-      .send(req)
-      .then(() => dispatch({ type: "REQUEST_SYNC" }))
-      .catch(() => undefined);
+    submitted.current = true;
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
+    void deliver(mailApi, dispatch, { kind: "send", req, compose, threadId, idempotencyKey: newIdempotencyKey() });
   };
 
-  // Park the compose for a future time. Recipients must be present and the time must be in
-  // the future; attachments are NOT supported on a scheduled send in this slice.
-  const scheduleSend = (): void => {
+  // Park the compose for a future time (SchedulePicker validated it is in the future).
+  // Works for new mail AND 返信/全員に返信 (inReplyTo keeps the thread), with Cc/Bcc and
+  // attachments — the gateway parks the files in R2 and attaches them at delivery.
+  const scheduleSend = (when: Date): string | null => {
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
-    if (to.length === 0) { setScheduleErr("宛先を入力してください"); return; }
-    if (!scheduleAt) { setScheduleErr("送信日時を選んでください"); return; }
-    const when = new Date(scheduleAt);
-    if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) { setScheduleErr("未来の日時を選んでください"); return; }
-    if (att.items.length > 0) { setScheduleErr("予約送信では添付ファイルは使えません"); return; }
+    const bcc = parseRecipients(compose.bcc).recipients;
+    if (to.length === 0) return "宛先を入力してください";
+    if (att.hasPending) return "添付ファイルを処理中です…";
     const req: mail.ScheduleMailRequest = {
       to,
       subject: compose.subject || "(件名なし)",
@@ -180,14 +160,14 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
       scheduledAt: when.toISOString(),
     };
     if (cc.length > 0) req.cc = cc;
+    if (bcc.length > 0) req.bcc = bcc;
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
+    const inputs = att.readyInputs();
+    if (inputs.length > 0) req.attachments = inputs;
     draft.clear();
-    void mailApi
-      .schedule(req)
-      .then(() => dispatch({ type: "REQUEST_SYNC" }))
-      .catch(() => undefined);
-    setScheduleOpen(false);
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
+    void deliver(mailApi, dispatch, { kind: "schedule", req, compose });
+    return null;
   };
 
   const maximized = compose.maximized;
@@ -295,7 +275,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
                   <button type="button" onClick={() => patch({ showCc: true })} style={ccBtn}>Cc</button>
                 ) : null}
                 {!compose.showBcc ? (
-                  <button type="button" onClick={() => patch({ showBcc: true })} style={ccBtn}>Bcc</button>
+                  <button type="button" data-testid="fe2-mail-compose-bcc-toggle" onClick={() => patch({ showBcc: true })} style={ccBtn}>Bcc</button>
                 ) : null}
               </span>
             }
@@ -338,50 +318,13 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             >
               送信 <MailIcon name="send" size={16} />
             </button>
-            <div style={{ position: "relative" }}>
-              <button
-                type="button"
-                aria-label="送信日時を設定"
-                data-testid="fe2-mail-compose-schedule-open"
-                onClick={() => {
-                  setScheduleErr(null);
-                  if (!scheduleAt) setScheduleAt(toDatetimeLocal(new Date(Date.now() + 60 * 60 * 1000)));
-                  setScheduleOpen((v) => !v);
-                }}
-                title="送信日時を設定 (予約送信)"
-                style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: "var(--dub-radius-full)", color: "var(--dub-color-brand-600)", border: "1px solid var(--dub-color-border-default)" }}
-              >
-                <MailIcon name="clock" size={18} />
-              </button>
-              {scheduleOpen ? (
-                <div
-                  data-testid="fe2-mail-compose-schedule-popover"
-                  style={{ position: "absolute", bottom: 44, left: 0, width: 280, padding: 16, borderRadius: "var(--dub-radius-lg)", background: "var(--dub-color-surface-raised)", border: "1px solid var(--dub-color-border-strong)", boxShadow: "var(--dub-shadow-overlay)", zIndex: 1400, display: "flex", flexDirection: "column", gap: 12 }}
-                >
-                  <span style={{ fontWeight: 700, fontSize: "var(--dub-font-size-sm)", color: "var(--dub-color-text-primary)" }}>送信日時を設定</span>
-                  <input
-                    type="datetime-local"
-                    data-testid="fe2-mail-compose-schedule-input"
-                    value={scheduleAt}
-                    min={toDatetimeLocal(new Date(Date.now() + 60 * 1000))}
-                    onChange={(e) => { setScheduleAt(e.target.value); setScheduleErr(null); }}
-                    style={{ height: 36, padding: "0 10px", borderRadius: "var(--dub-radius-md)", border: "1px solid var(--dub-color-border-default)", background: "var(--dub-color-surface-base)", color: "var(--dub-color-text-primary)", fontSize: "var(--dub-font-size-sm)", fontFamily: "inherit" }}
-                  />
-                  {scheduleErr ? <span style={{ color: "var(--dub-color-danger-600)", fontSize: "var(--dub-font-size-xs)" }}>{scheduleErr}</span> : null}
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                    <button type="button" onClick={() => setScheduleOpen(false)} style={{ all: "unset", cursor: "pointer", padding: "6px 12px", color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-sm)" }}>キャンセル</button>
-                    <button
-                      type="button"
-                      data-testid="fe2-mail-compose-schedule-confirm"
-                      onClick={scheduleSend}
-                      style={{ all: "unset", cursor: "pointer", padding: "6px 16px", borderRadius: "var(--dub-radius-full)", background: "var(--dub-color-brand-500)", color: "#fff", fontWeight: 600, fontSize: "var(--dub-font-size-sm)" }}
-                    >
-                      予約する
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
+            <SchedulePicker
+              testIdPrefix="fe2-mail-compose-schedule"
+              onSchedule={scheduleSend}
+              disabled={att.hasPending}
+              disabledReason="添付ファイルを処理中です…"
+              {...(att.items.length > 0 ? { hint: `添付ファイル ${att.items.length} 件も一緒に予約されます` } : {})}
+            />
             <button
               type="button"
               aria-label="ファイルを添付"

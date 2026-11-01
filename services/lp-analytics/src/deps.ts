@@ -6,7 +6,7 @@ import { common } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createD1LpRepo } from "./d1-repo";
 import { createCfSiteTrafficSource } from "./site-traffic";
-import { createStripeClient } from "./stripe";
+import { createStripeClient, isLiveStripeKey, usableStripeKey } from "./stripe";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -20,9 +20,15 @@ function siteTrafficFrom(env: Env): AppDeps["siteTraffic"] {
   return token && accountId && siteTag ? createCfSiteTrafficSource({ token, accountId, siteTag }) : null;
 }
 
-/** Payments need BOTH secrets: charging without a webhook secret risks money taken but no ticket. */
-export function stripeFrom(env: Pick<Env, "STRIPE_SECRET_KEY" | "STRIPE_WEBHOOK_SECRET">): AppDeps["stripe"] {
-  return env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET ? createStripeClient(env.STRIPE_SECRET_KEY) : null;
+/**
+ * Payments need BOTH secrets (charging without a webhook secret risks money taken but no ticket)
+ * and a usable key (sk_live_ only with STRIPE_ALLOW_LIVE="1").
+ */
+export function stripeFrom(
+  env: Pick<Env, "STRIPE_SECRET_KEY" | "STRIPE_WEBHOOK_SECRET" | "STRIPE_ALLOW_LIVE">,
+): AppDeps["stripe"] {
+  const key = usableStripeKey(env.STRIPE_SECRET_KEY, env.STRIPE_ALLOW_LIVE);
+  return key && env.STRIPE_WEBHOOK_SECRET ? createStripeClient(key) : null;
 }
 
 /** Free plan only (wrangler.free.toml binds TICKET_RECONCILE_DO); the paid topology runs the cron instead. */
@@ -42,6 +48,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     logger: (e) =>
       consoleSink({ level: "debug", message: "db", service: "lp-analytics", fields: { sql: e.sql, ms: e.durationMs } }),
   });
+  const stripeKey = usableStripeKey(env.STRIPE_SECRET_KEY, env.STRIPE_ALLOW_LIVE);
   return {
     repo: createD1LpRepo(db),
     authz: createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "lp-analytics", mode: "trustedHeader" }),
@@ -60,6 +67,8 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     stripe: stripeFrom(env),
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     armReconcile: reconcileArmer(env),
+    paypayEnabled: env.LP_PAYPAY_ENABLED === "1",
+    ticketPreviewKey: stripeKey && !isLiveStripeKey(stripeKey) ? stripeKey : null,
     newProposalId: () => newId("lpp"),
     dailyProposalCap:
       Number(env.LP_DAILY_PROPOSAL_CAP) > 0 ? Number(env.LP_DAILY_PROPOSAL_CAP) : DEFAULT_DAILY_PROPOSAL_CAP,

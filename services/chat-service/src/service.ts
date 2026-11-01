@@ -78,7 +78,7 @@ function nonEmptyString(value: unknown, field: string): string {
   return value;
 }
 const MAX_SECTION_NAME_LEN = 40;
-const MAX_SECTIONS_PER_USER = 50;
+const MAX_SECTIONS = 50;
 function requireSectionName(value: unknown): string {
   const s = nonEmptyString(value, "name").trim();
   if (s.length > MAX_SECTION_NAME_LEN) throw errors.validationFailed([{ field: "name", reason: "too_long" }]);
@@ -352,10 +352,10 @@ export class ChatService {
     await this.audit(ctx, "chat.channel.delete", "channel", id, { name: channel.name, type: channel.type });
   }
 
-  // ---- personal sidebar sections (caller-owned rows only) ----
+  // ---- org-wide sidebar sections (one shared set; who may write is POLICY_TABLE's call) ----
   async listSections(ctx: ReqCtx): Promise<ChatSectionList> {
     const [rows, assignments] = await Promise.all([
-      this.deps.repo.listSections(ctx.userId),
+      this.deps.repo.listSections(),
       this.deps.repo.sectionAssignments(ctx.userId),
     ]);
     return { items: rows.map(toSection), assignments: Object.fromEntries(assignments) };
@@ -363,12 +363,12 @@ export class ChatService {
 
   async createSection(ctx: ReqCtx, body: CreateSectionRequest): Promise<ChatSection> {
     const name = requireSectionName(body?.name);
-    const existing = await this.deps.repo.listSections(ctx.userId);
-    if (existing.length >= MAX_SECTIONS_PER_USER) throw errors.validationFailed([{ field: "name", reason: "too_many_sections" }]);
+    const existing = await this.deps.repo.listSections();
+    if (existing.length >= MAX_SECTIONS) throw errors.validationFailed([{ field: "name", reason: "too_many_sections" }]);
     const now = this.deps.now();
     const row: SectionRow = {
       id: this.deps.newSectionId(),
-      userId: ctx.userId,
+      createdBy: ctx.userId,
       name,
       position: existing.reduce((max, s) => Math.max(max, s.position), -1) + 1,
       createdAt: now,
@@ -378,8 +378,8 @@ export class ChatService {
     return toSection(row);
   }
 
-  async updateSection(ctx: ReqCtx, id: string, body: UpdateSectionRequest): Promise<ChatSection> {
-    const cur = await this.deps.repo.getSection(ctx.userId, id);
+  async updateSection(_ctx: ReqCtx, id: string, body: UpdateSectionRequest): Promise<ChatSection> {
+    const cur = await this.deps.repo.getSection(id);
     if (!cur) throw errors.notFound("section", id);
     const next: SectionRow = { ...cur, updatedAt: this.deps.now() };
     if (body?.name !== undefined) next.name = requireSectionName(body.name);
@@ -393,8 +393,8 @@ export class ChatService {
     return toSection(next);
   }
 
-  async deleteSection(ctx: ReqCtx, id: string): Promise<void> {
-    if (!(await this.deps.repo.deleteSection(ctx.userId, id))) throw errors.notFound("section", id);
+  async deleteSection(_ctx: ReqCtx, id: string): Promise<void> {
+    if (!(await this.deps.repo.deleteSection(id))) throw errors.notFound("section", id);
   }
 
   async setChannelSection(ctx: ReqCtx, channelId: common.ChannelId, body: SetChannelSectionRequest): Promise<void> {
@@ -403,10 +403,10 @@ export class ChatService {
       throw errors.validationFailed([{ field: "sectionId", reason: "required" }]);
     }
     await this.loadReadable(channelId, ctx.userId);
-    if (sectionId !== null && !(await this.deps.repo.getSection(ctx.userId, sectionId))) {
+    if (sectionId !== null && !(await this.deps.repo.getSection(sectionId))) {
       throw errors.notFound("section", sectionId);
     }
-    await this.deps.repo.setChannelSection(ctx.userId, channelId, sectionId);
+    await this.deps.repo.setChannelSection(channelId, sectionId);
   }
 
   async addMember(ctx: ReqCtx, id: common.ChannelId, body: AddMemberRequest): Promise<void> {

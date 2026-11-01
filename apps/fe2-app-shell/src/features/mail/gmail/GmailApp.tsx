@@ -9,11 +9,15 @@ import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
 import { ScheduledList } from "./ScheduledList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
+import { BlockNoticeBar, BlockedSendersPanel } from "./BlockedSenders.tsx";
+import blockStyles from "./blocks.module.css";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
-import { SHARED_FOLDERS, hasSharedMail, inFolder, matchesQuery, threadUnread } from "./mailModel.ts";
-import { MailStoreProvider, useMailStore } from "./useMailStore.tsx";
+import { SHARED_FOLDERS } from "./mailModel.ts";
+import { MailStoreProvider, folderUnread, selectVisible, showSharedFolders, useMailStore } from "./useMailStore.tsx";
 import { useMailSync } from "./useMailSync.tsx";
+import { deliver } from "./sendMail.ts";
+import { useMailApi } from "../MailProvider.tsx";
 
 /** P1-2 follow-up: floating compose windows are pure client state (useMailStore starts
  *  with composes: [] on every mount/reload) — a reload while typing loses the OPEN
@@ -159,10 +163,82 @@ function UndoToast(): JSX.Element | null {
   );
 }
 
+const SEND_LABELS = {
+  send: { sending: "送信中…", sent: "送信しました", failed: "送信できませんでした" },
+  schedule: { sending: "予約中…", sent: "送信を予約しました", failed: "予約できませんでした" },
+} as const;
+
+/** Gmail-style send status bar. A failure stays until retried/closed; the compose is
+ *  already restored by SEND_FAILED so the text is never lost. */
+function SendNoticeBar(): JSX.Element | null {
+  const { state, dispatch } = useMailStore();
+  const mailApi = useMailApi();
+  const notice = state.sendNotice;
+  useEffect(() => {
+    if (notice?.status !== "sent") return;
+    const t = setTimeout(() => dispatch({ type: "DISMISS_SEND_NOTICE" }), 5000);
+    return () => clearTimeout(t);
+  }, [notice, dispatch]);
+  if (!notice) return null;
+  const failed = notice.status === "failed";
+  return (
+    <div
+      data-testid="fe2-mail-send-notice"
+      data-status={notice.status}
+      role={failed ? "alert" : "status"}
+      style={{
+        position: "fixed",
+        left: 24,
+        bottom: state.undo ? 80 : 24,
+        display: "flex",
+        alignItems: "center",
+        gap: 16,
+        padding: "12px 16px",
+        borderRadius: "var(--dub-radius-md)",
+        background: "var(--dub-color-text-primary)",
+        color: "var(--dub-color-surface-base)",
+        boxShadow: "var(--dub-shadow-lg)",
+        zIndex: 1400,
+        fontSize: "var(--dub-font-size-sm)",
+      }}
+    >
+      <span>{SEND_LABELS[notice.pending.kind][notice.status]}</span>
+      {failed ? (
+        <>
+          <button
+            type="button"
+            data-testid="fe2-mail-send-retry"
+            onClick={() => void deliver(mailApi, dispatch, notice.pending)}
+            style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-info-300)", fontWeight: 700 }}
+          >
+            再試行
+          </button>
+          <button
+            type="button"
+            aria-label="閉じる"
+            onClick={() => dispatch({ type: "DISMISS_SEND_NOTICE" })}
+            style={{ all: "unset", cursor: "pointer", display: "inline-flex" }}
+          >
+            <MailIcon name="x" size={16} />
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+// An open modal (@dub/ui Modal/Drawer render aria-modal while open) owns the keyboard:
+// shortcuts must not act on the thread behind it.
+function modalOpen(target: EventTarget | null): boolean {
+  if (target instanceof Element && target.closest('[role="dialog"], [aria-modal="true"]')) return true;
+  return document.querySelector('[aria-modal="true"]') !== null;
+}
+
 function Shortcuts(): null {
   const { state, dispatch } = useMailStore();
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (modalOpen(e.target)) return;
       const el = e.target as HTMLElement | null;
       const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
       if (e.key === "/" && !typing) {
@@ -172,9 +248,7 @@ function Shortcuts(): null {
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const visible = state.threads.filter(
-        (t) => (state.labelFilter ? t.labels.includes(state.labelFilter) && t.folder !== "trash" : inFolder(t, state.folder)) && matchesQuery(t, state.search),
-      );
+      const visible = selectVisible(state);
       const open = state.openThreadId;
 
       if (e.key === "c") dispatch({ type: "OPEN_COMPOSE", compose: {} });
@@ -189,7 +263,7 @@ function Shortcuts(): null {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.threads, state.folder, state.labelFilter, state.search, state.openThreadId, dispatch]);
+  }, [state, dispatch]);
   return null;
 }
 
@@ -200,9 +274,10 @@ function GmailBody(): JSX.Element {
   // A purged (完全に削除) thread is never shown, even if it was the open one when a reload's
   // APPLY_FLAGS marked it purged — fall back to the list.
   const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId && !t.purged) : undefined;
-  const unreadInbox = state.threads.filter((t) => inFolder(t, "inbox") && threadUnread(t)).length;
+  const unreadInbox = folderUnread(state, "inbox");
   // The sidebar hides 自分宛て / 自分宛て以外 once no shared mail remains — don't strand the view on one.
-  const sharedHidden = state.labelFilter === null && SHARED_FOLDERS.has(state.folder) && !hasSharedMail(state.threads);
+  // Only once the server counts are in: a 自分宛て page alone never contains shared mail.
+  const sharedHidden = state.counts !== null && state.labelFilter === null && SHARED_FOLDERS.has(state.folder) && !showSharedFolders(state);
   useEffect(() => {
     if (sharedHidden) dispatch({ type: "SET_FOLDER", folder: "inbox" });
   }, [sharedHidden, dispatch]);
@@ -227,10 +302,15 @@ function GmailBody(): JSX.Element {
         ) : (
           <MailSidebar />
         )}
-        {state.folder === "scheduled" && !state.labelFilter ? (
+        {state.folder === "scheduled" && !state.labelFilter && state.search.trim() === "" ? (
           <ScheduledList />
         ) : openThread ? (
           <ReadingPane thread={openThread} labels={state.labels} />
+        ) : state.folder === "blocked" && !state.labelFilter ? (
+          <div className={blockStyles.blockedColumn}>
+            <BlockedSendersPanel />
+            <ThreadList />
+          </div>
         ) : (
           <ThreadList />
         )}
@@ -239,6 +319,8 @@ function GmailBody(): JSX.Element {
         <ComposeWindow key={c.id} compose={c} offset={i} />
       ))}
       <UndoToast />
+      <SendNoticeBar />
+      <BlockNoticeBar />
       <Shortcuts />
     </main>
   );

@@ -9,28 +9,42 @@ import { MailIcon } from "./icons.tsx";
 const norm = (email: string): string => email.trim().toLowerCase();
 
 /** The viewer's own addresses as seen in this thread: our sends' From, and the envelope
- *  recipient of messages delivered to us (not ones visible only via oversight/sharing). */
+ *  recipient of messages delivered to us (not ones visible only via oversight/sharing).
+ *  Another account's Sent row (oversight, mine === false) is not ours — counting its From
+ *  labelled e.g. info@ as 自分 and dropped it from reply-all. */
 export function ownAddresses(thread: MailThreadModel, me: MailPerson): Set<string> {
   const own = new Set<string>();
   if (me.email) own.add(norm(me.email));
   for (const m of thread.messages) {
-    if (m.outbound && m.from.email) own.add(norm(m.from.email));
+    if (m.outbound && m.mine !== false && m.from.email) own.add(norm(m.from.email));
     if (m.mine !== false && m.headerMeta?.deliveredTo) own.add(norm(m.headerMeta.deliveredTo));
   }
   return own;
 }
 
-/** "自分, 伊藤 由紀, office@example.net" — To then Cc, deduped, own address as 自分. */
+/** "自分　Cc: 伊藤 由紀, office@example.net" — To, then Cc and Bcc (sender's own view only)
+ *  each labelled (Gmail's "to me, cc: …"), deduped, own address as 自分. Cc used to be merged
+ *  into the To list, so a Cc'd address read as a direct recipient. */
 export function recipientSummary(msg: MailMsg, own: ReadonlySet<string>): string {
   const seen = new Set<string>();
-  const names: string[] = [];
-  for (const p of [...msg.to, ...(msg.cc ?? [])]) {
-    const key = norm(p.email);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    names.push(own.has(key) ? "自分" : displayName(p));
-  }
-  return names.length > 0 ? names.join(", ") : "(宛先なし)";
+  const names = (ps: readonly MailPerson[]): string[] => {
+    const out: string[] = [];
+    for (const p of ps) {
+      const key = norm(p.email);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(own.has(key) ? "自分" : displayName(p));
+    }
+    return out;
+  };
+  const to = names(msg.to);
+  const cc = names(msg.cc ?? []);
+  const bcc = names(msg.bcc ?? []);
+  const parts: string[] = [];
+  if (to.length > 0) parts.push(to.join(", "));
+  if (cc.length > 0) parts.push(`Cc: ${cc.join(", ")}`);
+  if (bcc.length > 0) parts.push(`Bcc: ${bcc.join(", ")}`);
+  return parts.length > 0 ? parts.join("　") : "(宛先なし)";
 }
 
 function CopyButton({ text, label, testId }: { text: string; label: string; testId?: string }): JSX.Element {
@@ -128,6 +142,7 @@ export function MessageDetailsDialog({
     ["返信先", meta?.replyTo && meta.replyTo.length > 0 ? <AddressList people={meta.replyTo} own={own} field="返信先" /> : null],
     ["宛先", msg.to.length > 0 ? <AddressList people={msg.to} own={own} field="To" /> : null],
     ["Cc", msg.cc && msg.cc.length > 0 ? <AddressList people={msg.cc} own={own} field="Cc" /> : null],
+    ["Bcc", msg.bcc && msg.bcc.length > 0 ? <AddressList people={msg.bcc} own={own} field="Bcc" /> : null],
     ["日付", fullDate(msg.date)],
     ["件名", subject],
     ["送信元", meta?.mailedBy ?? null],

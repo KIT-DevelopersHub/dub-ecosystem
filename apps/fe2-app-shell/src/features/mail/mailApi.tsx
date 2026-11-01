@@ -25,11 +25,16 @@ export interface InboxQuery {
   limit?: number;
   cursor?: string;
   threadId?: string;
+  /** Server-side free-text search (mail.ListMailMessagesQuery.q). */
+  q?: string;
+  /** Folder view: conversation-paged with blocked senders + flags filtered server-side. */
+  folder?: mail.MailFolderView;
 }
 
 export interface SentQuery {
   limit?: number;
   cursor?: string;
+  q?: string;
 }
 
 export interface ScheduledQuery {
@@ -38,10 +43,13 @@ export interface ScheduledQuery {
 }
 
 export interface MailApi {
-  /** Compose + send via the gateway (session-authorized, mail:send). */
-  send(req: SendMailRequest): Promise<SendMailResponse>;
+  /** Compose + send via the gateway (session-authorized, mail:send). `idempotencyKey`
+   *  (x-dub-idempotency-key) collapses a repeated submit of the same send into one mail. */
+  send(req: SendMailRequest, opts?: { idempotencyKey?: string }): Promise<SendMailResponse>;
   /** List received messages with their read flag (mail:read). */
-  listInbox(query?: InboxQuery): Promise<Paginated<MailMessageListItem>>;
+  listInbox(query?: InboxQuery): Promise<mail.MailMessagePage>;
+  /** Conversations + unread per folder view (sidebar badges) (mail:read). */
+  counts(): Promise<mail.MailFolderCounts>;
   /** Fetch one message's full detail — body + read state (mail:read). */
   getMessage(id: string): Promise<MailMessageDetail>;
   /** Fetch a whole thread (every message, bodies included) (mail:read). */
@@ -68,22 +76,43 @@ export interface MailApi {
   updateScheduled(id: string, patch: ScheduleMailPatch): Promise<ScheduledSendDetail>;
   /** Cancel (取消) a still-scheduled send (mail:send). */
   cancelScheduled(id: string): Promise<{ id: string; status: "canceled" }>;
+  /** The signed-in user's sender block list, newest first (mail:read). */
+  listBlocks(): Promise<mail.MailSenderBlock[]>;
+  /** Block a sender address or a whole domain (idempotent). Mail is never deleted. */
+  addBlock(req: mail.MailSenderBlockRequest): Promise<mail.MailSenderBlock>;
+  /** Unblock (address or domain value as listed). */
+  removeBlock(value: string): Promise<{ value: string; blocked: false }>;
 }
 
 const MAIL = "/api/v1/mail";
+const IDEMPOTENCY_HEADER = "x-dub-idempotency-key";
+
+/** Fresh idempotency key for one user send (reused by its retries). */
+export function newIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 /** Build the mail api from the shell ApiClient (fed in composition, faked in tests). */
 export function createMailApi(api: ApiClient): MailApi {
   return {
-    send: (req) => api.request<SendMailResponse, SendMailRequest>({ method: "POST", path: `${MAIL}/outbox`, body: req }),
+    send: (req, opts) =>
+      api.request<SendMailResponse, SendMailRequest>({
+        method: "POST",
+        path: `${MAIL}/outbox`,
+        body: req,
+        ...(opts?.idempotencyKey ? { headers: { [IDEMPOTENCY_HEADER]: opts.idempotencyKey } } : {}),
+      }),
     listInbox: (query) => {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query?.limit !== undefined) q.limit = query.limit;
       if (query?.cursor !== undefined) q.cursor = query.cursor;
       if (query?.threadId !== undefined) q.threadId = query.threadId;
+      if (query?.q !== undefined) q.q = query.q;
+      if (query?.folder !== undefined) q.folder = query.folder;
       const hasQuery = Object.keys(q).length > 0;
-      return api.request<Paginated<MailMessageListItem>>({ method: "GET", path: `${MAIL}/messages`, ...(hasQuery ? { query: q } : {}) });
+      return api.request<mail.MailMessagePage>({ method: "GET", path: `${MAIL}/messages`, ...(hasQuery ? { query: q } : {}) });
     },
+    counts: () => api.request<mail.MailFolderCounts>({ method: "GET", path: `${MAIL}/counts` }),
     getMessage: (id) => api.request<MailMessageDetail>({ method: "GET", path: `${MAIL}/messages/${encodeURIComponent(id)}` }),
     getThread: (threadId) => api.request<MailThread>({ method: "GET", path: `${MAIL}/threads/${encodeURIComponent(threadId)}` }),
     markRead: (id) => api.request<MailMessageState>({ method: "POST", path: `${MAIL}/messages/${encodeURIComponent(id)}/read` }),
@@ -91,6 +120,7 @@ export function createMailApi(api: ApiClient): MailApi {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query?.limit !== undefined) q.limit = query.limit;
       if (query?.cursor !== undefined) q.cursor = query.cursor;
+      if (query?.q !== undefined) q.q = query.q;
       const hasQuery = Object.keys(q).length > 0;
       return api.request<Paginated<MailSentListItem>>({ method: "GET", path: `${MAIL}/sent`, ...(hasQuery ? { query: q } : {}) });
     },
@@ -113,6 +143,9 @@ export function createMailApi(api: ApiClient): MailApi {
     getScheduled: (id) => api.request<ScheduledSendDetail>({ method: "GET", path: `${MAIL}/scheduled/${encodeURIComponent(id)}` }),
     updateScheduled: (id, patch) => api.request<ScheduledSendDetail, ScheduleMailPatch>({ method: "PATCH", path: `${MAIL}/scheduled/${encodeURIComponent(id)}`, body: patch }),
     cancelScheduled: (id) => api.request<{ id: string; status: "canceled" }>({ method: "DELETE", path: `${MAIL}/scheduled/${encodeURIComponent(id)}` }),
+    listBlocks: () => api.request<{ items: mail.MailSenderBlock[] }>({ method: "GET", path: `${MAIL}/blocks` }).then((r) => r.items),
+    addBlock: (req) => api.request<mail.MailSenderBlock, mail.MailSenderBlockRequest>({ method: "POST", path: `${MAIL}/blocks`, body: req }),
+    removeBlock: (value) => api.request<{ value: string; blocked: false }>({ method: "DELETE", path: `${MAIL}/blocks/${encodeURIComponent(value)}` }),
   };
 }
 

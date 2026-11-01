@@ -44,6 +44,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     listTicketCoupons: unused,
     createTicketCoupon: unused,
     setTicketCouponActive: unused,
+    createTicketPreviewToken: unused,
     getProposals: unused,
     setProposalsEnabled: unused,
     saveProposalFields: unused,

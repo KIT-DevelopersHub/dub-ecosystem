@@ -414,6 +414,11 @@ export function isMeetingTask(t: Pick<task.Task, "id">): boolean {
   return t.id.startsWith(MEETING_ITEM_PREFIX);
 }
 
+/** A meeting still being registered (optimistic row, id "tmp_…" until the server answers). */
+export function isPendingMeetingTask(t: Pick<task.Task, "id">): boolean {
+  return t.id.startsWith(`${MEETING_ITEM_PREFIX}tmp_`);
+}
+
 /** The item's label key (PERSONAL_LABEL when untagged). */
 export function labelOf(t: Pick<task.Task, "description">): string {
   return parseDescription(t.description).label;

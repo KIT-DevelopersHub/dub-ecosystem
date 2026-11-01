@@ -16,6 +16,10 @@ import type { TokenProvider } from "./token";
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
 // list() projection: owner + link-share hint (permissions type) computed in mapFile.
 const LIST_FIELDS = "nextPageToken,files(id,name,mimeType,owners(displayName),modifiedTime,webViewLink,permissions(id,type))";
+// Root scan also needs `parents` to tell top-level items from nested ones.
+const ROOT_SCAN_FIELDS = "nextPageToken,files(id,name,mimeType,owners(displayName),modifiedTime,webViewLink,permissions(id,type),parents)";
+// Upper bound on the root scan (Workers subrequest budget); Drive caps each page itself.
+const ROOT_SCAN_MAX_PAGES = 20;
 // permissionDetails.inherited tells us whether a grant comes from an ancestor folder /
 // shared drive (→ not deletable/editable on this item); the manager needs it to disable
 // the revoke/role controls instead of letting Drive reject the call with 403.
@@ -30,8 +34,9 @@ function extractReason(body: unknown): string | undefined {
   return undefined;
 }
 
+type GoogleFile = Parameters<typeof mapFile>[0] & { parents?: string[] };
 interface GoogleListResponse {
-  files?: Parameters<typeof mapFile>[0][];
+  files?: GoogleFile[];
   nextPageToken?: string;
 }
 interface GooglePermissionsListResponse {
@@ -85,21 +90,44 @@ export function createGoogleDriveShareClient(deps: {
     return clauses.join(" and ");
   }
 
+  async function listPage(q: string, pageSize: number, fields: string, pageToken?: string): Promise<GoogleListResponse> {
+    const url = new URL(`${DRIVE_BASE}/files`);
+    url.searchParams.set("q", q);
+    url.searchParams.set("pageSize", String(pageSize));
+    url.searchParams.set("orderBy", "folder,name");
+    url.searchParams.set("fields", fields);
+    // Include items owned by others / on shared drives, and let the call operate on
+    // shared-drive resources. Harmless for My Drive; required if the Hackit tree ever
+    // moves to (or links) a shared drive.
+    url.searchParams.set("supportsAllDrives", "true");
+    url.searchParams.set("includeItemsFromAllDrives", "true");
+    url.searchParams.set("corpora", "allDrives");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    return readJson<GoogleListResponse>(await call(url.toString(), { method: "GET" }));
+  }
+
+  // The tree's top level = every visible item whose parent is NOT itself visible
+  // (My Drive root children, shared-with-me tops, shared-drive tops). A plain
+  // `trashed = false` query would return the whole account flat, so nested folders
+  // would also show at the top level. Order (folder,name) is preserved by the filter.
+  async function listRoots(): Promise<ListFilesResult> {
+    const all: GoogleFile[] = [];
+    let pageToken: string | undefined;
+    for (let i = 0; i < ROOT_SCAN_MAX_PAGES; i++) {
+      const data = await listPage(buildQ(), 1000, ROOT_SCAN_FIELDS, pageToken);
+      all.push(...(data.files ?? []));
+      pageToken = data.nextPageToken;
+      if (!pageToken) break;
+    }
+    const visible = new Set(all.map((f) => f.id));
+    const roots = all.filter((f) => !(f.parents ?? []).some((id) => visible.has(id)));
+    return { files: roots.map(mapFile), nextCursor: null };
+  }
+
   return {
     async listFiles(p: ListFilesParams): Promise<ListFilesResult> {
-      const url = new URL(`${DRIVE_BASE}/files`);
-      url.searchParams.set("q", buildQ(p.folderId, p.q));
-      url.searchParams.set("pageSize", String(p.pageSize));
-      url.searchParams.set("orderBy", "folder,name");
-      url.searchParams.set("fields", LIST_FIELDS);
-      // Include items owned by others / on shared drives, and let the call operate on
-      // shared-drive resources. Harmless for My Drive; required if the Hackit tree ever
-      // moves to (or links) a shared drive.
-      url.searchParams.set("supportsAllDrives", "true");
-      url.searchParams.set("includeItemsFromAllDrives", "true");
-      url.searchParams.set("corpora", "allDrives");
-      if (p.pageToken) url.searchParams.set("pageToken", p.pageToken);
-      const data = await readJson<GoogleListResponse>(await call(url.toString(), { method: "GET" }));
+      if (!p.folderId && !p.q) return listRoots();
+      const data = await listPage(buildQ(p.folderId, p.q), p.pageSize, LIST_FIELDS, p.pageToken);
       return { files: (data.files ?? []).map(mapFile), nextCursor: data.nextPageToken ?? null };
     },
 

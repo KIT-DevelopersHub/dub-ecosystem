@@ -21,7 +21,15 @@ import type { DeliveryJob, IngestInput, IngestResult, NotificationChannel } from
 // Forced-in_app types bypass preferences for the in_app channel (design §3: the sole
 // exception — admin broadcast). `release` (new-feature announcements) always lands in
 // every recipient's inbox so nobody misses a release note, same as system.announcement.
+// The force is in_app-only: the push that rides along (withInboxPush) still obeys prefs.
 const FORCE_IN_APP_TYPES: ReadonlySet<string> = new Set(BROADCAST_IN_APP_TYPES);
+
+// Policy: everything that targets the inbox (in_app) is also pushed to the user's
+// devices; users opt out per type via their push preference. Done here — once — so
+// producers keep declaring just "in_app" and new notification types can't miss push.
+export function withInboxPush(channels: readonly NotificationChannel[]): NotificationChannel[] {
+  return channels.includes("in_app") && !channels.includes("push") ? [...channels, "push"] : [...channels];
+}
 
 export interface IngestDeps {
   db: DbClient;
@@ -53,8 +61,9 @@ export async function ingest(deps: IngestDeps, input: IngestInput): Promise<Inge
 
   if (userIds.length === 0) return { notificationId, deduplicated: false };
 
-  const candidateChannels: NotificationChannel[] =
-    input.channels && input.channels.length > 0 ? input.channels : [...CHANNELS];
+  const candidateChannels = withInboxPush(
+    input.channels && input.channels.length > 0 ? input.channels : [...CHANNELS],
+  );
   const forceInApp = FORCE_IN_APP_TYPES.has(input.type);
   // Users who received an in_app row this ingest — signalled over realtime after the loop.
   const inAppDelivered = new Set<string>();

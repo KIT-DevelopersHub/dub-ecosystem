@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Skeleton } from "@dub/ui";
 import type { ChatMessage } from "./lib/commanderApi.ts";
+import type { ChatImage } from "./lib/images.ts";
 import { useChat } from "./lib/chatStore.tsx";
 import { ChatComposer, MessageLog, SessionSidebar } from "./ChatUI.tsx";
 import {
@@ -200,7 +201,7 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
   );
 
   const planIntent = useCallback(
-    async (text: string) => {
+    async (text: string, images: ChatImage[] = []) => {
       if (!catalog) return;
       let sid = chat.activeId("operate");
       if (!sid) sid = (await chat.create("operate"))?.id ?? null;
@@ -210,6 +211,7 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
         userText: text,
         prompt: buildPlannerPrompt({ catalog, history, request: text }),
         opts: PLANNER_OPTS,
+        images,
       });
       if (!msg || msg.status !== "done") return;
       const reply = parsePlannerReply(msg.text);
@@ -363,7 +365,7 @@ export function OperateDub({ operateClient = defaultOperateClient }: { operateCl
             disabled={busy || !catalog}
             busy={busy}
             sendLabel="送信"
-            onSend={(text) => void planIntent(text)}
+            onSend={(text, images) => void planIntent(text, images)}
           />
         </div>
       </div>

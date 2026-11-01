@@ -1,0 +1,53 @@
+name: mail pattern matrix
+
+# Send/receive pattern matrix for mail-gateway (services/mail-gateway/test/send-pattern-matrix.test.ts).
+# Runs the real email() handler + POST /mail/outbox against an in-memory D1 — no Cloudflare
+# token, no network, no production D1. Known-defect rows are it.fails, so the job stays green
+# until behaviour changes in either direction. The daily run on main catches drift from
+# shared packages / dependency bumps that a path-filtered PR run would miss.
+on:
+  pull_request:
+    paths:
+      - 'services/mail-gateway/**'
+      - 'packages/types/**'
+      - 'packages/db/**'
+      - 'packages/http/**'
+      - 'packages/events/**'
+      - 'packages/policy-gate/**'
+      - 'packages/auth-client/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/mail-pattern-matrix.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/mail-gateway/**'
+      - '.github/workflows/mail-pattern-matrix.yml'
+  schedule:
+    # 22:00 UTC = 07:00 JST, after the 06:00 JST demo/schema jobs.
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: mail-pattern-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: mail send-pattern matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          # node:sqlite (in-memory D1 adapter) needs Node 24.
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run pattern matrix
+        working-directory: services/mail-gateway
+        run: pnpm exec vitest run test/send-pattern-matrix.test.ts --reporter=verbose

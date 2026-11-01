@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chunkResponse, CHUNK_CHARS, cwdAllowed, daemonRouteAllowed, drainSse, RelayAgent, sanitizeRunBody, type AgentSocket, type RelayAgentDeps } from "../src/relay-agent.ts";
+import { chunkResponse, CHUNK_CHARS, cwdAllowed, daemonRouteAllowed, drainSse, RelayAgent, sanitizeRunBody, sanitizeUploadBody, type AgentSocket, type RelayAgentDeps } from "../src/relay-agent.ts";
 
 class FakeSocket implements AgentSocket {
   readyState = 1;
@@ -154,6 +154,19 @@ describe("remote surface of the daemon", () => {
     // Unknown fields never reach the daemon.
     expect(JSON.parse(sanitizeRunBody('{"prompt":"p","extra":1,"taskId":"t"}', ["/work"])!)).toEqual({ prompt: "p", taskId: "t" });
     expect(cwdAllowed("/work", ["/work/"])).toBe(true);
+  });
+
+  it("relays image uploads and upload ids on runs, field-whitelisted", () => {
+    expect(daemonRouteAllowed("POST", "/uploads")).toBe(true);
+    expect(daemonRouteAllowed("GET", "/uploads")).toBe(false);
+    expect(JSON.parse(sanitizeUploadBody('{"mediaType":"image/png","data":"AAAA","x":1}')!)).toEqual({
+      mediaType: "image/png",
+      data: "AAAA",
+    });
+    expect(sanitizeUploadBody('{"mediaType":"image/png"}')).toBeNull();
+    expect(JSON.parse(sanitizeRunBody('{"prompt":"p","images":["a-1"]}', ["/work"])!)).toEqual({ prompt: "p", images: ["a-1"] });
+    expect(sanitizeRunBody('{"prompt":"p","images":["../x"]}', ["/work"])).toBeNull();
+    expect(sanitizeRunBody('{"prompt":"p","images":"a"}', ["/work"])).toBeNull();
   });
 
   it("answers 403 without calling the daemon", async () => {

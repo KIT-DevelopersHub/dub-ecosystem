@@ -38,6 +38,9 @@ import { ArtifactLinks } from "./ArtifactLinks.tsx";
 import { RunLog } from "./RunLog.tsx";
 import { Spinner, ProgressBar } from "./Spinner.tsx";
 import { btnDanger, btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
+import type { ChatImage } from "./lib/images.ts";
+import { AttachButton, AttachmentTray, dropOutline, useImageAttachments } from "./ImageAttach.tsx";
+import { IMAGE_ONLY_TEXT } from "./ChatUI.tsx";
 
 /** Human copy for the in-flight banner shown while an action is processing. */
 function inFlightLabel(kind: InFlight, to: FeaturePhase | null): string {
@@ -57,9 +60,9 @@ type InFlight = "approve" | "reject" | "rerun" | "rewind" | "archive" | null;
 
 export interface TaskDrawerHandlers {
   onApprove: (to: FeaturePhase) => Promise<void>;
-  onReject: (to: FeaturePhase, feedback: string) => Promise<void>;
+  onReject: (to: FeaturePhase, feedback: string, images: ChatImage[]) => Promise<void>;
   /** Additional instruction / fix re-run: a new run in the same task. */
-  onRerun: (prompt: string) => Promise<void>;
+  onRerun: (prompt: string, images: ChatImage[]) => Promise<void>;
   /** Phase-only step back to an earlier 確認待ち phase (no run, no rollback). */
   onRewind: (to: FeaturePhase) => Promise<void>;
   onArchive: () => Promise<void>;
@@ -107,6 +110,9 @@ export function TaskDrawer(props: TaskDrawerProps) {
   const [feedback, setFeedback] = useState("");
   const [rerunOpen, setRerunOpen] = useState(false);
   const [rerunPrompt, setRerunPrompt] = useState("");
+  // Screenshots for 却下 / 追加指示; scoped to the task so switching cards drops them.
+  const rejectAtt = useImageAttachments({ scope: item?.taskId ?? "" });
+  const rerunAtt = useImageAttachments({ scope: item?.taskId ?? "" });
   const [rewindOpen, setRewindOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   // Which action is currently processing (drives the visible 「反映中…」 banner). `busy`
@@ -156,6 +162,8 @@ export function TaskDrawer(props: TaskDrawerProps) {
       (tr) => tr.to === "demo_rejected" || tr.to === "staging_rejected",
     ) ?? null;
   const rewindEdges = detail?.allowedTransitions.filter((tr) => tr.rewind) ?? [];
+  const canReject = (feedback.trim() !== "" || rejectAtt.images.length > 0) && rejectAtt.preparing === 0;
+  const canRerun = (rerunPrompt.trim() !== "" || rerunAtt.images.length > 0) && rerunAtt.preparing === 0;
 
   const wrap = async (
     fn: () => Promise<void>,
@@ -493,27 +501,35 @@ export function TaskDrawer(props: TaskDrawerProps) {
 
         {/* reject feedback → re-run */}
         {rejectTo && (
-          <div data-testid="reject-form" style={{ display: "flex", flexDirection: "column", gap: t.space2 }}>
+          <div
+            data-testid="reject-form"
+            {...rejectAtt.dropProps}
+            style={{ display: "flex", flexDirection: "column", gap: t.space2, ...dropOutline(rejectAtt.dragging) }}
+          >
             <textarea
               aria-label="reject-feedback"
-              placeholder="却下の理由・直してほしい点（次の実行の指示に添えられます）"
+              placeholder="却下の理由・直してほしい点（次の実行の指示に添えられます・画像は貼り付けで添付）"
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
+              onPaste={rejectAtt.onPaste}
               style={{ ...input, minHeight: 80, resize: "vertical" }}
             />
+            <AttachmentTray att={rejectAtt} testIdPrefix="reject" />
             <div style={{ display: "flex", gap: t.space2 }}>
+              <AttachButton att={rejectAtt} disabled={busy} testIdPrefix="reject" />
               <button
                 type="button"
                 data-testid="reject-submit"
-                disabled={busy || feedback.trim() === ""}
+                disabled={busy || !canReject}
                 onClick={() =>
                   void wrap(async () => {
-                    await props.onReject(rejectTo, feedback.trim());
+                    await props.onReject(rejectTo, feedback.trim() || IMAGE_ONLY_TEXT, rejectAtt.images);
                     setRejectTo(null);
                     setFeedback("");
+                    rejectAtt.clear();
                   }, "reject")
                 }
-                style={{ ...btnDanger, opacity: feedback.trim() === "" ? 0.5 : 1 }}
+                style={{ ...btnDanger, opacity: canReject ? 1 : 0.5 }}
               >
                 却下して再投げ
               </button>
@@ -572,27 +588,35 @@ export function TaskDrawer(props: TaskDrawerProps) {
 
         {/* additional instruction / fix re-run */}
         {rerunOpen && (
-          <div data-testid="rerun-form" style={{ display: "flex", flexDirection: "column", gap: t.space2 }}>
+          <div
+            data-testid="rerun-form"
+            {...rerunAtt.dropProps}
+            style={{ display: "flex", flexDirection: "column", gap: t.space2, ...dropOutline(rerunAtt.dragging) }}
+          >
             <textarea
               aria-label="rerun-prompt"
-              placeholder="追加の指示 / 直してほしい点を書く（同じタスクで新しい run を起動）"
+              placeholder="追加の指示 / 直してほしい点を書く（同じタスクで新しい run を起動・画像は貼り付けで添付）"
               value={rerunPrompt}
               onChange={(e) => setRerunPrompt(e.target.value)}
+              onPaste={rerunAtt.onPaste}
               style={{ ...input, minHeight: 80, resize: "vertical" }}
             />
+            <AttachmentTray att={rerunAtt} testIdPrefix="rerun" />
             <div style={{ display: "flex", gap: t.space2 }}>
+              <AttachButton att={rerunAtt} disabled={busy} testIdPrefix="rerun" />
               <button
                 type="button"
                 data-testid="rerun-submit"
-                disabled={busy || rerunPrompt.trim() === ""}
+                disabled={busy || !canRerun}
                 onClick={() =>
                   void wrap(async () => {
-                    await props.onRerun(rerunPrompt.trim());
+                    await props.onRerun(rerunPrompt.trim() || IMAGE_ONLY_TEXT, rerunAtt.images);
                     setRerunOpen(false);
                     setRerunPrompt("");
+                    rerunAtt.clear();
                   }, "rerun")
                 }
-                style={{ ...btnPrimary, opacity: rerunPrompt.trim() === "" ? 0.5 : 1 }}
+                style={{ ...btnPrimary, opacity: canRerun ? 1 : 0.5 }}
               >
                 この指示で実行
               </button>

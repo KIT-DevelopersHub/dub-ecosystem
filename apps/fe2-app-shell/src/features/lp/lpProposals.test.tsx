@@ -75,6 +75,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     listTicketCoupons: unused,
     createTicketCoupon: unused,
     setTicketCouponActive: unused,
+    createTicketPreviewToken: unused,
     getProposals: () => Promise.resolve(baseState()),
     setProposalsEnabled: ({ enabled }) => Promise.resolve(baseState({ enabled })),
     saveProposalFields: ({ fields }) => Promise.resolve(baseState({ fields })),

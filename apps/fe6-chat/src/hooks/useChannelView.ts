@@ -23,7 +23,7 @@ import {
 import { emptyChannelView, type ChannelViewState, type PendingMessage } from "../types";
 import { newClientTempId } from "../lib/ulid";
 import type { ChatRealtimeClient } from "../realtime/client";
-import type { Attachment, MessageDeletionPolicy } from "../api/contract";
+import type { Attachment, ChatRealtimeEvent, MessageDeletionPolicy } from "../api/contract";
 
 const PAGE_SIZE = 50;
 // Fallback polling cadence used ONLY while the realtime WS is not "open" (e.g. the
@@ -42,9 +42,14 @@ export interface UseChannelView {
   editMessage: (id: common.MessageId, body: string, version: number) => Promise<void>;
   deleteMessage: (id: common.MessageId, version: number) => Promise<void>;
   toggleReaction: (id: common.MessageId, emoji: string) => Promise<void>;
+  /** Move the local read marker (「未読にする」 divider); the caller persists it. */
+  setLastRead: (lastReadMessageId: common.MessageId) => void;
 }
 
-export function useChannelView(channelId: common.ChannelId): UseChannelView {
+export function useChannelView(
+  channelId: common.ChannelId,
+  opts?: { onEvent?: (event: ChatRealtimeEvent) => void },
+): UseChannelView {
   const { api, can, currentUserId, createRealtimeClient } = useChatRuntime();
   const applyStoreEvent = useChatStore((s) => s.applyEvent);
   const setActiveChannel = useChatStore((s) => s.setActiveChannel);
@@ -57,6 +62,8 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
   // (hard=drop vs tombstone=redact) BEFORE the request resolves, so the row updates the
   // instant the user clicks. The server's authoritative `mode` reconciles any misguess.
   const policyRef = useRef<MessageDeletionPolicy | null>(null);
+  const onEventRef = useRef(opts?.onEvent);
+  onEventRef.current = opts?.onEvent;
 
   const setState = useCallback((next: ChannelViewState) => {
     stateRef.current = next;
@@ -119,6 +126,7 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
         if (cancelled) return;
         setState(applyRealtimeEvent(stateRef.current, event, currentUserId));
         applyStoreEvent(event, currentUserId);
+        onEventRef.current?.(event);
       });
       try {
         const ticket = await api.getWsTicket(channelId);
@@ -294,5 +302,10 @@ export function useChannelView(channelId: common.ChannelId): UseChannelView {
     [api, currentUserId], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  return { state, loading, loadOlder, send, resend, discard, editMessage, deleteMessage, toggleReaction };
+  const setLastRead = useCallback(
+    (lastReadMessageId: common.MessageId) => setState({ ...stateRef.current, lastReadMessageId }),
+    [setState],
+  );
+
+  return { state, loading, loadOlder, send, resend, discard, editMessage, deleteMessage, toggleReaction, setLastRead };
 }

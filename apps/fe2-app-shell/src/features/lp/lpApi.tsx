@@ -161,12 +161,17 @@ export interface LpTicketTypeStats {
 export interface LpTicketTypeSummary extends LpTicketType {
   stats: LpTicketTypeStats;
 }
+export type LpTicketPaymentMethod = "card" | "paypay";
 export interface LpTicketsState {
   site: string;
   enabled: boolean;
   /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える。効くのは enabled && ctaEnabled のとき。 */
   ctaEnabled: boolean;
   paymentReady: boolean;
+  /** LP に表示する決済手段（PayPay は lp-analytics の LP_PAYPAY_ENABLED=1 の時だけ）。古い API では無い。 */
+  paymentMethods?: LpTicketPaymentMethod[];
+  /** Stripe がテストキーで動いていて、プレビューからテスト購入できる（本番キー・未設定なら false）。古い API では無い。 */
+  previewCheckout?: boolean;
   /** LP_BASE_URL + "/tickets" */
   publicUrl: string;
   fields: LpTicketField[];
@@ -206,6 +211,12 @@ export interface LpTicketOrder {
   reviewReason: string | null;
   /** 使ったクーポン。クーポン注文は常に 0 円。 */
   couponId: string | null;
+  /** 実際に使われた Stripe の決済手段（"card" / "paypay" など）。無料・未確定・不明は null。古い API では無い。 */
+  paymentMethod?: string | null;
+  /** LP管理のプレビューから作られた注文。古い API では無い。 */
+  preview?: boolean;
+  /** テスト注文（プレビュー由来、または Stripe テストモードの決済）。実際の請求はない。古い API では無い。 */
+  test?: boolean;
 }
 export interface LpTicketOrdersPage {
   items: LpTicketOrder[];
@@ -320,6 +331,8 @@ export interface LpApi {
   createTicketCoupon(input: LpTicketCouponInput): Promise<LpTicketCoupon>;
   /** クーポンの停止/再開 (app:lp:edit + lp:publish)。 */
   setTicketCouponActive(id: string, input: { active: boolean }): Promise<LpTicketCoupon>;
+  /** プレビュー（販売あり）のテスト購入トークン (app:lp:edit・Stripe テストキーの時だけ。それ以外は 409)。 */
+  createTicketPreviewToken(): Promise<{ token: string; expiresAt: string }>;
   /** 登壇者募集の設定・応募数 (app:lp:view)。 */
   getProposals(): Promise<LpProposalsState>;
   /** 募集の公開/停止 (app:lp:edit + lp:publish)。 */
@@ -411,6 +424,8 @@ export function createLpApi(api: ApiClient): LpApi {
         path: `${BASE}/tickets/coupons/${encodeURIComponent(id)}`,
         body: input,
       }),
+    createTicketPreviewToken: () =>
+      api.request<{ token: string; expiresAt: string }>({ method: "POST", path: `${BASE}/tickets/preview-token`, body: {} }),
     getProposals: () => api.request<LpProposalsState>({ method: "GET", path: `${BASE}/proposals` }),
     setProposalsEnabled: (input) =>
       api.request<LpProposalsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/proposals/enabled`, body: input }),

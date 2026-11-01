@@ -110,6 +110,10 @@ class _WebShellState extends ConsumerState<WebShell> {
   /// `fcm_push.dart`). Never shown outside a debug build ([kDebugMode]).
   String? _fcmDebugToken;
 
+  /// Deep-link path from a notification tap that arrived before the WebView
+  /// finished its first load (cold start). Flushed in [_onLoadFinished].
+  String? _pendingNavPath;
+
   @override
   void initState() {
     super.initState();
@@ -144,7 +148,12 @@ class _WebShellState extends ConsumerState<WebShell> {
   Future<void> _navigateTo(String? path) async {
     final target = (path == null || path.isEmpty) ? '/notifications' : path;
     final controller = _controller;
-    if (controller == null) return;
+    if (controller == null || _loading) {
+      // Cold start from a notification tap: the WebView is not ready yet.
+      // Replayed by [_onLoadFinished].
+      _pendingNavPath = target;
+      return;
+    }
     try {
       await controller.evaluateJavascript(
         source: 'window.__dubNavigate && window.__dubNavigate('
@@ -268,6 +277,19 @@ class _WebShellState extends ConsumerState<WebShell> {
         _loadError = null;
       });
     }
+    final pending = _pendingNavPath;
+    if (pending != null) {
+      _pendingNavPath = null;
+      unawaited(_navigateTo(pending));
+    }
+    _retryPushRegistration();
+  }
+
+  /// A token obtained before login is deferred (no `dub_session` yet); retry
+  /// once a page has loaded or the login form reports success.
+  void _retryPushRegistration() {
+    unawaited(_fcm.retryPendingRegistration());
+    unawaited(_nativePush.retryPendingRegistration());
   }
 
   void _onLoadFailed(String message) {
@@ -411,6 +433,7 @@ class _WebShellState extends ConsumerState<WebShell> {
   Future<dynamic> _onLoginSucceeded(List<dynamic> args) async {
     // Offer to enable biometric autofill after a fresh, successful manual
     // login.
+    _retryPushRegistration();
     if (!mounted) return null;
     final autofill = ref.read(autofillControllerProvider.notifier);
     if (autofill.shouldPromptAfterLogin && _overlay == _Overlay.none) {

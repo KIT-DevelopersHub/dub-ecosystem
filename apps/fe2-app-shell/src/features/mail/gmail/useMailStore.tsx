@@ -8,7 +8,7 @@
 // mutations stay optimistic and in-memory (server persistence is a later slice).
 import { createContext, useContext, useMemo, useReducer, type Dispatch, type ReactNode } from "react";
 import type { mail } from "@dub/types";
-import { SELF, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
+import { SELF, hasSharedMail, inFolder, matchesQuery, senderMatcher, threadBlocked, threadUnread, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 export interface ComposeState {
   id: string;
@@ -28,10 +28,117 @@ export interface ComposeState {
   inReplyTo?: string;
 }
 
+/** One outbound send/schedule, kept until the gateway answers so a failure can restore
+ *  the compose and retry the exact request. */
+export interface PendingSend {
+  kind: "send" | "schedule";
+  req: mail.SendMailRequest | mail.ScheduleMailRequest;
+  /** Compose snapshot reopened on failure (same id, so its draft key is reused). */
+  compose: ComposeState;
+  /** Optimistic Sent entry to drop on failure. */
+  threadId?: string;
+  /** Idempotency key for a send: the retry bar re-sends with the SAME key, so a request
+   *  that actually went out before failing on the wire is not delivered twice. */
+  idempotencyKey?: string;
+}
+
+export interface SendNotice {
+  status: "sending" | "sent" | "failed";
+  pending: PendingSend;
+}
+
 export interface UndoState {
   label: string;
   prevThreads: MailThreadModel[];
 }
+
+/** Which server list a folder pages through: Sent pages GET /mail/sent, every other
+ *  thread folder pages GET /mail/messages. */
+export type PageSource = "inbox" | "sent";
+export const PAGE_SIZE = 50;
+
+/** Cursor pager for one server list. `stack` holds the cursors of pages after the first
+ *  ([] = page 1), so "previous" is a pop. `next`/`count` come from the last fetch. */
+export interface PagerState {
+  stack: string[];
+  next: string | null;
+  count: number;
+  /** Conversations in the whole server view (GET /mail/messages?folder= `total`); null when
+   *  the endpoint does not report one (Sent, older gateways). */
+  total?: number | null;
+}
+const FIRST_PAGE: PagerState = { stack: [], next: null, count: 0, total: null };
+
+export const pageSourceOf = (folder: FolderId): PageSource => (folder === "sent" ? "sent" : "inbox");
+
+/** The server view (GET /mail/messages?folder=) that backs a folder. Every filter of that
+ *  view — blocked senders, archive/trash/star/purge, mine/others — runs in SQL before the
+ *  limit, so the page the client gets is already exactly that folder's 50 conversations. A
+ *  user label (client-only) and the non-inbox folders page the unfiltered `all` view. */
+export function serverViewOf(folder: FolderId, labelFilter: string | null): mail.MailFolderView {
+  if (labelFilter) return "all";
+  switch (folder) {
+    case "inbox":
+    case "mine":
+    case "others":
+    case "starred":
+    case "archive":
+    case "trash":
+    case "blocked":
+      return folder;
+    default:
+      return "inbox";
+  }
+}
+
+/** Search spans everything but Trash / ブロック済み, which stay scoped to themselves. */
+export function searchViewOf(folder: FolderId, labelFilter: string | null): mail.MailFolderView {
+  if (labelFilter) return "all";
+  return folder === "trash" || folder === "blocked" ? folder : "all";
+}
+
+/** Sidebar folders whose badge comes from GET /mail/counts. */
+export const COUNTED_FOLDERS = ["inbox", "mine", "others", "starred", "trash", "blocked"] as const;
+type CountedFolder = (typeof COUNTED_FOLDERS)[number];
+
+/** Client-side unread conversations of a folder over the LOADED threads. */
+function clientUnread(threads: MailThreadModel[], folder: FolderId): number {
+  return threads.filter((t) => !t.purged && inFolder(t, folder) && threadUnread(t)).length;
+}
+
+/** 自分宛て / 自分宛て以外 only make sense when the viewer can see someone else's mail. The
+ *  loaded page alone can't tell (it is one folder's page), so the server count decides. */
+export function showSharedFolders(state: MailState): boolean {
+  return (state.counts ? state.counts.others.total > 0 : false) || hasSharedMail(state.threads);
+}
+
+/** Unread badge for a folder: the server count (exact, whole mailbox) adjusted by what the
+ *  viewer changed locally since it was fetched (opened / marked read / archived / blocked),
+ *  so the badge moves instantly and the next sync reconciles. Falls back to the loaded
+ *  threads when the gateway has no counts. ブロック済み never shows unread. */
+export function folderUnread(state: MailState, folder: FolderId): number {
+  if (folder === "blocked") return 0;
+  const counted = (COUNTED_FOLDERS as readonly string[]).includes(folder);
+  const now = clientUnread(state.threads, folder);
+  if (!state.counts || !counted) return now;
+  const f = folder as CountedFolder;
+  return Math.max(0, state.counts[f].unread + now - (state.countsBaseline[f] ?? 0));
+}
+
+/** Server-side search (GET /mail/messages?q= + GET /mail/sent?q=). The list endpoints are
+ *  paginated and carry only a snippet, so the client filter alone can't find older mail or
+ *  body text; useMailSync fetches matches (debounced) and SEARCH_RESULTS merges them into
+ *  `threads`. `ids` = threads the server matched for `query`; `added` = the subset that was
+ *  NOT in the hydrated list (dropped again when the search is cleared/changed, and carried
+ *  over a background HYDRATE while the search stays active). */
+export interface SearchState {
+  query: string;
+  status: "idle" | "loading" | "loadingMore" | "done" | "failed";
+  ids: Set<string>;
+  added: Set<string>;
+  next: Record<PageSource, string | null>;
+}
+const NO_SEARCH: SearchState = { query: "", status: "idle", ids: new Set(), added: new Set(), next: { inbox: null, sent: null } };
 
 export interface MailState {
   me: MailPerson;
@@ -44,17 +151,46 @@ export interface MailState {
   search: string;
   composes: ComposeState[];
   undo: UndoState | null;
+  /** Bottom-left send status bar (送信中… / 送信しました / 送信できませんでした). */
+  sendNotice: SendNotice | null;
   /** Bumped to ask the hydration hook to re-fetch inbox+sent (e.g. after a send). */
   syncNonce: number;
   /** Parked future sends (予約送信) — the Scheduled folder's list, loaded from the gateway
    *  (GET /mail/scheduled) by useMailSync. Not thread-backed: rendered by ScheduledList. */
   scheduled: mail.ScheduledSendListItem[];
+  pager: Record<PageSource, PagerState>;
+  /** True while the list is (re)loading for a page change or the first load — shows the
+   *  skeleton. Background refetches leave it false so the list never flickers. */
+  listLoading: boolean;
+  searchResults: SearchState;
+  /** The viewer's sender block list (GET /mail/blocks), newest first. Mutated optimistically
+   *  by useSenderBlocks; `threads[].blocked` is re-derived from it on every change. */
+  blocks: mail.MailSenderBlock[];
+  /** "loading" until the first GET /mail/blocks answers (management list shows a skeleton);
+   *  until then thread placement falls back to the server's per-message `blocked` flag. */
+  blocksStatus: "loading" | "ready" | "failed";
+  /** Bottom-left notice for block/unblock (success with 元に戻す, or a rollback error). */
+  blockNotice: BlockNotice | null;
+  /** GET /mail/counts (conversations + unread per view), or null before / without it. */
+  counts: mail.MailFolderCounts | null;
+  /** clientUnread per counted folder at the moment `counts` arrived (see folderUnread). */
+  countsBaseline: Partial<Record<FolderId, number>>;
+}
+
+export interface BlockNotice {
+  status: "blocked" | "unblocked" | "failed";
+  text: string;
+  /** The entry the notice is about — 元に戻す reverses it. */
+  block?: mail.MailSenderBlock;
 }
 
 export type MailAction =
   | { type: "SET_FOLDER"; folder: FolderId }
   | { type: "SET_LABEL"; label: string }
   | { type: "SET_SEARCH"; search: string }
+  | { type: "SEARCH_RESULTS"; query: string; threads: MailThreadModel[]; next: Record<PageSource, string | null>; append?: boolean }
+  | { type: "SEARCH_FAILED"; query: string }
+  | { type: "SEARCH_MORE" } // ask useMailSync for the next page of search results
   | { type: "OPEN_THREAD"; id: string }
   | { type: "CLOSE_THREAD" }
   | { type: "TOGGLE_STAR"; id: string }
@@ -68,37 +204,181 @@ export type MailAction =
   | { type: "TOGGLE_CHECK"; id: string }
   | { type: "CHECK_ALL"; ids: string[] }
   | { type: "CLEAR_CHECKS" }
-  | { type: "ADD_MESSAGE"; threadId: string; body: string; to: MailPerson[]; subject: string }
-  | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; subject: string; body: string }
+  | { type: "ADD_MESSAGE"; threadId: string; body: string; to: MailPerson[]; cc?: MailPerson[]; bcc?: MailPerson[]; subject: string }
+  | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; bcc?: MailPerson[]; subject: string; body: string; threadId?: string }
+  | { type: "SEND_STARTED"; pending: PendingSend }
+  | { type: "SEND_OK"; pending: PendingSend }
+  | { type: "SEND_FAILED"; pending: PendingSend }
+  | { type: "DISMISS_SEND_NOTICE" }
   | { type: "OPEN_COMPOSE"; compose: Partial<ComposeState> }
   | { type: "UPDATE_COMPOSE"; id: string; patch: Partial<ComposeState> }
   | { type: "CLOSE_COMPOSE"; id: string }
   | { type: "UNDO" }
   | { type: "DISMISS_UNDO" }
   // ---- server sync ----
-  | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson } // replace threads from the gateway
+  | { type: "HYDRATE"; threads: MailThreadModel[]; me?: MailPerson; pages?: Record<PageSource, { next: string | null; count: number; total?: number | null }> } // replace threads from the gateway
+  | { type: "HYDRATE_COUNTS"; counts: mail.MailFolderCounts }
+  | { type: "PAGE_NEXT"; source: PageSource }
+  | { type: "PAGE_PREV"; source: PageSource }
+  | { type: "LIST_FAILED" } // a list fetch failed: drop the skeleton, keep current threads
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
   | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean; purged: boolean; noReplyAt?: string | null }[] } // restore server-persisted star/archive/trash/purge/返信不要
   | { type: "HYDRATE_SCHEDULED"; scheduled: mail.ScheduledSendListItem[] } // replace the Scheduled folder list
-  | { type: "REQUEST_SYNC" }; // ask the hydration hook to re-fetch (post-send)
+  | { type: "REQUEST_SYNC" } // ask the hydration hook to re-fetch (post-send)
+  // ---- sender block list ----
+  | { type: "HYDRATE_BLOCKS"; blocks: mail.MailSenderBlock[] }
+  | { type: "BLOCKS_FAILED" }
+  | { type: "SET_BLOCKS"; blocks: mail.MailSenderBlock[] } // optimistic apply / reconcile / rollback
+  | { type: "BLOCK_NOTICE"; notice: BlockNotice | null };
 
 let seq = 0;
-const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
+export const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
 function setRead(threads: MailThreadModel[], ids: Set<string>, read: boolean): MailThreadModel[] {
   return threads.map((t) =>
-    ids.has(t.id) ? { ...t, messages: t.messages.map((m) => ({ ...m, read })) } : t,
+    // Another account's mail is view-only: its read state belongs to its owner.
+    ids.has(t.id) ? { ...t, messages: t.messages.map((m) => (m.mine === false ? m : { ...m, read })) } : t,
   );
 }
 
+/** Drop the threads a search merged in (not part of the hydrated list) and reset it. */
+function clearSearch(state: MailState, next: SearchState = NO_SEARCH): Pick<MailState, "threads" | "searchResults"> {
+  const added = state.searchResults.added;
+  return { threads: added.size > 0 ? state.threads.filter((t) => !added.has(t.id)) : state.threads, searchResults: next };
+}
+
+const latest = (t: MailThreadModel): string => t.messages.reduce((m, x) => (x.date > m ? x.date : m), "");
+
+/** Threads the list shows for the current view. With a search active it spans every folder
+ *  except Trash (Gmail-style; inside Trash/a label it stays scoped there) and shows the
+ *  client pre-filter (matchesQuery over loaded threads, instant) plus the server matches,
+ *  newest first. Purged threads never show. */
+export function selectVisible(state: MailState): MailThreadModel[] {
+  const q = state.search.trim();
+  const scoped = (t: MailThreadModel): boolean =>
+    state.labelFilter ? t.labels.includes(state.labelFilter) && t.folder !== "trash" : inFolder(t, state.folder);
+  if (q.length === 0) return state.threads.filter((t) => !t.purged && scoped(t));
+  const ids = state.searchResults.query === q ? state.searchResults.ids : new Set<string>();
+  // Search spans every folder except Trash and ブロック済み (each stays scoped to itself).
+  const inScope = (t: MailThreadModel): boolean =>
+    state.labelFilter
+      ? scoped(t)
+      : state.folder === "trash"
+        ? t.folder === "trash"
+        : state.folder === "blocked"
+          ? inFolder(t, "blocked")
+          : t.folder !== "trash" && !t.blocked;
+  return state.threads
+    .filter((t) => !t.purged && inScope(t) && (ids.has(t.id) || matchesQuery(t, q)))
+    .sort((a, b) => latest(b).localeCompare(latest(a)));
+}
+
+/** Re-derive `threads[].blocked` after any change to the threads or the block list. Keeps
+ *  thread identity when nothing changed so memoized consumers don't re-render needlessly. */
+function withBlocked(prev: MailState, next: MailState): MailState {
+  if (next.threads === prev.threads && next.blocks === prev.blocks && next.blocksStatus === prev.blocksStatus) return next;
+  const match = next.blocksStatus === "ready" ? senderMatcher(next.blocks) : null;
+  let changed = false;
+  const threads = next.threads.map((t) => {
+    const blocked = threadBlocked(t, match);
+    if ((t.blocked === true) === blocked) return t;
+    changed = true;
+    return { ...t, blocked };
+  });
+  return changed ? { ...next, threads } : next;
+}
+
 export function reducer(state: MailState, action: MailAction): MailState {
+  return withBlocked(state, baseReducer(state, action));
+}
+
+function baseReducer(state: MailState, action: MailAction): MailState {
   switch (action.type) {
-    case "SET_FOLDER":
-      return { ...state, folder: action.folder, labelFilter: null, openThreadId: null, search: "", checked: new Set() };
-    case "SET_LABEL":
-      return { ...state, labelFilter: action.label, openThreadId: null, search: "", checked: new Set() };
-    case "SET_SEARCH":
-      return { ...state, search: action.search, openThreadId: null };
+    case "SET_FOLDER": {
+      // Gmail resets to page 1 on a folder switch. Each inbox-type folder is its own server
+      // view (serverViewOf), so switching between them always reloads (skeleton); a non-first
+      // page reloads too.
+      const viewChanged = serverViewOf(action.folder, null) !== serverViewOf(state.folder, state.labelFilter);
+      const paged = viewChanged || state.pager.inbox.stack.length > 0 || state.pager.sent.stack.length > 0;
+      return {
+        ...state,
+        ...clearSearch(state),
+        folder: action.folder,
+        labelFilter: null,
+        openThreadId: null,
+        search: "",
+        checked: new Set(),
+        ...(paged
+          ? { pager: { inbox: { ...state.pager.inbox, stack: [] }, sent: { ...state.pager.sent, stack: [] } }, listLoading: true }
+          : {}),
+      };
+    }
+    case "PAGE_NEXT": {
+      const p = state.pager[action.source];
+      if (!p.next || state.listLoading) return state;
+      return {
+        ...state,
+        pager: { ...state.pager, [action.source]: { ...p, stack: [...p.stack, p.next] } },
+        listLoading: true,
+        openThreadId: null,
+        checked: new Set(),
+      };
+    }
+    case "PAGE_PREV": {
+      const p = state.pager[action.source];
+      if (p.stack.length === 0 || state.listLoading) return state;
+      return {
+        ...state,
+        pager: { ...state.pager, [action.source]: { ...p, stack: p.stack.slice(0, -1) } },
+        listLoading: true,
+        openThreadId: null,
+        checked: new Set(),
+      };
+    }
+    case "LIST_FAILED":
+      return { ...state, listLoading: false };
+    case "SET_LABEL": {
+      const viewChanged = serverViewOf(state.folder, action.label) !== serverViewOf(state.folder, state.labelFilter);
+      return {
+        ...state,
+        ...clearSearch(state),
+        labelFilter: action.label,
+        openThreadId: null,
+        search: "",
+        checked: new Set(),
+        ...(viewChanged ? { pager: { ...state.pager, inbox: FIRST_PAGE }, listLoading: true } : {}),
+      };
+    }
+    case "SET_SEARCH": {
+      const q = action.search.trim();
+      if (q === state.searchResults.query) return { ...state, search: action.search, openThreadId: null };
+      // New (or cleared) query: forget the previous matches; useMailSync fetches the new ones.
+      const next: SearchState = q.length === 0 ? NO_SEARCH : { ...NO_SEARCH, query: q, status: "loading" };
+      return { ...state, ...clearSearch(state, next), search: action.search, openThreadId: null };
+    }
+    case "SEARCH_RESULTS": {
+      const cur = state.searchResults;
+      if (action.query !== state.search.trim() || action.query !== cur.query) return state; // stale response
+      const base = action.append ? state : { ...state, ...clearSearch(state, cur) };
+      const have = new Set(base.threads.map((t) => t.id));
+      const fresh = action.threads.filter((t) => !have.has(t.id));
+      const ids = new Set(action.append ? cur.ids : []);
+      for (const t of action.threads) ids.add(t.id);
+      const added = new Set(action.append ? cur.added : []);
+      for (const t of fresh) added.add(t.id);
+      return {
+        ...base,
+        threads: [...base.threads, ...fresh],
+        searchResults: { query: cur.query, status: "done", ids, added, next: action.next },
+      };
+    }
+    case "SEARCH_FAILED":
+      return action.query === state.searchResults.query ? { ...state, searchResults: { ...state.searchResults, status: "failed" } } : state;
+    case "SEARCH_MORE": {
+      const cur = state.searchResults;
+      if (cur.status !== "done" || (!cur.next.inbox && !cur.next.sent)) return state;
+      return { ...state, searchResults: { ...cur, status: "loadingMore" } };
+    }
     case "OPEN_THREAD":
       return {
         ...state,
@@ -215,6 +495,8 @@ export function reducer(state: MailState, action: MailAction): MailState {
                     id: uid("msg"),
                     from: state.me,
                     to: action.to,
+                    ...(action.cc && action.cc.length > 0 ? { cc: action.cc } : {}),
+                    ...(action.bcc && action.bcc.length > 0 ? { bcc: action.bcc } : {}),
                     date: new Date().toISOString(),
                     body: action.body,
                     read: true,
@@ -228,7 +510,7 @@ export function reducer(state: MailState, action: MailAction): MailState {
     }
     case "SEND": {
       const thread: MailThreadModel = {
-        id: uid("thread"),
+        id: action.threadId ?? uid("thread"),
         subject: action.subject || "(件名なし)",
         folder: "sent",
         starred: false,
@@ -239,6 +521,7 @@ export function reducer(state: MailState, action: MailAction): MailState {
             from: state.me,
             to: action.to,
             ...(action.cc.length > 0 ? { cc: action.cc } : {}),
+            ...(action.bcc && action.bcc.length > 0 ? { bcc: action.bcc } : {}),
             date: new Date().toISOString(),
             body: action.body,
             read: true,
@@ -248,6 +531,27 @@ export function reducer(state: MailState, action: MailAction): MailState {
       };
       return { ...state, threads: [thread, ...state.threads] };
     }
+    case "SEND_STARTED":
+      return { ...state, sendNotice: { status: "sending", pending: action.pending } };
+    case "SEND_OK":
+      // A retry from the bar succeeded: close the restored compose too.
+      return {
+        ...state,
+        composes: state.composes.filter((c) => c.id !== action.pending.compose.id),
+        sendNotice: { status: "sent", pending: action.pending },
+      };
+    case "SEND_FAILED": {
+      const { pending } = action;
+      const reopened = state.composes.some((c) => c.id === pending.compose.id);
+      return {
+        ...state,
+        threads: pending.threadId ? state.threads.filter((t) => t.id !== pending.threadId) : state.threads,
+        composes: reopened ? state.composes : [...state.composes, { ...pending.compose, minimized: false }],
+        sendNotice: { status: "failed", pending },
+      };
+    }
+    case "DISMISS_SEND_NOTICE":
+      return { ...state, sendNotice: null };
     case "OPEN_COMPOSE": {
       const base: ComposeState = {
         id: uid("compose"),
@@ -284,18 +588,34 @@ export function reducer(state: MailState, action: MailAction): MailState {
       return state.undo ? { ...state, threads: state.undo.prevThreads, undo: null } : state;
     case "DISMISS_UNDO":
       return { ...state, undo: null };
-    case "HYDRATE":
+    case "HYDRATE": {
       // Replace threads with the server view. Drop selections/undo that referenced the
       // now-stale set; keep the open thread if it still exists (so an open reading pane
       // survives a post-send re-hydrate) and its body-load is preserved.
+      // Search-merged threads outside the hydrated page survive a background re-sync while
+      // the search is active (otherwise a poll would blank the results).
+      const hydrated = new Set(action.threads.map((t) => t.id));
+      const keep = state.threads.filter((t) => state.searchResults.added.has(t.id) && !hydrated.has(t.id));
+      const threads = keep.length > 0 ? [...action.threads, ...keep] : action.threads;
       return {
         ...state,
-        threads: action.threads,
+        threads,
+        searchResults: { ...state.searchResults, added: new Set(keep.map((t) => t.id)) },
         ...(action.me ? { me: action.me } : {}),
+        ...(action.pages
+          ? {
+              pager: {
+                inbox: { ...state.pager.inbox, ...action.pages.inbox },
+                sent: { ...state.pager.sent, ...action.pages.sent },
+              },
+            }
+          : {}),
+        listLoading: false,
         checked: new Set(),
         undo: null,
-        openThreadId: action.threads.some((t) => t.id === state.openThreadId) ? state.openThreadId : null,
+        openThreadId: threads.some((t) => t.id === state.openThreadId) ? state.openThreadId : null,
       };
+    }
     case "SET_THREAD_MESSAGES":
       return {
         ...state,
@@ -322,6 +642,22 @@ export function reducer(state: MailState, action: MailAction): MailState {
       return { ...state, scheduled: action.scheduled };
     case "REQUEST_SYNC":
       return { ...state, syncNonce: state.syncNonce + 1 };
+    case "HYDRATE_COUNTS": {
+      const countsBaseline: Partial<Record<FolderId, number>> = {};
+      for (const f of COUNTED_FOLDERS) countsBaseline[f] = clientUnread(state.threads, f);
+      return { ...state, counts: action.counts, countsBaseline };
+    }
+    case "HYDRATE_BLOCKS":
+      return { ...state, blocks: action.blocks, blocksStatus: "ready" };
+    case "BLOCKS_FAILED":
+      return state.blocksStatus === "ready" ? state : { ...state, blocksStatus: "failed" };
+    case "SET_BLOCKS": {
+      // An open blocked thread stays open (its banner offers ブロックを解除); the list views
+      // re-filter through inFolder on the re-derived `blocked` flag.
+      return { ...state, blocks: action.blocks, blocksStatus: "ready" };
+    }
+    case "BLOCK_NOTICE":
+      return { ...state, blockNotice: action.notice };
     default:
       return state;
   }
@@ -340,8 +676,17 @@ export const initialMailState: MailState = {
   search: "",
   composes: [],
   undo: null,
+  sendNotice: null,
   syncNonce: 0,
   scheduled: [],
+  pager: { inbox: FIRST_PAGE, sent: FIRST_PAGE },
+  listLoading: true,
+  searchResults: NO_SEARCH,
+  blocks: [],
+  blocksStatus: "loading",
+  blockNotice: null,
+  counts: null,
+  countsBaseline: {},
 };
 
 const MailStoreCtx = createContext<{ state: MailState; dispatch: Dispatch<MailAction> } | null>(null);

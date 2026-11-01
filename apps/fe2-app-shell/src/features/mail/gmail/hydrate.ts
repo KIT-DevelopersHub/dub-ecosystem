@@ -5,7 +5,7 @@
 // message(s) (getThread / getSent) to fill real bodies (threadDetailToMessages /
 // sentDetailToMessage).
 import type { mail } from "@dub/types";
-import type { MailMsg, MailPerson, MailThreadModel } from "./mailModel.ts";
+import { dedupeLoopback, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 /** Received messages -> inbox threads, grouped by threadId, messages oldest→newest. */
 export function inboxItemsToThreads(items: mail.MailMessageListItem[]): MailThreadModel[] {
@@ -22,6 +22,7 @@ export function inboxItemsToThreads(items: mail.MailMessageListItem[]): MailThre
       body: it.snippet,
       read: it.read,
       ...(it.mine === false ? { mine: false } : {}),
+      ...(it.blocked ? { blocked: true } : {}),
     };
     const existing = byThread.get(it.threadId);
     if (existing) {
@@ -62,16 +63,20 @@ export function combineThreads(
         from: s.from ?? me,
         to: s.to,
         ...(s.cc && s.cc.length > 0 ? { cc: s.cc } : {}),
+        ...(s.bcc && s.bcc.length > 0 ? { bcc: s.bcc } : {}),
         date: s.sentAt,
         body: s.snippet,
         read: true,
         outbound: true,
+        ...(s.mine === false ? { mine: false } : {}),
       });
       parent.messages.sort((a, b) => a.date.localeCompare(b.date));
     } else {
       standalone.push(s);
     }
   }
+  // A send to a Dub-routed mailbox also arrives as a received copy: show it once.
+  for (const t of inboxThreads) t.messages = dedupeLoopback(t.messages);
   return [...inboxThreads, ...sentItemsToThreads(standalone, me)];
 }
 
@@ -89,10 +94,12 @@ export function sentItemsToThreads(items: mail.MailSentListItem[], me: MailPerso
         from: it.from ?? me,
         to: it.to,
         ...(it.cc && it.cc.length > 0 ? { cc: it.cc } : {}),
+        ...(it.bcc && it.bcc.length > 0 ? { bcc: it.bcc } : {}),
         date: it.sentAt,
         body: it.snippet,
         read: true,
         outbound: true,
+        ...(it.mine === false ? { mine: false } : {}),
       },
     ],
   }));
@@ -112,6 +119,7 @@ export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
     body: m.textBody,
     read: m.read,
     ...(m.mine === false ? { mine: false } : {}),
+    ...(m.blocked ? { blocked: true } : {}),
     ...(m.attachments && m.attachments.length > 0 ? { attachments: m.attachments } : {}),
     ...(m.headerMeta ? { headerMeta: m.headerMeta } : {}),
   }));
@@ -125,10 +133,12 @@ export function sentDetailToMessage(detail: mail.MailSentDetail, me: MailPerson)
     from: detail.from ?? me,
     to: detail.to,
     ...(detail.cc && detail.cc.length > 0 ? { cc: detail.cc } : {}),
+    ...(detail.bcc && detail.bcc.length > 0 ? { bcc: detail.bcc } : {}),
     date: detail.sentAt,
     body: detail.textBody,
     read: true,
     outbound: true,
+    ...(detail.mine === false ? { mine: false } : {}),
     ...(detail.attachments && detail.attachments.length > 0 ? { attachments: detail.attachments } : {}),
   };
 }

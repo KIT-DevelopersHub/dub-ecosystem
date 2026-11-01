@@ -7,7 +7,7 @@
 // session live in KV. The auth segment now opts into forwarding; everything else must
 // keep the "token stays at the edge" guarantee.
 import { describe, it, expect } from "vitest";
-import { HDR_USER_ID, HDR_CALLER, HDR_INTERNAL } from "@dub/observability";
+import { HDR_USER_ID, HDR_CALLER, HDR_INTERNAL, HDR_IDEMPOTENCY_KEY } from "@dub/observability";
 import { createApp } from "../src/app";
 import { ROUTES } from "../src/routes";
 import { fakeBinding, authBinding, validSession, json, makeEnv, execCtx, errOf } from "./helpers";
@@ -147,6 +147,24 @@ describe("credential forwarding: every other segment keeps the token at the edge
     expect(fwd.headers.get("authorization")).toBeNull();
     // The downstream service is told WHO the caller is, never HOW to become them.
     expect(fwd.headers.get(HDR_USER_ID)).toBe("usr_real");
+  });
+
+  it("passes the client idempotency key through (a double-submitted send dedupes) but no other x-dub-*", async () => {
+    const task = fakeBinding(() => json(200, {}));
+    const env = makeEnv({ SVC_AUTH: authBinding(validSession("usr_real")).fetcher, SVC_TASK: task.fetcher });
+    await app().fetch(
+      new Request("https://x/api/v1/tasks", {
+        method: "POST",
+        headers: { cookie: SESSION_COOKIE, "content-type": "application/json", [HDR_IDEMPOTENCY_KEY]: "idem-123", [HDR_USER_ID]: "usr_SPOOFED", [HDR_INTERNAL]: "1" },
+        body: "{}",
+      }),
+      env,
+      execCtx,
+    );
+    const fwd = task.requests[0]!;
+    expect(fwd.headers.get(HDR_IDEMPOTENCY_KEY)).toBe("idem-123");
+    expect(fwd.headers.get(HDR_USER_ID)).toBe("usr_real");
+    expect(fwd.headers.get(HDR_INTERNAL)).toBeNull();
   });
 
   it("exactly one routing rule opts into credential forwarding, and it is the auth segment", () => {
