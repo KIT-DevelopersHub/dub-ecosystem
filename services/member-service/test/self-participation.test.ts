@@ -46,6 +46,8 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
       studentNumber: null,
       desiredActivity: null,
       note: null,
+      contact: null,
+      operations: null,
     });
   });
 
@@ -71,11 +73,12 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
     };
     const upd = await call(app, "POST", "/members/internal/me/participation", { userId: IDU, internal: true, body: patch });
     expect(upd.status).toBe(200);
-    expect(upd.json).toEqual(patch);
+    expect(upd.json).toMatchObject(patch);
 
     // Persisted: a fresh GET (new request) reflects the same values from the real repo.
     const read = await call(app, "GET", "/members/internal/me/participation", { userId: IDU, internal: true });
-    expect(read.json).toEqual(patch);
+    expect(read.json).toMatchObject(patch);
+    expect(read.json.operations).toEqual({ name: "山田 太郎", roleTitle: null, status: "added", teams: [], leaderName: null });
 
     // A member_people row was created, linked to the identity user, name composed "姓 名".
     const person = await deps.repo.getPersonByIdentityUserId(deps.orgId, IDU);
@@ -133,5 +136,60 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
       body: { grade: "99" },
     });
     expect(bad.status).toBe(400);
+  });
+
+  it("returns the roster's 運営 fields read-only and lets the caller edit only 連絡先", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const admin = { userId: "admin" };
+    const team = await call(app, "POST", "/members/teams", { ...admin, body: { name: "開発チーム" } });
+    const leader = await call(app, "POST", "/members/people", {
+      ...admin,
+      body: { lastName: "荒木", firstName: "大地", status: "added", teamIds: [] },
+    });
+    const me = await call(app, "POST", "/members/people", {
+      ...admin,
+      body: {
+        lastName: "高岡",
+        roleTitle: "副代表",
+        status: "added",
+        teamIds: [team.json.id],
+        leaderId: leader.json.id,
+        contact: "old@example.com",
+      },
+    });
+    await call(app, "PATCH", `/members/people/${me.json.id}`, {
+      ...admin,
+      body: { identityUserId: IDU, version: me.json.version },
+    });
+
+    const read = await call(app, "GET", "/members/internal/me/participation", { userId: IDU, internal: true });
+    expect(read.status).toBe(200);
+    expect(read.json.contact).toBe("old@example.com");
+    expect(read.json.operations).toEqual({
+      name: "高岡",
+      roleTitle: "副代表",
+      status: "added",
+      teams: [{ id: team.json.id, name: "開発チーム", color: team.json.color }],
+      leaderName: "荒木 大地",
+    });
+
+    // 本人が運営の項目を送っても変わらない (連絡先だけ反映)。
+    const upd = await call(app, "POST", "/members/internal/me/participation", {
+      userId: IDU,
+      internal: true,
+      body: { contact: " new@example.com ", roleTitle: "代表", status: "declined", teamIds: [], leaderId: null },
+    });
+    expect(upd.status).toBe(200);
+    expect(upd.json.contact).toBe("new@example.com");
+    expect(upd.json.operations.roleTitle).toBe("副代表");
+    expect(upd.json.operations.status).toBe("added");
+    expect(upd.json.operations.teams).toHaveLength(1);
+    expect(upd.json.operations.leaderName).toBe("荒木 大地");
+
+    const person = await deps.repo.getPersonByIdentityUserId(deps.orgId, IDU);
+    expect(person!.contact).toBe("new@example.com");
+    expect(person!.roleTitle).toBe("副代表");
+    expect(person!.leaderId).toBe(leader.json.id);
   });
 });

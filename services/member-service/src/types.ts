@@ -4,6 +4,7 @@
 // injected-dependency interfaces. Distinct from identity_* (RBAC login accounts).
 import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
+import type { HrRepo } from "./hr-repo";
 
 export type MemberStatus = member.MemberStatus;
 export const MEMBER_STATUSES = ["added", "invited", "considering", "on_leave", "declined"] as const;
@@ -179,6 +180,10 @@ export interface AppDeps {
   newMemberId: () => string;
   newParticipationId: () => string;
   newOnboardingItemId: () => string;
+  /** 人事 (member_hr_*) の永続化。名簿リポジトリとは分けてある (hr-repo.ts)。 */
+  hrRepo: HrRepo;
+  /** 人事の id 採番 (app = 応募者 / hre = 履歴)。 */
+  newHrId: (prefix: "app" | "hre") => string;
   /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
    *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
    *  without the binding, in which case the submission simply skips the notify. Must

@@ -48,6 +48,14 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /internal/status": INTERNAL,
   "GET /health/quota": INTERNAL,
 
+  // ---- Resend delivery-problem webhook (bounce / suppressed / complained / failed / delayed)
+  // INTERNAL, not PUBLIC: this Worker has no public hostname. Resend calls api-gateway's
+  // gateway-owned PUBLIC `POST /api/v1/public/webhooks/resend`, which forwards the raw bytes
+  // + svix-* headers here over the Service Binding. The handler AUTHENTICATES the payload
+  // with the Svix HMAC (RESEND_WEBHOOK_SECRET, 5-min replay window; unset -> 503) — that is
+  // authentication of a sessionless sender, not a permission check, so it stays handler-side.
+  "POST /internal/webhooks/resend": INTERNAL,
+
   // ---- POST /send: the SYSTEM send port (open-relay guard) ----
   // INTERNAL, and this is the single most important line in the table: a reachable-from-
   // outside mail send endpoint is an open relay. The only legitimate callers are our own
@@ -77,6 +85,7 @@ export const POLICY_TABLE = definePolicyTable({
   // what makes 閲覧 the right tier rather than 編集 — it is reading, with a bookmark.
   "GET /mail/messages": appLevel("mail", "view", "mail:read"),
   "GET /mail/messages/:id": appLevel("mail", "view", "mail:read"),
+  "GET /mail/counts": appLevel("mail", "view", "mail:read"),
   "POST /mail/messages/:id/read": appLevel("mail", "view", "mail:read"),
   "GET /mail/messages/:id/attachments/:attId": appLevel("mail", "view", "mail:read"),
   "GET /mail/sent": appLevel("mail", "view", "mail:read"),
@@ -87,6 +96,11 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /mail/threads/:id": appLevel("mail", "view", "mail:read"),
   "GET /mail/flags": appLevel("mail", "view", "mail:read"),
   "POST /mail/flags/:threadId": appLevel("mail", "view", "mail:read"),
+  // Personal sender block list (0021): like flags, it only changes how the caller's OWN view
+  // files mail they can already see — nothing is deleted, bounced or hidden from anyone else.
+  "GET /mail/blocks": appLevel("mail", "view", "mail:read"),
+  "POST /mail/blocks": appLevel("mail", "view", "mail:read"),
+  "DELETE /mail/blocks/:value": appLevel("mail", "view", "mail:read"),
 
   // ---- mail administration: the bare `mail:admin` key, no app tier ----
   // WHY no `appLevel("mail", ...)` here: these are not the メール app's own surface. The
@@ -111,6 +125,8 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /mail/admin/email-routing/rules": ["mail:admin"],
   "PATCH /mail/admin/email-routing/rules/:id": ["mail:admin"],
   "DELETE /mail/admin/email-routing/rules/:id": ["mail:admin"],
+  // Production canary probe results (read-only operational data, same admin console).
+  "GET /mail/admin/canary/probes": ["mail:admin"],
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────

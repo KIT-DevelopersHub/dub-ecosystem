@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (71 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (79 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -52,6 +52,8 @@ export const PERMISSION_CATALOG = [
   { key: "chat:moderate", name: "Moderate chat", description: "Manage channels and delete others' messages", domain: "chat", dangerous: true },
   { key: "chat:delete_channel", name: "Delete channels", description: "Permanently delete chat channels and all their messages", domain: "chat", dangerous: true },
   { key: "chat:slack_import", name: "Import from Slack", description: "Import Slack channel history (messages, threads, reactions, files) into new chat channels", domain: "chat", dangerous: true },
+  { key: "chat:emoji_import", name: "Import Slack custom emoji", description: "Import the Slack workspace's custom emoji (images) for use in chat reactions", domain: "chat", dangerous: true },
+  { key: "chat:manage_sections", name: "Manage chat sections", description: "Create, rename, reorder and delete the org-wide chat sidebar sections and assign channels to them", domain: "chat", dangerous: false },
   { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },
   { key: "infra:read", name: "Read infra", description: "View sites/deployments/dns/domains", domain: "infra", dangerous: false },
   { key: "infra:deploy", name: "Deploy", description: "Execute deployments", domain: "infra", dangerous: true },
@@ -70,6 +72,7 @@ export const PERMISSION_CATALOG = [
   { key: "drive:settings_edit", name: "Edit Drive共有 settings", description: "Add/switch/remove the Google accounts Drive共有 acts as (implies view)", domain: "drive", dangerous: true },
   // カレンダー > ミーティング (meetings on the shared Google account, drive-share-service /meetings).
   // Two toggles in カレンダー's 詳細設定; meetings_edit IMPLIES meetings_view (policy.normalizeAppAccessKeys).
+  { key: "calendar:schedule_edit", name: "Edit schedules", description: "Add/change/delete 予定 in the カレンダー app (saved as the caller's tasks)", domain: "calendar", dangerous: false },
   { key: "calendar:meetings_view", name: "View meetings", description: "See the meetings set up on the shared Google account (カレンダー > ミーティング)", domain: "calendar", dangerous: false },
   { key: "calendar:meetings_edit", name: "Edit meetings", description: "Create/change/delete meetings on the shared Google account and invite role members (implies view)", domain: "calendar", dangerous: true },
   { key: "webhook:read", name: "Read webhooks", description: "Search webhook delivery records", domain: "webhook", dangerous: false },
@@ -103,9 +106,14 @@ export const PERMISSION_CATALOG = [
   { key: "app:lp:edit", name: "Edit in LP管理 app", description: "Manage LP versions inside the LP管理 app (implies view)", domain: "app", dangerous: false },
   { key: "app:commander:view", name: "Open Commander app", description: "Open and view the Commander app (drives the local Claude Code exec bridge)", domain: "app", dangerous: true },
   { key: "app:commander:edit", name: "Edit in Commander app", description: "Run commands / advance phases inside the Commander app (implies view)", domain: "app", dangerous: true },
+  { key: "hr:read", name: "Read HR applicants", description: "View applicants, their selection history and new-member onboarding progress (personal data)", domain: "hr", dangerous: false },
+  { key: "hr:write", name: "Manage HR pipeline", description: "Register applicants, change their status, record interview dates / notes and tick onboarding items", domain: "hr", dangerous: false },
+  { key: "hr:admin", name: "Hire (add to roster) / delete applicants", description: "Mark an applicant as hired (adds them to the roster) and delete applicant records", domain: "hr", dangerous: true },
+  { key: "app:hr:view", name: "Open 人事 app", description: "Open and view the 人事 app", domain: "app", dangerous: false },
+  { key: "app:hr:edit", name: "Edit in 人事 app", description: "Act inside the 人事 app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 65 keys (open `${string}:${string}` template retired).
+// Closed union of the 79 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

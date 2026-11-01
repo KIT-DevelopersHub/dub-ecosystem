@@ -20,6 +20,8 @@ import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import { PUBLIC_PARTICIPATION_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
 import { IssueMailDialog } from "./IssueMailDialog.tsx";
+import { useParticipationApi } from "./ParticipationProvider.tsx";
+import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
 import styles from "./participation.module.css";
 
 /** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
@@ -92,6 +94,9 @@ export function ParticipationListPage(): JSX.Element {
   const [skipTarget, setSkipTarget] = useState<Participation | null>(null);
   const [unlinkTarget, setUnlinkTarget] = useState<Participation | null>(null);
   const [issueTarget, setIssueTarget] = useState<{ participation: Participation; member: RosterMember } | null>(null);
+  // 発行→紐付けまで済んだら、続けてアカウント発行メールを送るか聞く (Gmail がある時だけ)。
+  const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
+  const participationApi = useParticipationApi();
   // 解除確認に「誰との紐付けか」を出すため、確認を開いた時だけ名簿を引く。
   const rosterQuery = useParticipationRosterMembers(unlinkTarget !== null);
   const unlinkMemberName = unlinkTarget?.memberId
@@ -159,7 +164,7 @@ export function ParticipationListPage(): JSX.Element {
     ...PROFILE_DISPLAY_COLUMNS.map(
       (c): ColumnDef<Participation> => ({ key: c.id, header: c.header, noWrap: true, minWidth: "7rem", cell: (p) => c.value(p) || "—" }),
     ),
-    { key: "team", header: "希望チーム", noWrap: true, minWidth: "8rem", cell: (p) => teamName(p.desiredTeamId) },
+    { key: "team", header: "所属チーム", noWrap: true, minWidth: "8rem", cell: (p) => teamName(p.desiredTeamId) },
     { key: "submittedAt", header: "提出日時", noWrap: true, minWidth: "11rem", cell: (p) => fmtDateTime(p.submittedAt) },
   ];
 
@@ -223,8 +228,17 @@ export function ParticipationListPage(): JSX.Element {
           member={issueTarget.member}
           defaultLocalPart={emailCandidate(issueTarget.participation) ?? ""}
           onClose={() => setIssueTarget(null)}
+          onIssued={(progress) => {
+            const { participation, member } = issueTarget;
+            setIssueTarget(null);
+            setMailTarget(
+              accountMailTarget(progress.identityUserId, member.name, member.gmail || participation.gmail, progress.address),
+            );
+          }}
         />
       ) : null}
+
+      <AccountMailPrompt target={mailTarget} send={participationApi.sendAccountMail} onClose={() => setMailTarget(null)} />
 
       <ConfirmDialog
         open={skipTarget !== null}
@@ -473,7 +487,7 @@ function DetailBody({ p, teamName }: { p: Participation; teamName: (id: string |
     // 人物プロフィール項目は運営名簿と共通 (PROFILE_DISPLAY_COLUMNS)。
     ...PROFILE_DISPLAY_COLUMNS.map((c) => ({ label: c.header, value: c.value(p) || "—" })),
     { label: "メールアドレス素案", value: (() => { const c = emailCandidate(p); return c ? `${c}@…` : "—"; })() },
-    { label: "希望チーム", value: teamName(p.desiredTeamId) },
+    { label: "所属チーム", value: teamName(p.desiredTeamId) },
     { label: "運営メンバー反映", value: reviewLabel(p) },
     { label: "提出日時", value: fmtDateTime(p.submittedAt) },
   ];

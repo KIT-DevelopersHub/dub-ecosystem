@@ -17,6 +17,11 @@ name: Prod gate (確認した)
 #
 # Gate #2 (defence in depth, fail-close) lives in deploy.yml: even a commit that
 # reaches `main` is re-checked for the label before deploy-prod.sh runs.
+#
+# Exception: a PR that touches ONLY Commander app code (scripts/commander-only-pr.sh)
+# ships straight to prod without the label — Commander is the owner's own dev cockpit and
+# skips demo/staging by owner decision. The script is taken from the BASE commit so a PR
+# cannot widen its own exemption.
 
 on:
   pull_request:
@@ -31,6 +36,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   confirm-gate:
@@ -38,14 +44,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout gate script (base commit)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: scripts/commander-only-pr.sh
+          sparse-checkout-cone-mode: false
+
       - name: Require 「確認した」 label
         env:
           # Evaluated by the Actions expression engine from the PR payload — no API call,
           # so it cannot be spoofed by PR content and needs no token.
           HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, '確認した') }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUM: ${{ github.event.pull_request.number }}
         run: |
           if [ "${HAS_LABEL}" = "true" ]; then
             echo "✅ 「確認した」 label present — production merge is allowed for this PR."
+            exit 0
+          fi
+          if [ -f scripts/commander-only-pr.sh ] && bash scripts/commander-only-pr.sh "${PR_NUM}"; then
+            echo "✅ Commander のみの変更 — ラベル不要で本番マージ可。"
             exit 0
           fi
           echo "::error title=確認した ラベルが必要です::この PR はまだ本番マージできません。① 「stagingへ」ラベルで staging にデプロイ ② staging URL で動作確認 ③ 「確認した」ラベルを付与 — の順で進めてください。詳細: docs/runbooks/04-staging-label-gate.md"

@@ -74,7 +74,8 @@ jobs:
       # DEPLOY_APPLY_MIGRATIONS / DEPLOY_ADMIN_NOTIFY pattern). While unset/false this is a
       # no-op, so in-flight prod-direct work keeps deploying under the old rules. At CUTOVER
       # the owner sets PROD_LABEL_GATE=true. `workflow_dispatch` (manual owner deploy) is
-      # intentionally exempt — the manual run IS the confirmation. See
+      # intentionally exempt — the manual run IS the confirmation. Commander-only PRs
+      # (scripts/commander-only-pr.sh) are exempt too: Commander ships straight to prod. See
       # docs/runbooks/04-staging-label-gate.md.
       - name: Enforce 「確認した」 label (fail-close)
         if: ${{ vars.PROD_LABEL_GATE == 'true' && github.event_name == 'push' }}
@@ -92,6 +93,10 @@ jobs:
           fi
           HAS_LABEL="$(gh pr view "${PR_NUM}" --repo "${REPO}" \
             --json labels --jq '[.labels[].name] | index("確認した") != null')"
+          if [ "${HAS_LABEL}" != "true" ] && bash scripts/commander-only-pr.sh "${PR_NUM}"; then
+            echo "✅ PR #${PR_NUM} は Commander のみの変更 — ラベル不要で本番デプロイを続行します。"
+            exit 0
+          fi
           if [ "${HAS_LABEL}" != "true" ]; then
             echo "::error title=本番ゲート::PR #${PR_NUM} に「確認した」ラベルがありません。staging 確認 → 「確認した」付与の手順を踏んでから本番へ。deploy を abort します。"
             exit 1

@@ -2,8 +2,9 @@
 // #-prefixed channels, presence dots on DMs, unread = bold name + mention/count
 // badge. "New channel" (+) is gated by can("chat:create") upstream via canCreate.
 // Slack-style information design — built from @dub/ui + own glyphs, no Slack assets.
-// Personal sections (when `sections` handlers are passed) render above the default
-// groups; each row gets a hover/focus "⋯" menu to move it between sections.
+// Org-wide sections (one shared set) render above the default groups for everyone. Only
+// with `sectionActions` (chat:manage_sections) do the create / rename / delete entries and
+// the per-row "⋯" move menu appear.
 import { useState } from "react";
 import { Icon, Menu, Skeleton, type MenuItem } from "@dub/ui";
 import type { common } from "@dub/types";
@@ -34,12 +35,16 @@ export interface ChannelListProps {
   onCloseMobile?: () => void;
   /** Channels/sections still loading -> skeleton rows (not "no channels"). */
   loading?: boolean;
-  /** Personal sections overlay. Omit `sectionActions` to render the plain groups. */
+  /** Org-wide sections overlay. Omit `sectionActions` for a read-only view (no organizing UI). */
   sections?: ChatSection[];
   assignments?: Record<common.ChannelId, string>;
   sectionActions?: SectionActions;
   /** Admin-only 「チャンネル取り込み」 (Slack). Omit to hide the entry. */
   onImport?: () => void;
+  /** Admin-only 「絵文字取り込み」 (Slack custom emoji). Omit to hide the entry. */
+  onImportEmoji?: () => void;
+  /** Slack's 「後で」 entry above the channels (saved items + reminders). Omit to hide. */
+  later?: { count: number; active: boolean; onOpen: () => void };
 }
 
 export interface SectionActions {
@@ -49,6 +54,9 @@ export interface SectionActions {
   onDelete: (section: ChatSection) => void;
   onMove: (channelId: common.ChannelId, sectionId: string | null) => void;
 }
+
+/** Liveness marker for the org-wide (shared) sections build. */
+export const SHARED_SECTIONS_MARKER = "fe6-shared-sections-v1";
 
 function Dot({ p }: { p: Presence }) {
   return <span className={`${styles.presenceDot} ${styles[p]}`} aria-hidden />;
@@ -70,8 +78,10 @@ export function ChannelList({
   assignments = {},
   sectionActions,
   onImport,
+  onImportEmoji,
+  later,
 }: ChannelListProps) {
-  const layout = buildSidebar(channels, sectionActions ? sections : [], sectionActions ? assignments : {});
+  const layout = buildSidebar(channels, sections, assignments);
   const grouped = layout.groups;
   const groups: ChannelGroup[] =
     onNewDm && !grouped.some((g) => g.type === "dm") ? [...grouped, { type: "dm", label: "ダイレクト", channels: [] }] : grouped;
@@ -192,6 +202,28 @@ export function ChannelList({
       </div>
 
       <div className={styles.sidebarScroll}>
+        {later && (
+          <div className={styles.sidebarShortcuts}>
+            <button
+              type="button"
+              className={`${styles.channelItem} ${later.active ? styles.active : ""}`}
+              onClick={later.onOpen}
+              aria-current={later.active ? "page" : undefined}
+              data-testid="fe6-sidebar-later"
+              data-marker="fe6-later-sidebar"
+            >
+              <span className={styles.channelGlyph} aria-hidden>
+                🔖
+              </span>
+              <span className={styles.channelName}>後で</span>
+              {later.count > 0 && (
+                <span className={styles.countBadge} data-testid="fe6-sidebar-later-count">
+                  {later.count}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
         {loading ? (
           <div className={styles.sidebarSkeleton} data-testid="fe6-channel-list-loading" aria-busy="true">
             {[0, 1, 2].map((block) => (
@@ -206,10 +238,18 @@ export function ChannelList({
         ) : (
           <>
             {layout.sections.map(({ section, channels: list }) => {
+              // Read-only viewers have nothing to do with an empty shared section.
+              if (!sectionActions && list.length === 0) return null;
               const isCollapsed = !!collapsed[section.id];
               const pending = isPendingSection(section.id);
               return (
-                <section key={section.id} className={styles.section} data-testid="fe6-sidebar-section" data-section-id={section.id}>
+                <section
+                  key={section.id}
+                  className={styles.section}
+                  data-testid="fe6-sidebar-section"
+                  data-section-id={section.id}
+                  data-marker={SHARED_SECTIONS_MARKER}
+                >
                   <div className={styles.sectionHeader}>
                     <button
                       type="button"
@@ -309,6 +349,11 @@ export function ChannelList({
             {onImport && (
               <button type="button" className={styles.sectionCreate} onClick={onImport} data-testid="fe6-slack-import-open">
                 ⇩ チャンネル取り込み（Slack）
+              </button>
+            )}
+            {onImportEmoji && (
+              <button type="button" className={styles.sectionCreate} onClick={onImportEmoji} data-testid="fe6-emoji-import-sidebar">
+                ⇩ 絵文字取り込み（Slack）
               </button>
             )}
           </>

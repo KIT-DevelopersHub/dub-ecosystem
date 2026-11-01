@@ -25,6 +25,7 @@ export interface SendLogRow {
   snippet: string | null; // 0004: first ~140 chars of text_body (Sent list preview)
   from_address: string | null; // 0004: envelope From used for the send
   owner_user_id: string | null; // 0006: the user who sent it (Sent-folder scope); NULL = system
+  bcc_json?: string | null; // 0018: JSON MailAddress[] of Bcc recipients (sender-only); NULL = none / pre-0018
 }
 
 export interface InboundRow {
@@ -46,6 +47,12 @@ export interface InboundRow {
   owner_user_id: string | null; // 0006: roster user the message was delivered to (Inbox scope); NULL = unassigned
   cc_json: string | null; // 0012: JSON MailAddress[] of Cc header recipients; NULL = none / pre-0012
   header_meta_json?: string | null; // 0013: JSON MailHeaderMeta; NULL = nothing known / pre-0013
+  raw_r2_key?: string | null; // 0014: R2 key of the untruncated raw .eml; NULL = not archived / pre-0014
+  deleted_at?: string | null; // 0016: soft-delete stamp (destructive.ts); NULL = live
+  // Viewer projection (0018, computed per query from mail_inbound_delivery, not stored):
+  viewer_deliveries?: number | null; // how many deliveries of this message belong to the viewer
+  viewer_read_at?: string | null; // the viewer's own read stamp (any of their deliveries)
+  viewer_envelope?: string | null; // the envelope address the viewer's copy was delivered to
 }
 
 export interface MailboxRow {
@@ -109,6 +116,8 @@ export async function insertSendClaim(
     textBody: string;
     htmlBody: string | null;
     ccJson: string;
+    // Bcc recipients (JSON MailAddress[]) or null when none. Shown in Sent to the sender only.
+    bccJson?: string | null;
     fromAddress: string;
     // Owner = the human sender (Sent-folder scope). NULL for pure system/automation
     // sends with no user on the call — they belong to no person's Sent folder.
@@ -120,8 +129,8 @@ export async function insertSendClaim(
     `INSERT OR IGNORE INTO mail_send_log
        (id, idempotency_key, req_hash, requester, to_json, subject, thread_id,
         provider, provider_message_id, status, error_code, created_at, updated_at,
-        text_body, html_body, cc_json, snippet, from_address, owner_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        text_body, html_body, cc_json, snippet, from_address, owner_user_id, bcc_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.idempotencyKey,
     row.reqHash,
@@ -137,6 +146,7 @@ export async function insertSendClaim(
     snippetOf(row.textBody),
     row.fromAddress,
     row.ownerUserId,
+    row.bccJson ?? null,
   );
   return res.meta.changes;
 }
@@ -180,7 +190,7 @@ function parseAddresses(json: string | null): mail.MailAddress[] {
   }
 }
 
-function sendRowToListItem(r: SendLogRow): mail.MailSentListItem {
+function sendRowToListItem(r: SendLogRow, viewer?: string): mail.MailSentListItem {
   const item: mail.MailSentListItem = {
     id: r.id,
     to: parseAddresses(r.to_json),
@@ -193,6 +203,13 @@ function sendRowToListItem(r: SendLogRow): mail.MailSentListItem {
   const cc = parseAddresses(r.cc_json);
   if (cc.length > 0) item.cc = cc;
   if (r.from_address) item.from = { email: r.from_address };
+  // mine: the viewer sent it (vs another account's send seen via read_all oversight).
+  if (viewer !== undefined) item.mine = r.owner_user_id !== null && r.owner_user_id === viewer;
+  // Bcc is the sender's private knowledge: only the owner sees it (never read_all oversight).
+  if (viewer !== undefined && r.owner_user_id !== null && r.owner_user_id === viewer) {
+    const bcc = parseAddresses(r.bcc_json ?? null);
+    if (bcc.length > 0) item.bcc = bcc;
+  }
   if (r.provider_message_id) item.providerMessageId = r.provider_message_id;
   // thread_id is set for replies (= the parent message's id). Surfacing it lets the
   // client fold a sent reply back into its conversation instead of showing it as a
@@ -201,8 +218,8 @@ function sendRowToListItem(r: SendLogRow): mail.MailSentListItem {
   return item;
 }
 
-function sendRowToDetail(r: SendLogRow): mail.MailSentDetail {
-  const detail: mail.MailSentDetail = { ...sendRowToListItem(r), textBody: r.text_body ?? "" };
+function sendRowToDetail(r: SendLogRow, viewer?: string): mail.MailSentDetail {
+  const detail: mail.MailSentDetail = { ...sendRowToListItem(r, viewer), textBody: r.text_body ?? "" };
   if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
   return detail;
 }
@@ -237,23 +254,84 @@ function isReadAll(scope: MailScope): scope is { readAll: true } {
  *  caller — it only drives the `mine` flag on the returned items, never the filter. */
 export type InboundScope = MailScope | { userIds: string[] };
 
-/** `owner_user_id` predicate for an inbound scope, or null for the read_all bypass. An
- *  empty owner list matches nothing (fail-closed). The owner list rides as ONE JSON bind:
- *  D1 caps bound parameters per statement at 100, and cross-role visibility (e.g. a 統括
- *  role seeing every role) can exceed that — a per-id `IN (?, ...)` would have to truncate. */
-function inboundOwnerClause(scope: InboundScope): { sql: string; binds: string[] } | null {
-  if (typeof scope === "string") return { sql: "owner_user_id = ?", binds: [scope] };
+/** Visibility predicate for an inbound scope, or null for the read_all bypass. A message is
+ *  in scope when one of its deliveries (0018: one per envelope recipient, so To + Cc + Bcc
+ *  colleagues each get their own) belongs to a scoped owner. The legacy single
+ *  `mail_inbound.owner_user_id` is still honoured so a row ingested before the backfill (or
+ *  by an older Worker during rollout) never disappears. An empty owner list matches nothing
+ *  (fail-closed). The owner list rides as ONE JSON bind: D1 caps bound parameters per
+ *  statement at 100, and cross-role visibility can exceed that. */
+export function inboundOwnerClause(scope: InboundScope): { sql: string; binds: string[] } | null {
+  if (typeof scope === "string") {
+    return {
+      sql: "(owner_user_id = ? OR id IN (SELECT inbound_id FROM mail_inbound_delivery WHERE owner_user_id = ?))",
+      binds: [scope, scope],
+    };
+  }
   if ("readAll" in scope) return null;
   const ids = [...new Set(scope.userIds)];
   if (ids.length === 0) return { sql: "1 = 0", binds: [] };
-  return { sql: "owner_user_id IN (SELECT value FROM json_each(?))", binds: [JSON.stringify(ids)] };
+  const json = JSON.stringify(ids);
+  return {
+    sql:
+      "(owner_user_id IN (SELECT value FROM json_each(?))" +
+      " OR id IN (SELECT inbound_id FROM mail_inbound_delivery WHERE owner_user_id IN (SELECT value FROM json_each(?))))",
+    binds: [json, json],
+  };
+}
+
+/** SELECT list for inbound reads: the message row plus the VIEWER's own delivery state
+ *  (count / read stamp / envelope), so `read` and `mine` are per recipient. Binds the viewer
+ *  three times ('' when unknown, which matches no delivery). */
+export function inboundSelect(viewer: string | undefined): { sql: string; binds: string[] } {
+  const v = viewer ?? "";
+  const sub = (expr: string) =>
+    `(SELECT ${expr} FROM mail_inbound_delivery vd WHERE vd.inbound_id = mail_inbound.id AND vd.owner_user_id = ?)`;
+  return {
+    sql: `SELECT mail_inbound.*, ${sub("COUNT(*)")} AS viewer_deliveries, ${sub("MAX(vd.read_at)")} AS viewer_read_at, ${sub("MIN(vd.envelope_to)")} AS viewer_envelope FROM mail_inbound`,
+    binds: [v, v, v],
+  };
+}
+
+/** Escape LIKE wildcards so a user's `%` / `_` / `\\` match literally (paired with ESCAPE '\\'). */
+export function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/** Free-text search predicate (Gmail-style substring match). SQLite LIKE is ASCII
+ *  case-insensitive and matches UTF-8 substrings, so Japanese works as-is. Address
+ *  columns are matched per element (name + email) via json_each, never on the raw JSON,
+ *  so a needle like "email" does not hit every row's keys; malformed JSON reads as empty.
+ *  ANDed onto the caller's scope clause — it can only narrow, never widen, visibility. */
+function searchClause(q: string, text: string[], single: string[], lists: string[]): { sql: string; binds: string[] } {
+  const pat = `%${escapeLike(q)}%`;
+  const like = (expr: string) => `${expr} LIKE ? ESCAPE '\\'`;
+  const safe = (col: string, empty: string) => `CASE WHEN json_valid(${col}) THEN ${col} ELSE '${empty}' END`;
+  const parts: string[] = [];
+  for (const c of text) parts.push(like(`COALESCE(${c}, '')`));
+  for (const c of single) {
+    parts.push(like(`COALESCE(json_extract(${safe(c, "{}")}, '$.name'), '')`));
+    parts.push(like(`COALESCE(json_extract(${safe(c, "{}")}, '$.email'), '')`));
+  }
+  for (const c of lists) {
+    parts.push(
+      `EXISTS (SELECT 1 FROM json_each(${safe(c, "[]")}) je WHERE ${like("COALESCE(json_extract(je.value, '$.name'), '')")} OR ${like("COALESCE(json_extract(je.value, '$.email'), '')")})`,
+    );
+  }
+  const binds = parts.flatMap((p) => Array<string>((p.match(/LIKE \?/g) ?? []).length).fill(pat));
+  return { sql: `(${parts.join(" OR ")})`, binds };
+}
+
+/** The inbound free-text search predicate (subject / snippet / body / From / To / Cc). */
+export function inboundSearchClause(q: string): { sql: string; binds: string[] } {
+  return searchClause(q, ["subject", "snippet", "body_text"], ["from_json"], ["to_json", "cc_json"]);
 }
 
 /** List sent mail (status='sent'), newest first. id-based opaque cursor (like
  *  listInbound); ULID ids sort in creation order so the id cursor tracks created_at. */
 export async function listSent(
   db: DbClient,
-  q: { ownerUserId: MailScope; cursor?: string; limit: number },
+  q: { ownerUserId: MailScope; viewer?: string; cursor?: string; limit: number; q?: string },
 ): Promise<common.Paginated<mail.MailSentListItem>> {
   // Fail-closed account scope: only the signed-in user's own delivered sends. A NULL
   // owner_user_id (system send / legacy row) never matches `= ?`, so it is invisible.
@@ -263,6 +341,13 @@ export async function listSent(
   if (!isReadAll(q.ownerUserId)) {
     where.push("owner_user_id = ?");
     binds.push(q.ownerUserId);
+  }
+  if (q.q !== undefined) {
+    // Bcc is deliberately NOT searched: it is sender-only, and a read_all viewer must not
+    // learn a hidden recipient by probing.
+    const s = searchClause(q.q, ["subject", "snippet", "text_body"], [], ["to_json", "cc_json"]);
+    where.push(s.sql);
+    binds.push(...s.binds);
   }
   if (q.cursor !== undefined) {
     where.push("id < ?");
@@ -277,14 +362,14 @@ export async function listSent(
   const page = hasMore ? rows.slice(0, q.limit) : rows;
   const last = page[page.length - 1];
   return {
-    items: page.map(sendRowToListItem),
+    items: page.map((r) => sendRowToListItem(r, q.viewer)),
     nextCursor: hasMore && last ? encodeCursor(last.id) : null,
   };
 }
 
 /** Full sent detail (body included) — backs GET /sent/:id. Only a delivered
  *  (status='sent') row is returned; a pending/failed row reads as not-found. */
-export async function getSentDetail(db: DbClient, id: string, scope: MailScope): Promise<mail.MailSentDetail | null> {
+export async function getSentDetail(db: DbClient, id: string, scope: MailScope, viewer?: string): Promise<mail.MailSentDetail | null> {
   // Account scope: a user can only open their OWN sent mail — another user's id reads as
   // not-found (fail-closed 404), never a 403 that would confirm the row exists. Oversight
   // (mail:read_all) drops the owner filter so a supervisor can open any delivered send.
@@ -295,13 +380,46 @@ export async function getSentDetail(db: DbClient, id: string, scope: MailScope):
     binds.push(scope);
   }
   const row = await db.first<SendLogRow>(sql, ...binds);
-  return row ? sendRowToDetail(row) : null;
+  return row ? sendRowToDetail(row, viewer) : null;
 }
 
 // ---- inbound ----
-export async function seenInbound(db: DbClient, messageId: string): Promise<boolean> {
-  const row = await db.first<{ message_id: string }>(`SELECT message_id FROM mail_inbound WHERE message_id = ?`, messageId);
-  return row !== null;
+/** Record one envelope delivery of a stored message (0018). INSERT OR IGNORE on the
+ *  (message, envelope, owner) unique index makes an Email Routing redelivery a no-op.
+ *  ownerUserId NULL = an ownerless copy (archive@ oversight / non-roster address). */
+export async function insertDelivery(
+  db: DbClient,
+  d: { inboundId: string; ownerUserId: string | null; envelopeTo: string },
+): Promise<number> {
+  const now = nowIso();
+  const res = await db.run(
+    `INSERT OR IGNORE INTO mail_inbound_delivery
+       (id, inbound_id, owner_user_id, envelope_to, read_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    newDeliveryId(),
+    d.inboundId,
+    d.ownerUserId,
+    d.envelopeTo.trim().toLowerCase(),
+    now,
+    now,
+  );
+  return res.meta.changes;
+}
+
+/** Fill the legacy single owner column when the first copy was ownerless (e.g. archive@
+ *  arrived first). Keeps mail_inbound.owner_user_id meaningful for older readers. */
+export async function claimInboundOwnerIfUnset(db: DbClient, inboundId: string, ownerUserId: string): Promise<void> {
+  await db.run(`UPDATE mail_inbound SET owner_user_id = ? WHERE id = ? AND owner_user_id IS NULL`, ownerUserId, inboundId);
+}
+
+/** The envelope address `userId`'s own copy of a message was delivered to, if any. */
+export async function findDeliveryEnvelope(db: DbClient, inboundId: string, userId: string): Promise<string | null> {
+  const row = await db.first<{ envelope_to: string }>(
+    `SELECT envelope_to FROM mail_inbound_delivery WHERE inbound_id = ? AND owner_user_id = ? AND envelope_to <> '' ORDER BY created_at ASC LIMIT 1`,
+    inboundId,
+    userId,
+  );
+  return row?.envelope_to ?? null;
 }
 
 /** The received message with this RFC Message-Id, if any. Backs reply-From resolution:
@@ -349,8 +467,9 @@ export async function resolveThreadId(db: DbClient, candidateIds: string[]): Pro
   return null;
 }
 
-/** Persist a normalized inbound message. INSERT OR IGNORE on message_id makes an
- *  Email-Routing redelivery a no-op; returns changes (0 = duplicate). */
+/** Persist a normalized inbound message body. INSERT OR IGNORE on message_id: the 2nd
+ *  envelope copy (another recipient) or a redelivery is a no-op here — per-recipient
+ *  visibility lives in mail_inbound_delivery. Returns changes (0 = already stored). */
 export async function insertInbound(
   db: DbClient,
   m: mail.MailMessage,
@@ -393,6 +512,11 @@ export async function insertInbound(
   return res.meta.changes;
 }
 
+/** Record where the raw .eml of an inbound row was archived (raw-eml.ts). */
+export async function setInboundRawKey(db: DbClient, inboundId: string, key: string): Promise<void> {
+  await db.run(`UPDATE mail_inbound SET raw_r2_key = ? WHERE id = ?`, key, inboundId);
+}
+
 function rowToMailMessage(r: InboundRow): mail.MailMessage {
   return {
     id: r.id,
@@ -406,12 +530,15 @@ function rowToMailMessage(r: InboundRow): mail.MailMessage {
   };
 }
 
-/** List item = frozen message + read flag (read := read_at IS NOT NULL). */
-function rowToListItem(r: InboundRow, viewer?: string): mail.MailMessageListItem {
-  const item: mail.MailMessageListItem = { ...rowToMailMessage(r), read: r.read_at !== null };
+/** List item = frozen message + read flag. `read` is the VIEWER's own state when they hold
+ *  a delivery of it (per recipient, 0018); otherwise (read_all / role sharing / legacy row)
+ *  it is the primary owner's mail_inbound.read_at as before. */
+export function rowToListItem(r: InboundRow, viewer?: string): mail.MailMessageListItem {
+  const own = (r.viewer_deliveries ?? 0) > 0;
+  const item: mail.MailMessageListItem = { ...rowToMailMessage(r), read: own ? r.viewer_read_at != null : r.read_at !== null };
   // mine: delivered to the caller (vs visible via read_all / role sharing). Only set when
   // the caller is known so internal callers keep the frozen shape.
-  if (viewer !== undefined) item.mine = r.owner_user_id === viewer;
+  if (viewer !== undefined) item.mine = own || r.owner_user_id === viewer;
   const cc = parseAddresses(r.cc_json);
   if (cc.length > 0) item.cc = cc;
   return item;
@@ -422,7 +549,9 @@ function rowToDetail(r: InboundRow, viewer?: string): mail.MailMessageDetail {
   const detail: mail.MailMessageDetail = { ...rowToListItem(r, viewer), textBody: r.body_text ?? "" };
   if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
   const meta = parseHeaderMeta(r.header_meta_json);
-  if (meta) detail.headerMeta = meta;
+  // deliveredTo on the body row is whichever copy arrived first: show the viewer's own.
+  if (r.viewer_envelope) detail.headerMeta = { ...(meta ?? {}), deliveredTo: r.viewer_envelope };
+  else if (meta) detail.headerMeta = meta;
   return detail;
 }
 
@@ -436,8 +565,9 @@ export async function getInboundById(db: DbClient, id: string): Promise<mail.Mai
  *  user's message reads as not-found (fail-closed 404), never exposing its body. */
 export async function getInboundDetail(db: DbClient, id: string, scope: InboundScope, viewer?: string): Promise<mail.MailMessageDetail | null> {
   // Oversight (mail:read_all) drops the owner filter so a supervisor sees any message body.
-  const binds: unknown[] = [id];
-  let sql = `SELECT * FROM mail_inbound WHERE id = ?`;
+  const sel = inboundSelect(viewer);
+  const binds: unknown[] = [...sel.binds, id];
+  let sql = `${sel.sql} WHERE id = ?`;
   const owner = inboundOwnerClause(scope);
   if (owner) {
     sql += ` AND ${owner.sql}`;
@@ -453,8 +583,9 @@ export async function getInboundDetail(db: DbClient, id: string, scope: InboundS
  *  so role sharing (an inbound-only scope) cannot surface a peer's outbound mail here. */
 export async function listThread(db: DbClient, threadId: string, scope: InboundScope, viewer?: string): Promise<mail.MailMessageDetail[]> {
   // Oversight (mail:read_all) drops the owner filter so a supervisor sees the whole thread.
-  const binds: unknown[] = [threadId];
-  let sql = `SELECT * FROM mail_inbound WHERE thread_id = ?`;
+  const sel = inboundSelect(viewer);
+  const binds: unknown[] = [...sel.binds, threadId];
+  let sql = `${sel.sql} WHERE thread_id = ?`;
   const owner = inboundOwnerClause(scope);
   if (owner) {
     sql += ` AND ${owner.sql}`;
@@ -466,27 +597,34 @@ export async function listThread(db: DbClient, threadId: string, scope: InboundS
 }
 
 /** Mark a message read (idempotent): stamps read_at only on the first open. Returns
- *  whether the message exists FOR THIS OWNER so the route can 404 an unknown/foreign id
- *  (a user can never flip another account's read state). */
-export async function markInboundRead(db: DbClient, id: string, scope: InboundScope): Promise<{ found: boolean }> {
-  // Oversight (mail:read_all) may open (and thus mark read) any message. A role-shared
-  // scope may OPEN a peer's message but only flips read_at on the viewer's own mail
-  // (userIds[0] = self): read_at is per message, so a peer opening it would otherwise clear
-  // the owner's unread badge.
+ *  whether the message is visible in `scope` so the route can 404 an unknown/foreign id.
+ *  Only `self`'s OWN deliveries are stamped (per recipient, 0018): a Cc'd colleague opening
+ *  it leaves the To recipient's unread state alone, and read_all / role-sharing viewers
+ *  stay view-only (#700). */
+export async function markInboundRead(db: DbClient, id: string, scope: InboundScope, self: string): Promise<{ found: boolean }> {
+  // Oversight (mail:read_all) and role sharing may OPEN another account's message, but
+  // read_at is per message — flipping it would clear the owner's unread state.
   const owner = inboundOwnerClause(scope);
   const ownerSql = owner ? ` AND ${owner.sql}` : "";
   const ownerBinds = owner ? owner.binds : [];
   const row = await db.first<{ id: string }>(`SELECT id FROM mail_inbound WHERE id = ?${ownerSql}`, id, ...ownerBinds);
   if (!row) return { found: false };
-  const write = typeof scope === "object" && "userIds" in scope ? inboundOwnerClause(scope.userIds[0] ?? "") : owner;
-  const writeSql = write ? ` AND ${write.sql}` : "";
-  await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ?${writeSql} AND read_at IS NULL`, nowIso(), id, ...(write ? write.binds : []));
+  const now = nowIso();
+  await db.run(
+    `UPDATE mail_inbound_delivery SET read_at = ?, updated_at = ? WHERE inbound_id = ? AND owner_user_id = ? AND read_at IS NULL`,
+    now,
+    now,
+    id,
+    self,
+  );
+  // Legacy primary-owner stamp (what read_all / role-sharing viewers see as "read").
+  await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND owner_user_id = ? AND read_at IS NULL`, now, id, self);
   return { found: true };
 }
 
 export async function listInbound(
   db: DbClient,
-  q: { ownerUserId: InboundScope; viewer?: string; threadId?: string; cursor?: string; limit: number },
+  q: { ownerUserId: InboundScope; viewer?: string; threadId?: string; cursor?: string; limit: number; q?: string },
 ): Promise<common.Paginated<mail.MailMessageListItem>> {
   // Fail-closed account scope: only messages delivered to the signed-in user (plus role-
   // sharing peers). A NULL owner_user_id (unassigned / legacy row) never matches, so it
@@ -502,13 +640,20 @@ export async function listInbound(
     where.push("thread_id = ?");
     binds.push(q.threadId);
   }
+  if (q.q !== undefined) {
+    const s = inboundSearchClause(q.q);
+    where.push(s.sql);
+    binds.push(...s.binds);
+  }
   if (q.cursor !== undefined) {
     where.push("id < ?");
     binds.push(decodeCursor(q.cursor));
   }
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const sel = inboundSelect(q.viewer);
   const rows = await db.all<InboundRow>(
-    `SELECT * FROM mail_inbound ${whereSql} ORDER BY id DESC LIMIT ?`,
+    `${sel.sql} ${whereSql} ORDER BY id DESC LIMIT ?`,
+    ...sel.binds,
     ...binds,
     q.limit + 1,
   );
@@ -595,18 +740,6 @@ export async function getAttachment(db: DbClient, kind: "sent" | "inbound", mess
   );
 }
 
-/** R2 keys of attachments whose rows are about to be purged (so the caller can delete the
- *  bytes too). Uses the retention cutoffs for the owning message kind. */
-export async function attachmentKeysOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<string[]> {
-  const rows = await db.all<{ r2_key: string }>(
-    `SELECT r2_key FROM mail_attachments
-       WHERE (message_kind = 'sent' AND created_at < ?) OR (message_kind = 'inbound' AND created_at < ?)`,
-    sendCutoff,
-    inboundCutoff,
-  );
-  return rows.map((r) => r.r2_key);
-}
-
 // ---- per-user thread flags (改善#8: star/archive/trash persisted server-side) ----
 export interface UserFlagRow {
   owner_user_id: string;
@@ -684,27 +817,13 @@ export async function upsertUserFlags(
   return merged;
 }
 
-// ---- retention purge (scheduled) ----
-export async function purgeOlderThan(db: DbClient, sendCutoff: string, inboundCutoff: string): Promise<{ sendLog: number; inbound: number; attachments: number }> {
-  const sendLog = (await db.run(`DELETE FROM mail_send_log WHERE created_at < ?`, sendCutoff)).meta.changes;
-  const inbound = (await db.run(`DELETE FROM mail_inbound WHERE created_at < ?`, inboundCutoff)).meta.changes;
-  const attachments = (
-    await db.run(
-      `DELETE FROM mail_attachments
-         WHERE (message_kind = 'sent' AND created_at < ?) OR (message_kind = 'inbound' AND created_at < ?)`,
-      sendCutoff,
-      inboundCutoff,
-    )
-  ).meta.changes;
-  return { sendLog, inbound, attachments };
-}
-
 // ---- scheduled send (予約送信) ----
 export interface ScheduledRow {
   id: string;
   owner_user_id: string | null;
   to_json: string;
   cc_json: string | null;
+  bcc_json: string | null; // 0020: envelope-only Bcc (NULL when none)
   subject: string;
   text_body: string;
   html_body: string | null;
@@ -742,7 +861,62 @@ function scheduledRowToListItem(r: ScheduledRow): mail.ScheduledSendListItem {
 function scheduledRowToDetail(r: ScheduledRow): mail.ScheduledSendDetail {
   const detail: mail.ScheduledSendDetail = { ...scheduledRowToListItem(r), textBody: r.text_body };
   if (r.html_body !== null && r.html_body !== "") detail.htmlBody = r.html_body;
+  const bcc = parseAddresses(r.bcc_json);
+  if (bcc.length > 0) detail.bcc = bcc;
   return detail;
+}
+
+// ---- scheduled-send attachments (0020; metadata here, bytes in R2) ----
+export interface ScheduledAttachmentRow {
+  id: string;
+  scheduled_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  r2_key: string;
+  created_at: string;
+}
+
+export async function insertScheduledAttachment(
+  db: DbClient,
+  row: { id: string; scheduledId: string; filename: string; mimeType: string; sizeBytes: number; r2Key: string },
+): Promise<void> {
+  await db.run(
+    `INSERT INTO mail_scheduled_attachments (id, scheduled_id, filename, mime_type, size_bytes, r2_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    row.id,
+    row.scheduledId,
+    row.filename,
+    row.mimeType,
+    row.sizeBytes,
+    row.r2Key,
+    nowIso(),
+  );
+}
+
+/** Parked files of one or more schedules, in attach order (rowid = insert order). */
+export async function listScheduledAttachments(db: DbClient, scheduledIds: readonly string[]): Promise<ScheduledAttachmentRow[]> {
+  if (scheduledIds.length === 0) return [];
+  const marks = scheduledIds.map(() => "?").join(", ");
+  return db.all<ScheduledAttachmentRow>(
+    `SELECT * FROM mail_scheduled_attachments WHERE scheduled_id IN (${marks}) ORDER BY rowid ASC`,
+    ...scheduledIds,
+  );
+}
+
+function scheduledAttachmentMeta(r: ScheduledAttachmentRow): mail.MailAttachment {
+  return { id: r.id, filename: r.filename, contentType: r.mime_type, sizeBytes: r.size_bytes };
+}
+
+/** Decorate list/detail items with their parked-file metadata (absent when none). */
+async function withScheduledAttachments<T extends mail.ScheduledSendListItem>(db: DbClient, items: T[]): Promise<T[]> {
+  const rows = await listScheduledAttachments(db, items.map((i) => i.id));
+  if (rows.length === 0) return items;
+  for (const item of items) {
+    const mine = rows.filter((r) => r.scheduled_id === item.id).map(scheduledAttachmentMeta);
+    if (mine.length > 0) item.attachments = mine;
+  }
+  return items;
 }
 
 /** Park a compose for future delivery. status='scheduled'. */
@@ -753,6 +927,7 @@ export async function insertScheduled(
     ownerUserId: string | null;
     toJson: string;
     ccJson: string | null;
+    bccJson?: string | null;
     subject: string;
     textBody: string;
     htmlBody: string | null;
@@ -764,14 +939,15 @@ export async function insertScheduled(
   const now = nowIso();
   await db.run(
     `INSERT INTO mail_scheduled
-       (id, owner_user_id, to_json, cc_json, subject, text_body, html_body, in_reply_to,
+       (id, owner_user_id, to_json, cc_json, bcc_json, subject, text_body, html_body, in_reply_to,
         from_address, scheduled_at, status, sent_message_id, error_code, attempts, snippet,
         created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', NULL, NULL, 0, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', NULL, NULL, 0, ?, ?, ?)`,
     row.id,
     row.ownerUserId,
     row.toJson,
     row.ccJson,
+    row.bccJson ?? null,
     row.subject,
     row.textBody,
     row.htmlBody,
@@ -809,7 +985,7 @@ export async function listScheduled(
   const page = hasMore ? rows.slice(0, q.limit) : rows;
   const last = page[page.length - 1];
   return {
-    items: page.map(scheduledRowToListItem),
+    items: await withScheduledAttachments(db, page.map(scheduledRowToListItem)),
     nextCursor: hasMore && last ? encodeCursor(last.id) : null,
   };
 }
@@ -823,7 +999,9 @@ export async function getScheduledDetail(db: DbClient, id: string, scope: MailSc
     binds.push(scope);
   }
   const row = await db.first<ScheduledRow>(sql, ...binds);
-  return row ? scheduledRowToDetail(row) : null;
+  if (!row) return null;
+  const [detail] = await withScheduledAttachments(db, [scheduledRowToDetail(row)]);
+  return detail ?? null;
 }
 
 /** Raw scheduled row (owner-scoped) — used by edit/cancel to check current status. */
@@ -922,19 +1100,9 @@ export async function markScheduledAttemptFailed(db: DbClient, id: string, error
   );
 }
 
-/** Retention purge for terminal scheduled rows (sent/canceled/failed) older than cutoff.
- *  'scheduled' rows are never purged (a far-future schedule must survive). */
-export async function purgeScheduledOlderThan(db: DbClient, cutoff: string): Promise<number> {
-  return (
-    await db.run(
-      `DELETE FROM mail_scheduled WHERE status IN ('sent','canceled','failed') AND updated_at < ?`,
-      cutoff,
-    )
-  ).meta.changes;
-}
-
 // ---- id mints ----
 export const newSendLogId = (): string => newId("maillog");
 export const newInboundId = (): string => newId("mailin");
+export const newDeliveryId = (): string => newId("maildlv");
 export const newAttachmentId = (): string => newId("mailatt");
 export const newScheduledId = (): string => newId("mailsch");

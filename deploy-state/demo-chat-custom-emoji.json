@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "chat-custom-emoji",
+  "worker": "dub-demo-chat-custom-emoji",
+  "url": "https://dub-demo-chat-custom-emoji.developershub-site.workers.dev",
+  "deployedSha": "257a9c57",
+  "branch": "feat/chat-slack-custom-emoji",
+  "actor": "ko-tarou",
+  "markers": ["custom-emoji-v1","fe6-emoji-import-sidebar"],
+  "live": true,
+  "verifiedAt": "2026-10-18T09:22:42Z",
+  "updatedAt": "2026-10-18T09:22:42Z",
+  "note": "fe6 Slack カスタム絵文字の取り込み + リアクション/ピッカー表示 + 詳細権限 chat:emoji_import (admin のみ既定ON)"
+}

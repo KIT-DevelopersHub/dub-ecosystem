@@ -39,13 +39,12 @@ class AppConfig {
 
   /// Origin of the mo3-mobile-bff (the device-registration + push-dispatch BFF).
   ///
-  /// Default = the planned custom route `m-api.developershub.jp` (see
-  /// apps/mo3-mobile-bff/wrangler.toml, currently `workers_dev = false` and the
-  /// route commented — so this is NOT live yet; Phase 1 device registration is
-  /// blocked on that deploy + the mobile auth seam, 設計 未決事項 B).
+  /// Default = the production mo3 workers.dev origin (wrangler.free.toml
+  /// `workers_dev = true`). The planned custom route `m-api.developershub.jp`
+  /// is not DNS-wired yet; switch the default once it is.
   /// Overridable with `--dart-define=MO3_BASE_URL=...`.
   static const String mo3BaseUrl = String.fromEnvironment(
     'MO3_BASE_URL',
-    defaultValue: 'https://m-api.developershub.jp',
+    defaultValue: 'https://mo3-mobile-bff.developershub-site.workers.dev',
   );
 }

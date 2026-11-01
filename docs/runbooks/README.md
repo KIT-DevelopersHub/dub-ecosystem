@@ -15,6 +15,7 @@ DevHub (Dub) エコシステムの運用手順書。**手順のみ** をまと�
 | [05-liveness-verification.md](./05-liveness-verification.md) | 「確認して」の前に配信バンドルへ機能マーカー実在を機械検証。demo 直列化(`deploy:demo`)・`verify:live`・`deploy-state/` 台帳・staging CI liveness ゲート |
 | [06-parallel-demo-staging-flow.md](./06-parallel-demo-staging-flow.md) | 並行開発フロー。使い捨て per-feature demo(`deploy:demo:feature`)→承認→`teardown:demo`→staging キュー(`staging:queue`)5件バッチ flush→統合ブランチ反映 |
 | [07-slack-history-import.md](./07-slack-history-import.md) | Slack履歴→fe6-chat D1移行。マッピング表・冪等性(処理済みtsレジャー)・必要トークンscope/対象ch・パイロット手順(`pnpm slack:import`) |
+| [08-visual-screens.md](./08-visual-screens.md) | 画面ビジュアル回帰（fe2 demo ビルドを Playwright で撮って pixel diff）。Phase 1 は警告のみ・PR コメントの読み方・ベースライン seed/更新・必須化計画 |
 
 ## 前提知識（3 runbook 共通）
 

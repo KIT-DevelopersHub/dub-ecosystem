@@ -100,3 +100,70 @@ describe("createSlackClient — downloadFile", () => {
     expect(await client.downloadFile("https://files.slack.com/x")).toBeNull();
   });
 });
+
+describe("createSlackClient — emojiList", () => {
+  it("returns the name -> url / alias map in one call", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({ ok: true, emoji: { partyparrot: "https://emoji.slack-edge.com/T0/partyparrot/abc.gif", parrot: "alias:partyparrot" }, cache_ts: "1" }),
+    );
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    expect(await client.emojiList()).toEqual({ partyparrot: "https://emoji.slack-edge.com/T0/partyparrot/abc.gif", parrot: "alias:partyparrot" });
+    expect(String(fetchImpl.mock.calls[0]![0])).toContain("/emoji.list");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows response_metadata.next_cursor and merges pages", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, emoji: { a: "https://emoji.slack-edge.com/T0/a/1.png" }, response_metadata: { next_cursor: "p2" } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, emoji: { b: "alias:a" }, response_metadata: { next_cursor: "" } }));
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    expect(await client.emojiList()).toEqual({ a: "https://emoji.slack-edge.com/T0/a/1.png", b: "alias:a" });
+    expect(String(fetchImpl.mock.calls[1]![0])).toContain("cursor=p2");
+  });
+
+  it("surfaces missing_scope (no emoji:read) as SlackApiError", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: false, error: "missing_scope" }));
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    await expect(client.emojiList()).rejects.toMatchObject({ slackError: "missing_scope" });
+  });
+});
+
+describe("createSlackClient — downloadEmoji", () => {
+  it("fetches Slack's CDN without the bot token and returns bytes + content type", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(new Uint8Array([71, 73, 70]), { status: 200, headers: { "content-type": "image/gif" } }));
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    const got = await client.downloadEmoji("https://emoji.slack-edge.com/T0/p/abc.gif");
+    expect(new Uint8Array(got!.bytes)).toEqual(new Uint8Array([71, 73, 70]));
+    expect(got!.contentType).toBe("image/gif");
+    const init = fetchImpl.mock.calls[0]![1] as RequestInit;
+    // No Authorization header. "manual", not "error": Workers' fetch throws on "error".
+    expect(init).toEqual({ redirect: "manual" });
+  });
+
+  it("does not follow a redirect off Slack's CDN", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: "https://evil.example/x.png" } }));
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    expect(await client.downloadEmoji("https://emoji.slack-edge.com/T0/a/1.png")).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses bodies over the size cap (declared or actual)", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(new Uint8Array(10), { status: 200, headers: { "content-length": "999999999" } }))
+      .mockResolvedValueOnce(new Response(new Uint8Array(20), { status: 200 }));
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    expect(await client.downloadEmoji("https://emoji.slack-edge.com/T0/a/1.png", 16)).toBeNull();
+    expect(await client.downloadEmoji("https://emoji.slack-edge.com/T0/b/1.png", 16)).toBeNull();
+  });
+
+  it("never fetches a non-Slack host and returns null on HTTP / network errors", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(null, { status: 404 })).mockRejectedValueOnce(new Error("net"));
+    const client = createSlackClient({ token: "xoxb-test", fetchImpl });
+    expect(await client.downloadEmoji("https://evil.example/x.png")).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await client.downloadEmoji("https://emoji.slack-edge.com/T0/a/1.png")).toBeNull();
+    expect(await client.downloadEmoji("https://emoji.slack-edge.com/T0/b/1.png")).toBeNull();
+  });
+});

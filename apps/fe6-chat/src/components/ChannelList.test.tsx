@@ -45,7 +45,7 @@ function setup(assignments: Record<string, string> = { dev: "sec_ops" }) {
 describe("ChannelList sections", () => {
   beforeEach(() => localStorage.clear());
 
-  it("renders user sections first (empty ones with a hint), then default groups", () => {
+  it("renders the shared sections first (empty ones with a hint for managers), then default groups", () => {
     setup();
     const blocks = screen.getAllByTestId("fe6-sidebar-section");
     expect(blocks.map((b) => b.getAttribute("data-section-id"))).toEqual(["sec_ops", "sec_empty"]);
@@ -76,5 +76,30 @@ describe("ChannelList sections", () => {
     await userEvent.click(within(dev).getByRole("button", { name: "セクションに移動" }));
     await userEvent.click(screen.getByTestId("fe6-channel-move-new"));
     expect(actions.onCreate).toHaveBeenCalledWith("dev");
+  });
+
+  it("read-only (no chat:manage_sections): shows the shared sections but no organizing UI", () => {
+    render(
+      <ChannelList
+        channels={[chan("dev"), chan("general")]}
+        unread={{}}
+        activeChannelId={null}
+        canCreate={false}
+        onSelect={() => {}}
+        sections={[
+          { id: "sec_ops", name: "運営", position: 0, createdAt: "t" },
+          { id: "sec_empty", name: "空", position: 1, createdAt: "t" },
+        ]}
+        assignments={{ dev: "sec_ops" }}
+      />,
+    );
+    const blocks = screen.getAllByTestId("fe6-sidebar-section");
+    // Empty shared sections are noise for a viewer, so they are hidden.
+    expect(blocks.map((b) => b.getAttribute("data-section-id"))).toEqual(["sec_ops"]);
+    expect(blocks[0]!.getAttribute("data-marker")).toBe("fe6-shared-sections-v1");
+    expect(within(blocks[0]!).getAllByTestId("fe6-channel-list-item").map((b) => b.getAttribute("data-channel-id"))).toEqual(["dev"]);
+    expect(screen.queryByTestId("fe6-section-create")).toBeNull();
+    expect(screen.queryByTestId("fe6-section-menu")).toBeNull();
+    expect(screen.queryByTestId("fe6-channel-move-menu")).toBeNull();
   });
 });

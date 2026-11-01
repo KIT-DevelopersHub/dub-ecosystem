@@ -18,6 +18,26 @@ export interface ProviderReadiness {
   region?: string; // SES region when relevant
   ready: boolean; // credentialsPresent && known && no validation issues
   issues: string[]; // human-readable, secret-free
+  // Resend delivery-problem webhook (resend-webhook.ts). Reported separately: it does not
+  // gate `ready` (sending works without it), but an unset secret means bounces/suppressions
+  // go unnoticed, so it is surfaced here with its own issues.
+  deliveryWebhook: DeliveryWebhookReadiness;
+}
+
+export interface DeliveryWebhookReadiness {
+  secretPresent: boolean; // RESEND_WEBHOOK_SECRET set (value never echoed)
+  inAppNotify: boolean; // SVC_NOTIFICATION bound (admin in-app alert)
+  issues: string[];
+}
+
+/** Readiness of the Resend webhook -> admin alert path. Secret-free. */
+export function deliveryWebhookReadiness(env: Env): DeliveryWebhookReadiness {
+  const secretPresent = Boolean(env.RESEND_WEBHOOK_SECRET?.trim());
+  const inAppNotify = Boolean(env.SVC_NOTIFICATION);
+  const issues: string[] = [];
+  if (!secretPresent) issues.push("resend webhook signing secret is not set — the webhook answers 503 and bounces/suppressions are NOT alerted");
+  if (!inAppNotify) issues.push("SVC_NOTIFICATION is not bound — delivery alerts go to audit + error log only (no in-app notification)");
+  return { secretPresent, inAppNotify, issues };
 }
 
 const KNOWN = new Set<string>([...OUTBOUND_PROVIDERS, "mock"]);
@@ -69,6 +89,7 @@ export function providerReadiness(env: Env): ProviderReadiness {
     fromAddress: env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
     ready: creds && known && issues.length === 0,
     issues,
+    deliveryWebhook: deliveryWebhookReadiness(env),
   };
   if (provider === "ses") out.region = sesConfigFromEnv(env)?.region ?? env.SES_REGION ?? "ap-northeast-1";
   return out;

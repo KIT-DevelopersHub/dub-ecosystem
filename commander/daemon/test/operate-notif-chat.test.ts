@@ -16,6 +16,10 @@ function fakeGateway(opts: Opts = {}) {
   ]);
   const members = new Map<string, { userId: string; role: string }[]>([["c1", [{ userId: "bot", role: "admin" }, { userId: "u1", role: "member" }]]]);
   const messages = [{ id: "m1", channelId: "c1", threadRootId: null, authorId: "bot", body: "こんにちは", version: 1, deletedAt: null }];
+  const pins = new Map<string, string[]>([["c1", []]]);
+  const reactions = new Map<string, Record<string, string[]>>();
+  const jobs: { id: string; slackChannelId: string; slackChannelName: string; dubChannelId: string; status: string }[] = [];
+  const emojis: string[] = [];
   const calls: string[] = [];
   let seq = 0;
 
@@ -62,6 +66,43 @@ function fakeGateway(opts: Opts = {}) {
       if (method === "DELETE" && !drop) members.set(mem[1]!, list.filter((m) => m.userId !== mem[2]));
       return new Response(null, { status: 204 });
     }
+    const pin = path.match(/^\/chat\/channels\/([^/]+)\/pins$/);
+    if (pin) {
+      const ids = pins.get(pin[1]!) ?? [];
+      const list = (xs: string[]) => messages.filter((m) => xs.includes(m.id));
+      if (method === "GET") return reply(200, list(ids));
+      const next = ids.includes(body.messageId) ? ids.filter((x) => x !== body.messageId) : [...ids, body.messageId];
+      if (!drop) pins.set(pin[1]!, next);
+      return reply(200, list(next));
+    }
+    const react = path.match(/^\/chat\/messages\/([^/]+)\/reactions$/);
+    if (react && method === "POST") {
+      const set = { ...(reactions.get(react[1]!) ?? {}) };
+      const users = set[body.emoji] ?? [];
+      set[body.emoji] = users.includes("bot") ? users.filter((u) => u !== "bot") : [...users, "bot"];
+      if (set[body.emoji]!.length === 0) delete set[body.emoji];
+      if (!drop) reactions.set(react[1]!, set);
+      return reply(200, { messageId: react[1], reactions: set });
+    }
+    if (method === "POST" && path === "/chat/slack-import/jobs") {
+      const ref = String(body.channel).replace(/^#/, "");
+      if (ref !== "general" && ref !== "C1") return reply(404, { error: { code: "not_found" } });
+      const existing = jobs.find((j) => j.slackChannelId === "C1");
+      if (existing) return reply(200, existing);
+      const job = { id: `job${jobs.length + 1}`, slackChannelId: "C1", slackChannelName: "general", dubChannelId: "slack-C1", status: "queued" };
+      if (!drop) jobs.push(job);
+      return reply(201, job);
+    }
+    const job = path.match(/^\/chat\/slack-import\/jobs\/([^/]+)$/);
+    if (job && method === "GET") {
+      const j = jobs.find((x) => x.id === job[1]);
+      return j ? reply(200, j) : reply(404, { error: { code: "not_found" } });
+    }
+    if (method === "POST" && path === "/chat/custom-emojis/slack-import") {
+      const added = ["party", "tada"].filter((n) => !emojis.includes(n));
+      if (!drop) emojis.push(...added);
+      return reply(200, { total: 2, imported: emojis.length, added: added.length, skipped: 0, failed: [], nextAfter: null, retryAfterMs: 0 });
+    }
     if (method === "GET" && path === "/chat/messages") {
       const root = url.searchParams.get("threadRootId") || null;
       return reply(200, { items: messages.filter((m) => m.channelId === url.searchParams.get("channelId") && m.threadRootId === root), nextCursor: null });
@@ -86,7 +127,7 @@ function fakeGateway(opts: Opts = {}) {
     return reply(404, { error: { code: "no_route" } });
   }) as typeof fetch;
 
-  return { fetchImpl, calls, inbox, channels, members, messages };
+  return { fetchImpl, calls, inbox, channels, members, messages, pins, reactions, jobs, emojis };
 }
 
 function setup(opts: Opts = {}) {
@@ -163,6 +204,35 @@ describe("チャットの書き込み", () => {
     expect((await run(exec, { op: "chat.channels.update", params: { id: "c1" }, body: { version: 2, archived: true } })).result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
   });
 
+  it("ピン留めは切り替え後の一覧を読み直し、もう一度で外れる", async () => {
+    const { gw, exec } = setup();
+    const on = await run(exec, { op: "chat.pins.toggle", params: { id: "c1" }, body: { messageId: "m1" } });
+    expect(on.preview.writes[0]).toMatchObject({ reversible: true, risk: "mid" });
+    expect(on.result).toMatchObject({ verdict: "done", results: [{ outcome: "ok" }] });
+    expect(gw.pins.get("c1")).toEqual(["m1"]);
+    expect((await run(exec, { op: "chat.pins.toggle", params: { id: "c1" }, body: { messageId: "m1" } })).result).toMatchObject({ verdict: "done" });
+    expect(gw.pins.get("c1")).toEqual([]);
+    expect(gw.calls).toContain("GET /chat/channels/c1/pins");
+  });
+
+  it("ピン留めが反映されなければ未確認になる", async () => {
+    const { exec } = setup({ dropWrites: true });
+    const { result } = await run(exec, { op: "chat.pins.toggle", params: { id: "c1" }, body: { messageId: "m1" } });
+    expect(result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
+    expect(JSON.stringify(result)).toContain("ピン留めの一覧");
+  });
+
+  it("リアクションはボットの名前で切り替わり、検証不能の受付として報告する", async () => {
+    const { gw, exec } = setup();
+    const { preview, result } = await run(exec, { op: "chat.reactions.toggle", params: { id: "m1" }, body: { emoji: "👍" } });
+    expect(preview.requiresPhrase).toBe(false);
+    expect(preview.writes[0]!.unverifiable).toContain("確かめられない");
+    expect(result).toMatchObject({ verdict: "done", results: [{ outcome: "accepted" }] });
+    expect(gw.reactions.get("m1")).toEqual({ "👍": ["bot"] });
+    await run(exec, { op: "chat.reactions.toggle", params: { id: "m1" }, body: { emoji: "👍" } });
+    expect(gw.reactions.get("m1")).toEqual({});
+  });
+
   it("メッセージ削除は確認フレーズ必須で、検証不能の受付として報告する", async () => {
     const { gw, exec } = setup();
     const { preview, result } = await run(exec, { op: "chat.messages.delete", params: { id: "m1" } });
@@ -170,5 +240,37 @@ describe("チャットの書き込み", () => {
     expect(preview.writes[0]!.unverifiable).toContain("確かめられない");
     expect(result).toMatchObject({ verdict: "done", results: [{ outcome: "accepted" }] });
     expect(gw.messages).toEqual([]);
+  });
+});
+
+describe("チャットの Slack 取り込み", () => {
+  it("取り込み開始は確認フレーズ必須で、作ったジョブを読み直す。2回目は同じジョブが返る", async () => {
+    const { gw, exec } = setup();
+    const { preview, result } = await run(exec, { op: "chat.slackImport.jobs.start", body: { channel: "#general" } });
+    expect(preview.requiresPhrase).toBe(true);
+    expect(preview.writes[0]).toMatchObject({ reversible: false, risk: "high" });
+    expect(result).toMatchObject({ verdict: "done", results: [{ outcome: "ok" }] });
+    expect(gw.calls).toContain("GET /chat/slack-import/jobs/job1");
+    expect((await run(exec, { op: "chat.slackImport.jobs.start", body: { channel: "C1" } })).result).toMatchObject({ verdict: "done" });
+    expect(gw.jobs).toHaveLength(1);
+    // The step loop belongs to the import screen, never to the bot.
+    expect(gw.calls.some((c) => c.endsWith("/step"))).toBe(false);
+  });
+
+  it("ジョブが作られていなければ未確認になる", async () => {
+    const { exec } = setup({ dropWrites: true });
+    const { result } = await run(exec, { op: "chat.slackImport.jobs.start", body: { channel: "general" } });
+    expect(result).toMatchObject({ verdict: "failed", results: [{ outcome: "unverified" }] });
+  });
+
+  it("絵文字の取り込みは再実行しても登録済みを増やさず、検証不能の受付として報告する", async () => {
+    const { gw, exec } = setup();
+    const { preview, result } = await run(exec, { op: "chat.customEmojis.importFromSlack", body: {} });
+    expect(preview.requiresPhrase).toBe(false);
+    expect(preview.writes[0]).toMatchObject({ reversible: false, risk: "mid" });
+    expect(preview.writes[0]!.unverifiable).toContain("照合できない");
+    expect(result).toMatchObject({ verdict: "done", results: [{ outcome: "accepted" }] });
+    await run(exec, { op: "chat.customEmojis.importFromSlack", body: {} });
+    expect(gw.emojis).toEqual(["party", "tada"]);
   });
 });

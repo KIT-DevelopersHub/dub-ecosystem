@@ -144,6 +144,9 @@ export const TASK: AreaSpec = {
   excluded: [
     { service: S, route: "DELETE /tasks/:id", reason: "アーカイブすると元に戻す API が無い（不可逆）" },
     { service: S, route: "DELETE /tasks/:id/attachments/:attachmentId", reason: "アーカイブすると元に戻す API が無い（不可逆）" },
+    { service: S, route: "POST /tasks/calendar-events", reason: "カレンダー画面用の別名で中身は tasks.create と同じ。操作は tasks.create に一本化する" },
+    { service: S, route: "PATCH /tasks/calendar-events/:id", reason: "カレンダー画面用の別名で中身は tasks.update と同じ。操作は tasks.update に一本化する" },
+    { service: S, route: "DELETE /tasks/calendar-events/:id", reason: "DELETE /tasks/:id と同じくアーカイブすると元に戻す API が無い（不可逆）" },
   ],
   pending: [],
   ownerOpenedIrreversible: {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { Message } from "../api/contract";
 import { MessageItem } from "./MessageItem";
 
@@ -23,23 +23,41 @@ function msg(over: Partial<Message> = {}): Message {
   };
 }
 
+// Edit / delete live in the 「その他」 menu (Slack order), so open it first.
+const handlers = { onSubmitEdit: () => undefined, onDelete: () => undefined };
+
+function openMore() {
+  const more = screen.queryByTestId("fe6-msg-more");
+  if (more) fireEvent.click(more);
+}
+
 describe("MessageItem authorization UI", () => {
   it("shows edit + delete to the author", () => {
-    render(<MessageItem message={msg({ authorId: ME })} currentUserId={ME} canModerate={false} />);
+    render(<MessageItem message={msg({ authorId: ME })} currentUserId={ME} canModerate={false} {...handlers} />);
+    openMore();
     expect(screen.getByTestId("fe6-timeline-edit")).toBeInTheDocument();
     expect(screen.getByTestId("fe6-timeline-delete")).toBeInTheDocument();
   });
 
   it("hides both from a non-author non-moderator", () => {
-    render(<MessageItem message={msg()} currentUserId={ME} canModerate={false} />);
+    render(<MessageItem message={msg()} currentUserId={ME} canModerate={false} {...handlers} />);
+    openMore();
     expect(screen.queryByTestId("fe6-timeline-edit")).toBeNull();
     expect(screen.queryByTestId("fe6-timeline-delete")).toBeNull();
   });
 
   it("lets a moderator delete but never edit others' messages", () => {
-    render(<MessageItem message={msg()} currentUserId={ME} canModerate={true} />);
+    render(<MessageItem message={msg()} currentUserId={ME} canModerate={true} {...handlers} />);
+    openMore();
     expect(screen.queryByTestId("fe6-timeline-edit")).toBeNull();
     expect(screen.getByTestId("fe6-timeline-delete")).toBeInTheDocument();
+  });
+
+  it("offers no edit/delete where nothing handles them (thread pane)", () => {
+    render(<MessageItem message={msg({ authorId: ME })} currentUserId={ME} canModerate={true} />);
+    openMore();
+    expect(screen.queryByTestId("fe6-timeline-edit")).toBeNull();
+    expect(screen.queryByTestId("fe6-timeline-delete")).toBeNull();
   });
 
   it("renders a redacted tombstone for deleted messages", () => {

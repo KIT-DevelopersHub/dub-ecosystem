@@ -197,6 +197,123 @@ token value is never echoed).
 
 ---
 
+## 3.4 Gmail safety-net forward (`MAIL_GMAIL_FORWARD`)
+
+Every inbound copy is stored first; then, when `MAIL_GMAIL_FORWARD = "on"`, the Worker also
+calls `message.forward(<名簿 Gmail>)` for the **envelope recipient** (`src/gmail-forward.ts`).
+
+- **Who**: the roster user of the envelope address (`identity-roster /internal/users/lookup`)
+  whose 運営メンバー row is linked (`member_people.identity_user_id`) and has a `gmail`
+  (`member-service /members/internal/google-emails`). No link / no Gmail = skipped.
+- **Multi-recipient**: Email Routing invokes `email()` once per envelope recipient, so a mail
+  To/CC'd to several Dub users forwards to each one's own Gmail once. Header To/CC are never
+  used (would double-forward and could leak a BCC).
+- **Loop guards**: a copy carrying `X-Dub-Forwarded` is never re-forwarded (we stamp it);
+  a target on our own zone and mail sent *from* the target Gmail are skipped; the archive
+  address is never forwarded.
+- **Failure isolation**: a forward failure (e.g. unverified destination) is caught, logged
+  (`gmail forward failed`, masked address) and audited as `mail.message.forward_gmail`
+  (`failure`). It never drops or blocks storage. The forward also runs when ingest threw
+  (the ingest error is re-thrown afterwards, as before).
+- **Default OFF**: the var is unset in `wrangler.free.toml`, so merging/deploying changes nothing.
+
+### Enabling (manual, owner approval required)
+
+`message.forward()` only delivers to addresses **verified** as Email Routing destination
+addresses. Adding one sends a verification mail to that member, so each step needs approval.
+
+1. List targets (read-only): `SELECT p.gmail FROM member_people p JOIN identity_users u ON
+   u.id = p.identity_user_id WHERE TRIM(COALESCE(p.gmail,'')) <> ''`.
+2. Add each as a destination address — either
+   - Dashboard: Cloudflare → developershub.jp → Email → Email Routing → **Destination
+     addresses** → *Add destination address*; or
+   - API (token with **Account › Email Routing Addresses › Edit**):
+     `POST /accounts/{account_id}/email/routing/addresses` body `{"email":"<gmail>"}`.
+3. Each member clicks the verification link Cloudflare mails them (status becomes
+   *Verified*; check via `GET /accounts/{account_id}/email/routing/addresses`).
+   Unverified members simply get `failed` audit rows until they verify — no data impact.
+4. Set `MAIL_GMAIL_FORWARD = "on"` in `[vars]` of `wrangler.free.toml` and deploy through the
+   normal flow (or `wrangler secret put MAIL_GMAIL_FORWARD` for an out-of-band toggle).
+5. Verify: send a test mail to a verified member, confirm it is in the Dub inbox and in the
+   Gmail (check Spam), and that the Worker log shows `gmail forward forwarded`.
+
+Disable: remove the var (or set anything other than `on`) and redeploy.
+
+## 3.5 Archive forward (`MAIL_ARCHIVE_FORWARD_TO`)
+
+Independent of §3.4: when `MAIL_ARCHIVE_FORWARD_TO` is set (prod: `dub.developershub@gmail.com`
+in `wrangler.free.toml`), every inbound mail is stored first and then forwarded to that one
+address.
+
+- **Once per Message-ID**: Email Routing invokes `email()` once per Dub recipient. Only the
+  invocation that newly stored the `mail_inbound` row forwards (later recipients dedup to
+  `processed=false` and skip). Ingest failure → forward anyway. A mail without Message-ID
+  gets a unique synthetic id, so it forwards on every invocation.
+- **Headers**: `X-Dub-Forwarded: archive` and `X-Dub-Original-Rcpt: <envelope recipient of
+  the forwarding invocation>`. Other recipients of the same mail are visible in its To/CC.
+- **Loop guards**: skip if `X-Dub-Forwarded` is present or the sender is the archive address.
+- **Failure isolation**: a rejected forward (e.g. the address is not yet verified) is logged
+  (`archive forward failed`) and audited as `mail.message.forward_archive` (`failure`, masked
+  address); storage and the Gmail forward are unaffected.
+
+One-time setup: Cloudflare dashboard → developershub.jp → Email → Email Routing →
+**Destination addresses** → *Add destination address* → `dub.developershub@gmail.com`, then
+open the verification mail in that Gmail and click the link (status → *Verified*).
+
+## 3.6 本番の合成メール監視 (canary)
+
+本番と同じ経路で「送って・届いたか」を定期確認する外形監視（`src/canary.ts`）。**既定は OFF**。
+
+- 動作: 既存の 5 分 cron に相乗り（新しい trigger は無し）。`MAIL_CANARY_INTERVAL_MIN`（既定 15）分ごとに
+  件名 `[dub-canary] <uuid>` のメールを通常の送信コア（Resend）で To=`MAIL_CANARY_TO` / Cc=`MAIL_CANARY_CC`
+  に送り、以降の tick で `mail_inbound` を Message-ID か件名トークンで探す。宛先ごとの到着は
+  `header_meta_json.deliveredTo` で判定し、`MAIL_CANARY_DEADLINE_MIN`（既定 10）分で確定する。
+  結果は `mail_canary_probe`（migration 0014）に1行ずつ記録。
+- 隔離: QA アドレス2つだけに送る / archive の自動 CC を付けない / system 送信（owner なし）なので、
+  メンバーの受信箱・送信済みには出ない（`mail:read_all` の全件表示には出る）。受信コピーは archive 転送もしない。
+  QA アドレスは名簿（roster）に登録しないこと。
+- 判定: 既定は「どちらかのコピーが `mail_inbound` に入れば OK」。現状は Message-ID ごとに1行しか持てず
+  2通目（多くは Cc）が捨てられるため `cc_ok=0` が記録されるが、それではアラートしない。
+  Cc の修正後に `MAIL_CANARY_EXPECT_CC="true"` にすると To と Cc の両方を必須にする。
+- 通知: 2回連続で失敗した時点で audit `mail.canary.alert`（+ error ログ）を1回だけ、その後の最初の成功で
+  `mail.canary.recovered` を出す。
+- 確認: `GET /api/v1/mail/admin/canary/probes?limit=50`（`mail:admin`、読み取り専用）。
+- 有効化: (1) Email Routing で QA アドレス2つを「Worker に送る（dub-mail-gateway）」ルールで作成
+  (2) migration `0017_mail_canary_probe.sql` を適用 (3) `MAIL_CANARY_ENABLED="true"` /
+  `MAIL_CANARY_TO` / `MAIL_CANARY_CC` を vars に設定してデプロイ。
+- コスト注意: 15 分間隔だと 1日 96 送信 ≒ 月 2,880 送信。Resend 無料枠（100/日・3,000/月）をほぼ使い切るので、
+  無料枠のままなら間隔を 60 分などに延ばす。
+
+## 3.7 Resend の配送エラー → 管理者アラート（webhook）
+
+Resend は宛先が Suppressions（送信停止リスト）に載っていると **送信 API には 200 を返したまま黙って捨てる**。
+これを拾うため、Resend の webhook を受けて管理者に通知する（`src/resend-webhook.ts`）。
+
+- 経路: Resend → api-gateway `POST https://dub-api-gateway.developershub-site.workers.dev/api/v1/public/webhooks/resend`（PUBLIC・本文をバイト列のまま転送）
+  → mail-gateway `POST /internal/webhooks/resend`（INTERNAL）。Svix 署名（`svix-id` / `svix-timestamp` / `svix-signature`、
+  HMAC-SHA256、±5分）をここで検証。`RESEND_WEBHOOK_SECRET` 未設定なら **503**（fail closed・error ログ）、
+  `/internal/health/ready` の `deliveryWebhook` にも出る。
+- 対象イベント: `email.bounced` / `email.suppressed` / `email.failed` / `email.complained` / `email.delivery_delayed`（それ以外は 200 で無視）。
+- 記録: `mail_provider_event`（migration 0019）に svix-id を主キーで1行。再送は 200 の no-op（二重通知なし）。
+  `provider_message_id`（= Resend の email_id）で `mail_send_log` と突合し、件名・送信ログ id を補う。
+- 通知: 自ドメイン（`CF_EMAIL_ROUTING_ZONE_NAME`、既定 developershub.jp）宛ては **毎回**、外部宛ては同じ宛先につき **24時間に1回**。
+  チャネルは canary と同じ audit（`mail.delivery.alert`）+ error ログ、さらに `SVC_NOTIFICATION` があれば
+  `role_sys_admin` / `role_sys_maintainer` へアプリ内通知（`POST /notify`、type `mail.delivery_alert`）。
+  メール通知はしない（壊れている経路そのものに乗るため）。
+- 本文（日本語）: 宛先 / イベント / 理由（例: 宛先が存在しない・送信停止リスト）/ 件名 / 日時(JST) /
+  対処「Cloudflare Email Routing の受け口を確認 → Resend の Suppressions から外す」。
+
+### セットアップ手順（運用者）
+
+1. migration `0019_mail_provider_event.sql` を dub-core に適用。
+2. Resend ダッシュボード → **Webhooks** → *Add Webhook*
+   - Endpoint URL: `https://dub-api-gateway.developershub-site.workers.dev/api/v1/public/webhooks/resend`
+   - Events: `email.bounced` / `email.complained` / `email.delivery_delayed` / `email.failed` / `email.suppressed`
+   - 作成後の **Signing Secret**（`whsec_...`）をコピー。
+3. `pnpm dlx wrangler@4 secret put RESEND_WEBHOOK_SECRET --config services/mail-gateway/wrangler.free.toml` に貼り付け（repo 内の `npx` は pnpm ワークスペースのため wrangler を解決できない。`CLOUDFLARE_API_TOKEN` が別アカウント用なら `env -u CLOUDFLARE_API_TOKEN` を前に付けて DevHub の OAuth ログインで実行）。
+4. mail-gateway / api-gateway をデプロイ（`SVC_NOTIFICATION` binding は wrangler.free.toml に追加済み）。
+5. Resend の webhook 画面の *Send test* で 200 を確認（`email.delivered` 等は無視されて `ignored: true`）。
+
 ## 4. Workers free-tier verdict (9-E: is a paid plan required?)
 
 **Conclusion: the outbound send endpoint runs on the Workers FREE plan. A paid plan is
@@ -206,7 +323,7 @@ required ONLY if you want the Queue-based event/audit fan-out.**
 |---|---|---|
 | Worker `fetch` (`POST /send`) | Free | Yes — works |
 | D1 (send-log, inbound, mailboxes) | Free tier | Yes — works |
-| Cron trigger (retention purge) | Free | No (housekeeping) |
+| Cron trigger (予約送信 drain) | Free | No (scheduled send only) |
 | Email Routing (inbound) | Free | No (only for inbound) |
 | **Cloudflare Queues** (`EVT_*`, `AUDIT_QUEUE` producers) | **Paid ($5/mo)** | **No** |
 
@@ -257,8 +374,8 @@ Supports `resend`, `mailchannels`, and `ses` (full SigV4). Env knobs: `MAIL_FROM
   domain, `2xx`-without-id, bad signing key) fail fast. See `src/retry.ts`.
 - **Per-attempt timeout**: each provider call is aborted after `MAIL_SEND_TIMEOUT_MS`
   (default 15s) so a hung upstream can't wedge the Worker; the abort is treated as retryable.
-- **Send log** (`mail_send_log`): every attempt is persisted (`pending → sent | failed`),
-  purged after 30 days by the daily cron.
+- **Send log** (`mail_send_log`): every attempt is persisted (`pending → sent | failed`)
+  and kept indefinitely (no retention purge).
 - **Readiness**: `GET /internal/health/ready` (internal-only) reports the selected provider,
   whether its credentials are present, the effective From, and the tuning — `200 ready:true`
   or `503` with a secret-free issue list.

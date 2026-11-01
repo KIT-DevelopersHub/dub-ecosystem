@@ -130,3 +130,21 @@ describe("received Cc", () => {
     expect("cc" in b!).toBe(false);
   });
 });
+
+describe("sender-only Bcc", () => {
+  const bcc: mail.MailAddress[] = [{ email: "secret@example.com" }];
+  const base: mail.MailSentListItem = { id: "s1", to: [{ email: "x@y.z" }], subject: "Hi", snippet: "hey", sentAt: "2026-08-05T00:00:00.000Z", provider: "resend", status: "sent" };
+
+  it("sentItemsToThreads / sentDetailToMessage carry bcc; absent stays absent", () => {
+    expect(sentItemsToThreads([{ ...base, bcc }], SELF)[0]!.messages[0]!.bcc).toEqual(bcc);
+    expect("bcc" in sentItemsToThreads([{ ...base }], SELF)[0]!.messages[0]!).toBe(false);
+    expect(sentDetailToMessage({ ...base, textBody: "b", bcc }, SELF).bcc).toEqual(bcc);
+    expect("bcc" in sentDetailToMessage({ ...base, textBody: "b" }, SELF)).toBe(false);
+  });
+
+  it("combineThreads carries bcc on a folded sent reply", () => {
+    const threads = combineThreads(inbox, [{ ...base, threadId: "T", bcc }], SELF);
+    const t = threads.find((x) => x.id === "T")!;
+    expect(t.messages.find((m) => m.id === "s1")!.bcc).toEqual(bcc);
+  });
+});

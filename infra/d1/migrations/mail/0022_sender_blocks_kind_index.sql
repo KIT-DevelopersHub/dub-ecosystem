@@ -1,0 +1,13 @@
+-- mail-gateway — index for blocked-sender filtering in SQL (pagination fix for 0021). Additive, forward-only.
+-- Mirror of services/mail-gateway/db/0022_sender_blocks_kind_index.sql (kept byte-identical; infra
+-- is the 正本 / runner, the service copy backs the in-memory test schema).
+--
+-- 0021 flagged blocked mail on read but the inbox page was cut at LIMIT first, so a page
+-- could hold fewer than 50 visible conversations once blocked ones were dropped. The folder
+-- list (src/folders.ts) now excludes — or, for ブロック済み, selects — blocked senders BEFORE
+-- LIMIT with two correlated lookups per message:
+--   address : (owner_user_id, value) = (viewer, sender)   -> the 0021 primary key
+--   domain  : owner_user_id = viewer AND kind = 'domain' AND deleted_at IS NULL, then a
+--             suffix match on the sender (domain + subdomains)       -> this index
+-- Reads stay read-only: no row is ever marked.
+CREATE INDEX IF NOT EXISTS idx_mail_sender_blocks_owner_kind ON mail_sender_blocks(owner_user_id, kind, deleted_at);

@@ -10,6 +10,7 @@
 import { DubError } from "@dub/errors";
 import type { mail } from "@dub/types";
 import { DEFAULT_SEND_TIMEOUT_MS } from "./config";
+import { apiText, nfc, referencesHeader } from "./mime";
 import type { Env } from "./env";
 import { retryableStatus, safeErrorDetail } from "./provider-error";
 import { rateLimitError } from "./rate-limit";
@@ -26,9 +27,14 @@ export interface ResendConfig {
   fetchImpl?: typeof fetch;
 }
 
-/** Resend accepts "Name <email>" or a bare address string per recipient. */
+/** Resend accepts "Name <email>" or a bare address string per recipient. Resend does the
+ *  RFC2047 encoding itself, but an unquoted name with specials ("Doe, John") would be split
+ *  into two recipients, so such names are sent as a quoted-string. */
 function formatAddress(a: mail.MailAddress): string {
-  return a.name ? `${a.name} <${a.email}>` : a.email;
+  if (!a.name) return a.email;
+  const n = nfc(a.name).replace(/[\r\n]+/g, " ").trim();
+  const name = /[()<>\[\]:;@\\,."]/.test(n) ? `"${n.replace(/(["\\])/g, "\\$1")}"` : n;
+  return `${name} <${a.email}>`;
 }
 
 export class ResendMailProvider implements MailProvider {
@@ -50,9 +56,10 @@ export class ResendMailProvider implements MailProvider {
     // (honors custom Message-ID) are the deterministic paths; Resend carries this caveat.
     const headers: Record<string, string> = { "Message-ID": `<${msg.messageId}>` };
     if (msg.inReplyTo) {
-      const ref = `<${msg.inReplyTo}>`;
-      headers["In-Reply-To"] = ref;
-      headers["References"] = ref;
+      headers["In-Reply-To"] = `<${msg.inReplyTo}>`;
+      // JSON header values must be single-line: unfold (space-separated ids).
+      const refs = referencesHeader(msg.references && msg.references.length > 0 ? msg.references : [msg.inReplyTo]);
+      if (refs) headers["References"] = refs.replace(/\r\n /g, " ");
     }
 
     // Resend attachments: [{ filename, content }] where content is base64 (docs
@@ -67,9 +74,10 @@ export class ResendMailProvider implements MailProvider {
       from: msg.from,
       to: msg.to.map(formatAddress),
       ...(msg.cc.length > 0 ? { cc: msg.cc.map(formatAddress) } : {}),
-      subject: msg.subject,
-      text: msg.textBody,
-      ...(msg.htmlBody ? { html: msg.htmlBody } : {}),
+      ...(msg.bcc && msg.bcc.length > 0 ? { bcc: msg.bcc.map(formatAddress) } : {}),
+      subject: nfc(msg.subject).replace(/[\r\n]+/g, " "),
+      text: apiText(msg.textBody),
+      ...(msg.htmlBody ? { html: nfc(msg.htmlBody) } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
     });

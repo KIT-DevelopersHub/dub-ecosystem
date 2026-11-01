@@ -129,9 +129,9 @@ describe("calendar meetings (カレンダー > ミーティング)", () => {
   interface Meeting { id: string; title: string; targetName: string; meetUrl: string | null; startsAt: string }
   interface List { items: Meeting[]; account: { email: string | null; calendarReady: boolean } }
 
-  it("grants the demo admin the カレンダー app and both meeting keys", async () => {
+  it("grants the demo admin the カレンダー app, 予定を登録 and both meeting keys", async () => {
     const me = await api().auth.me();
-    for (const k of ["app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit"]) {
+    for (const k of ["app:calendar:view", "app:calendar:edit", "calendar:schedule_edit", "calendar:meetings_view", "calendar:meetings_edit"]) {
       expect(me.permissions).toContain(k);
     }
   });
@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 71-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 79-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(71);
+    expect(catalog).toHaveLength(79);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -402,7 +402,7 @@ describe("demo flags mock persists 返信不要 (noReplyAt)", () => {
   });
 });
 
-describe("chat channel delete + personal sections (demo store)", () => {
+describe("chat channel delete + org-wide sections (demo store)", () => {
   interface Section { id: string; name: string; position: number }
   interface SectionList { items: Section[]; assignments: Record<string, string> }
   const listSections = (a: ReturnType<typeof api>) => a.request<SectionList>({ method: "GET", path: "/api/v1/chat/sections" });
@@ -428,6 +428,51 @@ describe("chat channel delete + personal sections (demo store)", () => {
     const roles = await api().request<{ items: { name: string; permissions: string[] }[] }>({ method: "GET", path: "/api/v1/identity/roles" });
     for (const r of roles.items.filter((x) => x.name !== "admin")) {
       expect(r.permissions, r.name).not.toContain("chat:slack_import");
+    }
+  });
+
+  it("grants the demo admin chat:emoji_import and starts it OFF for every other role", async () => {
+    expect((await api().auth.me()).permissions).toContain("chat:emoji_import");
+    const roles = await api().request<{ items: { name: string; permissions: string[] }[] }>({ method: "GET", path: "/api/v1/identity/roles" });
+    for (const r of roles.items.filter((x) => x.name !== "admin")) {
+      expect(r.permissions, r.name).not.toContain("chat:emoji_import");
+    }
+  });
+
+  it("grants the demo admin chat:manage_sections and starts it OFF for every other role", async () => {
+    expect((await api().auth.me()).permissions).toContain("chat:manage_sections");
+    const roles = await api().request<{ items: { name: string; permissions: string[] }[] }>({ method: "GET", path: "/api/v1/identity/roles" });
+    for (const r of roles.items.filter((x) => x.name !== "admin")) {
+      expect(r.permissions, r.name).not.toContain("chat:manage_sections");
+    }
+  });
+
+  it("sections are shared by every account; only chat:manage_sections may organize them", async () => {
+    const a = api();
+    const created = await a.request<Section>({ method: "POST", path: "/api/v1/chat/sections", body: { name: "共通" } });
+    await a.request<void>({ method: "PUT", path: "/api/v1/chat/channels/chn_general/section", body: { sectionId: created.id } });
+    globalThis.localStorage.setItem("dub_demo_account", "usr_bob");
+    try {
+      expect((await a.auth.me()).permissions).not.toContain("chat:manage_sections");
+      const seen = await listSections(a);
+      expect(seen.items.map((x) => x.name)).toEqual(["運営", "共通"]);
+      expect(seen.assignments.chn_general).toBe(created.id);
+      for (const req of [
+        { method: "POST", path: "/api/v1/chat/sections", body: { name: "x" } },
+        { method: "PATCH", path: `/api/v1/chat/sections/${created.id}`, body: { name: "y" } },
+        { method: "DELETE", path: `/api/v1/chat/sections/${created.id}` },
+        { method: "PUT", path: "/api/v1/chat/channels/chn_general/section", body: { sectionId: null } },
+      ] as const) {
+        let err: unknown;
+        try {
+          await a.request<unknown>(req);
+        } catch (e) {
+          err = e;
+        }
+        expect((err as ApiError | undefined)?.status, `${req.method} ${req.path}`).toBe(403);
+      }
+    } finally {
+      globalThis.localStorage.removeItem("dub_demo_account");
     }
   });
 
@@ -486,6 +531,46 @@ describe("chat channel delete + personal sections (demo store)", () => {
   });
 });
 
+describe("カスタム絵文字 (Slack emoji import demo)", () => {
+  interface Emoji { name: string; aliasOf: string | null }
+  interface Result { total: number; imported: number; nextAfter: string | null }
+  interface Msg { id: string; reactions: { emoji: string; userIds: string[] }[] }
+
+  it("starts with two emoji, imports the rest in batches, and serves image bytes", async () => {
+    const a = api();
+    const before = await a.request<{ items: Emoji[] }>({ method: "GET", path: "/api/v1/chat/custom-emojis" });
+    expect(before.items.map((e) => e.name)).toEqual(["devhub", "kit-dev"]);
+    const img = await a.download("/api/v1/chat/custom-emojis/kit-dev/image");
+    expect(img.type).toBe("image/svg+xml");
+    await expect(a.download("/api/v1/chat/custom-emojis/partyparrot/image")).rejects.toBeInstanceOf(ApiError);
+
+    let after: string | null = null;
+    let r: Result;
+    let calls = 0;
+    do {
+      r = await a.request<Result>({ method: "POST", path: "/api/v1/chat/custom-emojis/slack-import", body: { after } });
+      after = r.nextAfter;
+      calls += 1;
+    } while (after && calls < 20);
+    expect(calls).toBeGreaterThan(1);
+    expect(r.imported).toBe(r.total);
+    const list = await a.request<{ items: Emoji[] }>({ method: "GET", path: "/api/v1/chat/custom-emojis" });
+    expect(list.items.find((e) => e.name === "parrot")?.aliasOf).toBe("partyparrot");
+    expect((await a.download("/api/v1/chat/custom-emojis/parrot/image")).size).toBeGreaterThan(0);
+  });
+
+  it("seeds custom emoji reactions in #general and toggles a :name: reaction", async () => {
+    const a = api();
+    const page = await a.request<{ items: Msg[] }>({ method: "GET", path: "/api/v1/chat/messages", query: { channelId: "chn_general" } });
+    const welcome = page.items.find((m) => m.id === "msg_01SEEDGEN0000000000000WEL")!;
+    expect(welcome.reactions.map((r) => r.emoji)).toEqual(["🎉", ":kit-dev:", ":partyparrot:"]);
+    const added = await a.request<Msg & { messageId: string }>({ method: "POST", path: `/api/v1/chat/messages/${welcome.id}/reactions`, body: { emoji: ":devhub:" } });
+    expect(added.reactions.find((r) => r.emoji === ":devhub:")?.userIds).toHaveLength(1);
+    const removed = await a.request<Msg>({ method: "POST", path: `/api/v1/chat/messages/${welcome.id}/reactions`, body: { emoji: ":devhub:" } });
+    expect(removed.reactions.find((r) => r.emoji === ":devhub:")).toBeUndefined();
+  });
+});
+
 describe("チャンネル取り込み (Slack import demo)", () => {
   interface Job { id: string; status: string; dubChannelId: string; retryAfterMs: number }
   interface Msg { id: string; authorId: string | null; threadRootId: string | null; replyCount: number; reactions: unknown[]; attachments: unknown[] }
@@ -520,5 +605,110 @@ describe("チャンネル取り込み (Slack import demo)", () => {
 
   it("404s an unknown Slack channel", async () => {
     await expect(api().request({ method: "POST", path: "/api/v1/chat/slack-import/jobs", body: { channel: "nope" } })).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("demo mail list paging (?demo_mail_bulk)", () => {
+  it("pages the inbox by limit + id cursor when bulk mail is seeded", async () => {
+    globalThis.history.replaceState(null, "", "/?demo_mail_bulk=60");
+    try {
+      const a = api();
+      type Page = { items: { id: string }[]; nextCursor: string | null };
+      const p1 = await a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { limit: 50 } });
+      expect(p1.items).toHaveLength(50);
+      expect(p1.nextCursor).not.toBeNull();
+      const p2 = await a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { limit: 50, cursor: p1.nextCursor! } });
+      expect(p2.items.length).toBeGreaterThan(0);
+      expect(p2.items.some((m) => p1.items.some((x) => x.id === m.id))).toBe(false);
+      expect(p2.nextCursor).toBeNull();
+    } finally {
+      globalThis.history.replaceState(null, "", "/");
+    }
+  });
+  it("filters by ?q= (server-search parity) across body text, beyond page 1", async () => {
+    globalThis.history.replaceState(null, "", "/?demo_mail_bulk=60");
+    try {
+      const a = api();
+      type Page = { items: { id: string; subject: string }[]; nextCursor: string | null };
+      const byBody = await a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { limit: 50, q: "ZR-2026-0042" } });
+      expect(byBody.items.map((m) => m.subject)).toEqual(["お見積りのご案内"]);
+      const byName = await a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { limit: 50, q: "全力エージェンシー" } });
+      expect(byName.items).toHaveLength(1);
+      const none = await a.request<Page>({ method: "GET", path: "/api/v1/mail/sent", query: { limit: 50, q: "全力エージェンシー" } });
+      expect(none.items).toHaveLength(0);
+    } finally {
+      globalThis.history.replaceState(null, "", "/");
+    }
+  });
+});
+
+describe("demo 運営チーム (参加届 / オンボーディングのチーム選択)", () => {
+  it("includes ネットワークチーム in /members/teams and the public onboarding team picker", async () => {
+    const a = api();
+    const { teams } = await a.request<{ teams: { name: string; color: string | null }[] }>({ method: "GET", path: "/api/v1/members/teams" });
+    expect(teams.find((t) => t.name === "ネットワークチーム")?.color).toBe("#0891b2");
+    const guide = await a.request<{ teams: { name: string }[] }>({ method: "GET", path: "/api/v1/public/onboarding" });
+    expect(guide.teams.map((t) => t.name)).toContain("ネットワークチーム");
+  });
+});
+
+describe("demo sender block list", () => {
+  it("block → messages flagged blocked (list/detail/thread) → unblock restores; validation like the gateway", async () => {
+    globalThis.localStorage.clear();
+    const client = api();
+    const blocked = async () =>
+      (await client.request<{ items: { id: string; blocked?: boolean }[] }>({ method: "GET", path: "/api/v1/mail/messages" })).items
+        .filter((m) => m.blocked)
+        .map((m) => m.id);
+    expect(await blocked()).toEqual([]);
+
+    const created = await client.request<{ value: string; kind: string }>({ method: "POST", path: "/api/v1/mail/blocks", body: { value: "News@Deals-Mail.example" } });
+    expect(created).toMatchObject({ value: "news@deals-mail.example", kind: "address" });
+    expect(await blocked()).toEqual(["msg_5"]);
+    const detail = await client.request<{ blocked?: boolean }>({ method: "GET", path: "/api/v1/mail/messages/msg_5" });
+    expect(detail.blocked).toBe(true);
+    const thread = await client.request<{ messages: { blocked?: boolean }[] }>({ method: "GET", path: "/api/v1/mail/threads/thr_5" });
+    expect(thread.messages[0]!.blocked).toBe(true);
+
+    await expect(client.request({ method: "POST", path: "/api/v1/mail/blocks", body: { value: "developershub.jp" } })).rejects.toBeInstanceOf(ApiError);
+    await expect(client.request({ method: "POST", path: "/api/v1/mail/blocks", body: { value: "demo@developershub.jp" } })).rejects.toBeInstanceOf(ApiError);
+
+    await client.request({ method: "POST", path: "/api/v1/mail/blocks", body: { value: "acme.co.jp", kind: "domain" } });
+    expect((await blocked()).sort()).toEqual(["msg_2", "msg_5"]);
+    const list = await client.request<{ items: { value: string }[] }>({ method: "GET", path: "/api/v1/mail/blocks" });
+    expect(list.items.map((b) => b.value)).toEqual(["acme.co.jp", "news@deals-mail.example"]);
+
+    await client.request({ method: "DELETE", path: `/api/v1/mail/blocks/${encodeURIComponent("news@deals-mail.example")}` });
+    expect(await blocked()).toEqual(["msg_2"]);
+  });
+});
+
+describe("demo folder views (?folder=, gateway parity)", () => {
+  it("excludes blocked senders BEFORE the limit: inbox pages 1 and 2 are full; ブロック済み pages the rest", async () => {
+    globalThis.localStorage.clear();
+    globalThis.history.replaceState(null, "", "/?demo_mail_bulk=180");
+    try {
+      const a = api();
+      type Page = { items: { threadId: string; blocked?: boolean; from: { email: string } }[]; nextCursor: string | null; total?: number };
+      const get = (folder: string, cursor?: string) =>
+        a.request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { folder, limit: 50, ...(cursor ? { cursor } : {}) } });
+      const before = (await get("inbox")).total!;
+      await a.request({ method: "POST", path: "/api/v1/mail/blocks", body: { value: "sale@shop-a.example" } });
+      await a.request({ method: "POST", path: "/api/v1/mail/blocks", body: { value: "spam-b.example", kind: "domain" } });
+      const p1 = await get("inbox");
+      const p2 = await get("inbox", p1.nextCursor!);
+      const threads = (p: Page) => new Set(p.items.map((m) => m.threadId)).size;
+      expect(threads(p1)).toBe(50);
+      expect(threads(p2)).toBe(50);
+      expect([...p1.items, ...p2.items].some((m) => /shop-a|spam-b/.test(m.from.email))).toBe(false);
+      const blocked = await get("blocked");
+      expect(blocked.items.every((m) => m.blocked)).toBe(true);
+      expect(p1.total! + blocked.total!).toBe(before);
+      const counts = await a.request<Record<string, { total: number; unread: number }>>({ method: "GET", path: "/api/v1/mail/counts" });
+      expect(counts.inbox!.total).toBe(p1.total);
+      expect(counts.blocked!.unread).toBe(0);
+    } finally {
+      globalThis.history.replaceState(null, "", "/");
+    }
   });
 });

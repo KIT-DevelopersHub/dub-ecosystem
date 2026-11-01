@@ -49,6 +49,19 @@ export interface AdminViewPasswordResponse {
   email: string;
   password: string;
 }
+// admin sends the account-issue mail (アカウント発行メール) to a linked 運営メンバー via the
+// gateway at POST /api/v1/admin/users/:userId/account-mail (identity:admin). Body is empty.
+// The gateway resolves the member's Gmail (to) + the @developershub.jp login (cc), reuses
+// the current password or issues one (mustChange), and sends ONE mail. The password itself
+// is never echoed back.
+export interface AdminSendAccountMailResponse {
+  ok: true;
+  to: string;
+  cc: string;
+  appUrl: string;
+  passwordSource: "existing" | "generated";
+  messageId: string;
+}
 export interface AuthVerifyRequest {
   token: string;
 }

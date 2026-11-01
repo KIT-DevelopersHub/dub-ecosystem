@@ -658,20 +658,40 @@ export class MemberService {
   // forwards their identity userId as x-dub-user-id). Resolved via the identity link to
   // their member_people row, so edits round-trip to the real roster (実DB) and survive a
   // reload — distinct from the admin submit/review pipeline (submitParticipation).
-  private toSelfParticipation(p: PersonRow): member.SelfParticipation {
-    return member.pickPersonProfile(toMember(p, []));
+  // 運営での情報 (役割/ステータス/チーム/リーダー) は名簿と同じ行から読み取り専用で返す。
+  private async toSelfParticipation(p: PersonRow): Promise<member.SelfParticipation> {
+    const [teams, links, leader] = await Promise.all([
+      this.deps.repo.listTeams(p.orgId),
+      this.deps.repo.teamLinksForOrg(p.orgId),
+      p.leaderId ? this.deps.repo.getPerson(p.leaderId) : Promise.resolve(null),
+    ]);
+    const mine = new Set(links.filter((l) => l.personId === p.id).map((l) => l.teamId));
+    return {
+      ...member.pickPersonProfile(toMember(p, [])),
+      contact: p.contact,
+      operations: {
+        name: p.name,
+        roleTitle: p.roleTitle,
+        status: p.status,
+        teams: teams.filter((t) => mine.has(t.id)).map((t) => ({ id: t.id, name: t.name, color: t.color })),
+        leaderName: leader && !leader.archivedAt ? leader.name : null,
+      },
+    };
   }
 
-  /** The signed-in user's OWN 参加届, resolved via their identity link to a member_people
-   *  row. All-null when the caller has no linked roster entry yet. */
+  /** The signed-in user's OWN roster entry, resolved via their identity link to a
+   *  member_people row. All-null (operations null) when the caller has no linked entry yet. */
   async getSelfParticipation(identityUserId: string): Promise<member.SelfParticipation> {
     const p = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, identityUserId);
-    return p ? this.toSelfParticipation(p) : member.emptyPersonProfile();
+    return p ? this.toSelfParticipation(p) : { ...member.emptyPersonProfile(), contact: null, operations: null };
   }
 
-  /** Fold a self 参加届 patch onto a PersonRow's profile fields (共通ルールで検証)。 */
+  /** Fold a self patch onto a PersonRow: profile fields (共通ルールで検証) + 連絡先 only.
+   *  運営の項目 (役割/ステータス/チーム/リーダー) は本人からは変えられないので無視する。 */
   private applySelfPatch(base: PersonRow, patch: member.SelfParticipationUpdateRequest): PersonRow {
-    return { ...base, ...profilePatch(patch) };
+    const next: PersonRow = { ...base, ...profilePatch(patch) };
+    if (patch.contact !== undefined) next.contact = optText(patch.contact, "contact");
+    return next;
   }
 
   /** Patch the signed-in user's OWN 参加届. Updates the caller's linked member_people row
@@ -698,7 +718,7 @@ export class MemberService {
       };
       const ok = await this.deps.repo.updatePerson(next, cur.version);
       if (!ok) throw errVersionConflict(cur.id);
-      return this.toSelfParticipation(next);
+      return await this.toSelfParticipation(next);
     }
 
     // No linked roster entry yet — create one linked to the caller's identity account.
@@ -725,7 +745,7 @@ export class MemberService {
     const fallbackLocal = (seed.gmail ?? seed.schoolEmail ?? "").split("@")[0] ?? "";
     const row: PersonRow = { ...seed, name: (composed || fallbackLocal || "メンバー").slice(0, MAX_NAME_LEN) };
     await this.deps.repo.createPerson(row, []);
-    return this.toSelfParticipation(row);
+    return await this.toSelfParticipation(row);
   }
 
   // ---- オンボーディング案内 -------------------------------------------------------

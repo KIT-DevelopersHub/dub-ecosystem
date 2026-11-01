@@ -169,3 +169,49 @@ CREATE UNIQUE INDEX idx_chat_slack_import_jobs_channel ON chat_slack_import_jobs
 CREATE INDEX idx_chat_slack_import_jobs_recent ON chat_slack_import_jobs(org_id, updated_at DESC);
 `.trim(),
 };
+
+// Forward-only add-on: workspace custom emoji (src/custom-emoji.ts). An image row points at
+// R2 `custom-emoji/<name>`; an alias row has no image and renders alias_of. Physical mirror:
+// infra/d1/migrations/chat/0006_custom_emojis.sql.
+export const CHAT_CUSTOM_EMOJI_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0006_custom_emojis",
+  up: `
+CREATE TABLE chat_custom_emojis (
+  name         TEXT PRIMARY KEY,
+  r2_key       TEXT,
+  content_type TEXT,
+  alias_of     TEXT,
+  source       TEXT NOT NULL CHECK (source IN ('slack','upload')),
+  created_by   TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  CHECK ((alias_of IS NULL AND r2_key IS NOT NULL AND content_type IS NOT NULL)
+      OR (alias_of IS NOT NULL AND r2_key IS NULL AND content_type IS NULL))
+);
+`.trim(),
+};
+
+// Forward-only add-on: ORG-WIDE sidebar sections (one shared set every member sees), replacing
+// 0004's per-user sections (left in place, no longer used). A channel sits in at most one
+// shared section (PK channel_id). Writes need chat:manage_sections. Physical mirror:
+// infra/d1/migrations/chat/0007_shared_sections.sql.
+export const CHAT_SHARED_SECTIONS_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0007_shared_sections",
+  up: `
+CREATE TABLE chat_shared_sections (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_chat_shared_sections_position ON chat_shared_sections(position);
+CREATE TABLE chat_shared_channel_sections (
+  channel_id TEXT PRIMARY KEY REFERENCES chat_channels(id),
+  section_id TEXT NOT NULL REFERENCES chat_shared_sections(id)
+);
+CREATE INDEX idx_chat_shared_channel_sections_section ON chat_shared_channel_sections(section_id);
+`.trim(),
+};

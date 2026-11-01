@@ -31,11 +31,28 @@ export interface CheckoutSession {
   /** "paid" | "unpaid" | "no_payment_required" */
   paymentStatus: string | null;
   clientReferenceId: string | null;
+  /** PaymentMethod.type actually used ("card" | "paypay" | ...). Only when payment_intent.payment_method is expanded. */
+  paymentMethodType: string | null;
 }
+
+/** Expansion that exposes the used payment method type on a retrieved session. */
+export const SESSION_EXPAND = "payment_intent.payment_method";
 
 export interface StripeClient {
   createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSession>;
   getCheckoutSession(id: string): Promise<CheckoutSession>;
+}
+
+/** sk_live_ / rk_live_ = real charges. sk_test_ / rk_test_ = sandbox. */
+export function isLiveStripeKey(key: string): boolean {
+  return /^(sk|rk)_live_/.test(key);
+}
+
+/** Live keys are refused unless STRIPE_ALLOW_LIVE="1" (fail-closed: no real charges by accident). */
+export function usableStripeKey(key: string | undefined, allowLive: string | undefined): string | null {
+  if (!key) return null;
+  if (isLiveStripeKey(key) && allowLive !== "1") return null;
+  return key;
 }
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
@@ -49,7 +66,16 @@ export function toCheckoutSession(raw: unknown): CheckoutSession {
     status: s(r.status),
     paymentStatus: s(r.payment_status),
     clientReferenceId: s(r.client_reference_id),
+    paymentMethodType: usedPaymentMethodType(r.payment_intent),
   };
+}
+
+function usedPaymentMethodType(pi: unknown): string | null {
+  if (!pi || typeof pi !== "object") return null;
+  const pm = (pi as Record<string, unknown>).payment_method;
+  if (!pm || typeof pm !== "object") return null;
+  const t = (pm as Record<string, unknown>).type;
+  return typeof t === "string" && t ? t : null;
 }
 
 export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, init) => fetch(i, init)): StripeClient {
@@ -75,9 +101,10 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
     createCheckoutSession(i) {
       const f = new URLSearchParams();
       f.set("mode", "payment");
-      // Card only: delayed methods (e.g. konbini) complete with payment_status=unpaid and pay
-      // after the 35-min seat hold, which would oversell and leave the order pending.
-      f.set("payment_method_types[0]", "card");
+      // Payment methods come from the Dashboard (dynamic payment methods; API 2026-09-30+ rejects
+      // payment_method_types). Card and PayPay (JPY, one-time, 50..1,000,000, immediate) are enabled
+      // there; Stripe hides PayPay when a session is ineligible. Keep delayed methods (e.g. konbini)
+      // disabled: they settle after the 35-min seat hold.
       i.lineItems.forEach((l, n) => {
         f.set(`line_items[${n}][price_data][currency]`, "jpy");
         f.set(`line_items[${n}][price_data][unit_amount]`, String(l.unitAmountJpy));
@@ -94,7 +121,8 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
       return call("POST", "/checkout/sessions", f);
     },
     getCheckoutSession(id) {
-      return call("GET", `/checkout/sessions/${encodeURIComponent(id)}`);
+      const q = new URLSearchParams({ "expand[]": SESSION_EXPAND });
+      return call("GET", `/checkout/sessions/${encodeURIComponent(id)}?${q.toString()}`);
     },
   };
 }

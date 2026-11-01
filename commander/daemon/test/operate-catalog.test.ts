@@ -183,6 +183,8 @@ describe("operate catalog", () => {
     const keys = requiredPermissionKeys();
     expect(keys).toContain("event:read");
     expect(keys).toContain("app:events:edit");
+    // Slack import is admin-only by default: the bot role has to be granted these on purpose.
+    expect(keys).toEqual(expect.arrayContaining(["chat:slack_import", "chat:emoji_import"]));
     for (const k of ["event:admin", "task:delete", "chat:delete", "chat:moderate", "file:admin"]) expect(keys).not.toContain(k);
   });
 });

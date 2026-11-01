@@ -38,7 +38,8 @@ Slack 無料プランは **直近 90 日分**のメッセージ・ファイル�
 1. [Slack API: Your Apps](https://api.slack.com/apps) で旧 LMB アプリを開く。
 2. OAuth & Permissions の Bot Token Scopes に次を追加:
    `channels:read` `groups:read` `channels:history` `groups:history` `channels:join`
-   `users:read` `users:read.email` `files:read` `bookmarks:read`
+   `users:read` `users:read.email` `files:read` `bookmarks:read` `emoji:read`
+   (`emoji:read` はカスタム絵文字の取り込み(5c)用。チャンネル取り込みだけなら不要)
 3. ワークスペースに再インストールし、Bot User OAuth Token（`xoxb-...`）を控える（コミットしない）。
 4. 取り込みたい**非公開**チャンネルで `/invite @<LMBアプリ名>`（公開チャンネルは自動で参加する）。
 
@@ -74,6 +75,18 @@ SLACK_BOT_TOKEN=xoxb-... CLOUDFLARE_API_TOKEN=... pnpm --filter @dub/infra-d1 sl
 - 失敗したジョブは同じチャンネルで再度「取り込み」を押すと続きから再開。完了済みを押すと差分取り込み。
 - 20MB 超・DL 不可のファイルは件数だけ数えて添付行を作らない。
 
+## 5c. カスタム絵文字の取り込み(fe6-chat 絵文字ピッカー「カスタム」)
+
+ロール管理 > チャット > 細かい権限「Slack の絵文字を取り込み」(`chat:emoji_import`・既定は admin のみ ON)を
+持つ人がピッカーの「Slack の絵文字を取り込む」を押すと、`emoji.list` の画像を R2(`dub-file-attachments` の
+`custom-emoji/<name>`)へ**原寸・原形式のまま**保存し `chat_custom_emojis` に登録する。
+
+- 有効化: Bot Token に `emoji:read` を追加して再インストール。`infra/d1/migrations/chat/0006_custom_emojis.sql` と
+  `identity/0023_chat_emoji_import_perm.sql` を dub-core に 1 回適用。
+- `POST /chat/custom-emojis/slack-import {after}` を画面が繰り返す(1 回 = 最大 20 枚 DL + 1 回の D1 batch)。
+  既存名はスキップ(冪等)。alias は画像を持たず `alias_of` で解決。標準絵文字への alias は対象外。
+- 取り込み済みのリアクション `:name:` は、同名のカスタム絵文字があれば自動で画像表示になる。
+
 ## 6. 実装の所在
 
 | ファイル | 役割 |
@@ -81,6 +94,7 @@ SLACK_BOT_TOKEN=xoxb-... CLOUDFLARE_API_TOKEN=... pnpm --filter @dub/infra-d1 sl
 | `services/chat-service/src/slack-import.ts` | アプリ内取り込みのステップエンジン(ルートは `app.ts`、認可は `policy-table.ts`) |
 | `packages/slack-import/src/mapping.ts` | 純粋関数層（型・決定的 ID・本文変換・絵文字・行/SQL 生成） |
 | `packages/slack-import/src/run.ts` | CLI 用の取得と順序付け（仮ユーザー → チャンネル → メッセージ） |
-| `packages/slack-import/src/client.ts` | Slack Web API（ページネーション・429 リトライ・join・ファイル DL） |
+| `packages/slack-import/src/client.ts` | Slack Web API（ページネーション・429 リトライ・join・ファイル DL・emoji.list） |
+| `services/chat-service/src/custom-emoji.ts` + `packages/slack-import/src/emoji.ts` | カスタム絵文字の取り込み・一覧・画像配信 |
 | `infra/d1/src/slackFixtureSource.ts` + `infra/d1/fixtures/slack/` | オフライン dry-run 用 |
 | `infra/d1/scripts/slack-import.ts` | CLI |

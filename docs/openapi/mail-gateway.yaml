@@ -121,6 +121,25 @@ paths:
           in: query
           schema:
             type: string
+        - name: q
+          in: query
+          description: >-
+            Free-text search (case-insensitive for ASCII, substring) over subject, snippet,
+            body, From, To and Cc. Trimmed; blank means no search; max 200 chars (400
+            otherwise). Only narrows the caller's account scope. GET /sent accepts the same
+            parameter (subject, snippet, body, To, Cc).
+          schema:
+            type: string
+            maxLength: 200
+        - name: folder
+          in: query
+          description: >-
+            Mailbox view (inbox, mine, others, starred, archive, trash, blocked, all). When
+            set, pages by conversation with blocked senders and the caller's flags applied
+            before the limit, and the response adds `total` (conversations in the view).
+          schema:
+            type: string
+            enum: [inbox, mine, others, starred, archive, trash, blocked, all]
       responses:
         '200':
           description: Page of messages
@@ -747,6 +766,11 @@ components:
             $ref: '#/components/schemas/MailAddress'
         cc:
           type: array
+          items:
+            $ref: '#/components/schemas/MailAddress'
+        bcc:
+          type: array
+          description: Envelope-only recipients (max 100). Never written to a header; shown in Sent to the sender only. Rejected on a scheduled send.
           items:
             $ref: '#/components/schemas/MailAddress'
         subject:

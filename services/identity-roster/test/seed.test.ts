@@ -75,6 +75,45 @@ describe("seedReferenceData / system roles", () => {
     }
   });
 
+  it("calendar:schedule_edit starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("calendar:schedule_edit");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("calendar:schedule_edit");
+    }
+  });
+
+  it("chat:emoji_import starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("chat:emoji_import");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("chat:emoji_import");
+    }
+  });
+
+  it("chat:manage_sections starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("chat:manage_sections");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("chat:manage_sections");
+    }
+  });
+
+  it("人事 (app:hr:* / hr:*) starts ON for admin only — unreleased app, other roles opt in via ロール管理", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    const keys = ["app:hr:view", "app:hr:edit", "hr:read", "hr:write", "hr:admin"] as const;
+    const admin = (await repo.getRoleByName(ORG_ID, "admin"))!.permissions;
+    for (const k of keys) expect(admin).toContain(k);
+    for (const name of ["maintainer", "organizer", "member"]) {
+      const perms = (await repo.getRoleByName(ORG_ID, name))!.permissions;
+      for (const k of keys) expect(perms, `${name} ${k}`).not.toContain(k);
+    }
+  });
+
   it("is idempotent: re-seeding does not duplicate roles or widen admin", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);
