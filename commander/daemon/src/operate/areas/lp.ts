@@ -129,6 +129,16 @@ export const LP: AreaSpec = {
     },
     {
       service: S,
+      route: "POST /lp/tickets/coupons",
+      reason: "無料券のクーポンコードを発行する操作（コードは券と同じ価値・lp:publish 詳細キー）。発行はオーナーが LP管理 で手で行う",
+    },
+    {
+      service: S,
+      route: "PATCH /lp/tickets/coupons/:id",
+      reason: "クーポンコードの停止/再開（lp:publish 詳細キー）。本番 LP で使えるかが即座に変わるので、オーナーが LP管理 で手で行う",
+    },
+    {
+      service: S,
       route: "POST /lp/tickets/preview-token",
       reason: "LP管理プレビューでテスト購入するための一時トークン発行で、Dub のデータではない",
     },
@@ -140,6 +150,7 @@ export const LP: AreaSpec = {
     { service: S, route: "POST /lp/tickets/types" },
     { service: S, route: "PATCH /lp/tickets/types/:id" },
     { service: S, route: "GET /lp/tickets/orders" },
+    { service: S, route: "GET /lp/tickets/coupons" },
     // 登壇者募集の設定・応募一覧も未開放。
     { service: S, route: "GET /lp/proposals" },
     { service: S, route: "POST /lp/proposals/fields" },

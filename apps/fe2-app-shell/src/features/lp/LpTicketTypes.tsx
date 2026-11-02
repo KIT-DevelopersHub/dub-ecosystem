@@ -27,6 +27,7 @@ import {
   TICKET_MAX_PER_ORDER_MAX,
   TICKET_NAME_MAX,
   TICKET_PRICE_MIN_PAID,
+  COUPON_ONLY_NOTE,
   formatPrice,
   formatYen,
   groupTicketTypesByDay,
@@ -98,7 +99,17 @@ export function LpTicketTypesCard({
         align: "right",
         width: "8rem",
         noWrap: true,
-        cell: (t) => <span className={styles.num}>{formatPrice(t.priceJpy)}</span>,
+        cell: (t) =>
+          t.priceJpy === 0 ? (
+            <Stack gap={1}>
+              <span className={styles.num}>{formatPrice(t.priceJpy)}</span>
+              <span className={styles.kpiHint} data-testid={`fe2-lp-ticket-type-coupon-only-${t.id}`}>
+                クーポン専用
+              </span>
+            </Stack>
+          ) : (
+            <span className={styles.num}>{formatPrice(t.priceJpy)}</span>
+          ),
       },
       {
         key: "capacity",
@@ -341,10 +352,33 @@ function TicketTypeDialog({
           label="価格（円）"
           htmlFor="fe2-lp-ticket-type-price"
           required
-          help={`0 = 無料（決済なしで即申込完了）。有料は ${TICKET_PRICE_MIN_PAID} 円以上`}
+          help={`0 = 無料（決済なし・クーポンコードで申し込む券種）。有料は ${TICKET_PRICE_MIN_PAID} 円以上`}
           {...err("price")}
         >
-          <TextField id="fe2-lp-ticket-type-price" testId="fe2-lp-ticket-type-price" type="number" value={draft.price} placeholder="3000" onChange={(v) => set({ price: v })} />
+          <div style={{ display: "grid", gap: "var(--dub-space-2)" }}>
+            <TextField id="fe2-lp-ticket-type-price" testId="fe2-lp-ticket-type-price" type="number" value={draft.price} placeholder="3000" onChange={(v) => set({ price: v })} />
+            {draft.price.trim() !== "" && Number(draft.price.trim()) === 0 ? (
+              <p
+                data-testid="fe2-lp-ticket-type-coupon-note"
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "var(--dub-space-2)",
+                  margin: 0,
+                  padding: "var(--dub-space-3) var(--dub-space-4)",
+                  border: "1px solid var(--dub-color-border-default)",
+                  borderRadius: "var(--dub-radius-sm)",
+                  background: "var(--dub-color-surface-sunken)",
+                  color: "var(--dub-color-text-secondary)",
+                  fontSize: "var(--dub-font-size-sm)",
+                  lineHeight: "var(--dub-font-lineHeight-relaxed)",
+                }}
+              >
+                <Icon name="info" />
+                <span>{COUPON_ONLY_NOTE}。コードは「クーポン」欄から発行して招待者に渡してください。</span>
+              </p>
+            ) : null}
+          </div>
         </FormField>
         <FormField label="定員（枚）" htmlFor="fe2-lp-ticket-type-capacity" help="この券種で売る合計枚数。空欄 = 無制限" {...err("capacity")}>
           <TextField id="fe2-lp-ticket-type-capacity" testId="fe2-lp-ticket-type-capacity" type="number" value={draft.capacity} placeholder="無制限" onChange={(v) => set({ capacity: v })} />

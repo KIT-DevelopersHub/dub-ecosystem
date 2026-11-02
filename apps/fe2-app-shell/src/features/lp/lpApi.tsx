@@ -209,6 +209,8 @@ export interface LpTicketOrder {
   paidAt: string | null;
   /** needs_review になった理由。確定後も履歴として残る（status は paid）。 */
   reviewReason: string | null;
+  /** 使ったクーポン。クーポン注文は常に 0 円。 */
+  couponId: string | null;
   /** 実際に使われた Stripe の決済手段（"card" / "paypay" など）。無料・未確定・不明は null。古い API では無い。 */
   paymentMethod?: string | null;
   /** LP管理のプレビューから作られた注文。古い API では無い。 */
@@ -228,6 +230,35 @@ export interface LpTicketTypeInput {
   dayLabel: string;
   maxPerOrder: number;
   active: boolean;
+}
+/** 無料券のクーポン。1 コード = 1 券種 x 最大 maxUses 枚。used = 使った枚数（決済待ち・要確認の確保分を含む）。 */
+export interface LpTicketCoupon {
+  id: string;
+  /** サーバー生成（英大文字 + 数字 10 文字）。 */
+  code: string;
+  label: string;
+  ticketTypeId: string;
+  maxUses: number;
+  used: number;
+  /** null = 期限なし */
+  expiresAt: string | null;
+  /** false = 停止中。削除は無い（注文が参照するため）。 */
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface LpTicketCouponsPage {
+  items: LpTicketCoupon[];
+}
+export interface LpTicketCouponInput {
+  ticketTypeId: string;
+  /** 1..1000 */
+  maxUses: number;
+  /** 0..60 字 */
+  label?: string;
+  /** ISO・未来 */
+  expiresAt?: string;
 }
 
 // ── 登壇者募集（/proposals）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
@@ -294,6 +325,12 @@ export interface LpApi {
   listTicketOrders(query: { cursor?: string; limit?: number }): Promise<LpTicketOrdersPage>;
   /** 要確認(needs_review)の注文を支払い済みに確定 (app:lp:edit + lp:publish)。要確認でなければ 409。 */
   approveTicketOrder(id: string): Promise<LpTicketOrder>;
+  /** 無料券のクーポン一覧・新しい順 (app:lp:edit + lp:publish。コードが見えるため)。 */
+  listTicketCoupons(): Promise<LpTicketCouponsPage>;
+  /** クーポンを発行 (app:lp:edit + lp:publish)。コードはサーバー生成。 */
+  createTicketCoupon(input: LpTicketCouponInput): Promise<LpTicketCoupon>;
+  /** クーポンの停止/再開 (app:lp:edit + lp:publish)。 */
+  setTicketCouponActive(id: string, input: { active: boolean }): Promise<LpTicketCoupon>;
   /** プレビュー（販売あり）のテスト購入トークン (app:lp:edit・Stripe テストキーの時だけ。それ以外は 409)。 */
   createTicketPreviewToken(): Promise<{ token: string; expiresAt: string }>;
   /** 登壇者募集の設定・応募数 (app:lp:view)。 */
@@ -378,6 +415,15 @@ export function createLpApi(api: ApiClient): LpApi {
     },
     approveTicketOrder: (id) =>
       api.request<LpTicketOrder>({ method: "POST", path: `${BASE}/tickets/orders/${encodeURIComponent(id)}/approve` }),
+    listTicketCoupons: () => api.request<LpTicketCouponsPage>({ method: "GET", path: `${BASE}/tickets/coupons` }),
+    createTicketCoupon: (input) =>
+      api.request<LpTicketCoupon, LpTicketCouponInput>({ method: "POST", path: `${BASE}/tickets/coupons`, body: input }),
+    setTicketCouponActive: (id, input) =>
+      api.request<LpTicketCoupon, { active: boolean }>({
+        method: "PATCH",
+        path: `${BASE}/tickets/coupons/${encodeURIComponent(id)}`,
+        body: input,
+      }),
     createTicketPreviewToken: () =>
       api.request<{ token: string; expiresAt: string }>({ method: "POST", path: `${BASE}/tickets/preview-token`, body: {} }),
     getProposals: () => api.request<LpProposalsState>({ method: "GET", path: `${BASE}/proposals` }),
