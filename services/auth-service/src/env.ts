@@ -4,6 +4,7 @@
 // the only remaining Google config is the MOBILE client ids used by the separate
 // /mobile/exchange track. TTLs are vars (theme8).
 import type { KVNamespace, D1Database, Fetcher } from "@cloudflare/workers-types";
+import { buildDemoAccounts, type DemoAccountSpec } from "./demo-accounts";
 
 export interface Env {
   // --- data ---
@@ -22,6 +23,9 @@ export interface Env {
   // be set in production: when unset the route is not registered at all (no backdoor).
   DEMO_AUTOLOGIN?: string;
   DEMO_AUTOLOGIN_EMAIL?: string; // demo account for /auth/demo-login (default demo-admin@developershub.jp)
+  // STAGING ONLY. Extra comma-separated seed emails the debug menu may switch to (on top of
+  // demo-accounts.ts SEED_DEMO_ACCOUNTS). Ignored unless DEMO_AUTOLOGIN=1.
+  DEMO_AUTOLOGIN_ACCOUNTS?: string;
   COOKIE_DOMAIN?: string; // unset/empty -> host-only cookie (no Domain attr; required on *.workers.dev)
   ALLOWED_LOGIN_DOMAIN?: string; // OPTIONAL extra filter; empty (default) => no domain restriction, roster allowlist is authoritative
   SESSION_ACCESS_TTL_SEC?: string; // access lifetime (default 3600 = 1h)
@@ -90,6 +94,8 @@ export interface AppConfig {
   testLoginEnabled: boolean;
   demoAutologin: boolean; // STAGING ONLY: register the password-less /auth/demo-login route
   demoAutologinEmail: string; // fixed demo account for /auth/demo-login
+  /** STAGING ONLY: accounts demo-login may switch to (default first). Empty unless demoAutologin. */
+  demoAccounts: DemoAccountSpec[];
   cookieName: string;
   cookieDomain: string;
   allowedLoginDomain: string; // "" => domain gate disabled (roster allowlist authoritative)
@@ -131,6 +137,8 @@ function webauthnConfig(env: Env): AppConfig["webauthn"] {
 export function configFromEnv(env: Env): AppConfig {
   const environment = env.ENVIRONMENT ?? "production";
   const isProduction = environment === "production";
+  const demoAutologin = env.DEMO_AUTOLOGIN === "1";
+  const demoAutologinEmail = (env.DEMO_AUTOLOGIN_EMAIL ?? "demo-admin@developershub.jp").trim().toLowerCase();
   return {
     environment,
     isProduction,
@@ -141,8 +149,9 @@ export function configFromEnv(env: Env): AppConfig {
     // set ONLY in the staging auth-service config; production never sets it ⇒ the route
     // is not registered. A distinct flag (not DUB_TEST_LOGIN) keeps this a deliberate,
     // single-account demo door rather than the arbitrary-userId test-login.
-    demoAutologin: env.DEMO_AUTOLOGIN === "1",
-    demoAutologinEmail: (env.DEMO_AUTOLOGIN_EMAIL ?? "demo-admin@developershub.jp").trim().toLowerCase(),
+    demoAutologin,
+    demoAutologinEmail,
+    demoAccounts: demoAutologin ? buildDemoAccounts(demoAutologinEmail, env.DEMO_AUTOLOGIN_ACCOUNTS) : [],
     cookieName: "dub_session",
     cookieDomain: env.COOKIE_DOMAIN ?? DEFAULTS.cookieDomain,
     allowedLoginDomain: (env.ALLOWED_LOGIN_DOMAIN ?? DEFAULTS.allowedLoginDomain).trim().toLowerCase(),

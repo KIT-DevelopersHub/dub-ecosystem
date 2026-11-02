@@ -1,0 +1,132 @@
+/* STAGING / DEMO ONLY — never part of the production bundle (lazy chunk behind a build flag). */
+.fab {
+  position: fixed;
+  left: max(var(--dub-space-4), env(safe-area-inset-left));
+  bottom: max(var(--dub-space-6), calc(env(safe-area-inset-bottom) + var(--dub-space-5)));
+  z-index: var(--dub-z-index-sticky);
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-raised);
+  box-shadow: var(--dub-shadow-md);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-secondary);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--dub-space-2) var(--dub-space-4);
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+}
+
+.kv dt {
+  color: var(--dub-color-text-muted);
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--dub-color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--dub-font-family-mono);
+  font-size: var(--dub-font-size-xs);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-2);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+}
+
+.account[data-current="true"] {
+  border-color: var(--dub-color-brand-500);
+  background: var(--dub-color-surface-sunken);
+}
+
+.accountMain {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  min-width: 0;
+}
+
+.accountName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-primary);
+}
+
+.accountEmail {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.apps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: var(--dub-space-2) var(--dub-space-3);
+  align-items: center;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+
+.details {
+  border-top: 1px solid var(--dub-color-border-default);
+  padding-top: var(--dub-space-3);
+}
+
+.summary {
+  cursor: pointer;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+  margin-bottom: var(--dub-space-3);
+}

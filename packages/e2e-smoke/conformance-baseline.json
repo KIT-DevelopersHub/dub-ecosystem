@@ -20,6 +20,7 @@
   "auth-service": {
     "missingInSpec": [
       "DELETE /auth/passkeys/{}",
+      "GET /auth/demo-accounts",
       "GET /auth/passkeys",
       "GET /internal/admin/users/{}/password",
       "PATCH /auth/passkeys/{}",
