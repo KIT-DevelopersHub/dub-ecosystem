@@ -468,10 +468,17 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   // and no code path that logs anyone in without a credential. The demo account must
   // still be an ACTIVE roster user (the allowlist gate is unchanged), so a disabled /
   // removed demo account can't be used either.
+  //
+  // Debug-menu account switch (same flag, same route): an optional `{ email }` picks one of
+  // the FIXED seed accounts in config.demoAccounts (demo-accounts.ts). Any email outside that
+  // server-side allowlist is refused, so the client cannot name an arbitrary user.
   if (config.demoAutologin) {
     app.post("/auth/demo-login", async (c) => {
       const ctx = ctxOf(c);
-      const email = config.demoAutologinEmail;
+      const body = await readJson<Partial<auth.DemoLoginRequest>>(c).catch(() => ({}) as Partial<auth.DemoLoginRequest>);
+      const requested = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      if (requested && !config.demoAccounts.some((a) => a.email === requested)) throw authErrors.notOnAllowlist();
+      const email = requested || config.demoAutologinEmail;
       const { user } = await deps.identity.lookupByEmail(ctx, email);
       if (!user || user.status !== "active") throw authErrors.notOnAllowlist();
       const created = await deps.sessions.create(user.id, "web");
@@ -484,6 +491,27 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       });
       setSessionCookie(c, config, created);
       const res: TokenSessionResponse = { token: created.token, session: created.session };
+      return c.json(res);
+    });
+
+    // ---- GET /auth/demo-accounts (STAGING ONLY — same DEMO_AUTOLOGIN gate) ----
+    // The debug menu's account list: the allowlist above, narrowed to accounts that are
+    // ACTIVE on this environment's roster (so the menu never offers a dead button).
+    app.get("/auth/demo-accounts", async (c) => {
+      const ctx = ctxOf(c);
+      const accounts: auth.DemoAccount[] = [];
+      for (const spec of config.demoAccounts) {
+        const { user } = await deps.identity.lookupByEmail(ctx, spec.email);
+        if (!user || user.status !== "active") continue;
+        accounts.push({
+          email: spec.email,
+          userId: user.id,
+          displayName: user.displayName,
+          label: spec.label,
+          isDefault: spec.email === config.demoAutologinEmail,
+        });
+      }
+      const res: auth.DemoAccountsResponse = { accounts };
       return c.json(res);
     });
   }

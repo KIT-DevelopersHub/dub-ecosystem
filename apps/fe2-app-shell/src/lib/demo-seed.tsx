@@ -791,6 +791,15 @@ function driveSettingsOverride(perms: identity.PermissionKey[]): identity.Permis
   return mode === "view" ? [...rest, "drive:settings_view"] : rest;
 }
 
+/** Debug-menu account list: every demo account, labelled by its effective role. */
+function demoAccountsResponse(): authTypes.DemoAccountsResponse {
+  const label = (a: DemoAccount): string =>
+    isOversight(a) ? "admin（全メール閲覧）" : a.permissions.includes("identity:admin") ? "admin" : a.permissions.includes("mail:send") ? "maintainer 相当" : "member";
+  return {
+    accounts: DEMO_ACCOUNTS.map((a, i) => ({ email: a.email, userId: a.id, displayName: a.displayName, label: label(a), isDefault: i === 0 })),
+  };
+}
+
 /** The /me session for the active account (drives RequireAuth + the shell header). */
 function currentMe(): gateway.MeResponse {
   const a = currentAccount();
@@ -5049,6 +5058,20 @@ export function createDemoFetch(): typeof fetch {
     // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
     // and reloading re-scopes the whole shell — the header title, permissions and mail.
     if (method === "GET" && url.pathname === "/api/v1/me") return json(currentMe());
+    // Staging debug menu (demo twin of auth-service /auth/demo-accounts + demo-login {email}):
+    // switching just re-points the active demo account; the reload re-scopes everything.
+    if (method === "GET" && url.pathname === "/api/v1/auth/demo-accounts") return json(demoAccountsResponse());
+    if (method === "POST" && url.pathname === "/api/v1/auth/demo-login") {
+      const email = (parsedBody as authTypes.DemoLoginRequest | undefined)?.email?.trim().toLowerCase();
+      const target = email ? DEMO_ACCOUNTS.find((a) => a.email === email) : DEMO_ACCOUNTS[0];
+      if (!target) return problem("AUTH_NOT_ON_ALLOWLIST", "This account is not permitted to log in", 403);
+      try {
+        globalThis.localStorage?.setItem(DEMO_ACCOUNT_STORAGE_KEY, target.id);
+      } catch {
+        // storage blocked: the switch can't persist across the reload
+      }
+      return json({ token: "demo", session: null });
+    }
     // Self password change (#155): demo accepts any current password and reports
     // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
     // Nothing is persisted — the demo session is stateless for credentials.

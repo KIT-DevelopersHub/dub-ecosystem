@@ -1,7 +1,7 @@
 // Admin SPA entry. Wires the api-client, registers FeatureModules (FE3-FE7 add
 // theirs here as they ship), builds the router and mounts it inside AppRoot's
 // providers. Distribution: Workers static assets (provisional, theme5 4-4).
-import { StrictMode } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 // Global styles — order matters: token custom properties (:root + [data-theme]),
@@ -101,12 +101,31 @@ if (useDemo && typeof document !== "undefined") {
   document.body.appendChild(banner);
 }
 
+// STAGING / DEMO ONLY debug menu (⌘⇧D). The flag test is inlined on import.meta.env so
+// Vite folds it to `false` in a production build and Rollup drops the lazy chunk entirely;
+// CI (scripts/assert-no-staging-debug.mjs) fails the build if it ever leaks into prod.
+const isStagingBuild = import.meta.env.VITE_DEMO_AUTOLOGIN === "1";
+const DebugMenu =
+  import.meta.env.VITE_DEMO_AUTOLOGIN === "1" || import.meta.env.VITE_DEMO === "1" || import.meta.env.VITE_DEMO === "true"
+    ? lazy(() => import("./debug/StagingDebugMenu.tsx"))
+    : null;
+
 const rootEl = document.getElementById("root");
 if (rootEl) {
   createRoot(rootEl).render(
     <StrictMode>
       <AppRoot api={api}>
         <RouterProvider router={router} />
+        {DebugMenu ? (
+          <Suspense fallback={null}>
+            <DebugMenu
+              api={api}
+              mode={useDemo ? "demo" : "staging"}
+              apiBaseUrl={baseUrl}
+              showFab={isStagingBuild}
+            />
+          </Suspense>
+        ) : null}
       </AppRoot>
     </StrictMode>,
   );

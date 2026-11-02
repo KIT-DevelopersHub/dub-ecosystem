@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildApp } from "../src/app";
-import { makeHarness, jsonInit } from "./helpers";
+import { makeHarness, jsonInit, getInit } from "./helpers";
 
 describe("POST /verify (internal)", () => {
   // Still 403, but the rejection now comes from policyGate (the INTERNAL rule in
@@ -232,6 +232,62 @@ describe("POST /auth/demo-login (staging-only)", () => {
     const app = buildApp(h.deps);
     const res = await app.request("/auth/demo-login", jsonInit({}));
     expect(res.status).toBe(403);
+  });
+});
+
+// STAGING-ONLY debug menu: account switch via demo-login { email } + the account list.
+describe("debug-menu account switch (staging-only)", () => {
+  const STAGING = { ENVIRONMENT: "production", DEMO_AUTOLOGIN: "1", DEMO_AUTOLOGIN_EMAIL: "demo-admin@developershub.jp" } as const;
+
+  it("switches to an allowlisted seed account by email", async () => {
+    const h = makeHarness(STAGING);
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-login", jsonInit({ email: "Demo-Member@dev.developershub.jp" }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toContain("dub_session=");
+    expect(h.identity.lookupCalls).toEqual(["demo-member@dev.developershub.jp"]);
+  });
+
+  it("refuses an email outside the server-side allowlist (no arbitrary user)", async () => {
+    const h = makeHarness(STAGING);
+    const app = buildApp(h.deps);
+    for (const email of ["info@developershub.jp", "admin@developershub.jp", "someone@developershub.jp"]) {
+      const res = await app.request("/auth/demo-login", jsonInit({ email }));
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_NOT_ON_ALLOWLIST");
+    }
+    expect(h.identity.lookupCalls).toEqual([]); // refused before touching the roster
+  });
+
+  it("accepts extra emails from DEMO_AUTOLOGIN_ACCOUNTS", async () => {
+    const h = makeHarness({ ...STAGING, DEMO_AUTOLOGIN_ACCOUNTS: " qa1@developershub.jp , qa2@developershub.jp" });
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-login", jsonInit({ email: "qa2@developershub.jp" }));
+    expect(res.status).toBe(200);
+  });
+
+  it("lists only ACTIVE allowlisted accounts, default first", async () => {
+    const h = makeHarness(STAGING);
+    const app = buildApp(h.deps);
+    const res = await app.request("/auth/demo-accounts", getInit());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { accounts: { email: string; label: string; isDefault: boolean }[] };
+    expect(body.accounts[0]).toMatchObject({ email: "demo-admin@developershub.jp", label: "admin", isDefault: true });
+    expect(body.accounts.map((a) => a.email)).toContain("demo-organizer@dev.developershub.jp");
+    expect(body.accounts.map((a) => a.email)).not.toContain("info@developershub.jp");
+    expect(body.accounts.filter((a) => a.isDefault)).toHaveLength(1);
+
+    h.identity.lookupUser = null; // nobody on the roster
+    const empty = (await (await app.request("/auth/demo-accounts", getInit())).json()) as { accounts: unknown[] };
+    expect(empty.accounts).toEqual([]);
+  });
+
+  it("neither route exists (404) without DEMO_AUTOLOGIN — production unchanged", async () => {
+    const h = makeHarness({ ENVIRONMENT: "production", DEMO_AUTOLOGIN_ACCOUNTS: "member@developershub.jp" });
+    const app = buildApp(h.deps);
+    expect((await app.request("/auth/demo-accounts", getInit())).status).toBe(404);
+    expect((await app.request("/auth/demo-login", jsonInit({ email: "member@developershub.jp" }))).status).toBe(404);
+    expect(h.deps.config.demoAccounts).toEqual([]);
   });
 });
 
