@@ -13,6 +13,7 @@
 // committed, so realtime never leads the source of truth. Fanout is best-effort: a DO push
 // failure never fails the notification write that already succeeded.
 import { DurableObject } from "cloudflare:workers";
+import { common } from "@dub/types";
 import { verifyWsTicket, DEV_WS_SECRET } from "./wsticket";
 
 export interface InboxRoomEnv {
@@ -26,7 +27,7 @@ export interface InboxRoomEnv {
 
 // Dev-only ws-ticket secret fallback (DEV_WS_SECRET) is imported from wsticket.ts so the
 // issuer (app.ts) and this verifier share ONE value without app.ts importing this module.
-const DEFAULT_ALLOWED_ORIGINS = "https://app.developershub.jp";
+const DEFAULT_ALLOWED_ORIGINS = common.PUBLIC_APP_ORIGINS.join(",");
 
 // The realtime event pushed to the browser. `inbox-changed` is a lightweight SIGNAL that
 // the user's inbox gained a new item; the client responds by refetching its AUTHORITATIVE

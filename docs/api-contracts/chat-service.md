@@ -516,7 +516,7 @@ The DO is the sole gate and enforces, in order:
 | Ticket's channel != path channel | 403 | `CHAT_WS_TICKET_CHANNEL_MISMATCH` |
 
 Native / mobile clients send **no** `Origin` and skip the Origin check; browser clients must
-match the server allow-list (default `https://app.developershub.jp`). On success the DO
+match the server allow-list (default `@dub/types` `common.PUBLIC_APP_ORIGINS`: the live workers.dev SPA + the planned `https://app.developershub.jp`). On success the DO
 returns `101 Switching Protocols`.
 
 ### 7.3 WS message protocol
