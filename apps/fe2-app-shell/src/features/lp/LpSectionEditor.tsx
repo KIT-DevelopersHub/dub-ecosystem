@@ -264,90 +264,92 @@ export function LpSectionEditor({
   ].filter((n): n is string => !!n);
 
   return (
-    <Card
-      padded={false}
-      testId="fe2-lp-config-editor"
-      header={
-        <div className={styles.miniHeader}>
-          <span>{title}</span>
-          {refreshing ? <Spinner size="sm" testId="fe2-lp-config-mini-refreshing" /> : null}
-          {narrow ? (
-            <Button variant="ghost" size="sm" onClick={() => setPreviewOpen((v) => !v)} testId="fe2-lp-config-mini-toggle">
-              {previewOpen ? "プレビューを隠す" : "プレビューを見る"}
-            </Button>
-          ) : null}
-          <a className={styles.urlOpen} href={src} target="_blank" rel="noopener noreferrer" aria-label={`${title}を新しいタブで開く`}>
-            <Icon name="external-link" />
-          </a>
-        </div>
-      }
-    >
-      {allNotes.map((text, i) => (
-        <p key={text} className={styles.miniNote} data-testid={i === 0 && bridge === "none" ? "fe2-lp-config-mini-nosync" : "fe2-lp-config-mini-note"}>
-          <Icon name="info" />
-          <span>{text}</span>
-        </p>
-      ))}
-      <div className={styles.lpEditor} data-narrow={narrow} data-sync={bridge}>
-        <div ref={previewRef} className={styles.lpEditorPreview} hidden={!showPreview} data-testid="fe2-lp-config-mini">
-          <div className={styles.miniBox} style={{ height: boxHeight }} data-fit={previewHeight !== null} data-testid="fe2-lp-config-mini-box">
-            {!loaded ? (
-              <div className={styles.miniSkeleton} role="status" aria-label="プレビューを読み込み中">
-                <Skeleton variant="rect" width="100%" height="100%" testId="fe2-lp-config-mini-loading" />
-              </div>
+    <div className={styles.lpEditorCard}>
+      <Card
+        padded={false}
+        testId="fe2-lp-config-editor"
+        header={
+          <div className={styles.miniHeader}>
+            <span>{title}</span>
+            {refreshing ? <Spinner size="sm" testId="fe2-lp-config-mini-refreshing" /> : null}
+            {narrow ? (
+              <Button variant="ghost" size="sm" onClick={() => setPreviewOpen((v) => !v)} testId="fe2-lp-config-mini-toggle">
+                {previewOpen ? "プレビューを隠す" : "プレビューを見る"}
+              </Button>
             ) : null}
-            <iframe
-              src={src}
-              title={title}
-              data-testid="fe2-lp-config-mini-frame"
-              ref={frameRef}
-              onLoad={onFrameLoad}
-              scrolling={previewHeight !== null ? "no" : undefined}
-              className={styles.miniFrame}
-              style={{ width: FRAME_WIDTH, height: frameHeight, transform: `scale(${scale})` }}
-            />
+            <a className={styles.urlOpen} href={src} target="_blank" rel="noopener noreferrer" aria-label={`${title}を新しいタブで開く`}>
+              <Icon name="external-link" />
+            </a>
+          </div>
+        }
+      >
+        {allNotes.map((text, i) => (
+          <p key={text} className={styles.miniNote} data-testid={i === 0 && bridge === "none" ? "fe2-lp-config-mini-nosync" : "fe2-lp-config-mini-note"}>
+            <Icon name="info" />
+            <span>{text}</span>
+          </p>
+        ))}
+        <div className={styles.lpEditor} data-narrow={narrow} data-sync={bridge}>
+          <div ref={previewRef} className={styles.lpEditorPreview} hidden={!showPreview} data-testid="fe2-lp-config-mini">
+            <div className={styles.miniBox} style={{ height: boxHeight }} data-fit={previewHeight !== null} data-testid="fe2-lp-config-mini-box">
+              {!loaded ? (
+                <div className={styles.miniSkeleton} role="status" aria-label="プレビューを読み込み中">
+                  <Skeleton variant="rect" width="100%" height="100%" testId="fe2-lp-config-mini-loading" />
+                </div>
+              ) : null}
+              <iframe
+                src={src}
+                title={title}
+                data-testid="fe2-lp-config-mini-frame"
+                ref={frameRef}
+                onLoad={onFrameLoad}
+                scrolling={previewHeight !== null ? "no" : undefined}
+                className={styles.miniFrame}
+                style={{ width: FRAME_WIDTH, height: frameHeight, transform: `scale(${scale})` }}
+              />
+            </div>
+          </div>
+          <div
+            className={styles.lpEditorSettings}
+            data-layout={tops ? "aligned" : "stacked"}
+            data-active-section={active ?? ""}
+            style={tops ? { height: columnHeight } : undefined}
+            data-testid="fe2-lp-config-settings"
+          >
+            {tops && report
+              ? report.sections
+                  .filter((s) => sectionIds.includes(s.id))
+                  .map((s) => (
+                    <span
+                      key={s.id}
+                      className={styles.lpEditorRange}
+                      data-active={active === s.id}
+                      style={{ top: Math.round(s.top * scale), height: Math.max(8, Math.round(s.height * scale)) }}
+                      aria-hidden="true"
+                    />
+                  ))
+              : null}
+            {sectionIds.map((id, i) => (
+              <div key={id} className={styles.lpEditorBand} data-lp-block={id} style={tops ? { top: tops[id], height: bandHeight(id, i) } : undefined}>
+                <div
+                  ref={(el) => {
+                    if (el) blockRefs.current.set(id, el);
+                    else blockRefs.current.delete(id);
+                  }}
+                  className={styles.lpEditorBlock}
+                  data-active={active === id}
+                  onMouseEnter={() => focusSection(id)}
+                  onFocus={() => focusSection(id)}
+                  aria-label={sectionLabel(id)}
+                  role="group"
+                >
+                  {renderSection(id)}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-        <div
-          className={styles.lpEditorSettings}
-          data-layout={tops ? "aligned" : "stacked"}
-          data-active-section={active ?? ""}
-          style={tops ? { height: columnHeight } : undefined}
-          data-testid="fe2-lp-config-settings"
-        >
-          {tops && report
-            ? report.sections
-                .filter((s) => sectionIds.includes(s.id))
-                .map((s) => (
-                  <span
-                    key={s.id}
-                    className={styles.lpEditorRange}
-                    data-active={active === s.id}
-                    style={{ top: Math.round(s.top * scale), height: Math.max(8, Math.round(s.height * scale)) }}
-                    aria-hidden="true"
-                  />
-                ))
-            : null}
-          {sectionIds.map((id, i) => (
-            <div key={id} className={styles.lpEditorBand} data-lp-block={id} style={tops ? { top: tops[id], height: bandHeight(id, i) } : undefined}>
-              <div
-                ref={(el) => {
-                  if (el) blockRefs.current.set(id, el);
-                  else blockRefs.current.delete(id);
-                }}
-                className={styles.lpEditorBlock}
-                data-active={active === id}
-                onMouseEnter={() => focusSection(id)}
-                onFocus={() => focusSection(id)}
-                aria-label={sectionLabel(id)}
-                role="group"
-              >
-                {renderSection(id)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Card>
+      </Card>
+    </div>
   );
 }

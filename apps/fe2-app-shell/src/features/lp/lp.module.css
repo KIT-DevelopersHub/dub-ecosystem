@@ -763,6 +763,11 @@
 }
 
 /* 公開設定: 左に LP（全高）、右にセクションの設定。1 枚のカードの中でページと一緒にスクロールする。 */
+/* Card の overflow:hidden は中の sticky を効かなくするので、角の切り抜きはそのまま clip にする。 */
+.lpEditorCard > section {
+  overflow: clip;
+}
+
 .lpEditor {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
