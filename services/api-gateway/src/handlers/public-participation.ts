@@ -41,6 +41,10 @@ function validate(body: unknown): { value: gateway.PublicParticipationRequest } 
     if (profile[k] == null && !bad.includes(k)) errs.push({ field: k, reason: "required" });
   }
 
+  // 役職: フォームでは必須。API は旧クライアント互換で省略を許すが、値は閉じた集合のみ。
+  const position = b.position === undefined || b.position === null || b.position === "" ? null : b.position;
+  if (position !== null && !member.isMemberPosition(position)) errs.push({ field: "position", reason: "invalid" });
+
   if (errs.length > 0) return { errors: errs };
   return {
     value: {
@@ -51,6 +55,7 @@ function validate(body: unknown): { value: gateway.PublicParticipationRequest } 
       nameKana: optStr(b.nameKana),
       nameRomaji: optStr(b.nameRomaji),
       desiredTeamId: optStr(b.desiredTeamId),
+      position: member.isMemberPosition(position) ? position : null,
       turnstileToken: optStr(b.turnstileToken),
     },
   };

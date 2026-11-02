@@ -64,6 +64,8 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   admin: [
     "identity:read",
     "identity:admin",
+    "app:admin:view",
+    "app:admin:edit",
     "app:members:view",
     "app:members:edit",
     "app:participation:view",
@@ -141,6 +143,8 @@ const HR_WRITES = [
   "PUT /members/hr/onboarding/:memberId/items/:itemId",
 ];
 const HR_ADMIN = ["DELETE /members/hr/applicants/:id", "POST /members/hr/applicants/:id/join"];
+// チーム・役職ロールの一括付与: ロール管理と同格 (管理 編集 + identity:admin)。
+const ROLE_SYNC_ADMIN = ["POST /members/role-sync/backfill"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
 const SELF = ["GET /members/me/mention-teams"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
@@ -165,6 +169,7 @@ const FULL = [
   ...HR_READS,
   ...HR_WRITES,
   ...HR_ADMIN,
+  ...ROLE_SYNC_ADMIN,
   ...SELF,
 ].sort();
 
@@ -206,6 +211,12 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = [...INTERNAL_ROUTES, ...FULL].sort();
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(buildApp()).sort());
+  });
+
+  it("role backfill needs BOTH the 管理 編集 tier and identity:admin (a 名簿編集者 cannot run it)", () => {
+    expect(allowedRoutes(["app:admin:edit", "app:admin:view"])).not.toContain(ROLE_SYNC_ADMIN[0]);
+    expect(allowedRoutes(["identity:admin", "app:members:edit", "app:members:view"])).not.toContain(ROLE_SYNC_ADMIN[0]);
+    expect(allowedRoutes(["identity:admin", "app:admin:edit", "app:admin:view"])).toContain(ROLE_SYNC_ADMIN[0]);
   });
 
   it("a caller holding nothing reaches only the self-scoped route (there is no PUBLIC one)", () => {

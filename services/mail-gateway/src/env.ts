@@ -38,6 +38,10 @@ export interface Env {
   // Unset/empty = off. Independent of MAIL_GMAIL_FORWARD. Must be a VERIFIED Email Routing
   // destination, or forward() fails (logged + audited, storage unaffected).
   MAIL_ARCHIVE_FORWARD_TO?: string;
+  // Per-user opt-in auto-forward (user-forward.ts, 0023). Nothing forwards until a user
+  // registers + verifies their own address, so the default is available; "off" is the
+  // kill switch (stops inbound forwarding AND new registrations).
+  MAIL_USER_FORWARD?: string;
 
   // --- outbound provider config (Workers Secrets; real send credentials) ---
   MAIL_OUTBOUND_PROVIDER?: string; // "resend" (default, ADR-0001) | "ses" | "mailchannels" | "mock"

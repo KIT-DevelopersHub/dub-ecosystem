@@ -108,6 +108,9 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /auth/test-login": PUBLIC,
   // Conditionally registered — see CONDITIONALLY_REGISTERED_ROUTES below.
   "POST /auth/demo-login": PUBLIC,
+  // Debug-menu account list (staging). Same flag, same reasoning as demo-login above: it
+  // exists only where demo-login already lets anyone in as the demo admin.
+  "GET /auth/demo-accounts": PUBLIC,
 
   // ==================== service-to-service only ====================
   // Unreachable from outside twice over: api-gateway maps only the `auth` segment to SVC_AUTH,
@@ -168,7 +171,7 @@ export const POLICY_TABLE = definePolicyTable({
  * registers everything, and the table minus these keys in the configuration that does not.
  * Both directions stay exact in both configurations — nothing is merely skipped.
  */
-export const CONDITIONALLY_REGISTERED_ROUTES = ["POST /auth/demo-login"] as const;
+export const CONDITIONALLY_REGISTERED_ROUTES = ["POST /auth/demo-login", "GET /auth/demo-accounts"] as const;
 
 // ---- the one deviation from docs/policy-coverage-inventory.md 2.2 ----
 // The inventory proposes `PUBLIC` for `GET /health`, reasoning that the `health` segment is not

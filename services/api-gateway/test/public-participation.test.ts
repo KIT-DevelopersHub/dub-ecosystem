@@ -68,6 +68,19 @@ describe("POST /api/v1/public/participation", () => {
     expect(forwarded.rosterNumber).toBe("3EP2-26");
   });
 
+  it("forwards 役職 (position) and rejects an unknown one before any forward", async () => {
+    const member = memberBinding("created_new");
+    const env = makeEnv({ SVC_MEMBER: member.fetcher });
+    const app = createApp({ ...NO_RL, turnstile: async () => true });
+    const ok = await app.fetch(post({ ...validBody, position: "leader" }), env, execCtx);
+    expect(ok.status).toBe(200);
+    expect(((await member.requests[0]!.json()) as Record<string, unknown>).position).toBe("leader");
+
+    const bad = await app.fetch(post({ ...validBody, position: "boss" }), env, execCtx);
+    expect(bad.status).toBe(400);
+    expect(member.requests).toHaveLength(1);
+  });
+
   it("does not leak the member identity nor any resolution result", async () => {
     const member = memberBinding("linked_existing");
     const env = makeEnv({ SVC_MEMBER: member.fetcher });

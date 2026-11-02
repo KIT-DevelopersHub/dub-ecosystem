@@ -3,7 +3,7 @@
 // and call these methods. Audit/authz/revoke side effects go through Deps.
 import { DubError, errors, CommonErrorCodes, type FieldError } from "@dub/errors";
 import type { common, identity } from "@dub/types";
-import { policy } from "@dub/types";
+import { policy, identity as identityContract } from "@dub/types";
 import type { Deps, RequestCtx } from "./deps";
 import type { AssignmentRow, RoleRow, UserRow } from "./repo/types";
 import { evaluate, effectiveOrgWidePermissions, type EvalContext } from "./authz";
@@ -30,6 +30,9 @@ import type {
 } from "./dto";
 
 const ADMIN: identity.PermissionKey = "identity:admin";
+const { MANAGED_ROLE_ID_PREFIX, AUTO_ASSIGNMENT_SOURCE: AUTO_SOURCE } = identityContract;
+/** Upper bound on one managed-role list (teams + 3 役職) — a crafted body cannot fan out unbounded writes. */
+const MAX_MANAGED_ROLES = 200;
 const AUTHZ_TTL_SECONDS = 60;
 const MAX_BATCH_CHECKS = 20;
 const MAX_IDS = 50;
@@ -100,6 +103,7 @@ export class IdentityService {
       resourceId: a.resourceId,
       grantedBy: a.grantedBy,
       grantedAt: a.grantedAt,
+      source: a.source ?? "manual",
     };
   }
 
@@ -647,7 +651,15 @@ export class IdentityService {
     if ((resourceType === null) !== (resourceId === null)) {
       throw errors.validationFailed([{ field: "resourceId", reason: "scope_incomplete", message: "resourceType and resourceId must be set together" }]);
     }
-    if (await this.d.repo.findAssignment(userId, req.roleId, orgId, resourceType, resourceId)) {
+    const existing = await this.d.repo.findAssignment(userId, req.roleId, orgId, resourceType, resourceId);
+    if (existing && (existing.source ?? "manual") === AUTO_SOURCE) {
+      // An admin granting a role the 名簿 sync already gave: pin it as manual so a later
+      // roster change (team / 役職) no longer removes it.
+      await this.d.audit.logSync(this.record("identity.role.assigned", "success", ctx, orgId, "user", userId, { roleId: req.roleId, resourceType, resourceId, pinned: true }));
+      await this.d.repo.setAssignmentSource(existing.id, "manual");
+      return this.toAssignmentView({ ...existing, source: "manual" }, role.name);
+    }
+    if (existing) {
       throw errors.conflict("assignment already exists", { code: "ASSIGNMENT_EXISTS" });
     }
 
@@ -684,6 +696,151 @@ export class IdentityService {
     // write-ahead sync audit (SYNC_AUDIT_ACTIONS: identity.role.revoked).
     await this.d.audit.logSync(this.record("identity.role.revoked", "success", ctx, orgId, "user", userId, { assignmentId, roleId: assignment.roleId }));
     await this.d.repo.deleteAssignment(assignmentId);
+  }
+
+  // ---------- managed roles (名簿のチーム・役職 -> 自動ロール) ----------
+  /** Validate + dedupe a managed-role list. Only MANAGED_ROLE_ID_PREFIX ids are accepted, so the
+   *  sync can never create, rename or grant an admin-made / system role. */
+  private parseManagedRoles(raw: unknown): identity.ManagedRoleSpec[] {
+    if (!Array.isArray(raw) || raw.length > MAX_MANAGED_ROLES) {
+      throw errors.validationFailed([{ field: "roles", reason: "invalid" }]);
+    }
+    const byId = new Map<string, identity.ManagedRoleSpec>();
+    for (const r of raw as Array<Partial<identity.ManagedRoleSpec>>) {
+      const id = typeof r?.id === "string" ? r.id : "";
+      const name = typeof r?.name === "string" ? r.name.trim() : "";
+      if (!id.startsWith(MANAGED_ROLE_ID_PREFIX) || id.length > 200 || !name || name.length > 200) {
+        throw errors.validationFailed([{ field: "roles", reason: "invalid", message: id }]);
+      }
+      byId.set(id, { id, name });
+    }
+    return [...byId.values()];
+  }
+
+  /** A free role name for a managed role: its own name, or "<name>（自動）" when an admin-made
+   *  role already uses it (role names are unique per org). */
+  private async managedRoleName(orgId: string, spec: identity.ManagedRoleSpec): Promise<string> {
+    const clash = await this.d.repo.getRoleByName(orgId, spec.name);
+    if (!clash || clash.id === spec.id) return spec.name;
+    return `${spec.name}（自動）`;
+  }
+
+  /** Create missing managed roles (no permissions) and rename drifted ones. */
+  private async ensureManagedRoles(
+    orgId: string,
+    specs: identity.ManagedRoleSpec[],
+    dryRun: boolean,
+    ctx: RequestCtx,
+  ): Promise<{ created: string[]; renamed: string[] }> {
+    const created: string[] = [];
+    const renamed: string[] = [];
+    for (const spec of specs) {
+      const cur = await this.d.repo.getRole(spec.id);
+      if (cur && cur.orgId !== orgId) throw errors.conflict(`role ${spec.id} belongs to another org`);
+      const name = await this.managedRoleName(orgId, spec);
+      if (!cur) {
+        created.push(spec.id);
+        if (dryRun) continue;
+        const now = this.d.now();
+        await this.d.repo.createRole({ id: spec.id, orgId, name, isSystem: false, permissions: [], createdAt: now, updatedAt: now });
+        await this.d.audit.publish(this.record("identity.role.created", "success", ctx, orgId, "role", spec.id, { name, managed: true }));
+      } else if (cur.name !== name && cur.name !== `${spec.name}（自動）`) {
+        renamed.push(spec.id);
+        if (dryRun) continue;
+        await this.d.repo.updateRolePermissions(spec.id, name, undefined, this.d.now());
+        await this.d.audit.publish(this.record("identity.role.updated", "success", ctx, orgId, "role", spec.id, { name, managed: true }));
+      }
+    }
+    return { created, renamed };
+  }
+
+  private async allRoles(orgId: string): Promise<RoleRow[]> {
+    const out: RoleRow[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.d.repo.listRoles(orgId, MAX_LIMIT, cursor);
+      out.push(...page.items);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    return out;
+  }
+
+  /**
+   * PUT /internal/managed-roles: the full list of managed roles (every team + every 役職).
+   * Creates / renames to match. A managed role no longer listed (its team was deleted) loses
+   * its auto assignments; the role itself is deleted only when nothing else depends on it
+   * (no manual assignment, no permission an admin added) — otherwise it is kept so an admin's
+   * deliberate use of it is never silently destroyed.
+   */
+  async syncManagedRoleCatalog(orgId: string, req: identity.PutManagedRoleCatalogRequest, ctx: RequestCtx): Promise<identity.PutManagedRoleCatalogResponse> {
+    const specs = this.parseManagedRoles(req?.roles);
+    const dryRun = req?.dryRun === true;
+    const { created, renamed } = await this.ensureManagedRoles(orgId, specs, dryRun, ctx);
+    const wanted = new Set(specs.map((s) => s.id));
+    const deleted: string[] = [];
+    const kept: string[] = [];
+    for (const role of await this.allRoles(orgId)) {
+      if (!role.id.startsWith(MANAGED_ROLE_ID_PREFIX) || wanted.has(role.id)) continue;
+      const assignments = await this.d.repo.listAssignmentsByRole(role.id);
+      const auto = assignments.filter((a) => (a.source ?? "manual") === AUTO_SOURCE);
+      const removable = assignments.length === auto.length && role.permissions.length === 0;
+      (removable ? deleted : kept).push(role.id);
+      if (dryRun) continue;
+      for (const a of auto) await this.d.repo.deleteAssignment(a.id);
+      if (removable) {
+        await this.d.repo.deleteRole(role.id);
+        await this.d.audit.publish(this.record("identity.role.deleted", "success", ctx, orgId, "role", role.id, { managed: true }));
+      }
+    }
+    return { dryRun, created, renamed, deleted, kept };
+  }
+
+  /**
+   * PUT /internal/users/:id/managed-roles: the managed roles this user should hold. Adds the
+   * missing auto assignments and removes auto assignments no longer wanted. Manual
+   * assignments are never added, removed or duplicated (an existing manual grant satisfies a
+   * wanted role). Auto rows are org-wide, so they behave exactly like a manual grant.
+   */
+  async syncUserManagedRoles(userId: string, orgId: string, req: identity.PutUserManagedRolesRequest, ctx: RequestCtx): Promise<identity.PutUserManagedRolesResponse> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
+    const specs = this.parseManagedRoles(req?.roles);
+    const dryRun = req?.dryRun === true;
+    await this.ensureManagedRoles(orgId, specs, dryRun, ctx);
+
+    const orgWide = (await this.d.repo.listAssignmentsByUser(userId, orgId)).filter((a) => a.resourceType === null && a.resourceId === null);
+    const wanted = new Set(specs.map((s) => s.id));
+    const added: string[] = [];
+    const removed: string[] = [];
+    const manual: string[] = [];
+    for (const id of wanted) {
+      const have = orgWide.find((a) => a.roleId === id);
+      if (!have) added.push(id);
+      else if ((have.source ?? "manual") !== AUTO_SOURCE) manual.push(id);
+    }
+    const stale = orgWide.filter((a) => (a.source ?? "manual") === AUTO_SOURCE && !wanted.has(a.roleId));
+    removed.push(...stale.map((a) => a.roleId));
+    if (dryRun || (added.length === 0 && stale.length === 0)) return { dryRun, added, removed, manual };
+
+    // granted_by is an FK to identity_users: the acting admin when it is a real user, else the
+    // subject (the same fallback assignRole uses).
+    const actor = ctx.actorId && (await this.d.repo.getUser(ctx.actorId)) ? ctx.actorId : userId;
+    for (const roleId of added) {
+      await this.d.repo.createAssignment({
+        id: this.d.newId("ra"),
+        userId,
+        roleId,
+        orgId,
+        resourceType: null,
+        resourceId: null,
+        grantedBy: actor,
+        grantedAt: this.d.now(),
+        source: AUTO_SOURCE,
+      });
+    }
+    for (const a of stale) await this.d.repo.deleteAssignment(a.id);
+    await this.d.audit.publish(this.record("identity.role.managed_synced", "success", ctx, orgId, "user", userId, { added, removed }));
+    return { dryRun, added, removed, manual };
   }
 
   private async countOrgWideAdminGrants(userId: string, orgId: string): Promise<number> {

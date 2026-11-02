@@ -16,6 +16,7 @@ import {
   toParticipation,
   toTeam,
 } from "./domain";
+import { desiredManagedRoles, errRoleSyncUnavailable, managedRoleCatalog, warnRoleSync } from "./roleSync";
 
 export interface ReqCtx {
   requestId: string;
@@ -50,6 +51,13 @@ function name(value: unknown, field = "name"): string {
   }
   if (value.length > MAX_NAME_LEN) throw errors.validationFailed([{ field, reason: "too_long" }]);
   return value.trim();
+}
+
+/** 役職。undefined/null/"" は null、それ以外は閉じた値のみ。 */
+function optPosition(value: unknown): member.MemberPosition | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (!member.isMemberPosition(value)) throw errors.validationFailed([{ field: "position", reason: "invalid" }]);
+  return value;
 }
 
 function optText(value: unknown, field: string): string | null {
@@ -179,7 +187,7 @@ export class MemberService {
     }
   }
 
-  async createTeam(_ctx: ReqCtx, body: member.CreateTeamRequest): Promise<member.Team> {
+  async createTeam(ctx: ReqCtx, body: member.CreateTeamRequest): Promise<member.Team> {
     const orgId = this.deps.orgId;
     const now = this.deps.now();
     const teamName = name(body.name);
@@ -197,10 +205,11 @@ export class MemberService {
       updatedAt: now,
     };
     await this.deps.repo.createTeam(row);
+    await this.syncRoleCatalog(ctx);
     return toTeam(row);
   }
 
-  async updateTeam(_ctx: ReqCtx, id: string, body: member.UpdateTeamRequest): Promise<member.Team> {
+  async updateTeam(ctx: ReqCtx, id: string, body: member.UpdateTeamRequest): Promise<member.Team> {
     const cur = await this.deps.repo.getTeam(id);
     if (!cur || cur.orgId !== this.deps.orgId) throw errTeamNotFound(id);
     const nextName = body.name !== undefined ? name(body.name) : cur.name;
@@ -216,13 +225,88 @@ export class MemberService {
     };
     const ok = await this.deps.repo.updateTeam(next);
     if (!ok) throw errTeamNotFound(id);
+    if (next.name !== cur.name) await this.syncRoleCatalog(ctx); // チームロールを改名
     return toTeam(next);
   }
 
-  async deleteTeam(_ctx: ReqCtx, id: string): Promise<void> {
+  async deleteTeam(ctx: ReqCtx, id: string): Promise<void> {
     const cur = await this.deps.repo.getTeam(id);
     if (!cur || cur.orgId !== this.deps.orgId) throw errTeamNotFound(id);
     await this.deps.repo.deleteTeam(id);
+    await this.syncRoleCatalog(ctx); // 自動割当を外し、他に使われていなければロールも削除
+  }
+
+  // ---- チーム・役職ロールの自動付与 (identity-roster) ----
+  // 名簿の保存を止めないよう best-effort。ずれたら管理者の一括付与 (backfillRoles) で直す。
+
+  private async syncRoleCatalog(ctx: ReqCtx): Promise<void> {
+    if (!this.deps.roleSync) return;
+    try {
+      const teams = await this.deps.repo.listTeams(this.deps.orgId);
+      await this.deps.roleSync.syncCatalog(ctx, { roles: managedRoleCatalog(teams) });
+    } catch (err) {
+      warnRoleSync(ctx, "catalog", err);
+    }
+  }
+
+  /** 各 identity ユーザーの自動ロールを名簿に合わせる。紐付け解除・アーカイブ後の旧ユーザーは
+   *  名簿に見つからないので空集合 (=自動ロールを全部外す) になる。 */
+  private async syncRolesForIdentities(ctx: ReqCtx, identityUserIds: ReadonlyArray<string | null | undefined>): Promise<void> {
+    if (!this.deps.roleSync) return;
+    const uids = [...new Set(identityUserIds.filter((u): u is string => typeof u === "string" && u.length > 0))];
+    if (uids.length === 0) return;
+    try {
+      const [teams, links] = await Promise.all([this.deps.repo.listTeams(this.deps.orgId), this.deps.repo.teamLinksForOrg(this.deps.orgId)]);
+      const teamsById = new Map(teams.map((t) => [t.id, t]));
+      for (const uid of uids) {
+        const person = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, uid);
+        const teamIds = person ? links.filter((l) => l.personId === person.id).map((l) => l.teamId) : [];
+        try {
+          await this.deps.roleSync.syncUser(ctx, uid, { roles: desiredManagedRoles(person, teamIds, teamsById) });
+        } catch (err) {
+          warnRoleSync(ctx, `user ${uid}`, err);
+        }
+      }
+    } catch (err) {
+      warnRoleSync(ctx, "users", err);
+    }
+  }
+
+  /** 既存メンバーへの一括付与 (管理者)。dryRun なら identity に書かず差分だけ返す。
+   *  対象は名簿でアカウントに紐付いた全員 (在籍中以外は空集合 = 自動ロールを外す)。 */
+  async backfillRoles(ctx: ReqCtx, body: member.RoleSyncBackfillRequest | null): Promise<member.RoleSyncBackfillResponse> {
+    const sync = this.deps.roleSync;
+    if (!sync) throw errRoleSyncUnavailable();
+    const dryRun = body?.dryRun === true;
+    const orgId = this.deps.orgId;
+    const [teams, people, links] = await Promise.all([
+      this.deps.repo.listTeams(orgId),
+      this.deps.repo.listPeople(orgId),
+      this.deps.repo.teamLinksForOrg(orgId),
+    ]);
+    const cat = await sync.syncCatalog(ctx, { roles: managedRoleCatalog(teams), dryRun });
+    const teamsById = new Map(teams.map((t) => [t.id, t]));
+    const out: member.RoleSyncBackfillPerson[] = [];
+    let failed = 0;
+    for (const p of people) {
+      if (!p.identityUserId) continue;
+      const teamIds = links.filter((l) => l.personId === p.id).map((l) => l.teamId);
+      const roles = desiredManagedRoles(p, teamIds, teamsById);
+      const base = { memberId: p.id, name: p.name, identityUserId: p.identityUserId, roleIds: roles.map((r) => r.id) };
+      try {
+        const r = await sync.syncUser(ctx, p.identityUserId, { roles, dryRun });
+        out.push({ ...base, added: r.added, removed: r.removed });
+      } catch (err) {
+        failed++;
+        out.push({ ...base, added: [], removed: [], error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return {
+      dryRun,
+      catalog: { created: cat.created, renamed: cat.renamed, deleted: cat.deleted, kept: cat.kept },
+      people: out,
+      failed,
+    };
   }
 
   // ---- people ----
@@ -253,6 +337,7 @@ export class MemberService {
       ...profile,
       name: name(composeName(profile.lastName, profile.firstName) || body.name),
       roleTitle: optText(body.roleTitle, "roleTitle"),
+      position: optPosition(body.position),
       status: body.status,
       identityUserId: null,
       leaderId,
@@ -268,7 +353,7 @@ export class MemberService {
     return toMember(row, teamIds);
   }
 
-  async updateMember(_ctx: ReqCtx, id: string, body: member.UpdateMemberRequest): Promise<member.Member> {
+  async updateMember(ctx: ReqCtx, id: string, body: member.UpdateMemberRequest): Promise<member.Member> {
     if (typeof body.version !== "number") throw errors.validationFailed([{ field: "version", reason: "required" }]);
     const cur = await this.deps.repo.getPerson(id);
     if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
@@ -293,6 +378,7 @@ export class MemberService {
         ? name(composeName(merged.lastName, merged.firstName))
         : body.name !== undefined ? name(body.name) : cur.name,
       roleTitle: body.roleTitle !== undefined ? optText(body.roleTitle, "roleTitle") : cur.roleTitle,
+      position: body.position !== undefined ? optPosition(body.position) : cur.position,
       status: body.status ?? cur.status,
       identityUserId,
       leaderId,
@@ -303,14 +389,16 @@ export class MemberService {
     };
     const ok = await this.deps.repo.updatePerson(next, body.version, teamIds);
     if (!ok) throw errVersionConflict(id);
+    await this.syncRolesForIdentities(ctx, [cur.identityUserId, next.identityUserId]);
     const finalTeamIds = teamIds ?? (await this.currentTeamIds(id));
     return toMember(next, finalTeamIds);
   }
 
-  async deleteMember(_ctx: ReqCtx, id: string): Promise<void> {
+  async deleteMember(ctx: ReqCtx, id: string): Promise<void> {
     const cur = await this.deps.repo.getPerson(id);
     if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
     await this.deps.repo.archivePerson(id);
+    await this.syncRolesForIdentities(ctx, [cur.identityUserId]);
   }
 
   // ---- identity linking (#1: bridge 組織図 <-> RBAC 真実) ----
@@ -356,7 +444,7 @@ export class MemberService {
   }
 
   /** Link (or re-link) a member to an identity account. Optimistic-concurrency by version. */
-  async linkIdentity(_ctx: ReqCtx, id: string, body: member.LinkIdentityRequest): Promise<member.Member> {
+  async linkIdentity(ctx: ReqCtx, id: string, body: member.LinkIdentityRequest): Promise<member.Member> {
     if (typeof body?.version !== "number") throw errors.validationFailed([{ field: "version", reason: "required" }]);
     const cur = await this.deps.repo.getPerson(id);
     if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
@@ -364,6 +452,7 @@ export class MemberService {
     const next: PersonRow = { ...cur, identityUserId, version: body.version + 1, updatedAt: this.deps.now() };
     const ok = await this.deps.repo.updatePerson(next, body.version);
     if (!ok) throw errVersionConflict(id);
+    await this.syncRolesForIdentities(ctx, [cur.identityUserId, identityUserId]);
     return toMember(next, await this.currentTeamIds(id));
   }
 
@@ -422,6 +511,7 @@ export class MemberService {
     if (profile.gmail === null) throw errors.validationFailed([{ field: "gmail", reason: "invalid" }]);
     const { schoolEmail, gmail } = profile;
     const desiredTeamId = await this.optTeamId(body.desiredTeamId);
+    const position = optPosition(body.position);
 
     // 名簿への反映は管理者が一覧で確定する（B案）。提出時は 参加届 を記録するだけで、
     // roster には一切書き込まない（自動追加による重複を根絶）。再提出は既存行の
@@ -441,6 +531,7 @@ export class MemberService {
       schoolEmail,
       gmail,
       desiredTeamId,
+      position,
       status: "submitted",
       // matchKind は未処理時は意味を持たない placeholder（reviewState で表示制御）。
       matchKind: existing?.matchKind ?? "created_new",
@@ -558,7 +649,7 @@ export class MemberService {
           { status: 409, details: [{ field: "memberId", reason: "already_linked", message: clash.id }] },
         );
       }
-      const resolved = await this.promoteFromParticipation(target, p, expectedVersion);
+      const resolved = await this.promoteFromParticipation(ctx, target, p, expectedVersion);
       const row: ParticipationRow = {
         ...p,
         memberId: resolved.id,
@@ -596,6 +687,7 @@ export class MemberService {
   /** 既存メンバー(招待中/検討中想定)を在籍(added)へ昇格し、参加届の内容を非破壊マージする。
    *  空欄のみ埋め、希望チームを追加する。楽観ロック(expectedVersion)で衝突は 409。 */
   private async promoteFromParticipation(
+    ctx: ReqCtx,
     match: PersonRow,
     p: ParticipationRow,
     expectedVersion: number,
@@ -613,11 +705,14 @@ export class MemberService {
       // 非破壊: 人物プロフィール項目は空欄のみ参加届で補完 (contact 未設定は学校メール)。
       ...fillEmptyProfile(match, profileOf(p)),
       contact: match.contact ?? p.schoolEmail,
+      // 役職も非破壊: 名簿が未設定のときだけ参加届の値を入れる (管理者の訂正を上書きしない)。
+      position: match.position ?? p.position,
       version: match.version + 1,
       updatedAt: this.deps.now(),
     };
     const ok = await this.deps.repo.updatePerson(next, expectedVersion, mergedTeamIds);
     if (!ok) throw errVersionConflict(match.id);
+    await this.syncRolesForIdentities(ctx, [next.identityUserId]);
     return toMember(next, mergedTeamIds);
   }
 
@@ -633,6 +728,7 @@ export class MemberService {
       ...profileOf(p),
       name: p.name,
       roleTitle: null,
+      position: p.position,
       status: "added",
       identityUserId: null,
       leaderId: null,
@@ -672,6 +768,7 @@ export class MemberService {
       operations: {
         name: p.name,
         roleTitle: p.roleTitle,
+        position: p.position,
         status: p.status,
         teams: teams.filter((t) => mine.has(t.id)).map((t) => ({ id: t.id, name: t.name, color: t.color })),
         leaderName: leader && !leader.archivedAt ? leader.name : null,
@@ -729,6 +826,7 @@ export class MemberService {
       ...member.emptyPersonProfile(),
       name: "",
       roleTitle: null,
+      position: null,
       status: "added",
       identityUserId,
       leaderId: null,
