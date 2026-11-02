@@ -96,6 +96,8 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
       "lp_ticket_order_items",
       "lp_proposal_settings",
       "lp_proposals",
+      "lp_site_config",
+      "lp_site_config_history",
     ],
   },
 ];
