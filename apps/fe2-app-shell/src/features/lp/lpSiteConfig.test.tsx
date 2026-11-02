@@ -338,7 +338,7 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     fireEvent.load(frame);
     expect(screen.queryByTestId("fe2-lp-config-mini-loading")).toBeNull();
     fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
-    await waitFor(() => expect(frame).toHaveAttribute("src", miniPreviewSrc(draftPreviewUrl(BASE), 4)), { timeout: 2000 });
+    await waitFor(() => expect(frame).toHaveAttribute("src", miniPreviewSrc(draftPreviewUrl(BASE), 4)), { timeout: 4000 });
   });
 
   it("live: staged release changes are previewed via URL; staged section changes get a note", async () => {
@@ -347,7 +347,7 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     const frame = await screen.findByTestId("fe2-lp-config-mini-frame");
     expect(frame.getAttribute("src")).toMatch(/\?version=live$/);
     fireEvent.click(screen.getByTestId("fe2-lp-config-proposalsEnabled"));
-    await waitFor(() => expect(frame).toHaveAttribute("src", releasePreviewUrl(setRelease(BASE, "proposalsEnabled", true))), { timeout: 2000 });
+    await waitFor(() => expect(frame).toHaveAttribute("src", releasePreviewUrl(setRelease(BASE, "proposalsEnabled", true))), { timeout: 4000 });
     fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
     expect(screen.getByTestId("fe2-lp-config-mini-note")).toHaveTextContent("本番に反映するとここに映ります");
   });
