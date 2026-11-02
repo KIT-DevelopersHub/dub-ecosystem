@@ -1341,6 +1341,38 @@ function createMailStore() {
       }
     }
 
+    // Gmail への自動転送 (0023): per-account opt-in setting in localStorage. The demo has no
+    // Cloudflare, so a pending address counts as "verified" DEMO_FORWARD_VERIFY_MS after it was
+    // registered (stands in for clicking the verification link) — the next GET flips it.
+    if (pathname === "/api/v1/mail/forward") {
+      const fail = (code: string, message: string, status: number) => json({ error: { code, message, retryable: false } }, status);
+      let cur = loadForward();
+      if (cur && cur.status === "pending" && cur.requestedAt && Date.now() - Date.parse(cur.requestedAt) >= DEMO_FORWARD_VERIFY_MS) {
+        cur = { ...cur, status: "verified", verifiedAt: new Date().toISOString(), active: cur.enabled };
+        saveForward(cur);
+      }
+      if (method === "GET") return json(cur ?? demoForwardNone());
+      if (method === "PUT") {
+        const target = typeof (body as { target?: unknown } | null)?.target === "string" ? String((body as { target: string }).target).trim().toLowerCase() : "";
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target) || target.endsWith("@developershub.jp")) return fail("MAIL_INVALID_REQUEST", "invalid target", 400);
+        const next: mail.MailForwardSetting = { ...demoForwardNone(), target, status: "pending", enabled: true, requestedAt: new Date().toISOString() };
+        saveForward(next);
+        return json(next);
+      }
+      if (method === "PATCH") {
+        if (!cur) return fail("MAIL_FORWARD_NOT_FOUND", "no forward address registered", 404);
+        const enabled = (body as { enabled?: unknown } | null)?.enabled === true;
+        const next = { ...cur, enabled, active: enabled && cur.status === "verified" };
+        saveForward(next);
+        return json(next);
+      }
+      if (method === "DELETE") {
+        if (!cur) return fail("MAIL_FORWARD_NOT_FOUND", "no forward address registered", 404);
+        saveForward(null);
+        return json(demoForwardNone());
+      }
+    }
+
     // 改善#8: per-user thread flags (star/archive/trash), persisted in localStorage so they
     // SURVIVE a reload in the demo (mirrors the real gateway persisting them server-side).
     if (method === "GET" && pathname === "/api/v1/mail/flags") {
@@ -1394,6 +1426,29 @@ function loadFlags(): mail.MailThreadFlags[] {
 function saveFlags(flags: mail.MailThreadFlags[]): void {
   try {
     globalThis.localStorage?.setItem(flagsKey(), JSON.stringify(flags));
+  } catch {
+    /* ignore */
+  }
+}
+
+// Gmail への自動転送 for the demo (localStorage, per account).
+const FORWARD_KEY = "dub-demo-mail-forward";
+export const DEMO_FORWARD_VERIFY_MS = 5000;
+function demoForwardNone(): mail.MailForwardSetting {
+  return { target: null, status: "none", enabled: false, active: false, available: true, requestedAt: null, verifiedAt: null, lastResult: null, lastError: null, lastAt: null };
+}
+function loadForward(): mail.MailForwardSetting | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(`${FORWARD_KEY}:${currentAccount().id}`);
+    return raw ? (JSON.parse(raw) as mail.MailForwardSetting) : null;
+  } catch {
+    return null;
+  }
+}
+function saveForward(v: mail.MailForwardSetting | null): void {
+  try {
+    if (v) globalThis.localStorage?.setItem(`${FORWARD_KEY}:${currentAccount().id}`, JSON.stringify(v));
+    else globalThis.localStorage?.removeItem(`${FORWARD_KEY}:${currentAccount().id}`);
   } catch {
     /* ignore */
   }

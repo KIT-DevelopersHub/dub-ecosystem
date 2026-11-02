@@ -115,11 +115,13 @@
   "mail-gateway": {
     "missingInSpec": [
       "DELETE /mail/blocks/{}",
+      "DELETE /mail/forward",
       "DELETE /mail/scheduled/{}",
       "GET /mail/admin/canary/probes",
       "GET /mail/blocks",
       "GET /mail/counts",
       "GET /mail/flags",
+      "GET /mail/forward",
       "GET /mail/mailboxes",
       "GET /mail/messages",
       "GET /mail/messages/{}",
@@ -128,6 +130,7 @@
       "GET /mail/sent",
       "GET /mail/sent/{}",
       "GET /mail/threads/{}",
+      "PATCH /mail/forward",
       "PATCH /mail/scheduled/{}",
       "POST /internal/webhooks/resend",
       "POST /mail/blocks",
@@ -135,7 +138,8 @@
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
       "POST /mail/outbox",
-      "POST /mail/scheduled"
+      "POST /mail/scheduled",
+      "PUT /mail/forward"
     ],
     "missingInCode": [
       "DELETE /admin/email-routing/addresses/{}",

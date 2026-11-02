@@ -107,9 +107,11 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 // star/archive/trash flags; their personal sender block list).
 const READS = [
   "DELETE /mail/blocks/:value",
+  "DELETE /mail/forward",
   "GET /mail/blocks",
   "GET /mail/counts",
   "GET /mail/flags",
+  "GET /mail/forward",
   "GET /mail/messages",
   "GET /mail/messages/:id",
   "GET /mail/messages/:id/attachments/:attId",
@@ -122,7 +124,9 @@ const READS = [
   "POST /mail/blocks",
   "POST /mail/flags/:threadId",
   "POST /mail/messages/:id/read",
-];
+  "PATCH /mail/forward",
+  "PUT /mail/forward",
+].sort();
 // 編集 on メール + mail:send — everything that puts or queues a message on the wire.
 const WRITES = [
   "DELETE /mail/scheduled/:id",
@@ -184,7 +188,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(41);
+    expect(everyRoute).toHaveLength(45);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing

@@ -82,6 +82,14 @@ export interface MailApi {
   addBlock(req: mail.MailSenderBlockRequest): Promise<mail.MailSenderBlock>;
   /** Unblock (address or domain value as listed). */
   removeBlock(value: string): Promise<{ value: string; blocked: false }>;
+  /** The signed-in user's opt-in auto-forward setting (Gmail 自動転送). */
+  getForward(): Promise<mail.MailForwardSetting>;
+  /** Register / change the personal address; Cloudflare mails it a verification link. */
+  registerForward(req: mail.MailForwardRegisterRequest): Promise<mail.MailForwardSetting>;
+  /** Turn auto-forward on/off (takes effect once the address is verified). */
+  updateForward(patch: mail.MailForwardPatch): Promise<mail.MailForwardSetting>;
+  /** Stop and forget the personal address. */
+  removeForward(): Promise<mail.MailForwardSetting>;
 }
 
 const MAIL = "/api/v1/mail";
@@ -146,6 +154,10 @@ export function createMailApi(api: ApiClient): MailApi {
     listBlocks: () => api.request<{ items: mail.MailSenderBlock[] }>({ method: "GET", path: `${MAIL}/blocks` }).then((r) => r.items),
     addBlock: (req) => api.request<mail.MailSenderBlock, mail.MailSenderBlockRequest>({ method: "POST", path: `${MAIL}/blocks`, body: req }),
     removeBlock: (value) => api.request<{ value: string; blocked: false }>({ method: "DELETE", path: `${MAIL}/blocks/${encodeURIComponent(value)}` }),
+    getForward: () => api.request<mail.MailForwardSetting>({ method: "GET", path: `${MAIL}/forward` }),
+    registerForward: (req) => api.request<mail.MailForwardSetting, mail.MailForwardRegisterRequest>({ method: "PUT", path: `${MAIL}/forward`, body: req }),
+    updateForward: (patch) => api.request<mail.MailForwardSetting, mail.MailForwardPatch>({ method: "PATCH", path: `${MAIL}/forward`, body: patch }),
+    removeForward: () => api.request<mail.MailForwardSetting>({ method: "DELETE", path: `${MAIL}/forward` }),
   };
 }
 

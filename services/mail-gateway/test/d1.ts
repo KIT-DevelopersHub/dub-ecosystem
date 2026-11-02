@@ -38,6 +38,7 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0020_scheduled_attachments_bcc.sql"),
   join(HERE, "../db/0021_sender_blocks.sql"),
   join(HERE, "../db/0022_sender_blocks_kind_index.sql"),
+  join(HERE, "../db/0023_user_forward.sql"),
 ];
 
 function norm(v: unknown): unknown {
