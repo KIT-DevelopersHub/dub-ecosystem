@@ -13,7 +13,7 @@
 // connects to the `doUrl` from GET /gantt/ws-ticket and presents the ticket as a query
 // param. Holds no durable rows (WS coordinator only) — cost is $0 on the free plan.
 import { DurableObject } from "cloudflare:workers";
-import type { gantt } from "@dub/types";
+import { common, type gantt } from "@dub/types";
 import { verifyWsTicket } from "./wsticket";
 
 export interface GanttRoomEnv {
@@ -26,7 +26,7 @@ export interface GanttRoomEnv {
 
 // Dev-only fallback; MUST match the issuer's fallback in src/index.ts / app.ts.
 const DEV_WS_SECRET = "dev-insecure-ws-ticket-secret";
-const DEFAULT_ALLOWED_ORIGINS = "https://app.developershub.jp";
+const DEFAULT_ALLOWED_ORIGINS = common.PUBLIC_APP_ORIGINS.join(",");
 
 // Per-socket metadata survives hibernation via serializeAttachment.
 interface SocketMeta {

@@ -1,6 +1,6 @@
 // Pure helpers for the message menu: forward body, permalink, and the read marker
 // that makes a message (and everything after it) unread again.
-import type { common } from "@dub/types";
+import { common } from "@dub/types";
 import type { Message } from "../api/contract";
 
 /** Sorts below every message id, so "unread from the very first message" is expressible. */
@@ -92,7 +92,7 @@ export function messagePermalink(
 }
 
 /** Origins whose message links unfurl as a quote card (besides the current one). */
-export const KNOWN_CHAT_ORIGINS = ["https://app.developershub.jp"];
+export const KNOWN_CHAT_ORIGINS: readonly string[] = common.PUBLIC_APP_ORIGINS;
 
 export interface MessageLink {
   channelId: common.ChannelId;

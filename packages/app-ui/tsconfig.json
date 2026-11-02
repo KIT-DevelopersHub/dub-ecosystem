@@ -11,7 +11,8 @@
       "@dub/tokens": ["packages/tokens/src/index.ts"],
       "@dub/tokens/css": ["packages/tokens/src/css.ts"],
       "@dub/ui": ["apps/fe1-design-system/src/index.tsx"],
-      "@dub/ui/icons": ["apps/fe1-design-system/src/icons.ts"]
+      "@dub/ui/icons": ["apps/fe1-design-system/src/icons.ts"],
+      "@dub/types": ["packages/types/src/index.ts"]
     }
   },
   "include": ["src/**/*", "test/**/*"]
