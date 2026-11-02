@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { MeterDO, DAILY_INTERVAL_MS, FIRST_RUN_DELAY_MS, collectionProblem } from "../src/meter-do";
 import type { Env } from "../src/env";
@@ -142,15 +142,17 @@ describe("MeterDO.alarm never throws (a throwing alarm is retried 6x, then dropp
   });
 
   it("does not throw when the collection itself throws", async () => {
+    vi.stubGlobal("fetch", async () => new Response("{}", { status: 200 }));
     const fs = fakeState();
     const broken = {
       prepare() {
         throw new Error("D1_ERROR: daily write limit exceeded");
       },
     };
-    await expect(new MeterDO(fs.state, { DB: broken } as unknown as Env).alarm()).resolves.toBeUndefined();
+    await expect(new MeterDO(fs.state, { DB: broken, USAGE_CF_ANALYTICS_TOKEN: "t", CF_ACCOUNT_ID: "acct" } as unknown as Env).alarm()).resolves.toBeUndefined();
     expect(fs.getAlarm()).not.toBeNull();
     expect(fs.store.get("collect:consecutiveFailures")).toBe(1);
+    vi.unstubAllGlobals();
   });
 });
 
@@ -168,11 +170,14 @@ describe("MeterDO collection health (consecutive failures -> admin alert)", () =
     return { svc, sent };
   }
 
+  afterEach(() => vi.unstubAllGlobals());
+
   it("counts a run with every Cloudflare metric unknown as a failure and alerts on the 2nd in a row", async () => {
     const { d1 } = makeD1();
     const mail = mailRecorder();
-    // no CF token -> every Cloudflare metric unknown (what a revoked token looks like)
-    const env = { DB: d1, SVC_MAIL_GATEWAY: mail.svc } as unknown as Env;
+    // configured, but the GraphQL call is rejected -> every Cloudflare metric unknown (revoked token)
+    vi.stubGlobal("fetch", async () => new Response("unauthorized", { status: 401 }));
+    const env = { DB: d1, SVC_MAIL_GATEWAY: mail.svc, USAGE_CF_ANALYTICS_TOKEN: "t", CF_ACCOUNT_ID: "acct" } as unknown as Env;
     const fs = fakeState();
 
     await new MeterDO(fs.state, env).alarm();
@@ -185,11 +190,34 @@ describe("MeterDO collection health (consecutive failures -> admin alert)", () =
     expect((mail.sent[0] as { textBody: string }).textBody).toContain("Cloudflare");
   });
 
+  // Regression (2026-11-02): staging copies (dub-usage-meter-staging/-staging2) deploy without
+  // the CF secrets, "failed" daily and mailed admin@ "21 回連続で失敗" while prod was healthy.
+  it("does not count or alert when the deployment has no CF token / account id", async () => {
+    const { d1 } = makeD1();
+    const mail = mailRecorder();
+    const env = { DB: d1, SVC_MAIL_GATEWAY: mail.svc } as unknown as Env;
+    const fs = fakeState();
+
+    for (let i = 0; i < 3; i++) await new MeterDO(fs.state, env).alarm();
+    expect(fs.store.get("collect:consecutiveFailures")).toBeUndefined();
+    expect(mail.sent).toHaveLength(0);
+  });
+
+  it("still treats a token without CF_ACCOUNT_ID as unconfigured", async () => {
+    const { d1 } = makeD1();
+    const mail = mailRecorder();
+    const env = { DB: d1, SVC_MAIL_GATEWAY: mail.svc, USAGE_CF_ANALYTICS_TOKEN: "t" } as unknown as Env;
+    const fs = fakeState();
+
+    for (let i = 0; i < 2; i++) await new MeterDO(fs.state, env).alarm();
+    expect(mail.sent).toHaveLength(0);
+  });
+
   it("a healthy run resets the counter and records the last success", async () => {
     const fs = fakeState();
     fs.store.set("collect:consecutiveFailures", 3);
     const { d1 } = makeD1();
-    const doo = new MeterDO(fs.state, { DB: d1 } as unknown as Env);
+    const doo = new MeterDO(fs.state, { DB: d1, USAGE_CF_ANALYTICS_TOKEN: "t", CF_ACCOUNT_ID: "acct" } as unknown as Env);
     // stub a healthy collection
     doo.runCollection = async () => ({ metrics: 12, worstStatus: "ok", newlyAlerted: 0, problem: null });
     await doo.alarm();
