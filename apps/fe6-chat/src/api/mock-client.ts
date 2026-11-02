@@ -32,6 +32,7 @@ import type {
   UnfurlPreview,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateChannelVisibilityRequest,
   UpdateSectionRequest,
   WsTicketResponse,
 } from "./contract";
@@ -181,6 +182,20 @@ export class MockChatClient implements ChatApiClient {
       version: channel.version + 1,
       updatedAt: now(),
     };
+    this.channels.set(id, next);
+    return this.settle(next);
+  }
+
+  // Mirrors chat-service: DM -> 400, stale version -> 409, same value -> unchanged.
+  async updateChannelVisibility(id: common.ChannelId, req: UpdateChannelVisibilityRequest): Promise<Channel> {
+    const channel = this.channels.get(id);
+    if (!channel) throw notFound("channel");
+    if (channel.type === "dm") throw invalid("dm_visibility_fixed");
+    if (channel.version !== req.version) {
+      throw new ChatApiError(409, { error: { code: "CHAT_VERSION_CONFLICT", message: "version conflict", retryable: false } });
+    }
+    if (channel.visibility === req.visibility) return this.settle(channel);
+    const next: Channel = { ...channel, visibility: req.visibility, version: channel.version + 1, updatedAt: now() };
     this.channels.set(id, next);
     return this.settle(next);
   }

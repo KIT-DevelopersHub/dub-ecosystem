@@ -56,6 +56,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:slack_import",
   "chat:emoji_import",
   "chat:manage_sections",
+  "chat:change_visibility",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -734,9 +735,12 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
   "mail:read",
 ];
 
-// チャット 編集 but NOT chat:manage_sections (the default for every non-admin role): sees the
-// org-wide sidebar sections without any organizing UI. ?demo_account=usr_bob previews it.
-const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "chat:manage_sections");
+// チャット 編集 but NOT chat:manage_sections / chat:change_visibility (the default for every
+// non-admin role): sees the org-wide sidebar sections without any organizing UI, and a
+// channel's 公開範囲 without the switch. ?demo_account=usr_bob previews it.
+const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter(
+  (k) => k !== "chat:manage_sections" && k !== "chat:change_visibility",
+);
 
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
@@ -2238,6 +2242,30 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
         if (sectionId === null) delete mine.assignments[channelId];
         else mine.assignments[channelId] = sectionId;
         return json(null, 204);
+      }
+    }
+    {
+      // Public <-> private, like chat-service: 編集 + chat:change_visibility (403 otherwise),
+      // DM 400, stale version 409, same value = unchanged. Existing members stay.
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/visibility$/.exec(pathname);
+      if (m && method === "PUT") {
+        const perms = currentAccount().permissions;
+        if (!perms.includes("app:chat:edit") || !perms.includes("chat:change_visibility")) {
+          return json({ error: { code: "FORBIDDEN", message: "chat:change_visibility required", retryable: false } } satisfies ErrorResponse, 403);
+        }
+        const c = byId.get(decodeURIComponent(m[1]!));
+        if (!c) return notFound(`PUT ${pathname}`);
+        if (c.type === "dm") return validationFailed("dm_visibility_fixed");
+        const req = (body ?? {}) as { visibility?: unknown; version?: unknown };
+        if (req.visibility !== "public" && req.visibility !== "private") return validationFailed("visibility must be public|private");
+        if (req.version !== (c.version ?? 1)) {
+          return json({ error: { code: "CHAT_VERSION_CONFLICT", message: "version conflict", retryable: false } } satisfies ErrorResponse, 409);
+        }
+        if ((c.visibility ?? "public") !== req.visibility) {
+          c.visibility = req.visibility;
+          c.version = (c.version ?? 1) + 1;
+        }
+        return json(toWire(c));
       }
     }
     {
