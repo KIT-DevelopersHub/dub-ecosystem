@@ -734,15 +734,12 @@
   white-space: nowrap;
 }
 
-/* ── 公開設定: テーマエディタ型（ページはスクロールしない。各ペインが中だけスクロール） ── */
-.editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-4);
-  min-height: 0;
-}
-
+/* 操作の帯: スクロールしても上に貼り付く。本番は左の色で一目で分かるように。 */
 .stickyBar {
+  position: sticky;
+  /* シェルの本文（スクロール領域）の上余白ぶん持ち上げて、ヘッダーの直下に貼り付ける。 */
+  top: calc(-1 * var(--dub-space-6));
+  z-index: var(--dub-zIndex-sticky);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -758,187 +755,119 @@
   border-left: 4px solid var(--dub-color-danger-600);
 }
 
-/* 左: 一覧 / 中: プレビュー / 右: インスペクタ */
-.workspace {
-  flex: 1 1 auto;
-  min-height: 0;
+/* 公開設定: 左に LP（全高）、右にセクションの設定。1 枚のカードの中でページと一緒にスクロールする。 */
+.lpEditor {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 340px;
-  gap: var(--dub-space-4);
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+  align-items: start;
 }
 
-.workspaceNarrow {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+.lpEditor[data-narrow="true"] {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.workspaceNarrow > [hidden] {
+.lpEditorPreview[hidden] {
   display: none;
 }
 
-.pane {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: var(--dub-space-4);
+.lpEditorPreview {
+  border-right: 1px solid var(--dub-color-border-default);
+}
+
+.lpEditor[data-narrow="true"] .lpEditorPreview {
+  border-right: 0;
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+
+.lpEditorSettings {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-4) var(--dub-space-5);
+}
+
+/* 位置合わせ: 各ブロックをそのセクションの高さに置く（top は実行時に決まる）。 */
+.lpEditorSettings[data-layout="aligned"] {
+  display: block;
+  padding: 0;
+}
+
+.lpEditorSettings[data-layout="aligned"] .lpEditorBlock {
+  position: absolute;
+  right: var(--dub-space-5);
+  left: var(--dub-space-6);
+  transition: top var(--dub-motion-normal) var(--dub-motion-easing);
+}
+
+/* 左端の縦線: そのセクションが LP のどこからどこまでか。 */
+.lpEditorRange {
+  position: absolute;
+  left: var(--dub-space-2);
+  width: 3px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-border-default);
+}
+
+.lpEditorRange[data-active="true"] {
+  background: var(--dub-color-brand-500);
+}
+
+.lpEditorBlock {
+  display: grid;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3) var(--dub-space-4);
   border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-lg);
+  border-radius: var(--dub-radius-md);
   background: var(--dub-color-surface-raised);
 }
 
-.workspaceNarrow > .pane,
-.workspaceNarrow > .paneFill {
-  flex: 1 1 auto;
+.lpEditorBlock[data-active="true"] {
+  border-color: var(--dub-color-brand-500);
+  box-shadow: var(--dub-shadow-sm);
 }
 
-.paneFill {
-  min-height: 0;
+.lpBlockHead {
   display: flex;
-  flex-direction: column;
-}
-
-.paneTitle {
-  margin: var(--dub-space-4) 0 var(--dub-space-2);
-  color: var(--dub-color-text-muted);
-  font-size: var(--dub-font-size-sm);
+  align-items: center;
+  gap: var(--dub-space-2);
   font-weight: var(--dub-font-weight-bold);
 }
 
-.paneTitle:first-child {
-  margin-top: 0;
-}
-
-.itemList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-2);
-}
-
-.item {
-  display: flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  padding: var(--dub-space-1) var(--dub-space-2) var(--dub-space-1) 0;
-  border: 1px solid transparent;
-  border-radius: var(--dub-radius-md);
-}
-
-.item[data-active="true"] {
-  border-color: var(--dub-color-brand-500);
-  background: color-mix(in srgb, var(--dub-color-brand-500) 12%, transparent);
-}
-
-.itemButton {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: grid;
-  gap: var(--dub-space-1);
-  padding: var(--dub-space-2) var(--dub-space-3);
-  border: 0;
-  border-radius: var(--dub-radius-md);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.itemButton:hover {
-  background: var(--dub-color-surface-sunken);
-}
-
-.itemButton:focus-visible {
-  outline: 2px solid var(--dub-color-brand-500);
-  outline-offset: 2px;
-}
-
-.itemName {
-  display: flex;
-  align-items: center;
-  gap: var(--dub-space-2);
-  font-weight: var(--dub-font-weight-medium);
-}
-
-.itemMeta {
+.lpBlockRow {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--dub-space-1);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2) var(--dub-space-4);
+}
+
+.lpBlockRow > :first-child {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
 }
 
 .changedDot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--dub-radius-full);
   background: var(--dub-color-warning-500);
-}
-
-.inViewTag {
-  margin-left: auto;
-  color: var(--dub-color-brand-600);
-  font-size: var(--dub-font-size-xs);
-  font-weight: var(--dub-font-weight-bold);
-}
-
-.stagedBox {
-  margin-top: var(--dub-space-4);
-  padding-top: var(--dub-space-2);
-  border-top: 1px solid var(--dub-color-border-default);
-}
-
-.inspector {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-6);
-}
-
-.inspector > h2 {
-  margin: 0;
-}
-
-.inspectorRow {
-  display: grid;
-  gap: var(--dub-space-2);
-}
-
-/* プレビューのキャンバス */
-.canvas,
-.canvasFill {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-lg);
-  background: var(--dub-color-surface-raised);
-}
-
-.canvasFill {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.canvas .miniBox {
-  height: 480px;
 }
 
 .miniHeader {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--dub-space-3);
-  padding: var(--dub-space-2) var(--dub-space-4);
-  border-bottom: 1px solid var(--dub-color-border-default);
-  font-weight: var(--dub-font-weight-medium);
 }
 
 .miniHeader > a {
   margin-left: auto;
 }
 
+/* 高さは実行時に決まる（全高 = LP の高さ × 縮尺 / 位置の分からない LP は中でスクロールする枠）。 */
 .miniBox {
   position: relative;
-  flex: 1 1 auto;
-  min-height: 200px;
   overflow: hidden;
   background: var(--dub-color-surface-sunken);
 }
@@ -951,7 +880,7 @@
   background: var(--dub-color-surface-raised);
 }
 
-/* 操作できる（ホイール / トラックパッドで LP 全体をスクロール・クリックでセクションを選ぶ）。 */
+/* クリックでセクションを選べる。全高のときは中でスクロールしない（ページと一緒に動く）。 */
 .miniFrame {
   display: block;
   border: 0;
@@ -963,13 +892,14 @@
   align-items: flex-start;
   gap: var(--dub-space-2);
   margin: 0;
-  padding: var(--dub-space-2) var(--dub-space-4);
-  border-top: 1px solid var(--dub-color-border-default);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-bottom: 1px solid var(--dub-color-border-default);
   color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-xs);
+  font-size: var(--dub-font-size-sm);
   line-height: var(--dub-font-lineHeight-relaxed);
 }
 
-.item[data-active="true"] .itemButton:hover {
-  background: transparent;
+.lpEditorSection {
+  display: grid;
+  gap: var(--dub-space-3);
 }

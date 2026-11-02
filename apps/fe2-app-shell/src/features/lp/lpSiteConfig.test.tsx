@@ -11,7 +11,7 @@ import { LpSiteConfigScreen, PUBLISH_CONFIRM_TITLE } from "./LpSiteConfigScreen.
 import { createLpApi, type LpApi, type LpSiteConfig, type LpSiteConfigState, type LpTicketsState } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
 import { diffSiteConfig, draftPreviewUrl, releasePreviewUrl, setRelease, setSection } from "./lpSiteConfig.ts";
-import { miniPreviewSrc } from "./LpMiniPreview.tsx";
+import { miniPreviewSrc, parseLayoutReport, placeBlocks } from "./LpSectionEditor.tsx";
 import { LP_PUBLIC_URL } from "./lpPublish.ts";
 import { STALE_MESSAGE } from "./lpSiteConfigHooks.ts";
 
@@ -125,29 +125,15 @@ describe("LpSiteConfigScreen — プレビュー（下書き）", () => {
     expect(screen.getByTestId("fe2-lp-config-loading")).toBeInTheDocument();
   });
 
-  it("lists 本番反映 + every registry section; the inspector shows only the selected one", async () => {
+  it("renders the release card and one card per registry section; non-hideable sections cannot be hidden", async () => {
     renderScreen();
     expect(await screen.findByTestId("fe2-lp-config-release")).toBeInTheDocument();
-    for (const id of lp.LP_SECTION_IDS) expect(screen.getByTestId(`fe2-lp-config-item-${id}`)).toBeInTheDocument();
-    expect(screen.queryByTestId("fe2-lp-config-section-header")).toBeNull();
-    // 非表示にできないセクション（ヘッダー・フッター）には一覧のスイッチが無い。
-    expect(screen.queryByTestId("fe2-lp-config-header-visible")).toBeNull();
-    expect(screen.queryByTestId("fe2-lp-config-footer-visible")).toBeNull();
-    expect(screen.getByTestId("fe2-lp-config-join-visible")).not.toBeDisabled();
-    fireEvent.click(within(screen.getByTestId("fe2-lp-config-item-header")).getByRole("button"));
-    expect(screen.getByTestId("fe2-lp-config-section-header")).toBeInTheDocument();
-    expect(screen.queryByTestId("fe2-lp-config-release")).toBeNull();
+    for (const id of lp.LP_SECTION_IDS) expect(screen.getByTestId(`fe2-lp-config-section-${id}`)).toBeInTheDocument();
     expect(screen.getByTestId("fe2-lp-config-header-banner")).toBeChecked();
-    expect(screen.getByTestId("fe2-lp-config-inspector-visible")).toBeDisabled();
+    expect(screen.getByTestId("fe2-lp-config-header-visible")).toBeDisabled();
+    expect(screen.getByTestId("fe2-lp-config-footer-visible")).toBeDisabled();
+    expect(screen.getByTestId("fe2-lp-config-join-visible")).not.toBeDisabled();
     expect(screen.getByTestId("fe2-lp-config-env-draft")).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("marks changed items in the list (draft vs production)", async () => {
-    renderScreen(fakeApi({ getSiteConfig: () => Promise.resolve(siteState({ draft: setSection(BASE, "vision", { visible: false }) })) }));
-    const vision = await screen.findByTestId("fe2-lp-config-item-vision");
-    expect(within(vision).getByLabelText("変更あり")).toBeInTheDocument();
-    expect(within(vision).getByText("非表示")).toBeInTheDocument();
-    expect(within(screen.getByTestId("fe2-lp-config-item-join")).queryByLabelText("変更あり")).toBeNull();
   });
 
   it("switches environment through the URL (?env=live)", async () => {
@@ -359,15 +345,17 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     nav.searchStr = "?env=live";
     renderScreen();
     const frame = await screen.findByTestId("fe2-lp-config-mini-frame");
-    // 本番は版を番号で固定して &config=live（プレビュー扱い = 連動の橋渡しが入る）。
     expect(frame).toHaveAttribute("src", `${releasePreviewUrl(BASE)}&config=live`);
     fireEvent.click(screen.getByTestId("fe2-lp-config-proposalsEnabled"));
-    await waitFor(() => expect(frame).toHaveAttribute("src", `${releasePreviewUrl(setRelease(BASE, "proposalsEnabled", true))}&config=live`), { timeout: 4000 });
+    await waitFor(
+      () => expect(frame).toHaveAttribute("src", `${releasePreviewUrl(setRelease(BASE, "proposalsEnabled", true))}&config=live`),
+      { timeout: 4000 },
+    );
     fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
     expect(screen.getByTestId("fe2-lp-config-mini-note")).toHaveTextContent("本番に反映するとプレビューに映ります");
   });
 
-  it("narrow screens switch between プレビュー and 設定 instead of stacking scroll areas", async () => {
+  it("narrow screens stack the settings and open the preview from the card header", async () => {
     const original = window.matchMedia;
     window.matchMedia = ((q: string) => ({
       matches: q.includes("1100px"),
@@ -381,20 +369,43 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     })) as typeof window.matchMedia;
     try {
       renderScreen();
-      await screen.findByTestId("fe2-lp-config-pane");
-      expect(screen.getByTestId("fe2-lp-config-mini")).toBeVisible();
-      expect(screen.getByTestId("fe2-lp-config-list")).not.toBeVisible();
-      fireEvent.click(screen.getByTestId("fe2-lp-config-pane-settings"));
-      expect(screen.getByTestId("fe2-lp-config-list")).toBeVisible();
-      expect(screen.getByTestId("fe2-lp-config-release")).toBeVisible();
+      await screen.findByTestId("fe2-lp-config-release");
+      expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-layout", "stacked");
       expect(screen.getByTestId("fe2-lp-config-mini")).not.toBeVisible();
+      fireEvent.click(screen.getByTestId("fe2-lp-config-mini-toggle"));
+      expect(screen.getByTestId("fe2-lp-config-mini")).toBeVisible();
     } finally {
       window.matchMedia = original;
     }
   });
 });
 
-describe("LpSiteConfigScreen — 一覧 ⇄ プレビューの選択連動", () => {
+describe("LpSectionEditor (pure)", () => {
+  it("accepts only a full layout report (old bridges without heights are not aligned)", () => {
+    expect(parseLayoutReport({ sections: [{ id: "header", top: 0 }] })).toBeNull();
+    expect(parseLayoutReport({ sections: [{ id: "header", top: 0, height: 900 }], docHeight: 5000 })).toEqual({
+      sections: [{ id: "header", top: 0, height: 900 }],
+      docHeight: 5000,
+    });
+    expect(parseLayoutReport({ sections: [], docHeight: 1e9 })?.docHeight).toBe(40000);
+  });
+
+  it("places each block at its section, pushes overlapping blocks down and stacks hidden sections under the previous one", () => {
+    const report = {
+      sections: [
+        { id: "header", top: 0, height: 900 },
+        { id: "program", top: 1000, height: 200 },
+        { id: "about", top: 1200, height: 800 },
+      ],
+      docHeight: 2000,
+    };
+    const tops = placeBlocks(["header", "join", "program", "about"], report, 0.5, { header: 100, join: 100, program: 150, about: 50 }, 10);
+    // header: 0 / join（非表示）: header のすぐ下 / program: 500 / about: 600 は program と重なるので 660 へ。
+    expect(tops).toEqual({ header: 0, join: 110, program: 500, about: 660 });
+  });
+});
+
+describe("LpSiteConfigScreen — LP（左）とセクションの設定（右）を 1 枚に", () => {
   async function setup() {
     renderScreen();
     const frame = (await screen.findByTestId("fe2-lp-config-mini-frame")) as HTMLIFrameElement;
@@ -405,65 +416,66 @@ describe("LpSiteConfigScreen — 一覧 ⇄ プレビューの選択連動", () 
       act(() => {
         window.dispatchEvent(new MessageEvent("message", { data, origin: o, source }));
       });
-    const pick = (id: string) => fireEvent.click(within(screen.getByTestId(`fe2-lp-config-item-${id}`)).getAllByRole("button")[0]!);
-    const list = () => screen.getByTestId("fe2-lp-config-list");
-    return { frame, origin, post, fromLp, pick, list };
+    return { frame, origin, post, fromLp };
   }
+  const REPORT = {
+    type: "lp:sections",
+    sections: [
+      { id: "header", top: 0, height: 900 },
+      { id: "join", top: 900, height: 600 },
+      { id: "program", top: 1500, height: 1000 },
+    ],
+    docHeight: 3000,
+  };
 
-  it("lays out list | preview | inspector, in that order", async () => {
+  it("is one card: the preview on the left, the section settings on the right", async () => {
     renderScreen();
-    const mini = await screen.findByTestId("fe2-lp-config-mini");
-    const listEl = screen.getByTestId("fe2-lp-config-list");
-    const inspector = screen.getByTestId("fe2-lp-config-release");
-    expect(listEl.compareDocumentPosition(mini) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(mini.compareDocumentPosition(inspector) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const card = await screen.findByTestId("fe2-lp-config-editor");
+    const mini = within(card).getByTestId("fe2-lp-config-mini");
+    const settings = within(card).getByTestId("fe2-lp-config-settings");
+    expect(mini.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const id of lp.LP_SECTION_IDS) expect(within(settings).getByTestId(`fe2-lp-config-section-${id}`)).toBeInTheDocument();
   });
 
-  it("asks the LP for select mode, and selecting in the list scrolls the preview (LP origin only, once the bridge is ready)", async () => {
-    const { frame, origin, post, fromLp, pick, list } = await setup();
+  it("asks the LP for full height + select mode, then draws it at full height and aligns each block to its section", async () => {
+    const { frame, origin, post, fromLp } = await setup();
     fireEvent.load(frame);
-    expect(post).toHaveBeenCalledWith({ type: "lp:hello", select: true }, origin);
-    pick("join");
-    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "lp:scrollTo" }), expect.anything());
-    fromLp({ type: "lp:sections", sections: [{ id: "header", top: 0 }] });
-    // 準備ができたら、選んでいたセクションへ移動する（読み直し後も同じ）。
-    expect(post).toHaveBeenCalledWith({ type: "lp:scrollTo", section: "join" }, origin);
-    pick("program");
-    expect(post).toHaveBeenCalledWith({ type: "lp:scrollTo", section: "program" }, origin);
-    expect(list()).toHaveAttribute("data-selected", "program");
-    expect(screen.getByTestId("fe2-lp-config-section-program")).toBeInTheDocument();
-    // 直後に返ってくる途中経過はエコーとして無視する。
-    fromLp({ type: "lp:scroll", activeSection: "about" });
-    expect(list()).toHaveAttribute("data-selected", "program");
+    expect(post).toHaveBeenCalledWith({ type: "lp:hello", select: true, fit: 900 }, origin);
+    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-layout", "stacked");
+    fromLp(REPORT);
+    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-layout", "aligned");
+    // jsdom は幅 0 なので縮尺 0.4。iframe は LP の全高・枠は全高 × 縮尺（中でスクロールしない）。
+    expect(frame.style.height).toBe("3000px");
+    expect(frame).toHaveAttribute("scrolling", "no");
+    expect(screen.getByTestId("fe2-lp-config-mini-box").style.height).toBe("1200px");
+    const top = (id: string) => (document.querySelector(`[data-lp-block="${id}"]`) as HTMLElement).style.top;
+    expect([top("header"), top("join"), top("program")]).toEqual(["0px", "360px", "600px"]);
   });
 
-  it("scrolling the preview marks the section in view (and follows the selection only when a section is selected)", async () => {
-    const { fromLp, pick, list } = await setup();
-    fromLp({ type: "lp:scroll", activeSection: "vision" });
-    expect(list()).toHaveAttribute("data-in-view", "vision");
-    expect(list()).toHaveAttribute("data-selected", "release");
-    expect(within(screen.getByTestId("fe2-lp-config-item-vision")).getByText("表示中")).toBeInTheDocument();
-    pick("about");
-    await new Promise((r) => setTimeout(r, 650));
-    fromLp({ type: "lp:scroll", activeSection: "contact" });
-    expect(list()).toHaveAttribute("data-selected", "contact");
-  });
-
-  it("clicking a section in the preview selects it; foreign origins / windows are ignored", async () => {
-    const { fromLp, list } = await setup();
+  it("hovering a block outlines the section in the LP; clicking a section in the LP picks its block", async () => {
+    const { frame, origin, post, fromLp } = await setup();
+    fireEvent.load(frame);
+    fromLp(REPORT);
+    fireEvent.mouseEnter(document.querySelector('[data-lp-block="program"]')!);
+    expect(post).toHaveBeenCalledWith({ type: "lp:mark", section: "program" }, origin);
     fromLp({ type: "lp:select", section: "crowdfunding" }, "https://evil.example");
     fromLp({ type: "lp:select", section: "crowdfunding" }, undefined, window);
     fromLp({ type: "lp:select", section: "not-a-section" });
-    expect(list()).toHaveAttribute("data-selected", "release");
+    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-active-section", "program");
     fromLp({ type: "lp:select", section: "crowdfunding" });
-    expect(list()).toHaveAttribute("data-selected", "crowdfunding");
-    expect(screen.getByTestId("fe2-lp-config-section-crowdfunding")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-active-section", "crowdfunding");
+    // 保存で読み直した LP には、選んでいるセクションの枠を付け直す。
+    post.mockClear();
+    fromLp(REPORT);
+    expect(post).toHaveBeenCalledWith({ type: "lp:mark", section: "crowdfunding" }, origin);
   });
 
-  it("says so when the LP does not answer (old version / LP without the bridge)", async () => {
+  it("an LP that does not report its layout gets a scrolling preview and stacked settings, with a note", async () => {
     const { frame } = await setup();
     fireEvent.load(frame);
-    expect(await screen.findByTestId("fe2-lp-config-mini-nosync", undefined, { timeout: 4500 })).toHaveTextContent("連動");
+    expect(await screen.findByTestId("fe2-lp-config-mini-nosync", undefined, { timeout: 4500 })).toHaveTextContent("v3.6");
+    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-layout", "stacked");
+    expect(frame).not.toHaveAttribute("scrolling");
   });
 });
 
