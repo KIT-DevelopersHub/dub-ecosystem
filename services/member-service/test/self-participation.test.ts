@@ -78,7 +78,7 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
     // Persisted: a fresh GET (new request) reflects the same values from the real repo.
     const read = await call(app, "GET", "/members/internal/me/participation", { userId: IDU, internal: true });
     expect(read.json).toMatchObject(patch);
-    expect(read.json.operations).toEqual({ name: "山田 太郎", roleTitle: null, status: "added", teams: [], leaderName: null });
+    expect(read.json.operations).toEqual({ name: "山田 太郎", position: null, roleTitle: null, status: "added", teams: [], leaderName: null });
 
     // A member_people row was created, linked to the identity user, name composed "姓 名".
     const person = await deps.repo.getPersonByIdentityUserId(deps.orgId, IDU);
@@ -168,6 +168,7 @@ describe("member-service self 参加届 (/members/internal/me/participation)", (
     expect(read.json.contact).toBe("old@example.com");
     expect(read.json.operations).toEqual({
       name: "高岡",
+      position: null,
       roleTitle: "副代表",
       status: "added",
       teams: [{ id: team.json.id, name: "開発チーム", color: team.json.color }],

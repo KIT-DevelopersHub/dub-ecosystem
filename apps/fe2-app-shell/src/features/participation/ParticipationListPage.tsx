@@ -15,7 +15,7 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
-import { REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
+import { POSITION_LABEL, REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import { PUBLIC_PARTICIPATION_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
@@ -165,6 +165,7 @@ export function ParticipationListPage(): JSX.Element {
       (c): ColumnDef<Participation> => ({ key: c.id, header: c.header, noWrap: true, minWidth: "7rem", cell: (p) => c.value(p) || "—" }),
     ),
     { key: "team", header: "所属チーム", noWrap: true, minWidth: "8rem", cell: (p) => teamName(p.desiredTeamId) },
+    { key: "position", header: "役職", noWrap: true, minWidth: "7rem", cell: (p) => positionLabel(p) },
     { key: "submittedAt", header: "提出日時", noWrap: true, minWidth: "11rem", cell: (p) => fmtDateTime(p.submittedAt) },
   ];
 
@@ -481,6 +482,10 @@ function ManualLinkPanel({
   );
 }
 
+function positionLabel(p: Participation): string {
+  return p.position ? POSITION_LABEL[p.position] : "—";
+}
+
 function DetailBody({ p, teamName }: { p: Participation; teamName: (id: string | null) => string }): JSX.Element {
   const rows: { label: string; value: string }[] = [
     { label: "氏名", value: p.name },
@@ -488,6 +493,7 @@ function DetailBody({ p, teamName }: { p: Participation; teamName: (id: string |
     ...PROFILE_DISPLAY_COLUMNS.map((c) => ({ label: c.header, value: c.value(p) || "—" })),
     { label: "メールアドレス素案", value: (() => { const c = emailCandidate(p); return c ? `${c}@…` : "—"; })() },
     { label: "所属チーム", value: teamName(p.desiredTeamId) },
+    { label: "役職", value: positionLabel(p) },
     { label: "運営メンバー反映", value: reviewLabel(p) },
     { label: "提出日時", value: fmtDateTime(p.submittedAt) },
   ];

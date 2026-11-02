@@ -337,6 +337,17 @@ CREATE TABLE member_hr_onboarding_checks (
 `.trim(),
 };
 
+// 0018: 役職 (position) を名簿と参加届に足す additive ALTER。既存行は null。参加届は管理者が
+// 確定すると member_people.position へ引き継ぐ。Mirrors 0018_position.sql (schema-lockstep).
+export const MEMBER_POSITION_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0018_position",
+  up: `
+ALTER TABLE member_people ADD COLUMN position TEXT;
+ALTER TABLE member_participations ADD COLUMN position TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -356,4 +367,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_ONBOARDING_MEETINGS_MIGRATION,
   MEMBER_STUDENT_NUMBER_MIGRATION,
   MEMBER_HR_MIGRATION,
+  MEMBER_POSITION_MIGRATION,
 ];
