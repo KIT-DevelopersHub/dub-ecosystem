@@ -35,6 +35,7 @@ import {
   type ProposalConfig,
 } from "./proposals.ts";
 import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supportsSiteConfig } from "./site-config.ts";
+import { bridgeScript, parseExtraOrigins, shouldInjectBridge } from "./preview-bridge.ts";
 
 interface Fetcher {
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
@@ -44,6 +45,8 @@ interface Env {
   LP_FLAG?: Fetcher;
   DEFAULT_VERSION?: string;
   TICKETS_DEMO?: string;
+  /** LP管理のミニプレビュー連動で許可する追加の親オリジン（カンマ区切り・https のみ）。 */
+  PREVIEW_PARENT_ORIGINS?: string;
 }
 interface RewriterElement {
   append(content: string, opts: { html: boolean }): void;
@@ -261,7 +264,12 @@ export default {
           spMode === "off" && (await proposalConfig(env))?.enabled ? "登壇者募集" : null,
         ].filter((x): x is string => x !== null)
       : [];
+    // LP管理のミニプレビューとのスクロール連動。プレビュー表示のときだけ（公開表示には足さない）。
+    const bridge = shouldInjectBridge({ page, siteConfig, previewing: r.preview || !!mode || !!spMode || cfgDraft })
+      ? bridgeScript(parseExtraOrigins(env.PREVIEW_PARENT_ORIGINS))
+      : "";
     const inject =
+      bridge +
       (r.preview ? previewBanner(r.version, published) : "") +
       previewBar(previewing, hidden) +
       ticketsInjection(cfg, false) +
