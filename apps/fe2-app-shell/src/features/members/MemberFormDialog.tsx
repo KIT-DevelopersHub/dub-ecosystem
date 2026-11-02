@@ -96,12 +96,12 @@ export function MemberFormDialog({
     const candidates = orgChartOrder(
       members.filter((m) => m.status !== "declined" && m.id !== editing?.id),
     );
-    const tierLabel: Record<string, string> = { organizer: "オーガナイザー", leader: "リーダー", member: "メンバー" };
+    // 役職が入っていればそれを、無ければ role_title から推した段を英字ラベルで添える。
     return [
       { value: NO_LEADER, label: "なし（直属リーダーなし）" },
       ...candidates.map((m) => ({
         value: m.id,
-        label: `${m.name}（${m.roleTitle ?? tierLabel[tierOf(m)]}）`,
+        label: `${m.name}（${m.roleTitle ?? POSITION_LABEL[m.position ?? tierOf(m)]}）`,
       })),
     ];
   }, [members, editing?.id]);
@@ -183,7 +183,7 @@ export function MemberFormDialog({
           <FormField
             label="役職"
             htmlFor="member-position"
-            help="オーガナイザー / リーダー / メンバー。アカウントに紐付いた在籍中の人には「役職: 〜」ロールが自動で付きます。"
+            help="Org / Lead / Member。アカウントに紐付いた在籍中の人には「役職: Org」などのロールが自動で付きます。"
           >
             <Select<MemberPosition | typeof NO_POSITION>
               id="member-position"

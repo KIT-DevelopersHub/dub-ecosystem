@@ -14,14 +14,14 @@ import type { OrgId, UserId, ISODateTime } from "./common";
 export type MemberStatus = "added" | "invited" | "considering" | "on_leave" | "declined";
 export const MEMBER_STATUSES: readonly MemberStatus[] = ["added", "invited", "considering", "on_leave", "declined"];
 
-/** 役職 (組織図の段)。オーガナイザー / リーダー / メンバー。参加届で本人が選び、名簿で
+/** 役職 (組織図の段)。表示は Org / Lead / Member (英字)。参加届で本人が選び、名簿で
  *  管理者が直せる。担当・役割 (roleTitle の自由記述) とは別の、決まった値の項目。 */
 export type MemberPosition = "organizer" | "leader" | "member";
 export const MEMBER_POSITIONS: readonly MemberPosition[] = ["organizer", "leader", "member"];
 export const POSITION_LABEL: Record<MemberPosition, string> = {
-  organizer: "オーガナイザー",
-  leader: "リーダー",
-  member: "メンバー",
+  organizer: "Org",
+  leader: "Lead",
+  member: "Member",
 };
 export function isMemberPosition(v: unknown): v is MemberPosition {
   return typeof v === "string" && (MEMBER_POSITIONS as readonly string[]).includes(v);

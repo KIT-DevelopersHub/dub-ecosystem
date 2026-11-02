@@ -97,7 +97,7 @@ export function ParticipationForm(): JSX.Element {
       label="役職"
       htmlFor={POSITION_FIELD_ID}
       required
-      help="運営での立場（分からなければ「メンバー」）"
+      help="運営での立場（分からなければ Member）"
       {...(positionError ? { error: positionError } : {})}
     >
       <Select<MemberPosition>

@@ -15,7 +15,7 @@ type H = Awaited<ReturnType<typeof makeHarness>>;
 
 const TEAM_A = { id: "role_auto_team_team_a", name: "チーム: 広報" };
 const TEAM_B = { id: "role_auto_team_team_b", name: "チーム: 開発" };
-const LEAD = { id: "role_auto_position_leader", name: "役職: リーダー" };
+const LEAD = { id: "role_auto_position_leader", name: "役職: Lead" };
 
 function putUser(h: H, userId: string, roles: identity.ManagedRoleSpec[], extra: Record<string, unknown> = {}) {
   return h.app.request(
@@ -118,6 +118,15 @@ describe("PUT /internal/managed-roles (catalog)", () => {
     const res = await putCatalog(h, [{ id: TEAM_A.id, name: "チーム: 広報部" }]);
     expect(await res.json()).toMatchObject({ created: [], renamed: [TEAM_A.id] });
     expect((await h.repo.getRole(TEAM_A.id))?.name).toBe("チーム: 広報部");
+  });
+
+  it("renames an existing 役職 role to the new label on the next sync (役職: リーダー -> 役職: Lead), keeping its holders", async () => {
+    const h = await makeHarness();
+    await putUser(h, h.memberId, [{ id: LEAD.id, name: "役職: リーダー" }]);
+    const res = await putCatalog(h, [LEAD]);
+    expect(await res.json()).toMatchObject({ renamed: [LEAD.id] });
+    expect((await h.repo.getRole(LEAD.id))?.name).toBe("役職: Lead");
+    expect((await rolesOf(h, h.memberId)).some((a) => a.roleId === LEAD.id)).toBe(true);
   });
 
   it("deletes an unlisted managed role held only by auto rows (team deleted)", async () => {

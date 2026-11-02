@@ -224,11 +224,11 @@ describe("ParticipationForm", () => {
     expect((api.submit as any).mock.calls[0][0]).toMatchObject({ desiredTeamId: null });
   });
 
-  it("requires 役職 (オーガナイザー / リーダー / メンバー) and sends it as position", async () => {
+  it("requires 役職 (Org / Lead / Member) and sends it as position", async () => {
     const api = makeApi();
     render(wrap(<ParticipationForm />, api));
     const select = screen.getByTestId("participation-position");
-    for (const label of ["オーガナイザー", "リーダー", "メンバー"]) {
+    for (const label of ["Org", "Lead", "Member"]) {
       expect(within(select).getByRole("option", { name: label })).toBeInTheDocument();
     }
     await fillRequired("新規", "太郎", null);
