@@ -13,6 +13,9 @@ import type {
   ProposalRow,
   ProposalSettingsRow,
   PublishRow,
+  SiteConfigHistoryRow,
+  SiteConfigPublishInput,
+  SiteConfigRow,
   TicketOrderRow,
   TicketCouponRow,
   TicketSettingsRow,
@@ -33,6 +36,8 @@ export class InMemoryLpRepo implements LpRepo {
   coupons: TicketCouponRow[] = [];
   proposalSettings = new Map<string, ProposalSettingsRow>();
   proposals: ProposalRow[] = [];
+  siteConfig = new Map<string, SiteConfigRow>();
+  siteConfigHistory: SiteConfigHistoryRow[] = [];
 
   async getTicketSettings(site: string) {
     const r = this.ticketSettings.get(site);
@@ -395,5 +400,66 @@ export class InMemoryLpRepo implements LpRepo {
   }
   async setPublish(site: string, versionId: string, updatedBy: string, updatedAt: string) {
     this.publish.set(site, { site, versionId, updatedBy, updatedAt });
+  }
+
+  // ---- 公開設定: D1 と同じ規則（revision 照合・本番反映は全部書くか何も書かないか・値が変わる行だけ更新）----
+  private siteConfigOf(site: string): SiteConfigRow {
+    return (
+      this.siteConfig.get(site) ?? {
+        site,
+        draftJson: "{}",
+        publishedJson: "{}",
+        revision: 0,
+        draftUpdatedBy: null,
+        draftUpdatedAt: null,
+        publishedBy: null,
+        publishedAt: null,
+      }
+    );
+  }
+  async getSiteConfig(site: string) {
+    const r = this.siteConfig.get(site);
+    return r ? clone(r) : null;
+  }
+  async saveSiteConfigDraft(site: string, draftJson: string, expectedRevision: number | null, updatedBy: string, updatedAt: string) {
+    const cur = this.siteConfigOf(site);
+    if (expectedRevision !== null && cur.revision !== expectedRevision) return false;
+    this.siteConfig.set(site, { ...cur, draftJson, revision: cur.revision + 1, draftUpdatedBy: updatedBy, draftUpdatedAt: updatedAt });
+    return true;
+  }
+  async publishSiteConfig(p: SiteConfigPublishInput) {
+    const cur = this.siteConfigOf(p.site);
+    if (cur.revision !== p.expectedRevision) return false;
+    const r = p.release;
+    this.siteConfig.set(p.site, {
+      ...cur,
+      publishedJson: p.layoutJson,
+      revision: cur.revision + 1,
+      publishedBy: p.updatedBy,
+      publishedAt: p.updatedAt,
+    });
+    this.siteConfigHistory.push({
+      id: p.historyId,
+      site: p.site,
+      configJson: p.configJson,
+      publishedBy: p.updatedBy,
+      publishedAt: p.updatedAt,
+    });
+    const pub = this.publish.get(p.site);
+    if (!pub || pub.versionId !== r.versionId) await this.setPublish(p.site, r.versionId, p.updatedBy, p.updatedAt);
+    const t = this.ticketSettings.get(p.site);
+    if (!t || t.enabled !== r.ticketsEnabled || t.ctaEnabled !== r.ticketsCtaEnabled) {
+      this.upsertSettings(p.site, { enabled: r.ticketsEnabled, ctaEnabled: r.ticketsCtaEnabled }, p.updatedBy, p.updatedAt);
+    }
+    const ps = this.proposalSettings.get(p.site);
+    if (!ps || ps.enabled !== r.proposalsEnabled) await this.setProposalEnabled(p.site, r.proposalsEnabled, p.updatedBy, p.updatedAt);
+    return true;
+  }
+  async listSiteConfigHistory(site: string, limit: number) {
+    return this.siteConfigHistory
+      .filter((h) => h.site === site)
+      .sort((a, b) => (a.publishedAt === b.publishedAt ? (a.id < b.id ? 1 : -1) : a.publishedAt < b.publishedAt ? 1 : -1))
+      .slice(0, limit)
+      .map(clone);
   }
 }
