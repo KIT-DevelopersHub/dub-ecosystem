@@ -100,11 +100,12 @@ function wrap(
 }
 
 /** Fill the required fields (氏名[姓/名] + 学校メール + Gmail) with valid values. */
-async function fillRequired(last = "新規", first = "太郎"): Promise<void> {
+async function fillRequired(last = "新規", first = "太郎", position: string | null = "member"): Promise<void> {
   await userEvent.type(screen.getByTestId("participation-last-name"), last);
   await userEvent.type(screen.getByTestId("participation-first-name"), first);
   await userEvent.type(screen.getByTestId("participation-school-email"), "taro@school.ac.jp");
   await userEvent.type(screen.getByTestId("participation-gmail"), "taro@gmail.com");
+  if (position) await userEvent.selectOptions(screen.getByTestId("participation-position"), position);
 }
 
 describe("createParticipationApi", () => {
@@ -221,6 +222,23 @@ describe("ParticipationForm", () => {
     await userEvent.click(screen.getByTestId("participation-submit"));
     await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
     expect((api.submit as any).mock.calls[0][0]).toMatchObject({ desiredTeamId: null });
+  });
+
+  it("requires 役職 (オーガナイザー / リーダー / メンバー) and sends it as position", async () => {
+    const api = makeApi();
+    render(wrap(<ParticipationForm />, api));
+    const select = screen.getByTestId("participation-position");
+    for (const label of ["オーガナイザー", "リーダー", "メンバー"]) {
+      expect(within(select).getByRole("option", { name: label })).toBeInTheDocument();
+    }
+    await fillRequired("新規", "太郎", null);
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    expect(screen.getByText("役職を選択してください")).toBeInTheDocument();
+    expect(api.submit).not.toHaveBeenCalled();
+    await userEvent.selectOptions(select, "leader");
+    await userEvent.click(screen.getByTestId("participation-submit"));
+    await waitFor(() => expect(api.submit).toHaveBeenCalledTimes(1));
+    expect((api.submit as any).mock.calls[0][0]).toMatchObject({ position: "leader" });
   });
 
   it("shows a skeleton while the teams load and omits the field when there are no teams", async () => {

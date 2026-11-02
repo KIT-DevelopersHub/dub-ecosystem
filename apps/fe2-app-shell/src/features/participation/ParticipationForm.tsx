@@ -1,12 +1,12 @@
 // 参加届 form body (shared by the in-shell page and the public standalone page).
 // 入力 → バリデーション → 送信 → サンクス。The submit goes to the PUBLIC endpoint, so the
 // サンクス view is intentionally generic (no roster/member echo). 氏名 + 学校メール + Gmail
-// are required (both emails must be a valid mail address); 所属チームも名簿のチームが
+// + 役職 are required (both emails must be a valid mail address); 所属チームも名簿のチームが
 // あれば必須 (「まだ決まっていない」も可)。the rest is optional.
 import { useState } from "react";
 import { Button, Card, Form, FormField, Select, Skeleton } from "@dub/ui";
 import { usePublicOnboardingItems, useSubmitParticipation } from "./hooks.ts";
-import type { PublicParticipationResponse } from "./contracts.ts";
+import { MEMBER_POSITIONS, POSITION_LABEL, type MemberPosition, type PublicParticipationResponse } from "./contracts.ts";
 import {
   PersonProfileFields,
   emptyProfileDraft,
@@ -22,6 +22,8 @@ const REQUIRED: readonly PersonProfileKey[] = ["lastName", "firstName", "schoolE
 // 所属チームの「まだ決まっていない」(送信時は desiredTeamId = null)。
 const NO_TEAM = "__none__";
 const TEAM_FIELD_ID = "participation-team";
+const POSITION_FIELD_ID = "participation-position";
+const POSITION_OPTIONS = MEMBER_POSITIONS.map((p) => ({ value: p, label: POSITION_LABEL[p] }));
 
 export function ParticipationForm(): JSX.Element {
   const submit = useSubmitParticipation();
@@ -32,6 +34,8 @@ export function ParticipationForm(): JSX.Element {
   const [errors, setErrors] = useState<PersonProfileErrors>({});
   const [team, setTeam] = useState("");
   const [teamError, setTeamError] = useState<string | null>(null);
+  const [position, setPosition] = useState<MemberPosition | null>(null);
+  const [positionError, setPositionError] = useState<string | null>(null);
   const [done, setDone] = useState<PublicParticipationResponse | null>(null);
 
   const onSubmit = () => {
@@ -39,11 +43,14 @@ export function ParticipationForm(): JSX.Element {
     setErrors(next);
     const nextTeamError = teams.length > 0 && team === "" ? "所属チームを選択してください" : null;
     setTeamError(nextTeamError);
-    if (Object.keys(next).length > 0 || nextTeamError) return;
+    const nextPositionError = position === null ? "役職を選択してください" : null;
+    setPositionError(nextPositionError);
+    if (Object.keys(next).length > 0 || nextTeamError || nextPositionError) return;
     submit.mutate(
       {
         ...profile,
         desiredTeamId: team === "" || team === NO_TEAM ? null : team,
+        position,
         schoolEmail: profile.schoolEmail ?? "",
         gmail: profile.gmail ?? "",
         // 後方互換: 合成した "姓 名" 等も同送する (旧受け口・デモ transport が参照)。
@@ -85,6 +92,29 @@ export function ParticipationForm(): JSX.Element {
     </FormField>
   ) : null;
 
+  const positionField = (
+    <FormField
+      label="役職"
+      htmlFor={POSITION_FIELD_ID}
+      required
+      help="運営での立場（分からなければ「メンバー」）"
+      {...(positionError ? { error: positionError } : {})}
+    >
+      <Select<MemberPosition>
+        id={POSITION_FIELD_ID}
+        value={position}
+        onChange={(v) => {
+          setPosition(v);
+          setPositionError(null);
+        }}
+        options={POSITION_OPTIONS}
+        placeholder="選択してください"
+        invalid={positionError !== null}
+        testId={POSITION_FIELD_ID}
+      />
+    </FormField>
+  );
+
   return (
     <Card>
       <Form onSubmit={onSubmit}>
@@ -95,7 +125,14 @@ export function ParticipationForm(): JSX.Element {
             errors={errors}
             required={REQUIRED}
             idPrefix="participation"
-            after={{ desiredActivity: teamField }}
+            after={{
+              desiredActivity: (
+                <>
+                  {teamField}
+                  {positionField}
+                </>
+              ),
+            }}
           />
           <div className={styles.actions}>
             <Button variant="primary" onClick={onSubmit} loading={submit.isPending} testId="participation-submit">

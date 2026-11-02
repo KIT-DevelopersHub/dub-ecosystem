@@ -3292,6 +3292,9 @@ function createMembersStore() {
     { id: "team_corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: "法人設立・契約・会計／規程" },
     { id: "team_network", key: "network", name: "ネットワークチーム", color: "#0891b2", description: "会場ネットワーク・Wi-Fi・配信回線" },
   ];
+  // デモ用の役職 (実サーバは role_title から推測しない。ここは見本データを埋めるだけ)。
+  const demoPosition = (roleTitle: string | null): memberValues.MemberPosition =>
+    /代表|統括|オーガナイザー/.test(roleTitle ?? "") ? "organizer" : /リーダー/.test(roleTitle ?? "") ? "leader" : "member";
   const mk = (
     id: string,
     name: string,
@@ -3306,7 +3309,7 @@ function createMembersStore() {
     leaderId: string | null = null,
   ): DemoMember => ({
     ...memberValues.emptyPersonProfile(),
-    id, orgId: ORG, name, roleTitle, status, teamIds, department, grade: memberValues.normalizeGrade(grade ?? "") ?? null,
+    id, orgId: ORG, name, roleTitle, position: demoPosition(roleTitle), status, teamIds, department, grade: memberValues.normalizeGrade(grade ?? "") ?? null,
     identityUserId, leaderId, contact, sortOrder: (i + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
   });
   // leaderId で「配下」を明示し、組織図順ソートと「リーダー」列/フォームのリーダー選択を
@@ -3450,7 +3453,7 @@ function createMembersStore() {
       lastName: "黒川", firstName: null, nameKana: "くろかわ", lastNameKana: "くろかわ", firstNameKana: null,
       nameRomaji: "Kurokawa", lastNameRomaji: "Kurokawa", firstNameRomaji: null,
       grade: "3", department: "情報工学科", contact: "kurokawa@school.ac.jp", phone: "090-1111-2222",
-      schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq",
+      schoolEmail: "kurokawa@school.ac.jp", gmail: "kurokawa.dev@gmail.com", desiredTeamId: "team_hq", position: "leader",
       desiredActivity: "both", note: "統括の手伝いをしたいです。", status: "submitted",
       matchKind: "linked_existing", reviewState: "added", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
@@ -3460,7 +3463,7 @@ function createMembersStore() {
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
       grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", studentNumber: "1401123", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
-      schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr",
+      schoolEmail: "tanaka@school.ac.jp", gmail: "tanaka.minoru@gmail.com", desiredTeamId: "team_pr", position: "member",
       desiredActivity: "event", note: null, status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
@@ -3470,7 +3473,7 @@ function createMembersStore() {
       lastName: "田村", firstName: "未", nameKana: "たむら み", lastNameKana: "たむら", firstNameKana: "み",
       nameRomaji: "Tamura Mi", lastNameRomaji: "Tamura", firstNameRomaji: "Mi",
       grade: "1", department: "情報工学科", rosterNumber: "1EP2-08", studentNumber: "1500456", contact: "tamura@school.ac.jp", phone: "070-5555-6666",
-      schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr",
+      schoolEmail: "tamura@school.ac.jp", gmail: "tamura.mi@gmail.com", desiredTeamId: "team_pr", position: "member",
       desiredActivity: "dev", note: "招待いただいた者です。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
@@ -3481,7 +3484,7 @@ function createMembersStore() {
       lastName: "鈴木", firstName: "一朗", nameKana: "すずき いちろう", lastNameKana: "すずき", firstNameKana: "いちろう",
       nameRomaji: "Suzuki Ichiro", lastNameRomaji: "Suzuki", firstNameRomaji: "Ichiro",
       grade: "1", department: "メディア情報学科", contact: "suzuki.i@school.ac.jp", phone: "070-7777-8888",
-      schoolEmail: "suzuki.i@school.ac.jp", gmail: "suzuki.ichiro@gmail.com", desiredTeamId: "team_pr",
+      schoolEmail: "suzuki.i@school.ac.jp", gmail: "suzuki.ichiro@gmail.com", desiredTeamId: "team_pr", position: "leader",
       desiredActivity: "event", note: "広報を手伝いたいです。", status: "submitted",
       matchKind: "created_new", reviewState: "pending", submittedBy: ME_ID, submittedAt: isoNow(), createdAt: isoNow(), updatedAt: isoNow(),
     },
@@ -3730,6 +3733,7 @@ function createMembersStore() {
         id: nid("member"), orgId: ORG,
         name: newName,
         roleTitle: body?.roleTitle ?? null,
+        position: memberValues.isMemberPosition(body?.position) ? body.position : null,
         status: body?.status ?? "added", teamIds: Array.isArray(body?.teamIds) ? [...body.teamIds] : [],
         identityUserId: null,
         leaderId: body?.leaderId ?? null,
@@ -3781,6 +3785,7 @@ function createMembersStore() {
         if (body?.name !== undefined) mem.name = String(body.name);
         if ("lastName" in profile || "firstName" in profile) mem.name = composeName(mem.lastName, mem.firstName) || mem.name;
         if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
+        if (body?.position !== undefined) mem.position = memberValues.isMemberPosition(body.position) ? body.position : null;
         if (body?.status !== undefined) mem.status = body.status;
         if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
         if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
@@ -3818,6 +3823,7 @@ function createMembersStore() {
         contact: body?.contact ?? null,
         schoolEmail: profile.schoolEmail ?? "", gmail: profile.gmail ?? "",
         desiredTeamId: body?.desiredTeamId ?? null,
+        position: memberValues.isMemberPosition(body?.position) ? body.position : null,
         status: "submitted", matchKind: existing?.matchKind ?? "created_new", reviewState: existing?.reviewState ?? "pending",
         submittedBy: ME_ID, submittedAt: isoNow(), createdAt: existing?.createdAt ?? isoNow(), updatedAt: isoNow(),
       };
@@ -3836,7 +3842,8 @@ function createMembersStore() {
         .filter((x) => x.length > 0)
         .join(" ");
       const hasName = composedName.length > 0 || String(body?.name ?? "").trim().length > 0;
-      if (!hasName || !emailRe.test(school) || !emailRe.test(gm) || !parseProfile()) {
+      const badPosition = body?.position != null && body.position !== "" && !memberValues.isMemberPosition(body.position);
+      if (!hasName || !emailRe.test(school) || !emailRe.test(gm) || !parseProfile() || badPosition) {
         const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "invalid", retryable: false } };
         return json(err, 400);
       }
@@ -3899,6 +3906,7 @@ function createMembersStore() {
         if (mem.status === "invited" || mem.status === "considering") mem.status = "added";
         if (p.desiredTeamId && !mem.teamIds.includes(p.desiredTeamId)) mem.teamIds.push(p.desiredTeamId);
         if (mem.contact === null) mem.contact = p.schoolEmail;
+        if (mem.position == null && p.position) mem.position = p.position;
         // 人物プロフィール項目は空欄だけ参加届で補完 (実サーバの fillEmptyProfile と同じ)。
         for (const k of memberValues.PERSON_PROFILE_KEYS) {
           if (mem[k] == null && p[k]) (mem as Record<string, unknown>)[k] = p[k];
@@ -3910,7 +3918,7 @@ function createMembersStore() {
       if (action === "create") {
         const created: DemoMember = {
           ...memberValues.pickPersonProfile(p),
-          id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, status: "added", identityUserId: null, leaderId: null,
+          id: nid("member"), orgId: ORG, name: p.name, roleTitle: null, position: p.position ?? null, status: "added", identityUserId: null, leaderId: null,
           teamIds: p.desiredTeamId ? [p.desiredTeamId] : [],
           contact: p.contact ?? p.schoolEmail,
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
