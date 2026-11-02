@@ -755,7 +755,7 @@
   border-left: 4px solid var(--dub-color-danger-600);
 }
 
-/* 左: 設定カード / 右: ミニプレビュー（半分ずつ）。狭い幅では縦積みでプレビューを上に。 */
+/* 左: ミニプレビュー / 右: 設定カード（半分ずつ）。狭い幅では縦積みでプレビューが上。 */
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -774,7 +774,6 @@
   }
   .splitPreview {
     position: static;
-    order: -1;
   }
 }
 

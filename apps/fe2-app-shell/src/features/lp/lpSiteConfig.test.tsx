@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import { lp, type identity } from "@dub/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { ApiError, createApiClient } from "../../lib/api-client.tsx";
 import { createDemoFetch } from "../../lib/demo-seed.tsx";
@@ -373,6 +373,92 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     } finally {
       window.matchMedia = original;
     }
+  });
+});
+
+describe("LpSiteConfigScreen — ミニプレビュー（左）と設定（右）のスクロール連動", () => {
+  type IoCallback = (entries: { target: Element; isIntersecting: boolean }[]) => void;
+  let ioCallback: IoCallback | null = null;
+  const original = globalThis.IntersectionObserver;
+  beforeEach(() => {
+    ioCallback = null;
+    globalThis.IntersectionObserver = class {
+      constructor(cb: IoCallback) {
+        ioCallback = cb;
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+      takeRecords(): [] {
+        return [];
+      }
+    } as unknown as typeof IntersectionObserver;
+  });
+  afterEach(() => {
+    globalThis.IntersectionObserver = original;
+  });
+
+  async function setup() {
+    renderScreen();
+    const frame = (await screen.findByTestId("fe2-lp-config-mini-frame")) as HTMLIFrameElement;
+    const origin = new URL(frame.getAttribute("src")!).origin;
+    const win = frame.contentWindow!;
+    const post = vi.spyOn(win, "postMessage").mockImplementation(() => {});
+    const fromLp = (data: unknown, o = origin, source: Window | null = win) =>
+      act(() => {
+        window.dispatchEvent(new MessageEvent("message", { data, origin: o, source }));
+      });
+    // id のカードだけが操作帯のすぐ下の帯に入った状態にする。
+    const cardTop = (id: string) =>
+      act(() => {
+        ioCallback?.(
+          [...document.querySelectorAll("[data-lp-card]")].map((el) => ({
+            target: el,
+            isIntersecting: el.getAttribute("data-lp-card") === id,
+          })),
+        );
+      });
+    return { frame, origin, post, fromLp, cardTop };
+  }
+
+  it("puts the preview on the left (first) and the settings on the right", async () => {
+    renderScreen();
+    const mini = await screen.findByTestId("fe2-lp-config-mini");
+    const settings = screen.getByTestId("fe2-lp-config-settings");
+    expect(mini.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("settings → preview: the topmost card scrolls the LP (to the LP origin only, after the bridge is ready)", async () => {
+    const { origin, post, fromLp, cardTop } = await setup();
+    cardTop("join");
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "lp:scrollTo" }), expect.anything());
+    fromLp({ type: "lp:sections", sections: [{ id: "header", top: 0 }] });
+    expect(screen.getByTestId("fe2-lp-config-mini-box")).toHaveAttribute("data-sync", "ready");
+    cardTop("program");
+    expect(post).toHaveBeenCalledWith({ type: "lp:scrollTo", section: "program" }, origin);
+    // 直後に LP から返ってくる途中経過はエコーとして無視する。
+    fromLp({ type: "lp:scroll", activeSection: "about" });
+    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-active-section", "program");
+    // 保存で読み直した LP（先頭に戻る）から lp:sections が来たら、見ていたセクションへ戻す。
+    post.mockClear();
+    fromLp({ type: "lp:sections", sections: [{ id: "header", top: 0 }] });
+    expect(post).toHaveBeenCalledWith({ type: "lp:scrollTo", section: "program" }, origin);
+  });
+
+  it("preview → settings: the LP's active section moves the settings; foreign origins / windows are ignored", async () => {
+    const { fromLp } = await setup();
+    fromLp({ type: "lp:scroll", activeSection: "vision" }, "https://evil.example");
+    fromLp({ type: "lp:scroll", activeSection: "vision" }, undefined, window);
+    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-active-section", "");
+    fromLp({ type: "lp:scroll", activeSection: "vision" });
+    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-active-section", "vision");
+  });
+
+  it("says so when the LP does not answer (old version / LP without the bridge)", async () => {
+    const { frame, post, origin } = await setup();
+    fireEvent.load(frame);
+    expect(post).toHaveBeenCalledWith({ type: "lp:hello" }, origin);
+    expect(await screen.findByTestId("fe2-lp-config-mini-nosync", undefined, { timeout: 4500 })).toHaveTextContent("連動");
   });
 });
 

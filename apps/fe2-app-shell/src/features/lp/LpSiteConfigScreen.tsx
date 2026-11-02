@@ -47,7 +47,7 @@ import {
 } from "./lpSiteConfig.ts";
 import { useDraftAutosave, useLpSiteConfig, usePublishSiteConfig, useResetDraft } from "./lpSiteConfigHooks.ts";
 import { formatSwitchedAt, LP_PUBLIC_URL, lpViewUrl } from "./lpPublish.ts";
-import { LpMiniPreview } from "./LpMiniPreview.tsx";
+import { LpMiniPreview, type ScrollRequest } from "./LpMiniPreview.tsx";
 import { LP_VERSIONS, type LpVersion } from "./lpVersions.ts";
 import { LpViewer } from "./LpViewer.tsx";
 import { LpTabs } from "./LpTabs.tsx";
@@ -65,6 +65,18 @@ const SECTION_CAPABLE_VERSION = "v3.6";
 // demo-seed の isDemoEnabled と同じ判定（demo-seed は大きいので import しない）。
 const DEMO_ENV = (import.meta.env as { VITE_DEMO?: string }).VITE_DEMO;
 const IS_DEMO = DEMO_ENV === "1" || DEMO_ENV === "true";
+
+/** プレビューに合わせて設定を動かしたあと、IntersectionObserver の変化を送り返さない時間（スムーズスクロール分）。 */
+const SETTINGS_FOLLOW_MS = 800;
+
+/** いちばん近いスクロール領域（シェルの本文）。scrollIntoView はルートまで動かしてしまうので使わない。 */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
+  }
+  return null;
+}
 
 export const PUBLISH_CONFIRM_TITLE = "これは本番です。反映してよいですか？";
 
@@ -89,6 +101,12 @@ export function LpSiteConfigScreen(): JSX.Element {
   const [opening, setOpening] = useState(false);
   const narrow = useMediaQuery(SPLIT_BREAKPOINT_QUERY);
   const [miniOpen, setMiniOpen] = useState(false);
+  // スクロール連動（設定カード ⇄ ミニプレビュー）。どちらが動かしたかを覚えてループさせない。
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const [activeSection, setActiveSection] = useState<string | null>(null);
+  const activeRef = useRef<string | null>(null);
+  const [scrollRequest, setScrollRequest] = useState<ScrollRequest | null>(null);
+  const followingUntil = useRef(0);
   const barRef = useRef<HTMLDivElement>(null);
   const [barHeight, setBarHeight] = useState(0);
   useEffect(() => {
@@ -100,11 +118,53 @@ export function LpSiteConfigScreen(): JSX.Element {
   }, []);
 
   const state = query.data;
+  const loadedSettings = !!state;
+
+  // 設定側: 操作帯のすぐ下の帯に入ったカードのうち、LP 上で一番上のものを「いま見ているセクション」にする。
+  useEffect(() => {
+    const root = settingsRef.current;
+    if (!root || typeof IntersectionObserver === "undefined") return undefined;
+    const barBottom = barRef.current?.getBoundingClientRect().bottom ?? 0;
+    const visible = new Set<string>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const id = (e.target as HTMLElement).dataset.lpCard;
+          if (!id) continue;
+          if (e.isIntersecting) visible.add(id);
+          else visible.delete(id);
+        }
+        const top = lp.LP_SECTION_IDS.find((id) => visible.has(id));
+        if (!top || top === activeRef.current) return;
+        activeRef.current = top;
+        setActiveSection(top);
+        // プレビューに合わせて設定を動かしている最中は、送り返さない。
+        if (Date.now() < followingUntil.current) return;
+        setScrollRequest((prev) => ({ section: top, seq: (prev?.seq ?? 0) + 1 }));
+      },
+      { rootMargin: `-${Math.round(barBottom)}px 0px -55% 0px` },
+    );
+    root.querySelectorAll<HTMLElement>("[data-lp-card]").forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [loadedSettings, barHeight, env]);
   const live = env === "live";
   const config = state ? (live ? (staged ?? state.published) : state.draft) : null;
   const stagedDiff = useMemo(() => (state && staged ? diffSiteConfig(state.published, staged) : []), [state, staged]);
   const draftDiff = useMemo(() => (state ? diffSiteConfig(state.published, state.draft) : []), [state]);
   const canChange = live ? canPublish && !publish.isPending : canEdit;
+
+  /** プレビュー側で上に来たセクションに、設定のカードを合わせる。 */
+  const followPreview = (section: string): void => {
+    if (section === activeRef.current) return;
+    activeRef.current = section;
+    setActiveSection(section);
+    const card = settingsRef.current?.querySelector<HTMLElement>(`[data-lp-card="${section}"]`);
+    const scroller = card ? scrollParent(card) : null;
+    if (!card || !scroller) return;
+    followingUntil.current = Date.now() + SETTINGS_FOLLOW_MS;
+    const offset = card.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    scroller.scrollTo({ top: scroller.scrollTop + offset - barHeight - 16, behavior: "smooth" });
+  };
 
   const switchEnv = (next: LpConfigEnv): void => {
     if (next !== env) void navigate({ to: "/lp", search: { env: next }, replace: true });
@@ -229,12 +289,12 @@ export function LpSiteConfigScreen(): JSX.Element {
   if (query.isLoading) {
     body = (
       <div className={styles.split}>
+        {!narrow ? <SkeletonCard media lines={1} /> : null}
         <Stack gap={6} testId="fe2-lp-config-loading">
           <SkeletonCard lines={4} />
           <SkeletonCard lines={2} />
           <SkeletonCard lines={2} />
         </Stack>
-        {!narrow ? <SkeletonCard media lines={1} /> : null}
       </div>
     );
   } else if (query.isError || !state || !config) {
@@ -248,6 +308,19 @@ export function LpSiteConfigScreen(): JSX.Element {
   } else {
     body = (
       <div className={styles.split} style={{ "--lp-bar-h": `${barHeight}px` } as CSSProperties}>
+        {showMini && mini ? (
+          <aside className={styles.splitPreview}>
+            <LpMiniPreview
+              url={mini.url}
+              refreshKey={mini.refreshKey}
+              title={live ? "本番のミニプレビュー" : "下書きのミニプレビュー"}
+              note={miniNote}
+              scrollRequest={scrollRequest}
+              onActiveSection={followPreview}
+            />
+          </aside>
+        ) : null}
+        <div ref={settingsRef} data-active-section={activeSection ?? ""} data-testid="fe2-lp-config-settings">
         <Stack gap={6}>
           {live ? (
             <p className={styles.liveBanner} data-testid="fe2-lp-config-live-banner">
@@ -276,19 +349,12 @@ export function LpSiteConfigScreen(): JSX.Element {
             onOpenCatalog={() => setCatalogOpen(true)}
           />
           {lp.LP_SECTION_IDS.map((id) => (
-            <SectionCard key={id} id={id} config={config} disabled={!canChange} onChange={onChange} />
+            <div key={id} data-lp-card={id}>
+              <SectionCard id={id} config={config} disabled={!canChange} onChange={onChange} />
+            </div>
           ))}
         </Stack>
-        {showMini && mini ? (
-          <aside className={styles.splitPreview}>
-            <LpMiniPreview
-              url={mini.url}
-              refreshKey={mini.refreshKey}
-              title={live ? "本番のミニプレビュー" : "下書きのミニプレビュー"}
-              note={miniNote}
-            />
-          </aside>
-        ) : null}
+        </div>
       </div>
     );
   }
