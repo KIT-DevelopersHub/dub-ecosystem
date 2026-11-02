@@ -13,9 +13,12 @@ import type { AppLauncherItem, MenuItem } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
-import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
+import { useAppCapability, useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
+import { createMailApi } from "../features/mail/mailApi.tsx";
+import { MailApiProvider } from "../features/mail/MailProvider.tsx";
+import { ForwardSettingsDialog } from "../features/mail/forward/ForwardSettingsDialog.tsx";
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
 import { createGlobalContentSearch } from "./globalContentSearch.ts";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
@@ -220,6 +223,12 @@ export function AppShellLayout({
   // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
   const authed = auth.status === "authenticated";
+  // メール設定 (Gmail への自動転送): personal mail settings live in this same ⚙ menu, shown
+  // only to viewers who can open メール at all (app tier + mail:read, like the launcher tile).
+  const [mailSettingsOpen, setMailSettingsOpen] = useState(false);
+  const mailCap = useAppCapability("mail");
+  const showMailSettings = showAccount && mailCap.canView && can("mail:read");
+  const mailApi = useMemo(() => (api ? createMailApi(api) : null), [api]);
 
   // The ⚙ menu's contents — a short list of self-service行き先, each a single row that
   // either opens a dialog or fires an action:
@@ -239,6 +248,15 @@ export function AppShellLayout({
       icon: "user",
       onSelect: () => setAcctOpen(true),
       testId: "fe2-account-settings-open",
+    });
+  }
+  if (showMailSettings) {
+    settingsItems.push({
+      id: "mail-settings",
+      label: "メール設定",
+      icon: "inbox",
+      onSelect: () => setMailSettingsOpen(true),
+      testId: "fe2-mail-settings-open",
     });
   }
   settingsItems.push({
@@ -366,6 +384,11 @@ export function AppShellLayout({
       ) : null}
       {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
       {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
+      {showMailSettings && mailApi ? (
+        <MailApiProvider value={mailApi}>
+          <ForwardSettingsDialog open={mailSettingsOpen} onClose={() => setMailSettingsOpen(false)} />
+        </MailApiProvider>
+      ) : null}
       <ColorSettingsDialog open={colorOpen} onClose={() => setColorOpen(false)} />
     </AppShell>
   );

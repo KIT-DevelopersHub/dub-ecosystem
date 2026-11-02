@@ -18,7 +18,6 @@ import { MailStoreProvider, folderUnread, selectVisible, showSharedFolders, useM
 import { useMailSync } from "./useMailSync.tsx";
 import { deliver } from "./sendMail.ts";
 import { useMailApi } from "../MailProvider.tsx";
-import { ForwardSettingsDialog } from "../forward/ForwardSettingsDialog.tsx";
 
 /** P1-2 follow-up: floating compose windows are pure client state (useMailStore starts
  *  with composes: [] on every mount/reload) — a reload while typing loses the OPEN
@@ -117,7 +116,6 @@ function SearchBar({ narrow, onOpenNav }: { narrow: boolean; onOpenNav: () => vo
           </button>
         ) : null}
       </div>
-      <MailSettingsButton />
       {narrow ? (
         <IconButton
           name="edit"
@@ -127,17 +125,6 @@ function SearchBar({ narrow, onOpenNav }: { narrow: boolean; onOpenNav: () => vo
         />
       ) : null}
     </div>
-  );
-}
-
-/** Gear at the end of the search row → メール設定 (Gmail への自動転送). */
-function MailSettingsButton(): JSX.Element {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <IconButton name="settings" aria-label="メール設定（Gmail への自動転送）" testId="fe2-mail-settings-open" onClick={() => setOpen(true)} />
-      <ForwardSettingsDialog open={open} onClose={() => setOpen(false)} />
-    </>
   );
 }
 

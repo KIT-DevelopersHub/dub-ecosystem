@@ -1,4 +1,4 @@
-// メール設定 > Gmail への自動転送 (opt-in, per user). Register a personal address →
+// メール設定 (shell ⚙ menu) > Gmail への自動転送 (opt-in, per user). Register a personal address →
 // Cloudflare mails it a verification link → once verified, mail delivered to you is also
 // forwarded there. Every mutation is optimistic (useForwardSetting).
 import { useState } from "react";
@@ -149,7 +149,7 @@ export function ForwardSettingsDialog({ open, onClose }: { open: boolean; onClos
       <Modal
         open={open}
         onClose={onClose}
-        title="Gmail への自動転送"
+        title="メール設定"
         footer={
           <Button variant="secondary" onClick={onClose} testId="fe2-mail-forward-close">
             閉じる
@@ -157,13 +157,16 @@ export function ForwardSettingsDialog({ open, onClose }: { open: boolean; onClos
         }
         testId="fe2-mail-forward-dialog"
       >
-        <div className={styles.stack}>
+        <section className={styles.stack} aria-labelledby="fe2-mail-forward-heading">
+          <h3 id="fe2-mail-forward-heading" className={styles.heading}>
+            Gmail への自動転送
+          </h3>
           <p className={styles.lead}>
             あなた宛てに届いたメールを、ご自身の Gmail などにも自動でコピーします（バックアップ用）。オンにするかは自由です。転送されるのはあなた宛てのメールだけで、共有メールボックスは対象外です。
           </p>
           <FormError testId="fe2-mail-forward-failure">{f.error}</FormError>
           {body}
-        </div>
+        </section>
       </Modal>
       <ConfirmDialog
         open={confirmRemove}

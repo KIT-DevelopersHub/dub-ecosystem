@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
-import type { gateway } from "@dub/types";
+import { policy, type gateway } from "@dub/types";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { AuthProvider } from "../auth/AuthProvider.tsx";
 import { AppShellLayout, truncateEmail } from "./AppShellLayout.tsx";
@@ -197,6 +197,39 @@ describe("AppShellLayout", () => {
     expect(screen.getAllByRole("separator")).toHaveLength(1);
     await userEvent.click(logout);
     expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("メール設定 sits in the 設定 menu for mail users and opens Gmail への自動転送", async () => {
+    const mailMe: gateway.MeResponse = { ...ME, permissions: ["mail:read"], appAccess: { mail: policy.AppAccessLevel.View } } as gateway.MeResponse;
+    const request = vi.fn(() => Promise.resolve({ target: null, status: "none", enabled: false, active: false, available: true, requestedAt: null, verifiedAt: null, lastResult: null, lastError: null, lastAt: null }));
+    const shellApi = { auth: { me: () => Promise.resolve(mailMe) }, request } as unknown as ApiClient;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <AuthProvider api={shellApi}>
+            <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={vi.fn()}>
+              <div data-testid="outlet">content</div>
+            </AppShellLayout>
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
+    const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
+    expect(items).toEqual(["fe2-account-settings-open", "fe2-mail-settings-open", "fe2-color-settings-open", "fe2-logout"]);
+    await userEvent.click(screen.getByTestId("fe2-mail-settings-open"));
+    expect(await screen.findByTestId("fe2-mail-forward-dialog")).toBeInTheDocument();
+    expect(screen.getByText("Gmail への自動転送")).toBeInTheDocument();
+    expect(await screen.findByTestId("fe2-mail-forward-input")).toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ method: "GET", path: "/api/v1/mail/forward" }));
+  });
+
+  it("hides メール設定 from viewers without mail access", async () => {
+    renderShell(vi.fn(), vi.fn());
+    const trigger = await screen.findByTestId("fe2-settings-menu-trigger");
+    await userEvent.click(trigger);
+    expect(screen.queryByTestId("fe2-mail-settings-open")).toBeNull();
   });
 
   it("renders injected nav badge from badgeSource inside the launcher", async () => {

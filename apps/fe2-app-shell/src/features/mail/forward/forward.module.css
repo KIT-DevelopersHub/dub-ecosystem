@@ -4,6 +4,12 @@
   flex-direction: column;
   gap: var(--dub-space-4);
 }
+.heading {
+  margin: 0;
+  font-size: var(--dub-font-size-md);
+  font-weight: 700;
+  color: var(--dub-color-text-primary);
+}
 .lead {
   margin: 0;
   font-size: var(--dub-font-size-sm);
