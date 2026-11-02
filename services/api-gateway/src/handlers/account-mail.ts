@@ -14,7 +14,7 @@
 import type { Context } from "hono";
 import { errors, isDubError } from "@dub/errors";
 import type { RequestContext } from "@dub/http";
-import type { auth, identity, mail, member } from "@dub/types";
+import { common, type auth, type identity, type mail, type member } from "@dub/types";
 import type { GatewayEnv } from "../env";
 import type { GatewayVariables } from "../context";
 import { getRequestId } from "../context";
@@ -25,7 +25,8 @@ type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
 
 /** The cc / login must be a Developers Hub address — otherwise the three are not linked yet. */
 export const DEVHUB_MAIL_DOMAIN = "developershub.jp";
-export const DEFAULT_APP_BASE_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev";
+/** Fallback when APP_BASE_URL is unset (SoT: @dub/types common.PUBLIC_APP_BASE_URL). */
+export const DEFAULT_APP_BASE_URL = common.PUBLIC_APP_BASE_URL;
 export const ACCOUNT_MAIL_SUBJECT = "【Developers Hub】アカウント発行のお知らせ";
 /** auth-service: no decryptable copy of the password exists (never set / legacy hash). */
 const PASSWORD_NOT_VIEWABLE = "AUTH_PASSWORD_NOT_VIEWABLE";

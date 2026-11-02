@@ -2,13 +2,13 @@
 // saved items / reminders for its signed-in account (same localStorage format as
 // message-prefs, written once — the user's own edits are never overwritten) and
 // builds message permalinks on the page's origin so the seeded links unfurl.
-import type { common } from "@dub/types";
+import { common } from "@dub/types";
 import { buildForwardBody, messagePermalink } from "./forward";
 import { emptyPrefs, prefsStorageKey, type MessagePrefsData, type SavedMessageRef } from "./message-prefs";
 
 /** Permalink on the current page origin (the demo SPA serves /chat at the root). */
 export function demoMessageLink(channelId: string, messageId: string): string {
-  const origin = globalThis.location?.origin ?? "https://app.developershub.jp";
+  const origin = globalThis.location?.origin ?? common.PUBLIC_APP_BASE_URL;
   return messagePermalink({ origin, pathname: "/chat" }, channelId as common.ChannelId, messageId as common.MessageId);
 }
 
