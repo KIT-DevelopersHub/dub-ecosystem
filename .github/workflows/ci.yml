@@ -65,3 +65,7 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+      # The staging debug menu (account/role switcher) must never ship in a production bundle.
+      - name: Assert no staging debug menu in fe2 bundle
+        run: node apps/fe2-app-shell/scripts/assert-no-staging-debug.mjs

@@ -330,6 +330,41 @@ export interface MailSenderBlockRequest {
 /** Per-user cap on block-list entries (the API answers 409 beyond it). */
 export const MAIL_SENDER_BLOCK_LIMIT = 500;
 
+// ---- per-user opt-in auto-forward (Gmail 自動転送, 0023) ----
+// Each account may opt in to have the mail delivered TO IT also forwarded to one personal
+// address it owns (typically Gmail) as a backup. Ownership is proven by the verification
+// link Cloudflare Email Routing mails to that address; nothing is forwarded before that.
+/** none = not registered, pending = verification mail sent / not clicked yet, verified = ready. */
+export type MailForwardStatus = "none" | "pending" | "verified";
+/** GET /mail/forward (and every mutation's response). */
+export interface MailForwardSetting {
+  /** Lowercased personal address, or null when not registered. */
+  target: string | null;
+  status: MailForwardStatus;
+  /** The user's switch. Takes effect only once `status` is "verified". */
+  enabled: boolean;
+  /** enabled AND verified AND the feature is available = new mail is being forwarded. */
+  active: boolean;
+  /** False when the server cannot run the feature (Email Routing not configured / switched off). */
+  available: boolean;
+  requestedAt: ISODateTime | null;
+  verifiedAt: ISODateTime | null;
+  /** Most recent forward attempt (null = none yet). Errors are short, address-free strings. */
+  lastResult: "forwarded" | "failed" | null;
+  lastError: string | null;
+  lastAt: ISODateTime | null;
+}
+/** PUT /mail/forward body: register (or change / re-verify) the personal address. */
+export interface MailForwardRegisterRequest {
+  target: string;
+}
+/** PATCH /mail/forward body: turn forwarding on/off without re-verifying. */
+export interface MailForwardPatch {
+  enabled: boolean;
+}
+/** Registrations (= verification mails) one account may trigger per UTC day. */
+export const MAIL_FORWARD_DAILY_REGISTER_LIMIT = 5;
+
 // ---- ② STUB: 未決B(9-B)解決後に確定 ----
 export interface Mailbox {
   address: string; // STUB

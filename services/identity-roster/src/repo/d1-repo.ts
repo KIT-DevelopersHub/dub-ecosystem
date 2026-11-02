@@ -43,6 +43,7 @@ interface AssignmentDb {
   resource_id: string | null;
   granted_by: string;
   granted_at: string;
+  source?: string | null;
 }
 
 function toUser(r: UserDb): UserRow {
@@ -70,6 +71,7 @@ function toAssignment(r: AssignmentDb): AssignmentRow {
     resourceId: r.resource_id,
     grantedBy: r.granted_by,
     grantedAt: r.granted_at,
+    source: (r.source as identity.RoleAssignmentSource | null | undefined) ?? "manual",
   };
 }
 
@@ -328,6 +330,24 @@ export class D1IdentityRepo implements IdentityRepo {
     return r ? toAssignment(r) : null;
   }
   async createAssignment(row: AssignmentRow): Promise<void> {
+    // Only auto rows name the `source` column (0026); manual rows rely on its DEFAULT, so manual
+    // grants keep working on a DB where 0026 has not been applied yet.
+    if (row.source && row.source !== "manual") {
+      await this.db.run(
+        `INSERT INTO identity_role_assignments (id, user_id, role_id, org_id, resource_type, resource_id, granted_by, granted_at, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        row.id,
+        row.userId,
+        row.roleId,
+        row.orgId,
+        row.resourceType,
+        row.resourceId,
+        row.grantedBy,
+        row.grantedAt,
+        row.source,
+      );
+      return;
+    }
     await this.db.run(
       `INSERT INTO identity_role_assignments (id, user_id, role_id, org_id, resource_type, resource_id, granted_by, granted_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -347,6 +367,13 @@ export class D1IdentityRepo implements IdentityRepo {
   }
   async deleteAssignment(assignmentId: string): Promise<void> {
     await this.db.run("DELETE FROM identity_role_assignments WHERE id = ?", assignmentId);
+  }
+  async listAssignmentsByRole(roleId: string): Promise<AssignmentRow[]> {
+    const rows = await this.db.all<AssignmentDb>("SELECT * FROM identity_role_assignments WHERE role_id = ?", roleId);
+    return rows.map(toAssignment);
+  }
+  async setAssignmentSource(assignmentId: string, source: identity.RoleAssignmentSource): Promise<void> {
+    await this.db.run("UPDATE identity_role_assignments SET source = ? WHERE id = ?", source, assignmentId);
   }
 
   async usersWithOrgWidePermission(orgId: string, permission: identity.PermissionKey): Promise<string[]> {

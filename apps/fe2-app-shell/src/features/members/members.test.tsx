@@ -194,6 +194,20 @@ describe("MembersPage", () => {
     for (const k of ["name", "lastName", "firstName", "grade", "department", "gmail"]) expect(patch).not.toHaveProperty(k);
   });
 
+  it("役職を選んで保存すると position が送られる", async () => {
+    const api = makeApi();
+    render(wrap(<MembersPage />, api));
+    await screen.findByText("山田太郎");
+    await userEvent.click(screen.getByRole("button", { name: "山田太郎 を編集" }));
+    const dialog = await screen.findByTestId("members-form-dialog");
+    const select = within(dialog).getByTestId("members-form-position");
+    expect(select).toHaveValue("");
+    await userEvent.selectOptions(select, "organizer");
+    await userEvent.click(within(dialog).getByTestId("members-form-submit"));
+    await waitFor(() => expect(api.updateMember).toHaveBeenCalledTimes(1));
+    expect((api.updateMember as any).mock.calls[0][1]).toMatchObject({ position: "organizer" });
+  });
+
   it("blocks submit when the 名列番号 format is wrong", async () => {
     const api = makeApi();
     render(wrap(<MembersPage />, api));

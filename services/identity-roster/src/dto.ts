@@ -111,6 +111,8 @@ export interface RoleAssignmentView {
   resourceId: string | null;
   grantedBy: common.UserId;
   grantedAt: common.ISODateTime;
+  /** 割当の由来 (additive)。auto:member-sync は名簿のチーム・役職から自動で付いたもの。 */
+  source?: identity.RoleAssignmentSource;
 }
 
 export interface InviteUserResponse {

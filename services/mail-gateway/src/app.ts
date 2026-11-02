@@ -43,6 +43,7 @@ import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
 import { parseListMessagesQuery, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
 import { countFolders, listInboundFolder } from "./folders";
+import { assertTargetAllowed, getForwardSetting, parseForwardPatch, parseRegisterRequest, registerForwardTarget, removeForwardSetting, setForwardEnabled } from "./user-forward";
 import { addBlock, assertBlockAllowed, listBlocks, loadMatcher, markBlocked, normalizeBlockValue, parseBlockRequest, removeBlock } from "./blocks";
 
 /** Drop the compliance archive address (auto-CC'd on every send) from a DTO's Cc for
@@ -505,6 +506,39 @@ export function createApp() {
     });
   });
 
+  // ---- per-user opt-in auto-forward (Gmail 自動転送, 0023). PERSONAL like blocks: `ownerOf`
+  // only — it forwards nothing but mail delivered TO the caller, to an address the caller
+  // proved they own (Cloudflare's verification link). Mutations are audited.
+  ext.get("/forward", async (c) => {
+    return c.json((await getForwardSetting(dbOf(c), c.env, ownerOf(c))) satisfies mail.MailForwardSetting);
+  });
+
+  ext.put("/forward", async (c) => {
+    const owner = ownerOf(c);
+    const body: unknown = await c.req.json().catch(() => null);
+    return audited(c, "mail.user_forward.register", "mail_user_forward", owner, async () => {
+      const { target } = parseRegisterRequest(body);
+      assertTargetAllowed(c.env, target, await ownAddressOf(c, owner));
+      return c.json((await registerForwardTarget(dbOf(c), c.env, owner, target)) satisfies mail.MailForwardSetting);
+    });
+  });
+
+  ext.patch("/forward", async (c) => {
+    const owner = ownerOf(c);
+    const body: unknown = await c.req.json().catch(() => null);
+    return audited(c, "mail.user_forward.update", "mail_user_forward", owner, async () => {
+      const { enabled } = parseForwardPatch(body);
+      return c.json((await setForwardEnabled(dbOf(c), c.env, owner, enabled)) satisfies mail.MailForwardSetting);
+    });
+  });
+
+  ext.delete("/forward", async (c) => {
+    const owner = ownerOf(c);
+    return audited(c, "mail.user_forward.delete", "mail_user_forward", owner, async () =>
+      c.json((await removeForwardSetting(dbOf(c), c.env, owner)) satisfies mail.MailForwardSetting),
+    );
+  });
+
   // ---- mailbox admin: the bare `mail:admin` key in the table (org infrastructure, not the
   // メール app's own surface — see policy-table.ts for why no app tier is paired here).
   ext.get("/mailboxes", async (c) => {
@@ -588,6 +622,11 @@ async function ownAddressOf(c: Context<AppBindings>, userId: string): Promise<st
 /** Run a block-list mutation, emitting a success/failure audit record either way. The audit
  *  publish never masks the outcome (a publish error is logged, not thrown). */
 async function auditedBlock(c: Context<AppBindings>, action: string, resourceId: string, fn: () => Promise<Response>): Promise<Response> {
+  return audited(c, action, "mail_sender_block", resourceId, fn);
+}
+
+/** Run a personal-setting mutation, emitting a success/failure audit record either way. */
+async function audited(c: Context<AppBindings>, action: string, resourceType: string, resourceId: string, fn: () => Promise<Response>): Promise<Response> {
   const ctx = c.get("dubCtx");
   const actorId = c.get("userId") ?? null;
   const emit = async (result: "success" | "failure", errorCode: string | null): Promise<void> => {
@@ -597,7 +636,7 @@ async function auditedBlock(c: Context<AppBindings>, action: string, resourceId:
         actorId,
         orgId: common.DUB_DEFAULT_ORG_ID,
         result,
-        resourceType: "mail_sender_block",
+        resourceType,
         resourceId: resourceId || "(invalid)",
         details: errorCode ? { errorCode } : null,
         requestId: ctx.requestId,
@@ -606,7 +645,7 @@ async function auditedBlock(c: Context<AppBindings>, action: string, resourceId:
     } catch (err) {
       consoleSink({
         level: "error",
-        message: "mail-gateway: failed to publish sender-block audit",
+        message: "mail-gateway: failed to publish personal-setting audit",
         service: SERVICE_NAME,
         requestId: ctx.requestId,
         fields: { error: err instanceof Error ? err.message : String(err) },

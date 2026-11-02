@@ -12,7 +12,7 @@ import type {
 } from "@simplewebauthn/browser";
 import type { ErrorResponse } from "@dub/errors";
 import { isErrorResponse } from "@dub/errors";
-import type { gateway, member } from "@dub/types";
+import type { auth as authTypes, gateway, member } from "@dub/types";
 import type { DisplayableError } from "@dub/ui";
 
 type MeResponse = gateway.MeResponse;
@@ -125,7 +125,10 @@ export interface ApiClient {
      *  /auth/demo-login route which exists only when DEMO_AUTOLOGIN is set on staging;
      *  in production the route 404s. The login button is itself hidden unless the
      *  VITE_DEMO_AUTOLOGIN build flag is on, so production bundles never call this. */
-    demoLogin(): Promise<void>;
+    demoLogin(email?: string): Promise<void>;
+    /** STAGING ONLY: the seed accounts the debug menu can switch to (same DEMO_AUTOLOGIN
+     *  gate as demoLogin; 404 in production). Only called from the staging debug menu. */
+    demoAccounts(): Promise<authTypes.DemoAccountsResponse>;
     logout(): Promise<void>;
     me(): Promise<MeResponse>;
     /** Rotate the session PROACTIVELY, outside the 401 path (AuthProvider schedules this
@@ -379,7 +382,9 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           path: "/api/v1/auth/password/login",
           body: { email, password },
         }),
-      demoLogin: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/demo-login", body: {} }),
+      demoLogin: (email?: string) =>
+        request<void, authTypes.DemoLoginRequest>({ method: "POST", path: "/api/v1/auth/demo-login", body: email ? { email } : {} }),
+      demoAccounts: () => request<authTypes.DemoAccountsResponse>({ method: "GET", path: "/api/v1/auth/demo-accounts" }),
       logout: () => request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/logout", body: {} }),
       me: () => request<MeResponse>({ method: "GET", path: "/api/v1/me" }),
       // Deliberately does NOT notify onUnauthenticated on failure: a proactive refresh that

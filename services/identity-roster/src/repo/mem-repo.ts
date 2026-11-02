@@ -174,6 +174,13 @@ export class MemIdentityRepo implements IdentityRepo {
   async deleteAssignment(assignmentId: string): Promise<void> {
     this.assignments.delete(assignmentId);
   }
+  async listAssignmentsByRole(roleId: string): Promise<AssignmentRow[]> {
+    return [...this.assignments.values()].filter((a) => a.roleId === roleId).map((a) => ({ ...a }));
+  }
+  async setAssignmentSource(assignmentId: string, source: identity.RoleAssignmentSource): Promise<void> {
+    const a = this.assignments.get(assignmentId);
+    if (a) this.assignments.set(assignmentId, { ...a, source });
+  }
 
   async usersWithOrgWidePermission(orgId: string, permission: identity.PermissionKey): Promise<string[]> {
     const roleIds = new Set(

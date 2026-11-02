@@ -141,6 +141,10 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # The staging debug menu (account/role switcher) must never ship in a production bundle.
+      - name: Assert no staging debug menu in fe2 bundle
+        run: node apps/fe2-app-shell/scripts/assert-no-staging-debug.mjs
+
       # --- Migrations (guarded) ---
       # D1 dub-core migrations are forward-only + idempotent (ledger + CREATE ... IF NOT
       # EXISTS). Remote apply is NOT wired into this repo yet (the custom migrate.ts is

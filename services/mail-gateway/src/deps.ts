@@ -12,6 +12,7 @@ import { sendRetryOptions } from "./resilience";
 import { AUDIT_TOPIC, TOPIC_MAIL_AUTOMATION, TOPIC_NOTIFICATION, outboxQueue } from "./outbox";
 import type { AuditEnv, EventPublishEnv, InboundDeps, SendDeps } from "./types";
 import type { ArchiveForwardDeps, GmailForwardDeps } from "./gmail-forward";
+import { userForwardDisabled, type UserForwardDeps } from "./user-forward";
 
 export function buildDb(env: Env, requestId: string): DbClient {
   return createDbClient(env.DB, { namespace: "mail", requestId });
@@ -92,6 +93,19 @@ export function buildGmailForwardDeps(env: Env, ctx: RequestContext): GmailForwa
     ctx,
     archiveAddress: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     internalDomain: env.CF_EMAIL_ROUTING_ZONE_NAME || "developershub.jp",
+  };
+}
+
+export function buildUserForwardDeps(env: Env, ctx: RequestContext): UserForwardDeps {
+  return {
+    db: buildDb(env, ctx.requestId),
+    identity: env.SVC_IDENTITY,
+    audit: buildAuditEnv(env),
+    orgId: common.DUB_DEFAULT_ORG_ID,
+    ctx,
+    archiveAddress: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
+    internalDomain: env.CF_EMAIL_ROUTING_ZONE_NAME || "developershub.jp",
+    disabled: userForwardDisabled(env),
   };
 }
 

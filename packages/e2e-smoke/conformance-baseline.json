@@ -20,6 +20,7 @@
   "auth-service": {
     "missingInSpec": [
       "DELETE /auth/passkeys/{}",
+      "GET /auth/demo-accounts",
       "GET /auth/passkeys",
       "GET /internal/admin/users/{}/password",
       "PATCH /auth/passkeys/{}",
@@ -107,18 +108,22 @@
       "POST /internal/webauthn/challenges",
       "POST /internal/webauthn/challenges/take",
       "POST /internal/webauthn/credentials/{}/use",
-      "POST /internal/webauthn/users/{}/credentials"
+      "POST /internal/webauthn/users/{}/credentials",
+      "PUT /internal/managed-roles",
+      "PUT /internal/users/{}/managed-roles"
     ],
     "missingInCode": []
   },
   "mail-gateway": {
     "missingInSpec": [
       "DELETE /mail/blocks/{}",
+      "DELETE /mail/forward",
       "DELETE /mail/scheduled/{}",
       "GET /mail/admin/canary/probes",
       "GET /mail/blocks",
       "GET /mail/counts",
       "GET /mail/flags",
+      "GET /mail/forward",
       "GET /mail/mailboxes",
       "GET /mail/messages",
       "GET /mail/messages/{}",
@@ -127,6 +132,7 @@
       "GET /mail/sent",
       "GET /mail/sent/{}",
       "GET /mail/threads/{}",
+      "PATCH /mail/forward",
       "PATCH /mail/scheduled/{}",
       "POST /internal/webhooks/resend",
       "POST /mail/blocks",
@@ -134,7 +140,8 @@
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
       "POST /mail/outbox",
-      "POST /mail/scheduled"
+      "POST /mail/scheduled",
+      "PUT /mail/forward"
     ],
     "missingInCode": [
       "DELETE /admin/email-routing/addresses/{}",

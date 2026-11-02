@@ -5,6 +5,7 @@
 import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
+import type { RoleSyncPort } from "./roleSync";
 
 export type MemberStatus = member.MemberStatus;
 export const MEMBER_STATUSES = ["added", "invited", "considering", "on_leave", "declined"] as const;
@@ -27,6 +28,8 @@ export interface PersonRow extends member.PersonProfile {
   orgId: common.OrgId;
   name: string;
   roleTitle: string | null;
+  /** 役職 (0018 additive column)。null = 未設定 (役職ロールは付かない)。 */
+  position: member.MemberPosition | null;
   status: MemberStatus;
   department: string | null;
   /** 学年。旧データの表記ゆれ ("2年" / "３") は読み出し時に normalizeGrade で正規化。 */
@@ -89,6 +92,8 @@ export interface ParticipationRow extends member.PersonProfile {
   schoolEmail: string;
   gmail: string;
   desiredTeamId: string | null;
+  /** 役職 (0018 additive column)。 */
+  position: member.MemberPosition | null;
   desiredActivity: member.DesiredActivity | null;
   note: string | null;
   status: "submitted";
@@ -184,6 +189,9 @@ export interface AppDeps {
   hrRepo: HrRepo;
   /** 人事の id 採番 (app = 応募者 / hre = 履歴)。 */
   newHrId: (prefix: "app" | "hre") => string;
+  /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
+   *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
+  roleSync?: RoleSyncPort;
   /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
    *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
    *  without the binding, in which case the submission simply skips the notify. Must

@@ -39,6 +39,7 @@ export interface RoleRow {
 }
 
 // resourceType/resourceId null => org-wide grant. P0 resource scope: "event".
+// source: provenance (0026). undefined/"manual" = admin grant; "auto:member-sync" = 名簿 sync.
 export interface AssignmentRow {
   id: string;
   userId: string;
@@ -48,6 +49,7 @@ export interface AssignmentRow {
   resourceId: string | null;
   grantedBy: string;
   grantedAt: string;
+  source?: identity.RoleAssignmentSource;
 }
 
 export interface ListUsersFilter {
@@ -104,6 +106,10 @@ export interface IdentityRepo {
   createAssignment(row: AssignmentRow): Promise<void>;
   getAssignment(assignmentId: string): Promise<AssignmentRow | null>;
   deleteAssignment(assignmentId: string): Promise<void>;
+  /** All assignments of one role (any user / scope) — managed-role catalog pruning. */
+  listAssignmentsByRole(roleId: string): Promise<AssignmentRow[]>;
+  /** Re-label an assignment's provenance (an admin re-granting an auto row pins it as manual). */
+  setAssignmentSource(assignmentId: string, source: identity.RoleAssignmentSource): Promise<void>;
 
   // authz support: users in an org holding a given permission org-wide (last-admin guard)
   usersWithOrgWidePermission(orgId: string, permission: identity.PermissionKey): Promise<string[]>;
