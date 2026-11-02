@@ -334,6 +334,26 @@ export class CfEmailRoutingClient {
     return env.result ?? [];
   }
 
+  /** Every destination address, following pagination (bounded: 20 pages x 50). */
+  async listAllAddresses(): Promise<CfDestinationAddress[]> {
+    const account = this.requireAccount();
+    const out: CfDestinationAddress[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const env = await this.call<CfDestinationAddress[]>("GET", `/accounts/${account}/email/routing/addresses?per_page=50&page=${page}`);
+      const items = env.result ?? [];
+      out.push(...items);
+      const total = env.result_info?.total_count;
+      if (items.length < 50 || (typeof total === "number" && out.length >= total)) break;
+    }
+    return out;
+  }
+
+  async getAddress(id: string): Promise<CfDestinationAddress> {
+    const account = this.requireAccount();
+    const env = await this.call<CfDestinationAddress>("GET", `/accounts/${account}/email/routing/addresses/${encodeURIComponent(id)}`);
+    return env.result;
+  }
+
   async createAddress(email: string): Promise<CfDestinationAddress> {
     const account = this.requireAccount();
     const env = await this.call<CfDestinationAddress>("POST", `/accounts/${account}/email/routing/addresses`, { email });

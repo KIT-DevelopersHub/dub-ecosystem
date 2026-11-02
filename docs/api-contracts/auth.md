@@ -58,9 +58,11 @@ hostname because Google redirects to it directly, not through the gateway.
 | `POST /verify` | auth-service (internal, gateway/BFF only) | `x-dub-internal` | Verify a token -> session (used by entrypoints) |
 | `POST /authz/check` | identity-roster (internal) | `x-dub-internal` | Batch permission decisions |
 | `POST /api/v1/auth/test-login` | gateway -> auth-service (**local/preview only**) | none | Mint a session for a user id without OAuth |
+| `POST /api/v1/auth/demo-login` | gateway -> auth-service (**staging only**, `DEMO_AUTOLOGIN=1`) | none | One-click sign-in as the demo admin, or `{ email }` = one of the fixed seed accounts (debug menu switch). Other emails -> `AUTH_NOT_ON_ALLOWLIST` (403) |
+| `GET /api/v1/auth/demo-accounts` | gateway -> auth-service (**staging only**, `DEMO_AUTOLOGIN=1`) | none | Seed accounts the debug menu can switch to (`DemoAccountsResponse`, active roster users only) |
 
 Internal-only routes reject any request lacking `x-dub-internal: 1` with
-`AUTH_INTERNAL_FORBIDDEN` (403). `test-login` is compiled out of production builds (theme8).
+`AUTH_INTERNAL_FORBIDDEN` (403). `test-login` is compiled out of production builds (theme8). `demo-login` / `demo-accounts` are not registered at all unless `DEMO_AUTOLOGIN=1` (set only by `infra/deploy/deploy-staging.sh`), so production answers 404.
 
 ---
 

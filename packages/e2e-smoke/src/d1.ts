@@ -61,6 +61,7 @@ export function allSchemas(): string[] {
     sqlFile("../../../services/mail-gateway/db/0020_scheduled_attachments_bcc.sql"),
     sqlFile("../../../services/mail-gateway/db/0021_sender_blocks.sql"),
     sqlFile("../../../services/mail-gateway/db/0022_sender_blocks_kind_index.sql"),
+    sqlFile("../../../services/mail-gateway/db/0023_user_forward.sql"),
   ];
 }
 

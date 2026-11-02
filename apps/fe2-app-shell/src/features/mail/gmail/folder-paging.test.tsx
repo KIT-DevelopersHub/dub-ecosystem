@@ -72,6 +72,10 @@ function fakeServer(initialBlocks: string[]) {
       blocks.add(value);
       return Promise.resolve({ value, kind: req.kind ?? "address", createdAt: "2026-10-30T00:00:00.000Z" });
     }),
+    getForward: vi.fn().mockResolvedValue({ target: null, status: "none", enabled: false, active: false, available: true, requestedAt: null, verifiedAt: null, lastResult: null, lastError: null, lastAt: null }),
+    registerForward: vi.fn(),
+    updateForward: vi.fn(),
+    removeForward: vi.fn(),
     removeBlock: vi.fn().mockImplementation((value: string) => {
       blocks.delete(value);
       return Promise.resolve({ value, blocked: false });

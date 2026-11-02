@@ -791,6 +791,15 @@ function driveSettingsOverride(perms: identity.PermissionKey[]): identity.Permis
   return mode === "view" ? [...rest, "drive:settings_view"] : rest;
 }
 
+/** Debug-menu account list: every demo account, labelled by its effective role. */
+function demoAccountsResponse(): authTypes.DemoAccountsResponse {
+  const label = (a: DemoAccount): string =>
+    isOversight(a) ? "admin（全メール閲覧）" : a.permissions.includes("identity:admin") ? "admin" : a.permissions.includes("mail:send") ? "maintainer 相当" : "member";
+  return {
+    accounts: DEMO_ACCOUNTS.map((a, i) => ({ email: a.email, userId: a.id, displayName: a.displayName, label: label(a), isDefault: i === 0 })),
+  };
+}
+
 /** The /me session for the active account (drives RequireAuth + the shell header). */
 function currentMe(): gateway.MeResponse {
   const a = currentAccount();
@@ -1332,6 +1341,38 @@ function createMailStore() {
       }
     }
 
+    // Gmail への自動転送 (0023): per-account opt-in setting in localStorage. The demo has no
+    // Cloudflare, so a pending address counts as "verified" DEMO_FORWARD_VERIFY_MS after it was
+    // registered (stands in for clicking the verification link) — the next GET flips it.
+    if (pathname === "/api/v1/mail/forward") {
+      const fail = (code: string, message: string, status: number) => json({ error: { code, message, retryable: false } }, status);
+      let cur = loadForward();
+      if (cur && cur.status === "pending" && cur.requestedAt && Date.now() - Date.parse(cur.requestedAt) >= DEMO_FORWARD_VERIFY_MS) {
+        cur = { ...cur, status: "verified", verifiedAt: new Date().toISOString(), active: cur.enabled };
+        saveForward(cur);
+      }
+      if (method === "GET") return json(cur ?? demoForwardNone());
+      if (method === "PUT") {
+        const target = typeof (body as { target?: unknown } | null)?.target === "string" ? String((body as { target: string }).target).trim().toLowerCase() : "";
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target) || target.endsWith("@developershub.jp")) return fail("MAIL_INVALID_REQUEST", "invalid target", 400);
+        const next: mail.MailForwardSetting = { ...demoForwardNone(), target, status: "pending", enabled: true, requestedAt: new Date().toISOString() };
+        saveForward(next);
+        return json(next);
+      }
+      if (method === "PATCH") {
+        if (!cur) return fail("MAIL_FORWARD_NOT_FOUND", "no forward address registered", 404);
+        const enabled = (body as { enabled?: unknown } | null)?.enabled === true;
+        const next = { ...cur, enabled, active: enabled && cur.status === "verified" };
+        saveForward(next);
+        return json(next);
+      }
+      if (method === "DELETE") {
+        if (!cur) return fail("MAIL_FORWARD_NOT_FOUND", "no forward address registered", 404);
+        saveForward(null);
+        return json(demoForwardNone());
+      }
+    }
+
     // 改善#8: per-user thread flags (star/archive/trash), persisted in localStorage so they
     // SURVIVE a reload in the demo (mirrors the real gateway persisting them server-side).
     if (method === "GET" && pathname === "/api/v1/mail/flags") {
@@ -1385,6 +1426,29 @@ function loadFlags(): mail.MailThreadFlags[] {
 function saveFlags(flags: mail.MailThreadFlags[]): void {
   try {
     globalThis.localStorage?.setItem(flagsKey(), JSON.stringify(flags));
+  } catch {
+    /* ignore */
+  }
+}
+
+// Gmail への自動転送 for the demo (localStorage, per account).
+const FORWARD_KEY = "dub-demo-mail-forward";
+export const DEMO_FORWARD_VERIFY_MS = 5000;
+function demoForwardNone(): mail.MailForwardSetting {
+  return { target: null, status: "none", enabled: false, active: false, available: true, requestedAt: null, verifiedAt: null, lastResult: null, lastError: null, lastAt: null };
+}
+function loadForward(): mail.MailForwardSetting | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(`${FORWARD_KEY}:${currentAccount().id}`);
+    return raw ? (JSON.parse(raw) as mail.MailForwardSetting) : null;
+  } catch {
+    return null;
+  }
+}
+function saveForward(v: mail.MailForwardSetting | null): void {
+  try {
+    if (v) globalThis.localStorage?.setItem(`${FORWARD_KEY}:${currentAccount().id}`, JSON.stringify(v));
+    else globalThis.localStorage?.removeItem(`${FORWARD_KEY}:${currentAccount().id}`);
   } catch {
     /* ignore */
   }
@@ -5002,6 +5066,20 @@ export function createDemoFetch(): typeof fetch {
     // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
     // and reloading re-scopes the whole shell — the header title, permissions and mail.
     if (method === "GET" && url.pathname === "/api/v1/me") return json(currentMe());
+    // Staging debug menu (demo twin of auth-service /auth/demo-accounts + demo-login {email}):
+    // switching just re-points the active demo account; the reload re-scopes everything.
+    if (method === "GET" && url.pathname === "/api/v1/auth/demo-accounts") return json(demoAccountsResponse());
+    if (method === "POST" && url.pathname === "/api/v1/auth/demo-login") {
+      const email = (parsedBody as authTypes.DemoLoginRequest | undefined)?.email?.trim().toLowerCase();
+      const target = email ? DEMO_ACCOUNTS.find((a) => a.email === email) : DEMO_ACCOUNTS[0];
+      if (!target) return problem("AUTH_NOT_ON_ALLOWLIST", "This account is not permitted to log in", 403);
+      try {
+        globalThis.localStorage?.setItem(DEMO_ACCOUNT_STORAGE_KEY, target.id);
+      } catch {
+        // storage blocked: the switch can't persist across the reload
+      }
+      return json({ token: "demo", session: null });
+    }
     // Self password change (#155): demo accepts any current password and reports
     // success (204) so the 設定 → パスワード変更 flow is exercisable end-to-end offline.
     // Nothing is persisted — the demo session is stateless for credentials.

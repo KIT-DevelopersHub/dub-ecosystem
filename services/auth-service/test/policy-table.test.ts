@@ -79,6 +79,8 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
     expect(POLICY_TABLE["POST /auth/demo-login"]).toBe("public");
     const res = await appWithoutDemoLogin().request("/auth/demo-login", jsonInit({}));
     expect(res.status).toBe(404);
+    expect(POLICY_TABLE["GET /auth/demo-accounts"]).toBe("public");
+    expect((await appWithoutDemoLogin().request("/auth/demo-accounts", getInit())).status).toBe(404);
   });
 
   it("catches a new endpoint added without a table entry, and denies it at runtime", async () => {
@@ -107,6 +109,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 // public surface of the login service and must be read as such in review.
 const PUBLIC_ROUTES = [
   "POST /auth/demo-login",
+  "GET /auth/demo-accounts",
   "POST /auth/logout",
   "POST /auth/password",
   "POST /auth/password/login",
