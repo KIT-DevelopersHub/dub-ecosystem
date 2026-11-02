@@ -207,6 +207,8 @@ export interface LpTicketOrder {
   answers: LpTicketAnswer[];
   createdAt: string;
   paidAt: string | null;
+  /** Why it is / was needs_review (amount_mismatch / currency_mismatch / oversold / dispute). Kept after approval. */
+  reviewReason: string | null;
   /** Stripe PaymentMethod.type used ("card" | "paypay" | ...). null = free / unknown / not yet paid. */
   paymentMethod: string | null;
   /** LP管理のプレビュー（テスト購入トークン）から作られた注文。 */
@@ -245,7 +247,11 @@ export interface TicketOrderRow extends Omit<LpTicketOrder, "test"> {
   stripeSessionId: string | null;
   paymentIntentId: string | null;
   refundedAt: string | null;
-  reviewReason: string | null;
+  /** Who turned needs_review into paid ('stripe' = dispute won) and when. */
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  /** Hashed sender IP from the public LP Worker (per-sender hold cap). Never the raw IP. */
+  clientKey: string | null;
 }
 export interface TicketTypeAgg {
   ticketTypeId: string;
@@ -258,8 +264,11 @@ export interface PaidSettlement {
   paidAt: string;
   sessionId: string | null;
   paymentIntentId: string | null;
-  /** Set => money taken but a human must look (e.g. "oversold"): status needs_review instead of paid. */
-  reviewReason?: string;
+  /**
+   * Set (= pendingSince) for a late settle: in the SAME statement, if any item no longer fits its
+   * type's capacity next to the other held orders, the order becomes needs_review "oversold" instead of paid.
+   */
+  capacitySince?: string;
 }
 
 export interface LpTicketRepo {
@@ -276,6 +285,8 @@ export interface LpTicketRepo {
   ticketAggregates(site: string, pendingSince: string): Promise<TicketTypeAgg[]>;
   /** Orders created at/after `since` (daily checkout cap). */
   countOrdersSince(site: string, since: string): Promise<number>;
+  /** Tickets in this sender's pending orders created at/after `pendingSince` (seats it holds unpaid right now). */
+  heldPendingByClient(site: string, clientKey: string, pendingSince: string): Promise<number>;
   /**
    * Seat hold for every item: held (paid + fresh pending) + quantity <= capacity per type
    * (capacity null = unlimited). All-or-nothing: on a short item nothing stays held and that
@@ -290,14 +301,20 @@ export interface LpTicketRepo {
   getOrderBySession(sessionId: string): Promise<TicketOrderRow | null>;
   setOrderSession(id: string, sessionId: string): Promise<void>;
   getOrderByPaymentIntent(paymentIntentId: string): Promise<TicketOrderRow | null>;
-  /** pending|expired -> paid, or needs_review with reviewReason ("paid wins" over a late expiry). true = this call made the transition. */
-  markOrderPaid(id: string, p: PaidSettlement): Promise<boolean>;
+  /** pending|expired -> paid, or needs_review "oversold" (see capacitySince). "Paid wins" over a late expiry. null = no transition. */
+  markOrderPaid(id: string, p: PaidSettlement): Promise<"paid" | "needs_review" | null>;
   /** pending -> expired only (never from paid). */
   markOrderExpired(id: string): Promise<boolean>;
   /** pending|expired|paid -> needs_review. */
   markOrderNeedsReview(id: string, reason: string, paymentIntentId?: string | null): Promise<boolean>;
   /** paid|needs_review -> refunded (releases the seat). */
   markOrderRefunded(id: string, refundedAt: string): Promise<boolean>;
+  /** needs_review -> paid (paid_at kept if set). `onlyReason` restricts it to that review_reason. */
+  approveOrder(id: string, resolvedBy: string, resolvedAt: string, onlyReason?: string): Promise<boolean>;
+  /** Fills payment_intent_id only where it is still NULL. */
+  setOrderPaymentIntent(id: string, paymentIntentId: string): Promise<void>;
+  /** Backfill: paid / needs_review orders with a session but no payment_intent_id (pre-0007), oldest first. */
+  listMissingPaymentIntent(site: string, livemode: boolean, limit: number): Promise<TicketOrderRow[]>;
   /** Reconcile: pending orders with a Stripe session, from <= created_at < to, oldest first. */
   listPendingWithSession(site: string, from: string, to: string, limit: number): Promise<TicketOrderRow[]>;
   /** Reconcile: pending orders without a session created before `before` -> expired. Returns count. */
@@ -429,6 +446,8 @@ export interface AppDeps {
   stripe: StripeClient | null;
   /** STRIPE_WEBHOOK_SECRET。null なら webhook は常に 400。 */
   stripeWebhookSecret: string | null;
+  /** Free plan: arms the reconcile alarm loop (TicketReconcileDO). null = cron drives reconcile (paid) / tests. */
+  armReconcile: (() => Promise<void>) | null;
   /**
    * LP管理「プレビュー」のテスト購入トークンの鍵（Stripe のテストキー sk_test_ / rk_test_）。
    * 未設定・本番キーなら null = テスト購入トークンを発行も検証もしない。

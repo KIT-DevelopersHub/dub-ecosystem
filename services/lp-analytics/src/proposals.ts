@@ -2,7 +2,7 @@
 // The custom-field vocabulary and answer validation are shared with tickets.
 import { errors, type FieldError } from "@dub/errors";
 import { lp } from "@dub/types";
-import { BUYER_EMAIL_MAX, BUYER_NAME_MAX, EMAIL_RE, jstDayStartIso, parseAnswers, parseFields } from "./tickets";
+import { BUYER_EMAIL_MAX, BUYER_NAME_MAX, CLIENT_KEY_RE, EMAIL_RE, jstDayStartIso, parseAnswers, parseFields } from "./tickets";
 import type {
   AppDeps,
   LpProposal,
@@ -31,7 +31,6 @@ export const DEFAULT_PROPOSAL_FIELDS: readonly LpTicketField[] = [
 /** 同じ送信元（IP ハッシュ）から 1 日 (JST) に受け付ける応募数。全体上限をボット 1 台で使い切らせない。
  *  学内 NAT など 1 つの IP を共有する応募者を弾かない程度に緩める。 */
 export const PER_CLIENT_DAILY_CAP = 20;
-const CLIENT_KEY_RE = /^[a-f0-9]{16,64}$/;
 
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;

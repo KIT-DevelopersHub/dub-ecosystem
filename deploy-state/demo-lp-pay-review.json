@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-pay-review",
+  "worker": "dub-demo-lp-pay-review",
+  "url": "https://dub-demo-lp-pay-review.developershub-site.workers.dev",
+  "deployedSha": "6f529460",
+  "branch": "fix/lp-ticket-payment-risks",
+  "actor": "ko-tarou",
+  "markers": ["確認して確定する","審理の結果は Stripe から自動で反映されます"],
+  "live": true,
+  "verifiedAt": "2026-10-15T05:27:20Z",
+  "updatedAt": "2026-10-15T05:27:20Z",
+  "note": "LP チケット: 要確認の注文を確定 (PR #655 フォロー)"
+}

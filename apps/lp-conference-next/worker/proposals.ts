@@ -15,6 +15,7 @@ import {
   redirect,
   renderField,
   reqMark,
+  senderKeyFor,
   shell,
   type FormErrors,
   type FormValues,
@@ -289,15 +290,9 @@ export function proposalsInjection(cfg: ProposalConfig | null): string {
 
 // ---------- handler ----------
 
-/**
- * Sender key for lp-analytics' per-sender daily cap: SHA-256 of the client IP (hex, 32 chars).
- * The raw IP never leaves the Worker. null when the header is absent (local dev / tests).
- */
-export async function clientKeyFor(req: Request): Promise<string | null> {
-  const ip = req.headers.get("cf-connecting-ip");
-  if (!ip) return null;
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`lp-proposals:${ip}`));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+/** Sender key for lp-analytics' per-sender daily cap (see senderKeyFor). */
+export function clientKeyFor(req: Request): Promise<string | null> {
+  return senderKeyFor(req, "lp-proposals");
 }
 
 export interface ProposalsDeps {

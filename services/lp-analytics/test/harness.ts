@@ -76,6 +76,7 @@ export async function makeApp(
     dailyCheckoutCap: 300,
     stripe: null,
     stripeWebhookSecret: null,
+    armReconcile: null,
     paypayEnabled: false,
     ticketPreviewKey: null,
     newProposalId: () => id("lpp"),

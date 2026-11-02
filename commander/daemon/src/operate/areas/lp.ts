@@ -124,6 +124,11 @@ export const LP: AreaSpec = {
     },
     {
       service: S,
+      route: "POST /lp/tickets/orders/:id/approve",
+      reason: "要確認のチケット注文をお金と結び付けて支払い済みに確定する操作（lp:publish 詳細キー）。Stripe で入金を確かめたうえでオーナーが手で行う",
+    },
+    {
+      service: S,
       route: "POST /lp/tickets/preview-token",
       reason: "LP管理プレビューでテスト購入するための一時トークン発行で、Dub のデータではない",
     },

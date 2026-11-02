@@ -207,6 +207,8 @@ export interface LpTicketOrder {
   answers: LpTicketAnswer[];
   createdAt: string;
   paidAt: string | null;
+  /** needs_review になった理由。確定後も履歴として残る（status は paid）。 */
+  reviewReason: string | null;
   /** 実際に使われた Stripe の決済手段（"card" / "paypay" など）。無料・未確定・不明は null。古い API では無い。 */
   paymentMethod?: string | null;
   /** LP管理のプレビューから作られた注文。古い API では無い。 */
@@ -290,6 +292,8 @@ export interface LpApi {
   updateTicketType(id: string, input: Partial<LpTicketTypeInput>): Promise<LpTicketTypeSummary>;
   /** 購入者一覧・新しい順 (app:lp:edit = 個人情報)。 */
   listTicketOrders(query: { cursor?: string; limit?: number }): Promise<LpTicketOrdersPage>;
+  /** 要確認(needs_review)の注文を支払い済みに確定 (app:lp:edit + lp:publish)。要確認でなければ 409。 */
+  approveTicketOrder(id: string): Promise<LpTicketOrder>;
   /** プレビュー（販売あり）のテスト購入トークン (app:lp:edit・Stripe テストキーの時だけ。それ以外は 409)。 */
   createTicketPreviewToken(): Promise<{ token: string; expiresAt: string }>;
   /** 登壇者募集の設定・応募数 (app:lp:view)。 */
@@ -372,6 +376,8 @@ export function createLpApi(api: ApiClient): LpApi {
       if (query.limit !== undefined) q.limit = query.limit;
       return api.request<LpTicketOrdersPage>({ method: "GET", path: `${BASE}/tickets/orders`, query: q });
     },
+    approveTicketOrder: (id) =>
+      api.request<LpTicketOrder>({ method: "POST", path: `${BASE}/tickets/orders/${encodeURIComponent(id)}/approve` }),
     createTicketPreviewToken: () =>
       api.request<{ token: string; expiresAt: string }>({ method: "POST", path: `${BASE}/tickets/preview-token`, body: {} }),
     getProposals: () => api.request<LpProposalsState>({ method: "GET", path: `${BASE}/proposals` }),

@@ -38,6 +38,18 @@ export const ORDER_STATUS: Record<LpTicketOrderStatus, { label: string; tone: "s
   needs_review: { label: "要確認", tone: "warning" },
 };
 
+/** 要確認になった理由（サーバーの reviewReason）→ 平易な文言。 */
+export const REVIEW_REASON: Record<string, string> = {
+  amount_mismatch: "支払額が注文額と違う",
+  currency_mismatch: "通貨が円ではない",
+  oversold: "定員超過後に支払いが完了",
+  dispute: "チャージバック（支払いへの異議）",
+};
+
+export function reviewReasonLabel(reason: string | null | undefined): string {
+  return (reason && Object.hasOwn(REVIEW_REASON, reason) ? REVIEW_REASON[reason] : undefined) ?? "要確認";
+}
+
 const PAYMENT_METHOD_LABELS: Record<string, string> = { card: "カード", paypay: "PayPay", link: "Link" };
 
 /** Stripe の PaymentMethod.type → 表示名。未知の手段はそのまま、null/空は ""。 */

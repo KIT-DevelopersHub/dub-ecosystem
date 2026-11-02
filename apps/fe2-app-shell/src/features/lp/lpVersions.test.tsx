@@ -40,6 +40,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: unused,
+    approveTicketOrder: unused,
     createTicketPreviewToken: unused,
     getProposals: unused,
     setProposalsEnabled: unused,
