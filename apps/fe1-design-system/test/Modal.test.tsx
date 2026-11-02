@@ -187,6 +187,29 @@ describe("Drawer", () => {
 });
 
 describe("ConfirmDialog", () => {
+  it("keeps confirm disabled while confirmDisabled and accepts rich message content", async () => {
+    const onConfirm = vi.fn();
+    const { rerender } = render(
+      <ConfirmDialog
+        open
+        title="反映しますか"
+        message={<ul><li>差分</li></ul>}
+        confirmLabel="反映する"
+        confirmDisabled
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByRole("listitem")).toHaveTextContent("差分");
+    const confirm = screen.getByRole("button", { name: "反映する" });
+    expect(confirm).toBeDisabled();
+    rerender(
+      <ConfirmDialog open title="反映しますか" message="x" confirmLabel="反映する" onConfirm={onConfirm} onCancel={() => {}} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "反映する" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
   it("prevents double execution while the async onConfirm is pending", async () => {
     let resolve!: () => void;
     const onConfirm = vi.fn(() => new Promise<void>((r) => (resolve = r)));

@@ -353,6 +353,7 @@ export interface ConfirmDialogProps extends TestableProps {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean; // destructive style
+  confirmDisabled?: boolean; // e.g. until a required acknowledgement is checked
   onConfirm: () => void | Promise<void>; // loading while pending
   onCancel: () => void;
 }
