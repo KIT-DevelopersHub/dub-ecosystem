@@ -2,7 +2,7 @@
 // Powers the standalone dev harness and component/E2E tests (design §5: "P1
 // 実装時の依存先はモックサーバ(契約準拠スタブ)"). NOT shipped to production —
 // FE2 provides the real ResourceClient there.
-import { identity, member } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
+import { identity, member, common as commonValues } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
 import type { common, auditLog, auth, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
 import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview, RoleView } from "../contracts/pending";
@@ -376,7 +376,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       const existing = s.passwords.has(u.id);
       if (!existing) s.passwords.set(u.id, `Pw-${Math.random().toString(36).slice(2, 10)}`);
       const res: auth.AdminSendAccountMailResponse = {
-        ok: true, to: gmail, cc: u.email, appUrl: "https://app.developershub.jp",
+        ok: true, to: gmail, cc: u.email, appUrl: commonValues.PUBLIC_APP_BASE_URL,
         passwordSource: existing ? "existing" : "generated", messageId: `msg_${Math.random().toString(36).slice(2, 8)}`,
       };
       return res as unknown as T;

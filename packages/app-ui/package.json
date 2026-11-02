@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@dub/tokens": "workspace:*",
+    "@dub/types": "workspace:*",
     "@dub/ui": "workspace:*"
   },
   "devDependencies": {

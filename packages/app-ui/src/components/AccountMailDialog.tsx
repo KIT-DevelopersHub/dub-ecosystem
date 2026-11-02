@@ -2,13 +2,14 @@
 // after an 運営メンバー is linked to an @developershub.jp login (and from the roster row for a
 // resend). Data-injected: the caller owns the send mutation + toast; this only shows who
 // receives what and reports 送る / あとで.
+import { common } from "@dub/types";
 import { Modal, Button } from "@dub/ui";
 import { DialogActions } from "./DialogActions";
 import { FormError } from "./FormError";
 import styles from "./AccountMailDialog.module.css";
 
 /** The login URL the mail carries (gateway APP_BASE_URL default). */
-export const ACCOUNT_MAIL_APP_URL = "https://app.developershub.jp";
+export const ACCOUNT_MAIL_APP_URL = common.PUBLIC_APP_BASE_URL;
 
 /** The 3 are linked only when the login is a Developers Hub address (it is also the CC). */
 export function isDevhubAddress(email: string | null | undefined): email is string {
