@@ -11,6 +11,9 @@ export const MEMBER_STATUSES = member.MEMBER_STATUSES;
 /** Canonical shared team entity: { id, key, name, color?, description? }. */
 export type MemberTeam = member.Team;
 export type OrgMember = member.Member;
+export type MemberPosition = member.MemberPosition;
+export const MEMBER_POSITIONS = member.MEMBER_POSITIONS;
+export const POSITION_LABEL = member.POSITION_LABEL;
 export type MembersOverview = member.MembersOverview;
 
 export type CreateTeamRequest = member.CreateTeamRequest;

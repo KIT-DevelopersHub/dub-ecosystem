@@ -13,7 +13,14 @@ import {
   type PersonProfileErrors,
   type PersonProfileKey,
 } from "../../lib/personProfile.tsx";
-import { type MemberStatus, type MemberTeam, type OrgMember } from "./contracts.ts";
+import {
+  MEMBER_POSITIONS,
+  POSITION_LABEL,
+  type MemberPosition,
+  type MemberStatus,
+  type MemberTeam,
+  type OrgMember,
+} from "./contracts.ts";
 import { WRITE_STATUS_OPTIONS, toWriteStatus } from "./memberStatus.ts";
 import { orgChartOrder, tierOf } from "./orgChartOrder.ts";
 import { useCreateMember, useUpdateMember } from "./hooks.ts";
@@ -21,6 +28,12 @@ import styles from "./members.module.css";
 
 const STATUS_OPTIONS: SelectOption<MemberStatus>[] = WRITE_STATUS_OPTIONS;
 const NO_LEADER = "";
+const NO_POSITION = "";
+// 役職はチーム・役職ロールの自動付与に使う (未設定なら役職ロールは付かない)。
+const POSITION_OPTIONS: SelectOption<MemberPosition | typeof NO_POSITION>[] = [
+  { value: NO_POSITION, label: "未設定" },
+  ...MEMBER_POSITIONS.map((p) => ({ value: p, label: POSITION_LABEL[p] })),
+];
 // 名簿は管理者が分かる範囲で登録するので、必須は苗字だけ (参加届より緩い)。
 const REQUIRED: readonly PersonProfileKey[] = ["lastName"];
 
@@ -56,6 +69,7 @@ export function MemberFormDialog({
   const [initialProfile, setInitialProfile] = useState(() => profileDraftOf(null));
   const [profileErrors, setProfileErrors] = useState<PersonProfileErrors>({});
   const [roleTitle, setRoleTitle] = useState("");
+  const [position, setPosition] = useState<MemberPosition | typeof NO_POSITION>(NO_POSITION);
   const [status, setStatus] = useState<MemberStatus>("added");
   const [leaderId, setLeaderId] = useState<string>(NO_LEADER);
   const [teamIds, setTeamIds] = useState<string[]>([]);
@@ -67,6 +81,7 @@ export function MemberFormDialog({
     setInitialProfile(profileDraftOf(editing));
     setProfileErrors({});
     setRoleTitle(editing?.roleTitle ?? "");
+    setPosition(editing?.position ?? NO_POSITION);
     // 通常→"added"、打診系(invited/considering)→"invited" へ書き込み正準値を寄せる。
     setStatus(editing ? toWriteStatus(editing.status) : "added");
     setLeaderId(editing?.leaderId ?? NO_LEADER);
@@ -81,12 +96,12 @@ export function MemberFormDialog({
     const candidates = orgChartOrder(
       members.filter((m) => m.status !== "declined" && m.id !== editing?.id),
     );
-    const tierLabel: Record<string, string> = { organizer: "オーガナイザー", leader: "リーダー", member: "メンバー" };
+    // 役職が入っていればそれを、無ければ role_title から推した段を英字ラベルで添える。
     return [
       { value: NO_LEADER, label: "なし（直属リーダーなし）" },
       ...candidates.map((m) => ({
         value: m.id,
-        label: `${m.name}（${m.roleTitle ?? tierLabel[tierOf(m)]}）`,
+        label: `${m.name}（${m.roleTitle ?? POSITION_LABEL[m.position ?? tierOf(m)]}）`,
       })),
     ];
   }, [members, editing?.id]);
@@ -113,6 +128,7 @@ export function MemberFormDialog({
         ? { lastName: parsed.lastName, firstName: parsed.firstName, name: joinParts([parsed.lastName, parsed.firstName]) }
         : {}),
       roleTitle: roleTitle.trim() || null,
+      position: position || null,
       status,
       leaderId: leaderId || null,
       teamIds,
@@ -164,6 +180,19 @@ export function MemberFormDialog({
             idPrefix="members-form"
           />
           <div className={styles.formSectionTitle}>運営での情報</div>
+          <FormField
+            label="役職"
+            htmlFor="member-position"
+            help="Org / Lead / Member。アカウントに紐付いた在籍中の人には「役職: Org」などのロールが自動で付きます。"
+          >
+            <Select<MemberPosition | typeof NO_POSITION>
+              id="member-position"
+              value={position}
+              onChange={setPosition}
+              options={POSITION_OPTIONS}
+              testId="members-form-position"
+            />
+          </FormField>
           <FormField label="担当・役割" htmlFor="member-role" help="例: 会場リーダー">
             <TextField id="member-role" value={roleTitle} onChange={setRoleTitle} />
           </FormField>
@@ -187,7 +216,7 @@ export function MemberFormDialog({
               />
             </FormField>
           ) : null}
-          <FormField label="所属チーム" htmlFor="member-teams" help="複数選択できます">
+          <FormField label="所属チーム" htmlFor="member-teams" help="複数選択できます。アカウントに紐付いた在籍中の人には「チーム: 〜」ロールが自動で付きます。">
             {teams.length === 0 ? (
               <p className={styles.emptyTeamNote}>先にチームを追加してください</p>
             ) : (

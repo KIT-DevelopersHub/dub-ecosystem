@@ -15,7 +15,7 @@
 import type { MouseEvent, ReactNode } from "react";
 import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
-import type { MemberTeam, OrgMember } from "./contracts.ts";
+import { POSITION_LABEL, type MemberTeam, type OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
 import { hasStatusBadge } from "./memberStatus.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
@@ -94,6 +94,7 @@ export function ListView({
         cell: (m) => <Truncate text={c.value(m) || "—"} max="14rem" />,
       }),
     ),
+    { key: "position", header: "役職", minWidth: "7rem", noWrap: true, cell: (m) => (m.position ? POSITION_LABEL[m.position] : "—") },
     { key: "role", header: "担当・役割", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.roleTitle ?? "—"} max="12rem" /> },
     ...(leaderNames
       ? [

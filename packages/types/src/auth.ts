@@ -81,3 +81,26 @@ export interface MobileExchangeRequest {
 export interface TestLoginRequest {
   userId: UserId;
 }
+
+// ---- STAGING ONLY: one-click demo sign-in + debug-menu account switcher ----
+// Both routes exist only when the auth-service runs with DEMO_AUTOLOGIN=1 (staging);
+// production does not register them (404). The switchable accounts are a fixed,
+// server-side allowlist of seed/test accounts — the client can only pick from it.
+/** POST /auth/demo-login body. Omit `email` (or send `{}`) for the default demo admin. */
+export interface DemoLoginRequest {
+  email?: string;
+}
+/** One switchable seed account (only accounts that are ACTIVE on the roster are listed). */
+export interface DemoAccount {
+  email: string;
+  userId: UserId;
+  displayName: string;
+  /** Short role hint for the menu (e.g. "admin"); the real permissions come from /me. */
+  label: string;
+  /** True for the default account used by an empty POST /auth/demo-login. */
+  isDefault: boolean;
+}
+/** GET /auth/demo-accounts response. */
+export interface DemoAccountsResponse {
+  accounts: DemoAccount[];
+}

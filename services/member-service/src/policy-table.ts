@@ -106,6 +106,10 @@ export const POLICY_TABLE = definePolicyTable({
   "PATCH /members/people/:id": appLevel("members", "edit"),
   "DELETE /members/people/:id": appLevel("members", "edit"),
 
+  // チーム・役職ロールの一括付与。全員のロール割当を書き換えるので、ロール管理と同じ
+  // 「管理 編集 + identity:admin」(identity-roster の POST /identity/users/:id/roles と同格)。
+  "POST /members/role-sync/backfill": appLevel("admin", "edit", "identity:admin"),
+
   // ---- 自分視点のチーム情報 (AUTHENTICATED) ----
   // Self-scoped and unnamed-subject: the response is the team list (id/key/name/color) plus
   // the CALLER's own teamIds, derived from their identity link — the route takes no target id,

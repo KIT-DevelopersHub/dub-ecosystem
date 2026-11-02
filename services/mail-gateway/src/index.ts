@@ -3,9 +3,10 @@
 import type { ExecutionContext, ForwardableEmailMessage, ReadableStream, ScheduledController } from "@cloudflare/workers-types";
 import { newRequestId } from "@dub/http";
 import { createApp } from "./app";
-import { buildArchiveForwardDeps, buildGmailForwardDeps, buildInboundDeps } from "./deps";
+import { buildArchiveForwardDeps, buildGmailForwardDeps, buildInboundDeps, buildUserForwardDeps } from "./deps";
 import { forwardToArchive, forwardToLinkedGmail, gmailForwardEnabled } from "./gmail-forward";
 import { handleInbound } from "./inbound";
+import { forwardToUserTarget, sweepPendingForwards } from "./user-forward";
 import { headersToMap, type RawInbound } from "./mime";
 import { runScheduledSendDrain } from "./scheduled-send";
 import { isCanaryInbound, runCanary } from "./canary";
@@ -105,7 +106,11 @@ const handler = {
         ...(ingest ? { messageId: ingest.message.messageId } : {}),
       });
     }
-    if (gmailForwardEnabled(env.MAIL_GMAIL_FORWARD)) {
+    // Per-user opt-in forward (user-forward.ts). The legacy 名簿 Gmail forward only runs for a
+    // recipient with NO registration, so a user's own choice (incl. "off") always wins.
+    const userForward = await forwardToUserTarget(buildUserForwardDeps(env, ctx), forwarder, raw);
+    const noOptIn = userForward.status === "skipped" && userForward.reason === "no_setting";
+    if (noOptIn && gmailForwardEnabled(env.MAIL_GMAIL_FORWARD)) {
       await forwardToLinkedGmail(buildGmailForwardDeps(env, ctx), forwarder, raw);
     }
     if (ingestError) throw ingestError;
@@ -126,6 +131,7 @@ const handler = {
       controller.scheduledTime,
     );
     await runCanary(env, controller.scheduledTime);
+    await sweepPendingForwards(buildDb(env, ctx.requestId), env, controller.scheduledTime);
   },
 };
 

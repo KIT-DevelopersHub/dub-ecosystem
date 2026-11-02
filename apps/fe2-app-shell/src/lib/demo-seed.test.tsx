@@ -3,7 +3,7 @@
 // endpoint from seed data, driven end-to-end through the REAL api-client (so the
 // mock exercises retry/refresh/error handling, not a bypass). Unknown routes
 // still fall through to a NOT_FOUND envelope (in-frame fallback, never blank).
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApiClient, ApiError } from "./api-client.tsx";
 import { createDemoFetch, isDemoEnabled } from "./demo-seed.tsx";
 
@@ -709,6 +709,27 @@ describe("demo folder views (?folder=, gateway parity)", () => {
       expect(counts.blocked!.unread).toBe(0);
     } finally {
       globalThis.history.replaceState(null, "", "/");
+    }
+  });
+});
+
+describe("demo Gmail auto-forward (0023)", () => {
+  it("register → pending → verified after the simulated link click → toggle → remove", async () => {
+    globalThis.localStorage.clear();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const client = api();
+      const get = () => client.request<{ status: string; enabled: boolean; active: boolean; target: string | null }>({ method: "GET", path: "/api/v1/mail/forward" });
+      expect((await get()).status).toBe("none");
+      await expect(client.request({ method: "PUT", path: "/api/v1/mail/forward", body: { target: "x@developershub.jp" } })).rejects.toBeInstanceOf(ApiError);
+      const reg = await client.request<{ status: string; target: string }>({ method: "PUT", path: "/api/v1/mail/forward", body: { target: "Me@Gmail.com" } });
+      expect(reg).toMatchObject({ status: "pending", target: "me@gmail.com" });
+      vi.setSystemTime(Date.now() + 6000);
+      expect(await get()).toMatchObject({ status: "verified", enabled: true, active: true });
+      expect(await client.request({ method: "PATCH", path: "/api/v1/mail/forward", body: { enabled: false } })).toMatchObject({ enabled: false, active: false });
+      expect(await client.request({ method: "DELETE", path: "/api/v1/mail/forward" })).toMatchObject({ status: "none" });
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

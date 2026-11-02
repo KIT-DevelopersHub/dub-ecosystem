@@ -36,10 +36,10 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
     expect(() => assertRouteCoverage(h.app, POLICY_TABLE)).not.toThrow();
   });
 
-  it("lists all 33 endpoints of this service", async () => {
+  it("lists all 35 endpoints of this service", async () => {
     const h = await makeHarness();
-    expect(protectableRouteKeys(h.app)).toHaveLength(33);
-    expect(Object.keys(POLICY_TABLE)).toHaveLength(33);
+    expect(protectableRouteKeys(h.app)).toHaveLength(35);
+    expect(Object.keys(POLICY_TABLE)).toHaveLength(35);
   });
 
   it("catches a new endpoint added without a table entry, and denies it at runtime", async () => {
@@ -137,6 +137,8 @@ const INTERNAL_ROUTES = [
   "POST /internal/webauthn/credentials/:credentialId/use",
   "PATCH /internal/webauthn/users/:id/credentials/:credentialId",
   "DELETE /internal/webauthn/users/:id/credentials/:credentialId",
+  "PUT /internal/managed-roles",
+  "PUT /internal/users/:id/managed-roles",
 ];
 const READ_ONLY = [...OPEN, ...READS].sort();
 const FULL = [...OPEN, ...READS, ...WRITES].sort();

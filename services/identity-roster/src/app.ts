@@ -275,6 +275,19 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.mailVisibleUsers(c.req.param("id"), orgId));
   });
 
+  // ---- managed roles (internal S2S: member-service only) ----
+  // 名簿のチーム・役職から付く自動ロール。member-service が「あるべき集合」を PUT し、ここが
+  // source = auto:member-sync の割当だけを足し引きする (手動の割当には触らない)。
+  app.put("/internal/managed-roles", async (c) => {
+    const body = await readJson<identity.PutManagedRoleCatalogRequest>(c);
+    return c.json(await svc.syncManagedRoleCatalog(orgId, body, ctxOf(c)));
+  });
+
+  app.put("/internal/users/:id/managed-roles", async (c) => {
+    const body = await readJson<identity.PutUserManagedRolesRequest>(c);
+    return c.json(await svc.syncUserManagedRoles(c.req.param("id"), orgId, body, ctxOf(c)));
+  });
+
   // ---- passkey credential store (internal S2S: auth-service only) ----
   // identity holds the rows; auth-service runs the WebAuthn ceremonies and owns every
   // policy decision (step-up, last-method guard). Writes are scoped by userId in the path

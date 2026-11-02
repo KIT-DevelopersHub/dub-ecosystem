@@ -174,6 +174,13 @@ CREATE INDEX IF NOT EXISTS idx_identity_role_mail_visibility_target
   ON identity_role_mail_visibility (target_role_id);
 `;
 
+// Provenance of a role assignment (infra/d1/migrations/identity/0026): 'manual' (ロール管理) or
+// 'auto:member-sync' (名簿のチーム・役職から自動). The managed-role sync only touches its own rows.
+const ASSIGNMENT_SOURCE_UP = `
+ALTER TABLE identity_role_assignments ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'
+  CHECK (source IN ('manual','auto:member-sync'));
+`;
+
 export const IDENTITY_MIGRATIONS: Migration[] = [
   { id: "0001_init", namespace: "identity", up: SCHEMA_UP },
   { id: "0002_system_roles", namespace: "identity", up: SEED_UP },
@@ -181,6 +188,7 @@ export const IDENTITY_MIGRATIONS: Migration[] = [
   { id: "0004_user_furigana", namespace: "identity", up: FURIGANA_UP },
   { id: "0005_webauthn_credentials", namespace: "identity", up: WEBAUTHN_UP },
   { id: "0006_role_mail_visibility", namespace: "identity", up: ROLE_MAIL_VISIBILITY_UP },
+  { id: "0007_role_assignment_source", namespace: "identity", up: ASSIGNMENT_SOURCE_UP },
 ];
 
 export const IDENTITY_SCHEMA_SQL = SCHEMA_UP;

@@ -43,6 +43,9 @@ export const parseOnboardingMeetingInput = member.parseOnboardingMeetingInput;
 export type MemberTeam = member.Team;
 
 export const GRADES = member.GRADES;
+export type MemberPosition = member.MemberPosition;
+export const MEMBER_POSITIONS = member.MEMBER_POSITIONS;
+export const POSITION_LABEL = member.POSITION_LABEL;
 export const DESIRED_ACTIVITIES = member.DESIRED_ACTIVITIES;
 
 /** JP labels for the closed unions (正典は @dub/types member)。 */
