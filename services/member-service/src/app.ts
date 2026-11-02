@@ -193,6 +193,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json({ ok: true });
   });
 
+  // チーム・役職ロールの一括付与 (既存メンバー向け)。dryRun で差分だけ確認できる。
+  app.post("/members/role-sync/backfill", async (c) => {
+    const body = await readJson<member.RoleSyncBackfillRequest>(c);
+    return c.json(await svc.backfillRoles(reqCtx(c), body));
+  });
+
   // ---- 参加届 (participation) ----
   // Submit is open to every 運営 whose role has 参加届 enabled (they file their own 届); whom a
   // 届 may be ABOUT is the handler's 氏名・メール突合 + dedupe, not a key. The admin list and the

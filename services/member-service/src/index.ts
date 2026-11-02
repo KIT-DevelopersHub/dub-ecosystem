@@ -10,6 +10,7 @@ import { createApp } from "./app";
 import { createD1MemberRepo } from "./d1-repo";
 import { createD1HrRepo } from "./hr-repo";
 import { notifyAdminsOfParticipation } from "./participationNotify";
+import { createIdentityRoleSync } from "./roleSync";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -40,6 +41,8 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newParticipationId: () => newId("part"),
     newOnboardingItemId: () => newId("onb"),
     hrRepo: createD1HrRepo(db),
+    // 名簿のチーム・役職 -> identity の自動ロール (best-effort・PUT /internal/*managed-roles)。
+    roleSync: createIdentityRoleSync(env.SVC_IDENTITY),
     newHrId: (prefix) => newId(prefix),
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
     notifyParticipationSubmitted: (ctx, participation) =>

@@ -30,12 +30,12 @@ function recordingDb(firstRow: Record<string, unknown> | null = null) {
 
 const base = { id: "x", orgId: "o", name: "n", version: 1, createdAt: "t", updatedAt: "t" };
 const person = (): PersonRow => ({
-  ...base, ...sentinelProfile(), roleTitle: null, status: "added", identityUserId: null, leaderId: null,
+  ...base, ...sentinelProfile(), roleTitle: null, position: "leader", status: "added", identityUserId: null, leaderId: null,
   contact: null, sortOrder: 1, archivedAt: null, createdBy: "u",
 });
 const participation = (): ParticipationRow => ({
   ...base, ...sentinelProfile(), schoolEmail: "v_schoolEmail", gmail: "v_gmail", memberId: null, normalizedName: "n",
-  nameKana: null, nameRomaji: null, contact: null, desiredTeamId: null, status: "submitted", matchKind: "created_new",
+  nameKana: null, nameRomaji: null, contact: null, desiredTeamId: null, position: "organizer", status: "submitted", matchKind: "created_new",
   reviewState: "pending", submittedBy: "u", submittedAt: "t",
 });
 
@@ -45,6 +45,29 @@ function expectAllProfileWritten(call: { sql: string; binds: unknown[] }, p: mem
     expect(call.binds, `${k} value`).toContain(p[k]);
   }
 }
+
+describe("d1-repo: 役職 (position, 0018)", () => {
+  it("名簿・参加届の書き込みに position 列と値が入り、読み込みで戻る (不正値は null)", async () => {
+    const { db, calls } = recordingDb();
+    const repo = createD1MemberRepo(db);
+    await repo.createPerson(person(), []);
+    await repo.updatePerson(person(), 1);
+    await repo.upsertParticipation(participation());
+    for (const marker of ["INSERT INTO member_people", "UPDATE member_people"]) {
+      const c = calls.find((x) => x.sql.includes(marker))!;
+      expect(c.sql).toContain("position");
+      expect(c.binds).toContain("leader");
+    }
+    const up = calls.find((x) => x.sql.includes("INSERT INTO member_participations"))!;
+    expect(up.binds).toContain("organizer");
+    expect(up.sql).toContain("position = excluded.position");
+
+    const row = { id: "x", org_id: "o", name: "n", status: "added", version: 1, sort_order: 1, created_at: "t", updated_at: "t", created_by: "u", position: "member" };
+    expect((await createD1MemberRepo(recordingDb(row).db).getPerson("x"))?.position).toBe("member");
+    const bad = { ...row, position: "boss" };
+    expect((await createD1MemberRepo(recordingDb(bad).db).getPerson("x"))?.position).toBeNull();
+  });
+});
 
 describe("d1-repo: PersonProfile の全項目を保存・読み込みする", () => {
   it("member_people の INSERT / UPDATE", async () => {
