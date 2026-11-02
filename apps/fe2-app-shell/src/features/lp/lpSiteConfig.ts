@@ -89,6 +89,14 @@ export function enablesTickets(before: LpSiteConfig, after: LpSiteConfig): boole
   return !before.release.ticketsEnabled && after.release.ticketsEnabled;
 }
 
+/** 版・チケット・募集だけを URL で当てたプレビュー（セクションは公開中の見た目）。本番のミニプレビュー用。 */
+export function releasePreviewUrl(config: LpSiteConfig): string {
+  return lpPreviewUrl(config.release.versionId, {
+    tickets: config.release.ticketsEnabled ? "on" : "off",
+    proposals: config.release.proposalsEnabled ? "on" : "off",
+  });
+}
+
 /** 下書きのプレビュー URL: 下書きの版・チケット・募集で既存のプレビュー URL を作り、&config=draft で下書きの見た目を当てる。 */
 export function draftPreviewUrl(draft: LpSiteConfig, previewToken?: string): string {
   return `${lpPreviewUrl(draft.release.versionId, {

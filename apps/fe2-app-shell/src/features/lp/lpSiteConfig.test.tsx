@@ -10,7 +10,9 @@ import { createDemoFetch } from "../../lib/demo-seed.tsx";
 import { LpSiteConfigScreen, PUBLISH_CONFIRM_TITLE } from "./LpSiteConfigScreen.tsx";
 import { createLpApi, type LpApi, type LpSiteConfig, type LpSiteConfigState, type LpTicketsState } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
-import { diffSiteConfig, draftPreviewUrl, setRelease, setSection } from "./lpSiteConfig.ts";
+import { diffSiteConfig, draftPreviewUrl, releasePreviewUrl, setRelease, setSection } from "./lpSiteConfig.ts";
+import { miniPreviewSrc } from "./LpMiniPreview.tsx";
+import { LP_PUBLIC_URL } from "./lpPublish.ts";
 import { STALE_MESSAGE } from "./lpSiteConfigHooks.ts";
 
 const nav = vi.hoisted(() => ({ navigate: vi.fn(), searchStr: "" }));
@@ -190,7 +192,8 @@ describe("LpSiteConfigScreen — プレビュー（下書き）", () => {
   it("opens the draft preview (&config=draft) in the in-app viewer", async () => {
     const draft = setRelease(BASE, "versionId", "v3.5");
     renderScreen(fakeApi({ getSiteConfig: () => Promise.resolve(siteState({ draft })) }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-config-preview-open"));
+    await screen.findByTestId("fe2-lp-config-release");
+    fireEvent.click(screen.getByTestId("fe2-lp-config-preview-open"));
     await waitFor(() =>
       expect(screen.getByTestId("fe2-lp-viewer-frame")).toHaveAttribute("src", draftPreviewUrl(draft)),
     );
@@ -302,6 +305,74 @@ describe("LpSiteConfigScreen — 本番", () => {
     expect(screen.getByTestId("fe2-lp-config-ticketsEnabled")).toBeDisabled();
     expect(screen.getByTestId("fe2-lp-config-join-visible")).toBeDisabled();
     expect(screen.getByTestId("fe2-lp-config-publish")).toBeDisabled();
+  });
+});
+
+describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", () => {
+  it("puts every action, the preview button and the live LP link in the sticky top bar", async () => {
+    renderScreen();
+    await screen.findByTestId("fe2-lp-config-release");
+    const bar = screen.getByTestId("fe2-lp-config-actionbar");
+    for (const id of ["fe2-lp-config-env", "fe2-lp-config-preview-open", "fe2-lp-config-reset", "fe2-lp-config-publish-draft"]) {
+      expect(within(bar).getByTestId(id)).toBeInTheDocument();
+    }
+    expect(within(bar).getByTestId("fe2-lp-config-live-url")).toHaveAttribute("href", LP_PUBLIC_URL);
+  });
+
+  it("live: the change count, discard and publish are in the top bar too", async () => {
+    nav.searchStr = "?env=live";
+    renderScreen();
+    await screen.findByTestId("fe2-lp-config-release");
+    const bar = screen.getByTestId("fe2-lp-config-actionbar");
+    for (const id of ["fe2-lp-config-change-count", "fe2-lp-config-discard", "fe2-lp-config-publish", "fe2-lp-config-live-url"]) {
+      expect(within(bar).getByTestId(id)).toBeInTheDocument();
+    }
+    expect(within(bar).queryByTestId("fe2-lp-config-preview-open")).toBeNull();
+  });
+
+  it("draft: the mini preview shows the saved draft and reloads after each autosave", async () => {
+    renderScreen();
+    const frame = await screen.findByTestId("fe2-lp-config-mini-frame");
+    expect(frame).toHaveAttribute("src", miniPreviewSrc(draftPreviewUrl(BASE), 3));
+    expect(screen.getByTestId("fe2-lp-config-mini-loading")).toBeInTheDocument();
+    fireEvent.load(frame);
+    expect(screen.queryByTestId("fe2-lp-config-mini-loading")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
+    await waitFor(() => expect(frame).toHaveAttribute("src", miniPreviewSrc(draftPreviewUrl(BASE), 4)), { timeout: 2000 });
+  });
+
+  it("live: staged release changes are previewed via URL; staged section changes get a note", async () => {
+    nav.searchStr = "?env=live";
+    renderScreen();
+    const frame = await screen.findByTestId("fe2-lp-config-mini-frame");
+    expect(frame.getAttribute("src")).toMatch(/\?version=live$/);
+    fireEvent.click(screen.getByTestId("fe2-lp-config-proposalsEnabled"));
+    await waitFor(() => expect(frame).toHaveAttribute("src", releasePreviewUrl(setRelease(BASE, "proposalsEnabled", true))), { timeout: 2000 });
+    fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
+    expect(screen.getByTestId("fe2-lp-config-mini-note")).toHaveTextContent("本番に反映するとここに映ります");
+  });
+
+  it("narrow screens hide the mini preview behind a toggle", async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((q: string) => ({
+      matches: q.includes("1100px"),
+      media: q,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+    try {
+      renderScreen();
+      await screen.findByTestId("fe2-lp-config-release");
+      expect(screen.queryByTestId("fe2-lp-config-mini")).toBeNull();
+      fireEvent.click(screen.getByTestId("fe2-lp-config-mini-toggle"));
+      expect(screen.getByTestId("fe2-lp-config-mini")).toBeInTheDocument();
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });
 

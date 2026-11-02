@@ -733,3 +733,96 @@
   flex: 0 0 auto;
   white-space: nowrap;
 }
+
+/* 操作の帯: スクロールしても上に貼り付く。本番は左の色で一目で分かるように。 */
+.stickyBar {
+  position: sticky;
+  /* シェルの本文（スクロール領域）の上余白ぶん持ち上げて、ヘッダーの直下に貼り付ける。 */
+  top: calc(-1 * var(--dub-space-6));
+  z-index: var(--dub-zIndex-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-3) var(--dub-space-4);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-raised);
+  box-shadow: var(--dub-shadow-sm);
+}
+
+.stickyBar[data-env="live"] {
+  border-left: 4px solid var(--dub-color-danger-600);
+}
+
+/* 左: 設定カード / 右: ミニプレビュー（半分ずつ）。狭い幅では縦積みでプレビューを上に。 */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--dub-space-6);
+}
+
+.splitPreview {
+  position: sticky;
+  top: calc(var(--lp-bar-h, 64px) + var(--dub-space-4) - var(--dub-space-6));
+}
+
+@media (max-width: 1100px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .splitPreview {
+    position: static;
+    order: -1;
+  }
+}
+
+.miniHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.miniHeader > a {
+  margin-left: auto;
+}
+
+.miniBox {
+  position: relative;
+  height: clamp(420px, calc(100dvh - 320px), 900px);
+  overflow: hidden;
+  background: var(--dub-color-surface-sunken);
+}
+
+.miniSkeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: var(--dub-space-4);
+  background: var(--dub-color-surface-raised);
+}
+
+.miniFrame {
+  border: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.miniNote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-top: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-lineHeight-relaxed);
+}
+
+@media (max-width: 1100px) {
+  .miniBox {
+    height: 360px;
+  }
+}

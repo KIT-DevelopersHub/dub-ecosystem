@@ -7,7 +7,7 @@
 //    「プレビューを開く」は下書きの値で LP を開く（&config=draft）。「この下書きを本番へ反映」は本番と同じ確認を通す。
 //  - 本番: 変更は画面に溜めて「変更 N 件」と差分を出し、「本番に反映」→ 確認ダイアログでまとめて 1 回で反映する。
 //    チケット販売を公開にする変更を含むときは ack チェックを必須にする。lp:publish が無ければ操作は無効。
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { lp } from "@dub/types";
 import {
@@ -25,6 +25,7 @@ import {
   SkeletonCard,
   Stack,
   Switch,
+  useMediaQuery,
 } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
@@ -35,6 +36,7 @@ import {
   diffSiteConfig,
   draftPreviewUrl,
   enablesTickets,
+  releasePreviewUrl,
   parseEnv,
   RELEASE_FLAGS,
   setRelease,
@@ -44,7 +46,8 @@ import {
   type LpConfigEnv,
 } from "./lpSiteConfig.ts";
 import { useDraftAutosave, useLpSiteConfig, usePublishSiteConfig, useResetDraft } from "./lpSiteConfigHooks.ts";
-import { formatSwitchedAt, lpViewUrl } from "./lpPublish.ts";
+import { formatSwitchedAt, LP_PUBLIC_URL, lpViewUrl } from "./lpPublish.ts";
+import { LpMiniPreview } from "./LpMiniPreview.tsx";
 import { LP_VERSIONS, type LpVersion } from "./lpVersions.ts";
 import { LpViewer } from "./LpViewer.tsx";
 import { LpTabs } from "./LpTabs.tsx";
@@ -54,6 +57,14 @@ const ENV_OPTIONS = [
   { value: "draft" as const, label: "プレビュー（下書き）", testId: "fe2-lp-config-env-draft" },
   { value: "live" as const, label: "本番", testId: "fe2-lp-config-env-live" },
 ];
+
+/** これより狭いとミニプレビューを横に並べず、トグルで上に出す。 */
+const SPLIT_BREAKPOINT_QUERY = "(max-width: 1100px)";
+/** セクションの切り替え（?config=draft・data-lp-*）を描ける最初の LP の版。 */
+const SECTION_CAPABLE_VERSION = "v3.6";
+// demo-seed の isDemoEnabled と同じ判定（demo-seed は大きいので import しない）。
+const DEMO_ENV = (import.meta.env as { VITE_DEMO?: string }).VITE_DEMO;
+const IS_DEMO = DEMO_ENV === "1" || DEMO_ENV === "true";
 
 export const PUBLISH_CONFIRM_TITLE = "これは本番です。反映してよいですか？";
 
@@ -76,6 +87,17 @@ export function LpSiteConfigScreen(): JSX.Element {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [viewing, setViewing] = useState<LpVersion | null>(null);
   const [opening, setOpening] = useState(false);
+  const narrow = useMediaQuery(SPLIT_BREAKPOINT_QUERY);
+  const [miniOpen, setMiniOpen] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => setBarHeight(el.getBoundingClientRect().height));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const state = query.data;
   const live = env === "live";
@@ -121,114 +143,6 @@ export function LpSiteConfigScreen(): JSX.Element {
     setViewing({ ...base, name: `${versionName(draft.release.versionId)}（下書きのプレビュー）`, url: draftPreviewUrl(draft, token) });
   };
 
-  let body: JSX.Element;
-  if (query.isLoading) {
-    body = (
-      <Stack gap={6} testId="fe2-lp-config-loading">
-        <SkeletonCard lines={4} />
-        <SkeletonCard lines={2} />
-        <SkeletonCard lines={2} />
-      </Stack>
-    );
-  } else if (query.isError || !state || !config) {
-    body = (
-      <ErrorState
-        testId="fe2-lp-config-error"
-        error={{ code: "INTERNAL", message: "公開設定を読み込めませんでした。" }}
-        onRetry={() => void query.refetch()}
-      />
-    );
-  } else {
-    body = (
-      <Stack gap={6}>
-        {live ? (
-          <p className={styles.liveBanner} data-testid="fe2-lp-config-live-banner">
-            <Icon name="flag" />
-            <span>
-              本番の設定です。変更は「本番に反映」を押して確認するまで公開されません。
-              {!canPublish ? " 変更には lp:publish 権限が必要です。" : ""}
-            </span>
-          </p>
-        ) : (
-          <p className={styles.previewNotice} data-testid="fe2-lp-config-draft-notice">
-            <Icon name="info" />
-            <span>下書きは変えるたびに自動で保存されます。公開中の LP は「この下書きを本番へ反映」まで変わりません。</span>
-          </p>
-        )}
-        <ReleaseCard
-          config={config}
-          publishedVersionId={state.published.release.versionId}
-          disabled={!canChange}
-          onChange={onChange}
-          onOpenCatalog={() => setCatalogOpen(true)}
-        />
-        {lp.LP_SECTION_IDS.map((id) => (
-          <SectionCard key={id} id={id} config={config} disabled={!canChange} onChange={onChange} />
-        ))}
-        {live ? (
-          <Card testId="fe2-lp-config-live-actions">
-            <Stack gap={4}>
-              <div className={styles.actionBar}>
-                <Badge tone={stagedDiff.length > 0 ? "warning" : "neutral"} testId="fe2-lp-config-change-count">
-                  変更 {stagedDiff.length} 件
-                </Badge>
-                <span className={styles.actionSpacer} />
-                <Button
-                  variant="secondary"
-                  disabled={stagedDiff.length === 0}
-                  onClick={() => setStaged(null)}
-                  testId="fe2-lp-config-discard"
-                >
-                  取り消す
-                </Button>
-                <Button
-                  variant="primary"
-                  disabled={!canPublish || stagedDiff.length === 0 || publish.isPending}
-                  onClick={() => staged && setConfirm({ from: state.published, to: staged, source: "live" })}
-                  testId="fe2-lp-config-publish"
-                >
-                  本番に反映…
-                </Button>
-              </div>
-              {stagedDiff.length > 0 ? <DiffList diff={stagedDiff} testId="fe2-lp-config-staged-diff" /> : null}
-            </Stack>
-          </Card>
-        ) : (
-          <Card testId="fe2-lp-config-draft-actions">
-            <div className={styles.actionBar}>
-              <Button
-                variant="primary"
-                iconRight={<Icon name="external-link" />}
-                disabled={opening}
-                onClick={() => void openPreview()}
-                testId="fe2-lp-config-preview-open"
-              >
-                プレビューを開く
-              </Button>
-              <span className={styles.actionSpacer} />
-              <Button
-                variant="secondary"
-                disabled={!canEdit || draftDiff.length === 0 || reset.isPending}
-                onClick={() => setResetting(true)}
-                testId="fe2-lp-config-reset"
-              >
-                本番の内容に戻す
-              </Button>
-              <Button
-                variant="secondary"
-                disabled={!canPublish || draftDiff.length === 0 || publish.isPending}
-                onClick={() => setConfirm({ from: state.published, to: state.draft, source: "draft" })}
-                testId="fe2-lp-config-publish-draft"
-              >
-                この下書きを本番へ反映…
-              </Button>
-            </div>
-          </Card>
-        )}
-      </Stack>
-    );
-  }
-
   const status = state
     ? live
       ? state.publishedAt
@@ -241,6 +155,144 @@ export function LpSiteConfigScreen(): JSX.Element {
           : null
     : null;
 
+  // 右側のミニプレビュー。下書きは保存済みの下書き（&config=draft）を、保存のたび（revision）に読み直す。
+  // 本番は公開中の LP。ためた変更のうち版・チケット・募集だけは URL で当てられるので当て、
+  // セクションの見た目は反映（または下書きへ）しないと LP 側で描けない（注記で伝える）。
+  const mini = state && config
+    ? live
+      ? stagedDiff.some((d) => d.key === "versionId" || d.key === "ticketsEnabled" || d.key === "proposalsEnabled")
+        ? { url: releasePreviewUrl(config), refreshKey: 0 }
+        : { url: lpViewUrl(state.published.release.versionId, LP_PUBLIC_URL, { versionId: state.published.release.versionId, versions: lp.LP_PUBLISHABLE_VERSION_IDS }), refreshKey: 0 }
+      : { url: draftPreviewUrl(state.draft), refreshKey: state.revision }
+    : null;
+  const miniNote = !state || !config
+    ? null
+    : live && stagedDiff.some((d) => d.key.includes("."))
+      ? "セクションの未反映の変更は、本番に反映するとここに映ります（プレビュー（下書き）なら変えた直後に確かめられます）。"
+      : IS_DEMO
+        ? "デモ環境です。セクションの切り替えが LP に映るのは、LP の v3.6 がデプロイされてからです。"
+        : config.release.versionId !== SECTION_CAPABLE_VERSION
+          ? `セクションの切り替えが映るのは ${SECTION_CAPABLE_VERSION} 以降の版です（いまの版では見た目は変わりません）。`
+          : null;
+  const showMini = !narrow || miniOpen;
+
+  const actions = state ? (
+    live ? (
+      <>
+        <Badge tone={stagedDiff.length > 0 ? "warning" : "neutral"} testId="fe2-lp-config-change-count">
+          変更 {stagedDiff.length} 件
+        </Badge>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={stagedDiff.length === 0}
+          onClick={() => setStaged(null)}
+          testId="fe2-lp-config-discard"
+        >
+          取り消す
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!canPublish || stagedDiff.length === 0 || publish.isPending}
+          onClick={() => staged && setConfirm({ from: state.published, to: staged, source: "live" })}
+          testId="fe2-lp-config-publish"
+        >
+          本番に反映…
+        </Button>
+      </>
+    ) : (
+      <>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!canEdit || draftDiff.length === 0 || reset.isPending}
+          onClick={() => setResetting(true)}
+          testId="fe2-lp-config-reset"
+        >
+          本番の内容に戻す
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!canPublish || draftDiff.length === 0 || publish.isPending}
+          onClick={() => setConfirm({ from: state.published, to: state.draft, source: "draft" })}
+          testId="fe2-lp-config-publish-draft"
+        >
+          この下書きを本番へ反映…
+        </Button>
+      </>
+    )
+  ) : null;
+
+  let body: JSX.Element;
+  if (query.isLoading) {
+    body = (
+      <div className={styles.split}>
+        <Stack gap={6} testId="fe2-lp-config-loading">
+          <SkeletonCard lines={4} />
+          <SkeletonCard lines={2} />
+          <SkeletonCard lines={2} />
+        </Stack>
+        {!narrow ? <SkeletonCard media lines={1} /> : null}
+      </div>
+    );
+  } else if (query.isError || !state || !config) {
+    body = (
+      <ErrorState
+        testId="fe2-lp-config-error"
+        error={{ code: "INTERNAL", message: "公開設定を読み込めませんでした。" }}
+        onRetry={() => void query.refetch()}
+      />
+    );
+  } else {
+    body = (
+      <div className={styles.split} style={{ "--lp-bar-h": `${barHeight}px` } as CSSProperties}>
+        <Stack gap={6}>
+          {live ? (
+            <p className={styles.liveBanner} data-testid="fe2-lp-config-live-banner">
+              <Icon name="flag" />
+              <span>
+                本番の設定です。変更は「本番に反映」を押して確認するまで公開されません。
+                {!canPublish ? " 変更には lp:publish 権限が必要です。" : ""}
+              </span>
+            </p>
+          ) : (
+            <p className={styles.previewNotice} data-testid="fe2-lp-config-draft-notice">
+              <Icon name="info" />
+              <span>下書きは変えるたびに自動で保存されます。公開中の LP は「この下書きを本番へ反映」まで変わりません。</span>
+            </p>
+          )}
+          {live && stagedDiff.length > 0 ? (
+            <Card testId="fe2-lp-config-staged" header={<span className={styles.sectionTitle}>未反映の変更</span>}>
+              <DiffList diff={stagedDiff} testId="fe2-lp-config-staged-diff" />
+            </Card>
+          ) : null}
+          <ReleaseCard
+            config={config}
+            publishedVersionId={state.published.release.versionId}
+            disabled={!canChange}
+            onChange={onChange}
+            onOpenCatalog={() => setCatalogOpen(true)}
+          />
+          {lp.LP_SECTION_IDS.map((id) => (
+            <SectionCard key={id} id={id} config={config} disabled={!canChange} onChange={onChange} />
+          ))}
+        </Stack>
+        {showMini && mini ? (
+          <aside className={styles.splitPreview}>
+            <LpMiniPreview
+              url={mini.url}
+              refreshKey={mini.refreshKey}
+              title={live ? "本番のミニプレビュー" : "下書きのミニプレビュー"}
+              note={miniNote}
+            />
+          </aside>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <Stack gap={6} testId="fe2-lp-config-screen">
       <PageHeader
@@ -250,9 +302,11 @@ export function LpSiteConfigScreen(): JSX.Element {
       />
       <LpTabs active="config" />
       <AppReadOnlyNotice appId="lp" />
-      <div className={styles.configToolbar}>
+      {/* 操作は全部この帯に置き、スクロールしても上に貼り付ける（下まで降りなくてよい）。 */}
+      <div ref={barRef} className={styles.stickyBar} data-env={env} data-testid="fe2-lp-config-actionbar">
         <SegmentedControl<LpConfigEnv>
           aria-label="環境"
+          size="sm"
           value={env}
           onChange={switchEnv}
           options={ENV_OPTIONS.map((o) =>
@@ -260,11 +314,39 @@ export function LpSiteConfigScreen(): JSX.Element {
           )}
           testId="fe2-lp-config-env"
         />
+        {!live ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            iconRight={<Icon name="external-link" />}
+            disabled={!state || opening}
+            onClick={() => void openPreview()}
+            testId="fe2-lp-config-preview-open"
+          >
+            プレビューを開く
+          </Button>
+        ) : null}
+        <a
+          className={styles.urlOpen}
+          href={LP_PUBLIC_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="fe2-lp-config-live-url"
+        >
+          本番の LP（{LP_PUBLIC_URL.replace(/^https?:\/\//, "")}）
+        </a>
         {status ? (
           <span className={styles.note} data-testid="fe2-lp-config-status">
             {status}
           </span>
         ) : null}
+        <span className={styles.actionSpacer} />
+        {narrow && state ? (
+          <Button variant="ghost" size="sm" onClick={() => setMiniOpen((v) => !v)} testId="fe2-lp-config-mini-toggle">
+            {miniOpen ? "ミニプレビューを隠す" : "ミニプレビュー"}
+          </Button>
+        ) : null}
+        {actions}
       </div>
       {body}
       {confirm ? (
