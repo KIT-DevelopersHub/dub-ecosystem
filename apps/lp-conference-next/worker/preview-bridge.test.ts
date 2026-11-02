@@ -37,15 +37,20 @@ function run(opts: { ancestor?: string; referrer?: string }) {
   const posted: { msg: unknown; target: string }[] = [];
   const scrolled: unknown[] = [];
   const parent = { postMessage: (msg: unknown, target: string) => posted.push({ msg, target }) };
-  const slot = (id: string, top: number) => ({
-    getAttribute: () => id,
-    classList: { add: () => {}, remove: () => {} },
-    // display:contents のスロットは高さ 0。中の最初の要素で測る。
-    getBoundingClientRect: () => ({ top: 0, height: 0 }),
-    querySelectorAll: () => [
-      { getBoundingClientRect: () => ({ top: top - win.scrollY, height: 100 }), classList: { add: () => {}, remove: () => {} } },
-    ],
-  });
+  const slot = (id: string, top: number) => {
+    const child = {
+      getBoundingClientRect: () => ({ top: top - win.scrollY, bottom: top - win.scrollY + 100, height: 100 }),
+      classList: { add: () => {}, remove: () => {} },
+    };
+    return {
+      getAttribute: () => id,
+      classList: { add: () => {}, remove: () => {} },
+      // display:contents のスロットは高さ 0。中の要素で測る。
+      getBoundingClientRect: () => ({ top: 0, bottom: 0, height: 0 }),
+      children: [child],
+      querySelectorAll: () => [child],
+    };
+  };
   const slots = [slot("header", 0), slot("join", 1000), slot("program", 2000)];
   const win: Record<string, unknown> & { scrollY: number } = {
     scrollY: 0,
@@ -61,6 +66,12 @@ function run(opts: { ancestor?: string; referrer?: string }) {
     scrollTo: (o: unknown) => scrolled.push(o),
   };
   const docListeners: Record<string, Listener[]> = {};
+  // 100svh の要素（ヒーロー）と、画面の高さに関係ない要素。
+  const tall = [
+    { style: { minHeight: "" }, cs: { minHeight: "800px" } },
+    { style: { minHeight: "" }, cs: { minHeight: "120px" } },
+  ];
+  const observed: unknown[] = [];
   const classes = new Set<string>();
   const ctx = vm.createContext({
     window: win,
@@ -70,7 +81,8 @@ function run(opts: { ancestor?: string; referrer?: string }) {
       referrer: opts.referrer ?? "",
       querySelectorAll: (q: string) => (q === "[data-lp-slot]" ? slots : []),
       addEventListener: (t: string, f: Listener) => (docListeners[t] ??= []).push(f),
-      documentElement: { classList: { add: (c: string) => classes.add(c) } },
+      documentElement: { classList: { add: (c: string) => classes.add(c) }, scrollHeight: 3000 },
+      body: { querySelectorAll: () => tall },
       createElement: () => ({ textContent: "" }),
       head: { appendChild: () => {} },
     },
@@ -79,6 +91,15 @@ function run(opts: { ancestor?: string; referrer?: string }) {
     Date,
     Math,
     JSON,
+    getComputedStyle: (el: { cs: unknown }) => el.cs,
+    ResizeObserver: class {
+      constructor(_f: unknown) {}
+      observe(t: unknown) {
+        observed.push(t);
+      }
+    },
+    setTimeout,
+    clearTimeout,
   });
   const js = bridgeScript().replace(/^<script[^>]*>/, "").replace(/<\/script>$/, "");
   vm.runInContext(js, ctx);
@@ -93,7 +114,7 @@ function run(opts: { ancestor?: string; referrer?: string }) {
     (docListeners.click ?? []).forEach((f) => f(e));
     return prevented;
   };
-  return { win, parent, posted, scrolled, fire, click, classes };
+  return { win, parent, posted, scrolled, fire, click, classes, tall, observed };
 }
 
 test("posts the section list and the active section to an allowed parent only", () => {
@@ -102,10 +123,11 @@ test("posts the section list and the active section to an allowed parent only", 
   assert.deepEqual(JSON.parse(JSON.stringify(ok.posted[0]!.msg)), {
     type: "lp:sections",
     sections: [
-      { id: "header", top: 0 },
-      { id: "join", top: 1000 },
-      { id: "program", top: 2000 },
+      { id: "header", top: 0, height: 100 },
+      { id: "join", top: 1000, height: 100 },
+      { id: "program", top: 2000, height: 100 },
     ],
+    docHeight: 3000,
   });
   // 読み込んだだけでは lp:scroll を送らない（親の設定画面を勝手に動かさない）。スクロールして別のセクションが上に来たら知らせる。
   ok.fire("scroll");
@@ -147,4 +169,19 @@ test("select mode (asked by the editor only): a click on a section is reported i
   assert.equal(b.classes.has("lp-edit"), true);
   assert.equal(b.click("program"), true);
   assert.deepEqual(JSON.parse(JSON.stringify(b.posted.at(-1)!.msg)), { type: "lp:select", section: "program" });
+});
+
+test("fit mode (iframe drawn at full height): pins viewport-tall min-heights and keeps reporting the layout", () => {
+  const b = run({ ancestor: "http://localhost:5195" });
+  b.fire("message", { source: b.parent, origin: "http://localhost:5195", data: { type: "lp:hello", select: true, fit: 900 } });
+  assert.equal(b.tall[0]!.style.minHeight, "900px", "100svh hero is pinned instead of growing with the iframe");
+  assert.equal(b.tall[1]!.style.minHeight, "", "unrelated elements are untouched");
+  assert.equal(b.observed.length, 1, "observes the body to resend lp:sections on layout changes");
+  // 2 回目の hello（読み直し後の再送依頼）で監視を重ねない。
+  b.fire("message", { source: b.parent, origin: "http://localhost:5195", data: { type: "lp:hello", select: true, fit: 900 } });
+  assert.equal(b.observed.length, 1);
+  // lp:mark はスクロールせずに選択の枠だけ。
+  const before = b.scrolled.length;
+  b.fire("message", { source: b.parent, origin: "http://localhost:5195", data: { type: "lp:mark", section: "join" } });
+  assert.equal(b.scrolled.length, before);
 });
