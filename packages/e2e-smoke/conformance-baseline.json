@@ -107,7 +107,9 @@
       "POST /internal/webauthn/challenges",
       "POST /internal/webauthn/challenges/take",
       "POST /internal/webauthn/credentials/{}/use",
-      "POST /internal/webauthn/users/{}/credentials"
+      "POST /internal/webauthn/users/{}/credentials",
+      "PUT /internal/managed-roles",
+      "PUT /internal/users/{}/managed-roles"
     ],
     "missingInCode": []
   },
