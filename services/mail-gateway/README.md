@@ -239,6 +239,34 @@ addresses. Adding one sends a verification mail to that member, so each step nee
 
 Disable: remove the var (or set anything other than `on`) and redeploy.
 
+## 3.4b Per-user opt-in auto-forward (Gmail 自動転送, `src/user-forward.ts`, migration 0023)
+
+Each user can turn on, for themselves only, a copy of the mail delivered to them to one
+personal address (typically Gmail) — メール → 右上の歯車 → 「Gmail への自動転送」.
+
+- **Opt-in**: no row in `mail_user_forward` = nothing forwarded. API: `GET|PUT|PATCH|DELETE
+  /mail/forward` (personal, メール閲覧 + `mail:read`, mutations audited `mail.user_forward.*`).
+- **Ownership proof = Cloudflare's verification mail**: `PUT` creates the address as an
+  Email Routing *destination address*; Cloudflare mails it a verification link. Forwarding
+  starts only after that destination is verified (checked on `GET` and by the 5-min cron,
+  which polls up to 10 pending rows/tick). An already-existing destination is deleted and
+  re-created so the registering user must verify it themselves; one used by an Email Routing
+  forward rule or the archive target is refused (409). One address = one account.
+- **Scope**: the envelope recipient's own mail only (role-shared / `mail:read_all` visibility
+  is never forwarded). The archive address and `@developershub.jp` targets are refused.
+- **Safety**: runs after storage and never throws (failure → `last_result=failed`, masked
+  log, audit `mail.message.forward_user`). Loop guards: `X-Dub-Forwarded`, from-target, own
+  zone. A user with a registration (even switched off) never gets the legacy §3.4 forward.
+  No retry: `message.forward()` only works inside the `email()` invocation; the original is
+  always in Dub (and R2 raw .eml).
+- **Cost**: $0 — Email Routing forward, no outbound send quota. Rate limit: 60s cooldown and
+  5 verification mails/user/day.
+- **Prerequisites (owner)**: `CF_EMAIL_ROUTING_TOKEN` must have **Account › Email Routing
+  Addresses › Edit** (+ Zone › Email Routing Rules › Read for the in-use check) and
+  `CF_EMAIL_ROUTING_ACCOUNT_ID` must be set; otherwise the settings screen shows
+  "利用できません" and `PUT` answers 503. Apply migration `0023_user_forward.sql`.
+- **Kill switch**: `MAIL_USER_FORWARD = "off"` stops forwarding and new registrations.
+
 ## 3.5 Archive forward (`MAIL_ARCHIVE_FORWARD_TO`)
 
 Independent of §3.4: when `MAIL_ARCHIVE_FORWARD_TO` is set (prod: `dub.developershub@gmail.com`
