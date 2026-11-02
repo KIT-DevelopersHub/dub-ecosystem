@@ -39,9 +39,12 @@ function run(opts: { ancestor?: string; referrer?: string }) {
   const parent = { postMessage: (msg: unknown, target: string) => posted.push({ msg, target }) };
   const slot = (id: string, top: number) => ({
     getAttribute: () => id,
+    classList: { add: () => {}, remove: () => {} },
     // display:contents のスロットは高さ 0。中の最初の要素で測る。
     getBoundingClientRect: () => ({ top: 0, height: 0 }),
-    querySelectorAll: () => [{ getBoundingClientRect: () => ({ top: top - win.scrollY, height: 100 }) }],
+    querySelectorAll: () => [
+      { getBoundingClientRect: () => ({ top: top - win.scrollY, height: 100 }), classList: { add: () => {}, remove: () => {} } },
+    ],
   });
   const slots = [slot("header", 0), slot("join", 1000), slot("program", 2000)];
   const win: Record<string, unknown> & { scrollY: number } = {
@@ -57,10 +60,20 @@ function run(opts: { ancestor?: string; referrer?: string }) {
     },
     scrollTo: (o: unknown) => scrolled.push(o),
   };
+  const docListeners: Record<string, Listener[]> = {};
+  const classes = new Set<string>();
   const ctx = vm.createContext({
     window: win,
     location: win.location,
-    document: { readyState: "complete", referrer: opts.referrer ?? "", querySelectorAll: () => slots },
+    document: {
+      readyState: "complete",
+      referrer: opts.referrer ?? "",
+      querySelectorAll: (q: string) => (q === "[data-lp-slot]" ? slots : []),
+      addEventListener: (t: string, f: Listener) => (docListeners[t] ??= []).push(f),
+      documentElement: { classList: { add: (c: string) => classes.add(c) } },
+      createElement: () => ({ textContent: "" }),
+      head: { appendChild: () => {} },
+    },
     requestAnimationFrame: win.requestAnimationFrame,
     URL,
     Date,
@@ -70,7 +83,17 @@ function run(opts: { ancestor?: string; referrer?: string }) {
   const js = bridgeScript().replace(/^<script[^>]*>/, "").replace(/<\/script>$/, "");
   vm.runInContext(js, ctx);
   const fire = (t: string, e: unknown = {}) => (listeners[t] ?? []).forEach((f) => f(e));
-  return { win, parent, posted, scrolled, fire };
+  const click = (section: string) => {
+    let prevented = false;
+    const e = {
+      target: { closest: () => slots.find((s) => s.getAttribute() === section) },
+      preventDefault: () => (prevented = true),
+      stopPropagation: () => {},
+    };
+    (docListeners.click ?? []).forEach((f) => f(e));
+    return prevented;
+  };
+  return { win, parent, posted, scrolled, fire, click, classes };
 }
 
 test("posts the section list and the active section to an allowed parent only", () => {
@@ -114,4 +137,14 @@ test("adopts the parent origin from a hello when referrer/ancestorOrigins are mi
   assert.equal(b.posted.length, 0);
   b.fire("message", { source: b.parent, origin: "https://fe2-demo.developershub-site.workers.dev", data: { type: "lp:hello" } });
   assert.equal(b.posted[0]!.target, "https://fe2-demo.developershub-site.workers.dev");
+});
+
+test("select mode (asked by the editor only): a click on a section is reported instead of navigating", () => {
+  const b = run({ ancestor: "http://localhost:5195" });
+  // 頼まれていない（全画面プレビュー）ときはクリックを横取りしない。
+  assert.equal(b.click("program"), false);
+  b.fire("message", { source: b.parent, origin: "http://localhost:5195", data: { type: "lp:hello", select: true } });
+  assert.equal(b.classes.has("lp-edit"), true);
+  assert.equal(b.click("program"), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(b.posted.at(-1)!.msg)), { type: "lp:select", section: "program" });
 });

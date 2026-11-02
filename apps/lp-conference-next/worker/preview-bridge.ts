@@ -3,7 +3,11 @@
 // script を <body> に足す。通常の公開表示には絶対に足さない。
 //  LP → 親: {type:"lp:sections", sections:[{id, top}]}（読み込み時・hello への返事）
 //           {type:"lp:scroll", activeSection}（閲覧者が LP をスクロールして一番上のセクションが変わったときだけ）
-//  親 → LP: {type:"lp:hello"}（再送の依頼） / {type:"lp:scrollTo", section}
+//           {type:"lp:select", section}（選択モードでセクションをクリックしたとき）
+//  親 → LP: {type:"lp:hello", select?}（再送の依頼。select:true で選択モード） / {type:"lp:scrollTo", section}
+// 選択モード（LP管理の編集画面のプレビューだけが頼む）: セクションにホバーで枠、クリックはリンクや
+// ボタンとして動かさず lp:select を送る。選んだセクション（クリック / scrollTo）には枠を残す。
+// 全画面のプレビュー（LpViewer）は select を頼まないので、今までどおり普通に操作できる。
 // 宛先と送信元は許可リストのオリジンだけ（"*" は使わない）。
 // No runtime-only imports so it runs under both workerd and `node --test` (strip-only TS).
 
@@ -69,9 +73,13 @@ window.addEventListener("message",function(e){
 if(e.source!==window.parent||!ok(e.origin))return;
 var d=e.data;if(!d||typeof d!=="object")return;
 T=e.origin;
-if(d.type==="lp:hello"){hello();return}
-if(d.type==="lp:scrollTo"&&typeof d.section==="string"){var s=list();for(var i=0;i<s.length;i++){if(s[i].id===d.section){quiet=Date.now()+800;last=d.section;window.scrollTo({top:Math.max(0,s[i].top-8),behavior:"smooth"});return}}}
+if(d.type==="lp:hello"){if(d.select===true)selectMode();hello();return}
+if(d.type==="lp:scrollTo"&&typeof d.section==="string"){var s=list();for(var i=0;i<s.length;i++){if(s[i].id===d.section){quiet=Date.now()+800;last=d.section;mark(d.section);window.scrollTo({top:Math.max(0,s[i].top-8),behavior:"smooth"});return}}}
 });
+var SEL=false;
+function mark(id){if(!SEL)return;var o=document.querySelectorAll(".lp-edit-sel");for(var i=0;i<o.length;i++)o[i].classList.remove("lp-edit-sel");var s=document.querySelectorAll("[data-lp-slot]");for(var j=0;j<s.length;j++){if(s[j].getAttribute("data-lp-slot")!==id)continue;var c=s[j].querySelectorAll("[data-lp-variant]>*");for(var k=0;k<c.length;k++)c[k].classList.add("lp-edit-sel")}}
+function selectMode(){if(SEL)return;SEL=true;document.documentElement.classList.add("lp-edit");var st=document.createElement("style");st.textContent="html.lp-edit [data-lp-variant]>*{cursor:pointer}html.lp-edit [data-lp-variant]>*:hover{outline:3px dashed rgba(37,99,235,.55);outline-offset:-3px}html.lp-edit .lp-edit-sel{outline:3px solid rgba(37,99,235,.9)!important;outline-offset:-3px}";document.head.appendChild(st);
+document.addEventListener("click",function(e){var t=e.target,el=t&&t.closest?t.closest("[data-lp-slot]"):null;if(!el)return;e.preventDefault();e.stopPropagation();var id=el.getAttribute("data-lp-slot");mark(id);last=id;post({type:"lp:select",section:id})},true)}
 if(document.readyState==="complete")hello();else window.addEventListener("load",hello);
 })();`;
   return `<script id="lp-preview-bridge">${js}</script>`;
