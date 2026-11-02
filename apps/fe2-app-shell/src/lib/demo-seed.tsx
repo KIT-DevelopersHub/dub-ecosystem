@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr } from "@dub/types";
+import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
@@ -5104,7 +5104,7 @@ export function createDemoFetch(): typeof fetch {
           ok: true,
           to: gmail,
           cc: roster.findUser(uid)?.email ?? "",
-          appUrl: "https://app.developershub.jp",
+          appUrl: commonValues.PUBLIC_APP_BASE_URL,
           passwordSource: "existing",
           messageId: `demo_msg_${Date.now()}`,
         };

@@ -373,7 +373,9 @@ Caps are env-tunable without a contract change; the numbers above are the P0 def
 
 Credentialed, exact-allow-list CORS (cookies cross-site require it).
 
-- **Allowed origins (P0 default):** `https://app.developershub.jp`,
+- **Allowed origins (P0 default):** `@dub/types` `common.PUBLIC_APP_ORIGINS`
+  (`https://dub-fe2-app-shell.developershub-site.workers.dev` = live SPA, plus the planned
+  custom domain `https://app.developershub.jp`, not DNS-configured yet),
   `http://localhost:5173`, `http://localhost:3000`. Overridable via `ALLOWED_ORIGINS`
   (comma-separated) without a contract change.
 - **Preflight (`OPTIONS`):** answered directly with `204`. For an allowed `Origin` it

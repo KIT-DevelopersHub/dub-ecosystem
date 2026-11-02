@@ -10,7 +10,7 @@
 // WS is gateway-bypassing / DO-direct: the client connects to the `doUrl` returned
 // by GET /channels/:id/ws-ticket and presents the ticket as a query param.
 import { DurableObject } from "cloudflare:workers";
-import type { chat } from "@dub/types";
+import { common, type chat } from "@dub/types";
 import { verifyWsTicket } from "./wsticket";
 
 export interface ChatRoomEnv {
@@ -23,7 +23,7 @@ export interface ChatRoomEnv {
 
 // Dev-only fallback; MUST match the issuer's fallback in src/index.ts.
 const DEV_WS_SECRET = "dev-insecure-ws-ticket-secret";
-const DEFAULT_ALLOWED_ORIGINS = "https://app.developershub.jp";
+const DEFAULT_ALLOWED_ORIGINS = common.PUBLIC_APP_ORIGINS.join(",");
 
 // Per-socket metadata survives hibernation via serializeAttachment.
 interface SocketMeta {

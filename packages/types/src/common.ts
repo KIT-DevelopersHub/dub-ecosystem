@@ -48,5 +48,15 @@ export const MOBILE_API_PREFIX = "/m/v1";
 // E4: value follows infra-d1-seed's canonical org id at Apply time. Prefix-ULID form.
 export const DUB_DEFAULT_ORG_ID = "org_devhub";
 
+// ---- public app URL (SoT) ----
+// The SPA (fe2-app-shell) users open. Every user-visible link (account mail, dialogs,
+// message permalinks) derives from this; switching to the custom domain = edit this line
+// (+ api-gateway wrangler.free.toml APP_BASE_URL). app.developershub.jp has no DNS yet.
+export const PUBLIC_APP_BASE_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev";
+/** Planned custom domain (not DNS-configured yet). Kept in allow-lists only. */
+export const PLANNED_APP_CUSTOM_ORIGIN = "https://app.developershub.jp";
+/** Origins the production SPA may be served from (CORS / WS / link-unfurl allow-lists). */
+export const PUBLIC_APP_ORIGINS: readonly string[] = [PUBLIC_APP_BASE_URL, PLANNED_APP_CUSTOM_ORIGIN];
+
 // ---- bindings.ts (union実体は infra レジストリが正本・型面のみ) ----
 export type ServiceBindingName = string; // "SVC_" + UPPER_SNAKE, e.g. "SVC_DRIVE_PROXY"

@@ -1,9 +1,10 @@
 // CORS: credentialed allow-list. Only exact allowed origins get ACAO; unknown
 // origins receive no ACAO (browser blocks). Preflight is answered here.
 import type { MiddlewareHandler } from "hono";
+import { common } from "@dub/types";
 import type { GatewayEnv } from "./env";
 
-const DEFAULT_ORIGINS = ["https://app.developershub.jp", "http://localhost:5173", "http://localhost:3000"];
+const DEFAULT_ORIGINS = [...common.PUBLIC_APP_ORIGINS, "http://localhost:5173", "http://localhost:3000"];
 
 // PUT is required: the SPA persists gantt dependencies (PUT /tasks/:id/dependencies),
 // gantt view state (PUT /gantt/views) and drive-share links (PUT /driveshare/.../link)

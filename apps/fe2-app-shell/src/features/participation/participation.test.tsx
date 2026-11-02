@@ -655,7 +655,7 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
 
   it("発行→紐付けが済んだら、続けてアカウント発行メールを送るか聞き、送る で API を呼ぶ", async () => {
     const sendAccountMail = vi.fn(() =>
-      Promise.resolve({ ok: true as const, to: TANAKA.gmail ?? "", cc: "minoru.tanaka@developershub.jp", appUrl: "https://app.developershub.jp", passwordSource: "generated" as const, messageId: "m" }),
+      Promise.resolve({ ok: true as const, to: TANAKA.gmail ?? "", cc: "minoru.tanaka@developershub.jp", appUrl: "https://dub-fe2-app-shell.developershub-site.workers.dev", passwordSource: "generated" as const, messageId: "m" }),
     );
     const api = issueApi({ sendAccountMail });
     render(wrap(<ParticipationListPage />, api, issuer));
