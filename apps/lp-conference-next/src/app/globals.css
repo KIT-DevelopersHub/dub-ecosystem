@@ -3446,3 +3446,7 @@ body.has-open-dialog.has-lp-cursor .prog-dialog [role="button"],
   .cf-pennant-flag { animation: none !important; }
   .cf-pennant { transform: translateY(calc(var(--k) * var(--cf-sag))); }
 }
+
+/* ==== v3.6 公開設定: 帯を消したときは帯の高さぶんの余白も消す ====
+   :root:has(.cf-ribbon) (specificity 0,2,0) より強くするため :has を重ねている。 */
+:root:has(.cf-ribbon)[data-lp-o-header-banner="off"] { --cf-ribbon-h: 0px; }

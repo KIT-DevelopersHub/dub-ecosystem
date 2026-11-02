@@ -4,6 +4,7 @@ import snapshot from "@/config/snapshot.json";
 import type { LpConfig } from "@/config/types";
 import { StructuredData } from "@/components/StructuredData";
 import { VisitBeacon } from "@/components/VisitBeacon";
+import { SiteConfigStyle } from "@/sections/SiteConfigStyle";
 
 // Typography — Inter for latin/numerals (clean, high x-height) layered over
 // Zen Kaku Gothic New for Japanese (modern, highly readable geometric gothic).
@@ -81,9 +82,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ja">
+    // LP Worker が公開設定の data-lp-* 属性を <html> に足す（HTMLRewriter）。React は <html> の属性差分を直さないので警告だけ抑える。
+    <html lang="ja" suppressHydrationWarning>
       <head>
         <StructuredData />
+        <SiteConfigStyle />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* Load Google Fonts WITHOUT blocking first paint. The stylesheet is a

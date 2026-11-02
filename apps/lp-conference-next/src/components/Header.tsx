@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { CrowdfundingBanner, NavLink } from "@/config/types";
 import { CrowdfundingRibbon } from "@/components/CrowdfundingRibbon";
+import { navSection } from "@/sections/nav";
 
 // Sticky site header — reproduces goodpatch's header skeleton (functional layout
 // only, no copied assets): brand wordmark left · centered anchor nav · right-side
@@ -59,7 +60,7 @@ export function Header({
         <nav className="site-nav" aria-label="グローバルナビ">
           <ul className="site-nav-list">
             {centerNav.map((l) => (
-              <li key={l.href}>
+              <li key={l.href} data-lp-nav={navSection(l.href)}>
                 <a href={l.href} onClick={() => setOpen(false)}>
                   {l.label}
                 </a>
@@ -67,7 +68,7 @@ export function Header({
             ))}
           </ul>
           <div className="site-head-actions">
-            <a className="site-head-link" href={contactHref} onClick={() => setOpen(false)}>
+            <a className="site-head-link" href={contactHref} data-lp-nav={navSection(contactHref)} onClick={() => setOpen(false)}>
               お問い合わせ
             </a>
             {cta && (
