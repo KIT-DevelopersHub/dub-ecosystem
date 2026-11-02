@@ -22,6 +22,7 @@ const APP = dirname(dirname(fileURLToPath(import.meta.url)));
 const BUNDLE = join(APP, "dist-bundle");
 const CACHE = join(APP, ".bundle-cache");
 const APP_REL = "apps/lp-conference-next";
+const TYPES_REL = "packages/types/src";
 const noCache = process.argv.includes("--no-cache");
 
 const manifest = JSON.parse(readFileSync(join(APP, "versions.json"), "utf8"));
@@ -35,6 +36,8 @@ function applyFixes(src, id) {
   for (const f of fixes) {
     const p = join(src, f.file);
     const text = readFileSync(p, "utf8");
+    // Refs cut after the fix landed in source already contain `to` (e.g. v3.5 pinned after #701).
+    if (!text.includes(f.from) && text.includes(f.to)) continue;
     if (!text.includes(f.from)) throw new Error(`${id}: content fix not applicable in ${f.file}: ${f.from}`);
     writeFileSync(p, text.split(f.from).join(f.to));
   }
@@ -81,7 +84,9 @@ function buildArchived(id, ref) {
   }
   const tmp = mkdtempSync(join(tmpdir(), `lp-bundle-${id}-`));
   try {
-    const tar = execFileSync("git", ["archive", sha, APP_REL], { cwd: repo, maxBuffer: 1 << 30 });
+    // v3.6+ reads the section registry from packages/types/src (src/sections/registry.ts), so archive
+    // it alongside the app: each version builds against the registry of its own commit.
+    const tar = execFileSync("git", ["archive", sha, APP_REL, TYPES_REL], { cwd: repo, maxBuffer: 1 << 30 });
     execFileSync("tar", ["-x", "-C", tmp], { input: tar });
     const src = join(tmp, APP_REL);
     applyFixes(src, id);
