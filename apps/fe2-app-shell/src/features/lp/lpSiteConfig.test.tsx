@@ -450,13 +450,15 @@ describe("LpSiteConfigScreen — LP（左）とセクションの設定（右）
     expect(screen.getByTestId("fe2-lp-config-mini-box").style.height).toBe("1200px");
     const top = (id: string) => (document.querySelector(`[data-lp-block="${id}"]`) as HTMLElement).style.top;
     expect([top("header"), top("join"), top("program")]).toEqual(["0px", "360px", "600px"]);
+    // 各設定は次の設定の手前までの帯の中で貼り付く。
+    expect((document.querySelector('[data-lp-block="header"]') as HTMLElement).style.height).toBe("344px");
   });
 
   it("hovering a block outlines the section in the LP; clicking a section in the LP picks its block", async () => {
     const { frame, origin, post, fromLp } = await setup();
     fireEvent.load(frame);
     fromLp(REPORT);
-    fireEvent.mouseEnter(document.querySelector('[data-lp-block="program"]')!);
+    fireEvent.mouseEnter(screen.getByRole("group", { name: "プログラム" }));
     expect(post).toHaveBeenCalledWith({ type: "lp:mark", section: "program" }, origin);
     fromLp({ type: "lp:select", section: "crowdfunding" }, "https://evil.example");
     fromLp({ type: "lp:select", section: "crowdfunding" }, undefined, window);

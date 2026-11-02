@@ -755,6 +755,13 @@
   border-left: 4px solid var(--dub-color-danger-600);
 }
 
+/* スマホ幅では操作帯が数行になり画面を覆うので、貼り付けない。 */
+@media (max-width: 640px) {
+  .stickyBar {
+    position: static;
+  }
+}
+
 /* 公開設定: 左に LP（全高）、右にセクションの設定。1 枚のカードの中でページと一緒にスクロールする。 */
 .lpEditor {
   display: grid;
@@ -793,11 +800,16 @@
   padding: 0;
 }
 
-.lpEditorSettings[data-layout="aligned"] .lpEditorBlock {
+.lpEditorSettings[data-layout="aligned"] .lpEditorBand {
   position: absolute;
   right: var(--dub-space-5);
   left: var(--dub-space-6);
-  transition: top var(--dub-motion-normal) var(--dub-motion-easing);
+}
+
+/* 帯の中で操作帯のすぐ下に貼り付く（--lp-bar-h は操作帯の高さ）。 */
+.lpEditorSettings[data-layout="aligned"] .lpEditorBlock {
+  position: sticky;
+  top: calc(var(--lp-bar-h, 64px) + var(--dub-space-4) - var(--dub-space-6));
 }
 
 /* 左端の縦線: そのセクションが LP のどこからどこまでか。 */

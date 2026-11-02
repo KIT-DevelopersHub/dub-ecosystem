@@ -8,7 +8,7 @@
 //    「プレビューを開く」は下書きの値で LP を開く（&config=draft）。「この下書きを本番へ反映」は本番と同じ確認を通す。
 //  - 本番: 変更は画面に溜めて「変更 N 件」と差分を出し、「本番に反映」→ 確認ダイアログでまとめて 1 回で反映する。
 //    チケット販売を公開にする変更を含むときは ack チェックを必須にする。lp:publish が無ければ操作は無効。
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { lp } from "@dub/types";
 import {
@@ -91,6 +91,16 @@ export function LpSiteConfigScreen(): JSX.Element {
   const [viewing, setViewing] = useState<LpVersion | null>(null);
   const [opening, setOpening] = useState(false);
   const narrow = useMediaQuery(SPLIT_BREAKPOINT_QUERY);
+  // 操作帯の高さ（セクションの設定はその下に貼り付く）。
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => setBarHeight(el.getBoundingClientRect().height));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const state = query.data;
   const live = env === "live";
@@ -304,7 +314,7 @@ export function LpSiteConfigScreen(): JSX.Element {
       <LpTabs active="config" />
       <AppReadOnlyNotice appId="lp" />
       {/* 操作は全部この帯に置き、スクロールしても上に貼り付ける（下まで降りなくてよい）。 */}
-      <div className={styles.stickyBar} data-env={env} data-testid="fe2-lp-config-actionbar">
+      <div ref={barRef} className={styles.stickyBar} data-env={env} data-testid="fe2-lp-config-actionbar">
         <SegmentedControl<LpConfigEnv>
           aria-label="環境"
           size="sm"
@@ -344,7 +354,7 @@ export function LpSiteConfigScreen(): JSX.Element {
         <span className={styles.actionSpacer} />
         {actions}
       </div>
-      {body}
+      <div style={{ "--lp-bar-h": `${barHeight}px` } as CSSProperties}>{body}</div>
       {confirm ? (
         <PublishConfirm
           diff={diffSiteConfig(confirm.from, confirm.to)}

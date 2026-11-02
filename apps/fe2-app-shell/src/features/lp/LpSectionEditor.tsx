@@ -1,6 +1,7 @@
 // 公開設定の「LP のプレビュー | セクションの設定」を 1 枚にまとめたカード。左に縮小した LP、右に各セクションの設定。
 // LP は全高で描き（iframe の中はスクロールしない）、ページと一緒にスクロールする。各セクションの設定は
-// 縮小した LP の中のそのセクションの高さに置く（前の設定と重なるときだけ下へずらす）。
+// 縮小した LP の中のそのセクションの高さに置く（前の設定と重なるときだけ下へずらす）。背の高いセクションでは、
+// そのセクションが画面にある間は設定が操作帯の下に貼り付いてついてくる（次のセクションの手前まで）。
 // 位置は LP の橋渡し（v3.6 以降のプレビュー表示）が送る lp:sections（各セクションの top/height・全高）で決める。
 // 橋渡しの無い LP（古い版・未デプロイ）は、プレビューを固定の高さの枠（中でスクロール）にして設定を縦に並べる。
 // 狭い画面は設定を縦に並べ、プレビューは見出しのボタンで開く枠にする。
@@ -181,7 +182,8 @@ export function LpSectionEditor({
       }
       if (d.type === "lp:select" && typeof d.section === "string" && sectionIds.includes(d.section)) {
         setActive(d.section);
-        const el = blockRefs.current.get(d.section);
+        // 貼り付く中身ではなく、そのセクションの位置にある帯で測る。
+        const el = blockRefs.current.get(d.section)?.parentElement ?? null;
         const scroller = el ? scrollParent(el) : null;
         if (el && scroller) {
           const r = el.getBoundingClientRect();
@@ -191,7 +193,7 @@ export function LpSectionEditor({
             scroller.scrollTo({ top: scroller.scrollTop + r.top - box.top - box.height / 3, behavior: "smooth" });
           }
         }
-        el?.querySelector<HTMLElement>("button, select, input, [role='radio']")?.focus({ preventScroll: true });
+        blockRefs.current.get(d.section)?.querySelector<HTMLElement>("button, select, input, [role='radio']")?.focus({ preventScroll: true });
       }
     };
     window.addEventListener("message", onMessage);
@@ -239,6 +241,14 @@ export function LpSectionEditor({
   const tops = aligned && report ? placeBlocks(sectionIds, report, scale, heights) : null;
   const previewHeight = report && bridge !== "none" && !narrow ? Math.round(report.docHeight * scale) : null;
   const lastBottom = tops ? Math.max(0, ...sectionIds.map((id) => (tops[id] ?? 0) + (heights[id] ?? 0))) : 0;
+  const columnHeight = Math.max(previewHeight ?? 0, lastBottom);
+  /** 各設定の帯の高さ（次の設定の手前まで）。この中で貼り付く。 */
+  const bandHeight = (id: string, i: number): number | undefined => {
+    if (!tops) return undefined;
+    const next = sectionIds[i + 1];
+    const end = next !== undefined ? (tops[next] ?? columnHeight) - BLOCK_GAP : columnHeight;
+    return Math.max(heights[id] ?? 0, end - (tops[id] ?? 0));
+  };
   const frameHeight = previewHeight !== null && report ? report.docHeight : narrow || bridge === "none" ? SCROLL_BOX_HEIGHT / scale : VIEWPORT_HEIGHT;
   const boxHeight = previewHeight ?? (narrow || bridge === "none" ? SCROLL_BOX_HEIGHT : Math.round(VIEWPORT_HEIGHT * scale));
 
@@ -302,7 +312,7 @@ export function LpSectionEditor({
           className={styles.lpEditorSettings}
           data-layout={tops ? "aligned" : "stacked"}
           data-active-section={active ?? ""}
-          style={tops ? { height: Math.max(previewHeight ?? 0, lastBottom) } : undefined}
+          style={tops ? { height: columnHeight } : undefined}
           data-testid="fe2-lp-config-settings"
         >
           {tops && report
@@ -318,23 +328,22 @@ export function LpSectionEditor({
                   />
                 ))
             : null}
-          {sectionIds.map((id) => (
-            <div
-              key={id}
-              ref={(el) => {
-                if (el) blockRefs.current.set(id, el);
-                else blockRefs.current.delete(id);
-              }}
-              className={styles.lpEditorBlock}
-              data-lp-block={id}
-              data-active={active === id}
-              style={tops ? { top: tops[id] } : undefined}
-              onMouseEnter={() => focusSection(id)}
-              onFocus={() => focusSection(id)}
-              aria-label={sectionLabel(id)}
-              role="group"
-            >
-              {renderSection(id)}
+          {sectionIds.map((id, i) => (
+            <div key={id} className={styles.lpEditorBand} data-lp-block={id} style={tops ? { top: tops[id], height: bandHeight(id, i) } : undefined}>
+              <div
+                ref={(el) => {
+                  if (el) blockRefs.current.set(id, el);
+                  else blockRefs.current.delete(id);
+                }}
+                className={styles.lpEditorBlock}
+                data-active={active === id}
+                onMouseEnter={() => focusSection(id)}
+                onFocus={() => focusSection(id)}
+                aria-label={sectionLabel(id)}
+                role="group"
+              >
+                {renderSection(id)}
+              </div>
             </div>
           ))}
         </div>
