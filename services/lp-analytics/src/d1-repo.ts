@@ -15,7 +15,10 @@ import type {
   LpTicketOrderStatus,
   LpTicketRepo,
   LpVisitKind,
+  LpSiteConfigRepo,
   ProposalRow,
+  SiteConfigHistoryRow,
+  SiteConfigRow,
   TicketOrderRow,
   TicketCouponRow,
   TicketTypeRow,
@@ -783,10 +786,122 @@ function proposalRepo(db: DbClient): LpProposalRepo {
   };
 }
 
+interface SiteConfigDbRow {
+  site: string;
+  draft_json: string;
+  published_json: string;
+  revision: number;
+  draft_updated_by: string | null;
+  draft_updated_at: string | null;
+  published_by: string | null;
+  published_at: string | null;
+}
+
+function siteConfigRepo(db: DbClient): LpSiteConfigRepo {
+  // 行が無いときの土台（revision 0・下書き/本番とも "{}"）。行が無い = この行がある、と同じ意味。
+  const ensureRow = (site: string, at: string) => ({
+    sql: "INSERT OR IGNORE INTO lp_site_config (site, created_at, updated_at) VALUES (?, ?, ?)",
+    binds: [site, at, at],
+  });
+  return {
+    async getSiteConfig(site): Promise<SiteConfigRow | null> {
+      const r = await db.first<SiteConfigDbRow>(
+        `SELECT site, draft_json, published_json, revision, draft_updated_by, draft_updated_at, published_by, published_at
+         FROM lp_site_config WHERE site = ?`,
+        site,
+      );
+      return r
+        ? {
+            site: r.site,
+            draftJson: r.draft_json,
+            publishedJson: r.published_json,
+            revision: r.revision,
+            draftUpdatedBy: r.draft_updated_by,
+            draftUpdatedAt: r.draft_updated_at,
+            publishedBy: r.published_by,
+            publishedAt: r.published_at,
+          }
+        : null;
+    },
+    async saveSiteConfigDraft(site, draftJson, expectedRevision, updatedBy, updatedAt) {
+      const check = expectedRevision === null ? "" : " AND revision = ?";
+      const results = await db.batch([
+        ensureRow(site, updatedAt),
+        {
+          sql: `UPDATE lp_site_config
+                SET draft_json = ?, revision = revision + 1, draft_updated_by = ?, draft_updated_at = ?, updated_at = ?
+                WHERE site = ?${check}`,
+          binds: [draftJson, updatedBy, updatedAt, updatedAt, site, ...(expectedRevision === null ? [] : [expectedRevision])],
+        },
+      ]);
+      return results[1]?.meta.changes === 1;
+    },
+    async publishSiteConfig(p) {
+      // One batch (= one transaction). The history row is inserted only when the revision still
+      // matches, and every later write is gated on that row existing: a stale revision writes nothing
+      // (batch statements cannot abort each other, so the history id is the per-request token).
+      const gate = "EXISTS (SELECT 1 FROM lp_site_config_history WHERE id = ?)";
+      const r = p.release;
+      const results = await db.batch([
+        ensureRow(p.site, p.updatedAt),
+        {
+          sql: `INSERT INTO lp_site_config_history (id, site, config_json, published_by, published_at)
+                SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM lp_site_config WHERE site = ? AND revision = ?)`,
+          binds: [p.historyId, p.site, p.configJson, p.updatedBy, p.updatedAt, p.site, p.expectedRevision],
+        },
+        {
+          sql: `UPDATE lp_site_config
+                SET published_json = ?, revision = revision + 1, published_by = ?, published_at = ?, updated_at = ?
+                WHERE site = ? AND ${gate}`,
+          binds: [p.layoutJson, p.updatedBy, p.updatedAt, p.updatedAt, p.site, p.historyId],
+        },
+        {
+          sql: `INSERT INTO lp_publish (site, version_id, updated_by, updated_at) SELECT ?, ?, ?, ? WHERE ${gate}
+                ON CONFLICT(site) DO UPDATE SET version_id = excluded.version_id, updated_by = excluded.updated_by,
+                  updated_at = excluded.updated_at
+                WHERE lp_publish.version_id IS NOT excluded.version_id`,
+          binds: [p.site, r.versionId, p.updatedBy, p.updatedAt, p.historyId],
+        },
+        {
+          sql: `INSERT INTO lp_ticket_settings (site, enabled, cta_enabled, updated_by, updated_at) SELECT ?, ?, ?, ?, ? WHERE ${gate}
+                ON CONFLICT(site) DO UPDATE SET enabled = excluded.enabled, cta_enabled = excluded.cta_enabled,
+                  updated_by = excluded.updated_by, updated_at = excluded.updated_at
+                WHERE lp_ticket_settings.enabled IS NOT excluded.enabled OR lp_ticket_settings.cta_enabled IS NOT excluded.cta_enabled`,
+          binds: [p.site, r.ticketsEnabled ? 1 : 0, r.ticketsCtaEnabled ? 1 : 0, p.updatedBy, p.updatedAt, p.historyId],
+        },
+        {
+          sql: `INSERT INTO lp_proposal_settings (site, enabled, updated_by, updated_at) SELECT ?, ?, ?, ? WHERE ${gate}
+                ON CONFLICT(site) DO UPDATE SET enabled = excluded.enabled, updated_by = excluded.updated_by,
+                  updated_at = excluded.updated_at
+                WHERE lp_proposal_settings.enabled IS NOT excluded.enabled`,
+          binds: [p.site, r.proposalsEnabled ? 1 : 0, p.updatedBy, p.updatedAt, p.historyId],
+        },
+      ]);
+      return results[1]?.meta.changes === 1;
+    },
+    async listSiteConfigHistory(site, limit): Promise<SiteConfigHistoryRow[]> {
+      const rows = await db.all<{ id: string; site: string; config_json: string; published_by: string; published_at: string }>(
+        `SELECT id, site, config_json, published_by, published_at FROM lp_site_config_history
+         WHERE site = ? ORDER BY published_at DESC, id DESC LIMIT ?`,
+        site,
+        limit,
+      );
+      return rows.map((x) => ({
+        id: x.id,
+        site: x.site,
+        configJson: x.config_json,
+        publishedBy: x.published_by,
+        publishedAt: x.published_at,
+      }));
+    },
+  };
+}
+
 export function createD1LpRepo(db: DbClient): LpRepo {
   return {
     ...ticketRepo(db),
     ...proposalRepo(db),
+    ...siteConfigRepo(db),
     async listLinks(orgId) {
       return (await db.all<LinkDbRow>("SELECT * FROM lp_links WHERE org_id = ?", orgId)).map(toLink);
     },

@@ -2,7 +2,7 @@
 // mirror the contract frozen by fe2 (apps/fe2-app-shell/src/features/lp/lpApi.tsx) —
 // that file and the demo transport answer exactly these, so keep them in lockstep.
 import type { MiddlewareHandler, Context } from "hono";
-import type { common, identity, policy } from "@dub/types";
+import type { common, identity, lp, policy } from "@dub/types";
 import type { SiteTrafficSource } from "./site-traffic";
 import type { StripeClient } from "./stripe";
 
@@ -425,7 +425,61 @@ export interface LpProposalRepo {
   countProposalsSince(site: string, since: string, clientKey?: string): Promise<number>;
 }
 
-export interface LpRepo extends LpTicketRepo, LpProposalRepo {
+// ---- 公開設定（lp_site_config）----
+export interface SiteConfigRow {
+  site: string;
+  /** LpSiteConfig の JSON。"{}" = まだ保存していない（本番と同じ）。 */
+  draftJson: string;
+  /** LpLayout の JSON。 */
+  publishedJson: string;
+  revision: number;
+  draftUpdatedBy: string | null;
+  draftUpdatedAt: string | null;
+  publishedBy: string | null;
+  publishedAt: string | null;
+}
+
+export interface SiteConfigHistoryRow {
+  id: string;
+  site: string;
+  configJson: string;
+  publishedBy: string;
+  publishedAt: string;
+}
+
+export interface SiteConfigPublishInput {
+  site: string;
+  expectedRevision: number;
+  layoutJson: string;
+  /** 履歴に残す LpSiteConfig 全体。 */
+  configJson: string;
+  release: lp.LpRelease;
+  historyId: string;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface LpSiteConfigRepo {
+  getSiteConfig(site: string): Promise<SiteConfigRow | null>;
+  /** 下書きを保存して revision を 1 進める。expectedRevision が null なら照合しない。false = revision 不一致。 */
+  saveSiteConfigDraft(
+    site: string,
+    draftJson: string,
+    expectedRevision: number | null,
+    updatedBy: string,
+    updatedAt: string,
+  ): Promise<boolean>;
+  /**
+   * 本番反映を 1 トランザクションで書く: lp_site_config.published_json + revision、lp_publish、
+   * lp_ticket_settings.enabled / cta_enabled、lp_proposal_settings.enabled、履歴 1 行。
+   * 既存 3 テーブルは値が変わる行だけ更新する（変わらない項目の更新者・日時は残す）。false = revision 不一致（何も書かない）。
+   */
+  publishSiteConfig(input: SiteConfigPublishInput): Promise<boolean>;
+  /** 本番反映の履歴（新しい順）。 */
+  listSiteConfigHistory(site: string, limit: number): Promise<SiteConfigHistoryRow[]>;
+}
+
+export interface LpRepo extends LpTicketRepo, LpProposalRepo, LpSiteConfigRepo {
   listLinks(orgId: string): Promise<LinkRow[]>;
   getLink(orgId: string, id: string): Promise<LinkRow | null>;
   getLinkBySlug(orgId: string, slug: string): Promise<LinkRow | null>;
@@ -495,6 +549,8 @@ export interface AppDeps {
   /** LP_PAYPAY_ENABLED="1": PayPay is on in the Stripe Dashboard, so the LP / LP管理 advertise it. */
   paypayEnabled: boolean;
   newProposalId: () => string;
+  /** 本番反映の履歴 id（lp_site_config_history）。 */
+  newSiteConfigHistoryId: () => string;
   /** 1 日 (JST) に受け付ける登壇応募の上限。公開フォームからの書き込み濫用の天井。 */
   dailyProposalCap: number;
 }
