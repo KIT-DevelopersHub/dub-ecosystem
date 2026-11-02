@@ -1,14 +1,13 @@
-// LP管理 のタブ帯（バージョン ⇄ プレビュー ⇄ 流入URL ⇄ ログ管理 ⇄ チケット ⇄ 登壇者募集）。MailFolderTabs と同じ流儀で、@dub/ui の
+// LP管理 のタブ帯（公開設定 ⇄ 流入URL ⇄ ログ管理 ⇄ チケット ⇄ 登壇者募集）。MailFolderTabs と同じ流儀で、@dub/ui の
 // Tabs をシェルのルーター navigate に繋ぐ薄いラッパ。タブは URL（/lp・/lp/links・/lp/visits）に
 // 紐づくので deep link / リロード / 戻る が成立する（ローカル state のタブにしない）。
 import { useNavigate } from "@tanstack/react-router";
 import { Tabs } from "@dub/ui";
 
-export type LpTabId = "versions" | "preview" | "links" | "visits" | "tickets" | "proposals";
+export type LpTabId = "config" | "links" | "visits" | "tickets" | "proposals";
 
 const TABS = [
-  { id: "versions", label: "バージョン", path: "/lp" },
-  { id: "preview", label: "プレビュー", path: "/lp/preview" },
+  { id: "config", label: "公開設定", path: "/lp" },
   { id: "links", label: "流入URL", path: "/lp/links" },
   { id: "visits", label: "ログ管理", path: "/lp/visits" },
   { id: "tickets", label: "チケット", path: "/lp/tickets" },

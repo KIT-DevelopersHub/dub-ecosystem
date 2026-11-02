@@ -607,25 +607,6 @@
   margin-top: var(--dub-space-4);
 }
 
-/* ── プレビュー タブ ────────────────────────────────────────────────────── */
-/* 「実際の販売」バッジは caption ではなく切り替えの帯の高さに揃える。 */
-.previewTicketsRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--dub-space-3);
-}
-
-.previewTicketsRow > [data-testid="fe2-lp-preview-sales-state"],
-.previewTicketsRow > [data-testid="fe2-lp-preview-proposals-state"] {
-  margin-bottom: var(--dub-space-3);
-}
-
-.previewFooter {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .previewNotice {
   display: flex;
   align-items: flex-start;
@@ -638,4 +619,101 @@
   color: var(--dub-color-text-secondary);
   font-size: var(--dub-font-size-sm);
   line-height: var(--dub-font-lineHeight-relaxed);
+}
+
+/* ── 公開設定 タブ ─────────────────────────────────────────────────────── */
+.configToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-4);
+}
+
+/* 本番は帯の色で一目で分かるように。 */
+.liveBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-danger-200);
+  border-left: 4px solid var(--dub-color-danger-600);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-danger-50);
+  color: var(--dub-color-danger-700);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  line-height: var(--dub-font-lineHeight-relaxed);
+}
+
+/* 1 設定 = ラベル列 + 操作列。狭い幅では縦積み。 */
+.configRow {
+  display: grid;
+  grid-template-columns: minmax(10rem, 16rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--dub-space-3) var(--dub-space-6);
+}
+
+@media (max-width: 640px) {
+  .configRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.configRowLabel {
+  display: grid;
+  gap: var(--dub-space-1);
+  font-weight: var(--dub-font-weight-medium);
+}
+
+.configRowControl {
+  min-width: 0;
+  max-width: 28rem;
+}
+
+.actionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.actionSpacer {
+  flex: 1 1 auto;
+}
+
+.diffList {
+  display: grid;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.diffList > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+.diffLabel {
+  min-width: 10rem;
+  color: var(--dub-color-text-secondary);
+}
+
+.diffFrom {
+  color: var(--dub-color-text-muted);
+  text-decoration: line-through;
+}
+
+.catalogItem {
+  display: grid;
+  gap: var(--dub-space-2);
+  padding-bottom: var(--dub-space-5);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+
+.catalogItem > p {
+  margin: 0;
 }
