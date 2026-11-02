@@ -790,7 +790,8 @@
 
 .miniBox {
   position: relative;
-  height: clamp(420px, calc(100dvh - 320px), 900px);
+  /* 画面の高さから シェルのヘッダー・操作帯・カードの見出しと注記 を引いた残りいっぱい。 */
+  height: max(420px, calc(var(--dub-app-height, 100dvh) - var(--lp-bar-h, 64px) - 240px));
   overflow: hidden;
   background: var(--dub-color-surface-sunken);
 }
@@ -803,10 +804,11 @@
   background: var(--dub-color-surface-raised);
 }
 
+/* 操作できる（ホイール / トラックパッドで LP 全体をスクロールできる）。 */
 .miniFrame {
+  display: block;
   border: 0;
   transform-origin: 0 0;
-  pointer-events: none;
 }
 
 .miniNote {

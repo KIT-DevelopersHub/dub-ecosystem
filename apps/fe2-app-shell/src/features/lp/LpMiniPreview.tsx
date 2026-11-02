@@ -2,6 +2,8 @@
 // LP は別オリジンなので中身には触れない。iframe を 1280px 幅で描き、CSS の transform で枠に合わせて縮める。
 // 下書きを保存するたびに refreshKey（revision）が変わるので、少し待ってから（連続操作をまとめて）読み直す。
 // src を差し替えるだけなので、次のページが出るまで前の表示は残る（真っ白にならない）。
+// iframe は枠の高さいっぱい（枠の高さ / 縮尺）に描くので、中でホイールを回すと LP 全体をスクロールできる。
+// 別オリジンなのでスクロール位置は読めず、保存後の読み直しで先頭に戻る（注記で伝える）。
 import { useEffect, useRef, useState } from "react";
 import { Card, Icon, Skeleton, Spinner } from "@dub/ui";
 import styles from "./lp.module.css";
@@ -79,7 +81,6 @@ export function LpMiniPreview({
         <iframe
           src={src}
           title={title}
-          tabIndex={-1}
           data-testid="fe2-lp-config-mini-frame"
           onLoad={() => {
             setLoaded(true);
@@ -89,6 +90,10 @@ export function LpMiniPreview({
           style={{ width: FRAME_WIDTH, height: frameHeight, transform: `scale(${scale})` }}
         />
       </div>
+      <p className={styles.miniNote} data-testid="fe2-lp-config-mini-hint">
+        <Icon name="info" />
+        <span>プレビューの上でスクロールすると LP 全体を見られます（保存して読み直すと先頭に戻ります）。</span>
+      </p>
       {note ? (
         <p className={styles.miniNote} data-testid="fe2-lp-config-mini-note">
           <Icon name="info" />
