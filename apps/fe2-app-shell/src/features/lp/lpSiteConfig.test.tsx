@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import { lp, type identity } from "@dub/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { ApiError, createApiClient } from "../../lib/api-client.tsx";
 import { createDemoFetch } from "../../lib/demo-seed.tsx";
@@ -125,15 +125,29 @@ describe("LpSiteConfigScreen — プレビュー（下書き）", () => {
     expect(screen.getByTestId("fe2-lp-config-loading")).toBeInTheDocument();
   });
 
-  it("renders the release card and one card per registry section; non-hideable sections cannot be hidden", async () => {
+  it("lists 本番反映 + every registry section; the inspector shows only the selected one", async () => {
     renderScreen();
     expect(await screen.findByTestId("fe2-lp-config-release")).toBeInTheDocument();
-    for (const id of lp.LP_SECTION_IDS) expect(screen.getByTestId(`fe2-lp-config-section-${id}`)).toBeInTheDocument();
-    expect(screen.getByTestId("fe2-lp-config-header-banner")).toBeChecked();
-    expect(screen.getByTestId("fe2-lp-config-header-visible")).toBeDisabled();
-    expect(screen.getByTestId("fe2-lp-config-footer-visible")).toBeDisabled();
+    for (const id of lp.LP_SECTION_IDS) expect(screen.getByTestId(`fe2-lp-config-item-${id}`)).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-config-section-header")).toBeNull();
+    // 非表示にできないセクション（ヘッダー・フッター）には一覧のスイッチが無い。
+    expect(screen.queryByTestId("fe2-lp-config-header-visible")).toBeNull();
+    expect(screen.queryByTestId("fe2-lp-config-footer-visible")).toBeNull();
     expect(screen.getByTestId("fe2-lp-config-join-visible")).not.toBeDisabled();
+    fireEvent.click(within(screen.getByTestId("fe2-lp-config-item-header")).getByRole("button"));
+    expect(screen.getByTestId("fe2-lp-config-section-header")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-config-release")).toBeNull();
+    expect(screen.getByTestId("fe2-lp-config-header-banner")).toBeChecked();
+    expect(screen.getByTestId("fe2-lp-config-inspector-visible")).toBeDisabled();
     expect(screen.getByTestId("fe2-lp-config-env-draft")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("marks changed items in the list (draft vs production)", async () => {
+    renderScreen(fakeApi({ getSiteConfig: () => Promise.resolve(siteState({ draft: setSection(BASE, "vision", { visible: false }) })) }));
+    const vision = await screen.findByTestId("fe2-lp-config-item-vision");
+    expect(within(vision).getByLabelText("変更あり")).toBeInTheDocument();
+    expect(within(vision).getByText("非表示")).toBeInTheDocument();
+    expect(within(screen.getByTestId("fe2-lp-config-item-join")).queryByLabelText("変更あり")).toBeNull();
   });
 
   it("switches environment through the URL (?env=live)", async () => {
@@ -345,14 +359,15 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     nav.searchStr = "?env=live";
     renderScreen();
     const frame = await screen.findByTestId("fe2-lp-config-mini-frame");
-    expect(frame.getAttribute("src")).toMatch(/\?version=live$/);
+    // 本番は版を番号で固定して &config=live（プレビュー扱い = 連動の橋渡しが入る）。
+    expect(frame).toHaveAttribute("src", `${releasePreviewUrl(BASE)}&config=live`);
     fireEvent.click(screen.getByTestId("fe2-lp-config-proposalsEnabled"));
-    await waitFor(() => expect(frame).toHaveAttribute("src", releasePreviewUrl(setRelease(BASE, "proposalsEnabled", true))), { timeout: 4000 });
+    await waitFor(() => expect(frame).toHaveAttribute("src", `${releasePreviewUrl(setRelease(BASE, "proposalsEnabled", true))}&config=live`), { timeout: 4000 });
     fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
-    expect(screen.getByTestId("fe2-lp-config-mini-note")).toHaveTextContent("本番に反映するとここに映ります");
+    expect(screen.getByTestId("fe2-lp-config-mini-note")).toHaveTextContent("本番に反映するとプレビューに映ります");
   });
 
-  it("narrow screens hide the mini preview behind a toggle", async () => {
+  it("narrow screens switch between プレビュー and 設定 instead of stacking scroll areas", async () => {
     const original = window.matchMedia;
     window.matchMedia = ((q: string) => ({
       matches: q.includes("1100px"),
@@ -366,38 +381,20 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     })) as typeof window.matchMedia;
     try {
       renderScreen();
-      await screen.findByTestId("fe2-lp-config-release");
-      expect(screen.queryByTestId("fe2-lp-config-mini")).toBeNull();
-      fireEvent.click(screen.getByTestId("fe2-lp-config-mini-toggle"));
-      expect(screen.getByTestId("fe2-lp-config-mini")).toBeInTheDocument();
+      await screen.findByTestId("fe2-lp-config-pane");
+      expect(screen.getByTestId("fe2-lp-config-mini")).toBeVisible();
+      expect(screen.getByTestId("fe2-lp-config-list")).not.toBeVisible();
+      fireEvent.click(screen.getByTestId("fe2-lp-config-pane-settings"));
+      expect(screen.getByTestId("fe2-lp-config-list")).toBeVisible();
+      expect(screen.getByTestId("fe2-lp-config-release")).toBeVisible();
+      expect(screen.getByTestId("fe2-lp-config-mini")).not.toBeVisible();
     } finally {
       window.matchMedia = original;
     }
   });
 });
 
-describe("LpSiteConfigScreen — ミニプレビュー（左）と設定（右）のスクロール連動", () => {
-  type IoCallback = (entries: { target: Element; isIntersecting: boolean }[]) => void;
-  let ioCallback: IoCallback | null = null;
-  const original = globalThis.IntersectionObserver;
-  beforeEach(() => {
-    ioCallback = null;
-    globalThis.IntersectionObserver = class {
-      constructor(cb: IoCallback) {
-        ioCallback = cb;
-      }
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-      takeRecords(): [] {
-        return [];
-      }
-    } as unknown as typeof IntersectionObserver;
-  });
-  afterEach(() => {
-    globalThis.IntersectionObserver = original;
-  });
-
+describe("LpSiteConfigScreen — 一覧 ⇄ プレビューの選択連動", () => {
   async function setup() {
     renderScreen();
     const frame = (await screen.findByTestId("fe2-lp-config-mini-frame")) as HTMLIFrameElement;
@@ -408,56 +405,64 @@ describe("LpSiteConfigScreen — ミニプレビュー（左）と設定（右�
       act(() => {
         window.dispatchEvent(new MessageEvent("message", { data, origin: o, source }));
       });
-    // id のカードだけが操作帯のすぐ下の帯に入った状態にする。
-    const cardTop = (id: string) =>
-      act(() => {
-        ioCallback?.(
-          [...document.querySelectorAll("[data-lp-card]")].map((el) => ({
-            target: el,
-            isIntersecting: el.getAttribute("data-lp-card") === id,
-          })),
-        );
-      });
-    return { frame, origin, post, fromLp, cardTop };
+    const pick = (id: string) => fireEvent.click(within(screen.getByTestId(`fe2-lp-config-item-${id}`)).getAllByRole("button")[0]!);
+    const list = () => screen.getByTestId("fe2-lp-config-list");
+    return { frame, origin, post, fromLp, pick, list };
   }
 
-  it("puts the preview on the left (first) and the settings on the right", async () => {
+  it("lays out list | preview | inspector, in that order", async () => {
     renderScreen();
     const mini = await screen.findByTestId("fe2-lp-config-mini");
-    const settings = screen.getByTestId("fe2-lp-config-settings");
-    expect(mini.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const listEl = screen.getByTestId("fe2-lp-config-list");
+    const inspector = screen.getByTestId("fe2-lp-config-release");
+    expect(listEl.compareDocumentPosition(mini) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mini.compareDocumentPosition(inspector) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("settings → preview: the topmost card scrolls the LP (to the LP origin only, after the bridge is ready)", async () => {
-    const { origin, post, fromLp, cardTop } = await setup();
-    cardTop("join");
+  it("asks the LP for select mode, and selecting in the list scrolls the preview (LP origin only, once the bridge is ready)", async () => {
+    const { frame, origin, post, fromLp, pick, list } = await setup();
+    fireEvent.load(frame);
+    expect(post).toHaveBeenCalledWith({ type: "lp:hello", select: true }, origin);
+    pick("join");
     expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "lp:scrollTo" }), expect.anything());
     fromLp({ type: "lp:sections", sections: [{ id: "header", top: 0 }] });
-    expect(screen.getByTestId("fe2-lp-config-mini-box")).toHaveAttribute("data-sync", "ready");
-    cardTop("program");
+    // 準備ができたら、選んでいたセクションへ移動する（読み直し後も同じ）。
+    expect(post).toHaveBeenCalledWith({ type: "lp:scrollTo", section: "join" }, origin);
+    pick("program");
     expect(post).toHaveBeenCalledWith({ type: "lp:scrollTo", section: "program" }, origin);
-    // 直後に LP から返ってくる途中経過はエコーとして無視する。
+    expect(list()).toHaveAttribute("data-selected", "program");
+    expect(screen.getByTestId("fe2-lp-config-section-program")).toBeInTheDocument();
+    // 直後に返ってくる途中経過はエコーとして無視する。
     fromLp({ type: "lp:scroll", activeSection: "about" });
-    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-active-section", "program");
-    // 保存で読み直した LP（先頭に戻る）から lp:sections が来たら、見ていたセクションへ戻す。
-    post.mockClear();
-    fromLp({ type: "lp:sections", sections: [{ id: "header", top: 0 }] });
-    expect(post).toHaveBeenCalledWith({ type: "lp:scrollTo", section: "program" }, origin);
+    expect(list()).toHaveAttribute("data-selected", "program");
   });
 
-  it("preview → settings: the LP's active section moves the settings; foreign origins / windows are ignored", async () => {
-    const { fromLp } = await setup();
-    fromLp({ type: "lp:scroll", activeSection: "vision" }, "https://evil.example");
-    fromLp({ type: "lp:scroll", activeSection: "vision" }, undefined, window);
-    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-active-section", "");
+  it("scrolling the preview marks the section in view (and follows the selection only when a section is selected)", async () => {
+    const { fromLp, pick, list } = await setup();
     fromLp({ type: "lp:scroll", activeSection: "vision" });
-    expect(screen.getByTestId("fe2-lp-config-settings")).toHaveAttribute("data-active-section", "vision");
+    expect(list()).toHaveAttribute("data-in-view", "vision");
+    expect(list()).toHaveAttribute("data-selected", "release");
+    expect(within(screen.getByTestId("fe2-lp-config-item-vision")).getByText("表示中")).toBeInTheDocument();
+    pick("about");
+    await new Promise((r) => setTimeout(r, 650));
+    fromLp({ type: "lp:scroll", activeSection: "contact" });
+    expect(list()).toHaveAttribute("data-selected", "contact");
+  });
+
+  it("clicking a section in the preview selects it; foreign origins / windows are ignored", async () => {
+    const { fromLp, list } = await setup();
+    fromLp({ type: "lp:select", section: "crowdfunding" }, "https://evil.example");
+    fromLp({ type: "lp:select", section: "crowdfunding" }, undefined, window);
+    fromLp({ type: "lp:select", section: "not-a-section" });
+    expect(list()).toHaveAttribute("data-selected", "release");
+    fromLp({ type: "lp:select", section: "crowdfunding" });
+    expect(list()).toHaveAttribute("data-selected", "crowdfunding");
+    expect(screen.getByTestId("fe2-lp-config-section-crowdfunding")).toBeInTheDocument();
   });
 
   it("says so when the LP does not answer (old version / LP without the bridge)", async () => {
-    const { frame, post, origin } = await setup();
+    const { frame } = await setup();
     fireEvent.load(frame);
-    expect(post).toHaveBeenCalledWith({ type: "lp:hello" }, origin);
     expect(await screen.findByTestId("fe2-lp-config-mini-nosync", undefined, { timeout: 4500 })).toHaveTextContent("連動");
   });
 });

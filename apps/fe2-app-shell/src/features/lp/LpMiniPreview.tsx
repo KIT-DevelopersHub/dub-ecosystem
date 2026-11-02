@@ -12,7 +12,7 @@
 // こちらから scrollTo を送った直後の lp:scroll はエコーなので 600ms 無視する。
 // 読み込み後 3 秒たっても lp:sections が来なければ、連動しない LP（古い版・橋渡しの無い LP）として注記を出す。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Card, Icon, Skeleton, Spinner } from "@dub/ui";
+import { Icon, Skeleton, Spinner } from "@dub/ui";
 import styles from "./lp.module.css";
 
 /** LP をこの幅のデスクトップ表示として描いてから縮める。 */
@@ -44,6 +44,8 @@ export function LpMiniPreview({
   note,
   scrollRequest = null,
   onActiveSection,
+  onSelectSection,
+  fill = false,
 }: {
   url: string;
   refreshKey: number;
@@ -51,6 +53,10 @@ export function LpMiniPreview({
   note: string | null;
   scrollRequest?: ScrollRequest | null;
   onActiveSection?: (section: string) => void;
+  /** プレビューでセクションをクリックした（選択モード）。 */
+  onSelectSection?: (section: string) => void;
+  /** 親の高さいっぱいに広げる（エディタのキャンバス）。 */
+  fill?: boolean;
 }): JSX.Element {
   const target = miniPreviewSrc(url, refreshKey);
   const [src, setSrc] = useState(target);
@@ -72,6 +78,8 @@ export function LpMiniPreview({
   const requestRef = useRef<ScrollRequest | null>(scrollRequest);
   const onActiveRef = useRef(onActiveSection);
   onActiveRef.current = onActiveSection;
+  const onSelectRef = useRef(onSelectSection);
+  onSelectRef.current = onSelectSection;
   const markBridge = (next: BridgeState): void => {
     bridgeRef.current = next;
     setBridge(next);
@@ -80,13 +88,17 @@ export function LpMiniPreview({
   useEffect(() => {
     const onMessage = (e: MessageEvent): void => {
       if (!lpOrigin || e.origin !== lpOrigin || !frameRef.current || e.source !== frameRef.current.contentWindow) return;
-      const d = e.data as { type?: unknown; activeSection?: unknown } | null;
+      const d = e.data as { type?: unknown; activeSection?: unknown; section?: unknown } | null;
       if (!d || typeof d !== "object") return;
       if (d.type === "lp:sections") {
         markBridge("ready");
         // 読み直し（保存のたび）で LP は先頭に戻るので、設定側で見ているセクションへ戻す。
         const req = requestRef.current;
         if (req) sendRef.current(req.section);
+      }
+      if (d.type === "lp:select" && typeof d.section === "string") {
+        markBridge("ready");
+        onSelectRef.current?.(d.section);
       }
       if (d.type === "lp:scroll" && typeof d.activeSection === "string") {
         markBridge("ready");
@@ -118,7 +130,8 @@ export function LpMiniPreview({
     const w = frameRef.current?.contentWindow;
     if (w && lpOrigin) {
       try {
-        w.postMessage({ type: "lp:hello" }, lpOrigin);
+        // select: クリックでセクションを選べる選択モードを頼む（選べる画面のときだけ）。
+        w.postMessage(onSelectRef.current ? { type: "lp:hello", select: true } : { type: "lp:hello" }, lpOrigin);
       } catch {
         // 宛先のオリジンが違う（LP 内で別サイトへ移動した等）: 連動しない。
       }
@@ -150,20 +163,30 @@ export function LpMiniPreview({
   const scale = box.width > 0 ? box.width / FRAME_WIDTH : 0.4;
   const frameHeight = box.height > 0 ? box.height / scale : 1600;
 
+  const notes = [
+    bridge === "none"
+      ? { id: "nosync", text: "この LP は連動に対応していません（連動するのは v3.6 以降の版のプレビュー表示です）。" }
+      : {
+          id: "hint",
+          text:
+            bridge === "ready"
+              ? onSelectSection
+                ? "セクションをクリックすると選べます。スクロールすると一覧の「表示中」が動きます。"
+                : "スクロールが連動します。"
+              : "プレビューの上でスクロールすると LP 全体を見られます。",
+        },
+    note ? { id: "note", text: note } : null,
+  ].filter((n): n is { id: string; text: string } => n !== null);
+
   return (
-    <Card
-      padded={false}
-      testId="fe2-lp-config-mini"
-      header={
-        <div className={styles.miniHeader}>
-          <span>{title}</span>
-          {refreshing ? <Spinner size="sm" testId="fe2-lp-config-mini-refreshing" /> : null}
-          <a className={styles.urlOpen} href={src} target="_blank" rel="noopener noreferrer" aria-label={`${title}を新しいタブで開く`}>
-            <Icon name="external-link" />
-          </a>
-        </div>
-      }
-    >
+    <div className={fill ? styles.canvasFill : styles.canvas} data-testid="fe2-lp-config-mini">
+      <div className={styles.miniHeader}>
+        <span>{title}</span>
+        {refreshing ? <Spinner size="sm" testId="fe2-lp-config-mini-refreshing" /> : null}
+        <a className={styles.urlOpen} href={src} target="_blank" rel="noopener noreferrer" aria-label={`${title}を新しいタブで開く`}>
+          <Icon name="external-link" />
+        </a>
+      </div>
       <div ref={boxRef} className={styles.miniBox} data-sync={bridge} data-testid="fe2-lp-config-mini-box">
         {!loaded ? (
           <div className={styles.miniSkeleton} role="status" aria-label="プレビューを読み込み中">
@@ -180,26 +203,12 @@ export function LpMiniPreview({
           style={{ width: FRAME_WIDTH, height: frameHeight, transform: `scale(${scale})` }}
         />
       </div>
-      <p className={styles.miniNote} data-testid="fe2-lp-config-mini-hint">
-        <Icon name="info" />
-        <span>
-          {bridge === "ready"
-            ? "プレビューと右の設定はスクロールが連動します（保存して読み直しても、見ていたセクションに戻ります）。"
-            : "プレビューの上でスクロールすると LP 全体を見られます（保存して読み直すと先頭に戻ります）。"}
-        </span>
-      </p>
-      {bridge === "none" ? (
-        <p className={styles.miniNote} data-testid="fe2-lp-config-mini-nosync">
+      {notes.map((n) => (
+        <p key={n.id} className={styles.miniNote} data-testid={`fe2-lp-config-mini-${n.id}`}>
           <Icon name="info" />
-          <span>この LP はスクロールの連動に対応していません（連動するのは v3.6 以降の版のプレビュー表示です）。</span>
+          <span>{n.text}</span>
         </p>
-      ) : null}
-      {note ? (
-        <p className={styles.miniNote} data-testid="fe2-lp-config-mini-note">
-          <Icon name="info" />
-          <span>{note}</span>
-        </p>
-      ) : null}
-    </Card>
+      ))}
+    </div>
   );
 }
