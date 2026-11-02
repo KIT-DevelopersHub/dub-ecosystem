@@ -244,3 +244,51 @@ type _IdentityWireKeysAreTyped =
     : never;
 const _identityWireKeyGuard: _IdentityWireKeysAreTyped = true;
 void _identityWireKeyGuard;
+
+// ---- 自動管理ロール (managed roles) ----------------------------------------------------
+// 名簿 (member-service) のチーム・役職から自動で付くロール。identity-roster が実体
+// (identity_roles / identity_role_assignments) を持ち、member-service が s2s で
+// 「あるべき集合」を PUT する。手動の割当とは identity_role_assignments.source で区別し、
+// 同期は source = AUTO_ASSIGNMENT_SOURCE の行だけを足し引きする (手動の割当には触らない)。
+
+/** 自動管理ロールの id 接頭辞。これで始まる id だけを同期で作成・改名・削除できる。 */
+export const MANAGED_ROLE_ID_PREFIX = "role_auto_";
+/** 割当の由来。manual = 管理者が付けた / auto:member-sync = 名簿から自動で付いた。 */
+export type RoleAssignmentSource = "manual" | "auto:member-sync";
+export const AUTO_ASSIGNMENT_SOURCE: RoleAssignmentSource = "auto:member-sync";
+
+/** 自動管理ロール 1 件 (id は MANAGED_ROLE_ID_PREFIX 始まり・権限は持たせない)。 */
+export interface ManagedRoleSpec {
+  id: RoleId;
+  name: string;
+}
+
+/** PUT /internal/managed-roles — 自動管理ロールの一覧そのもの (チーム改名・削除の反映)。
+ *  無いロールは作り、名前が違えば改名する。一覧に無い自動ロールは自動割当を外し、
+ *  手動の割当も権限も無ければ削除する (あれば残す)。 */
+export interface PutManagedRoleCatalogRequest {
+  roles: ManagedRoleSpec[];
+  dryRun?: boolean;
+}
+export interface PutManagedRoleCatalogResponse {
+  dryRun: boolean;
+  created: RoleId[];
+  renamed: RoleId[];
+  /** 削除したロール。 */
+  deleted: RoleId[];
+  /** 一覧から外れたが、手動の割当か権限があるので残したロール (自動割当だけ外す)。 */
+  kept: RoleId[];
+}
+
+/** PUT /internal/users/:id/managed-roles — その人に付くべき自動ロールの集合。 */
+export interface PutUserManagedRolesRequest {
+  roles: ManagedRoleSpec[];
+  dryRun?: boolean;
+}
+export interface PutUserManagedRolesResponse {
+  dryRun: boolean;
+  added: RoleId[];
+  removed: RoleId[];
+  /** 既に手動で付いているので自動では付けなかったロール (手動を優先)。 */
+  manual: RoleId[];
+}

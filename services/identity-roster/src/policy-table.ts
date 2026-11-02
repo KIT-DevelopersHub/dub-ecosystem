@@ -117,6 +117,10 @@ export const POLICY_TABLE = definePolicyTable({
 
   // Passkey credential store. Only auth-service calls these (it runs the WebAuthn ceremonies
   // and owns step-up / last-method policy); INTERNAL keeps the store off the internet.
+  // 名簿 (member-service) からのチーム・役職ロール同期。INTERNAL のみ: 書けるのは
+  // role_auto_* の権限なしロールと source=auto:member-sync の割当だけ (service が検証)。
+  "PUT /internal/managed-roles": INTERNAL,
+  "PUT /internal/users/:id/managed-roles": INTERNAL,
   "POST /internal/webauthn/challenges": INTERNAL,
   "POST /internal/webauthn/challenges/take": INTERNAL,
   "GET /internal/webauthn/users/:id/credentials": INTERNAL,

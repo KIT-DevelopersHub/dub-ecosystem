@@ -14,6 +14,19 @@ import type { OrgId, UserId, ISODateTime } from "./common";
 export type MemberStatus = "added" | "invited" | "considering" | "on_leave" | "declined";
 export const MEMBER_STATUSES: readonly MemberStatus[] = ["added", "invited", "considering", "on_leave", "declined"];
 
+/** 役職 (組織図の段)。オーガナイザー / リーダー / メンバー。参加届で本人が選び、名簿で
+ *  管理者が直せる。担当・役割 (roleTitle の自由記述) とは別の、決まった値の項目。 */
+export type MemberPosition = "organizer" | "leader" | "member";
+export const MEMBER_POSITIONS: readonly MemberPosition[] = ["organizer", "leader", "member"];
+export const POSITION_LABEL: Record<MemberPosition, string> = {
+  organizer: "オーガナイザー",
+  leader: "リーダー",
+  member: "メンバー",
+};
+export function isMemberPosition(v: unknown): v is MemberPosition {
+  return typeof v === "string" && (MEMBER_POSITIONS as readonly string[]).includes(v);
+}
+
 /**
  * A team / 班. The canonical shared entity — this exact shape is what every app
  * consumes. `key` is a stable, URL-safe slug (unique within an org) that other apps
@@ -38,6 +51,8 @@ export interface Member extends PersonProfile {
   name: string;
   /** 担当・役割 (free text, e.g. "会場リーダー"). */
   roleTitle: string | null;
+  /** 役職。未設定は null (additive・旧データは省略され得る)。 */
+  position?: MemberPosition | null;
   status: MemberStatus;
   teamIds: string[];
   /**
@@ -92,6 +107,7 @@ export interface UpdateTeamRequest {
 export interface CreateMemberRequest extends Partial<PersonProfile> {
   name?: string;
   roleTitle?: string | null;
+  position?: MemberPosition | null;
   status: MemberStatus;
   teamIds: string[];
   /** 配下につくリーダーの member id（任意・additive）。 */
@@ -103,6 +119,8 @@ export interface CreateMemberRequest extends Partial<PersonProfile> {
 export interface UpdateMemberRequest extends Partial<PersonProfile> {
   name?: string;
   roleTitle?: string | null;
+  /** 役職。null で解除・省略で変更なし。 */
+  position?: MemberPosition | null;
   status?: MemberStatus;
   teamIds?: string[];
   /** Set (link) or null (unlink) the identity-roster account. Omit = leave unchanged. */
@@ -376,6 +394,8 @@ export interface Participation extends PersonProfile {
   gmail: string;
   /** 希望チーム — references Team.id (canonical member_teams). */
   desiredTeamId: string | null;
+  /** 役職 (参加届で本人が選ぶ)。旧データは null/省略。 */
+  position?: MemberPosition | null;
   status: "submitted";
   matchKind: ParticipationMatchKind;
   /** 管理者レビュー状態. 提出時は "pending"（名簿未反映）。管理者が確定した時のみ
@@ -406,6 +426,8 @@ export interface SubmitParticipationRequest extends Partial<PersonProfile> {
   nameRomaji?: string | null;
   contact?: string | null;
   desiredTeamId?: string | null;
+  /** 役職。フォームでは必須だが、旧クライアント互換で API は省略を許す。 */
+  position?: MemberPosition | null;
 }
 
 /** 名簿で管理者が決める「運営での情報」(Member の運営固有項目)。本人は閲覧のみ
@@ -414,6 +436,7 @@ export interface SelfOperationsInfo {
   /** 名簿の氏名 (合成値 "姓 名")。姓/名 が未分割の旧データで入力欄を埋めるのに使う。 */
   name: string;
   roleTitle: string | null;
+  position?: MemberPosition | null;
   status: MemberStatus;
   teams: Array<Pick<Team, "id" | "name" | "color">>;
   /** リーダー (上長) の氏名。直属リーダー無しは null。 */
@@ -627,6 +650,51 @@ export function parseOnboardingItemInput(
     else value.url = u || null;
   }
   return { value, errors };
+}
+
+// ---- チーム・役職ロールの自動付与 (member-service -> identity-roster) ----------------
+// 在籍中 (status=added) でアカウントに紐付いた人に、所属チームごとの「チーム: <名前>」と
+// 役職の「役職: <ラベル>」を付ける。どちらも権限を持たないロールで、id は決定的。
+
+export const TEAM_ROLE_NAME_PREFIX = "チーム: ";
+export const POSITION_ROLE_NAME_PREFIX = "役職: ";
+
+/** チームロールの id (チーム id から決まる)。 */
+export function teamRoleId(teamId: TeamId): string {
+  return `role_auto_team_${teamId}`;
+}
+/** 役職ロールの id。 */
+export function positionRoleId(position: MemberPosition): string {
+  return `role_auto_position_${position}`;
+}
+export function teamRoleName(teamName: string): string {
+  return `${TEAM_ROLE_NAME_PREFIX}${teamName}`;
+}
+export function positionRoleName(position: MemberPosition): string {
+  return `${POSITION_ROLE_NAME_PREFIX}${POSITION_LABEL[position]}`;
+}
+
+/** POST /api/v1/members/role-sync/backfill — 既存メンバーへの一括付与 (管理者)。 */
+export interface RoleSyncBackfillRequest {
+  /** true なら identity 側に書き込まず、付く/外れる予定だけを返す。 */
+  dryRun?: boolean;
+}
+export interface RoleSyncBackfillPerson {
+  memberId: MemberId;
+  name: string;
+  identityUserId: string;
+  /** あるべき自動ロールの id。 */
+  roleIds: string[];
+  added: string[];
+  removed: string[];
+  error?: string;
+}
+export interface RoleSyncBackfillResponse {
+  dryRun: boolean;
+  /** チーム・役職ロール一覧の同期結果。 */
+  catalog: { created: string[]; renamed: string[]; deleted: string[]; kept: string[] };
+  people: RoleSyncBackfillPerson[];
+  failed: number;
 }
 
 /** Internal id alias (plain string, like the other common ids). */
