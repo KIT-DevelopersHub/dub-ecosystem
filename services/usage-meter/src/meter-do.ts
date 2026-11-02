@@ -14,7 +14,7 @@
 // scriptThrewException, then no invocation at all) and nothing re-armed it.
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { consoleSink } from "@dub/observability";
-import type { Env } from "./env";
+import { cfConfigured, type Env } from "./env";
 import { collectSnapshot } from "./collect";
 import { mailReadDb, upsertSnapshot, usageDb } from "./snapshot-repo";
 import { buildSummary } from "./summary";
@@ -77,6 +77,9 @@ export class MeterDO {
     }
 
     const now = new Date();
+    // Unconfigured (no CF token/account id, e.g. staging copies): collect what we can but do
+    // not track health — otherwise it "fails" every day and mails the real admin inbox.
+    const trackHealth = cfConfigured(this.env);
     let problem: string | null;
     try {
       const res = await this.runCollection(now);
@@ -87,6 +90,10 @@ export class MeterDO {
       this.logError("usage collection failed (loop preserved)", err);
     }
 
+    if (!trackHealth) {
+      consoleSink({ level: "warn", message: "usage health not tracked: CF token or CF_ACCOUNT_ID unset", service: SERVICE });
+      return;
+    }
     try {
       await this.recordOutcome(problem, now);
     } catch (err) {
