@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "b0ceeea9",
-  "branch": "feat/chat-shared-sections",
+  "deployedSha": "522861a5",
+  "branch": "feat/chat-channel-visibility-toggle",
   "actor": "ko-tarou",
-  "markers": ["fe6-shared-sections-v1"],
+  "markers": ["これまでのメッセージを含めてこのチャンネルを閲覧できるようになります"],
   "live": true,
-  "verifiedAt": "2026-10-19T06:52:04Z",
-  "updatedAt": "2026-10-19T06:52:04Z",
-  "note": "chat: サイドバーのセクションを全員共通 + chat:manage_sections(admin のみ既定ON)。?demo_account=usr_bob で管理権限なし表示"
+  "verifiedAt": "2026-11-02T14:20:52Z",
+  "updatedAt": "2026-11-02T14:20:52Z",
+  "note": "chat: channel visibility toggle (chat:change_visibility)"
 }
