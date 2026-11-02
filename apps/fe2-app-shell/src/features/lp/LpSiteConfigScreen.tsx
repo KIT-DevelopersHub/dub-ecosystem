@@ -336,7 +336,7 @@ function ReleaseCard({
     <Card testId="fe2-lp-config-release" header={<span className={styles.sectionTitle}>本番反映</span>}>
       <Stack gap={6}>
         <SettingRow label="公開する版">
-          <div className={styles.statusRow}>
+          <div className={styles.versionPick}>
             <Select
               id="fe2-lp-config-version"
               testId="fe2-lp-config-version"

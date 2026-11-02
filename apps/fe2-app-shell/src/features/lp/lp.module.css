@@ -717,3 +717,19 @@
 .catalogItem > p {
   margin: 0;
 }
+
+.versionPick {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.versionPick > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.versionPick > :last-child {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
