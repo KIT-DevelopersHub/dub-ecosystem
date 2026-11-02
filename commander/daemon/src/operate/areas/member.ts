@@ -295,6 +295,7 @@ export const MEMBER: AreaSpec = {
     { service: M, route: "DELETE /members/people/:id", reason: "アーカイブ後は API から見えず戻せない。チーム所属も物理削除される（不可逆）" },
     { service: M, route: "POST /members/participation/:id/resolve", reason: "参加届の紐付け。取り消す API が無い（不可逆）" },
     { service: M, route: "POST /members/participation", reason: "参加届を出す側の操作で、ボットが出す用途が無い" },
+    { service: M, route: "POST /members/role-sync/backfill", reason: "全員のロール割当を一括で書き換える管理者向けの一括操作（件数上限と1件ずつの読み直しが効かない）" },
     { service: M, route: "POST /members/onboarding", reason: "依頼範囲外。公開ページの案内文は管理画面で人が書く" },
     { service: M, route: "PATCH /members/onboarding/:id", reason: "依頼範囲外。公開ページの案内文は管理画面で人が書く" },
     { service: M, route: "POST /members/onboarding/reorder", reason: "依頼範囲外。公開ページの案内文は管理画面で人が書く" },
