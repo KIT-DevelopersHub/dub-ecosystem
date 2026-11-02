@@ -969,3 +969,7 @@
   font-size: var(--dub-font-size-xs);
   line-height: var(--dub-font-lineHeight-relaxed);
 }
+
+.item[data-active="true"] .itemButton:hover {
+  background: transparent;
+}
