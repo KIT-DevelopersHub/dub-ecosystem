@@ -150,6 +150,7 @@ export function ConfirmDialog({
   confirmLabel = "確認",
   cancelLabel = "キャンセル",
   danger,
+  confirmDisabled,
   onConfirm,
   onCancel,
   testId,
@@ -167,12 +168,18 @@ export function ConfirmDialog({
 
   return (
     <Modal open={open} onClose={onCancel} title={title} size="sm" testId={testId}>
-      <p className={cx(styles.message)}>{message}</p>
+      {/* div: message may be rich content (lists, checkboxes), which a <p> cannot hold. */}
+      <div className={cx(styles.message)}>{message}</div>
       <div className={cx(styles.confirmActions)}>
         <Button variant="secondary" onClick={onCancel} disabled={pending}>
           {cancelLabel}
         </Button>
-        <Button variant={danger ? "danger" : "primary"} loading={pending} onClick={handleConfirm}>
+        <Button
+          variant={danger ? "danger" : "primary"}
+          loading={pending}
+          disabled={confirmDisabled}
+          onClick={handleConfirm}
+        >
           {confirmLabel}
         </Button>
       </div>

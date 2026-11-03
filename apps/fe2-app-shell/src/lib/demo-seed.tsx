@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, common as commonValues } from "@dub/types";
+import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
@@ -4325,7 +4325,7 @@ function createLpStore() {
   const publish = {
     site: "hokuriku-it-conf.com",
     versionId: "v3.4",
-    versions: ["v3.5", "v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"],
+    versions: ["v3.6", "v3.5", "v3.4", "v3.3", "v3.2", "v3.1", "v3.0", "v2.0"],
     updatedAt: null as string | null,
     updatedBy: null as string | null,
   };
@@ -4466,7 +4466,7 @@ function createLpStore() {
     return null;
   }
 
-  return { handle };
+  return { handle, publish };
 }
 
 // ── LP管理 → チケット ──────────────────────────────────────────────────────────
@@ -4872,6 +4872,96 @@ function createLpTicketsStore() {
     return null;
   }
 
+  return { handle, settings };
+}
+
+// Answers the 公開設定 wire contract (lp-analytics site-config.ts; types in @dub/types lp):
+//   GET  /api/v1/lp/site-config
+//   PUT  /api/v1/lp/site-config/draft         { config, revision }   409 on stale revision, 400 on invalid
+//   POST /api/v1/lp/site-config/draft/reset   { revision? }
+//   POST /api/v1/lp/site-config/publish       { config, revision }   writes the release into the
+//                                             publish / tickets / proposals stores (their state is the 正本)
+type DemoRelease = { versionId: string; ticketsEnabled: boolean; ticketsCtaEnabled: boolean; proposalsEnabled: boolean };
+function createLpSiteConfigStore(deps: {
+  publish: { versionId: string; updatedAt: string | null; updatedBy: string | null };
+  tickets: { enabled: boolean; ctaEnabled: boolean; updatedAt: string | null };
+  proposals: { enabled: boolean; updatedAt: string | null };
+}) {
+  let publishedLayout = lpValues.defaultLayout();
+  let draftJson: unknown = null;
+  let revision = 0;
+  let draftUpdatedAt: string | null = null;
+  let publishedAt: string | null = null;
+  const by = "デモ 管理者";
+
+  const release = (): DemoRelease => ({
+    versionId: deps.publish.versionId,
+    ticketsEnabled: deps.tickets.enabled,
+    ticketsCtaEnabled: deps.tickets.ctaEnabled,
+    proposalsEnabled: deps.proposals.enabled,
+  });
+  const state = () => {
+    const published = { layout: structuredClone(publishedLayout), release: release() };
+    const draft = draftJson ? structuredClone(draftJson) : structuredClone(published);
+    return {
+      site: lpValues.LP_PUBLISH_SITE,
+      draft,
+      published,
+      revision,
+      draftUpdatedAt,
+      draftUpdatedBy: draftUpdatedAt ? by : null,
+      publishedAt,
+      publishedBy: publishedAt ? by : null,
+    };
+  };
+  const parseWrite = (body: unknown) => {
+    const b = (body ?? {}) as { config?: unknown; revision?: unknown };
+    const { config, issues } = lpValues.validateSiteConfig(b.config);
+    if (!config || issues.length > 0 || typeof b.revision !== "number") {
+      return { error: problem("VALIDATION_FAILED", "公開設定の形式が正しくありません", 400, issues) };
+    }
+    if (b.revision !== revision) {
+      return { error: problem("CONFLICT", "公開設定が他の操作で更新されています。最新の内容を読み込んでからやり直してください", 409) };
+    }
+    return { config };
+  };
+
+  function handle(method: string, pathname: string, _url: URL, body: unknown): Response | null {
+    if (!pathname.startsWith("/api/v1/lp/site-config")) return null;
+    const now = new Date().toISOString();
+    if (method === "GET" && pathname === "/api/v1/lp/site-config") return json(state());
+    if (method === "PUT" && pathname === "/api/v1/lp/site-config/draft") {
+      const r = parseWrite(body);
+      if (r.error) return r.error;
+      draftJson = r.config;
+      revision += 1;
+      draftUpdatedAt = now;
+      return json(state());
+    }
+    if (method === "POST" && pathname === "/api/v1/lp/site-config/draft/reset") {
+      const rev = (body as { revision?: unknown } | undefined)?.revision;
+      if (typeof rev === "number" && rev !== revision) return problem("CONFLICT", "公開設定が他の操作で更新されています", 409);
+      draftJson = null;
+      revision += 1;
+      draftUpdatedAt = now;
+      return json(state());
+    }
+    if (method === "POST" && pathname === "/api/v1/lp/site-config/publish") {
+      const r = parseWrite(body);
+      if (r.error) return r.error;
+      const rel = r.config!.release;
+      publishedLayout = r.config!.layout;
+      if (deps.publish.versionId !== rel.versionId) Object.assign(deps.publish, { versionId: rel.versionId, updatedAt: now, updatedBy: by });
+      Object.assign(deps.tickets, { enabled: rel.ticketsEnabled, ctaEnabled: rel.ticketsCtaEnabled, updatedAt: now });
+      Object.assign(deps.proposals, { enabled: rel.proposalsEnabled, updatedAt: now });
+      // 下書きを保存したことが無ければ本番に追従する（実 API と同じ）。
+      revision += 1;
+      publishedAt = now;
+      return json(state());
+    }
+    return null;
+  }
+
   return { handle };
 }
 
@@ -4992,7 +5082,7 @@ function createLpProposalsStore() {
     return null;
   }
 
-  return { handle };
+  return { handle, settings };
 }
 
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
@@ -5049,6 +5139,12 @@ export function createDemoFetch(): typeof fetch {
   const lpTicketsStore = createLpTicketsStore();
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
+  // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
+  const lpSiteConfigStore = createLpSiteConfigStore({
+    publish: lpStore.publish,
+    tickets: lpTicketsStore.settings,
+    proposals: lpProposalsStore.settings,
+  });
 
   const demoFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -5137,6 +5233,7 @@ export function createDemoFetch(): typeof fetch {
       lpStore.handle(method, url.pathname, url, parsedBody) ??
       lpTicketsStore.handle(method, url.pathname, url, parsedBody) ??
       lpProposalsStore.handle(method, url.pathname, url, parsedBody) ??
+      lpSiteConfigStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;
     // Boot surface (/bff/home, /auth/*) + NOT_FOUND for everything else.
