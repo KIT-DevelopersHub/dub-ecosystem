@@ -40,3 +40,9 @@ export interface Env {
 export function cfToken(env: Env): string | null {
   return env.USAGE_CF_ANALYTICS_TOKEN || env.CLOUDFLARE_API_TOKEN || null;
 }
+
+/** Whether this deployment is set up to read Cloudflare usage at all (token + account id).
+ *  Staging copies deploy without these secrets; an unconfigured deployment is not a failure. */
+export function cfConfigured(env: Env): boolean {
+  return cfToken(env) !== null && !!env.CF_ACCOUNT_ID;
+}
