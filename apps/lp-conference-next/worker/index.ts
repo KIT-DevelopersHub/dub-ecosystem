@@ -34,6 +34,8 @@ import {
   proposalsInjection,
   type ProposalConfig,
 } from "./proposals.ts";
+import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supportsSiteConfig } from "./site-config.ts";
+import { bridgeScript, parseExtraOrigins, shouldInjectBridge } from "./preview-bridge.ts";
 
 interface Fetcher {
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
@@ -43,9 +45,15 @@ interface Env {
   LP_FLAG?: Fetcher;
   DEFAULT_VERSION?: string;
   TICKETS_DEMO?: string;
+  /** LP管理のミニプレビュー連動で許可する追加の親オリジン（カンマ区切り・https のみ）。 */
+  PREVIEW_PARENT_ORIGINS?: string;
+}
+interface RewriterElement {
+  append(content: string, opts: { html: boolean }): void;
+  setAttribute(name: string, value: string): void;
 }
 declare class HTMLRewriter {
-  on(selector: string, handler: { element(el: { append(content: string, opts: { html: boolean }): void }): void }): HTMLRewriter;
+  on(selector: string, handler: { element(el: RewriterElement): void }): HTMLRewriter;
   transform(res: Response): Response;
 }
 
@@ -133,6 +141,16 @@ async function proposalConfig(env: Env): Promise<ProposalConfig | null> {
   return value;
 }
 
+// 公開設定（セクション切り替え）。isolate ごとに 1 つ・service binding が無い環境（demo など）は常に既定値。
+let siteConfigSource: ReturnType<typeof createSiteConfigSource> | null = null;
+function siteLayout(env: Env, draft: boolean) {
+  if (!siteConfigSource) {
+    const flag = env.LP_FLAG;
+    siteConfigSource = createSiteConfigSource(flag ? (u, init) => flag.fetch(u, init) : null);
+  }
+  return siteConfigSource(draft);
+}
+
 function ticketsInternal(env: Env): ((path: string, init: RequestInit) => Promise<Response>) | null {
   const flag = env.LP_FLAG;
   if (!flag || env.TICKETS_DEMO === "1") return null;
@@ -168,6 +186,9 @@ export default {
     const spMode = proposalsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
     const getProposals = async (): Promise<ProposalConfig | null> => previewProposals(await proposalConfig(env), spMode);
     const spCookie = proposalsCookie(url);
+    // 下書きの公開設定プレビュー（?config=draft）。この閲覧者にだけ効く。
+    const cfgDraft = draftPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
+    const cfgCookie = draftCookie(url);
     if (proposalsPath) {
       const handled = await handleProposals(req, {
         demo: env.TICKETS_DEMO === "1",
@@ -196,6 +217,7 @@ export default {
     // Started in parallel; only awaited for HTML pages (CTA injection).
     const tickets = ticketsPath ? null : getConfig();
     const proposals = proposalsPath ? null : getProposals();
+    const layout = ticketsPath || proposalsPath ? null : siteLayout(env, cfgDraft);
     const published = await publishedVersion(env);
     const r = resolveRequest(url, req.headers.get("cookie"), published, BUNDLED, req.headers.get("referer"));
 
@@ -205,6 +227,7 @@ export default {
       if (tkCookie) headers.append("set-cookie", tkCookie);
       if (spCookie) headers.append("set-cookie", spCookie);
       if (tkTokenCookie) headers.append("set-cookie", tkTokenCookie);
+      if (cfgCookie) headers.append("set-cookie", cfgCookie);
       return new Response(null, { status: 302, headers });
     }
 
@@ -217,15 +240,20 @@ export default {
     if (tkCookie) headers.append("set-cookie", tkCookie);
     if (spCookie) headers.append("set-cookie", spCookie);
     if (tkTokenCookie) headers.append("set-cookie", tkTokenCookie);
+    if (cfgCookie) headers.append("set-cookie", cfgCookie);
     const loc = headers.get("location");
     if (loc) headers.set("location", rewriteLocation(loc, r.version, url.origin));
-    if (r.preview || mode || spMode) headers.set("x-robots-tag", "noindex");
+    if (r.preview || mode || spMode || cfgDraft) headers.set("x-robots-tag", "noindex");
 
     const isHtml = (headers.get("content-type") ?? "").includes("text/html");
     const page = isHtml && res.status === 200;
     const cfg = page && tickets ? await tickets : null;
     const spCfg = page && proposals ? await proposals : null;
+    // 公開設定は v3.6 以降の版だけ（古い版は属性を知らないので付けない）。
+    const siteConfig = page && layout !== null && supportsSiteConfig(r.version);
+    const attrs = siteConfig ? htmlAttributes(await layout) : {};
     const previewing = [
+      siteConfig && cfgDraft ? "下書きの公開設定" : null,
       cfg?.enabled && cfg.preview ? "チケット販売" : null,
       spCfg?.enabled && spCfg.preview ? "登壇者募集" : null,
     ].filter((x): x is string => x !== null);
@@ -236,16 +264,25 @@ export default {
           spMode === "off" && (await proposalConfig(env))?.enabled ? "登壇者募集" : null,
         ].filter((x): x is string => x !== null)
       : [];
+    // LP管理のミニプレビューとのスクロール連動。プレビュー表示のときだけ（公開表示には足さない）。
+    const bridge = shouldInjectBridge({ page, siteConfig, previewing: r.preview || !!mode || !!spMode || cfgDraft })
+      ? bridgeScript(parseExtraOrigins(env.PREVIEW_PARENT_ORIGINS))
+      : "";
     const inject =
+      bridge +
       (r.preview ? previewBanner(r.version, published) : "") +
       previewBar(previewing, hidden) +
       ticketsInjection(cfg, false) +
       proposalsInjection(spCfg);
-    if (inject) headers.delete("etag");
+    const attrEntries = Object.entries(attrs);
+    if (inject || attrEntries.length > 0) headers.delete("etag");
     const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-    if (!inject || !isHtml) return out;
-    return new HTMLRewriter()
-      .on("body", { element: (el) => el.append(inject, { html: true }) })
-      .transform(out);
+    if ((!inject && attrEntries.length === 0) || !isHtml) return out;
+    let rw = new HTMLRewriter();
+    if (attrEntries.length > 0) {
+      rw = rw.on("html", { element: (el) => attrEntries.forEach(([k, v]) => el.setAttribute(k, v)) });
+    }
+    if (inject) rw = rw.on("body", { element: (el) => el.append(inject, { html: true }) });
+    return rw.transform(out);
   },
 };

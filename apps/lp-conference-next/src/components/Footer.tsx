@@ -1,4 +1,5 @@
 import type { FooterConfig, NavLink } from "@/config/types";
+import { navSection } from "@/sections/nav";
 
 // Footer — reproduces goodpatch's multi-part footer skeleton: a top area with the
 // brand block on the left and link groups on the right, then a bottom bar with
@@ -27,7 +28,7 @@ export function Footer({ data, nav }: { data: FooterConfig; nav?: NavLink[] }) {
               <span className="footer-col-head">MENU</span>
               <ul>
                 {pageLinks.map((l) => (
-                  <li key={l.href}>
+                  <li key={l.href} data-lp-nav={navSection(l.href)}>
                     <a href={l.href}>{l.label}</a>
                   </li>
                 ))}

@@ -2,16 +2,9 @@ import snapshot from "@/config/snapshot.json";
 import type { LpConfig } from "@/config/types";
 import { MotionRoot } from "@/components/MotionRoot";
 import { ScrollProgress } from "@/components/ScrollProgress";
-import { Header } from "@/components/Header";
 import { Hero } from "@/components/Hero";
-import { Apply } from "@/components/Apply";
-import { Program } from "@/components/Program";
 import { Marquee } from "@/components/Marquee";
-import { About } from "@/components/About";
-import { Crowdfunding } from "@/components/Crowdfunding";
-import { Vision } from "@/components/Vision";
-import { Contact } from "@/components/Contact";
-import { Footer } from "@/components/Footer";
+import { SectionSlot } from "@/sections/SectionSlot";
 
 // Public conference LP — single page composed from the published snapshot
 // (read-only at build time; never calls internal services live).
@@ -30,6 +23,9 @@ import { Footer } from "@/components/Footer";
 //   multi-part footer                        → Footer
 // (goodpatch's Design-Platforms carousel, Latest-Activities grid and Careers
 //  are omitted — the conference has no matching content to flow in.)
+//
+// 公開設定（LP管理）で切り替えるセクションは SectionSlot で包む（sections/variants.tsx）。
+// Hero と Marquee は登録簿に無いので常に出る。
 const config = snapshot as LpConfig;
 const siteUrl = config.footer.links[0]?.href;
 
@@ -38,16 +34,16 @@ export default function Page() {
     <>
       <MotionRoot />
       <ScrollProgress />
-      <Header nav={config.nav} cta={config.hero.primaryCta} banner={config.crowdfunding.banner} />
+      <SectionSlot id="header" props={{ nav: config.nav, cta: config.hero.primaryCta, banner: config.crowdfunding.banner }} />
       <Hero data={config.hero} subheading={config.catch.lead} />
-      <Apply data={config.apply} />
-      <Program data={config.program} />
+      <SectionSlot id="join" props={{ data: config.apply }} />
+      <SectionSlot id="program" props={{ data: config.program }} />
       <Marquee sub={config.catch.lead} />
-      <About data={config.about} />
-      <Crowdfunding data={config.crowdfunding} />
-      <Vision eyebrow="VISION" statement={config.catch.heading} />
-      <Contact data={config.contact} siteUrl={siteUrl} />
-      <Footer data={config.footer} nav={config.nav} />
+      <SectionSlot id="about" props={{ data: config.about }} />
+      <SectionSlot id="crowdfunding" props={{ data: config.crowdfunding }} />
+      <SectionSlot id="vision" props={{ eyebrow: "VISION", statement: config.catch.heading }} />
+      <SectionSlot id="contact" props={{ data: config.contact, siteUrl }} />
+      <SectionSlot id="footer" props={{ data: config.footer, nav: config.nav }} />
     </>
   );
 }
