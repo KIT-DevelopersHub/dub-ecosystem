@@ -35,6 +35,15 @@ export interface LpVersion {
  */
 export const LP_VERSIONS: readonly LpVersion[] = [
   {
+    id: "v3.6",
+    name: "v3.6 公開設定対応版",
+    description:
+      "v3.5 をベースに、LP管理の「公開設定」で各セクションのバリアント・表示/非表示・ヘッダーの帯を切り替えられるようにした版（見た目は v3.5 と同じ）。プレビュー（下書き）は ?config=draft で下書きの設定を当てて確認できる。本番(hokuriku-it-conf.com)には未反映。",
+    url: "https://hokuriku-it-conf.com/?version=3.6",
+    updatedAt: "2026-11-02",
+    status: "draft",
+  },
+  {
     id: "v3.5",
     name: "v3.5 クラファン告知帯版",
     description:

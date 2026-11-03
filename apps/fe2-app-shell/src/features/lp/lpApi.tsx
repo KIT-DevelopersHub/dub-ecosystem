@@ -9,7 +9,13 @@
 //
 // Types are declared locally (not in @dub/types): the LP visit shapes are not in the
 // frozen contract yet, exactly like driveshare's drive:read/drive:write shapes.
+import type { lp } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
+
+// 公開設定（セクション切り替え・本番反映）の wire 型は @dub/types が唯一の定義（lp-analytics と共有）。
+export type LpSiteConfig = lp.LpSiteConfig;
+export type LpSiteConfigState = lp.LpSiteConfigState;
+export type LpSiteConfigWriteRequest = lp.LpSiteConfigWriteRequest;
 
 /** How the visit was classified. `bot` is counted separately and excluded from totals. */
 export type LpDevice = "mobile" | "desktop" | "bot" | "unknown";
@@ -343,6 +349,14 @@ export interface LpApi {
   listProposals(query: { cursor?: string; limit?: number }): Promise<LpProposalsPage>;
   /** 応募の選考状況を変える (app:lp:edit)。 */
   setProposalStatus(id: string, input: { status: LpProposalStatus }): Promise<LpProposal>;
+  /** 公開設定（下書き + 本番）(app:lp:view)。 */
+  getSiteConfig(): Promise<LpSiteConfigState>;
+  /** 下書きを保存 (app:lp:edit)。revision が古ければ 409。 */
+  saveSiteConfigDraft(input: LpSiteConfigWriteRequest): Promise<LpSiteConfigState>;
+  /** 下書きを本番の内容に戻す (app:lp:edit)。 */
+  resetSiteConfigDraft(input: { revision?: number }): Promise<LpSiteConfigState>;
+  /** 本番に反映 (app:lp:edit + lp:publish)。revision が古ければ 409。 */
+  publishSiteConfig(input: LpSiteConfigWriteRequest): Promise<LpSiteConfigState>;
 }
 
 const BASE = "/api/v1/lp";
@@ -447,5 +461,12 @@ export function createLpApi(api: ApiClient): LpApi {
         path: `${BASE}/proposals/submissions/${encodeURIComponent(id)}`,
         body: input,
       }),
+    getSiteConfig: () => api.request<LpSiteConfigState>({ method: "GET", path: `${BASE}/site-config` }),
+    saveSiteConfigDraft: (input) =>
+      api.request<LpSiteConfigState, LpSiteConfigWriteRequest>({ method: "PUT", path: `${BASE}/site-config/draft`, body: input }),
+    resetSiteConfigDraft: (input) =>
+      api.request<LpSiteConfigState, { revision?: number }>({ method: "POST", path: `${BASE}/site-config/draft/reset`, body: input }),
+    publishSiteConfig: (input) =>
+      api.request<LpSiteConfigState, LpSiteConfigWriteRequest>({ method: "POST", path: `${BASE}/site-config/publish`, body: input }),
   };
 }

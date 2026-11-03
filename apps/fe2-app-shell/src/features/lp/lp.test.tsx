@@ -62,6 +62,10 @@ const linksStubs = {
   saveProposalFields: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   listProposals: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   setProposalStatus: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  getSiteConfig: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  saveSiteConfigDraft: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  resetSiteConfigDraft: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  publishSiteConfig: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
 };
 
 const UNCONFIGURED_SITE = {
