@@ -348,6 +348,34 @@ ALTER TABLE member_participations ADD COLUMN position TEXT;
 `.trim(),
 };
 
+// 0019: スポンサーアプリ (名刺の共有) の新規テーブル (additive)。写真本体は R2、ここは形式だけ
+// (image_content_type NULL = 写真なし)。Mirrors 0019_sponsor_cards.sql (schema-lockstep).
+export const MEMBER_SPONSOR_CARDS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0019_sponsor_cards",
+  up: `
+CREATE TABLE member_sponsor_cards (
+  id                  TEXT PRIMARY KEY,
+  org_id              TEXT NOT NULL,
+  company_name        TEXT,
+  person_name         TEXT,
+  department          TEXT,
+  title               TEXT,
+  email               TEXT,
+  phone               TEXT,
+  note                TEXT,
+  image_content_type  TEXT,
+  version             INTEGER NOT NULL,
+  created_by          TEXT NOT NULL,
+  created_by_name     TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  archived_at         TEXT
+);
+CREATE INDEX idx_member_sponsor_cards_org ON member_sponsor_cards(org_id, updated_at) WHERE archived_at IS NULL;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -368,4 +396,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_STUDENT_NUMBER_MIGRATION,
   MEMBER_HR_MIGRATION,
   MEMBER_POSITION_MIGRATION,
+  MEMBER_SPONSOR_CARDS_MIGRATION,
 ];

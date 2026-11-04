@@ -7,6 +7,7 @@ import { policy } from "@dub/types";
 import { createApp } from "../src/app";
 import { InMemoryMemberRepo } from "../src/memory-repo";
 import { InMemoryHrRepo } from "../src/hr-repo";
+import { InMemorySponsorRepo, type SponsorImageStore } from "../src/sponsor-repo";
 import type { AppDeps } from "../src/types";
 
 /**
@@ -32,7 +33,28 @@ export function adminGrants(): Set<identity.PermissionKey> {
     "hr:read",
     "hr:write",
     "hr:admin",
+    ...policy.keysForAppLevel("sponsor", "edit"),
+    "sponsor:read",
+    "sponsor:write",
+    "sponsor:admin",
   ]);
+}
+
+/** R2 の fake (名刺写真)。objects を覗いて保存・削除を検証できる。failDelete で削除失敗を再現。 */
+export class FakeImageStore implements SponsorImageStore {
+  objects = new Map<string, { body: ArrayBuffer; contentType: string }>();
+  failDelete = false;
+  async put(key: string, bytes: ArrayBuffer, contentType: string): Promise<void> {
+    this.objects.set(key, { body: bytes.slice(0), contentType });
+  }
+  async get(key: string): Promise<{ body: ArrayBuffer; contentType: string | null } | null> {
+    const o = this.objects.get(key);
+    return o ? { body: o.body.slice(0), contentType: o.contentType } : null;
+  }
+  async delete(key: string): Promise<void> {
+    if (this.failDelete) throw new Error("r2 down");
+    this.objects.delete(key);
+  }
 }
 
 let seq = 0;
@@ -49,6 +71,9 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     newOnboardingItemId: () => `onb_${String(seq++).padStart(6, "0")}`,
     hrRepo: new InMemoryHrRepo(),
     newHrId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
+    sponsorRepo: new InMemorySponsorRepo(),
+    sponsorImages: new FakeImageStore(),
+    newSponsorCardId: () => `card_${String(seq++).padStart(6, "0")}`,
     ...overrides,
   };
   return Object.assign(deps, { repo });

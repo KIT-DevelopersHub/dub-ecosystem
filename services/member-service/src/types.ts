@@ -5,6 +5,7 @@
 import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
+import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
 import type { RoleSyncPort } from "./roleSync";
 
 export type MemberStatus = member.MemberStatus;
@@ -189,6 +190,11 @@ export interface AppDeps {
   hrRepo: HrRepo;
   /** 人事の id 採番 (app = 応募者 / hre = 履歴)。 */
   newHrId: (prefix: "app" | "hre") => string;
+  /** スポンサー (member_sponsor_cards) の永続化 (sponsor-repo.ts)。 */
+  sponsorRepo: SponsorRepo;
+  /** 名刺写真の置き場 (本番 R2 SPONSOR_FILES)。undefined なら写真ルートだけ 503。 */
+  sponsorImages?: SponsorImageStore;
+  newSponsorCardId: () => string;
   /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
    *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
   roleSync?: RoleSyncPort;
