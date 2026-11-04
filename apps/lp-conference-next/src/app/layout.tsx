@@ -86,8 +86,10 @@ export default function RootLayout({
     <html
       lang="ja"
       suppressHydrationWarning
-      // ローカル確認専用（page.tsx の LP_SUPPORTERS_FIXTURE と同じ）: 支援者情報パターンを表示する。
-      {...(process.env.LP_SUPPORTERS_FIXTURE === "1" ? { "data-lp-o-crowdfunding-pattern": "supporters" } : {})}
+      // ローカル確認専用: 支援者情報パターンを表示する（LP_SUPPORTERS_FIXTURE=1 はダミー、LP_PREVIEW_SUPPORTERS=1 は実データ）。
+      {...(process.env.LP_SUPPORTERS_FIXTURE === "1" || process.env.LP_PREVIEW_SUPPORTERS === "1"
+        ? { "data-lp-o-crowdfunding-pattern": "supporters" }
+        : {})}
     >
       <head>
         <StructuredData />
