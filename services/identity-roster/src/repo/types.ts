@@ -76,6 +76,8 @@ export interface IdentityRepo {
   // users
   getUser(userId: string): Promise<UserRow | null>;
   getUserByEmail(orgId: string, email: string): Promise<UserRow | null>;
+  /** Users whose email matches any of `emails` (case-insensitive), in one query. */
+  getUsersByEmails(orgId: string, emails: string[]): Promise<UserRow[]>;
   listUsers(filter: ListUsersFilter): Promise<UserPage>;
   createUser(row: UserRow): Promise<void>;
   updateUser(userId: string, patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>, updatedAt: string): Promise<void>;

@@ -330,6 +330,17 @@ export interface MailSenderBlockRequest {
 /** Per-user cap on block-list entries (the API answers 409 beyond it). */
 export const MAIL_SENDER_BLOCK_LIMIT = 500;
 
+// ---- sender icons (Dub users only) ----
+/** POST /mail/avatars body: the addresses to resolve (deduped, at most MAIL_AVATAR_LOOKUP_LIMIT). */
+export interface MailAvatarsRequest {
+  emails: string[];
+}
+/** lowercased email -> avatar URL, only for active Dub users that set an icon. Others are absent. */
+export interface MailAvatarsResponse {
+  avatars: Record<string, string>;
+}
+export const MAIL_AVATAR_LOOKUP_LIMIT = 50;
+
 // ---- per-user opt-in auto-forward (Gmail 自動転送, 0023) ----
 // Each account may opt in to have the mail delivered TO IT also forwarded to one personal
 // address it owns (typically Gmail) as a backup. Ownership is proven by the verification

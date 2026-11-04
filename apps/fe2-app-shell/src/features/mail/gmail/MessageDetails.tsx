@@ -5,6 +5,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { Modal } from "@dub/ui";
 import { displayName, fullDate, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
+import { SenderAvatar } from "./SenderAvatar.tsx";
 
 const norm = (email: string): string => email.trim().toLowerCase();
 
@@ -89,6 +90,7 @@ const selectable: CSSProperties = { userSelect: "text", wordBreak: "break-all" }
 function Address({ p, own }: { p: MailPerson; own: boolean }): JSX.Element {
   return (
     <div data-testid="fe2-mail-details-address" style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-1)" }}>
+      <SenderAvatar p={p} size={20} />
       <span style={selectable}>
         {p.name ? (
           <>

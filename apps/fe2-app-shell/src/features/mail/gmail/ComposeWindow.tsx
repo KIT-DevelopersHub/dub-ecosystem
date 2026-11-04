@@ -27,6 +27,7 @@ import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { UnsavedChangesGuard } from "../../../lib/UnsavedChangesGuard.tsx";
 import { MailIcon } from "./icons.tsx";
+import { recipientIcon } from "./SenderAvatar.tsx";
 import { addressCandidates } from "./mailModel.ts";
 import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { deliver } from "./sendMail.ts";
@@ -268,6 +269,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             parse={parseRecipients}
             candidates={candidates}
             removeIcon={removeIcon}
+            renderTokenIcon={recipientIcon}
             testId="fe2-mail-compose-to"
             extra={
               <span style={{ display: "flex", gap: 8 }}>
@@ -281,10 +283,10 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             }
           />
           {compose.showCc ? (
-            <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-cc" />
+            <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} renderTokenIcon={recipientIcon} testId="fe2-mail-compose-cc" />
           ) : null}
           {compose.showBcc ? (
-            <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-bcc" />
+            <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} renderTokenIcon={recipientIcon} testId="fe2-mail-compose-bcc" />
           ) : null}
           <input
             data-testid="fe2-mail-compose-subject"
