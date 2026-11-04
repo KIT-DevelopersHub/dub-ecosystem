@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "56e093f0",
+  "deployedSha": "8859b628",
   "branch": "HEAD",
   "actor": "ko-tarou",
-  "markers": ["fe2-mail-avatar-img"],
+  "markers": ["fe2-mail-avatar-img", "fe2-mail-inline-to"],
   "live": true,
-  "verifiedAt": "2026-11-04T04:35:48Z",
-  "updatedAt": "2026-11-04T04:35:48Z",
-  "note": "mail: Dub ユーザーの送信者アイコン (PR #745)。受信トレイの staff@ 等がアイコン表示"
+  "verifiedAt": "2026-11-04T04:59:48Z",
+  "updatedAt": "2026-11-04T04:59:48Z",
+  "note": "mail: 送信者アイコン + 宛先/Cc/Bcc の小アイコン (PR #745)"
 }
