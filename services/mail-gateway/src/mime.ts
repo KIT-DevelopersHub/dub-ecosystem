@@ -437,19 +437,53 @@ function splitMultipart(body: string, boundary: string): string[] {
   return parts;
 }
 
-/** Very small HTML -> text: strip tags + decode the handful of common entities. */
+const NAMED_ENTITIES: Record<string, string> = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/** Single-pass entity decode (named subset + numeric), so "&amp;lt;" stays "&lt;". */
+function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+    if (e[0] === "#") {
+      const cp = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : m;
+    }
+    return NAMED_ENTITIES[e.toLowerCase()] ?? m;
+  });
+}
+
+/** <a href="url">text</a> -> "text（url）" so the URL survives tag stripping. Dropped when the
+ *  text already shows the URL, the link has no text (image banner), or it is not http(s). */
+function anchorToText(_m: string, dq: string | undefined, sq: string | undefined, bare: string | undefined, inner: string): string {
+  const href = decodeEntities(dq ?? sq ?? bare ?? "").trim();
+  const label = decodeEntities(inner.replace(/<[^>]+>/g, "")).trim();
+  if (!/^https?:\/\//i.test(href) || label === "" || label.includes(href)) return inner;
+  return `${inner}（${href}）`;
+}
+
+/** Very small HTML -> text: keep link targets, collapse source whitespace, strip tags,
+ *  decode entities. */
 function htmlToText(html: string): string {
-  return html
+  const text = html
     .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\s+/g, " ") // source indentation / newlines are not content in HTML
+    .replace(/<\s*a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]{0,500}?)<\s*\/\s*a\s*>/gi, anchorToText) // bounded: unclosed <a> can't go quadratic
     .replace(/<\s*br\s*\/?\s*>/gi, "\n")
     .replace(/<\s*\/\s*(p|div|tr|li|h[1-6])\s*>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'");
+    .replace(/<[^>]+>/g, "");
+  return decodeEntities(text).replace(/[ \t]*\n[ \t]*/g, "\n");
+}
+
+/** RFC 3676 format=flowed -> plain lines: a line ending in a space is a soft break joined
+ *  to the next (delsp=yes also drops that space — how CJK text and long URLs get split);
+ *  leading space-stuffing is undone. Without this a wrapped URL renders cut in two. */
+function unflow(text: string, delsp: boolean): string {
+  let out = "";
+  for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
+    const line = raw.startsWith(" ") ? raw.slice(1) : raw;
+    const soft = line.endsWith(" ") && line !== "-- ";
+    out += soft ? (delsp ? line.slice(0, -1) : line) : line + "\n";
+  }
+  return out.endsWith("\n") ? out.slice(0, -1) : out;
 }
 
 /** Walk one MIME block (recursing into multipart) and return the best decoded text. */
@@ -466,7 +500,9 @@ function partToText(block: string): string {
     return chosen ? partToText(chosen.raw) : "";
   }
   const decoded = decodeCte(body, headers["content-transfer-encoding"] ?? "", charsetOf(ct));
-  return /text\/html/i.test(ct) ? htmlToText(decoded) : decoded;
+  if (/text\/html/i.test(ct)) return htmlToText(decoded);
+  if (/;\s*format\s*=\s*"?flowed"?/i.test(ct)) return unflow(decoded, /;\s*delsp\s*=\s*"?yes"?/i.test(ct));
+  return decoded;
 }
 
 /** Old heuristic body extract — retained as the fallback when the MIME walk yields nothing. */

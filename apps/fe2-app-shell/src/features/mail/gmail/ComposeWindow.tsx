@@ -17,7 +17,7 @@
 // useRestoreComposeDraftsOnMount() re-opens any leftover draft found in storage
 // on mount so a restored window is reachable to show the notice/beforeunload
 // guard again.
-import { useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent } from "react";
 import type { mail } from "@dub/types";
 import { EmailAddressSelect, type EmailToken, DraftRestoredNotice, useDraftAutosave } from "@dub/app-ui";
 import { newIdempotencyKey, parseRecipients } from "../mailApi.tsx";
@@ -174,12 +174,36 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const maximized = compose.maximized;
   const minimized = compose.minimized;
 
+  // Drag-to-move by the title bar. `pos` = top-left once moved (null = docked bottom-right).
+  // Maximized ignores it; minimized re-docks to the bottom and restores to `pos` on expand.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const grab = useRef<{ dx: number; dy: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const onHeaderPointerDown = (e: PointerEvent<HTMLDivElement>): void => {
+    if (maximized || minimized || e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    const r = rootRef.current?.getBoundingClientRect();
+    if (!r) return;
+    e.preventDefault(); // no text selection while dragging
+    grab.current = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onHeaderPointerMove = (e: PointerEvent<HTMLDivElement>): void => {
+    if (grab.current) setPos({ left: e.clientX - grab.current.dx, top: e.clientY - grab.current.dy });
+  };
+  const onHeaderPointerUp = (e: PointerEvent<HTMLDivElement>): void => {
+    grab.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
+
   const frame: CSSProperties = maximized
     ? { position: "fixed", inset: "48px", width: "auto", height: "auto", maxWidth: 900, margin: "0 auto" }
-    : { position: "fixed", right: 16 + offset * 30, bottom: 0, width: 500, height: minimized ? 40 : 460 };
+    : pos && !minimized
+      ? { position: "fixed", ...clampToViewport(pos), width: WINDOW_W, height: WINDOW_H }
+      : { position: "fixed", right: 16 + offset * 30, bottom: 0, width: WINDOW_W, height: minimized ? 40 : WINDOW_H };
 
   return (
     <div
+      ref={rootRef}
       data-testid="fe2-mail-compose-window"
       data-p12-mail-window-draft-fix="1"
       onDragEnter={onDragEnter}
@@ -224,7 +248,12 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         </div>
       ) : null}
       <div
+        data-testid="fe2-mail-compose-header"
         onClick={() => minimized && patch({ minimized: false })}
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={onHeaderPointerUp}
+        onPointerCancel={onHeaderPointerUp}
         style={{
           display: "flex",
           alignItems: "center",
@@ -232,7 +261,9 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
           padding: "0 8px 0 16px",
           background: "var(--dub-color-text-primary)",
           color: "var(--dub-color-surface-base)",
-          cursor: minimized ? "pointer" : "default",
+          cursor: minimized ? "pointer" : maximized ? "default" : "move",
+          touchAction: maximized || minimized ? undefined : "none",
+          userSelect: "none",
           flexShrink: 0,
         }}
       >
@@ -361,6 +392,17 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
       )}
     </div>
   );
+}
+
+const WINDOW_W = 500;
+const WINDOW_H = 460;
+
+/** Keep a moved window fully on screen (re-applied each render, e.g. after a resize). */
+function clampToViewport(p: { left: number; top: number }): { left: number; top: number } {
+  return {
+    left: Math.min(Math.max(0, p.left), Math.max(0, window.innerWidth - WINDOW_W)),
+    top: Math.min(Math.max(0, p.top), Math.max(0, window.innerHeight - WINDOW_H)),
+  };
 }
 
 const hdrBtn: CSSProperties = { all: "unset", cursor: "pointer", display: "inline-flex", padding: 6, color: "var(--dub-color-surface-base)", opacity: 0.85 };

@@ -25,6 +25,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
+import { linkifyBody } from "./linkify.ts";
 import { SenderAvatar, recipientIcon } from "./SenderAvatar.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
@@ -285,10 +286,25 @@ function MessageBlock({
             lineHeight: 1.6,
             color: "var(--dub-color-text-primary)",
             whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
+            overflowWrap: "anywhere",
           }}
         >
-          {msg.body}
+          {linkifyBody(msg.body).map((part, i) =>
+            part.type === "link" ? (
+              <a
+                key={i}
+                href={part.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="fe2-mail-body-link"
+                style={{ color: "var(--dub-color-brand-600)", textDecoration: "underline" }}
+              >
+                {part.href}
+              </a>
+            ) : (
+              part.value
+            ),
+          )}
         </div>
       ) : null}
       {open ? <Attachments msg={msg} /> : null}
