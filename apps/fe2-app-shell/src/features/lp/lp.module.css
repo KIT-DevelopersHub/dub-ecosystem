@@ -265,6 +265,22 @@
   color: var(--dub-color-text-primary);
 }
 
+/* ── 期間・流入元の絞り込み ─────────────────────────────────────────────── */
+.filterField {
+  width: 16rem;
+  max-width: 100%;
+}
+
+.rangeDash {
+  padding-bottom: var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+}
+
+.rangeError {
+  color: var(--dub-color-danger-600);
+  font-size: var(--dub-font-size-sm);
+}
+
 /* ── 補足テキスト ───────────────────────────────────────────────────────── */
 .note {
   color: var(--dub-color-text-muted);
