@@ -51,6 +51,8 @@ export type RunStatus = "pending" | "running" | "succeeded" | "failed";
 export interface RunSummary {
   id: string;
   taskId: string | null;
+  /** Claude session the run belonged to (one per task). Absent on older services. */
+  sessionId?: string | null;
   prompt: string;
   cwd: string;
   status: RunStatus;
@@ -219,7 +221,8 @@ export interface CommanderApi {
     opts?: { approvedByUser?: boolean; note?: string },
   ): Promise<Result<{ feature: Feature; transition: PhaseTransition }>>;
   /** Persisted run history (newest first). Survives daemon/web/service restarts. */
-  listRuns(): Promise<RunSummary[]>;
+  /** Persisted runs, newest first; `taskId` narrows to one task's runs. */
+  listRuns(filter?: { taskId?: string }): Promise<RunSummary[]>;
   /** One persisted run with its full event log, for restoring the console after a reset. */
   getRun(id: string): Promise<RunDetail | null>;
   /** The whole task board: every task + its feature phase + latest run status. */
@@ -403,8 +406,9 @@ export class HttpCommanderApi implements CommanderApi {
     };
   }
 
-  async listRuns(): Promise<RunSummary[]> {
-    const res = await this.fetchImpl(`${this.baseUrl}/runs`, { headers: this.auth() });
+  async listRuns(filter: { taskId?: string } = {}): Promise<RunSummary[]> {
+    const q = filter.taskId ? `?taskId=${encodeURIComponent(filter.taskId)}` : "";
+    const res = await this.fetchImpl(`${this.baseUrl}/runs${q}`, { headers: this.auth() });
     if (!res.ok) throw new Error(`GET /runs -> ${res.status}`);
     return ((await res.json()) as { runs: RunSummary[] }).runs;
   }

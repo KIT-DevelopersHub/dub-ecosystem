@@ -250,6 +250,20 @@ describe("commander-service run persistence", () => {
     expect(list.json.runs.map((r: { id: string }) => r.id)).toContain("run_test_1");
   });
 
+  it("stores each run's Claude session and lists one task's runs only (per-task history)", async () => {
+    const ta = (await call(app, env, "POST", "/tasks", { title: "チャット" })).json.task.id as string;
+    const tb = (await call(app, env, "POST", "/tasks", { title: "Drive" })).json.task.id as string;
+    await call(app, env, "POST", "/runs", { id: "ra1", prompt: "A1", cwd: "/w/task-a", taskId: ta, sessionId: "sess-a" });
+    await call(app, env, "POST", "/runs", { id: "rb1", prompt: "B1", cwd: "/w/task-b", taskId: tb, sessionId: "sess-b" });
+    await call(app, env, "POST", "/runs", { id: "rq", prompt: "質問", cwd: "/tmp" });
+
+    const a = await call(app, env, "GET", `/runs?taskId=${ta}`);
+    expect(a.json.runs.map((r: { id: string }) => r.id)).toEqual(["ra1"]);
+    expect(a.json.runs[0].sessionId).toBe("sess-a");
+    const q = await call(app, env, "GET", "/runs/rq");
+    expect(q.json.run.sessionId).toBe(null);
+  });
+
   it("appends events and folds status/exit into the run row", async () => {
     await call(app, env, "POST", "/runs", { id: "run_test_2", prompt: "p", cwd: "/tmp" });
 
