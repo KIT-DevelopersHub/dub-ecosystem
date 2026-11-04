@@ -108,3 +108,8 @@ export function SenderAvatar({ p, size = 36, fontSize = size * 0.42 }: { p: Mail
     </span>
   );
 }
+
+/** Small avatar in front of a recipient chip / suggestion (To・Cc・Bcc), Gmail-style. */
+export function recipientIcon(p: MailPerson): JSX.Element {
+  return <SenderAvatar p={p} size={18} />;
+}

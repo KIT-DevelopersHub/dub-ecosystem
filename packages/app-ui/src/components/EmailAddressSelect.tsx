@@ -32,6 +32,8 @@ export interface EmailAddressSelectProps {
   extra?: ReactNode;
   /** Custom remove-chip glyph (defaults to "×"). Lets consumers pass their icon. */
   removeIcon?: ReactNode;
+  /** Optional leading icon for each chip and suggestion (e.g. a small avatar). */
+  renderTokenIcon?: (token: EmailToken) => ReactNode;
   /** "boxed" (form field) | "flush" (borderless divider row). Default "boxed". */
   variant?: "boxed" | "flush";
 }
@@ -53,6 +55,7 @@ export function EmailAddressSelect({
   testId,
   extra,
   removeIcon,
+  renderTokenIcon,
   variant = "boxed",
 }: EmailAddressSelectProps): JSX.Element {
   const { draft, setDraft, recipients, invalid, commit, remove, add } = useEmailAddressInput({
@@ -109,7 +112,8 @@ export function EmailAddressSelect({
       {label != null ? <span className={styles.label}>{label}</span> : null}
 
       {recipients.map((r) => (
-        <span key={r.email} className={styles.chip}>
+        <span key={r.email} className={styles.chip} data-has-icon={renderTokenIcon ? "true" : undefined}>
+          {renderTokenIcon?.(r)}
           {r.name ?? r.email}
           <button
             type="button"
@@ -211,8 +215,11 @@ export function EmailAddressSelect({
                   pick(c);
                 }}
               >
-                {c.name ? <span className={styles.optionName}>{c.name}</span> : null}
-                <span className={styles.optionEmail}>{c.email}</span>
+                {renderTokenIcon ? <span className={styles.optionIcon}>{renderTokenIcon(c)}</span> : null}
+                <span className={styles.optionText}>
+                  {c.name ? <span className={styles.optionName}>{c.name}</span> : null}
+                  <span className={styles.optionEmail}>{c.email}</span>
+                </span>
               </button>
             </li>
           ))}

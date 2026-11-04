@@ -1,7 +1,7 @@
 // 送信 must post ONE mail even when clicked twice (the prod thread showed the same reply
 // twice), each send carries an idempotency key, and a reply whose newest message is our own
 // sent reply re-addresses the original correspondent (never ourselves).
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { mail } from "@dub/types";
@@ -89,13 +89,15 @@ describe("reply after our own reply", () => {
       getSent: vi.fn().mockResolvedValue({ ...ours, textBody: "先ほどの件です" }),
     });
     await openThread(api);
-    await waitFor(() => expect(screen.getByText(/宛先: 山田 花子$/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-inline-to")).toHaveTextContent(/山田 花子$/));
     // 全員に返信 keeps the original Cc in Cc (and never adds ourselves).
     await userEvent.click(screen.getByTestId("fe2-mail-reply-all"));
     await screen.findByTestId("fe2-mail-compose-cc");
     const win = screen.getByTestId("fe2-mail-compose-window");
     expect(win).toHaveTextContent("yuki@example.com");
-    expect(win.textContent).toMatch(/To山田 花子Bcc/); // To = the correspondent only, not info@ (us)
+    // To = the correspondent only, not info@ (us)
+    const toChips = within(screen.getByTestId("fe2-mail-compose-to-field")).getAllByRole("button", { name: /を削除$/ });
+    expect(toChips.map((b) => b.getAttribute("aria-label"))).toEqual(["hanako@example.com を削除"]);
     await userEvent.type(screen.getByTestId("fe2-mail-inline-reply"), "追記です");
     await userEvent.click(screen.getByTestId("fe2-mail-inline-send"));
     const [req] = sendCalls(api)[0]!;

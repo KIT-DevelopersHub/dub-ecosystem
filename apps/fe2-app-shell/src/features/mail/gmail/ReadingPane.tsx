@@ -25,7 +25,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
-import { SenderAvatar } from "./SenderAvatar.tsx";
+import { SenderAvatar, recipientIcon } from "./SenderAvatar.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
 import { BlockSenderMenu, BlockedBanner } from "./BlockedSenders.tsx";
@@ -596,8 +596,17 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             <SenderAvatar p={state.me} size={32} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-2, 8px)", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  宛先: {replyRecipients.map((p) => displayName(p)).join(", ")}
+                <span data-testid="fe2-mail-inline-to" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  宛先:{" "}
+                  {replyRecipients.map((p, i) => (
+                    <span key={p.email}>
+                      {i > 0 ? ", " : null}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--dub-space-1)", verticalAlign: "middle" }}>
+                        {recipientIcon(p)}
+                        {displayName(p)}
+                      </span>
+                    </span>
+                  ))}
                 </span>
                 {!showCcBcc ? (
                   <button type="button" data-testid="fe2-mail-inline-ccbcc-toggle" onClick={() => setShowCcBcc(true)} style={ccBccBtn}>
@@ -607,8 +616,8 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
               </div>
               {showCcBcc ? (
                 <div style={{ marginBottom: "var(--dub-space-2, 8px)" }}>
-                  <EmailAddressSelect variant="flush" label="Cc" value={replyCc} onChange={setReplyCc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} testId="fe2-mail-inline-cc" />
-                  <EmailAddressSelect variant="flush" label="Bcc" value={replyBcc} onChange={setReplyBcc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} testId="fe2-mail-inline-bcc" />
+                  <EmailAddressSelect variant="flush" label="Cc" value={replyCc} onChange={setReplyCc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} renderTokenIcon={recipientIcon} testId="fe2-mail-inline-cc" />
+                  <EmailAddressSelect variant="flush" label="Bcc" value={replyBcc} onChange={setReplyBcc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} renderTokenIcon={recipientIcon} testId="fe2-mail-inline-bcc" />
                 </div>
               ) : null}
               <textarea

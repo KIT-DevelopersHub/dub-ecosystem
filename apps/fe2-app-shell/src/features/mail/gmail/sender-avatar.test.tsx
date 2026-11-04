@@ -4,7 +4,9 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MailApiProvider } from "../MailProvider.tsx";
 import type { MailApi } from "../mailApi.tsx";
-import { SenderAvatar } from "./SenderAvatar.tsx";
+import { EmailAddressSelect } from "@dub/app-ui";
+import { parseRecipients } from "../mailApi.tsx";
+import { SenderAvatar, recipientIcon } from "./SenderAvatar.tsx";
 
 function apiWith(avatars: MailApi["avatars"]): MailApi {
   return { avatars } as unknown as MailApi;
@@ -54,5 +56,23 @@ describe("SenderAvatar", () => {
   it("renders the initial without a MailApi provider", () => {
     render(<SenderAvatar p={{ email: "dave@example.com", name: "Dave" }} />);
     expect(screen.getByTestId("fe2-mail-avatar").textContent).toBe("D");
+  });
+
+  it("shows small icons on To/Cc chips (recipientIcon), Dub users only", async () => {
+    const avatars = vi.fn().mockResolvedValue({ avatars: { "alice@developershub.jp": "https://img.example/alice.png" } });
+    render(
+      <MailApiProvider value={apiWith(avatars)}>
+        <EmailAddressSelect
+          value="Alice <alice@developershub.jp>, stranger@gmail.com"
+          onChange={() => undefined}
+          parse={parseRecipients}
+          renderTokenIcon={recipientIcon}
+        />
+      </MailApiProvider>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId("fe2-mail-avatar-img")).toHaveLength(1));
+    const [alice, stranger] = screen.getAllByTestId("fe2-mail-avatar");
+    expect(alice!.style.width).toBe("18px");
+    expect(stranger!.textContent).toBe("S");
   });
 });
