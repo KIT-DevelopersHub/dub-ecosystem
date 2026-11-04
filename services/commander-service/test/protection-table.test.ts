@@ -115,6 +115,7 @@ describe("route x protection (frozen)", () => {
 
     "GET /runs": OPERATOR,
     "POST /runs": OPERATOR,
+    "POST /runs/reconcile": OPERATOR,
     "GET /runs/:id": OPERATOR,
     "GET /runs/:id/events": OPERATOR,
     "POST /runs/:id/events": OPERATOR,

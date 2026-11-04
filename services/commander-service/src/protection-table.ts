@@ -116,6 +116,7 @@ export const PROTECTION_TABLE = defineProtectionTable({
   // ---- runs: prompts, worktree paths and the full execution log ----
   "GET /runs": OPERATOR,
   "POST /runs": OPERATOR,
+  "POST /runs/reconcile": OPERATOR,
   "GET /runs/:id": OPERATOR,
   "GET /runs/:id/events": OPERATOR,
   "POST /runs/:id/events": OPERATOR,

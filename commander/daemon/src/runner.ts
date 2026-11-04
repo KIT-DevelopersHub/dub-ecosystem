@@ -36,6 +36,8 @@ interface Active {
   timedOut: boolean;
   /** Which timer fired (drives the failure reason). */
   timeoutKind?: "idle" | "hard";
+  /** The daemon is exiting: abortAll() already recorded the failure; close adds nothing. */
+  aborted?: boolean;
 }
 
 export class RunStore {
@@ -163,6 +165,31 @@ export class RunStore {
     return true;
   }
 
+  /**
+   * Daemon shutdown: every live run is about to lose its claude child, so record it as
+   * failed NOW (notice + exit null + status failed, mirrored to the sink) and kill the
+   * child. Returns the aborted run ids. The children's close handlers then add nothing.
+   */
+  abortAll(notice: string): string[] {
+    const ids: string[] = [];
+    for (const [id, a] of this.active) {
+      const run = this.runs.get(id);
+      a.aborted = true;
+      if (a.idleTimer) clearTimeout(a.idleTimer);
+      if (a.hardTimer) clearTimeout(a.hardTimer);
+      a.child.kill("SIGTERM");
+      if (!run) continue;
+      this.emit(run, { type: "stderr", at: new Date().toISOString(), line: notice });
+      run.exitCode = null;
+      run.endedAt = new Date().toISOString();
+      this.emit(run, { type: "exit", at: run.endedAt, code: null });
+      this.setStatus(run, "failed");
+      ids.push(id);
+    }
+    this.active.clear();
+    return ids;
+  }
+
   private setStatus(run: Run, status: Run["status"]): void {
     run.status = status;
     this.emit(run, { type: "status", status, at: new Date().toISOString() });
@@ -285,6 +312,7 @@ export class RunStore {
       if (entry.idleTimer) clearTimeout(entry.idleTimer);
       if (entry.hardTimer) clearTimeout(entry.hardTimer);
       this.active.delete(run.id);
+      if (entry.aborted) return; // abortAll() already settled this run
       if (stdoutBuf.trim()) this.handleStdoutLine(run, stdoutBuf.trim());
       if (stderrBuf) {
         this.emit(run, {

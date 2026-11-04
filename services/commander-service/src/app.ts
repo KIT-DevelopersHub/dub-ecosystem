@@ -6,6 +6,7 @@
 //   POST /features/:id/transition        -> phase gate ({ to, approvedByUser?, note? })
 //   GET  /features/:id/tasks             -> TaskRow[]
 //   POST /features/:id/tasks             -> create task ({ title, status? })
+//   POST /runs/reconcile                 -> fail orphaned pending/running runs (daemon restart)
 //   GET|POST /bundles, PATCH|DELETE /bundles/:id, DELETE /bundles/:id/tasks/:taskId
 //                                        -> staging 合体 (see ./bundles)
 //
@@ -38,6 +39,7 @@ import {
   listRuns,
   listRunEvents,
   appendRunEvent,
+  reconcileOrphanRuns,
   isRunEventType,
   backfillTaskUrls,
   isChatKind,
@@ -229,6 +231,30 @@ export function createApp() {
       sessionId: typeof body?.sessionId === "string" ? body.sessionId : null,
     });
     return c.json({ run }, 201);
+  });
+
+  // Self-heal runs whose daemon died (restart/crash): fail every still-pending/running run
+  // the caller does not own, with a notice. Called by the daemon at boot and on shutdown.
+  // Body (all optional): { ids?: string[], before?: ISO, exceptIds?: string[], line?: string }.
+  app.post("/runs/reconcile", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const strList = (v: unknown): string[] | undefined =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined;
+    const before = typeof body?.before === "string" && !Number.isNaN(Date.parse(body.before))
+      ? body.before
+      : undefined;
+    const line = typeof body?.line === "string" && body.line.trim() !== "" && body.line.length <= 500
+      ? body.line
+      : undefined;
+    const ids = await reconcileOrphanRuns(c.env.DB, {
+      ids: strList(body?.ids),
+      before,
+      exceptIds: strList(body?.exceptIds),
+      line,
+    });
+    // The bundle hook folds a dead bundle run's `exit` into status failed, as for any run.
+    for (const id of ids) await applyBundleRunEvent(c.env.DB, id, "exit", { code: null });
+    return c.json({ reconciled: ids });
   });
 
   app.get("/runs/:id", async (c) => {
