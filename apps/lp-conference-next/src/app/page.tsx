@@ -1,4 +1,5 @@
 import snapshot from "@/config/snapshot.json";
+import supportersFixture from "@/config/supporters.fixture.json";
 import type { LpConfig } from "@/config/types";
 import { MotionRoot } from "@/components/MotionRoot";
 import { ScrollProgress } from "@/components/ScrollProgress";
@@ -27,6 +28,11 @@ import { SectionSlot } from "@/sections/SectionSlot";
 // 公開設定（LP管理）で切り替えるセクションは SectionSlot で包む（sections/variants.tsx）。
 // Hero と Marquee は登録簿に無いので常に出る。
 const config = snapshot as LpConfig;
+// ローカル確認専用: LP_SUPPORTERS_FIXTURE=1 で「支援者情報」をダミー（○○ ○○様）に差し替える。本番ビルドでは使わない。
+const crowdfunding =
+  process.env.LP_SUPPORTERS_FIXTURE === "1"
+    ? { ...config.crowdfunding, supporters: supportersFixture as LpConfig["crowdfunding"]["supporters"] }
+    : config.crowdfunding;
 const siteUrl = config.footer.links[0]?.href;
 
 export default function Page() {
@@ -40,7 +46,7 @@ export default function Page() {
       <SectionSlot id="program" props={{ data: config.program }} />
       <Marquee sub={config.catch.lead} />
       <SectionSlot id="about" props={{ data: config.about }} />
-      <SectionSlot id="crowdfunding" props={{ data: config.crowdfunding }} />
+      <SectionSlot id="crowdfunding" props={{ data: crowdfunding }} />
       <SectionSlot id="vision" props={{ eyebrow: "VISION", statement: config.catch.heading }} />
       <SectionSlot id="contact" props={{ data: config.contact, siteUrl }} />
       <SectionSlot id="footer" props={{ data: config.footer, nav: config.nav }} />
