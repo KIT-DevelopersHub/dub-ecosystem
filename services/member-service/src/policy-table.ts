@@ -65,6 +65,14 @@ export const POLICY_TABLE = definePolicyTable({
   // no actor and no key to demand. Read-only, and the content is authored to be public.
   "GET /members/internal/onboarding": INTERNAL,
 
+  // 公開 面談申し込みフォーム (人事アプリ). api-gateway の PUBLIC GET|POST /api/v1/public/hr-interview-form
+  // が未ログインの応募者のために s2s で転送してくる (POST は gateway で囮フィールド・Turnstile・レート制限を
+  // 通した後)。参加届の公開受付と同じく発信者が居ないので鍵は要求できず INTERNAL。GET が返すのは人事が公開
+  // 前提で書いた質問だけ、POST の応答は accepted のみ (誰が応募済みかは返さない)。回答は
+  // `system:public-hr-interview-form` に帰属し、応募者を 面談日程調整中 で作る (hr-form-service)。
+  "GET /members/internal/hr/interview-form": INTERNAL,
+  "POST /members/internal/hr/interview-form": INTERNAL,
+
   // Self 参加届 (アカウント設定 -> 参加情報), reached through api-gateway's GET|POST
   // /api/v1/me/participation, which authenticates the session and forwards the caller's
   // identity id alongside the marker. Self-scoped by construction: no target id is accepted
@@ -163,6 +171,12 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /members/hr/applicants/:id/notes": appLevel("hr", "edit", "hr:write"),
   "POST /members/hr/applicants/:id/join": appLevel("hr", "edit", "hr:admin"),
   "DELETE /members/hr/applicants/:id": appLevel("hr", "edit", "hr:admin"),
+  // 面談申し込みフォーム: 定義と回答一覧は応募者の個人情報と同格なので 閲覧 + hr:read。定義の編集 (公開ページを
+  // 書き換える) と代理入力 (応募者を作る = POST /applicants と同じ) は 編集 + hr:write。
+  "GET /members/hr/interview-form": appLevel("hr", "view", "hr:read"),
+  "PUT /members/hr/interview-form": appLevel("hr", "edit", "hr:write"),
+  "GET /members/hr/interview-form/responses": appLevel("hr", "view", "hr:read"),
+  "POST /members/hr/interview-form/responses": appLevel("hr", "edit", "hr:write"),
   "GET /members/hr/onboarding": appLevel("hr", "view", "hr:read"),
   "PUT /members/hr/onboarding/:memberId/items/:itemId": appLevel("hr", "edit", "hr:write"),
   // ---- スポンサー (スポンサーアプリ: 名刺の共有) ----

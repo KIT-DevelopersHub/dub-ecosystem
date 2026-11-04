@@ -7,6 +7,7 @@ import { policy } from "@dub/types";
 import { createApp } from "../src/app";
 import { InMemoryMemberRepo } from "../src/memory-repo";
 import { InMemoryHrRepo } from "../src/hr-repo";
+import { InMemoryHrFormRepo } from "../src/hr-form-repo";
 import { InMemorySponsorRepo, type SponsorImageStore } from "../src/sponsor-repo";
 import type { AppDeps } from "../src/types";
 
@@ -70,6 +71,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     newParticipationId: () => `part_${String(seq++).padStart(6, "0")}`,
     newOnboardingItemId: () => `onb_${String(seq++).padStart(6, "0")}`,
     hrRepo: new InMemoryHrRepo(),
+    hrFormRepo: new InMemoryHrFormRepo(),
     newHrId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
     sponsorRepo: new InMemorySponsorRepo(),
     sponsorImages: new FakeImageStore(),

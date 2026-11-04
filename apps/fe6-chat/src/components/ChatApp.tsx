@@ -243,6 +243,10 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
     [api, reloadChannels, onSelect],
   );
 
+  const onChannelPatched = useCallback((channelId: common.ChannelId, patch: Partial<Channel>) => {
+    setChannels((list) => list.map((c) => (c.id === channelId ? { ...c, ...patch } : c)));
+  }, []);
+
   // Hard-deleted channel: drop it locally right away, move off it, then resync.
   const onChannelDeleted = useCallback(
     (deletedId: common.ChannelId) => {
@@ -338,6 +342,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
           onThreadOpenChange={setThreadOpen}
           onSelectChannel={onSelect}
           onChannelsChanged={() => void reloadChannels()}
+          onChannelPatched={onChannelPatched}
           onChannelDeleted={onChannelDeleted}
           onOpenMobileNav={isMobile ? () => setMobileNavOpen(true) : undefined}
           forwardTargets={forwardTargets}

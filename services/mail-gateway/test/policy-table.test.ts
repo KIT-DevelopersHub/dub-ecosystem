@@ -121,6 +121,7 @@ const READS = [
   "GET /mail/sent/:id",
   "GET /mail/sent/:id/attachments/:attId",
   "GET /mail/threads/:id",
+  "POST /mail/avatars",
   "POST /mail/blocks",
   "POST /mail/flags/:threadId",
   "POST /mail/messages/:id/read",
@@ -188,7 +189,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(45);
+    expect(everyRoute).toHaveLength(46);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing

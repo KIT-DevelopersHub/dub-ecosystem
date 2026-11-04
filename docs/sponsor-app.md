@@ -33,7 +33,7 @@
 
 ## データモデル
 
-D1 `member` namespace に新規テーブル 1 つ（`infra/d1/migrations/member/0019_sponsor_cards.sql`、additive）。
+D1 `member` namespace に新規テーブル 1 つ（`infra/d1/migrations/member/0020_sponsor_cards.sql`、additive）。
 
 | テーブル | 役割 |
 |---|---|
@@ -59,7 +59,7 @@ D1 `member` namespace に新規テーブル 1 つ（`infra/d1/migrations/member/
 | `sponsor:admin` ⚠ | 名刺の削除 | admin のみ |
 
 - `APP_MANIFEST` に `sponsor`（domain `sponsor`）を登録 → ロール管理の行と「詳細設定」に自動で出る。
-- `identity/0027_sponsor_app_perms.sql` で `role_sys_admin` にだけ付与。**スポンサーチームの自動ロール**
+- `identity/0029_sponsor_app_perms.sql` で `role_sys_admin` にだけ付与。**スポンサーチームの自動ロール**
   （名簿の所属チームから付く `チーム: スポンサー` 等）にはロール管理から `編集` + `sponsor:read`/`sponsor:write` をオンにする。
 - 表（`services/member-service/src/policy-table.ts`）: 読み取り = `appLevel("sponsor", "view", "sponsor:read")`、
   登録・編集・写真 = `appLevel("sponsor", "edit", "sponsor:write")`、削除 = `appLevel("sponsor", "edit", "sponsor:admin")`。
@@ -108,8 +108,8 @@ D1 `member` namespace に新規テーブル 1 つ（`infra/d1/migrations/member/
 1. demo で確認 → staging で実 backend（D1・R2 往復）を確認 → 本番デプロイ（admin のみ利用可）→
    スポンサーチームのロールに権限を付与 → メンバー公開（`PUBLISHED_APPS` に `sponsor` を足す 1 行）。
 2. **本番デプロイ前に D1 migration を適用する**（前方のみ・additive）:
-   - `infra/d1/migrations/member/0019_sponsor_cards.sql`（新規テーブル）
-   - `infra/d1/migrations/identity/0027_sponsor_app_perms.sql`（admin への 5 キー付与）
+   - `infra/d1/migrations/member/0020_sponsor_cards.sql`（新規テーブル）
+   - `infra/d1/migrations/identity/0029_sponsor_app_perms.sql`（admin への 5 キー付与）
 
 ## フェーズ2 以降の TODO
 

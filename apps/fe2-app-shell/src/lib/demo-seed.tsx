@@ -23,8 +23,10 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, lp as lpValues, common as commonValues } from "@dub/types";
+import { identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
+import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
+import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
@@ -44,7 +46,10 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "file:read",
   "notif:inbox:self",
   "notif:prefs:self",
+  "notif:admin",
   "notif:broadcast_publish",
+  "notif:receive_all",
+  "notif:receive_admin",
   "mail:read",
   "mail:send",
   "mail:admin",
@@ -56,6 +61,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:slack_import",
   "chat:emoji_import",
   "chat:manage_sections",
+  "chat:change_visibility",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -507,7 +513,31 @@ const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
   { id: "ntfn_adm_0005", type: "release", title: "🎉 使用量ダッシュボードを公開しました", body: "各サービスの無料枠の使用状況を確認できます。", audience: "admin", createdAt: "2026-08-02T01:30:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0006", type: "deploy.deployment.status_changed", title: "デプロイ完了: fe2-app-shell", body: "SPA シェルの本番デプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T01:15:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0007", type: "feedback", title: "新しいフィードバック: 通知の一括操作がほしい", body: "カテゴリ: idea\n送信ユーザー: usr_bob\n\n大量に公開する時に一括操作がほしいです", audience: "admin", createdAt: "2026-08-02T01:00:00Z", publishedBroadcastId: null },
+  // ⚙ → 問い合わせ (non-feedback kind) as the backend labels it.
+  { id: "ntfn_adm_0008", type: "feedback", title: "新しい問い合わせ（名刺が切れた）: 希望枚数: 50枚", body: "種別: 名刺が切れた\n送信ユーザー: usr_alice\n発生ページ: ホーム\n\n希望枚数: 50枚", audience: "admin", createdAt: "2026-08-02T00:45:00Z", publishedBroadcastId: null },
 ];
+
+// Demo POST /api/v1/feedback (⚙ → 問い合わせ): file it into the admin list the way the
+// backend's in-app admin notification reads, so the round trip is visible in-session.
+function recordInquiryDemo(body: notification.CreateFeedbackRequest | null): { id: string } {
+  const id = `nfb_demo_${Date.now()}`;
+  const kind = body?.kind ?? "feedback";
+  const label = INQUIRY_KIND_SPECS.find((s) => s.kind === kind)?.label ?? kind;
+  const message = (body?.message ?? "").replace(/\s+/g, " ").trim();
+  const heading = kind === "feedback" ? "フィードバック" : `問い合わせ（${label}）`;
+  const lines = [`種別: ${label}`];
+  if (kind === "feedback") lines.push(`カテゴリ: ${body?.category ?? "other"}`);
+  ADMIN_NOTIFICATIONS.unshift({
+    id: `ntfn_adm_${id}`,
+    type: "feedback",
+    title: `新しい${heading}: ${message.slice(0, 60)}`,
+    body: [...lines, `送信ユーザー: ${ME_ID}`, `発生ページ: ${body?.page?.name ?? "(不明)"}`, "", message].join("\n"),
+    audience: "admin",
+    createdAt: new Date().toISOString(),
+    publishedBroadcastId: null,
+  });
+  return { id };
+}
 
 // Publish one admin notification to members (idempotent). Flips the source row to 公開済み
 // in-session and fans a single members broadcast into the inbox. Returns null on an unknown
@@ -544,6 +574,16 @@ function unpublishAdminNotificationDemo(id: string): notification.UnpublishBroad
 }
 
 // ── mail ────────────────────────────────────────────────────────────────────
+// Icons the demo's Dub users "set" in アカウント設定 (POST /mail/avatars resolves only these).
+function demoPortrait(from: string, to: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="96" height="96" fill="url(#g)"/><circle cx="48" cy="38" r="17" fill="#ffffff" fill-opacity="0.92"/><path d="M16 96c4-20 17-31 32-31s28 11 32 31z" fill="#ffffff" fill-opacity="0.92"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+const DEMO_MAIL_AVATARS: Record<string, string> = {
+  "demo@developershub.jp": demoPortrait("#2563eb", "#7c3aed"),
+  "staff@developershub.jp": demoPortrait("#059669", "#0891b2"),
+  "taro@developershub.jp": demoPortrait("#d97706", "#db2777"),
+};
 // Demo attachment blob store: attId -> bytes (download links serve real bytes in-session).
 const DEMO_MAIL_BLOBS = new Map<string, { filename: string; contentType: string; bytes: Uint8Array }>();
 function seedMailBlob(id: string, filename: string, contentType: string, text: string): mail.MailAttachment {
@@ -636,7 +676,38 @@ MAIL_DETAIL.msg_5 = {
   textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
 };
 
+// Tricky-URL mail (ハイパーリンク表示の回帰確認用): long unbroken URLs, URLs glued to
+// Japanese brackets/punctuation, query/fragment/percent-encoding, Gmail-style
+// "label <url>" plain-text links and an angle-bracketed URL hard-wrapped across lines.
+const MSG_LINKS: mail.MailMessageListItem = {
+  id: "msg_6", messageId: "<m6@demo>", threadId: "thr_6", from: { email: "info@connpass.example", name: "イベント告知" },
+  to: [{ email: "demo@developershub.jp" }], subject: "【リンク確認】参加登録URLと資料のご案内",
+  snippet: "参加登録はこちら https://connpass.example/event/123456/registration/?utm_source=mail&utm_medium=email",
+  receivedAt: daysAgoIso(0.05), read: false, mine: true,
+};
+MAIL_DETAIL.msg_6 = {
+  ...MSG_LINKS,
+  textBody: [
+    "イベント運営チームです。参加登録URLと資料をお送りします。",
+    "",
+    "参加登録はこちら（https://connpass.example/event/123456/registration/?utm_source=mail&utm_medium=email）。",
+    "資料「https://drive.example.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/view?usp=sharing」をご確認ください。",
+    "",
+    "会場マップ: https://maps.example.com/maps/place/%E9%87%91%E6%B2%A2%E5%B7%A5%E6%A5%AD%E5%A4%A7%E5%AD%A6/@36.5310,136.6270,17z/data=!3m1!4b1!4m6!3m5!1s0x5ff8333b2e7d0c4d:0x1234567890abcdef!8m2!3d36.531!4d136.627#map-section",
+    "",
+    "タイムテーブルの詳細<https://conf.example.jp/2026/timetable?day=1&track=A#session-42>",
+    "Markdown形式: [申込フォーム](https://forms.example.com/apply?ref=mail&lang=ja) と [企業ページ](https://ja.wikipedia.org/wiki/Cloudflare_(企業))",
+    "アンケート <https://forms.example.com/d/e/1FAIpQLSf0123456789abcdefghijklmnopqrstuvwxyz/viewform?usp=pp_url&entry.1=",
+    "abc> へのご協力をお願いします。",
+    "",
+    "Wikipedia: https://ja.wikipedia.org/wiki/Cloudflare_(企業)、GitHub: https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/752.",
+    "",
+    "よろしくお願いいたします。",
+  ].join("\n"),
+};
+
 const MAIL_THREAD: Record<string, mail.MailThread> = {
+  thr_6: { id: "thr_6", messages: [MAIL_DETAIL.msg_6!] },
   thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
@@ -738,9 +809,12 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
   "mail:read",
 ];
 
-// チャット 編集 but NOT chat:manage_sections (the default for every non-admin role): sees the
-// org-wide sidebar sections without any organizing UI. ?demo_account=usr_bob previews it.
-const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "chat:manage_sections");
+// チャット 編集 but NOT chat:manage_sections / chat:change_visibility (the default for every
+// non-admin role): sees the org-wide sidebar sections without any organizing UI, and a
+// channel's 公開範囲 without the switch. ?demo_account=usr_bob previews it.
+const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter(
+  (k) => k !== "chat:manage_sections" && k !== "chat:change_visibility",
+);
 
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
@@ -1312,6 +1386,18 @@ function createMailStore() {
       }
     }
 
+    // 送信者アイコン: only Dub users (DEMO_MAIL_AVATARS) resolve; outside senders keep initials.
+    if (method === "POST" && pathname === "/api/v1/mail/avatars") {
+      const emails = Array.isArray((body as { emails?: unknown } | null)?.emails) ? (body as { emails: unknown[] }).emails : null;
+      if (!emails) return validationFailed("emails is required");
+      const avatars: Record<string, string> = {};
+      for (const e of emails) {
+        const key = typeof e === "string" ? e.trim().toLowerCase() : "";
+        if (DEMO_MAIL_AVATARS[key]) avatars[key] = DEMO_MAIL_AVATARS[key];
+      }
+      return json({ avatars } satisfies mail.MailAvatarsResponse);
+    }
+
     // 送信者ブロック (0021): per-account block list in localStorage, with the gateway's
     // validation (lowercase, no own address / org domain, cap) so the preview behaves alike.
     if (method === "GET" && pathname === "/api/v1/mail/blocks") {
@@ -1519,8 +1605,25 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
   "chat:moderate",
   "github:read",
   "notif:send",
+  // 通知 = 閲覧 like prod (identity 0004/0008) + 0028: receives 管理者向け + 全体 notifications.
+  "app:notifications:view",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "notif:broadcast_publish",
+  "notif:admin",
+  "notif:receive_admin",
+  "notif:receive_all",
 ];
-const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read"];
+// 通知 = 閲覧 like prod; 0028 gives every 通知 role 「全体への通知を受け取る」.
+const MEMBER_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "task:read",
+  "app:notifications:view",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "notif:receive_all",
+];
 
 // The roster carries `source` (Email Routing vs. 手動) — extra field over the frozen
 // IdentityUser, read by FE7's RosterUser projection and its 種別 column / sort.
@@ -1669,6 +1772,22 @@ function createRosterStore() {
         }
       }
       if (pathname === "/api/v1/identity/roles") return json(page(roles));
+      // 通知管理「誰に届くか」: derived from the LIVE demo roles, so toggling 「管理者向け通知を
+      // 受け取る」 in ロール管理 changes this summary in the same session (mirrors identity
+      // GET /internal/permission-holders behind notification GET /audiences).
+      if (pathname === "/api/v1/notifications/audiences") {
+        const active = users.filter((u) => u.status === "active");
+        const items: notification.AudienceSummary[] = notificationValues.RECEIVE_AUDIENCES.map((def) => {
+          const holding = roles.filter((r) => (r.permissions as string[]).includes(def.permission));
+          const ids = new Set(holding.flatMap((r) => users.filter((u) => u.roleIds.includes(r.id)).map((u) => u.id)));
+          return {
+            ...def,
+            roles: holding.map((r) => ({ id: r.id, name: r.name, memberCount: users.filter((u) => u.roleIds.includes(r.id)).length })),
+            recipientCount: active.filter((u) => ids.has(u.id)).length,
+          };
+        });
+        return json({ items } satisfies notification.ListAudiencesResponse);
+      }
       if (pathname === "/api/v1/identity/permissions/catalog") return json(identityValues.PERMISSION_CATALOG);
       if (pathname === "/api/v1/audit/logs") {
         const action = url.searchParams.get("action") ?? "identity.";
@@ -2245,6 +2364,30 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       }
     }
     {
+      // Public <-> private, like chat-service: 編集 + chat:change_visibility (403 otherwise),
+      // DM 400, stale version 409, same value = unchanged. Existing members stay.
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/visibility$/.exec(pathname);
+      if (m && method === "PUT") {
+        const perms = currentAccount().permissions;
+        if (!perms.includes("app:chat:edit") || !perms.includes("chat:change_visibility")) {
+          return json({ error: { code: "FORBIDDEN", message: "chat:change_visibility required", retryable: false } } satisfies ErrorResponse, 403);
+        }
+        const c = byId.get(decodeURIComponent(m[1]!));
+        if (!c) return notFound(`PUT ${pathname}`);
+        if (c.type === "dm") return validationFailed("dm_visibility_fixed");
+        const req = (body ?? {}) as { visibility?: unknown; version?: unknown };
+        if (req.visibility !== "public" && req.visibility !== "private") return validationFailed("visibility must be public|private");
+        if (req.version !== (c.version ?? 1)) {
+          return json({ error: { code: "CHAT_VERSION_CONFLICT", message: "version conflict", retryable: false } } satisfies ErrorResponse, 409);
+        }
+        if ((c.visibility ?? "public") !== req.visibility) {
+          c.visibility = req.visibility;
+          c.version = (c.version ?? 1) + 1;
+        }
+        return json(toWire(c));
+      }
+    }
+    {
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const c = byId.get(decodeURIComponent(m[1]!));
@@ -2541,6 +2684,9 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const now = new Date().toISOString();
       for (const n of NOTIFICATIONS) if (n.readAt === null) n.readAt = now;
       return json(null, 204);
+    }
+    if (pathname === "/api/v1/feedback") {
+      return json(recordInquiryDemo(body as notification.CreateFeedbackRequest | null), 201);
     }
     // admin: bulk publish a selection in one request (idempotent, per-item outcomes).
     if (pathname === "/api/v1/notifications/manage/publish-batch") {
@@ -2880,6 +3026,11 @@ function demoJstAt(days: number, hh: number, mm: number): string {
   return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() + days, hh - 9, mm)).toISOString();
 }
 
+/** Now minus `min` minutes, on a whole minute (UTC ISO). */
+function demoNowMinus(min: number): string {
+  return new Date(Math.floor((Date.now() - min * 60_000) / 60_000) * 60_000).toISOString();
+}
+
 function demoMeetUrl(): string {
   const r = (n: number) => Array.from({ length: n }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("");
   return `https://meet.google.com/${r(3)}-${r(4)}-${r(3)}`;
@@ -2902,6 +3053,7 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/abc-defg-hij",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_all",
       attendeeCount: 9,
+      trackAttendance: true,
     },
     {
       ...base,
@@ -2917,6 +3069,23 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/kln-opqr-stu",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_lead",
       attendeeCount: 2,
+      trackAttendance: true,
+    },
+    {
+      ...base,
+      id: "mtg_member_now",
+      title: "メンバー定例",
+      description: "デモ用: いま開催中（開始10分後）の定例。ダッシュボードの「定例に参加」から参加すると出席になります。",
+      targetId: "role_member",
+      targetName: "member",
+      startsAt: demoNowMinus(10),
+      durationMinutes: 60,
+      recurrence: "weekly",
+      until: null,
+      meetUrl: "https://meet.google.com/mem-bers-now",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_member",
+      attendeeCount: 3,
+      trackAttendance: true,
     },
     {
       ...base,
@@ -2932,6 +3101,7 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/vwx-yzab-cde",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_kickoff",
       attendeeCount: 3,
+      trackAttendance: false,
     },
   ];
 }
@@ -2962,9 +3132,12 @@ function createMeetingsDemoStore() {
   };
   const target = (id: string) => DEMO_MEETING_TARGETS.find((t) => t.id === id);
   const BASE = "/api/v1/meetings";
+  const attendance = createAttendanceDemo(read);
 
-  function handle(method: string, pathname: string, body: unknown): Response | null {
+  function handle(method: string, pathname: string, body: unknown, url?: URL): Response | null {
     if (!pathname.startsWith(BASE)) return null;
+    const att = attendance.handle(method, pathname, body, url);
+    if (att) return att;
     if (method === "GET" && pathname === BASE) {
       const res: meeting.ListMeetingsResponse = { items: read(), account: account() };
       return json(res);
@@ -3003,6 +3176,7 @@ function createMeetingsDemoStore() {
         meetUrl: demoMeetUrl(),
         htmlLink: "https://calendar.google.com/calendar/",
         attendeeCount: t.memberCount,
+        trackAttendance: b.trackAttendance ?? false,
         createdBy: ME_ID as meeting.Meeting["createdBy"],
         createdAt: now,
         updatedAt: now,
@@ -3041,6 +3215,299 @@ function createMeetingsDemoStore() {
         write(cur.map((m) => (m.id === id ? next : m)));
         return json(next);
       }
+    }
+    return null;
+  }
+  return { handle };
+}
+
+// ── 定例の出席 (drive-share-service /meetings/:id/join · /me/regulars · /attendance …) ───────
+// Mirrors the service: Meet participant records (seeded for past occurrences: full / short stays,
+// one unmatched Google account per occurrence, an anonymous guest), Google account links, manual and
+// Dub-join records, the threshold and the same precedence (manual > Meet > Dub join). Nothing
+// reaches Google. State lasts for the tab (sessionStorage).
+//   ?demo_account=hanako@developershub.jp — a member (not linked: the dashboard offers Googleと連携)
+//   ?meetApi=missing — the shared account lacks the Meet records scope (再連携が必要)
+const DEMO_ATTENDANCE_KEY = "dub-demo:meeting-attendance-v2";
+const DEMO_REGULAR_PEOPLE: { userId: string; name: string; email: string; roleIds: string[] }[] = [
+  { userId: ME_ID, name: "デモ 管理者", email: "demo@developershub.jp", roleIds: ["role_lead"] },
+  { userId: "usr_lead", name: "統括 山本", email: "lead@developershub.jp", roleIds: ["role_lead"] },
+  { userId: "usr_bob", name: "佐藤 太郎", email: "taro@developershub.jp", roleIds: ["role_maintainer"] },
+  { userId: "usr_emi", name: "山田 恵美", email: "emi@developershub.jp", roleIds: ["role_maintainer"] },
+  { userId: "usr_member", name: "一般メンバー 花子", email: "hanako@developershub.jp", roleIds: ["role_member"] },
+  { userId: "usr_carol", name: "鈴木 一郎", email: "ichiro@developershub.jp", roleIds: ["role_member"] },
+  { userId: "usr_frank", name: "高橋 文人", email: "fumito@developershub.jp", roleIds: ["role_member"] },
+];
+/** Members whose Google account is linked from the start (佐藤 太郎 and 花子 are not). */
+const DEMO_LINKED = ["usr_demo", "usr_lead", "usr_emi", "usr_carol", "usr_frank"];
+
+interface DemoAttendanceState {
+  records: (Omit<meeting.AttendanceRecord, "meet"> & { meetingId: string; date: string; source: "manual" | "join" })[];
+  participants: (Omit<meeting.MeetParticipant, "userId" | "suggestions"> & { meetingId: string; date: string })[];
+  ingests: Record<string, meeting.MeetIngestState>;
+  links: Record<string, string>;
+  minPercent: number;
+  lastRunAt: string | null;
+}
+
+function createAttendanceDemo(meetings: () => meeting.Meeting[]) {
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  const jstToday = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const expected = (targetId: string) =>
+    DEMO_REGULAR_PEOPLE.filter((p) => targetId === meetingValues.ALL_MEMBERS_TARGET_ID || p.roleIds.includes(targetId));
+  const started = (m: meeting.Meeting, from: string, to: string) =>
+    meetingValues.occurrenceStarts(m, from, to).filter((o) => Date.parse(o.startsAt) <= Date.now());
+  const ended = (m: meeting.Meeting, o: meeting.OccurrenceStart) => Date.parse(o.startsAt) + m.durationMinutes * 60_000 <= Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  function seed(): DemoAttendanceState {
+    const st: DemoAttendanceState = { records: [], participants: [], ingests: {}, links: {}, minPercent: meetingValues.DEFAULT_MIN_ATTEND_PERCENT, lastRunAt: null };
+    for (const id of DEMO_LINKED) st.links[`g_${id}`] = id;
+    const today = jstToday();
+    for (const m of meetings()) {
+      if (!m.trackAttendance || m.id === "mtg_member_now") continue;
+      for (const [i, o] of started(m, addDays(today, -182), today).entries()) {
+        if (!ended(m, o)) continue;
+        const s = Date.parse(o.startsAt);
+        const len = m.durationMinutes * 60;
+        expected(m.targetId).forEach((p, j) => {
+          const k = (i * 3 + j * 5) % 9;
+          if (k === 0) return; // 欠席 (not in the Meet)
+          if (k === 1) {
+            st.records.push({ meetingId: m.id, date: o.date, userId: p.userId, status: "excused", source: "manual", joinedAt: null, recordedBy: ME_ID, updatedAt: o.startsAt });
+            return;
+          }
+          const short = k === 2; // in the Meet only 8 minutes -> below the threshold
+          const join = s + (j % 4) * 60_000;
+          const secs = short ? 8 * 60 : len - (j % 4) * 60 - (k % 3) * 60;
+          const gid = p.userId === "usr_bob" || p.userId === "usr_member" ? `g_${p.userId}_personal` : `g_${p.userId}`;
+          st.participants.push({
+            meetingId: m.id,
+            date: o.date,
+            key: `u:${gid}`,
+            kind: "signed_in",
+            displayName: p.userId === "usr_bob" ? "佐藤太郎" : p.userId === "usr_member" ? "Hanako (personal)" : p.name,
+            googleUserId: gid,
+            firstJoin: iso(join),
+            lastLeave: iso(join + secs * 1000),
+            durationSeconds: secs,
+            approx: false,
+          });
+        });
+        st.participants.push({
+          meetingId: m.id,
+          date: o.date,
+          key: `conferenceRecords/demo/participants/guest-${i}`,
+          kind: "anonymous",
+          displayName: "見学（ゲスト）",
+          googleUserId: null,
+          firstJoin: iso(s + 5 * 60_000),
+          lastLeave: iso(s + 25 * 60_000),
+          durationSeconds: 20 * 60,
+          approx: false,
+        });
+        const at = iso(s + (m.durationMinutes + 15) * 60_000);
+        st.ingests[`${m.id}|${o.date}`] = { status: "done", ingestedAt: at, error: null };
+        if (!st.lastRunAt || at > st.lastRunAt) st.lastRunAt = at;
+      }
+    }
+    return st;
+  }
+  let memory: DemoAttendanceState | null = null;
+  const state = (): DemoAttendanceState => {
+    const raw = storage()?.getItem(DEMO_ATTENDANCE_KEY);
+    if (raw) return JSON.parse(raw) as DemoAttendanceState;
+    return (memory ??= seed());
+  };
+  const save = (next: DemoAttendanceState) => {
+    memory = next;
+    storage()?.setItem(DEMO_ATTENDANCE_KEY, JSON.stringify(next));
+  };
+  const meetReady = () => typeof window === "undefined" || new URLSearchParams(window.location.search).get("meetApi") !== "missing";
+  const openOcc = (m: meeting.Meeting) => {
+    const today = jstToday();
+    return (
+      meetingValues.occurrenceStarts(m, addDays(today, -1), addDays(today, 1)).find((o) => {
+        const s = Date.parse(o.startsAt);
+        return Date.now() >= s - meetingValues.JOIN_WINDOW_BEFORE_MINUTES * 60_000 && Date.now() <= s + m.durationMinutes * 60_000;
+      }) ?? null
+    );
+  };
+  const norm = (v: string) => v.normalize("NFKC").toLowerCase().replace(/[\s・._\-()（）]/g, "");
+
+  function report(from: string, to: string): meeting.AttendanceReportResponse {
+    const st = state();
+    const tally = new Map<string, { expected: number; present: number; excused: number }>();
+    const list: meeting.AttendanceMeeting[] = meetings()
+      .filter((m) => m.trackAttendance)
+      .map((m) => {
+        const people = expected(m.targetId);
+        const threshold = Math.ceil((m.durationMinutes * 60 * st.minPercent) / 100);
+        const occurrences = started(m, from, to)
+          .reverse()
+          .map((o): meeting.AttendanceOccurrence => {
+            const parts = st.participants
+              .filter((p) => p.meetingId === m.id && p.date === o.date)
+              .map(({ meetingId: _m, date: _d, ...p }) => ({ ...p, userId: p.googleUserId ? st.links[p.googleUserId] ?? null : null }));
+            const matched = new Set(parts.map((p) => p.userId).filter((x): x is string => !!x));
+            const recs = st.records.filter((r) => r.meetingId === m.id && r.date === o.date);
+            const ids = new Set([...recs.map((r) => r.userId), ...matched]);
+            const records: meeting.AttendanceRecord[] = [];
+            for (const userId of ids) {
+              const mine = parts.filter((p) => p.userId === userId);
+              const meet: meeting.MeetPresence | null = mine.length
+                ? {
+                    firstJoin: mine.map((p) => p.firstJoin).sort()[0]!,
+                    lastLeave: mine.some((p) => !p.lastLeave) ? null : mine.map((p) => p.lastLeave!).sort().at(-1)!,
+                    durationSeconds: mine.reduce((a, p) => a + p.durationSeconds, 0),
+                    approx: false,
+                  }
+                : null;
+              const manual = recs.find((r) => r.userId === userId && r.source === "manual");
+              const join = recs.find((r) => r.userId === userId && r.source === "join");
+              const joinedAt = join?.joinedAt ?? null;
+              if (manual) records.push({ userId, status: manual.status, source: "manual", joinedAt, meet, recordedBy: manual.recordedBy, updatedAt: manual.updatedAt });
+              else if (meet) records.push({ userId, status: meet.durationSeconds >= threshold ? "present" : "absent", source: "meet_api", joinedAt, meet, recordedBy: null, updatedAt: null });
+              else if (join) records.push({ userId, status: "present", source: "join", joinedAt, meet: null, recordedBy: null, updatedAt: join.updatedAt });
+            }
+            const candidates = people.filter((p) => !matched.has(p.userId));
+            return {
+              ...o,
+              records,
+              participants: parts.map((p) => ({
+                ...p,
+                suggestions:
+                  !p.userId && p.kind === "signed_in"
+                    ? candidates.filter((c) => norm(c.name) === norm(p.displayName) || norm(p.displayName).includes(norm(c.name.split(/\s+/).at(-1) ?? "~"))).map((c) => ({ userId: c.userId, name: c.name }))
+                    : [],
+              })),
+              ingest: st.ingests[`${m.id}|${o.date}`] ?? null,
+            };
+          });
+        for (const p of people) {
+          const t = tally.get(p.userId) ?? { expected: 0, present: 0, excused: 0 };
+          t.expected += occurrences.length;
+          for (const o of occurrences) {
+            const r = o.records.find((x) => x.userId === p.userId);
+            if (r?.status === "present") t.present++;
+            else if (r?.status === "excused") t.excused++;
+          }
+          tally.set(p.userId, t);
+        }
+        return { id: m.id, title: m.title, targetId: m.targetId, targetName: m.targetName, kind: meetingValues.regularKindOf(m.targetId), durationMinutes: m.durationMinutes, recurrence: m.recurrence, expectedUserIds: people.map((p) => p.userId), occurrences };
+      });
+    const members: meeting.AttendanceMember[] = DEMO_REGULAR_PEOPLE.filter((p) => tally.has(p.userId))
+      .map((p) => {
+        const t = tally.get(p.userId)!;
+        const denom = t.expected - t.excused;
+        return { userId: p.userId, name: p.name, email: p.email, ...t, rate: denom > 0 ? t.present / denom : null };
+      })
+      .sort((a, b) => (a.rate ?? 2) - (b.rate ?? 2) || a.name.localeCompare(b.name, "ja"));
+    return { from, to, settings: { minPercent: st.minPercent }, meetApi: { ready: meetReady(), lastRunAt: st.lastRunAt }, meetings: list, members };
+  }
+
+  function handle(method: string, pathname: string, body: unknown, url?: URL): Response | null {
+    const me = currentAccount().id;
+    const P = "/api/v1/meetings";
+    if (method === "GET" && pathname === `${P}/me/regulars`) {
+      const st = state();
+      const person = DEMO_REGULAR_PEOPLE.find((p) => p.userId === me);
+      const today = jstToday();
+      const items: meeting.MyRegularMeeting[] = person
+        ? meetings()
+            .filter((m) => m.trackAttendance && (m.targetId === meetingValues.ALL_MEMBERS_TARGET_ID || person.roleIds.includes(m.targetId)))
+            .map((m) => {
+              const open = openOcc(m);
+              const next = open ?? meetingValues.occurrenceStarts(m, today, addDays(today, 62)).find((o) => Date.parse(o.startsAt) > Date.now()) ?? null;
+              const attended = !!open && st.records.some((r) => r.meetingId === m.id && r.date === open.date && r.userId === me && r.source === "join");
+              return { id: m.id, title: m.title, targetName: m.targetName, kind: meetingValues.regularKindOf(m.targetId), meetUrl: m.meetUrl, next, durationMinutes: m.durationMinutes, joinOpen: !!open, attended };
+            })
+            .sort((a, b) => Number(b.joinOpen) - Number(a.joinOpen) || (a.next?.startsAt ?? "~").localeCompare(b.next?.startsAt ?? "~"))
+        : [];
+      return json({ items, googleLinked: Object.values(st.links).includes(me) } satisfies meeting.ListMyRegularMeetingsResponse);
+    }
+    const joinM = /^\/api\/v1\/meetings\/([^/]+)\/join$/.exec(pathname);
+    if (method === "POST" && joinM) {
+      const m = meetings().find((x) => x.id === decodeURIComponent(joinM[1]!));
+      if (!m) return problem("NOT_FOUND", "meeting not found", 404);
+      if (!expected(m.targetId).some((p) => p.userId === me)) return problem("FORBIDDEN", "この定例の対象メンバーではありません。", 403);
+      const occ = m.trackAttendance ? openOcc(m) : null;
+      if (occ) {
+        const st = state();
+        if (!st.records.some((r) => r.meetingId === m.id && r.date === occ.date && r.userId === me && r.source === "join")) {
+          const now = new Date().toISOString();
+          st.records.push({ meetingId: m.id, date: occ.date, userId: me, status: "present", source: "join", joinedAt: now, recordedBy: me, updatedAt: now });
+          save(st);
+        }
+      }
+      return json({ meetUrl: m.meetUrl, recordedFor: occ?.date ?? null } satisfies meeting.JoinMeetingResponse);
+    }
+    if (method === "GET" && pathname === `${P}/attendance`) {
+      const to = url?.searchParams.get("to") || jstToday();
+      const from = url?.searchParams.get("from") || addDays(to, -83);
+      return json(report(from, to));
+    }
+    if (method === "POST" && pathname === `${P}/attendance/ingest`) {
+      if (!meetReady()) return json({ occurrences: 0, participants: 0, complete: true, skipped: "scope_missing" } satisfies meeting.IngestAttendanceResponse);
+      const st = state();
+      st.lastRunAt = new Date().toISOString();
+      save(st);
+      return json({ occurrences: 0, participants: 0, complete: true, skipped: null } satisfies meeting.IngestAttendanceResponse);
+    }
+    if (method === "PUT" && pathname === `${P}/attendance/settings`) {
+      const v = Number(((body ?? {}) as Partial<meeting.AttendanceSettings>).minPercent);
+      if (!Number.isInteger(v) || v < 1 || v > 100) return problem("VALIDATION_FAILED", "出席とみなす割合は 1〜100% の整数で指定してください。", 400);
+      const st = state();
+      st.minPercent = v;
+      save(st);
+      return json({ minPercent: v } satisfies meeting.AttendanceSettings);
+    }
+    const linkM = /^\/api\/v1\/meetings\/attendance\/links\/([^/]+)$/.exec(pathname);
+    if (linkM && (method === "PUT" || method === "DELETE")) {
+      const st = state();
+      const gid = decodeURIComponent(linkM[1]!);
+      if (method === "PUT") {
+        const userId = ((body ?? {}) as Partial<meeting.ConfirmParticipantRequest>).userId;
+        if (!userId || !DEMO_REGULAR_PEOPLE.some((p) => p.userId === userId)) return problem("VALIDATION_FAILED", "そのメンバーが見つかりません。", 400);
+        st.links[gid] = userId;
+      } else delete st.links[gid];
+      save(st);
+      return json({ ok: true });
+    }
+    const setM = /^\/api\/v1\/meetings\/([^/]+)\/attendance\/([^/]+)\/([^/]+)$/.exec(pathname);
+    if (method === "PUT" && setM) {
+      const [meetingId, date, userId] = [setM[1]!, setM[2]!, setM[3]!].map(decodeURIComponent) as [string, string, string];
+      const status = ((body ?? {}) as meeting.SetAttendanceRequest).status ?? null;
+      const st = state();
+      st.records = st.records.filter((r) => !(r.meetingId === meetingId && r.date === date && r.userId === userId && r.source === "manual"));
+      if (status === null) {
+        save(st);
+        return json({ record: null } satisfies meeting.SetAttendanceResponse);
+      }
+      const now = new Date().toISOString();
+      st.records.push({ meetingId, date, userId, status, source: "manual", joinedAt: null, recordedBy: me, updatedAt: now });
+      save(st);
+      return json({ record: { userId, status, source: "manual", joinedAt: null, meet: null, recordedBy: me, updatedAt: now } } satisfies meeting.SetAttendanceResponse);
+    }
+    if (method === "POST" && pathname === `${P}/me/google-link/start`) {
+      // No Google in the demo: come straight back to the return page with a fake code.
+      const origin = typeof window === "undefined" ? "https://demo.local" : window.location.origin;
+      return json({ authUrl: `${origin}/driveshare?code=demo&state=${meetingValues.GOOGLE_LINK_STATE_PREFIX}demo${Date.now()}` } satisfies meeting.StartGoogleLinkResponse);
+    }
+    if (method === "POST" && pathname === `${P}/me/google-link/callback`) {
+      const st = state();
+      // The member's personal Google account (seeded as an unmatched participant) becomes theirs.
+      const personal = `g_${me}_personal`;
+      st.links[st.participants.some((p) => p.googleUserId === personal) ? personal : `g_${me}`] = me;
+      save(st);
+      return json({ googleLinked: true });
     }
     return null;
   }
@@ -5265,6 +5732,16 @@ export function createDemoFetch(): typeof fetch {
   const meetingsStore = createMeetingsDemoStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
+  // 人事 > 面談申し込みフォーム (回答は上の人事 demo の POST /applicants を通して応募者になる)。
+  const hrInterviewFormStore = createHrInterviewFormDemoStore({
+    createApplicant: async (body) =>
+      (await membersStore.handle("POST", "/api/v1/members/hr/applicants", new URL("https://demo.local"), body)!.json()) as hr.ApplicantDetail,
+    listApplicants: async () =>
+      (await membersStore.handle("GET", "/api/v1/members/hr/applicants", new URL("https://demo.local"), undefined)!.json()) as hr.ListApplicantsResponse,
+    addNote: async (id, text) => {
+      membersStore.handle("POST", `/api/v1/members/hr/applicants/${id}/notes`, new URL("https://demo.local"), { body: text });
+    },
+  });
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
   const chatStore = createChatStore({ addUsers: roster.addUsers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
@@ -5358,6 +5835,9 @@ export function createDemoFetch(): typeof fetch {
       }
     }
 
+    const hrFormHit = await hrInterviewFormStore.handle(method, url.pathname, url, parsedBody);
+    if (hrFormHit) return hrFormHit;
+
     const sponsorHit = await sponsorStore.handle(method, url.pathname, parsedBody, init?.body, new Headers(init?.headers));
     if (sponsorHit) return sponsorHit;
 
@@ -5365,7 +5845,7 @@ export function createDemoFetch(): typeof fetch {
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
-      meetingsStore.handle(method, url.pathname, parsedBody) ??
+      meetingsStore.handle(method, url.pathname, parsedBody, url) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??

@@ -1,6 +1,6 @@
 // Reading pane: the opened conversation. Older messages collapse to a one-line
 // summary (Gmail behaviour); the newest stays expanded. Header carries the
-// subject, star and archive/delete actions; each message shows a round initial
+// subject, star and archive/delete actions; each message shows a round sender
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -10,10 +10,8 @@ import type { mail } from "@dub/types";
 import { isImageType } from "../attach.ts";
 import {
   addressCandidates,
-  avatarColor,
   displayName,
   fullDate,
-  initial,
   pendingReplyIds,
   replyPlan,
   replyNudge,
@@ -27,6 +25,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
+import { SenderAvatar, recipientIcon } from "./SenderAvatar.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
 import { BlockSenderMenu, BlockedBanner } from "./BlockedSenders.tsx";
@@ -39,30 +38,8 @@ import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
 import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
+import { LinkifiedText } from "../MailBody.tsx";
 import { formatBytes, newIdempotencyKey, parseRecipients, saveBlob } from "../mailApi.tsx";
-
-function Avatar({ p, size = 36 }: { p: MailPerson; size?: number }): JSX.Element {
-  return (
-    <span
-      aria-hidden
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "var(--dub-radius-full)",
-        background: avatarColor(p),
-        color: "#fff",
-        fontSize: size * 0.42,
-        fontWeight: 700,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-      }}
-    >
-      {initial(p)}
-    </span>
-  );
-}
 
 function quote(msg: MailMsg): string {
   const when = fullDate(msg.date);
@@ -236,7 +213,7 @@ function MessageBlock({
         onClick={() => setOpen((v) => !v)}
         style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
       >
-        <Avatar p={msg.from} />
+        <SenderAvatar p={msg.from} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
             <strong style={{ fontSize: "var(--dub-font-size-sm)", whiteSpace: "nowrap", flexShrink: 0 }}>{displayName(msg.from)}</strong>
@@ -300,20 +277,17 @@ function MessageBlock({
         </span>
       </div>
       {open ? (
-        <div
-          data-testid="fe2-mail-body-text"
+        <LinkifiedText
+          testId="fe2-mail-body-text"
+          text={msg.body}
           style={{
             marginTop: 16,
             marginLeft: 48,
             fontSize: "var(--dub-font-size-sm)",
             lineHeight: 1.6,
             color: "var(--dub-color-text-primary)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
           }}
-        >
-          {msg.body}
-        </div>
+        />
       ) : null}
       {open ? <Attachments msg={msg} /> : null}
       {details ? <MessageDetailsDialog msg={msg} subject={subject} own={own} onClose={() => setDetails(false)} /> : null}
@@ -617,11 +591,20 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
 
         <div style={{ padding: "0 24px 24px" }}>
           <div style={{ display: "flex", gap: 12, border: "1px solid var(--dub-color-border-strong)", borderRadius: "var(--dub-radius-lg)", padding: 12 }}>
-            <Avatar p={state.me} size={32} />
+            <SenderAvatar p={state.me} size={32} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-2, 8px)", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  宛先: {replyRecipients.map((p) => displayName(p)).join(", ")}
+                <span data-testid="fe2-mail-inline-to" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  宛先:{" "}
+                  {replyRecipients.map((p, i) => (
+                    <span key={p.email}>
+                      {i > 0 ? ", " : null}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--dub-space-1)", verticalAlign: "middle" }}>
+                        {recipientIcon(p)}
+                        {displayName(p)}
+                      </span>
+                    </span>
+                  ))}
                 </span>
                 {!showCcBcc ? (
                   <button type="button" data-testid="fe2-mail-inline-ccbcc-toggle" onClick={() => setShowCcBcc(true)} style={ccBccBtn}>
@@ -631,8 +614,8 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
               </div>
               {showCcBcc ? (
                 <div style={{ marginBottom: "var(--dub-space-2, 8px)" }}>
-                  <EmailAddressSelect variant="flush" label="Cc" value={replyCc} onChange={setReplyCc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} testId="fe2-mail-inline-cc" />
-                  <EmailAddressSelect variant="flush" label="Bcc" value={replyBcc} onChange={setReplyBcc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} testId="fe2-mail-inline-bcc" />
+                  <EmailAddressSelect variant="flush" label="Cc" value={replyCc} onChange={setReplyCc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} renderTokenIcon={recipientIcon} testId="fe2-mail-inline-cc" />
+                  <EmailAddressSelect variant="flush" label="Bcc" value={replyBcc} onChange={setReplyBcc} parse={parseRecipients} candidates={candidates} removeIcon={<MailIcon name="x" size={12} />} renderTokenIcon={recipientIcon} testId="fe2-mail-inline-bcc" />
                 </div>
               ) : null}
               <textarea

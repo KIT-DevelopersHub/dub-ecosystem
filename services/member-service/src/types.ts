@@ -5,6 +5,7 @@
 import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
+import type { HrFormRepo } from "./hr-form-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
 import type { RoleSyncPort } from "./roleSync";
 
@@ -188,8 +189,10 @@ export interface AppDeps {
   newOnboardingItemId: () => string;
   /** 人事 (member_hr_*) の永続化。名簿リポジトリとは分けてある (hr-repo.ts)。 */
   hrRepo: HrRepo;
-  /** 人事の id 採番 (app = 応募者 / hre = 履歴)。 */
-  newHrId: (prefix: "app" | "hre") => string;
+  /** 面談申し込みフォーム (member_hr_forms / member_hr_form_responses) の永続化 (hr-form-repo.ts)。 */
+  hrFormRepo: HrFormRepo;
+  /** 人事の id 採番 (app = 応募者 / hre = 履歴 / hfr = フォームの回答)。 */
+  newHrId: (prefix: "app" | "hre" | "hfr") => string;
   /** スポンサー (member_sponsor_cards) の永続化 (sponsor-repo.ts)。 */
   sponsorRepo: SponsorRepo;
   /** 名刺写真の置き場 (本番 R2 SPONSOR_FILES)。undefined なら写真ルートだけ 503。 */

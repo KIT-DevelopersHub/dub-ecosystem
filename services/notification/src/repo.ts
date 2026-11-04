@@ -148,7 +148,7 @@ export async function backfillBroadcastInbox(db: DbClient, userId: string): Prom
  * (deploy hook) that never fanned out to individual admins — becomes visible to every
  * admin/maintainer on their next inbox read, WITHOUT the producer needing to know admin
  * user ids. This is what lets the CI deploy-notify be a single idempotent INSERT of one
- * notification row. Callers MUST gate on isAdminViewer (only admins get admin-audience
+ * notification row. Callers MUST gate on receiverFlags().admin (only notif:receive_admin holders get admin-audience
  * rows). Idempotent (NOT EXISTS + INSERT OR IGNORE); cheap for the same reasons as the
  * broadcast backfill (retention purge bounds the admin-audience row count). Returns rows
  * newly created. notif_* tables only (@dub/db guard).
@@ -523,6 +523,7 @@ interface FeedbackRow {
   id: string;
   user_id: string;
   category: notification.FeedbackCategory;
+  kind: notification.InquiryKind;
   message: string;
   page_url: string | null;
   page_name: string | null;
@@ -537,6 +538,7 @@ function rowToFeedbackItem(r: FeedbackRow): notification.FeedbackItem {
     id: r.id,
     userId: r.user_id,
     category: r.category,
+    kind: r.kind,
     message: r.message,
     pageUrl: r.page_url,
     pageName: r.page_name,
@@ -548,6 +550,7 @@ function rowToFeedbackItem(r: FeedbackRow): notification.FeedbackItem {
 export interface InsertFeedbackInput {
   userId: string;
   category: notification.FeedbackCategory;
+  kind: notification.InquiryKind;
   message: string;
   pageUrl: string | null;
   pageName: string | null;
@@ -561,11 +564,12 @@ export async function insertFeedback(db: DbClient, input: InsertFeedbackInput): 
   const now = nowIso();
   await db.run(
     `INSERT INTO notif_feedback
-       (id, user_id, category, message, page_url, page_name, user_agent, request_id, read_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+       (id, user_id, category, kind, message, page_url, page_name, user_agent, request_id, read_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     id,
     input.userId,
     input.category,
+    input.kind,
     input.message,
     input.pageUrl,
     input.pageName,
@@ -574,7 +578,7 @@ export async function insertFeedback(db: DbClient, input: InsertFeedbackInput): 
     now,
   );
   const row = await db.first<FeedbackRow>(
-    `SELECT id, user_id, category, message, page_url, page_name, user_agent, request_id, read_at, created_at
+    `SELECT id, user_id, category, kind, message, page_url, page_name, user_agent, request_id, read_at, created_at
      FROM notif_feedback WHERE id = ?`,
     id,
   );
@@ -596,7 +600,7 @@ export async function listFeedback(
   }
   const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const rows = await db.all<FeedbackRow>(
-    `SELECT id, user_id, category, message, page_url, page_name, user_agent, request_id, read_at, created_at
+    `SELECT id, user_id, category, kind, message, page_url, page_name, user_agent, request_id, read_at, created_at
      FROM notif_feedback ${clause}
      ORDER BY id DESC
      LIMIT ?`,

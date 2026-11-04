@@ -4,11 +4,12 @@
 //   canEdit   (chat:moderate or channel admin) -> name / topic / archive / add+remove members
 //   onDelete  (chat:delete_channel, non-DM)     -> irreversible delete (typed-checkbox gate)
 //   onLeave   (a member of a non-DM channel)    -> leave
+//   onChangeVisibility (編集 + chat:change_visibility, non-DM) -> public <-> private
 // Edits are optimistic in the caller (ChannelPage); this component only drives the UI.
 import { useEffect, useMemo, useState } from "react";
 import { Avatar, Button, ConfirmDialog, Modal, SkeletonList, Tabs } from "@dub/ui";
 import type { common, identity } from "@dub/types";
-import type { Channel, ChannelMember, ChatSection } from "../api/contract";
+import type { Channel, ChannelMember, ChannelVisibility, ChatSection } from "../api/contract";
 import { normalizeChannelName } from "./CreateChannelModal";
 import styles from "../styles/chat.module.css";
 
@@ -36,6 +37,7 @@ export interface ChannelDetailsProps {
   onRemoveMember: (userId: common.UserId) => void;
   onLeave?: () => Promise<void>;
   onDelete?: () => Promise<void>;
+  onChangeVisibility?: (visibility: ChannelVisibility) => Promise<void>;
   sections?: ChannelDetailsSections;
 }
 
@@ -78,7 +80,7 @@ export function ChannelDetails(props: ChannelDetailsProps) {
 
 function AboutTab({ channel, canEdit, onUpdate, onLeave }: ChannelDetailsProps) {
   const [leaveOpen, setLeaveOpen] = useState(false);
-  const kind = channel.type === "event" ? "イベントチャンネル" : channel.visibility === "private" ? "プライベートチャンネル" : "パブリックチャンネル";
+  const kind = channel.type === "event" ? "イベントチャンネル" : channel.visibility === "private" ? "Private チャンネル" : "Public チャンネル";
   return (
     <div className={styles.detailsStack}>
       <div className={styles.detailsCard}>
@@ -128,8 +130,8 @@ function AboutTab({ channel, canEdit, onUpdate, onLeave }: ChannelDetailsProps) 
           title={`#${channel.name} から退出しますか？`}
           message={
             channel.visibility === "private"
-              ? "プライベートチャンネルのため、再度招待されるまで参加・閲覧できなくなります。"
-              : "サイドバーから外れます。パブリックチャンネルなので、あとから再参加できます。"
+              ? "Private チャンネルのため、再度招待されるまで参加・閲覧できなくなります。"
+              : "サイドバーから外れます。Public チャンネルなので、あとから再参加できます。"
           }
           confirmLabel="退出する"
           onConfirm={async () => {
@@ -433,13 +435,15 @@ function AddMembersPanel({
 
 /* ── 設定 ─────────────────────────────────────────────────────────────────── */
 
-function SettingsTab({ channel, canEdit, onUpdate, onDelete, sections }: ChannelDetailsProps) {
+function SettingsTab({ channel, canEdit, onUpdate, onDelete, onChangeVisibility, sections }: ChannelDetailsProps) {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const canArchive = canEdit && channel.type !== "dm";
 
   return (
     <div className={styles.detailsStack}>
+      {channel.type !== "dm" && <VisibilityCard channel={channel} onChange={onChangeVisibility} />}
+
       {sections && (
         <div className={styles.detailsCard}>
           <div className={styles.detailsRow}>
@@ -511,6 +515,61 @@ function SettingsTab({ channel, canEdit, onUpdate, onDelete, sections }: Channel
         testId="fe6-settings-archive-confirm"
       />
       {onDelete && <DeleteChannelDialog open={deleteOpen} channel={channel} onDelete={onDelete} onClose={() => setDeleteOpen(false)} />}
+    </div>
+  );
+}
+
+const VISIBILITY_COPY: Record<ChannelVisibility, { label: string; help: string }> = {
+  public: { label: "Public", help: "組織の全員が閲覧・参加できます。" },
+  private: { label: "Private", help: "招待されたメンバーだけが閲覧できます。" },
+};
+
+// 公開範囲: everyone sees the current value; only onChange holders get 「変更」.
+// Both directions go through a confirm (going public exposes the whole history).
+function VisibilityCard({ channel, onChange }: { channel: Channel; onChange: ChannelDetailsProps["onChangeVisibility"] }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const current = VISIBILITY_COPY[channel.visibility];
+  const target: ChannelVisibility = channel.visibility === "private" ? "public" : "private";
+  const toPublic = target === "public";
+
+  return (
+    <div className={styles.detailsCard}>
+      <div className={styles.detailsRow}>
+        <div className={styles.detailsRowMain}>
+          <span className={styles.detailsLabel}>公開範囲</span>
+          <span className={styles.detailsValue} data-testid="fe6-settings-visibility">
+            {channel.visibility === "private" ? "🔒 " : "# "}
+            {current.label}
+          </span>
+          <span className={styles.detailsHelp}>
+            {onChange ? current.help : `${current.help}変更はロール管理で「チャンネルの公開範囲を変更」を許可された人だけが行えます。`}
+          </span>
+        </div>
+        {onChange && (
+          <button type="button" className={styles.detailsEditLink} onClick={() => setConfirmOpen(true)} data-testid="fe6-settings-visibility-change">
+            {toPublic ? "Public にする" : "Private にする"}
+          </button>
+        )}
+      </div>
+      {onChange && (
+        <ConfirmDialog
+          open={confirmOpen}
+          title={`#${channel.name} を ${VISIBILITY_COPY[target].label} チャンネルに変更しますか？`}
+          message={
+            toPublic
+              ? "組織の全員が、これまでのメッセージを含めてこのチャンネルを閲覧できるようになります。"
+              : "メンバー以外はこのチャンネルを見られなくなります。今のメンバーはそのまま残ります。"
+          }
+          confirmLabel={`${VISIBILITY_COPY[target].label} に変更する`}
+          danger={toPublic}
+          onConfirm={async () => {
+            setConfirmOpen(false);
+            await onChange(target).catch(() => undefined);
+          }}
+          onCancel={() => setConfirmOpen(false)}
+          testId="fe6-settings-visibility-confirm"
+        />
+      )}
     </div>
   );
 }

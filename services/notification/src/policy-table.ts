@@ -18,7 +18,7 @@
 // comment for the prod incident that forced the second mount.
 //
 // The gate keys on the route PATTERN Hono matched, so the two mounts are two distinct
-// routes and each needs its own line — a table that listed only one prefix would leave 16
+// routes and each needs its own line — a table that listed only one prefix would leave 17
 // endpoints with no rule, i.e. denied at runtime (and red in the coverage test). The pairs
 // are therefore written out in full below rather than generated, because the table's whole
 // value is that a reviewer can read what a given path demands without running code.
@@ -45,7 +45,7 @@
 import { definePolicyTable, appLevel, INTERNAL, PUBLIC } from "@dub/policy-gate";
 
 // The 3-tier levels of the 通知 app (app:notifications:view / :edit), paired with the
-// fine-grained notif key each route needs. Named once so the 16 duplicated pairs below
+// fine-grained notif key each route needs. Named once so the 17 duplicated pairs below
 // cannot drift between the bare and the /notifications mount.
 const INBOX_SELF = appLevel("notifications", "view", "notif:inbox:self");
 const PREFS_SELF_READ = appLevel("notifications", "view", "notif:prefs:self");
@@ -100,6 +100,8 @@ export const POLICY_TABLE = definePolicyTable({
   // (Re)publishes the curated release back-catalog — a deploy-hook seam, no acting user.
   "POST /internal/seed-releases": INTERNAL,
   "GET /manage": MANAGE_READ,
+  // 「誰に届くか」 summary on the management screen — same audience as the list it sits on.
+  "GET /audiences": MANAGE_READ,
   "POST /manage/:id/publish": MANAGE_WRITE,
   "POST /manage/publish-batch": MANAGE_WRITE,
   "POST /manage/:id/unpublish": MANAGE_WRITE,
@@ -114,12 +116,13 @@ export const POLICY_TABLE = definePolicyTable({
   "PATCH /preferences": PREFS_SELF_WRITE,
 
   // =====================================================================================
-  // mountNotif("/notifications") — the gateway segment, same 16 routes, same 16 rules
+  // mountNotif("/notifications") — the gateway segment, same 17 routes, same 17 rules
   // =====================================================================================
   "POST /notifications/notify": INTERNAL,
   "POST /notifications/release": NOTIF_ADMIN_WRITE,
   "POST /notifications/internal/seed-releases": INTERNAL,
   "GET /notifications/manage": MANAGE_READ,
+  "GET /notifications/audiences": MANAGE_READ,
   "POST /notifications/manage/:id/publish": MANAGE_WRITE,
   "POST /notifications/manage/publish-batch": MANAGE_WRITE,
   "POST /notifications/manage/:id/unpublish": MANAGE_WRITE,

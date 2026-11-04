@@ -16,6 +16,7 @@ import { createOptimisticMutation } from "../../lib/optimistic.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useDriveShareApi } from "./DriveShareProvider.tsx";
 import type { DriveGoogleAccount, DriveGoogleAccountsStatus } from "./driveShareApi.tsx";
+import { meeting } from "@dub/types";
 
 export const DRIVE_SETTINGS_PATH = "/driveshare";
 export const GOOGLE_ACCOUNT_SETTING = "google-account";
@@ -40,6 +41,8 @@ function readOAuthReturn(): OAuthReturn | null {
   if (typeof window === "undefined" || window.location.pathname !== DRIVE_SETTINGS_PATH) return null;
   const q = new URLSearchParams(window.location.search);
   const ret = { code: q.get("code"), state: q.get("state"), error: q.get("error") };
+  // 「Googleと連携」 (人事 > 出席) shares this return page; GoogleLinkReturn finishes it.
+  if (ret.state?.startsWith(meeting.GOOGLE_LINK_STATE_PREFIX)) return null;
   return ret.state || ret.error ? ret : null;
 }
 
@@ -210,6 +213,7 @@ function GoogleAccountSection(): JSX.Element {
   const activeBroken = s?.accounts.some((a) => a.active && a.needsReconnect) ?? false;
   const activeNoCalendar = s?.accounts.some((a) => a.active && !a.needsReconnect && a.calendarMissing) ?? false;
   const activeNoMeet = s?.accounts.some((a) => a.active && !a.needsReconnect && !a.calendarMissing && a.meetMissing) ?? false;
+  const activeNoAttendance = s?.accounts.some((a) => a.active && !a.needsReconnect && !a.calendarMissing && a.attendanceMissing) ?? false;
   const noneActive = s ? s.accounts.length > 0 && !s.accounts.some((a) => a.active) : false;
 
   return (
@@ -266,6 +270,11 @@ function GoogleAccountSection(): JSX.Element {
               使用中のアカウントに Meet の設定権限がないため、ミーティングの Meet が「誰でも参加可」になりません。「再接続」を押し、Google の画面で Meet の設定へのアクセスにもチェックを入れてください。
             </p>
           ) : null}
+          {activeNoAttendance ? (
+            <p style={alertStyle} role="alert" data-testid={`${tid}-attendance-missing-warning`}>
+              再連携が必要です: 使用中のアカウントに Meet の参加記録を読む権限がないため、人事 → 出席 に Meet の出席が入りません。「再接続」を押し、Google の画面で Meet の会議情報へのアクセスにもチェックを入れてください。
+            </p>
+          ) : null}
           {noneActive ? (
             <p style={alertStyle} role="alert" data-testid={`${tid}-none-active`}>
               使用中のアカウントがありません。使うアカウントに切り替えてください。
@@ -291,6 +300,9 @@ function GoogleAccountSection(): JSX.Element {
                       {!a.needsReconnect && !a.calendarMissing && a.meetMissing ? (
                         <Badge tone="warning" testId={`${tid}-no-meet-${a.id}`}>Meet 権限なし</Badge>
                       ) : null}
+                      {!a.needsReconnect && !a.calendarMissing && a.attendanceMissing ? (
+                        <Badge tone="warning" testId={`${tid}-no-attendance-${a.id}`}>再連携が必要（出席）</Badge>
+                      ) : null}
                     </span>
                     {metaFor(a) ? <span style={metaStyle}>{metaFor(a)}</span> : null}
                     {a.needsReconnect && a.kind === "secret" ? <span style={alertStyle}>サーバー設定の更新が必要です</span> : null}
@@ -299,7 +311,7 @@ function GoogleAccountSection(): JSX.Element {
                     ) : null}
                   </div>
                   <span style={actionsStyle}>
-                    {canEdit && (a.needsReconnect || a.calendarMissing || a.meetMissing) && a.kind === "connected" && s.canConnect ? (
+                    {canEdit && (a.needsReconnect || a.calendarMissing || a.meetMissing || a.attendanceMissing) && a.kind === "connected" && s.canConnect ? (
                       <Button
                         variant="primary"
                         size="sm"

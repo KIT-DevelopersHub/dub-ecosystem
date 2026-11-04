@@ -22,7 +22,9 @@ export interface NotifyRecipients {
   userIds?: string[];
   roles?: string[]; // identity GET /users?roleKey=
   eventId?: string; // event GET /events/:id/participants
-  all?: boolean; // broadcast — every active user (identity GET /users, paged). Release notes.
+  // Audiences: the users whose roles hold the audience key (ロール管理 > 通知 — "all" =
+  // notif:receive_all for broadcasts/release notes, "admin" = notif:receive_admin).
+  audiences?: notification.ReceiveAudience[];
 }
 
 // Normalized ingest input shared by all three lanes.

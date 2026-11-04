@@ -63,10 +63,10 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
     const registered = protectableRouteKeys(buildApp());
     const bare = registered.filter((k) => !k.includes(" /notifications/") && !k.includes(" /internal/") && !k.includes(" /feedback"));
     const segment = registered.filter((k) => k.includes(" /notifications/"));
-    // 16 notification routes per mount (notify, release, 5 manage, 6 inbox, 2 preferences),
+    // 17 notification routes per mount (notify, release, 5 manage, audiences, 6 inbox, 2 preferences),
     // minus /internal/seed-releases which the filters above exclude from `bare`.
     expect(bare.length).toBeGreaterThan(0);
-    expect(segment).toHaveLength(16);
+    expect(segment).toHaveLength(17);
     for (const key of registered) expect(Object.keys(POLICY_TABLE)).toContain(key);
     // Every bare notification route has a /notifications twin carrying the SAME rule.
     for (const [route, rule] of Object.entries(POLICY_TABLE)) {
@@ -176,7 +176,7 @@ const SELF_WRITE = [...both("PATCH", "/preferences")];
 const ADMIN_READ = ["GET /feedback"];
 const ADMIN_WRITE = ["PATCH /feedback/:id/read", ...both("POST", "/release")];
 // notif:broadcast_publish surfaces.
-const MANAGE_READ = [...both("GET", "/manage")];
+const MANAGE_READ = [...both("GET", "/manage"), ...both("GET", "/audiences")];
 const MANAGE_WRITE = [
   ...both("POST", "/manage/:id/publish"),
   ...both("POST", "/manage/publish-batch"),
@@ -225,8 +225,8 @@ describe("role x endpoint matrix (frozen)", () => {
     );
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(buildApp()).sort());
-    // 16 routes per mount x 2, plus the probe, the event landing route and 3 feedback routes.
-    expect(everyRoute).toHaveLength(37);
+    // 17 routes per mount x 2, plus the probe, the event landing route and 3 feedback routes.
+    expect(everyRoute).toHaveLength(39);
   });
 
   it("no role, however privileged, reaches an INTERNAL route from outside", () => {

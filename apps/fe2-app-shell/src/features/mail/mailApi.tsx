@@ -82,6 +82,8 @@ export interface MailApi {
   addBlock(req: mail.MailSenderBlockRequest): Promise<mail.MailSenderBlock>;
   /** Unblock (address or domain value as listed). */
   removeBlock(value: string): Promise<{ value: string; blocked: false }>;
+  /** Icons of the Dub users behind these addresses (≤ MAIL_AVATAR_LOOKUP_LIMIT). Others are absent. */
+  avatars(emails: string[]): Promise<mail.MailAvatarsResponse>;
   /** The signed-in user's opt-in auto-forward setting (Gmail 自動転送). */
   getForward(): Promise<mail.MailForwardSetting>;
   /** Register / change the personal address; Cloudflare mails it a verification link. */
@@ -154,6 +156,7 @@ export function createMailApi(api: ApiClient): MailApi {
     listBlocks: () => api.request<{ items: mail.MailSenderBlock[] }>({ method: "GET", path: `${MAIL}/blocks` }).then((r) => r.items),
     addBlock: (req) => api.request<mail.MailSenderBlock, mail.MailSenderBlockRequest>({ method: "POST", path: `${MAIL}/blocks`, body: req }),
     removeBlock: (value) => api.request<{ value: string; blocked: false }>({ method: "DELETE", path: `${MAIL}/blocks/${encodeURIComponent(value)}` }),
+    avatars: (emails) => api.request<mail.MailAvatarsResponse, mail.MailAvatarsRequest>({ method: "POST", path: `${MAIL}/avatars`, body: { emails } }),
     getForward: () => api.request<mail.MailForwardSetting>({ method: "GET", path: `${MAIL}/forward` }),
     registerForward: (req) => api.request<mail.MailForwardSetting, mail.MailForwardRegisterRequest>({ method: "PUT", path: `${MAIL}/forward`, body: req }),
     updateForward: (patch) => api.request<mail.MailForwardSetting, mail.MailForwardPatch>({ method: "PATCH", path: `${MAIL}/forward`, body: patch }),

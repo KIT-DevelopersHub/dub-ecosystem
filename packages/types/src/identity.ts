@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (84 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (87 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -43,6 +43,11 @@ export const PERMISSION_CATALOG = [
   { key: "notif:inbox:self", name: "Read own inbox", description: "View and manage one's own notification inbox", domain: "notif", dangerous: false },
   { key: "notif:prefs:self", name: "Manage own notification preferences", description: "View and update one's own notification preferences", domain: "notif", dangerous: false },
   { key: "notif:broadcast_publish", name: "Publish member broadcasts", description: "Publish an admin notification to all members from the Notification management screen", domain: "notif", dangerous: false },
+  // Receive-audience keys: who an audience-addressed notification is delivered to. The
+  // notification service resolves "管理者向け" / "全体" recipients as the users whose roles hold
+  // the key (identity GET /internal/permission-holders), so ロール管理 decides who gets what.
+  { key: "notif:receive_admin", name: "Receive admin notifications", description: "Receive admin-audience notifications (deploys, inquiries/feedback, 参加届, ops alerts)", domain: "notif", dangerous: false },
+  { key: "notif:receive_all", name: "Receive org-wide notifications", description: "Receive notifications addressed to all members (announcements, release notes)", domain: "notif", dangerous: false },
   { key: "mail:send", name: "Send mail", description: "Send email", domain: "mail", dangerous: true },
   { key: "mail:read", name: "Read mail", description: "View messages/threads/rules", domain: "mail", dangerous: false },
   { key: "mail:read_all", name: "Read all mail", description: "View every user's mail (oversight/archive)", domain: "mail", dangerous: true },
@@ -54,6 +59,7 @@ export const PERMISSION_CATALOG = [
   { key: "chat:slack_import", name: "Import from Slack", description: "Import Slack channel history (messages, threads, reactions, files) into new chat channels", domain: "chat", dangerous: true },
   { key: "chat:emoji_import", name: "Import Slack custom emoji", description: "Import the Slack workspace's custom emoji (images) for use in chat reactions", domain: "chat", dangerous: true },
   { key: "chat:manage_sections", name: "Manage chat sections", description: "Create, rename, reorder and delete the org-wide chat sidebar sections and assign channels to them", domain: "chat", dangerous: false },
+  { key: "chat:change_visibility", name: "Change channel visibility", description: "Switch a chat channel between public and private", domain: "chat", dangerous: true },
   { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },
   { key: "infra:read", name: "Read infra", description: "View sites/deployments/dns/domains", domain: "infra", dangerous: false },
   { key: "infra:deploy", name: "Deploy", description: "Execute deployments", domain: "infra", dangerous: true },
@@ -118,7 +124,7 @@ export const PERMISSION_CATALOG = [
   { key: "app:sponsor:edit", name: "Edit in スポンサー app", description: "Act inside the スポンサー app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 84 keys (open `${string}:${string}` template retired).
+// Closed union of the 87 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";
@@ -219,6 +225,10 @@ export interface ListUsersQuery extends CursorQuery {
 export type ListOrgsQuery = CursorQuery;
 /** GET /identity/roles — cursor-only. */
 export type ListRolesQuery = CursorQuery;
+/** GET /internal/permission-holders — the catalog permission key to resolve holders for. */
+export interface PermissionHoldersQuery {
+  key: PermissionKey;
+}
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
 // SINGLE source of truth for the query-parameter *names* identity-roster's public
@@ -227,7 +237,8 @@ export type ListRolesQuery = CursorQuery;
 // CI (see @dub/e2e-smoke wire-params.test.ts). `roleKey` is intentionally listed as an
 // accepted (deprecated) alias of `role` — the server reads both; canonical is `role`.
 // The internal `/internal/users` route (not in the public spec) reads a subset of these
-// same keys, so it needs no separate entry. See docs/api-contracts/_wire-contract-enforcement.md.
+// same keys, so it needs no separate entry. `/internal/permission-holders` reads its own key
+// (`key`), so it is listed. See docs/api-contracts/_wire-contract-enforcement.md.
 export const IDENTITY_WIRE = {
   listOrgs: { method: "GET", path: "/identity/orgs", query: ["cursor", "limit"] },
   listUsers: {
@@ -236,6 +247,7 @@ export const IDENTITY_WIRE = {
     query: ["cursor", "limit", "ids", "status", "role", "roleKey", "q"],
   },
   listRoles: { method: "GET", path: "/identity/roles", query: ["cursor", "limit"] },
+  permissionHolders: { method: "GET", path: "/internal/permission-holders", query: ["key"] },
 } as const;
 
 // Compile-time tie: each endpoint's query keys must be real keys of its query type.
@@ -243,7 +255,9 @@ type _IdentityWireKeysAreTyped =
   (typeof IDENTITY_WIRE.listOrgs.query)[number] extends keyof ListOrgsQuery
     ? (typeof IDENTITY_WIRE.listUsers.query)[number] extends keyof ListUsersQuery
       ? (typeof IDENTITY_WIRE.listRoles.query)[number] extends keyof ListRolesQuery
-        ? true
+        ? (typeof IDENTITY_WIRE.permissionHolders.query)[number] extends keyof PermissionHoldersQuery
+          ? true
+          : never
         : never
       : never
     : never;

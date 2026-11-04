@@ -90,10 +90,14 @@ export const APP_MANIFEST = [
   // pair (meetings on the shared Google account, drive-share-service /meetings).
   { id: "calendar", label: "カレンダー", navPath: "/calendar", domain: "task", permissions: ["task:read"], access: { view: "app:calendar:view", edit: "app:calendar:edit" },
     detailPermissions: ["calendar:schedule_edit", "calendar:meetings_view", "calendar:meetings_edit"] },
-  { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" },
-    detailPermissions: ["notif:inbox:self", "notif:prefs:self", "notif:send", "notif:admin", "notif:broadcast_publish"] },
+  // 通知's 詳細 dialog lists only knobs that change something: WHO RECEIVES which audience
+  // (notif:receive_*) and the two admin surfaces. The self-service inbox/preference keys ride
+  // the 3 段階 instead (in `permissions`, so turning 通知 on bundles them — see
+  // withRequiredAppDomainKeys) and notif:send gates nothing; both are policy.HIDDEN_PERMISSION_KEYS.
+  { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self", "notif:prefs:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" },
+    detailPermissions: ["notif:receive_all", "notif:receive_admin", "notif:broadcast_publish", "notif:admin"] },
   { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" },
-    detailPermissions: ["chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections"] },
+    detailPermissions: ["chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility"] },
   { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" },
     detailPermissions: ["mail:read", "mail:send", "mail:read_all", "mail:read_role_shared", "mail:admin"] },
   { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true,

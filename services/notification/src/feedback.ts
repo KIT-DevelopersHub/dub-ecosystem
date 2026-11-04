@@ -12,8 +12,8 @@ import type { IngestInput } from "./types";
 import {
   FEEDBACK_ADMIN_EMAIL,
   FEEDBACK_EXCERPT_LEN,
-  FEEDBACK_NOTIFY_ROLE_IDS,
   FEEDBACK_NOTIFY_TYPE,
+  INQUIRY_KIND_LABELS,
 } from "./config";
 
 function excerpt(message: string): string {
@@ -21,12 +21,24 @@ function excerpt(message: string): string {
   return oneLine.length > FEEDBACK_EXCERPT_LEN ? `${oneLine.slice(0, FEEDBACK_EXCERPT_LEN)}…` : oneLine;
 }
 
+/** Admin-facing label: "フィードバック" for the original flow, else "問い合わせ（<種別>）". */
+export function inquiryHeading(item: Pick<notification.FeedbackItem, "kind">): string {
+  return item.kind === "feedback" ? "フィードバック" : `問い合わせ（${INQUIRY_KIND_LABELS[item.kind] ?? item.kind}）`;
+}
+
+/** 種別 + (feedback only) カテゴリ lines shared by the email and in-app bodies. */
+function kindLines(item: notification.FeedbackItem): string[] {
+  const lines = [`種別: ${INQUIRY_KIND_LABELS[item.kind] ?? item.kind}`];
+  if (item.kind === "feedback") lines.push(`カテゴリ: ${item.category}`);
+  return lines;
+}
+
 /** Build the admin-notification email for a stored feedback item. */
 export function buildFeedbackEmail(item: notification.FeedbackItem): mail.SendMailRequest {
   const lines = [
-    `新しいフィードバックが届きました。`,
+    `新しい${inquiryHeading(item)}が届きました。`,
     ``,
-    `カテゴリ: ${item.category}`,
+    ...kindLines(item),
     `送信ユーザー: ${item.userId}`,
     `発生ページ: ${item.pageName ?? "(不明)"}${item.pageUrl ? ` <${item.pageUrl}>` : ""}`,
     `送信時刻: ${item.createdAt}`,
@@ -37,7 +49,7 @@ export function buildFeedbackEmail(item: notification.FeedbackItem): mail.SendMa
   ];
   return {
     to: [{ email: FEEDBACK_ADMIN_EMAIL, name: "DevHub 管理者" }],
-    subject: `フィードバック: ${excerpt(item.message)}`,
+    subject: `${inquiryHeading(item)}: ${excerpt(item.message)}`,
     textBody: lines.join("\n"),
   };
 }
@@ -73,14 +85,14 @@ export async function notifyAdminOfFeedback(
 }
 
 /**
- * Build the in-app notification for a stored feedback item, fanned out to admin /
- * maintainer users. in_app (+ push added by ingest; Slack / chat / email are not targeted);
+ * Build the in-app notification for a stored feedback item, fanned out to every
+ * notif:receive_admin holder. in_app (+ push added by ingest; Slack / chat / email are not targeted);
  * the dedupKey is namespaced to the feedback id so retries never create duplicates.
  */
 export function buildFeedbackNotifyInput(item: notification.FeedbackItem, requestId: string): IngestInput {
   const pageLine = item.pageName ?? item.pageUrl ?? "(不明)";
   const body = [
-    `カテゴリ: ${item.category}`,
+    ...kindLines(item),
     `送信ユーザー: ${item.userId}`,
     `発生ページ: ${pageLine}`,
     ``,
@@ -88,8 +100,8 @@ export function buildFeedbackNotifyInput(item: notification.FeedbackItem, reques
   ].join("\n");
   return {
     type: FEEDBACK_NOTIFY_TYPE,
-    recipients: { roles: [...FEEDBACK_NOTIFY_ROLE_IDS] },
-    title: `新しいフィードバック: ${excerpt(item.message)}`,
+    recipients: { audiences: ["admin"] }, // notif:receive_admin holders (ロール管理)
+    title: `新しい${inquiryHeading(item)}: ${excerpt(item.message)}`,
     body,
     priority: "normal",
     audience: "admin", // "フィードバック受信" (auto-admin notification #3) — admin publishes to members

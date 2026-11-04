@@ -3,7 +3,7 @@
 // 管理者ロールへ in_app で飛ぶことを検証する。
 import { describe, it, expect, vi } from "vitest";
 import { createApp, makeDeps, call } from "./harness";
-import { buildParticipationNotify, PARTICIPATION_NOTIFY_ROLE_IDS, PARTICIPATION_NOTIFY_TYPE } from "../src/participationNotify";
+import { buildParticipationNotify, PARTICIPATION_NOTIFY_AUDIENCES, PARTICIPATION_NOTIFY_TYPE } from "../src/participationNotify";
 import type { member } from "@dub/types";
 
 const EMAILS = { schoolEmail: "taro@school.ac.jp", gmail: "taro@gmail.com" };
@@ -69,7 +69,8 @@ describe("buildParticipationNotify のペイロード", () => {
   it("管理者ロールへ in_app・admin向けの通知を作る", () => {
     const req = buildParticipationNotify(p);
     expect(req.type).toBe(PARTICIPATION_NOTIFY_TYPE);
-    expect(req.recipientRoles).toEqual([...PARTICIPATION_NOTIFY_ROLE_IDS]);
+    expect(req.recipientAudiences).toEqual([...PARTICIPATION_NOTIFY_AUDIENCES]);
+    expect(req.recipientRoles).toBeUndefined();
     expect(req.recipientIds).toEqual([]);
     expect(req.channels).toEqual(["in_app"]);
     expect(req.title).toContain("山田 太郎");

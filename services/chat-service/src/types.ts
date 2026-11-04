@@ -75,6 +75,9 @@ export interface UpdateChannelRequest extends common.Versioned {
   topic?: string | null;
   archived?: boolean;
 }
+export interface UpdateChannelVisibilityRequest extends common.Versioned {
+  visibility: ChannelVisibility;
+}
 export interface AddMemberRequest {
   userId: common.UserId;
   role?: ChannelRole;
@@ -256,6 +259,8 @@ export interface AuditSink {
 // emitted (message.created / message.deleted / member.added / member.removed).
 export interface RealtimePublisher {
   publishToChannel(channelId: common.ChannelId, event: chat.ChatRealtimeEvent): Promise<void>;
+  // Close every socket on the channel whose user is not in `memberIds` (channel went private).
+  evictNonMembers(channelId: common.ChannelId, memberIds: common.UserId[]): Promise<void>;
 }
 
 // The service's ONE permission source: "which of these keys does this user hold?", i.e.

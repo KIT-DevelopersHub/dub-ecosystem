@@ -66,12 +66,13 @@ describe("in-app feedback", () => {
 
     // persisted
     const row = await h.db.first<{ user_id: string; category: string; message: string; page_url: string; page_name: string; read_at: string | null }>(
-      `SELECT user_id, category, message, page_url, page_name, read_at FROM notif_feedback WHERE id = ?`,
+      `SELECT user_id, category, kind, message, page_url, page_name, read_at FROM notif_feedback WHERE id = ?`,
       out.id,
     );
     expect(row).toMatchObject({
       user_id: "usr_alice",
       category: "bug",
+      kind: "feedback",
       message: "この画面のボタンが押せない",
       page_url: "https://app/x",
       page_name: "イベント詳細",
@@ -163,11 +164,58 @@ describe("in-app feedback", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("NOTIF_FEEDBACK_NOT_FOUND");
   });
 
+  it("POST /feedback: omitted kind defaults to 'feedback'; an inquiry kind is stored as sent", async () => {
+    const h = makeTestEnv();
+    const app = createApp({ mail: recordingMail("ok") });
+    const req = reqOf(app, h);
+
+    const plain = (await (await req("/feedback", jsonPost({ message: "旧ウィジェット互換" }))).json()) as notification.CreateFeedbackResponse;
+    const card = await req("/feedback", jsonPost({ message: "希望枚数: 100枚", kind: "business_card" }));
+    expect(card.status).toBe(201);
+    const cardOut = (await card.json()) as notification.CreateFeedbackResponse;
+
+    const kindOf = async (id: string) =>
+      (await h.db.first<{ kind: string; category: string }>(`SELECT kind, category FROM notif_feedback WHERE id = ?`, id))!;
+    expect(await kindOf(plain.id)).toEqual({ kind: "feedback", category: "other" });
+    expect(await kindOf(cardOut.id)).toEqual({ kind: "business_card", category: "other" });
+  });
+
+  it("POST /feedback: unknown kind -> 400 invalid_enum", async () => {
+    const h = makeTestEnv();
+    const req = reqOf(createApp({ mail: recordingMail("ok") }), h);
+    const res = await req("/feedback", jsonPost({ message: "x", kind: "spam" }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { details: { field: string; reason: string }[] } };
+    expect(body.error.details).toContainEqual(expect.objectContaining({ field: "kind", reason: "invalid_enum" }));
+  });
+
+  it("buildFeedbackEmail / buildFeedbackNotifyInput: an inquiry is labelled by its kind (no feedback カテゴリ line)", () => {
+    const item: notification.FeedbackItem = {
+      id: "nfb_2",
+      userId: "usr_a",
+      category: "other",
+      kind: "interview",
+      message: "希望日時の候補: 11/10 午後",
+      pageUrl: null,
+      pageName: null,
+      readAt: null,
+      createdAt: "2026-11-04T00:00:00.000Z",
+    };
+    const email = buildFeedbackEmail(item);
+    expect(email.subject).toBe("問い合わせ（面談を希望）: 希望日時の候補: 11/10 午後");
+    expect(email.textBody).toContain("種別: 面談を希望");
+    expect(email.textBody).not.toContain("カテゴリ:");
+    const input = buildFeedbackNotifyInput(item, "req_k");
+    expect(input.title).toBe("新しい問い合わせ（面談を希望）: 希望日時の候補: 11/10 午後");
+    expect(input.body).toContain("種別: 面談を希望");
+  });
+
   it("buildFeedbackEmail: subject carries the excerpt + admin recipient", () => {
     const email = buildFeedbackEmail({
       id: "nfb_1",
       userId: "usr_a",
       category: "idea",
+      kind: "feedback",
       message: "検索を速くしてほしい",
       pageUrl: "https://app/s",
       pageName: "検索",
@@ -176,22 +224,21 @@ describe("in-app feedback", () => {
     });
     expect(email.to[0]!.email).toBe("admin@developershub.jp");
     expect(email.subject).toContain("フィードバック:");
+    expect(email.textBody).toContain("種別: フィードバック");
+    expect(email.textBody).toContain("カテゴリ: idea");
     expect(email.textBody).toContain("検索を速くしてほしい");
   });
 });
 
-// Role IDs mirror the identity-roster system-role seed (config.FEEDBACK_NOTIFY_ROLE_IDS).
-const ADMIN_ROLE = "role_sys_admin";
-const MAINTAINER_ROLE = "role_sys_maintainer";
-const MEMBER_ROLE = "role_sys_member";
+// Feedback goes to the 「管理者向け通知を受け取る」 holders (ロール管理), not a role list.
+const RECEIVE_ADMIN = "notif:receive_admin";
 
 describe("feedback -> in-app admin notifications", () => {
-  it("POST /feedback: creates one inbox notification per admin + maintainer (member excluded)", async () => {
+  it("POST /feedback: creates one inbox notification per notif:receive_admin holder (others excluded)", async () => {
     const identity = fakeIdentity({
-      byRole: {
-        [ADMIN_ROLE]: ["usr_admin1", "usr_admin2"],
-        [MAINTAINER_ROLE]: ["usr_maint1"],
-        [MEMBER_ROLE]: ["usr_member1"],
+      byPermission: {
+        [RECEIVE_ADMIN]: ["usr_admin1", "usr_admin2", "usr_maint1"],
+        "notif:receive_all": ["usr_member1"],
       },
     });
     const h = makeTestEnv();
@@ -210,12 +257,13 @@ describe("feedback -> in-app admin notifications", () => {
     expect(await unreadCount(h.db, "usr_admin1", true)).toBe(1);
     expect(await unreadCount(h.db, "usr_admin2", true)).toBe(1);
     expect(await unreadCount(h.db, "usr_maint1", true)).toBe(1);
-    // member role is never queried -> no notification; the submitter gets none either
+    // a non-holder gets nothing; the submitter gets none either
     expect(await unreadCount(h.db, "usr_member1", true)).toBe(0);
     expect(await unreadCount(h.db, "usr_alice", true)).toBe(0);
 
-    // only the admin + maintainer roles were expanded
-    expect(identity.roleCalls.sort()).toEqual([ADMIN_ROLE, MAINTAINER_ROLE].sort());
+    // only the admin audience key was expanded (no hard-coded role list)
+    expect(identity.permissionCalls).toEqual([RECEIVE_ADMIN]);
+    expect(identity.roleCalls).toEqual([]);
 
     // the inbox item is typed + deep-links back to the feedback record
     const inbox = await listInbox(h.db, "usr_admin1", { limit: 10 }, true);
@@ -237,13 +285,14 @@ describe("feedback -> in-app admin notifications", () => {
   });
 
   it("notifyAdminsOfFeedbackInApp is idempotent — re-running does not duplicate inbox rows", async () => {
-    const identity = fakeIdentity({ byRole: { [ADMIN_ROLE]: ["usr_admin1"], [MAINTAINER_ROLE]: ["usr_maint1"] } });
+    const identity = fakeIdentity({ byPermission: { [RECEIVE_ADMIN]: ["usr_admin1", "usr_maint1"] } });
     const h = makeTestEnv();
     const deps = buildIngestDeps(h.env, ctx("req_idem"), { identity });
     const item: notification.FeedbackItem = {
       id: "nfb_dupe",
       userId: "usr_alice",
       category: "bug",
+      kind: "feedback",
       message: "二重にならないこと",
       pageUrl: null,
       pageName: "設定",
@@ -262,12 +311,13 @@ describe("feedback -> in-app admin notifications", () => {
     expect(await unreadCount(h.db, "usr_maint1", true)).toBe(1);
   });
 
-  it("buildFeedbackNotifyInput: in_app only, role-targeted, feedback-scoped dedupKey", () => {
+  it("buildFeedbackNotifyInput: in_app only, admin-audience-targeted, feedback-scoped dedupKey", () => {
     const input = buildFeedbackNotifyInput(
       {
         id: "nfb_9",
         userId: "usr_a",
         category: "question",
+        kind: "feedback",
         message: "使い方が分からない",
         pageUrl: "https://app/x",
         pageName: "ホーム",
@@ -277,7 +327,8 @@ describe("feedback -> in-app admin notifications", () => {
       "req_1",
     );
     expect(input.channels).toEqual(["in_app"]);
-    expect(input.recipients.roles).toEqual([ADMIN_ROLE, MAINTAINER_ROLE]);
+    expect(input.recipients.audiences).toEqual(["admin"]);
+    expect(input.recipients.roles).toBeUndefined();
     expect(input.recipients.userIds).toBeUndefined();
     expect(input.dedupKey).toBe("feedback:nfb_9");
     expect(input.resourceType).toBe("feedback");

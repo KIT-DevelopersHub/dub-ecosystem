@@ -101,6 +101,8 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /mail/blocks": appLevel("mail", "view", "mail:read"),
   "POST /mail/blocks": appLevel("mail", "view", "mail:read"),
   "DELETE /mail/blocks/:value": appLevel("mail", "view", "mail:read"),
+  // Sender icons: avatars of Dub users behind addresses already in the caller's mail.
+  "POST /mail/avatars": appLevel("mail", "view", "mail:read"),
   // Personal opt-in auto-forward (0023): forwards only mail delivered TO the caller, to an
   // address the caller verified (Cloudflare's link) — the caller's own data, so the same tier.
   "GET /mail/forward": appLevel("mail", "view", "mail:read"),

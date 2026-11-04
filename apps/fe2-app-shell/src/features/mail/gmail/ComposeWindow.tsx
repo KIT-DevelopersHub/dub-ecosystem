@@ -27,10 +27,12 @@ import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { UnsavedChangesGuard } from "../../../lib/UnsavedChangesGuard.tsx";
 import { MailIcon } from "./icons.tsx";
+import { recipientIcon } from "./SenderAvatar.tsx";
 import { addressCandidates } from "./mailModel.ts";
 import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { deliver } from "./sendMail.ts";
 import { SchedulePicker } from "./SchedulePicker.tsx";
+import { useDraggableWindow, useIsNarrowViewport } from "./useDraggableWindow.ts";
 
 /** localStorage key prefix for a floating compose window's draft — one per compose.id
  *  (several windows can be open at once, Gmail-style). Exported so GmailApp can scan
@@ -173,9 +175,23 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const maximized = compose.maximized;
   const minimized = compose.minimized;
 
+  // Drag the window by its header (desktop, normal size only). Minimized windows dock
+  // to the bottom edge like Gmail and return to the dragged spot when expanded.
+  const narrow = useIsNarrowViewport();
+  const { pos, dragging, onHandlePointerDown } = useDraggableWindow({
+    enabled: !maximized && !minimized && !narrow,
+    size: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT },
+    offset,
+  });
+
   const frame: CSSProperties = maximized
     ? { position: "fixed", inset: "48px", width: "auto", height: "auto", maxWidth: 900, margin: "0 auto" }
-    : { position: "fixed", right: 16 + offset * 30, bottom: 0, width: 500, height: minimized ? 40 : 460 };
+    : narrow
+      ? { position: "fixed", left: 8, right: 8, bottom: 0, height: minimized ? 40 : `min(${WINDOW_HEIGHT}px, calc(100dvh - 64px))` }
+      : pos
+        ? { position: "fixed", left: pos.x, top: pos.y, width: WINDOW_WIDTH, height: WINDOW_HEIGHT }
+        : { position: "fixed", right: 16 + offset * 30, bottom: 0, width: WINDOW_WIDTH, height: minimized ? 40 : WINDOW_HEIGHT };
+  const draggable = !maximized && !minimized && !narrow;
 
   return (
     <div
@@ -191,7 +207,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         flexDirection: "column",
         background: "var(--dub-color-surface-raised)",
         border: "1px solid var(--dub-color-border-strong)",
-        borderRadius: "var(--dub-radius-lg) var(--dub-radius-lg) 0 0",
+        borderRadius: pos && draggable ? "var(--dub-radius-lg)" : "var(--dub-radius-lg) var(--dub-radius-lg) 0 0",
         boxShadow: "var(--dub-shadow-overlay)",
         zIndex: 1300,
         overflow: "hidden",
@@ -223,15 +239,21 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         </div>
       ) : null}
       <div
+        data-testid="fe2-mail-compose-header"
+        data-draggable={draggable ? "true" : "false"}
+        title={draggable ? "ドラッグして移動" : undefined}
+        onPointerDown={onHandlePointerDown}
         onClick={() => minimized && patch({ minimized: false })}
         style={{
+          touchAction: draggable ? "none" : undefined,
+          userSelect: dragging ? "none" : undefined,
           display: "flex",
           alignItems: "center",
           height: 40,
           padding: "0 8px 0 16px",
           background: "var(--dub-color-text-primary)",
           color: "var(--dub-color-surface-base)",
-          cursor: minimized ? "pointer" : "default",
+          cursor: minimized ? "pointer" : draggable ? (dragging ? "grabbing" : "grab") : "default",
           flexShrink: 0,
         }}
       >
@@ -268,6 +290,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             parse={parseRecipients}
             candidates={candidates}
             removeIcon={removeIcon}
+            renderTokenIcon={recipientIcon}
             testId="fe2-mail-compose-to"
             extra={
               <span style={{ display: "flex", gap: 8 }}>
@@ -281,10 +304,10 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             }
           />
           {compose.showCc ? (
-            <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-cc" />
+            <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} renderTokenIcon={recipientIcon} testId="fe2-mail-compose-cc" />
           ) : null}
           {compose.showBcc ? (
-            <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} testId="fe2-mail-compose-bcc" />
+            <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} renderTokenIcon={recipientIcon} testId="fe2-mail-compose-bcc" />
           ) : null}
           <input
             data-testid="fe2-mail-compose-subject"
@@ -361,5 +384,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   );
 }
 
+const WINDOW_WIDTH = 500;
+const WINDOW_HEIGHT = 460;
 const hdrBtn: CSSProperties = { all: "unset", cursor: "pointer", display: "inline-flex", padding: 6, color: "var(--dub-color-surface-base)", opacity: 0.85 };
 const ccBtn: CSSProperties = { all: "unset", cursor: "pointer", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)", fontWeight: 600 };

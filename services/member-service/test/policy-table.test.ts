@@ -144,12 +144,20 @@ const ONBOARDING_WRITES = [
   "PUT /members/onboarding/meetings",
 ];
 // 人事: 閲覧 (+hr:read) / 段階・メモ・チェック (編集 +hr:write) / 参加確定・削除 (編集 +hr:admin).
-const HR_READS = ["GET /members/hr/applicants", "GET /members/hr/applicants/:id", "GET /members/hr/onboarding"];
+const HR_READS = [
+  "GET /members/hr/applicants",
+  "GET /members/hr/applicants/:id",
+  "GET /members/hr/interview-form",
+  "GET /members/hr/interview-form/responses",
+  "GET /members/hr/onboarding",
+];
 const HR_WRITES = [
   "PATCH /members/hr/applicants/:id",
   "POST /members/hr/applicants",
   "POST /members/hr/applicants/:id/notes",
   "POST /members/hr/applicants/:id/stage",
+  "POST /members/hr/interview-form/responses",
+  "PUT /members/hr/interview-form",
   "PUT /members/hr/onboarding/:memberId/items/:itemId",
 ];
 const HR_ADMIN = ["DELETE /members/hr/applicants/:id", "POST /members/hr/applicants/:id/join"];
@@ -172,10 +180,12 @@ const SELF = ["GET /members/me/mention-teams"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = [
   "GET /health",
+  "GET /members/internal/hr/interview-form",
   "GET /members/internal/me/participation",
   "GET /members/internal/onboarding",
   "GET /members/internal/team-members",
   "POST /members/internal/google-emails",
+  "POST /members/internal/hr/interview-form",
   "POST /members/internal/me/participation",
   "POST /members/internal/participation",
 ];

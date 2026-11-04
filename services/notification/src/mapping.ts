@@ -27,9 +27,10 @@ import type {
 import type { EventMappingRule, NotifyRecipients } from "./types";
 import { CHAT_MENTION_NOTIFY_TYPE } from "./config";
 
-// Role keys used for operational / admin fan-out (identity GET /users?roleKey=).
-const ROLE_ADMIN = "admin";
-const ROLE_ORGANIZER = "organizer";
+// Admin-audience fan-out: whoever holds notif:receive_admin in ロール管理 (「管理者向け通知を
+// 受け取る」). These rules used to name role keys "admin"/"organizer", which never matched a
+// role id (role_sys_*), so they reached admins only through the inbox backfill.
+const ADMINS: NotifyRecipients = { audiences: ["admin"] };
 
 // eventId is optional on task.* payloads now (判断44). An unlinked task has no event
 // audience, so recipients resolve to none by event scope (assignee-scoped rules, where
@@ -176,10 +177,12 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
   // ---- public inquiry (gateway) — save + notify staff ----
   "public.inquiry.received": {
     type: "public.inquiry.received",
-    channels: ["in_app", "email"],
-    priority: "urgent", // staff should see inquiries promptly (enables email default)
+    // in_app only: the role-key fan-out never resolved anyone, so no inquiry email was ever
+    // sent — kept that way now that recipients actually resolve (email is a separate decision).
+    channels: ["in_app"],
+    priority: "urgent", // staff should see inquiries promptly
     audience: "admin", // staff-facing; not shown to general members
-    buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN, ROLE_ORGANIZER] }),
+    buildRecipients: (): NotifyRecipients => ADMINS,
     buildContent: (p) => {
       const i = p as PublicInquiryReceivedPayload;
       return { title: `New inquiry: ${i.kind}`, body: `From ${i.name} <${i.email}>\n\n${i.message}`, resourceType: "inquiry" };
@@ -187,7 +190,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
   },
 
   // ---- operational alerts (admin only) ----
-  // All admin-audience: only admins/maintainers see them until an admin publishes to
+  // All admin-audience: only notif:receive_admin holders see them until an admin publishes to
   // members via the Notification management screen. "deploy完了" is the auto-admin
   // notification B-set member is expected to publish (Notification管理 §5).
   "github.sync_failed": {
@@ -195,7 +198,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     channels: ["in_app"],
     priority: "normal",
     audience: "admin",
-    buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN] }),
+    buildRecipients: (): NotifyRecipients => ADMINS,
     buildContent: (p) => {
       const g = p as GithubSyncFailedPayload;
       return { title: `GitHub sync failed: ${g.scope}`, body: g.error };
@@ -206,7 +209,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     channels: ["in_app"],
     priority: "normal",
     audience: "admin",
-    buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN] }),
+    buildRecipients: (): NotifyRecipients => ADMINS,
     buildContent: (p) => ({ title: "GitHub conflict detected", resourceType: "task", resourceId: (p as GithubConflictDetectedPayload).taskId }),
   },
   "deploy.deployment.status_changed": {
@@ -214,7 +217,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     channels: ["in_app"],
     priority: "normal",
     audience: "admin", // "デプロイ完了" (auto-admin notification #1) — admin publishes to members
-    buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN] }),
+    buildRecipients: (): NotifyRecipients => ADMINS,
     buildContent: (p) => {
       const d = p as DeployDeploymentStatusChangedPayload;
       return { title: `Deployment ${d.status}`, resourceType: "deployment", resourceId: d.deploymentId };
@@ -225,7 +228,7 @@ export const EVENT_MAPPINGS: Partial<Record<DubEventName, EventMappingRule>> = {
     channels: ["in_app"],
     priority: "normal",
     audience: "admin",
-    buildRecipients: (): NotifyRecipients => ({ roles: [ROLE_ADMIN] }),
+    buildRecipients: (): NotifyRecipients => ADMINS,
     buildContent: (p) => {
       const d = p as DeployDnsRecordChangedPayload;
       return { title: `DNS changed: ${d.name}`, body: `zone ${d.zone}` };

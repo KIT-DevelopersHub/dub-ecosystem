@@ -114,6 +114,15 @@ describe("seedReferenceData / system roles", () => {
     }
   });
 
+  it("chat:change_visibility starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("chat:change_visibility");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("chat:change_visibility");
+    }
+  });
+
   it("スポンサー (app:sponsor:* / sponsor:*) starts ON for admin only — unreleased app, other roles opt in via ロール管理", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);
