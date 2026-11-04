@@ -75,6 +75,11 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
     "hr:read",
     "hr:write",
     "hr:admin",
+    "app:sponsor:view",
+    "app:sponsor:edit",
+    "sponsor:read",
+    "sponsor:write",
+    "sponsor:admin",
   ],
   maintainer: ["identity:read", "app:members:view", "app:participation:view"],
   organizer: ["identity:read", "app:members:view", "app:participation:view"],
@@ -86,6 +91,11 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "hr-viewer": ["app:hr:view", "hr:read"],
   "hr-recruiter": ["app:hr:view", "app:hr:edit", "hr:read", "hr:write"],
   "hr-keys-but-app-disabled": ["hr:read", "hr:write", "hr:admin"],
+  // スポンサー: 閲覧だけ / 登録・編集はできるが削除できない担当 / アプリ無効で詳細キーだけ / 閲覧 (アプリ) だけで詳細キーなし。
+  "sponsor-viewer": ["app:sponsor:view", "sponsor:read"],
+  "sponsor-editor": ["app:sponsor:view", "app:sponsor:edit", "sponsor:read", "sponsor:write"],
+  "sponsor-keys-but-app-disabled": ["sponsor:read", "sponsor:write", "sponsor:admin"],
+  "sponsor-app-view-without-read": ["app:sponsor:view", "app:sponsor:edit"],
 };
 
 /**
@@ -143,6 +153,18 @@ const HR_WRITES = [
   "PUT /members/hr/onboarding/:memberId/items/:itemId",
 ];
 const HR_ADMIN = ["DELETE /members/hr/applicants/:id", "POST /members/hr/applicants/:id/join"];
+// スポンサー: 閲覧 (+sponsor:read・写真含む) / 登録・編集・写真 (編集 +sponsor:write) / 削除 (編集 +sponsor:admin).
+const SPONSOR_READS = [
+  "GET /members/sponsor/cards",
+  "GET /members/sponsor/cards/:id",
+  "GET /members/sponsor/cards/:id/image",
+];
+const SPONSOR_WRITES = [
+  "PATCH /members/sponsor/cards/:id",
+  "POST /members/sponsor/cards",
+  "PUT /members/sponsor/cards/:id/image",
+];
+const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id"];
 // チーム・役職ロールの一括付与: ロール管理と同格 (管理 編集 + identity:admin)。
 const ROLE_SYNC_ADMIN = ["POST /members/role-sync/backfill"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
@@ -169,6 +191,9 @@ const FULL = [
   ...HR_READS,
   ...HR_WRITES,
   ...HR_ADMIN,
+  ...SPONSOR_READS,
+  ...SPONSOR_WRITES,
+  ...SPONSOR_ADMIN,
   ...ROLE_SYNC_ADMIN,
   ...SELF,
 ].sort();
@@ -198,6 +223,13 @@ describe("role x endpoint matrix (frozen)", () => {
     "hr-recruiter": [...HR_READS, ...HR_WRITES, ...SELF].sort(),
     // 人事アプリが無効なら詳細キーだけでは何も触れない (ロール管理の 無効 が本当に効く)。
     "hr-keys-but-app-disabled": [...SELF].sort(),
+    "sponsor-viewer": [...SPONSOR_READS, ...SELF].sort(),
+    // 削除 (sponsor:admin) だけは届かない。
+    "sponsor-editor": [...SPONSOR_READS, ...SPONSOR_WRITES, ...SELF].sort(),
+    // スポンサーアプリが無効なら詳細キーだけでは何も触れない。
+    "sponsor-keys-but-app-disabled": [...SELF].sort(),
+    // 逆に アプリの 閲覧/編集 だけで詳細キーが無ければ名刺 (社外の個人情報) は見えない。
+    "sponsor-app-view-without-read": [...SELF].sort(),
   };
 
   it("matches the committed matrix for every role", () => {

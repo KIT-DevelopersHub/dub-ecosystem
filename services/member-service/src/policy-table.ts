@@ -165,4 +165,14 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /members/hr/applicants/:id": appLevel("hr", "edit", "hr:admin"),
   "GET /members/hr/onboarding": appLevel("hr", "view", "hr:read"),
   "PUT /members/hr/onboarding/:memberId/items/:itemId": appLevel("hr", "edit", "hr:write"),
+  // ---- スポンサー (スポンサーアプリ: 名刺の共有) ----
+  // スポンサーアプリ自身の 無効/閲覧/編集 行で出し分ける。名刺は社外の個人の連絡先なので、閲覧 (写真を含む)
+  // にも詳細権限 sponsor:read を重ねる。登録・編集・写真の撮り直しは 編集 + sponsor:write、削除は 編集 + sponsor:admin。
+  "GET /members/sponsor/cards": appLevel("sponsor", "view", "sponsor:read"),
+  "GET /members/sponsor/cards/:id": appLevel("sponsor", "view", "sponsor:read"),
+  "GET /members/sponsor/cards/:id/image": appLevel("sponsor", "view", "sponsor:read"),
+  "POST /members/sponsor/cards": appLevel("sponsor", "edit", "sponsor:write"),
+  "PATCH /members/sponsor/cards/:id": appLevel("sponsor", "edit", "sponsor:write"),
+  "PUT /members/sponsor/cards/:id/image": appLevel("sponsor", "edit", "sponsor:write"),
+  "DELETE /members/sponsor/cards/:id": appLevel("sponsor", "edit", "sponsor:admin"),
 });
