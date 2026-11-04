@@ -319,6 +319,14 @@ export const MEMBER: AreaSpec = {
     { service: "member-service", route: "DELETE /members/hr/applicants/:id" },
     { service: "member-service", route: "GET /members/hr/onboarding" },
     { service: "member-service", route: "PUT /members/hr/onboarding/:memberId/items/:itemId" },
+    // スポンサー (名刺の共有 /members/sponsor/*) も新設したばかり。写真のバイト列を扱うので Commander からは触らせない方向。
+    { service: "member-service", route: "GET /members/sponsor/cards" },
+    { service: "member-service", route: "GET /members/sponsor/cards/:id" },
+    { service: "member-service", route: "POST /members/sponsor/cards" },
+    { service: "member-service", route: "PATCH /members/sponsor/cards/:id" },
+    { service: "member-service", route: "DELETE /members/sponsor/cards/:id" },
+    { service: "member-service", route: "PUT /members/sponsor/cards/:id/image" },
+    { service: "member-service", route: "GET /members/sponsor/cards/:id/image" },
   ],
   ownerOpenedIrreversible: {
     "mail.issued.create": "確認メールの送信は取り消せないが、受信は mail.issued.setEnabled で停止できる",
