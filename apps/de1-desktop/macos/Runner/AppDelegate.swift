@@ -1,4 +1,5 @@
 import Cocoa
+import FirebaseMessaging
 import FlutterMacOS
 
 @main
@@ -12,8 +13,8 @@ class AppDelegate: FlutterAppDelegate {
   // `applicationDidFinishLaunching` that exception aborts the launch
   // notification before firebase_messaging's observer runs, which skips its
   // app-delegate swizzling — the plugin then never receives the APNs token and
-  // `getToken()` never returns. The swizzled interceptor (not `super`) is what
-  // hands the token to the plugin.
+  // `getToken()` never returns. The APNs token is handed to FCM explicitly in
+  // `didRegisterForRemoteNotificationsWithDeviceToken` (as on iOS).
   private var pushChannel: FlutterMethodChannel?
   private var pendingResult: FlutterResult?
 
@@ -49,6 +50,10 @@ class AppDelegate: FlutterAppDelegate {
     _ application: NSApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
+    // Same as iOS: hand the APNs token to FCM explicitly. Without this the FCM
+    // token is not bound to this Mac's APNs token and sends are accepted (200)
+    // but never delivered.
+    Messaging.messaging().apnsToken = deviceToken
     let token = deviceToken.map { String(format: "%02x", $0) }.joined()
     pendingResult?(token)
     pendingResult = nil
