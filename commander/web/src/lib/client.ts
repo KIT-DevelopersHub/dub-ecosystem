@@ -25,6 +25,19 @@ export interface StartRunOptions {
   args?: string[];
   /** Upload ids from uploadImage(); claude receives them as image blocks with the prompt. */
   images?: string[];
+  /**
+   * What the task is (title, original request, PR). The daemon prepends it only when it
+   * opens a NEW Claude session for the task; a resumed session already has it.
+   */
+  taskContext?: string;
+}
+
+/** The task already has a live run; its session can't be driven twice at once. */
+export class TaskRunActiveError extends Error {
+  constructor() {
+    super("このタスクはまだ実行中です。終わってから追加指示を出すか、実行を止めてください。");
+    this.name = "TaskRunActiveError";
+  }
 }
 
 export interface CommanderClient {
@@ -85,11 +98,13 @@ export class HttpCommanderClient implements CommanderClient {
     if (opts.taskId) body.taskId = opts.taskId;
     if (opts.args && opts.args.length > 0) body.args = opts.args;
     if (opts.images && opts.images.length > 0) body.images = opts.images;
+    if (opts.taskContext) body.taskContext = opts.taskContext;
     const res = await this.fetchImpl(`${this.baseUrl}/runs`, {
       method: "POST",
       headers: this.headers({ "content-type": "application/json" }),
       body: JSON.stringify(body),
     });
+    if (res.status === 409) throw new TaskRunActiveError();
     if (!res.ok) throw new Error(`daemon returned ${res.status}`);
     return (await res.json()) as { runId: string };
   }

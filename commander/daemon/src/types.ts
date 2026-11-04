@@ -24,6 +24,10 @@ export interface Run {
   cwd: string;
   /** Optional task this run belongs to (commander_tasks.id), for the board. */
   taskId?: string;
+  /** Claude session this run belongs to (one per task; absent for task-less runs). */
+  sessionId?: string;
+  /** true when the run continued the task's existing session (`--resume`). */
+  resumed?: boolean;
   status: RunStatus;
   /** Images sent with the prompt (count only; the bytes are never kept on the run). */
   imageCount?: number;
@@ -52,6 +56,11 @@ export interface StartRunInput {
    * for a pasted image — instead of as the `-p` argument.
    */
   images?: StagedImage[];
+  /** Claude session for this run: `--resume` it when `resume`, else `--session-id`. */
+  sessionId?: string;
+  resume?: boolean;
+  /** Prompt actually sent to claude when it differs from the stored `prompt`. */
+  spawnPrompt?: string;
 }
 
 import type { OperateConfig } from "./operate/routes.ts";
@@ -117,4 +126,14 @@ export interface DaemonConfig {
    * answer 503; the catalog stays readable.
    */
   operate?: OperateConfig;
+  /**
+   * Per-task isolation (own worktree + own Claude session per task). Absent => task runs
+   * fall back to the legacy shared cwd (tests / non-git setups only).
+   */
+  taskWorkspaces?: {
+    repoRoot: string;
+    worktreeRoot: string;
+    baseRef: string;
+    setupCommand?: string;
+  };
 }

@@ -144,6 +144,16 @@ describe("remote surface of the daemon", () => {
     expect(daemonRouteAllowed("GET", "/runs/a/b")).toBe(false);
   });
 
+  it("carries taskContext but never lets a caller pick a session (--resume / --session-id)", () => {
+    expect(JSON.parse(sanitizeRunBody('{"prompt":"p","taskId":"t1","taskContext":"[このタスク]"}', ["/work"])!)).toEqual({
+      prompt: "p",
+      taskId: "t1",
+      taskContext: "[このタスク]",
+    });
+    expect(sanitizeRunBody('{"prompt":"p","args":["--resume","other-session"]}', ["/work"])).toBeNull();
+    expect(sanitizeRunBody('{"prompt":"p","args":["--session-id","x"]}', ["/work"])).toBeNull();
+  });
+
   it("refuses claude flags that would widen permissions, and cwd outside the roots", () => {
     expect(sanitizeRunBody('{"prompt":"p","args":["--dangerously-skip-permissions"]}', ["/work"])).toBeNull();
     expect(sanitizeRunBody('{"prompt":"p","args":["--settings","/tmp/x.json"]}', ["/work"])).toBeNull();

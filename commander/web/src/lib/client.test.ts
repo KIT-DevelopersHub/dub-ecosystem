@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatEvent } from "./client.ts";
+import { HttpCommanderClient, TaskRunActiveError, formatEvent } from "./client.ts";
 
 const claude = (data: unknown) => formatEvent({ type: "claude", data });
 
@@ -58,5 +58,27 @@ describe("formatEvent", () => {
   it("keeps non-claude events as before", () => {
     expect(formatEvent({ type: "status", status: "running" })).toBe("● status: running");
     expect(formatEvent({ type: "exit", code: 0 })).toBe("exit code: 0");
+  });
+});
+
+describe("HttpCommanderClient.startRun", () => {
+  const capture = (status: number) => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
+      return new Response(JSON.stringify({ runId: "r1" }), { status });
+    }) as unknown as typeof fetch;
+    return { calls, client: new HttpCommanderClient("http://d", undefined, fetchImpl) };
+  };
+
+  it("sends taskId + taskContext so the daemon can open the task's own session", async () => {
+    const { calls, client } = capture(201);
+    await client.startRun("p", { taskId: "t1", taskContext: "[このタスク]" });
+    expect(calls[0]!.body).toEqual({ prompt: "p", taskId: "t1", taskContext: "[このタスク]" });
+  });
+
+  it("maps 409 (task already running) to a readable error", async () => {
+    const { client } = capture(409);
+    await expect(client.startRun("p", { taskId: "t1" })).rejects.toBeInstanceOf(TaskRunActiveError);
   });
 });

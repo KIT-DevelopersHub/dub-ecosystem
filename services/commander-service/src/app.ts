@@ -209,7 +209,8 @@ export function createApp() {
   // The loopback daemon POSTs runs + events here (it cannot reach D1 itself, ADR 0004).
   // POST routes are behind the operator-token guard above.
   app.get("/runs", async (c) => {
-    return c.json({ runs: await listRuns(c.env.DB) });
+    const taskId = c.req.query("taskId");
+    return c.json({ runs: await listRuns(c.env.DB, taskId ? { taskId } : {}) });
   });
 
   app.post("/runs", async (c) => {
@@ -225,6 +226,7 @@ export function createApp() {
       cwd,
       status: body?.status,
       taskId: typeof body?.taskId === "string" ? body.taskId : null,
+      sessionId: typeof body?.sessionId === "string" ? body.sessionId : null,
     });
     return c.json({ run }, 201);
   });

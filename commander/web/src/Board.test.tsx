@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Board, PROD_DEPLOY_PROMPT, STAGING_DEPLOY_PROMPT, followUpPrompt } from "./Board.tsx";
+import { Board, followUpPrompt, taskContextFor } from "./Board.tsx";
 import { makeBoardItem, makeFakeApi, makeFakeClient } from "./test/fakes.ts";
 
 describe("<Board>", () => {
@@ -69,7 +69,7 @@ describe("<Board>", () => {
     expect(within(screen.getByTestId("lane-done")).getByText("アーカイブ済カード")).toBeInTheDocument();
   });
 
-  it("composer creates a task then starts a run with its taskId + cwd", async () => {
+  it("composer creates a task then starts its first run with taskId + task context (no cwd)", async () => {
     const api = makeFakeApi([]);
     const client = makeFakeClient();
     render(<Board client={client} api={api} pollMs={0} />);
@@ -77,8 +77,6 @@ describe("<Board>", () => {
 
     await userEvent.click(screen.getByTestId("open-composer"));
     await userEvent.type(screen.getByLabelText("task-title"), "ログイン画面を作る");
-    await userEvent.clear(screen.getByLabelText("task-cwd"));
-    await userEvent.type(screen.getByLabelText("task-cwd"), "/repo/login");
     await userEvent.type(screen.getByLabelText("task-prompt"), "作って");
     await userEvent.click(screen.getByTestId("composer-submit"));
 
@@ -86,8 +84,9 @@ describe("<Board>", () => {
     await waitFor(() => expect(client.startRun).toHaveBeenCalled());
     const [prompt, opts] = client.startRun.mock.calls[0]!;
     expect(prompt).toBe("作って");
-    expect(opts).toMatchObject({ cwd: "/repo/login" });
     expect(opts.taskId).toMatch(/^task-/);
+    expect(opts.cwd).toBeUndefined();
+    expect(opts.taskContext).toContain("タイトル: ログイン画面を作る");
   });
 
   it("auto-advances a succeeded build to demo_review (deploy-complete marker)", async () => {
@@ -126,11 +125,15 @@ describe("<Board>", () => {
     await userEvent.click(await screen.findByTestId("action-approve"));
     await userEvent.click(await screen.findByTestId("approval-confirm-yes"));
 
-    // A real run is kicked (the "反映中" work), carrying the staging反映 instruction + cwd.
+    // A real run is kicked (the "反映中" work), carrying the staging反映 instruction. The
+    // daemon picks the task's own worktree — the web never passes another run's cwd.
     await waitFor(() => expect(client.startRun).toHaveBeenCalled());
     const [prompt, opts] = client.startRun.mock.calls.at(-1)!;
     expect(prompt).toMatch(/staging に反映/);
-    expect(opts).toMatchObject({ taskId: "rev", cwd: "/repo/wt" });
+    expect(prompt).toContain("対象タスク: 反映対象 (taskId: rev)");
+    expect(opts).toMatchObject({ taskId: "rev" });
+    expect(opts.cwd).toBeUndefined();
+    expect(opts.taskContext).toContain("タイトル: 反映対象");
     // It must NOT auto-advance to staging_review here — the run's success does that.
     expect(api.transition).not.toHaveBeenCalledWith("feat-1", "staging_review", expect.anything());
   });
@@ -191,7 +194,9 @@ describe("<Board>", () => {
     await waitFor(() => expect(client.startRun).toHaveBeenCalled());
     const [prompt, opts] = client.startRun.mock.calls.at(-1)!;
     expect(prompt).toMatch(/本番に反映/);
-    expect(opts).toMatchObject({ taskId: "rev", cwd: "/repo/wt" });
+    expect(opts).toMatchObject({ taskId: "rev" });
+    expect(opts.cwd).toBeUndefined();
+    expect(prompt).toContain("対象タスク:");
     // And the ship transition goes through the approval gate.
     await waitFor(() =>
       expect(api.transition).toHaveBeenCalledWith("feat-1", "prod_shipped", { approvedByUser: true }),
@@ -265,12 +270,20 @@ describe("<Board>", () => {
     await waitFor(() => expect(client.startRun).toHaveBeenCalled());
     const [prompt] = client.startRun.mock.calls.at(-1)!;
     expect(prompt).toContain("余白が足りない");
-    expect(prompt).toContain("元の指示"); // prior context re-injected
+    // The prior prompt is NOT re-sent: the daemon resumes the task's own session.
+    expect(prompt).not.toContain("元の指示");
+    expect(prompt).not.toContain("前回の実行へのフィードバック");
   });
 
-  it("追加指示 starts a follow-up run with the prior context re-injected", async () => {
+  it("追加指示 sends only the new instruction + the task's own context (original request from ITS runs)", async () => {
     const api = makeFakeApi([
       makeBoardItem({ taskId: "rev", featureId: "feat-1", title: "追加指示対象", featurePhase: "demo_review", runStatus: "succeeded" }),
+    ]);
+    vi.mocked(api.listRuns).mockImplementation(async (filter?: { taskId?: string }) => [
+      // newest first; only runs of the requested task count
+      { id: "r2", taskId: filter?.taskId ?? null, prompt: "[commander] staging に反映", cwd: "/x", status: "succeeded", exitCode: 0, createdAt: "t2", updatedAt: "t2" },
+      { id: "r1", taskId: filter?.taskId ?? null, prompt: "最初のお願い", cwd: "/x", status: "succeeded", exitCode: 0, createdAt: "t1", updatedAt: "t1" },
+      { id: "o", taskId: "other-task", prompt: "別タスクの依頼", cwd: "/x", status: "succeeded", exitCode: 0, createdAt: "t0", updatedAt: "t0" },
     ]);
     const client = makeFakeClient();
     render(<Board client={client} api={api} pollMs={0} />);
@@ -282,9 +295,12 @@ describe("<Board>", () => {
 
     await waitFor(() => expect(client.startRun).toHaveBeenCalled());
     const [prompt, opts] = client.startRun.mock.calls.at(-1)!;
-    expect(prompt).toContain("ボタンを大きく");
-    expect(prompt).toContain("元の指示");
+    expect(prompt).toBe("ボタンを大きく");
     expect(opts.taskId).toBe("rev");
+    expect(opts.cwd).toBeUndefined();
+    expect(api.listRuns).toHaveBeenCalledWith({ taskId: "rev" });
+    expect(opts.taskContext).toContain("最初のお願い");
+    expect(opts.taskContext).not.toContain("別タスクの依頼");
   });
 
   it("追加指示 (再実行) の run にもタスクの PR を明記する", async () => {
@@ -430,21 +446,44 @@ describe("<Board>", () => {
   });
 });
 
+describe("<Board> task switching", () => {
+  it("does not carry one task's drawer state (draft / in-flight) into another task", async () => {
+    const api = makeFakeApi([
+      makeBoardItem({ taskId: "a", featureId: "feat-a", title: "タスクA", featurePhase: "demo_review", runStatus: "succeeded" }),
+      makeBoardItem({ taskId: "b", featureId: "feat-b", title: "タスクB", featurePhase: "demo_review", runStatus: "succeeded" }),
+    ]);
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+
+    await userEvent.click(await screen.findByTestId("task-card-a"));
+    await userEvent.click(await screen.findByTestId("action-rerun"));
+    await userEvent.type(screen.getByLabelText("rerun-prompt"), "Aへの指示");
+
+    await userEvent.click(screen.getByTestId("task-card-b"));
+    await screen.findByTestId("action-rerun");
+    expect(screen.queryByDisplayValue("Aへの指示")).not.toBeInTheDocument();
+  });
+});
+
 describe("followUpPrompt", () => {
   const pr = "https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/677";
 
-  it("deploy run の再実行は PR 未記録でも「推測するな」の行を付ける", () => {
-    const out = followUpPrompt(STAGING_DEPLOY_PROMPT, "再実行頼む", { prUrl: null, prUrls: [] });
-    expect(out).toContain("対象 PR: 未記録");
+  it("is just the new instruction (no prior prompt stacking)", () => {
+    expect(followUpPrompt("ボタンを大きく", { prUrl: null, prUrls: [] })).toBe("ボタンを大きく");
   });
 
-  it("既に同じ行で終わる prompt に二重に付けない", () => {
-    const once = followUpPrompt(PROD_DEPLOY_PROMPT, "x", { prUrl: pr, prUrls: [] });
-    const twice = followUpPrompt(null, once, { prUrl: pr, prUrls: [] });
+  it("pins the task's PR once recorded, never twice", () => {
+    const once = followUpPrompt("x", { prUrl: pr, prUrls: [] });
+    const twice = followUpPrompt(once, { prUrl: pr, prUrls: [] });
     expect(twice.split(`対象 PR: ${pr}`).length - 1).toBe(1);
   });
+});
 
-  it("PR 未記録の通常の追加指示には付けない", () => {
-    expect(followUpPrompt("元の指示", "ボタンを大きく", { prUrl: null, prUrls: [] })).not.toContain("対象 PR");
+describe("taskContextFor", () => {
+  it("names the task, its PR and its original request", () => {
+    const ctx = taskContextFor({ taskId: "t1", title: "チャット", prUrl: null, prUrls: ["https://x/pull/1"] }, "最初");
+    expect(ctx).toContain("タイトル: チャット");
+    expect(ctx).toContain("taskId: t1");
+    expect(ctx).toContain("PR: https://x/pull/1");
+    expect(ctx).toContain("最初");
   });
 });
