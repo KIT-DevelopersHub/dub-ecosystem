@@ -36,6 +36,7 @@ import type {
   UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateChannelVisibilityRequest,
   UpdateSectionRequest,
   WsTicketResponse,
 } from "./contract";
@@ -45,6 +46,8 @@ export interface ChatApiClient {
   createChannel(req: CreateChannelRequest): Promise<Channel>;
   getChannel(id: common.ChannelId): Promise<GetChannelResponse>;
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel>;
+  /** Public <-> private (app:chat:edit + chat:change_visibility). DMs are rejected. */
+  updateChannelVisibility(id: common.ChannelId, req: UpdateChannelVisibilityRequest): Promise<Channel>;
   /** Hard delete (chat:delete_channel). Messages are erased; DMs are rejected. */
   deleteChannel(id: common.ChannelId): Promise<void>;
   /** Org-wide sidebar sections + channel assignments (writes need chat:manage_sections). */
@@ -205,6 +208,9 @@ export class HttpChatClient implements ChatApiClient {
   }
   updateChannel(id: common.ChannelId, req: UpdateChannelRequest): Promise<Channel> {
     return this.request<Channel>("PATCH", `${CHAT}/channels/${id}`, req);
+  }
+  updateChannelVisibility(id: common.ChannelId, req: UpdateChannelVisibilityRequest): Promise<Channel> {
+    return this.request<Channel>("PUT", `${CHAT}/channels/${id}/visibility`, req);
   }
   deleteChannel(id: common.ChannelId): Promise<void> {
     return this.request<void>("DELETE", `${CHAT}/channels/${id}`);

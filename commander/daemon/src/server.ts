@@ -32,7 +32,7 @@ import { MAX_IMAGE_BYTES, MAX_IMAGES_PER_RUN, UploadStore, type StagedImage } fr
 export const VERSION = "0.1.0";
 const SERVICE = "commander-daemon";
 /** Changes on every daemon start; the web polls /health for it to see a restart finish. */
-const BOOT_ID = new Date().toISOString();
+export const BOOT_ID = new Date().toISOString();
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -291,5 +291,5 @@ export function createDaemonServer(
     json(res, 404, { error: "not_found" });
   });
 
-  return { server, store };
+  return { server, store, sink };
 }

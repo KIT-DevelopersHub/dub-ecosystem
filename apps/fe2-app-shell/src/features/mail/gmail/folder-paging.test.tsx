@@ -76,6 +76,7 @@ function fakeServer(initialBlocks: string[]) {
     registerForward: vi.fn(),
     updateForward: vi.fn(),
     removeForward: vi.fn(),
+    avatars: vi.fn().mockResolvedValue({ avatars: {} }),
     removeBlock: vi.fn().mockImplementation((value: string) => {
       blocks.delete(value);
       return Promise.resolve({ value, blocked: false });

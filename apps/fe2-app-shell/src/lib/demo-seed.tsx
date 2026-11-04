@@ -25,6 +25,7 @@ import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
+import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
@@ -56,6 +57,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:slack_import",
   "chat:emoji_import",
   "chat:manage_sections",
+  "chat:change_visibility",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -503,7 +505,31 @@ const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
   { id: "ntfn_adm_0005", type: "release", title: "🎉 使用量ダッシュボードを公開しました", body: "各サービスの無料枠の使用状況を確認できます。", audience: "admin", createdAt: "2026-08-02T01:30:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0006", type: "deploy.deployment.status_changed", title: "デプロイ完了: fe2-app-shell", body: "SPA シェルの本番デプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T01:15:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0007", type: "feedback", title: "新しいフィードバック: 通知の一括操作がほしい", body: "カテゴリ: idea\n送信ユーザー: usr_bob\n\n大量に公開する時に一括操作がほしいです", audience: "admin", createdAt: "2026-08-02T01:00:00Z", publishedBroadcastId: null },
+  // ⚙ → 問い合わせ (non-feedback kind) as the backend labels it.
+  { id: "ntfn_adm_0008", type: "feedback", title: "新しい問い合わせ（名刺が切れた）: 希望枚数: 50枚", body: "種別: 名刺が切れた\n送信ユーザー: usr_alice\n発生ページ: ホーム\n\n希望枚数: 50枚", audience: "admin", createdAt: "2026-08-02T00:45:00Z", publishedBroadcastId: null },
 ];
+
+// Demo POST /api/v1/feedback (⚙ → 問い合わせ): file it into the admin list the way the
+// backend's in-app admin notification reads, so the round trip is visible in-session.
+function recordInquiryDemo(body: notification.CreateFeedbackRequest | null): { id: string } {
+  const id = `nfb_demo_${Date.now()}`;
+  const kind = body?.kind ?? "feedback";
+  const label = INQUIRY_KIND_SPECS.find((s) => s.kind === kind)?.label ?? kind;
+  const message = (body?.message ?? "").replace(/\s+/g, " ").trim();
+  const heading = kind === "feedback" ? "フィードバック" : `問い合わせ（${label}）`;
+  const lines = [`種別: ${label}`];
+  if (kind === "feedback") lines.push(`カテゴリ: ${body?.category ?? "other"}`);
+  ADMIN_NOTIFICATIONS.unshift({
+    id: `ntfn_adm_${id}`,
+    type: "feedback",
+    title: `新しい${heading}: ${message.slice(0, 60)}`,
+    body: [...lines, `送信ユーザー: ${ME_ID}`, `発生ページ: ${body?.page?.name ?? "(不明)"}`, "", message].join("\n"),
+    audience: "admin",
+    createdAt: new Date().toISOString(),
+    publishedBroadcastId: null,
+  });
+  return { id };
+}
 
 // Publish one admin notification to members (idempotent). Flips the source row to 公開済み
 // in-session and fans a single members broadcast into the inbox. Returns null on an unknown
@@ -540,6 +566,16 @@ function unpublishAdminNotificationDemo(id: string): notification.UnpublishBroad
 }
 
 // ── mail ────────────────────────────────────────────────────────────────────
+// Icons the demo's Dub users "set" in アカウント設定 (POST /mail/avatars resolves only these).
+function demoPortrait(from: string, to: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="96" height="96" fill="url(#g)"/><circle cx="48" cy="38" r="17" fill="#ffffff" fill-opacity="0.92"/><path d="M16 96c4-20 17-31 32-31s28 11 32 31z" fill="#ffffff" fill-opacity="0.92"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+const DEMO_MAIL_AVATARS: Record<string, string> = {
+  "demo@developershub.jp": demoPortrait("#2563eb", "#7c3aed"),
+  "staff@developershub.jp": demoPortrait("#059669", "#0891b2"),
+  "taro@developershub.jp": demoPortrait("#d97706", "#db2777"),
+};
 // Demo attachment blob store: attId -> bytes (download links serve real bytes in-session).
 const DEMO_MAIL_BLOBS = new Map<string, { filename: string; contentType: string; bytes: Uint8Array }>();
 function seedMailBlob(id: string, filename: string, contentType: string, text: string): mail.MailAttachment {
@@ -734,9 +770,12 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
   "mail:read",
 ];
 
-// チャット 編集 but NOT chat:manage_sections (the default for every non-admin role): sees the
-// org-wide sidebar sections without any organizing UI. ?demo_account=usr_bob previews it.
-const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "chat:manage_sections");
+// チャット 編集 but NOT chat:manage_sections / chat:change_visibility (the default for every
+// non-admin role): sees the org-wide sidebar sections without any organizing UI, and a
+// channel's 公開範囲 without the switch. ?demo_account=usr_bob previews it.
+const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter(
+  (k) => k !== "chat:manage_sections" && k !== "chat:change_visibility",
+);
 
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
@@ -1306,6 +1345,18 @@ function createMailStore() {
           return json({ id, status: "canceled" });
         }
       }
+    }
+
+    // 送信者アイコン: only Dub users (DEMO_MAIL_AVATARS) resolve; outside senders keep initials.
+    if (method === "POST" && pathname === "/api/v1/mail/avatars") {
+      const emails = Array.isArray((body as { emails?: unknown } | null)?.emails) ? (body as { emails: unknown[] }).emails : null;
+      if (!emails) return validationFailed("emails is required");
+      const avatars: Record<string, string> = {};
+      for (const e of emails) {
+        const key = typeof e === "string" ? e.trim().toLowerCase() : "";
+        if (DEMO_MAIL_AVATARS[key]) avatars[key] = DEMO_MAIL_AVATARS[key];
+      }
+      return json({ avatars } satisfies mail.MailAvatarsResponse);
     }
 
     // 送信者ブロック (0021): per-account block list in localStorage, with the gateway's
@@ -2241,6 +2292,30 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       }
     }
     {
+      // Public <-> private, like chat-service: 編集 + chat:change_visibility (403 otherwise),
+      // DM 400, stale version 409, same value = unchanged. Existing members stay.
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/visibility$/.exec(pathname);
+      if (m && method === "PUT") {
+        const perms = currentAccount().permissions;
+        if (!perms.includes("app:chat:edit") || !perms.includes("chat:change_visibility")) {
+          return json({ error: { code: "FORBIDDEN", message: "chat:change_visibility required", retryable: false } } satisfies ErrorResponse, 403);
+        }
+        const c = byId.get(decodeURIComponent(m[1]!));
+        if (!c) return notFound(`PUT ${pathname}`);
+        if (c.type === "dm") return validationFailed("dm_visibility_fixed");
+        const req = (body ?? {}) as { visibility?: unknown; version?: unknown };
+        if (req.visibility !== "public" && req.visibility !== "private") return validationFailed("visibility must be public|private");
+        if (req.version !== (c.version ?? 1)) {
+          return json({ error: { code: "CHAT_VERSION_CONFLICT", message: "version conflict", retryable: false } } satisfies ErrorResponse, 409);
+        }
+        if ((c.visibility ?? "public") !== req.visibility) {
+          c.visibility = req.visibility;
+          c.version = (c.version ?? 1) + 1;
+        }
+        return json(toWire(c));
+      }
+    }
+    {
       const m = /^\/api\/v1\/chat\/channels\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const c = byId.get(decodeURIComponent(m[1]!));
@@ -2537,6 +2612,9 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const now = new Date().toISOString();
       for (const n of NOTIFICATIONS) if (n.readAt === null) n.readAt = now;
       return json(null, 204);
+    }
+    if (pathname === "/api/v1/feedback") {
+      return json(recordInquiryDemo(body as notification.CreateFeedbackRequest | null), 201);
     }
     // admin: bulk publish a selection in one request (idempotent, per-item outcomes).
     if (pathname === "/api/v1/notifications/manage/publish-batch") {
