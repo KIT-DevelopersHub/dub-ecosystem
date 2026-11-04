@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "8859b628",
-  "branch": "HEAD",
+  "deployedSha": "96f0c31b",
+  "branch": "commander/task-ctask_01M6JH1TB0B4GRQ2H8FC6B60RM",
   "actor": "ko-tarou",
-  "markers": ["fe2-mail-avatar-img", "fe2-mail-inline-to"],
+  "markers": ["fe2-mail-compose-header", "fe2-mail-body-link"],
   "live": true,
-  "verifiedAt": "2026-11-04T04:59:48Z",
-  "updatedAt": "2026-11-04T04:59:48Z",
-  "note": "mail: 送信者アイコン + 宛先/Cc/Bcc の小アイコン (PR #745)"
+  "verifiedAt": "2026-11-04T05:53:57Z",
+  "updatedAt": "2026-11-04T05:53:57Z",
+  "note": "PR #758 mail URL linkify + draggable compose"
 }
