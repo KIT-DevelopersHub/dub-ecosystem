@@ -1,0 +1,42 @@
+name: Release staging slot
+
+# Free a PR's staging slot once it leaves staging review:
+#   * `確認した` is added  -> staging is done, the PR is now waiting for the prod merge
+#   * the PR is closed     -> merged (prod via deploy.yml) or abandoned
+#
+# A slot counts as busy while ANY open PR carries `stagingへ` / `staging2へ`
+# (scripts/staging-pick-slot.sh), so leaving the label on an approved PR blocks the next
+# staging run until someone removes it by hand. Removing it here also stops a later push to
+# the approved PR (e.g. a main catch-up) from redeploying over whoever took the slot next.
+# prod-gate.yml only looks at `確認した`, so dropping the staging label never affects merging.
+on:
+  pull_request:
+    types: [labeled, closed]
+
+concurrency:
+  group: staging-release-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  pull-requests: write
+
+jobs:
+  release:
+    name: remove staging slot labels
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action == 'closed' || github.event.label.name == '確認した') &&
+      (contains(github.event.pull_request.labels.*.name, 'stagingへ') ||
+       contains(github.event.pull_request.labels.*.name, 'staging2へ'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Remove stagingへ / staging2へ
+        run: |
+          for label in "stagingへ" "staging2へ"; do
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$label" \
+              && echo "released $label from #$PR" || true
+          done
