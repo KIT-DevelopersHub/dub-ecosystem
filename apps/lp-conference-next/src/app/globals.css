@@ -2064,6 +2064,7 @@ img { max-width: 100%; height: auto; display: block; }
   border-block: 1px solid var(--lp-border-soft);
 }
 .supporters-inner { text-align: center; }
+.supporters-head { margin-bottom: clamp(2.5rem, 6vw, 4rem); }
 .supporters-title {
   margin: 0.6rem 0 1rem;
   font-family: var(--font-display);
@@ -2073,31 +2074,106 @@ img { max-width: 100%; height: auto; display: block; }
   text-wrap: balance;
 }
 .supporters-body {
-  margin: 0 auto 2.25rem;
-  max-width: 48ch;
+  margin: 0 auto;
+  max-width: 34em;
   color: var(--lp-ink-soft);
-  font-size: clamp(1rem, 1.8vw, 1.1rem);
+  font-size: clamp(0.95rem, 1.7vw, 1.05rem);
   line-height: 1.9;
   white-space: pre-line;
+  text-wrap: pretty;
 }
-.supporters-names {
+.supporters-group { text-align: left; margin: 0 auto clamp(2.75rem, 6vw, 4rem); }
+.supporters-group-title {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.75rem 1rem;
-  margin: 0 auto 2.5rem;
+  align-items: center;
+  gap: 1.1rem;
+  margin: 0 0 clamp(1.25rem, 3vw, 1.75rem);
+  font-family: var(--font-display);
+  font-size: clamp(1.05rem, 2.2vw, 1.3rem);
+  font-weight: 900;
+  color: var(--lp-heading);
+  letter-spacing: 0.04em;
+}
+.supporters-group-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--lp-border);
+}
+/* 金・銀の枠: 枠画像の縦横比のまま伸縮し、中身は枠の内側に収める */
+.supporters-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(1rem, 2.4vw, 1.75rem) clamp(1rem, 2.4vw, 1.75rem);
+  margin: 0;
   padding: 0;
-  max-width: 60rem;
   list-style: none;
 }
-.supporters-names li {
-  padding: 0.55rem 1.2rem;
-  border: 1px solid var(--lp-border);
-  border-radius: 999px;
-  background: var(--lp-surface);
-  color: var(--lp-ink);
-  font-weight: 700;
+.supporters-cards + .supporters-cards { margin-top: clamp(1rem, 2.4vw, 1.75rem); }
+.supporter-card {
+  position: relative;
+  background: center / 100% 100% no-repeat;
 }
+.supporter-card--gold { aspect-ratio: 1392 / 724; background-image: url("/img/supporter-frame-gold.png"); }
+.supporter-card--silver { aspect-ratio: 1429 / 702; background-image: url("/img/supporter-frame-silver.png"); }
+.supporter-card-body {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.3em;
+  min-width: 0;
+  overflow: hidden;
+}
+.supporter-card--gold .supporter-card-body { inset: 14% 9% 13% 10%; }
+.supporter-card--silver .supporter-card-body { inset: 11% 10% 14% 10%; }
+.supporter-name {
+  display: block;
+  color: var(--lp-ink);
+  font-size: clamp(1rem, 1.6vw, 1.12rem);
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.supporter-message {
+  display: block;
+  color: var(--lp-ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.supporter-card .supporter-name,
+.supporter-card .supporter-message {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+/* その他: ◆ + お名前 + 一言 */
+.supporters-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(1.25rem, 2.6vw, 1.75rem) clamp(1rem, 2.4vw, 1.75rem);
+  margin: 0;
+  padding: 0 0 0 0.25rem;
+  list-style: none;
+}
+.supporters-list-item {
+  position: relative;
+  padding-left: 1.6rem;
+  min-width: 0;
+}
+.supporters-list-item::before {
+  content: "";
+  position: absolute;
+  left: 0.15rem;
+  top: 0.5em;
+  width: 0.55rem;
+  height: 0.55rem;
+  background: var(--lp-blue);
+  transform: rotate(45deg);
+}
+.supporters-list-item .supporter-message { margin-top: 0.2em; }
 .supporters-empty {
   margin: 0 auto 2.5rem;
   max-width: 40rem;
@@ -2107,6 +2183,15 @@ img { max-width: 100%; height: auto; display: block; }
   background: var(--lp-surface);
   color: var(--lp-ink-mute);
   line-height: 1.8;
+  text-align: center;
+}
+.supporters-actions { text-align: center; }
+@media (max-width: 960px) {
+  .supporters-cards, .supporters-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .supporters-cards { grid-template-columns: minmax(0, 26rem); justify-content: center; }
+  .supporters-list { grid-template-columns: 1fr; }
 }
 .btn-support--onLight { background: var(--lp-blue-btn); color: #fff; }
 
