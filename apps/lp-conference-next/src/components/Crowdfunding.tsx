@@ -39,7 +39,7 @@ export function Crowdfunding({ data, index }: { data: CrowdfundingConfig; index?
           )}
         </div>
       </div>
-      {supporters && <Supporters data={supporters} cta={data.cta} index={index} />}
+      {supporters && <Supporters data={supporters} index={index} />}
     </section>
   );
 }
@@ -59,15 +59,15 @@ function SupportCta({ cta, className = "btn-support" }: { cta: CtaLink; classNam
   );
 }
 
-/** 「支援者情報」パターン: 段（金・銀の枠付きカード / その他は ◆ の一覧）ごとに支援者を並べる。 */
-function Supporters({ data, cta, index }: { data: CrowdfundingSupporters; cta?: CtaLink; index?: string }) {
+/** 「支援者情報」パターン: 段（金・銀の枠付きカード / その他は ◆ の一覧）ごとに支援者を並べる。背景は帯と同じ・CTA は出さない。 */
+function Supporters({ data, index }: { data: CrowdfundingSupporters; index?: string }) {
   const groups = supporterGroups(data);
   const lead = data.lead ?? data.body;
   return (
     <div className="supporters" data-lp-opt="crowdfunding-pattern" data-lp-opt-value="supporters">
       <div className="container supporters-inner">
         <header className="supporters-head">
-          <Reveal as="span" className="section-eyebrow" variant="fade">
+          <Reveal as="span" className="section-eyebrow section-eyebrow--onDark" variant="fade">
             {index && <span className="section-eyebrow-idx">{index}</span>}
             {data.eyebrow ?? "SPECIAL THANKS"}
           </Reveal>
@@ -112,11 +112,6 @@ function Supporters({ data, cta, index }: { data: CrowdfundingSupporters; cta?: 
         ) : (
           <Reveal variant="up" delay={200}>
             <p className="supporters-empty">{data.emptyNote}</p>
-          </Reveal>
-        )}
-        {cta && (
-          <Reveal className="supporters-actions" variant="up" delay={240}>
-            <SupportCta cta={cta} className="btn-support btn-support--onLight" />
           </Reveal>
         )}
       </div>
