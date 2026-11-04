@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createApp } from "../src/app";
 import type { Env } from "../src/env";
 import { makeD1 } from "./d1";
+import { createRun, ORPHAN_RUN_NOTICE } from "../src/repo";
 
 // Every route requires the operator token (src/protection-table.ts), so these behaviour
 // tests configure one and present it. Authorization itself is covered by
@@ -447,6 +448,70 @@ describe("commander-service run persistence", () => {
     const board = await call(app, env, "GET", "/tasks");
     const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
     expect(item.stagingUrl).toBe("https://staging-bf.example.workers.dev");
+  });
+});
+
+describe("commander-service orphan-run reconcile", () => {
+  let app: ReturnType<typeof createApp>;
+  let env: Env;
+
+  beforeEach(() => {
+    app = createApp();
+    env = makeEnv();
+  });
+
+  async function seed(id: string, status: string, at: string, taskId: string | null = null) {
+    await createRun(env.DB as never, { id, prompt: "p", cwd: "/wt", status: status as never, taskId, at });
+  }
+
+  it("fails every pending/running run created before `before` with a notice trail", async () => {
+    const taskId = (await call(app, env, "POST", "/tasks", { title: "途中で落ちた" })).json.task.id as string;
+    await seed("old_running", "running", "2026-11-04T01:00:00.000Z", taskId);
+    await seed("old_pending", "pending", "2026-11-04T01:00:01.000Z");
+    await seed("old_done", "succeeded", "2026-11-04T01:00:02.000Z");
+    await seed("old_owned", "running", "2026-11-04T01:00:03.000Z");
+    await seed("new_running", "running", "2026-11-04T03:00:00.000Z");
+
+    const r = await call(app, env, "POST", "/runs/reconcile", {
+      before: "2026-11-04T02:00:00.000Z",
+      exceptIds: ["old_owned"],
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.reconciled).toEqual(["old_running", "old_pending"]);
+
+    const got = await call(app, env, "GET", "/runs/old_running");
+    expect(got.json.run.status).toBe("failed");
+    expect(got.json.run.exitCode).toBeNull();
+    expect(got.json.events.map((e: { type: string }) => e.type)).toEqual(["stderr", "exit", "status"]);
+    expect(got.json.events[0].payload.line).toBe(ORPHAN_RUN_NOTICE);
+
+    for (const [id, status] of [["old_done", "succeeded"], ["old_owned", "running"], ["new_running", "running"]]) {
+      expect((await call(app, env, "GET", `/runs/${id}`)).json.run.status).toBe(status);
+    }
+
+    // The board's latest run for the task is now failed → the web shows it as 要修正.
+    const board = await call(app, env, "GET", "/tasks");
+    const item = board.json.items.find((i: { taskId: string }) => i.taskId === taskId);
+    expect(item.latestRun.status).toBe("failed");
+
+    // Idempotent: nothing left to sweep.
+    const again = await call(app, env, "POST", "/runs/reconcile", { before: "2026-11-04T02:00:00.000Z", exceptIds: ["old_owned"] });
+    expect(again.json.reconciled).toEqual([]);
+  });
+
+  it("limits the sweep to `ids` and uses a custom line (shutdown path)", async () => {
+    await seed("a", "running", "2026-11-04T01:00:00.000Z");
+    await seed("b", "running", "2026-11-04T01:00:00.000Z");
+    const r = await call(app, env, "POST", "/runs/reconcile", { ids: ["a"], line: "bye" });
+    expect(r.json.reconciled).toEqual(["a"]);
+    expect((await call(app, env, "GET", "/runs/a")).json.events[0].payload.line).toBe("bye");
+    expect((await call(app, env, "GET", "/runs/b")).json.run.status).toBe("running");
+    expect((await call(app, env, "POST", "/runs/reconcile", { ids: [] })).json.reconciled).toEqual([]);
+  });
+
+  it("requires the operator token", async () => {
+    const r = await call(app, env, "POST", "/runs/reconcile", {}, { "x-commander-token": "wrong" });
+    expect(r.status).toBe(401);
   });
 });
 

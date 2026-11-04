@@ -33,7 +33,8 @@
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { createDaemonServer, VERSION } from "./server.ts";
+import { BOOT_ID, createDaemonServer, VERSION } from "./server.ts";
+import { abortInFlightRuns, reconcileAtBoot } from "./lifecycle.ts";
 import { resolveClaudeConfigDir } from "./env.ts";
 import type { DaemonConfig } from "./types.ts";
 
@@ -111,7 +112,7 @@ function loadConfig(): DaemonConfig {
 }
 
 const config = loadConfig();
-const { server } = createDaemonServer(config);
+const { server, store, sink } = createDaemonServer(config);
 
 server.listen(config.port, "127.0.0.1", () => {
   // Bound to loopback only: single-operator, no network exposure (ADR 0003).
@@ -126,3 +127,29 @@ server.listen(config.port, "127.0.0.1", () => {
       ` isolateEnv=${config.isolateEnv}, claudeConfigDir=${config.claudeConfigDir})`,
   );
 });
+
+// Self-heal runs the previous daemon left `running` (its claude children died with it).
+// Background + best-effort: boot never waits on or fails because of commander-service.
+if (config.serviceUrl) {
+  void reconcileAtBoot({
+    serviceUrl: config.serviceUrl,
+    serviceToken: config.serviceToken,
+    before: BOOT_ID,
+    ownedIds: () => store.list().map((r) => r.id),
+  });
+}
+
+// Graceful stop: record this daemon's in-flight runs as failed before exiting (short cap).
+let stopping = false;
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.on(sig, () => {
+    if (stopping) process.exit(1); // second signal: give up waiting
+    stopping = true;
+    void abortInFlightRuns(store, sink, 3000)
+      .catch(() => [])
+      .finally(() => {
+        server.close();
+        process.exit(sig === "SIGINT" ? 130 : 143); // conventional 128+signal
+      });
+  });
+}
