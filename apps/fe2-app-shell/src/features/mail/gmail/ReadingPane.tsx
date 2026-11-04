@@ -38,6 +38,7 @@ import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
 import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
+import { LinkifiedText } from "../MailBody.tsx";
 import { formatBytes, newIdempotencyKey, parseRecipients, saveBlob } from "../mailApi.tsx";
 
 function quote(msg: MailMsg): string {
@@ -276,20 +277,17 @@ function MessageBlock({
         </span>
       </div>
       {open ? (
-        <div
-          data-testid="fe2-mail-body-text"
+        <LinkifiedText
+          testId="fe2-mail-body-text"
+          text={msg.body}
           style={{
             marginTop: 16,
             marginLeft: 48,
             fontSize: "var(--dub-font-size-sm)",
             lineHeight: 1.6,
             color: "var(--dub-color-text-primary)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
           }}
-        >
-          {msg.body}
-        </div>
+        />
       ) : null}
       {open ? <Attachments msg={msg} /> : null}
       {details ? <MessageDetailsDialog msg={msg} subject={subject} own={own} onClose={() => setDetails(false)} /> : null}

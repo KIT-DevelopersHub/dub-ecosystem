@@ -12,7 +12,7 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
 import { MailFolderTabs } from "./MailFolderTabs.tsx";
-import { sanitizeHtml } from "./sanitize.tsx";
+import { LinkifiedText, SanitizedHtml } from "./MailBody.tsx";
 import { formatBytes, saveBlob } from "./mailApi.tsx";
 
 function formatSent(iso: string): string {
@@ -53,16 +53,9 @@ function SentRow({ item, onOpen }: { item: mail.MailSentListItem; onOpen: () => 
 /** Render one sent message body. Text is preferred; HTML is sanitized to a safe subset. */
 function SentBody({ message }: { message: mail.MailSentDetail }): JSX.Element {
   if (message.textBody && message.textBody.trim().length > 0) {
-    return (
-      <div data-testid="fe2-mail-sent-body-text" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-        {message.textBody}
-      </div>
-    );
+    return <LinkifiedText testId="fe2-mail-sent-body-text" text={message.textBody} />;
   }
-  if (message.htmlBody) {
-    const safe = sanitizeHtml(message.htmlBody);
-    return <div data-testid="fe2-mail-sent-body-html" dangerouslySetInnerHTML={{ __html: safe }} />;
-  }
+  if (message.htmlBody) return <SanitizedHtml testId="fe2-mail-sent-body-html" html={message.htmlBody} />;
   return <em data-testid="fe2-mail-sent-body-empty">(本文なし)</em>;
 }
 
