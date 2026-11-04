@@ -75,7 +75,15 @@ export const POLICY_TABLE = definePolicyTable({
   // attendance record unreachable for the very people it counts.
   "POST /meetings/:id/join": AUTHENTICATED,
   "GET /meetings/me/regulars": AUTHENTICATED,
+  // 「Googleと連携」 stores only the CALLER's own Google account id (the state is bound to them).
+  "POST /meetings/me/google-link/start": AUTHENTICATED,
+  "POST /meetings/me/google-link/callback": AUTHENTICATED,
   // The report and corrections are 人事 data: 人事 閲覧 + hr:read / 人事 編集 + hr:write (identity/0025).
   "GET /meetings/attendance": appLevel("hr", "view", "hr:read"),
   "PUT /meetings/:id/attendance/:date/:userId": appLevel("hr", "edit", "hr:write"),
+  // Reading Meet records now, confirming who a participant is, and the threshold: corrections too.
+  "POST /meetings/attendance/ingest": appLevel("hr", "edit", "hr:write"),
+  "PUT /meetings/attendance/links/:googleUserId": appLevel("hr", "edit", "hr:write"),
+  "DELETE /meetings/attendance/links/:googleUserId": appLevel("hr", "edit", "hr:write"),
+  "PUT /meetings/attendance/settings": appLevel("hr", "edit", "hr:write"),
 });

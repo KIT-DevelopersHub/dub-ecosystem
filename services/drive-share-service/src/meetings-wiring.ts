@@ -10,11 +10,14 @@ import { createGoogleCalendarClient, type CalendarClient } from "./google/calend
 import { createTokenProvider, isInvalidGrant } from "./google/token";
 import { importTokenKey } from "./google/crypto";
 import { createD1GoogleAccountStore } from "./google-account-store";
-import { CALENDAR_SCOPE, MEET_SCOPE, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
+import { CALENDAR_SCOPE, MEET_RECORDS_SCOPE, MEET_SCOPE, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
+import { createEmptyMeetRecordsClient, createGoogleMeetRecordsClient } from "./google/meet-records-client";
+import { runMeetIngest, type IngestResult } from "./meet-ingest";
+import { createGoogleLinkService, type GoogleLinkService } from "./google-link";
 import { createMemberDirectory } from "./member-directory";
 import { createD1MeetingStore } from "./meetings-store";
 import { createD1AttendanceStore } from "./attendance-store";
-import { createAttendanceService, type AttendanceService } from "./attendance-service";
+import { createAttendanceService, type AttendanceService, type MeetRecordsAccess } from "./attendance-service";
 import { createMeetingsService, type MeetingAccount, type MeetingsService } from "./meetings-service";
 import { createIdentityRoleMembership } from "./role-membership";
 import { SECRET_ACCOUNT_ID } from "./types";
@@ -112,14 +115,58 @@ export async function buildMeetingsService(
   });
 }
 
-/** 定例の出席 (join from Dub / 人事 report). Needs no Google account: D1 + identity only. */
+/** The Meet records client over the same account Drive / meetings use. Mock or nothing connected =
+ *  an always-empty client (ready, so the UI shows no reconnect warning in local / demo runs). */
+export async function resolveMeetRecords(env: Env, resolved: ResolvedCredentials, fetchImpl?: typeof fetch): Promise<MeetRecordsAccess> {
+  if (mockForced(env) || resolved.source === "none") return { ready: true, client: createEmptyMeetRecordsClient() };
+  if (resolved.source === "unusable") return { ready: false, client: createEmptyMeetRecordsClient() };
+  const token = createTokenProvider({ credentials: resolved.credentials, ...(fetchImpl ? { fetchImpl } : {}) });
+  let ready = true;
+  try {
+    const scopes = await token.grantedScopes();
+    ready = scopes === null || scopes.includes(MEET_RECORDS_SCOPE);
+  } catch {
+    ready = false;
+  }
+  return { ready, client: createGoogleMeetRecordsClient({ token, ...(fetchImpl ? { fetchImpl } : {}) }) };
+}
+
+async function meetRecordsFor(env: Env, requestId: string): Promise<MeetRecordsAccess> {
+  const accountStore = createD1GoogleAccountStore(createDbClient(env.DB, { namespace: "driveshare", requestId }));
+  const key = await importTokenKey(env.DRIVESHARE_TOKEN_ENC_KEY);
+  const resolved = await resolveDriveCredentials({ env, store: accountStore, orgId: common.DUB_DEFAULT_ORG_ID, key });
+  return resolveMeetRecords(env, resolved);
+}
+
+/** 定例の出席 (join from Dub / 人事 report / Meet ingest). */
 export function buildAttendanceService(env: Env, ctx: { requestId: string; userId?: string }): AttendanceService {
   const db = createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId });
+  let access: Promise<MeetRecordsAccess> | null = null;
   return createAttendanceService({
     meetings: createD1MeetingStore(db),
     store: createD1AttendanceStore(db),
     roster: createIdentityRoleMembership(env.SVC_IDENTITY, { requestId: ctx.requestId, ...(ctx.userId ? { userId: ctx.userId } : {}) }),
     orgId: common.DUB_DEFAULT_ORG_ID,
     now: nowIso,
+    meetRecords: () => (access ??= meetRecordsFor(env, ctx.requestId)),
+    kick: (soonMs?: number) => kickMeetingSync(env, soonMs),
   });
+}
+
+/** The scheduled Meet ingest (MeetingSyncDO alarm). null = skipped (scope missing). */
+export async function runScheduledMeetIngest(env: Env, opts: { budget: number; deadline: number }): Promise<IngestResult | null> {
+  const requestId = newId("req");
+  const access = await meetRecordsFor(env, requestId);
+  if (!access.ready) return null;
+  const db = createDbClient(env.DB, { namespace: "driveshare", requestId });
+  return runMeetIngest(
+    { meetings: createD1MeetingStore(db), store: createD1AttendanceStore(db), client: access.client, orgId: common.DUB_DEFAULT_ORG_ID, now: nowIso },
+    opts,
+  );
+}
+
+/** 「Googleと連携」 for the acting member. */
+export function buildGoogleLinkService(env: Env, ctx: { requestId: string }): GoogleLinkService {
+  const db = createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId });
+  return createGoogleLinkService({ env, states: createD1GoogleAccountStore(db), attendance: createD1AttendanceStore(db), orgId: common.DUB_DEFAULT_ORG_ID });
 }

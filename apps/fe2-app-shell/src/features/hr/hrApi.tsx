@@ -21,6 +21,11 @@ export interface HrApi {
   attendance(range: { from: string; to: string }): Promise<meeting.AttendanceReportResponse>;
   /** 出席の手修正 (null = 記録を消す = 欠席)。 */
   setAttendance(meetingId: string, date: string, userId: string, status: meeting.AttendanceStatus | null): Promise<meeting.SetAttendanceResponse>;
+  /** Meet の参加記録を今すぐ取り込む。 */
+  ingestAttendance(body?: meeting.IngestAttendanceRequest): Promise<meeting.IngestAttendanceResponse>;
+  /** 未確定の参加者 (Google アカウント) をメンバーに確定 (次回から自動)。 */
+  confirmParticipant(googleUserId: string, userId: string): Promise<{ ok: true }>;
+  updateAttendanceSettings(body: meeting.UpdateAttendanceSettingsRequest): Promise<meeting.AttendanceSettings>;
 }
 
 const BASE = "/api/v1/members/hr";
@@ -71,5 +76,15 @@ export function createHrApi(api: ApiClient): HrApi {
         path: `/api/v1/meetings/${enc(meetingId)}/attendance/${enc(date)}/${enc(userId)}`,
         body: { status },
       }),
+    ingestAttendance: (body = {}) =>
+      api.request<meeting.IngestAttendanceResponse, meeting.IngestAttendanceRequest>({ method: "POST", path: "/api/v1/meetings/attendance/ingest", body }),
+    confirmParticipant: (googleUserId, userId) =>
+      api.request<{ ok: true }, meeting.ConfirmParticipantRequest>({
+        method: "PUT",
+        path: `/api/v1/meetings/attendance/links/${enc(googleUserId)}`,
+        body: { userId },
+      }),
+    updateAttendanceSettings: (body) =>
+      api.request<meeting.AttendanceSettings, meeting.UpdateAttendanceSettingsRequest>({ method: "PUT", path: "/api/v1/meetings/attendance/settings", body }),
   };
 }

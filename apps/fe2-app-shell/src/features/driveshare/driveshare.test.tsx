@@ -99,6 +99,7 @@ function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
     completeGoogleConnect: () => Promise.resolve({ accounts: [], canConnect: false }),
     switchGoogleAccount: () => Promise.resolve({ accounts: [], canConnect: false }),
     removeGoogleAccount: () => Promise.resolve(),
+    completeGoogleLink: () => Promise.resolve({ googleLinked: true }),
     ...over,
   };
 }
@@ -396,6 +397,32 @@ describe("Drive共有 > 設定 > Google アカウント", () => {
     render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(CONNECTED), completeGoogleConnect })));
     await waitFor(() => expect(completeGoogleConnect).toHaveBeenCalledWith("c1", "s1"));
     expect(screen.getByTestId("fe2-driveshare-settings")).toBeInTheDocument();
+    expect(window.location.search).toBe("");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("an account without Meet records access says 再連携が必要 and offers 再接続", async () => {
+    const noRecords = {
+      ...CONNECTED,
+      accounts: CONNECTED.accounts.map((a) => (a.id === "dga_main" ? { ...a, attendanceMissing: true } : a)),
+    };
+    const startGoogleConnect = vi.fn(() => new Promise<{ authUrl: string }>(() => {}));
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(noRecords), startGoogleConnect })));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-attendance-missing-warning")).toHaveTextContent("再連携が必要です");
+    expect(screen.getByTestId("fe2-driveshare-google-no-attendance-dga_main")).toHaveTextContent("再連携が必要");
+    await userEvent.click(screen.getByTestId("fe2-driveshare-google-reconnect-dga_main"));
+    expect(startGoogleConnect).toHaveBeenCalled();
+  });
+
+  it("a 「Googleと連携」 return (lnk_ state) links the member, never the account connect", async () => {
+    window.history.replaceState(null, "", "/driveshare?code=c9&state=lnk_abc");
+    const completeGoogleConnect = vi.fn(() => Promise.resolve(CONNECTED));
+    const completeGoogleLink = vi.fn(() => Promise.resolve({ googleLinked: true as const }));
+    render(wrap(<DriveShareScreen />, stubApi({ completeGoogleConnect, completeGoogleLink })));
+    await waitFor(() => expect(completeGoogleLink).toHaveBeenCalledWith("c9", "lnk_abc"));
+    expect(completeGoogleConnect).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Google と連携しました/)).toBeInTheDocument();
     expect(window.location.search).toBe("");
     window.history.replaceState(null, "", "/");
   });

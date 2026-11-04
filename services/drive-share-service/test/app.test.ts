@@ -3,7 +3,7 @@ import { CommonErrorCodes } from "@dub/errors";
 import { createApp } from "../src/app";
 import { createDriveShareService } from "../src/service";
 import { createMockDriveShareClient } from "../src/mock-client";
-import { memAuthzHolding, allowAll, DRIVE_READER, AUTHED, fakeRoster, buildRoleGrants, stubGoogleAccount, buildMeetings, buildAttendance } from "./helpers";
+import { memAuthzHolding, allowAll, DRIVE_READER, AUTHED, fakeRoster, buildRoleGrants, stubGoogleAccount, buildMeetings, buildAttendance, buildGoogleLink } from "./helpers";
 
 function app(authz = allowAll) {
   const client = createMockDriveShareClient();
@@ -12,7 +12,7 @@ function app(authz = allowAll) {
     drive: client,
     roster: fakeRoster({ role_sys_member: ["staff-a@example.com"] }, { role_sys_member: "member" }),
   });
-  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service, attendance: () => buildAttendance().service });
+  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service, attendance: () => buildAttendance().service, googleLink: () => buildGoogleLink().service });
 }
 
 const JSON_HDR = { ...AUTHED, "content-type": "application/json" };

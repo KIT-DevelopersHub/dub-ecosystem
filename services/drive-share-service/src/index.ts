@@ -24,7 +24,7 @@ import { createD1GoogleAccountStore } from "./google-account-store";
 import { createGoogleAccountService, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
 import { importTokenKey } from "./google/crypto";
 import { mockForced, parseConfig, type Env } from "./env";
-import { buildAttendanceService, buildMeetingsService } from "./meetings-wiring";
+import { buildAttendanceService, buildGoogleLinkService, buildMeetingsService } from "./meetings-wiring";
 import { MeetingSyncDO } from "./meeting-sync-do";
 
 /** Pick the Drive client: real when an account is available (connected from Drive共有 > 設定, or
@@ -98,8 +98,9 @@ async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof cre
 
   const meetings = () => buildMeetingsService(env, reqCtx);
   const attendance = () => buildAttendanceService(env, reqCtx);
+  const googleLink = () => buildGoogleLinkService(env, reqCtx);
 
-  return createApp({ service, roleGrants, authz, googleAccount, meetings, attendance });
+  return createApp({ service, roleGrants, authz, googleAccount, meetings, attendance, googleLink });
 }
 
 // The entry module exports ONLY the default handler and the Durable Object class (workerd

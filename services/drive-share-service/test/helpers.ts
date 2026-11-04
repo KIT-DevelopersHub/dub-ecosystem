@@ -12,7 +12,9 @@ import type { Env } from "../src/env";
 import { createMeetingsService } from "../src/meetings-service";
 import { createInMemoryMeetingStore } from "../src/meetings-store";
 import { createInMemoryAttendanceStore } from "../src/attendance-store";
-import { createAttendanceService } from "../src/attendance-service";
+import { createAttendanceService, type MeetRecordsAccess } from "../src/attendance-service";
+import { createEmptyMeetRecordsClient } from "../src/google/meet-records-client";
+import { createGoogleLinkService } from "../src/google-link";
 import { createMockCalendarClient } from "../src/calendar-mock-client";
 import { staticMemberDirectory, type MemberDirectory } from "../src/member-directory";
 import type { CalendarClient } from "../src/google/calendar-client";
@@ -146,15 +148,36 @@ export function buildAttendance(opts: {
   meetings?: ReturnType<typeof createInMemoryMeetingStore>;
   store?: ReturnType<typeof createInMemoryAttendanceStore>;
   now?: () => string;
+  meetRecords?: MeetRecordsAccess | null;
 } = {}) {
   const meetings = opts.meetings ?? createInMemoryMeetingStore();
   const store = opts.store ?? createInMemoryAttendanceStore();
+  const kicks: (number | undefined)[] = [];
+  const access = opts.meetRecords === undefined ? { ready: true, client: createEmptyMeetRecordsClient() } : opts.meetRecords;
   const service = createAttendanceService({
     meetings,
     store,
     roster: opts.roster ?? fakeRoster({}, {}),
     orgId: common.DUB_DEFAULT_ORG_ID,
     now: opts.now ?? (() => "2026-10-20T10:00:00.000Z"),
+    meetRecords: async () => access,
+    kick: async (soonMs?: number) => {
+      kicks.push(soonMs);
+    },
   });
-  return { service, meetings, store };
+  return { service, meetings, store, kicks };
+}
+
+/** 「Googleと連携」 over in-memory stores (no OAuth client configured unless env says so). */
+export function buildGoogleLink(opts: { env?: Env; fetchImpl?: typeof fetch; attendance?: ReturnType<typeof createInMemoryAttendanceStore> } = {}) {
+  const states = createInMemoryGoogleAccountStore();
+  const attendance = opts.attendance ?? createInMemoryAttendanceStore();
+  const service = createGoogleLinkService({
+    env: opts.env ?? ({} as Env),
+    states,
+    attendance,
+    orgId: common.DUB_DEFAULT_ORG_ID,
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  });
+  return { service, states, attendance };
 }

@@ -102,9 +102,15 @@ export interface SyncMeetingsResponse {
 }
 
 // ---- 定例の出席 (attendance of 全体定例 / チーム定例) ----
-// A meeting with trackAttendance is a 定例. A member who opens its Meet from Dub during an
-// occurrence (POST /meetings/:id/join) is recorded present for that occurrence; 人事 sees the
-// report (GET /meetings/attendance) and can correct it (PUT .../attendance/:date/:userId).
+// A meeting with trackAttendance is a 定例. Attendance comes from, strongest first:
+//   manual   — 人事 set it by hand (PUT .../attendance/:date/:userId)
+//   meet_api — Google Meet's own participant records (conferenceRecords → participants →
+//              participantSessions), ingested after each occurrence ends; a participant counts as
+//              present when matched to a Dub member and in the meeting at least minPercent of its
+//              scheduled length. Matching is by Google account id (users/{id}): a member's own
+//              「Googleと連携」 link, or a mapping 人事 confirmed once (remembered).
+//   join     — the member opened the Meet from Dub (POST /meetings/:id/join) during the occurrence;
+//              counts only when Meet has no matched participant for them.
 // Expected members = the target's CURRENT active members (role membership is not historised).
 
 /** all_hands = 全体定例 (target "all"); team = チーム定例 (target is a role). */
@@ -116,11 +122,15 @@ export function regularKindOf(targetId: string): RegularMeetingKind {
 
 export const REGULAR_KIND_LABELS: Record<RegularMeetingKind, string> = { all_hands: "全体定例", team: "チーム定例" };
 
-/** present = 出席; excused = 欠席連絡あり (rate excludes it from the denominator). No row = 欠席. */
-export type AttendanceStatus = "present" | "excused";
-export const ATTENDANCE_STATUSES: readonly AttendanceStatus[] = ["present", "excused"];
-/** join = opened the Meet from Dub; manual = set by 人事. */
-export type AttendanceSource = "join" | "manual";
+/** present = 出席; excused = 欠席連絡あり (rate excludes it from the denominator); absent = 欠席
+ *  (set by hand, or Meet shows them for less than the threshold). No record = 欠席. */
+export type AttendanceStatus = "present" | "excused" | "absent";
+export const ATTENDANCE_STATUSES: readonly AttendanceStatus[] = ["present", "excused", "absent"];
+/** manual = 人事; meet_api = Google Meet participant records; join = opened the Meet from Dub. */
+export type AttendanceSource = "manual" | "meet_api" | "join";
+
+/** Default share of the scheduled length a participant must be in the Meet to count as present. */
+export const DEFAULT_MIN_ATTEND_PERCENT = 50;
 
 /** Joining from Dub counts from this many minutes before an occurrence starts until it ends. */
 export const JOIN_WINDOW_BEFORE_MINUTES = 30;
@@ -202,20 +212,62 @@ export function occurrenceStarts(
   return out;
 }
 
+/** What Meet recorded for one person in one occurrence (all their conferences / sessions merged). */
+export interface MeetPresence {
+  firstJoin: ISODateTime;
+  /** null = still in the meeting when ingested. */
+  lastLeave: ISODateTime | null;
+  durationSeconds: number;
+  /** true = sessions could not all be read; duration is first join → last leave. */
+  approx: boolean;
+}
+
 export interface AttendanceRecord {
   userId: UserId;
   status: AttendanceStatus;
   source: AttendanceSource;
-  /** First join from Dub (null for a manual record that never joined). */
+  /** Opened the Meet from Dub at (null = never). */
   joinedAt: ISODateTime | null;
-  recordedBy: UserId;
-  updatedAt: ISODateTime;
+  /** Matched Meet participant(s) of this member (null = none). */
+  meet: MeetPresence | null;
+  /** Who set a manual record (null for automatic ones). */
+  recordedBy: UserId | null;
+  updatedAt: ISODateTime | null;
+}
+
+export type MeetParticipantKind = "signed_in" | "anonymous" | "phone";
+
+/** One Meet participant of an occurrence, matched or not. */
+export interface MeetParticipant extends MeetPresence {
+  /** Stable within the occurrence: "u:<googleUserId>" for signed-in users, else the participant resource. */
+  key: string;
+  kind: MeetParticipantKind;
+  displayName: string;
+  /** Google account id (the {id} of users/{id}); null for anonymous / phone. */
+  googleUserId: string | null;
+  /** The Dub member it is matched to (null = 未確定 / guest). */
+  userId: UserId | null;
+  /** For an unmatched signed-in participant: members whose name looks like displayName, best first. */
+  suggestions: { userId: UserId; name: string }[];
+}
+
+export type MeetIngestStatus = "done" | "no_conference" | "error";
+
+export interface MeetIngestState {
+  status: MeetIngestStatus;
+  ingestedAt: ISODateTime;
+  error: string | null;
 }
 
 export interface AttendanceOccurrence {
   date: ISODate;
   startsAt: ISODateTime;
+  /** Effective attendance of every member with any signal (manual / Meet / Dub join). */
   records: AttendanceRecord[];
+  /** Everyone Meet recorded (members, 未確定, guests). */
+  participants: MeetParticipant[];
+  /** null = Meet records not read for this occurrence yet. */
+  ingest: MeetIngestState | null;
 }
 
 export interface AttendanceMeeting {
@@ -244,23 +296,81 @@ export interface AttendanceMember {
   rate: number | null;
 }
 
+export interface AttendanceSettings {
+  /** Present when in the Meet at least this % of the scheduled length (1–100). */
+  minPercent: number;
+}
+
+export interface MeetApiState {
+  /** false = the shared Google account lacks meetings.space.readonly: reconnect it in Drive共有 > 設定. */
+  ready: boolean;
+  /** Last ingest run (scheduled or manual); null = never. */
+  lastRunAt: ISODateTime | null;
+}
+
 /** GET /meetings/attendance?from=&to= (JST dates; default: the last 12 weeks up to today). */
 export interface AttendanceReportResponse {
   from: ISODate;
   to: ISODate;
+  settings: AttendanceSettings;
+  meetApi: MeetApiState;
   meetings: AttendanceMeeting[];
   /** Every member expected at any 定例, by rate ascending (lowest attendance first). */
   members: AttendanceMember[];
 }
 
-/** PUT /meetings/:id/attendance/:date/:userId — null clears the record (= 欠席). */
+/** PUT /meetings/:id/attendance/:date/:userId — a manual record; null removes it (back to 自動). */
 export interface SetAttendanceRequest {
   status: AttendanceStatus | null;
 }
 
 export interface SetAttendanceResponse {
+  /** The manual record, or null when removed. */
   record: AttendanceRecord | null;
 }
+
+/** POST /meetings/attendance/ingest — read Meet records now. Without a range: every occurrence not
+ *  read yet (or still settling / failed) within Google's retention (29 days). With a range: re-read it. */
+export interface IngestAttendanceRequest {
+  from?: ISODate;
+  to?: ISODate;
+}
+
+export interface IngestAttendanceResponse {
+  /** Occurrences read this run. */
+  occurrences: number;
+  participants: number;
+  /** false = stopped at the Google call budget; the scheduled job continues shortly. */
+  complete: boolean;
+  /** scope_missing = reconnect the shared Google account (Drive共有 > 設定). */
+  skipped: "scope_missing" | "no_account" | null;
+}
+
+/** PUT /meetings/attendance/links/:googleUserId — 人事 confirms who a Meet participant is (remembered). */
+export interface ConfirmParticipantRequest {
+  userId: UserId;
+}
+
+/** PUT /meetings/attendance/settings */
+export type UpdateAttendanceSettingsRequest = AttendanceSettings;
+
+/** POST /meetings/me/google-link/start — 「Googleと連携」 (openid only; stores the Google account id). */
+export interface StartGoogleLinkRequest {
+  redirectUri: string;
+}
+
+export interface StartGoogleLinkResponse {
+  authUrl: string;
+}
+
+/** POST /meetings/me/google-link/callback */
+export interface CompleteGoogleLinkRequest {
+  code: string;
+  state: string;
+}
+
+/** State prefix of a 「Googleと連携」 round-trip (shares the /driveshare return page with the account connect). */
+export const GOOGLE_LINK_STATE_PREFIX = "lnk_";
 
 /** POST /meetings/:id/join — the caller opens the Meet from Dub. */
 export interface JoinMeetingResponse {
@@ -288,4 +398,6 @@ export interface MyRegularMeeting {
 /** GET /meetings/me/regulars */
 export interface ListMyRegularMeetingsResponse {
   items: MyRegularMeeting[];
+  /** The caller linked a Google account (Meet attendance is then automatic). */
+  googleLinked: boolean;
 }

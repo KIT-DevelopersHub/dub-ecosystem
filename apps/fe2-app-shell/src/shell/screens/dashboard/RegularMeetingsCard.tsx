@@ -1,12 +1,14 @@
-// ダッシュボードの「定例に参加」。自分が対象の全体定例・チーム定例 (出席を取る定例) を並べ、
-// 「参加」で Meet を開くと同時に出席が記録される (POST /meetings/:id/join)。開始30分前〜終了まで
-// が出席になる時間帯。定例が無い / 取得できない人にはカード自体を出さない (誰でも見るダッシュボード
+// ダッシュボードの「定例に参加」。自分が対象の全体定例・チーム定例 (出席を取る定例) を並べる。
+// 出席は Google Meet の参加記録から自動で付く (Google アカウントで連携済みの人)。未連携の人には
+// 「Googleと連携」を出す。「参加」で Meet を開くと Dub 側にも参加が記録される (Meet で本人と
+// 分からなかった時の補助)。定例が無い / 取得できない人にはカード自体を出さない (誰でも見るダッシュボード
 // なので、関係のない人に空のカードやエラーを見せない)。
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Card, Icon, SkeletonLoader, useToast } from "@dub/ui";
 import { meeting } from "@dub/types";
 import type { ApiClient } from "../../../lib/api-client.tsx";
-import { joinMeetingRequest, openMeetWithAttendance } from "../../../lib/meet-join.ts";
+import { joinMeetingRequest, openMeetWithAttendance, startGoogleLink } from "../../../lib/meet-join.ts";
 
 export const MY_REGULARS_KEY = ["home", "my-regular-meetings"] as const;
 const WEEKDAY = ["日", "月", "火", "水", "木", "金", "土"];
@@ -39,8 +41,40 @@ export function RegularMeetingsCard({ api }: { api: ApiClient }): JSX.Element | 
         </span>
       }
     >
-      {q.isPending ? <SkeletonLoader lines={2} /> : <RegularMeetingsList api={api} items={q.data!.items} />}
+      {q.isPending ? (
+        <SkeletonLoader lines={2} />
+      ) : (
+        <>
+          {!q.data!.googleLinked ? <GoogleLinkPrompt api={api} /> : null}
+          <RegularMeetingsList api={api} items={q.data!.items} />
+        </>
+      )}
     </Card>
+  );
+}
+
+function GoogleLinkPrompt({ api }: { api: ApiClient }): JSX.Element {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="fe2-notice-row" data-testid="fe2-home-regulars-link" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: "var(--dub-space-3)", paddingBottom: "var(--dub-space-3)" }}>
+      <span className="fe2-stat-hint">Google と連携すると、Meet に入るだけで出席になります。</span>
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={busy}
+        testId="fe2-home-regulars-link-start"
+        onClick={() => {
+          setBusy(true);
+          startGoogleLink(api).catch(() => {
+            setBusy(false);
+            toast.show({ kind: "error", title: "Google との連携を始められませんでした" });
+          });
+        }}
+      >
+        Googleと連携
+      </Button>
+    </div>
   );
 }
 
@@ -51,7 +85,7 @@ function RegularMeetingsList({ api, items }: { api: ApiClient; items: meeting.My
     // 楽観的: 開いている回なら先に「出席済み」にする (失敗したら取り直して戻す)。
     if (m.joinOpen) {
       qc.setQueryData<meeting.ListMyRegularMeetingsResponse>(MY_REGULARS_KEY, (prev) =>
-        prev ? { items: prev.items.map((x) => (x.id === m.id ? { ...x, attended: true } : x)) } : prev,
+        prev ? { ...prev, items: prev.items.map((x) => (x.id === m.id ? { ...x, attended: true } : x)) } : prev,
       );
     }
     void openMeetWithAttendance(() => joinMeetingRequest(api, m.id), m.meetUrl).then((res) => {

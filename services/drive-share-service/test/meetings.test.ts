@@ -17,7 +17,7 @@ import { nextAlarmAt } from "../src/meeting-sync-do";
 import { resolveMeetingAccount } from "../src/meetings-wiring";
 import type { ActiveUser } from "../src/role-membership";
 import type { Env } from "../src/env";
-import { AUTHED, buildAttendance, buildMeetings, buildRoleGrants, fakeRoster, memAuthzHolding, stubGoogleAccount } from "./helpers";
+import { AUTHED, buildAttendance, buildGoogleLink, buildMeetings, buildRoleGrants, fakeRoster, memAuthzHolding, stubGoogleAccount } from "./helpers";
 
 const USERS: ActiveUser[] = [
   { id: "usr_a", email: "a@dub.example", name: "A", roleIds: ["role_dev"] },
@@ -557,6 +557,7 @@ describe("calendar scope gate", () => {
       googleAccount: stubGoogleAccount(),
       meetings: async () => meetings.service,
       attendance: () => buildAttendance().service,
+      googleLink: () => buildGoogleLink().service,
     });
   }
   const JSON_HDR = { ...AUTHED, "content-type": "application/json" };

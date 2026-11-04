@@ -32,3 +32,14 @@ export async function openMeetWithAttendance(
   }
   return res;
 }
+
+/** 「Googleと連携」: Google comes back to /driveshare (the Web client's one return page), where
+ *  GoogleLinkReturn finishes the link. */
+export async function startGoogleLink(api: ApiClient, loc: Pick<Location, "origin" | "assign"> = window.location): Promise<void> {
+  const res = await api.request<meeting.StartGoogleLinkResponse, meeting.StartGoogleLinkRequest>({
+    method: "POST",
+    path: "/api/v1/meetings/me/google-link/start",
+    body: { redirectUri: `${loc.origin}/driveshare` },
+  });
+  loc.assign(res.authUrl);
+}

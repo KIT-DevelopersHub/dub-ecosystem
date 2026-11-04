@@ -8,7 +8,7 @@ import { createInMemoryGoogleAccountStore } from "../src/google-account-store";
 import { importTokenKey, openToken, sealToken } from "../src/google/crypto";
 import type { Env } from "../src/env";
 import { SECRET_ACCOUNT_ID } from "../src/types";
-import { AUTHED, buildRoleGrants, fakeRoster, memAuthzHolding, buildMeetings, buildAttendance } from "./helpers";
+import { AUTHED, buildRoleGrants, fakeRoster, memAuthzHolding, buildMeetings, buildAttendance, buildGoogleLink } from "./helpers";
 
 const ORG = "org_devhub";
 const KEY_B64 = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
@@ -106,7 +106,7 @@ describe("add-account flow", () => {
     expect(u.searchParams.get("client_id")).toBe("web-cid");
     expect(u.searchParams.get("redirect_uri")).toBe(REDIRECT);
     expect(u.searchParams.get("scope")).toBe(
-      "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/meetings.space.settings",
+      "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/meetings.space.settings https://www.googleapis.com/auth/meetings.space.readonly",
     );
     const row = store.states.get(stateOf(authUrl))!;
     expect(row).toMatchObject({ userId: "usr_admin", redirectUri: REDIRECT, orgId: ORG });
@@ -145,6 +145,7 @@ describe("add-account flow", () => {
           needsReconnect: false,
           calendarMissing: false,
           meetMissing: false,
+          attendanceMissing: false,
         },
       ],
     });
@@ -306,7 +307,7 @@ describe("status + credential precedence", () => {
     expect(await svc.status()).toEqual({
       canConnect: false,
       accounts: [
-        { id: SECRET_ACCOUNT_ID, kind: "secret", email: "new-owner@gmail.com", connectedAt: null, connectedBy: null, active: true, needsReconnect: false, calendarMissing: false, meetMissing: false },
+        { id: SECRET_ACCOUNT_ID, kind: "secret", email: "new-owner@gmail.com", connectedAt: null, connectedBy: null, active: true, needsReconnect: false, calendarMissing: false, meetMissing: false, attendanceMissing: false },
       ],
     });
     const resolved = await resolveDriveCredentials({ env, store, orgId: ORG, key: null });
@@ -359,6 +360,10 @@ describe("status + credential precedence", () => {
 
     scope += " https://www.googleapis.com/auth/meetings.space.settings";
     expect((await svc.status()).accounts.map((a) => a.meetMissing)).toEqual([false, false]);
+    // Connected before 人事 > 出席 asked for Meet records: 再連携 to read who attended.
+    expect((await svc.status()).accounts.map((a) => a.attendanceMissing)).toEqual([true, true]);
+    scope += " https://www.googleapis.com/auth/meetings.space.readonly";
+    expect((await svc.status()).accounts.map((a) => a.attendanceMissing)).toEqual([false, false]);
 
     // Google did not report scopes: not flagged (same as meetings calendarReady)
     scope = undefined;
@@ -442,7 +447,7 @@ describe("routes (through policyGate)", () => {
     const service = createDriveShareService({ client, config: { listPageSize: 50 } });
     const { service: roleGrants } = buildRoleGrants({ drive: client, roster: fakeRoster({}) });
     const { svc } = await setup();
-    return createApp({ service, roleGrants, authz: memAuthzHolding(...keys), googleAccount: svc, meetings: async () => buildMeetings().service, attendance: () => buildAttendance().service });
+    return createApp({ service, roleGrants, authz: memAuthzHolding(...keys), googleAccount: svc, meetings: async () => buildMeetings().service, attendance: () => buildAttendance().service, googleLink: () => buildGoogleLink().service });
   }
   const HDR = { ...AUTHED, "content-type": "application/json" };
   const ADMIN_KEYS = ["app:driveshare:view", "app:driveshare:edit", "drive:settings_view", "drive:settings_edit"] as Parameters<typeof memAuthzHolding>;

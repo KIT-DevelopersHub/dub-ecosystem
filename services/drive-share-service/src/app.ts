@@ -17,6 +17,7 @@ import type { RoleGrantsService } from "./role-grants-service";
 import type { GoogleAccountService } from "./google-account";
 import type { MeetingsService } from "./meetings-service";
 import type { AttendanceService } from "./attendance-service";
+import type { GoogleLinkService } from "./google-link";
 import { POLICY_TABLE } from "./policy-table";
 import type {
   CompleteGoogleConnectRequest,
@@ -41,6 +42,8 @@ export interface AppDeps {
   meetings: () => Promise<MeetingsService>;
   /** 定例の出席 (join from Dub, 人事 report / corrections). */
   attendance: () => AttendanceService;
+  /** 「Googleと連携」 (Meet attendance matches the member automatically). */
+  googleLink: () => GoogleLinkService;
 }
 
 type Vars = PolicyGateVars;
@@ -192,6 +195,36 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.get("/meetings/attendance", async (c) => {
     const q = c.req.query();
     return c.json(await deps.attendance().report({ ...(q.from ? { from: q.from } : {}), ...(q.to ? { to: q.to } : {}) }));
+  });
+
+  // Read Meet participant records now (the scheduled job does it hourly).
+  app.post("/meetings/attendance/ingest", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    return c.json(await deps.attendance().ingest(body));
+  });
+
+  // 人事 confirms who a Meet participant (Google account id) is — remembered for next time.
+  app.put("/meetings/attendance/links/:googleUserId", async (c) => {
+    const body = await parseBody<unknown>(c);
+    return c.json(await deps.attendance().confirm(c.get("userId"), c.req.param("googleUserId"), body));
+  });
+
+  app.delete("/meetings/attendance/links/:googleUserId", async (c) => c.json(await deps.attendance().unlink(c.req.param("googleUserId"))));
+
+  app.put("/meetings/attendance/settings", async (c) => {
+    const body = await parseBody<unknown>(c);
+    return c.json(await deps.attendance().updateSettings(c.get("userId"), body));
+  });
+
+  // 「Googleと連携」 (the caller's own Google account id).
+  app.post("/meetings/me/google-link/start", async (c) => {
+    const body = await parseBody<unknown>(c);
+    return c.json(await deps.googleLink().start(c.get("userId"), body));
+  });
+
+  app.post("/meetings/me/google-link/callback", async (c) => {
+    const body = await parseBody<unknown>(c);
+    return c.json(await deps.googleLink().complete(c.get("userId"), body));
   });
 
   app.put("/meetings/:id/attendance/:date/:userId", async (c) => {

@@ -6,7 +6,7 @@ import { ToastProvider } from "@dub/ui";
 import type { meeting } from "@dub/types";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../../../lib/api-client.tsx";
-import { openMeetWithAttendance } from "../../../lib/meet-join.ts";
+import { openMeetWithAttendance, startGoogleLink } from "../../../lib/meet-join.ts";
 import { RegularMeetingsCard, regularWhen } from "./RegularMeetingsCard.tsx";
 
 const ITEMS: meeting.MyRegularMeeting[] = [
@@ -40,7 +40,7 @@ describe("RegularMeetingsCard", () => {
     const tab = { opener: {}, location: { href: "" }, close: vi.fn() };
     const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
     const api = makeApi(async ({ method, path }) => {
-      if (method === "GET") return { items: ITEMS };
+      if (method === "GET") return { items: ITEMS, googleLinked: true };
       expect(path).toBe("/api/v1/meetings/mtg_all/join");
       return { meetUrl: ITEMS[0]!.meetUrl, recordedFor: "2026-10-19" };
     });
@@ -51,11 +51,17 @@ describe("RegularMeetingsCard", () => {
     expect(await screen.findByTestId("fe2-home-regular-mtg_all-attended")).toBeTruthy(); // optimistic
     await waitFor(() => expect(tab.location.href).toBe("https://meet.google.com/abc-defg-hij"));
     expect(tab.opener).toBeNull();
+    expect(screen.queryByTestId("fe2-home-regulars-link")).toBeNull(); // already linked
     open.mockRestore();
   });
 
+  it("offers 「Googleと連携」 to a member who has not linked Google", async () => {
+    renderCard(makeApi(async () => ({ items: ITEMS, googleLinked: false })));
+    expect((await screen.findByTestId("fe2-home-regulars-link")).textContent).toContain("Meet に入るだけで出席になります");
+  });
+
   it("renders nothing without 定例, or when the list cannot be read", async () => {
-    const { container, unmount } = renderCard(makeApi(async () => ({ items: [] })));
+    const { container, unmount } = renderCard(makeApi(async () => ({ items: [], googleLinked: false })));
     await waitFor(() => expect(container.textContent).toBe(""));
     unmount();
     const failed = renderCard(makeApi(async () => Promise.reject(new Error("403"))));
@@ -64,6 +70,20 @@ describe("RegularMeetingsCard", () => {
 
   it("formats the occurrence in JST", () => {
     expect(regularWhen({ date: "2026-10-19", startsAt: "2026-10-19T12:00:00.000Z" }, 60)).toBe("10/19(月) 21:00〜22:00");
+  });
+});
+
+describe("startGoogleLink", () => {
+  it("asks for the consent URL with /driveshare as the return page and goes there", async () => {
+    const assign = vi.fn();
+    const api = makeApi(async () => ({ authUrl: "https://accounts.google.com/o/oauth2/v2/auth?x=1" }));
+    await startGoogleLink(api, { origin: "https://app.example", assign });
+    expect((api.request as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/meetings/me/google-link/start",
+      body: { redirectUri: "https://app.example/driveshare" },
+    });
+    expect(assign).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?x=1");
   });
 });
 

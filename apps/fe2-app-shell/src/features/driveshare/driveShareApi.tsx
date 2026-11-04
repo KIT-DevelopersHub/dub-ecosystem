@@ -121,6 +121,8 @@ export interface DriveGoogleAccount {
   calendarMissing?: boolean;
   /** The grant lacks Meet settings access (Meet を誰でも参加可にする): reconnect to grant it. */
   meetMissing?: boolean;
+  /** The grant lacks Meet records access (人事 > 出席 の Meet 参加記録): reconnect to grant it. */
+  attendanceMissing?: boolean;
 }
 
 export interface DriveGoogleAccountsStatus {
@@ -161,6 +163,8 @@ export interface DriveShareApi {
   completeGoogleConnect(code: string, state: string): Promise<DriveGoogleAccountsStatus>;
   switchGoogleAccount(accountId: string): Promise<DriveGoogleAccountsStatus>;
   removeGoogleAccount(accountId: string): Promise<void>;
+  /** 「Googleと連携」 return (drive-share-service /meetings/me/google-link/callback). */
+  completeGoogleLink(code: string, state: string): Promise<{ googleLinked: true }>;
 }
 
 const IDENTITY_BASE = "/api/v1/identity";
@@ -243,6 +247,8 @@ export function createDriveShareApi(api: ApiClient): DriveShareApi {
       api.request<DriveGoogleAccountsStatus>({ method: "POST", path: `${GOOGLE}/active`, body: { accountId } }),
     removeGoogleAccount: (accountId) =>
       api.request<void>({ method: "DELETE", path: `${GOOGLE}/accounts/${encodeURIComponent(accountId)}` }),
+    completeGoogleLink: (code, state) =>
+      api.request<{ googleLinked: true }>({ method: "POST", path: "/api/v1/meetings/me/google-link/callback", body: { code, state } }),
   };
 }
 

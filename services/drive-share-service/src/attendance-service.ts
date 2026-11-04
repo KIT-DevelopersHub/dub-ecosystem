@@ -1,14 +1,18 @@
-// 定例の出席 (全体定例 / チーム定例). A meeting marked trackAttendance is a 定例; a member who opens
-// its Meet from Dub (POST /meetings/:id/join) during an occurrence — from JOIN_WINDOW_BEFORE_MINUTES
-// before the start until the end — is recorded present for that occurrence (its JST date). 人事 reads
-// the report (who attended / who was expected, rate per member) and can correct it by hand.
-//
-// Why "join from Dub" and not Google's participant list: reading Meet conference records needs a
-// further Google scope (meetings.space.readonly) on the shared account, which Dub does not ask for.
+// 定例の出席 (全体定例 / チーム定例). A meeting marked trackAttendance is a 定例. Attendance per member
+// per occurrence is derived at read time, strongest signal first:
+//   manual   — 人事 set it (stored record, source 'manual')
+//   meet_api — Google Meet participant records (ingested by meet-ingest.ts), matched to the member by
+//              Google account id through driveshare_google_identity_links ('self' = the member's own
+//              「Googleと連携」, 'confirmed' = 人事 confirmed the participant once). Present when the
+//              member was in the Meet ≥ minPercent of the scheduled length, else absent.
+//   join     — the member opened the Meet from Dub during the occurrence (stored, source 'join');
+//              counts only when Meet has no matched participant for them.
 // Expected members = the target's CURRENT active members (role membership is not historised).
 import { errors } from "@dub/errors";
 import { meeting } from "@dub/types";
-import type { AttendanceRow, AttendanceStore } from "./attendance-store";
+import type { AttendanceRow, AttendanceStore, ParticipantRow } from "./attendance-store";
+import type { MeetRecordsClient } from "./google/meet-records-client";
+import { runMeetIngest } from "./meet-ingest";
 import { jstDate } from "./meeting-rules";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
 import type { ActiveUser, RoleMembership } from "./role-membership";
@@ -19,6 +23,16 @@ const MAX_RANGE_DAYS = 366;
 /** How far ahead "next occurrence" looks (a monthly meeting always has one within this). */
 const NEXT_LOOKAHEAD_DAYS = 62;
 const ALL_TARGET_NAME = "全体";
+/** Google calls of a manual 「今すぐ取り込む」 (request path: the gateway gives 15 s). */
+const MANUAL_INGEST_BUDGET = 25;
+const MANUAL_INGEST_TIME_MS = 9_000;
+
+/** The shared Google account as attendance needs it. null = nothing usable (no account / mock off). */
+export interface MeetRecordsAccess {
+  /** false = the grant lacks meetings.space.readonly. */
+  ready: boolean;
+  client: MeetRecordsClient;
+}
 
 export interface AttendanceDeps {
   meetings: MeetingStore;
@@ -26,6 +40,9 @@ export interface AttendanceDeps {
   roster: RoleMembership;
   orgId: string;
   now: () => string;
+  meetRecords: () => Promise<MeetRecordsAccess | null>;
+  /** Pull the scheduled job (MeetingSyncDO alarm) earlier — continues an unfinished manual ingest. */
+  kick?: (soonMs?: number) => Promise<void>;
 }
 
 export interface AttendanceService {
@@ -33,6 +50,10 @@ export interface AttendanceService {
   myRegulars(userId: string): Promise<meeting.ListMyRegularMeetingsResponse>;
   report(query: { from?: string; to?: string }): Promise<meeting.AttendanceReportResponse>;
   set(by: string, meetingId: string, date: string, userId: string, body: unknown): Promise<meeting.SetAttendanceResponse>;
+  confirm(by: string, googleUserId: string, body: unknown): Promise<{ ok: true }>;
+  unlink(googleUserId: string): Promise<{ ok: true }>;
+  updateSettings(by: string, body: unknown): Promise<meeting.AttendanceSettings>;
+  ingest(body: unknown): Promise<meeting.IngestAttendanceResponse>;
 }
 
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * MS_PER_DAY).toISOString().slice(0, 10);
@@ -54,8 +75,59 @@ export function openOccurrence(
   return null;
 }
 
-function toRecord(r: AttendanceRow): meeting.AttendanceRecord {
-  return { userId: r.userId, status: r.status, source: r.source, joinedAt: r.joinedAt, recordedBy: r.recordedBy, updatedAt: r.updatedAt };
+const norm = (s: string) => s.normalize("NFKC").toLowerCase().replace(/[\s・._\-()（）]/g, "");
+
+/** Members whose name looks like a Meet display name, best first (max 3). */
+export function suggestMembers(displayName: string, candidates: readonly { id: string; name: string }[]): { userId: string; name: string }[] {
+  const d = norm(displayName);
+  const dTokens = displayName.normalize("NFKC").toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+  const scored = candidates
+    .map((c) => {
+      const n = norm(c.name);
+      let score = 0;
+      if (!n || !d) score = 0;
+      else if (n === d) score = 3;
+      else if ((n.length >= 2 && d.includes(n)) || (d.length >= 2 && n.includes(d))) score = 2;
+      else {
+        const cTokens = c.name.normalize("NFKC").toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+        if (cTokens.some((t) => dTokens.includes(t))) score = 1;
+      }
+      return { userId: c.id, name: c.name, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "ja"));
+  return scored.slice(0, 3).map(({ userId, name }) => ({ userId, name }));
+}
+
+/** Effective record for one member in one occurrence (null = no signal at all = 欠席). */
+export function effectiveRecord(
+  userId: string,
+  signals: { manual: AttendanceRow | null; join: AttendanceRow | null; meet: meeting.MeetPresence | null },
+  thresholdSeconds: number,
+): meeting.AttendanceRecord | null {
+  const { manual, join, meet } = signals;
+  const joinedAt = join?.joinedAt ?? null;
+  if (manual) {
+    return { userId, status: manual.status, source: "manual", joinedAt, meet, recordedBy: manual.recordedBy, updatedAt: manual.updatedAt };
+  }
+  if (meet) {
+    return { userId, status: meet.durationSeconds >= thresholdSeconds ? "present" : "absent", source: "meet_api", joinedAt, meet, recordedBy: null, updatedAt: null };
+  }
+  if (join) return { userId, status: "present", source: "join", joinedAt, meet: null, recordedBy: null, updatedAt: join.updatedAt };
+  return null;
+}
+
+/** Several matched participant rows of one member merged into one presence. */
+function presenceOf(rows: readonly ParticipantRow[]): meeting.MeetPresence | null {
+  if (rows.length === 0) return null;
+  const first = rows.map((r) => r.firstJoin).sort()[0]!;
+  const last = rows.some((r) => r.lastLeave === null) ? null : rows.map((r) => r.lastLeave!).sort().at(-1)!;
+  return {
+    firstJoin: first,
+    lastLeave: last,
+    durationSeconds: rows.reduce((s, r) => s + r.durationSeconds, 0),
+    approx: rows.some((r) => r.approx),
+  };
 }
 
 export function createAttendanceService(deps: AttendanceDeps): AttendanceService {
@@ -64,7 +136,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
   const expectedOf = (users: ActiveUser[], targetId: string) =>
     targetId === meeting.ALL_MEMBERS_TARGET_ID ? users : users.filter((u) => u.roleIds.includes(targetId));
 
-  /** Role names, best-effort (needs identity:read of the caller; a failure just shows the id). */
+  /** Role names, best-effort (needs identity:read of the caller; a failure just shows a placeholder). */
   async function names(): Promise<Map<string, string>> {
     try {
       return new Map((await deps.roster.listRoles()).map((r) => [r.id, r.name]));
@@ -81,6 +153,15 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
     return (await deps.meetings.listMeetings(orgId)).filter((m) => ids.has(m.id));
   }
 
+  async function minPercent(): Promise<number> {
+    return (await deps.store.getMinPercent(orgId)) ?? meeting.DEFAULT_MIN_ATTEND_PERCENT;
+  }
+
+  async function meetState(): Promise<meeting.MeetApiState> {
+    const [access, lastRunAt] = await Promise.all([deps.meetRecords().catch(() => null), deps.store.lastIngestAt(orgId)]);
+    return { ready: access?.ready ?? false, lastRunAt };
+  }
+
   return {
     async join(userId, meetingId) {
       const m = await deps.meetings.getMeeting(orgId, meetingId);
@@ -92,31 +173,28 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
       const now = deps.now();
       const occ = regular ? openOccurrence(m, now) : null;
       if (!occ) return { meetUrl: m.meetUrl, recordedFor: null };
-      const existing = await deps.store.get(m.id, occ.date, userId);
-      if (existing?.status !== "present") {
-        await deps.store.upsert({
+      if (!(await deps.store.getRecord(m.id, occ.date, userId, "join"))) {
+        await deps.store.upsertRecord({
           meetingId: m.id,
           occurrenceDate: occ.date,
           userId,
           orgId,
           status: "present",
           source: "join",
-          joinedAt: existing?.joinedAt ?? now,
+          joinedAt: now,
           recordedBy: userId,
           updatedAt: now,
         });
-      } else if (!existing.joinedAt) {
-        // 人事 marked present by hand before: keep it, just note the real join.
-        await deps.store.upsert({ ...existing, joinedAt: now });
       }
       return { meetUrl: m.meetUrl, recordedFor: occ.date };
     },
 
     async myRegulars(userId) {
+      const linked = (await deps.store.listLinks(orgId)).some((l) => l.userId === userId);
       const rows = await regularMeetings();
-      if (rows.length === 0) return { items: [] };
+      if (rows.length === 0) return { items: [], googleLinked: linked };
       const me = (await deps.roster.listActiveUsers()).find((u) => u.id === userId);
-      if (!me) return { items: [] };
+      if (!me) return { items: [], googleLinked: linked };
       const mine = rows.filter((m) => m.targetId === meeting.ALL_MEMBERS_TARGET_ID || me.roleIds.includes(m.targetId));
       const n = mine.some((m) => m.targetId !== meeting.ALL_MEMBERS_TARGET_ID) ? await names() : new Map<string, string>();
       const now = deps.now();
@@ -126,7 +204,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
         const open = openOccurrence(m, now);
         const next =
           open ?? meeting.occurrenceStarts(m, today, addDays(today, NEXT_LOOKAHEAD_DAYS)).find((o) => Date.parse(o.startsAt) > Date.parse(now)) ?? null;
-        const rec = open ? await deps.store.get(m.id, open.date, userId) : null;
+        const joined = open ? await deps.store.getRecord(m.id, open.date, userId, "join") : null;
         items.push({
           id: m.id,
           title: m.title,
@@ -136,12 +214,12 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
           next,
           durationMinutes: m.durationMinutes,
           joinOpen: !!open,
-          attended: rec?.status === "present",
+          attended: !!joined,
         });
       }
       // Open now first, then soonest; ended series last.
       items.sort((a, b) => Number(b.joinOpen) - Number(a.joinOpen) || (a.next?.startsAt ?? "~").localeCompare(b.next?.startsAt ?? "~"));
-      return { items };
+      return { items, googleLinked: linked };
     },
 
     async report(query) {
@@ -154,24 +232,82 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
       if (from > to || addDays(from, MAX_RANGE_DAYS) < to) {
         throw errors.validationFailed([{ field: "from", reason: "out_of_range" }], `期間は開始日〜終了日の順で、${MAX_RANGE_DAYS} 日以内にしてください。`);
       }
+      const [percent, meetApi] = await Promise.all([minPercent(), meetState()]);
+      const settings = { minPercent: percent };
       const rows = await regularMeetings();
-      if (rows.length === 0) return { from, to, meetings: [], members: [] };
-      const [users, n, records] = await Promise.all([deps.roster.listActiveUsers(), names(), deps.store.listRange(orgId, from, to)]);
-      const byOcc = new Map<string, AttendanceRow[]>();
-      for (const r of records) {
-        const k = `${r.meetingId}|${r.occurrenceDate}`;
-        byOcc.set(k, [...(byOcc.get(k) ?? []), r]);
-      }
+      if (rows.length === 0) return { from, to, settings, meetApi, meetings: [], members: [] };
+      const [users, n, records, participants, ingests, links] = await Promise.all([
+        deps.roster.listActiveUsers(),
+        names(),
+        deps.store.listRecords(orgId, from, to),
+        deps.store.listParticipants(orgId, from, to),
+        deps.store.listIngests(orgId, from, to),
+        deps.store.listLinks(orgId),
+      ]);
+      const linkOf = new Map(links.map((l) => [l.googleUserId, l.userId]));
+      const group = <T extends { meetingId: string; occurrenceDate: string }>(list: readonly T[]) => {
+        const out = new Map<string, T[]>();
+        for (const r of list) {
+          const k = `${r.meetingId}|${r.occurrenceDate}`;
+          out.set(k, [...(out.get(k) ?? []), r]);
+        }
+        return out;
+      };
+      const recBy = group(records);
+      const partBy = group(participants);
+      const ingestBy = new Map(ingests.map((i) => [`${i.meetingId}|${i.occurrenceDate}`, i]));
       const tally = new Map<string, { expected: number; present: number; excused: number }>();
       const nowMs = Date.parse(now);
+
       const meetings: meeting.AttendanceMeeting[] = rows.map((m) => {
         const expected = expectedOf(users, m.targetId);
         const expectedIds = new Set(expected.map((u) => u.id));
-        const occurrences = meeting
+        const threshold = Math.ceil((m.durationMinutes * 60 * percent) / 100);
+        const occurrences: meeting.AttendanceOccurrence[] = meeting
           .occurrenceStarts(m, from, to)
           .filter((o) => Date.parse(o.startsAt) <= nowMs)
           .reverse()
-          .map((o) => ({ ...o, records: (byOcc.get(`${m.id}|${o.date}`) ?? []).map(toRecord) }));
+          .map((o) => {
+            const k = `${m.id}|${o.date}`;
+            const parts = (partBy.get(k) ?? []).map((p) => ({ ...p, userId: p.googleUserId ? linkOf.get(p.googleUserId) ?? null : null }));
+            const matchedIds = new Set(parts.map((p) => p.userId).filter((x): x is string => !!x));
+            const unmatchedCandidates = expected.filter((u) => !matchedIds.has(u.id)).map((u) => ({ id: u.id, name: u.name }));
+            const recs = recBy.get(k) ?? [];
+            const userIds = new Set([...recs.map((r) => r.userId), ...matchedIds]);
+            const records: meeting.AttendanceRecord[] = [];
+            for (const userId of userIds) {
+              const rec = effectiveRecord(
+                userId,
+                {
+                  manual: recs.find((r) => r.userId === userId && r.source === "manual") ?? null,
+                  join: recs.find((r) => r.userId === userId && r.source === "join") ?? null,
+                  meet: presenceOf(parts.filter((p) => p.userId === userId)),
+                },
+                threshold,
+              );
+              if (rec) records.push(rec);
+            }
+            const ing = ingestBy.get(k);
+            return {
+              ...o,
+              records,
+              participants: parts
+                .sort((a, b) => a.firstJoin.localeCompare(b.firstJoin))
+                .map((p) => ({
+                  key: p.participantKey,
+                  kind: p.kind,
+                  displayName: p.displayName,
+                  googleUserId: p.googleUserId,
+                  userId: p.userId,
+                  firstJoin: p.firstJoin,
+                  lastLeave: p.lastLeave,
+                  durationSeconds: p.durationSeconds,
+                  approx: p.approx,
+                  suggestions: !p.userId && p.kind === "signed_in" ? suggestMembers(p.displayName, unmatchedCandidates) : [],
+                })),
+              ingest: ing ? { status: ing.status, ingestedAt: ing.ingestedAt, error: ing.lastError } : null,
+            };
+          });
         for (const u of expected) {
           const t = tally.get(u.id) ?? { expected: 0, present: 0, excused: 0 };
           t.expected += occurrences.length;
@@ -182,7 +318,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
             const t = expectedIds.has(r.userId) ? tally.get(r.userId) : undefined;
             if (!t) continue; // not (or no longer) expected: shown on the occurrence, not in the rate
             if (r.status === "present") t.present++;
-            else t.excused++;
+            else if (r.status === "excused") t.excused++;
           }
         }
         return {
@@ -205,7 +341,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
           return { userId: u.id, name: u.name, email: u.email, ...t, rate: denom > 0 ? t.present / denom : null };
         })
         .sort((a, b) => (a.rate ?? 2) - (b.rate ?? 2) || a.name.localeCompare(b.name, "ja"));
-      return { from, to, meetings, members };
+      return { from, to, settings, meetApi, meetings, members };
     },
 
     async set(by, meetingId, date, userId, body) {
@@ -219,13 +355,12 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
       if (!isDate(date) || meeting.occurrenceStarts(m, date, date).length === 0) {
         throw errors.validationFailed([{ field: "date", reason: "not_an_occurrence" }], "その日はこの定例の開催日ではありません。");
       }
-      const existing = await deps.store.get(m.id, date, userId);
       if (status === null) {
-        await deps.store.remove(m.id, date, userId);
+        await deps.store.removeRecord(m.id, date, userId, "manual");
         return { record: null };
       }
       const users = expectedOf(await deps.roster.listActiveUsers(), m.targetId);
-      if (!existing && !users.some((u) => u.id === userId)) {
+      if (!users.some((u) => u.id === userId)) {
         throw errors.validationFailed([{ field: "userId", reason: "not_expected" }], "この定例の対象メンバーではありません。");
       }
       const row: AttendanceRow = {
@@ -235,12 +370,56 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
         orgId,
         status,
         source: "manual",
-        joinedAt: existing?.joinedAt ?? null,
+        joinedAt: null,
         recordedBy: by,
         updatedAt: deps.now(),
       };
-      await deps.store.upsert(row);
-      return { record: toRecord(row) };
+      await deps.store.upsertRecord(row);
+      const join = await deps.store.getRecord(m.id, date, userId, "join");
+      return { record: effectiveRecord(userId, { manual: row, join, meet: null }, 0) };
+    },
+
+    async confirm(by, googleUserId, body) {
+      const userId = body && typeof body === "object" ? (body as { userId?: unknown }).userId : undefined;
+      if (typeof userId !== "string" || !userId) throw errors.validationFailed([{ field: "userId", reason: "required" }], "メンバーを選んでください。");
+      if (!/^[\w-]{1,64}$/.test(googleUserId)) throw errors.validationFailed([{ field: "googleUserId", reason: "invalid" }]);
+      if (!(await deps.roster.listActiveUsers()).some((u) => u.id === userId)) {
+        throw errors.validationFailed([{ field: "userId", reason: "unknown" }], "そのメンバーが見つかりません。");
+      }
+      await deps.store.putLink({ orgId, googleUserId, userId, source: "confirmed", linkedBy: by, linkedAt: deps.now() });
+      return { ok: true };
+    },
+
+    async unlink(googleUserId) {
+      await deps.store.removeLink(orgId, googleUserId);
+      return { ok: true };
+    },
+
+    async updateSettings(by, body) {
+      const v = body && typeof body === "object" ? (body as { minPercent?: unknown }).minPercent : undefined;
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 100) {
+        throw errors.validationFailed([{ field: "minPercent", reason: "out_of_range" }], "出席とみなす割合は 1〜100% の整数で指定してください。");
+      }
+      await deps.store.setMinPercent(orgId, v, by, deps.now());
+      return { minPercent: v };
+    },
+
+    async ingest(body) {
+      const b = (body && typeof body === "object" ? body : {}) as meeting.IngestAttendanceRequest;
+      if ((b.from !== undefined && !isDate(b.from)) || (b.to !== undefined && !isDate(b.to))) {
+        throw errors.validationFailed([{ field: "from", reason: "invalid" }], "期間の形式が正しくありません（YYYY-MM-DD）。");
+      }
+      const access = await deps.meetRecords();
+      if (!access) return { occurrences: 0, participants: 0, complete: true, skipped: "no_account" };
+      if (!access.ready) return { occurrences: 0, participants: 0, complete: true, skipped: "scope_missing" };
+      const r = await runMeetIngest(
+        { meetings: deps.meetings, store: deps.store, client: access.client, orgId, now: deps.now },
+        // A plain run reads what is pending (new / settling / failed occurrences); naming a range re-reads it.
+        { force: !!(b.from || b.to), ...(b.from ? { from: b.from } : {}), ...(b.to ? { to: b.to } : {}), budget: MANUAL_INGEST_BUDGET, deadline: Date.now() + MANUAL_INGEST_TIME_MS },
+      );
+      if (!r.complete) await deps.kick?.(60_000).catch(() => undefined);
+      return { ...r, skipped: null };
     },
   };
 }
+

@@ -18,7 +18,7 @@ import { createApp } from "../src/app";
 import { POLICY_TABLE } from "../src/policy-table";
 import { createDriveShareService } from "../src/service";
 import { createMockDriveShareClient } from "../src/mock-client";
-import { allowAll, AUTHED, buildRoleGrants, fakeRoster, stubGoogleAccount, buildMeetings, buildAttendance } from "./helpers";
+import { allowAll, AUTHED, buildRoleGrants, fakeRoster, stubGoogleAccount, buildMeetings, buildAttendance, buildGoogleLink } from "./helpers";
 import type { PermissionGranter } from "@dub/policy-gate";
 
 function buildApp(authz: PermissionGranter = allowAll) {
@@ -28,7 +28,7 @@ function buildApp(authz: PermissionGranter = allowAll) {
     drive: client,
     roster: fakeRoster({ role_sys_member: ["staff-a@example.com"] }, { role_sys_member: "member" }),
   });
-  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service, attendance: () => buildAttendance().service });
+  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service, attendance: () => buildAttendance().service, googleLink: () => buildGoogleLink().service });
 }
 
 describe("route coverage (POLICY_TABLE <-> router)", () => {
@@ -135,10 +135,16 @@ const SETTINGS_WRITE = [
 const MEETINGS_READ = ["GET /meetings", "GET /meetings/targets"];
 const MEETINGS_WRITE = ["DELETE /meetings/:id", "PATCH /meetings/:id", "POST /meetings", "POST /meetings/sync"];
 // 定例の出席: the caller's own join + their own 定例 list (AUTHENTICATED; join asserts target membership).
-const SELF = ["GET /meetings/me/regulars", "POST /meetings/:id/join"];
+const SELF = ["GET /meetings/me/regulars", "POST /meetings/:id/join", "POST /meetings/me/google-link/callback", "POST /meetings/me/google-link/start"];
 // 定例の出席 report / corrections (人事).
 const ATTENDANCE_READ = ["GET /meetings/attendance"];
-const ATTENDANCE_WRITE = ["PUT /meetings/:id/attendance/:date/:userId"];
+const ATTENDANCE_WRITE = [
+  "DELETE /meetings/attendance/links/:googleUserId",
+  "POST /meetings/attendance/ingest",
+  "PUT /meetings/:id/attendance/:date/:userId",
+  "PUT /meetings/attendance/links/:googleUserId",
+  "PUT /meetings/attendance/settings",
+];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /internal/health"];
 // The whole external surface — what a caller can reach through api-gateway at most.

@@ -234,27 +234,28 @@ export function useHrAttendance(range: { from: string; to: string }) {
 }
 
 type AttCtx = { prev: meeting.AttendanceReportResponse | undefined };
+type AttVars = { meetingId: string; date: string; userId: string; status: meeting.AttendanceStatus | null };
 
-/** 出席の手修正を report キャッシュに重ねる (出席率もその場で再計算)。 */
-export function applyAttendance(
-  report: meeting.AttendanceReportResponse,
-  v: { meetingId: string; date: string; userId: string; status: meeting.AttendanceStatus | null },
-  record: meeting.AttendanceRecord | null,
-): meeting.AttendanceReportResponse {
-  const meetings = report.meetings.map((m) =>
-    m.id !== v.meetingId
-      ? m
-      : {
-          ...m,
-          occurrences: m.occurrences.map((o) =>
-            o.date !== v.date ? o : { ...o, records: [...o.records.filter((r) => r.userId !== v.userId), ...(record ? [record] : [])] },
-          ),
-        },
-  );
+/** The automatic record of a member (Meet → Dub join), as the server derives it when no manual one exists. */
+export function autoRecord(
+  base: Pick<meeting.AttendanceRecord, "userId" | "meet" | "joinedAt">,
+  durationMinutes: number,
+  minPercent: number,
+): meeting.AttendanceRecord | null {
+  if (base.meet) {
+    const present = base.meet.durationSeconds >= Math.ceil((durationMinutes * 60 * minPercent) / 100);
+    return { ...base, status: present ? "present" : "absent", source: "meet_api", recordedBy: null, updatedAt: null };
+  }
+  if (base.joinedAt) return { ...base, status: "present", source: "join", recordedBy: null, updatedAt: null };
+  return null;
+}
+
+/** Recount every member's rate from the occurrences (same rule as the server). */
+function recount(report: meeting.AttendanceReportResponse): meeting.AttendanceReportResponse {
   const members = report.members.map((mem) => {
     let present = 0;
     let excused = 0;
-    for (const m of meetings) {
+    for (const m of report.meetings) {
       if (!m.expectedUserIds.includes(mem.userId)) continue;
       for (const o of m.occurrences) {
         const r = o.records.find((x) => x.userId === mem.userId);
@@ -265,7 +266,51 @@ export function applyAttendance(
     const denom = mem.expected - excused;
     return { ...mem, present, excused, rate: denom > 0 ? present / denom : null };
   });
-  return { ...report, meetings, members };
+  return { ...report, members };
+}
+
+/** 出席の手修正を report キャッシュに重ねる (null = 手修正を外して自動に戻す)。出席率も数え直す。 */
+export function applyAttendance(report: meeting.AttendanceReportResponse, v: AttVars, manual?: meeting.AttendanceRecord | null): meeting.AttendanceReportResponse {
+  const meetings = report.meetings.map((m) => {
+    if (m.id !== v.meetingId) return m;
+    return {
+      ...m,
+      occurrences: m.occurrences.map((o) => {
+        if (o.date !== v.date) return o;
+        const cur = o.records.find((r) => r.userId === v.userId);
+        const base = { userId: v.userId, meet: cur?.meet ?? null, joinedAt: cur?.joinedAt ?? null };
+        const next: meeting.AttendanceRecord | null = v.status
+          ? manual ?? { ...base, status: v.status, source: "manual", recordedBy: "", updatedAt: new Date().toISOString() }
+          : autoRecord(base, m.durationMinutes, report.settings.minPercent);
+        if (next && manual) Object.assign(next, { meet: base.meet, joinedAt: base.joinedAt });
+        return { ...o, records: [...o.records.filter((r) => r.userId !== v.userId), ...(next ? [next] : [])] };
+      }),
+    };
+  });
+  return recount({ ...report, meetings });
+}
+
+/** 未確定の参加者をメンバーに確定したことを report キャッシュに重ねる (その人の他の回も)。 */
+export function applyConfirm(report: meeting.AttendanceReportResponse, googleUserId: string, userId: string): meeting.AttendanceReportResponse {
+  const meetings = report.meetings.map((m) => ({
+    ...m,
+    occurrences: m.occurrences.map((o) => {
+      const parts = o.participants.map((p) => (p.googleUserId === googleUserId ? { ...p, userId, suggestions: [] } : p));
+      const mine = parts.filter((p) => p.userId === userId);
+      if (!mine.some((p) => p.googleUserId === googleUserId)) return { ...o, participants: parts };
+      const cur = o.records.find((r) => r.userId === userId);
+      if (cur?.source === "manual") return { ...o, participants: parts };
+      const meet: meeting.MeetPresence = {
+        firstJoin: mine.map((p) => p.firstJoin).sort()[0]!,
+        lastLeave: mine.some((p) => p.lastLeave === null) ? null : mine.map((p) => p.lastLeave!).sort().at(-1)!,
+        durationSeconds: mine.reduce((s, p) => s + p.durationSeconds, 0),
+        approx: mine.some((p) => p.approx),
+      };
+      const rec = autoRecord({ userId, meet, joinedAt: cur?.joinedAt ?? null }, m.durationMinutes, report.settings.minPercent);
+      return { ...o, participants: parts, records: [...o.records.filter((r) => r.userId !== userId), ...(rec ? [rec] : [])] };
+    }),
+  }));
+  return recount({ ...report, meetings });
 }
 
 /** 出席の手修正 (楽観的: 先に表へ反映 → 失敗で戻してエラートースト)。 */
@@ -274,26 +319,87 @@ export function useSetAttendance(range: { from: string; to: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const key = HR_ATTENDANCE_KEY(range.from, range.to);
-  return useMutation<meeting.SetAttendanceResponse, unknown, { meetingId: string; date: string; userId: string; status: meeting.AttendanceStatus | null }, AttCtx>({
+  return useMutation<meeting.SetAttendanceResponse, unknown, AttVars, AttCtx>({
     mutationFn: (v) => api.setAttendance(v.meetingId, v.date, v.userId, v.status),
     onMutate: async (v) => {
       await qc.cancelQueries({ queryKey: key, exact: true });
       const prev = qc.getQueryData<meeting.AttendanceReportResponse>(key);
-      if (prev) {
-        const optimistic: meeting.AttendanceRecord | null = v.status
-          ? { userId: v.userId, status: v.status, source: "manual", joinedAt: null, recordedBy: "", updatedAt: new Date().toISOString() }
-          : null;
-        qc.setQueryData(key, applyAttendance(prev, v, optimistic));
-      }
+      if (prev) qc.setQueryData(key, applyAttendance(prev, v));
       return { prev };
     },
     onSuccess: (res, v) => {
       const cur = qc.getQueryData<meeting.AttendanceReportResponse>(key);
-      if (cur) qc.setQueryData(key, applyAttendance(cur, v, res.record));
+      if (cur && res.record) qc.setQueryData(key, applyAttendance(cur, v, res.record));
     },
     onError: (err, _v, ctx) => {
       if (ctx?.prev) qc.setQueryData(key, ctx.prev);
       toast.show({ kind: "error", title: messageFor(err, "出席を変更できませんでした") });
     },
+  });
+}
+
+/** 未確定の参加者を確定 (楽観的)。確定は記憶され、次回から自動で一致する。 */
+export function useConfirmParticipant(range: { from: string; to: string }) {
+  const api = useHrApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = HR_ATTENDANCE_KEY(range.from, range.to);
+  return useMutation<{ ok: true }, unknown, { googleUserId: string; userId: string; name: string }, AttCtx>({
+    mutationFn: (v) => api.confirmParticipant(v.googleUserId, v.userId),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: key, exact: true });
+      const prev = qc.getQueryData<meeting.AttendanceReportResponse>(key);
+      if (prev) qc.setQueryData(key, applyConfirm(prev, v.googleUserId, v.userId));
+      return { prev };
+    },
+    onSuccess: (_r, v) => toast.show({ kind: "success", title: `${v.name} さんとして確定しました（次回から自動）` }),
+    onError: (err, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, "確定できませんでした") });
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["hr", "attendance"] }),
+  });
+}
+
+/** 出席とみなす割合 (楽観的)。率はサーバで数え直すので、反映後に取り直す。 */
+export function useAttendanceSettings(range: { from: string; to: string }) {
+  const api = useHrApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = HR_ATTENDANCE_KEY(range.from, range.to);
+  return useMutation<meeting.AttendanceSettings, unknown, meeting.AttendanceSettings, AttCtx>({
+    mutationFn: (v) => api.updateAttendanceSettings(v),
+    onMutate: async (v) => {
+      const prev = qc.getQueryData<meeting.AttendanceReportResponse>(key);
+      if (prev) qc.setQueryData(key, { ...prev, settings: v });
+      return { prev };
+    },
+    onError: (err, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, "設定を変更できませんでした") });
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["hr", "attendance"] }),
+  });
+}
+
+/** 「今すぐ取り込む」。 */
+export function useIngestAttendance() {
+  const api = useHrApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<meeting.IngestAttendanceResponse, unknown, void>({
+    mutationFn: () => api.ingestAttendance(),
+    onSuccess: (r) => {
+      if (r.skipped === "scope_missing") {
+        toast.show({ kind: "error", title: "Google アカウントの再連携が必要です（Drive共有 → 設定）" });
+        return;
+      }
+      toast.show({
+        kind: "success",
+        title: r.complete ? `Meet の記録を取り込みました（${r.occurrences} 回・${r.participants} 人）` : `${r.occurrences} 回分を取り込みました。残りは数分で自動で続きます`,
+      });
+      void qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+    },
+    onError: (err) => toast.show({ kind: "error", title: messageFor(err, "取り込めませんでした") }),
   });
 }
