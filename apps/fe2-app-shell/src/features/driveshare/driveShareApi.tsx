@@ -105,6 +105,33 @@ export interface ListRoleGrantsResult {
   items: RoleFileGrant[];
 }
 
+/** How one sharing entry differs from the file's role grants (drive-share-service types.ts).
+ *  unexpected = shared outside every role (incl. link / domain / group); excess_role /
+ *  insufficient_role = a member holds a stronger / weaker role than granted; missing = a
+ *  member has no access. */
+export type ShareDriftKind = "unexpected" | "excess_role" | "insufficient_role" | "missing";
+
+export interface ShareDriftItem {
+  kind: ShareDriftKind;
+  permissionId: string | null;
+  granteeType: GranteeType;
+  email: string | null;
+  displayName: string | null;
+  domain: string | null;
+  actualRole: ShareRole | null;
+  expectedRole: DriveRole | null;
+  roleNames: string[];
+}
+
+/** GET /driveshare/files/:id/drift. grantCount=0 = no role grant, so nothing to compare. */
+export interface FileShareDrift {
+  fileId: string;
+  grantCount: number;
+  expectedCount: number;
+  matchedCount: number;
+  items: ShareDriftItem[];
+}
+
 // ---- Google accounts drive-share-service acts as (admin only, Drive共有 > 設定) ----
 export interface DriveGoogleAccount {
   id: string;
@@ -154,6 +181,8 @@ export interface DriveShareApi {
   revokeRoleGrant(fileId: string, roleId: string): Promise<void>;
   /** Re-apply a role grant so every current member is (re)synced (drive:write). */
   reapplyRoleGrant(fileId: string, roleId: string): Promise<RoleFileGrant>;
+  /** Actual sharing vs the file's role grants (drive:read). */
+  getShareDrift(fileId: string): Promise<FileShareDrift>;
   getGoogleAccounts(): Promise<DriveGoogleAccountsStatus>;
   /** Start the add-account consent round-trip; the browser is then sent to `authUrl`. */
   startGoogleConnect(redirectUri: string, loginHint?: string): Promise<{ authUrl: string }>;
@@ -230,6 +259,8 @@ export function createDriveShareApi(api: ApiClient): DriveShareApi {
         method: "POST",
         path: `${BASE}/files/${encodeURIComponent(fileId)}/role-grants/${encodeURIComponent(roleId)}/reapply`,
       }),
+    getShareDrift: (fileId) =>
+      api.request<FileShareDrift>({ method: "GET", path: `${BASE}/files/${encodeURIComponent(fileId)}/drift` }),
     getGoogleAccounts: () => api.request<DriveGoogleAccountsStatus>({ method: "GET", path: GOOGLE }),
     startGoogleConnect: (redirectUri, loginHint) =>
       api.request<{ authUrl: string }>({
@@ -296,5 +327,41 @@ export function driveRoleTone(driveRole: DriveRole): "brand" | "info" | "neutral
       return "info";
     case "reader":
       return "neutral";
+  }
+}
+
+/** Section heading per drift kind, in display order. */
+export const DRIFT_KIND_ORDER: readonly ShareDriftKind[] = ["unexpected", "excess_role", "insufficient_role", "missing"];
+export function driftKindLabel(kind: ShareDriftKind): string {
+  switch (kind) {
+    case "unexpected":
+      return "ロール外の共有";
+    case "excess_role":
+      return "ロールより強い権限";
+    case "insufficient_role":
+      return "ロールより弱い権限";
+    case "missing":
+      return "まだ共有されていないメンバー";
+  }
+}
+
+/** Who a drift item is about: email, or the link / domain wording for non-user grantees. */
+export function driftGranteeLabel(item: Pick<ShareDriftItem, "granteeType" | "email" | "displayName" | "domain">): string {
+  if (item.granteeType === "anyone") return "リンクを知っている全員";
+  if (item.granteeType === "domain") return `${item.domain ?? "(不明)"} ドメインの全員`;
+  return item.email ?? item.displayName ?? "(不明)";
+}
+
+/** One-line explanation, e.g. 「編集者（ロール「開発」では閲覧者）」. */
+export function driftDetail(item: ShareDriftItem): string {
+  const roles = item.roleNames.map((n) => `「${n}」`).join("・");
+  switch (item.kind) {
+    case "unexpected":
+      return `${item.actualRole ? roleLabel(item.actualRole) : ""}（どのロールにも含まれていません）`;
+    case "excess_role":
+    case "insufficient_role":
+      return `${item.actualRole ? roleLabel(item.actualRole) : ""}（ロール${roles}では${item.expectedRole ? roleLabel(item.expectedRole) : ""}）`;
+    case "missing":
+      return `ロール${roles}で${item.expectedRole ? roleLabel(item.expectedRole) : ""}のはずが、共有されていません`;
   }
 }

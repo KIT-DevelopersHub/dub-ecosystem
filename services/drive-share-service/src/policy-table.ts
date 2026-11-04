@@ -42,6 +42,7 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /driveshare/files/:id/permissions": appLevel("driveshare", "view", "drive:read"),
   "GET /driveshare/role-grants": appLevel("driveshare", "view", "drive:read"),
   "GET /driveshare/files/:id/role-grants": appLevel("driveshare", "view", "drive:read"),
+  "GET /driveshare/files/:id/drift": appLevel("driveshare", "view", "drive:read"),
 
   // ---- writes: 編集 on Drive共有 + drive:write ----
   "POST /driveshare/files/:id/permissions": appLevel("driveshare", "edit", "drive:write"),

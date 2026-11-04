@@ -135,6 +135,39 @@ export interface RoleFileGrant {
   invited?: InvitedMember[];
 }
 
+/** How one sharing entry differs from what the file's role grants say.
+ *  unexpected = shared with someone no role grant covers (incl. link / domain / group);
+ *  excess_role / insufficient_role = a role member holds a stronger / weaker role than granted;
+ *  missing = a role member has no access at all. */
+export type ShareDriftKind = "unexpected" | "excess_role" | "insufficient_role" | "missing";
+
+export interface ShareDriftItem {
+  kind: ShareDriftKind;
+  /** The Drive permission, or null for `missing`. */
+  permissionId: string | null;
+  granteeType: GranteeType;
+  email: string | null;
+  displayName: string | null;
+  domain: string | null;
+  /** Role in Drive now (null for `missing`). */
+  actualRole: ShareRole | null;
+  /** Role the grants call for (null for `unexpected`). */
+  expectedRole: AssignableDriveRole | null;
+  /** Names of the roles that grant this member access (empty for `unexpected`). */
+  roleNames: string[];
+}
+
+/** GET /driveshare/files/:id/drift. grantCount=0 means there is no baseline (items empty). */
+export interface FileShareDrift {
+  fileId: string;
+  grantCount: number;
+  /** Distinct member emails the grants expand to. */
+  expectedCount: number;
+  /** Members whose access matches the grants. */
+  matchedCount: number;
+  items: ShareDriftItem[];
+}
+
 /** POST /driveshare/files/:id/role-grants body. */
 export interface CreateRoleGrantRequest {
   roleId: string;
