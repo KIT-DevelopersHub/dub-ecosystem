@@ -418,13 +418,7 @@ export function UserListPage() {
                 />
               </Card>
             </div>
-          ) : (
-            <div style={paneColStyle}>
-              <Card testId="fe7-user-pane-empty">
-                <EmptyState title="ユーザーを選択してください" description="一覧から名前をクリックすると、ここで編集できます。" />
-              </Card>
-            </div>
-          )}
+          ) : null}
         </div>
       )}
 
