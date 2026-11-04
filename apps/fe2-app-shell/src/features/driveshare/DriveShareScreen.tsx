@@ -33,6 +33,10 @@ import { DriveTree } from "./DriveTree.tsx";
 import { DriveShareSettingsDialog, settingsOpenOnLoad, useDriveSettingsAccess } from "./DriveShareSettings.tsx";
 import { FILES_QUERY_CACHE } from "./tree.ts";
 import {
+  DRIFT_KIND_ORDER,
+  driftDetail,
+  driftGranteeLabel,
+  driftKindLabel,
   driveRoleLabel,
   driveRoleTone,
   isValidEmail,
@@ -41,6 +45,7 @@ import {
   type AssignableRole,
   type DriveFile,
   type DriveRole,
+  type FileShareDrift,
   type ListPermissionsResult,
   type ListRoleGrantsResult,
   type RoleFileGrant,
@@ -65,6 +70,13 @@ function roleGrantsKey(fileId: string): readonly unknown[] {
   return queryKeys.feature("driveshare", "role-grants", fileId);
 }
 const ALL_ROLE_GRANTS_KEY = queryKeys.feature("driveshare", "role-grants");
+function permissionsKey(fileId: string): readonly unknown[] {
+  return queryKeys.feature("driveshare", "permissions", fileId);
+}
+// Under the permissions key: every permission change invalidates the drift with it.
+function driftKey(fileId: string): readonly unknown[] {
+  return [...permissionsKey(fileId), "drift"];
+}
 
 function formatUpdated(iso: string | null): string {
   if (!iso) return "";
@@ -313,6 +325,7 @@ function LinkSharingToggle({
     mutationFn: (enabled: boolean) => driveApi.setLinkSharing(file.id, { enabled, role: "reader" }),
     onSuccess: (result, enabled) => {
       queryClient.setQueryData<ListPermissionsResult>(permsKey, result);
+      void queryClient.invalidateQueries({ queryKey: driftKey(file.id) });
       // the files list carries a linkShared hint — refresh it too
       void queryClient.invalidateQueries({ queryKey: queryKeys.feature("driveshare", "files") });
       toast.show({ kind: "success", title: enabled ? "リンク共有をオンにしました" : "リンク共有をオフにしました" });
@@ -428,6 +441,7 @@ function RoleGrantRow({
       toast.show({ kind: "success", title: "ロールの割り当てを解除しました", description: `${grant.roleName}` });
       void queryClient.invalidateQueries({ queryKey: grantsKey });
       void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY });
+      void queryClient.invalidateQueries({ queryKey: permissionsKey(fileId) });
     },
     onError: (err) =>
       toast.show({
@@ -441,7 +455,10 @@ function RoleGrantRow({
     reapply.mutate(undefined, {
       // Silent on a clean reapply (it was already optimistic); warn only if Drive refused some members.
       onSuccess: (result) => showRoleGrantOutcome(toast, result, "再適用しました", { silentOnSuccess: true }),
-      onSettled: () => void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY }),
+      onSettled: () => {
+        void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY });
+        void queryClient.invalidateQueries({ queryKey: permissionsKey(fileId) });
+      },
     });
   };
 
@@ -549,7 +566,10 @@ function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: 
           setRoleId("");
           setDriveRole("reader");
         },
-        onSettled: () => void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY }),
+        onSettled: () => {
+          void queryClient.invalidateQueries({ queryKey: ALL_ROLE_GRANTS_KEY });
+          void queryClient.invalidateQueries({ queryKey: permissionsKey(file.id) });
+        },
       },
     );
   };
@@ -631,9 +651,106 @@ function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: 
   );
 }
 
+const MUTED = { color: "var(--dub-color-fg-muted, #667)" } as const;
+
+/** 「ロールとの差分」: where the file's actual sharing departs from its role grants — shares
+ *  outside every role (incl. link), a stronger / weaker role than granted, members without
+ *  access. Read-only; the fixes are the existing controls (剥奪・ロール変更・再適用). */
+function ShareDriftCard({ fileId }: { fileId: string }): JSX.Element {
+  const driveApi = useDriveShareApi();
+  const query = useQuery({ queryKey: driftKey(fileId), queryFn: () => driveApi.getShareDrift(fileId) });
+
+  let badge: JSX.Element | null = null;
+  let body: JSX.Element;
+  if (query.isPending) {
+    body = <SkeletonLoader lines={2} />;
+  } else if (query.isError) {
+    const display = ApiError.isApiError(query.error)
+      ? toDisplayableError(query.error)
+      : { code: "INTERNAL", message: "差分を確認できませんでした。" };
+    body = <ErrorState testId="fe2-driveshare-drift-error" error={display} onRetry={() => void query.refetch()} />;
+  } else if (query.data.grantCount === 0) {
+    body = (
+      <small data-testid="fe2-driveshare-drift-nobaseline" style={MUTED}>
+        ロール権限が無いため比べる基準がありません。ロールで共有を追加すると、そのロール以外への共有などの差分をここで確認できます。
+      </small>
+    );
+  } else if (query.data.items.length === 0) {
+    badge = (
+      <Badge tone="success" testId="fe2-driveshare-drift-badge">
+        一致
+      </Badge>
+    );
+    body = (
+      <small data-testid="fe2-driveshare-drift-clean" style={MUTED}>
+        ロールの設定どおりに共有されています（{query.data.matchedCount}人が一致）。
+      </small>
+    );
+  } else {
+    badge = (
+      <Badge tone="warning" testId="fe2-driveshare-drift-badge">
+        差分 {query.data.items.length}件
+      </Badge>
+    );
+    body = <ShareDriftList drift={query.data} />;
+  }
+
+  return (
+    <Card testId="fe2-driveshare-drift">
+      <Stack gap={3}>
+        <Stack direction="row" gap={2} align="center" justify="between">
+          <Stack direction="row" gap={2} align="center">
+            <strong>ロールとの差分</strong>
+            {badge}
+          </Stack>
+          <Button
+            variant="secondary"
+            testId="fe2-driveshare-drift-refresh"
+            loading={query.isFetching && !query.isPending}
+            disabled={query.isPending}
+            onClick={() => void query.refetch()}
+          >
+            再チェック
+          </Button>
+        </Stack>
+        {body}
+      </Stack>
+    </Card>
+  );
+}
+
+function ShareDriftList({ drift }: { drift: FileShareDrift }): JSX.Element {
+  return (
+    <Stack gap={3}>
+      {DRIFT_KIND_ORDER.map((kind) => {
+        const items = drift.items.filter((i) => i.kind === kind);
+        if (items.length === 0) return null;
+        return (
+          <Stack key={kind} gap={2} testId={`fe2-driveshare-drift-${kind}`}>
+            <small>
+              <strong>
+                {driftKindLabel(kind)}（{items.length}）
+              </strong>
+            </small>
+            {items.map((item) => (
+              <Stack key={item.permissionId ?? item.email} gap={1} testId="fe2-driveshare-drift-item">
+                <span>{driftGranteeLabel(item)}</span>
+                <small style={MUTED}>{driftDetail(item)}</small>
+              </Stack>
+            ))}
+          </Stack>
+        );
+      })}
+      <small style={MUTED}>
+        ロール外の共有や強すぎる権限は下の共有一覧で剥奪・変更でき、まだ共有されていないメンバーはロールの「再適用」で共有できます。継承された権限は親フォルダ側で確認してください。
+      </small>
+    </Stack>
+  );
+}
+
 function PermissionsPanel({ file }: { file: DriveFile }): JSX.Element {
   const driveApi = useDriveShareApi();
-  const permsKey = queryKeys.feature("driveshare", "permissions", file.id);
+  const permsKey = permissionsKey(file.id);
   const query = useQuery({
     queryKey: permsKey,
     queryFn: () => driveApi.listPermissions(file.id),
@@ -655,6 +772,7 @@ function PermissionsPanel({ file }: { file: DriveFile }): JSX.Element {
       <Stack gap={3}>
         <GrantForm fileId={file.id} permsKey={permsKey} />
         <RolePermissionPanel file={file} grantsKey={roleGrantsKey(file.id)} />
+        <ShareDriftCard fileId={file.id} />
         <LinkSharingToggle file={file} permsKey={permsKey} linkShared={linkShared} linkInherited={linkInherited} />
         <Stack gap={2}>
           {query.data.permissions.map((p) => (

@@ -20,7 +20,15 @@ import { DubError, errors } from "@dub/errors";
 import type { DriveShareClient } from "./drive-client";
 import type { GrantMemberRow, GrantRow, RoleGrantStore } from "./role-grants-store";
 import type { RoleMembership } from "./role-membership";
-import type { AssignableDriveRole, InvitedMember, RoleFileGrant, SharePermission, SkippedMember } from "./types";
+import { computeShareDrift } from "./share-drift";
+import type {
+  AssignableDriveRole,
+  FileShareDrift,
+  InvitedMember,
+  RoleFileGrant,
+  SharePermission,
+  SkippedMember,
+} from "./types";
 
 const ASSIGNABLE: ReadonlySet<string> = new Set(["reader", "commenter", "writer"]);
 
@@ -40,6 +48,8 @@ export interface RoleGrantsService {
   apply(fileId: string, actingUserId: string, roleId: string, driveRole: AssignableDriveRole): Promise<RoleFileGrant>;
   revoke(fileId: string, roleId: string): Promise<void>;
   reapply(fileId: string, roleId: string): Promise<RoleFileGrant>;
+  /** Read-only: how the file's actual sharing differs from its role grants. */
+  drift(fileId: string): Promise<FileShareDrift>;
 }
 
 /** Index a file's Drive permissions by lowercased user email (ignores anyone/domain). */
@@ -219,6 +229,18 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       const updated = await store.upsertGrant({ ...grant, updatedAt: ts });
       const { skipped, invited } = await reconcile(updated, updated.driveRole, { removeDeparted: true });
       return toRoleFileGrant(updated, { skipped, invited });
+    },
+
+    async drift(fileId): Promise<FileShareDrift> {
+      const [grants, perms] = await Promise.all([store.listGrantsByFile(orgId, fileId), drive.listPermissions(fileId)]);
+      const expected = await Promise.all(
+        grants.map(async (g) => ({
+          roleName: (await roster.roleName(g.roleId)) ?? g.roleId,
+          driveRole: g.driveRole,
+          emails: await roster.listActiveEmails(g.roleId),
+        })),
+      );
+      return computeShareDrift(fileId, expected, perms.permissions);
     },
   };
 }

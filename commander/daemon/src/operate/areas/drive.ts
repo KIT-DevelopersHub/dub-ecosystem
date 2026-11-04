@@ -55,6 +55,15 @@ export const DRIVE: AreaSpec = {
       hint: "items[].roleId・roleName・driveRole",
     }),
     read({
+      id: "driveshare.drift.get",
+      area: "drive",
+      path: "/driveshare/files/:id/drift",
+      service: SHARE,
+      requires: DRIVE_VIEW,
+      description: "ファイル1件の実際の共有とロール単位の共有設定の差分を取得する",
+      hint: "items[].kind(unexpected|excess_role|insufficient_role|missing)・email・actualRole・expectedRole・roleNames。grantCount=0 は比較対象なし",
+    }),
+    read({
       id: "drive.files.list",
       area: "drive",
       path: "/drive/files",
