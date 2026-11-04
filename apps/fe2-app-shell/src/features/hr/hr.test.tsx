@@ -17,7 +17,8 @@ import { HrApiProvider } from "./HrProvider.tsx";
 import { HrApplicantsScreen } from "./HrApplicantsScreen.tsx";
 import { HrOnboardingScreen } from "./HrOnboardingScreen.tsx";
 
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
+const navigateMock = vi.fn();
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock, useRouter: () => null }));
 
 const EDITOR = editorPermissions("hr", ["hr:read", "hr:write", "hr:admin"]);
 const VIEWER = viewerPermissions("hr", ["hr:read"]);
@@ -55,6 +56,11 @@ function fakeApi(overrides: Partial<HrApi> = {}): HrApi {
     remove: unused,
     onboarding: unused,
     setCheck: unused,
+    attendance: unused,
+    setAttendance: unused,
+    ingestAttendance: unused,
+    confirmParticipant: unused,
+    updateAttendanceSettings: unused,
     teams: () => Promise.resolve({ teams: [] }),
     ...overrides,
   };
@@ -193,7 +199,15 @@ describe("HrApplicantsScreen (表)", () => {
     renderWith(<HrApplicantsScreen />, fakeApi(), VIEWER);
     await screen.findByTestId("fe2-hr-row-app_1");
     expect(screen.queryByTestId("fe2-hr-row-app_1-status")).toBeNull();
+    expect(screen.queryByTestId("fe2-hr-enter-on-behalf")).toBeNull();
+  });
+
+  it("has no standalone register dialog; the header sends editors to the form's 代わりに入力", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi());
+    await screen.findByTestId("fe2-hr-row-app_1");
     expect(screen.queryByTestId("fe2-hr-new")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe2-hr-enter-on-behalf"));
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/hr/form", search: { enter: 1 } });
   });
 });
 

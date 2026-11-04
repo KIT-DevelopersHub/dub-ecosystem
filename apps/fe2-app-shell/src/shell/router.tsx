@@ -12,6 +12,7 @@ import {
 } from "@tanstack/react-router";
 import type { ComponentType } from "react";
 import type { ApiClient } from "../lib/api-client.tsx";
+import { GoogleLinkReturn } from "./GoogleLinkReturn.tsx";
 import type { Registry, ResolvedRoute } from "../modules/types.tsx";
 import { RequireAuth, RequirePermission, usePermissions } from "../auth/AuthProvider.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
@@ -29,6 +30,8 @@ import {
   PUBLIC_ONBOARDING_PATH,
   PUBLIC_PARTICIPATION_PATH,
 } from "../features/participation/index.tsx";
+import { PublicInterviewFormPage } from "../features/hr/index.tsx";
+import { hrForm } from "@dub/types";
 import { openNotificationDialog } from "@dub/fe5-notification-inbox";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
 import { PermissionDeniedScreen } from "./screens/PermissionDeniedScreen.tsx";
@@ -116,7 +119,7 @@ export function appSegment(pathname: string): string {
  * crossfade-in; navigating WITHIN an app (e.g. /chat → /chat/settings) keeps the
  * same key so state isn't lost and no fade replays.
  */
-function ShellRouteContent({ navEntries }: { navEntries: NavEntry[] }): JSX.Element {
+function ShellRouteContent({ navEntries, api }: { navEntries: NavEntry[]; api: ApiClient }): JSX.Element {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   // Record the current route into the "最近開いた" history (P3-1). Mounted here so it
   // sees every feature navigation while persisting across route changes.
@@ -124,6 +127,7 @@ function ShellRouteContent({ navEntries }: { navEntries: NavEntry[] }): JSX.Elem
   const inRoster = activeSectionId(pathname) != null;
   return (
     <>
+      <GoogleLinkReturn api={api} />
       {inRoster && <MemberRosterSubnav />}
       <Suspense fallback={inRoster ? <RosterContentSkeleton /> : <RouteLoadingBar active />}>
         <div key={appSegment(pathname)} className="fe2-app-fade" data-testid="fe2-app-fade">
@@ -164,6 +168,13 @@ export function createShellRouter(
     component: () => <PublicOnboardingPage api={api} />,
   });
 
+  // PUBLIC 面談申し込みフォーム (人事) — /participate と同じ置き方: 申し込む人はまだアカウントが無い。
+  const publicInterviewFormRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: hrForm.PUBLIC_INTERVIEW_FORM_PATH,
+    component: () => <PublicInterviewFormPage api={api} />,
+  });
+
   // Authenticated shell layout wraps the home screen and all feature routes.
   const shellRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -178,7 +189,7 @@ export function createShellRouter(
         {...(opts?.onLogout ? { onLogout: opts.onLogout } : {})}
       >
         <RequireAuth loadingFallback={<RouteLoadingBar active />}>
-          <ShellRouteContent navEntries={registry.nav} />
+          <ShellRouteContent navEntries={registry.nav} api={api} />
         </RequireAuth>
       </AppShellLayout>
     ),
@@ -211,6 +222,7 @@ export function createShellRouter(
     loginRoute,
     publicParticipationRoute,
     publicOnboardingRoute,
+    publicInterviewFormRoute,
     shellRoute.addChildren([homeRoute, ...featureRoutes]),
   ]);
 

@@ -71,6 +71,12 @@ export const POLICY_TABLE = definePolicyTable({
   // 持っていないのがこのページの前提なので PUBLIC。読み取り専用で、返すのは管理者が公開前提で
   // 書いた案内項目だけ（名簿・個人情報は含まない）。
   "GET /api/v1/public/onboarding": PUBLIC,
+  // 人事の 面談申し込みフォーム。申し込む人は参加届より前の段階でアカウントをまだ持っていないので PUBLIC。
+  // GET は人事が公開前提で書いた質問だけ (個人情報なし)、POST は応募者を 面談日程調整中 で作る書き込み。
+  // bot 対策 (囮フィールド・Turnstile・IP レート制限) は認可ではないのでハンドラに置く。参加届と同じく
+  // Turnstile は token が来たときだけ検証する (上の CAVEAT と同じ弱さ・widget を出したら token 必須化を検討)。
+  "GET /api/v1/public/hr-interview-form": PUBLIC,
+  "POST /api/v1/public/hr-interview-form": PUBLIC,
   // LP visit beacon. The handler drops non-LP origins and forwards only a sanitized row to
   // lp-analytics s2s; there is no session to check and nothing readable comes back (204).
   "POST /api/v1/public/lp-visits": PUBLIC,

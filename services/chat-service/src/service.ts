@@ -19,6 +19,7 @@ import type {
   SetChannelSectionRequest,
   UpdateSectionRequest,
   UpdateChannelRequest,
+  UpdateChannelVisibilityRequest,
   AddMemberRequest,
   DeleteMessageResult,
   DeletionPolicyResponse,
@@ -350,6 +351,31 @@ export class ChatService {
     if (channel.type === "dm") throw errors.validationFailed([{ field: "type", reason: "dm_not_deletable" }]);
     await this.deps.repo.hardDeleteChannel(id);
     await this.audit(ctx, "chat.channel.delete", "channel", id, { name: channel.name, type: channel.type });
+  }
+
+  // public <-> private. POLICY_TABLE's `chat:change_visibility` is the whole authority (as with
+  // delete); the instance check here is readability only. Going private also drops every
+  // non-member socket from the ChatRoom DO: a ws-ticket is only checked at connect, so a
+  // public-channel reader would otherwise keep receiving the now-private conversation.
+  async updateChannelVisibility(ctx: ReqCtx, id: common.ChannelId, body: UpdateChannelVisibilityRequest): Promise<Channel> {
+    if (typeof body.version !== "number") throw errors.validationFailed([{ field: "version", reason: "required" }]);
+    if (body.visibility !== "public" && body.visibility !== "private") {
+      throw errors.validationFailed([{ field: "visibility", reason: "invalid" }]);
+    }
+    const { channel } = await this.loadReadable(id, ctx.userId);
+    if (channel.type === "dm") throw errors.validationFailed([{ field: "type", reason: "dm_visibility_fixed" }]);
+    if (channel.version !== body.version) throw errVersionConflict(id);
+    if (channel.visibility === body.visibility) return toChannel(channel);
+
+    const next: ChannelRow = { ...channel, visibility: body.visibility, version: channel.version + 1, updatedAt: this.deps.now() };
+    if (!(await this.deps.repo.updateChannel(next, body.version))) throw errVersionConflict(id);
+
+    if (next.visibility === "private") {
+      const members = await this.deps.repo.listMembers(id);
+      await this.deps.realtime.evictNonMembers(id, members.map((m) => m.userId));
+    }
+    await this.audit(ctx, "chat.channel.visibility", "channel", id, { from: channel.visibility, to: next.visibility });
+    return toChannel(next);
   }
 
   // ---- org-wide sidebar sections (one shared set; who may write is POLICY_TABLE's call) ----

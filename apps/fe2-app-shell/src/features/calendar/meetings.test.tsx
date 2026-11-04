@@ -37,6 +37,7 @@ function mtg(over: Partial<meeting.Meeting>): meeting.Meeting {
     meetUrl: "https://meet.google.com/abc-defg-hij",
     htmlLink: "https://calendar.google.com/x",
     attendeeCount: 9,
+    trackAttendance: false,
     createdBy: ME,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
@@ -74,6 +75,7 @@ function fakeApi(over: Partial<CalendarApi> = {}, account: meeting.MeetingAccoun
     updateMeeting: vi.fn(),
     deleteMeeting: vi.fn(() => Promise.resolve()),
     syncMeetings: vi.fn(),
+    joinMeeting: vi.fn(async () => ({ meetUrl: "https://meet.google.com/abc-defg-hij", recordedFor: null })),
     ...over,
   };
   return api;
@@ -122,6 +124,23 @@ describe("カレンダー > ミーティング permissions", () => {
     expect(screen.queryByTestId("calendar-meeting-detail-delete")).not.toBeInTheDocument();
   });
 
+  it("a 定例 shows that attendance is taken, and Meet に参加 goes through the join (records attendance)", async () => {
+    const tab = { opener: {}, location: { href: "" }, close: vi.fn() };
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    const api = fakeApi({
+      listMeetings: vi.fn(async () => ({ items: [mtg({ trackAttendance: true })], account: { email: "hackit.dub@gmail.com", calendarReady: true } })),
+    });
+    render(wrap(<CalendarScreen />, api, VIEW));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
+    await userEvent.click(chipsOf("mtg_all")[0]!);
+    const detail = await screen.findByTestId("calendar-meeting-detail");
+    expect(within(detail).getByTestId("calendar-meeting-detail-attendance")).toHaveTextContent("全体定例");
+    await userEvent.click(within(detail).getByTestId("calendar-meeting-detail-join"));
+    expect(api.joinMeeting).toHaveBeenCalledWith("mtg_all");
+    await waitFor(() => expect(tab.location.href).toBe("https://meet.google.com/abc-defg-hij"));
+    open.mockRestore();
+  });
+
   it("meetings_edit on a カレンダー 閲覧 role is capped at 閲覧", async () => {
     const perms = viewerPermissions("calendar", ["task:read", "calendar:meetings_view", "calendar:meetings_edit"]);
     render(wrap(<CalendarScreen />, fakeApi(), perms));
@@ -157,6 +176,9 @@ describe("定例ミーティングを設定", () => {
     await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-duration"), "30");
     await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-recurrence"), "none");
     expect(within(dialog).queryByTestId("calendar-meeting-form-until")).not.toBeInTheDocument();
+    // 定例として出席を取る (チーム定例: target is a role).
+    expect(within(dialog).getByText("チーム定例として出席を取る")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByText("チーム定例として出席を取る"));
     await userEvent.click(within(dialog).getByTestId("calendar-meeting-form-submit"));
 
     const [y, m, d] = date.split("-").map(Number) as [number, number, number];
@@ -168,6 +190,7 @@ describe("定例ミーティングを設定", () => {
       durationMinutes: 30,
       recurrence: "none",
       until: null,
+      trackAttendance: true,
     });
     // Optimistic chip before the server answers (統括 is one of the caller's default-on targets).
     await waitFor(() => expect(chipsOf("tmp_[a-z0-9]+").length).toBe(1));

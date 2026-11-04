@@ -66,6 +66,8 @@ export interface CalendarApi {
   updateMeeting(id: string, body: meeting.UpdateMeetingRequest): Promise<meeting.Meeting>;
   deleteMeeting(id: string): Promise<void>;
   syncMeetings(): Promise<meeting.SyncMeetingsResponse>;
+  /** Open a meeting from Dub (records attendance when it is a 定例). */
+  joinMeeting(id: string): Promise<meeting.JoinMeetingResponse>;
 }
 
 export function createCalendarApi(api: ApiClient): CalendarApi {
@@ -185,5 +187,6 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
       await api.request<unknown>({ method: "DELETE", path: m(id) });
     },
     syncMeetings: () => api.request<meeting.SyncMeetingsResponse>({ method: "POST", path: `${P}/meetings/sync` }),
+    joinMeeting: (id) => api.request<meeting.JoinMeetingResponse>({ method: "POST", path: `${m(id)}/join` }),
   };
 }

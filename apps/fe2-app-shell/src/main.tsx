@@ -23,6 +23,7 @@ import { assembleFeatureModules } from "./composition/index.tsx";
 import { AppRoot } from "./shell/AppRoot.tsx";
 import { createShellRouter } from "./shell/router.tsx";
 import { reloadForStaleChunk } from "./lib/chunkReload.ts";
+import { hrForm } from "@dub/types";
 
 // Recover from a stale hashed chunk after a deploy at the earliest point: Vite
 // dispatches `vite:preloadError` when a dynamic import / modulepreload 404s
@@ -61,6 +62,7 @@ const api = createApiClient({
     // The public 参加届 form is anonymous by design: a 401 there (e.g. the global /me
     // probe, or the optional teams lookup) must NOT bounce the visitor to /login.
     if (globalThis.location.pathname.startsWith("/participate")) return;
+    if (globalThis.location.pathname.startsWith(hrForm.PUBLIC_INTERVIEW_FORM_PATH)) return;
     redirectAfterLogin = globalThis.location.pathname + globalThis.location.search;
     router.navigate({ to: "/login" });
   },

@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (79 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (80 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -54,6 +54,7 @@ export const PERMISSION_CATALOG = [
   { key: "chat:slack_import", name: "Import from Slack", description: "Import Slack channel history (messages, threads, reactions, files) into new chat channels", domain: "chat", dangerous: true },
   { key: "chat:emoji_import", name: "Import Slack custom emoji", description: "Import the Slack workspace's custom emoji (images) for use in chat reactions", domain: "chat", dangerous: true },
   { key: "chat:manage_sections", name: "Manage chat sections", description: "Create, rename, reorder and delete the org-wide chat sidebar sections and assign channels to them", domain: "chat", dangerous: false },
+  { key: "chat:change_visibility", name: "Change channel visibility", description: "Switch a chat channel between public and private", domain: "chat", dangerous: true },
   { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },
   { key: "infra:read", name: "Read infra", description: "View sites/deployments/dns/domains", domain: "infra", dangerous: false },
   { key: "infra:deploy", name: "Deploy", description: "Execute deployments", domain: "infra", dangerous: true },
@@ -113,7 +114,7 @@ export const PERMISSION_CATALOG = [
   { key: "app:hr:edit", name: "Edit in 人事 app", description: "Act inside the 人事 app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 79 keys (open `${string}:${string}` template retired).
+// Closed union of the 80 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";
