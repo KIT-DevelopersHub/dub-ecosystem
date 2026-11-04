@@ -241,6 +241,14 @@ export function createApp(opts: AppOptions): App {
     return c.json(out);
   });
 
+  // Permission → holders (roles + active user ids) — internal S2S read for notification
+  // audience fan-out (notif:receive_admin / notif:receive_all) and 通知管理「誰に届くか」.
+  // INTERNAL like /internal/users: the caller acts for the system, and a permission-holder
+  // list must not be reachable from outside.
+  app.get("/internal/permission-holders", async (c) => {
+    return c.json(await svc.permissionHolders(orgId, c.req.query("key") ?? ""));
+  });
+
   // Login allowlist lookup — internal S2S read for auth-service password login.
   // Returns { user } (any status) or { user: null } when the email is not on the
   // roster; auth-service enforces the active-only allowlist. Read-only (no provision

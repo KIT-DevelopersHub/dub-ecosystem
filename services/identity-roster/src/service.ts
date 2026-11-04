@@ -907,6 +907,35 @@ export class IdentityService {
   }
 
   /**
+   * Who holds `permission` org-wide: the roles carrying it (with their member counts, as
+   * ロール管理 shows them) and the distinct ACTIVE users reached through those roles.
+   * Serves `GET /internal/permission-holders` — notification-service resolves audience
+   * recipients (notif:receive_admin / notif:receive_all) and renders 通知管理「誰に届くか」
+   * from it. Event-scoped grants never count (same rule as authz org-wide evaluation).
+   */
+  async permissionHolders(
+    orgId: string,
+    permission: string,
+  ): Promise<{ permission: string; roles: { id: string; name: string; memberCount: number }[]; userIds: string[] }> {
+    if (!isPermissionKey(permission)) {
+      throw errors.validationFailed([{ field: "key", reason: "not_in_catalog", message: permission }]);
+    }
+    const counts = await this.d.repo.roleMemberCounts(orgId);
+    const roles: { id: string; name: string; memberCount: number }[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 50; page++) {
+      const res = await this.d.repo.listRoles(orgId, 100, cursor);
+      for (const r of res.items) {
+        if (r.permissions.includes(permission)) roles.push({ id: r.id, name: r.name, memberCount: counts.get(r.id) ?? 0 });
+      }
+      if (!res.nextCursor) break;
+      cursor = res.nextCursor;
+    }
+    const userIds = await this.d.repo.usersWithOrgWidePermission(orgId, permission);
+    return { permission, roles, userIds: [...new Set(userIds)].sort() };
+  }
+
+  /**
    * Role peers for `permission`: the OTHER active users who hold, org-wide, a role that
    * `userId` also holds org-wide and that carries `permission`. `mailVisibleUsers` uses it
    * with `mail:read_role_shared` (same-role mail sharing). Per role: a

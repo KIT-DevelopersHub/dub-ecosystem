@@ -123,11 +123,22 @@ describe("APP_MANIFEST — canonical app ↔ RBAC coverage", () => {
     const claimed = new Set(policy.claimedDetailKeys());
     const other = new Set(policy.otherPermissions().map((e) => e.key));
     const graded = new Set(policy.appAccessCatalogKeys());
+    const hidden = new Set(policy.HIDDEN_PERMISSION_KEYS);
     for (const entry of identity.PERMISSION_CATALOG) {
-      const buckets = [claimed.has(entry.key), other.has(entry.key), graded.has(entry.key)].filter(Boolean).length;
-      expect(buckets, `'${entry.key}' must live in exactly one bucket (app 詳細 / その他 / 段階), got ${buckets}`).toBe(1);
+      const buckets = [claimed.has(entry.key), other.has(entry.key), graded.has(entry.key), hidden.has(entry.key)].filter(Boolean).length;
+      expect(buckets, `'${entry.key}' must live in exactly one bucket (app 詳細 / その他 / 段階 / 非表示), got ${buckets}`).toBe(1);
     }
-    expect(claimed.size + other.size + graded.size).toBe(identity.PERMISSION_CATALOG.length);
+    expect(claimed.size + other.size + graded.size + hidden.size).toBe(identity.PERMISSION_CATALOG.length);
+  });
+
+  it("hidden keys are real catalog keys, and the 通知 app bundles its self-service pair", () => {
+    for (const key of policy.HIDDEN_PERMISSION_KEYS) expect(policy.catalogEntry(key), key).toBeDefined();
+    const out = new Set(appRegistry.withRequiredAppDomainKeys(["app:notifications:view"]));
+    expect(out.has("notif:inbox:self")).toBe(true);
+    expect(out.has("notif:prefs:self")).toBe(true);
+    // the receive toggles stay opt-in (never bundled)
+    expect(out.has("notif:receive_all")).toBe(false);
+    expect(out.has("notif:receive_admin")).toBe(false);
   });
 
   it("access-key helpers agree with the manifest", () => {

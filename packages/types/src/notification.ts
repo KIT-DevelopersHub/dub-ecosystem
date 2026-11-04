@@ -1,5 +1,6 @@
 // notification — notification namespace.
-import type { NotificationId, UserId, ISODateTime, Paginated, CursorQuery } from "./common";
+import type { NotificationId, UserId, ISODateTime, Paginated, CursorQuery, RoleId } from "./common";
+import type { PermissionKey } from "./identity";
 
 export type NotificationChannel = "in_app" | "email" | "chat" | "push"; // 4 closed (theme4)
 export type NotificationType = string; // open vocabulary
@@ -14,13 +15,76 @@ export type NotificationType = string; // open vocabulary
 // notification into a "members" broadcast via the management screen.
 export type NotificationAudience = "admin" | "members";
 
+// ---- receive audiences (ロール管理 > 通知 decides who gets what) ----
+// An audience-addressed notification is delivered to the users whose roles hold the
+// audience's permission key — never to a hard-coded role list. "admin" = 管理者向け
+// (deploys, inquiries/feedback, 参加届, ops alerts); "all" = 全体への通知 (announcements and
+// release notes published to every member).
+export type ReceiveAudience = "admin" | "all";
+export interface ReceiveAudienceDefinition {
+  audience: ReceiveAudience;
+  permission: PermissionKey;
+  /** ロール管理 / 通知管理 label (the toggle wording). */
+  label: string;
+  description: string;
+  /** What actually rides this audience today (shown in 通知管理「誰に届くか」). */
+  examples: readonly string[];
+}
+export const RECEIVE_AUDIENCES: readonly ReceiveAudienceDefinition[] = [
+  {
+    audience: "all",
+    permission: "notif:receive_all",
+    label: "全体への通知を受け取る",
+    description: "お知らせ・新機能のリリースノートなど、メンバー全体に向けた通知が受信箱に届きます。",
+    examples: ["新機能のお知らせ（リリースノート）", "Notification管理からメンバーへ公開した通知"],
+  },
+  {
+    audience: "admin",
+    permission: "notif:receive_admin",
+    label: "管理者向け通知を受け取る",
+    description: "デプロイ完了・問い合わせ/フィードバック・参加届・死活監視や無料枠のアラートなど、管理者向けの通知が受信箱に届きます。",
+    examples: [
+      "デプロイ完了",
+      "問い合わせ・フィードバック（アプリ内／公開フォーム）",
+      "新しい参加届",
+      "死活監視・無料枠・メール配信のアラート",
+      "GitHub 同期失敗・DNS 変更",
+    ],
+  },
+] as const;
+/** The permission key that decides who receives `audience`. */
+export function receiveAudiencePermission(audience: ReceiveAudience): PermissionKey {
+  return audience === "admin" ? "notif:receive_admin" : "notif:receive_all";
+}
+export function isReceiveAudience(value: unknown): value is ReceiveAudience {
+  return value === "admin" || value === "all";
+}
+
+// GET /notifications/audiences — 通知管理「誰に届くか」: per audience, the roles holding its
+// key (with member counts) and the distinct active recipients it resolves to right now.
+export interface AudienceRoleSummary {
+  id: RoleId;
+  name: string;
+  memberCount: number;
+}
+export interface AudienceSummary extends ReceiveAudienceDefinition {
+  roles: AudienceRoleSummary[];
+  recipientCount: number;
+}
+export interface ListAudiencesResponse {
+  items: AudienceSummary[];
+}
+
 export interface NotifyRequest {
   type: NotificationType;
   recipientIds: UserId[];
   /** Role keys expanded to user ids by the notification service (identity roster). Lets a
    *  caller fan out to admins/maintainers without knowing user ids. At least one of
-   *  recipientIds / recipientRoles must be non-empty; the two union. */
+   *  recipientIds / recipientRoles / recipientAudiences must be non-empty; they union. */
   recipientRoles?: string[];
+  /** Audiences expanded to the users whose roles hold the audience key (ロール管理 > 通知).
+   *  Preferred over recipientRoles for 管理者向け alerts so ロール管理 decides who gets them. */
+  recipientAudiences?: ReceiveAudience[];
   title: string;
   body: string;
   channels?: NotificationChannel[]; // P0 delivers in_app only; others are adapter stubs

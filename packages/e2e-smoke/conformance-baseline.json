@@ -96,6 +96,7 @@
   "identity-roster": {
     "missingInSpec": [
       "DELETE /internal/webauthn/users/{}/credentials/{}",
+      "GET /internal/permission-holders",
       "GET /internal/users",
       "GET /internal/webauthn/credentials/{}",
       "GET /internal/webauthn/users/{}/credentials",
@@ -165,8 +166,10 @@
   },
   "notification": {
     "missingInSpec": [
+      "GET /audiences",
       "GET /inbox/ws-ticket",
       "GET /manage",
+      "GET /notifications/audiences",
       "GET /notifications/inbox",
       "GET /notifications/inbox/unread-count",
       "GET /notifications/inbox/ws-ticket",

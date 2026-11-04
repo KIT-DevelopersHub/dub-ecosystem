@@ -3,7 +3,7 @@
 // avoids lockfile churn across the parallel unit build). Each failure → a FieldError
 // with the NOTIF_VALIDATION_FAILED envelope (design §6).
 import { DubError, errors, type FieldError } from "@dub/errors";
-import type { notification } from "@dub/types";
+import { notification } from "@dub/types";
 import {
   CHANNELS,
   MAX_DIRECT_RECIPIENTS,
@@ -68,9 +68,24 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
       hasRoles = recipientRoles.length > 0;
     }
   }
-  // Require at least one recipient source (ids or roles).
-  if (Array.isArray(recipientIds) && recipientIds.length === 0 && !hasRoles) {
-    fe.push({ field: "recipientIds", reason: "required", message: "recipientIds or recipientRoles must be non-empty" });
+  // Optional audience fan-out ("admin" / "all"): expanded to the users whose roles hold the
+  // audience key in ロール管理 (notif:receive_admin / notif:receive_all).
+  const recipientAudiences = b.recipientAudiences;
+  let hasAudiences = false;
+  if (recipientAudiences !== undefined) {
+    if (!Array.isArray(recipientAudiences) || !recipientAudiences.every((a) => notification.isReceiveAudience(a))) {
+      fe.push({ field: "recipientAudiences", reason: "invalid_enum", message: "subset of admin,all" });
+    } else {
+      hasAudiences = recipientAudiences.length > 0;
+    }
+  }
+  // Require at least one recipient source (ids, roles or audiences).
+  if (Array.isArray(recipientIds) && recipientIds.length === 0 && !hasRoles && !hasAudiences) {
+    fe.push({
+      field: "recipientIds",
+      reason: "required",
+      message: "recipientIds, recipientRoles or recipientAudiences must be non-empty",
+    });
   }
 
   const title = b.title;
@@ -105,6 +120,7 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
     body: bodyText as string,
   };
   if (hasRoles) out.recipientRoles = recipientRoles as string[];
+  if (hasAudiences) out.recipientAudiences = [...new Set(recipientAudiences as notification.ReceiveAudience[])];
   if (channels !== undefined) out.channels = channels as NotificationChannel[];
   if (dedupKey !== undefined) out.dedupKey = dedupKey as string;
   if (resourceType !== undefined) out.resourceType = resourceType as string;

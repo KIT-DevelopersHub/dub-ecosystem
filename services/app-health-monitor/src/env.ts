@@ -10,7 +10,7 @@ export interface Env {
   // ---- durable record of the latest per-target status + incident transitions (dub-core D1) ----
   DB?: D1Database;
 
-  // ---- notification fan-out (admin in-app alert via POST /notify, recipientRoles=[admin]) ----
+  // ---- notification fan-out (admin in-app alert via POST /notify, recipientAudiences=[admin]) ----
   SVC_NOTIFICATION?: Fetcher;
 
   // ---- the fe2 admin SPA (assets worker) — probed for "can each app page open?" over its

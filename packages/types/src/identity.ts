@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (80 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (82 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -43,6 +43,11 @@ export const PERMISSION_CATALOG = [
   { key: "notif:inbox:self", name: "Read own inbox", description: "View and manage one's own notification inbox", domain: "notif", dangerous: false },
   { key: "notif:prefs:self", name: "Manage own notification preferences", description: "View and update one's own notification preferences", domain: "notif", dangerous: false },
   { key: "notif:broadcast_publish", name: "Publish member broadcasts", description: "Publish an admin notification to all members from the Notification management screen", domain: "notif", dangerous: false },
+  // Receive-audience keys: who an audience-addressed notification is delivered to. The
+  // notification service resolves "管理者向け" / "全体" recipients as the users whose roles hold
+  // the key (identity GET /internal/permission-holders), so ロール管理 decides who gets what.
+  { key: "notif:receive_admin", name: "Receive admin notifications", description: "Receive admin-audience notifications (deploys, inquiries/feedback, 参加届, ops alerts)", domain: "notif", dangerous: false },
+  { key: "notif:receive_all", name: "Receive org-wide notifications", description: "Receive notifications addressed to all members (announcements, release notes)", domain: "notif", dangerous: false },
   { key: "mail:send", name: "Send mail", description: "Send email", domain: "mail", dangerous: true },
   { key: "mail:read", name: "Read mail", description: "View messages/threads/rules", domain: "mail", dangerous: false },
   { key: "mail:read_all", name: "Read all mail", description: "View every user's mail (oversight/archive)", domain: "mail", dangerous: true },
@@ -114,7 +119,7 @@ export const PERMISSION_CATALOG = [
   { key: "app:hr:edit", name: "Edit in 人事 app", description: "Act inside the 人事 app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 80 keys (open `${string}:${string}` template retired).
+// Closed union of the 82 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

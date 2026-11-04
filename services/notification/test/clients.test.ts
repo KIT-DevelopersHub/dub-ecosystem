@@ -35,6 +35,23 @@ describe("makeIdentityPort.listUserIdsByRole", () => {
   });
 });
 
+describe("makeIdentityPort.permissionHolders", () => {
+  it("calls the internal S2S route /internal/permission-holders?key= and returns roles + ids", async () => {
+    const paths: string[] = [];
+    const binding = {
+      async fetch(req: Request): Promise<Response> {
+        const url = new URL(req.url);
+        paths.push(url.pathname + url.search);
+        const body = { permission: "notif:receive_admin", roles: [{ id: "r1", name: "admin", memberCount: 1 }], userIds: ["u1"] };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    } as unknown as Fetcher;
+    const out = await makeIdentityPort(binding).permissionHolders("notif:receive_admin", ctx());
+    expect(out).toEqual({ roles: [{ id: "r1", name: "admin", memberCount: 1 }], userIds: ["u1"] });
+    expect(paths).toEqual(["/internal/permission-holders?key=notif%3Areceive_admin"]);
+  });
+});
+
 // Records the request path + parsed JSON body of every call.
 function recordingBff(): { binding: Fetcher; calls: { path: string; body: unknown }[] } {
   const calls: { path: string; body: unknown }[] = [];
