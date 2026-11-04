@@ -31,6 +31,7 @@ import { createOptimisticMutation } from "../../lib/optimistic.tsx";
 import { useDriveShareApi } from "./DriveShareProvider.tsx";
 import { DriveTree } from "./DriveTree.tsx";
 import { DriveShareSettingsDialog, settingsOpenOnLoad, useDriveSettingsAccess } from "./DriveShareSettings.tsx";
+import { FILES_QUERY_CACHE } from "./tree.ts";
 import {
   driveRoleLabel,
   driveRoleTone,
@@ -686,6 +687,7 @@ export function DriveShareScreen(): JSX.Element {
   const query = useQuery({
     queryKey: filesKey,
     queryFn: () => driveApi.listFiles(searching ? { q: trimmed, limit: 50 } : { limit: 50 }),
+    ...FILES_QUERY_CACHE,
   });
 
   // Fetch every role grant once and index by fileId so each row can show its chips.

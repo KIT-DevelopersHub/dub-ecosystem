@@ -73,6 +73,12 @@ function run(opts: { ancestor?: string; referrer?: string }) {
   ];
   const observed: unknown[] = [];
   const classes = new Set<string>();
+  // <html> の属性（Worker が付けた公開設定の属性 + 関係ない属性）。
+  const htmlAttrs = new Map<string, string>([
+    ["lang", "ja"],
+    ["data-lp-s-join", "off"],
+    ["data-lp-o-header-banner", "off"],
+  ]);
   const ctx = vm.createContext({
     window: win,
     location: win.location,
@@ -81,7 +87,15 @@ function run(opts: { ancestor?: string; referrer?: string }) {
       referrer: opts.referrer ?? "",
       querySelectorAll: (q: string) => (q === "[data-lp-slot]" ? slots : []),
       addEventListener: (t: string, f: Listener) => (docListeners[t] ??= []).push(f),
-      documentElement: { classList: { add: (c: string) => classes.add(c) }, scrollHeight: 3000 },
+      documentElement: {
+        classList: { add: (c: string) => classes.add(c) },
+        scrollHeight: 3000,
+        get attributes() {
+          return [...htmlAttrs.keys()].map((name) => ({ name }));
+        },
+        removeAttribute: (k: string) => htmlAttrs.delete(k),
+        setAttribute: (k: string, v: string) => htmlAttrs.set(k, v),
+      },
       body: { querySelectorAll: () => tall },
       createElement: () => ({ textContent: "" }),
       head: { appendChild: () => {} },
@@ -114,7 +128,7 @@ function run(opts: { ancestor?: string; referrer?: string }) {
     (docListeners.click ?? []).forEach((f) => f(e));
     return prevented;
   };
-  return { win, parent, posted, scrolled, fire, click, classes, tall, observed };
+  return { win, parent, posted, scrolled, fire, click, classes, tall, observed, htmlAttrs };
 }
 
 test("posts the section list and the active section to an allowed parent only", () => {
@@ -128,6 +142,7 @@ test("posts the section list and the active section to an allowed parent only", 
       { id: "program", top: 2000, height: 100 },
     ],
     docHeight: 3000,
+    caps: ["config"],
   });
   // 読み込んだだけでは lp:scroll を送らない（親の設定画面を勝手に動かさない）。スクロールして別のセクションが上に来たら知らせる。
   ok.fire("scroll");
@@ -184,4 +199,40 @@ test("fit mode (iframe drawn at full height): pins viewport-tall min-heights and
   const before = b.scrolled.length;
   b.fire("message", { source: b.parent, origin: "http://localhost:5195", data: { type: "lp:mark", section: "join" } });
   assert.equal(b.scrolled.length, before);
+});
+
+test("lp:config swaps the site-config attributes on <html> instantly (validated, allowed parent only)", () => {
+  const b = run({ ancestor: "http://localhost:5199" });
+  const before = b.posted.length;
+  // 許可されていないオリジン・親以外からは何もしない。
+  b.fire("message", { source: b.parent, origin: "https://evil.example", data: { type: "lp:config", attrs: { "data-lp-s-program": "off" } } });
+  b.fire("message", { source: {}, origin: "http://localhost:5199", data: { type: "lp:config", attrs: { "data-lp-s-program": "off" } } });
+  assert.equal(b.htmlAttrs.has("data-lp-s-program"), false);
+  b.fire("message", {
+    source: b.parent,
+    origin: "http://localhost:5199",
+    data: {
+      type: "lp:config",
+      attrs: {
+        "data-lp-s-program": "off",
+        "data-lp-o-crowdfunding-pattern": "backers",
+        onclick: "alert(1)",
+        style: "display:none",
+        "data-lp-s-about": "<img src=x>",
+        "data-lp-x-about": "off",
+        "data-lp-s-vision": 1,
+      },
+    },
+  });
+  assert.deepEqual(Object.fromEntries(b.htmlAttrs), {
+    lang: "ja",
+    "data-lp-s-program": "off",
+    "data-lp-o-crowdfunding-pattern": "backers",
+  });
+  // 付け替えた後は位置が変わるので lp:sections を送り直す（親が設定の帯を置き直す）。
+  assert.equal(b.posted.length, before + 1);
+  assert.equal((b.posted.at(-1)!.msg as { type: string }).type, "lp:sections");
+  // 既定値に戻す = 空の attrs で全部外れる。
+  b.fire("message", { source: b.parent, origin: "http://localhost:5199", data: { type: "lp:config", attrs: {} } });
+  assert.deepEqual(Object.fromEntries(b.htmlAttrs), { lang: "ja" });
 });

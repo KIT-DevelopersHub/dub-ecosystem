@@ -6,6 +6,9 @@
 //           {type:"lp:select", section}（選択モードでセクションをクリックしたとき）
 //  親 → LP: {type:"lp:hello", select?, fit?}（再送の依頼。select:true で選択モード） / {type:"lp:scrollTo", section}
 //           {type:"lp:mark", section}（スクロールせず選択の枠だけ付ける）
+//           {type:"lp:config", attrs}（公開設定の data-lp-* 属性を丸ごと付け替える。LP管理の画面上の設定を読み直し
+//           なしで即時に映す。attrs は layoutAttributes の結果。名前・値は LP_ATTR_NAME / LP_ATTR_VALUE で検める）
+//  lp:sections の caps:["config"] = lp:config を受け付ける橋渡し（無い古い橋渡しには LP管理が読み直しで映す）。
 // fit（数値 = 1 画面ぶんの高さ px）: 親が iframe を LP の全高で描く（中でスクロールしない）ときに頼む。
 //   100svh などの「画面の高さ」で決まる min-height をその値に固定し（全高に合わせて伸び続けないように）、
 //   高さが変わるたびに lp:sections を送り直す。
@@ -14,6 +17,10 @@
 // 全画面のプレビュー（LpViewer）は select を頼まないので、今までどおり普通に操作できる。
 // 宛先と送信元は許可リストのオリジンだけ（"*" は使わない）。
 // No runtime-only imports so it runs under both workerd and `node --test` (strip-only TS).
+import { LP_ATTR_NAME, LP_ATTR_VALUE } from "../../../packages/types/src/lp.ts";
+
+/** lp:config で 1 回に付ける属性の上限（壊れた・悪意のあるメッセージで <html> を膨らませない）。 */
+export const MAX_CONFIG_ATTRS = 64;
 
 /** LP管理（fe2）のオリジン: 本番・workers.dev・staging 2 枠・demo。ローカルは下の正規表現。 */
 export const BRIDGE_ORIGINS: readonly string[] = [
@@ -60,7 +67,7 @@ export function bridgeScript(extra: readonly string[] = []): string {
   const list = JSON.stringify([...BRIDGE_ORIGINS, ...extra]).replace(/</g, "\\u003c");
   const js = `(function(){
 if(window.parent===window)return;
-var L=${list},R=${LOCAL_ORIGIN.toString()};
+var L=${list},R=${LOCAL_ORIGIN.toString()},AN=${LP_ATTR_NAME.toString()},AV=${LP_ATTR_VALUE.toString()};
 function ok(o){return typeof o==="string"&&(L.indexOf(o)>=0||R.test(o))}
 var T=null;
 try{var ao=location.ancestorOrigins;if(ao&&ao.length&&ok(ao[0]))T=ao[0]}catch(e){}
@@ -71,7 +78,11 @@ function list(){var out=[],s=document.querySelectorAll("[data-lp-slot]");for(var
 function active(){var s=list(),a=null,y=window.scrollY+window.innerHeight*0.25;for(var i=0;i<s.length;i++){if(s[i].top<=y)a=s[i].id}return a||(s[0]?s[0].id:null)}
 var last=null,quiet=0,raf=0;
 function report(){var a=active();if(!a||a===last)return;last=a;if(Date.now()>=quiet)post({type:"lp:scroll",activeSection:a})}
-function hello(){post({type:"lp:sections",sections:list(),docHeight:document.documentElement.scrollHeight});last=active()}
+function hello(){post({type:"lp:sections",sections:list(),docHeight:document.documentElement.scrollHeight,caps:["config"]});last=active()}
+function config(a){var h=document.documentElement,n=[],i,k,c=0;for(i=0;i<h.attributes.length;i++){k=h.attributes[i].name;if(k.indexOf("data-lp-s-")===0||k.indexOf("data-lp-o-")===0)n.push(k)}
+for(i=0;i<n.length;i++)h.removeAttribute(n[i]);
+for(k in a){if(c>=${MAX_CONFIG_ATTRS})break;if(Object.prototype.hasOwnProperty.call(a,k)&&AN.test(k)&&typeof a[k]==="string"&&AV.test(a[k])){h.setAttribute(k,a[k]);c++}}
+requestAnimationFrame(function(){requestAnimationFrame(hello)})}
 var FIT=0,ft=0;
 function fit(px){if(!(px>0))return;var first=!FIT;FIT=px;var vh=window.innerHeight,a=document.body?document.body.querySelectorAll("*"):[];for(var i=0;i<a.length;i++){var mh=parseFloat(getComputedStyle(a[i]).minHeight);if(mh>0&&Math.abs(mh-vh)<2)a[i].style.minHeight=px+"px"}
 if(first&&typeof ResizeObserver==="function"&&document.body)new ResizeObserver(function(){clearTimeout(ft);ft=setTimeout(hello,120)}).observe(document.body)}
@@ -82,6 +93,7 @@ var d=e.data;if(!d||typeof d!=="object")return;
 T=e.origin;
 if(d.type==="lp:hello"){if(d.select===true)selectMode();if(typeof d.fit==="number")fit(d.fit);hello();return}
 if(d.type==="lp:mark"&&typeof d.section==="string"){last=d.section;mark(d.section);return}
+if(d.type==="lp:config"&&d.attrs&&typeof d.attrs==="object"&&!Array.isArray(d.attrs)){config(d.attrs);return}
 if(d.type==="lp:scrollTo"&&typeof d.section==="string"){var s=list();for(var i=0;i<s.length;i++){if(s[i].id===d.section){quiet=Date.now()+800;last=d.section;mark(d.section);window.scrollTo({top:Math.max(0,s[i].top-8),behavior:"smooth"});return}}}
 });
 var SEL=false;
