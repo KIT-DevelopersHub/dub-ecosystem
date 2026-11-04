@@ -96,7 +96,6 @@
   "identity-roster": {
     "missingInSpec": [
       "DELETE /internal/webauthn/users/{}/credentials/{}",
-      "GET /internal/permission-holders",
       "GET /internal/users",
       "GET /internal/webauthn/credentials/{}",
       "GET /internal/webauthn/users/{}/credentials",

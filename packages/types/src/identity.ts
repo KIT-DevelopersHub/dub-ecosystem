@@ -220,6 +220,10 @@ export interface ListUsersQuery extends CursorQuery {
 export type ListOrgsQuery = CursorQuery;
 /** GET /identity/roles — cursor-only. */
 export type ListRolesQuery = CursorQuery;
+/** GET /internal/permission-holders — the catalog permission key to resolve holders for. */
+export interface PermissionHoldersQuery {
+  key: PermissionKey;
+}
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
 // SINGLE source of truth for the query-parameter *names* identity-roster's public
@@ -228,7 +232,8 @@ export type ListRolesQuery = CursorQuery;
 // CI (see @dub/e2e-smoke wire-params.test.ts). `roleKey` is intentionally listed as an
 // accepted (deprecated) alias of `role` — the server reads both; canonical is `role`.
 // The internal `/internal/users` route (not in the public spec) reads a subset of these
-// same keys, so it needs no separate entry. See docs/api-contracts/_wire-contract-enforcement.md.
+// same keys, so it needs no separate entry. `/internal/permission-holders` reads its own key
+// (`key`), so it is listed. See docs/api-contracts/_wire-contract-enforcement.md.
 export const IDENTITY_WIRE = {
   listOrgs: { method: "GET", path: "/identity/orgs", query: ["cursor", "limit"] },
   listUsers: {
@@ -237,6 +242,7 @@ export const IDENTITY_WIRE = {
     query: ["cursor", "limit", "ids", "status", "role", "roleKey", "q"],
   },
   listRoles: { method: "GET", path: "/identity/roles", query: ["cursor", "limit"] },
+  permissionHolders: { method: "GET", path: "/internal/permission-holders", query: ["key"] },
 } as const;
 
 // Compile-time tie: each endpoint's query keys must be real keys of its query type.
@@ -244,7 +250,9 @@ type _IdentityWireKeysAreTyped =
   (typeof IDENTITY_WIRE.listOrgs.query)[number] extends keyof ListOrgsQuery
     ? (typeof IDENTITY_WIRE.listUsers.query)[number] extends keyof ListUsersQuery
       ? (typeof IDENTITY_WIRE.listRoles.query)[number] extends keyof ListRolesQuery
-        ? true
+        ? (typeof IDENTITY_WIRE.permissionHolders.query)[number] extends keyof PermissionHoldersQuery
+          ? true
+          : never
         : never
       : never
     : never;

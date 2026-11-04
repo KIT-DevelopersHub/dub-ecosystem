@@ -513,6 +513,55 @@ paths:
                     items:
                       type: string
       security: []
+  /internal/permission-holders:
+    get:
+      operationId: permissionHolders
+      summary: Roles and active users holding a permission key
+      tags:
+        - identity
+      description: 'Internal-only (notification audience fan-out): the roles whose permission set contains `key` (with member counts) and the active user ids holding it via those roles. Requires x-dub-internal; the api-gateway 404s this path for external clients.'
+      parameters:
+        - name: key
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/PermissionKey'
+      responses:
+        '200':
+          description: Permission holders
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - permission
+                  - roles
+                  - userIds
+                properties:
+                  permission:
+                    $ref: '#/components/schemas/PermissionKey'
+                  roles:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - name
+                        - memberCount
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        memberCount:
+                          type: integer
+                  userIds:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      security: []
 components:
   schemas:
     Error:
