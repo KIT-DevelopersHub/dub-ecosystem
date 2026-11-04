@@ -104,6 +104,8 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /internal/users/:id/profile": INTERNAL,
   "GET /internal/users": INTERNAL,
   "POST /internal/users/lookup": INTERNAL,
+  // mail-gateway's sender icons; the caller's mail:read is checked by mail-gateway's own table.
+  "POST /internal/users/avatars": INTERNAL,
 
   // The ecosystem's authorization decision point: @dub/policy-gate's `createAuthzGranter`
   // calls this over SVC_IDENTITY for every gated request in every other service. INTERNAL is
