@@ -179,6 +179,42 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /chat/channels/{id}/visibility:
+    put:
+      operationId: updateChannelVisibility
+      summary: Switch a channel between public and private
+      description: Requires chat:change_visibility. Going private hides the channel from every non-member (404) and closes their realtime sockets; going public exposes its history org-wide. Same value is a no-op. DMs cannot be changed (400).
+      tags:
+        - chat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: #/components/schemas/UpdateChannelVisibilityRequest
+      responses:
+        200:
+          description: Updated channel.
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/ChatChannel
+        400:
+          $ref: #/components/responses/BadRequest
+        401:
+          $ref: #/components/responses/Unauthenticated
+        403:
+          $ref: #/components/responses/Forbidden
+        404:
+          $ref: #/components/responses/NotFound
+        409:
+          $ref: #/components/responses/Conflict
   /chat/channels/{id}/section:
     put:
       operationId: setChannelSection
@@ -918,6 +954,15 @@ components:
       properties:
         name:
           type: string
+    UpdateChannelVisibilityRequest:
+      type: object
+      required: [visibility, version]
+      properties:
+        visibility:
+          type: string
+          enum: [public, private]
+        version:
+          type: integer
     ChatSection:
       type: object
       required: [id, name, position, createdAt]

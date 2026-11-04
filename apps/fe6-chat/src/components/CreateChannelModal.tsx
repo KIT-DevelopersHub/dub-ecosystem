@@ -89,7 +89,7 @@ export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelMod
               onChange={() => setVisibility("public")}
             />
             <span>
-              <strong># 公開</strong> — 誰でも参加・閲覧できます
+              <strong># Public</strong> — 誰でも参加・閲覧できます
             </span>
           </label>
           <label className={styles.createRadio}>
@@ -101,7 +101,7 @@ export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelMod
               onChange={() => setVisibility("private")}
             />
             <span>
-              <strong>🔒 非公開</strong> — 招待されたメンバーのみ
+              <strong>🔒 Private</strong> — 招待されたメンバーのみ
             </span>
           </label>
         </div>

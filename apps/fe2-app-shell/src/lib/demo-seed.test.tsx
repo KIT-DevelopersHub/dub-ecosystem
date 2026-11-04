@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 79-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 80-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(79);
+    expect(catalog).toHaveLength(80);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -471,6 +471,34 @@ describe("chat channel delete + org-wide sections (demo store)", () => {
         }
         expect((err as ApiError | undefined)?.status, `${req.method} ${req.path}`).toBe(403);
       }
+    } finally {
+      globalThis.localStorage.removeItem("dub_demo_account");
+    }
+  });
+
+  it("switches public <-> private (versioned); 403 without chat:change_visibility, 400 for a DM", async () => {
+    const a = api();
+    expect((await a.auth.me()).permissions).toContain("chat:change_visibility");
+    interface Wire { visibility: string; version: number }
+    const put = (id: string, body: unknown) => a.request<Wire>({ method: "PUT", path: `/api/v1/chat/channels/${id}/visibility`, body });
+    const status = async (p: Promise<unknown>) => {
+      try {
+        await p;
+      } catch (e) {
+        return (e as ApiError).status;
+      }
+      return 200;
+    };
+    expect(await put("chn_dev", { visibility: "private", version: 1 })).toMatchObject({ visibility: "private", version: 2 });
+    const listed = await a.request<{ id: string; visibility: string }[]>({ method: "GET", path: "/api/v1/chat/channels" });
+    expect(listed.find((c) => c.id === "chn_dev")?.visibility).toBe("private");
+    expect(await put("chn_dev", { visibility: "private", version: 2 })).toMatchObject({ visibility: "private", version: 2 });
+    expect(await status(put("chn_dev", { visibility: "public", version: 1 }))).toBe(409);
+    expect(await status(put("chn_dm_bob", { visibility: "public", version: 1 }))).toBe(400);
+    globalThis.localStorage.setItem("dub_demo_account", "usr_bob");
+    try {
+      expect((await a.auth.me()).permissions).not.toContain("chat:change_visibility");
+      expect(await status(put("chn_dev", { visibility: "public", version: 2 }))).toBe(403);
     } finally {
       globalThis.localStorage.removeItem("dub_demo_account");
     }
