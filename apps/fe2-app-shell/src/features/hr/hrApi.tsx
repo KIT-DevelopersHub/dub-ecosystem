@@ -1,7 +1,7 @@
 // 人事 feature の api アダプタ。シェルの api-client (session cookie / 401→refresh / requestId /
 // エラー正規化) に乗り、/api/v1/members/hr/* → gateway → member-service に届く。
 // 契約型は @dub/types `hr` (SoT) をそのまま使い、ここでは再定義しない。
-import type { hr, member } from "@dub/types";
+import type { hr, meeting, member } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 export interface HrApi {
@@ -17,6 +17,15 @@ export interface HrApi {
   setCheck(memberId: string, itemId: string, checked: boolean): Promise<hr.OnboardingProgress>;
   /** 希望チームの選択肢 (名簿のチーム一覧)。 */
   teams(): Promise<{ teams: member.Team[] }>;
+  /** 定例の出席レポート (drive-share-service GET /meetings/attendance, 人事 閲覧 + hr:read)。 */
+  attendance(range: { from: string; to: string }): Promise<meeting.AttendanceReportResponse>;
+  /** 出席の手修正 (null = 記録を消す = 欠席)。 */
+  setAttendance(meetingId: string, date: string, userId: string, status: meeting.AttendanceStatus | null): Promise<meeting.SetAttendanceResponse>;
+  /** Meet の参加記録を今すぐ取り込む。 */
+  ingestAttendance(body?: meeting.IngestAttendanceRequest): Promise<meeting.IngestAttendanceResponse>;
+  /** 未確定の参加者 (Google アカウント) をメンバーに確定 (次回から自動)。 */
+  confirmParticipant(googleUserId: string, userId: string): Promise<{ ok: true }>;
+  updateAttendanceSettings(body: meeting.UpdateAttendanceSettingsRequest): Promise<meeting.AttendanceSettings>;
 }
 
 const BASE = "/api/v1/members/hr";
@@ -59,5 +68,23 @@ export function createHrApi(api: ApiClient): HrApi {
         body: { checked },
       }),
     teams: () => api.request<{ teams: member.Team[] }>({ method: "GET", path: "/api/v1/members/teams" }),
+    attendance: ({ from, to }) =>
+      api.request<meeting.AttendanceReportResponse>({ method: "GET", path: "/api/v1/meetings/attendance", query: { from, to } }),
+    setAttendance: (meetingId, date, userId, status) =>
+      api.request<meeting.SetAttendanceResponse, meeting.SetAttendanceRequest>({
+        method: "PUT",
+        path: `/api/v1/meetings/${enc(meetingId)}/attendance/${enc(date)}/${enc(userId)}`,
+        body: { status },
+      }),
+    ingestAttendance: (body = {}) =>
+      api.request<meeting.IngestAttendanceResponse, meeting.IngestAttendanceRequest>({ method: "POST", path: "/api/v1/meetings/attendance/ingest", body }),
+    confirmParticipant: (googleUserId, userId) =>
+      api.request<{ ok: true }, meeting.ConfirmParticipantRequest>({
+        method: "PUT",
+        path: `/api/v1/meetings/attendance/links/${enc(googleUserId)}`,
+        body: { userId },
+      }),
+    updateAttendanceSettings: (body) =>
+      api.request<meeting.AttendanceSettings, meeting.UpdateAttendanceSettingsRequest>({ method: "PUT", path: "/api/v1/meetings/attendance/settings", body }),
   };
 }

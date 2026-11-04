@@ -15,6 +15,7 @@
 // POST /active switches between registered accounts (or back to the secret); DELETE removes
 // one that is not in use. The refresh token never appears in a response or a log line.
 import { CommonErrorCodes, DubError, errors } from "@dub/errors";
+import { meeting } from "@dub/types";
 import { newId } from "@dub/db";
 import { clientById, connectClient, type Env } from "./env";
 import { newOAuthState, openToken, sealToken } from "./google/crypto";
@@ -37,6 +38,9 @@ export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
 /** Meet REST: make a meeting's Meet open to anyone with the link (Calendar cannot). Accounts
  *  connected before this was requested lack it until reconnected (see meetings meetReady). */
 export const MEET_SCOPE = "https://www.googleapis.com/auth/meetings.space.settings";
+/** Meet REST: read conference records / participants of the account's meetings (人事 > 出席).
+ *  Accounts connected before this was requested lack it until reconnected (meetRecordsReady). */
+export const MEET_RECORDS_SCOPE = "https://www.googleapis.com/auth/meetings.space.readonly";
 const STATE_TTL_MS = 10 * 60 * 1000;
 /** Google sends the admin back here; the SPA page that finishes the round-trip. */
 export const OAUTH_RETURN_PATH = "/driveshare";
@@ -181,16 +185,22 @@ export function createGoogleAccountService(deps: {
    *  invalid_grant => reconnect; other failures (network) are not the account's fault. */
   async function probe(
     credentials: GoogleCredentials,
-  ): Promise<{ accessToken: string | null; invalid: boolean; calendarMissing: boolean; meetMissing: boolean }> {
+  ): Promise<{ accessToken: string | null; invalid: boolean; calendarMissing: boolean; meetMissing: boolean; attendanceMissing: boolean }> {
     try {
       const token = createTokenProvider({ credentials, fetchImpl: doFetch, now });
       const accessToken = await token.getAccessToken();
       // Granted on the refresh just made (cached). Unknown (null) is given the benefit of the doubt.
       const scopes = await token.grantedScopes();
       const missing = (scope: string) => scopes !== null && !scopes.includes(scope);
-      return { accessToken, invalid: false, calendarMissing: missing(CALENDAR_SCOPE), meetMissing: missing(MEET_SCOPE) };
+      return {
+        accessToken,
+        invalid: false,
+        calendarMissing: missing(CALENDAR_SCOPE),
+        meetMissing: missing(MEET_SCOPE),
+        attendanceMissing: missing(MEET_RECORDS_SCOPE),
+      };
     } catch (err) {
-      return { accessToken: null, invalid: isInvalidGrant(err), calendarMissing: false, meetMissing: false };
+      return { accessToken: null, invalid: isInvalidGrant(err), calendarMissing: false, meetMissing: false, attendanceMissing: false };
     }
   }
 
@@ -212,12 +222,13 @@ export function createGoogleAccountService(deps: {
         needsReconnect: probed ? probed.invalid : true,
         calendarMissing: probed?.calendarMissing ?? false,
         meetMissing: probed?.meetMissing ?? false,
+        attendanceMissing: probed?.attendanceMissing ?? false,
       };
     });
     const secret = secretCredentials(env);
     if (secret) {
       entries.unshift(
-        probe(secret).then(async ({ accessToken, invalid, calendarMissing, meetMissing }): Promise<GoogleAccountEntry> => ({
+        probe(secret).then(async ({ accessToken, invalid, calendarMissing, meetMissing, attendanceMissing }): Promise<GoogleAccountEntry> => ({
           id: SECRET_ACCOUNT_ID,
           kind: "secret",
           email: accessToken ? await accountEmail(accessToken) : null,
@@ -227,6 +238,7 @@ export function createGoogleAccountService(deps: {
           needsReconnect: invalid,
           calendarMissing,
           meetMissing,
+          attendanceMissing,
         })),
       );
     }
@@ -260,7 +272,7 @@ export function createGoogleAccountService(deps: {
         client_id: client.clientId,
         redirect_uri: redirectUri,
         response_type: "code",
-        scope: `${DRIVE_SCOPE} ${CALENDAR_SCOPE} ${MEET_SCOPE}`,
+        scope: `${DRIVE_SCOPE} ${CALENDAR_SCOPE} ${MEET_SCOPE} ${MEET_RECORDS_SCOPE}`,
         access_type: "offline",
         prompt: "consent",
         state,
@@ -273,6 +285,8 @@ export function createGoogleAccountService(deps: {
       if (typeof body.code !== "string" || !body.code || typeof body.state !== "string" || !body.state) {
         throw errors.validationFailed([{ field: "code", reason: "required" }]);
       }
+      // A 「Googleと連携」 round-trip shares the return page; it never registers an account.
+      if (body.state.startsWith(meeting.GOOGLE_LINK_STATE_PREFIX)) throw errors.validationFailed([{ field: "state", reason: "wrong_flow" }]);
       const pending = await store.consumeState(body.state);
       const t = now();
       if (!pending || pending.orgId !== orgId || pending.expiresAt < iso(t)) {
