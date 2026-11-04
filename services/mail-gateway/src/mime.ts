@@ -437,10 +437,25 @@ function splitMultipart(body: string, boundary: string): string[] {
   return parts;
 }
 
+/** `<a href="url">label</a>` -> `label <url>` (Gmail's text/plain form) so an HTML-only
+ *  mail keeps its link target once tags are stripped; a label that is the URL itself
+ *  collapses to the bare URL. Non-http(s) hrefs (javascript:, mailto:, #…) keep the label only. */
+function anchorsToText(html: string): string {
+  return html.replace(
+    /<\s*a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\s*\/\s*a\s*>/gi,
+    (_m, dq: string | undefined, sq: string | undefined, bare: string | undefined, inner: string) => {
+      const href = (dq ?? sq ?? bare ?? "").trim().replace(/&amp;/gi, "&");
+      if (!/^https?:\/\//i.test(href)) return inner;
+      const labelText = inner.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().replace(/&amp;/gi, "&");
+      if (!labelText || labelText === href || labelText.replace(/\/$/, "") === href.replace(/\/$/, "")) return href;
+      return `${inner} \u0001${href}\u0002`;
+    },
+  );
+}
+
 /** Very small HTML -> text: strip tags + decode the handful of common entities. */
-function htmlToText(html: string): string {
-  return html
-    .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
+export function htmlToText(html: string): string {
+  return anchorsToText(html.replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, ""))
     .replace(/<\s*br\s*\/?\s*>/gi, "\n")
     .replace(/<\s*\/\s*(p|div|tr|li|h[1-6])\s*>/gi, "\n")
     .replace(/<[^>]+>/g, "")
@@ -449,7 +464,9 @@ function htmlToText(html: string): string {
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'");
+    .replace(/&#39;/gi, "'")
+    .replace(/\u0001/g, "<")
+    .replace(/\u0002/g, ">");
 }
 
 /** Walk one MIME block (recursing into multipart) and return the best decoded text. */

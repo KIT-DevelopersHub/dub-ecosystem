@@ -669,7 +669,38 @@ MAIL_DETAIL.msg_5 = {
   textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
 };
 
+// Tricky-URL mail (ハイパーリンク表示の回帰確認用): long unbroken URLs, URLs glued to
+// Japanese brackets/punctuation, query/fragment/percent-encoding, Gmail-style
+// "label <url>" plain-text links and an angle-bracketed URL hard-wrapped across lines.
+const MSG_LINKS: mail.MailMessageListItem = {
+  id: "msg_6", messageId: "<m6@demo>", threadId: "thr_6", from: { email: "info@connpass.example", name: "イベント告知" },
+  to: [{ email: "demo@developershub.jp" }], subject: "【リンク確認】参加登録URLと資料のご案内",
+  snippet: "参加登録はこちら https://connpass.example/event/123456/registration/?utm_source=mail&utm_medium=email",
+  receivedAt: daysAgoIso(0.05), read: false, mine: true,
+};
+MAIL_DETAIL.msg_6 = {
+  ...MSG_LINKS,
+  textBody: [
+    "イベント運営チームです。参加登録URLと資料をお送りします。",
+    "",
+    "参加登録はこちら（https://connpass.example/event/123456/registration/?utm_source=mail&utm_medium=email）。",
+    "資料「https://drive.example.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/view?usp=sharing」をご確認ください。",
+    "",
+    "会場マップ: https://maps.example.com/maps/place/%E9%87%91%E6%B2%A2%E5%B7%A5%E6%A5%AD%E5%A4%A7%E5%AD%A6/@36.5310,136.6270,17z/data=!3m1!4b1!4m6!3m5!1s0x5ff8333b2e7d0c4d:0x1234567890abcdef!8m2!3d36.531!4d136.627#map-section",
+    "",
+    "タイムテーブルの詳細<https://conf.example.jp/2026/timetable?day=1&track=A#session-42>",
+    "Markdown形式: [申込フォーム](https://forms.example.com/apply?ref=mail&lang=ja) と [企業ページ](https://ja.wikipedia.org/wiki/Cloudflare_(企業))",
+    "アンケート <https://forms.example.com/d/e/1FAIpQLSf0123456789abcdefghijklmnopqrstuvwxyz/viewform?usp=pp_url&entry.1=",
+    "abc> へのご協力をお願いします。",
+    "",
+    "Wikipedia: https://ja.wikipedia.org/wiki/Cloudflare_(企業)、GitHub: https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/752.",
+    "",
+    "よろしくお願いいたします。",
+  ].join("\n"),
+};
+
 const MAIL_THREAD: Record<string, mail.MailThread> = {
+  thr_6: { id: "thr_6", messages: [MAIL_DETAIL.msg_6!] },
   thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
