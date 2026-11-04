@@ -317,6 +317,11 @@ export const MEMBER: AreaSpec = {
     { service: "member-service", route: "POST /members/hr/applicants/:id/notes" },
     { service: "member-service", route: "POST /members/hr/applicants/:id/join" },
     { service: "member-service", route: "DELETE /members/hr/applicants/:id" },
+    // 面談申し込みフォーム (定義の編集・回答一覧・代理入力)。公開受付 /members/internal/hr/interview-form は INTERNAL で対象外。
+    { service: "member-service", route: "GET /members/hr/interview-form" },
+    { service: "member-service", route: "PUT /members/hr/interview-form" },
+    { service: "member-service", route: "GET /members/hr/interview-form/responses" },
+    { service: "member-service", route: "POST /members/hr/interview-form/responses" },
     { service: "member-service", route: "GET /members/hr/onboarding" },
     { service: "member-service", route: "PUT /members/hr/onboarding/:memberId/items/:itemId" },
   ],
