@@ -47,7 +47,7 @@
 
 ```mermaid
 stateDiagram-v2
-  [*] --> scheduling: 応募者を登録
+  [*] --> scheduling: 面談申し込みフォーム (本人 / 代わりに入力)
   scheduling --> interview_set
   interview_set --> interviewed
   interviewed --> hired: 確認ダイアログ → 名簿に追加 (POST /join)
@@ -153,6 +153,7 @@ D1 `member` namespace に新規テーブル 3 つ（`infra/d1/migrations/member/
 - **契約 / 検証の SoT**: `@dub/types` の `hrForm`（`validateFormDefinition` / `validateAnswers` をフロントとサービスで共有）。
 - **API**: `GET|PUT /members/hr/interview-form`（閲覧+hr:read / 編集+hr:write）・`GET|POST /members/hr/interview-form/responses`（一覧 / 代理入力）・公開は gateway `GET|POST /api/v1/public/hr-interview-form`（PUBLIC → member-service `/members/internal/hr/interview-form` INTERNAL）。bot 対策は囮フィールド + Turnstile（token があるとき）+ IP レート制限。
 - **画面**: 人事 → 申し込みフォーム タブ（公開 URL・編集・回答一覧・代わりに入力する）、公開ページ `/interview-apply`（シェルの外・ログイン不要）。
+- **応募者の登録口はこのフォームに一本化**: 旧「応募者を登録」ボタン/ダイアログは廃止。応募者タブの見出し（と空の状態）には「面談申し込みを代わりに入力」を置き、申し込みフォーム タブの代理入力を開いた状態（`/hr/form?enter=1`）へ移る。バックエンドの作成処理（`HrService.create`。フォームの受付がこれを通す）と `POST /members/hr/applicants` はそのまま残す。
 - **migration**: `infra/d1/migrations/member/0019_hr_interview_form.sql`（新規 2 テーブルのみの additive）。
 
 ## リリース手順と migration

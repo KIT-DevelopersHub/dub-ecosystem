@@ -46,23 +46,6 @@ export function useHrOnboarding() {
   return useQuery({ queryKey: HR_ONBOARDING_KEY, queryFn: () => api.onboarding(), staleTime: 15_000 });
 }
 
-export function useCreateApplicant() {
-  const api = useHrApi();
-  const qc = useQueryClient();
-  const toast = useToast();
-  return useMutation<hr.ApplicantDetail, unknown, hr.CreateApplicantRequest>({
-    mutationFn: (input) => api.create(input),
-    onSuccess: (detail) => {
-      qc.setQueryData<hr.ListApplicantsResponse>(HR_LIST_KEY, (prev) =>
-        prev ? { applicants: [{ ...detail.applicant, latestNote: null }, ...prev.applicants] } : prev,
-      );
-      qc.setQueryData(HR_DETAIL_KEY(detail.applicant.id), detail);
-      toast.show({ kind: "success", title: `${detail.applicant.name} さんを登録しました` });
-    },
-    onError: (err) => toast.show({ kind: "error", title: messageFor(err, "応募者を登録できませんでした") }),
-  });
-}
-
 type ListCtx = { prev: hr.ListApplicantsResponse | undefined };
 
 /** ステータス変更 (楽観的)。表のプルダウンからも詳細ドロワーからも同じ。 */

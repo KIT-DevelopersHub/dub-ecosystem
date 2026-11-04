@@ -3,7 +3,7 @@
 //  - フォームの編集 (InterviewFormEditor): Google フォーム風に質問を追加・並べ替え・必須・選択肢・応募者の項目。
 //  - 回答: 届いた回答の一覧 (行を押すと回答の中身)。回答した人は応募者タブに 面談日程調整中 で入っている。
 //  - 代理入力: 電話や対面で聞き取った内容を人事が代わりに入力する (同じく応募者として登録)。
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Card,
@@ -24,8 +24,24 @@ import { useHrCapability } from "./HrShared.tsx";
 import { InterviewFormEditor } from "./InterviewFormEditor.tsx";
 import { InterviewFormFields, useAnswerDraft } from "./InterviewFormFields.tsx";
 import { FormResponseView, VIA_LABELS, formatDateTime } from "./ApplicantFormAnswers.tsx";
-import { useInterviewForm, useInterviewFormResponses, useSubmitOnBehalf } from "./interviewFormApi.tsx";
+import { ENTER_ON_BEHALF_PARAM, useInterviewForm, useInterviewFormResponses, useSubmitOnBehalf } from "./interviewFormApi.tsx";
 import styles from "./interview-form.module.css";
+
+/** 応募者タブの「面談申し込みを代わりに入力」から来たとき (?enter=1)、代理入力を開いた状態で表示する。
+ *  TanStack Router は search を JSON で直列化する (1 → "1"・"1" → "%221%22") のでどちらも受ける。
+ *  useState の初期化は StrictMode で 2 回呼ばれるので読むだけにし、URL の掃除は effect で行う。 */
+function hasEnterParam(): boolean {
+  if (typeof window === "undefined") return false;
+  const v = new URL(window.location.href).searchParams.get(ENTER_ON_BEHALF_PARAM);
+  return v === "1" || v === '"1"';
+}
+
+function clearEnterParam(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(ENTER_ON_BEHALF_PARAM)) return;
+  url.searchParams.delete(ENTER_ON_BEHALF_PARAM);
+  window.history.replaceState(window.history.state, "", url);
+}
 
 export function HrInterviewFormScreen(): JSX.Element {
   const form = useInterviewForm();
@@ -65,7 +81,8 @@ export function HrInterviewFormScreen(): JSX.Element {
 function ResponsesCard({ form, canWrite }: { form: hrForm.InterviewForm | null; canWrite: boolean }): JSX.Element {
   const list = useInterviewFormResponses();
   const [openId, setOpenId] = useState<string | null>(null);
-  const [entering, setEntering] = useState(false);
+  const [entering, setEntering] = useState(hasEnterParam);
+  useEffect(clearEnterParam, []);
   const rows = list.data?.responses ?? [];
   const open = rows.find((r) => r.id === openId) ?? null;
 

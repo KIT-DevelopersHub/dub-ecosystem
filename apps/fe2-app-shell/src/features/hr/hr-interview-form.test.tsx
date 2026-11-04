@@ -156,6 +156,13 @@ describe("フォームの編集", () => {
 });
 
 describe("代理入力", () => {
+  it("opens the 代わりに入力 dialog when arriving with ?enter=1 (from the 応募者 tab) and clears the param", async () => {
+    window.history.replaceState(null, "", "/hr/form?enter=1");
+    renderWith(<HrInterviewFormScreen />, fakeFormApi());
+    expect(await screen.findByTestId("fe2-hr-form-enter-modal")).toBeTruthy();
+    expect(window.location.search).toBe("");
+  });
+
   it("adds a pending row to the applicants list immediately (optimistic)", async () => {
     let resolve!: (v: hrForm.StaffSubmitInterviewFormResponse) => void;
     const submitOnBehalf = vi.fn(() => new Promise<hrForm.StaffSubmitInterviewFormResponse>((r) => (resolve = r)));

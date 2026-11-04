@@ -102,12 +102,6 @@
   overflow-wrap: anywhere;
 }
 
-.formGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--dub-space-4);
-}
-
 /* ── オンボーディング ───────────────────────────────────── */
 .obGrid {
   display: grid;

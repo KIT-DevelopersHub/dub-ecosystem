@@ -75,6 +75,9 @@ export function useInterviewFormApi(): InterviewFormApi {
   return ctx;
 }
 
+/** 申し込みフォーム タブで代理入力を開いた状態にするクエリ (?enter=1)。 */
+export const ENTER_ON_BEHALF_PARAM = "enter";
+
 export const FORM_KEY = queryKeys.feature("hr", "interview-form");
 export const RESPONSES_KEY = queryKeys.feature("hr", "interview-form-responses");
 export const APPLICANT_RESPONSES_KEY = (id: string) => queryKeys.feature("hr", "interview-form-responses", id);
