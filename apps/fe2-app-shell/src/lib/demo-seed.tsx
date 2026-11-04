@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
+import { identity as identityValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
@@ -2954,6 +2954,11 @@ function demoJstAt(days: number, hh: number, mm: number): string {
   return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() + days, hh - 9, mm)).toISOString();
 }
 
+/** Now minus `min` minutes, on a whole minute (UTC ISO). */
+function demoNowMinus(min: number): string {
+  return new Date(Math.floor((Date.now() - min * 60_000) / 60_000) * 60_000).toISOString();
+}
+
 function demoMeetUrl(): string {
   const r = (n: number) => Array.from({ length: n }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("");
   return `https://meet.google.com/${r(3)}-${r(4)}-${r(3)}`;
@@ -2976,6 +2981,7 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/abc-defg-hij",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_all",
       attendeeCount: 9,
+      trackAttendance: true,
     },
     {
       ...base,
@@ -2991,6 +2997,23 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/kln-opqr-stu",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_lead",
       attendeeCount: 2,
+      trackAttendance: true,
+    },
+    {
+      ...base,
+      id: "mtg_member_now",
+      title: "メンバー定例",
+      description: "デモ用: いま開催中（開始10分後）の定例。ダッシュボードの「定例に参加」から参加すると出席になります。",
+      targetId: "role_member",
+      targetName: "member",
+      startsAt: demoNowMinus(10),
+      durationMinutes: 60,
+      recurrence: "weekly",
+      until: null,
+      meetUrl: "https://meet.google.com/mem-bers-now",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_member",
+      attendeeCount: 3,
+      trackAttendance: true,
     },
     {
       ...base,
@@ -3006,6 +3029,7 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/vwx-yzab-cde",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_kickoff",
       attendeeCount: 3,
+      trackAttendance: false,
     },
   ];
 }
@@ -3036,9 +3060,12 @@ function createMeetingsDemoStore() {
   };
   const target = (id: string) => DEMO_MEETING_TARGETS.find((t) => t.id === id);
   const BASE = "/api/v1/meetings";
+  const attendance = createAttendanceDemo(read);
 
-  function handle(method: string, pathname: string, body: unknown): Response | null {
+  function handle(method: string, pathname: string, body: unknown, url?: URL): Response | null {
     if (!pathname.startsWith(BASE)) return null;
+    const att = attendance.handle(method, pathname, body, url);
+    if (att) return att;
     if (method === "GET" && pathname === BASE) {
       const res: meeting.ListMeetingsResponse = { items: read(), account: account() };
       return json(res);
@@ -3077,6 +3104,7 @@ function createMeetingsDemoStore() {
         meetUrl: demoMeetUrl(),
         htmlLink: "https://calendar.google.com/calendar/",
         attendeeCount: t.memberCount,
+        trackAttendance: b.trackAttendance ?? false,
         createdBy: ME_ID as meeting.Meeting["createdBy"],
         createdAt: now,
         updatedAt: now,
@@ -3115,6 +3143,162 @@ function createMeetingsDemoStore() {
         write(cur.map((m) => (m.id === id ? next : m)));
         return json(next);
       }
+    }
+    return null;
+  }
+  return { handle };
+}
+
+// ── 定例の出席 (drive-share-service /meetings/:id/join · /me/regulars · /attendance) ─────
+// Who belongs to which target (the demo roster for 定例), seeded attendance for past occurrences
+// (deterministic pattern) and the same join window / rate rules as the service. State lasts for the
+// tab (sessionStorage). Open as ?demo_account=hanako@developershub.jp to join as a member.
+const DEMO_ATTENDANCE_KEY = "dub-demo:meeting-attendance";
+const DEMO_REGULAR_PEOPLE: { userId: string; name: string; email: string; roleIds: string[] }[] = [
+  { userId: ME_ID, name: "デモ 管理者", email: "demo@developershub.jp", roleIds: ["role_lead"] },
+  { userId: "usr_lead", name: "統括 山本", email: "lead@developershub.jp", roleIds: ["role_lead"] },
+  { userId: "usr_bob", name: "佐藤 太郎", email: "taro@developershub.jp", roleIds: ["role_maintainer"] },
+  { userId: "usr_emi", name: "山田 恵美", email: "emi@developershub.jp", roleIds: ["role_maintainer"] },
+  { userId: "usr_member", name: "一般メンバー 花子", email: "hanako@developershub.jp", roleIds: ["role_member"] },
+  { userId: "usr_carol", name: "鈴木 一郎", email: "ichiro@developershub.jp", roleIds: ["role_member"] },
+  { userId: "usr_frank", name: "高橋 文人", email: "fumito@developershub.jp", roleIds: ["role_member"] },
+];
+
+function createAttendanceDemo(meetings: () => meeting.Meeting[]) {
+  type Row = meeting.AttendanceRecord & { meetingId: string; date: string };
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  const jstToday = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const expected = (targetId: string) =>
+    DEMO_REGULAR_PEOPLE.filter((p) => targetId === meetingValues.ALL_MEMBERS_TARGET_ID || p.roleIds.includes(targetId));
+  const started = (m: meeting.Meeting, from: string, to: string) =>
+    meetingValues.occurrenceStarts(m, from, to).filter((o) => Date.parse(o.startsAt) <= Date.now());
+
+  function seed(): Row[] {
+    const out: Row[] = [];
+    const today = jstToday();
+    for (const m of meetings()) {
+      if (!m.trackAttendance || m.id === "mtg_member_now") continue;
+      started(m, addDays(today, -182), today).forEach((o, i) => {
+        expected(m.targetId).forEach((p, j) => {
+          const k = (i * 3 + j * 5) % 9;
+          if (k === 0) return; // 欠席
+          const status: meeting.AttendanceStatus = k === 1 ? "excused" : "present";
+          const joinedAt = status === "present" ? new Date(Date.parse(o.startsAt) + (j % 4) * 60_000).toISOString() : null;
+          out.push({ meetingId: m.id, date: o.date, userId: p.userId, status, source: status === "present" && j % 3 !== 2 ? "join" : "manual", joinedAt, recordedBy: status === "present" && j % 3 !== 2 ? p.userId : ME_ID, updatedAt: o.startsAt });
+        });
+      });
+    }
+    return out;
+  }
+  let memory: Row[] | null = null;
+  const rows = (): Row[] => {
+    const raw = storage()?.getItem(DEMO_ATTENDANCE_KEY);
+    if (raw) return JSON.parse(raw) as Row[];
+    return (memory ??= seed());
+  };
+  const save = (next: Row[]) => {
+    memory = next;
+    storage()?.setItem(DEMO_ATTENDANCE_KEY, JSON.stringify(next));
+  };
+  const openOcc = (m: meeting.Meeting) => {
+    const today = jstToday();
+    return (
+      meetingValues.occurrenceStarts(m, addDays(today, -1), addDays(today, 1)).find((o) => {
+        const s = Date.parse(o.startsAt);
+        return Date.now() >= s - meetingValues.JOIN_WINDOW_BEFORE_MINUTES * 60_000 && Date.now() <= s + m.durationMinutes * 60_000;
+      }) ?? null
+    );
+  };
+  const strip = ({ meetingId: _m, date: _d, ...r }: Row): meeting.AttendanceRecord => r;
+
+  function handle(method: string, pathname: string, body: unknown, url?: URL): Response | null {
+    const me = currentAccount().id;
+    if (method === "GET" && pathname === "/api/v1/meetings/me/regulars") {
+      const person = DEMO_REGULAR_PEOPLE.find((p) => p.userId === me);
+      const today = jstToday();
+      const items: meeting.MyRegularMeeting[] = meetings()
+        .filter((m) => m.trackAttendance && (m.targetId === meetingValues.ALL_MEMBERS_TARGET_ID || !!person?.roleIds.includes(m.targetId)))
+        .filter(() => !!person)
+        .map((m) => {
+          const open = openOcc(m);
+          const next = open ?? meetingValues.occurrenceStarts(m, today, addDays(today, 62)).find((o) => Date.parse(o.startsAt) > Date.now()) ?? null;
+          const attended = !!open && rows().some((r) => r.meetingId === m.id && r.date === open.date && r.userId === me && r.status === "present");
+          return { id: m.id, title: m.title, targetName: m.targetName, kind: meetingValues.regularKindOf(m.targetId), meetUrl: m.meetUrl, next, durationMinutes: m.durationMinutes, joinOpen: !!open, attended };
+        })
+        .sort((a, b) => Number(b.joinOpen) - Number(a.joinOpen) || (a.next?.startsAt ?? "~").localeCompare(b.next?.startsAt ?? "~"));
+      return json({ items } satisfies meeting.ListMyRegularMeetingsResponse);
+    }
+    const joinM = /^\/api\/v1\/meetings\/([^/]+)\/join$/.exec(pathname);
+    if (method === "POST" && joinM) {
+      const m = meetings().find((x) => x.id === decodeURIComponent(joinM[1]!));
+      if (!m) return problem("NOT_FOUND", "meeting not found", 404);
+      if (!expected(m.targetId).some((p) => p.userId === me)) return problem("FORBIDDEN", "この定例の対象メンバーではありません。", 403);
+      const occ = m.trackAttendance ? openOcc(m) : null;
+      if (occ) {
+        const cur = rows();
+        const existing = cur.find((r) => r.meetingId === m.id && r.date === occ.date && r.userId === me);
+        if (existing?.status !== "present") {
+          const now = new Date().toISOString();
+          save([...cur.filter((r) => r !== existing), { meetingId: m.id, date: occ.date, userId: me, status: "present", source: "join", joinedAt: existing?.joinedAt ?? now, recordedBy: me, updatedAt: now }]);
+        }
+      }
+      return json({ meetUrl: m.meetUrl, recordedFor: occ?.date ?? null } satisfies meeting.JoinMeetingResponse);
+    }
+    if (method === "GET" && pathname === "/api/v1/meetings/attendance") {
+      const to = url?.searchParams.get("to") || jstToday();
+      const from = url?.searchParams.get("from") || addDays(to, -83);
+      const all = rows();
+      const tally = new Map<string, { expected: number; present: number; excused: number }>();
+      const list: meeting.AttendanceMeeting[] = meetings()
+        .filter((m) => m.trackAttendance)
+        .map((m) => {
+          const people = expected(m.targetId);
+          const ids = new Set(people.map((p) => p.userId));
+          const occurrences = started(m, from, to)
+            .reverse()
+            .map((o) => ({ ...o, records: all.filter((r) => r.meetingId === m.id && r.date === o.date).map(strip) }));
+          for (const p of people) {
+            const t = tally.get(p.userId) ?? { expected: 0, present: 0, excused: 0 };
+            t.expected += occurrences.length;
+            for (const o of occurrences) {
+              const r = o.records.find((x) => x.userId === p.userId);
+              if (r?.status === "present") t.present++;
+              else if (r?.status === "excused") t.excused++;
+            }
+            tally.set(p.userId, t);
+          }
+          return { id: m.id, title: m.title, targetId: m.targetId, targetName: m.targetName, kind: meetingValues.regularKindOf(m.targetId), durationMinutes: m.durationMinutes, recurrence: m.recurrence, expectedUserIds: [...ids], occurrences };
+        });
+      const members: meeting.AttendanceMember[] = DEMO_REGULAR_PEOPLE.filter((p) => tally.has(p.userId))
+        .map((p) => {
+          const t = tally.get(p.userId)!;
+          const denom = t.expected - t.excused;
+          return { userId: p.userId, name: p.name, email: p.email, ...t, rate: denom > 0 ? t.present / denom : null };
+        })
+        .sort((a, b) => (a.rate ?? 2) - (b.rate ?? 2) || a.name.localeCompare(b.name, "ja"));
+      return json({ from, to, meetings: list, members } satisfies meeting.AttendanceReportResponse);
+    }
+    const setM = /^\/api\/v1\/meetings\/([^/]+)\/attendance\/([^/]+)\/([^/]+)$/.exec(pathname);
+    if (method === "PUT" && setM) {
+      const [meetingId, date, userId] = [setM[1]!, setM[2]!, setM[3]!].map(decodeURIComponent) as [string, string, string];
+      const status = ((body ?? {}) as meeting.SetAttendanceRequest).status ?? null;
+      const cur = rows();
+      const existing = cur.find((r) => r.meetingId === meetingId && r.date === date && r.userId === userId);
+      const rest = cur.filter((r) => r !== existing);
+      if (status === null) {
+        save(rest);
+        return json({ record: null } satisfies meeting.SetAttendanceResponse);
+      }
+      const row: Row = { meetingId, date, userId, status, source: "manual", joinedAt: existing?.joinedAt ?? null, recordedBy: me, updatedAt: new Date().toISOString() };
+      save([...rest, row]);
+      return json({ record: strip(row) } satisfies meeting.SetAttendanceResponse);
     }
     return null;
   }
@@ -5304,7 +5488,7 @@ export function createDemoFetch(): typeof fetch {
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
-      meetingsStore.handle(method, url.pathname, parsedBody) ??
+      meetingsStore.handle(method, url.pathname, parsedBody, url) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??
