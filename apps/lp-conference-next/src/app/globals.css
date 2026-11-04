@@ -1996,13 +1996,17 @@ img { max-width: 100%; height: auto; display: block; }
 
 /* ---- Crowdfunding → full-width colored callout band ---- */
 .support { background: var(--lp-surface); }
+/* 帯と「支援者情報」で同じ背景（パターンを切り替えても背景は変えない） */
+.support-band,
+.supporters {
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(23,184,146,0.28) 0%, transparent 55%),
+    linear-gradient(135deg, #0f2f8f 0%, #1e3fa8 46%, #0e6f8f 100%);
+}
 .support-band {
   position: relative;
   overflow: hidden;
   padding-block: clamp(4rem, 9vw, 7rem);
-  background:
-    radial-gradient(120% 100% at 50% 0%, rgba(23,184,146,0.28) 0%, transparent 55%),
-    linear-gradient(135deg, #0f2f8f 0%, #1e3fa8 46%, #0e6f8f 100%);
 }
 .support-inner { position: relative; z-index: 1; text-align: center; }
 .support-title {
@@ -2060,55 +2064,142 @@ img { max-width: 100%; height: auto; display: block; }
 /* ---- Crowdfunding「支援者情報」パターン（公開設定 crowdfunding.options.pattern=supporters） ---- */
 .supporters {
   padding-block: clamp(4rem, 9vw, 7rem);
-  background: var(--lp-surface-alt);
-  border-block: 1px solid var(--lp-border-soft);
+  color: #fff;
 }
 .supporters-inner { text-align: center; }
+.supporters-head { margin-bottom: clamp(2.5rem, 6vw, 4rem); }
 .supporters-title {
   margin: 0.6rem 0 1rem;
   font-family: var(--font-display);
   font-size: clamp(1.7rem, 4vw, 2.6rem);
   font-weight: 900;
-  color: var(--lp-heading);
+  color: #fff;
   text-wrap: balance;
 }
 .supporters-body {
-  margin: 0 auto 2.25rem;
-  max-width: 48ch;
-  color: var(--lp-ink-soft);
-  font-size: clamp(1rem, 1.8vw, 1.1rem);
+  margin: 0 auto;
+  max-width: 34em;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: clamp(0.95rem, 1.7vw, 1.05rem);
   line-height: 1.9;
   white-space: pre-line;
+  text-wrap: pretty;
 }
-.supporters-names {
+.supporters-group { text-align: left; margin: 0 auto clamp(2.75rem, 6vw, 4rem); }
+.supporters-group:last-child { margin-bottom: 0; }
+.supporters-group-title {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  margin: 0 0 clamp(1.25rem, 3vw, 1.75rem);
+  font-family: var(--font-display);
+  font-size: clamp(1.05rem, 2.2vw, 1.3rem);
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+.supporters-group-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.55);
+}
+/* 金・銀の枠: 枠画像の縦横比のまま伸縮し、中身は枠の内側に収める */
+/* 3列幅のまま、端数の行は中央に寄せる */
+.supporters-cards,
+.supporters-list {
+  --cols: 3;
+  --col-gap: clamp(1rem, 2.4vw, 1.75rem);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.75rem 1rem;
-  margin: 0 auto 2.5rem;
+  column-gap: var(--col-gap);
+  margin: 0;
   padding: 0;
-  max-width: 60rem;
   list-style: none;
 }
-.supporters-names li {
-  padding: 0.55rem 1.2rem;
-  border: 1px solid var(--lp-border);
-  border-radius: 999px;
-  background: var(--lp-surface);
-  color: var(--lp-ink);
-  font-weight: 700;
+.supporters-cards > li,
+.supporters-list > li { flex: 0 0 calc((100% - (var(--cols) - 1) * var(--col-gap)) / var(--cols)); }
+.supporters-cards { row-gap: clamp(1rem, 2.4vw, 1.75rem); }
+.supporters-cards + .supporters-cards { margin-top: clamp(1rem, 2.4vw, 1.75rem); }
+.supporter-card {
+  position: relative;
+  background: center / 100% 100% no-repeat;
 }
+.supporter-card--gold { aspect-ratio: 1392 / 724; background-image: url("/img/supporter-frame-gold.png"); }
+.supporter-card--silver { aspect-ratio: 1429 / 702; background-image: url("/img/supporter-frame-silver.png"); }
+/* 枠画像は加工せず、青背景で線が沈まないよう薄い光彩だけ足す */
+.supporter-card--gold, .supporter-card--silver { filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.35)); }
+.supporter-card-body {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.3em;
+  min-width: 0;
+  overflow: hidden;
+}
+.supporter-card--gold .supporter-card-body { inset: 14% 9% 13% 10%; }
+.supporter-card--silver .supporter-card-body { inset: 11% 10% 14% 10%; }
+.supporter-name {
+  display: block;
+  color: #fff;
+  font-size: clamp(1rem, 1.6vw, 1.12rem);
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.supporter-message {
+  display: block;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.supporter-card .supporter-name,
+.supporter-card .supporter-message {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+/* その他: ◆ + お名前 + 一言 */
+.supporters-list { row-gap: clamp(1.25rem, 2.6vw, 1.75rem); }
+.supporters-list-item {
+  position: relative;
+  padding-left: 1.6rem;
+  min-width: 0;
+}
+.supporters-list-item::before {
+  content: "";
+  position: absolute;
+  left: 0.15rem;
+  top: 0.5em;
+  width: 0.55rem;
+  height: 0.55rem;
+  background: #fff;
+  transform: rotate(45deg);
+}
+.supporters-list-item .supporter-message { margin-top: 0.2em; }
 .supporters-empty {
   margin: 0 auto 2.5rem;
   max-width: 40rem;
   padding: 1.5rem 1.75rem;
-  border: 1px dashed var(--lp-border);
+  border: 1px dashed rgba(255, 255, 255, 0.5);
   border-radius: 16px;
-  background: var(--lp-surface);
-  color: var(--lp-ink-mute);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
   line-height: 1.8;
+  text-align: center;
 }
-.btn-support--onLight { background: var(--lp-blue-btn); color: #fff; }
+.supporters-inner > :last-child .supporters-empty { margin-bottom: 0; }
+@media (max-width: 960px) {
+  .supporters-cards, .supporters-list { --cols: 2; }
+}
+@media (max-width: 600px) {
+  .supporters-cards > li { flex-basis: min(100%, 26rem); }
+  .supporters-list { --cols: 1; }
+}
 
 /* ---- Vision → big statement over decorative rings ---- */
 .vision {

@@ -83,7 +83,14 @@ export default function RootLayout({
 }) {
   return (
     // LP Worker が公開設定の data-lp-* 属性を <html> に足す（HTMLRewriter）。React は <html> の属性差分を直さないので警告だけ抑える。
-    <html lang="ja" suppressHydrationWarning>
+    <html
+      lang="ja"
+      suppressHydrationWarning
+      // ローカル確認専用: 支援者情報パターンを表示する（LP_SUPPORTERS_FIXTURE=1 はダミー、LP_PREVIEW_SUPPORTERS=1 は実データ）。
+      {...(process.env.LP_SUPPORTERS_FIXTURE === "1" || process.env.LP_PREVIEW_SUPPORTERS === "1"
+        ? { "data-lp-o-crowdfunding-pattern": "supporters" }
+        : {})}
+    >
       <head>
         <StructuredData />
         <SiteConfigStyle />
