@@ -15,6 +15,8 @@ import { SponsorApiProvider } from "./SponsorProvider.tsx";
 import { SponsorCardsScreen } from "./SponsorCardsScreen.tsx";
 import { SponsorScanScreen } from "./SponsorScanScreen.tsx";
 import { SHARE_NOTICE } from "./SponsorShared.tsx";
+import { SponsorCompaniesScreen } from "./SponsorCompaniesScreen.tsx";
+import { companyKey, groupCompanies, suggestCompanies } from "./companies.ts";
 
 const navigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate, useRouter: () => null }));
@@ -108,7 +110,30 @@ describe("SponsorCardsScreen (一覧)", () => {
     expect(screen.getByTestId("fe2-sponsor-loading")).toBeTruthy();
     await screen.findByTestId("fe2-sponsor-card-card_1");
     expect(names()).toEqual(["株式会社北陸テック", "金沢クラウド合同会社", "名刺（未入力）"]);
-    expect(within(screen.getByTestId("fe2-sponsor-card-card_1")).getByText(/鈴木 一郎/)).toBeTruthy();
+    // 名簿形式: 同じ行に「誰が・いつ」登録したかが出る。
+    const row = screen.getByTestId("fe2-sponsor-card-card_1").closest("tr")!;
+    expect(within(row).getByText("鈴木 一郎")).toBeTruthy();
+    expect(within(row).getByText(/2026\/11\/01/)).toBeTruthy();
+  });
+
+  it("sorts by 登録者 / 登録日時 and searches by 登録者", async () => {
+    const api = fakeApi({
+      list: () =>
+        Promise.resolve({
+          cards: [
+            card({ id: "a", companyName: "A社", createdByName: "鈴木 一郎", createdAt: "2026-11-01T00:00:00Z" }),
+            card({ id: "b", companyName: "B社", createdByName: "青木 次郎", createdAt: "2026-11-03T00:00:00Z" }),
+            card({ id: "c", companyName: "C社", createdByName: "佐藤 三郎", createdAt: "2026-11-02T00:00:00Z" }),
+          ],
+        }),
+    });
+    renderWith(<SponsorCardsScreen />, api);
+    await screen.findByTestId("fe2-sponsor-card-a");
+    expect(names()).toEqual(["B社", "C社", "A社"]);
+    fireEvent.click(screen.getByRole("button", { name: /登録日時/ }));
+    expect(names()).toEqual(["A社", "C社", "B社"]);
+    fireEvent.change(screen.getByTestId("fe2-sponsor-search"), { target: { value: "青木" } });
+    expect(names()).toEqual(["B社"]);
   });
 
   it("searches by company / name / department / memo", async () => {
@@ -281,5 +306,59 @@ describe("SponsorScanScreen (撮影 → 入力 → 保存)", () => {
     renderWith(<SponsorScanScreen />, fakeApi(), VIEWER);
     expect(await screen.findByTestId("fe2-sponsor-scan-forbidden")).toBeTruthy();
     expect(screen.queryByTestId("fe2-sponsor-capture")).toBeNull();
+  });
+});
+
+describe("企業 (名刺を会社名でまとめる)", () => {
+  const cards = [
+    card({ id: "k1", companyName: "株式会社北陸テック", personName: "山田 太郎", createdByName: "鈴木 一郎", createdAt: "2026-11-01T00:00:00Z" }),
+    card({ id: "k2", companyName: "（株）北陸テック", personName: "川口 恵", createdByName: "佐藤 三郎", createdAt: "2026-11-03T00:00:00Z" }),
+    card({ id: "k3", companyName: "株式会社北陸テック", personName: "山田 太郎", createdByName: "鈴木 一郎", createdAt: "2026-10-20T00:00:00Z" }),
+    card({ id: "k4", companyName: "金沢クラウド合同会社", personName: "中村 花", createdAt: "2026-11-02T00:00:00Z" }),
+    card({ id: "k5", companyName: null }),
+  ];
+
+  it("treats 株式会社 / (株) / 全角 / 空白 as the same company", () => {
+    expect(companyKey("株式会社北陸テック")).toBe(companyKey("（株）北陸テック"));
+    expect(companyKey("北陸 テック 株式会社")).toBe(companyKey("北陸テック"));
+    const { companies, unassigned } = groupCompanies(cards);
+    expect(unassigned).toBe(1);
+    expect(companies.map((c) => [c.name, c.cards.length])).toEqual([
+      ["株式会社北陸テック", 3],
+      ["金沢クラウド合同会社", 1],
+    ]);
+    expect(companies[0]!.members).toEqual(["佐藤 三郎", "鈴木 一郎"]);
+    expect(companies[0]!.lastAt).toBe("2026-11-03T00:00:00Z");
+  });
+
+  it("suggests existing companies for a differently written name", () => {
+    const names = ["株式会社北陸テック", "金沢クラウド合同会社"];
+    expect(suggestCompanies("北陸", names)).toEqual(["株式会社北陸テック"]);
+    expect(suggestCompanies("ほくりく", names)).toEqual([]);
+    expect(suggestCompanies("株式会社北陸テック", names)).toEqual([]);
+  });
+
+  it("lists companies; a row opens its cards (who / when) and then the card detail", async () => {
+    renderWith(<SponsorCompaniesScreen />, fakeApi({ list: () => Promise.resolve({ cards: cards.map((c) => ({ ...c })) }) }));
+    expect(screen.getByTestId("fe2-sponsor-companies-loading")).toBeTruthy();
+    const table = await screen.findByTestId("fe2-sponsor-companies-table");
+    expect(within(table).getByText("3 枚")).toBeTruthy();
+    expect(screen.getByTestId("fe2-sponsor-unassigned").textContent).toContain("1 枚");
+    fireEvent.click(within(table).getByRole("button", { name: "株式会社北陸テック" }));
+    const detail = await screen.findByTestId("fe2-sponsor-company-detail");
+    expect(within(detail).getByTestId("fe2-sponsor-company-card-k2").textContent).toContain("佐藤 三郎 が登録");
+    fireEvent.click(within(detail).getByTestId("fe2-sponsor-company-card-k2"));
+    expect(await screen.findByTestId("fe2-sponsor-detail")).toBeTruthy();
+  });
+
+  it("the scan form offers an existing company and fills it in on tap", async () => {
+    renderWith(<SponsorScanScreen />, fakeApi({ list: () => Promise.resolve({ cards: cards.map((c) => ({ ...c })) }) }));
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-skip-photo"));
+    const field = await screen.findByTestId("fe2-sponsor-field-companyName");
+    fireEvent.change(field, { target: { value: "北陸テック" } });
+    const suggest = await screen.findByTestId("fe2-sponsor-company-suggest");
+    fireEvent.click(within(suggest).getByRole("button", { name: "株式会社北陸テック" }));
+    expect((field as HTMLInputElement).value).toBe("株式会社北陸テック");
+    expect(screen.queryByTestId("fe2-sponsor-company-suggest")).toBeNull();
   });
 });

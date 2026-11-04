@@ -2,7 +2,7 @@
 // エラートースト)。登録は POST → PUT image の 2 段で、写真だけ失敗したら名刺は残して「写真を再送」を出す。
 // 登録・写真送信は撮影画面を離れた後に終わるので、useMutation の呼び出し側コールバックではなく
 // qc / pendingStore / toast (いずれもアプリ寿命) だけを触る素の async 関数で書く。
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useToast } from "@dub/ui";
 import type { sponsor } from "@dub/types";
@@ -11,6 +11,7 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAuth } from "../../auth/AuthProvider.tsx";
 import { useSponsorApi, useSponsorPending } from "./SponsorProvider.tsx";
 import { usePendingState } from "./pendingStore.ts";
+import { groupCompanies } from "./companies.ts";
 
 export const SPONSOR_LIST_KEY = queryKeys.feature("sponsor", "cards");
 export const SPONSOR_IMAGE_KEY = (id: string) => queryKeys.feature("sponsor", "image", id);
@@ -34,6 +35,13 @@ const replaceCard = (qc: QueryClient, id: string, next: sponsor.BusinessCard) =>
 export function useCards() {
   const api = useSponsorApi();
   return useQuery({ queryKey: SPONSOR_LIST_KEY, queryFn: () => api.list(), staleTime: 15_000 });
+}
+
+/** 名刺を企業ごとにまとめたもの (一覧と同じクエリから作る)。 */
+export function useCompanies() {
+  const list = useCards();
+  const grouped = useMemo(() => groupCompanies(list.data?.cards ?? []), [list.data]);
+  return { list, ...grouped };
 }
 
 /** blob → object URL。差し替え・アンマウントで revoke する。 */

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Button, ConfirmDialog, Drawer, Modal } from "@dub/ui";
 import { sponsor } from "@dub/types";
 import { CardCapture } from "./CardCapture.tsx";
-import { useCards, useRemoveCard, useUpdateCard, useUploadImage } from "./sponsorHooks.ts";
+import { useCompanies, useRemoveCard, useUpdateCard, useUploadImage } from "./sponsorHooks.ts";
 import {
   CardForm,
   CardPhoto,
@@ -28,7 +28,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export function CardDrawer({ cardId, onClose }: { cardId: string | null; onClose: () => void }): JSX.Element {
-  const list = useCards();
+  const { list, companies } = useCompanies();
   const card = list.data?.cards.find((c) => c.id === cardId) ?? null;
   const { canWrite, canAdmin } = useSponsorCapability();
   const update = useUpdateCard();
@@ -65,7 +65,7 @@ export function CardDrawer({ cardId, onClose }: { cardId: string | null; onClose
 
         {editing ? (
           <div className={styles.detailSection}>
-            <CardForm idPrefix={`sponsor-edit-${card.id}`} value={editing} onChange={setEditing} />
+            <CardForm idPrefix={`sponsor-edit-${card.id}`} value={editing} onChange={setEditing} companies={companies.map((c) => c.name)} />
             <div className={styles.actionRow}>
               <Button variant="secondary" size="lg" testId="fe2-sponsor-edit-cancel" onClick={() => setEditing(null)}>
                 キャンセル

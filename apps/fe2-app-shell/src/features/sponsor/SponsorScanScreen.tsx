@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button, EmptyState, PageHeader, Stack } from "@dub/ui";
 import { CardCapture } from "./CardCapture.tsx";
-import { useObjectUrl, useSaveCard } from "./sponsorHooks.ts";
+import { useCompanies, useObjectUrl, useSaveCard } from "./sponsorHooks.ts";
 import { useSponsorPending } from "./SponsorProvider.tsx";
 import { CardForm, EMPTY_FORM, formFromCard, SHARE_NOTICE, useSponsorCapability, type CardFormValues } from "./SponsorShared.tsx";
 import styles from "./sponsor.module.css";
@@ -19,6 +19,7 @@ export function SponsorScanScreen(): JSX.Element {
   const pending = useSponsorPending();
   const { canWrite } = useSponsorCapability();
   const save = useSaveCard();
+  const { companies } = useCompanies();
   // 失敗した下書きは開いた瞬間に 1 度だけ取り込む。
   const [restored] = useState(() => pending.get().draft);
   const [step, setStep] = useState<Step>(() => (restored ? { kind: "form", image: restored.image } : { kind: "capture" }));
@@ -92,7 +93,7 @@ export function SponsorScanScreen(): JSX.Element {
               </Button>
             </div>
             <p className={styles.note}>項目はすべて任意です。写真だけでも保存できます。</p>
-            <CardForm idPrefix="sponsor-new" value={form} onChange={setForm} />
+            <CardForm idPrefix="sponsor-new" value={form} onChange={setForm} companies={companies.map((c) => c.name)} />
             <div className={styles.submitBar}>
               <Button
                 size="lg"

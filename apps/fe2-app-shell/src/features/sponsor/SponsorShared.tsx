@@ -3,6 +3,7 @@ import { Button, FormField, Modal, Skeleton, TextField, Textarea } from "@dub/ui
 import { sponsor } from "@dub/types";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { useCardImage, useUploadImage } from "./sponsorHooks.ts";
+import { suggestCompanies } from "./companies.ts";
 import { usePendingState } from "./pendingStore.ts";
 import { useSponsorPending } from "./SponsorProvider.tsx";
 import styles from "./sponsor.module.css";
@@ -15,6 +16,13 @@ export function useSponsorCapability(): { canWrite: boolean; canAdmin: boolean }
   const { canEdit } = useAppCapability("sponsor");
   const { can } = usePermissions();
   return { canWrite: canEdit && can("sponsor:write"), canAdmin: canEdit && can("sponsor:admin") };
+}
+
+/** 一覧の「登録日時」: 2026/11/04 13:05 */
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 export function formatDate(iso: string): string {
@@ -110,15 +118,33 @@ const TEXT_FIELDS: { key: Exclude<keyof CardFormValues, "note">; label: string; 
   { key: "phone", label: "電話" },
 ];
 
-/** 名刺の項目 (すべて任意)。登録と編集で共通。 */
+/** 会社名の下に出す「登録済みの企業」候補。押すとその表記に揃える (企業への紐付け)。 */
+function CompanySuggestions({ input, companies, onPick }: { input: string; companies: readonly string[]; onPick: (name: string) => void }): JSX.Element | null {
+  const hits = suggestCompanies(input, companies);
+  if (hits.length === 0) return null;
+  return (
+    <div className={styles.suggest} data-testid="fe2-sponsor-company-suggest">
+      <span className={styles.suggestLabel}>登録済みの企業:</span>
+      {hits.map((name) => (
+        <button key={name} type="button" className={styles.suggestChip} onClick={() => onPick(name)}>
+          {name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 名刺の項目 (すべて任意)。登録と編集で共通。companies = 既存の企業名 (候補に出す)。 */
 export function CardForm({
   idPrefix,
   value,
   onChange,
+  companies = [],
 }: {
   idPrefix: string;
   value: CardFormValues;
   onChange: (next: CardFormValues) => void;
+  companies?: readonly string[];
 }): JSX.Element {
   const set = (k: keyof CardFormValues) => (v: string) => onChange({ ...value, [k]: v });
   return (
@@ -134,6 +160,9 @@ export function CardForm({
               onChange={set(f.key)}
               placeholder={f.placeholder}
             />
+            {f.key === "companyName" ? (
+              <CompanySuggestions input={value.companyName} companies={companies} onPick={set("companyName")} />
+            ) : null}
           </FormField>
         ))}
       </div>

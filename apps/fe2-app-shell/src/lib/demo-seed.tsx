@@ -5133,6 +5133,11 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
       companyName: "一般社団法人 加賀デジタル協会", personName: "小松 健", title: "理事", email: "komatsu@kaga-digital.example.jp",
       note: "後援の相談先として紹介してもらった。",
     }),
+    // 同じ企業の別の担当者 (表記ゆれ「（株）」・別メンバーが登録) → 企業タブで 1 社にまとまる。
+    card("card_demo_5", 9, {
+      companyName: "（株）北陸テック", personName: "川口 恵", department: "人事部", title: "採用担当",
+      email: "kawaguchi@hokuriku-tech.example.jp", note: "学生向けハッカソンの後援に関心あり。", createdByName: "佐藤 三郎",
+    }),
     // テキスト未入力 (写真だけ撮って後で入力する想定)。
     card("card_demo_4", 0, { hasImage: true, createdBy: ME_ID as Card["createdBy"], createdByName: "デモ 管理者" }),
   ];
