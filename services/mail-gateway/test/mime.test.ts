@@ -164,6 +164,30 @@ describe("extractBody (MIME transfer decode)", () => {
     expect(extractBody(raw)).toBe("Hello\nWorld");
   });
 
+  it("HTML fallback keeps link targets, collapses source whitespace and decodes numeric entities", () => {
+    const raw =
+      "Content-Type: text/html; charset=UTF-8\r\n\r\n" +
+      "<div>\r\n    詳しくは\r\n    <a href=\"https://ex.com/p?a=1&amp;b=2\">こちら</a>\r\n  </div>\r\n" +
+      "<p><a href='https://ex.com/raw'>https://ex.com/raw</a></p>\r\n" +
+      "<p><a href=\"https://ex.com/banner\"><img src=\"x.png\"></a>&#x3D;&#12354;&amp;lt;</p>\r\n";
+    expect(extractBody(raw)).toBe("詳しくは こちら（https://ex.com/p?a=1&b=2）\nhttps://ex.com/raw\n=あ&lt;");
+  });
+
+  it("joins format=flowed soft breaks so a wrapped URL is not cut in two", () => {
+    const raw =
+      "Content-Type: text/plain; charset=UTF-8;\r\n format=flowed; delsp=yes\r\n\r\n" +
+      "詳細はこちら https://example.com/very/long/path?query= \r\n" +
+      "abc&def=ghi\r\n" +
+      " From here\r\n" +
+      "以上です。";
+    expect(extractBody(raw)).toBe("詳細はこちら https://example.com/very/long/path?query=abc&def=ghi\nFrom here\n以上です。");
+  });
+
+  it("format=flowed without delsp keeps the soft-break space", () => {
+    const raw = "Content-Type: text/plain; format=flowed\r\n\r\nhello \r\nworld\r\nend";
+    expect(extractBody(raw)).toBe("hello world\nend");
+  });
+
   it("keeps a plain unencoded body intact", () => {
     const raw = "Subject: x\r\nFrom: a@x.com\r\n\r\nLine one\r\nLine two";
     expect(extractBody(raw)).toBe("Line one\nLine two");

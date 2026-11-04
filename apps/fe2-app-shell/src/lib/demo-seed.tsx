@@ -627,7 +627,7 @@ const MAIL_LIST: mail.MailMessageListItem[] = [
   {
     // Promotional sender to try 送信者ブロック on in the preview (この送信者をブロック).
     id: "msg_5", messageId: "<m5@demo>", threadId: "thr_5", from: { email: "news@deals-mail.example", name: "お得情報配信" },
-    to: [{ email: "demo@developershub.jp" }], subject: "【期間限定】今だけ全品50%オフのご案内", snippet: "いつもご利用ありがとうございます。今週末限定のセール情報をお届けします。",
+    to: [{ email: "demo@developershub.jp" }], subject: "【期間限定】今だけ全品50%オフのご案内", snippet: "▼セール会場はこちら https://deals-mail.example/campaign/2026-weekend-sale?utm_source=newsletter&utm_medium=email&utm_campaign=weekend_sale_50off&utm_content=hero",
     receivedAt: daysAgoIso(0.1), read: false, mine: true,
   },
 ];
@@ -665,7 +665,12 @@ const MAIL_DETAIL: Record<string, mail.MailMessageDetail> = {
 
 MAIL_DETAIL.msg_5 = {
   ...MAIL_LIST[4]!,
-  textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
+  // Long tracking URLs (no break opportunities) exercise URL wrapping + linkify in the body.
+  textBody:
+    "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n" +
+    "▼セール会場はこちら\nhttps://deals-mail.example/campaign/2026-weekend-sale?utm_source=newsletter&utm_medium=email&utm_campaign=weekend_sale_50off&utm_content=hero_banner&trk=a8f3c9e1d2b74f6aa0c5e9d8b7f6a5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8\n\n" +
+    "詳しくは特設ページ（https://deals-mail.example/lp）をご覧ください。\n\n" +
+    "配信停止はこちらから<https://deals-mail.example/unsubscribe?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJkZW1vQGRldmVsb3BlcnNodWIuanAiLCJsaXN0Ijoid2Vla2x5In0.Zm9vYmFyYmF6cXV4>",
 };
 
 const MAIL_THREAD: Record<string, mail.MailThread> = {
