@@ -420,6 +420,7 @@ export function createApp(options: CreateAppOptions = {}) {
     const item = await insertFeedback(dbOf(c), {
       userId,
       category: parsed.category ?? "other",
+      kind: parsed.kind ?? "feedback",
       message: parsed.message,
       pageUrl: parsed.page?.url ?? null,
       pageName: parsed.page?.name ?? null,
