@@ -26,6 +26,7 @@ import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail
 import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
+import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
@@ -5209,6 +5210,16 @@ export function createDemoFetch(): typeof fetch {
   const meetingsStore = createMeetingsDemoStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
+  // 人事 > 面談申し込みフォーム (回答は上の人事 demo の POST /applicants を通して応募者になる)。
+  const hrInterviewFormStore = createHrInterviewFormDemoStore({
+    createApplicant: async (body) =>
+      (await membersStore.handle("POST", "/api/v1/members/hr/applicants", new URL("https://demo.local"), body)!.json()) as hr.ApplicantDetail,
+    listApplicants: async () =>
+      (await membersStore.handle("GET", "/api/v1/members/hr/applicants", new URL("https://demo.local"), undefined)!.json()) as hr.ListApplicantsResponse,
+    addNote: async (id, text) => {
+      membersStore.handle("POST", `/api/v1/members/hr/applicants/${id}/notes`, new URL("https://demo.local"), { body: text });
+    },
+  });
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
   const chatStore = createChatStore({ addUsers: roster.addUsers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
@@ -5300,6 +5311,8 @@ export function createDemoFetch(): typeof fetch {
       }
     }
 
+    const hrFormHit = await hrInterviewFormStore.handle(method, url.pathname, url, parsedBody);
+    if (hrFormHit) return hrFormHit;
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??

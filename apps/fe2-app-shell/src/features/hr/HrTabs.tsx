@@ -2,10 +2,11 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Tabs } from "@dub/ui";
 
-export type HrTabId = "applicants" | "onboarding";
+export type HrTabId = "applicants" | "form" | "onboarding";
 
 const TABS = [
   { id: "applicants", label: "応募者", path: "/hr" },
+  { id: "form", label: "申し込みフォーム", path: "/hr/form" },
   { id: "onboarding", label: "オンボーディング", path: "/hr/onboarding" },
 ] as const;
 

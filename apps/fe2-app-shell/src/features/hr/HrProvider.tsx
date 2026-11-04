@@ -2,12 +2,18 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import { createHrApi, type HrApi } from "./hrApi.tsx";
+import { InterviewFormProvider } from "./interviewFormApi.tsx";
 
 const HrApiCtx = createContext<HrApi | null>(null);
 
 export function HrProvider({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const value = useMemo(() => createHrApi(api), [api]);
-  return <HrApiCtx.Provider value={value}>{children}</HrApiCtx.Provider>;
+  // 面談申し込みフォームの api も同じ api-client から配る (応募者の詳細ドロワーが回答を読む)。
+  return (
+    <HrApiCtx.Provider value={value}>
+      <InterviewFormProvider api={api}>{children}</InterviewFormProvider>
+    </HrApiCtx.Provider>
+  );
 }
 
 /** テスト用: HrApi を直接注入する。 */

@@ -9,6 +9,7 @@
 - [権限（ロール管理）](#権限ロール管理)
 - [API](#api)
 - [フロントエンド](#フロントエンド)
+- [面談申し込みフォーム](#面談申し込みフォーム)
 - [リリース手順と migration](#リリース手順と-migration)
 - [フェーズ2 以降の TODO](#フェーズ2-以降の-todo)
 
@@ -140,6 +141,19 @@ D1 `member` namespace に新規テーブル 3 つ（`infra/d1/migrations/member/
 - 読み込み中はスケルトン、失敗は再試行つき ErrorState。閲覧者にはプルダウン/書き込みボタンを出さない（`useAppCapability("hr")` + `hr:write`/`hr:admin`）。
 - ランチャー・ホームに「人事」。`releaseGate.PUBLISHED_APPS` には入れていないので admin 以外はグレー表示。
 - demo（`VITE_DEMO=1`）: `lib/demo-seed.tsx` の名簿 demo の中に人事 store（全 8 ステータスに 1 人以上）。採用で demo 名簿に在籍が増え、チェックでステータスが自動で動く。
+
+## 面談申し込みフォーム
+
+参加届より前の面談に申し込んでもらう公開フォーム（Google フォーム風に人事アプリで質問を編集できる）。
+
+- **既存フローへの乗り方**: 回答 = 応募者の登録。`HrService.create` をそのまま通すので、応募者は **面談日程調整中** で入り、以降のステータス変更・採用（名簿へ）は手で登録した人と同じ。応募経路は「面談申し込みフォーム」（代理入力は「…（代理入力）」）。
+- **質問と応募者の列**: 質問に「応募者の項目」（氏名・フリガナ・メール・学科・学年・志望動機）を選ぶと、その回答が応募者の列に入る。**氏名とメールの質問は必須で消せない**。それ以外の回答は JSON として応募者に結び、詳細ドロワーに表示する。回答時点の質問も保存するので、あとで編集しても過去の回答は崩れない。
+- **重複防止**: 同じメールで選考前（面談日程調整中 / 面談確定 / 面談済み）の応募者がいれば新しく作らず、その人に回答を足して履歴に残す。
+- **受付の開閉**: 受付停止中は公開ページが「受付終了」を表示し送信は 409。人事の代理入力は停止中でも可。
+- **契約 / 検証の SoT**: `@dub/types` の `hrForm`（`validateFormDefinition` / `validateAnswers` をフロントとサービスで共有）。
+- **API**: `GET|PUT /members/hr/interview-form`（閲覧+hr:read / 編集+hr:write）・`GET|POST /members/hr/interview-form/responses`（一覧 / 代理入力）・公開は gateway `GET|POST /api/v1/public/hr-interview-form`（PUBLIC → member-service `/members/internal/hr/interview-form` INTERNAL）。bot 対策は囮フィールド + Turnstile（token があるとき）+ IP レート制限。
+- **画面**: 人事 → 申し込みフォーム タブ（公開 URL・編集・回答一覧・代わりに入力する）、公開ページ `/interview-apply`（シェルの外・ログイン不要）。
+- **migration**: `infra/d1/migrations/member/0019_hr_interview_form.sql`（新規 2 テーブルのみの additive）。
 
 ## リリース手順と migration
 
