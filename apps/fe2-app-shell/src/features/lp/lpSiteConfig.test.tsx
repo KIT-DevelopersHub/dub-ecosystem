@@ -136,6 +136,24 @@ describe("LpSiteConfigScreen — プレビュー（下書き）", () => {
     expect(screen.getByTestId("fe2-lp-config-env-draft")).toHaveAttribute("aria-selected", "true");
   });
 
+  it("クラファン情報: picks the pattern (現状のページ / 支援者情報); disabled while the section is hidden", async () => {
+    const save = vi.fn(({ config, revision }: { config: LpSiteConfig; revision: number }) =>
+      Promise.resolve(siteState({ draft: config, revision: revision + 1 })),
+    );
+    renderScreen(fakeApi({ saveSiteConfigDraft: save }));
+    const current = await screen.findByTestId("fe2-lp-config-crowdfunding-pattern-current");
+    expect(current).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByTestId("fe2-lp-config-crowdfunding-pattern-supporters"));
+    await waitFor(() =>
+      expect(save).toHaveBeenLastCalledWith({
+        config: setSection(BASE, "crowdfunding", { option: { key: "pattern", value: "supporters" } }),
+        revision: 3,
+      }),
+    );
+    fireEvent.click(screen.getByTestId("fe2-lp-config-crowdfunding-visible"));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-config-crowdfunding-pattern-current")).toBeDisabled());
+  });
+
   it("switches environment through the URL (?env=live)", async () => {
     renderScreen();
     fireEvent.click(await screen.findByTestId("fe2-lp-config-env-live"));
@@ -199,25 +217,38 @@ describe("LpSiteConfigScreen — プレビュー（下書き）", () => {
     );
   });
 
-  it("publishes the draft through the same production confirm", async () => {
+  it("never writes production from the draft tab: プレビューに反映 only reloads the preview", async () => {
     const draft = setSection(BASE, "vision", { visible: false });
-    const publish = vi.fn(({ config, revision }: { config: LpSiteConfig; revision: number }) =>
-      Promise.resolve(siteState({ draft: config, published: config, revision: revision + 1 })),
-    );
+    const publish = vi.fn();
     renderScreen(fakeApi({ getSiteConfig: () => Promise.resolve(siteState({ draft })), publishSiteConfig: publish }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-config-publish-draft"));
-    const dialog = await screen.findByTestId("fe2-lp-config-publish-dialog");
-    expect(within(dialog).getByText(PUBLISH_CONFIRM_TITLE)).toBeInTheDocument();
-    expect(within(dialog).getByTestId("fe2-lp-config-publish-diff-vision.visible")).toHaveTextContent("非表示");
-    fireEvent.click(within(dialog).getByRole("button", { name: "本番に反映する" }));
-    await waitFor(() => expect(publish).toHaveBeenCalledWith({ config: draft, revision: 3 }));
+    await screen.findByTestId("fe2-lp-config-release");
+    expect(screen.queryByTestId("fe2-lp-config-publish")).toBeNull();
+    expect(screen.queryByText(/本番へ反映/)).toBeNull();
+    fireEvent.click(screen.getByTestId("fe2-lp-config-apply-preview"));
+    expect(await screen.findByText("プレビューに反映しました（本番の LP は変わりません）")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-config-publish-dialog")).toBeNull();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("本番タブで確かめる carries the draft to the live tab as staged changes without writing", async () => {
+    const draft = setSection(BASE, "vision", { visible: false });
+    const publish = vi.fn();
+    const save = vi.fn();
+    nav.navigate.mockClear();
+    renderScreen(
+      fakeApi({ getSiteConfig: () => Promise.resolve(siteState({ draft })), publishSiteConfig: publish, saveSiteConfigDraft: save }),
+    );
+    fireEvent.click(await screen.findByTestId("fe2-lp-config-to-live"));
+    expect(nav.navigate).toHaveBeenCalledWith({ to: "/lp", search: { env: "live" }, replace: true });
+    expect(publish).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("a viewer sees everything disabled", async () => {
     renderScreen(fakeApi(), viewerPermissions("lp"));
     expect(await screen.findByTestId("fe2-lp-config-join-visible")).toBeDisabled();
     expect(screen.getByTestId("fe2-lp-config-version")).toBeDisabled();
-    expect(screen.getByTestId("fe2-lp-config-publish-draft")).toBeDisabled();
+    expect(screen.getByTestId("fe2-lp-config-apply-preview")).toBeDisabled();
   });
 });
 
@@ -313,7 +344,7 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     renderScreen();
     await screen.findByTestId("fe2-lp-config-release");
     const bar = screen.getByTestId("fe2-lp-config-actionbar");
-    for (const id of ["fe2-lp-config-env", "fe2-lp-config-preview-open", "fe2-lp-config-reset", "fe2-lp-config-publish-draft"]) {
+    for (const id of ["fe2-lp-config-env", "fe2-lp-config-preview-open", "fe2-lp-config-reset", "fe2-lp-config-apply-preview", "fe2-lp-config-to-live"]) {
       expect(within(bar).getByTestId(id)).toBeInTheDocument();
     }
     expect(within(bar).getByTestId("fe2-lp-config-live-url")).toHaveAttribute("href", LP_PUBLIC_URL);

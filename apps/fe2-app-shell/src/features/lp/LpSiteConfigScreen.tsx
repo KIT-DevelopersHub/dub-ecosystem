@@ -5,7 +5,9 @@
 //   LP とセクションの設定を 1 枚にしたカード（左に LP、右にそのセクションの高さで設定。ページと一緒にスクロール）。
 // セクションの設定は登録簿（LP_SECTION_REGISTRY）から汎用に描くので、バリアント・オプションを足すと自動で出る。
 //  - 下書き: 変えるたびに自動保存（楽観的・失敗で戻す・409 は読み直し）。確認ダイアログは出さない。
-//    「プレビューを開く」は下書きの値で LP を開く（&config=draft）。「この下書きを本番へ反映」は本番と同じ確認を通す。
+//    「プレビューに反映」は保存済みの下書きでミニプレビューを読み直すだけ（本番は変えない）。
+//    「プレビューを開く」は下書きの値で LP を開く（&config=draft）。本番の LP はこのタブからは変えられない:
+//    「本番タブで確かめる」は下書きを本番タブの未反映の変更として読み込むだけで、何も書き込まない。
 //  - 本番: 変更は画面に溜めて「変更 N 件」と差分を出し、「本番に反映」→ 確認ダイアログでまとめて 1 回で反映する。
 //    チケット販売を公開にする変更を含むときは ack チェックを必須にする。lp:publish が無ければ操作は無効。
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -29,6 +31,7 @@ import {
   Stack,
   Switch,
   useMediaQuery,
+  useToast,
 } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
@@ -80,12 +83,15 @@ export function LpSiteConfigScreen(): JSX.Element {
   const autosave = useDraftAutosave();
   const reset = useResetDraft();
   const publish = usePublishSiteConfig();
+  const toast = useToast();
   const { canEdit } = useAppCapability("lp");
   const { can } = usePermissions();
   const canPublish = canEdit && can("lp:publish");
 
   const [staged, setStaged] = useState<LpSiteConfig | null>(null);
-  const [confirm, setConfirm] = useState<{ from: LpSiteConfig; to: LpSiteConfig; source: LpConfigEnv } | null>(null);
+  const [confirm, setConfirm] = useState<{ from: LpSiteConfig; to: LpSiteConfig } | null>(null);
+  // 「プレビューに反映」で増やし、ミニプレビューを読み直させる。
+  const [previewNonce, setPreviewNonce] = useState(0);
   const [resetting, setResetting] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [viewing, setViewing] = useState<LpVersion | null>(null);
@@ -119,13 +125,26 @@ export function LpSiteConfigScreen(): JSX.Element {
     else autosave.save(next);
   };
 
+  // 本番への書き込みはここだけ（本番タブの「本番に反映…」→ 確認ダイアログ）。
   const doPublish = (): void => {
-    if (!confirm) return;
-    const { to, source } = confirm;
-    const restore = source === "live" ? staged : null;
+    if (!confirm || !live) return;
+    const { to } = confirm;
+    const restore = staged;
     setConfirm(null);
-    if (source === "live") setStaged(null);
+    setStaged(null);
     publish.mutate({ config: to }, { onError: () => restore && setStaged(restore) });
+  };
+
+  const applyToPreview = (): void => {
+    setPreviewNonce((n) => n + 1);
+    toast.show({ kind: "success", title: "プレビューに反映しました（本番の LP は変わりません）" });
+  };
+
+  // 下書きを本番タブの「未反映の変更」として持っていく。書き込みはしない（反映は本番タブで確認してから）。
+  const carryDraftToLive = (): void => {
+    if (!state) return;
+    setStaged(diffSiteConfig(state.published, state.draft).length > 0 ? structuredClone(state.draft) : null);
+    switchEnv("live");
   };
 
   const openPreview = async (): Promise<void> => {
@@ -164,7 +183,7 @@ export function LpSiteConfigScreen(): JSX.Element {
   const mini = state && config
     ? live
       ? { url: `${releasePreviewUrl(config)}&config=live`, refreshKey: 0 }
-      : { url: draftPreviewUrl(state.draft), refreshKey: state.revision }
+      : { url: draftPreviewUrl(state.draft), refreshKey: state.revision + (previewNonce % 1000) / 1000 }
     : null;
   const miniNote = !state || !config
     ? null
@@ -200,7 +219,7 @@ export function LpSiteConfigScreen(): JSX.Element {
           variant="primary"
           size="sm"
           disabled={!canPublish || stagedDiff.length === 0 || publish.isPending}
-          onClick={() => staged && setConfirm({ from: state.published, to: staged, source: "live" })}
+          onClick={() => staged && setConfirm({ from: state.published, to: staged })}
           testId="fe2-lp-config-publish"
         >
           本番に反映…
@@ -218,13 +237,22 @@ export function LpSiteConfigScreen(): JSX.Element {
           本番の内容に戻す
         </Button>
         <Button
+          variant="secondary"
+          size="sm"
+          disabled={draftDiff.length === 0}
+          onClick={carryDraftToLive}
+          testId="fe2-lp-config-to-live"
+        >
+          本番タブで確かめる
+        </Button>
+        <Button
           variant="primary"
           size="sm"
-          disabled={!canPublish || draftDiff.length === 0 || publish.isPending}
-          onClick={() => setConfirm({ from: state.published, to: state.draft, source: "draft" })}
-          testId="fe2-lp-config-publish-draft"
+          disabled={!canEdit || autosave.saving}
+          onClick={applyToPreview}
+          testId="fe2-lp-config-apply-preview"
         >
-          この下書きを本番へ反映…
+          プレビューに反映
         </Button>
       </>
     )
@@ -265,7 +293,10 @@ export function LpSiteConfigScreen(): JSX.Element {
         ) : (
           <p className={styles.previewNotice} data-testid="fe2-lp-config-draft-notice">
             <Icon name="info" />
-            <span>下書きは変えるたびに自動で保存されます。公開中の LP は「この下書きを本番へ反映」まで変わりません。</span>
+            <span>
+              ここはプレビュー（下書き）です。変えるたびに自動で保存され、プレビューにだけ映ります。本番の LP
+              を変えられるのは「本番」タブの「本番に反映…」だけです。
+            </span>
           </p>
         )}
         {live && stagedDiff.length > 0 ? (
@@ -478,6 +509,9 @@ function SectionControls({
   const def: lp.LpSectionDef = lp.LP_SECTION_REGISTRY[id];
   const cur = lp.resolveSection(config.layout, id);
   const variants = Object.entries(def.variants).map(([value, label]) => ({ value, label }));
+  const options = Object.entries(def.options ?? {});
+  // 非表示のセクションのパターン・オプションは選べない（表示にしたときに選ぶ）。
+  const hiddenNow = !cur.visible;
   return (
     <section className={styles.lpEditorSection} data-testid={`fe2-lp-config-section-${id}`}>
       <div className={styles.lpBlockHead}>
@@ -493,34 +527,36 @@ function SectionControls({
           onChange={(v) => onChange(setSection(config, id, { visible: v }))}
         />
       </div>
-      <div className={styles.lpBlockRow}>
-        <span>バリアント</span>
-        {variants.length >= 2 && variants.length <= 4 ? (
-          <SegmentedControl<string>
-            aria-label={`${def.label}のバリアント`}
-            size="sm"
-            value={cur.variant}
-            onChange={(v) => onChange(setSection(config, id, { variant: v }))}
-            options={variants.map((o) => ({ ...o, disabled, testId: `fe2-lp-config-${id}-variant-${o.value}` }))}
-            testId={`fe2-lp-config-${id}-variant`}
-          />
-        ) : variants.length > 4 ? (
-          <Select
-            id={`fe2-lp-config-${id}-variant`}
-            testId={`fe2-lp-config-${id}-variant`}
-            value={cur.variant}
-            disabled={disabled}
-            onChange={(v) => onChange(setSection(config, id, { variant: v }))}
-            options={variants}
-          />
-        ) : (
-          <span className={styles.note} data-testid={`fe2-lp-config-${id}-variant`}>
-            {variants[0]?.label}（1 種類だけ）
-          </span>
-        )}
-      </div>
+      {variants.length === 1 && options.length > 0 ? null : (
+        <div className={styles.lpBlockRow}>
+          <span>バリアント</span>
+          {variants.length >= 2 && variants.length <= 4 ? (
+            <SegmentedControl<string>
+              aria-label={`${def.label}のバリアント`}
+              size="sm"
+              value={cur.variant}
+              onChange={(v) => onChange(setSection(config, id, { variant: v }))}
+              options={variants.map((o) => ({ ...o, disabled, testId: `fe2-lp-config-${id}-variant-${o.value}` }))}
+              testId={`fe2-lp-config-${id}-variant`}
+            />
+          ) : variants.length > 4 ? (
+            <Select
+              id={`fe2-lp-config-${id}-variant`}
+              testId={`fe2-lp-config-${id}-variant`}
+              value={cur.variant}
+              disabled={disabled}
+              onChange={(v) => onChange(setSection(config, id, { variant: v }))}
+              options={variants}
+            />
+          ) : (
+            <span className={styles.note} data-testid={`fe2-lp-config-${id}-variant`}>
+              {variants[0]?.label}（1 種類だけ）
+            </span>
+          )}
+        </div>
+      )}
       {!def.hideable ? <span className={styles.note}>このセクションは常に表示されます。</span> : null}
-      {Object.entries(def.options ?? {}).map(([key, od]) => (
+      {options.map(([key, od]) => (
         <div key={key} className={styles.lpBlockRow}>
           <span>{od.label}</span>
           {od.kind === "boolean" ? (
@@ -528,16 +564,30 @@ function SectionControls({
               id={`fe2-lp-config-${id}-${key}`}
               testId={`fe2-lp-config-${id}-${key}`}
               checked={cur.options[key] === true}
-              disabled={disabled}
+              disabled={disabled || hiddenNow}
               label={cur.options[key] === true ? "表示" : "非表示"}
               onChange={(v) => onChange(setSection(config, id, { option: { key, value: v } }))}
+            />
+          ) : Object.keys(od.values ?? {}).length >= 2 && Object.keys(od.values ?? {}).length <= 4 ? (
+            <SegmentedControl<string>
+              aria-label={`${def.label}の${od.label}`}
+              size="sm"
+              value={String(cur.options[key])}
+              onChange={(v) => onChange(setSection(config, id, { option: { key, value: v } }))}
+              options={Object.entries(od.values ?? {}).map(([value, label]) => ({
+                value,
+                label,
+                disabled: disabled || hiddenNow,
+                testId: `fe2-lp-config-${id}-${key}-${value}`,
+              }))}
+              testId={`fe2-lp-config-${id}-${key}`}
             />
           ) : (
             <Select
               id={`fe2-lp-config-${id}-${key}`}
               testId={`fe2-lp-config-${id}-${key}`}
               value={String(cur.options[key])}
-              disabled={disabled}
+              disabled={disabled || hiddenNow}
               onChange={(v) => onChange(setSection(config, id, { option: { key, value: v } }))}
               options={Object.entries(od.values ?? {}).map(([value, label]) => ({ value, label }))}
             />
