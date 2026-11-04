@@ -92,6 +92,7 @@ describe("assembleFeatureModules", () => {
       "driveshare",
       "lp",
       "hr",
+      "sponsor",
       "admin",
       "commander",
     ]);

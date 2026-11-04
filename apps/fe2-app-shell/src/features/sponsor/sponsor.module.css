@@ -1,0 +1,450 @@
+/* スポンサー (名刺) のローカルスタイル。モバイルファースト。色・余白・字は @dub/tokens の CSS 変数を使う。
+   例外はカメラのファインダーだけ (テーマに関係なく黒地 + 白字が正しいので固定色)。
+   タップできる要素は 44px 以上。 */
+
+.page {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.note {
+  margin: 0;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+.error {
+  margin: 0;
+  color: var(--dub-color-danger-600);
+  font-size: var(--dub-font-size-sm);
+}
+
+.search {
+  width: 100%;
+  max-width: 420px;
+}
+
+/* ── 一覧 (カードグリッド) ─────────────────────────────── */
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: var(--dub-space-5);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-raised);
+  overflow: hidden;
+}
+
+.tileButton {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tileButton:hover:not(:disabled) {
+  background: var(--dub-color-surface-sunken);
+}
+
+.tileButton:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: -2px;
+}
+
+.tileButton:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.tileBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-3) var(--dub-space-4) var(--dub-space-4);
+  min-width: 0;
+}
+
+.tileTitle {
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileSub {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileMeta {
+  margin-top: var(--dub-space-1);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+
+.tileRetry:not(:empty) {
+  padding: 0 var(--dub-space-4) var(--dub-space-4);
+}
+
+/* ── 名刺の写真 (91:55) ─────────────────────────────────── */
+.photo {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 91 / 55;
+  background: var(--dub-color-surface-sunken);
+  overflow: hidden;
+}
+
+.photoLarge {
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-border-default);
+}
+
+.photoImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photoLarge .photoImg {
+  object-fit: contain;
+}
+
+.photoButton {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.photoEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+.photoBadge {
+  position: absolute;
+  left: var(--dub-space-2);
+  bottom: var(--dub-space-2);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-raised);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-xs);
+  box-shadow: var(--dub-shadow-sm);
+}
+
+.photoBadgeDanger {
+  color: var(--dub-color-danger-700);
+  background: var(--dub-color-danger-50);
+}
+
+.zoomBody {
+  display: flex;
+  justify-content: center;
+}
+
+.zoomBody .photo {
+  max-width: 1200px;
+}
+
+/* ── 詳細 (ドロワー) ─────────────────────────────────────── */
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+  padding: var(--dub-space-2) 0;
+}
+
+.detailPhoto,
+.detailSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: var(--dub-space-3) var(--dub-space-5);
+  margin: 0;
+}
+
+.fields dt {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+.fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* mailto / tel は指で押すので行の高さを 44px 取る。 */
+.contactLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--dub-color-text-link);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-3);
+}
+
+.inlineActions:empty {
+  display: none;
+}
+
+/* ── 撮影 ─────────────────────────────────────────────── */
+.capture {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-5);
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  max-height: 62vh;
+  border-radius: var(--dub-radius-lg);
+  overflow: hidden;
+  background: #000;
+}
+
+@media (min-width: 720px) {
+  .viewport {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+.video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.viewportLoading {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #111 25%, #222 37%, #111 63%);
+  background-size: 400% 100%;
+  animation: dub-skeleton-shimmer 1.4s ease infinite;
+}
+
+/* 名刺の枠。外側を暗くして枠に合わせやすくする。 */
+.frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 88%;
+  aspect-ratio: 91 / 55;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  border-radius: var(--dub-radius-md);
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.frameHint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--dub-space-4);
+  margin: 0;
+  text-align: center;
+  color: #fff;
+  font-size: var(--dub-font-size-sm);
+  pointer-events: none;
+}
+
+.noCamera {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: var(--dub-space-6);
+  border: 1px dashed var(--dub-color-border-strong);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+  text-align: center;
+}
+
+.noCamera p {
+  margin: 0;
+  max-width: 32em;
+}
+
+.shutterRow {
+  display: flex;
+  justify-content: center;
+}
+
+.shutter {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--dub-radius-full);
+  border: 4px solid var(--dub-color-surface-raised);
+  background: var(--dub-color-brand-500);
+  box-shadow: 0 0 0 3px var(--dub-color-brand-500), var(--dub-shadow-md);
+  cursor: pointer;
+}
+
+.shutter:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.shutter:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.shutter:focus-visible {
+  outline: 3px solid var(--dub-color-border-focus);
+  outline-offset: 4px;
+}
+
+.hiddenInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ボタンの並び。スマホでは押しやすいよう横幅いっぱいに均等割り。 */
+.actionRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--dub-space-3);
+}
+
+.actionRow > * {
+  flex: 1 1 160px;
+  justify-content: center;
+}
+
+.previewBox {
+  width: 100%;
+  aspect-ratio: 91 / 55;
+  border-radius: var(--dub-radius-md);
+  overflow: hidden;
+  background: var(--dub-color-surface-sunken);
+}
+
+.previewImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-sunken);
+}
+
+/* ── 入力 ─────────────────────────────────────────────── */
+.shareNotice {
+  margin: 0;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-brand-50);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+}
+
+.scanForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-5);
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.scanPhoto {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--dub-space-3);
+}
+
+.scanPhoto > img,
+.scanPhoto > .photo {
+  aspect-ratio: 91 / 55;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--dub-space-4);
+}
+
+/* 保存はスマホで親指が届く下端に貼り付ける。 */
+.submitBar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  padding: var(--dub-space-3) 0;
+  background: var(--dub-color-surface-base);
+}
+
+.submitBar > * {
+  flex: 1;
+  justify-content: center;
+}
+
+@media (min-width: 720px) {
+  .submitBar {
+    position: static;
+    justify-content: flex-end;
+  }
+
+  .submitBar > * {
+    flex: 0 0 auto;
+  }
+}
