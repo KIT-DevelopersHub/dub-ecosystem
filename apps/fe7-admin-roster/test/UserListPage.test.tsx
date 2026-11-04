@@ -49,10 +49,10 @@ describe("UserListPage", () => {
     expect(screen.queryByTestId("fe7-users-invite")).not.toBeInTheDocument();
   });
 
-  it("shows a placeholder pane until a user is selected", async () => {
+  it("shows no side pane until a user is selected", async () => {
     renderWithProviders(<UserListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-users-table")).toBeInTheDocument());
-    expect(screen.getByTestId("fe7-user-pane-empty")).toBeInTheDocument();
+    expect(screen.queryByText("ユーザーを選択してください")).not.toBeInTheDocument();
     expect(screen.queryByTestId("fe7-user-pane")).not.toBeInTheDocument();
   });
 
@@ -196,7 +196,6 @@ describe("UserListPage", () => {
 
     await user.click(within(pane).getByTestId("fe7-user-pane-close"));
     await waitFor(() => expect(screen.queryByTestId("fe7-user-pane")).not.toBeInTheDocument());
-    expect(screen.getByTestId("fe7-user-pane-empty")).toBeInTheDocument();
   });
 
   it("shows each user's フリガナ column (or 未設定 when unset)", async () => {
