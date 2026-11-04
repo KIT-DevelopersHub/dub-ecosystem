@@ -115,31 +115,40 @@ describe("real Google client — request shape", () => {
     expect(url).toContain("corpora=allDrives");
   });
 
-  it("root listing returns only items whose parent is not visible (no nested items at top level)", async () => {
+  it("root listing queries only top-level sources (no whole-account scan)", async () => {
     const folder = "application/vnd.google-apps.folder";
-    const pages = [
-      {
-        files: [
-          { id: "top", name: "Hackit", mimeType: folder, parents: ["myDriveRoot"] },
-          { id: "child", name: "子フォルダ", mimeType: folder, parents: ["top"] },
-          { id: "shared", name: "共有されたフォルダ", mimeType: folder },
-        ],
-        nextPageToken: "p2",
-      },
-      { files: [{ id: "grandchild", name: "孫.pdf", mimeType: "application/pdf", parents: ["child"] }] },
-    ];
     const urls: string[] = [];
     const impl = vi.fn(async (input: string | URL | Request) => {
-      urls.push(String(input));
-      return new Response(JSON.stringify(pages[urls.length - 1]), { status: 200 });
+      const url = new URL(String(input));
+      urls.push(url.toString());
+      if (url.pathname.endsWith("/drives")) return new Response(JSON.stringify({ drives: [{ id: "sd1" }] }), { status: 200 });
+      const q = url.searchParams.get("q") ?? "";
+      if (q.includes("'sd1' in parents")) {
+        return new Response(JSON.stringify({ files: [{ id: "sdTop", name: "共有ドライブ直下", mimeType: folder, parents: ["sd1"] }] }), { status: 200 });
+      }
+      if (url.searchParams.get("pageToken") === "p2") {
+        return new Response(JSON.stringify({ files: [{ id: "a.pdf", name: "A.pdf", mimeType: "application/pdf", parents: ["myDriveRoot"] }] }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({
+          files: [
+            { id: "top", name: "Hackit", mimeType: folder, parents: ["myDriveRoot"] },
+            { id: "shared", name: "共有されたフォルダ", mimeType: folder },
+            { id: "sharedChild", name: "共有の中身", mimeType: folder, parents: ["shared"] },
+          ],
+          nextPageToken: "p2",
+        }),
+        { status: 200 },
+      );
     }) as unknown as typeof fetch;
     const client = createGoogleDriveShareClient({ token: staticToken, fetchImpl: impl });
     const res = await client.listFiles({ pageSize: 50 });
-    expect(res.files.map((f) => f.id)).toEqual(["top", "shared"]);
+    expect(res.files.map((f) => f.id)).toEqual(["top", "shared", "sdTop", "a.pdf"]);
     expect(res.nextCursor).toBeNull();
-    expect(urls).toHaveLength(2);
-    expect(decodeURIComponent(urls[0]!)).toContain("parents");
-    expect(urls[1]).toContain("pageToken=p2");
+    const fileQueries = urls.filter((u) => new URL(u).pathname.endsWith("/files")).map((u) => new URL(u).searchParams.get("q"));
+    expect(fileQueries).toContain("trashed = false and ('root' in parents or sharedWithMe = true)");
+    expect(fileQueries.every((q) => q !== "trashed = false")).toBe(true);
+    expect(urls).toHaveLength(4);
   });
 
   it("folder and search listings stay a single page query", async () => {
