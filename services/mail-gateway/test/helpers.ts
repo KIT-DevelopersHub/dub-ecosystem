@@ -101,7 +101,7 @@ export function inboundDeps(h: Harness, over: Partial<InboundDeps> = {}): Inboun
 // email present in the map resolves to { user }, any other email to { user: null }.
 export function fakeIdentityFetcher(
   allow: boolean,
-  users: Record<string, { email: string; displayName?: string }> = {},
+  users: Record<string, { email: string; displayName?: string; avatarUrl?: string }> = {},
   // When provided, /authz/check answers PER permission: a check is allowed iff its
   // permission key is in this set. Lets a test grant mail:read but deny mail:read_all
   // (own-mail scope) vs grant both (oversight). When omitted, every check uses `allow`.
@@ -133,6 +133,12 @@ export function fakeIdentityFetcher(
         const match = Object.entries(users).find(([, u]) => u.email.trim().toLowerCase() === wanted);
         const user = match ? toIdentityUser(match[0], match[1].email, match[1].displayName) : null;
         return new Response(JSON.stringify({ user }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.pathname === "/internal/users/avatars" && req.method === "POST") {
+        const wanted = new Set(((await req.json()) as { emails: string[] }).emails);
+        const avatars: Record<string, string> = {};
+        for (const u of Object.values(users)) if (u.avatarUrl && wanted.has(u.email.toLowerCase())) avatars[u.email.toLowerCase()] = u.avatarUrl;
+        return new Response(JSON.stringify({ avatars }), { status: 200, headers: { "content-type": "application/json" } });
       }
       if (url.pathname === "/authz/check") {
         const body = (await req.json()) as identity.AuthzCheckRequest;

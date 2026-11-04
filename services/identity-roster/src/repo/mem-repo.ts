@@ -49,6 +49,10 @@ export class MemIdentityRepo implements IdentityRepo {
     }
     return null;
   }
+  async getUsersByEmails(orgId: string, emails: string[]): Promise<UserRow[]> {
+    const wanted = new Set(emails.map((e) => e.toLowerCase()));
+    return [...this.users.values()].filter((u) => u.orgId === orgId && wanted.has(u.email.toLowerCase())).map((u) => ({ ...u }));
+  }
   async listUsers(filter: ListUsersFilter): Promise<UserPage> {
     let rows = [...this.users.values()].filter((u) => u.orgId === filter.orgId);
     if (filter.ids && filter.ids.length > 0) {

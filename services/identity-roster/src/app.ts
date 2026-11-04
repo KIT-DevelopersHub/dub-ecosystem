@@ -253,6 +253,12 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.lookupByEmail(orgId, body.email));
   });
 
+  // Batch email → avatarUrl for mail-gateway's sender icons (Dub users only). Internal S2S read.
+  app.post("/internal/users/avatars", async (c) => {
+    const body = await readJson<{ emails?: unknown }>(c);
+    return c.json(await svc.avatarsByEmail(orgId, body?.emails));
+  });
+
   // The ecosystem's authorization decision point — what every other service's granter calls.
   // INTERNAL in the table, so it is unreachable from outside (no permission oracle), and the
   // gate protecting it must never be wired to a granter that calls THIS route: see
