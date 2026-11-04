@@ -149,6 +149,11 @@ export const COMMANDER: AreaSpec = {
       route: "POST /runs",
       reason: "daemon が実行記録を保存する内部経路。ここに書いても Claude は起動せず、偽の実行記録でボードのレーン判定が狂う",
     },
+    {
+      service: S,
+      route: "POST /runs/reconcile",
+      reason: "daemon が起動時と停止時に呼ぶ内部経路。走行中の実行まで失敗扱いにして中断表示にしてしまう（取り消せない）",
+    },
     { service: S, route: "POST /runs/:id/events", reason: "daemon が実行ログを書き込む内部経路。偽のログを足すとボードの成功・失敗判定と成果物 URL 抽出が狂う" },
     { service: S, route: "POST /chats", reason: SELF_REFERENCE },
     { service: S, route: "PATCH /chats/:id", reason: SELF_REFERENCE },
