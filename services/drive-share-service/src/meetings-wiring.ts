@@ -13,6 +13,8 @@ import { createD1GoogleAccountStore } from "./google-account-store";
 import { CALENDAR_SCOPE, MEET_SCOPE, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
 import { createMemberDirectory } from "./member-directory";
 import { createD1MeetingStore } from "./meetings-store";
+import { createD1AttendanceStore } from "./attendance-store";
+import { createAttendanceService, type AttendanceService } from "./attendance-service";
 import { createMeetingsService, type MeetingAccount, type MeetingsService } from "./meetings-service";
 import { createIdentityRoleMembership } from "./role-membership";
 import { SECRET_ACCOUNT_ID } from "./types";
@@ -95,6 +97,7 @@ export async function buildMeetingsService(
   const reqCtx = { requestId: ctx.requestId, ...(ctx.userId ? { userId: ctx.userId } : {}) };
   return createMeetingsService({
     store: createD1MeetingStore(createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId })),
+    attendance: createD1AttendanceStore(createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId })),
     roster: createIdentityRoleMembership(env.SVC_IDENTITY, reqCtx),
     directory: createMemberDirectory(env.SVC_MEMBER, reqCtx),
     account: () => (account ??= resolveDriveCredentials({ env, store: accountStore, orgId, key }).then((r) => resolveMeetingAccount(env, r))),
@@ -106,5 +109,17 @@ export async function buildMeetingsService(
     ...(opts.system ? {} : { kick: (soonMs?: number) => kickMeetingSync(env, soonMs) }),
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
     ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
+  });
+}
+
+/** 定例の出席 (join from Dub / 人事 report). Needs no Google account: D1 + identity only. */
+export function buildAttendanceService(env: Env, ctx: { requestId: string; userId?: string }): AttendanceService {
+  const db = createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId });
+  return createAttendanceService({
+    meetings: createD1MeetingStore(db),
+    store: createD1AttendanceStore(db),
+    roster: createIdentityRoleMembership(env.SVC_IDENTITY, { requestId: ctx.requestId, ...(ctx.userId ? { userId: ctx.userId } : {}) }),
+    orgId: common.DUB_DEFAULT_ORG_ID,
+    now: nowIso,
   });
 }

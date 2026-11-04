@@ -123,3 +123,33 @@ CREATE TABLE driveshare_meeting_calendar_acl (
 );
 `.trim(),
 };
+
+// Physical twin: infra/d1/migrations/driveshare/0004_meeting_attendance.sql (lockstep test).
+// 定例の出席: which meetings are 定例, and one row per member per occurrence they attended
+// (or were excused from). No FK to the meeting: attendance outlives a deleted meeting.
+export const DRIVESHARE_ATTENDANCE_MIGRATION: Migration = {
+  namespace: "driveshare",
+  id: "0004_meeting_attendance",
+  up: `
+CREATE TABLE driveshare_meeting_regulars (
+  meeting_id TEXT PRIMARY KEY,
+  org_id     TEXT NOT NULL,
+  enabled_by TEXT NOT NULL,
+  enabled_at TEXT NOT NULL
+);
+
+CREATE TABLE driveshare_meeting_attendance (
+  meeting_id      TEXT NOT NULL,
+  occurrence_date TEXT NOT NULL,
+  user_id         TEXT NOT NULL,
+  org_id          TEXT NOT NULL,
+  status          TEXT NOT NULL CHECK (status IN ('present','excused')),
+  source          TEXT NOT NULL CHECK (source IN ('join','manual')),
+  joined_at       TEXT,
+  recorded_by     TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  PRIMARY KEY (meeting_id, occurrence_date, user_id)
+);
+CREATE INDEX idx_driveshare_attendance_org_date ON driveshare_meeting_attendance(org_id, occurrence_date);
+`.trim(),
+};

@@ -7,7 +7,7 @@
 // fine-grained Drive key. Both halves matter: the tier is what an admin actually sets per role
 // in ロール管理 — before this table it was unenforced here, so a role set to 無効 or 閲覧 could
 // still write through the API as long as it carried the legacy `drive:write` key.
-import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate";
+import { definePolicyTable, appLevel, AUTHENTICATED, INTERNAL } from "@dub/policy-gate";
 
 // Drive共有 の「設定」 (the Google accounts Drive is accessed as) has its own toggles in
 // ロール管理 > Drive共有 > 詳細設定. Reading needs 閲覧 on the app + settings_view; changing (which
@@ -66,4 +66,16 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /meetings/sync": MEETINGS_EDIT,
   "PATCH /meetings/:id": MEETINGS_EDIT,
   "DELETE /meetings/:id": MEETINGS_EDIT,
+
+  // ---- 定例の出席 ----
+  // Joining a 定例 from Dub records ONLY the caller's own attendance, and the handler asserts the
+  // caller is a current member of the meeting's target (attendance-service join) — the /me shape.
+  // Members hold neither カレンダー nor ミーティング keys by default (identity/0008, 0019), and the
+  // Meet link is already in their Google Calendar invite, so a key here would only make the
+  // attendance record unreachable for the very people it counts.
+  "POST /meetings/:id/join": AUTHENTICATED,
+  "GET /meetings/me/regulars": AUTHENTICATED,
+  // The report and corrections are 人事 data: 人事 閲覧 + hr:read / 人事 編集 + hr:write (identity/0025).
+  "GET /meetings/attendance": appLevel("hr", "view", "hr:read"),
+  "PUT /meetings/:id/attendance/:date/:userId": appLevel("hr", "edit", "hr:write"),
 });

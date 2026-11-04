@@ -11,6 +11,8 @@ import { createInMemoryGoogleAccountStore } from "../src/google-account-store";
 import type { Env } from "../src/env";
 import { createMeetingsService } from "../src/meetings-service";
 import { createInMemoryMeetingStore } from "../src/meetings-store";
+import { createInMemoryAttendanceStore } from "../src/attendance-store";
+import { createAttendanceService } from "../src/attendance-service";
 import { createMockCalendarClient } from "../src/calendar-mock-client";
 import { staticMemberDirectory, type MemberDirectory } from "../src/member-directory";
 import type { CalendarClient } from "../src/google/calendar-client";
@@ -106,14 +108,17 @@ export function buildMeetings(opts: {
   syncTimeLimitMs?: number;
   now?: () => string;
   meetReady?: boolean;
+  attendance?: ReturnType<typeof createInMemoryAttendanceStore>;
 } = {}) {
   const store = opts.store ?? createInMemoryMeetingStore();
   const calendar = opts.calendar ?? createMockCalendarClient();
   let seq = 0;
   let tick = 0;
   const kicks: (number | undefined)[] = [];
+  const attendance = opts.attendance ?? createInMemoryAttendanceStore();
   const service = createMeetingsService({
     store,
+    attendance,
     roster: opts.roster ?? fakeRoster({}, {}),
     directory: opts.directory ?? staticMemberDirectory(),
     account: async () => ({
@@ -132,5 +137,24 @@ export function buildMeetings(opts: {
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
     ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
   });
-  return { service, store, calendar, kicks };
+  return { service, store, calendar, kicks, attendance };
+}
+
+/** 定例の出席 over in-memory meeting + attendance stores and a fake roster. */
+export function buildAttendance(opts: {
+  roster?: RoleMembership;
+  meetings?: ReturnType<typeof createInMemoryMeetingStore>;
+  store?: ReturnType<typeof createInMemoryAttendanceStore>;
+  now?: () => string;
+} = {}) {
+  const meetings = opts.meetings ?? createInMemoryMeetingStore();
+  const store = opts.store ?? createInMemoryAttendanceStore();
+  const service = createAttendanceService({
+    meetings,
+    store,
+    roster: opts.roster ?? fakeRoster({}, {}),
+    orgId: common.DUB_DEFAULT_ORG_ID,
+    now: opts.now ?? (() => "2026-10-20T10:00:00.000Z"),
+  });
+  return { service, meetings, store };
 }
