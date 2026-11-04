@@ -348,6 +348,41 @@ ALTER TABLE member_participations ADD COLUMN position TEXT;
 `.trim(),
 };
 
+// 0019: 人事アプリの面談申し込みフォーム (定義 org ごと 1 行 + 回答 → 応募者) の新規テーブル (additive)。
+// Mirrors 0019_hr_interview_form.sql (schema-lockstep).
+export const MEMBER_HR_INTERVIEW_FORM_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0019_hr_interview_form",
+  up: `
+CREATE TABLE member_hr_forms (
+  org_id          TEXT NOT NULL,
+  form_key        TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  description     TEXT,
+  questions_json  TEXT NOT NULL,
+  accepting       INTEGER NOT NULL DEFAULT 1,
+  version         INTEGER NOT NULL,
+  updated_by      TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  PRIMARY KEY (org_id, form_key)
+);
+CREATE TABLE member_hr_form_responses (
+  id              TEXT PRIMARY KEY,
+  org_id          TEXT NOT NULL,
+  form_key        TEXT NOT NULL,
+  applicant_id    TEXT NOT NULL REFERENCES member_hr_applicants(id),
+  answers_json    TEXT NOT NULL,
+  questions_json  TEXT NOT NULL,
+  via             TEXT NOT NULL,
+  submitted_by    TEXT NOT NULL,
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX idx_member_hr_form_responses_org ON member_hr_form_responses(org_id, form_key, created_at);
+CREATE INDEX idx_member_hr_form_responses_applicant ON member_hr_form_responses(applicant_id);
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -368,4 +403,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_STUDENT_NUMBER_MIGRATION,
   MEMBER_HR_MIGRATION,
   MEMBER_POSITION_MIGRATION,
+  MEMBER_HR_INTERVIEW_FORM_MIGRATION,
 ];
