@@ -16,6 +16,7 @@ import { createHrApi, type HrApi } from "./hrApi.tsx";
 import { HrApiProvider } from "./HrProvider.tsx";
 import { HrApplicantsScreen } from "./HrApplicantsScreen.tsx";
 import { HrOnboardingScreen } from "./HrOnboardingScreen.tsx";
+import { HrTabs } from "./HrTabs.tsx";
 
 const navigateMock = vi.fn();
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock, useRouter: () => null }));
@@ -208,6 +209,27 @@ describe("HrApplicantsScreen (表)", () => {
     expect(screen.queryByTestId("fe2-hr-new")).toBeNull();
     fireEvent.click(screen.getByTestId("fe2-hr-enter-on-behalf"));
     expect(navigateMock).toHaveBeenCalledWith({ to: "/hr/form", search: { enter: 1 } });
+  });
+});
+
+describe("HrTabs", () => {
+  // /me は非同期に解決される (解決前は fail-closed で active タブだけ)。
+  const tabIds = () => screen.getAllByRole("tab").map((t) => t.dataset.testid?.replace("fe2-hr-tabs-tab-", ""));
+
+  it("shows 参加届の回答 / オンボーディング案内 (moved from 運営メンバー) to holders of the 参加届 keys", async () => {
+    renderWith(<HrTabs active="applicants" />, fakeApi(), [...EDITOR, ...viewerPermissions("participation", ["identity:read"])]);
+    await screen.findByTestId("fe2-hr-tabs-tab-form");
+    expect(tabIds()).toEqual(["applicants", "form", "participation", "onboarding", "guide", "attendance"]);
+    fireEvent.click(screen.getByTestId("fe2-hr-tabs-tab-participation"));
+    expect(navigateMock).toHaveBeenLastCalledWith({ to: "/participation/list" });
+    fireEvent.click(screen.getByTestId("fe2-hr-tabs-tab-guide"));
+    expect(navigateMock).toHaveBeenLastCalledWith({ to: "/participation" });
+  });
+
+  it("hides tabs whose route the caller cannot open (no dead tabs)", async () => {
+    renderWith(<HrTabs active="applicants" />, fakeApi(), EDITOR);
+    await screen.findByTestId("fe2-hr-tabs-tab-form");
+    expect(tabIds()).toEqual(["applicants", "form", "onboarding", "attendance"]);
   });
 });
 
