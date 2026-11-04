@@ -202,6 +202,23 @@ describe("ChatRoom DO — message delivery & fanout", () => {
     expect(delivered).toBe(0);
   });
 
+  it("evictNonMembers closes only the sockets of users outside the member list", async () => {
+    const ch = "chan_evict";
+    const stub = CHAT_ROOM.getByName(ch);
+    const member = await connect(ch, await ticketFor(ch, "user_member"));
+    const outsider = await connect(ch, await ticketFor(ch, "user_outsider"));
+    member.webSocket!.accept();
+    outsider.webSocket!.accept();
+    const closed = new Promise<number>((resolve) => outsider.webSocket!.addEventListener("close", (e) => resolve(e.code)));
+
+    expect(await stub.evictNonMembers(["user_member"])).toBe(1);
+    expect(await closed).toBe(4403);
+    const got = nextMessage(member.webSocket!);
+    await stub.publish(sampleEvent(ch));
+    expect(JSON.parse(await got)).toEqual(sampleEvent(ch)); // the member keeps the live feed
+    member.webSocket!.close();
+  });
+
   it("reports presence (connected socket count)", async () => {
     const ch = "chan_presence";
     const stub = CHAT_ROOM.getByName(ch);

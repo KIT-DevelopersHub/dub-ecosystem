@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "b0ceeea9",
-  "branch": "feat/chat-shared-sections",
+  "deployedSha": "8859b628",
+  "branch": "HEAD",
   "actor": "ko-tarou",
-  "markers": ["fe6-shared-sections-v1"],
+  "markers": ["fe2-mail-avatar-img", "fe2-mail-inline-to"],
   "live": true,
-  "verifiedAt": "2026-10-19T06:52:04Z",
-  "updatedAt": "2026-10-19T06:52:04Z",
-  "note": "chat: サイドバーのセクションを全員共通 + chat:manage_sections(admin のみ既定ON)。?demo_account=usr_bob で管理権限なし表示"
+  "verifiedAt": "2026-11-04T04:59:48Z",
+  "updatedAt": "2026-11-04T04:59:48Z",
+  "note": "mail: 送信者アイコン + 宛先/Cc/Bcc の小アイコン (PR #745)"
 }

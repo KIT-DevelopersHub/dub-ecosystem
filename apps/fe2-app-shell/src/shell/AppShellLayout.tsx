@@ -14,7 +14,7 @@ import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { useAppCapability, useAuth, usePermissions } from "../auth/AuthProvider.tsx";
-import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
+import { InquiryDialog } from "./inquiry/InquiryDialog.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 import { createMailApi } from "../features/mail/mailApi.tsx";
 import { MailApiProvider } from "../features/mail/MailProvider.tsx";
@@ -22,11 +22,7 @@ import { ForwardSettingsDialog } from "../features/mail/forward/ForwardSettingsD
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
 import { createGlobalContentSearch } from "./globalContentSearch.ts";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
-import {
-  isReleaseGatedFor,
-  UNPUBLISHED_TILE_REASON,
-  UNAUTHORIZED_TILE_REASON,
-} from "../lib/releaseGate.ts";
+import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -67,46 +63,33 @@ export interface AppShellLayoutProps {
 }
 
 // NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
-// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal). Every tile is
-// ALWAYS rendered (消さない — apps are never removed from the launcher, per
-// [[dub-never-hide-or-reduce-apps]]); an app the current viewer cannot open is
-// greyed-out + disabled + tooltip instead, and greyed apps are SORTED to the bottom.
+// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal). An app the
+// current viewer cannot open is HIDDEN (not greyed) so the launcher only lists apps
+// the viewer is actually allowed to use.
 //
 // "Cannot open" mirrors the route access gate (router.tsx) so the launcher and a
-// deep-link stay consistent — an app greyed here 403s on direct navigation, and vice
+// deep-link stay consistent — an app hidden here 403s on direct navigation, and vice
 // versa. Two gates decide it:
-//   1. Member release gate (社長決定 2026-08-14, see lib/releaseGate / RequirePublished):
-//      an app not member-published is greyed for general members; only full admins
-//      (isPrivilegedViewer = identity:admin) bypass it — non-admin operator roles
-//      (maintainer/organizer) are gated too (#255). メールのみ published as of 2026-08-14.
+//   1. Member release gate (lib/releaseGate / RequirePublished): an app that is not
+//      member-published and not granted to the viewer's role (app:<id>:view) is hidden
+//      for everyone except full admins (identity:admin).
 //   2. Permission gate (RequirePermission): an app whose requiredPermissions the viewer
-//      does not hold is greyed for EVERYONE — admins included — exactly matching the
-//      route's own requiredPermissions guard (e.g. a maintainer without identity:admin
-//      can't open a role-admin tool, so its tile greys). No privileged bypass here, so
-//      the launcher never shows an app that would 403.
-// Sort order: usable apps first, greyed apps last; the existing order-based sequence is
-// preserved within each group (a stable partition), and nothing is removed.
-// The access gate for a nav entry, shared by the launcher and the command palette so
-// a greyed app looks/behaves identically in both surfaces (and matches router.tsx).
-function navGate(entry: NavEntry, can: Can): { disabled: boolean; reason?: string } {
-  const releaseGated = isReleaseGatedFor(entry.appId, can);
-  const lacksPermission =
-    entry.requiredPermissions !== undefined &&
-    entry.requiredPermissions.length > 0 &&
-    !entry.requiredPermissions.every((p) => can(p));
-  if (releaseGated || lacksPermission) {
-    // Release gate wins the reason, matching router.tsx where RequirePublished wraps
-    // the permission gate (an unpublished app denies first, regardless of perms).
-    return { disabled: true, reason: releaseGated ? UNPUBLISHED_TILE_REASON : UNAUTHORIZED_TILE_REASON };
-  }
-  return { disabled: false };
+//      does not hold is hidden for EVERYONE — admins included — exactly matching the
+//      route's own requiredPermissions guard.
+// Shared by the launcher and the command palette so both surfaces list the same apps.
+function canOpen(entry: NavEntry, can: Can): boolean {
+  if (isReleaseGatedFor(entry.appId, can)) return false;
+  return entry.requiredPermissions === undefined || entry.requiredPermissions.every((p) => can(p));
 }
 
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
-  const items = [...navEntries]
+  return [...navEntries]
     .sort((a, b) => a.order - b.order)
-    .map((entry) => {
+    .flatMap((entry) => {
+      // badgeSource is a React hook: call it for EVERY entry before filtering, so the
+      // hook count stays stable when permissions resolve (else React #310).
       const badge = entry.badgeSource?.();
+      if (!canOpen(entry, can)) return [];
       const item: AppLauncherItem = {
         id: entry.path,
         label: entry.label,
@@ -114,16 +97,8 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         href: entry.path,
       };
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
-      const gate = navGate(entry, can);
-      if (gate.disabled) {
-        item.disabled = true;
-        item.disabledReason = gate.reason;
-      }
-      return item;
+      return [item];
     });
-  // Usable first, greyed last. filter() is a stable partition, so each group keeps its
-  // order-sorted sequence; no tile is dropped (消さない — greyed apps only move down).
-  return [...items.filter((i) => !i.disabled), ...items.filter((i) => i.disabled)];
 }
 
 // Derive extra ASCII search terms from an entry so a Japanese label ("メール") is still
@@ -133,38 +108,31 @@ function navKeywords(entry: NavEntry): string[] {
   return entry.appId ? [entry.appId, ...fromPath] : fromPath;
 }
 
-// Build the palette command list: every app (gated identically to the launcher, greyed
-// apps kept — 消さない) plus the global self-service actions. Apps sort usable-first to
-// match the launcher; actions follow in their own section.
+// Build the palette command list: every app the viewer can open (filtered identically
+// to the launcher) plus the global self-service actions in their own section.
 export function buildPaletteCommands(
   navEntries: NavEntry[],
   can: Can,
   actions: {
     onNavigate?: (path: string) => void;
     onOpenAccount?: () => void;
+    onOpenInquiry?: () => void;
     onLogout?: () => void;
   },
 ): PaletteCommand[] {
-  const apps = [...navEntries]
+  const apps = navEntries
+    .filter((entry) => canOpen(entry, can))
     .sort((a, b) => a.order - b.order)
-    .map((entry): PaletteCommand => {
-      const gate = navGate(entry, can);
-      const cmd: PaletteCommand = {
+    .map(
+      (entry): PaletteCommand => ({
         id: `app:${entry.path}`,
         label: entry.label,
         group: "アプリ",
         icon: entry.icon,
         keywords: navKeywords(entry),
         run: () => actions.onNavigate?.(entry.path),
-      };
-      if (gate.disabled) {
-        cmd.disabled = true;
-        cmd.disabledReason = gate.reason;
-      }
-      return cmd;
-    });
-  const usable = apps.filter((c) => !c.disabled);
-  const greyed = apps.filter((c) => c.disabled);
+      }),
+    );
 
   const actionCmds: PaletteCommand[] = [];
   if (actions.onNavigate) {
@@ -187,6 +155,16 @@ export function buildPaletteCommands(
       run: () => actions.onOpenAccount?.(),
     });
   }
+  if (actions.onOpenInquiry) {
+    actionCmds.push({
+      id: "action:inquiry",
+      label: "問い合わせ",
+      group: "アクション",
+      icon: "message-circle",
+      keywords: ["inquiry", "feedback", "contact", "問い合わせ", "フィードバック", "名刺", "友達", "招待", "面談"],
+      run: () => actions.onOpenInquiry?.(),
+    });
+  }
   if (actions.onLogout) {
     actionCmds.push({
       id: "action:logout",
@@ -198,7 +176,7 @@ export function buildPaletteCommands(
     });
   }
 
-  return [...usable, ...greyed, ...actionCmds];
+  return [...apps, ...actionCmds];
 }
 
 export function AppShellLayout({
@@ -220,9 +198,12 @@ export function AppShellLayout({
   // カラー設定 (表示設定) dialog — theme lives inside it, not directly in the ⚙ menu.
   const [colorOpen, setColorOpen] = useState(false);
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
-  // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
+  // signed in. Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
   const authed = auth.status === "authenticated";
+  // 問い合わせ (feedback + 名刺/友達/面談 requests) — lives in the ⚙ menu; replaces the old
+  // always-visible bottom-right feedback button. Same gate as アカウント設定 (needs the api).
+  const [inquiryOpen, setInquiryOpen] = useState(false);
   // メール設定 (Gmail への自動転送): personal mail settings live in this same ⚙ menu, shown
   // only to viewers who can open メール at all (app tier + mail:read, like the launcher tile).
   const [mailSettingsOpen, setMailSettingsOpen] = useState(false);
@@ -238,6 +219,7 @@ export function AppShellLayout({
   //     menu, which read oddly; folding them behind one カラー設定 row keeps the menu a tidy
   //     list of destinations and leaves room to grow (density/accent) inside the dialog.
   //     setTheme/localStorage永続/全アプリ波及/system時OS追従 are all unchanged.
+  //   • 問い合わせ (needs the api-client) — feedback + 名刺/友達/面談 requests to 運営.
   //   • ログアウト — needs only onLogout, so it stays for any signed-in viewer even with no
   //     api wired. Last, under a divider, danger-toned — a 離脱/destructive action set apart.
   const settingsItems: MenuItem[] = [];
@@ -266,6 +248,15 @@ export function AppShellLayout({
     onSelect: () => setColorOpen(true),
     testId: "fe2-color-settings-open",
   });
+  if (showAccount) {
+    settingsItems.push({
+      id: "inquiry",
+      label: "問い合わせ",
+      icon: "message-circle",
+      onSelect: () => setInquiryOpen(true),
+      testId: "fe2-inquiry-open",
+    });
+  }
   if (authed && onLogout) {
     settingsItems.push({
       id: "logout",
@@ -351,7 +342,7 @@ export function AppShellLayout({
   // signed-in user can actually do; the palette itself owns the open/close + shortcut.
   const paletteCommands = buildPaletteCommands(navEntries, can, {
     ...(onNavigate ? { onNavigate } : {}),
-    ...(showAccount ? { onOpenAccount: () => setAcctOpen(true) } : {}),
+    ...(showAccount ? { onOpenAccount: () => setAcctOpen(true), onOpenInquiry: () => setInquiryOpen(true) } : {}),
     ...(authed && onLogout ? { onLogout } : {}),
   });
   // ①グローバル検索: task/event CONTENT results (see globalContentSearch.ts) — needs
@@ -382,7 +373,7 @@ export function AppShellLayout({
       {authed ? (
         <CommandPalette commands={paletteCommands} {...(contentSearch ? { contentSearch } : {})} />
       ) : null}
-      {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
+      {showAccount && api ? <InquiryDialog api={api} open={inquiryOpen} onClose={() => setInquiryOpen(false)} /> : null}
       {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
       {showMailSettings && mailApi ? (
         <MailApiProvider value={mailApi}>

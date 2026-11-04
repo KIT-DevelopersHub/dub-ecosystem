@@ -189,4 +189,26 @@ describe("EmailAddressSelect", () => {
       expect(screen.getByText("Sato")).toBeInTheDocument();
     });
   });
+
+  it("renders renderTokenIcon in front of each chip and suggestion", () => {
+    function IconHarness() {
+      const [value, setValue] = useState("Alice <alice@x.com>");
+      return (
+        <EmailAddressSelect
+          value={value}
+          onChange={setValue}
+          parse={parse}
+          candidates={[{ email: "bob@x.com", name: "Bob" }]}
+          renderTokenIcon={(t) => <i data-testid="tok-icon">{t.email}</i>}
+          testId="to"
+        />
+      );
+    }
+    render(<IconHarness />);
+    expect(screen.getAllByTestId("tok-icon").map((e) => e.textContent)).toEqual(["alice@x.com"]);
+    const input = screen.getByTestId("to");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "bo" } });
+    expect(within(screen.getByRole("listbox")).getByTestId("tok-icon").textContent).toBe("bob@x.com");
+  });
 });

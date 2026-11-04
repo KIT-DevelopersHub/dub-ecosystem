@@ -105,6 +105,11 @@ export const POLICY_TABLE = definePolicyTable({
   // messages. Its own toggle in ロール管理 so it can be granted apart from moderate. This rule
   // is the whole authority (no channel-admin fallback); the handler only runs loadReadable.
   "DELETE /chat/channels/:id": appLevel("chat", "edit", "chat:delete_channel"),
+  // `chat:change_visibility` (dangerous key) — public <-> private. Going private hides the
+  // channel from every non-member; going public exposes its whole history org-wide. Like
+  // delete, this rule is the whole authority (no channel-admin fallback); the handler only
+  // runs loadReadable (so a private channel cannot be flipped by someone who cannot see it).
+  "PUT /chat/channels/:id/visibility": appLevel("chat", "edit", "chat:change_visibility"),
 
   // ---- Slack channel import: 編集 + chat:slack_import (dangerous key) ----
   // It creates a channel AND writes org-wide data outside a caller's own scope (disabled

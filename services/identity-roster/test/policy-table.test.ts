@@ -36,10 +36,10 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
     expect(() => assertRouteCoverage(h.app, POLICY_TABLE)).not.toThrow();
   });
 
-  it("lists all 35 endpoints of this service", async () => {
+  it("lists all 37 endpoints of this service", async () => {
     const h = await makeHarness();
-    expect(protectableRouteKeys(h.app)).toHaveLength(35);
-    expect(Object.keys(POLICY_TABLE)).toHaveLength(35);
+    expect(protectableRouteKeys(h.app)).toHaveLength(37);
+    expect(Object.keys(POLICY_TABLE)).toHaveLength(37);
   });
 
   it("catches a new endpoint added without a table entry, and denies it at runtime", async () => {
@@ -122,12 +122,14 @@ const WRITES = [
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = [
   "GET /internal/users",
+  "GET /internal/permission-holders",
   "GET /internal/users/:id/permissions",
   "GET /internal/users/:id/mail-visible-users",
   "GET /users/:id",
   "POST /authz/check",
   "POST /internal/users/:id/profile",
   "POST /internal/users/lookup",
+  "POST /internal/users/avatars",
   "POST /users/provision",
   "POST /internal/webauthn/challenges",
   "POST /internal/webauthn/challenges/take",
@@ -241,6 +243,7 @@ describe("INTERNAL routes at runtime", () => {
       ["GET", `/users/${h.memberId}`],
       ["POST", `/internal/users/${h.memberId}/profile`],
       ["GET", "/internal/users"],
+      ["GET", "/internal/permission-holders?key=notif:receive_admin"],
       ["POST", "/internal/users/lookup"],
       ["GET", `/internal/users/${h.memberId}/permissions`],
       ["GET", `/internal/users/${h.memberId}/mail-visible-users`],

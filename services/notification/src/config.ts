@@ -46,12 +46,15 @@ export const AUDIENCE_ADMIN = "admin" as const;
 export const AUDIENCE_MEMBERS = "members" as const;
 export const DEFAULT_AUDIENCE = AUDIENCE_MEMBERS;
 
-// "admin viewer" flag for inbox audience filtering: holders see BOTH audiences. Members
-// (who lack it) are filtered to audience='members' rows only. NOT an authorization gate
-// (src/policy-table.ts owns all of those) — it shapes the response. The per-route
-// permission keys that used to live here as constants are gone: they belong in the policy
-// table and nowhere else, so a second check can never drift from it.
-export const ADMIN_VIEWER_PERMISSION = "notif:admin" as const;
+// Receive-audience keys (ロール管理 > 通知). NOT authorization gates (src/policy-table.ts owns
+// all of those) — they shape WHO an audience reaches and WHAT an inbox shows:
+//   ADMIN_VIEWER_PERMISSION — 「管理者向け通知を受け取る」: holders get audience='admin' rows
+//     (direct fan-out + the lazy inbox backfill); everyone else is filtered to 'members'.
+//     Was notif:admin before 0028 (which grants this key to every notif:admin role).
+//   BROADCAST_RECEIVER_PERMISSION — 「全体への通知を受け取る」: holders get broadcasts
+//     (release / system.announcement), including the late-join backfill.
+export const ADMIN_VIEWER_PERMISSION = "notif:receive_admin" as const;
+export const BROADCAST_RECEIVER_PERMISSION = "notif:receive_all" as const;
 
 // The type a member broadcast is published under. Reuses the existing broadcast machinery
 // (forced in_app + late-join backfill) so every member — including late joiners — sees it.
@@ -72,6 +75,17 @@ export const CHAT_DM_NOTIFY_TYPE = "chat.dm";
 // ---- in-app feedback (widget -> admin) ----
 // Closed category vocabulary (mirrors notification.FeedbackCategory).
 export const FEEDBACK_CATEGORIES = ["bug", "idea", "question", "other"] as const;
+// 問い合わせ種別 (mirrors notification.InquiryKind). Validated app-side; the column has no
+// CHECK so a new kind never needs a table rebuild.
+export const INQUIRY_KINDS = ["feedback", "business_card", "invite_friend", "interview", "other"] as const;
+// Admin-facing labels for the notification title/body and email.
+export const INQUIRY_KIND_LABELS: Record<(typeof INQUIRY_KINDS)[number], string> = {
+  feedback: "フィードバック",
+  business_card: "名刺が切れた",
+  invite_friend: "友達を誘いたい",
+  interview: "面談を希望",
+  other: "その他",
+};
 export const FEEDBACK_MESSAGE_MAX = 4000;
 export const FEEDBACK_PAGE_URL_MAX = 2048;
 export const FEEDBACK_PAGE_NAME_MAX = 200;
@@ -83,17 +97,14 @@ export const FEEDBACK_EXCERPT_LEN = 60;
 
 // ---- in-app admin notification on feedback submit ----
 // On every feedback submit we also create an in-app notification (notifications inbox)
-// for each admin / maintainer user, so it shows up in their inbox + unread badge. This
+// for every notif:receive_admin holder (「管理者向け通知を受け取る」), so it shows up in their inbox + unread badge. This
 // is a SYNCHRONOUS D1 write via the shared ingest path (in_app channel only), so it
 // lands even when the async freeq drain is paused. Slack / chat / email are intentionally
 // NOT targeted here — the pre-existing best-effort admin email is untouched.
 export const FEEDBACK_NOTIFY_TYPE = "feedback";
-// Role IDs mirror the identity-roster system-role seed (identity-roster/src/schema.ts:
-// role_sys_admin / role_sys_maintainer). identity `GET /users?roleKey=` filters by roleId.
-export const FEEDBACK_NOTIFY_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"] as const;
 
 // ---- release notes (new-feature announcements) ----
-// A release note is broadcast to EVERY active user's inbox as an in_app notification of
+// A release note is broadcast to every notif:receive_all holder's inbox as an in_app notification of
 // type `release`. FE5 badges it "🎉 新機能". Publishing is admin-gated (POST /release,
 // notif:admin — the rule lives in src/policy-table.ts); the curated back-catalog below is
 // (re)published idempotently by the internal seed route so demo + prod show the releases.

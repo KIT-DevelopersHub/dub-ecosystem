@@ -402,6 +402,11 @@ export const CHAT: AreaSpec = {
       route: "DELETE /chat/channels/:id",
       reason: "チャンネルと全メッセージを物理削除する操作で復元不能。アーカイブ（chat.channels.update）で一覧から消せる",
     },
+    {
+      service: S,
+      route: "PUT /chat/channels/:id/visibility",
+      reason: "公開範囲の切替は危険権限（chat:change_visibility）で守る操作。公開にすると過去のメッセージが組織全体に見える",
+    },
     { service: S, route: "GET /chat/sections", reason: SIDEBAR },
     { service: S, route: "POST /chat/sections", reason: SIDEBAR },
     { service: S, route: "PATCH /chat/sections/:id", reason: SIDEBAR },

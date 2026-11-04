@@ -40,6 +40,10 @@ export type UnpublishBroadcastResponse = notification.UnpublishBroadcastResponse
 export type UnpublishBroadcastBatchRequest = notification.UnpublishBroadcastBatchRequest;
 export type UnpublishBroadcastBatchResponse = notification.UnpublishBroadcastBatchResponse;
 export type UnpublishBroadcastBatchItem = notification.UnpublishBroadcastBatchItem;
+// GET /notifications/audiences — 「誰に届くか」 (receive audience → roles holding its key).
+export type ReceiveAudience = notification.ReceiveAudience;
+export type AudienceSummary = notification.AudienceSummary;
+export type ListAudiencesResponse = notification.ListAudiencesResponse;
 // GET /notifications/manage query params (cursor paging only).
 export interface ListAdminNotificationsParams {
   cursor?: string;

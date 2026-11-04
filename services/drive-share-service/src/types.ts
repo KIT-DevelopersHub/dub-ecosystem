@@ -201,6 +201,9 @@ export interface GoogleAccountEntry {
   /** The grant lacks the Meet settings scope, so new Meet links cannot be opened to anyone with
    *  the link — reconnect to grant it. */
   meetMissing: boolean;
+  /** The grant lacks meetings.space.readonly, so 人事 > 出席 cannot read who was in each Meet —
+   *  reconnect to grant it. */
+  attendanceMissing: boolean;
 }
 
 /** GET /driveshare/google-account (and the result of every change). No active entry =

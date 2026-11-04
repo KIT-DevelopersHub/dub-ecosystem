@@ -23,3 +23,8 @@ export function useMailApi(): MailApi {
   if (!ctx) throw new Error("useMailApi must be used within <MailProvider>");
   return ctx;
 }
+
+/** Like useMailApi, but null outside a provider — for best-effort decorations (sender icons). */
+export function useOptionalMailApi(): MailApi | null {
+  return useContext(MailApiCtx);
+}

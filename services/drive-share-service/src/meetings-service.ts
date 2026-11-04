@@ -26,6 +26,7 @@
 import { errors } from "@dub/errors";
 import { meeting } from "@dub/types";
 import { EventIdTaken, type CalendarAttendee, type CalendarClient, type CalendarEvent, type CalendarEventInput } from "./google/calendar-client";
+import type { AttendanceStore } from "./attendance-store";
 import type { MemberDirectory } from "./member-directory";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
 import { DESCRIPTION_MAX, DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
@@ -55,6 +56,8 @@ export interface MeetingAccount {
 
 export interface MeetingsDeps {
   store: MeetingStore;
+  /** Which meetings are 定例 (trackAttendance). */
+  attendance: AttendanceStore;
   roster: RoleMembership;
   directory: MemberDirectory;
   account: () => Promise<MeetingAccount>;
@@ -80,7 +83,7 @@ export interface MeetingsService {
   list(): Promise<meeting.ListMeetingsResponse>;
   targets(userId: string | undefined): Promise<meeting.ListMeetingTargetsResponse>;
   create(userId: string, body: unknown): Promise<meeting.Meeting>;
-  update(id: string, body: unknown): Promise<meeting.Meeting>;
+  update(id: string, body: unknown, userId?: string): Promise<meeting.Meeting>;
   remove(id: string): Promise<void>;
   /** opts.system = the alarm: a not-ready account is skipped instead of a 409. */
   sync(opts?: { system?: boolean }): Promise<SyncResult>;
@@ -183,7 +186,16 @@ function eventInput(f: MeetingFields): Omit<CalendarEventInput, "attendees"> {
   };
 }
 
-function toMeeting(m: MeetingRow, targetName: string, attendeeCount: number): meeting.Meeting {
+/** The optional trackAttendance flag of a create / update body (undefined = leave as is). */
+function trackAttendanceOf(body: unknown): boolean | undefined {
+  if (!body || typeof body !== "object" || !("trackAttendance" in body)) return undefined;
+  const v = (body as { trackAttendance?: unknown }).trackAttendance;
+  if (v === undefined) return undefined;
+  if (typeof v !== "boolean") throw errors.validationFailed([{ field: "trackAttendance", reason: "invalid" }], "「定例として出席を取る」の指定が正しくありません。");
+  return v;
+}
+
+function toMeeting(m: MeetingRow, targetName: string, attendeeCount: number, trackAttendance: boolean): meeting.Meeting {
   return {
     id: m.id,
     title: m.title,
@@ -197,6 +209,7 @@ function toMeeting(m: MeetingRow, targetName: string, attendeeCount: number): me
     meetUrl: m.meetUrl,
     htmlLink: m.htmlLink,
     attendeeCount,
+    trackAttendance,
     createdBy: m.createdBy,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
@@ -381,7 +394,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
   return {
     async list() {
-      const [rows, counts] = await Promise.all([store.listMeetings(orgId), store.inviteCounts(orgId)]);
+      const [rows, counts, regulars] = await Promise.all([store.listMeetings(orgId), store.inviteCounts(orgId), deps.attendance.listRegularIds(orgId)]);
       const lastSync = Math.max(0, ...rows.map((r) => (r.syncedAt ? Date.parse(r.syncedAt) : 0)));
       if (rows.length > 0 && Date.parse(deps.now()) - lastSync > LIST_KICK_MIN_GAP_MS) await kick(LIST_SOON_MS);
       let names = new Map<string, string>();
@@ -401,7 +414,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       }
       return {
         items: rows.map((r) =>
-          toMeeting(r, r.targetId === meeting.ALL_MEMBERS_TARGET_ID ? ALL_TARGET_NAME : names.get(r.targetId) ?? "（削除されたロール）", counts.get(r.id) ?? 0),
+          toMeeting(r, r.targetId === meeting.ALL_MEMBERS_TARGET_ID ? ALL_TARGET_NAME : names.get(r.targetId) ?? "（削除されたロール）", counts.get(r.id) ?? 0, regulars.has(r.id)),
         ),
         account,
       };
@@ -424,6 +437,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
     async create(userId, body) {
       const f = validateMeeting(body);
+      const track = trackAttendanceOf(body) ?? false;
       const name = await requireTargetName(f.targetId);
       const account = await readyAccount();
       const cal = budgeted(account.calendar, budgetLimit);
@@ -468,13 +482,15 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         throw err;
       }
       await openMeet(account.calendar, account, done.meetUrl);
-      return toMeeting(done, name, members.length);
+      if (track) await deps.attendance.setRegular(orgId, done.id, true, userId, deps.now());
+      return toMeeting(done, name, members.length, track);
     },
 
-    async update(id, body) {
+    async update(id, body, userId) {
       const row = await store.getMeeting(orgId, id);
       if (!row) throw errors.notFound("meeting", id);
       const f = validateMeeting(body, fieldsOf(row));
+      const track = trackAttendanceOf(body);
       const name = await requireTargetName(f.targetId);
       const account = await readyAccount();
       if (account.accountId !== row.accountId) {
@@ -507,7 +523,9 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         attendeeCount = (await store.listInvites(row.id)).length;
       }
       await kick(SOON_MS);
-      return toMeeting(next, name, attendeeCount);
+      if (track !== undefined) await deps.attendance.setRegular(orgId, row.id, track, userId ?? row.createdBy, deps.now());
+      const regular = track ?? (await deps.attendance.listRegularIds(orgId)).has(row.id);
+      return toMeeting(next, name, attendeeCount, regular);
     },
 
     async remove(id) {

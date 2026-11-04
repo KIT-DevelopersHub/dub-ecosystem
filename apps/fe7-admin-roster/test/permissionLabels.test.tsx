@@ -294,6 +294,24 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     await user.click(within(dialog).getByTestId("fe7-app-dialog-toggle-drive:settings_edit"));
     expect(onChange.mock.calls.at(-1)?.[0]).toContain("drive:settings_edit");
   });
+
+  // ユーザー要望: 通知の細かい権限は「誰に届くか」を決める項目だけにする（意味のない項目は出さない）。
+  it("通知の詳細は 受け取る通知 + 管理の 2 つだけで、受信箱/通知設定/送信は出ない", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup(["app:notifications:view", "notif:inbox:self", "notif:prefs:self"]);
+    await user.click(screen.getByTestId("fe7-app-name-notifications"));
+    const dialog = screen.getByTestId("fe7-app-dialog");
+    expect(within(dialog).getByText("全体への通知を受け取る")).toBeInTheDocument();
+    expect(within(dialog).getByText("管理者向け通知を受け取る")).toBeInTheDocument();
+    for (const hidden of ["notif:inbox:self", "notif:prefs:self", "notif:send"]) {
+      expect(within(dialog).queryByTestId(`fe7-app-dialog-toggle-${hidden}`)).not.toBeInTheDocument();
+    }
+    await user.click(within(dialog).getByTestId("fe7-app-dialog-toggle-notif:receive_admin"));
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain("notif:receive_admin");
+    await user.click(within(dialog).getByTestId("fe7-app-dialog-close"));
+    // その他 にも落ちてこない
+    expect(within(screen.getByTestId("fe7-other-permissions")).queryByText(/通知/)).not.toBeInTheDocument();
+  });
 });
 
 describe("カレンダー > ミーティング labels", () => {

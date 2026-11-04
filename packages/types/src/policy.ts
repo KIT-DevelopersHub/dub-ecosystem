@@ -314,12 +314,24 @@ export function claimedDetailKeys(): PermissionKey[] {
 }
 
 /**
+ * Catalog keys ロール管理 never shows (neither in an app's 詳細 dialog nor in その他). The
+ * catalog itself is a frozen wire contract, so a key that stopped being a meaningful toggle
+ * is retired from the UI here instead of being deleted:
+ *   - notif:inbox:self / notif:prefs:self — every 通知 user needs them; they ride the 通知
+ *     app's 3 段階 (APP_MANIFEST `permissions`, bundled on save), so a separate toggle could
+ *     only produce the broken "通知 is on but the inbox 403s" state.
+ *   - notif:send — gates nothing (POST /notify is INTERNAL in the notification policy table).
+ * Each entry needs a reason; the partition test treats this as the 4th bucket.
+ */
+export const HIDDEN_PERMISSION_KEYS: readonly PermissionKey[] = ["notif:inbox:self", "notif:prefs:self", "notif:send"];
+
+/**
  * 「その他」: catalog keys that belong to NO app — org-wide capabilities (インフラ/デプロイ,
  * 監査ログ, GitHub 連携, Webhook). Computed as the complement, so a catalog key
  * added later automatically shows up here instead of disappearing from ロール管理.
  */
 export function otherPermissions(): PermissionCatalogEntry[] {
-  const claimed = new Set<string>([...claimedDetailKeys(), ...appAccessCatalogKeys()]);
+  const claimed = new Set<string>([...claimedDetailKeys(), ...appAccessCatalogKeys(), ...HIDDEN_PERMISSION_KEYS]);
   return PERMISSION_CATALOG.filter((e) => !claimed.has(e.key));
 }
 

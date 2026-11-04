@@ -17,10 +17,10 @@ export const FAIL_THRESHOLD = 2;
 // Per-probe network timeout. Kept short so one hung target can't stall the whole cycle.
 export const PROBE_TIMEOUT_MS = 10_000;
 
-// Admin fan-out roles (mirrors feedback / usage-meter admin alerting). The notification
-// service expands these to admin/maintainer inboxes, so alerts reach admins WITHOUT any
-// user-id config, and — being addressed to admin roles only — never reach ordinary members.
-export const ADMIN_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"] as const;
+// Alerts go to the 管理者向け audience: the notification service expands it to whoever holds
+// notif:receive_admin in ロール管理 (「管理者向け通知を受け取る」), so no user-id config is
+// needed and ordinary members never get health noise.
+export const ALERT_AUDIENCES = ["admin"] as const;
 
 // Notification type for health alerts (open vocabulary; FE can badge on it later).
 export const HEALTH_NOTIFY_TYPE = "ops.health";

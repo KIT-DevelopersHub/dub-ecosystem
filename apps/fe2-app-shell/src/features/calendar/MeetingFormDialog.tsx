@@ -1,7 +1,7 @@
 // 定例ミーティングを設定 / 編集 dialog. Renders inside the @dub/ui Modal portal, so only
 // global @dub/tokens variables are used for colors (feature CSS variables do not reach it).
 import { useEffect, useState } from "react";
-import { Button, DatePicker, FormField, Modal, Select, TextField, Textarea } from "@dub/ui";
+import { Button, Checkbox, DatePicker, FormField, Modal, Select, TextField, Textarea } from "@dub/ui";
 import type { meeting } from "@dub/types";
 import {
   DURATION_OPTIONS,
@@ -149,6 +149,20 @@ export function MeetingFormDialog({
 
         <FormField label="メモ" htmlFor={`${tid}-description`} help="Google カレンダーの予定の説明欄に入ります">
           <Textarea id={`${tid}-description`} value={form.description} onChange={(v) => set("description", v)} rows={3} testId={`${tid}-description`} />
+        </FormField>
+
+        <FormField
+          label="出席"
+          htmlFor={`${tid}-track`}
+          help="オンにすると、Dub（ダッシュボードの「定例に参加」）から Meet に入った人を出席として記録します。出席は 人事 → 出席 で確認できます。"
+        >
+          <Checkbox
+            id={`${tid}-track`}
+            testId={`${tid}-track`}
+            checked={form.trackAttendance}
+            label={form.targetId === "all" ? "全体定例として出席を取る" : "チーム定例として出席を取る"}
+            onChange={(v) => set("trackAttendance", v)}
+          />
         </FormField>
       </div>
     </Modal>

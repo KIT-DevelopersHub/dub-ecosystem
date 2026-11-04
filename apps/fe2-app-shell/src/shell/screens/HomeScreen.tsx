@@ -25,6 +25,7 @@ import { useRecentVisits } from "../useVisitTracker.tsx";
 import { saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
+import { RegularMeetingsCard } from "./dashboard/RegularMeetingsCard.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
   CONFERENCE,
@@ -467,6 +468,8 @@ export function HomeScreen({
         <aside className="fe2-home-side">
           {/* 最近開いた (P3-1): client-side jump-back, above the live panels. */}
           <RecentOpenedCard {...(onNavigate ? { onNavigate } : {})} />
+          {/* 定例に参加: Dub から Meet を開くと出席が記録される (対象の定例がある人にだけ出る)。 */}
+          <RegularMeetingsCard api={api} />
           <Card
             testId="fe2-home-events"
             header={

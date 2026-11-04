@@ -30,7 +30,8 @@ describe("createNotifier — admin fan-out shape", () => {
     expect(c.headers["x-dub-internal"]).toBeDefined(); // internal marker attached by the service client
     const body = c.body as Record<string, unknown>;
     expect(body.type).toBe("ops.health");
-    expect(body.recipientRoles).toEqual(["role_sys_admin", "role_sys_maintainer"]);
+    expect(body.recipientAudiences).toEqual(["admin"]);
+    expect(body.recipientRoles).toBeUndefined();
     expect(body.recipientIds).toEqual([]);
     expect(body.channels).toEqual(["in_app"]);
     expect(body.dedupKey).toBe("health:down:fe:mail:2026-08-19T00:00:00.000Z");

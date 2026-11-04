@@ -1,0 +1,44 @@
+/* Plain-text / sanitized-HTML mail body. Long unbroken URLs must wrap inside the pane
+   instead of widening it (overflow-wrap: anywhere also shrinks the min-content width). */
+.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  min-width: 0;
+}
+
+.html {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.html img {
+  max-width: 100%;
+  height: auto;
+}
+
+.html table {
+  max-width: 100%;
+}
+
+.link,
+.html a {
+  color: var(--dub-color-text-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.link:hover,
+.html a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.link:focus-visible,
+.html a:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+  border-radius: var(--dub-radius-sm);
+}

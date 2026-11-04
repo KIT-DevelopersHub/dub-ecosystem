@@ -241,6 +241,14 @@ export function createApp(opts: AppOptions): App {
     return c.json(out);
   });
 
+  // Permission → holders (roles + active user ids) — internal S2S read for notification
+  // audience fan-out (notif:receive_admin / notif:receive_all) and 通知管理「誰に届くか」.
+  // INTERNAL like /internal/users: the caller acts for the system, and a permission-holder
+  // list must not be reachable from outside.
+  app.get("/internal/permission-holders", async (c) => {
+    return c.json(await svc.permissionHolders(orgId, c.req.query("key") ?? ""));
+  });
+
   // Login allowlist lookup — internal S2S read for auth-service password login.
   // Returns { user } (any status) or { user: null } when the email is not on the
   // roster; auth-service enforces the active-only allowlist. Read-only (no provision
@@ -251,6 +259,12 @@ export function createApp(opts: AppOptions): App {
       throw errors.validationFailed([{ field: "email", reason: "required" }]);
     }
     return c.json(await svc.lookupByEmail(orgId, body.email));
+  });
+
+  // Batch email → avatarUrl for mail-gateway's sender icons (Dub users only). Internal S2S read.
+  app.post("/internal/users/avatars", async (c) => {
+    const body = await readJson<{ emails?: unknown }>(c);
+    return c.json(await svc.avatarsByEmail(orgId, body?.emails));
   });
 
   // The ecosystem's authorization decision point — what every other service's granter calls.

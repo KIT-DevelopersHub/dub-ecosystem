@@ -164,3 +164,26 @@ describe("NotificationManagePage", () => {
     expect(harness.store.items.items.filter((i) => i.resourceType === "notification").length).toBe(1);
   });
 });
+
+describe("NotificationManagePage — 誰に届くか", () => {
+  it("shows each audience with the roles that receive it and the recipient count", async () => {
+    const { deps } = makeDeps();
+    renderWithDeps(<NotificationManagePage />, deps);
+    await waitFor(() => expect(screen.getByTestId("fe5-audience-admin")).toBeTruthy());
+    expect(screen.getByTestId("fe5-audience-admin").textContent).toContain("管理者向け通知を受け取る");
+    expect(screen.getByTestId("fe5-audience-count-admin").textContent).toBe("4人に届く");
+    expect(screen.getByTestId("fe5-audience-all").textContent).toContain("全体への通知を受け取る");
+    expect(screen.getAllByTestId("fe5-audience-role-admin").map((e) => e.textContent)).toEqual(["admin（1人）", "maintainer（3人）"]);
+  });
+
+  it("a load failure keeps the management list usable and offers a retry", async () => {
+    const { deps } = makeDeps({
+      failNext: { pathIncludes: "/audiences", error: new MockApiError("NOTIF_INTERNAL", 500, "boom", true) },
+    });
+    renderWithDeps(<NotificationManagePage />, deps);
+    await waitFor(() => expect(screen.getByTestId("fe5-audiences-error")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByTestId("fe5-manage-item").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByTestId("fe5-audiences-retry"));
+    await waitFor(() => expect(screen.getByTestId("fe5-audience-admin")).toBeTruthy());
+  });
+});

@@ -233,6 +233,7 @@ function fullApi(over: Partial<MailApi> = {}): MailApi {
     registerForward: vi.fn(),
     updateForward: vi.fn(),
     removeForward: vi.fn(),
+    avatars: vi.fn().mockResolvedValue({ avatars: {} }),
     removeBlock: vi.fn().mockImplementation((value: string) => Promise.resolve({ value, blocked: false })),
     counts: vi.fn().mockRejectedValue(new Error("no counts")),
     ...over,

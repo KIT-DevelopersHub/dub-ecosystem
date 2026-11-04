@@ -1,6 +1,7 @@
 // NotificationManagePage — the /notifications/manage route (admin only). Lists
 // audience='admin' notifications and lets an admin publish them to members: one row at a
 // time, OR in BULK — filter by genre, "すべて選択", then "メンバーへ一括公開" (one request).
+// The 「誰に届くか」 panel on top shows which roles receive each audience (ロール管理 > 通知).
 // Skeleton loading; publishing is optimistic (rows flip to 公開済み instantly, roll back on
 // failure). The shell gates this route on notif:broadcast_publish (admins/maintainers).
 
@@ -21,6 +22,7 @@ import {
 import type { AdminNotificationItem } from "../contracts/notification-api";
 import { useAdminNotifications } from "../hooks/useAdminNotifications";
 import { NotificationTypeLabel } from "./NotificationTypeLabel";
+import { AudienceSummaryPanel } from "./AudienceSummaryPanel";
 import { NOTIFICATION_GROUP_META } from "../lib/type-dictionary";
 import {
   availableCategories,
@@ -197,6 +199,8 @@ export function NotificationManagePage(): ReactNode {
         description="管理者向けの通知を確認し、「メンバーへ公開」でメンバー全体に配信します。公開済みの通知は「公開解除」でメンバーから取り下げられます。"
         testId="fe5-manage-header"
       />
+
+      <AudienceSummaryPanel />
 
       {!loading && !displayError && items.length > 0 ? (
         <Stack gap={3}>
