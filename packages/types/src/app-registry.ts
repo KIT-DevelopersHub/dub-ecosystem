@@ -136,6 +136,11 @@ export const APP_MANIFEST = [
   // 未公開アプリ (releaseGate PUBLISHED_APPS 外) なので admin 以外はグレー表示 (identity/0025 で admin のみ付与)。
   { id: "hr", label: "人事", navPath: "/hr", domain: "hr", permissions: ["hr:read"], access: { view: "app:hr:view", edit: "app:hr:edit" },
     detailPermissions: ["hr:read", "hr:write", "hr:admin"] },
+  // スポンサー: スポンサーチーム向け。フェーズ1 = 名刺をカメラで撮って共有 (member-service
+  // /members/sponsor/*・写真は R2)。未公開アプリなので identity/0027 で admin のみ付与し、
+  // スポンサーチームのロールにはロール管理からオンにする。
+  { id: "sponsor", label: "スポンサー", navPath: "/sponsor", domain: "sponsor", permissions: ["sponsor:read"], access: { view: "app:sponsor:view", edit: "app:sponsor:edit" },
+    detailPermissions: ["sponsor:read", "sponsor:write", "sponsor:admin"] },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */

@@ -189,13 +189,15 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
       headers[REQUEST_ID_HEADER] = config.requestIdFactory();
     }
     const hasBody = input.body !== undefined && input.method !== "GET";
-    if (hasBody) headers["content-type"] = "application/json";
+    // Blob body = raw bytes (e.g. a JPEG upload); everything else is JSON.
+    const rawBody = hasBody && typeof Blob !== "undefined" && input.body instanceof Blob ? input.body : null;
+    if (hasBody) headers["content-type"] = rawBody ? headers["content-type"] ?? (rawBody.type || "application/octet-stream") : "application/json";
     const init: RequestInit = {
       method: input.method,
       credentials: "include",
       headers,
     };
-    if (hasBody) init.body = JSON.stringify(input.body);
+    if (hasBody) init.body = rawBody ?? JSON.stringify(input.body);
     if (input.signal) init.signal = input.signal;
     return fetchImpl(buildUrl(config.baseUrl, input.path, input.query), init);
   }

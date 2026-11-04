@@ -23,7 +23,8 @@ import { MemberService, type ReqCtx } from "./service";
 import { HrService } from "./hr-service";
 import { HrFormService } from "./hr-form-service";
 import { registerHrInterviewFormRoutes } from "./hr-form-routes";
-import type { hr } from "@dub/types";
+import type { hr, sponsor } from "@dub/types";
+import { SponsorService } from "./sponsor-service";
 
 // Actor stamped on a 参加届 that arrives through the public (unauthenticated) path.
 // The gateway forwards it as a genuine service-to-service call (x-dub-internal), but
@@ -69,6 +70,7 @@ async function readJson<T>(c: Context): Promise<T> {
 export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const svc = new MemberService(deps);
   const hrSvc = new HrService(deps, svc);
+  const sponsorSvc = new SponsorService(deps);
   const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "member-service" }));
@@ -287,6 +289,39 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.put("/members/hr/onboarding/:memberId/items/:itemId", async (c) => {
     const body = await readJson<hr.SetOnboardingCheckRequest>(c);
     return c.json(await hrSvc.setOnboardingCheck(reqCtx(c), c.req.param("memberId"), c.req.param("itemId"), body));
+  });
+
+  // ---- スポンサー (フェーズ1 = 名刺の共有) ----
+  // 認可は表 (スポンサーアプリの 閲覧/編集 + sponsor:read / sponsor:write / sponsor:admin)。
+  // 写真は JSON ではなく生のバイト列 (Content-Type = 形式)。形式・サイズ・楽観ロックはハンドラ (sponsor-service)。
+  app.get("/members/sponsor/cards", async (c) => c.json(await sponsorSvc.list(reqCtx(c))));
+  app.post("/members/sponsor/cards", async (c) => {
+    const body = await readJson<sponsor.CreateCardRequest>(c);
+    return c.json(await sponsorSvc.create(reqCtx(c), body), 201);
+  });
+  app.get("/members/sponsor/cards/:id", async (c) => c.json(await sponsorSvc.get(reqCtx(c), c.req.param("id"))));
+  app.patch("/members/sponsor/cards/:id", async (c) => {
+    const body = await readJson<sponsor.UpdateCardRequest>(c);
+    return c.json(await sponsorSvc.update(reqCtx(c), c.req.param("id"), body));
+  });
+  app.delete("/members/sponsor/cards/:id", async (c) => {
+    await sponsorSvc.remove(reqCtx(c), c.req.param("id"));
+    return c.body(null, 204);
+  });
+  app.put("/members/sponsor/cards/:id/image", async (c) => {
+    const len = Number(c.req.header("content-length"));
+    const card = await sponsorSvc.putImage(
+      reqCtx(c),
+      c.req.param("id"),
+      c.req.header("content-type"),
+      () => c.req.arrayBuffer(),
+      Number.isFinite(len) && len > 0 ? len : undefined,
+    );
+    return c.json(card);
+  });
+  app.get("/members/sponsor/cards/:id/image", async (c) => {
+    const img = await sponsorSvc.getImage(reqCtx(c), c.req.param("id"));
+    return c.body(img.body, 200, { "content-type": img.contentType, "cache-control": "private, max-age=300" });
   });
 
   return app;

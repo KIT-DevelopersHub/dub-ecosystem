@@ -68,6 +68,7 @@ const APP_TILES: AppTile[] = [
   // LP管理 はランチャーシート経由でしか開けず「どこにあるか分からない」状態だったのでタイルを出す。
   { id: "lp", label: "LP管理", desc: "LPの版・流入URL・流入ログ", icon: "megaphone", path: "/lp" },
   { id: "hr", label: "人事", desc: "面談・採用・オンボーディング", icon: "user", path: "/hr" },
+  { id: "sponsor", label: "スポンサー", desc: "名刺をスキャンしてチームで共有", icon: "folder", path: "/sponsor" },
 ];
 
 /** One clickable app tile. Renders as an anchor (real href for accessibility /
