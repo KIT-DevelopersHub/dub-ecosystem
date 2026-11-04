@@ -1,4 +1,4 @@
-// Recipient resolution (design §1 two-stage): direct userIds + roles (identity) +
+// Recipient resolution (design §1 two-stage): direct userIds + audiences/roles (identity) +
 // eventId (event-service). Results are de-duplicated. roles AND eventId compose by
 // union (a user reachable via either spec is a recipient). An empty result is a
 // legitimate no-op, never an error (design test #3).
@@ -6,6 +6,7 @@ import { DubError, CommonErrorCodes } from "@dub/errors";
 import type { RequestContext } from "@dub/http";
 import type { EventPort, IdentityPort } from "./clients";
 import type { NotifyRecipients } from "./types";
+import { notification } from "@dub/types";
 
 export interface RecipientResolver {
   resolve(recipients: NotifyRecipients, ctx: RequestContext): Promise<string[]>;
@@ -19,10 +20,11 @@ export function makeRecipientResolver(deps: { identity: IdentityPort; event: Eve
       for (const id of recipients.userIds ?? []) set.add(id);
 
       try {
-        // Broadcast: every active user (release notes / org-wide announcements).
-        if (recipients.all) {
-          const ids = await deps.identity.listAllUserIds(ctx);
-          for (const id of ids) set.add(id);
+        // Audiences (broadcasts = "all", 管理者向け = "admin"): whoever's roles hold the
+        // audience key in ロール管理 — never a hard-coded role list.
+        for (const audience of recipients.audiences ?? []) {
+          const { userIds } = await deps.identity.permissionHolders(notification.receiveAudiencePermission(audience), ctx);
+          for (const id of userIds) set.add(id);
         }
         for (const roleKey of recipients.roles ?? []) {
           const ids = await deps.identity.listUserIdsByRole(roleKey, ctx);

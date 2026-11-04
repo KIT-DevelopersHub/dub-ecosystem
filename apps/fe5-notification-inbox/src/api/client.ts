@@ -10,6 +10,7 @@ import type {
   ListInboxResponse,
   ListAdminNotificationsParams,
   ListAdminNotificationsResponse,
+  ListAudiencesResponse,
   PublishBroadcastResponse,
   PublishBroadcastBatchResponse,
   UnpublishBroadcastResponse,
@@ -40,6 +41,8 @@ export interface NotificationApi {
   publishRelease(req: PublishReleaseRequest): Promise<PublishReleaseResponse>;
   /** Admin (notif:broadcast_publish): list audience='admin' notifications to manage. */
   listAdminNotifications(params?: ListAdminNotificationsParams): Promise<ListAdminNotificationsResponse>;
+  /** Admin (notif:broadcast_publish): who receives each audience (roles → member counts). */
+  listAudiences(): Promise<ListAudiencesResponse>;
   /** Admin: publish one admin notification to all members as a broadcast. */
   publishBroadcast(id: string): Promise<PublishBroadcastResponse>;
   /** Admin: publish MANY admin notifications to members in one round trip (bulk). */
@@ -81,6 +84,9 @@ export function createNotificationApi(client: ApiClient): NotificationApi {
     },
     listAdminNotifications(params) {
       return client.get<ListAdminNotificationsResponse>(`${BASE}/manage`, params as Record<string, unknown> | undefined);
+    },
+    listAudiences() {
+      return client.get<ListAudiencesResponse>(`${BASE}/audiences`);
     },
     publishBroadcast(id) {
       return client.post<PublishBroadcastResponse>(`${BASE}/manage/${encodeURIComponent(id)}/publish`);

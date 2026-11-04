@@ -103,6 +103,8 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /users/:id": INTERNAL,
   "POST /internal/users/:id/profile": INTERNAL,
   "GET /internal/users": INTERNAL,
+  // notification-service audience fan-out + 通知管理「誰に届くか」 (roles + active holders of one key).
+  "GET /internal/permission-holders": INTERNAL,
   "POST /internal/users/lookup": INTERNAL,
   // mail-gateway's sender icons; the caller's mail:read is checked by mail-gateway's own table.
   "POST /internal/users/avatars": INTERNAL,

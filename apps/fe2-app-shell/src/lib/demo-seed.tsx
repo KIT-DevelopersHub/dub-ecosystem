@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
+import { identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
@@ -46,7 +46,10 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "file:read",
   "notif:inbox:self",
   "notif:prefs:self",
+  "notif:admin",
   "notif:broadcast_publish",
+  "notif:receive_all",
+  "notif:receive_admin",
   "mail:read",
   "mail:send",
   "mail:admin",
@@ -1598,8 +1601,25 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
   "chat:moderate",
   "github:read",
   "notif:send",
+  // 通知 = 閲覧 like prod (identity 0004/0008) + 0028: receives 管理者向け + 全体 notifications.
+  "app:notifications:view",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "notif:broadcast_publish",
+  "notif:admin",
+  "notif:receive_admin",
+  "notif:receive_all",
 ];
-const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read"];
+// 通知 = 閲覧 like prod; 0028 gives every 通知 role 「全体への通知を受け取る」.
+const MEMBER_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "task:read",
+  "app:notifications:view",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "notif:receive_all",
+];
 
 // The roster carries `source` (Email Routing vs. 手動) — extra field over the frozen
 // IdentityUser, read by FE7's RosterUser projection and its 種別 column / sort.
@@ -1748,6 +1768,22 @@ function createRosterStore() {
         }
       }
       if (pathname === "/api/v1/identity/roles") return json(page(roles));
+      // 通知管理「誰に届くか」: derived from the LIVE demo roles, so toggling 「管理者向け通知を
+      // 受け取る」 in ロール管理 changes this summary in the same session (mirrors identity
+      // GET /internal/permission-holders behind notification GET /audiences).
+      if (pathname === "/api/v1/notifications/audiences") {
+        const active = users.filter((u) => u.status === "active");
+        const items: notification.AudienceSummary[] = notificationValues.RECEIVE_AUDIENCES.map((def) => {
+          const holding = roles.filter((r) => (r.permissions as string[]).includes(def.permission));
+          const ids = new Set(holding.flatMap((r) => users.filter((u) => u.roleIds.includes(r.id)).map((u) => u.id)));
+          return {
+            ...def,
+            roles: holding.map((r) => ({ id: r.id, name: r.name, memberCount: users.filter((u) => u.roleIds.includes(r.id)).length })),
+            recipientCount: active.filter((u) => ids.has(u.id)).length,
+          };
+        });
+        return json({ items } satisfies notification.ListAudiencesResponse);
+      }
       if (pathname === "/api/v1/identity/permissions/catalog") return json(identityValues.PERMISSION_CATALOG);
       if (pathname === "/api/v1/audit/logs") {
         const action = url.searchParams.get("action") ?? "identity.";

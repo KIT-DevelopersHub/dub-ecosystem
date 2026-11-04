@@ -104,7 +104,7 @@ describe("buildBroadcastInput", () => {
   it("targets all users, in_app, type=system.announcement, audience=members, linked dedup key", () => {
     const input = buildBroadcastInput({ id: "ntfn_src", title: "T", body: "B" }, "req_1", "usr_admin");
     expect(input.type).toBe("system.announcement");
-    expect(input.recipients).toEqual({ all: true });
+    expect(input.recipients).toEqual({ audiences: ["all"] });
     expect(input.audience).toBe("members");
     expect(input.channels).toEqual(["in_app"]);
     expect(input.dedupKey).toBe("broadcast:from:ntfn_src");

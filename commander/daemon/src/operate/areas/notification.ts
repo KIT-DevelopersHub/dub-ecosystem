@@ -26,6 +26,15 @@ export const NOTIFICATION: AreaSpec = {
       query: ["limit", "cursor"],
     }),
     read({
+      id: "notifications.audiences.list",
+      area: "notification",
+      path: "/notifications/audiences",
+      service: S,
+      requires: MANAGE_VIEW,
+      description: "通知の種類ごとに誰に届くか（受け取るロールと人数）を取得する",
+      hint: "items[].audience（admin=管理者向け / all=全体）・label・roles[].name・roles[].memberCount・recipientCount",
+    }),
+    read({
       id: "notifications.inbox.list",
       area: "notification",
       path: "/notifications/inbox",

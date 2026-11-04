@@ -12,7 +12,6 @@ import type { IngestInput } from "./types";
 import {
   FEEDBACK_ADMIN_EMAIL,
   FEEDBACK_EXCERPT_LEN,
-  FEEDBACK_NOTIFY_ROLE_IDS,
   FEEDBACK_NOTIFY_TYPE,
   INQUIRY_KIND_LABELS,
 } from "./config";
@@ -86,8 +85,8 @@ export async function notifyAdminOfFeedback(
 }
 
 /**
- * Build the in-app notification for a stored feedback item, fanned out to admin /
- * maintainer users. in_app (+ push added by ingest; Slack / chat / email are not targeted);
+ * Build the in-app notification for a stored feedback item, fanned out to every
+ * notif:receive_admin holder. in_app (+ push added by ingest; Slack / chat / email are not targeted);
  * the dedupKey is namespaced to the feedback id so retries never create duplicates.
  */
 export function buildFeedbackNotifyInput(item: notification.FeedbackItem, requestId: string): IngestInput {
@@ -101,7 +100,7 @@ export function buildFeedbackNotifyInput(item: notification.FeedbackItem, reques
   ].join("\n");
   return {
     type: FEEDBACK_NOTIFY_TYPE,
-    recipients: { roles: [...FEEDBACK_NOTIFY_ROLE_IDS] },
+    recipients: { audiences: ["admin"] }, // notif:receive_admin holders (ロール管理)
     title: `新しい${inquiryHeading(item)}: ${excerpt(item.message)}`,
     body,
     priority: "normal",

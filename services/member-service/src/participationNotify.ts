@@ -13,9 +13,9 @@ import type { Fetcher } from "@cloudflare/workers-types";
 import { createServiceClient, type RequestContext } from "@dub/http";
 import { member, type notification } from "@dub/types";
 
-// Admin fan-out roles — mirrors the feedback / usage-alert → admin flow. notification-service
-// expands these to the matching users' inboxes, so admins are reached without any user-id config.
-export const PARTICIPATION_NOTIFY_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"] as const;
+// 管理者向け audience — notification-service expands it to the notif:receive_admin holders
+// (ロール管理「管理者向け通知を受け取る」), so admins are reached without any user-id config.
+export const PARTICIPATION_NOTIFY_AUDIENCES = ["admin"] as const;
 export const PARTICIPATION_NOTIFY_TYPE = "member.participation.submitted";
 
 /** Build the admin in-app notification for a submitted 参加届. in_app only; dedupKey is
@@ -33,7 +33,7 @@ export function buildParticipationNotify(p: member.Participation): notification.
   return {
     type: PARTICIPATION_NOTIFY_TYPE,
     recipientIds: [],
-    recipientRoles: [...PARTICIPATION_NOTIFY_ROLE_IDS],
+    recipientAudiences: [...PARTICIPATION_NOTIFY_AUDIENCES],
     title: `新しい参加届: ${p.name}`,
     body,
     channels: ["in_app"],

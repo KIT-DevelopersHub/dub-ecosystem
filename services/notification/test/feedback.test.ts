@@ -230,18 +230,15 @@ describe("in-app feedback", () => {
   });
 });
 
-// Role IDs mirror the identity-roster system-role seed (config.FEEDBACK_NOTIFY_ROLE_IDS).
-const ADMIN_ROLE = "role_sys_admin";
-const MAINTAINER_ROLE = "role_sys_maintainer";
-const MEMBER_ROLE = "role_sys_member";
+// Feedback goes to the 「管理者向け通知を受け取る」 holders (ロール管理), not a role list.
+const RECEIVE_ADMIN = "notif:receive_admin";
 
 describe("feedback -> in-app admin notifications", () => {
-  it("POST /feedback: creates one inbox notification per admin + maintainer (member excluded)", async () => {
+  it("POST /feedback: creates one inbox notification per notif:receive_admin holder (others excluded)", async () => {
     const identity = fakeIdentity({
-      byRole: {
-        [ADMIN_ROLE]: ["usr_admin1", "usr_admin2"],
-        [MAINTAINER_ROLE]: ["usr_maint1"],
-        [MEMBER_ROLE]: ["usr_member1"],
+      byPermission: {
+        [RECEIVE_ADMIN]: ["usr_admin1", "usr_admin2", "usr_maint1"],
+        "notif:receive_all": ["usr_member1"],
       },
     });
     const h = makeTestEnv();
@@ -260,12 +257,13 @@ describe("feedback -> in-app admin notifications", () => {
     expect(await unreadCount(h.db, "usr_admin1", true)).toBe(1);
     expect(await unreadCount(h.db, "usr_admin2", true)).toBe(1);
     expect(await unreadCount(h.db, "usr_maint1", true)).toBe(1);
-    // member role is never queried -> no notification; the submitter gets none either
+    // a non-holder gets nothing; the submitter gets none either
     expect(await unreadCount(h.db, "usr_member1", true)).toBe(0);
     expect(await unreadCount(h.db, "usr_alice", true)).toBe(0);
 
-    // only the admin + maintainer roles were expanded
-    expect(identity.roleCalls.sort()).toEqual([ADMIN_ROLE, MAINTAINER_ROLE].sort());
+    // only the admin audience key was expanded (no hard-coded role list)
+    expect(identity.permissionCalls).toEqual([RECEIVE_ADMIN]);
+    expect(identity.roleCalls).toEqual([]);
 
     // the inbox item is typed + deep-links back to the feedback record
     const inbox = await listInbox(h.db, "usr_admin1", { limit: 10 }, true);
@@ -287,7 +285,7 @@ describe("feedback -> in-app admin notifications", () => {
   });
 
   it("notifyAdminsOfFeedbackInApp is idempotent — re-running does not duplicate inbox rows", async () => {
-    const identity = fakeIdentity({ byRole: { [ADMIN_ROLE]: ["usr_admin1"], [MAINTAINER_ROLE]: ["usr_maint1"] } });
+    const identity = fakeIdentity({ byPermission: { [RECEIVE_ADMIN]: ["usr_admin1", "usr_maint1"] } });
     const h = makeTestEnv();
     const deps = buildIngestDeps(h.env, ctx("req_idem"), { identity });
     const item: notification.FeedbackItem = {
@@ -313,7 +311,7 @@ describe("feedback -> in-app admin notifications", () => {
     expect(await unreadCount(h.db, "usr_maint1", true)).toBe(1);
   });
 
-  it("buildFeedbackNotifyInput: in_app only, role-targeted, feedback-scoped dedupKey", () => {
+  it("buildFeedbackNotifyInput: in_app only, admin-audience-targeted, feedback-scoped dedupKey", () => {
     const input = buildFeedbackNotifyInput(
       {
         id: "nfb_9",
@@ -329,7 +327,8 @@ describe("feedback -> in-app admin notifications", () => {
       "req_1",
     );
     expect(input.channels).toEqual(["in_app"]);
-    expect(input.recipients.roles).toEqual([ADMIN_ROLE, MAINTAINER_ROLE]);
+    expect(input.recipients.audiences).toEqual(["admin"]);
+    expect(input.recipients.roles).toBeUndefined();
     expect(input.recipients.userIds).toBeUndefined();
     expect(input.dedupKey).toBe("feedback:nfb_9");
     expect(input.resourceType).toBe("feedback");

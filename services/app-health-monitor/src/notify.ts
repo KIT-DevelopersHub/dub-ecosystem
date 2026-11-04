@@ -1,11 +1,11 @@
 // Admin alerting. When a target crosses the failure threshold we fire ONE in-app notification
-// to admins/maintainers (recipientRoles fan-out — mirrors feedback / usage-meter; the roles are
+// to the 管理者向け audience (recipientAudiences — notif:receive_admin holders; the audience is
 // resolved to admin inboxes only, so members never see health noise). On recovery we fire a
 // clear. Best-effort: every failure is swallowed + logged so alerting can never break the loop.
 import { createServiceClient, newRequestId, type RequestContext } from "@dub/http";
 import { consoleSink } from "@dub/observability";
 import type { notification } from "@dub/types";
-import { ADMIN_ROLE_IDS, HEALTH_NOTIFY_TYPE, SERVICE_NAME } from "./config";
+import { ALERT_AUDIENCES, HEALTH_NOTIFY_TYPE, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
 import type { TargetResult } from "./types";
 
@@ -41,7 +41,7 @@ export function createNotifier(env: Env): Notifier {
       const req: notification.NotifyRequest = {
         type: HEALTH_NOTIFY_TYPE,
         recipientIds: [],
-        recipientRoles: [...ADMIN_ROLE_IDS],
+        recipientAudiences: [...ALERT_AUDIENCES],
         title: `⚠️ ${target.label} が開けない可能性があります`,
         body: [
           `死活監視が「${target.label}」の異常を検知しました。`,
@@ -62,7 +62,7 @@ export function createNotifier(env: Env): Notifier {
       const req: notification.NotifyRequest = {
         type: HEALTH_NOTIFY_TYPE,
         recipientIds: [],
-        recipientRoles: [...ADMIN_ROLE_IDS],
+        recipientAudiences: [...ALERT_AUDIENCES],
         title: `✅ ${target.label} が復旧しました`,
         body: [`死活監視が「${target.label}」の復旧を確認しました。`, ``, `対象: ${target.id}`, `詳細: ${target.detail}`].join("\n"),
         channels: ["in_app"],

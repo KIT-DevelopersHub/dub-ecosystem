@@ -148,7 +148,7 @@ export async function backfillBroadcastInbox(db: DbClient, userId: string): Prom
  * (deploy hook) that never fanned out to individual admins — becomes visible to every
  * admin/maintainer on their next inbox read, WITHOUT the producer needing to know admin
  * user ids. This is what lets the CI deploy-notify be a single idempotent INSERT of one
- * notification row. Callers MUST gate on isAdminViewer (only admins get admin-audience
+ * notification row. Callers MUST gate on receiverFlags().admin (only notif:receive_admin holders get admin-audience
  * rows). Idempotent (NOT EXISTS + INSERT OR IGNORE); cheap for the same reasons as the
  * broadcast backfill (retention purge bounds the admin-audience row count). Returns rows
  * newly created. notif_* tables only (@dub/db guard).

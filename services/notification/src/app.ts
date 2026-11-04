@@ -12,7 +12,7 @@
 //
 // What stays in the handlers is RESOURCE SCOPE, by design (gate.ts's two-layer note): every
 // inbox / preferences query is scoped to the acting `userId`, so "my inbox" still means
-// mine, and `isAdminViewer` still decides which AUDIENCE a reader sees. The table answers
+// mine, and `receiverFlags` still decides which AUDIENCE a reader sees. The table answers
 // "may this caller use an inbox at all"; those answer "whose, and which rows".
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { DubError, errors, dubErrorHandler } from "@dub/errors";
@@ -20,7 +20,7 @@ import { dubContext } from "@dub/http";
 import type { RequestContext } from "@dub/http";
 import { policyGate, sharedAuthzGranter, type PermissionGranter } from "@dub/policy-gate";
 import { HEADERS } from "@dub/observability";
-import { common, type notification } from "@dub/types";
+import { common, notification } from "@dub/types";
 import type { AppBindings } from "./env";
 import { SERVICE_NAME, CHANNELS } from "./config";
 import { buildDb, buildIngestDeps } from "./deps";
@@ -54,7 +54,7 @@ import {
   parseUnpublishBatch,
   parseReleaseRequest,
 } from "./validation";
-import { makeMailPort, type MailPort, type IdentityPort } from "./clients";
+import { makeIdentityPort, makeMailPort, type MailPort, type IdentityPort } from "./clients";
 import { notifyAdminOfFeedback, notifyAdminsOfFeedbackInApp } from "./feedback";
 import { publishRelease, seedInitialReleases } from "./release";
 import {
@@ -63,7 +63,7 @@ import {
   unpublishBroadcastFromNotification,
   unpublishBroadcastBatch,
 } from "./broadcast";
-import { ADMIN_VIEWER_PERMISSION } from "./config";
+import { ADMIN_VIEWER_PERMISSION, BROADCAST_RECEIVER_PERMISSION } from "./config";
 import { POLICY_TABLE } from "./policy-table";
 import type { IngestInput } from "./types";
 import { dispatchEvent } from "./queue";
@@ -109,10 +109,11 @@ export function createApp(options: CreateAppOptions = {}) {
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, ctxOf(c).requestId);
   const mailOf = (c: Context<AppBindings>): MailPort | null =>
     options.mail ?? (c.env.SVC_MAIL_GATEWAY ? makeMailPort(c.env.SVC_MAIL_GATEWAY) : null);
+  const identityOf = (c: Context<AppBindings>): IdentityPort => options.identity ?? makeIdentityPort(c.env.SVC_IDENTITY);
   const ingestDepsOf = (c: Context<AppBindings>, ctx: RequestContext) =>
     buildIngestDeps(c.env, ctx, options.identity ? { identity: options.identity } : {});
 
-  // The authorization decision point, shared by the gate below and by `isAdminViewer`.
+  // The authorization decision point, shared by the gate below and by `receiverFlags`.
   // `sharedAuthzGranter` (not `createAuthzGranter`): the TTL decision cache ADR 0004 asks
   // for is memoized per Env, so it survives across requests served by the same isolate
   // instead of being empty on every one — identity-roster is on the inbox hot path, which
@@ -142,18 +143,24 @@ export function createApp(options: CreateAppOptions = {}) {
     return gate(c, next);
   });
 
-  // Is the signed-in user an admin viewer (sees BOTH audiences)? NOT an authorization
-  // check — the gate already decided whether this caller may read an inbox at all. This
-  // shapes the RESPONSE: holders of notif:admin additionally see audience='admin' rows
-  // (the "Admin には例外なく全部届く" guarantee), members are filtered to 'members'.
-  // Fail-closed: any error (identity unreachable) is treated as a member, so
-  // admin-audience rows stay hidden rather than leaking on a transient failure.
-  const isAdminViewer = async (c: Context<AppBindings>, userId: string): Promise<boolean> => {
+  // Which receive audiences does the signed-in user hold (ロール管理 > 通知)? NOT an
+  // authorization check — the gate already decided whether this caller may read an inbox at
+  // all. It shapes the RESPONSE: notif:receive_admin holders additionally see audience='admin'
+  // rows; notif:receive_all holders get late-join broadcast backfill. One /authz/check for
+  // both keys. Fail-closed: any error (identity unreachable) means neither, so admin-audience
+  // rows stay hidden rather than leaking on a transient failure.
+  const receiverFlags = async (
+    c: Context<AppBindings>,
+    userId: string,
+  ): Promise<{ admin: boolean; broadcasts: boolean }> => {
     try {
-      const held = await authzOf(c)(userId, common.DUB_DEFAULT_ORG_ID, [ADMIN_VIEWER_PERMISSION]);
-      return held.includes(ADMIN_VIEWER_PERMISSION);
+      const held = await authzOf(c)(userId, common.DUB_DEFAULT_ORG_ID, [
+        ADMIN_VIEWER_PERMISSION,
+        BROADCAST_RECEIVER_PERMISSION,
+      ]);
+      return { admin: held.includes(ADMIN_VIEWER_PERMISSION), broadcasts: held.includes(BROADCAST_RECEIVER_PERMISSION) };
     } catch {
-      return false;
+      return { admin: false, broadcasts: false };
     }
   };
 
@@ -193,7 +200,7 @@ export function createApp(options: CreateAppOptions = {}) {
   // This closes GAP-2: previously the service only mounted at "/inbox", so every proxied
   // external "/notifications/*" request 404'd (prod 通知ダイアログ "Couldn't load"). The
   // integration harness masked it because its notification STUB accepted both prefixes.
-  // Both prefixes get the SAME 16 rules in POLICY_TABLE — see its header for why the bare
+  // Both prefixes get the SAME 17 rules in POLICY_TABLE — see its header for why the bare
   // twin is not given a weaker rule just because the gateway cannot route to it today.
   const mountNotif = (p: string) => {
     // ---- POST /notify: internal binding only (design §2/§6). INTERNAL in the table:
@@ -208,6 +215,9 @@ export function createApp(options: CreateAppOptions = {}) {
         recipients: {
           userIds: parsed.recipientIds,
           ...(parsed.recipientRoles && parsed.recipientRoles.length > 0 ? { roles: parsed.recipientRoles } : {}),
+          ...(parsed.recipientAudiences && parsed.recipientAudiences.length > 0
+            ? { audiences: parsed.recipientAudiences }
+            : {}),
         },
         title: parsed.title,
         body: parsed.body,
@@ -220,7 +230,7 @@ export function createApp(options: CreateAppOptions = {}) {
         ...(parsed.channels ? { channels: parsed.channels } : {}),
         ...(parsed.dedupKey ? { dedupKey: parsed.dedupKey } : {}),
       };
-      const deps = buildIngestDeps(c.env, ctx);
+      const deps = ingestDepsOf(c, ctx);
       const result = await ingest(deps, input);
       const res: NotifyResponse = result;
       return c.json(res, 202);
@@ -257,6 +267,19 @@ export function createApp(options: CreateAppOptions = {}) {
       const q = parseListManageQuery(c.req.query());
       const page = await listAdminNotifications(dbOf(c), q);
       return c.json(page satisfies notification.ListAdminNotificationsResponse);
+    });
+
+    // 「誰に届くか」: per receive audience, the roles holding its key in ロール管理 (with member
+    // counts) and how many active users it resolves to right now. Same gate as the list.
+    app.get(`${p}/audiences`, async (c) => {
+      const ctx = ctxOf(c);
+      const identity = identityOf(c);
+      const items: notification.AudienceSummary[] = [];
+      for (const def of notification.RECEIVE_AUDIENCES) {
+        const holders = await identity.permissionHolders(def.permission, ctx);
+        items.push({ ...def, roles: holders.roles, recipientCount: holders.userIds.length });
+      }
+      return c.json({ items } satisfies notification.ListAudiencesResponse);
     });
 
     app.post(`${p}/manage/:id/publish`, async (c) => {
@@ -307,14 +330,14 @@ export function createApp(options: CreateAppOptions = {}) {
     app.get(`${p}/inbox`, async (c) => {
       const userId = c.get("userId");
       const db = dbOf(c);
-      // Backfill broadcast rows this user is missing (late-join safety) before listing, so
-      // release notes always appear regardless of when the user was created (bugfix).
-      await backfillBroadcastInbox(db, userId);
       const q = parseListInboxQuery(c.req.query());
-      const admin = await isAdminViewer(c, userId);
-      // Admins additionally get every audience='admin' notification lazily materialized
-      // (feedback / deploy / ops / CI-written rows) so nothing addressed to admins is
-      // ever missed — the "Admin には例外なく全部届く" guarantee.
+      const { admin, broadcasts } = await receiverFlags(c, userId);
+      // 全体への通知 receivers: backfill broadcast rows they are missing (late-join safety)
+      // before listing, so release notes appear regardless of when the user was created.
+      if (broadcasts) await backfillBroadcastInbox(db, userId);
+      // 管理者向け通知 receivers additionally get every audience='admin' notification lazily
+      // materialized (feedback / deploy / ops / CI-written rows) so nothing addressed to
+      // admins is ever missed.
       if (admin) await backfillAdminAudienceInbox(db, userId);
       const page = await listInbox(db, userId, q, admin);
       return c.json(page satisfies notification.ListInboxResponse);
@@ -338,10 +361,9 @@ export function createApp(options: CreateAppOptions = {}) {
     app.get(`${p}/inbox/unread-count`, async (c) => {
       const userId = c.get("userId");
       const db = dbOf(c);
-      // Same backfill as GET /inbox so the header unread badge counts broadcasts a late-join
-      // user never received a fan-out row for.
-      await backfillBroadcastInbox(db, userId);
-      const admin = await isAdminViewer(c, userId);
+      // Same backfills as GET /inbox so the header unread badge counts what the list shows.
+      const { admin, broadcasts } = await receiverFlags(c, userId);
+      if (broadcasts) await backfillBroadcastInbox(db, userId);
       if (admin) await backfillAdminAudienceInbox(db, userId);
       const count = await unreadCount(db, userId, admin);
       return c.json({ count } satisfies notification.UnreadCountResponse);

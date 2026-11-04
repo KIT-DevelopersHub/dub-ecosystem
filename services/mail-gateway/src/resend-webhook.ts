@@ -35,7 +35,8 @@ export const RESEND_ALERT_EVENTS = new Set([
 ]);
 export const SVIX_TOLERANCE_SEC = 300;
 export const EXTERNAL_THROTTLE_MS = 24 * 60 * 60 * 1000;
-export const ALERT_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"];
+// 管理者向け audience: notif:receive_admin holders (ロール管理), resolved by notification.
+export const ALERT_AUDIENCES: notification.ReceiveAudience[] = ["admin"];
 export const ALERT_NOTIFY_TYPE = "mail.delivery_alert";
 const DEFAULT_ZONE = "developershub.jp";
 
@@ -316,14 +317,14 @@ async function raiseAlert(
   } catch (err) {
     log("error", "resend webhook: failed to publish audit", ctx, { error: err instanceof Error ? err.message : String(err) });
   }
-  // In-app notification to admin roles (same role fan-out as feedback / usage-meter alerts).
+  // In-app notification to the 管理者向け audience (same fan-out as feedback / usage-meter alerts).
   if (env.SVC_NOTIFICATION) {
     try {
       const client = createServiceClient(env.SVC_NOTIFICATION, { service: "notification", caller: SERVICE_NAME });
       const req: notification.NotifyRequest = {
         type: ALERT_NOTIFY_TYPE,
         recipientIds: [],
-        recipientRoles: ALERT_ROLE_IDS,
+        recipientAudiences: ALERT_AUDIENCES,
         title: msg.title,
         body: msg.body,
         channels: ["in_app"],
