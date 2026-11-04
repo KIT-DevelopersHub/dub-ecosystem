@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "sponsor-cards",
+  "worker": "dub-demo-sponsor-cards",
+  "url": "https://dub-demo-sponsor-cards.developershub-site.workers.dev",
+  "deployedSha": "6e8c3daf",
+  "branch": "feat/sponsor-app",
+  "actor": "ko-tarou",
+  "markers": ["fe2-sponsor-capture","fe2-sponsor-grid","card_demo_1"],
+  "live": true,
+  "verifiedAt": "2026-11-04T04:35:22Z",
+  "updatedAt": "2026-11-04T04:35:22Z",
+  "note": "スポンサーアプリ: 名刺スキャン共有 (ctask_01M6J1SJK5HBYK7QVF802T8YSE)"
+}
