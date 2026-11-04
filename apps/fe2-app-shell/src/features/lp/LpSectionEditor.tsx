@@ -7,7 +7,9 @@
 // 狭い画面は設定を縦に並べ、プレビューは見出しのボタンで開く枠にする。
 // 連動: 設定にホバー / フォーカス → LP のそのセクションに枠（lp:mark）/ LP でセクションをクリック（lp:select）→ その設定へ。
 // 受け取るのはこの iframe の window から LP のオリジンで来たものだけ。送る宛先も LP のオリジン。
-// 下書きは保存のたびに refreshKey（revision）が変わるので、少し待って（連続操作をまとめて）読み直す。
+// 即時反映: 画面上の設定（attrs = layoutAttributes の結果）を lp:config で LP に送り、LP が <html> の data-lp-* を
+// 付け替える（読み直し・保存待ち・Worker のキャッシュ待ちなし）。読み込み直後にも送るので、demo（保存しない）でも映る。
+// lp:config を受け付けない古い橋渡しのときだけ、従来どおり refreshKey（revision）の変化で少し待って読み直す。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, Card, Icon, Skeleton, Spinner } from "@dub/ui";
 import styles from "./lp.module.css";
@@ -38,6 +40,16 @@ export interface SectionBox {
 export interface LpLayoutReport {
   sections: SectionBox[];
   docHeight: number;
+}
+
+/** lp:sections の caps に "config" があるか（= lp:config で即時に映せる橋渡し）。 */
+export function supportsLiveConfig(d: { caps?: unknown }): boolean {
+  return Array.isArray(d.caps) && d.caps.includes("config");
+}
+
+/** 送った属性と同じか比べるためのキー（順不同）。 */
+export function attrsKey(attrs: Readonly<Record<string, string>>): string {
+  return JSON.stringify(Object.entries(attrs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
 export function miniPreviewSrc(url: string, refreshKey: number): string {
@@ -108,26 +120,35 @@ function useWidth(ref: React.RefObject<HTMLElement>): number {
 export function LpSectionEditor({
   url,
   refreshKey,
+  attrs,
   title,
   notes,
+  noSyncNotes = [],
   sectionIds,
   sectionLabel,
   renderSection,
   narrow = false,
 }: {
   url: string;
+  /** 保存のたびに変わる値。即時反映できない（古い橋渡しの）LP だけ、これの変化で読み直す。 */
   refreshKey: number;
+  /** 画面上の設定を当てた <html> の data-lp-* 属性（layoutAttributes の結果）。変わるたびに即時に LP へ送る。 */
+  attrs: Readonly<Record<string, string>>;
   title: string;
-  /** プレビューについての注記（版が古い・本番は反映後に映る 等）。 */
+  /** プレビューについての注記（版が古い 等）。 */
   notes: string[];
+  /** 即時反映できない LP のときだけ出す注記（本番は反映後に映る・demo は v3.6 のデプロイ後 等）。 */
+  noSyncNotes?: string[];
   sectionIds: readonly string[];
   sectionLabel: (id: string) => string;
   renderSection: (id: string) => ReactNode;
   /** 狭い画面: 設定を縦に並べ、プレビューは開閉する枠にする。 */
   narrow?: boolean;
 }): JSX.Element {
-  const target = miniPreviewSrc(url, refreshKey);
-  const [src, setSrc] = useState(target);
+  // いま iframe に読ませている URL と refreshKey。即時反映できる LP では refreshKey が変わっても読み直さない。
+  const [frame, setFrame] = useState({ url, key: refreshKey });
+  const src = miniPreviewSrc(frame.url, frame.key);
+  const [liveConfig, setLiveConfig] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -148,6 +169,10 @@ export function LpSectionEditor({
   const [bridge, setBridge] = useState<BridgeState>("waiting");
   const [report, setReport] = useState<LpLayoutReport | null>(null);
   const gotReport = useRef(false);
+  const attrsRef = useRef(attrs);
+  attrsRef.current = attrs;
+  /** この読み込みで LP に最後に送った属性（同じものを送り直さない = lp:config → lp:sections のループ防止）。 */
+  const sentKey = useRef<string | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const activeRef = useRef<string | null>(null);
   activeRef.current = active;
@@ -165,18 +190,31 @@ export function LpSectionEditor({
   const postRef = useRef(post);
   postRef.current = post;
 
+  const sendConfig = (): void => {
+    const key = attrsKey(attrsRef.current);
+    if (key === sentKey.current) return;
+    sentKey.current = key;
+    postRef.current({ type: "lp:config", attrs: { ...attrsRef.current } });
+  };
+  const sendConfigRef = useRef(sendConfig);
+  sendConfigRef.current = sendConfig;
+
   // 狭い画面（設定を縦に並べる）と、全高を測れない LP では、ブロックを位置合わせしない。
   const aligned = !narrow && bridge !== "none" && report !== null;
 
   useEffect(() => {
     const onMessage = (e: MessageEvent): void => {
       if (!lpOrigin || e.origin !== lpOrigin || !frameRef.current || e.source !== frameRef.current.contentWindow) return;
-      const d = e.data as { type?: unknown; section?: unknown; sections?: unknown; docHeight?: unknown } | null;
+      const d = e.data as { type?: unknown; section?: unknown; sections?: unknown; docHeight?: unknown; caps?: unknown } | null;
       if (!d || typeof d !== "object") return;
       if (d.type === "lp:sections") {
         gotReport.current = true;
         setBridge("ready");
         setReport(parseLayoutReport(d));
+        const live = supportsLiveConfig(d);
+        setLiveConfig(live);
+        // 読み込み直後（Worker が付けた保存済みの設定）に、画面上の設定を当て直す。
+        if (live) sendConfigRef.current();
         // 読み直し（保存のたび）で枠が消えるので、選んでいたセクションに付け直す。
         if (activeRef.current) postRef.current({ type: "lp:mark", section: activeRef.current });
       }
@@ -204,6 +242,7 @@ export function LpSectionEditor({
     setLoaded(true);
     setRefreshing(false);
     gotReport.current = false;
+    sentKey.current = null;
     // select: クリックでセクションを選べる / fit: 全高で描くので 1 画面ぶんの高さを固定してもらう。
     post({ type: "lp:hello", select: true, fit: VIEWPORT_HEIGHT });
     setTimeout(() => {
@@ -213,14 +252,23 @@ export function LpSectionEditor({
     }, BRIDGE_TIMEOUT_MS);
   };
 
+  // 設定を変えたら即時に送る（楽観的: 保存の完了を待たない）。
+  const currentKey = attrsKey(attrs);
   useEffect(() => {
-    if (target === src) return undefined;
+    if (liveConfig && bridge === "ready") sendConfigRef.current();
+  }, [currentKey, liveConfig, bridge]);
+
+  // 読み直すのは URL（版・チケット・募集）が変わったときと、即時反映できない LP で保存されたとき。
+  useEffect(() => {
+    const stale = url !== frame.url || (!liveConfig && refreshKey !== frame.key);
+    if (!stale) return undefined;
     const t = setTimeout(() => {
       setRefreshing(true);
-      setSrc(target);
+      if (url !== frame.url) setLiveConfig(false);
+      setFrame({ url, key: refreshKey });
     }, MINI_PREVIEW_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [target, src]);
+  }, [url, refreshKey, frame, liveConfig]);
 
   // ブロックの高さを測って置き直す（高さが変わったら＝切り替えでラベルが変わった等、もう一度）。
   const [heights, setHeights] = useState<Record<string, number>>({});
@@ -261,6 +309,7 @@ export function LpSectionEditor({
   const allNotes = [
     bridge === "none" ? "この LP はセクションの位置を返さないので、設定は順に並べています（位置がそろうのは v3.6 以降の版のプレビュー表示です）。" : null,
     ...notes,
+    ...(liveConfig ? [] : noSyncNotes),
   ].filter((n): n is string => !!n);
 
   return (
@@ -289,7 +338,7 @@ export function LpSectionEditor({
             <span>{text}</span>
           </p>
         ))}
-        <div className={styles.lpEditor} data-narrow={narrow} data-sync={bridge}>
+        <div className={styles.lpEditor} data-narrow={narrow} data-sync={bridge} data-live-config={liveConfig}>
           <div ref={previewRef} className={styles.lpEditorPreview} hidden={!showPreview} data-testid="fe2-lp-config-mini">
             <div className={styles.miniBox} style={{ height: boxHeight }} data-fit={previewHeight !== null} data-testid="fe2-lp-config-mini-box">
               {!loaded ? (

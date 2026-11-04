@@ -217,15 +217,14 @@ describe("LpSiteConfigScreen — プレビュー（下書き）", () => {
     );
   });
 
-  it("never writes production from the draft tab: プレビューに反映 only reloads the preview", async () => {
+  it("never writes production from the draft tab, and has no manual 「プレビューに反映」 (the preview follows instantly)", async () => {
     const draft = setSection(BASE, "vision", { visible: false });
     const publish = vi.fn();
     renderScreen(fakeApi({ getSiteConfig: () => Promise.resolve(siteState({ draft })), publishSiteConfig: publish }));
     await screen.findByTestId("fe2-lp-config-release");
     expect(screen.queryByTestId("fe2-lp-config-publish")).toBeNull();
     expect(screen.queryByText(/本番へ反映/)).toBeNull();
-    fireEvent.click(screen.getByTestId("fe2-lp-config-apply-preview"));
-    expect(await screen.findByText("プレビューに反映しました（本番の LP は変わりません）")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-config-apply-preview")).toBeNull();
     expect(screen.queryByTestId("fe2-lp-config-publish-dialog")).toBeNull();
     expect(publish).not.toHaveBeenCalled();
   });
@@ -248,7 +247,6 @@ describe("LpSiteConfigScreen — プレビュー（下書き）", () => {
     renderScreen(fakeApi(), viewerPermissions("lp"));
     expect(await screen.findByTestId("fe2-lp-config-join-visible")).toBeDisabled();
     expect(screen.getByTestId("fe2-lp-config-version")).toBeDisabled();
-    expect(screen.getByTestId("fe2-lp-config-apply-preview")).toBeDisabled();
   });
 });
 
@@ -344,7 +342,7 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
     renderScreen();
     await screen.findByTestId("fe2-lp-config-release");
     const bar = screen.getByTestId("fe2-lp-config-actionbar");
-    for (const id of ["fe2-lp-config-env", "fe2-lp-config-preview-open", "fe2-lp-config-reset", "fe2-lp-config-apply-preview", "fe2-lp-config-to-live"]) {
+    for (const id of ["fe2-lp-config-env", "fe2-lp-config-preview-open", "fe2-lp-config-reset", "fe2-lp-config-to-live"]) {
       expect(within(bar).getByTestId(id)).toBeInTheDocument();
     }
     expect(within(bar).getByTestId("fe2-lp-config-live-url")).toHaveAttribute("href", LP_PUBLIC_URL);
@@ -383,7 +381,26 @@ describe("LpSiteConfigScreen — 上部の操作帯とミニプレビュー", ()
       { timeout: 4000 },
     );
     fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
-    expect(screen.getByTestId("fe2-lp-config-mini-note")).toHaveTextContent("本番に反映するとプレビューに映ります");
+    // 即時反映できない（古い橋渡しの）LP のときだけの注記。
+    const notes = () => screen.getAllByTestId("fe2-lp-config-mini-note").map((n) => n.textContent).join("\n");
+    expect(notes()).toContain("本番に反映するとプレビューに映ります");
+  });
+
+  it("live: with an instant-capable LP, staged section changes are sent to the preview and the note goes away", async () => {
+    nav.searchStr = "?env=live";
+    renderScreen();
+    const frame = (await screen.findByTestId("fe2-lp-config-mini-frame")) as HTMLIFrameElement;
+    const origin = new URL(frame.getAttribute("src")!).origin;
+    const post = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => {});
+    fireEvent.load(frame);
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", { data: { type: "lp:sections", sections: [], docHeight: 900, caps: ["config"] }, origin, source: frame.contentWindow }),
+      );
+    });
+    fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
+    expect(post).toHaveBeenCalledWith({ type: "lp:config", attrs: { "data-lp-s-join": "off" } }, origin);
+    expect(screen.queryByText(/本番に反映するとプレビューに映ります/)).toBeNull();
   });
 
   it("narrow screens stack the settings and open the preview from the card header", async () => {
@@ -501,6 +518,36 @@ describe("LpSiteConfigScreen — LP（左）とセクションの設定（右）
     post.mockClear();
     fromLp(REPORT);
     expect(post).toHaveBeenCalledWith({ type: "lp:mark", section: "crowdfunding" }, origin);
+  });
+
+  it("instant: switching a section sends the new data-lp-* attributes to the LP at once (no reload)", async () => {
+    const { frame, origin, post, fromLp } = await setup();
+    const src = frame.getAttribute("src");
+    fireEvent.load(frame);
+    fromLp({ ...REPORT, caps: ["config"] });
+    // 読み込み直後に画面上の設定を当て直す（保存済みと同じでも送る = demo でも映る）。
+    expect(post).toHaveBeenCalledWith({ type: "lp:config", attrs: {} }, origin);
+    expect(screen.getByTestId("fe2-lp-config-editor").querySelector("[data-live-config]")).toHaveAttribute("data-live-config", "true");
+    post.mockClear();
+    fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
+    expect(post).toHaveBeenCalledWith({ type: "lp:config", attrs: { "data-lp-s-join": "off" } }, origin);
+    // LP が付け替えて送り直した lp:sections では同じ属性を送り直さない（ループしない）。
+    post.mockClear();
+    fromLp({ ...REPORT, caps: ["config"] });
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "lp:config" }), origin);
+    // 保存（revision）で読み直さない。
+    await act(() => new Promise((r) => setTimeout(r, 700)));
+    expect(frame.getAttribute("src")).toBe(src);
+  });
+
+  it("legacy bridge (no caps): does not send lp:config and reloads after the save instead", async () => {
+    const { frame, post, fromLp } = await setup();
+    const src = frame.getAttribute("src");
+    fireEvent.load(frame);
+    fromLp(REPORT);
+    fireEvent.click(screen.getByTestId("fe2-lp-config-join-visible"));
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "lp:config" }), expect.anything());
+    await waitFor(() => expect(frame.getAttribute("src")).not.toBe(src), { timeout: 2000 });
   });
 
   it("an LP that does not report its layout gets a scrolling preview and stacked settings, with a note", async () => {

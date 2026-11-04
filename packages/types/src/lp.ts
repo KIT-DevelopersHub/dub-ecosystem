@@ -202,6 +202,40 @@ export function normalizeLayout(raw: unknown): LpLayout {
   return out;
 }
 
+// <html> の data-lp-* 属性。LP Worker（読み込み時に付ける）と LP管理のミニプレビュー（postMessage で即時に
+// 付け替える）が共用する。LP のビルドの CSS（siteConfigCss）も同じ名前を使う。
+
+/** <html> 上のセクションの属性名。値はバリアント ID か LP_HIDDEN。 */
+export const lpSectionAttr = (section: string): string => `data-lp-s-${section}`;
+/** <html> 上のオプションの属性名。boolean は "on" / "off"、enum は値そのもの。 */
+export const lpOptionAttr = (section: string, option: string): string => `data-lp-o-${section}-${option}`;
+export const LP_HIDDEN = "off";
+/** 公開設定の属性として受け付ける名前と値（postMessage で来たものを当てる前に検める）。 */
+export const LP_ATTR_NAME = /^data-lp-[so]-[a-z0-9_-]{1,64}$/;
+export const LP_ATTR_VALUE = /^[a-z0-9_]{1,40}$/;
+
+/**
+ * 正規化済みの layout（normalizeLayout の結果）→ <html> に付ける属性。既定値と同じものは付けない
+ * （既定の設定なら属性ゼロ = 静的 HTML のまま）。登録簿は引数（テストで差し替える）。
+ */
+export function layoutAttributes(registry: Readonly<Record<string, LpSectionDef>>, layout: LpLayout): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [id, def] of Object.entries(registry)) {
+    const s = (layout.sections as Record<string, LpSectionSetting | undefined>)[id];
+    if (!s) continue;
+    if (def.hideable && s.visible === false) out[lpSectionAttr(id)] = LP_HIDDEN;
+    else if (hasKey(def.variants, s.variant) && s.variant !== def.defaultVariant) out[lpSectionAttr(id)] = s.variant;
+    for (const [k, o] of Object.entries(def.options ?? {})) {
+      if (!hasKey(s.options, k)) continue;
+      const v = s.options[k];
+      if (v === o.default) continue;
+      if (o.kind === "boolean" && typeof v === "boolean") out[lpOptionAttr(id, k)] = v ? "on" : "off";
+      else if (o.kind === "enum" && typeof v === "string" && hasKey(o.values, v)) out[lpOptionAttr(id, k)] = v;
+    }
+  }
+  return out;
+}
+
 /**
  * 厳格な検証（書き込み API 用）: 未知のセクション・バリアント・オプション、型違い、
  * hideable でないセクションの非表示は issue にする。variant / visible / options は省略可（既定値）。
