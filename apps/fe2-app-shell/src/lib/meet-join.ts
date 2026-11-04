@@ -43,3 +43,11 @@ export async function startGoogleLink(api: ApiClient, loc: Pick<Location, "origi
   });
   loc.assign(res.authUrl);
 }
+
+export function completeGoogleLink(api: ApiClient, code: string, state: string): Promise<{ googleLinked: true }> {
+  return api.request<{ googleLinked: true }, meeting.CompleteGoogleLinkRequest>({
+    method: "POST",
+    path: "/api/v1/meetings/me/google-link/callback",
+    body: { code, state },
+  });
+}

@@ -3201,7 +3201,7 @@ function createAttendanceDemo(meetings: () => meeting.Meeting[]) {
     const today = jstToday();
     for (const m of meetings()) {
       if (!m.trackAttendance || m.id === "mtg_member_now") continue;
-      for (const [i, o] of started(m, addDays(today, -28), today).entries()) {
+      for (const [i, o] of started(m, addDays(today, -182), today).entries()) {
         if (!ended(m, o)) continue;
         const s = Date.parse(o.startsAt);
         const len = m.durationMinutes * 60;

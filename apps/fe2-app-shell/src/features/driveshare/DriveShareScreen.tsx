@@ -32,7 +32,6 @@ import { useDriveShareApi } from "./DriveShareProvider.tsx";
 import { DriveTree } from "./DriveTree.tsx";
 import { DriveShareSettingsDialog, settingsOpenOnLoad, useDriveSettingsAccess } from "./DriveShareSettings.tsx";
 import { FILES_QUERY_CACHE } from "./tree.ts";
-import { GoogleLinkReturn } from "./GoogleLinkReturn.tsx";
 import {
   driveRoleLabel,
   driveRoleTone,
@@ -741,7 +740,6 @@ export function DriveShareScreen(): JSX.Element {
 
   return (
     <main data-testid="fe2-driveshare">
-      <GoogleLinkReturn />
       <PageHeader
         title="Drive 共有管理"
         description="Hackit 共有ドライブの閲覧・編集権限を管理します"

@@ -99,7 +99,6 @@ function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
     completeGoogleConnect: () => Promise.resolve({ accounts: [], canConnect: false }),
     switchGoogleAccount: () => Promise.resolve({ accounts: [], canConnect: false }),
     removeGoogleAccount: () => Promise.resolve(),
-    completeGoogleLink: () => Promise.resolve({ googleLinked: true }),
     ...over,
   };
 }
@@ -415,15 +414,13 @@ describe("Drive共有 > 設定 > Google アカウント", () => {
     expect(startGoogleConnect).toHaveBeenCalled();
   });
 
-  it("a 「Googleと連携」 return (lnk_ state) links the member, never the account connect", async () => {
+  it("a 「Googleと連携」 return (lnk_ state) is not an account connect (the shell finishes it)", async () => {
     window.history.replaceState(null, "", "/driveshare?code=c9&state=lnk_abc");
     const completeGoogleConnect = vi.fn(() => Promise.resolve(CONNECTED));
-    const completeGoogleLink = vi.fn(() => Promise.resolve({ googleLinked: true as const }));
-    render(wrap(<DriveShareScreen />, stubApi({ completeGoogleConnect, completeGoogleLink })));
-    await waitFor(() => expect(completeGoogleLink).toHaveBeenCalledWith("c9", "lnk_abc"));
+    render(wrap(<DriveShareScreen />, stubApi({ completeGoogleConnect })));
+    await screen.findByTestId("fe2-driveshare");
     expect(completeGoogleConnect).not.toHaveBeenCalled();
-    expect(await screen.findByText(/Google と連携しました/)).toBeInTheDocument();
-    expect(window.location.search).toBe("");
+    expect(screen.queryByTestId("fe2-driveshare-settings")).toBeNull();
     window.history.replaceState(null, "", "/");
   });
 
