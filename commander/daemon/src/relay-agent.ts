@@ -113,6 +113,7 @@ export function sanitizeRunBody(raw: string | undefined, cwdRoots: string[]): st
   if (!b || typeof b.prompt !== "string") return null;
   const out: Record<string, unknown> = { prompt: b.prompt };
   if (typeof b.taskId === "string") out.taskId = b.taskId;
+  if (typeof b.taskContext === "string") out.taskContext = b.taskContext;
   if (b.cwd !== undefined) {
     if (typeof b.cwd !== "string" || !cwdAllowed(b.cwd, cwdRoots)) return null;
     out.cwd = b.cwd;

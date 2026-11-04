@@ -24,10 +24,15 @@
 //                               owner's and the bot's own); roles default to role_sys_admin
 //   COMMANDER_PERMISSION_MODE   --permission-mode for headless claude (default
 //                               "acceptEdits" so Edit/Write work non-interactively; "" omits)
+//   COMMANDER_TASK_ISOLATION    0 disables per-task worktree + session (default on)
+//   COMMANDER_REPO_ROOT         checkout task worktrees are added from (default COMMANDER_CWD)
+//   COMMANDER_TASK_WORKTREE_ROOT parent dir of task-<id> worktrees (default <repo>/../dub-worktrees)
+//   COMMANDER_TASK_BASE_REF     ref a new task worktree starts from (default origin/main)
+//   COMMANDER_TASK_WORKTREE_SETUP optional shell cmd run once in a new task worktree
 
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createDaemonServer, VERSION } from "./server.ts";
 import { resolveClaudeConfigDir } from "./env.ts";
 import type { DaemonConfig } from "./types.ts";
@@ -68,6 +73,19 @@ function loadConfig(): DaemonConfig {
     // Set COMMANDER_PERMISSION_MODE="" to omit the flag.
     permissionMode: process.env.COMMANDER_PERMISSION_MODE ?? "acceptEdits",
   };
+  // Per-task isolation: each task runs in <root>/task-<id> (own branch + Claude session).
+  // COMMANDER_TASK_ISOLATION=0 turns it off (legacy shared cwd; not recommended).
+  if (!/^(0|false|no)$/i.test(process.env.COMMANDER_TASK_ISOLATION ?? "")) {
+    const repoRoot = process.env.COMMANDER_REPO_ROOT ?? config.defaultCwd;
+    config.taskWorkspaces = {
+      repoRoot,
+      worktreeRoot: process.env.COMMANDER_TASK_WORKTREE_ROOT ?? join(dirname(repoRoot), "dub-worktrees"),
+      baseRef: process.env.COMMANDER_TASK_BASE_REF ?? "origin/main",
+      ...(process.env.COMMANDER_TASK_WORKTREE_SETUP
+        ? { setupCommand: process.env.COMMANDER_TASK_WORKTREE_SETUP }
+        : {}),
+    };
+  }
   if (process.env.COMMANDER_SERVICE_URL) config.serviceUrl = process.env.COMMANDER_SERVICE_URL;
   if (process.env.COMMANDER_SERVICE_TOKEN) config.serviceToken = process.env.COMMANDER_SERVICE_TOKEN;
   const apiBase = process.env.COMMANDER_DUB_API_BASE?.replace(/\/+$/, "");
@@ -104,6 +122,7 @@ server.listen(config.port, "127.0.0.1", () => {
       ` idle=${config.idleTimeoutMs}ms, hardTimeout=${config.runTimeoutMs}ms,` +
       ` persist=${config.serviceUrl ? "on" : "off"},` +
       ` operate=${config.operate?.baseUrl ?? "off"},` +
+      ` tasks=${config.taskWorkspaces?.worktreeRoot ?? "shared-cwd"},` +
       ` isolateEnv=${config.isolateEnv}, claudeConfigDir=${config.claudeConfigDir})`,
   );
 });

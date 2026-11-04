@@ -23,6 +23,11 @@ export function childrenQueryKey(folderId: string): readonly unknown[] {
   return queryKeys.feature("driveshare", "files", "children", folderId);
 }
 
+/** Cache policy for file listings (root, search, folder children). Drive listings change
+ *  rarely and are expensive upstream, so reopening a folder or coming back to the app
+ *  reuses them; our own writes invalidate the "files" prefix explicitly. */
+export const FILES_QUERY_CACHE = { staleTime: 5 * 60 * 1000, gcTime: 30 * 60 * 1000 } as const;
+
 /** aria-level is 1-based; the root row is level 1 (depth 0). */
 export function ariaLevel(depth: number): number {
   return depth + 1;

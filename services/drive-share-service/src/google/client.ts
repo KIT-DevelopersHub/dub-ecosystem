@@ -16,10 +16,10 @@ import type { TokenProvider } from "./token";
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
 // list() projection: owner + link-share hint (permissions type) computed in mapFile.
 const LIST_FIELDS = "nextPageToken,files(id,name,mimeType,owners(displayName),modifiedTime,webViewLink,permissions(id,type))";
-// Root scan also needs `parents` to tell top-level items from nested ones.
-const ROOT_SCAN_FIELDS = "nextPageToken,files(id,name,mimeType,owners(displayName),modifiedTime,webViewLink,permissions(id,type),parents)";
-// Upper bound on the root scan (Workers subrequest budget); Drive caps each page itself.
-const ROOT_SCAN_MAX_PAGES = 20;
+// Root listing also needs `parents` to drop shared items nested under another root item.
+const ROOT_FIELDS = "nextPageToken,files(id,name,mimeType,owners(displayName),modifiedTime,webViewLink,permissions(id,type),parents)";
+// Upper bound per root query (Workers subrequest budget); Drive caps each page itself.
+const ROOT_MAX_PAGES = 5;
 // permissionDetails.inherited tells us whether a grant comes from an ancestor folder /
 // shared drive (→ not deletable/editable on this item); the manager needs it to disable
 // the revoke/role controls instead of letting Drive reject the call with 403.
@@ -38,6 +38,9 @@ type GoogleFile = Parameters<typeof mapFile>[0] & { parents?: string[] };
 interface GoogleListResponse {
   files?: GoogleFile[];
   nextPageToken?: string;
+}
+interface GoogleDrivesListResponse {
+  drives?: { id: string }[];
 }
 interface GooglePermissionsListResponse {
   permissions?: Parameters<typeof mapPermission>[0][];
@@ -106,22 +109,42 @@ export function createGoogleDriveShareClient(deps: {
     return readJson<GoogleListResponse>(await call(url.toString(), { method: "GET" }));
   }
 
-  // The tree's top level = every visible item whose parent is NOT itself visible
-  // (My Drive root children, shared-with-me tops, shared-drive tops). A plain
-  // `trashed = false` query would return the whole account flat, so nested folders
-  // would also show at the top level. Order (folder,name) is preserved by the filter.
-  async function listRoots(): Promise<ListFilesResult> {
+  async function listAll(q: string): Promise<GoogleFile[]> {
     const all: GoogleFile[] = [];
     let pageToken: string | undefined;
-    for (let i = 0; i < ROOT_SCAN_MAX_PAGES; i++) {
-      const data = await listPage(buildQ(), 1000, ROOT_SCAN_FIELDS, pageToken);
+    for (let i = 0; i < ROOT_MAX_PAGES; i++) {
+      const data = await listPage(q, 1000, ROOT_FIELDS, pageToken);
       all.push(...(data.files ?? []));
       pageToken = data.nextPageToken;
       if (!pageToken) break;
     }
+    return all;
+  }
+
+  async function listSharedDriveIds(): Promise<string[]> {
+    const url = new URL(`${DRIVE_BASE}/drives`);
+    url.searchParams.set("pageSize", "100");
+    url.searchParams.set("fields", "drives(id)");
+    const data = await readJson<GoogleDrivesListResponse>(await call(url.toString(), { method: "GET" }));
+    return (data.drives ?? []).map((d) => d.id);
+  }
+
+  // The tree's top level: My Drive root children, shared-with-me tops and shared-drive
+  // tops — queried directly instead of scanning the whole account. A shared-with-me item
+  // whose parent is also in the result is nested, so it is dropped here.
+  async function listRoots(): Promise<ListFilesResult> {
+    const [mine, driveIds] = await Promise.all([
+      listAll("trashed = false and ('root' in parents or sharedWithMe = true)"),
+      listSharedDriveIds(),
+    ]);
+    const driveTops = await Promise.all(driveIds.map((id) => listAll(buildQ(id))));
+    const all = [...mine, ...driveTops.flat()];
     const visible = new Set(all.map((f) => f.id));
-    const roots = all.filter((f) => !(f.parents ?? []).some((id) => visible.has(id)));
-    return { files: roots.map(mapFile), nextCursor: null };
+    const roots = all
+      .filter((f) => !(f.parents ?? []).some((id) => visible.has(id)))
+      .map(mapFile)
+      .sort((a, b) => Number(b.isFolder) - Number(a.isFolder) || a.name.localeCompare(b.name));
+    return { files: roots, nextCursor: null };
   }
 
   return {

@@ -58,7 +58,12 @@ node --experimental-strip-types commander/daemon/src/index.ts
 |---|---|---|
 | `COMMANDER_PORT` | `4319` | 待ち受けポート |
 | `COMMANDER_CLAUDE_BIN` | `claude` | claude バイナリのパス |
-| `COMMANDER_CWD` | `process.cwd()` | spawn する claude の作業ディレクトリ |
+| `COMMANDER_CWD` | `process.cwd()` | タスクに属さない run（Dubに聞く・束）の既定の作業ディレクトリ |
+| `COMMANDER_TASK_ISOLATION` | `1`（有効） | タスクごとに専用 worktree + 専用 Claude セッション。`0` で旧来の共有 cwd（非推奨） |
+| `COMMANDER_REPO_ROOT` | `COMMANDER_CWD` | タスク worktree を `git worktree add` する元のチェックアウト |
+| `COMMANDER_TASK_WORKTREE_ROOT` | `<repo>/../dub-worktrees` | タスク worktree の置き場（`task-<taskId>`。初回 run で作成・以後再利用。自動削除はしない） |
+| `COMMANDER_TASK_BASE_REF` | `origin/main` | 新しいタスク worktree の起点 |
+| `COMMANDER_TASK_WORKTREE_SETUP` | (空) | 新しいタスク worktree で 1 回だけ実行するコマンド（例 `pnpm install --frozen-lockfile --prefer-offline`） |
 | `COMMANDER_CLAUDE_ARGS` | (空) | claude へ渡す追加引数（スペース区切り。例 `--model sonnet`） |
 | `COMMANDER_OPERATOR_TOKEN` | (空) | 共有トークン。設定すると `/health`・`/` 以外の全ルートで必須（`Authorization: Bearer <token>`、SSE は `?token=`）。未設定なら開放（単独ループバック） |
 | `COMMANDER_RUN_IDLE_TIMEOUT_MS` | `1800000` | 無音（stream-json の進捗が途切れた）が続いたら kill→failed する idle watchdog。進捗が来るたびリセットするので稼働中の run は殺さない。既定 30 分。`0` で無効 |
@@ -161,7 +166,7 @@ COMMANDER_RELAY_SECRET=<RELAY_AGENT_SECRET と同じ値>
 | method | path | 説明 |
 |---|---|---|
 | GET | `/health` | `{ ok, service, version }` |
-| POST | `/runs` | `{ prompt, cwd? }` → `{ runId, status }`（1 実行 = 1 run） |
+| POST | `/runs` | `{ prompt, cwd?, taskId?, taskContext? }` → `{ runId, status }`（1 実行 = 1 run）。`taskId` 付きはそのタスク専用の worktree で、初回 `--session-id`・以後 `--resume` で同じ Claude セッションを続ける（`cwd` は無視）。同じタスクの run が走行中なら 409 `task_run_active` |
 | GET | `/runs` | run 履歴（新しい順） |
 | GET | `/runs/:id` | run 詳細（バッファ済みイベント込み） |
 | DELETE | `/runs/:id` | 実行中の run を cancel（child を SIGTERM → failed）。202 / 404 |

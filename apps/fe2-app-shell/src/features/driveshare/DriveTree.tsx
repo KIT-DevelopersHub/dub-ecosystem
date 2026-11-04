@@ -15,7 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge, Icon, SkeletonLoader } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useDriveShareApi } from "./DriveShareProvider.tsx";
-import { ariaLevel, childrenQueryKey, nextFocusIndex, toggleExpanded } from "./tree.ts";
+import { FILES_QUERY_CACHE, ariaLevel, childrenQueryKey, nextFocusIndex, toggleExpanded } from "./tree.ts";
 import styles from "./driveshare.module.css";
 import {
   driveRoleTone,
@@ -144,6 +144,7 @@ function ChildGroup({ folderId, depth, ctx }: { folderId: string; depth: number;
   const query = useQuery({
     queryKey: childrenQueryKey(folderId),
     queryFn: () => driveApi.listFiles({ folderId, limit: 200 }),
+    ...FILES_QUERY_CACHE,
   });
 
   if (query.isPending) {

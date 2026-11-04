@@ -1,7 +1,8 @@
-// New-task composer (P0-4). A right-side drawer that captures the work unit — name,
-// target worktree (cwd), and the instruction prompt — then hands it to the board, which
+// New-task composer (P0-4). A right-side drawer that captures the work unit — name and
+// the instruction prompt — then hands it to the board, which
 // creates the task (feature + task) and immediately starts a run against it. Kept
-// deliberately light (design §7: "気軽さはコンポーザの軽さで担保").
+// deliberately light (design §7: "気軽さはコンポーザの軽さで担保"). There is no cwd field:
+// the daemon gives every task its own worktree + Claude session (never another task's).
 import { useEffect, useRef, useState } from "react";
 import { Drawer } from "./Drawer.tsx";
 import { btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
@@ -10,7 +11,6 @@ import { AttachButton, AttachmentTray, dropOutline, useImageAttachments } from "
 
 export interface ComposerSubmit {
   title: string;
-  cwd: string;
   prompt: string;
   ledgerRef: string;
   /** Pasted / dropped screenshots sent with the first run. */
@@ -21,8 +21,6 @@ interface TaskComposerProps {
   open: boolean;
   onClose: () => void;
   onSubmit: (v: ComposerSubmit) => void | Promise<void>;
-  /** Preset worktree paths offered in the cwd datalist (self-brushup pin first). */
-  cwdSuggestions?: string[];
   submitting?: boolean;
 }
 
@@ -38,28 +36,20 @@ export function TaskComposer({
   open,
   onClose,
   onSubmit,
-  cwdSuggestions = [],
   submitting = false,
 }: TaskComposerProps) {
   const [title, setTitle] = useState("");
-  const [cwd, setCwd] = useState("");
   const [prompt, setPrompt] = useState("");
   const [ledgerRef, setLedgerRef] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
   const att = useImageAttachments();
 
-  // Latest suggestions kept in a ref so the reset effect can seed the cwd default without
-  // depending on the array's identity — the board rebuilds cwdSuggestions on every poll
-  // (new array each tick), and depending on it would wipe in-progress input mid-typing.
-  const cwdSuggestionsRef = useRef(cwdSuggestions);
-  cwdSuggestionsRef.current = cwdSuggestions;
 
   // Reset fields only when the drawer transitions open (not on every poll-driven
   // re-render). Focus is handled by Drawer via initialFocusRef.
   useEffect(() => {
     if (open) {
       setTitle("");
-      setCwd(cwdSuggestionsRef.current[0] ?? "");
       setPrompt("");
       setLedgerRef("");
       att.clear();
@@ -72,7 +62,6 @@ export function TaskComposer({
     if (!canSubmit) return;
     void onSubmit({
       title: title.trim(),
-      cwd: cwd.trim(),
       prompt: prompt.trim(),
       ledgerRef: ledgerRef.trim(),
       images: att.images,
@@ -103,25 +92,9 @@ export function TaskComposer({
           />
         </div>
 
-        <div>
-          <label style={label} htmlFor="composer-cwd">
-            対象worktree（cwd・省略時は daemon 既定）
-          </label>
-          <input
-            id="composer-cwd"
-            aria-label="task-cwd"
-            list="composer-cwd-options"
-            placeholder="/Users/…/dub-worktrees/feature-x"
-            value={cwd}
-            onChange={(e) => setCwd(e.target.value)}
-            style={input}
-          />
-          <datalist id="composer-cwd-options">
-            {cwdSuggestions.map((c) => (
-              <option key={c} value={c} />
-            ))}
-          </datalist>
-        </div>
+        <p data-testid="composer-workspace-note" style={{ margin: 0, fontSize: 12, color: t.textMuted }}>
+          作業ディレクトリはタスクごとに自動で用意されます（他のタスクと共有しません）。
+        </p>
 
         <div {...att.dropProps} data-testid="composer-prompt-drop" style={dropOutline(att.dragging)}>
           <label style={label} htmlFor="composer-prompt">

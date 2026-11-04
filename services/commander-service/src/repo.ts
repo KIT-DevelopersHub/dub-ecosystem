@@ -545,6 +545,8 @@ export function isRunEventType(v: unknown): v is RunEventType {
 export interface RunRow {
   id: string;
   taskId: string | null;
+  /** Claude session the run belonged to (one per task); null for task-less/legacy runs. */
+  sessionId: string | null;
   prompt: string;
   cwd: string;
   status: RunStatus;
@@ -563,6 +565,7 @@ export interface RunEventRow {
 interface RunDb {
   id: string;
   task_id: string | null;
+  session_id?: string | null;
   prompt: string;
   cwd: string;
   status: string;
@@ -582,6 +585,7 @@ function toRun(r: RunDb): RunRow {
   return {
     id: r.id,
     taskId: r.task_id,
+    sessionId: r.session_id ?? null,
     prompt: r.prompt,
     cwd: r.cwd,
     status: r.status as RunStatus,
@@ -602,18 +606,37 @@ function toRunEvent(r: RunEventDb): RunEventRow {
 
 export async function createRun(
   db: D1Database,
-  input: { id?: string; prompt: string; cwd: string; status?: RunStatus; taskId?: string | null; at?: string },
+  input: {
+    id?: string;
+    prompt: string;
+    cwd: string;
+    status?: RunStatus;
+    taskId?: string | null;
+    sessionId?: string | null;
+    at?: string;
+  },
 ): Promise<RunRow> {
   const id = input.id ?? newId("run");
   const at = input.at ?? nowIso();
   const status: RunStatus = input.status && isRunStatus(input.status) ? input.status : "pending";
+  const sessionId = input.sessionId ?? null;
   await db
     .prepare(
-      "INSERT INTO commander_runs (id, task_id, prompt, cwd, status, exit_code, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO commander_runs (id, task_id, session_id, prompt, cwd, status, exit_code, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(id, input.taskId ?? null, input.prompt, input.cwd, status, null, at, at)
+    .bind(id, input.taskId ?? null, sessionId, input.prompt, input.cwd, status, null, at, at)
     .run();
-  return { id, taskId: input.taskId ?? null, prompt: input.prompt, cwd: input.cwd, status, exitCode: null, createdAt: at, updatedAt: at };
+  return {
+    id,
+    taskId: input.taskId ?? null,
+    sessionId,
+    prompt: input.prompt,
+    cwd: input.cwd,
+    status,
+    exitCode: null,
+    createdAt: at,
+    updatedAt: at,
+  };
 }
 
 export async function getRun(db: D1Database, id: string): Promise<RunRow | null> {
@@ -621,10 +644,13 @@ export async function getRun(db: D1Database, id: string): Promise<RunRow | null>
   return row ? toRun(row) : null;
 }
 
-export async function listRuns(db: D1Database): Promise<RunRow[]> {
-  const res = await db
-    .prepare("SELECT * FROM commander_runs ORDER BY created_at DESC")
-    .all<RunDb>();
+export async function listRuns(db: D1Database, filter: { taskId?: string } = {}): Promise<RunRow[]> {
+  const res = filter.taskId
+    ? await db
+        .prepare("SELECT * FROM commander_runs WHERE task_id = ? ORDER BY created_at DESC, id DESC")
+        .bind(filter.taskId)
+        .all<RunDb>()
+    : await db.prepare("SELECT * FROM commander_runs ORDER BY created_at DESC").all<RunDb>();
   return (res.results ?? []).map(toRun);
 }
 
