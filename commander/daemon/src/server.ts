@@ -4,7 +4,8 @@
 //   GET    /health             -> { ok, service, version }        (always open)
 //   GET    /                   -> tiny built-in test UI           (always open)
 //   POST   /uploads            -> { uploadId }         (body: { mediaType, data(base64) })
-//   POST   /runs               -> { runId }            (body: { prompt, cwd?, images?: uploadId[] })
+//   POST   /runs               -> { runId }            (body: { prompt, cwd?, taskId?, taskContext?, images?: uploadId[] })
+//                                  a task run uses the task's own worktree + Claude session (workspace.ts)
 //   GET    /runs               -> Run[]                (history, newest first)
 //   GET    /runs/:id           -> Run                  (with buffered events)
 //   DELETE /runs/:id           -> 202 (cancel) | 404   (cancel a running run)
@@ -25,6 +26,7 @@ import { nullSink, HttpRunSink, type RunSink } from "./sink.ts";
 import { INDEX_HTML } from "./index-html.ts";
 import { createOperateHandler } from "./operate/routes.ts";
 import { scriptRestarter, type Restarter } from "./restart.ts";
+import { TaskWorkspaces, taskPrompt, type WorkspaceDeps } from "./workspace.ts";
 import { MAX_IMAGE_BYTES, MAX_IMAGES_PER_RUN, UploadStore, type StagedImage } from "./uploads.ts";
 
 export const VERSION = "0.1.0";
@@ -70,12 +72,16 @@ function tokenMatches(expected: string, req: IncomingMessage, url: URL): boolean
 export function createDaemonServer(
   config: DaemonConfig,
   restarter: Restarter = scriptRestarter,
+  workspaceDeps?: WorkspaceDeps,
 ) {
   const sink: RunSink = config.serviceUrl
     ? new HttpRunSink(config.serviceUrl, config.serviceToken)
     : nullSink;
   const store = new RunStore(config, sink);
   const uploads = new UploadStore();
+  const workspaces = config.taskWorkspaces
+    ? new TaskWorkspaces({ ...config.taskWorkspaces, claudeConfigDir: config.claudeConfigDir }, workspaceDeps)
+    : null;
   const operate = createOperateHandler(config.operate);
   let restarting = false;
 
@@ -140,7 +146,14 @@ export function createDaemonServer(
     if (method === "POST" && pathname === "/runs") {
       // A run started now would be killed by the pending relaunch.
       if (restarting) return json(res, 503, { error: "restarting" });
-      let parsed: { prompt?: unknown; cwd?: unknown; taskId?: unknown; args?: unknown; images?: unknown };
+      let parsed: {
+        prompt?: unknown;
+        cwd?: unknown;
+        taskId?: unknown;
+        taskContext?: unknown;
+        args?: unknown;
+        images?: unknown;
+      };
       try {
         parsed = JSON.parse((await readBody(req)) || "{}");
       } catch {
@@ -151,6 +164,11 @@ export function createDaemonServer(
       }
       const cwd = typeof parsed.cwd === "string" ? parsed.cwd : undefined;
       const taskId = typeof parsed.taskId === "string" ? parsed.taskId : undefined;
+      if (taskId && workspaces) {
+        // A task's session can only be driven by one run at a time.
+        const live = store.activeRunForTask(taskId);
+        if (live) return json(res, 409, { error: "task_run_active", runId: live.id });
+      }
       // Per-run CLI args (only strings survive); appended after the global extraArgs.
       const args = Array.isArray(parsed.args)
         ? parsed.args.filter((a): a is string => typeof a === "string")
@@ -169,6 +187,34 @@ export function createDaemonServer(
         const taken = uploads.take(ids);
         if (!taken) return json(res, 400, { error: "image_not_found" });
         images = taken;
+      }
+      if (taskId && workspaces) {
+        const taskContext = typeof parsed.taskContext === "string" ? parsed.taskContext : undefined;
+        let ws;
+        try {
+          // The task's own worktree + session. A requested cwd is ignored on purpose:
+          // reusing another task's (or a shared) directory is what mixed tasks up.
+          ws = await workspaces.resolve(taskId);
+        } catch (e) {
+          const failed = store.fail(
+            { prompt: parsed.prompt, cwd: cwd ?? config.defaultCwd, taskId },
+            `task workspace unavailable: ${(e as Error).message}`,
+          );
+          return json(res, 201, { runId: failed.id, status: failed.status });
+        }
+        const run = store.start({
+          prompt: parsed.prompt,
+          spawnPrompt: taskPrompt(ws, parsed.prompt, taskContext),
+          cwd: ws.cwd,
+          taskId,
+          sessionId: ws.sessionId,
+          resume: ws.resume,
+          args,
+          images,
+        });
+        for (const n of ws.notes) store.note(run.id, n);
+        if (cwd && cwd !== ws.cwd) store.note(run.id, `requested cwd ${cwd} ignored; tasks run in their own worktree`);
+        return json(res, 201, { runId: run.id, status: run.status, sessionId: ws.sessionId, cwd: ws.cwd });
       }
       const run = store.start({ prompt: parsed.prompt, cwd, taskId, args, images });
       return json(res, 201, { runId: run.id, status: run.status });

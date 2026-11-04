@@ -4,11 +4,12 @@ import type { CrowdfundingBanner } from "@/config/types";
 // Its bottom edge sags like hung cloth and a string of pennants hangs along the
 // curve, both gently breathing/swaying. The whole band is one external link.
 // Decoration is aria-hidden; all motion is CSS and stops under reduced-motion.
+// 公開設定 header.options.banner（data-lp-opt）で消せる。snapshot に banner が無ければそもそも描かない。
 const PENNANTS = 9;
 
 export function CrowdfundingRibbon({ data }: { data: CrowdfundingBanner }) {
   return (
-    <a className="cf-ribbon" href={data.href} target="_blank" rel="noopener noreferrer">
+    <a className="cf-ribbon" data-lp-opt="header-banner" href={data.href} target="_blank" rel="noopener noreferrer">
       <span className="cf-ribbon-inner">
         <span className="cf-ribbon-live" aria-hidden="true">
           <span className="cf-ribbon-dot" />

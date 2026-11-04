@@ -142,6 +142,11 @@ export const LP: AreaSpec = {
       route: "POST /lp/tickets/preview-token",
       reason: "LP管理プレビューでテスト購入するための一時トークン発行で、Dub のデータではない",
     },
+    {
+      service: S,
+      route: "POST /lp/site-config/publish",
+      reason: "本番 LP のセクション構成（表示/非表示・並び順）を即座に切り替える操作（lp:publish 詳細キー）。本番反映はオーナーが LP管理 で手で行う",
+    },
   ],
   // チケットの設定・購入者一覧は未開放。
   pending: [
@@ -156,6 +161,10 @@ export const LP: AreaSpec = {
     { service: S, route: "POST /lp/proposals/fields" },
     { service: S, route: "GET /lp/proposals/submissions" },
     { service: S, route: "PATCH /lp/proposals/submissions/:id" },
+    // 公開設定（セクション構成）の閲覧・下書き編集も未開放。
+    { service: S, route: "GET /lp/site-config" },
+    { service: S, route: "PUT /lp/site-config/draft" },
+    { service: S, route: "POST /lp/site-config/draft/reset" },
   ],
   ownerOpenedIrreversible: {
     "lp.links.create": "削除 API が無く発行した URL は一覧に残り同じ値も再発行できないが、停止はできる。オーナーが「流入 URL の発行」を名指しで開放",

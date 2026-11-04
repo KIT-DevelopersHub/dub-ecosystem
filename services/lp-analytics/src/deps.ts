@@ -70,6 +70,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     paypayEnabled: env.LP_PAYPAY_ENABLED === "1",
     ticketPreviewKey: stripeKey && !isLiveStripeKey(stripeKey) ? stripeKey : null,
     newProposalId: () => newId("lpp"),
+    newSiteConfigHistoryId: () => newId("lph"),
     dailyProposalCap:
       Number(env.LP_DAILY_PROPOSAL_CAP) > 0 ? Number(env.LP_DAILY_PROPOSAL_CAP) : DEFAULT_DAILY_PROPOSAL_CAP,
   };

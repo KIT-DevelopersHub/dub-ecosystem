@@ -1,5 +1,5 @@
 // LP管理 feature — public surface for the shell composition (featureModules.tsx).
-export { LpManagementScreen } from "./LpManagementScreen.tsx";
+export { LpSiteConfigScreen } from "./LpSiteConfigScreen.tsx";
 export { LpVisitLogScreen } from "./LpVisitLogScreen.tsx";
 export { LpLinksScreen } from "./LpLinksScreen.tsx";
 export { LpPreviewScreen } from "./LpPreviewScreen.tsx";
@@ -25,5 +25,7 @@ export type {
   LpProposalsState,
   LpProposal,
   LpProposalStatus,
+  LpSiteConfig,
+  LpSiteConfigState,
 } from "./lpApi.tsx";
 export { LP_BASE_URL, LP_TRACKING_PARAM, buildTrackingUrl, slugifySource, validateLinkDraft } from "./lpLinks.ts";

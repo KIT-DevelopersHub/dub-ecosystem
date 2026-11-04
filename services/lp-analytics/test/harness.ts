@@ -81,6 +81,7 @@ export async function makeApp(
     paypayEnabled: false,
     ticketPreviewKey: null,
     newProposalId: () => id("lpp"),
+    newSiteConfigHistoryId: () => id("lph"),
     dailyProposalCap: 200,
     ...overrides,
   };

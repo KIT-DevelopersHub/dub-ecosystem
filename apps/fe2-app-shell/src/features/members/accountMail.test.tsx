@@ -49,7 +49,7 @@ function makeApi(): MembersApi & { sendAccountMail: ReturnType<typeof vi.fn> } {
     linkIdentity: vi.fn((id: string) => Promise.resolve(OVERVIEW.members.find((m) => m.id === id) as OrgMember)),
     listIdentityUsers: vi.fn(() => Promise.resolve({ items: USERS, nextCursor: null })),
     sendAccountMail: vi.fn((id: string) =>
-      Promise.resolve({ ok: true as const, to: "taro.yamada@gmail.com", cc: `${id}@developershub.jp`, appUrl: "https://app.developershub.jp", passwordSource: "generated" as const, messageId: "msg" }),
+      Promise.resolve({ ok: true as const, to: "taro.yamada@gmail.com", cc: `${id}@developershub.jp`, appUrl: "https://dub-fe2-app-shell.developershub-site.workers.dev", passwordSource: "generated" as const, messageId: "msg" }),
     ),
   } as unknown as MembersApi & { sendAccountMail: ReturnType<typeof vi.fn> };
 }

@@ -52,6 +52,12 @@
       "shortText": "クラファン開催中！",
       "ctaLabel": "CAMPFIREで支援する",
       "href": "https://camp-fire.jp/projects/975088/"
+    },
+    "supporters": {
+      "heading": "ご支援いただいた皆さま",
+      "body": "クラウドファンディングで北陸ITカンファレンスを応援してくださった皆さまです。\n心より感謝申し上げます。",
+      "names": [],
+      "emptyNote": "支援者のお名前は、掲載のご希望をうかがったうえで順次掲載します。"
     }
   },
   "apply": {

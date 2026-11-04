@@ -607,25 +607,6 @@
   margin-top: var(--dub-space-4);
 }
 
-/* ── プレビュー タブ ────────────────────────────────────────────────────── */
-/* 「実際の販売」バッジは caption ではなく切り替えの帯の高さに揃える。 */
-.previewTicketsRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--dub-space-3);
-}
-
-.previewTicketsRow > [data-testid="fe2-lp-preview-sales-state"],
-.previewTicketsRow > [data-testid="fe2-lp-preview-proposals-state"] {
-  margin-bottom: var(--dub-space-3);
-}
-
-.previewFooter {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .previewNotice {
   display: flex;
   align-items: flex-start;
@@ -638,4 +619,304 @@
   color: var(--dub-color-text-secondary);
   font-size: var(--dub-font-size-sm);
   line-height: var(--dub-font-lineHeight-relaxed);
+}
+
+/* ── 公開設定 タブ ─────────────────────────────────────────────────────── */
+.configToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-4);
+}
+
+/* 本番は帯の色で一目で分かるように。 */
+.liveBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-danger-200);
+  border-left: 4px solid var(--dub-color-danger-600);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-danger-50);
+  color: var(--dub-color-danger-700);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  line-height: var(--dub-font-lineHeight-relaxed);
+}
+
+/* 1 設定 = ラベル列 + 操作列。狭い幅では縦積み。 */
+.configRow {
+  display: grid;
+  grid-template-columns: minmax(10rem, 16rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--dub-space-3) var(--dub-space-6);
+}
+
+@media (max-width: 640px) {
+  .configRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.configRowLabel {
+  display: grid;
+  gap: var(--dub-space-1);
+  font-weight: var(--dub-font-weight-medium);
+}
+
+.configRowControl {
+  min-width: 0;
+  max-width: 28rem;
+}
+
+.actionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.actionSpacer {
+  flex: 1 1 auto;
+}
+
+.diffList {
+  display: grid;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.diffList > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+.diffLabel {
+  min-width: 10rem;
+  color: var(--dub-color-text-secondary);
+}
+
+.diffFrom {
+  color: var(--dub-color-text-muted);
+  text-decoration: line-through;
+}
+
+.catalogItem {
+  display: grid;
+  gap: var(--dub-space-2);
+  padding-bottom: var(--dub-space-5);
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+
+.catalogItem > p {
+  margin: 0;
+}
+
+.versionPick {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.versionPick > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.versionPick > :last-child {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 操作の帯: スクロールしても上に貼り付く。本番は左の色で一目で分かるように。 */
+.stickyBar {
+  position: sticky;
+  /* シェルの本文（スクロール領域）の上余白ぶん持ち上げて、ヘッダーの直下に貼り付ける。 */
+  top: calc(-1 * var(--dub-space-6));
+  z-index: var(--dub-zIndex-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-3) var(--dub-space-4);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-raised);
+  box-shadow: var(--dub-shadow-sm);
+}
+
+.stickyBar[data-env="live"] {
+  border-left: 4px solid var(--dub-color-danger-600);
+}
+
+/* スマホ幅では操作帯が数行になり画面を覆うので、貼り付けない。 */
+@media (max-width: 640px) {
+  .stickyBar {
+    position: static;
+  }
+}
+
+/* 公開設定: 左に LP（全高）、右にセクションの設定。1 枚のカードの中でページと一緒にスクロールする。 */
+/* Card の overflow:hidden は中の sticky を効かなくするので、角の切り抜きはそのまま clip にする。 */
+.lpEditorCard > section {
+  overflow: clip;
+}
+
+.lpEditor {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+  align-items: start;
+}
+
+.lpEditor[data-narrow="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lpEditorPreview[hidden] {
+  display: none;
+}
+
+.lpEditorPreview {
+  border-right: 1px solid var(--dub-color-border-default);
+}
+
+.lpEditor[data-narrow="true"] .lpEditorPreview {
+  border-right: 0;
+  border-bottom: 1px solid var(--dub-color-border-default);
+}
+
+.lpEditorSettings {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-4) var(--dub-space-5);
+}
+
+/* 位置合わせ: 各ブロックをそのセクションの高さに置く（top は実行時に決まる）。 */
+.lpEditorSettings[data-layout="aligned"] {
+  display: block;
+  padding: 0;
+}
+
+.lpEditorSettings[data-layout="aligned"] .lpEditorBand {
+  position: absolute;
+  right: var(--dub-space-5);
+  left: var(--dub-space-6);
+}
+
+/* 帯の中で操作帯のすぐ下に貼り付く（--lp-bar-h は操作帯の高さ）。 */
+.lpEditorSettings[data-layout="aligned"] .lpEditorBlock {
+  position: sticky;
+  top: calc(var(--lp-bar-h, 64px) + var(--dub-space-4) - var(--dub-space-6));
+}
+
+/* 左端の縦線: そのセクションが LP のどこからどこまでか。 */
+.lpEditorRange {
+  position: absolute;
+  left: var(--dub-space-2);
+  width: 3px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-border-default);
+}
+
+.lpEditorRange[data-active="true"] {
+  background: var(--dub-color-brand-500);
+}
+
+.lpEditorBlock {
+  display: grid;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+}
+
+.lpEditorBlock[data-active="true"] {
+  border-color: var(--dub-color-brand-500);
+  box-shadow: var(--dub-shadow-sm);
+}
+
+.lpBlockHead {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.lpBlockRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2) var(--dub-space-4);
+}
+
+.lpBlockRow > :first-child {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+
+.changedDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-warning-500);
+}
+
+.miniHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.miniHeader > a {
+  margin-left: auto;
+}
+
+/* 高さは実行時に決まる（全高 = LP の高さ × 縮尺 / 位置の分からない LP は中でスクロールする枠）。 */
+.miniBox {
+  position: relative;
+  overflow: hidden;
+  background: var(--dub-color-surface-sunken);
+}
+
+.miniSkeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: var(--dub-space-4);
+  background: var(--dub-color-surface-raised);
+}
+
+/* クリックでセクションを選べる。全高のときは中でスクロールしない（ページと一緒に動く）。 */
+.miniFrame {
+  display: block;
+  border: 0;
+  transform-origin: 0 0;
+}
+
+.miniNote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dub-space-2);
+  margin: 0;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border-bottom: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-lineHeight-relaxed);
+}
+
+.lpEditorSection {
+  display: grid;
+  gap: var(--dub-space-3);
 }

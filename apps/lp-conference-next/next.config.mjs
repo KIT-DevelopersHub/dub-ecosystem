@@ -16,6 +16,8 @@ const nextConfig = {
   // Bundled multi-version build (scripts/build-bundle.mjs) serves each version's
   // chunks from /_v/<id>/_next/... — unset for a normal build (no change).
   ...(process.env.LP_ASSET_PREFIX ? { assetPrefix: process.env.LP_ASSET_PREFIX } : {}),
+  // 公開設定の登録簿は packages/types/src/lp.ts をソースのまま読む（src/sections/registry.ts）。
+  experimental: { externalDir: true },
   images: {
     unoptimized: true,
   },

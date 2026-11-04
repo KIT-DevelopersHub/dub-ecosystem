@@ -10,6 +10,7 @@ import { dubContext, DUB_HEADERS, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
 import { LpService } from "./service";
 import { ProposalService } from "./proposals";
+import { SiteConfigService } from "./site-config";
 import { TicketService } from "./tickets";
 import type { AppDeps, IngestVisitRequest, LpDevice, ReqCtx } from "./types";
 
@@ -27,6 +28,17 @@ function reqCtx(c: Context): ReqCtx {
 async function readJson(c: Context): Promise<unknown> {
   try {
     return await c.req.json();
+  } catch {
+    throw errors.validationFailed([{ field: "body", reason: "invalid_json" }]);
+  }
+}
+
+/** Optional body: empty → {}. */
+async function readBody(c: Context): Promise<unknown> {
+  const text = await c.req.text();
+  if (text.trim() === "") return {};
+  try {
+    return JSON.parse(text) as unknown;
   } catch {
     throw errors.validationFailed([{ field: "body", reason: "invalid_json" }]);
   }
@@ -58,6 +70,7 @@ export function createApp(deps: AppDeps): Hono {
   const svc = new LpService(deps);
   const tickets = new TicketService(deps);
   const proposals = new ProposalService(deps);
+  const siteConfig = new SiteConfigService(deps);
   const app = new Hono();
 
   app.onError(dubErrorHandler({ service: "lp-analytics" }));
@@ -90,6 +103,8 @@ export function createApp(deps: AppDeps): Hono {
   });
   // 登壇者募集 (public LP Worker → service binding).
   app.get("/lp/internal/proposals", async (c) => c.json(await proposals.getPublic()));
+  // 公開設定の layout（public LP Worker → service binding）。下書きと本番の両方を返す。
+  app.get("/lp/internal/site-config", async (c) => c.json(await siteConfig.getInternal()));
   app.post("/lp/internal/proposals/submit", async (c) => c.json(await proposals.submit(await readJson(c)), 201));
 
   // ---- user routes (signed-in + LP管理 policy gate) ----
@@ -112,6 +127,12 @@ export function createApp(deps: AppDeps): Hono {
   );
   app.get("/lp/publish", view, async (c) => c.json(await svc.getPublish()));
   app.post("/lp/publish", publish, async (c) => c.json(await svc.setPublish(reqCtx(c), await readJson(c))));
+
+  // 公開設定: 下書きの保存・リセットは edit（本番に効かない）。本番反映は公開版切り替えと同じ lp:publish。
+  app.get("/lp/site-config", view, async (c) => c.json(await siteConfig.getState()));
+  app.put("/lp/site-config/draft", edit, async (c) => c.json(await siteConfig.saveDraft(reqCtx(c), await readJson(c))));
+  app.post("/lp/site-config/draft/reset", edit, async (c) => c.json(await siteConfig.resetDraft(reqCtx(c), await readBody(c))));
+  app.post("/lp/site-config/publish", publish, async (c) => c.json(await siteConfig.publish(reqCtx(c), await readJson(c))));
 
   // チケット: 販売 on/off は公開切り替えと同じ lp:publish。購入者一覧は個人情報なので edit。
   app.get("/lp/tickets", view, async (c) => c.json(await tickets.getState()));

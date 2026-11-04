@@ -4,19 +4,19 @@ import userEvent from "@testing-library/user-event";
 import { TaskComposer } from "./TaskComposer.tsx";
 
 describe("<TaskComposer>", () => {
-  it("keeps in-progress input when a poll rebuilds cwdSuggestions (regression)", async () => {
-    // The board rebuilds cwdSuggestions into a fresh array on every poll tick. The reset
-    // effect must NOT refire on that identity change, or typed input is wiped mid-entry.
+  it("keeps in-progress input when the board re-renders it (regression)", async () => {
+    // The board re-renders on every poll tick. The reset effect must NOT refire on that,
+    // or typed input is wiped mid-entry.
     const { rerender } = render(
-      <TaskComposer open onClose={() => {}} onSubmit={() => {}} cwdSuggestions={["/repo/a"]} />,
+      <TaskComposer open onClose={() => {}} onSubmit={() => {}} />,
     );
 
     await userEvent.type(screen.getByLabelText("task-title"), "入力中のタスク");
     await userEvent.type(screen.getByLabelText("task-prompt"), "消えないでほしい");
 
-    // Simulate a poll: same content, brand-new array reference (as useMemo produces).
+    // Simulate a poll re-render.
     rerender(
-      <TaskComposer open onClose={() => {}} onSubmit={() => {}} cwdSuggestions={["/repo/a"]} />,
+      <TaskComposer open onClose={() => {}} onSubmit={() => {}} />,
     );
 
     expect(screen.getByLabelText("task-title")).toHaveValue("入力中のタスク");
@@ -25,27 +25,31 @@ describe("<TaskComposer>", () => {
 
   it("resets fields when the drawer is reopened", async () => {
     const { rerender } = render(
-      <TaskComposer open onClose={() => {}} onSubmit={() => {}} cwdSuggestions={[]} />,
+      <TaskComposer open onClose={() => {}} onSubmit={() => {}} />,
     );
     await userEvent.type(screen.getByLabelText("task-title"), "前回の入力");
     expect(screen.getByLabelText("task-title")).toHaveValue("前回の入力");
 
-    rerender(<TaskComposer open={false} onClose={() => {}} onSubmit={() => {}} cwdSuggestions={[]} />);
-    rerender(<TaskComposer open onClose={() => {}} onSubmit={() => {}} cwdSuggestions={["/repo/x"]} />);
+    rerender(<TaskComposer open={false} onClose={() => {}} onSubmit={() => {}} />);
+    rerender(<TaskComposer open onClose={() => {}} onSubmit={() => {}} />);
 
     expect(screen.getByLabelText("task-title")).toHaveValue("");
-    // cwd is seeded from the latest suggestions on (re)open.
-    expect(screen.getByLabelText("task-cwd")).toHaveValue("/repo/x");
+  });
+
+  it("has no cwd field: every task gets its own worktree (never another task's)", () => {
+    render(<TaskComposer open onClose={() => {}} onSubmit={() => {}} />);
+    expect(screen.queryByLabelText("task-cwd")).not.toBeInTheDocument();
+    expect(screen.getByTestId("composer-workspace-note")).toHaveTextContent("タスクごと");
   });
 
   it("submits the trimmed field values", async () => {
     const onSubmit = vi.fn();
-    render(<TaskComposer open onClose={() => {}} onSubmit={onSubmit} cwdSuggestions={[]} />);
+    render(<TaskComposer open onClose={() => {}} onSubmit={onSubmit} />);
 
     await userEvent.type(screen.getByLabelText("task-title"), "  作る  ");
     await userEvent.type(screen.getByLabelText("task-prompt"), " やって ");
     await userEvent.click(screen.getByTestId("composer-submit"));
 
-    expect(onSubmit).toHaveBeenCalledWith({ title: "作る", cwd: "", prompt: "やって", ledgerRef: "", images: [] });
+    expect(onSubmit).toHaveBeenCalledWith({ title: "作る", prompt: "やって", ledgerRef: "", images: [] });
   });
 });
