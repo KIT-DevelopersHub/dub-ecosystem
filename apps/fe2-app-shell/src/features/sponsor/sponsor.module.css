@@ -14,12 +14,6 @@
   font-size: var(--dub-font-size-sm);
 }
 
-.error {
-  margin: 0;
-  color: var(--dub-color-danger-600);
-  font-size: var(--dub-font-size-sm);
-}
-
 .search {
   width: 100%;
   max-width: 420px;
@@ -32,16 +26,6 @@
   gap: var(--dub-space-4);
 }
 
-.count {
-  color: var(--dub-color-text-muted);
-  font-size: var(--dub-font-size-sm);
-}
-
-.muted {
-  color: var(--dub-color-text-muted);
-  font-size: var(--dub-font-size-xs);
-}
-
 /* ── 表 (名刺 / 企業) ───────────────────────────────────── */
 .cellPhoto {
   display: flex;
@@ -50,80 +34,13 @@
   width: 5.5rem;
 }
 
+.rowName {
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+
 .cellPhoto .photo {
   border-radius: var(--dub-radius-sm);
-}
-
-/* 行全体もクリックできるが、キーボード操作用に名前セルをボタンにする。 */
-.rowLink {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-weight: var(--dub-font-weight-bold);
-  color: var(--dub-color-text-primary);
-  text-align: left;
-  cursor: pointer;
-}
-
-.rowLink:hover:not(:disabled) {
-  text-decoration: underline;
-}
-
-.rowLink:focus-visible {
-  outline: 3px solid var(--dub-color-border-focus);
-  outline-offset: 2px;
-  border-radius: var(--dub-radius-sm);
-}
-
-.rowLink:disabled {
-  cursor: default;
-  color: var(--dub-color-text-muted);
-}
-
-/* ── 企業ドロワー ───────────────────────────────────────── */
-.companyBody {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-5);
-}
-
-.companyCards {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-3);
-}
-
-.companyCard {
-  width: 100%;
-  min-height: 44px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-1);
-  padding: var(--dub-space-3) var(--dub-space-4);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-md);
-  background: var(--dub-color-surface-raised);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.companyCard:hover {
-  background: var(--dub-color-surface-sunken);
-}
-
-.companyCard:focus-visible {
-  outline: 3px solid var(--dub-color-border-focus);
-  outline-offset: 2px;
-}
-
-.companyCardName {
-  font-weight: var(--dub-font-weight-bold);
-  color: var(--dub-color-text-primary);
 }
 
 /* ── 会社名の候補 (既存の企業に揃える) ───────────────────── */
@@ -138,22 +55,6 @@
 .suggestLabel {
   color: var(--dub-color-text-muted);
   font-size: var(--dub-font-size-xs);
-}
-
-.suggestChip {
-  min-height: 32px;
-  padding: 0 var(--dub-space-3);
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-full);
-  background: var(--dub-color-surface-raised);
-  font: inherit;
-  font-size: var(--dub-font-size-sm);
-  color: var(--dub-color-text-primary);
-  cursor: pointer;
-}
-
-.suggestChip:hover {
-  background: var(--dub-color-surface-sunken);
 }
 
 /* ── 名刺の写真 (91:55) ─────────────────────────────────── */
@@ -203,17 +104,6 @@
   position: absolute;
   left: var(--dub-space-2);
   bottom: var(--dub-space-2);
-  padding: var(--dub-space-1) var(--dub-space-2);
-  border-radius: var(--dub-radius-full);
-  background: var(--dub-color-surface-raised);
-  color: var(--dub-color-text-secondary);
-  font-size: var(--dub-font-size-xs);
-  box-shadow: var(--dub-shadow-sm);
-}
-
-.photoBadgeDanger {
-  color: var(--dub-color-danger-700);
-  background: var(--dub-color-danger-50);
 }
 
 .zoomBody {
@@ -345,24 +235,6 @@
   color: #fff;
   font-size: var(--dub-font-size-sm);
   pointer-events: none;
-}
-
-.noCamera {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 160px;
-  padding: var(--dub-space-6);
-  border: 1px dashed var(--dub-color-border-strong);
-  border-radius: var(--dub-radius-lg);
-  background: var(--dub-color-surface-sunken);
-  color: var(--dub-color-text-secondary);
-  text-align: center;
-}
-
-.noCamera p {
-  margin: 0;
-  max-width: 32em;
 }
 
 .shutterRow {

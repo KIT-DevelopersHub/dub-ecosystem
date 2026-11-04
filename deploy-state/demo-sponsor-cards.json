@@ -3,12 +3,12 @@
   "slug": "sponsor-cards",
   "worker": "dub-demo-sponsor-cards",
   "url": "https://dub-demo-sponsor-cards.developershub-site.workers.dev",
-  "deployedSha": "01d2143d",
+  "deployedSha": "9bd73b40",
   "branch": "feat/sponsor-app",
   "actor": "ko-tarou",
-  "markers": ["fe2-sponsor-table","fe2-sponsor-companies-table","fe2-sponsor-company-suggest","card_demo_5"],
+  "markers": ["fe2-sponsor-filters","fe2-sponsor-companies-filters","fe2-sponsor-company-cards","fe2-sponsor-table"],
   "live": true,
-  "verifiedAt": "2026-11-04T05:02:10Z",
-  "updatedAt": "2026-11-04T05:02:10Z",
-  "note": "スポンサー: 名簿形式の表 + 企業タブ (ctask_01M6J1SJK5HBYK7QVF802T8YSE)"
+  "verifiedAt": "2026-11-04T05:25:48Z",
+  "updatedAt": "2026-11-04T05:25:48Z",
+  "note": "スポンサー: 共通コンポーネント化 (FilterBar/FilterChips/useClientFilter 等)"
 }

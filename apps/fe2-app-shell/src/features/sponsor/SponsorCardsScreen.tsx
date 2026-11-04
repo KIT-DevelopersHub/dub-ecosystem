@@ -1,12 +1,28 @@
 // スポンサー → 名刺 (名簿形式の表)。写真・会社・氏名・部署/役職・連絡先・登録者・登録日時 (既定 = 新しい順)。
-// 会社名・氏名・部署・メモ・登録者で検索。行を押すと詳細ドロワー。主ボタン「名刺をスキャン」は sponsor:write の人だけ。
+// 登録者で絞り込み (FilterBar + FilterChips)・会社名/氏名/部署/メモ/登録者で検索 (useClientFilter)。
+// 行を押すと詳細ドロワー。主ボタン「名刺をスキャン」は sponsor:write の人だけ。
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Button, DataTable, EmptyState, ErrorState, PageHeader, SkeletonTable, Stack, TextField, type ColumnDef, type SortState } from "@dub/ui";
+import {
+  Badge,
+  Button,
+  DataTable,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FilterChips,
+  PageHeader,
+  SkeletonTable,
+  Stack,
+  TextField,
+  type ColumnDef,
+  type SortState,
+} from "@dub/ui";
+import { useClientFilter } from "@dub/app-ui";
 import { sponsor } from "@dub/types";
 import { isTempCard, useCards } from "./sponsorHooks.ts";
 import { CardDrawer } from "./CardDrawer.tsx";
-import { CardPhoto, formatDateTime, RetryUpload, useSponsorCapability } from "./SponsorShared.tsx";
+import { CardPhoto, formatDateTime, memberOf, memberOptions, RetryUpload, useSponsorCapability } from "./SponsorShared.tsx";
 import { SponsorTabs } from "./SponsorTabs.tsx";
 import styles from "./sponsor.module.css";
 
@@ -14,10 +30,7 @@ export const SCAN_PATH = "/sponsor/scan";
 
 type Card = sponsor.BusinessCard;
 
-function matches(c: Card, q: string): boolean {
-  if (q === "") return true;
-  return [c.companyName, c.personName, c.department, c.note, c.createdByName].some((v) => v?.toLowerCase().includes(q));
-}
+const searchText = (c: Card): string => [c.companyName, c.personName, c.department, c.note, c.createdByName].filter(Boolean).join(" ");
 
 const SORT_VALUE: Record<string, (c: Card) => string> = {
   company: (c) => c.companyName ?? "",
@@ -60,6 +73,7 @@ export function SponsorCardsScreen(): JSX.Element {
   const navigate = useNavigate();
   const { canWrite } = useSponsorCapability();
   const [query, setQuery] = useState("");
+  const [members, setMembers] = useState<string[]>([]);
   const [sort, setSort] = useState<SortState>({ key: "createdAt", direction: "desc" });
   const [openId, setOpenId] = useState<string | null>(null);
   const scan = () => void navigate({ to: SCAN_PATH });
@@ -68,10 +82,13 @@ export function SponsorCardsScreen(): JSX.Element {
   };
 
   const all = list.data?.cards ?? [];
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return sortRows(all.filter((c) => matches(c, q)), sort);
-  }, [all, query, sort]);
+  const options = useMemo(() => memberOptions(all, (c) => [memberOf(c)], "fe2-sponsor-filter-member"), [all]);
+  const { results } = useClientFilter(all, query, searchText);
+  const rows = useMemo(
+    () => sortRows(members.length === 0 ? [...results] : results.filter((c) => members.includes(memberOf(c))), sort),
+    [results, members, sort],
+  );
+  const filtering = members.length > 0 || query.trim() !== "";
 
   const columns: ColumnDef<Card>[] = [
     {
@@ -93,19 +110,8 @@ export function SponsorCardsScreen(): JSX.Element {
       hideable: false,
       minWidth: "11rem",
       cell: (c) => (
-        <span data-testid={`fe2-sponsor-card-${c.id}`}>
-          <button
-            type="button"
-            className={styles.rowLink}
-            disabled={isTempCard(c)}
-            aria-label={`${sponsor.cardDisplayName(c)} の名刺を開く`}
-            onClick={(e) => {
-              e.stopPropagation();
-              open(c);
-            }}
-          >
-            <span data-testid="fe2-sponsor-card-name">{c.companyName ?? sponsor.cardDisplayName(c)}</span>
-          </button>
+        <span className={styles.rowName} data-testid={`fe2-sponsor-card-${c.id}`}>
+          <span data-testid="fe2-sponsor-card-name">{c.companyName ?? sponsor.cardDisplayName(c)}</span>
         </span>
       ),
     },
@@ -119,7 +125,7 @@ export function SponsorCardsScreen(): JSX.Element {
       header: "登録日時",
       sortable: true,
       noWrap: true,
-      cell: (c) => (isTempCard(c) ? <span className={styles.muted}>保存中…</span> : formatDateTime(c.createdAt)),
+      cell: (c) => (isTempCard(c) ? <Badge tone="info">保存中…</Badge> : formatDateTime(c.createdAt)),
     },
   ];
 
@@ -154,8 +160,26 @@ export function SponsorCardsScreen(): JSX.Element {
         }
       />
     );
-  } else if (rows.length === 0) {
-    body = <p className={styles.note} data-testid="fe2-sponsor-no-match">「{query.trim()}」に合う名刺はありません。</p>;
+  } else if (rows.length === 0 && filtering) {
+    body = (
+      <EmptyState
+        testId="fe2-sponsor-no-match"
+        icon="search"
+        title="条件に合う名刺はありません"
+        description="検索語や登録者の絞り込みを変えてみてください。"
+        action={
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setQuery("");
+              setMembers([]);
+            }}
+          >
+            条件をクリア
+          </Button>
+        }
+      />
+    );
   } else {
     body = (
       <DataTable<Card>
@@ -185,6 +209,15 @@ export function SponsorCardsScreen(): JSX.Element {
       <>
         {all.length > 0 ? (
           <div className={styles.toolbar}>
+            <FilterBar
+              testId="fe2-sponsor-filters"
+              aria-label="登録者で絞り込み"
+              activeCount={members.length}
+              onClear={() => setMembers([])}
+              clearTestId="fe2-sponsor-filter-clear"
+            >
+              <FilterChips multiple aria-label="登録者" value={members} onChange={setMembers} options={options} />
+            </FilterBar>
             <div className={styles.search}>
               <TextField
                 id="sponsor-search"
@@ -194,9 +227,6 @@ export function SponsorCardsScreen(): JSX.Element {
                 placeholder="会社名・氏名・部署・メモ・登録者で検索"
               />
             </div>
-            <span className={styles.count} data-testid="fe2-sponsor-count">
-              {rows.length} 件
-            </span>
           </div>
         ) : null}
         {body}

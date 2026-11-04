@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button, EmptyState, PageHeader, Stack } from "@dub/ui";
+import { DraftRestoredNotice } from "@dub/app-ui";
 import { CardCapture } from "./CardCapture.tsx";
 import { useCompanies, useObjectUrl, useSaveCard } from "./sponsorHooks.ts";
 import { useSponsorPending } from "./SponsorProvider.tsx";
@@ -22,6 +23,7 @@ export function SponsorScanScreen(): JSX.Element {
   const { companies } = useCompanies();
   // 失敗した下書きは開いた瞬間に 1 度だけ取り込む。
   const [restored] = useState(() => pending.get().draft);
+  const [restoredVisible, setRestoredVisible] = useState(restored !== null);
   const [step, setStep] = useState<Step>(() => (restored ? { kind: "form", image: restored.image } : { kind: "capture" }));
   const [form, setForm] = useState<CardFormValues>(() => (restored ? formFromCard(restored.fields) : EMPTY_FORM));
   const photoUrl = useObjectUrl(step.kind === "form" ? step.image : null);
@@ -64,11 +66,18 @@ export function SponsorScanScreen(): JSX.Element {
         <p className={styles.shareNotice} data-testid="fe2-sponsor-share-notice">
           {SHARE_NOTICE}
         </p>
-        {restored && step.kind === "form" ? (
-          <p className={styles.note} role="status" data-testid="fe2-sponsor-restored">
-            前回保存できなかった入力を復元しました。
-          </p>
-        ) : null}
+        <DraftRestoredNotice
+          testId="fe2-sponsor-restored"
+          visible={restoredVisible && step.kind === "form"}
+          message="前回保存できなかった入力を復元しました。"
+          onKeep={() => setRestoredVisible(false)}
+          onDiscard={() => {
+            pending.setDraft(null);
+            setForm(EMPTY_FORM);
+            setStep({ kind: "capture" });
+            setRestoredVisible(false);
+          }}
+        />
 
         {step.kind === "capture" ? (
           <CardCapture

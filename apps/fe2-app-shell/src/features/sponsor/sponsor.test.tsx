@@ -133,7 +133,24 @@ describe("SponsorCardsScreen (一覧)", () => {
     fireEvent.click(screen.getByRole("button", { name: /登録日時/ }));
     expect(names()).toEqual(["A社", "C社", "B社"]);
     fireEvent.change(screen.getByTestId("fe2-sponsor-search"), { target: { value: "青木" } });
-    expect(names()).toEqual(["B社"]);
+    await waitFor(() => expect(names()).toEqual(["B社"]));
+    fireEvent.change(screen.getByTestId("fe2-sponsor-search"), { target: { value: "" } });
+    await waitFor(() => expect(names()).toHaveLength(3));
+  });
+
+  it("filters by 登録者 with the shared FilterBar / FilterChips, and offers クリア when nothing matches", async () => {
+    renderWith(<SponsorCardsScreen />, fakeApi());
+    await screen.findByTestId("fe2-sponsor-card-card_1");
+    const bar = screen.getByTestId("fe2-sponsor-filters");
+    const chip = within(bar).getByRole("button", { name: /鈴木 一郎/ });
+    expect(chip.textContent).toContain("3");
+    fireEvent.click(chip);
+    expect(names()).toHaveLength(3);
+    fireEvent.change(screen.getByTestId("fe2-sponsor-search"), { target: { value: "該当なし" } });
+    const empty = await screen.findByTestId("fe2-sponsor-no-match");
+    fireEvent.click(within(empty).getByRole("button", { name: "条件をクリア" }));
+    await waitFor(() => expect(names()).toHaveLength(3));
+    expect(within(screen.getByTestId("fe2-sponsor-filters")).queryByText("クリア")).toBeNull();
   });
 
   it("searches by company / name / department / memo", async () => {
@@ -167,7 +184,7 @@ describe("SponsorCardsScreen (一覧)", () => {
     renderWith(<SponsorCardsScreen />, fakeApi(), VIEWER);
     await screen.findByTestId("fe2-sponsor-card-card_1");
     expect(screen.queryByTestId("fe2-sponsor-scan")).toBeNull();
-    fireEvent.click(within(screen.getByTestId("fe2-sponsor-card-card_1")).getByRole("button"));
+    fireEvent.click(screen.getByTestId("fe2-sponsor-card-card_1"));
     const detail = await screen.findByTestId("fe2-sponsor-detail");
     expect(within(detail).getByTestId("fe2-sponsor-mailto").getAttribute("href")).toBe("mailto:yamada@example.jp");
     expect(within(detail).getByTestId("fe2-sponsor-tel").getAttribute("href")).toBe("tel:0761234567");
@@ -182,7 +199,7 @@ describe("SponsorCardsScreen (一覧)", () => {
     const get = vi.fn(() => Promise.resolve(card({ companyName: "北陸テック（他の人が更新）", version: 2 })));
     renderWith(<SponsorCardsScreen />, fakeApi({ update, get }), WRITER);
     expect(await screen.findByTestId("fe2-sponsor-scan")).toBeTruthy();
-    fireEvent.click(within(screen.getByTestId("fe2-sponsor-card-card_1")).getByRole("button"));
+    fireEvent.click(screen.getByTestId("fe2-sponsor-card-card_1"));
     const detail = await screen.findByTestId("fe2-sponsor-detail");
     expect(within(detail).queryByTestId("fe2-sponsor-remove")).toBeNull();
     fireEvent.click(within(detail).getByTestId("fe2-sponsor-edit"));
@@ -200,7 +217,7 @@ describe("SponsorCardsScreen (一覧)", () => {
     const remove = vi.fn(() => Promise.resolve());
     renderWith(<SponsorCardsScreen />, fakeApi({ remove }));
     await screen.findByTestId("fe2-sponsor-card-card_2");
-    fireEvent.click(within(screen.getByTestId("fe2-sponsor-card-card_2")).getByRole("button"));
+    fireEvent.click(screen.getByTestId("fe2-sponsor-card-card_2"));
     fireEvent.click(await screen.findByTestId("fe2-sponsor-remove"));
     const dialog = await screen.findByTestId("fe2-sponsor-remove-confirm");
     fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
@@ -283,6 +300,10 @@ describe("SponsorScanScreen (撮影 → 入力 → 保存)", () => {
     renderWith(<SponsorScanScreen />, api);
     expect(await screen.findByTestId("fe2-sponsor-restored")).toBeTruthy();
     expect((screen.getByTestId("fe2-sponsor-field-companyName") as HTMLInputElement).value).toBe("能登ソフト");
+    // 共通の DraftRestoredNotice: 破棄で下書きを捨てて撮影からやり直す。
+    fireEvent.click(screen.getByTestId("fe2-sponsor-restored-discard"));
+    expect(await screen.findByTestId("fe2-sponsor-capture")).toBeTruthy();
+    expect(screen.queryByTestId("fe2-sponsor-restored")).toBeNull();
   });
 
   it("starts the back camera and stops its track on unmount", async () => {
@@ -344,11 +365,21 @@ describe("企業 (名刺を会社名でまとめる)", () => {
     const table = await screen.findByTestId("fe2-sponsor-companies-table");
     expect(within(table).getByText("3 枚")).toBeTruthy();
     expect(screen.getByTestId("fe2-sponsor-unassigned").textContent).toContain("1 枚");
-    fireEvent.click(within(table).getByRole("button", { name: "株式会社北陸テック" }));
+    fireEvent.click(within(table).getByText("株式会社北陸テック"));
     const detail = await screen.findByTestId("fe2-sponsor-company-detail");
-    expect(within(detail).getByTestId("fe2-sponsor-company-card-k2").textContent).toContain("佐藤 三郎 が登録");
+    const row = within(detail).getByTestId("fe2-sponsor-company-card-k2").closest("tr")!;
+    expect(within(row).getByText("佐藤 三郎")).toBeTruthy();
     fireEvent.click(within(detail).getByTestId("fe2-sponsor-company-card-k2"));
     expect(await screen.findByTestId("fe2-sponsor-detail")).toBeTruthy();
+  });
+
+  it("filters companies by 接点のあるメンバー", async () => {
+    renderWith(<SponsorCompaniesScreen />, fakeApi({ list: () => Promise.resolve({ cards: cards.map((c) => ({ ...c })) }) }));
+    const table = await screen.findByTestId("fe2-sponsor-companies-table");
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    fireEvent.click(within(screen.getByTestId("fe2-sponsor-companies-filters")).getByRole("button", { name: /佐藤 三郎/ }));
+    await waitFor(() => expect(within(screen.getByTestId("fe2-sponsor-companies-table")).getAllByRole("row")).toHaveLength(2));
+    expect(screen.getByText("株式会社北陸テック")).toBeTruthy();
   });
 
   it("the scan form offers an existing company and fills it in on tap", async () => {

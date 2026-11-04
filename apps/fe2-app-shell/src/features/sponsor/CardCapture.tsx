@@ -2,7 +2,8 @@
 // プレビューで「撮り直す / この写真を使う」。カメラが使えない (拒否・非対応・PC) ときは「写真を選ぶ」だけ。
 // 「写真を選ぶ」はカメラが使えるときも常に出す。カメラはプレビュー中・アンマウントで必ず止める。
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Button, Skeleton } from "@dub/ui";
+import { Button, EmptyState, Skeleton } from "@dub/ui";
+import { FormError } from "@dub/app-ui";
 import { CardImageError, cameraSupported, captureFrame, fileToCardImage } from "./cardImage.ts";
 import { useObjectUrl } from "./sponsorHooks.ts";
 import styles from "./sponsor.module.css";
@@ -148,9 +149,7 @@ export function CardCapture({
   return (
     <div className={styles.capture} data-testid="fe2-sponsor-capture">
       {state.kind === "unavailable" ? (
-        <div className={styles.noCamera} data-testid="fe2-sponsor-no-camera" role="status">
-          <p>{state.message}</p>
-        </div>
+        <EmptyState testId="fe2-sponsor-no-camera" icon="info" title="カメラを使えません" description={state.message} />
       ) : (
         <div ref={viewportRef} className={styles.viewport}>
           <video ref={videoRef} className={styles.video} autoPlay muted playsInline aria-label="カメラの映像" />
@@ -159,11 +158,7 @@ export function CardCapture({
           <p className={styles.frameHint}>枠に名刺を合わせて撮影</p>
         </div>
       )}
-      {error ? (
-        <p className={styles.error} role="alert" data-testid="fe2-sponsor-capture-error">
-          {error}
-        </p>
-      ) : null}
+      <FormError testId="fe2-sponsor-capture-error">{error}</FormError>
       {state.kind !== "unavailable" ? (
         <div className={styles.shutterRow}>
           <button

@@ -89,6 +89,9 @@ D1 `member` namespace に新規テーブル 1 つ（`infra/d1/migrations/member/
 - `/sponsor/companies` 企業: 名刺を会社名でまとめた表（名刺の枚数・先方の担当者・接点のあるメンバー・最終登録日）。行を押すと
   その企業の名刺（誰がいつ登録したか）→ 名刺の詳細。
 - `/sponsor/scan` 撮影 → 入力 → 保存。
+- 部品は共通コンポーネントで組む（人事・応募者と同じ形）: 絞り込み = `FilterBar` + `FilterChips`（名刺は登録者・企業は接点のあるメンバー）、
+  検索 = `@dub/app-ui` `useClientFilter`、表 = `DataTable`、0 件/条件に合わない = `EmptyState`、状態表示 = `Badge`、
+  下書きの復元 = `DraftRestoredNotice`、エラー = `FormError`、ボタン行 = `DialogActions`。
 
 ### 企業の紐付け（企業テーブルは持たない）
 

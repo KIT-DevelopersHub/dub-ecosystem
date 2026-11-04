@@ -1,5 +1,5 @@
 // スポンサーの共通部品: 権限フラグ・共有の注意書き・名刺の写真 (サムネ/拡大)・入力フォーム・写真の再送。
-import { Button, FormField, Modal, Skeleton, TextField, Textarea } from "@dub/ui";
+import { Badge, Button, FormField, Modal, Skeleton, TextField, Textarea } from "@dub/ui";
 import { sponsor } from "@dub/types";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { useCardImage, useUploadImage } from "./sponsorHooks.ts";
@@ -23,6 +23,24 @@ export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+/** 名前の付いていない登録者を 1 つの選択肢にまとめるための値。 */
+export const UNKNOWN_MEMBER = "__unknown__";
+export const memberOf = (c: sponsor.BusinessCard): string => c.createdByName ?? UNKNOWN_MEMBER;
+
+/** 絞り込みの選択肢 (件数の多い順)。 */
+export function memberOptions<T>(items: readonly T[], namesOf: (item: T) => readonly string[], testIdPrefix: string) {
+  const counts = new Map<string, number>();
+  for (const it of items) for (const n of new Set(namesOf(it))) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return [...counts]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ja"))
+    .map(([value, count], i) => ({
+      value,
+      label: value === UNKNOWN_MEMBER ? "不明" : value,
+      count,
+      testId: `${testIdPrefix}-${i}`,
+    }));
 }
 
 export function formatDate(iso: string): string {
@@ -54,8 +72,11 @@ export function CardPhoto({
         ) : (
           node
         )}
-        {img.pending === "uploading" ? <span className={styles.photoBadge}>写真を送信中…</span> : null}
-        {img.pending === "failed" ? <span className={`${styles.photoBadge} ${styles.photoBadgeDanger}`}>写真の送信に失敗</span> : null}
+        {img.pending ? (
+          <span className={styles.photoBadge}>
+            {img.pending === "uploading" ? <Badge tone="info">写真を送信中…</Badge> : <Badge tone="danger">写真の送信に失敗</Badge>}
+          </span>
+        ) : null}
       </div>
     );
   }
@@ -126,9 +147,9 @@ function CompanySuggestions({ input, companies, onPick }: { input: string; compa
     <div className={styles.suggest} data-testid="fe2-sponsor-company-suggest">
       <span className={styles.suggestLabel}>登録済みの企業:</span>
       {hits.map((name) => (
-        <button key={name} type="button" className={styles.suggestChip} onClick={() => onPick(name)}>
+        <Button key={name} variant="secondary" size="sm" onClick={() => onPick(name)}>
           {name}
-        </button>
+        </Button>
       ))}
     </div>
   );

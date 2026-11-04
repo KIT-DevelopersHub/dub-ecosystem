@@ -1,17 +1,36 @@
 // スポンサー → 企業。名刺を会社名でまとめた表 (企業・名刺の枚数・先方の担当者・接点のあるメンバー・最終登録日)。
-// 行を押すとその企業の名刺 (誰がいつ登録したか) をドロワーで出し、そこから名刺の詳細へ進める。
+// 接点のあるメンバーで絞り込み (FilterBar + FilterChips)・企業名/担当者/メンバーで検索 (useClientFilter)。
+// 行を押すとその企業の名刺 (誰がいつ登録したか) の表をドロワーで出し、そこから名刺の詳細へ進める。
 import { useMemo, useState } from "react";
-import { DataTable, Drawer, EmptyState, ErrorState, SkeletonTable, TextField, type ColumnDef, type SortState } from "@dub/ui";
+import {
+  Button,
+  DataTable,
+  Drawer,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  FilterChips,
+  SkeletonTable,
+  Stack,
+  TextField,
+  type ColumnDef,
+  type SortState,
+} from "@dub/ui";
+import { useClientFilter } from "@dub/app-ui";
+import type { sponsor } from "@dub/types";
 import { useCompanies } from "./sponsorHooks.ts";
-import { companyKey, type Company } from "./companies.ts";
+import type { Company } from "./companies.ts";
 import { CardDrawer } from "./CardDrawer.tsx";
-import { formatDate, formatDateTime } from "./SponsorShared.tsx";
+import { formatDate, formatDateTime, memberOptions } from "./SponsorShared.tsx";
 import { SponsorFrame } from "./SponsorCardsScreen.tsx";
 import styles from "./sponsor.module.css";
 
 const people = (c: Company) => [...new Set(c.cards.map((x) => x.personName).filter((n): n is string => !!n))];
 
-function sortCompanies(rows: Company[], sort: SortState): Company[] {
+const searchText = (c: Company): string =>
+  [...new Set(c.cards.map((x) => x.companyName ?? "")), ...people(c), ...c.members].join(" ");
+
+function sortCompanies(rows: readonly Company[], sort: SortState): Company[] {
   const dir = sort.direction === "asc" ? 1 : -1;
   const cmp: Record<string, (a: Company, b: Company) => number> = {
     name: (a, b) => a.name.localeCompare(b.name, "ja"),
@@ -22,27 +41,38 @@ function sortCompanies(rows: Company[], sort: SortState): Company[] {
   return [...rows].sort((a, b) => f(a, b) * dir);
 }
 
+const CARD_COLUMNS: ColumnDef<sponsor.BusinessCard>[] = [
+  {
+    key: "person",
+    header: "先方の担当者",
+    hideable: false,
+    minWidth: "9rem",
+    cell: (c) => (
+      <span className={styles.rowName} data-testid={`fe2-sponsor-company-card-${c.id}`}>
+        {[c.personName, c.title].filter(Boolean).join("・") || "氏名未入力"}
+      </span>
+    ),
+  },
+  { key: "createdBy", header: "登録者", noWrap: true, cell: (c) => c.createdByName ?? "—" },
+  { key: "createdAt", header: "登録日時", noWrap: true, cell: (c) => formatDateTime(c.createdAt) },
+];
+
 function CompanyDrawer({ company, onClose, onOpenCard }: { company: Company | null; onClose: () => void; onOpenCard: (id: string) => void }): JSX.Element {
   return (
     <Drawer testId="fe2-sponsor-company-drawer" open={company !== null} onClose={onClose} title={company?.name ?? "企業"}>
       {company ? (
-        <div className={styles.companyBody} data-testid="fe2-sponsor-company-detail">
+        <Stack gap={5} testId="fe2-sponsor-company-detail">
           <p className={styles.note}>
             名刺 {company.cards.length} 枚・接点のあるメンバー {company.members.join("、") || "—"}
           </p>
-          <ul className={styles.companyCards}>
-            {company.cards.map((c) => (
-              <li key={c.id}>
-                <button type="button" className={styles.companyCard} data-testid={`fe2-sponsor-company-card-${c.id}`} onClick={() => onOpenCard(c.id)}>
-                  <span className={styles.companyCardName}>{[c.personName, c.title].filter(Boolean).join("・") || "氏名未入力"}</span>
-                  <span className={styles.muted}>
-                    {c.createdByName ?? "—"} が登録・{formatDateTime(c.createdAt)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+          <DataTable<sponsor.BusinessCard>
+            testId="fe2-sponsor-company-cards"
+            columns={CARD_COLUMNS}
+            rows={company.cards}
+            rowKey={(c) => c.id}
+            onRowClick={(c) => onOpenCard(c.id)}
+          />
+        </Stack>
       ) : null}
     </Drawer>
   );
@@ -51,17 +81,18 @@ function CompanyDrawer({ company, onClose, onOpenCard }: { company: Company | nu
 export function SponsorCompaniesScreen(): JSX.Element {
   const { list, companies, unassigned } = useCompanies();
   const [query, setQuery] = useState("");
+  const [members, setMembers] = useState<string[]>([]);
   const [sort, setSort] = useState<SortState>({ key: "lastAt", direction: "desc" });
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [cardId, setCardId] = useState<string | null>(null);
 
-  const rows = useMemo(() => {
-    const q = query.trim();
-    const k = q === "" ? "" : companyKey(q);
-    const hit = (c: Company) =>
-      q === "" || c.key.includes(k) || [...people(c), ...c.members].some((n) => n.toLowerCase().includes(q.toLowerCase()));
-    return sortCompanies(companies.filter(hit), sort);
-  }, [companies, query, sort]);
+  const options = useMemo(() => memberOptions(companies, (c) => c.members, "fe2-sponsor-companies-filter-member"), [companies]);
+  const { results } = useClientFilter(companies, query, searchText);
+  const rows = useMemo(
+    () => sortCompanies(members.length === 0 ? results : results.filter((c) => c.members.some((m) => members.includes(m))), sort),
+    [results, members, sort],
+  );
+  const filtering = members.length > 0 || query.trim() !== "";
   const opened = companies.find((c) => c.key === openKey) ?? null;
 
   const columns: ColumnDef<Company>[] = [
@@ -72,17 +103,9 @@ export function SponsorCompaniesScreen(): JSX.Element {
       hideable: false,
       minWidth: "12rem",
       cell: (c) => (
-        <button
-          type="button"
-          className={styles.rowLink}
-          data-testid={`fe2-sponsor-company-${c.key}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            setOpenKey(c.key);
-          }}
-        >
+        <span className={styles.rowName} data-testid={`fe2-sponsor-company-${c.key}`}>
           {c.name}
-        </button>
+        </span>
       ),
     },
     { key: "count", header: "名刺", sortable: true, noWrap: true, align: "right", cell: (c) => `${c.cards.length} 枚` },
@@ -115,8 +138,26 @@ export function SponsorCompaniesScreen(): JSX.Element {
         description="名刺に会社名を入れると、企業ごとにまとまってここに並びます。"
       />
     );
-  } else if (rows.length === 0) {
-    body = <p className={styles.note} data-testid="fe2-sponsor-companies-no-match">「{query.trim()}」に合う企業はありません。</p>;
+  } else if (rows.length === 0 && filtering) {
+    body = (
+      <EmptyState
+        testId="fe2-sponsor-companies-no-match"
+        icon="search"
+        title="条件に合う企業はありません"
+        description="検索語やメンバーの絞り込みを変えてみてください。"
+        action={
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setQuery("");
+              setMembers([]);
+            }}
+          >
+            条件をクリア
+          </Button>
+        }
+      />
+    );
   } else {
     body = (
       <DataTable<Company>
@@ -136,6 +177,15 @@ export function SponsorCompaniesScreen(): JSX.Element {
       <>
         {companies.length > 0 ? (
           <div className={styles.toolbar}>
+            <FilterBar
+              testId="fe2-sponsor-companies-filters"
+              aria-label="接点のあるメンバーで絞り込み"
+              activeCount={members.length}
+              onClear={() => setMembers([])}
+              clearTestId="fe2-sponsor-companies-filter-clear"
+            >
+              <FilterChips multiple aria-label="接点のあるメンバー" value={members} onChange={setMembers} options={options} />
+            </FilterBar>
             <div className={styles.search}>
               <TextField
                 id="sponsor-company-search"
@@ -145,7 +195,6 @@ export function SponsorCompaniesScreen(): JSX.Element {
                 placeholder="企業名・担当者・メンバーで検索"
               />
             </div>
-            <span className={styles.count}>{rows.length} 社</span>
           </div>
         ) : null}
         {body}
@@ -154,11 +203,7 @@ export function SponsorCompaniesScreen(): JSX.Element {
             会社名が未入力の名刺が {unassigned} 枚あります（「名刺」タブから入力すると企業にまとまります）。
           </p>
         ) : null}
-        <CompanyDrawer
-          company={cardId ? null : opened}
-          onClose={() => setOpenKey(null)}
-          onOpenCard={(id) => setCardId(id)}
-        />
+        <CompanyDrawer company={cardId ? null : opened} onClose={() => setOpenKey(null)} onOpenCard={setCardId} />
         <CardDrawer cardId={cardId} onClose={() => setCardId(null)} />
       </>
     </SponsorFrame>

@@ -3,6 +3,7 @@
 // 閲覧のみの人には編集 UI を出さない。
 import { useEffect, useState } from "react";
 import { Button, ConfirmDialog, Drawer, Modal } from "@dub/ui";
+import { DialogActions } from "@dub/app-ui";
 import { sponsor } from "@dub/types";
 import { CardCapture } from "./CardCapture.tsx";
 import { useCompanies, useRemoveCard, useUpdateCard, useUploadImage } from "./sponsorHooks.ts";
@@ -66,7 +67,7 @@ export function CardDrawer({ cardId, onClose }: { cardId: string | null; onClose
         {editing ? (
           <div className={styles.detailSection}>
             <CardForm idPrefix={`sponsor-edit-${card.id}`} value={editing} onChange={setEditing} companies={companies.map((c) => c.name)} />
-            <div className={styles.actionRow}>
+            <DialogActions>
               <Button variant="secondary" size="lg" testId="fe2-sponsor-edit-cancel" onClick={() => setEditing(null)}>
                 キャンセル
               </Button>
@@ -83,7 +84,7 @@ export function CardDrawer({ cardId, onClose }: { cardId: string | null; onClose
               >
                 保存する
               </Button>
-            </div>
+            </DialogActions>
           </div>
         ) : (
           <div className={styles.detailSection}>
