@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
+import { identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
@@ -80,6 +80,10 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "hr:read",
   "hr:write",
   "hr:admin",
+  // スポンサー: 名刺の閲覧・登録/編集・削除 (admin は identity/0027 で全部持つ)。
+  "sponsor:read",
+  "sponsor:write",
+  "sponsor:admin",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -5613,6 +5617,136 @@ function createLpProposalsStore() {
   return { handle, settings };
 }
 
+// ── スポンサー (member-service /members/sponsor/* の demo) ──────────────────────
+// 名刺の CRUD + 写真 (生バイト)。seed の写真は SVG で描いた名刺風の画像。撮影/選択した写真は
+// メモリにそのまま持ち、一覧・詳細に出る (リロードで消える)。
+type DemoCardImage = { bytes: ArrayBuffer; type: string };
+
+function demoCardSvg(company: string, person: string, title: string, accent: string): string {
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="910" height="550" viewBox="0 0 910 550">` +
+    `<rect width="910" height="550" fill="#fbfaf7"/><rect width="910" height="18" fill="${accent}"/>` +
+    `<text x="60" y="120" font-family="sans-serif" font-size="34" fill="#333">${esc(company)}</text>` +
+    `<text x="60" y="210" font-family="sans-serif" font-size="26" fill="#666">${esc(title)}</text>` +
+    `<text x="60" y="290" font-family="sans-serif" font-size="60" font-weight="bold" fill="#111">${esc(person)}</text>` +
+    `<line x1="60" y1="360" x2="850" y2="360" stroke="#ddd" stroke-width="2"/>` +
+    `<text x="60" y="430" font-family="sans-serif" font-size="22" fill="#777">TEL 076-000-0000  /  info@example.co.jp</text>` +
+    `<circle cx="790" cy="150" r="56" fill="${accent}" opacity="0.85"/></svg>`;
+}
+
+function createSponsorStore(me: () => { id: string; displayName: string }) {
+  // 常に過去 (今日の分も 30 分前) にして、新しく登録した名刺が先頭に来るようにする。
+  const at = (daysAgo: number): string => new Date(Date.now() - daysAgo * 86_400_000 - 30 * 60_000).toISOString();
+  const enc = new TextEncoder();
+  const images = new Map<string, DemoCardImage>();
+  const svg = (id: string, markup: string) => images.set(id, { bytes: enc.encode(markup).slice().buffer as ArrayBuffer, type: "image/svg+xml" });
+  type Card = sponsorValues.BusinessCard;
+  const card = (id: string, daysAgo: number, f: Partial<Card>): Card => ({
+    id, companyName: null, personName: null, department: null, title: null, email: null, phone: null, note: null,
+    hasImage: false, version: 1, createdBy: "usr_sponsor" as Card["createdBy"], createdByName: "鈴木 一郎",
+    createdAt: at(daysAgo), updatedAt: at(daysAgo), ...f,
+  });
+  const cards: Card[] = [
+    card("card_demo_1", 1, {
+      companyName: "株式会社北陸テック", personName: "山田 太郎", department: "事業開発部", title: "部長",
+      email: "yamada@hokuriku-tech.example.jp", phone: "076-123-4567", note: "北陸ITカンファレンスの懇親会で名刺交換。協賛に前向き、来週資料を送る。", hasImage: true,
+    }),
+    card("card_demo_2", 3, {
+      companyName: "金沢クラウド合同会社", personName: "中村 花", department: "マーケティング部", title: "マネージャー",
+      email: "nakamura@kanazawa-cloud.example.jp", phone: "090-1234-5678", note: "ブース出展に興味あり。予算は春に確定。", hasImage: true,
+      createdBy: ME_ID as Card["createdBy"], createdByName: "デモ 管理者",
+    }),
+    // 写真なし (手入力だけで登録した名刺)。
+    card("card_demo_3", 6, {
+      companyName: "一般社団法人 加賀デジタル協会", personName: "小松 健", title: "理事", email: "komatsu@kaga-digital.example.jp",
+      note: "後援の相談先として紹介してもらった。",
+    }),
+    // 同じ企業の別の担当者 (表記ゆれ「（株）」・別メンバーが登録) → 企業タブで 1 社にまとまる。
+    card("card_demo_5", 9, {
+      companyName: "（株）北陸テック", personName: "川口 恵", department: "人事部", title: "採用担当",
+      email: "kawaguchi@hokuriku-tech.example.jp", note: "学生向けハッカソンの後援に関心あり。", createdByName: "佐藤 三郎",
+    }),
+    // テキスト未入力 (写真だけ撮って後で入力する想定)。
+    card("card_demo_4", 0, { hasImage: true, createdBy: ME_ID as Card["createdBy"], createdByName: "デモ 管理者" }),
+  ];
+  svg("card_demo_1", demoCardSvg("株式会社北陸テック", "山田 太郎", "事業開発部 部長", "#2f6fde"));
+  svg("card_demo_2", demoCardSvg("金沢クラウド合同会社", "中村 花", "マーケティング部 マネージャー", "#1f9d6b"));
+  svg("card_demo_4", demoCardSvg("能登ソフトウェア株式会社", "石川 翔", "代表取締役", "#d9822b"));
+
+  let seq = 0;
+  const FIELDS = ["companyName", "personName", "department", "title", "email", "phone", "note"] as const;
+  const pick = (body: any): Partial<Card> =>
+    Object.fromEntries(FIELDS.filter((k) => body && k in body).map((k) => [k, body[k] == null || String(body[k]).trim() === "" ? null : String(body[k]).trim()]));
+  const err = (code: string, status: number) => json({ error: { code, message: code, retryable: false } }, status);
+  // Blob.arrayBuffer が無い環境 (jsdom) は FileReader で読む。
+  const readBytes = async (raw: unknown): Promise<ArrayBuffer | null> => {
+    if (typeof Blob === "undefined" || !(raw instanceof Blob)) return null;
+    if (typeof raw.arrayBuffer === "function") return raw.arrayBuffer();
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as ArrayBuffer);
+      r.onerror = () => reject(r.error);
+      r.readAsArrayBuffer(raw);
+    });
+  };
+
+  async function handle(method: string, pathname: string, body: any, raw: unknown, headers: Headers): Promise<Response | null> {
+    if (!pathname.startsWith("/api/v1/members/sponsor/")) return null;
+    const now = new Date().toISOString();
+    if (pathname === "/api/v1/members/sponsor/cards") {
+      if (method === "GET") return json({ cards: [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((c) => ({ ...c })) });
+      if (method === "POST") {
+        const u = me();
+        const c = card(`card_demo_new_${++seq}`, 0, { ...pick(body), createdBy: u.id as Card["createdBy"], createdByName: u.displayName });
+        c.createdAt = now;
+        c.updatedAt = now;
+        cards.push(c);
+        return json({ ...c }, 201);
+      }
+      return null;
+    }
+    const m = /^\/api\/v1\/members\/sponsor\/cards\/([^/]+)(\/image)?$/.exec(pathname);
+    if (!m) return null;
+    const c = cards.find((x) => x.id === decodeURIComponent(m[1]!));
+    if (!c) return err("SPONSOR_CARD_NOT_FOUND", 404);
+    if (m[2]) {
+      if (method === "GET") {
+        const img = images.get(c.id);
+        return img ? new Response(img.bytes, { status: 200, headers: { "content-type": img.type } }) : err("SPONSOR_IMAGE_NOT_FOUND", 404);
+      }
+      if (method === "PUT") {
+        const type = (headers.get("content-type") ?? "").split(";")[0]!.trim();
+        if (!sponsorValues.isCardImageType(type)) return err("VALIDATION_FAILED", 400);
+        const bytes = await readBytes(raw);
+        if (!bytes || bytes.byteLength === 0) return err("VALIDATION_FAILED", 400);
+        if (bytes.byteLength > sponsorValues.CARD_IMAGE_MAX_BYTES) return err("PAYLOAD_TOO_LARGE", 413);
+        images.set(c.id, { bytes, type });
+        c.hasImage = true;
+        c.version += 1;
+        c.updatedAt = now;
+        return json({ ...c });
+      }
+      return null;
+    }
+    if (method === "GET") return json({ ...c });
+    if (method === "PATCH") {
+      if (body?.expectedVersion !== c.version) return err("SPONSOR_VERSION_CONFLICT", 409);
+      Object.assign(c, pick(body));
+      c.version += 1;
+      c.updatedAt = now;
+      return json({ ...c });
+    }
+    if (method === "DELETE") {
+      cards.splice(cards.indexOf(c), 1);
+      images.delete(c.id);
+      return json(null, 204);
+    }
+    return null;
+  }
+
+  return { handle };
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -5677,6 +5811,8 @@ export function createDemoFetch(): typeof fetch {
   const lpTicketsStore = createLpTicketsStore();
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
+  // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
+  const sponsorStore = createSponsorStore(() => currentMe().user);
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
   const lpSiteConfigStore = createLpSiteConfigStore({
     publish: lpStore.publish,
@@ -5762,6 +5898,10 @@ export function createDemoFetch(): typeof fetch {
 
     const hrFormHit = await hrInterviewFormStore.handle(method, url.pathname, url, parsedBody);
     if (hrFormHit) return hrFormHit;
+
+    const sponsorHit = await sponsorStore.handle(method, url.pathname, parsedBody, init?.body, new Headers(init?.headers));
+    if (sponsorHit) return sponsorHit;
+
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??

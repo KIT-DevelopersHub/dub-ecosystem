@@ -24,6 +24,12 @@ service = "identity-roster"
 binding = "SVC_NOTIFICATION"
 service = "notification"
 
+# R2 dub-file-attachments (chat-service / file-meta と同じ既存バケット): スポンサーの名刺写真
+# (sponsor/cards/<cardId>)。無い環境では写真ルートだけ 503 で他は動く。
+[[r2_buckets]]
+binding = "SPONSOR_FILES"
+bucket_name = "dub-file-attachments"
+
 [observability]
 enabled = true
 
