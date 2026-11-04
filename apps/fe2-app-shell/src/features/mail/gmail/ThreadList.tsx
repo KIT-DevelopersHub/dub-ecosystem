@@ -5,9 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Badge, NARROW_VIEWPORT_QUERY, SkeletonList, useMediaQuery } from "@dub/ui";
 import {
-  avatarColor,
   displayName,
-  initial,
   latest,
   partitionNudged,
   pendingReplyIds,
@@ -21,6 +19,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
+import { SenderAvatar } from "./SenderAvatar.tsx";
 import { PAGE_SIZE, pageSourceOf, selectVisible, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
 
 // P25: exit-animation two-phase pattern (mirrors fe1 Toast.tsx's `leaving` + EXIT_MS).
@@ -308,24 +307,7 @@ function ThreadRow({
         />
       </StopClick>
 
-      <span
-        aria-hidden
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: "var(--dub-radius-full)",
-          background: avatarColor(people),
-          color: "#fff",
-          fontSize: 12,
-          fontWeight: 700,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        {initial(people)}
-      </span>
+      <SenderAvatar p={people} size={24} fontSize={12} />
 
       {/* Phones stack sender over subject so neither collapses to nothing. */}
       <span style={narrow ? { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 } : { display: "contents" }}>

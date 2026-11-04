@@ -182,6 +182,21 @@ export class IdentityService {
     return { user: this.toIdentityUser(user, assignments) };
   }
 
+  /** email → avatarUrl for the ACTIVE roster users among `emails` that set an avatar
+   *  (mail-gateway's sender icons). Emails not on the roster / without an avatar are absent. */
+  async avatarsByEmail(orgId: string, emails: unknown): Promise<{ avatars: Record<string, string> }> {
+    if (!Array.isArray(emails)) throw errors.validationFailed([{ field: "emails", reason: "required" }]);
+    const wanted = [...new Set(emails.filter((e): e is string => typeof e === "string").map((e) => e.trim().toLowerCase()).filter(Boolean))];
+    if (wanted.length > MAX_IDS) {
+      throw errors.validationFailed([{ field: "emails", reason: "too_long", message: `max ${MAX_IDS}` }]);
+    }
+    const avatars: Record<string, string> = {};
+    for (const u of await this.d.repo.getUsersByEmails(orgId, wanted)) {
+      if (u.status === "active" && u.avatarUrl) avatars[u.email.toLowerCase()] = u.avatarUrl;
+    }
+    return { avatars };
+  }
+
   // ---------- invite / provision ----------
   async invite(orgId: string, req: { email: string; displayName?: string; furigana?: string; roleIds?: string[] }, ctx: RequestCtx): Promise<InviteUserResponse> {
     const email = requireEmail(req.email);

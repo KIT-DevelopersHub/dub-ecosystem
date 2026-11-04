@@ -36,10 +36,10 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
     expect(() => assertRouteCoverage(h.app, POLICY_TABLE)).not.toThrow();
   });
 
-  it("lists all 35 endpoints of this service", async () => {
+  it("lists all 36 endpoints of this service", async () => {
     const h = await makeHarness();
-    expect(protectableRouteKeys(h.app)).toHaveLength(35);
-    expect(Object.keys(POLICY_TABLE)).toHaveLength(35);
+    expect(protectableRouteKeys(h.app)).toHaveLength(36);
+    expect(Object.keys(POLICY_TABLE)).toHaveLength(36);
   });
 
   it("catches a new endpoint added without a table entry, and denies it at runtime", async () => {
@@ -128,6 +128,7 @@ const INTERNAL_ROUTES = [
   "POST /authz/check",
   "POST /internal/users/:id/profile",
   "POST /internal/users/lookup",
+  "POST /internal/users/avatars",
   "POST /users/provision",
   "POST /internal/webauthn/challenges",
   "POST /internal/webauthn/challenges/take",

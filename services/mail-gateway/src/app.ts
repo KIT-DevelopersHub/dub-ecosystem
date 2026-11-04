@@ -26,7 +26,7 @@ import { policyGate, sharedAuthzGranter } from "@dub/policy-gate";
 import { HEADERS, consoleSink } from "@dub/observability";
 import { publishAudit } from "@dub/events";
 import { nowIso } from "@dub/db";
-import { common, type identity, type mail } from "@dub/types";
+import { common, mail, type identity } from "@dub/types";
 import type { AppBindings } from "./env";
 import { POLICY_TABLE } from "./policy-table";
 import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
@@ -504,6 +504,28 @@ export function createApp() {
       if (!removed) throw new DubError("MAIL_BLOCK_NOT_FOUND", `not blocked: ${value}`, { status: 404 });
       return c.json({ value, blocked: false });
     });
+  });
+
+  // ---- sender icons: email -> avatar of the Dub user behind it (roster avatarUrl). Only
+  // active roster users that set an icon resolve; anything else is absent and the client
+  // keeps its initial. Best-effort: an identity failure answers {} rather than an error.
+  ext.post("/avatars", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { emails?: unknown } | null;
+    if (!Array.isArray(body?.emails)) throw errors.validationFailed([{ field: "emails", reason: "required" }]);
+    const emails = [...new Set(body.emails.filter((e): e is string => typeof e === "string").map((e) => e.trim().toLowerCase()).filter(Boolean))];
+    if (emails.length > mail.MAIL_AVATAR_LOOKUP_LIMIT) {
+      throw errors.validationFailed([{ field: "emails", reason: "too_long", message: `max ${mail.MAIL_AVATAR_LOOKUP_LIMIT}` }]);
+    }
+    if (emails.length === 0) return c.json({ avatars: {} } satisfies mail.MailAvatarsResponse);
+    try {
+      const client = createServiceClient(c.env.SVC_IDENTITY, { service: "identity-roster", caller: SERVICE_NAME });
+      const res = await client.post<{ avatars?: Record<string, unknown> }, { emails: string[] }>(ctxOf(c), "/internal/users/avatars", { emails });
+      const avatars: Record<string, string> = {};
+      for (const [email, url] of Object.entries(res?.avatars ?? {})) if (typeof url === "string") avatars[email] = url;
+      return c.json({ avatars } satisfies mail.MailAvatarsResponse);
+    } catch {
+      return c.json({ avatars: {} } satisfies mail.MailAvatarsResponse);
+    }
   });
 
   // ---- per-user opt-in auto-forward (Gmail 自動転送, 0023). PERSONAL like blocks: `ownerOf`

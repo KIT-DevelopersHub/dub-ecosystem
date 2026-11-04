@@ -541,6 +541,16 @@ function unpublishAdminNotificationDemo(id: string): notification.UnpublishBroad
 }
 
 // ── mail ────────────────────────────────────────────────────────────────────
+// Icons the demo's Dub users "set" in アカウント設定 (POST /mail/avatars resolves only these).
+function demoPortrait(from: string, to: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="96" height="96" fill="url(#g)"/><circle cx="48" cy="38" r="17" fill="#ffffff" fill-opacity="0.92"/><path d="M16 96c4-20 17-31 32-31s28 11 32 31z" fill="#ffffff" fill-opacity="0.92"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+const DEMO_MAIL_AVATARS: Record<string, string> = {
+  "demo@developershub.jp": demoPortrait("#2563eb", "#7c3aed"),
+  "staff@developershub.jp": demoPortrait("#059669", "#0891b2"),
+  "taro@developershub.jp": demoPortrait("#d97706", "#db2777"),
+};
 // Demo attachment blob store: attId -> bytes (download links serve real bytes in-session).
 const DEMO_MAIL_BLOBS = new Map<string, { filename: string; contentType: string; bytes: Uint8Array }>();
 function seedMailBlob(id: string, filename: string, contentType: string, text: string): mail.MailAttachment {
@@ -1310,6 +1320,18 @@ function createMailStore() {
           return json({ id, status: "canceled" });
         }
       }
+    }
+
+    // 送信者アイコン: only Dub users (DEMO_MAIL_AVATARS) resolve; outside senders keep initials.
+    if (method === "POST" && pathname === "/api/v1/mail/avatars") {
+      const emails = Array.isArray((body as { emails?: unknown } | null)?.emails) ? (body as { emails: unknown[] }).emails : null;
+      if (!emails) return validationFailed("emails is required");
+      const avatars: Record<string, string> = {};
+      for (const e of emails) {
+        const key = typeof e === "string" ? e.trim().toLowerCase() : "";
+        if (DEMO_MAIL_AVATARS[key]) avatars[key] = DEMO_MAIL_AVATARS[key];
+      }
+      return json({ avatars } satisfies mail.MailAvatarsResponse);
     }
 
     // 送信者ブロック (0021): per-account block list in localStorage, with the gateway's

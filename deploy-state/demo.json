@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "522861a5",
-  "branch": "feat/chat-channel-visibility-toggle",
+  "deployedSha": "8859b628",
+  "branch": "HEAD",
   "actor": "ko-tarou",
-  "markers": ["これまでのメッセージを含めてこのチャンネルを閲覧できるようになります"],
+  "markers": ["fe2-mail-avatar-img", "fe2-mail-inline-to"],
   "live": true,
-  "verifiedAt": "2026-11-02T14:20:52Z",
-  "updatedAt": "2026-11-02T14:20:52Z",
-  "note": "chat: channel visibility toggle (chat:change_visibility)"
+  "verifiedAt": "2026-11-04T04:59:48Z",
+  "updatedAt": "2026-11-04T04:59:48Z",
+  "note": "mail: 送信者アイコン + 宛先/Cc/Bcc の小アイコン (PR #745)"
 }
