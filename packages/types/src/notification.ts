@@ -65,10 +65,17 @@ export interface PreferenceEntry {
 // public inquiry flow: a signed-in user reports "fix this here"; the record is stored
 // append-only and admins read it. category is a small closed vocabulary.
 export type FeedbackCategory = "bug" | "idea" | "question" | "other";
+/**
+ * What the submission is about (⚙ → 問い合わせ). "feedback" is the original widget flow
+ * (refined by `category`); the others are member requests to the organisers. Non-feedback
+ * kinds carry their structured fields (枚数・候補日時 etc.) inside `message`.
+ */
+export type InquiryKind = "feedback" | "business_card" | "invite_friend" | "interview" | "other";
 
 export interface CreateFeedbackRequest {
   message: string; // 1..4000
   category?: FeedbackCategory; // default "other"
+  kind?: InquiryKind; // default "feedback"
   /** Where the feedback was raised (helps triage). Both optional. */
   page?: {
     url?: string; // e.g. https://app.dub/…/events/evt_123
@@ -84,6 +91,7 @@ export interface FeedbackItem {
   id: string;
   userId: UserId; // submitter
   category: FeedbackCategory;
+  kind: InquiryKind;
   message: string;
   pageUrl: string | null;
   pageName: string | null;

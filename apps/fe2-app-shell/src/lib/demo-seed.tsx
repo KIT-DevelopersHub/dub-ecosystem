@@ -25,6 +25,7 @@ import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
 import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
+import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
@@ -503,7 +504,31 @@ const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
   { id: "ntfn_adm_0005", type: "release", title: "🎉 使用量ダッシュボードを公開しました", body: "各サービスの無料枠の使用状況を確認できます。", audience: "admin", createdAt: "2026-08-02T01:30:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0006", type: "deploy.deployment.status_changed", title: "デプロイ完了: fe2-app-shell", body: "SPA シェルの本番デプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T01:15:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0007", type: "feedback", title: "新しいフィードバック: 通知の一括操作がほしい", body: "カテゴリ: idea\n送信ユーザー: usr_bob\n\n大量に公開する時に一括操作がほしいです", audience: "admin", createdAt: "2026-08-02T01:00:00Z", publishedBroadcastId: null },
+  // ⚙ → 問い合わせ (non-feedback kind) as the backend labels it.
+  { id: "ntfn_adm_0008", type: "feedback", title: "新しい問い合わせ（名刺が切れた）: 希望枚数: 50枚", body: "種別: 名刺が切れた\n送信ユーザー: usr_alice\n発生ページ: ホーム\n\n希望枚数: 50枚", audience: "admin", createdAt: "2026-08-02T00:45:00Z", publishedBroadcastId: null },
 ];
+
+// Demo POST /api/v1/feedback (⚙ → 問い合わせ): file it into the admin list the way the
+// backend's in-app admin notification reads, so the round trip is visible in-session.
+function recordInquiryDemo(body: notification.CreateFeedbackRequest | null): { id: string } {
+  const id = `nfb_demo_${Date.now()}`;
+  const kind = body?.kind ?? "feedback";
+  const label = INQUIRY_KIND_SPECS.find((s) => s.kind === kind)?.label ?? kind;
+  const message = (body?.message ?? "").replace(/\s+/g, " ").trim();
+  const heading = kind === "feedback" ? "フィードバック" : `問い合わせ（${label}）`;
+  const lines = [`種別: ${label}`];
+  if (kind === "feedback") lines.push(`カテゴリ: ${body?.category ?? "other"}`);
+  ADMIN_NOTIFICATIONS.unshift({
+    id: `ntfn_adm_${id}`,
+    type: "feedback",
+    title: `新しい${heading}: ${message.slice(0, 60)}`,
+    body: [...lines, `送信ユーザー: ${ME_ID}`, `発生ページ: ${body?.page?.name ?? "(不明)"}`, "", message].join("\n"),
+    audience: "admin",
+    createdAt: new Date().toISOString(),
+    publishedBroadcastId: null,
+  });
+  return { id };
+}
 
 // Publish one admin notification to members (idempotent). Flips the source row to 公開済み
 // in-session and fans a single members broadcast into the inbox. Returns null on an unknown
@@ -2537,6 +2562,9 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const now = new Date().toISOString();
       for (const n of NOTIFICATIONS) if (n.readAt === null) n.readAt = now;
       return json(null, 204);
+    }
+    if (pathname === "/api/v1/feedback") {
+      return json(recordInquiryDemo(body as notification.CreateFeedbackRequest | null), 201);
     }
     // admin: bulk publish a selection in one request (idempotent, per-item outcomes).
     if (pathname === "/api/v1/notifications/manage/publish-batch") {

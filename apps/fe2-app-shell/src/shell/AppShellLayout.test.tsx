@@ -183,12 +183,13 @@ describe("AppShellLayout", () => {
       </QueryClientProvider>,
     );
     await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
-    // Order: アカウント設定, カラー設定 (opens the dialog), then logout last.
-    // Logout is danger-toned and ordered AFTER account + color settings.
+    // Order: アカウント設定, カラー設定 (opens the dialog), 問い合わせ, then logout last.
+    // Logout is danger-toned and ordered AFTER the self-service rows.
     const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
     expect(items).toEqual([
       "fe2-account-settings-open",
       "fe2-color-settings-open",
+      "fe2-inquiry-open",
       "fe2-logout",
     ]);
     const logout = screen.getByTestId("fe2-logout");
@@ -217,12 +218,35 @@ describe("AppShellLayout", () => {
     );
     await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
     const items = screen.getAllByRole("menuitem").map((el) => el.getAttribute("data-testid"));
-    expect(items).toEqual(["fe2-account-settings-open", "fe2-mail-settings-open", "fe2-color-settings-open", "fe2-logout"]);
+    expect(items).toEqual(["fe2-account-settings-open", "fe2-mail-settings-open", "fe2-color-settings-open", "fe2-inquiry-open", "fe2-logout"]);
     await userEvent.click(screen.getByTestId("fe2-mail-settings-open"));
     expect(await screen.findByTestId("fe2-mail-forward-dialog")).toBeInTheDocument();
     expect(screen.getByText("Gmail への自動転送")).toBeInTheDocument();
     expect(await screen.findByTestId("fe2-mail-forward-input")).toBeInTheDocument();
     expect(request).toHaveBeenCalledWith(expect.objectContaining({ method: "GET", path: "/api/v1/mail/forward" }));
+  });
+
+  it("問い合わせ lives in the 設定 menu (no floating corner button) and opens the inquiry dialog", async () => {
+    const shellApi = { auth: { me: () => Promise.resolve(ME) }, request: vi.fn() } as unknown as ApiClient;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <AuthProvider api={shellApi}>
+            <AppShellLayout navEntries={NAV} api={shellApi} onNavigate={vi.fn()} onLogout={vi.fn()}>
+              <div data-testid="outlet">content</div>
+            </AppShellLayout>
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByTestId("fe2-settings-menu-trigger"));
+    // The old always-visible bottom-right button is gone.
+    expect(screen.queryByTestId("fe2-feedback-fab")).toBeNull();
+    const item = screen.getByTestId("fe2-inquiry-open");
+    expect(item).toHaveTextContent("問い合わせ");
+    await userEvent.click(item);
+    expect(await screen.findByTestId("fe2-inquiry-dialog")).toBeInTheDocument();
   });
 
   it("hides メール設定 from viewers without mail access", async () => {
