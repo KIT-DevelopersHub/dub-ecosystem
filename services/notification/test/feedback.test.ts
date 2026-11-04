@@ -66,12 +66,13 @@ describe("in-app feedback", () => {
 
     // persisted
     const row = await h.db.first<{ user_id: string; category: string; message: string; page_url: string; page_name: string; read_at: string | null }>(
-      `SELECT user_id, category, message, page_url, page_name, read_at FROM notif_feedback WHERE id = ?`,
+      `SELECT user_id, category, kind, message, page_url, page_name, read_at FROM notif_feedback WHERE id = ?`,
       out.id,
     );
     expect(row).toMatchObject({
       user_id: "usr_alice",
       category: "bug",
+      kind: "feedback",
       message: "この画面のボタンが押せない",
       page_url: "https://app/x",
       page_name: "イベント詳細",
@@ -163,11 +164,58 @@ describe("in-app feedback", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("NOTIF_FEEDBACK_NOT_FOUND");
   });
 
+  it("POST /feedback: omitted kind defaults to 'feedback'; an inquiry kind is stored as sent", async () => {
+    const h = makeTestEnv();
+    const app = createApp({ mail: recordingMail("ok") });
+    const req = reqOf(app, h);
+
+    const plain = (await (await req("/feedback", jsonPost({ message: "旧ウィジェット互換" }))).json()) as notification.CreateFeedbackResponse;
+    const card = await req("/feedback", jsonPost({ message: "希望枚数: 100枚", kind: "business_card" }));
+    expect(card.status).toBe(201);
+    const cardOut = (await card.json()) as notification.CreateFeedbackResponse;
+
+    const kindOf = async (id: string) =>
+      (await h.db.first<{ kind: string; category: string }>(`SELECT kind, category FROM notif_feedback WHERE id = ?`, id))!;
+    expect(await kindOf(plain.id)).toEqual({ kind: "feedback", category: "other" });
+    expect(await kindOf(cardOut.id)).toEqual({ kind: "business_card", category: "other" });
+  });
+
+  it("POST /feedback: unknown kind -> 400 invalid_enum", async () => {
+    const h = makeTestEnv();
+    const req = reqOf(createApp({ mail: recordingMail("ok") }), h);
+    const res = await req("/feedback", jsonPost({ message: "x", kind: "spam" }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { details: { field: string; reason: string }[] } };
+    expect(body.error.details).toContainEqual(expect.objectContaining({ field: "kind", reason: "invalid_enum" }));
+  });
+
+  it("buildFeedbackEmail / buildFeedbackNotifyInput: an inquiry is labelled by its kind (no feedback カテゴリ line)", () => {
+    const item: notification.FeedbackItem = {
+      id: "nfb_2",
+      userId: "usr_a",
+      category: "other",
+      kind: "interview",
+      message: "希望日時の候補: 11/10 午後",
+      pageUrl: null,
+      pageName: null,
+      readAt: null,
+      createdAt: "2026-11-04T00:00:00.000Z",
+    };
+    const email = buildFeedbackEmail(item);
+    expect(email.subject).toBe("問い合わせ（面談を希望）: 希望日時の候補: 11/10 午後");
+    expect(email.textBody).toContain("種別: 面談を希望");
+    expect(email.textBody).not.toContain("カテゴリ:");
+    const input = buildFeedbackNotifyInput(item, "req_k");
+    expect(input.title).toBe("新しい問い合わせ（面談を希望）: 希望日時の候補: 11/10 午後");
+    expect(input.body).toContain("種別: 面談を希望");
+  });
+
   it("buildFeedbackEmail: subject carries the excerpt + admin recipient", () => {
     const email = buildFeedbackEmail({
       id: "nfb_1",
       userId: "usr_a",
       category: "idea",
+      kind: "feedback",
       message: "検索を速くしてほしい",
       pageUrl: "https://app/s",
       pageName: "検索",
@@ -176,6 +224,8 @@ describe("in-app feedback", () => {
     });
     expect(email.to[0]!.email).toBe("admin@developershub.jp");
     expect(email.subject).toContain("フィードバック:");
+    expect(email.textBody).toContain("種別: フィードバック");
+    expect(email.textBody).toContain("カテゴリ: idea");
     expect(email.textBody).toContain("検索を速くしてほしい");
   });
 });
@@ -244,6 +294,7 @@ describe("feedback -> in-app admin notifications", () => {
       id: "nfb_dupe",
       userId: "usr_alice",
       category: "bug",
+      kind: "feedback",
       message: "二重にならないこと",
       pageUrl: null,
       pageName: "設定",
@@ -268,6 +319,7 @@ describe("feedback -> in-app admin notifications", () => {
         id: "nfb_9",
         userId: "usr_a",
         category: "question",
+        kind: "feedback",
         message: "使い方が分からない",
         pageUrl: "https://app/x",
         pageName: "ホーム",

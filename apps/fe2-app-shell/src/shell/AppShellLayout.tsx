@@ -14,7 +14,7 @@ import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { useAppCapability, useAuth, usePermissions } from "../auth/AuthProvider.tsx";
-import { FeedbackWidget } from "./feedback/FeedbackWidget.tsx";
+import { InquiryDialog } from "./inquiry/InquiryDialog.tsx";
 import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
 import { createMailApi } from "../features/mail/mailApi.tsx";
 import { MailApiProvider } from "../features/mail/MailProvider.tsx";
@@ -116,6 +116,7 @@ export function buildPaletteCommands(
   actions: {
     onNavigate?: (path: string) => void;
     onOpenAccount?: () => void;
+    onOpenInquiry?: () => void;
     onLogout?: () => void;
   },
 ): PaletteCommand[] {
@@ -154,6 +155,16 @@ export function buildPaletteCommands(
       run: () => actions.onOpenAccount?.(),
     });
   }
+  if (actions.onOpenInquiry) {
+    actionCmds.push({
+      id: "action:inquiry",
+      label: "問い合わせ",
+      group: "アクション",
+      icon: "message-circle",
+      keywords: ["inquiry", "feedback", "contact", "問い合わせ", "フィードバック", "名刺", "友達", "招待", "面談"],
+      run: () => actions.onOpenInquiry?.(),
+    });
+  }
   if (actions.onLogout) {
     actionCmds.push({
       id: "action:logout",
@@ -187,9 +198,12 @@ export function AppShellLayout({
   // カラー設定 (表示設定) dialog — theme lives inside it, not directly in the ⚙ menu.
   const [colorOpen, setColorOpen] = useState(false);
   // Self settings导线: offered only when a shared api-client is wired and the viewer is
-  // signed in (mirrors the FeedbackWidget gate). Separate from FE7's admin roster.
+  // signed in. Separate from FE7's admin roster.
   const showAccount = Boolean(api) && auth.status === "authenticated";
   const authed = auth.status === "authenticated";
+  // 問い合わせ (feedback + 名刺/友達/面談 requests) — lives in the ⚙ menu; replaces the old
+  // always-visible bottom-right feedback button. Same gate as アカウント設定 (needs the api).
+  const [inquiryOpen, setInquiryOpen] = useState(false);
   // メール設定 (Gmail への自動転送): personal mail settings live in this same ⚙ menu, shown
   // only to viewers who can open メール at all (app tier + mail:read, like the launcher tile).
   const [mailSettingsOpen, setMailSettingsOpen] = useState(false);
@@ -205,6 +219,7 @@ export function AppShellLayout({
   //     menu, which read oddly; folding them behind one カラー設定 row keeps the menu a tidy
   //     list of destinations and leaves room to grow (density/accent) inside the dialog.
   //     setTheme/localStorage永続/全アプリ波及/system時OS追従 are all unchanged.
+  //   • 問い合わせ (needs the api-client) — feedback + 名刺/友達/面談 requests to 運営.
   //   • ログアウト — needs only onLogout, so it stays for any signed-in viewer even with no
   //     api wired. Last, under a divider, danger-toned — a 離脱/destructive action set apart.
   const settingsItems: MenuItem[] = [];
@@ -233,6 +248,15 @@ export function AppShellLayout({
     onSelect: () => setColorOpen(true),
     testId: "fe2-color-settings-open",
   });
+  if (showAccount) {
+    settingsItems.push({
+      id: "inquiry",
+      label: "問い合わせ",
+      icon: "message-circle",
+      onSelect: () => setInquiryOpen(true),
+      testId: "fe2-inquiry-open",
+    });
+  }
   if (authed && onLogout) {
     settingsItems.push({
       id: "logout",
@@ -318,7 +342,7 @@ export function AppShellLayout({
   // signed-in user can actually do; the palette itself owns the open/close + shortcut.
   const paletteCommands = buildPaletteCommands(navEntries, can, {
     ...(onNavigate ? { onNavigate } : {}),
-    ...(showAccount ? { onOpenAccount: () => setAcctOpen(true) } : {}),
+    ...(showAccount ? { onOpenAccount: () => setAcctOpen(true), onOpenInquiry: () => setInquiryOpen(true) } : {}),
     ...(authed && onLogout ? { onLogout } : {}),
   });
   // ①グローバル検索: task/event CONTENT results (see globalContentSearch.ts) — needs
@@ -349,7 +373,7 @@ export function AppShellLayout({
       {authed ? (
         <CommandPalette commands={paletteCommands} {...(contentSearch ? { contentSearch } : {})} />
       ) : null}
-      {api && auth.status === "authenticated" ? <FeedbackWidget api={api} /> : null}
+      {showAccount && api ? <InquiryDialog api={api} open={inquiryOpen} onClose={() => setInquiryOpen(false)} /> : null}
       {showAccount && api ? <AccountSettingsDialog api={api} open={acctOpen} onClose={() => setAcctOpen(false)} /> : null}
       {showMailSettings && mailApi ? (
         <MailApiProvider value={mailApi}>

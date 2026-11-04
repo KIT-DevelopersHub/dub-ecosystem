@@ -340,7 +340,7 @@ export function createMockFetch(seed: Partial<MockSeed> = {}): typeof fetch {
       case "POST /api/v1/auth/passkey/login/options":
       case "POST /api/v1/auth/passkey/register/options":
         return errorEnvelope("AUTH_PASSKEY_DISABLED", "Passkey login is not configured", 404);
-      // Feedback widget (shell chrome): acknowledge so the offline/demo build shows
+      // 問い合わせ (⚙ menu): acknowledge so the offline build shows
       // the success state. No real feedback leaves the browser under the mock.
       case "POST /api/v1/feedback":
         return json({ id: `fb_demo_${Date.now()}` }, 201);

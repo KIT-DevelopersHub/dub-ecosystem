@@ -551,6 +551,15 @@ components:
         - idea
         - question
         - other
+    InquiryKind:
+      type: string
+      description: What the submission is about (⚙ → 問い合わせ). feedback is refined by category; the others carry their details in message.
+      enum:
+        - feedback
+        - business_card
+        - invite_friend
+        - interview
+        - other
     CreateFeedbackRequest:
       type: object
       required:
@@ -561,6 +570,8 @@ components:
           description: 1..4000 chars.
         category:
           $ref: '#/components/schemas/FeedbackCategory'
+        kind:
+          $ref: '#/components/schemas/InquiryKind'
         page:
           type: object
           description: Where the feedback was raised (aids triage).
@@ -585,6 +596,7 @@ components:
         - id
         - userId
         - category
+        - kind
         - message
         - pageUrl
         - pageName
@@ -597,6 +609,8 @@ components:
           type: string
         category:
           $ref: '#/components/schemas/FeedbackCategory'
+        kind:
+          $ref: '#/components/schemas/InquiryKind'
         message:
           type: string
         pageUrl:

@@ -12,6 +12,7 @@ import {
   TITLE_MAX,
   TITLE_MIN,
   FEEDBACK_CATEGORIES,
+  INQUIRY_KINDS,
   FEEDBACK_MESSAGE_MAX,
   FEEDBACK_PAGE_URL_MAX,
   FEEDBACK_PAGE_NAME_MAX,
@@ -228,6 +229,7 @@ export function parsePreferencesUpdate(body: unknown): notification.PreferenceEn
 }
 
 const FEEDBACK_CATEGORY_SET: ReadonlySet<string> = new Set(FEEDBACK_CATEGORIES);
+const INQUIRY_KIND_SET: ReadonlySet<string> = new Set(INQUIRY_KINDS);
 
 /** Validate POST /feedback body (notification.CreateFeedbackRequest). */
 export function parseCreateFeedback(body: unknown): notification.CreateFeedbackRequest {
@@ -247,6 +249,15 @@ export function parseCreateFeedback(body: unknown): notification.CreateFeedbackR
       fe.push({ field: "category", reason: "invalid_enum", message: `one of ${FEEDBACK_CATEGORIES.join(",")}` });
     } else {
       category = b.category as notification.FeedbackCategory;
+    }
+  }
+
+  let kind: notification.InquiryKind | undefined;
+  if (b.kind !== undefined) {
+    if (typeof b.kind !== "string" || !INQUIRY_KIND_SET.has(b.kind)) {
+      fe.push({ field: "kind", reason: "invalid_enum", message: `one of ${INQUIRY_KINDS.join(",")}` });
+    } else {
+      kind = b.kind as notification.InquiryKind;
     }
   }
 
@@ -276,6 +287,7 @@ export function parseCreateFeedback(body: unknown): notification.CreateFeedbackR
 
   const out: notification.CreateFeedbackRequest = { message };
   if (category !== undefined) out.category = category;
+  if (kind !== undefined) out.kind = kind;
   if (page !== undefined) out.page = page;
   return out;
 }
