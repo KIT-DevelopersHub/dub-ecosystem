@@ -1,6 +1,6 @@
 // Reading pane: the opened conversation. Older messages collapse to a one-line
 // summary (Gmail behaviour); the newest stays expanded. Header carries the
-// subject, star and archive/delete actions; each message shows a round initial
+// subject, star and archive/delete actions; each message shows a round sender
 // avatar, participants and full body. Reply / reply-all / forward open a prefilled
 // floating compose; a trailing inline reply box appends to the thread in place.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -10,10 +10,8 @@ import type { mail } from "@dub/types";
 import { isImageType } from "../attach.ts";
 import {
   addressCandidates,
-  avatarColor,
   displayName,
   fullDate,
-  initial,
   pendingReplyIds,
   replyPlan,
   replyNudge,
@@ -27,6 +25,7 @@ import {
   type MailThreadModel,
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
+import { SenderAvatar } from "./SenderAvatar.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
 import { BlockSenderMenu, BlockedBanner } from "./BlockedSenders.tsx";
@@ -40,29 +39,6 @@ import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { formatBytes, newIdempotencyKey, parseRecipients, saveBlob } from "../mailApi.tsx";
-
-function Avatar({ p, size = 36 }: { p: MailPerson; size?: number }): JSX.Element {
-  return (
-    <span
-      aria-hidden
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "var(--dub-radius-full)",
-        background: avatarColor(p),
-        color: "#fff",
-        fontSize: size * 0.42,
-        fontWeight: 700,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-      }}
-    >
-      {initial(p)}
-    </span>
-  );
-}
 
 function quote(msg: MailMsg): string {
   const when = fullDate(msg.date);
@@ -236,7 +212,7 @@ function MessageBlock({
         onClick={() => setOpen((v) => !v)}
         style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
       >
-        <Avatar p={msg.from} />
+        <SenderAvatar p={msg.from} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
             <strong style={{ fontSize: "var(--dub-font-size-sm)", whiteSpace: "nowrap", flexShrink: 0 }}>{displayName(msg.from)}</strong>
@@ -617,7 +593,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
 
         <div style={{ padding: "0 24px 24px" }}>
           <div style={{ display: "flex", gap: 12, border: "1px solid var(--dub-color-border-strong)", borderRadius: "var(--dub-radius-lg)", padding: 12 }}>
-            <Avatar p={state.me} size={32} />
+            <SenderAvatar p={state.me} size={32} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-2, 8px)", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
                 <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

@@ -129,6 +129,16 @@ export class D1IdentityRepo implements IdentityRepo {
     );
     return r ? toUser(r) : null;
   }
+  async getUsersByEmails(orgId: string, emails: string[]): Promise<UserRow[]> {
+    if (emails.length === 0) return [];
+    const placeholders = emails.map(() => "lower(?)").join(", ");
+    const rows = await this.db.all<UserDb>(
+      `SELECT * FROM identity_users WHERE org_id = ? AND lower(email) IN (${placeholders})`,
+      orgId,
+      ...emails,
+    );
+    return rows.map(toUser);
+  }
   async listUsers(filter: ListUsersFilter): Promise<UserPage> {
     if (filter.ids && filter.ids.length > 0) {
       const placeholders = filter.ids.map(() => "?").join(", ");
