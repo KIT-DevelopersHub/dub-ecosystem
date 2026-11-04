@@ -113,6 +113,7 @@ export function useMeetingMutations(targets: readonly meeting.MeetingTarget[]): 
           meetUrl: null,
           htmlLink: null,
           attendeeCount: 0,
+          trackAttendance: body.trackAttendance ?? false,
           createdBy: "" as meeting.Meeting["createdBy"],
           createdAt: now,
           updatedAt: now,

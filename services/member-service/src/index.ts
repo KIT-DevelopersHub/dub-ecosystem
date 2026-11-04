@@ -9,6 +9,7 @@ import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1MemberRepo } from "./d1-repo";
 import { createD1HrRepo } from "./hr-repo";
+import { createD1HrFormRepo } from "./hr-form-repo";
 import { notifyAdminsOfParticipation } from "./participationNotify";
 import { createIdentityRoleSync } from "./roleSync";
 import type { Env } from "./env";
@@ -41,6 +42,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newParticipationId: () => newId("part"),
     newOnboardingItemId: () => newId("onb"),
     hrRepo: createD1HrRepo(db),
+    hrFormRepo: createD1HrFormRepo(db),
     // 名簿のチーム・役職 -> identity の自動ロール (best-effort・PUT /internal/*managed-roles)。
     roleSync: createIdentityRoleSync(env.SVC_IDENTITY),
     newHrId: (prefix) => newId(prefix),

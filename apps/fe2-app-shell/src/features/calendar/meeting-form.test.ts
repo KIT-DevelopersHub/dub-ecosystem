@@ -18,6 +18,7 @@ const valid: MeetingFormValues = {
   recurrence: "weekly",
   until: "",
   description: "",
+  trackAttendance: false,
 };
 
 describe("validateMeetingForm", () => {
@@ -46,7 +47,12 @@ describe("toMeetingRequest", () => {
       durationMinutes: 60,
       recurrence: "weekly",
       until: null,
+      trackAttendance: false,
     });
+  });
+
+  it("carries 定例として出席を取る", () => {
+    expect(toMeetingRequest({ ...valid, trackAttendance: true }).trackAttendance).toBe(true);
   });
 
   it("keeps until only for repeating meetings", () => {

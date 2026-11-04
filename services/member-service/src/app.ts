@@ -21,6 +21,8 @@ import type { AppDeps } from "./types";
 import { POLICY_TABLE } from "./policy-table";
 import { MemberService, type ReqCtx } from "./service";
 import { HrService } from "./hr-service";
+import { HrFormService } from "./hr-form-service";
+import { registerHrInterviewFormRoutes } from "./hr-form-routes";
 import type { hr } from "@dub/types";
 
 // Actor stamped on a 参加届 that arrives through the public (unauthenticated) path.
@@ -248,6 +250,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     await svc.deleteOnboardingItem(reqCtx(c), c.req.param("id"));
     return c.json({ ok: true });
   });
+
+  // ---- 人事: 面談申し込みフォーム (定義の編集・回答・公開ページの s2s 受付)。ルートは hr-form-routes.ts ----
+  registerHrInterviewFormRoutes(app, new HrFormService(deps, hrSvc));
 
   // ---- 人事 (面談 → 採用 → オンボーディング) ----
   // 認可は表 (人事アプリの 閲覧/編集 + hr:read / hr:write / hr:admin)。採用 (join) は名簿に行を

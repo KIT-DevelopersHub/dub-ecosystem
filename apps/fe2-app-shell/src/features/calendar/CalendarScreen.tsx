@@ -61,6 +61,7 @@ import {
   resolveLabel,
   statusVisual,
 } from "./taskVisuals";
+import { openMeetWithAttendance } from "../../lib/meet-join.ts";
 import styles from "./calendar.module.css";
 
 const VIEW_LABEL: Record<CalendarView, string> = { day: "日", week: "週", month: "月", schedule: "スケジュール" };
@@ -851,6 +852,11 @@ export function CalendarScreen(): JSX.Element {
             onDelete={(m) => {
               setSelectedMeeting(null);
               removeMeeting.mutate(m.id, { onSuccess: () => toast.show({ kind: "success", title: "ミーティングを削除しました" }) });
+            }}
+            onJoin={(m) => {
+              void openMeetWithAttendance(() => api.joinMeeting(m.id), m.meetUrl).then((res) => {
+                if (res?.recordedFor) toast.show({ kind: "success", title: "出席を記録しました" });
+              });
             }}
           />
         )}

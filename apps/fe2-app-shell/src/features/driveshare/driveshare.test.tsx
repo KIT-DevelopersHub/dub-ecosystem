@@ -400,6 +400,30 @@ describe("Drive共有 > 設定 > Google アカウント", () => {
     window.history.replaceState(null, "", "/");
   });
 
+  it("an account without Meet records access says 再連携が必要 and offers 再接続", async () => {
+    const noRecords = {
+      ...CONNECTED,
+      accounts: CONNECTED.accounts.map((a) => (a.id === "dga_main" ? { ...a, attendanceMissing: true } : a)),
+    };
+    const startGoogleConnect = vi.fn(() => new Promise<{ authUrl: string }>(() => {}));
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(noRecords), startGoogleConnect })));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-attendance-missing-warning")).toHaveTextContent("再連携が必要です");
+    expect(screen.getByTestId("fe2-driveshare-google-no-attendance-dga_main")).toHaveTextContent("再連携が必要");
+    await userEvent.click(screen.getByTestId("fe2-driveshare-google-reconnect-dga_main"));
+    expect(startGoogleConnect).toHaveBeenCalled();
+  });
+
+  it("a 「Googleと連携」 return (lnk_ state) is not an account connect (the shell finishes it)", async () => {
+    window.history.replaceState(null, "", "/driveshare?code=c9&state=lnk_abc");
+    const completeGoogleConnect = vi.fn(() => Promise.resolve(CONNECTED));
+    render(wrap(<DriveShareScreen />, stubApi({ completeGoogleConnect })));
+    await screen.findByTestId("fe2-driveshare");
+    expect(completeGoogleConnect).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("fe2-driveshare-settings")).toBeNull();
+    window.history.replaceState(null, "", "/");
+  });
+
   it("the api adapter hits /api/v1/driveshare/google-account", async () => {
     const { api, calls } = fakeApi();
     const drive = createDriveShareApi(api);

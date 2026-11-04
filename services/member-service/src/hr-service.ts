@@ -61,7 +61,7 @@ function toApplicant(r: ApplicantRow): hr.Applicant {
 
 export interface HrDeps extends Pick<AppDeps, "orgId" | "now" | "repo"> {
   hrRepo: HrRepo;
-  newHrId: (prefix: "app" | "hre") => string;
+  newHrId: (prefix: "app" | "hre" | "hfr") => string;
 }
 
 export class HrService {
