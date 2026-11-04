@@ -543,7 +543,7 @@ export function ChannelPage({
         const updated = await api.updateChannelVisibility(channelId, { visibility, version: prev.version });
         setChannel(updated);
         onChannelPatched?.(channelId, { visibility: updated.visibility, version: updated.version });
-        show({ kind: "success", title: visibility === "private" ? `#${prev.name} をプライベートにしました` : `#${prev.name} をパブリックにしました` });
+        show({ kind: "success", title: visibility === "private" ? `#${prev.name} を Private にしました` : `#${prev.name} を Public にしました` });
       } catch (err) {
         setChannel((cur) => (cur ? { ...cur, visibility: prev.visibility } : cur));
         onChannelPatched?.(channelId, { visibility: prev.visibility });

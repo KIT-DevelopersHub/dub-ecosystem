@@ -34,7 +34,7 @@ export function SlackImportJobCard({ job, driveError, pending = false, onResume,
         <span className={styles.jobName}>
           {job.isPrivate ? "🔒" : "#"} {job.slackChannelName}
         </span>
-        <Badge tone={job.isPrivate ? "warning" : "neutral"}>{job.isPrivate ? "非公開" : "公開"}</Badge>
+        <Badge tone={job.isPrivate ? "warning" : "neutral"}>{job.isPrivate ? "Private" : "Public"}</Badge>
         <Badge tone={STATUS_TONE[job.status]} testId="fe6-slack-import-job-status">
           {STATUS_LABEL[job.status]}
         </Badge>

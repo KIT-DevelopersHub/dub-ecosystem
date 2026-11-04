@@ -80,7 +80,7 @@ export function ChannelDetails(props: ChannelDetailsProps) {
 
 function AboutTab({ channel, canEdit, onUpdate, onLeave }: ChannelDetailsProps) {
   const [leaveOpen, setLeaveOpen] = useState(false);
-  const kind = channel.type === "event" ? "イベントチャンネル" : channel.visibility === "private" ? "プライベートチャンネル" : "パブリックチャンネル";
+  const kind = channel.type === "event" ? "イベントチャンネル" : channel.visibility === "private" ? "Private チャンネル" : "Public チャンネル";
   return (
     <div className={styles.detailsStack}>
       <div className={styles.detailsCard}>
@@ -130,8 +130,8 @@ function AboutTab({ channel, canEdit, onUpdate, onLeave }: ChannelDetailsProps) 
           title={`#${channel.name} から退出しますか？`}
           message={
             channel.visibility === "private"
-              ? "プライベートチャンネルのため、再度招待されるまで参加・閲覧できなくなります。"
-              : "サイドバーから外れます。パブリックチャンネルなので、あとから再参加できます。"
+              ? "Private チャンネルのため、再度招待されるまで参加・閲覧できなくなります。"
+              : "サイドバーから外れます。Public チャンネルなので、あとから再参加できます。"
           }
           confirmLabel="退出する"
           onConfirm={async () => {
@@ -520,8 +520,8 @@ function SettingsTab({ channel, canEdit, onUpdate, onDelete, onChangeVisibility,
 }
 
 const VISIBILITY_COPY: Record<ChannelVisibility, { label: string; help: string }> = {
-  public: { label: "パブリック", help: "組織の全員が閲覧・参加できます。" },
-  private: { label: "プライベート", help: "招待されたメンバーだけが閲覧できます。" },
+  public: { label: "Public", help: "組織の全員が閲覧・参加できます。" },
+  private: { label: "Private", help: "招待されたメンバーだけが閲覧できます。" },
 };
 
 // 公開範囲: everyone sees the current value; only onChange holders get 「変更」.
@@ -547,20 +547,20 @@ function VisibilityCard({ channel, onChange }: { channel: Channel; onChange: Cha
         </div>
         {onChange && (
           <button type="button" className={styles.detailsEditLink} onClick={() => setConfirmOpen(true)} data-testid="fe6-settings-visibility-change">
-            {toPublic ? "パブリックにする" : "プライベートにする"}
+            {toPublic ? "Public にする" : "Private にする"}
           </button>
         )}
       </div>
       {onChange && (
         <ConfirmDialog
           open={confirmOpen}
-          title={`#${channel.name} を${VISIBILITY_COPY[target].label}チャンネルに変更しますか？`}
+          title={`#${channel.name} を ${VISIBILITY_COPY[target].label} チャンネルに変更しますか？`}
           message={
             toPublic
               ? "組織の全員が、これまでのメッセージを含めてこのチャンネルを閲覧できるようになります。"
               : "メンバー以外はこのチャンネルを見られなくなります。今のメンバーはそのまま残ります。"
           }
-          confirmLabel={`${VISIBILITY_COPY[target].label}に変更する`}
+          confirmLabel={`${VISIBILITY_COPY[target].label} に変更する`}
           danger={toPublic}
           onConfirm={async () => {
             setConfirmOpen(false);

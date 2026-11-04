@@ -131,12 +131,12 @@ describe("ChannelDetails", () => {
     const onChangeVisibility = vi.fn(async () => {});
     setup({ onChangeVisibility });
     await openTab(/設定/);
-    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("パブリック");
+    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("Public");
     await userEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
     const confirm = await screen.findByTestId("fe6-settings-visibility-confirm");
     expect(confirm.textContent).toContain("メンバー以外はこのチャンネルを見られなくなります");
     expect(onChangeVisibility).not.toHaveBeenCalled();
-    await userEvent.click(within(confirm).getByRole("button", { name: "プライベートに変更する" }));
+    await userEvent.click(within(confirm).getByRole("button", { name: "Private に変更する" }));
     await waitFor(() => expect(onChangeVisibility).toHaveBeenCalledWith("private"));
   });
 
@@ -147,14 +147,14 @@ describe("ChannelDetails", () => {
     await userEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
     const confirm = await screen.findByTestId("fe6-settings-visibility-confirm");
     expect(confirm.textContent).toContain("これまでのメッセージを含めて");
-    await userEvent.click(within(confirm).getByRole("button", { name: "パブリックに変更する" }));
+    await userEvent.click(within(confirm).getByRole("button", { name: "Public に変更する" }));
     await waitFor(() => expect(onChangeVisibility).toHaveBeenCalledWith("public"));
   });
 
   it("visibility: without the right the current value shows but there is no switch", async () => {
     setup({ channel: { ...channel, visibility: "private" } });
     await openTab(/設定/);
-    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("プライベート");
+    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("Private");
     expect(screen.queryByTestId("fe6-settings-visibility-change")).toBeNull();
   });
 

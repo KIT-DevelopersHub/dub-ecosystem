@@ -11,8 +11,8 @@ export const SLACK_IMPORT_MARKER = "slack-import-v1";
 // Same text as chat-service JOB_ERROR_MESSAGES — fallback when a job carries only a code.
 export const JOB_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   not_in_channel: "LMB がこのチャンネルに参加していません。Slack で LMB を招待してから再開してください。",
-  channel_not_found: "Slack チャンネルが見つかりません。非公開チャンネルは LMB を招待すると表示されます。",
-  is_archived: "アーカイブ済みの公開チャンネルには LMB が参加できません。",
+  channel_not_found: "Slack チャンネルが見つかりません。Private チャンネルは LMB を招待すると表示されます。",
+  is_archived: "アーカイブ済みの Public チャンネルには LMB が参加できません。",
   invalid_auth: "Slack のトークンが無効です。管理者に SLACK_BOT_TOKEN の確認を依頼してください。",
   missing_scope: "Slack アプリの権限(スコープ)が不足しています。",
 };
@@ -83,7 +83,7 @@ export function describeImportError(e: unknown): string {
     case 403:
       return "チャンネル取り込みの権限がありません。";
     case 404:
-      return "Slack チャンネルが見つかりません。非公開チャンネルは LMB を招待すると選べるようになります。";
+      return "Slack チャンネルが見つかりません。Private チャンネルは LMB を招待すると選べるようになります。";
     case 429:
       return "Slack のレート制限中です。少し待ってからもう一度お試しください。";
     case 409:

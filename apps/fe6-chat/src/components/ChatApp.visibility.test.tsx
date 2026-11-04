@@ -49,14 +49,14 @@ describe("channel visibility switch (ChatApp)", () => {
     await openVisibility();
     await userEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
     const confirm = await screen.findByTestId("fe6-settings-visibility-confirm");
-    await userEvent.click(within(confirm).getByRole("button", { name: "プライベートに変更する" }));
+    await userEvent.click(within(confirm).getByRole("button", { name: "Private に変更する" }));
 
     await waitFor(async () => expect(await sidebarGlyph()).toBe("🔒"));
-    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("プライベート");
+    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("Private");
 
     reject(new ChatApiError(409, { error: { code: "CHAT_VERSION_CONFLICT", message: "version conflict", retryable: false } }));
     await waitFor(async () => expect(await sidebarGlyph()).toBe("#"));
-    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("パブリック");
+    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("Public");
     expect(await screen.findByText("公開範囲を変更できませんでした")).toBeInTheDocument();
   });
 
@@ -66,7 +66,7 @@ describe("channel visibility switch (ChatApp)", () => {
     await openVisibility();
     await userEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
     const confirm = await screen.findByTestId("fe6-settings-visibility-confirm");
-    await userEvent.click(within(confirm).getByRole("button", { name: "プライベートに変更する" }));
+    await userEvent.click(within(confirm).getByRole("button", { name: "Private に変更する" }));
     await waitFor(() => expect(spy).toHaveBeenCalledWith(GENERAL, { visibility: "private", version: 1 }));
     expect((await api.getChannel(GENERAL)).channel.visibility).toBe("private");
     await waitFor(async () => expect(await sidebarGlyph()).toBe("🔒"));
