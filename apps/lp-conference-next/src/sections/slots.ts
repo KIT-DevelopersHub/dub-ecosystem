@@ -1,15 +1,13 @@
 // 公開設定（セクション切り替え）の純粋ロジック。LP のビルド（CSS 生成）と LP Worker（<html> の属性）が共用する。
-// import は型だけ（node --test の strip-only TS でもそのまま動くように、登録簿は引数で受け取る）。
-import type { LpLayout, LpSectionDef } from "../../../../packages/types/src/lp";
+// 属性名と layout → 属性の対応は packages/types/src/lp.ts が正本（LP管理のミニプレビューとも共用）。
+// 登録簿は引数で受け取る（テストで差し替える）。.ts 付きの import は node --test の strip-only TS 向け。
+import type { LpSectionDef } from "../../../../packages/types/src/lp.ts";
+import { lpSectionAttr as sectionAttr, lpOptionAttr as optionAttr, LP_HIDDEN as HIDDEN } from "../../../../packages/types/src/lp.ts";
+
+export { sectionAttr, optionAttr, HIDDEN };
+export { layoutAttributes } from "../../../../packages/types/src/lp.ts";
 
 type Registry = Readonly<Record<string, LpSectionDef>>;
-
-/** <html> 上の属性名。値はバリアント ID か "off"。 */
-export const sectionAttr = (section: string): string => `data-lp-s-${section}`;
-/** <html> 上の属性名。boolean は "on" / "off"、enum は値そのもの。 */
-export const optionAttr = (section: string, option: string): string => `data-lp-o-${section}-${option}`;
-
-export const HIDDEN = "off";
 
 const SAFE_ID = /^[a-z0-9_]+$/;
 
@@ -57,30 +55,4 @@ export function siteConfigCss(registry: Registry): string {
     }
   }
   return rules.join("\n");
-}
-
-/**
- * 正規化済みの layout（normalizeLayout の結果）→ <html> に付ける属性。既定値と同じものは付けない
- * （既定の設定なら属性ゼロ = 静的 HTML のまま）。
- */
-export function layoutAttributes(registry: Registry, layout: LpLayout): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [id, def] of Object.entries(registry)) {
-    const s = (layout.sections as Record<string, LpLayout["sections"][keyof LpLayout["sections"]]>)[id];
-    if (!s) continue;
-    if (def.hideable && s.visible === false) out[sectionAttr(id)] = HIDDEN;
-    else if (Object.prototype.hasOwnProperty.call(def.variants, s.variant) && s.variant !== def.defaultVariant) {
-      out[sectionAttr(id)] = s.variant;
-    }
-    for (const [k, o] of Object.entries(def.options ?? {})) {
-      if (!Object.prototype.hasOwnProperty.call(s.options, k)) continue;
-      const v = s.options[k];
-      if (v === o.default) continue;
-      if (o.kind === "boolean" && typeof v === "boolean") out[optionAttr(id, k)] = v ? "on" : "off";
-      else if (o.kind === "enum" && typeof v === "string" && Object.prototype.hasOwnProperty.call(o.values ?? {}, v)) {
-        out[optionAttr(id, k)] = v;
-      }
-    }
-  }
-  return out;
 }
