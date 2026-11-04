@@ -35,6 +35,7 @@ import type {
   ReadStateUpdateRequest,
   SetChannelSectionRequest,
   UpdateChannelRequest,
+  UpdateChannelVisibilityRequest,
   UpdateDeletionPolicyRequest,
   UpdateSectionRequest,
 } from "./types";
@@ -165,6 +166,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.delete("/chat/channels/:id", async (c) => {
     await svc.deleteChannel(reqCtx(c), c.req.param("id"));
     return c.body(null, 204);
+  });
+
+  app.put("/chat/channels/:id/visibility", async (c) => {
+    const body = await readJson<UpdateChannelVisibilityRequest>(c);
+    return c.json(await svc.updateChannelVisibility(reqCtx(c), c.req.param("id"), body));
   });
 
   app.put("/chat/channels/:id/section", async (c) => {

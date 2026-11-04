@@ -61,5 +61,6 @@ export type {
   UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateChannelVisibilityRequest,
   WsTicketResponse,
 } from "@dub/fe6-chat/src/api/contract";

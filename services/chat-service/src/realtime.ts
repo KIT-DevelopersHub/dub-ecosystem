@@ -17,6 +17,9 @@ export class NoopRealtimePublisher implements RealtimePublisher {
   async publishToChannel(_channelId: common.ChannelId, _event: chat.ChatRealtimeEvent): Promise<void> {
     // intentionally empty when no ChatRoom DO binding exists
   }
+  async evictNonMembers(_channelId: common.ChannelId, _memberIds: common.UserId[]): Promise<void> {
+    // no sockets to drop without a ChatRoom DO binding
+  }
 }
 
 /**
@@ -40,6 +43,21 @@ export class DoRealtimePublisher implements RealtimePublisher {
         message: "realtime fanout failed",
         service: "chat-service",
         fields: { channelId, kind: event.kind, err: String(err) },
+      });
+    }
+  }
+
+  // Best-effort like publishToChannel: the visibility change is already committed; a failed
+  // evict is logged, and the dropped reader still loses access on its next HTTP read (404).
+  async evictNonMembers(channelId: common.ChannelId, memberIds: common.UserId[]): Promise<void> {
+    try {
+      await this.ns.getByName(channelId).evictNonMembers(memberIds);
+    } catch (err) {
+      consoleSink({
+        level: "warn",
+        message: "realtime evict failed",
+        service: "chat-service",
+        fields: { channelId, err: String(err) },
       });
     }
   }

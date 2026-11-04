@@ -15,7 +15,7 @@ import { ReadTracker } from "../store/read-tracker";
 import { newClientTempId } from "../lib/ulid";
 import { mapChatError } from "../lib/errors";
 import { ChatApiError, IDENTITY_BATCH_MAX } from "../api/client";
-import type { Attachment, Channel, ChannelMember, Message, SearchHit, TeamSummary } from "../api/contract";
+import type { Attachment, Channel, ChannelMember, ChannelVisibility, Message, SearchHit, TeamSummary } from "../api/contract";
 import { extractMentions, type MentionCandidate } from "../lib/mentions";
 import { ChannelHeader } from "./ChannelHeader";
 import { ChannelDetails, type ChannelDetailsSections, type ChannelDetailsTab } from "./ChannelDetails";
@@ -50,6 +50,7 @@ export function ChannelPage({
   onThreadOpenChange,
   onSelectChannel,
   onChannelsChanged,
+  onChannelPatched,
   onChannelDeleted,
   onOpenMobileNav,
   sections,
@@ -61,6 +62,8 @@ export function ChannelPage({
   onThreadOpenChange?: (open: boolean) => void;
   onSelectChannel?: (channelId: common.ChannelId) => void;
   onChannelsChanged?: () => void;
+  // Mirror an optimistic channel patch into the sidebar list (e.g. the lock glyph).
+  onChannelPatched?: (channelId: common.ChannelId, patch: Partial<Channel>) => void;
   // Fired after a successful hard delete so ChatApp can move off the channel.
   onChannelDeleted?: (channelId: common.ChannelId) => void;
   // Hamburger callback for the mobile channel-list drawer (P21) — forwarded to
@@ -121,6 +124,8 @@ export function ChannelPage({
   const canModerate = can("chat:moderate") || membership?.role === "admin";
   // Hard delete is decided by the key alone (no channel-admin fallback); DMs never.
   const canDelete = can("chat:delete_channel") && channel !== null && channel.type !== "dm";
+  // Same keys as PUT /chat/channels/:id/visibility (編集 + the dangerous key); DMs never.
+  const canChangeVisibility = can("app:chat:edit") && can("chat:change_visibility") && channel !== null && channel.type !== "dm";
   const pinnedIds = useMemo(() => new Set(pinned.map((m) => m.id)), [pinned]);
 
   useEffect(() => {
@@ -527,6 +532,28 @@ export function ChannelPage({
     [api, channel, channelId, onChannelsChanged, show, failToast],
   );
 
+  // Optimistic: the modal, header and sidebar flip at once; on failure all three revert.
+  const onChangeVisibility = useCallback(
+    async (visibility: ChannelVisibility) => {
+      const prev = channel;
+      if (!prev || prev.visibility === visibility) return;
+      setChannel({ ...prev, visibility });
+      onChannelPatched?.(channelId, { visibility });
+      try {
+        const updated = await api.updateChannelVisibility(channelId, { visibility, version: prev.version });
+        setChannel(updated);
+        onChannelPatched?.(channelId, { visibility: updated.visibility, version: updated.version });
+        show({ kind: "success", title: visibility === "private" ? `#${prev.name} を Private にしました` : `#${prev.name} を Public にしました` });
+      } catch (err) {
+        setChannel((cur) => (cur ? { ...cur, visibility: prev.visibility } : cur));
+        onChannelPatched?.(channelId, { visibility: prev.visibility });
+        failToast("公開範囲を変更できませんでした", err);
+        throw err;
+      }
+    },
+    [api, channel, channelId, onChannelPatched, show, failToast],
+  );
+
   const onAddMember = useCallback(
     (user: identity.UserSummary) => {
       const temp: ChannelMember = { channelId, userId: user.id, role: "member", joinedAt: new Date().toISOString() };
@@ -712,6 +739,7 @@ export function ChannelPage({
           onRemoveMember={onRemoveMember}
           {...(membership ? { onLeave } : {})}
           {...(canDelete ? { onDelete: onDeleteChannel } : {})}
+          {...(canChangeVisibility ? { onChangeVisibility } : {})}
           {...(sections ? { sections } : {})}
         />
       )}

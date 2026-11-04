@@ -127,6 +127,44 @@ describe("ChannelDetails", () => {
     expect(onMove).toHaveBeenCalledWith("sec_1");
   });
 
+  it("visibility: public -> private goes through a confirm, then calls onChangeVisibility", async () => {
+    const onChangeVisibility = vi.fn(async () => {});
+    setup({ onChangeVisibility });
+    await openTab(/設定/);
+    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("Public");
+    await userEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
+    const confirm = await screen.findByTestId("fe6-settings-visibility-confirm");
+    expect(confirm.textContent).toContain("メンバー以外はこのチャンネルを見られなくなります");
+    expect(onChangeVisibility).not.toHaveBeenCalled();
+    await userEvent.click(within(confirm).getByRole("button", { name: "Private に変更する" }));
+    await waitFor(() => expect(onChangeVisibility).toHaveBeenCalledWith("private"));
+  });
+
+  it("visibility: private -> public warns that past messages become readable", async () => {
+    const onChangeVisibility = vi.fn(async () => {});
+    setup({ channel: { ...channel, visibility: "private" }, onChangeVisibility });
+    await openTab(/設定/);
+    await userEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
+    const confirm = await screen.findByTestId("fe6-settings-visibility-confirm");
+    expect(confirm.textContent).toContain("これまでのメッセージを含めて");
+    await userEvent.click(within(confirm).getByRole("button", { name: "Public に変更する" }));
+    await waitFor(() => expect(onChangeVisibility).toHaveBeenCalledWith("public"));
+  });
+
+  it("visibility: without the right the current value shows but there is no switch", async () => {
+    setup({ channel: { ...channel, visibility: "private" } });
+    await openTab(/設定/);
+    expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("Private");
+    expect(screen.queryByTestId("fe6-settings-visibility-change")).toBeNull();
+  });
+
+  it("visibility: a DM never shows the section", async () => {
+    setup({ channel: { ...channel, type: "dm", visibility: "private" }, onChangeVisibility: vi.fn(async () => {}) });
+    await openTab(/設定/);
+    expect(screen.queryByTestId("fe6-settings-visibility")).toBeNull();
+    expect(screen.queryByTestId("fe6-settings-visibility-change")).toBeNull();
+  });
+
   it("offers leave only when onLeave is given", async () => {
     const onLeave = vi.fn(async () => {});
     setup({ onLeave });

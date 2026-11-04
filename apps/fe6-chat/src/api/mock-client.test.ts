@@ -128,6 +128,15 @@ describe("MockChatClient", () => {
     await expect(api.getChannel(GENERAL)).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("switches visibility (versioned, idempotent) but refuses DMs", async () => {
+    const next = await api.updateChannelVisibility(GENERAL, { visibility: "private", version: 1 });
+    expect(next).toMatchObject({ visibility: "private", version: 2 });
+    expect(await api.updateChannelVisibility(GENERAL, { visibility: "private", version: 2 })).toMatchObject({ version: 2 });
+    await expect(api.updateChannelVisibility(GENERAL, { visibility: "public", version: 1 })).rejects.toMatchObject({ status: 409 });
+    const dm = (await api.listChannels()).find((c) => c.type === "dm")!;
+    await expect(api.updateChannelVisibility(dm.id, { visibility: "public", version: dm.version })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
   it("deletes archived channels but refuses DMs", async () => {
     await api.deleteChannel(ARCHIVED);
     expect((await api.listChannels()).some((c) => c.id === ARCHIVED)).toBe(false);
