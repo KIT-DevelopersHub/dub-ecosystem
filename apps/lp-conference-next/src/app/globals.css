@@ -2105,14 +2105,22 @@ img { max-width: 100%; height: auto; display: block; }
   background: rgba(255, 255, 255, 0.55);
 }
 /* 金・銀の枠: 枠画像の縦横比のまま伸縮し、中身は枠の内側に収める */
-.supporters-cards {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(1rem, 2.4vw, 1.75rem) clamp(1rem, 2.4vw, 1.75rem);
+/* 3列幅のまま、端数の行は中央に寄せる */
+.supporters-cards,
+.supporters-list {
+  --cols: 3;
+  --col-gap: clamp(1rem, 2.4vw, 1.75rem);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: var(--col-gap);
   margin: 0;
   padding: 0;
   list-style: none;
 }
+.supporters-cards > li,
+.supporters-list > li { flex: 0 0 calc((100% - (var(--cols) - 1) * var(--col-gap)) / var(--cols)); }
+.supporters-cards { row-gap: clamp(1rem, 2.4vw, 1.75rem); }
 .supporters-cards + .supporters-cards { margin-top: clamp(1rem, 2.4vw, 1.75rem); }
 .supporter-card {
   position: relative;
@@ -2156,14 +2164,7 @@ img { max-width: 100%; height: auto; display: block; }
   overflow: hidden;
 }
 /* その他: ◆ + お名前 + 一言 */
-.supporters-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(1.25rem, 2.6vw, 1.75rem) clamp(1rem, 2.4vw, 1.75rem);
-  margin: 0;
-  padding: 0 0 0 0.25rem;
-  list-style: none;
-}
+.supporters-list { row-gap: clamp(1.25rem, 2.6vw, 1.75rem); }
 .supporters-list-item {
   position: relative;
   padding-left: 1.6rem;
@@ -2193,11 +2194,11 @@ img { max-width: 100%; height: auto; display: block; }
 }
 .supporters-inner > :last-child .supporters-empty { margin-bottom: 0; }
 @media (max-width: 960px) {
-  .supporters-cards, .supporters-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .supporters-cards, .supporters-list { --cols: 2; }
 }
 @media (max-width: 600px) {
-  .supporters-cards { grid-template-columns: minmax(0, 26rem); justify-content: center; }
-  .supporters-list { grid-template-columns: 1fr; }
+  .supporters-cards > li { flex-basis: min(100%, 26rem); }
+  .supporters-list { --cols: 1; }
 }
 
 /* ---- Vision → big statement over decorative rings ---- */
