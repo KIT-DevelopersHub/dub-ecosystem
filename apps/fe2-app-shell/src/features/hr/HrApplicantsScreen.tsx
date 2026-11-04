@@ -6,6 +6,7 @@
 //    するときだけ確認ダイアログ → 名簿に追加。
 //  - 行を押すと詳細ドロワー (面談日・メモ・履歴)。
 import { useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Button,
   Card,
@@ -28,7 +29,6 @@ import {
   formatDate,
   formatDateTime,
   JoinConfirmDialog,
-  NewApplicantModal,
   StageBadge,
   STAGE_LABELS,
   StatusSelect,
@@ -36,11 +36,12 @@ import {
   type JoinRequest,
 } from "./HrShared.tsx";
 import { HrTabs, type HrTabId } from "./HrTabs.tsx";
+import { ENTER_ON_BEHALF_PARAM } from "./interviewFormApi.tsx";
 import styles from "./hr.module.css";
 
 export function HrFrame({ active, children }: { active: HrTabId; children: JSX.Element }): JSX.Element {
   const { canWrite } = useHrCapability();
-  const [creating, setCreating] = useState(false);
+  const navigate = useNavigate();
   return (
     <Stack gap={6} testId={`fe2-hr-${active}-screen`}>
       <PageHeader
@@ -49,17 +50,22 @@ export function HrFrame({ active, children }: { active: HrTabId; children: JSX.E
         description="面談から採用・オンボーディングまでを一覧で管理します。採用した人は運営メンバー・名簿に追加されます。"
         actions={
           canWrite && active === "applicants" ? (
-            <Button testId="fe2-hr-new" onClick={() => setCreating(true)}>
-              応募者を登録
+            // 応募者は面談申し込みフォーム経由で登録する (人事が聞き取った分は「代わりに入力する」)。
+            <Button testId="fe2-hr-enter-on-behalf" onClick={openOnBehalf(navigate)}>
+              面談申し込みを代わりに入力
             </Button>
           ) : undefined
         }
       />
       <HrTabs active={active} />
       {children}
-      <NewApplicantModal open={creating} onClose={() => setCreating(false)} />
     </Stack>
   );
+}
+
+/** 申し込みフォーム タブへ移り、「代わりに入力する」を開いた状態にする。 */
+function openOnBehalf(navigate: ReturnType<typeof useNavigate>): () => void {
+  return () => void navigate({ to: "/hr/form", search: { [ENTER_ON_BEHALF_PARAM]: 1 } as never });
 }
 
 /** 絞り込み。"all" / "before_onboarding" / 各ステータス。 */
@@ -99,6 +105,7 @@ export function HrApplicantsScreen(): JSX.Element {
   const list = useApplicants();
   const teams = useHrTeams();
   const { canWrite } = useHrCapability();
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<HrFilter>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "updated", direction: "desc" });
@@ -176,7 +183,21 @@ export function HrApplicantsScreen(): JSX.Element {
       />
     );
   } else if (all.length === 0) {
-    body = <EmptyState testId="fe2-hr-empty" icon="user" title="まだ応募者がいません" description="「応募者を登録」から追加できます。" />;
+    body = (
+      <EmptyState
+        testId="fe2-hr-empty"
+        icon="user"
+        title="まだ応募者がいません"
+        description="面談申し込みフォームに回答があると、ここに「面談日程調整中」で入ります。聞き取った内容は「代わりに入力する」から登録できます。"
+        action={
+          canWrite ? (
+            <Button variant="secondary" testId="fe2-hr-empty-enter" onClick={openOnBehalf(navigate)}>
+              面談申し込みを代わりに入力
+            </Button>
+          ) : undefined
+        }
+      />
+    );
   } else {
     body = (
       <DataTable<hr.ApplicantListItem>

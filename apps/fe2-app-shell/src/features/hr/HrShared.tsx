@@ -1,4 +1,4 @@
-// 人事の共通部品: 権限フラグ・ステータスバッジ/プルダウン・採用の確認ダイアログ・新規登録モーダル・
+// 人事の共通部品: 権限フラグ・ステータスバッジ/プルダウン・採用の確認ダイアログ・
 // 応募者詳細ドロワー・押した値を即座に重ねる usePendingOverlay。
 import { useCallback, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -9,10 +9,8 @@ import {
   Drawer,
   ErrorState,
   FormField,
-  Modal,
   Select,
   SkeletonLoader,
-  TextField,
   Textarea,
   type BadgeTone,
 } from "@dub/ui";
@@ -21,13 +19,13 @@ import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import {
   useAddNote,
   useApplicantDetail,
-  useCreateApplicant,
   useHrTeams,
   useJoinApplicant,
   useMoveStage,
   useRemoveApplicant,
   useUpdateApplicant,
 } from "./hrHooks.ts";
+import { ApplicantFormAnswers } from "./ApplicantFormAnswers.tsx";
 import styles from "./hr.module.css";
 
 export const STAGE_LABELS = hr.APPLICANT_STAGE_LABELS;
@@ -193,108 +191,6 @@ export function StatusSelect({
   );
 }
 
-const EMPTY_FORM = {
-  name: "", nameKana: "", email: "", department: "", grade: "", desiredTeamId: "", source: "", interviewAt: "", motivation: "",
-};
-
-export function NewApplicantModal({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element {
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [touched, setTouched] = useState(false);
-  const create = useCreateApplicant();
-  const teams = useHrTeams();
-  const set = (k: keyof typeof EMPTY_FORM) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const nameError = touched && form.name.trim() === "" ? "氏名を入力してください" : undefined;
-
-  const submit = () => {
-    setTouched(true);
-    if (form.name.trim() === "") return;
-    create.mutate(
-      {
-        name: form.name,
-        nameKana: form.nameKana || null,
-        email: form.email || null,
-        department: form.department || null,
-        grade: form.grade || null,
-        desiredTeamId: form.desiredTeamId || null,
-        source: form.source || null,
-        interviewAt: form.interviewAt ? new Date(form.interviewAt).toISOString() : null,
-        motivation: form.motivation || null,
-      },
-      {
-        onSuccess: () => {
-          setForm(EMPTY_FORM);
-          setTouched(false);
-          onClose();
-        },
-      },
-    );
-  };
-
-  return (
-    <Modal
-      testId="fe2-hr-new-modal"
-      open={open}
-      onClose={onClose}
-      title="応募者を登録"
-      size="lg"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            キャンセル
-          </Button>
-          <Button testId="fe2-hr-new-submit" loading={create.isPending} onClick={submit}>
-            登録する
-          </Button>
-        </>
-      }
-    >
-      <div className={styles.formGrid}>
-        <FormField label="氏名" htmlFor="hr-name" required error={nameError}>
-          <TextField id="hr-name" testId="fe2-hr-new-name" value={form.name} onChange={set("name")} invalid={!!nameError} />
-        </FormField>
-        <FormField label="フリガナ" htmlFor="hr-kana">
-          <TextField id="hr-kana" value={form.nameKana} onChange={set("nameKana")} />
-        </FormField>
-        <FormField label="メールアドレス" htmlFor="hr-email">
-          <TextField id="hr-email" type="email" value={form.email} onChange={set("email")} />
-        </FormField>
-        <FormField label="学科" htmlFor="hr-dept">
-          <TextField id="hr-dept" value={form.department} onChange={set("department")} />
-        </FormField>
-        <FormField label="学年" htmlFor="hr-grade">
-          <TextField id="hr-grade" value={form.grade} onChange={set("grade")} placeholder="例: 2年" />
-        </FormField>
-        <FormField label="希望チーム" htmlFor="hr-team">
-          <Select
-            id="hr-team"
-            value={form.desiredTeamId || null}
-            onChange={set("desiredTeamId")}
-            placeholder="未定"
-            options={(teams.data?.teams ?? []).map((t) => ({ value: t.id, label: t.name }))}
-          />
-        </FormField>
-        <FormField label="応募経路" htmlFor="hr-source">
-          <TextField id="hr-source" value={form.source} onChange={set("source")} placeholder="例: 公開フォーム / 紹介" />
-        </FormField>
-        <FormField label="面談日（決まっていれば）" htmlFor="hr-interview">
-          <input
-            id="hr-interview"
-            type="datetime-local"
-            className={styles.dateInput}
-            value={form.interviewAt}
-            onChange={(e) => set("interviewAt")(e.target.value)}
-          />
-        </FormField>
-      </div>
-      <div style={{ marginTop: "var(--dub-space-4)" }}>
-        <FormField label="志望動機・メモ" htmlFor="hr-motivation">
-          <Textarea id="hr-motivation" rows={3} value={form.motivation} onChange={set("motivation")} />
-        </FormField>
-      </div>
-    </Modal>
-  );
-}
-
 function eventLabel(e: hr.ApplicantEvent): string {
   switch (e.kind) {
     case "created":
@@ -397,6 +293,8 @@ export function ApplicantDrawer({
             </>
           ) : null}
         </dl>
+
+        <ApplicantFormAnswers applicantId={a.id} />
 
         {canWrite ? (
           <div>

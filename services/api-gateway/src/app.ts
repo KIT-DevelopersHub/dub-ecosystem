@@ -19,6 +19,7 @@ import { bffHomeHandler } from "./handlers/bff-home";
 import { createPublicInquiryHandler } from "./handlers/public-inquiry";
 import { createPublicParticipationHandler } from "./handlers/public-participation";
 import { publicOnboardingHandler } from "./handlers/public-onboarding";
+import { publicHrInterviewFormGetHandler, createPublicHrInterviewFormSubmitHandler } from "./handlers/public-hr-interview-form";
 import { publicLpVisitHandler } from "./handlers/public-lp-visit";
 import { publicResendWebhookHandler } from "./handlers/public-resend-webhook";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
@@ -84,6 +85,9 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.post(`${API_PREFIX}/public/participation`, createPublicParticipationHandler(options.turnstile));
   // Public オンボーディング案内: unauthenticated read → member-service internal route.
   app.get(`${API_PREFIX}/public/onboarding`, publicOnboardingHandler);
+  // Public 面談申し込みフォーム (人事): unauthenticated read / submit → member-service internal route.
+  app.get(`${API_PREFIX}/public/hr-interview-form`, publicHrInterviewFormGetHandler);
+  app.post(`${API_PREFIX}/public/hr-interview-form`, createPublicHrInterviewFormSubmitHandler(options.turnstile));
   // Public LP pageview beacon (sendBeacon from the conference LP) → lp-analytics internal route.
   app.post(`${API_PREFIX}/public/lp-visits`, publicLpVisitHandler);
   // Resend delivery-event webhook (Svix-signed) → mail-gateway internal route, raw bytes.

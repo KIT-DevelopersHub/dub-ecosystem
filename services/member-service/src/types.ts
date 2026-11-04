@@ -5,6 +5,7 @@
 import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
+import type { HrFormRepo } from "./hr-form-repo";
 import type { RoleSyncPort } from "./roleSync";
 
 export type MemberStatus = member.MemberStatus;
@@ -187,8 +188,10 @@ export interface AppDeps {
   newOnboardingItemId: () => string;
   /** 人事 (member_hr_*) の永続化。名簿リポジトリとは分けてある (hr-repo.ts)。 */
   hrRepo: HrRepo;
-  /** 人事の id 採番 (app = 応募者 / hre = 履歴)。 */
-  newHrId: (prefix: "app" | "hre") => string;
+  /** 面談申し込みフォーム (member_hr_forms / member_hr_form_responses) の永続化 (hr-form-repo.ts)。 */
+  hrFormRepo: HrFormRepo;
+  /** 人事の id 採番 (app = 応募者 / hre = 履歴 / hfr = フォームの回答)。 */
+  newHrId: (prefix: "app" | "hre" | "hfr") => string;
   /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
    *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
   roleSync?: RoleSyncPort;

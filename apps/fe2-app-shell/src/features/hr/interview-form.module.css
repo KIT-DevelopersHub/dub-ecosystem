@@ -1,0 +1,278 @@
+/* 面談申し込みフォーム (編集・回答・公開ページ)。色・余白・字は @dub/tokens の CSS 変数だけ。
+   要素同士は十分な余白を取る (UI spacing principle)。 */
+
+/* ── 回答する側 (公開ページ / 代理入力) ─────────────────── */
+.answerList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+}
+
+.choiceGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+
+.honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+/* ── 公開ページ (シェルの外) ──────────────────────────────── */
+.publicPage {
+  min-height: 100vh;
+  min-height: var(--dub-app-height, 100dvh);
+  box-sizing: border-box;
+  padding: var(--dub-space-6) var(--dub-space-4) var(--dub-space-12);
+  background: var(--dub-color-surface-sunken);
+  display: flex;
+  justify-content: center;
+}
+
+.publicInner {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+}
+
+.publicHero {
+  padding-left: var(--dub-space-4);
+  border-left: 4px solid var(--dub-color-brand-500);
+}
+
+.publicTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-2xl);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.publicLead {
+  margin: var(--dub-space-3) 0 0;
+  color: var(--dub-color-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.requiredNote {
+  margin: var(--dub-space-4) 0 0;
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-danger-600);
+}
+
+.submitRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--dub-space-6);
+}
+
+.thanks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--dub-space-3);
+}
+
+.thanksLead {
+  margin: 0;
+  font-size: var(--dub-font-size-xl);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+/* ── 人事アプリ: フォームの編集 ───────────────────────────── */
+.editorHead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+
+.editorList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.questionCard {
+  display: flex;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+}
+
+.questionCard[data-dragging] {
+  box-shadow: var(--dub-shadow-md);
+}
+
+.dragHandle {
+  display: inline-flex;
+  align-items: flex-start;
+  padding-top: var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.questionBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+
+.questionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--dub-space-4);
+}
+
+@media (max-width: 640px) {
+  .questionRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.questionFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+}
+
+.lockedNote {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+}
+
+.optionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+
+.optionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+.optionRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.editorActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+}
+
+.dirtyNote {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-secondary);
+}
+
+.errorSummary {
+  margin: var(--dub-space-3) 0 0;
+  color: var(--dub-color-danger-600);
+  font-size: var(--dub-font-size-sm);
+}
+
+
+
+.shareActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+
+.hint {
+  margin: 0 0 var(--dub-space-3);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+
+/* ── 回答 (一覧 / 応募者の詳細) ───────────────────────────── */
+.responseHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+}
+
+.answers {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--dub-space-2) var(--dub-space-4);
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+}
+
+.answers dt {
+  color: var(--dub-color-text-muted);
+  max-width: 12rem;
+  overflow-wrap: anywhere;
+}
+
+.answers dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.responseMeta {
+  margin: 0 0 var(--dub-space-2);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+
+.responseBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+
+.responseBlock + .responseBlock {
+  padding-top: var(--dub-space-4);
+  border-top: 1px solid var(--dub-color-border-default);
+}
+
+.muted {
+  color: var(--dub-color-text-muted);
+}
+
+.spaced {
+  margin-top: var(--dub-space-6);
+}
+
+.bindingField {
+  min-width: 14rem;
+}
+
+.answerPair {
+  display: contents;
+}
+
+.answersTitle {
+  margin-bottom: var(--dub-space-3);
+  font-weight: var(--dub-font-weight-bold);
+  font-size: var(--dub-font-size-sm);
+}
