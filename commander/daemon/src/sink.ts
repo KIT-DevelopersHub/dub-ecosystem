@@ -51,6 +51,7 @@ export class HttpRunSink implements RunSink {
       prompt: run.prompt,
       cwd: run.cwd,
       taskId: run.taskId ?? null,
+      sessionId: run.sessionId ?? null,
       status: run.status,
     });
   }
