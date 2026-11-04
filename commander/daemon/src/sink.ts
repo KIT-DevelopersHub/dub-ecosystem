@@ -9,6 +9,8 @@ export interface RunSink {
   runStarted(run: Run): void;
   /** Persist one run event (commander_run_events) + fold status/exit into the run row. */
   runEvent(runId: string, event: RunEvent): void;
+  /** Wait (at most timeoutMs) for in-flight persistence requests — used before exit. */
+  flush?(timeoutMs: number): Promise<void>;
 }
 
 /** No-op sink used when no commander-service URL is configured. */
@@ -22,6 +24,7 @@ export class HttpRunSink implements RunSink {
   // `node --experimental-strip-types` — strip-only mode rejects parameter properties.
   private baseUrl: string;
   private token?: string;
+  private inflight = new Set<Promise<unknown>>();
 
   constructor(baseUrl: string, token?: string) {
     this.baseUrl = baseUrl;
@@ -36,13 +39,25 @@ export class HttpRunSink implements RunSink {
 
   private post(path: string, body: unknown): void {
     // Fire-and-forget; swallow every failure (persistence is best-effort).
-    void fetch(`${this.baseUrl}${path}`, {
+    const p = fetch(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(body),
     }).catch((err: unknown) => {
       console.warn(`[commander-daemon] persist ${path} failed:`, (err as Error).message);
     });
+    // Tracked only so a shutdown can wait for them (flush); never awaited otherwise.
+    this.inflight.add(p);
+    void p.finally(() => this.inflight.delete(p));
+  }
+
+  async flush(timeoutMs: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.allSettled([...this.inflight]),
+      new Promise<void>((r) => (timer = setTimeout(r, timeoutMs))),
+    ]);
+    clearTimeout(timer);
   }
 
   runStarted(run: Run): void {

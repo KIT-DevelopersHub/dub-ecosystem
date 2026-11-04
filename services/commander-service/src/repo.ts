@@ -749,6 +749,56 @@ export async function appendRunEvent(
   return { id, runId, type: input.type, payload, createdAt: at };
 }
 
+/** Notice appended to a run the daemon lost (its claude child died with the daemon). */
+export const ORPHAN_RUN_NOTICE =
+  "[commander] commanderの再起動でこの実行は中断されました。もう一度送ってください。";
+
+/**
+ * Fail every run still persisted as pending/running that no daemon owns any more: when the
+ * daemon restarts or crashes its claude children die, but their rows would stay `running`
+ * forever (実行中 on the board). Each one gets the same trail a killed run gets — a stderr
+ * notice, `exit` with code null, then `status: failed` — via appendRunEvent, so the row fold,
+ * URL harvest and board lanes (failed → 要修正) behave exactly as for any failed run.
+ *
+ * `ids` limits the sweep to those runs (graceful shutdown: "my in-flight runs"); `before`
+ * spares runs created at/after that instant (boot: a run the new daemon already started);
+ * `exceptIds` spares runs the caller still owns. Idempotent: a settled run is never touched.
+ */
+export async function reconcileOrphanRuns(
+  db: D1Database,
+  opts: { ids?: string[]; before?: string; exceptIds?: string[]; line?: string } = {},
+): Promise<string[]> {
+  const where = ["status IN ('pending', 'running')"];
+  const binds: string[] = [];
+  if (opts.ids) {
+    if (opts.ids.length === 0) return [];
+    where.push(`id IN (${opts.ids.map(() => "?").join(", ")})`);
+    binds.push(...opts.ids);
+  }
+  if (opts.before) {
+    where.push("created_at < ?");
+    binds.push(opts.before);
+  }
+  const res = await db
+    .prepare(`SELECT id FROM commander_runs WHERE ${where.join(" AND ")} ORDER BY created_at ASC`)
+    .bind(...binds)
+    .all<{ id: string }>();
+  const except = new Set(opts.exceptIds ?? []);
+  const line = opts.line ?? ORPHAN_RUN_NOTICE;
+  const done: string[] = [];
+  for (const { id } of res.results ?? []) {
+    if (except.has(id)) continue;
+    // Distinct, increasing timestamps keep the trail in order (events sort by created_at).
+    const t0 = Date.now();
+    const at = (i: number) => new Date(t0 + i).toISOString();
+    await appendRunEvent(db, id, { type: "stderr", payload: { line }, at: at(0) });
+    await appendRunEvent(db, id, { type: "exit", payload: { code: null }, at: at(1) });
+    await appendRunEvent(db, id, { type: "status", payload: { status: "failed" }, at: at(2) });
+    done.push(id);
+  }
+  return done;
+}
+
 // --- AI chat sessions + messages (persistence for "Dubに聞く"/"Dubを操作") ----
 // Chat history lives in the commander_ namespace so it survives restarts. "履歴をクリア"
 // deletes rows physically (no soft-delete). Multiple sessions per kind back the UI tabs.
