@@ -56,7 +56,21 @@ export const LP_SECTION_REGISTRY = {
   join: { label: "参加・登壇 (Join)", hideable: true, defaultVariant: "a", variants: { a: "2カード" } },
   program: { label: "プログラム", hideable: true, defaultVariant: "a", variants: { a: "標準" } },
   about: { label: "とは？", hideable: true, defaultVariant: "a", variants: { a: "3点" } },
-  crowdfunding: { label: "クラファン情報", hideable: true, defaultVariant: "a", variants: { a: "帯" } },
+  crowdfunding: {
+    label: "クラファン情報",
+    hideable: true,
+    defaultVariant: "a",
+    variants: { a: "帯" },
+    // パターンは 1 つの <section id="crowdfunding"> の中で切り替える（バリアントにするとアンカーの id が重複する）。
+    options: {
+      pattern: {
+        kind: "enum",
+        label: "パターン",
+        default: "current",
+        values: { current: "現状のページ", supporters: "支援者情報" },
+      },
+    },
+  },
   vision: { label: "ビジョン", hideable: true, defaultVariant: "a", variants: { a: "標準" } },
   contact: { label: "お問い合わせ", hideable: true, defaultVariant: "a", variants: { a: "標準" } },
   footer: { label: "フッター", hideable: false, defaultVariant: "a", variants: { a: "標準" } },

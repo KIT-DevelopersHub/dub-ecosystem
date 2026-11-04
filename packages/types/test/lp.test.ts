@@ -23,6 +23,19 @@ describe("lp section registry", () => {
   });
 });
 
+describe("crowdfunding pattern (enum option)", () => {
+  it("defaults to 現状のページ and accepts 支援者情報; unknown values are rejected / dropped", () => {
+    expect(lp.resolveSection(lp.defaultLayout(), "crowdfunding").options).toEqual({ pattern: "current" });
+    const ok = lp.validateLayout({ schema: 1, sections: { crowdfunding: { options: { pattern: "supporters" } } } });
+    expect(ok.issues).toEqual([]);
+    expect(lp.resolveSection(ok.layout, "crowdfunding").options).toEqual({ pattern: "supporters" });
+    const bad = lp.validateLayout({ schema: 1, sections: { crowdfunding: { options: { pattern: "x" } } } });
+    expect(bad.issues).toEqual([{ field: "layout.sections.crowdfunding.options.pattern", reason: "invalid" }]);
+    const n = lp.normalizeLayout({ schema: 1, sections: { crowdfunding: { options: { pattern: "x" } } } });
+    expect(lp.resolveSection(n, "crowdfunding").options).toEqual({ pattern: "current" });
+  });
+});
+
 describe("normalizeLayout (lenient)", () => {
   it("drops unknown sections / variants / options and wrong types", () => {
     const n = lp.normalizeLayout({

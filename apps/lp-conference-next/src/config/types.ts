@@ -58,11 +58,21 @@ export interface CrowdfundingBanner {
   href: string;
 }
 
+/** クラファン情報の「支援者情報」パターン（LP管理の公開設定で切り替え）。 */
+export interface CrowdfundingSupporters {
+  heading: string;
+  body: string;
+  /** 掲載する支援者のお名前（掲載を希望された方のみ）。空なら emptyNote を出す。 */
+  names: string[];
+  emptyNote: string;
+}
+
 export interface CrowdfundingConfig {
   heading: string;
   body: string;
   cta?: CtaLink;
   banner?: CrowdfundingBanner;
+  supporters?: CrowdfundingSupporters;
 }
 
 export interface ApplySide {

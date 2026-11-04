@@ -2057,6 +2057,59 @@ img { max-width: 100%; height: auto; display: block; }
 @keyframes sh-a { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(30px,24px,0) scale(1.2); } }
 @keyframes sh-b { from { transform: translate3d(0,0,0) scale(1.05); } to { transform: translate3d(-26px,-20px,0) scale(0.86); } }
 
+/* ---- Crowdfunding「支援者情報」パターン（公開設定 crowdfunding.options.pattern=supporters） ---- */
+.supporters {
+  padding-block: clamp(4rem, 9vw, 7rem);
+  background: var(--lp-surface-alt);
+  border-block: 1px solid var(--lp-border-soft);
+}
+.supporters-inner { text-align: center; }
+.supporters-title {
+  margin: 0.6rem 0 1rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 4vw, 2.6rem);
+  font-weight: 900;
+  color: var(--lp-heading);
+  text-wrap: balance;
+}
+.supporters-body {
+  margin: 0 auto 2.25rem;
+  max-width: 48ch;
+  color: var(--lp-ink-soft);
+  font-size: clamp(1rem, 1.8vw, 1.1rem);
+  line-height: 1.9;
+  white-space: pre-line;
+}
+.supporters-names {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem 1rem;
+  margin: 0 auto 2.5rem;
+  padding: 0;
+  max-width: 60rem;
+  list-style: none;
+}
+.supporters-names li {
+  padding: 0.55rem 1.2rem;
+  border: 1px solid var(--lp-border);
+  border-radius: 999px;
+  background: var(--lp-surface);
+  color: var(--lp-ink);
+  font-weight: 700;
+}
+.supporters-empty {
+  margin: 0 auto 2.5rem;
+  max-width: 40rem;
+  padding: 1.5rem 1.75rem;
+  border: 1px dashed var(--lp-border);
+  border-radius: 16px;
+  background: var(--lp-surface);
+  color: var(--lp-ink-mute);
+  line-height: 1.8;
+}
+.btn-support--onLight { background: var(--lp-blue-btn); color: #fff; }
+
 /* ---- Vision → big statement over decorative rings ---- */
 .vision {
   position: relative;
