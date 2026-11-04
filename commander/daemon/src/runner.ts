@@ -99,6 +99,7 @@ export class RunStore {
       prompt: input.prompt,
       cwd: input.cwd ?? this.config.defaultCwd,
       ...(input.taskId ? { taskId: input.taskId } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId, resumed: !!input.resume } : {}),
       ...(input.images?.length ? { imageCount: input.images.length } : {}),
       status: "pending",
       startedAt: now,
@@ -106,8 +107,47 @@ export class RunStore {
     };
     this.runs.set(id, run);
     this.sink.runStarted(run);
-    this.spawnClaude(run, input.args ?? [], input.images ?? []);
+    const sessionArgs = input.sessionId
+      ? input.resume
+        ? ["--resume", input.sessionId]
+        : ["--session-id", input.sessionId]
+      : [];
+    this.spawnClaude(run, [...sessionArgs, ...(input.args ?? [])], input.images ?? [], input.spawnPrompt ?? input.prompt);
     return run;
+  }
+
+  /** Record a run that could not even be spawned (e.g. its task worktree failed). */
+  fail(input: { prompt: string; cwd: string; taskId?: string }, message: string): Run {
+    const run: Run = {
+      id: randomUUID(),
+      prompt: input.prompt,
+      cwd: input.cwd,
+      ...(input.taskId ? { taskId: input.taskId } : {}),
+      status: "pending",
+      startedAt: new Date().toISOString(),
+      events: [],
+    };
+    this.runs.set(run.id, run);
+    this.sink.runStarted(run);
+    this.emit(run, { type: "error", at: new Date().toISOString(), message });
+    run.endedAt = new Date().toISOString();
+    this.setStatus(run, "failed");
+    return run;
+  }
+
+  /** The live run of a task, if any (a task's session must not be resumed twice at once). */
+  activeRunForTask(taskId: string): Run | undefined {
+    for (const id of this.active.keys()) {
+      const run = this.runs.get(id);
+      if (run?.taskId === taskId) return run;
+    }
+    return undefined;
+  }
+
+  /** Append a daemon note to a run's log (shown like stderr). */
+  note(id: string, line: string): void {
+    const run = this.runs.get(id);
+    if (run) this.emit(run, { type: "stderr", at: new Date().toISOString(), line: `[commander] ${line}` });
   }
 
   /**
@@ -128,13 +168,13 @@ export class RunStore {
     this.emit(run, { type: "status", status, at: new Date().toISOString() });
   }
 
-  private spawnClaude(run: Run, runArgs: string[] = [], images: StagedImage[] = []): void {
+  private spawnClaude(run: Run, runArgs: string[] = [], images: StagedImage[] = [], prompt: string = run.prompt): void {
     // With images the prompt goes on stdin as a stream-json user message (image blocks
     // + text), which `-p` cannot carry; claude exits once stdin closes.
     const viaStdin = images.length > 0;
     const args = [
       "-p",
-      ...(viaStdin ? ["--input-format", "stream-json"] : [run.prompt]),
+      ...(viaStdin ? ["--input-format", "stream-json"] : [prompt]),
       "--output-format",
       "stream-json",
       "--verbose",
@@ -167,7 +207,7 @@ export class RunStore {
       if (viaStdin) {
         // A child that dies early closes stdin; the close handler reports the failure.
         child.stdin!.on("error", () => {});
-        child.stdin!.end(imageMessageLine(run.prompt, images));
+        child.stdin!.end(imageMessageLine(prompt, images));
       }
     } catch (err) {
       this.emit(run, {

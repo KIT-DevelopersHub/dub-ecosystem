@@ -72,25 +72,17 @@ interface BoardProps {
   pollMs?: number;
   /** Soft concurrency guidance shown in the status bar (design §7: default 3). */
   concurrencyLimit?: number;
-  /** Extra pinned worktree paths for the composer (e.g. the self-brushup pin). */
-  cwdPins?: string[];
 }
 
 const defaultClient = new HttpCommanderClient();
 const defaultApi = new HttpCommanderApi();
 
-/** Compose prior run context into a follow-up prompt (P0 re-injection; P1 = --resume). */
-function composePrompt(prior: string | null, addition: string): string {
-  if (!prior) return addition;
-  return `${prior}\n\n---\n[前回の実行へのフィードバック / 追加指示]\n${addition}`;
-}
-
 /** Start a run with pasted screenshots: stage each on the daemon, then pass the ids. The
- *  prompt notes the count so later follow-ups (which re-inject it) know images were sent. */
+ *  prompt notes the count so the task's session records that images were sent. */
 async function startRunWithImages(
   client: CommanderClient,
   prompt: string,
-  opts: { taskId?: string; cwd?: string },
+  opts: { taskId?: string; taskContext?: string },
   images: ChatImage[],
 ): Promise<{ runId: string }> {
   if (images.length === 0) return client.startRun(prompt, opts);
@@ -140,16 +132,33 @@ export function withTargetPr(prompt: string, item: { prUrl: string | null; prUrl
   return prompt.trimEnd().endsWith(line) ? prompt : `${prompt}\n\n${line}`;
 }
 
-// 再実行 / 却下 re-inject the prior prompt, so a deploy run's follow-up must re-pin the PR
-// too (its prior may predate withTargetPr). Other follow-ups get it once a PR is recorded.
-export function followUpPrompt(
-  prior: string | null,
-  addition: string,
-  item: { prUrl: string | null; prUrls: string[] },
+// A follow-up (追加指示 / 却下) is just the new instruction: the daemon resumes the task's
+// own Claude session, which already holds the earlier turns and answers. Re-sending the
+// prior prompt (the old approach) made the agent re-do or confuse past work. The task's PR
+// is pinned once one is recorded.
+export function followUpPrompt(addition: string, item: { prUrl: string | null; prUrls: string[] }): string {
+  return item.prUrl || item.prUrls.length > 0 ? withTargetPr(addition, item) : addition;
+}
+
+/** Name the task inside a deploy instruction (「このタスク」 alone left the agent guessing). */
+export function withTaskName(prompt: string, item: { taskId: string; title: string }): string {
+  return `${prompt}\n\n対象タスク: ${item.title} (taskId: ${item.taskId})`;
+}
+
+/**
+ * What the task is, for the daemon to prepend when it opens a NEW session for the task
+ * (first run, or the first run after this change for an older task). `original` is the
+ * task's first instruction.
+ */
+export function taskContextFor(
+  item: { taskId: string; title: string; prUrl: string | null; prUrls: string[] },
+  original: string | null,
 ): string {
-  const prompt = composePrompt(prior, addition);
-  const isDeploy = !!prior && (prior.startsWith(STAGING_DEPLOY_PROMPT) || prior.startsWith(PROD_DEPLOY_PROMPT));
-  return isDeploy || item.prUrl || item.prUrls.length > 0 ? withTargetPr(prompt, item) : prompt;
+  const lines = ["[このタスク]", `タイトル: ${item.title}`, `taskId: ${item.taskId}`];
+  const pr = item.prUrl ?? item.prUrls.at(-1);
+  if (pr) lines.push(`PR: ${pr}`);
+  if (original?.trim()) lines.push("最初の依頼:", original.trim());
+  return lines.join("\n");
 }
 
 // Phases a 追加指示 must rewind to demo_building before the follow-up run starts
@@ -165,7 +174,6 @@ export function Board({
   api = defaultApi,
   pollMs = 3000,
   concurrencyLimit = 3,
-  cwdPins = [],
 }: BoardProps) {
   const [items, setItems] = useState<BoardItem[]>([]);
   const [bundles, setBundles] = useState<StagingBundle[]>([]);
@@ -308,11 +316,6 @@ export function Board({
     bundles.filter((b) => b.status !== "merging").reduce((n, b) => n + bundleChildren(b, all).length, 0);
   const filtering = query.trim() !== "";
 
-  const cwdSuggestions = useMemo(() => {
-    const fromItems = items.map((i) => i.latestRun?.cwd).filter((c): c is string => !!c);
-    return [...new Set([...cwdPins, ...fromItems])];
-  }, [items, cwdPins]);
-
   const selected = all.find((i) => i.taskId === selectedTaskId) ?? null;
 
   const refreshAfterAction = useCallback(async () => {
@@ -334,7 +337,7 @@ export function Board({
         stagingUrl: null,
         prUrl: null,
         prUrls: [],
-        latestRun: { id: "", status: "pending", cwd: v.cwd, createdAt: new Date().toISOString() },
+        latestRun: { id: "", status: "pending", cwd: "", createdAt: new Date().toISOString() },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -349,7 +352,10 @@ export function Board({
         await startRunWithImages(
           client,
           v.prompt,
-          { taskId: res.value.task.id, ...(v.cwd ? { cwd: v.cwd } : {}) },
+          {
+            taskId: res.value.task.id,
+            taskContext: taskContextFor({ taskId: res.value.task.id, title: v.title, prUrl: null, prUrls: [] }, null),
+          },
           v.images,
         );
         await load();
@@ -427,12 +433,14 @@ export function Board({
   );
 
   // ── Next-action orchestration (P0-6) ──────────────────────────────────────
-  const priorPrompt = useCallback(
-    async (runId: string | undefined): Promise<string | null> => {
-      if (!runId) return null;
+  // The task's first instruction (its oldest run), so a NEW session — e.g. an older task's
+  // first run after per-task sessions landed — still knows what the task is about.
+  const originalPrompt = useCallback(
+    async (taskId: string): Promise<string | null> => {
       try {
-        const detail = await api.getRun(runId);
-        return detail?.run.prompt ?? null;
+        const runs = await api.listRuns({ taskId });
+        const mine = runs.filter((r) => r.taskId === taskId);
+        return mine.at(-1)?.prompt ?? null;
       } catch {
         return null;
       }
@@ -440,23 +448,27 @@ export function Board({
     [api],
   );
 
+  const taskContextOf = useCallback(
+    async (item: BoardItem) => taskContextFor(item, await originalPrompt(item.taskId)),
+    [originalPrompt],
+  );
+
   const startFollowUpRun = useCallback(
     async (item: BoardItem, addition: string, images: ChatImage[] = []) => {
-      const prior = await priorPrompt(item.latestRun?.id);
       await startRunWithImages(
         client,
-        followUpPrompt(prior, addition, item),
-        { taskId: item.taskId, ...(item.latestRun?.cwd ? { cwd: item.latestRun.cwd } : {}) },
+        followUpPrompt(addition, item),
+        { taskId: item.taskId, taskContext: await taskContextOf(item) },
         images,
       );
     },
-    [client, priorPrompt],
+    [client, taskContextOf],
   );
 
   const handleApprove = useCallback(
     async (to: FeaturePhase) => {
       if (!selected) return;
-      const cwdOpt = selected.latestRun?.cwd ? { cwd: selected.latestRun.cwd } : {};
+      const deployOpts = async () => ({ taskId: selected.taskId, taskContext: await taskContextOf(selected) });
 
       if (to === "staging_deployed") {
         // demo承認→staging_deployed: kick a REAL staging反映 run (not just a phase flip). The
@@ -466,7 +478,7 @@ export function Board({
         await api.transition(selected.featureId, to, { approvedByUser: true });
         deployingRef.current.add(selected.featureId);
         try {
-          await client.startRun(withTargetPr(STAGING_DEPLOY_PROMPT, selected), { taskId: selected.taskId, ...cwdOpt });
+          await client.startRun(withTargetPr(withTaskName(STAGING_DEPLOY_PROMPT, selected), selected), await deployOpts());
         } catch {
           // daemon down: can't run the reflect now. Fall back to the phase-only advance so
           // the task still leaves 確認待ち instead of getting stuck; the shield is released.
@@ -479,7 +491,7 @@ export function Board({
         // deriveLane が古い run の結果で「本番確認中」に一瞬飛ぶ flash が起きる）。
         // これで prod_shipped + 走行中 run = 「本番反映中」→ 終われば「本番確認中」(失敗は要修正表示)。
         try {
-          await client.startRun(withTargetPr(PROD_DEPLOY_PROMPT, selected), { taskId: selected.taskId, ...cwdOpt });
+          await client.startRun(withTargetPr(withTaskName(PROD_DEPLOY_PROMPT, selected), selected), await deployOpts());
         } catch {
           // daemon down: no progress run possible — fall through to the phase-only ship so
           // the approval still registers (本番反映済) instead of getting stuck in 確認待ち.
@@ -491,7 +503,7 @@ export function Board({
       await leaveBundle(selected.taskId);
       await refreshAfterAction();
     },
-    [api, client, selected, refreshAfterAction, leaveBundle],
+    [api, client, selected, refreshAfterAction, leaveBundle, taskContextOf],
   );
 
   const handleReject = useCallback(
@@ -916,7 +928,6 @@ export function Board({
         onClose={() => setComposerOpen(false)}
         onSubmit={handleSubmit}
         submitting={submitting}
-        cwdSuggestions={cwdSuggestions}
       />
 
       {api.bundles && (
@@ -930,6 +941,8 @@ export function Board({
       )}
 
       <TaskDrawer
+        // Remount per task: no state (busy/in-flight/detail/drafts) survives a card switch.
+        key={selected?.taskId ?? "none"}
         item={selected}
         notice={selected && bundleByTask.has(selected.taskId) ? (
           <BundleNotice
