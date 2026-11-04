@@ -7,6 +7,8 @@
 //  - a bare http(s) URL is ASCII-only, so it stops at Japanese text and full-width
 //    punctuation (「」（）、。) glued to it. Non-ASCII is allowed only inside a balanced
 //    "(...)" group (e.g. Wikipedia `Cloudflare_(企業)`).
+//  - Markdown `[label](https://…)` shows the label as the link; brackets and the
+//    raw URL are not shown. A balanced "(...)" inside the URL is kept.
 //  - trailing sentence punctuation (. , ; : ! ? ') and unbalanced `]` are not part of it.
 // Only http(s) hrefs are ever produced (no javascript:/data:).
 
@@ -14,7 +16,8 @@ export type LinkSegment = { kind: "text"; text: string } | { kind: "link"; text:
 
 const ANGLE_URL = String.raw`<(https?:\/\/[^\s<>]+(?:[ \t]*\r?\n[ \t]*[^\s<>]+)*)>`;
 const BARE_URL = String.raw`https?:\/\/(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'*+,;=%]|\([^\s()<>「」（）、。]*\))+`;
-const LINK_RE = new RegExp(`${ANGLE_URL}|(${BARE_URL})`, "g");
+const MD_URL = String.raw`\[([^\[\]\n]{1,300})\]\((https?:\/\/(?:[^\s()<>]|\([^\s()<>]*\))+)\)`;
+const LINK_RE = new RegExp(`${MD_URL}|${ANGLE_URL}|(${BARE_URL})`, "g");
 
 const TRAILING_PUNCT = /[.,;:!?']$/;
 
@@ -49,8 +52,16 @@ export function linkifySegments(text: string): LinkSegment[] {
   let cursor = 0;
   for (const m of text.matchAll(LINK_RE)) {
     const start = m.index ?? 0;
-    if (m[1] !== undefined) {
-      const href = m[1].replace(/\s+/g, "");
+    if (m[1] !== undefined && m[2] !== undefined) {
+      const href = m[2];
+      if (!hasHost(href)) continue;
+      pushText(text.slice(cursor, start));
+      out.push({ kind: "link", text: m[1].trim() || href, href });
+      cursor = start + m[0].length;
+      continue;
+    }
+    if (m[3] !== undefined) {
+      const href = m[3].replace(/\s+/g, "");
       if (!hasHost(href)) continue;
       pushText(text.slice(cursor, start));
       // "詳細<https://…>" -> keep the label and link visually apart once the brackets go.
@@ -60,7 +71,7 @@ export function linkifySegments(text: string): LinkSegment[] {
       cursor = start + m[0].length;
       continue;
     }
-    const url = trimBareUrl(m[2] ?? "");
+    const url = trimBareUrl(m[4] ?? "");
     if (!hasHost(url)) continue;
     pushText(text.slice(cursor, start));
     out.push({ kind: "link", text: url, href: url });

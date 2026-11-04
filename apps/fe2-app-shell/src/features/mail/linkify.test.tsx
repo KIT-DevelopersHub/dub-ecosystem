@@ -48,6 +48,20 @@ describe("linkifySegments (mail body URL boundaries)", () => {
     ]);
   });
 
+  it("renders a Markdown [label](url) as the label linking to the url", () => {
+    const segs = linkifySegments("詳細は[申込フォーム](https://ex.jp/form?a=1)まで。[x](https://w.org/A_(B))");
+    expect(segs).toEqual([
+      { kind: "text", text: "詳細は" },
+      { kind: "link", text: "申込フォーム", href: "https://ex.jp/form?a=1" },
+      { kind: "text", text: "まで。" },
+      { kind: "link", text: "x", href: "https://w.org/A_(B)" },
+    ]);
+  });
+
+  it("leaves a Markdown link with a non-http url as text", () => {
+    expect(links("[x](javascript:alert(1))")).toEqual([]);
+  });
+
   it("never links non-http schemes or a scheme without a host", () => {
     expect(links("javascript:alert(1) data:text/html,x <javascript:alert(1)> https:// http://")).toEqual([]);
   });

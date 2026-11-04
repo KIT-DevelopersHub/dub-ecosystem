@@ -687,6 +687,7 @@ MAIL_DETAIL.msg_6 = {
     "会場マップ: https://maps.example.com/maps/place/%E9%87%91%E6%B2%A2%E5%B7%A5%E6%A5%AD%E5%A4%A7%E5%AD%A6/@36.5310,136.6270,17z/data=!3m1!4b1!4m6!3m5!1s0x5ff8333b2e7d0c4d:0x1234567890abcdef!8m2!3d36.531!4d136.627#map-section",
     "",
     "タイムテーブルの詳細<https://conf.example.jp/2026/timetable?day=1&track=A#session-42>",
+    "Markdown形式: [申込フォーム](https://forms.example.com/apply?ref=mail&lang=ja) と [企業ページ](https://ja.wikipedia.org/wiki/Cloudflare_(企業))",
     "アンケート <https://forms.example.com/d/e/1FAIpQLSf0123456789abcdefghijklmnopqrstuvwxyz/viewform?usp=pp_url&entry.1=",
     "abc> へのご協力をお願いします。",
     "",
