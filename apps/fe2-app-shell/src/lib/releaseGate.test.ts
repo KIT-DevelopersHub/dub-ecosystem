@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { identity } from "@dub/types";
-import { isAppPublished, isPrivilegedViewer, isReleaseGatedFor, hasExplicitAppAccess, PUBLISHED_APPS, UNPUBLISHED_TILE_REASON } from "./releaseGate.ts";
+import { isAppPublished, isPrivilegedViewer, isReleaseGatedFor, hasExplicitAppAccess, PUBLISHED_APPS } from "./releaseGate.ts";
 
 type PermissionKey = identity.PermissionKey;
 
@@ -20,10 +20,6 @@ describe("releaseGate", () => {
 
   it("treats an unknown/undefined appId as published (never greys test fixtures)", () => {
     expect(isAppPublished(undefined)).toBe(true);
-  });
-
-  it("exposes the member tooltip text", () => {
-    expect(UNPUBLISHED_TILE_REASON).toContain("メンバー未公開");
   });
 
   it("admin (identity:admin) is privileged -> bypasses the gate", () => {

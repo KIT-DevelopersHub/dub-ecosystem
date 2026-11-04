@@ -22,11 +22,7 @@ import { ForwardSettingsDialog } from "../features/mail/forward/ForwardSettingsD
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
 import { createGlobalContentSearch } from "./globalContentSearch.ts";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
-import {
-  isReleaseGatedFor,
-  UNPUBLISHED_TILE_REASON,
-  UNAUTHORIZED_TILE_REASON,
-} from "../lib/releaseGate.ts";
+import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -67,46 +63,33 @@ export interface AppShellLayoutProps {
 }
 
 // NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
-// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal). Every tile is
-// ALWAYS rendered (消さない — apps are never removed from the launcher, per
-// [[dub-never-hide-or-reduce-apps]]); an app the current viewer cannot open is
-// greyed-out + disabled + tooltip instead, and greyed apps are SORTED to the bottom.
+// injected as badgeCount (FE5 useUnreadCount / FE6 useChatUnreadTotal). An app the
+// current viewer cannot open is HIDDEN (not greyed) so the launcher only lists apps
+// the viewer is actually allowed to use.
 //
 // "Cannot open" mirrors the route access gate (router.tsx) so the launcher and a
-// deep-link stay consistent — an app greyed here 403s on direct navigation, and vice
+// deep-link stay consistent — an app hidden here 403s on direct navigation, and vice
 // versa. Two gates decide it:
-//   1. Member release gate (社長決定 2026-08-14, see lib/releaseGate / RequirePublished):
-//      an app not member-published is greyed for general members; only full admins
-//      (isPrivilegedViewer = identity:admin) bypass it — non-admin operator roles
-//      (maintainer/organizer) are gated too (#255). メールのみ published as of 2026-08-14.
+//   1. Member release gate (lib/releaseGate / RequirePublished): an app that is not
+//      member-published and not granted to the viewer's role (app:<id>:view) is hidden
+//      for everyone except full admins (identity:admin).
 //   2. Permission gate (RequirePermission): an app whose requiredPermissions the viewer
-//      does not hold is greyed for EVERYONE — admins included — exactly matching the
-//      route's own requiredPermissions guard (e.g. a maintainer without identity:admin
-//      can't open a role-admin tool, so its tile greys). No privileged bypass here, so
-//      the launcher never shows an app that would 403.
-// Sort order: usable apps first, greyed apps last; the existing order-based sequence is
-// preserved within each group (a stable partition), and nothing is removed.
-// The access gate for a nav entry, shared by the launcher and the command palette so
-// a greyed app looks/behaves identically in both surfaces (and matches router.tsx).
-function navGate(entry: NavEntry, can: Can): { disabled: boolean; reason?: string } {
-  const releaseGated = isReleaseGatedFor(entry.appId, can);
-  const lacksPermission =
-    entry.requiredPermissions !== undefined &&
-    entry.requiredPermissions.length > 0 &&
-    !entry.requiredPermissions.every((p) => can(p));
-  if (releaseGated || lacksPermission) {
-    // Release gate wins the reason, matching router.tsx where RequirePublished wraps
-    // the permission gate (an unpublished app denies first, regardless of perms).
-    return { disabled: true, reason: releaseGated ? UNPUBLISHED_TILE_REASON : UNAUTHORIZED_TILE_REASON };
-  }
-  return { disabled: false };
+//      does not hold is hidden for EVERYONE — admins included — exactly matching the
+//      route's own requiredPermissions guard.
+// Shared by the launcher and the command palette so both surfaces list the same apps.
+function canOpen(entry: NavEntry, can: Can): boolean {
+  if (isReleaseGatedFor(entry.appId, can)) return false;
+  return entry.requiredPermissions === undefined || entry.requiredPermissions.every((p) => can(p));
 }
 
 function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
-  const items = [...navEntries]
+  return [...navEntries]
     .sort((a, b) => a.order - b.order)
-    .map((entry) => {
+    .flatMap((entry) => {
+      // badgeSource is a React hook: call it for EVERY entry before filtering, so the
+      // hook count stays stable when permissions resolve (else React #310).
       const badge = entry.badgeSource?.();
+      if (!canOpen(entry, can)) return [];
       const item: AppLauncherItem = {
         id: entry.path,
         label: entry.label,
@@ -114,16 +97,8 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         href: entry.path,
       };
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
-      const gate = navGate(entry, can);
-      if (gate.disabled) {
-        item.disabled = true;
-        item.disabledReason = gate.reason;
-      }
-      return item;
+      return [item];
     });
-  // Usable first, greyed last. filter() is a stable partition, so each group keeps its
-  // order-sorted sequence; no tile is dropped (消さない — greyed apps only move down).
-  return [...items.filter((i) => !i.disabled), ...items.filter((i) => i.disabled)];
 }
 
 // Derive extra ASCII search terms from an entry so a Japanese label ("メール") is still
@@ -133,9 +108,8 @@ function navKeywords(entry: NavEntry): string[] {
   return entry.appId ? [entry.appId, ...fromPath] : fromPath;
 }
 
-// Build the palette command list: every app (gated identically to the launcher, greyed
-// apps kept — 消さない) plus the global self-service actions. Apps sort usable-first to
-// match the launcher; actions follow in their own section.
+// Build the palette command list: every app the viewer can open (filtered identically
+// to the launcher) plus the global self-service actions in their own section.
 export function buildPaletteCommands(
   navEntries: NavEntry[],
   can: Can,
@@ -145,26 +119,19 @@ export function buildPaletteCommands(
     onLogout?: () => void;
   },
 ): PaletteCommand[] {
-  const apps = [...navEntries]
+  const apps = navEntries
+    .filter((entry) => canOpen(entry, can))
     .sort((a, b) => a.order - b.order)
-    .map((entry): PaletteCommand => {
-      const gate = navGate(entry, can);
-      const cmd: PaletteCommand = {
+    .map(
+      (entry): PaletteCommand => ({
         id: `app:${entry.path}`,
         label: entry.label,
         group: "アプリ",
         icon: entry.icon,
         keywords: navKeywords(entry),
         run: () => actions.onNavigate?.(entry.path),
-      };
-      if (gate.disabled) {
-        cmd.disabled = true;
-        cmd.disabledReason = gate.reason;
-      }
-      return cmd;
-    });
-  const usable = apps.filter((c) => !c.disabled);
-  const greyed = apps.filter((c) => c.disabled);
+      }),
+    );
 
   const actionCmds: PaletteCommand[] = [];
   if (actions.onNavigate) {
@@ -198,7 +165,7 @@ export function buildPaletteCommands(
     });
   }
 
-  return [...usable, ...greyed, ...actionCmds];
+  return [...apps, ...actionCmds];
 }
 
 export function AppShellLayout({
