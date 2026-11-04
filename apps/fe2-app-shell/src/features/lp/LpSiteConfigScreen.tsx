@@ -5,7 +5,7 @@
 //   LP とセクションの設定を 1 枚にしたカード（左に LP、右にそのセクションの高さで設定。ページと一緒にスクロール）。
 // セクションの設定は登録簿（LP_SECTION_REGISTRY）から汎用に描くので、バリアント・オプションを足すと自動で出る。
 //  - 下書き: 変えるたびに自動保存（楽観的・失敗で戻す・409 は読み直し）。確認ダイアログは出さない。
-//    「プレビューに反映」は保存済みの下書きでミニプレビューを読み直すだけ（本番は変えない）。
+//    ミニプレビューは切り替えた瞬間に映る（画面上の設定を postMessage で LP に送る・本番は変えない）。
 //    「プレビューを開く」は下書きの値で LP を開く（&config=draft）。本番の LP はこのタブからは変えられない:
 //    「本番タブで確かめる」は下書きを本番タブの未反映の変更として読み込むだけで、何も書き込まない。
 //  - 本番: 変更は画面に溜めて「変更 N 件」と差分を出し、「本番に反映」→ 確認ダイアログでまとめて 1 回で反映する。
@@ -31,7 +31,6 @@ import {
   Stack,
   Switch,
   useMediaQuery,
-  useToast,
 } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
@@ -83,15 +82,12 @@ export function LpSiteConfigScreen(): JSX.Element {
   const autosave = useDraftAutosave();
   const reset = useResetDraft();
   const publish = usePublishSiteConfig();
-  const toast = useToast();
   const { canEdit } = useAppCapability("lp");
   const { can } = usePermissions();
   const canPublish = canEdit && can("lp:publish");
 
   const [staged, setStaged] = useState<LpSiteConfig | null>(null);
   const [confirm, setConfirm] = useState<{ from: LpSiteConfig; to: LpSiteConfig } | null>(null);
-  // 「プレビューに反映」で増やし、ミニプレビューを読み直させる。
-  const [previewNonce, setPreviewNonce] = useState(0);
   const [resetting, setResetting] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [viewing, setViewing] = useState<LpVersion | null>(null);
@@ -135,11 +131,6 @@ export function LpSiteConfigScreen(): JSX.Element {
     publish.mutate({ config: to }, { onError: () => restore && setStaged(restore) });
   };
 
-  const applyToPreview = (): void => {
-    setPreviewNonce((n) => n + 1);
-    toast.show({ kind: "success", title: "プレビューに反映しました（本番の LP は変わりません）" });
-  };
-
   // 下書きを本番タブの「未反映の変更」として持っていく。書き込みはしない（反映は本番タブで確認してから）。
   const carryDraftToLive = (): void => {
     if (!state) return;
@@ -177,23 +168,27 @@ export function LpSiteConfigScreen(): JSX.Element {
           : null
     : null;
 
-  // 左のプレビュー。下書きは保存済みの下書き（&config=draft）を保存のたび（revision）に読み直す。
-  // 本番は版を番号で固定して &config=live（?version=live はプレビュー扱いにならず橋渡しが入らない）。
-  // ためた変更のうち版・チケット・募集は URL で当たる。セクションの見た目は反映後に映る（注記）。
+  // 左のプレビュー。版・チケット・募集は URL で当たる（変えると読み直す）。セクションの見た目は画面上の設定
+  // （下書き = 楽観的に更新済みのキャッシュ / 本番 = ためた変更）を attrs として LP に送り、即時に映す。
+  // 下書きは &config=draft、本番は版を番号で固定して &config=live（?version=live はプレビュー扱いにならず橋渡しが入らない）。
+  // 即時反映できない古い橋渡しの LP だけ、下書きの保存のたび（revision）に読み直す。
+  const miniAttrs = useMemo(() => (config ? lp.layoutAttributes(lp.LP_SECTION_REGISTRY, config.layout) : {}), [config]);
   const mini = state && config
     ? live
       ? { url: `${releasePreviewUrl(config)}&config=live`, refreshKey: 0 }
-      : { url: draftPreviewUrl(state.draft), refreshKey: state.revision + (previewNonce % 1000) / 1000 }
+      : { url: draftPreviewUrl(state.draft), refreshKey: state.revision }
     : null;
-  const miniNote = !state || !config
+  const miniNote = config && config.release.versionId !== SECTION_CAPABLE_VERSION
+    ? `セクションの切り替えが映るのは ${SECTION_CAPABLE_VERSION} 以降の版です（いまの版では見た目は変わりません）。`
+    : null;
+  // 即時反映できない（lp:config を知らない古い橋渡しの）LP のときだけ出す注記。
+  const miniNoSyncNote = !state || !config
     ? null
     : live && stagedDiff.some((d) => d.key.includes("."))
       ? "セクションの未反映の変更は、本番に反映するとプレビューに映ります（プレビュー（下書き）なら変えた直後に確かめられます）。"
       : IS_DEMO
         ? "デモ環境です。セクションの切り替えが LP に映るのは、LP の v3.6 がデプロイされてからです。"
-        : config.release.versionId !== SECTION_CAPABLE_VERSION
-          ? `セクションの切り替えが映るのは ${SECTION_CAPABLE_VERSION} 以降の版です（いまの版では見た目は変わりません）。`
-          : null;
+        : null;
   // 「変更あり」の印: 下書きは本番との差、本番はためた変更。
   const changedSections = useMemo(
     () => new Set((live ? stagedDiff : draftDiff).map((d) => d.key.split(".")[0] ?? d.key)),
@@ -244,15 +239,6 @@ export function LpSiteConfigScreen(): JSX.Element {
           testId="fe2-lp-config-to-live"
         >
           本番タブで確かめる
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={!canEdit || autosave.saving}
-          onClick={applyToPreview}
-          testId="fe2-lp-config-apply-preview"
-        >
-          プレビューに反映
         </Button>
       </>
     )
@@ -315,8 +301,10 @@ export function LpSiteConfigScreen(): JSX.Element {
           <LpSectionEditor
             url={mini.url}
             refreshKey={mini.refreshKey}
+            attrs={miniAttrs}
             title={live ? "本番のプレビューとセクションの設定" : "下書きのプレビューとセクションの設定"}
             notes={miniNote ? [miniNote] : []}
+            noSyncNotes={miniNoSyncNote ? [miniNoSyncNote] : []}
             narrow={narrow}
             sectionIds={lp.LP_SECTION_IDS}
             sectionLabel={(id) => lp.LP_SECTION_REGISTRY[id as lp.LpSectionId].label}

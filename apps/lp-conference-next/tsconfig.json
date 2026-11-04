@@ -14,6 +14,7 @@
     "jsx": "preserve",
     "incremental": true,
     "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": true,
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/*": ["./src/*"]
