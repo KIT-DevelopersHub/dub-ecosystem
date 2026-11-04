@@ -18,7 +18,7 @@ import { createApp } from "../src/app";
 import { POLICY_TABLE } from "../src/policy-table";
 import { createDriveShareService } from "../src/service";
 import { createMockDriveShareClient } from "../src/mock-client";
-import { allowAll, AUTHED, buildRoleGrants, fakeRoster, stubGoogleAccount, buildMeetings } from "./helpers";
+import { allowAll, AUTHED, buildRoleGrants, fakeRoster, stubGoogleAccount, buildMeetings, buildAttendance, buildGoogleLink } from "./helpers";
 import type { PermissionGranter } from "@dub/policy-gate";
 
 function buildApp(authz: PermissionGranter = allowAll) {
@@ -28,7 +28,7 @@ function buildApp(authz: PermissionGranter = allowAll) {
     drive: client,
     roster: fakeRoster({ role_sys_member: ["staff-a@example.com"] }, { role_sys_member: "member" }),
   });
-  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service });
+  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service, attendance: () => buildAttendance().service, googleLink: () => buildGoogleLink().service });
 }
 
 describe("route coverage (POLICY_TABLE <-> router)", () => {
@@ -64,6 +64,7 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   admin: [
     "app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write", "identity:admin", "drive:settings_view", "drive:settings_edit",
     "app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit",
+    "app:hr:view", "app:hr:edit", "hr:read", "hr:write", "hr:admin",
   ],
   maintainer: ["app:driveshare:view", "app:driveshare:edit", "drive:read", "drive:write"],
   organizer: ["app:driveshare:view"],
@@ -87,6 +88,10 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "meetings-edit-on-view-tier": ["app:calendar:view", "calendar:meetings_view", "calendar:meetings_edit"],
   // Full ミーティング without any Drive共有 key: meetings never open Drive.
   "meetings-editor": ["app:calendar:view", "app:calendar:edit", "calendar:meetings_view", "calendar:meetings_edit"],
+  // 人事 at 閲覧 (hr:read): sees the 定例 attendance report, cannot correct it.
+  "hr-viewer": ["app:hr:view", "hr:read"],
+  // 人事 at 編集 (identity/0025 gives role_sys_admin these; others opt in).
+  "hr-editor": ["app:hr:view", "app:hr:edit", "hr:read", "hr:write"],
 };
 
 /**
@@ -129,13 +134,25 @@ const SETTINGS_WRITE = [
 // カレンダー > ミーティング.
 const MEETINGS_READ = ["GET /meetings", "GET /meetings/targets"];
 const MEETINGS_WRITE = ["DELETE /meetings/:id", "PATCH /meetings/:id", "POST /meetings", "POST /meetings/sync"];
+// 定例の出席: the caller's own join + their own 定例 list (AUTHENTICATED; join asserts target membership).
+const SELF = ["GET /meetings/me/regulars", "POST /meetings/:id/join", "POST /meetings/me/google-link/callback", "POST /meetings/me/google-link/start"];
+// 定例の出席 report / corrections (人事).
+const ATTENDANCE_READ = ["GET /meetings/attendance"];
+const ATTENDANCE_WRITE = [
+  "DELETE /meetings/attendance/links/:googleUserId",
+  "POST /meetings/attendance/ingest",
+  "PUT /meetings/:id/attendance/:date/:userId",
+  "PUT /meetings/attendance/links/:googleUserId",
+  "PUT /meetings/attendance/settings",
+];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /internal/health"];
 // The whole external surface — what a caller can reach through api-gateway at most.
-const FULL = [...READS, ...WRITES, ...SETTINGS_READ, ...SETTINGS_WRITE, ...MEETINGS_READ, ...MEETINGS_WRITE].sort();
-const OPERATOR = [...READS, ...WRITES].sort();
-const READ_ONLY = [...READS].sort();
-const NONE: string[] = [];
+const FULL = [...READS, ...WRITES, ...SETTINGS_READ, ...SETTINGS_WRITE, ...MEETINGS_READ, ...MEETINGS_WRITE, ...SELF, ...ATTENDANCE_READ, ...ATTENDANCE_WRITE].sort();
+const OPERATOR = [...READS, ...WRITES, ...SELF].sort();
+const READ_ONLY = [...READS, ...SELF].sort();
+/** Every signed-in caller reaches the self routes and nothing else. */
+const NONE: string[] = [...SELF].sort();
 
 describe("role x endpoint matrix (frozen)", () => {
   // Loosening a rule adds a route to one of these arrays — a visible diff in review.
@@ -147,12 +164,14 @@ describe("role x endpoint matrix (frozen)", () => {
     "disabled-tier-with-legacy-drive-keys": NONE,
     "view-tier-with-legacy-write-key": READ_ONLY,
     "settings-view": [...OPERATOR, ...SETTINGS_READ].sort(),
-    "settings-edit-on-view-tier": [...READS, ...SETTINGS_READ].sort(),
+    "settings-edit-on-view-tier": [...READ_ONLY, ...SETTINGS_READ].sort(),
     "identity-admin-without-settings-keys": OPERATOR,
     "calendar-editor-without-meeting-keys": NONE,
-    "meetings-view": [...MEETINGS_READ].sort(),
-    "meetings-edit-on-view-tier": [...MEETINGS_READ].sort(),
-    "meetings-editor": [...MEETINGS_READ, ...MEETINGS_WRITE].sort(),
+    "meetings-view": [...NONE, ...MEETINGS_READ].sort(),
+    "meetings-edit-on-view-tier": [...NONE, ...MEETINGS_READ].sort(),
+    "meetings-editor": [...NONE, ...MEETINGS_READ, ...MEETINGS_WRITE].sort(),
+    "hr-viewer": [...NONE, ...ATTENDANCE_READ].sort(),
+    "hr-editor": [...NONE, ...ATTENDANCE_READ, ...ATTENDANCE_WRITE].sort(),
   };
 
   it("matches the committed matrix for every role", () => {
@@ -168,7 +187,7 @@ describe("role x endpoint matrix (frozen)", () => {
     expect(everyRoute).toEqual(protectableRouteKeys(buildApp()).sort());
   });
 
-  it("a caller holding nothing reaches nothing — there is no public route here", () => {
+  it("a caller holding nothing reaches only the self routes — there is no public route here", () => {
     expect(allowedRoutes([])).toEqual(NONE);
   });
 

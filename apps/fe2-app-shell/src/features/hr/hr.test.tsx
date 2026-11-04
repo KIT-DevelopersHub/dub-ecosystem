@@ -55,6 +55,11 @@ function fakeApi(overrides: Partial<HrApi> = {}): HrApi {
     remove: unused,
     onboarding: unused,
     setCheck: unused,
+    attendance: unused,
+    setAttendance: unused,
+    ingestAttendance: unused,
+    confirmParticipant: unused,
+    updateAttendanceSettings: unused,
     teams: () => Promise.resolve({ teams: [] }),
     ...overrides,
   };

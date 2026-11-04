@@ -12,6 +12,7 @@ import {
 } from "@tanstack/react-router";
 import type { ComponentType } from "react";
 import type { ApiClient } from "../lib/api-client.tsx";
+import { GoogleLinkReturn } from "./GoogleLinkReturn.tsx";
 import type { Registry, ResolvedRoute } from "../modules/types.tsx";
 import { RequireAuth, RequirePermission, usePermissions } from "../auth/AuthProvider.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
@@ -116,7 +117,7 @@ export function appSegment(pathname: string): string {
  * crossfade-in; navigating WITHIN an app (e.g. /chat → /chat/settings) keeps the
  * same key so state isn't lost and no fade replays.
  */
-function ShellRouteContent({ navEntries }: { navEntries: NavEntry[] }): JSX.Element {
+function ShellRouteContent({ navEntries, api }: { navEntries: NavEntry[]; api: ApiClient }): JSX.Element {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   // Record the current route into the "最近開いた" history (P3-1). Mounted here so it
   // sees every feature navigation while persisting across route changes.
@@ -124,6 +125,7 @@ function ShellRouteContent({ navEntries }: { navEntries: NavEntry[] }): JSX.Elem
   const inRoster = activeSectionId(pathname) != null;
   return (
     <>
+      <GoogleLinkReturn api={api} />
       {inRoster && <MemberRosterSubnav />}
       <Suspense fallback={inRoster ? <RosterContentSkeleton /> : <RouteLoadingBar active />}>
         <div key={appSegment(pathname)} className="fe2-app-fade" data-testid="fe2-app-fade">
@@ -178,7 +180,7 @@ export function createShellRouter(
         {...(opts?.onLogout ? { onLogout: opts.onLogout } : {})}
       >
         <RequireAuth loadingFallback={<RouteLoadingBar active />}>
-          <ShellRouteContent navEntries={registry.nav} />
+          <ShellRouteContent navEntries={registry.nav} api={api} />
         </RequireAuth>
       </AppShellLayout>
     ),

@@ -129,8 +129,23 @@ export const MEETING: AreaSpec = {
       unverifiable: "同期は招待の差分を合わせる操作で、結果は応答の件数でしか分からない（一覧には同期の状態が出ない）",
     },
   ],
-  excluded: [],
-  pending: [],
+  excluded: [
+    // 定例の出席: 呼んだ本人だけに作用するルート。ボットは定例のメンバーでも Meet の参加者でもない。
+    { service: SHARE, route: "POST /meetings/:id/join", reason: "呼んだ本人の出席を記録して Meet を開く操作で、ボットが参加する用途が無い" },
+    { service: SHARE, route: "GET /meetings/me/regulars", reason: "ボット自身の定例一覧で、Dub のデータではない" },
+    { service: SHARE, route: "POST /meetings/me/google-link/start", reason: "本人の Google アカウントを結ぶ OAuth で、ブラウザでの同意が要る" },
+    { service: SHARE, route: "POST /meetings/me/google-link/callback", reason: "本人の Google アカウントを結ぶ OAuth で、ブラウザでの同意が要る" },
+  ],
+  // 人事 → 出席 (定例の出席レポート・Meet 取り込み・手修正) は新設したばかり。人事アプリ
+  // (/members/hr/*) と同じく、Commander から操作させるかはフェーズ2で決める。
+  pending: [
+    { service: SHARE, route: "GET /meetings/attendance" },
+    { service: SHARE, route: "PUT /meetings/:id/attendance/:date/:userId" },
+    { service: SHARE, route: "POST /meetings/attendance/ingest" },
+    { service: SHARE, route: "PUT /meetings/attendance/links/:googleUserId" },
+    { service: SHARE, route: "DELETE /meetings/attendance/links/:googleUserId" },
+    { service: SHARE, route: "PUT /meetings/attendance/settings" },
+  ],
   ownerOpenedIrreversible: {
     "meetings.create": "作成は削除で取り消せるが、参加者への招待メールは取り消せない。オーナーが「ミーティングを1件ずつ追加する」ために名指しで開放",
     "meetings.delete": "削除すると同じ Meet の URL は戻らず、参加者に取消メールが届く。オーナーが「ミーティングの削除」を名指しで開放",
