@@ -121,6 +121,8 @@ export interface DriveGoogleAccount {
   calendarMissing?: boolean;
   /** The grant lacks Meet settings access (Meet を誰でも参加可にする): reconnect to grant it. */
   meetMissing?: boolean;
+  /** The grant lacks Meet records access (人事 > 出席 の Meet 参加記録): reconnect to grant it. */
+  attendanceMissing?: boolean;
 }
 
 export interface DriveGoogleAccountsStatus {

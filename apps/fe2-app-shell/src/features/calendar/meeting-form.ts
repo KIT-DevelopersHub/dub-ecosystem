@@ -18,6 +18,8 @@ export interface MeetingFormValues {
   /** "YYYY-MM-DD" JST or "" (no end). Ignored unless recurring. */
   until: string;
   description: string;
+  /** 定例として出席を取る (Dub から参加した人を記録し、人事で確認できる)。 */
+  trackAttendance: boolean;
 }
 
 export type MeetingFormErrors = Partial<Record<keyof MeetingFormValues, string>>;
@@ -40,6 +42,7 @@ export function emptyMeetingForm(now: Date = new Date()): MeetingFormValues {
     recurrence: "weekly",
     until: "",
     description: "",
+    trackAttendance: false,
   };
 }
 
@@ -55,6 +58,7 @@ export function meetingToForm(m: meeting.Meeting): MeetingFormValues {
     recurrence: m.recurrence,
     until: m.until ?? "",
     description: m.description ?? "",
+    trackAttendance: m.trackAttendance,
   };
 }
 
@@ -88,6 +92,7 @@ export function toMeetingRequest(v: MeetingFormValues): meeting.CreateMeetingReq
     durationMinutes: v.durationMinutes,
     recurrence: v.recurrence,
     until: v.recurrence !== "none" && v.until ? v.until : null,
+    trackAttendance: v.trackAttendance,
   };
 }
 

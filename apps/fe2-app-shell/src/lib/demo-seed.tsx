@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
+import { identity as identityValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
@@ -2955,6 +2955,11 @@ function demoJstAt(days: number, hh: number, mm: number): string {
   return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() + days, hh - 9, mm)).toISOString();
 }
 
+/** Now minus `min` minutes, on a whole minute (UTC ISO). */
+function demoNowMinus(min: number): string {
+  return new Date(Math.floor((Date.now() - min * 60_000) / 60_000) * 60_000).toISOString();
+}
+
 function demoMeetUrl(): string {
   const r = (n: number) => Array.from({ length: n }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("");
   return `https://meet.google.com/${r(3)}-${r(4)}-${r(3)}`;
@@ -2977,6 +2982,7 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/abc-defg-hij",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_all",
       attendeeCount: 9,
+      trackAttendance: true,
     },
     {
       ...base,
@@ -2992,6 +2998,23 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/kln-opqr-stu",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_lead",
       attendeeCount: 2,
+      trackAttendance: true,
+    },
+    {
+      ...base,
+      id: "mtg_member_now",
+      title: "メンバー定例",
+      description: "デモ用: いま開催中（開始10分後）の定例。ダッシュボードの「定例に参加」から参加すると出席になります。",
+      targetId: "role_member",
+      targetName: "member",
+      startsAt: demoNowMinus(10),
+      durationMinutes: 60,
+      recurrence: "weekly",
+      until: null,
+      meetUrl: "https://meet.google.com/mem-bers-now",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_member",
+      attendeeCount: 3,
+      trackAttendance: true,
     },
     {
       ...base,
@@ -3007,6 +3030,7 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/vwx-yzab-cde",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_kickoff",
       attendeeCount: 3,
+      trackAttendance: false,
     },
   ];
 }
@@ -3037,9 +3061,12 @@ function createMeetingsDemoStore() {
   };
   const target = (id: string) => DEMO_MEETING_TARGETS.find((t) => t.id === id);
   const BASE = "/api/v1/meetings";
+  const attendance = createAttendanceDemo(read);
 
-  function handle(method: string, pathname: string, body: unknown): Response | null {
+  function handle(method: string, pathname: string, body: unknown, url?: URL): Response | null {
     if (!pathname.startsWith(BASE)) return null;
+    const att = attendance.handle(method, pathname, body, url);
+    if (att) return att;
     if (method === "GET" && pathname === BASE) {
       const res: meeting.ListMeetingsResponse = { items: read(), account: account() };
       return json(res);
@@ -3078,6 +3105,7 @@ function createMeetingsDemoStore() {
         meetUrl: demoMeetUrl(),
         htmlLink: "https://calendar.google.com/calendar/",
         attendeeCount: t.memberCount,
+        trackAttendance: b.trackAttendance ?? false,
         createdBy: ME_ID as meeting.Meeting["createdBy"],
         createdAt: now,
         updatedAt: now,
@@ -3116,6 +3144,299 @@ function createMeetingsDemoStore() {
         write(cur.map((m) => (m.id === id ? next : m)));
         return json(next);
       }
+    }
+    return null;
+  }
+  return { handle };
+}
+
+// ── 定例の出席 (drive-share-service /meetings/:id/join · /me/regulars · /attendance …) ───────
+// Mirrors the service: Meet participant records (seeded for past occurrences: full / short stays,
+// one unmatched Google account per occurrence, an anonymous guest), Google account links, manual and
+// Dub-join records, the threshold and the same precedence (manual > Meet > Dub join). Nothing
+// reaches Google. State lasts for the tab (sessionStorage).
+//   ?demo_account=hanako@developershub.jp — a member (not linked: the dashboard offers Googleと連携)
+//   ?meetApi=missing — the shared account lacks the Meet records scope (再連携が必要)
+const DEMO_ATTENDANCE_KEY = "dub-demo:meeting-attendance-v2";
+const DEMO_REGULAR_PEOPLE: { userId: string; name: string; email: string; roleIds: string[] }[] = [
+  { userId: ME_ID, name: "デモ 管理者", email: "demo@developershub.jp", roleIds: ["role_lead"] },
+  { userId: "usr_lead", name: "統括 山本", email: "lead@developershub.jp", roleIds: ["role_lead"] },
+  { userId: "usr_bob", name: "佐藤 太郎", email: "taro@developershub.jp", roleIds: ["role_maintainer"] },
+  { userId: "usr_emi", name: "山田 恵美", email: "emi@developershub.jp", roleIds: ["role_maintainer"] },
+  { userId: "usr_member", name: "一般メンバー 花子", email: "hanako@developershub.jp", roleIds: ["role_member"] },
+  { userId: "usr_carol", name: "鈴木 一郎", email: "ichiro@developershub.jp", roleIds: ["role_member"] },
+  { userId: "usr_frank", name: "高橋 文人", email: "fumito@developershub.jp", roleIds: ["role_member"] },
+];
+/** Members whose Google account is linked from the start (佐藤 太郎 and 花子 are not). */
+const DEMO_LINKED = ["usr_demo", "usr_lead", "usr_emi", "usr_carol", "usr_frank"];
+
+interface DemoAttendanceState {
+  records: (Omit<meeting.AttendanceRecord, "meet"> & { meetingId: string; date: string; source: "manual" | "join" })[];
+  participants: (Omit<meeting.MeetParticipant, "userId" | "suggestions"> & { meetingId: string; date: string })[];
+  ingests: Record<string, meeting.MeetIngestState>;
+  links: Record<string, string>;
+  minPercent: number;
+  lastRunAt: string | null;
+}
+
+function createAttendanceDemo(meetings: () => meeting.Meeting[]) {
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  const jstToday = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const expected = (targetId: string) =>
+    DEMO_REGULAR_PEOPLE.filter((p) => targetId === meetingValues.ALL_MEMBERS_TARGET_ID || p.roleIds.includes(targetId));
+  const started = (m: meeting.Meeting, from: string, to: string) =>
+    meetingValues.occurrenceStarts(m, from, to).filter((o) => Date.parse(o.startsAt) <= Date.now());
+  const ended = (m: meeting.Meeting, o: meeting.OccurrenceStart) => Date.parse(o.startsAt) + m.durationMinutes * 60_000 <= Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  function seed(): DemoAttendanceState {
+    const st: DemoAttendanceState = { records: [], participants: [], ingests: {}, links: {}, minPercent: meetingValues.DEFAULT_MIN_ATTEND_PERCENT, lastRunAt: null };
+    for (const id of DEMO_LINKED) st.links[`g_${id}`] = id;
+    const today = jstToday();
+    for (const m of meetings()) {
+      if (!m.trackAttendance || m.id === "mtg_member_now") continue;
+      for (const [i, o] of started(m, addDays(today, -182), today).entries()) {
+        if (!ended(m, o)) continue;
+        const s = Date.parse(o.startsAt);
+        const len = m.durationMinutes * 60;
+        expected(m.targetId).forEach((p, j) => {
+          const k = (i * 3 + j * 5) % 9;
+          if (k === 0) return; // 欠席 (not in the Meet)
+          if (k === 1) {
+            st.records.push({ meetingId: m.id, date: o.date, userId: p.userId, status: "excused", source: "manual", joinedAt: null, recordedBy: ME_ID, updatedAt: o.startsAt });
+            return;
+          }
+          const short = k === 2; // in the Meet only 8 minutes -> below the threshold
+          const join = s + (j % 4) * 60_000;
+          const secs = short ? 8 * 60 : len - (j % 4) * 60 - (k % 3) * 60;
+          const gid = p.userId === "usr_bob" || p.userId === "usr_member" ? `g_${p.userId}_personal` : `g_${p.userId}`;
+          st.participants.push({
+            meetingId: m.id,
+            date: o.date,
+            key: `u:${gid}`,
+            kind: "signed_in",
+            displayName: p.userId === "usr_bob" ? "佐藤太郎" : p.userId === "usr_member" ? "Hanako (personal)" : p.name,
+            googleUserId: gid,
+            firstJoin: iso(join),
+            lastLeave: iso(join + secs * 1000),
+            durationSeconds: secs,
+            approx: false,
+          });
+        });
+        st.participants.push({
+          meetingId: m.id,
+          date: o.date,
+          key: `conferenceRecords/demo/participants/guest-${i}`,
+          kind: "anonymous",
+          displayName: "見学（ゲスト）",
+          googleUserId: null,
+          firstJoin: iso(s + 5 * 60_000),
+          lastLeave: iso(s + 25 * 60_000),
+          durationSeconds: 20 * 60,
+          approx: false,
+        });
+        const at = iso(s + (m.durationMinutes + 15) * 60_000);
+        st.ingests[`${m.id}|${o.date}`] = { status: "done", ingestedAt: at, error: null };
+        if (!st.lastRunAt || at > st.lastRunAt) st.lastRunAt = at;
+      }
+    }
+    return st;
+  }
+  let memory: DemoAttendanceState | null = null;
+  const state = (): DemoAttendanceState => {
+    const raw = storage()?.getItem(DEMO_ATTENDANCE_KEY);
+    if (raw) return JSON.parse(raw) as DemoAttendanceState;
+    return (memory ??= seed());
+  };
+  const save = (next: DemoAttendanceState) => {
+    memory = next;
+    storage()?.setItem(DEMO_ATTENDANCE_KEY, JSON.stringify(next));
+  };
+  const meetReady = () => typeof window === "undefined" || new URLSearchParams(window.location.search).get("meetApi") !== "missing";
+  const openOcc = (m: meeting.Meeting) => {
+    const today = jstToday();
+    return (
+      meetingValues.occurrenceStarts(m, addDays(today, -1), addDays(today, 1)).find((o) => {
+        const s = Date.parse(o.startsAt);
+        return Date.now() >= s - meetingValues.JOIN_WINDOW_BEFORE_MINUTES * 60_000 && Date.now() <= s + m.durationMinutes * 60_000;
+      }) ?? null
+    );
+  };
+  const norm = (v: string) => v.normalize("NFKC").toLowerCase().replace(/[\s・._\-()（）]/g, "");
+
+  function report(from: string, to: string): meeting.AttendanceReportResponse {
+    const st = state();
+    const tally = new Map<string, { expected: number; present: number; excused: number }>();
+    const list: meeting.AttendanceMeeting[] = meetings()
+      .filter((m) => m.trackAttendance)
+      .map((m) => {
+        const people = expected(m.targetId);
+        const threshold = Math.ceil((m.durationMinutes * 60 * st.minPercent) / 100);
+        const occurrences = started(m, from, to)
+          .reverse()
+          .map((o): meeting.AttendanceOccurrence => {
+            const parts = st.participants
+              .filter((p) => p.meetingId === m.id && p.date === o.date)
+              .map(({ meetingId: _m, date: _d, ...p }) => ({ ...p, userId: p.googleUserId ? st.links[p.googleUserId] ?? null : null }));
+            const matched = new Set(parts.map((p) => p.userId).filter((x): x is string => !!x));
+            const recs = st.records.filter((r) => r.meetingId === m.id && r.date === o.date);
+            const ids = new Set([...recs.map((r) => r.userId), ...matched]);
+            const records: meeting.AttendanceRecord[] = [];
+            for (const userId of ids) {
+              const mine = parts.filter((p) => p.userId === userId);
+              const meet: meeting.MeetPresence | null = mine.length
+                ? {
+                    firstJoin: mine.map((p) => p.firstJoin).sort()[0]!,
+                    lastLeave: mine.some((p) => !p.lastLeave) ? null : mine.map((p) => p.lastLeave!).sort().at(-1)!,
+                    durationSeconds: mine.reduce((a, p) => a + p.durationSeconds, 0),
+                    approx: false,
+                  }
+                : null;
+              const manual = recs.find((r) => r.userId === userId && r.source === "manual");
+              const join = recs.find((r) => r.userId === userId && r.source === "join");
+              const joinedAt = join?.joinedAt ?? null;
+              if (manual) records.push({ userId, status: manual.status, source: "manual", joinedAt, meet, recordedBy: manual.recordedBy, updatedAt: manual.updatedAt });
+              else if (meet) records.push({ userId, status: meet.durationSeconds >= threshold ? "present" : "absent", source: "meet_api", joinedAt, meet, recordedBy: null, updatedAt: null });
+              else if (join) records.push({ userId, status: "present", source: "join", joinedAt, meet: null, recordedBy: null, updatedAt: join.updatedAt });
+            }
+            const candidates = people.filter((p) => !matched.has(p.userId));
+            return {
+              ...o,
+              records,
+              participants: parts.map((p) => ({
+                ...p,
+                suggestions:
+                  !p.userId && p.kind === "signed_in"
+                    ? candidates.filter((c) => norm(c.name) === norm(p.displayName) || norm(p.displayName).includes(norm(c.name.split(/\s+/).at(-1) ?? "~"))).map((c) => ({ userId: c.userId, name: c.name }))
+                    : [],
+              })),
+              ingest: st.ingests[`${m.id}|${o.date}`] ?? null,
+            };
+          });
+        for (const p of people) {
+          const t = tally.get(p.userId) ?? { expected: 0, present: 0, excused: 0 };
+          t.expected += occurrences.length;
+          for (const o of occurrences) {
+            const r = o.records.find((x) => x.userId === p.userId);
+            if (r?.status === "present") t.present++;
+            else if (r?.status === "excused") t.excused++;
+          }
+          tally.set(p.userId, t);
+        }
+        return { id: m.id, title: m.title, targetId: m.targetId, targetName: m.targetName, kind: meetingValues.regularKindOf(m.targetId), durationMinutes: m.durationMinutes, recurrence: m.recurrence, expectedUserIds: people.map((p) => p.userId), occurrences };
+      });
+    const members: meeting.AttendanceMember[] = DEMO_REGULAR_PEOPLE.filter((p) => tally.has(p.userId))
+      .map((p) => {
+        const t = tally.get(p.userId)!;
+        const denom = t.expected - t.excused;
+        return { userId: p.userId, name: p.name, email: p.email, ...t, rate: denom > 0 ? t.present / denom : null };
+      })
+      .sort((a, b) => (a.rate ?? 2) - (b.rate ?? 2) || a.name.localeCompare(b.name, "ja"));
+    return { from, to, settings: { minPercent: st.minPercent }, meetApi: { ready: meetReady(), lastRunAt: st.lastRunAt }, meetings: list, members };
+  }
+
+  function handle(method: string, pathname: string, body: unknown, url?: URL): Response | null {
+    const me = currentAccount().id;
+    const P = "/api/v1/meetings";
+    if (method === "GET" && pathname === `${P}/me/regulars`) {
+      const st = state();
+      const person = DEMO_REGULAR_PEOPLE.find((p) => p.userId === me);
+      const today = jstToday();
+      const items: meeting.MyRegularMeeting[] = person
+        ? meetings()
+            .filter((m) => m.trackAttendance && (m.targetId === meetingValues.ALL_MEMBERS_TARGET_ID || person.roleIds.includes(m.targetId)))
+            .map((m) => {
+              const open = openOcc(m);
+              const next = open ?? meetingValues.occurrenceStarts(m, today, addDays(today, 62)).find((o) => Date.parse(o.startsAt) > Date.now()) ?? null;
+              const attended = !!open && st.records.some((r) => r.meetingId === m.id && r.date === open.date && r.userId === me && r.source === "join");
+              return { id: m.id, title: m.title, targetName: m.targetName, kind: meetingValues.regularKindOf(m.targetId), meetUrl: m.meetUrl, next, durationMinutes: m.durationMinutes, joinOpen: !!open, attended };
+            })
+            .sort((a, b) => Number(b.joinOpen) - Number(a.joinOpen) || (a.next?.startsAt ?? "~").localeCompare(b.next?.startsAt ?? "~"))
+        : [];
+      return json({ items, googleLinked: Object.values(st.links).includes(me) } satisfies meeting.ListMyRegularMeetingsResponse);
+    }
+    const joinM = /^\/api\/v1\/meetings\/([^/]+)\/join$/.exec(pathname);
+    if (method === "POST" && joinM) {
+      const m = meetings().find((x) => x.id === decodeURIComponent(joinM[1]!));
+      if (!m) return problem("NOT_FOUND", "meeting not found", 404);
+      if (!expected(m.targetId).some((p) => p.userId === me)) return problem("FORBIDDEN", "この定例の対象メンバーではありません。", 403);
+      const occ = m.trackAttendance ? openOcc(m) : null;
+      if (occ) {
+        const st = state();
+        if (!st.records.some((r) => r.meetingId === m.id && r.date === occ.date && r.userId === me && r.source === "join")) {
+          const now = new Date().toISOString();
+          st.records.push({ meetingId: m.id, date: occ.date, userId: me, status: "present", source: "join", joinedAt: now, recordedBy: me, updatedAt: now });
+          save(st);
+        }
+      }
+      return json({ meetUrl: m.meetUrl, recordedFor: occ?.date ?? null } satisfies meeting.JoinMeetingResponse);
+    }
+    if (method === "GET" && pathname === `${P}/attendance`) {
+      const to = url?.searchParams.get("to") || jstToday();
+      const from = url?.searchParams.get("from") || addDays(to, -83);
+      return json(report(from, to));
+    }
+    if (method === "POST" && pathname === `${P}/attendance/ingest`) {
+      if (!meetReady()) return json({ occurrences: 0, participants: 0, complete: true, skipped: "scope_missing" } satisfies meeting.IngestAttendanceResponse);
+      const st = state();
+      st.lastRunAt = new Date().toISOString();
+      save(st);
+      return json({ occurrences: 0, participants: 0, complete: true, skipped: null } satisfies meeting.IngestAttendanceResponse);
+    }
+    if (method === "PUT" && pathname === `${P}/attendance/settings`) {
+      const v = Number(((body ?? {}) as Partial<meeting.AttendanceSettings>).minPercent);
+      if (!Number.isInteger(v) || v < 1 || v > 100) return problem("VALIDATION_FAILED", "出席とみなす割合は 1〜100% の整数で指定してください。", 400);
+      const st = state();
+      st.minPercent = v;
+      save(st);
+      return json({ minPercent: v } satisfies meeting.AttendanceSettings);
+    }
+    const linkM = /^\/api\/v1\/meetings\/attendance\/links\/([^/]+)$/.exec(pathname);
+    if (linkM && (method === "PUT" || method === "DELETE")) {
+      const st = state();
+      const gid = decodeURIComponent(linkM[1]!);
+      if (method === "PUT") {
+        const userId = ((body ?? {}) as Partial<meeting.ConfirmParticipantRequest>).userId;
+        if (!userId || !DEMO_REGULAR_PEOPLE.some((p) => p.userId === userId)) return problem("VALIDATION_FAILED", "そのメンバーが見つかりません。", 400);
+        st.links[gid] = userId;
+      } else delete st.links[gid];
+      save(st);
+      return json({ ok: true });
+    }
+    const setM = /^\/api\/v1\/meetings\/([^/]+)\/attendance\/([^/]+)\/([^/]+)$/.exec(pathname);
+    if (method === "PUT" && setM) {
+      const [meetingId, date, userId] = [setM[1]!, setM[2]!, setM[3]!].map(decodeURIComponent) as [string, string, string];
+      const status = ((body ?? {}) as meeting.SetAttendanceRequest).status ?? null;
+      const st = state();
+      st.records = st.records.filter((r) => !(r.meetingId === meetingId && r.date === date && r.userId === userId && r.source === "manual"));
+      if (status === null) {
+        save(st);
+        return json({ record: null } satisfies meeting.SetAttendanceResponse);
+      }
+      const now = new Date().toISOString();
+      st.records.push({ meetingId, date, userId, status, source: "manual", joinedAt: null, recordedBy: me, updatedAt: now });
+      save(st);
+      return json({ record: { userId, status, source: "manual", joinedAt: null, meet: null, recordedBy: me, updatedAt: now } } satisfies meeting.SetAttendanceResponse);
+    }
+    if (method === "POST" && pathname === `${P}/me/google-link/start`) {
+      // No Google in the demo: come straight back to the return page with a fake code.
+      const origin = typeof window === "undefined" ? "https://demo.local" : window.location.origin;
+      return json({ authUrl: `${origin}/driveshare?code=demo&state=${meetingValues.GOOGLE_LINK_STATE_PREFIX}demo${Date.now()}` } satisfies meeting.StartGoogleLinkResponse);
+    }
+    if (method === "POST" && pathname === `${P}/me/google-link/callback`) {
+      const st = state();
+      // The member's personal Google account (seeded as an unmatched participant) becomes theirs.
+      const personal = `g_${me}_personal`;
+      st.links[st.participants.some((p) => p.googleUserId === personal) ? personal : `g_${me}`] = me;
+      save(st);
+      return json({ googleLinked: true });
     }
     return null;
   }
@@ -5317,7 +5638,7 @@ export function createDemoFetch(): typeof fetch {
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
-      meetingsStore.handle(method, url.pathname, parsedBody) ??
+      meetingsStore.handle(method, url.pathname, parsedBody, url) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??

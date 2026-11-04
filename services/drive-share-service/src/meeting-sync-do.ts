@@ -8,7 +8,7 @@
 // be left as-is (usage-meter got stuck forever exactly that way).
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { newRequestId } from "@dub/http";
-import { buildMeetingsService } from "./meetings-wiring";
+import { buildMeetingsService, runScheduledMeetIngest } from "./meetings-wiring";
 import type { Env } from "./env";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -20,6 +20,11 @@ const ALARM_GOOGLE_BUDGET = 35;
 const ALARM_TIME_LIMIT_MS = 5 * 60 * 1000;
 
 /** Next alarm time given the pending one: schedule when none / overdue, pull earlier for `soonMs`. */
+/** Storage key: the next alarm runs the Meet attendance ingest instead of the invitation sync. Each
+ *  phase gets its own invocation, so each has the whole subrequest allowance. */
+const PHASE_KEY = "phase";
+const INGEST_AFTER_SYNC_MS = 60 * 1000;
+
 export function nextAlarmAt(pending: number | null, now: number, soonMs?: number): number | null {
   const target = now + (soonMs ?? HOUR_MS);
   if (pending === null || pending <= now) return target;
@@ -57,13 +62,40 @@ export class MeetingSyncDO {
   async alarm(): Promise<void> {
     // Reschedule FIRST so the loop survives a throwing run.
     await this.state.storage.setAlarm(Date.now() + HOUR_MS);
+    if ((await this.state.storage.get<string>(PHASE_KEY)) === "ingest") {
+      await this.ingest();
+      return;
+    }
+    // The ingest follows each sync a minute later.
+    await this.state.storage.put(PHASE_KEY, "ingest");
+    await this.state.storage.setAlarm(Date.now() + INGEST_AFTER_SYNC_MS);
     try {
       const svc = await buildMeetingsService(this.env, { requestId: newRequestId() }, { system: true, googleBudget: ALARM_GOOGLE_BUDGET, syncTimeLimitMs: ALARM_TIME_LIMIT_MS });
       const r = await svc.sync({ system: true });
-      if (!r.complete) await this.state.storage.setAlarm(Date.now() + CONTINUE_MS);
+      if (!r.complete) {
+        // Finish the sync first; the ingest waits for its turn.
+        await this.state.storage.put(PHASE_KEY, "sync");
+        await this.state.storage.setAlarm(Date.now() + CONTINUE_MS);
+      }
       console.log(JSON.stringify({ service: "drive-share-service", event: "meeting_sync_alarm", meetings: r.meetings, added: r.invitedAdded, removed: r.invitedRemoved, complete: r.complete }));
     } catch (err) {
       console.warn(JSON.stringify({ service: "drive-share-service", event: "meeting_sync_alarm_failed", message: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
+  /** 人事 > 出席: read Meet participant records of ended 定例 occurrences (catch-up within retention). */
+  private async ingest(): Promise<void> {
+    try {
+      const r = await runScheduledMeetIngest(this.env, { budget: ALARM_GOOGLE_BUDGET, deadline: Date.now() + ALARM_TIME_LIMIT_MS });
+      if (r && !r.complete) {
+        await this.state.storage.setAlarm(Date.now() + CONTINUE_MS); // still phase "ingest"
+        return;
+      }
+      await this.state.storage.put(PHASE_KEY, "sync");
+      console.log(JSON.stringify({ service: "drive-share-service", event: "meet_ingest_alarm", skipped: r === null, occurrences: r?.occurrences ?? 0, participants: r?.participants ?? 0 }));
+    } catch (err) {
+      await this.state.storage.put(PHASE_KEY, "sync");
+      console.warn(JSON.stringify({ service: "drive-share-service", event: "meet_ingest_alarm_failed", message: err instanceof Error ? err.message : String(err) }));
     }
   }
 }

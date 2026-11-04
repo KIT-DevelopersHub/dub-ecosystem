@@ -24,6 +24,7 @@ function mk(over: Partial<meeting.Meeting>): meeting.Meeting {
     meetUrl: null,
     htmlLink: null,
     attendeeCount: 0,
+    trackAttendance: false,
     createdBy: "usr_x" as meeting.Meeting["createdBy"],
     createdAt: "2026-09-01T00:00:00Z",
     updatedAt: "2026-09-01T00:00:00Z",
