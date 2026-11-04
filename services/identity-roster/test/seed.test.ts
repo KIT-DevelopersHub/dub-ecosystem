@@ -114,6 +114,18 @@ describe("seedReferenceData / system roles", () => {
     }
   });
 
+  it("スポンサー (app:sponsor:* / sponsor:*) starts ON for admin only — unreleased app, other roles opt in via ロール管理", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    const keys = ["app:sponsor:view", "app:sponsor:edit", "sponsor:read", "sponsor:write", "sponsor:admin"] as const;
+    const admin = (await repo.getRoleByName(ORG_ID, "admin"))!.permissions;
+    for (const k of keys) expect(admin).toContain(k);
+    for (const name of ["maintainer", "organizer", "member"]) {
+      const perms = (await repo.getRoleByName(ORG_ID, name))!.permissions;
+      for (const k of keys) expect(perms, `${name} ${k}`).not.toContain(k);
+    }
+  });
+
   it("is idempotent: re-seeding does not duplicate roles or widen admin", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);

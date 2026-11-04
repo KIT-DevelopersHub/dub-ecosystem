@@ -321,6 +321,7 @@ Self-service keys carry a `:self` scope segment. Every entry declares `dangerous
 | infra | `infra:read`, `infra:deploy` ⚠, `infra:dns` ⚠, `infra:admin` ⚠ |
 | audit | `audit:read` |
 | hr | `hr:read`, `hr:write`, `hr:admin` ⚠ |
+| sponsor | `sponsor:read`, `sponsor:write`, `sponsor:admin` ⚠ |
 | github | `github:read`, `github:write`, `github:sync`, `github:admin` ⚠ |
 | drive | `drive:read`, `drive:write` |
 | webhook | `webhook:read` |

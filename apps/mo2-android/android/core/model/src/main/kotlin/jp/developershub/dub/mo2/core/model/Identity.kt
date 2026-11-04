@@ -20,5 +20,6 @@ object PermissionCatalog {
         "infra:read", "infra:deploy", "infra:dns", "infra:admin",
         "audit:read",
         "hr:read", "hr:write", "hr:admin",
+        "sponsor:read", "sponsor:write", "sponsor:admin",
     )
 }

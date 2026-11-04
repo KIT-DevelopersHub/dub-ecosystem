@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (79 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (84 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -111,9 +111,14 @@ export const PERMISSION_CATALOG = [
   { key: "hr:admin", name: "Hire (add to roster) / delete applicants", description: "Mark an applicant as hired (adds them to the roster) and delete applicant records", domain: "hr", dangerous: true },
   { key: "app:hr:view", name: "Open 人事 app", description: "Open and view the 人事 app", domain: "app", dangerous: false },
   { key: "app:hr:edit", name: "Edit in 人事 app", description: "Act inside the 人事 app (implies view)", domain: "app", dangerous: false },
+  { key: "sponsor:read", name: "Read sponsor business cards", description: "View business cards (photos and contact details) shared by the sponsor team", domain: "sponsor", dangerous: false },
+  { key: "sponsor:write", name: "Share sponsor business cards", description: "Scan / register business cards and edit their contact details and notes", domain: "sponsor", dangerous: false },
+  { key: "sponsor:admin", name: "Delete sponsor business cards", description: "Delete shared business cards (photo and contact details)", domain: "sponsor", dangerous: true },
+  { key: "app:sponsor:view", name: "Open スポンサー app", description: "Open and view the スポンサー app", domain: "app", dangerous: false },
+  { key: "app:sponsor:edit", name: "Edit in スポンサー app", description: "Act inside the スポンサー app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 79 keys (open `${string}:${string}` template retired).
+// Closed union of the 84 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

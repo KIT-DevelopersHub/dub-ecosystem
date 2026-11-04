@@ -29,5 +29,6 @@ export * as policy from "./policy"; // RBAC policy layer (PDP): 無効/閲覧/�
 export * as lp from "./lp"; // lp-analytics (LP管理: 公開版切り替え)
 export * as meeting from "./meeting"; // drive-share-service /meetings (カレンダー > ミーティング)
 export * as hr from "./hr"; // member-service /members/hr/* (人事: 応募→選考→参加→オンボーディング)
+export * as sponsor from "./sponsor"; // member-service /members/sponsor/* (スポンサー: 名刺の共有)
 
 export const CONTRACT_VERSION = "1.0.0";

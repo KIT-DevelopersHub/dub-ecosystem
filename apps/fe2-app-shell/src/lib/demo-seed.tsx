@@ -74,6 +74,10 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "hr:read",
   "hr:write",
   "hr:admin",
+  // スポンサー: 名刺の閲覧・登録/編集・削除 (admin は identity/0027 で全部持つ)。
+  "sponsor:read",
+  "sponsor:write",
+  "sponsor:admin",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
