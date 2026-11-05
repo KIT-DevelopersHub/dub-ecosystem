@@ -95,8 +95,7 @@ export function TeamMailingListsDialog({ open, onClose }: { open: boolean; onClo
   return (
     <Modal title="メーリングリスト" open={open} onClose={onClose} size="lg" testId="fe7-team-lists-dialog">
       <p style={hintStyle} data-testid="fe7-team-lists-hint">
-        アドレス宛のメールは、チームのメンバー全員の Dub メール受信箱に届きます。メンバーの追加や削除はチームの名簿に自動で反映されます。
-        Dub アカウント未連携の人と、メール閲覧権限のない人は読めません。
+        アドレス宛のメールは、チームのメンバー全員の Dub メール受信箱に届きます。メンバーの追加や削除はチームの名簿に自動で反映されます。Dub アカウント未連携の人と、メール閲覧権限のない人は読めません。
       </p>
 
       {lists.isLoading ? (
