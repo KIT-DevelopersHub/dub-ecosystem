@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "driveshare-drift",
+  "worker": "dub-demo-driveshare-drift",
+  "url": "https://dub-demo-driveshare-drift.developershub-site.workers.dev",
+  "deployedSha": "234494c1",
+  "branch": "feat/driveshare-share-drift",
+  "actor": "ko-tarou",
+  "markers": ["fe2-driveshare-drift","ロールとの差分"],
+  "live": true,
+  "verifiedAt": "2026-11-04T05:27:05Z",
+  "updatedAt": "2026-11-04T05:27:05Z",
+  "note": "Drive共有 ロールとの差分"
+}

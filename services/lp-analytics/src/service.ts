@@ -120,14 +120,17 @@ export class LpService {
     return { ...this.toLink({ ...link, active, updatedAt: now }), stats };
   }
 
-  async getStats(q: RangeQuery & { includeBots?: string }): Promise<LpStats> {
+  /** `source` narrows totals / byDevice / byDay. bySource stays unfiltered: it is both the
+   *  breakdown and the list the 流入元 picker offers, so it must not collapse to one row. */
+  async getStats(q: RangeQuery & { includeBots?: string; source?: string }): Promise<LpStats> {
     const range = parseRange(q.from, q.to);
     const includeBots = q.includeBots === "true";
-    const base = { orgId: this.deps.orgId, ...range, includeBots };
+    const all = { orgId: this.deps.orgId, ...range, includeBots };
+    const base = q.source ? { ...all, source: q.source } : all;
     const [total, bots, bySource, byDevice, byDay, links] = await Promise.all([
       this.deps.repo.total(base),
-      includeBots ? Promise.resolve(0) : this.deps.repo.countBots({ orgId: this.deps.orgId, ...range }),
-      this.deps.repo.aggregate(base, "source"),
+      includeBots ? Promise.resolve(0) : this.deps.repo.countBots(base),
+      this.deps.repo.aggregate(all, "source"),
       this.deps.repo.aggregate(base, "device"),
       this.deps.repo.aggregate(base, "day"),
       this.deps.repo.listLinks(this.deps.orgId),
@@ -151,8 +154,11 @@ export class LpService {
   }
 
   /** Cloudflare Web Analytics for the LP site, per JST day + referrer (hosts merged by label).
-   *  The referrer split is sampled separately, so its sum can differ a little from the totals. */
-  async getSiteTraffic(q: RangeQuery): Promise<LpSiteTraffic> {
+   *  The referrer split is sampled separately, so its sum can differ a little from the totals.
+   *  `referrer` (a byReferrer label) narrows totals / byDay to that referrer's rows; byReferrer
+   *  stays unfiltered so the picker keeps every option. No extra Cloudflare request: the
+   *  per-day referrer split is already in the same response. */
+  async getSiteTraffic(q: RangeQuery & { referrer?: string }): Promise<LpSiteTraffic> {
     const range = parseRange(q.from, q.to);
     const days = eachDay(range.from, range.to);
     const empty = { range, totals: { pageViews: 0, visits: 0 }, byReferrer: [] };
@@ -163,7 +169,8 @@ export class LpService {
     const lpHost = new URL(this.deps.lpBaseUrl).host;
     const perDay = new Map(zeroDays.map((d) => [d.date, { ...d }]));
     const totals = { pageViews: 0, visits: 0 };
-    for (const r of data.days) {
+    const counted = q.referrer ? data.referrers.filter((r) => referrerLabel(r.host, lpHost) === q.referrer) : data.days;
+    for (const r of counted) {
       const day = perDay.get(r.date);
       if (!day) continue;
       day.pageViews += r.pageViews;

@@ -3629,6 +3629,20 @@ function createDriveShareStore() {
     permIds: string[]; // internal: the fanned-out Drive permission ids on the file
   }
   const roleGrants: DemoRoleGrant[] = [];
+  // 「ロールとの差分」 sample: maintainer is 編集 on Hackit 2026 共有, but in Drive someone
+  // lowered araki to 閲覧, ikeda was never shared, and staff-a (no role) still has 編集.
+  {
+    const root = byId.get("fld_root")!;
+    root.permissions.push(
+      { id: "perm_role_taro", type: "user", role: "writer", emailAddress: "taro@developershub.jp", displayName: "taro", domain: null },
+      { id: "perm_role_araki", type: "user", role: "reader", emailAddress: "araki@developershub.jp", displayName: "araki", domain: null },
+    );
+    roleGrants.push({
+      id: "rg_seed_root", fileId: "fld_root", roleId: "role_maintainer", roleName: "maintainer", driveRole: "writer",
+      memberCount: 3, appliedCount: 2, grantedBy: "demo@developershub.jp", grantedAt: "2026-08-10T10:00:00Z",
+      permIds: ["perm_role_taro", "perm_role_araki"],
+    });
+  }
   type FanResult = { skipped: { email: string; reason: string }[]; invited: { email: string }[] };
   const grantView = (g: DemoRoleGrant, extra: Partial<FanResult> = {}) => ({
     id: g.id, fileId: g.fileId, roleId: g.roleId, roleName: g.roleName, driveRole: g.driveRole,
@@ -3671,7 +3685,54 @@ function createDriveShareStore() {
   });
   const permsView = (f: DemoDriveFile) => ({ fileId: f.id, permissions: f.permissions.map((p) => ({ ...p, inherited: p.inherited ?? false })) });
 
+  // Mirrors drive-share-service share-drift.ts: role grants (expanded to members) vs Drive.
+  const RANK: Record<DemoDrivePermission["role"], number> = { reader: 1, commenter: 2, writer: 3, owner: 4 };
+  const driftView = (f: DemoDriveFile) => {
+    const grants = roleGrants.filter((g) => g.fileId === f.id);
+    const expected = new Map<string, { driveRole: DemoRoleGrant["driveRole"]; roleNames: string[] }>();
+    for (const g of grants) {
+      for (const email of roleMembers[g.roleId] ?? []) {
+        const cur = expected.get(email);
+        if (!cur) expected.set(email, { driveRole: g.driveRole, roleNames: [g.roleName] });
+        else {
+          cur.roleNames.push(g.roleName);
+          if (RANK[g.driveRole] > RANK[cur.driveRole]) cur.driveRole = g.driveRole;
+        }
+      }
+    }
+    const base = { fileId: f.id, grantCount: grants.length, expectedCount: expected.size };
+    if (grants.length === 0) return { ...base, matchedCount: 0, items: [] };
+    const items: Record<string, unknown>[] = [];
+    const seen = new Set<string>();
+    let matchedCount = 0;
+    for (const p of f.permissions) {
+      if (p.role === "owner") continue;
+      const email = p.type === "user" && p.emailAddress ? p.emailAddress.toLowerCase() : null;
+      const exp = email ? expected.get(email) : undefined;
+      if (email && exp) seen.add(email);
+      if (p.inherited && (!exp || RANK[p.role] >= RANK[exp.driveRole])) {
+        if (exp) matchedCount++;
+        continue;
+      }
+      const grantee = { permissionId: p.id, granteeType: p.type, email: p.emailAddress, displayName: p.displayName, domain: p.domain, actualRole: p.role };
+      if (!exp) items.push({ kind: "unexpected", ...grantee, expectedRole: null, roleNames: [] });
+      else if (RANK[p.role] > RANK[exp.driveRole]) items.push({ kind: "excess_role", ...grantee, expectedRole: exp.driveRole, roleNames: exp.roleNames });
+      else if (RANK[p.role] < RANK[exp.driveRole]) items.push({ kind: "insufficient_role", ...grantee, expectedRole: exp.driveRole, roleNames: exp.roleNames });
+      else matchedCount++;
+    }
+    for (const [email, exp] of expected) {
+      if (seen.has(email)) continue;
+      items.push({ kind: "missing", permissionId: null, granteeType: "user", email, displayName: null, domain: null, actualRole: null, expectedRole: exp.driveRole, roleNames: exp.roleNames });
+    }
+    return { ...base, matchedCount, items };
+  };
+
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    const driftMatch = method === "GET" ? /^\/api\/v1\/driveshare\/files\/([^/]+)\/drift$/.exec(pathname) : null;
+    if (driftMatch) {
+      const f = byId.get(driftMatch[1]!);
+      return f ? json(driftView(f)) : notFound(`${method} ${pathname}`);
+    }
     // ── role-based grants (matched before the generic file routes) ─────────────
     if (method === "GET" && pathname === "/api/v1/driveshare/role-grants") {
       return json({ items: roleGrants.map((g) => grantView(g)) });
@@ -4586,7 +4647,8 @@ function createMembersStore() {
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
 // Answers the wire contract frozen in features/lp/lpApi.tsx:
-//   GET   /api/v1/lp/stats      ?from&to&includeBots
+//   GET   /api/v1/lp/stats      ?from&to&includeBots&source
+//   GET   /api/v1/lp/site-traffic ?from&to&referrer
 //   GET   /api/v1/lp/visits     ?from&to&source&cursor&limit
 //   GET   /api/v1/lp/links      ?from&to
 //   POST  /api/v1/lp/links      ?from&to   { name, slug }   409 on duplicate slug
@@ -4871,23 +4933,34 @@ function createLpStore() {
         const [pageViews, visits] = DEMO_LP_SITE_DAYS[k] ?? [0, 0];
         byDay.push({ date: k, pageViews, visits });
       }
+      // 流入元の実測は 9/28〜10/10 の合計しか持たないので、山の 10/01 を含む期間だけ出す。
+      const byReferrer = from <= "2026-10-01" && "2026-10-01" <= to ? DEMO_LP_SITE_REFERRERS : [];
+      // 流入元で絞った時: 日別の内訳を持たないので、その流入元の合計を全体の日別の形に按分する
+      // （見た目/挙動の確認用。実 backend は日ごとの流入元データから集計する）。
+      const referrer = url.searchParams.get("referrer");
+      if (referrer) {
+        const hit = byReferrer.find((r) => r.label === referrer);
+        const allPv = byDay.reduce((n, d) => n + d.pageViews, 0);
+        const allVisits = byDay.reduce((n, d) => n + d.visits, 0);
+        for (const d of byDay) {
+          d.pageViews = hit && allPv > 0 ? Math.round((d.pageViews / allPv) * hit.pageViews) : 0;
+          d.visits = hit && allVisits > 0 ? Math.round((d.visits / allVisits) * hit.visits) : 0;
+        }
+      }
       const pageViews = byDay.reduce((n, d) => n + d.pageViews, 0);
       const visits = byDay.reduce((n, d) => n + d.visits, 0);
-      return json({
-        configured: true,
-        range: { from, to },
-        totals: { pageViews, visits },
-        byDay,
-        // 流入元の実測は 9/28〜10/10 の合計しか持たないので、山の 10/01 を含む期間だけ出す。
-        byReferrer: from <= "2026-10-01" && "2026-10-01" <= to ? DEMO_LP_SITE_REFERRERS : [],
-      });
+      return json({ configured: true, range: { from, to }, totals: { pageViews, visits }, byDay, byReferrer });
     }
 
     if (pathname === "/api/v1/lp/stats") {
       const includeBots = url.searchParams.get("includeBots") === "true";
-      const windowed = visits.filter((v) => inRange(v, from, to));
+      const source = url.searchParams.get("source");
+      const inPeriod = visits.filter((v) => inRange(v, from, to));
+      // 流入元の絞り込みは bySource 以外に効かせる（bySource は絞り込みの候補一覧でもある）。
+      const windowed = source ? inPeriod.filter((v) => v.source === source) : inPeriod;
       const bots = windowed.filter((v) => v.device === "bot");
       const rows = includeBots ? windowed : windowed.filter((v) => v.device !== "bot");
+      const sourceRows = includeBots ? inPeriod : inPeriod.filter((v) => v.device !== "bot");
 
       // 日別は「0 件の日」も行として出す（抜け落ちると折れ線/表が嘘をつく）。
       const byDayMap = new Map<string, number>();
@@ -4910,7 +4983,7 @@ function createLpStore() {
           uniques: new Set(rows.map((v) => v.visitorId)).size,
           botExcluded: includeBots ? 0 : bots.length,
         },
-        bySource: bucket(rows, (v) => v.source, sourceLabelOf),
+        bySource: bucket(sourceRows, (v) => v.source, sourceLabelOf),
         byDay,
         byDevice: bucket(rows, (v) => v.device, deviceLabelOf),
       });

@@ -117,6 +117,8 @@ export interface AggregateQuery {
   from: string;
   to: string;
   includeBots: boolean;
+  /** Narrow to one source (utm_source slug / "direct"). Omitted = every source. */
+  source?: string;
 }
 
 export interface AggregateRow {

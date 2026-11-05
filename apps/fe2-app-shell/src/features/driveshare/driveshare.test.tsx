@@ -14,11 +14,14 @@ import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../au
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import {
   createDriveShareApi,
+  driftDetail,
+  driftGranteeLabel,
   driveRoleLabel,
   isValidEmail,
   roleGrantChipLabel,
   roleLabel,
   type DriveShareApi,
+  type FileShareDrift,
   type ListFilesResult,
   type ListPermissionsResult,
   type ListRoleGrantsResult,
@@ -79,6 +82,19 @@ const DEV_GRANT: RoleFileGrant = {
   memberCount: 5, appliedCount: 5, grantedBy: "hackit@gmail.com", grantedAt: "2026-08-12T00:00:00Z",
 };
 const ROLE_GRANTS: ListRoleGrantsResult = { items: [DEV_GRANT] };
+const NO_DRIFT: FileShareDrift = { fileId: "fil_budget", grantCount: 1, expectedCount: 5, matchedCount: 5, items: [] };
+const DRIFT: FileShareDrift = {
+  fileId: "fil_budget",
+  grantCount: 1,
+  expectedCount: 5,
+  matchedCount: 3,
+  items: [
+    { kind: "unexpected", permissionId: "p_reader", granteeType: "user", email: "sponsor@example.com", displayName: "協賛担当", domain: null, actualRole: "reader", expectedRole: null, roleNames: [] },
+    { kind: "unexpected", permissionId: "p_anyone", granteeType: "anyone", email: null, displayName: null, domain: null, actualRole: "reader", expectedRole: null, roleNames: [] },
+    { kind: "insufficient_role", permissionId: "p_dev4", granteeType: "user", email: "dev4@example.com", displayName: null, domain: null, actualRole: "reader", expectedRole: "writer", roleNames: ["開発"] },
+    { kind: "missing", permissionId: null, granteeType: "user", email: "dev5@example.com", displayName: null, domain: null, actualRole: null, expectedRole: "writer", roleNames: ["開発"] },
+  ],
+};
 
 function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
   return {
@@ -94,6 +110,7 @@ function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
     grantRole: (fileId, req) => Promise.resolve({ id: "rg_new", fileId, roleId: req.roleId, roleName: "会場", driveRole: req.driveRole, memberCount: 3, appliedCount: 3, grantedBy: "hackit@gmail.com", grantedAt: "2026-08-13T00:00:00Z" }),
     revokeRoleGrant: () => Promise.resolve(),
     reapplyRoleGrant: (fileId, roleId) => Promise.resolve({ ...DEV_GRANT, fileId, roleId }),
+    getShareDrift: () => Promise.resolve(NO_DRIFT),
     getGoogleAccounts: () => Promise.resolve({ accounts: [], canConnect: false }),
     startGoogleConnect: () => Promise.resolve({ authUrl: "https://accounts.google.com/" }),
     completeGoogleConnect: () => Promise.resolve({ accounts: [], canConnect: false }),
@@ -168,6 +185,12 @@ describe("createDriveShareApi", () => {
     await d.revokeRoleGrant("fil_budget", "role_dev");
     expect(calls[2]).toMatchObject({ method: "DELETE", path: "/api/v1/driveshare/files/fil_budget/role-grants/role_dev" });
   });
+
+  it("getShareDrift GETs the file's drift", async () => {
+    const { api, calls } = fakeApi(NO_DRIFT);
+    await createDriveShareApi(api).getShareDrift("fil_budget");
+    expect(calls[0]).toMatchObject({ method: "GET", path: "/api/v1/driveshare/files/fil_budget/drift" });
+  });
 });
 
 describe("helpers", () => {
@@ -189,6 +212,13 @@ describe("helpers", () => {
   it("roleGrantChipLabel formats as `<roleName>: <driveRole>`", () => {
     expect(roleGrantChipLabel({ roleName: "開発", driveRole: "writer" })).toBe("開発: 編集");
     expect(roleGrantChipLabel({ roleName: "会場", driveRole: "reader" })).toBe("会場: 閲覧");
+  });
+  it("drift labels name the grantee and say what the roles call for", () => {
+    expect(driftGranteeLabel(DRIFT.items[1]!)).toBe("リンクを知っている全員");
+    expect(driftGranteeLabel({ granteeType: "domain", email: null, displayName: null, domain: "example.com" })).toBe("example.com ドメインの全員");
+    expect(driftDetail(DRIFT.items[0]!)).toBe("閲覧者（どのロールにも含まれていません）");
+    expect(driftDetail(DRIFT.items[2]!)).toBe("閲覧者（ロール「開発」では編集者）");
+    expect(driftDetail(DRIFT.items[3]!)).toBe("ロール「開発」で編集者のはずが、共有されていません");
   });
 });
 
@@ -303,6 +333,47 @@ describe("DriveShareScreen", () => {
     await screen.findByTestId("fe2-driveshare-link-switch");
     await user.click(screen.getByTestId("fe2-driveshare-link-switch"));
     await waitFor(() => expect(setLinkSharing).toHaveBeenCalledWith("fil_budget", { enabled: true, role: "reader" }));
+  });
+});
+
+describe("ロールとの差分", () => {
+  async function openBudget(api: DriveShareApi): Promise<HTMLElement> {
+    const user = userEvent.setup();
+    render(wrap(<DriveShareScreen />, api));
+    await waitFor(() => expect(screen.getAllByTestId("fe2-driveshare-file").length).toBe(2));
+    await user.click(screen.getByRole("button", { name: /予算管理/ }));
+    return screen.findByTestId("fe2-driveshare-drift");
+  }
+
+  it("lists shares outside the roles, wrong roles and members without access, grouped by kind", async () => {
+    const card = await openBudget(stubApi({ getShareDrift: () => Promise.resolve(DRIFT) }));
+    expect(await within(card).findByTestId("fe2-driveshare-drift-badge")).toHaveTextContent("差分 4件");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("ロール外の共有（2）");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("sponsor@example.com");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("リンクを知っている全員");
+    expect(within(card).getByTestId("fe2-driveshare-drift-insufficient_role")).toHaveTextContent("dev4@example.com");
+    expect(within(card).getByTestId("fe2-driveshare-drift-missing")).toHaveTextContent("dev5@example.com");
+    expect(within(card).queryByTestId("fe2-driveshare-drift-excess_role")).toBeNull();
+  });
+
+  it("says so when sharing matches the roles", async () => {
+    const clean = await openBudget(stubApi());
+    expect(await within(clean).findByTestId("fe2-driveshare-drift-clean")).toHaveTextContent("5人が一致");
+  });
+
+  it("explains that a file without role grants has no baseline", async () => {
+    const getShareDrift = () => Promise.resolve({ ...NO_DRIFT, grantCount: 0, expectedCount: 0, matchedCount: 0 });
+    const card = await openBudget(stubApi({ getShareDrift }));
+    expect(await within(card).findByTestId("fe2-driveshare-drift-nobaseline")).toBeInTheDocument();
+    expect(within(card).queryByTestId("fe2-driveshare-drift-badge")).toBeNull();
+  });
+
+  it("再チェック fetches the drift again", async () => {
+    const getShareDrift = vi.fn(() => Promise.resolve(NO_DRIFT));
+    const card = await openBudget(stubApi({ getShareDrift }));
+    await within(card).findByTestId("fe2-driveshare-drift-clean");
+    await userEvent.click(within(card).getByTestId("fe2-driveshare-drift-refresh"));
+    await waitFor(() => expect(getShareDrift).toHaveBeenCalledTimes(2));
   });
 });
 

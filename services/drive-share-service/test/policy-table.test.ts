@@ -110,6 +110,7 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 
 const READS = [
   "GET /driveshare/files",
+  "GET /driveshare/files/:id/drift",
   "GET /driveshare/files/:id/permissions",
   "GET /driveshare/files/:id/role-grants",
   "GET /driveshare/role-grants",
