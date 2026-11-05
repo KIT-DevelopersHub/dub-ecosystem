@@ -327,7 +327,13 @@ export class InMemoryLpRepo implements LpRepo {
   }
 
   private inRange(v: VisitRow, q: Omit<AggregateQuery, "includeBots"> & { includeBots?: boolean }): boolean {
-    return v.orgId === q.orgId && v.dayJst >= q.from && v.dayJst <= q.to && (q.includeBots === true || v.device !== "bot");
+    return (
+      v.orgId === q.orgId &&
+      v.dayJst >= q.from &&
+      v.dayJst <= q.to &&
+      (q.includeBots === true || v.device !== "bot") &&
+      (!q.source || v.source === q.source)
+    );
   }
 
   private agg(rows: VisitRow[], key: string): AggregateRow {

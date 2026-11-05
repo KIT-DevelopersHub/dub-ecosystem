@@ -633,9 +633,11 @@ const GROUP_COLUMN: Record<AggregateBy, string> = { source: "source", device: "d
 const AGG_SELECT = "COUNT(*) AS visits, COUNT(DISTINCT visitor_key) AS uniques, MAX(occurred_at) AS last_at";
 
 function rangeWhere(q: AggregateQuery): { sql: string; binds: unknown[] } {
+  const bot = q.includeBots ? "" : " AND device != 'bot'";
+  if (!q.source) return { sql: `org_id = ? AND day_jst >= ? AND day_jst <= ?${bot}`, binds: [q.orgId, q.from, q.to] };
   return {
-    sql: `org_id = ? AND day_jst >= ? AND day_jst <= ?${q.includeBots ? "" : " AND device != 'bot'"}`,
-    binds: [q.orgId, q.from, q.to],
+    sql: `org_id = ? AND day_jst >= ? AND day_jst <= ?${bot} AND source = ?`,
+    binds: [q.orgId, q.from, q.to, q.source],
   };
 }
 
@@ -972,11 +974,10 @@ export function createD1LpRepo(db: DbClient): LpRepo {
       return { key: "", visits: r?.visits ?? 0, uniques: r?.uniques ?? 0, lastVisitAt: r?.last_at ?? null };
     },
     async countBots(q) {
+      const w = rangeWhere({ ...q, includeBots: true });
       const r = await db.first<{ c: number }>(
-        "SELECT COUNT(*) AS c FROM lp_visits WHERE org_id = ? AND day_jst >= ? AND day_jst <= ? AND device = 'bot'",
-        q.orgId,
-        q.from,
-        q.to,
+        `SELECT COUNT(*) AS c FROM lp_visits WHERE ${w.sql} AND device = 'bot'`,
+        ...w.binds,
       );
       return r?.c ?? 0;
     },
