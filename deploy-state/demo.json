@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "8859b628",
-  "branch": "HEAD",
+  "deployedSha": "aba4b657",
+  "branch": "commander/task-ctask_01M6K67DC307AVHF1CW1AEVVCC",
   "actor": "ko-tarou",
-  "markers": ["fe2-mail-avatar-img", "fe2-mail-inline-to"],
+  "markers": ["「オンボーディング案内」タブ"],
   "live": true,
-  "verifiedAt": "2026-11-04T04:59:48Z",
-  "updatedAt": "2026-11-04T04:59:48Z",
-  "note": "mail: 送信者アイコン + 宛先/Cc/Bcc の小アイコン (PR #745)"
+  "verifiedAt": "2026-11-04T12:02:25Z",
+  "updatedAt": "2026-11-04T12:02:25Z",
+  "note": "ctask_01M6K67DC307AVHF1CW1AEVVCC: 参加届の回答/オンボーディング案内を人事タブへ"
 }

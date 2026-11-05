@@ -1,15 +1,14 @@
 // 運営メンバー・名簿 — 統合アプリの共有サブナビ（横タブ帯）。
 //
 // 運営メンバー(member-service: チーム/組織/学科学年) と ユーザー名簿(identity-roster:
-// ログイン/メールアドレス/表示名) と 参加届(member-service: 届出→名簿反映) を 1 アプリに
-// 統合する。ランチャーのタイルは 1 つ（運営メンバー・名簿）にまとめ、その中をこの共有
+// ログイン/メールアドレス/表示名) を 1 アプリに統合する。ランチャーのタイルは 1 つ（運営メンバー・名簿）にまとめ、その中をこの共有
 // サブナビで横断する。各セクションは従来のルート/Provider をそのまま維持（additive・非破壊）:
 //   運営メンバー   → /members（チーム別）
 //   組織図         → /members/org-chart（チームとリーダーの上下関係）
 //   運営名簿       → /members/roster（運営メンバー全員の情報をフラットな一覧で並べる）
 //   メール名簿     → /admin/users（Email Routing アドレス／メールアカウントの一覧・発行・同期）
-//   オンボーディング → /participation（新メンバー向け案内ページ /onboarding の項目管理）
-//   参加届の回答   → /participation/list（回答管理）
+// 参加届の回答(/participation/list) と オンボーディング案内(/participation) は人事アプリのタブ
+// (features/hr/HrTabs) に移したのでこのサブナビには載せない。
 // データ源は member-service / identity-roster のままで、突合キーは member.identityUserId
 // （＝メール一致で紐付く既存の仕組み）。表示の一貫性はこの共有サブナビ + 各セクション見出しで担保する。
 //
@@ -34,12 +33,12 @@ interface SectionTab {
 }
 
 // 順序 = 表示順。active 判定は「pathname が path で始まる最長一致」なので、より深い
-// パス（例: /admin/users/:id, /participation/list）は親タブにハイライトが乗る。
+// パス（例: /admin/users/:id）は親タブにハイライトが乗る。
 // 各タブの requiredPermissions は、対応ルートが registry.flatten で AND される実効権限と
-// 一致させる = per-app view キー（app:members:view / app:admin:view / app:participation:view,
+// 一致させる = per-app view キー（app:members:view / app:admin:view,
 // withAppAccessGate 由来）が AUTHORITATIVE な 有効化ゲート。運営メンバー/運営名簿タブは
 // app:members:view のみでガードする（組織図タブも同じ）（ドメイン identity:read は要求しない）ので、統括ロールが
-// app:members:view だけで名簿を開ける。メール名簿(/admin/users)・参加届の回答は対応ルートが
+// app:members:view だけで名簿を開ける。メール名簿(/admin/users)は対応ルートが
 // なお identity:read を AND するためタブ側もそれに合わせる。これでタブの表示可否がルート
 // ガードと厳密に一致し、「見えるのに開くと 403」というデッドタブを作らない（fail-closed）。
 const SECTIONS: SectionTab[] = [
@@ -47,8 +46,6 @@ const SECTIONS: SectionTab[] = [
   { id: "org-chart", label: "組織図", path: "/members/org-chart", requiredPermissions: ["app:members:view"] },
   { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["app:members:view"] },
   { id: "roster", label: "メール名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
-  { id: "onboarding", label: "オンボーディング", path: "/participation", requiredPermissions: ["app:participation:view"] },
-  { id: "participation-list", label: "参加届の回答", path: "/participation/list", requiredPermissions: ["identity:read", "app:participation:view"] },
 ];
 
 /** pathname に最も長く前方一致するセクションの id（統合アプリ外なら null）。 */
