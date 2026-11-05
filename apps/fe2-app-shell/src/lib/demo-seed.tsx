@@ -3662,8 +3662,7 @@ function createDriveShareStore() {
   // real service: a malformed email is skipped with a reason; a no-Google-account address
   // is applied but flagged `invited` (pending); the rest apply normally — a partial
   // success, never an all-or-nothing failure.
-  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant): FanResult => {
-    const emails = roleMembers[g.roleId] ?? [];
+  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant, emails: readonly string[] = roleMembers[g.roleId] ?? []): FanResult => {
     const skipped: { email: string; reason: string }[] = [];
     const invited: { email: string }[] = [];
     let applied = 0;
@@ -3683,7 +3682,7 @@ function createDriveShareStore() {
       applied++;
       if (NO_GOOGLE_ACCOUNT.has(email)) invited.push({ email }); // shared via invite → pending
     }
-    g.appliedCount = applied;
+    g.appliedCount += applied;
     return { skipped, invited };
   };
   const clearFan = (f: DemoDriveFile, g: DemoRoleGrant): void => {
@@ -3756,9 +3755,19 @@ function createDriveShareStore() {
       const f = byId.get(reapplyMatch[1]!);
       const g = roleGrants.find((x) => x.fileId === reapplyMatch[1]! && x.roleId === decodeURIComponent(reapplyMatch[2]!));
       if (!f || !g) return notFound(`${method} ${pathname}`);
-      clearFan(f, g);
-      const result = fanOut(f, g);
-      return json(grantView(g, result));
+      // Mirrors the service's per-request budget: two members per call, continued by cursor.
+      const members = roleMembers[g.roleId] ?? [];
+      const from = Number(url.searchParams.get("cursor") ?? 0);
+      if (from === 0) {
+        clearFan(f, g);
+        g.appliedCount = 0;
+      }
+      const result = fanOut(f, g, members.slice(from, from + 2));
+      const next = from + 2;
+      return json({
+        ...grantView(g, result),
+        ...(next < members.length ? { nextCursor: String(next), remaining: members.length - next } : {}),
+      });
     }
     const roleGrantItemMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)$/.exec(pathname);
     if (roleGrantItemMatch && method === "DELETE") {
