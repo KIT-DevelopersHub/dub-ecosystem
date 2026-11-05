@@ -36,6 +36,7 @@ export function MeetingFormDialog({
   editing,
   targets,
   accountEmail,
+  initial = null,
   onClose,
   onSubmit,
 }: {
@@ -44,17 +45,19 @@ export function MeetingFormDialog({
   editing: meeting.Meeting | null;
   targets: readonly meeting.MeetingTarget[];
   accountEmail: string | null;
+  /** Prefill for a create (a repeating 予定 handed over from the 作成 dialog). */
+  initial?: MeetingFormValues | null;
   onClose: () => void;
   onSubmit: (body: meeting.CreateMeetingRequest) => void;
 }): JSX.Element | null {
-  const [form, setForm] = useState<MeetingFormValues>(() => (editing ? meetingToForm(editing) : emptyMeetingForm()));
+  const [form, setForm] = useState<MeetingFormValues>(() => (editing ? meetingToForm(editing) : initial ?? emptyMeetingForm()));
   const [errors, setErrors] = useState<MeetingFormErrors>({});
 
   useEffect(() => {
     if (!open) return;
-    setForm(editing ? meetingToForm(editing) : emptyMeetingForm());
+    setForm(editing ? meetingToForm(editing) : initial ?? emptyMeetingForm());
     setErrors({});
-  }, [open, editing]);
+  }, [open, editing, initial]);
 
   if (!open) return null;
 
