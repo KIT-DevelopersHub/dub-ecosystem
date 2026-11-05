@@ -114,6 +114,10 @@ export function mapPermission(p: GooglePermissionResource): SharePermission {
 
 // Well-known Drive 403 `reason` strings → user-facing Japanese. Anything not listed
 // falls back to a generic (reason-tagged) message so the cause is never fully hidden.
+/** 403 cannotInviteNonGoogleUser: Drive will not even send an invite to a non-Google address. */
+export const NON_GOOGLE_USER_JA =
+  "Google アカウントの無いアドレスとは共有できません（Drive が招待を許可していません）。Gmail など Google アカウントのアドレスで共有してください。";
+
 const FORBIDDEN_REASON_JA: Record<string, string> = {
   cannotDeletePermission:
     "この権限は親フォルダから継承されているため、このファイル単体では剥奪できません。親フォルダの共有設定で操作してください。",
@@ -123,6 +127,7 @@ const FORBIDDEN_REASON_JA: Record<string, string> = {
     "この操作を行う権限がありません（このファイルのオーナーではありません）。",
   cannotRemoveOwnerPermission: "オーナー権限は剥奪できません。",
   cannotModifyOwnerPermission: "オーナー権限は変更できません。",
+  cannotInviteNonGoogleUser: NON_GOOGLE_USER_JA,
 };
 
 // Well-known Drive 400 `reason` strings → user-facing Japanese. `invalidSharingRequest`
