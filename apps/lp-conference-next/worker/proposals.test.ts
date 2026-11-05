@@ -274,3 +274,8 @@ test("renderProposalThanksPage: 共有ダイアログを出す", () => {
   assert.ok(html.includes("data-share-open"));
   assert.ok(html.includes(encodeURIComponent("登壇応募しました")));
 });
+
+test("renderProposalsPage: プレビュー中は再送しても閉じないよう POST 先に指定を残す", () => {
+  assert.ok(renderProposalsPage({ config: { ...CFG, preview: true } }).includes('action="/proposals/submit?proposals=on"'));
+  assert.ok(renderProposalsPage({ config: CFG }).includes('action="/proposals/submit"'));
+});

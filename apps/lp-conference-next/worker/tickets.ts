@@ -1819,13 +1819,14 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     if (parsed.spam) return redirect("/tickets/thanks");
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: parsed.errors, coupon, demo: deps.demo }), 400);
   }
+  // demo は何も保存しないので、プレビュー表示でも完了画面まで通して確認できる。
+  if (deps.demo) {
+    const summary = itemsSummary(parsed.input.items, config.types);
+    return redirect(`/tickets/thanks?order=demo&summary=${encodeURIComponent(summary)}${config.preview ? "&tickets=on" : ""}`);
+  }
   if (config.preview) {
     const errors: FormErrors = { _form: "プレビュー表示中のため、お申し込みはできません。" };
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors, coupon, demo: deps.demo }), 403);
-  }
-  if (deps.demo) {
-    const summary = itemsSummary(parsed.input.items, config.types);
-    return redirect(`/tickets/thanks?order=demo&summary=${encodeURIComponent(summary)}`);
   }
   if (!deps.internal) {
     return htmlResponse(renderTicketsPage({ config, values: parsed.values, errors: mapCheckoutError(503, null, config), coupon }), 503);

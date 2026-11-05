@@ -21,6 +21,7 @@ export function xShareHref(text: string, url: string): string {
 
 const STYLE =
   ".share{width:min(480px,calc(100vw - 32px));margin:auto;padding:32px;border:0;border-radius:24px;color:var(--ink);box-shadow:var(--sh-xl)}" +
+  ".share:focus{outline:0}" +
   ".share::backdrop{background:rgba(7,18,53,.6)}" +
   ".share h2{margin:0 40px 8px 0;font-family:var(--disp);font-size:22px;font-weight:900;color:var(--h)}" +
   ".share p{margin:0 0 16px;font-size:14px;color:var(--mute)}" +
@@ -32,7 +33,9 @@ const STYLE =
   ".share-btn svg{width:18px;height:18px;flex:none}" +
   ".share-btn--x{background:#000;border-color:#000;color:#fff}" +
   ".share-btn--ig{background:linear-gradient(45deg,#f09433,#dc2743 50%,#bc1888);border-color:transparent;color:#fff}" +
-  ".share .share-status{min-height:20px;margin:12px 0 0;font-weight:700;color:var(--blue)}" +
+  "[data-share-copy]:has(+[hidden]){grid-column:1/-1}" +
+  ".share .share-status{margin:12px 0 0;font-weight:700;color:var(--blue)}" +
+  ".share .share-status:empty{margin:0}" +
   "@media (max-width:420px){.share{padding:24px}.share-btns{grid-template-columns:1fr}}";
 
 const ICON_X =
@@ -72,12 +75,12 @@ export function renderShareDialog(o: ShareOptions): string {
   const copied = `${text}\n${shareUrl(o.origin, "share-copy")}`;
   return (
     `<style>${STYLE}</style>` +
-    `<dialog class="share" data-lp-share aria-labelledby="share-title" data-key="${o.key}" data-image="${SHARE_IMAGE}"` +
+    `<dialog class="share" data-lp-share autofocus tabindex="-1" aria-labelledby="share-title" data-key="${o.key}" data-image="${SHARE_IMAGE}"` +
     ` data-text="${escapeHtml(text)}" data-native-url="${escapeHtml(shareUrl(o.origin, "share-native"))}">` +
     '<button type="button" class="share-x" data-share-close aria-label="閉じる">×</button>' +
     `<h2 id="share-title">${escapeHtml(o.heading)}</h2>` +
     `<p>${SHARE_HASHTAG} をつけて、カンファレンスを一緒に盛り上げてください。</p>` +
-    `<textarea readonly rows="3" aria-label="投稿する文章">${escapeHtml(copied)}</textarea>` +
+    `<textarea readonly rows="5" aria-label="投稿する文章">${escapeHtml(copied)}</textarea>` +
     '<div class="share-btns">' +
     `<a class="share-btn share-btn--x" target="_blank" rel="noopener noreferrer" href="${escapeHtml(xShareHref(text, shareUrl(o.origin, "share-x")))}">${ICON_X}X でポスト</a>` +
     `<a class="share-btn share-btn--ig" target="_blank" rel="noopener noreferrer" href="https://www.instagram.com/" data-share-ig>${ICON_IG}Instagram</a>` +
