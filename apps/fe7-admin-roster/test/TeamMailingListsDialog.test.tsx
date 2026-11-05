@@ -36,8 +36,21 @@ describe("TeamMailingListsDialog", () => {
     await user.clear(screen.getByTestId("fe7-team-list-localpart"));
     await user.type(screen.getByTestId("fe7-team-list-localpart"), "design");
     await user.click(screen.getByTestId("fe7-team-list-submit"));
-    await waitFor(() => expect(screen.getByTestId("fe7-team-list-localpart")).toHaveValue("design"));
-    expect(screen.queryByText("pr@developershub.jp")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("このアドレスは既に使われています。別のアドレスを指定してください")).toBeInTheDocument());
+    expect(screen.getByTestId("fe7-team-list-localpart")).toHaveValue("design");
+  });
+
+  it("keeps the lists usable when the teams cannot be read, and offers a retry", async () => {
+    const client = createMockClient();
+    const realGet = client.get.bind(client);
+    client.get = vi.fn(async (path: string, ...rest: unknown[]) => {
+      if (path.endsWith("/members/overview")) throw new Error("boom");
+      return (realGet as (...a: unknown[]) => Promise<unknown>)(path, ...rest);
+    }) as typeof client.get;
+    renderWithProviders(<TeamMailingListsDialog open onClose={() => {}} />, { me: adminMe, client });
+    await waitFor(() => expect(screen.getByTestId("fe7-team-list-form-error")).toBeInTheDocument());
+    expect(screen.getByText("design@developershub.jp")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe7-team-list-submit")).not.toBeInTheDocument();
   });
 
   it("confirms before deleting, hides the row at once and restores it on failure", async () => {

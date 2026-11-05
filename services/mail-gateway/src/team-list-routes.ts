@@ -3,18 +3,21 @@
 //
 // The row is written BEFORE the Cloudflare rule and soft-deleted if the rule fails: a row with no
 // rule is inert, while a rule with no row would take mail for the address and deliver it to
-// nobody. Deleting runs the other way round for the same reason.
+// nobody. Deleting runs the other way round for the same reason. A rule left behind anyway
+// (a timed-out create that did land) is `dub-list:` with no live row, and creating the list
+// again clears it.
 import type { Hono } from "hono";
 import { DubError } from "@dub/errors";
 import { nowIso, ulid } from "@dub/db";
 import type { mail } from "@dub/types";
 import { buildDb } from "./deps";
 import type { AppBindings } from "./env";
-import { CfEmailRoutingClient, requireEmailRoutingConfig, teamListRuleInput, type CfRoutingRule } from "./email-routing";
+import { CfEmailRoutingClient, isTeamListRule, requireEmailRoutingConfig, teamListRuleInput, type CfRoutingRule } from "./email-routing";
 import { audited } from "./email-routing-routes";
+import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_FROM_ADDRESS } from "./config";
 import { parseTeamListRequest } from "./email-routing-validation";
 import { lookupRosterUserId } from "./owner";
-import { findActiveTeamList, toTeamListDto, type TeamListRow } from "./team-list";
+import { findActiveTeamList, TEAM_LIST_COLUMNS, toTeamListDto, type TeamListRow } from "./team-list";
 
 function conflict(address: string): DubError {
   return new DubError("MAIL_EMAIL_ROUTING_CONFLICT", `address already in use: ${address}`, { status: 409 });
@@ -28,7 +31,7 @@ export function registerTeamListAdmin(ext: Hono<AppBindings>): void {
   ext.get("/admin/lists", async (c) => {
     const db = buildDb(c.env, c.get("dubCtx").requestId);
     const rows = await db.all<TeamListRow>(
-      `SELECT id, address, team_id, cf_rule_id, created_at FROM mail_team_list WHERE deleted_at IS NULL ORDER BY address`,
+      `SELECT ${TEAM_LIST_COLUMNS} FROM mail_team_list WHERE deleted_at IS NULL ORDER BY address`,
     );
     return c.json({ items: rows.map(toTeamListDto) });
   });
@@ -41,15 +44,19 @@ export function registerTeamListAdmin(ext: Hono<AppBindings>): void {
     const client = new CfEmailRoutingClient(cfg);
 
     // A person's address, an issued address or another list must keep working as it does.
-    const rules = await client.listRules();
-    if (rules.some((r) => ruleMatches(r, address))) throw conflict(address);
+    // archive@ and info@ are named outright: a list there would hand them to a team.
+    const reserved = [c.env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS, c.env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS];
+    if (reserved.some((a) => a.trim().toLowerCase() === address)) throw conflict(address);
+    const rules = (await client.listRules()).filter((r) => ruleMatches(r, address));
+    if (rules.some((r) => !isTeamListRule(r))) throw conflict(address);
+    if (await findActiveTeamList(db, address)) throw conflict(address);
     if (await lookupRosterUserId(c.env.SVC_IDENTITY, ctx, address)) throw conflict(address);
 
     const now = nowIso();
-    const row: TeamListRow = { id: `maillist_${ulid()}`, address, team_id: teamId, cf_rule_id: null, created_at: now };
+    const row: TeamListRow = { id: `maillist_${ulid()}`, address, team_id: teamId, created_at: now };
     const inserted = await db.run(
-      `INSERT OR IGNORE INTO mail_team_list (id, address, team_id, cf_rule_id, created_by, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, NULL)`,
+      `INSERT OR IGNORE INTO mail_team_list (id, address, team_id, created_by, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL)`,
       row.id,
       address,
       teamId,
@@ -60,10 +67,10 @@ export function registerTeamListAdmin(ext: Hono<AppBindings>): void {
     if (inserted.meta.changes === 0) throw conflict(address);
 
     try {
-      const rule = await audited(c, "mail.team_list.create", "mail_team_list", address, () =>
-        client.createRule(teamListRuleInput(address, localPart, cfg.workerName)),
-      );
-      await db.run(`UPDATE mail_team_list SET cf_rule_id = ?, updated_at = ? WHERE id = ?`, rule.id, nowIso(), row.id);
+      await audited(c, "mail.team_list.create", "mail_team_list", address, async () => {
+        for (const orphan of rules) await client.deleteRule(orphan.id);
+        return client.createRule(teamListRuleInput(address, localPart, cfg.workerName));
+      });
     } catch (err) {
       const failedAt = nowIso();
       await db.run(`UPDATE mail_team_list SET deleted_at = ?, updated_at = ? WHERE id = ?`, failedAt, failedAt, row.id);
@@ -77,15 +84,15 @@ export function registerTeamListAdmin(ext: Hono<AppBindings>): void {
     const id = c.req.param("id");
     const db = buildDb(c.env, c.get("dubCtx").requestId);
     const row = await db.first<TeamListRow>(
-      `SELECT id, address, team_id, cf_rule_id, created_at FROM mail_team_list WHERE id = ? AND deleted_at IS NULL`,
+      `SELECT ${TEAM_LIST_COLUMNS} FROM mail_team_list WHERE id = ? AND deleted_at IS NULL`,
       id,
     );
     if (!row) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `mailing list not found: ${id}`, { status: 404 });
     const client = new CfEmailRoutingClient(requireEmailRoutingConfig(c.env));
     await audited(c, "mail.team_list.delete", "mail_team_list", row.address, async () => {
-      // A rule already removed by hand must not leave the row undeletable.
+      // By address, so a rule already removed by hand cannot leave the row undeletable.
       const rules = await client.listRules();
-      if (row.cf_rule_id && rules.some((r) => r.id === row.cf_rule_id)) await client.deleteRule(row.cf_rule_id);
+      for (const rule of rules.filter((r) => isTeamListRule(r) && ruleMatches(r, row.address))) await client.deleteRule(rule.id);
     });
     const now = nowIso();
     await db.run(`UPDATE mail_team_list SET deleted_at = ?, updated_at = ? WHERE id = ?`, now, now, id);

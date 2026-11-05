@@ -1,8 +1,8 @@
 // Team mailing lists (チームのメーリングリスト, migration 0024). A list address is an Email
 // Routing rule to this Worker plus a mail_team_list row naming the team; when mail reaches
 // it, each Dub account linked to the team's 運営メンバー gets a delivery row, so the mail sits
-// in their inbox with its own read state. Nothing is sent back out, so a list uses no
-// provider quota and cannot loop.
+// in their inbox with its own read state. The list itself sends nothing back out, so it
+// uses no provider quota.
 //
 // Reach is Dub inboxes only: personal auto-forward (user-forward.ts) stays envelope-scoped,
 // and a member with no linked account receives nothing.
@@ -20,30 +20,32 @@ export interface TeamListRow {
   id: string;
   address: string;
   team_id: string;
-  cf_rule_id: string | null;
   created_at: string;
 }
 
-const LIVE_COLUMNS = `id, address, team_id, cf_rule_id, created_at`;
+export const TEAM_LIST_COLUMNS = `id, address, team_id, created_at`;
+
+/** @dub/db wraps every failure in DB_QUERY_FAILED: the D1 text is on the cause chain. */
+function isMissingTable(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e && depth < 5; e = (e as { cause?: unknown }).cause, depth++) {
+    if (e instanceof Error && /no such table/i.test(e.message)) return true;
+  }
+  return false;
+}
 
 /**
- * The live list at this address, or null. Every inbound mail passes through here, so a
- * failure (including migration 0024 not being applied yet) must not cost it its ordinary
- * delivery: it is logged and read as "not a list". Migrations are applied out-of-band.
+ * The live list at this address, or null. Every inbound mail passes through here and
+ * migrations are applied out-of-band, so a missing table reads as "not a list". Any other
+ * failure propagates: swallowing it would drop a real list's mail without a trace.
  */
 export async function findActiveTeamList(db: DbClient, address: string): Promise<TeamListRow | null> {
   const normalized = address.trim().toLowerCase();
   if (!normalized) return null;
   try {
-    return (await db.first<TeamListRow>(`SELECT ${LIVE_COLUMNS} FROM mail_team_list WHERE address = ? AND deleted_at IS NULL`, normalized)) ?? null;
+    return (await db.first<TeamListRow>(`SELECT ${TEAM_LIST_COLUMNS} FROM mail_team_list WHERE address = ? AND deleted_at IS NULL`, normalized)) ?? null;
   } catch (err) {
-    consoleSink({
-      level: "error",
-      message: "mail-gateway: team list lookup failed",
-      service: SERVICE_NAME,
-      fields: { error: err instanceof Error ? err.message : String(err) },
-    });
-    return null;
+    if (isMissingTable(err)) return null;
+    throw err;
   }
 }
 
@@ -62,7 +64,7 @@ async function senderUserId(deps: InboundDeps, from: string): Promise<string | n
 export async function deliverToTeam(deps: InboundDeps, list: TeamListRow, message: mail.MailMessage): Promise<void> {
   if (!deps.member) throw new Error("mail-gateway: SVC_MEMBER is not bound; cannot expand a team list");
   const client = createServiceClient(deps.member, { service: "member-service", caller: SERVICE_NAME });
-  const { userIds } = await client.get<{ userIds: string[] }>(deps.ctx, `/members/internal/team-members?teamIds=${encodeURIComponent(list.team_id)}`);
+  const { userIds } = await client.get<{ userIds: string[] }>(deps.ctx, `/members/internal/team-members?teamIds=${encodeURIComponent(list.team_id)}&excludeDeclined=1`);
   const sender = await senderUserId(deps, message.from.email);
   const recipients = userIds.filter((id) => id !== sender);
   await insertListDeliveries(deps.db, message.id, list.address, recipients);

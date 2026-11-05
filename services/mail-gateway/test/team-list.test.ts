@@ -19,7 +19,7 @@ const ROSTER = { usr_alice: { email: A }, usr_bob: { email: B }, usr_carol: { em
 function memberFetcher(userIds: string[] | "error"): Fetcher {
   return {
     fetch: async (req: Request) => {
-      expect(req.url).toContain("/members/internal/team-members?teamIds=team_design");
+      expect(req.url).toContain("/members/internal/team-members?teamIds=team_design&excludeDeclined=1");
       if (userIds === "error") return new Response("{}", { status: 500 });
       return Response.json({ userIds });
     },
@@ -46,7 +46,7 @@ function copyFor(envelope: string, headers: Record<string, string> = {}): RawInb
 
 function addList(h: Harness) {
   h.raw
-    .prepare(`INSERT INTO mail_team_list (id, address, team_id, cf_rule_id, created_at, updated_at) VALUES ('l1', ?, 'team_design', 'r1', 't', 't')`)
+    .prepare(`INSERT INTO mail_team_list (id, address, team_id, created_at, updated_at) VALUES ('l1', ?, 'team_design', 't', 't')`)
     .run(LIST);
 }
 
@@ -118,6 +118,12 @@ describe("inbound: list address", () => {
     expect(deliveries(h)).toEqual([]);
   });
 
+  it("a list lookup failure other than a missing table is not swallowed", async () => {
+    const { deps } = setup();
+    const broken = { ...deps, db: { ...deps.db, first: async () => { throw new Error("D1_ERROR: overloaded"); } } };
+    await expect(handleInbound(broken as typeof deps, copyFor(LIST))).rejects.toThrow("overloaded");
+  });
+
   it("ordinary mail still lands when the table is missing (migration not applied)", async () => {
     const { h, deps } = setup();
     h.raw.exec(`DROP TABLE mail_team_list`);
@@ -141,6 +147,22 @@ describe("reading and replying to list mail", () => {
     await handleInbound(deps, copyFor(A));
     const detail = await getInboundDetail(h.db, message.id, "usr_alice", "usr_alice");
     expect(detail?.headerMeta?.deliveredTo).toBe(A);
+  });
+
+  it("never shows a list-only member another recipient's envelope (a Bcc stays hidden)", async () => {
+    const { h, deps } = setup();
+    const { message } = await handleInbound(deps, copyFor(A)); // Alice's copy stored first
+    await handleInbound(deps, copyFor(LIST));
+    const detail = await getInboundDetail(h.db, message.id, "usr_bob", "usr_bob");
+    expect(detail?.headerMeta?.deliveredTo).toBeUndefined();
+  });
+
+  it("an oversight reader with no copy of their own replies as themselves too", async () => {
+    const { h, deps } = setup();
+    await handleInbound(deps, copyFor(LIST, { to: LIST, cc: "" }));
+    const { env } = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, ROSTER) });
+    const from = await resolveReplyFromAddress(env, deps.ctx, h.db, "<list-1@partner.example>", "usr_carol");
+    expect(from).toBe(C);
   });
 
   it("replies as the member, not as the list", async () => {
@@ -212,6 +234,19 @@ describe("admin routes", () => {
     stub([]);
     const { env } = wired(fakeIdentityFetcher(true, { usr_d: { email: LIST } }));
     expect((await post(env, { localPart: "design", teamId: "t" })).status).toBe(409);
+  });
+
+  it("refuses the archive and shared addresses", async () => {
+    stub([]);
+    const { env } = wired();
+    expect((await post(env, { localPart: "archive", teamId: "t" })).status).toBe(409);
+    expect((await post(env, { localPart: "info", teamId: "t" })).status).toBe(409);
+  });
+
+  it("clears a leftover dub-list: rule with no live row and creates the list", async () => {
+    const calls = stub([{ id: "r_old", name: "dub-list:design", matchers: [{ type: "literal", field: "to", value: LIST }], actions: [] }]);
+    expect((await post(wired().env, { localPart: "design", teamId: "t" })).status).toBe(201);
+    expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/r_old"))).toBe(true);
   });
 
   it("leaves no live row behind when Cloudflare refuses the rule", async () => {

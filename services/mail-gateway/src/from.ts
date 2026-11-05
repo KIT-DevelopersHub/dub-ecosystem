@@ -12,7 +12,7 @@ import type { DbClient } from "@dub/db";
 import type { identity, mail } from "@dub/types";
 import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS, SERVICE_NAME } from "./config";
-import { findDeliveryEnvelope, findInboundByMessageId, findSendLogById, LIST_ENVELOPE_PREFIX } from "./repo";
+import { findDeliveryEnvelope, findInboundByMessageId, findSendLogById, LIST_ENVELOPE_PREFIX, wasDeliveredByList } from "./repo";
 
 /** Verified sending domain (Resend). Only addresses on this domain may be a From. */
 export const COMPANY_MAIL_DOMAIN = "developershub.jp";
@@ -89,7 +89,7 @@ export async function resolveReplyFromAddress(
       if (isCompanyAddress(own)) return own.trim();
       const recipients = JSON.parse(parent.to_json) as mail.MailAddress[];
       const mailbox = recipients.map((r) => r.email).find(isCompanyAddress);
-      if (mailbox) return mailbox.trim();
+      if (mailbox && !(await wasDeliveredByList(db, parent.id, mailbox))) return mailbox.trim();
     }
   } catch {
     /* fall through to the per-user resolution */

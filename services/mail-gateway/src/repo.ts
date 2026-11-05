@@ -434,6 +434,16 @@ export async function insertListDeliveries(db: DbClient, inboundId: string, list
   );
 }
 
+/** Did a team list at `address` deliver this message? */
+export async function wasDeliveredByList(db: DbClient, inboundId: string, address: string): Promise<boolean> {
+  const row = await db.first<{ id: string }>(
+    `SELECT id FROM mail_inbound_delivery WHERE inbound_id = ? AND envelope_to = ? LIMIT 1`,
+    inboundId,
+    `${LIST_ENVELOPE_PREFIX}${address.trim().toLowerCase()}`,
+  );
+  return !!row;
+}
+
 /** Fill the legacy single owner column when the first copy was ownerless (e.g. archive@
  *  arrived first). Keeps mail_inbound.owner_user_id meaningful for older readers. */
 export async function claimInboundOwnerIfUnset(db: DbClient, inboundId: string, ownerUserId: string): Promise<void> {
@@ -579,7 +589,12 @@ function rowToDetail(r: InboundRow, viewer?: string): mail.MailMessageDetail {
   const meta = parseHeaderMeta(r.header_meta_json);
   // deliveredTo on the body row is whichever copy arrived first: show the viewer's own.
   if (r.viewer_envelope) detail.headerMeta = { ...(meta ?? {}), deliveredTo: r.viewer_envelope };
-  else if (meta) detail.headerMeta = meta;
+  else if (meta && (r.viewer_deliveries ?? 0) > 0) {
+    // Reached the viewer through a list only: the stored value is someone else's envelope,
+    // which could be a Bcc recipient, and the UI would treat it as the viewer's own address.
+    const { deliveredTo: _firstCopyEnvelope, ...rest } = meta;
+    detail.headerMeta = rest;
+  } else if (meta) detail.headerMeta = meta;
   return detail;
 }
 

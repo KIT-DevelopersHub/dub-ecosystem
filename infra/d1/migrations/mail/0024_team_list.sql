@@ -7,15 +7,14 @@
 -- a team needs no list maintenance.
 --   address     lowercased full address (e.g. design@developershub.jp)
 --   team_id     member_teams.id the list expands to
---   cf_rule_id  the Cloudflare Email Routing rule (name `dub-list:<local>`) that hands the
---               address to this Worker. NULL only while the rule is being created.
+-- The Cloudflare Email Routing rule that hands the address to this Worker is found by its
+-- name (`dub-list:<local>`) + address, so it cannot drift from a stored rule id.
 -- Removal is a SOFT delete (deleted_at); the address can then be issued again.
 -- Timestamps app-side.
 CREATE TABLE IF NOT EXISTS mail_team_list (
   id          TEXT PRIMARY KEY,
   address     TEXT NOT NULL,
   team_id     TEXT NOT NULL,
-  cf_rule_id  TEXT,
   created_by  TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,

@@ -32,7 +32,7 @@ function reachLabel(list: mail.MailTeamList, overview: member.MembersOverview | 
   if (!overview) return "";
   const team = overview.teams.find((t) => t.id === list.teamId);
   if (!team) return "チームが見つかりません（このアドレス宛のメールは誰にも届きません）";
-  const members = overview.members.filter((m) => m.teamIds.includes(team.id));
+  const members = overview.members.filter((m) => m.teamIds.includes(team.id) && m.status !== "declined");
   const linked = members.filter((m) => m.identityUserId).length;
   return `${team.name}・受信できる人 ${linked} / ${members.length} 人`;
 }
@@ -58,6 +58,12 @@ export function TeamMailingListsDialog({ open, onClose }: { open: boolean; onClo
     setTeamId(id);
     const team = teams.find((t) => t.id === id);
     if (team) setLocalPart(team.key.toLowerCase());
+  }
+
+  function close() {
+    setFormError(null);
+    setFieldErrors({});
+    onClose();
   }
 
   function submit() {
@@ -93,7 +99,7 @@ export function TeamMailingListsDialog({ open, onClose }: { open: boolean; onClo
   const items = lists.data?.items ?? [];
 
   return (
-    <Modal title="メーリングリスト" open={open} onClose={onClose} size="lg" testId="fe7-team-lists-dialog">
+    <Modal title="メーリングリスト" open={open} onClose={close} size="lg" testId="fe7-team-lists-dialog">
       <p style={hintStyle} data-testid="fe7-team-lists-hint">
         アドレス宛のメールは、チームのメンバー全員の Dub メール受信箱に届きます。メンバーの追加や削除はチームの名簿に自動で反映されます。Dub アカウント未連携の人と、メール閲覧権限のない人は読めません。
       </p>
@@ -120,30 +126,40 @@ export function TeamMailingListsDialog({ open, onClose }: { open: boolean; onClo
         </div>
       )}
 
-      <div style={formStyle}>
-        <FormField label="チーム" htmlFor="fe7-team-list-team" error={fieldErrors.teamId}>
-          <Select
-            id="fe7-team-list-team"
-            value={teamId}
-            options={teamOptions}
-            placeholder="チームを選択"
-            onChange={pickTeam}
-            testId="fe7-team-list-team"
-          />
-        </FormField>
-        <FormField label="アドレス" htmlFor="fe7-team-list-localpart" error={fieldErrors.localPart}>
-          <div style={suffixRow}>
-            <TextField id="fe7-team-list-localpart" value={localPart} onChange={setLocalPart} placeholder="design" testId="fe7-team-list-localpart" />
-            <span style={suffixStyle}>@{EMAIL_ROUTING_DOMAIN}</span>
-          </div>
-        </FormField>
-        <FormError>{formError}</FormError>
-        <div style={actionsStyle}>
-          <Button variant="primary" onClick={submit} loading={create.isPending} disabled={!teamId || !localPart.trim()} testId="fe7-team-list-submit">
-            作成する
-          </Button>
+      {overview.isLoading ? (
+        <div style={formStyle}>
+          <SkeletonList rows={2} testId="fe7-team-list-form-loading" />
         </div>
-      </div>
+      ) : overview.isError ? (
+        <div style={formStyle}>
+          <ErrorState error={displayError(overview.error)} onRetry={() => overview.refetch()} testId="fe7-team-list-form-error" />
+        </div>
+      ) : (
+        <div style={formStyle}>
+          <FormField label="チーム" htmlFor="fe7-team-list-team" error={fieldErrors.teamId}>
+            <Select
+              id="fe7-team-list-team"
+              value={teamId}
+              options={teamOptions}
+              placeholder="チームを選択"
+              onChange={pickTeam}
+              testId="fe7-team-list-team"
+            />
+          </FormField>
+          <FormField label="アドレス" htmlFor="fe7-team-list-localpart" error={fieldErrors.localPart}>
+            <div style={suffixRow}>
+              <TextField id="fe7-team-list-localpart" value={localPart} onChange={setLocalPart} placeholder="design" testId="fe7-team-list-localpart" />
+              <span style={suffixStyle}>@{EMAIL_ROUTING_DOMAIN}</span>
+            </div>
+          </FormField>
+          <FormError>{formError}</FormError>
+          <div style={actionsStyle}>
+            <Button variant="primary" onClick={submit} loading={create.isPending} disabled={!teamId || !localPart.trim()} testId="fe7-team-list-submit">
+              作成する
+            </Button>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         title="メーリングリストを削除"

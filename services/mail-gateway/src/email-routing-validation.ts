@@ -19,8 +19,9 @@ export const MAX_TARGETS_PER_ACTION = 20;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Local part: lowercase, starts/ends alnum, inner dot/underscore/%+- allowed. Blocks
 // spaces, uppercase, and unicode look-alikes used for spoofing/abuse.
-const TEAM_ID_MAX_LEN = 128;
 const LOCAL_PART_RE = /^[a-z0-9](?:[a-z0-9._%+-]*[a-z0-9])?$/;
+
+const TEAM_ID_MAX_LEN = 128;
 
 function bad(message: string): never {
   throw new DubError("MAIL_INVALID_REQUEST", message, { status: 400 });

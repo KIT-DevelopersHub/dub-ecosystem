@@ -117,7 +117,7 @@ export function rosterAddressesFromRules(rules: CfRoutingRule[], zoneName: strin
  *  from a person's address without a D1 read. */
 export const TEAM_LIST_RULE_PREFIX = "dub-list:";
 
-function isTeamListRule(rule: CfRoutingRule): boolean {
+export function isTeamListRule(rule: CfRoutingRule): boolean {
   return (rule.name ?? "").startsWith(TEAM_LIST_RULE_PREFIX);
 }
 

@@ -137,7 +137,7 @@ export class MemberService {
    * with no linked identity account are skipped (nothing to notify); ids are unique and
    * returned in roster order. Read-only, internal-only (see /members/internal/*).
    */
-  async listTeamIdentityUserIds(teamIds: readonly string[]): Promise<{ userIds: string[] }> {
+  async listTeamIdentityUserIds(teamIds: readonly string[], opts: { excludeDeclined?: boolean } = {}): Promise<{ userIds: string[] }> {
     // One message can only mention so many teams; bound the request so a crafted body
     // cannot turn one post into an unbounded roster scan.
     const wanted = new Set(teamIds.filter((id) => id.length > 0).slice(0, MAX_TEAM_MENTION_EXPANSION));
@@ -150,6 +150,7 @@ export class MemberService {
     for (const p of people) {
       const uid = p.identityUserId;
       if (!uid || !inTeam.has(p.id) || seen.has(uid)) continue;
+      if (opts.excludeDeclined && p.status === "declined") continue;
       seen.add(uid);
       userIds.push(uid);
     }

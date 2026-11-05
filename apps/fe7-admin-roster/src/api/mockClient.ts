@@ -327,7 +327,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     }
     if (path.endsWith("/mail/admin/lists")) {
       const req = body as mail.MailTeamListCreateRequest;
-      if (s.teamLists.some((l) => l.localPart === req.localPart)) throw err("CONFLICT", "address already in use");
+      if (s.teamLists.some((l) => l.localPart === req.localPart)) throw err("MAIL_EMAIL_ROUTING_CONFLICT", "address already in use");
       const list: mail.MailTeamList = { id: `list_${Math.random().toString(36).slice(2, 8)}`, address: `${req.localPart}@${EMAIL_ROUTING_DOMAIN}`, localPart: req.localPart, teamId: req.teamId, createdAt: now() };
       s.teamLists.push(list);
       return list as unknown as T;
