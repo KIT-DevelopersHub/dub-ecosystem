@@ -49,7 +49,6 @@ export const FIELD_OPTION_MAX = 60;
 const FIELD_ID_RE = /^[a-z0-9_-]{1,40}$/;
 /** 氏名・メールは固定項目なのでカスタム項目の id に使わせない。 */
 const RESERVED_FIELD_IDS: ReadonlySet<string> = new Set(["name", "email"]);
-const FIELD_TYPES: ReadonlySet<LpTicketFieldType> = new Set(["text", "textarea", "select", "checkbox"]);
 export const CHECKBOX_YES = "はい";
 
 export const BUYER_NAME_MAX = 100;
@@ -73,7 +72,17 @@ export const COUPON_CODE_LEN = 10;
 const COUPON_CODE_RE = /^[A-Z0-9]{4,32}$/;
 export const COUPON_LABEL_MAX = 60;
 export const COUPON_MAX_USES_MAX = 1000;
-const ANSWER_MAX: Record<LpTicketFieldType, number> = { text: 200, textarea: 2000, select: FIELD_OPTION_MAX, checkbox: 10 };
+const ANSWER_MAX: Record<LpTicketFieldType, number> = {
+  text: 200,
+  textarea: 2000,
+  radio: FIELD_OPTION_MAX,
+  multiselect: (FIELD_OPTION_MAX + 1) * FIELD_OPTIONS_MAX,
+  select: FIELD_OPTION_MAX,
+  checkbox: 10,
+  date: 10,
+  email: BUYER_EMAIL_MAX,
+  phone: 30,
+};
 
 /** Stripe session lifetime. Stripe requires >= 30 min, so a minute of headroom for clock/network skew. */
 export const CHECKOUT_TTL_SEC = 31 * 60;
@@ -201,18 +210,24 @@ export function parseFields(body: unknown, reserved: ReadonlySet<string> = RESER
     const label = typeof f.label === "string" ? f.label.trim() : "";
     if (label.length === 0) bad.push({ field: at("label"), reason: "required" });
     else if (label.length > FIELD_LABEL_MAX) bad.push({ field: at("label"), reason: "too_long" });
+    const description = typeof f.description === "string" ? f.description.trim() : "";
+    if (description.length > lp.LP_FIELD_DESCRIPTION_MAX) bad.push({ field: at("description"), reason: "too_long" });
     const type = f.type as LpTicketFieldType;
-    if (!FIELD_TYPES.has(type)) bad.push({ field: at("type"), reason: "invalid" });
+    if (!lp.isLpFieldType(type)) bad.push({ field: at("type"), reason: "invalid" });
     if (typeof f.required !== "boolean") bad.push({ field: at("required"), reason: "invalid" });
     let options: string[] = [];
-    if (type === "select") {
+    if (lp.isLpChoiceField(type)) {
       const opts = Array.isArray(f.options) ? f.options : [];
       options = opts.map((o) => (typeof o === "string" ? o.trim() : ""));
       if (options.length < 1 || options.length > FIELD_OPTIONS_MAX) bad.push({ field: at("options"), reason: "invalid_count" });
-      else if (options.some((o) => o.length === 0 || o.length > FIELD_OPTION_MAX)) bad.push({ field: at("options"), reason: "invalid" });
+      else if (options.some((o) => o.length === 0 || o.length > FIELD_OPTION_MAX || o.includes(lp.LP_MULTISELECT_SEPARATOR))) {
+        bad.push({ field: at("options"), reason: "invalid" });
+      }
       else if (new Set(options).size !== options.length) bad.push({ field: at("options"), reason: "duplicate" });
     }
-    if (bad.length === before) out.push({ id, label, type, required: f.required as boolean, options });
+    if (bad.length === before) {
+      out.push({ id, label, ...(description ? { description } : {}), type, required: f.required as boolean, options });
+    }
   });
   if (bad.length > 0) throw errors.validationFailed(bad);
   return out;
@@ -342,9 +357,11 @@ export function parseAnswers(raw: unknown, fields: readonly LpTicketField[], bad
     const key = `answers.${f.id}`;
     if (f.required && value === "") bad.push({ field: key, reason: "required" });
     else if (value.length > ANSWER_MAX[f.type]) bad.push({ field: key, reason: "too_long" });
-    else if (value !== "" && f.type === "select" && !f.options.includes(value)) bad.push({ field: key, reason: "invalid" });
+    else if (value !== "" && lp.lpFieldAnswerProblem(f, value)) bad.push({ field: key, reason: "invalid" });
     else if (value !== "" && f.type === "checkbox" && value !== CHECKBOX_YES) bad.push({ field: key, reason: "invalid" });
-    answers.push({ fieldId: f.id, label: f.label, value });
+    // 回答は表示用の 1 文字列で持つ（一覧・CSV はこのまま出す）。
+    const shown = f.type === "multiselect" ? value.split(lp.LP_MULTISELECT_SEPARATOR).join("、") : value;
+    answers.push({ fieldId: f.id, label: f.label, value: shown });
   }
   return answers;
 }

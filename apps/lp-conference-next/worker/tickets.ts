@@ -2,11 +2,24 @@
 // the tickets feature flag served by lp-analytics (GET /lp/internal/tickets).
 // Pure logic + a dependency-injected handler: no runtime imports, so it runs under both
 // workerd and `node --test` (strip-only TS: no enums / parameter properties).
+import {
+  LP_FIELD_DESCRIPTION_MAX,
+  LP_MULTISELECT_SEPARATOR,
+  isLpChoiceField,
+  isLpFieldType,
+  lpFieldAnswerProblem,
+  type LpFieldType,
+} from "../../../packages/types/src/lp.ts";
+import { escapeHtml } from "./html.ts";
+import { SHARE_OPEN_BUTTON, renderShareDialog } from "./share.ts";
 
-export type TicketFieldType = "text" | "textarea" | "select" | "checkbox";
+export { escapeHtml };
+
+export type TicketFieldType = LpFieldType;
 export interface TicketField {
   id: string;
   label: string;
+  description?: string;
   type: TicketFieldType;
   required: boolean;
   options: string[];
@@ -125,15 +138,6 @@ export const DEMO_COUPONS: Readonly<Record<string, { ticketTypeId: string; remai
 };
 
 // ---------- helpers ----------
-
-export function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 export function formatPrice(priceJpy: number): string {
   if (priceJpy <= 0) return "無料";
@@ -269,27 +273,44 @@ export function parseConfig(raw: unknown): TicketConfig | null {
       couponOnly: r.couponOnly === true,
     });
   }
-  const fields: TicketField[] = [];
-  for (const f of o.fields) {
-    if (!f || typeof f !== "object") continue;
-    const r = f as Record<string, unknown>;
-    if (typeof r.id !== "string" || typeof r.label !== "string") continue;
-    const type = r.type === "textarea" || r.type === "select" || r.type === "checkbox" ? r.type : "text";
-    const options = Array.isArray(r.options) ? r.options.filter((x): x is string => typeof x === "string") : [];
-    fields.push({ id: r.id, label: r.label, type, required: r.required === true, options });
-  }
   return {
     enabled: o.enabled,
     preview: false,
     ctaEnabled: o.ctaEnabled === true,
     paymentReady: o.paymentReady === true,
     paymentMethods: Array.isArray(o.paymentMethods) && o.paymentMethods.includes("paypay") ? ["card", "paypay"] : ["card"],
-    fields,
+    fields: parseFieldList(o.fields),
     types,
   };
 }
 
+/** Custom fields of an internal config payload (malformed entries are dropped). */
+export function parseFieldList(raw: unknown[]): TicketField[] {
+  const fields: TicketField[] = [];
+  for (const f of raw) {
+    if (!f || typeof f !== "object") continue;
+    const r = f as Record<string, unknown>;
+    if (typeof r.id !== "string" || typeof r.label !== "string") continue;
+    const type = isLpFieldType(r.type) ? r.type : "text";
+    const options = Array.isArray(r.options) ? r.options.filter((x): x is string => typeof x === "string") : [];
+    const description = typeof r.description === "string" ? r.description.slice(0, LP_FIELD_DESCRIPTION_MAX) : "";
+    fields.push({ id: r.id, label: r.label, ...(description ? { description } : {}), type, required: r.required === true, options });
+  }
+  return fields;
+}
+
 // ---------- form parsing / validation ----------
+
+/** A custom field's submitted value. A multiselect posts one entry per ticked option. */
+export function fieldFormValue(form: URLSearchParams, f: TicketField): string {
+  const key = fieldInputName(f.id);
+  if (f.type !== "multiselect") return (form.get(key) ?? "").trim();
+  return form
+    .getAll(key)
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .join(LP_MULTISELECT_SEPARATOR);
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -307,8 +328,7 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig, c
     values[key] = (form.get(key) ?? "").trim();
   }
   for (const f of config.fields) {
-    const key = fieldInputName(f.id);
-    values[key] = (form.get(key) ?? "").trim();
+    values[fieldInputName(f.id)] = fieldFormValue(form, f);
   }
   if ((form.get(HONEYPOT) ?? "") !== "") return { ok: false, spam: true, values, errors: {} };
 
@@ -362,11 +382,12 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig, c
       values[key] = v;
     }
     if (f.required && !v) {
-      errors[key] = f.type === "checkbox" ? "チェックしてください" : f.type === "select" ? "選択してください" : "入力してください";
-    } else if (f.type === "select" && v && !f.options.includes(v)) {
-      errors[key] = "選択肢から選んでください";
+      errors[key] = f.type === "checkbox" ? "チェックしてください" : isLpChoiceField(f.type) ? "選択してください" : "入力してください";
     } else if ((f.type === "text" && v.length > TEXT_MAX) || (f.type === "textarea" && v.length > TEXTAREA_MAX)) {
       errors[key] = `${f.type === "text" ? TEXT_MAX : TEXTAREA_MAX}文字以内で入力してください`;
+    } else if (v) {
+      const problem = lpFieldAnswerProblem(f, v);
+      if (problem) errors[key] = problem;
     }
     answers[f.id] = v;
   }
@@ -651,17 +672,20 @@ transition:transform .25s cubic-bezier(.2,.7,.2,1),box-shadow .25s,border-color 
 .field{margin:0 0 22px}
 .field:last-child{margin-bottom:0}
 .lbl{display:block;font-weight:800;color:var(--ink);margin:0 0 8px;font-size:15px}
-input[type=text],input[type=email],select,textarea{width:100%;font:inherit;font-size:16px;color:var(--ink);background:#fbfcff;border:1.5px solid #d5dbe8;border-radius:12px;padding:13px 16px;transition:border-color .15s,box-shadow .15s,background .15s}
-input[type=text]:hover,input[type=email]:hover,select:hover,textarea:hover{border-color:#b5c2dc}
+input[type=text],input[type=email],input[type=tel],input[type=date],select,textarea{width:100%;font:inherit;font-size:16px;color:var(--ink);background:#fbfcff;border:1.5px solid #d5dbe8;border-radius:12px;padding:13px 16px;transition:border-color .15s,box-shadow .15s,background .15s}
+input[type=text]:hover,input[type=email]:hover,input[type=tel]:hover,input[type=date]:hover,select:hover,textarea:hover{border-color:#b5c2dc}
 textarea{min-height:120px;resize:vertical}
 select{appearance:none;-webkit-appearance:none;padding-right:44px;background-image:linear-gradient(45deg,transparent 50%,#4b5563 50%),linear-gradient(135deg,#4b5563 50%,transparent 50%);background-position:calc(100% - 22px) 52%,calc(100% - 16px) 52%;background-size:6px 6px;background-repeat:no-repeat}
 input:focus,select:focus,textarea:focus{border-color:var(--blue);background-color:#fff;outline:none;box-shadow:0 0 0 4px rgba(47,97,214,.14)}
-.bad input[type=text],.bad input[type=email],.bad select,.bad textarea{border-color:var(--err);background-color:#fffafa}
+.bad input[type=text],.bad input[type=email],.bad input[type=tel],.bad input[type=date],.bad select,.bad textarea{border-color:var(--err);background-color:#fffafa}
 .msg{display:flex;align-items:center;gap:6px;color:var(--err);font-size:13px;font-weight:700;margin:8px 0 0}
 .msg::before{content:"!";display:grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--err);color:#fff;font-size:11px;font-weight:900;flex:none}
 .check{display:flex;gap:12px;align-items:center;font-weight:600;cursor:pointer;padding:14px 16px;border:1.5px solid #d5dbe8;border-radius:12px;background:#fbfcff}
 .check:has(input:checked){border-color:var(--blue);background:#f4f8ff}
 .check input{width:20px;height:20px;accent-color:var(--btn);flex:none}
+.choices{display:grid;gap:10px}
+.hint{color:var(--mute);font-size:13px;margin:-2px 0 10px;white-space:pre-line}
+.check+.hint{margin:8px 0 0}
 .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
 .two .field:last-child{margin-bottom:22px}
@@ -1136,10 +1160,27 @@ export function renderField(f: TicketField, values: FormValues, errors: FormErro
   const bad = errors[key] ? " bad" : "";
   const aria = errors[key] ? ` aria-invalid="true" aria-describedby="${k}-err"` : "";
   const req = f.required ? " required" : "";
+  const hint = f.description ? `<p class="hint">${escapeHtml(f.description)}</p>` : "";
   if (f.type === "checkbox") {
     return (
       `<div class="field${bad}"><label class="check"><input type="checkbox" name="${k}" value="${CHECKBOX_YES}"` +
-      `${v ? " checked" : ""}${req}${aria}><span>${escapeHtml(f.label)}${reqMark(f.required)}</span></label>${errMsg(errors, key)}</div>`
+      `${v ? " checked" : ""}${req}${aria}><span>${escapeHtml(f.label)}${reqMark(f.required)}</span></label>${hint}${errMsg(errors, key)}</div>`
+    );
+  }
+  if (f.type === "radio" || f.type === "multiselect") {
+    const picked = f.type === "radio" ? [v] : v.split(LP_MULTISELECT_SEPARATOR);
+    const inputType = f.type === "radio" ? "radio" : "checkbox";
+    const choices = f.options
+      .map(
+        (o) =>
+          `<label class="check"><input type="${inputType}" name="${k}" value="${escapeHtml(o)}"${picked.includes(o) ? " checked" : ""}>` +
+          `<span>${escapeHtml(o)}</span></label>`,
+      )
+      .join("");
+    return (
+      `<div class="field${bad}" role="${f.type === "radio" ? "radiogroup" : "group"}" aria-labelledby="${k}-lbl"${aria}>` +
+      `<span class="lbl" id="${k}-lbl">${escapeHtml(f.label)}${reqMark(f.required)}</span>${hint}` +
+      `<div class="choices">${choices}</div>${errMsg(errors, key)}</div>`
     );
   }
   let control: string;
@@ -1150,10 +1191,17 @@ export function renderField(f: TicketField, values: FormValues, errors: FormErro
       .map((o) => `<option value="${escapeHtml(o)}"${o === v ? " selected" : ""}>${escapeHtml(o)}</option>`)
       .join("");
     control = `<select id="${k}" name="${k}"${req}${aria}><option value="">選択してください</option>${opts}</select>`;
+  } else if (f.type === "date" || f.type === "email" || f.type === "phone") {
+    const attrs = {
+      date: 'type="date"',
+      email: `type="email" autocomplete="email" maxlength="${EMAIL_MAX}"`,
+      phone: 'type="tel" autocomplete="tel" maxlength="30"',
+    }[f.type];
+    control = `<input ${attrs} id="${k}" name="${k}" value="${escapeHtml(v)}"${req}${aria}>`;
   } else {
     control = `<input type="text" id="${k}" name="${k}" value="${escapeHtml(v)}" maxlength="${TEXT_MAX}"${req}${aria}>`;
   }
-  return `<div class="field${bad}"><label class="lbl" for="${k}">${escapeHtml(f.label)}${reqMark(f.required)}</label>${control}${errMsg(errors, key)}</div>`;
+  return `<div class="field${bad}"><label class="lbl" for="${k}">${escapeHtml(f.label)}${reqMark(f.required)}</label>${hint}${control}${errMsg(errors, key)}</div>`;
 }
 
 function fixedField(key: "name" | "email", label: string, values: FormValues, errors: FormErrors): string {
@@ -1317,7 +1365,7 @@ const ICON_OK = '<div class="ico pop"><svg viewBox="0 0 24 24" aria-hidden="true
 const ICON_WAIT = '<div class="ico wait pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>';
 const ICON_WARN = '<div class="ico warn pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6M12 17h.01"/></svg></div>';
 
-export function renderThanksPage(o: { status: ThanksStatus; summary?: string; demo?: boolean; test?: boolean }): string {
+export function renderThanksPage(o: { status: ThanksStatus; summary?: string; demo?: boolean; test?: boolean; origin?: string }): string {
   let inner: string;
   let acts = '<a class="btn1" href="/">トップへ戻る</a>';
   let step = 3;
@@ -1347,10 +1395,21 @@ export function renderThanksPage(o: { status: ThanksStatus; summary?: string; de
       '<h2>お申し込みを受け付けました</h2><p class="lead">お申し込み状況はご登録のメールアドレスをご確認ください。ご不明な点は事務局までお問い合わせください。</p>';
   }
   const ok = o.status === "paid" || o.status === "free";
+  // Only confirmed orders: "unknown" also shows a check mark, but nothing proves a purchase there.
+  const share =
+    ok && o.origin
+      ? renderShareDialog({
+          key: "tickets",
+          origin: o.origin,
+          heading: "参加することをシェアしませんか？",
+          message: `${CONF_NAME} に参加します！`,
+        })
+      : "";
+  if (share) acts += SHARE_OPEN_BUTTON;
   return shell(
     "お申し込み",
     hero({ title: ok ? 'Thank <span class="g">you!</span>' : "お申し込み", ghost: ok ? "THANKS" : "TICKETS", step, small: true }) +
-      `<div class="body"><div class="wrap"><section class="card done rv">${inner}<div class="acts">${acts}</div></section></div></div>`,
+      `<div class="body"><div class="wrap"><section class="card done rv">${inner}<div class="acts">${acts}</div></section></div></div>${share}`,
     !!o.demo,
     !!o.test,
     undefined,
@@ -1694,7 +1753,7 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
       // Demo only (no real orders): the mock checkout passes its summary along in the URL.
       const summary = deps.demo && order ? (url.searchParams.get("summary") ?? "").slice(0, 300) : "";
       return htmlResponse(
-        renderThanksPage({ status: deps.demo && order ? "free" : "unknown", summary: summary || undefined, demo: deps.demo, test }),
+        renderThanksPage({ status: deps.demo && order ? "free" : "unknown", summary: summary || undefined, demo: deps.demo, test, origin: url.origin }),
       );
     }
     // Never trust the query string: both paid (session_id) and free (order) are confirmed server-side.
@@ -1714,7 +1773,7 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     } catch {
       // fall through to the generic message
     }
-    return htmlResponse(renderThanksPage({ status, summary: status === "paid" ? summary : undefined, demo: deps.demo, test }));
+    return htmlResponse(renderThanksPage({ status, summary: status === "paid" ? summary : undefined, demo: deps.demo, test, origin: url.origin }));
   }
 
   if (!config || !config.enabled) return null;

@@ -318,3 +318,55 @@ export function validateSiteConfig(raw: unknown, path = "config"): { config: LpS
   const issues = [...l.issues, ...r.issues];
   return { config: issues.length === 0 && r.release ? { layout: l.layout, release: r.release } : null, issues };
 }
+
+// ---- Custom form fields (チケット / 登壇者募集で共用). lp-analytics, fe2 and the LP Worker share this vocabulary ----
+
+export const LP_FIELD_TYPES = ["text", "textarea", "radio", "multiselect", "select", "checkbox", "date", "email", "phone"] as const;
+export type LpFieldType = (typeof LP_FIELD_TYPES)[number];
+
+export const LP_FIELD_TYPE_LABELS: Record<LpFieldType, string> = {
+  text: "記述式（短文）",
+  textarea: "段落（長文）",
+  radio: "ラジオボタン（1つ選ぶ）",
+  multiselect: "チェックボックス（複数選ぶ）",
+  select: "プルダウン",
+  checkbox: "同意チェック",
+  date: "日付",
+  email: "メールアドレス",
+  phone: "電話番号",
+};
+
+export const LP_FIELD_DESCRIPTION_MAX = 200;
+/** Separator of a multiselect answer between the LP Worker and lp-analytics (options cannot contain it). */
+export const LP_MULTISELECT_SEPARATOR = "\n";
+
+const LP_CHOICE_FIELD_TYPES: readonly string[] = ["radio", "multiselect", "select"];
+const LP_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LP_PHONE_RE = /^[0-9+\-() ]{6,30}$/;
+const LP_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function isLpFieldType(v: unknown): v is LpFieldType {
+  return typeof v === "string" && (LP_FIELD_TYPES as readonly string[]).includes(v);
+}
+
+export function isLpChoiceField(type: string): boolean {
+  return LP_CHOICE_FIELD_TYPES.includes(type);
+}
+
+/** What is wrong with a non-empty answer (shown on the public form), or null when it is valid. */
+export function lpFieldAnswerProblem(f: { type: LpFieldType; options: readonly string[] }, value: string): string | null {
+  if (f.type === "multiselect") {
+    const picked = value.split(LP_MULTISELECT_SEPARATOR);
+    const known = picked.every((v) => f.options.includes(v)) && new Set(picked).size === picked.length;
+    return known ? null : "選択肢から選んでください";
+  }
+  if (f.type === "radio" || f.type === "select") return f.options.includes(value) ? null : "選択肢から選んでください";
+  if (f.type === "email") return LP_EMAIL_RE.test(value) ? null : "メールアドレスの形式が正しくありません";
+  if (f.type === "phone") return LP_PHONE_RE.test(value) ? null : "電話番号の形式が正しくありません";
+  if (f.type === "date") {
+    const time = Date.parse(`${value}T00:00:00Z`);
+    const real = LP_DATE_RE.test(value) && !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
+    return real ? null : "日付を選び直してください";
+  }
+  return null;
+}

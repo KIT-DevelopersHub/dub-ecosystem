@@ -5031,7 +5031,7 @@ function createLpStore() {
 // Demo starts PUBLISHED but with paymentReady=false so the 「決済 未設定」 state is visible.
 // Event = 2027-09-13(月) / 14(火): 一般・学生は Day 別の券種。sold/pending are TICKET counts.
 // Orders are fixed (not random) so the stats a reviewer sees are the same every load.
-type DemoTicketField = { id: string; label: string; type: "text" | "textarea" | "select" | "checkbox"; required: boolean; options: string[] };
+type DemoTicketField = { id: string; label: string; description?: string; type: lpValues.LpFieldType; required: boolean; options: string[] };
 type DemoTicketType = {
   id: string;
   name: string;
@@ -5111,18 +5111,20 @@ function validDemoFields(raw: unknown, reserved: readonly string[]): DemoTicketF
         typeof f.label === "string" &&
         f.label.trim().length >= 1 &&
         f.label.length <= 60 &&
-        ["text", "textarea", "select", "checkbox"].includes(f.type) &&
+        lpValues.isLpFieldType(f.type) &&
+        (f.description === undefined || (typeof f.description === "string" && f.description.length <= lpValues.LP_FIELD_DESCRIPTION_MAX)) &&
         typeof f.required === "boolean" &&
         Array.isArray(f.options) &&
-        (f.type !== "select" || (f.options.length >= 1 && f.options.length <= 20)),
+        (!lpValues.isLpChoiceField(f.type) || (f.options.length >= 1 && f.options.length <= 20)),
     );
   if (!ok) return null;
   return (raw as DemoTicketField[]).map((f) => ({
     id: f.id,
     label: f.label.trim(),
+    ...(f.description ? { description: f.description } : {}),
     type: f.type,
     required: f.required,
-    options: f.type === "select" ? [...f.options] : [],
+    options: lpValues.isLpChoiceField(f.type) ? [...f.options] : [],
   }));
 }
 
@@ -5535,9 +5537,11 @@ function createLpProposalsStore() {
     enabled: false,
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/proposals`,
     fields: [
-      { id: "format", label: "発表形式", type: "select", required: true, options: ["セッション（30分）", "LT（5分）"] },
+      { id: "format", label: "発表形式", type: "radio", required: true, options: ["セッション（30分）", "LT（5分）"] },
+      { id: "topics", label: "テーマ", description: "当てはまるものをすべて選んでください", type: "multiselect", required: false, options: ["Web", "モバイル", "インフラ", "AI"] },
       { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
       { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
+      { id: "unavailable", label: "登壇できない日", type: "date", required: false, options: [] },
     ] as DemoTicketField[],
     updatedAt: null as string | null,
     updatedBy: null as string | null,

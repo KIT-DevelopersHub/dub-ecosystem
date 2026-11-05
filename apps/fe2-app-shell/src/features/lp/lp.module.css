@@ -428,7 +428,7 @@
 .fieldMain {
   display: grid;
   /* 項目名(伸縮) / 種類 / 必須 / 操作 */
-  grid-template-columns: minmax(10rem, 1fr) minmax(8rem, 10rem) auto auto;
+  grid-template-columns: minmax(10rem, 1fr) minmax(8rem, 14rem) auto auto;
   align-items: center;
   gap: var(--dub-space-3);
 }
