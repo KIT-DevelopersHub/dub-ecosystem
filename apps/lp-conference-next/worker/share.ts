@@ -46,7 +46,7 @@ const ICON_IG =
 const SCRIPT = `(function(){var d=document,D=d.querySelector("[data-lp-share]"),n=navigator;if(!D||!D.showModal)return;
 var q=function(s){return D.querySelector(s)},O=d.querySelector("[data-share-open]"),S=q("[data-share-status]"),A=q("textarea").value,T=D.getAttribute("data-text"),U=D.getAttribute("data-native-url"),I=null,K="lp-share:"+D.getAttribute("data-key"),C=q("[data-share-native]");
 function copy(t,m){var f=function(){S.textContent="コピーできませんでした。文章を選択してコピーしてください。"};try{n.clipboard.writeText(t).then(function(){S.textContent=m},f)}catch(e){f()}}
-function open(){D.showModal()}
+function open(){D.showModal();D.focus()}
 O.hidden=false;O.addEventListener("click",open);
 q("[data-share-close]").addEventListener("click",function(){D.close()});
 D.addEventListener("click",function(e){if(e.target===D)D.close()});
@@ -75,7 +75,7 @@ export function renderShareDialog(o: ShareOptions): string {
   const copied = `${text}\n${shareUrl(o.origin, "share-copy")}`;
   return (
     `<style>${STYLE}</style>` +
-    `<dialog class="share" data-lp-share autofocus tabindex="-1" aria-labelledby="share-title" data-key="${o.key}" data-image="${SHARE_IMAGE}"` +
+    `<dialog class="share" data-lp-share tabindex="-1" aria-labelledby="share-title" data-key="${o.key}" data-image="${SHARE_IMAGE}"` +
     ` data-text="${escapeHtml(text)}" data-native-url="${escapeHtml(shareUrl(o.origin, "share-native"))}">` +
     '<button type="button" class="share-x" data-share-close aria-label="閉じる">×</button>' +
     `<h2 id="share-title">${escapeHtml(o.heading)}</h2>` +
