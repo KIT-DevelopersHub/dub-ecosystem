@@ -95,6 +95,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json({ items: await deps.roleGrants.listByFile(c.req.param("id")) });
   });
 
+  // Actual sharing vs the file's role grants (shares outside the roles, wrong role, missing).
+  app.get("/driveshare/files/:id/drift", async (c) => {
+    return c.json(await deps.roleGrants.drift(c.req.param("id")));
+  });
+
   // ---- writes ----
   app.post("/driveshare/files/:id/permissions", async (c) => {
     const body = await parseBody<GrantPermissionRequest>(c);
