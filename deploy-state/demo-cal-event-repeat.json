@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "cal-event-repeat",
+  "worker": "dub-demo-cal-event-repeat",
+  "url": "https://dub-demo-cal-event-repeat.developershub-site.workers.dev",
+  "deployedSha": "5bc8627b",
+  "branch": "commander/task-ctask_01M6K6V5YSHNA455NKZ1F174F1",
+  "actor": "ko-tarou",
+  "markers": ["calendar-form-repeat-note"],
+  "live": true,
+  "verifiedAt": "2026-11-05T19:08:41Z",
+  "updatedAt": "2026-11-05T19:08:41Z",
+  "note": "予定の作成から繰り返し"
+}
