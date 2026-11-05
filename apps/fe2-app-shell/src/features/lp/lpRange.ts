@@ -30,6 +30,35 @@ export function rangeLabel(days: LpRangeDays): string {
   return `直近${days}日間`;
 }
 
+/** 1 回に指定できる最長の日数。lp-analytics の MAX_RANGE_DAYS と一致させる（超えると 400）。 */
+export const LP_MAX_RANGE_DAYS = 92;
+
+/** 閉区間の日数（from=to なら 1）。 */
+export function rangeDayCount(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
+}
+
+/** 日キーに n 日足す（負も可）。 */
+export function addDays(dayKey: string, n: number): string {
+  return new Date(Date.parse(`${dayKey}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** カレンダーで選んだ期間の検証。問題なければ null、あれば画面に出す文言。 */
+export function customRangeError(from: string | null, to: string | null, today: string): string | null {
+  if (!from || !to) return "開始日と終了日を選んでください。";
+  if (from > to) return "開始日は終了日より前にしてください。";
+  if (to > today) return "未来の日付は選べません。";
+  if (rangeDayCount(from, to) > LP_MAX_RANGE_DAYS) return `一度に見られるのは${LP_MAX_RANGE_DAYS}日間までです。`;
+  return null;
+}
+
+/** 期間の表示（2026-09-01〜2026-09-30 → 9/1〜9/30）。年をまたぐ/今年でない時は年も出す。 */
+export function formatRangeLabel(range: { from: string; to: string }, today: string): string {
+  const sameYear = range.from.slice(0, 4) === range.to.slice(0, 4) && range.to.slice(0, 4) === today.slice(0, 4);
+  const fmt = (d: string): string => (sameYear ? formatDayLabel(d) : `${d.slice(0, 4)}/${formatDayLabel(d)}`);
+  return range.from === range.to ? fmt(range.from) : `${fmt(range.from)}〜${fmt(range.to)}`;
+}
+
 /** 日キー（2026-09-28）→ 表示（9/28）。不正値はそのまま返す（落とさない）。 */
 export function formatDayLabel(dayKey: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
