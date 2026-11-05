@@ -19,6 +19,7 @@ export const MAX_TARGETS_PER_ACTION = 20;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Local part: lowercase, starts/ends alnum, inner dot/underscore/%+- allowed. Blocks
 // spaces, uppercase, and unicode look-alikes used for spoofing/abuse.
+const TEAM_ID_MAX_LEN = 128;
 const LOCAL_PART_RE = /^[a-z0-9](?:[a-z0-9._%+-]*[a-z0-9])?$/;
 
 function bad(message: string): never {
@@ -53,6 +54,14 @@ export function parseIssueAddressRequest(body: unknown, zoneName: string): { loc
   const address = `${localPart}@${zoneName.toLowerCase()}`;
   if (address.length > ADDRESS_MAX_LEN) bad(`address too long (max ${ADDRESS_MAX_LEN})`);
   return { localPart, address };
+}
+
+/** Create a team mailing list: a receiving address (same rules as issuing one) + its team. */
+export function parseTeamListRequest(body: unknown, zoneName: string): { localPart: string; address: string; teamId: string } {
+  const issued = parseIssueAddressRequest(body, zoneName);
+  const teamId = (body as { teamId?: unknown }).teamId;
+  if (typeof teamId !== "string" || teamId.trim().length === 0 || teamId.length > TEAM_ID_MAX_LEN) bad("`teamId` is required");
+  return { ...issued, teamId: (teamId as string).trim() };
 }
 
 /** Update an issued address: only the enable/disable toggle is mutable (the forward target

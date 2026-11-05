@@ -285,10 +285,14 @@ export function inboundOwnerClause(scope: InboundScope): { sql: string; binds: s
  *  three times ('' when unknown, which matches no delivery). */
 export function inboundSelect(viewer: string | undefined): { sql: string; binds: string[] } {
   const v = viewer ?? "";
+  // A list copy has no personal address: showing it as deliveredTo would make the UI treat
+  // the list as "own" and drop it from 全員に返信. Excluded by prefix, not by reading
+  // mail_team_list, so the inbox never depends on that migration being applied.
+  const ownEnvelope = `CASE WHEN vd.envelope_to LIKE '${LIST_ENVELOPE_PREFIX}%' THEN NULL ELSE vd.envelope_to END`;
   const sub = (expr: string) =>
     `(SELECT ${expr} FROM mail_inbound_delivery vd WHERE vd.inbound_id = mail_inbound.id AND vd.owner_user_id = ?)`;
   return {
-    sql: `SELECT mail_inbound.*, ${sub("COUNT(*)")} AS viewer_deliveries, ${sub("MAX(vd.read_at)")} AS viewer_read_at, ${sub("MIN(vd.envelope_to)")} AS viewer_envelope FROM mail_inbound`,
+    sql: `SELECT mail_inbound.*, ${sub("COUNT(*)")} AS viewer_deliveries, ${sub("MAX(vd.read_at)")} AS viewer_read_at, ${sub(`MIN(${ownEnvelope})`)} AS viewer_envelope FROM mail_inbound`,
     binds: [v, v, v],
   };
 }
@@ -404,6 +408,30 @@ export async function insertDelivery(
     now,
   );
   return res.meta.changes;
+}
+
+/** envelope_to prefix of a delivery made by a team list (`list:design@developershub.jp`):
+ *  the member never had that address as an envelope of their own. */
+export const LIST_ENVELOPE_PREFIX = "list:";
+
+/** One delivery per team member, in a single statement: the ids ride as ONE JSON bind (D1
+ *  caps bound parameters at 100) and one statement keeps a big team within the Worker's
+ *  subrequest budget. A redelivered list copy is an INSERT OR IGNORE no-op per member. */
+export async function insertListDeliveries(db: DbClient, inboundId: string, listAddress: string, userIds: readonly string[]): Promise<void> {
+  if (userIds.length === 0) return;
+  const now = nowIso();
+  const rows = JSON.stringify(userIds.map((owner) => ({ id: newDeliveryId(), owner })));
+  await db.run(
+    `INSERT OR IGNORE INTO mail_inbound_delivery
+       (id, inbound_id, owner_user_id, envelope_to, read_at, created_at, updated_at)
+     SELECT json_extract(value, '$.id'), ?, json_extract(value, '$.owner'), ?, NULL, ?, ?
+       FROM json_each(?)`,
+    inboundId,
+    `${LIST_ENVELOPE_PREFIX}${listAddress}`,
+    now,
+    now,
+    rows,
+  );
 }
 
 /** Fill the legacy single owner column when the first copy was ownerless (e.g. archive@

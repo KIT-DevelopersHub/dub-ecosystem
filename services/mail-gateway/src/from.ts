@@ -12,7 +12,7 @@ import type { DbClient } from "@dub/db";
 import type { identity, mail } from "@dub/types";
 import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS, SERVICE_NAME } from "./config";
-import { findDeliveryEnvelope, findInboundByMessageId, findSendLogById } from "./repo";
+import { findDeliveryEnvelope, findInboundByMessageId, findSendLogById, LIST_ENVELOPE_PREFIX } from "./repo";
 
 /** Verified sending domain (Resend). Only addresses on this domain may be a From. */
 export const COMPANY_MAIL_DOMAIN = "developershub.jp";
@@ -83,6 +83,9 @@ export async function resolveReplyFromAddress(
       // The replier's OWN copy wins: a colleague who was Cc'd (or Bcc'd) replies as the
       // address it reached them at, never as the To: recipient's address.
       const own = userId ? await findDeliveryEnvelope(db, parent.id, userId) : null;
+      // Reached them through a team list: answer as themselves, so the reader sees who
+      // replied. The list stays on the reply through 全員に返信's Cc.
+      if (own?.startsWith(LIST_ENVELOPE_PREFIX)) return await resolveUserFromAddress(env, ctx, userId);
       if (isCompanyAddress(own)) return own.trim();
       const recipients = JSON.parse(parent.to_json) as mail.MailAddress[];
       const mailbox = recipients.map((r) => r.email).find(isCompanyAddress);
