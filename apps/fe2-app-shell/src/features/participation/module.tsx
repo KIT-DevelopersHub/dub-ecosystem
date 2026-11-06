@@ -53,7 +53,7 @@ export const participationNav: ParticipationNavEntry[] = [
 // PUBLIC standalone route (unauthenticated). Mounted by the shell router OUTSIDE the
 // authenticated shell (sibling of /login) so participants can submit without signing in.
 // Kept distinct from the in-shell "/participation" tile (which 運営 use while signed in).
-export const PUBLIC_PARTICIPATION_PATH = "/participate";
+export { PUBLIC_PARTICIPATION_PATH } from "./prefillLink.ts";
 
 // PUBLIC オンボーディング案内 (unauthenticated, read-only)。/participate と同じくシェルの外。
 export const PUBLIC_ONBOARDING_PATH = "/onboarding";

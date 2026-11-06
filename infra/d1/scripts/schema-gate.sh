@@ -7,19 +7,22 @@
 # Gates only on missingTables / missingColumns. The `drift` list (ledger rows) is ignored:
 # prod has no dub_migrations ledger, so every migration reads as drift there.
 #
-# Usage: schema-gate.sh <database_name>
+# Usage: schema-gate.sh <database_name> [sql_dir]
+#   sql_dir                 -> compare against this directory's *.sql instead of the aggregated
+#                              migrations (a D1 a service owns alone; relative to infra/d1)
 #   D1_SCHEMA_GATE=enforce  -> fail on missing schema (default)
 #   D1_SCHEMA_GATE=warn     -> annotate and pass (escape hatch)
 set -euo pipefail
 
-DB="${1:?usage: schema-gate.sh <database_name>}"
+DB="${1:?usage: schema-gate.sh <database_name> [sql_dir]}"
+SQL_DIR="${2:-}"
 MODE="${D1_SCHEMA_GATE:-enforce}"
 cd "$(dirname "$0")/.."
 
 export WRANGLER_BIN="${WRANGLER_BIN:-pnpm dlx wrangler@4.35.0}"
 OUT="$(mktemp)"
 # verify.ts exits 1 whenever ok=false (incl. ledger drift); judge from the JSON instead.
-node --import tsx scripts/verify.ts --remote "$DB" > "$OUT" || true
+node --import tsx scripts/verify.ts --remote "$DB" ${SQL_DIR:+--sql-dir "$SQL_DIR"} > "$OUT" || true
 
 node - "$OUT" "$DB" "$MODE" <<'EOF'
 const fs = require("node:fs");

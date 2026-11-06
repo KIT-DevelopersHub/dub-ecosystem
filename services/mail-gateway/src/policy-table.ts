@@ -97,6 +97,7 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /mail/counts": appLevel("mail", "view", "mail:read"),
   "POST /mail/messages/:id/read": appLevel("mail", "view", "mail:read"),
   "POST /mail/read-state": appLevel("mail", "view", "mail:read"),
+  "POST /mail/bulk": appLevel("mail", "view", "mail:read"),
   "GET /mail/messages/:id/attachments/:attId": appLevel("mail", "view", "mail:read"),
   "GET /mail/sent": appLevel("mail", "view", "mail:read"),
   "GET /mail/sent/:id": appLevel("mail", "view", "mail:read"),

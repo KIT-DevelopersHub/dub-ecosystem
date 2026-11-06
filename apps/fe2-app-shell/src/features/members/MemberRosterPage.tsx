@@ -21,8 +21,8 @@ import {
 } from "@dub/ui";
 import type { SelectOption } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useAppCapability } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
+import { AppReadOnlyNotice, ScopeReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useMembersOverview, useDeleteMember, useIdentityUsers, useUnlinkIdentity } from "./hooks.ts";
 import { useMembersApi } from "./MembersProvider.tsx";
 import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
@@ -49,8 +49,10 @@ function remindMessage(targets: OrgMember[]): string {
 }
 
 export function MemberRosterPage(): JSX.Element {
-  // 書き込みは運営メンバータブと同じ要件 (app:members:edit)。閲覧のみなら操作を無効化する。
-  const { canEdit } = useAppCapability("members");
+  // 書き込みは app:members:edit + 編集範囲が メール名簿以外 以上 (members:roster_edit)。
+  const { canEdit: canEditApp } = useAppCapability("members");
+  const { can } = usePermissions();
+  const canEdit = canEditApp && can("members:roster_edit");
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const identityUsers = useIdentityUsers();
@@ -166,7 +168,7 @@ export function MemberRosterPage(): JSX.Element {
     setConfirm(null);
   };
 
-  if (overview.isLoading) return <SkeletonLoader testId="member-roster-loading" />;
+  if (overview.isPending) return <SkeletonLoader testId="member-roster-loading" />;
   if (overview.isError) {
     const display = ApiError.isApiError(overview.error)
       ? toDisplayableError(overview.error)
@@ -177,6 +179,12 @@ export function MemberRosterPage(): JSX.Element {
   return (
     <div data-testid="member-roster-page">
       <AppReadOnlyNotice appId="members" testId="member-roster-readonly-notice" />
+      {canEditApp && !canEdit ? (
+        <ScopeReadOnlyNotice
+          message="運営名簿は閲覧のみです。編集できる範囲を広げるには管理者に依頼してください。"
+          testId="member-roster-scope-notice"
+        />
+      ) : null}
       <PageHeader
         title="運営名簿"
         description={

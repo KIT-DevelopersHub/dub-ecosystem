@@ -11,7 +11,7 @@ import type { GatewayEnv } from "./env";
 import { bindingByName } from "./env";
 import type { GatewayVariables } from "./context";
 import { getRequestId, gatewayError, GATEWAY_ROUTE_NOT_FOUND, GATEWAY_WEBSOCKET_UNSUPPORTED } from "./context";
-import { routeForSegment, stripApiPrefix, firstSegment, isInternalOnly, GATEWAY_OWNED_SEGMENTS } from "./routes";
+import { bindingForPath, routeForSegment, stripApiPrefix, firstSegment, isInternalOnly, GATEWAY_OWNED_SEGMENTS } from "./routes";
 import { authenticateOnce } from "./policy";
 import { forwardRequest } from "./proxy";
 import { enforceImpersonationPolicy, auditLogSink, type ImpersonationAuditSink } from "./impersonation";
@@ -76,8 +76,9 @@ export async function gatewayRouteHandler(
     enforceImpersonationPolicy(c, impersonationAudit);
   }
 
-  const binding = bindingByName(c.env, route.binding);
-  if (!binding) throw errors.upstreamUnavailable(route.binding);
+  const bindingName = bindingForPath(route, internalPath);
+  const binding = bindingByName(c.env, bindingName);
+  if (!binding) throw errors.upstreamUnavailable(bindingName);
 
   return forwardRequest(binding, internalPath, c.req.raw, {
     requestId,

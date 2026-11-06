@@ -144,8 +144,64 @@ export function badRequestReasonJa(reason: string | undefined): string {
   return (reason && BAD_REQUEST_REASON_JA[reason]) ?? "Drive にリクエストが拒否されました。";
 }
 
-/** Convert a non-2xx Google Drive response into a DubError (no raw Google leak). */
-export function mapGoogleError(status: number, body: unknown, retryAfterSec?: number): DubError {
+/** Which Google API answered. All three go through mapGoogleError but have separate quotas. */
+export type GoogleApi = "drive" | "calendar" | "meet";
+
+const API_NAME_JA: Record<GoogleApi, string> = { drive: "Drive ", calendar: "Google カレンダー", meet: "Google Meet" };
+const QUOTA_NAME_JA: Record<GoogleApi, string> = { drive: "Google ドライブ", calendar: "Google カレンダー", meet: "Google Meet" };
+
+/** 403 reasons that mean "too much", not "not allowed" (429 always does). storageQuotaExceeded is
+ *  not here: it is about disk space, and waiting does not fix it. */
+const QUOTA_REASONS: ReadonlySet<string> = new Set([
+  "dailyLimitExceeded",
+  "quotaExceeded",
+  "rateLimitExceeded",
+  "sharingRateLimitExceeded",
+  "userRateLimitExceeded",
+]);
+
+/** A Google usage limit. Not retryable: an immediate retry only spends more of the same limit. A
+ *  service code of its own, because the SPA replaces FORBIDDEN / RATE_LIMITED with fixed copy. */
+export class GoogleQuotaError extends DubError {
+  readonly api: GoogleApi;
+  readonly reason: string;
+  /** Google's error.message, addresses masked. */
+  readonly googleMessage: string | null;
+  /** "acl.insert" etc. */
+  readonly operation: string | null;
+
+  constructor(api: GoogleApi, reason: string, googleMessage: string | null = null, operation: string | null = null) {
+    super("GOOGLE_QUOTA_EXCEEDED", `${QUOTA_NAME_JA[api]}の利用上限に達しました。時間を置いて再試行してください`, { status: 429, retryable: false, details: { api } });
+    this.name = "GoogleQuotaError";
+    this.api = api;
+    this.reason = reason;
+    this.googleMessage = googleMessage;
+    this.operation = operation;
+  }
+}
+
+export const isCalendarQuota = (err: unknown): err is GoogleQuotaError => err instanceof GoogleQuotaError && err.api === "calendar";
+
+/** Who answered, so a limit is reported against the right API (default Drive). */
+export interface GoogleErrorSource {
+  api: GoogleApi;
+  operation?: string;
+}
+
+function quotaError(status: number, body: unknown, source: GoogleErrorSource): GoogleQuotaError | null {
+  const e = (body as { error?: { message?: string; errors?: { reason?: string }[] } } | null)?.error;
+  const hit = e?.errors?.map((x) => x.reason).find((r): r is string => !!r && QUOTA_REASONS.has(r));
+  if (status !== 429 && !hit) return null;
+  const message = e?.message?.replace(/[^\s@]+@[^\s@]+/g, "[email]").slice(0, 300) ?? null;
+  const err = new GoogleQuotaError(source.api, hit ?? e?.errors?.[0]?.reason ?? `http_${status}`, message, source.operation ?? null);
+  console.warn(JSON.stringify({ service: "drive-share-service", event: "google_quota_exceeded", api: err.api, operation: err.operation, reason: err.reason, googleMessage: err.googleMessage }));
+  return err;
+}
+
+/** Convert a non-2xx Google response into a DubError (no raw Google leak). */
+export function mapGoogleError(status: number, body: unknown, source: GoogleErrorSource = { api: "drive" }): DubError {
+  const quota = quotaError(status, body, source);
+  if (quota) return quota;
   const reason = extractGoogleReason(body);
   switch (status) {
     case 400:
@@ -160,12 +216,10 @@ export function mapGoogleError(status: number, body: unknown, retryAfterSec?: nu
       // (Japanese) instead of leaking the raw reason string to the user.
       const ja = reason ? FORBIDDEN_REASON_JA[reason] : undefined;
       if (ja) return errors.forbidden(ja);
-      return errors.forbidden(`Drive で操作が拒否されました${reason ? `（${reason}）` : ""}`);
+      return errors.forbidden(`${API_NAME_JA[source.api]}で操作が拒否されました${reason ? `（${reason}）` : ""}`);
     }
     case 404:
       return errors.notFound("driveResource");
-    case 429:
-      return errors.rateLimited(retryAfterSec ?? 1);
     default:
       if (status >= 500) return errors.upstreamUnavailable("google");
       return errors.upstreamUnavailable("google");

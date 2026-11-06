@@ -4,11 +4,14 @@
 // Google's own invitation / update / cancellation mail.
 import { errors } from "@dub/errors";
 import { retryFetch } from "@dub/http";
-import { mapGoogleError } from "../drive-client";
+import { mapGoogleError, type GoogleErrorSource } from "../drive-client";
 import type { TokenProvider } from "./token";
 
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
 const MEET_BASE = "https://meet.googleapis.com/v2";
+/** 429 is a usage limit here: retrying it within the call only spends more of that limit. */
+const RETRY_STATUSES: ReadonlySet<number> = new Set([500, 502, 503, 504]);
+const retryOn = ({ status, error }: { status?: number; error?: unknown }): boolean => error !== undefined || (status !== undefined && RETRY_STATUSES.has(status));
 
 /** "abc-defg-hij" from a Meet link, null when it is not one. */
 export function meetingCodeOf(meetUrl: string): string | null {
@@ -133,7 +136,7 @@ function eventBody(p: Partial<CalendarEventInput>): Record<string, unknown> {
 }
 
 export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchImpl?: typeof fetch; newRequestId?: () => string }): CalendarClient {
-  const doFetch = deps.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => retryFetch(input, init));
+  const doFetch = deps.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => retryFetch(input, { ...init, retry: { retryOn } }));
   const requestId = deps.newRequestId ?? (() => crypto.randomUUID());
 
   async function call(url: string, init: RequestInit): Promise<Response> {
@@ -154,13 +157,14 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
     return res;
   }
 
-  async function fail(res: Response): Promise<never> {
+  async function fail(res: Response, source: GoogleErrorSource): Promise<never> {
     const body = await res.json().catch(() => null);
-    throw mapGoogleError(res.status, body, Number(res.headers.get("retry-after")) || undefined);
+    throw mapGoogleError(res.status, body, source);
   }
 
-  async function readJson<T>(res: Response): Promise<T> {
-    if (!res.ok) await fail(res);
+  /** `operation` = the Calendar method; pass a Meet source for Meet REST (its own quota). */
+  async function readJson<T>(res: Response, operation: string | GoogleErrorSource): Promise<T> {
+    if (!res.ok) await fail(res, typeof operation === "string" ? { api: "calendar", operation } : operation);
     return (await res.json().catch(() => ({}))) as T;
   }
 
@@ -170,7 +174,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
   const client: CalendarClient = {
     async createCalendar(summary, timeZone) {
       const res = await call(`${CAL_BASE}/calendars`, { method: "POST", body: JSON.stringify({ summary, timeZone }) });
-      const json = await readJson<{ id?: string }>(res);
+      const json = await readJson<{ id?: string }>(res, "calendars.insert");
       if (!json.id) throw errors.upstreamUnavailable("google:calendar");
       return { id: json.id };
     },
@@ -184,6 +188,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
         if (pageToken) url.searchParams.set("pageToken", pageToken);
         const json = await readJson<{ items?: { id?: string; role?: string; scope?: { type?: string; value?: string } }[]; nextPageToken?: string }>(
           await call(url.toString(), { method: "GET" }),
+          "acl.list",
         );
         for (const r of json.items ?? []) {
           if (!r.id) continue;
@@ -201,7 +206,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
         method: "POST",
         body: JSON.stringify({ role: "reader", scope: { type: "user", value: email } }),
       });
-      const json = await readJson<{ id?: string }>(res);
+      const json = await readJson<{ id?: string }>(res, "acl.insert");
       if (!json.id) throw errors.upstreamUnavailable("google:calendar");
       return { id: json.id };
     },
@@ -209,7 +214,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
     async deleteAcl(calendarId, ruleId) {
       const res = await call(`${cal(calendarId)}/acl/${encodeURIComponent(ruleId)}`, { method: "DELETE" });
       if (res.ok || gone(res.status)) return;
-      await fail(res);
+      await fail(res, { api: "calendar", operation: "acl.delete" });
     },
 
     async insertEvent(calendarId, input) {
@@ -227,13 +232,13 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
         if (existing) return existing;
         throw new EventIdTaken(input.id);
       }
-      return mapEvent(await readJson<GoogleEvent>(res));
+      return mapEvent(await readJson<GoogleEvent>(res, "events.insert"));
     },
 
     async getEvent(calendarId, eventId) {
       const res = await call(`${cal(calendarId)}/events/${encodeURIComponent(eventId)}`, { method: "GET" });
       if (gone(res.status)) return null;
-      const json = await readJson<GoogleEvent & { status?: string }>(res);
+      const json = await readJson<GoogleEvent & { status?: string }>(res, "events.get");
       // A deleted event can still be read back with status "cancelled".
       return json.status === "cancelled" ? null : mapEvent(json);
     },
@@ -242,7 +247,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
       const url = new URL(`${cal(calendarId)}/events/${encodeURIComponent(eventId)}`);
       url.searchParams.set("sendUpdates", "all");
       url.searchParams.set("conferenceDataVersion", "1");
-      return mapEvent(await readJson<GoogleEvent>(await call(url.toString(), { method: "PATCH", body: JSON.stringify(eventBody(patch)) })));
+      return mapEvent(await readJson<GoogleEvent>(await call(url.toString(), { method: "PATCH", body: JSON.stringify(eventBody(patch)) }), "events.patch"));
     },
 
     async deleteEvent(calendarId, eventId) {
@@ -250,7 +255,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
       url.searchParams.set("sendUpdates", "all");
       const res = await call(url.toString(), { method: "DELETE" });
       if (res.ok || gone(res.status)) return;
-      await fail(res);
+      await fail(res, { api: "calendar", operation: "events.delete" });
     },
 
     async openMeet(meetUrl) {
@@ -259,12 +264,13 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
       // A meeting code is an alias of the space; patch needs its real name ("spaces/…").
       const space = await readJson<{ name?: string; config?: { accessType?: string } }>(
         await call(`${MEET_BASE}/spaces/${encodeURIComponent(code)}`, { method: "GET" }),
+        { api: "meet", operation: "spaces.get" },
       );
       if (space.config?.accessType === "OPEN") return true;
       if (!space.name || !/^spaces\/[\w-]+$/.test(space.name)) throw errors.upstreamUnavailable("google:meet");
       const url = new URL(`${MEET_BASE}/${space.name}`);
       url.searchParams.set("updateMask", "config.accessType");
-      await readJson(await call(url.toString(), { method: "PATCH", body: JSON.stringify({ config: { accessType: "OPEN" } }) }));
+      await readJson(await call(url.toString(), { method: "PATCH", body: JSON.stringify({ config: { accessType: "OPEN" } }) }), { api: "meet", operation: "spaces.patch" });
       return true;
     },
   };

@@ -23,7 +23,8 @@ import { MemberService, type ReqCtx } from "./service";
 import { HrService } from "./hr-service";
 import { HrFormService } from "./hr-form-service";
 import { registerHrInterviewFormRoutes } from "./hr-form-routes";
-import type { hr, sponsor } from "@dub/types";
+import type { goal, hr, sponsor } from "@dub/types";
+import { GoalService } from "./goal-service";
 import { SponsorService } from "./sponsor-service";
 import { SponsorLeadService } from "./sponsor-lead-service";
 
@@ -73,6 +74,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const hrSvc = new HrService(deps, svc);
   const sponsorSvc = new SponsorService(deps);
   const sponsorLeadSvc = new SponsorLeadService(deps);
+  const goalSvc = new GoalService(deps);
   const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "member-service" }));
@@ -149,6 +151,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.getOverview(reqCtx(c)));
   });
 
+  // 組織図までのロール向け。形は overview と同じで、個人情報の項目は空。
+  app.get("/members/org-overview", async (c) => {
+    return c.json(await svc.getOrgOverview(reqCtx(c)));
+  });
+
   // チーム単位メンション用の自分視点のチーム情報 (AUTHENTICATED in the table: signed-in なら
   // 誰でも可・名簿キー不要)。名簿を読む権限が無い一般メンバーでも「@統括チーム」を選べて、
   // 受け取った側もチップをチーム名で読める必要があるため。返すのはチーム(id/key/name/color)と
@@ -198,6 +205,10 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.patch("/members/people/:id", async (c) => {
     const body = await readJson<member.UpdateMemberRequest>(c);
     return c.json(await svc.updateMember(reqCtx(c), c.req.param("id"), body));
+  });
+  app.patch("/members/people/:id/org", async (c) => {
+    const body = await readJson<member.UpdateMemberOrgRequest>(c);
+    return c.json(await svc.updateMemberOrg(reqCtx(c), c.req.param("id"), body));
   });
   app.delete("/members/people/:id", async (c) => {
     await svc.deleteMember(reqCtx(c), c.req.param("id"));
@@ -299,6 +310,17 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
 
   // ---- スポンサー (フェーズ1 = 名刺の共有) ----
+  // 目標管理。認可は表、入力の検証と楽観ロックは goal-service。
+  app.get("/members/goals", async (c) => c.json(await goalSvc.list(reqCtx(c), c.req.query("month"))));
+  app.put("/members/goals/:teamId/:month", async (c) => {
+    const body = await readJson<goal.PutGoalRequest>(c);
+    return c.json(await goalSvc.put(reqCtx(c), c.req.param("teamId"), c.req.param("month"), body));
+  });
+  app.delete("/members/goals/:teamId/:month", async (c) => {
+    await goalSvc.remove(c.req.param("teamId"), c.req.param("month"));
+    return c.body(null, 204);
+  });
+
   // 認可は表 (スポンサーアプリの 閲覧/編集 + sponsor:read / sponsor:write / sponsor:admin)。
   // 写真は JSON ではなく生のバイト列 (Content-Type = 形式)。形式・サイズ・楽観ロックはハンドラ (sponsor-service)。
   app.get("/members/sponsor/leads", async (c) => c.json(await sponsorLeadSvc.list(reqCtx(c))));

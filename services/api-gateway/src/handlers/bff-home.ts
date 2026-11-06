@@ -7,7 +7,7 @@
 //   • notification-service /inbox/unread-count → unreadCount
 //   • task-service         /tasks?assigneeId → taskSummary (caller's own tasks)
 //   • usage-meter          /usage/summary    → usageSummary (free-tier snapshot)
-//   • member-service       /members/overview → orgStats (運営メンバー / チーム)
+//   • member-service       /members/org-overview → orgStats (運営メンバー / チーム)
 import type { Context } from "hono";
 import type { GatewayEnv } from "../env";
 import type { GatewayVariables } from "../context";
@@ -113,7 +113,7 @@ export async function bffHomeHandler(
     }),
     fetchTaskSummary(svc, ctx),
     svc.usage.get<UsageSummaryWire>(ctx, "/usage/summary", { timeoutMs: PER_CALL_TIMEOUT_MS }),
-    svc.member.get<member.MembersOverview>(ctx, "/members/overview", { timeoutMs: PER_CALL_TIMEOUT_MS }),
+    svc.member.get<member.MembersOverview>(ctx, "/members/org-overview", { timeoutMs: PER_CALL_TIMEOUT_MS }),
   ]);
 
   const partialErrors: gateway.UpstreamPartialError[] = [];

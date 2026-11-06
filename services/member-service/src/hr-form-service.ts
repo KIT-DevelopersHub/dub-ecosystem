@@ -34,7 +34,7 @@ function toForm(row: HrFormRow | null): hrForm.InterviewForm {
   return {
     title: row.title,
     description: row.description,
-    questions: row.questions,
+    questions: hrForm.upgradeQuestions(row.questions),
     accepting: row.accepting,
     version: row.version,
     updatedBy: row.updatedBy,
@@ -63,9 +63,11 @@ export class HrFormService {
       throw errors.validationFailed([{ field: "expectedVersion", reason: "required" }]);
     }
     if (typeof b.accepting !== "boolean") throw errors.validationFailed([{ field: "accepting", reason: "required" }]);
-    const bad = hrForm.validateFormDefinition({ title: b.title, description: b.description, questions: b.questions });
+    // 旧形式を開いたままのタブからの保存も通す。
+    const questions = Array.isArray(b.questions) ? hrForm.upgradeQuestions(b.questions) : b.questions;
+    const bad = hrForm.validateFormDefinition({ title: b.title, description: b.description, questions });
     if (bad.length > 0) throw errors.validationFailed(bad);
-    const normalized = hrForm.normalizeFormDefinition(b as hrForm.SaveInterviewFormRequest);
+    const normalized = hrForm.normalizeFormDefinition({ ...b, questions } as hrForm.SaveInterviewFormRequest);
     const now = this.deps.now();
     const cur = await this.deps.hrFormRepo.getForm(this.deps.orgId, INTERVIEW_FORM_KEY);
     const expected = b.expectedVersion;

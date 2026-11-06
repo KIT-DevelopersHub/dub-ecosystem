@@ -6,6 +6,7 @@
 // Remote examples:
 //   node --import tsx scripts/verify.ts --remote dub-core
 //   WRANGLER_BIN="node /path/to/wrangler.js" node --import tsx scripts/verify.ts --remote dub-core-staging
+import { collectSqlDir } from "../src/collect";
 import { lintAllErrors } from "../src/lint-all";
 import { verifySchema } from "../src/verify-schema";
 import { fileD1 } from "../src/node-d1";
@@ -40,7 +41,10 @@ async function main(): Promise<void> {
       return;
     }
     // Read-only: no ensureLedger, SELECT/PRAGMA only. Safe to point at prod.
-    const res = await verifySchema(remoteD1(database), undefined, { readOnly: true });
+    // --sql-dir: a D1 one service owns alone (e.g. services/lp-tickets/db), not the aggregated set.
+    const sqlDir = flagValue(argv, "--sql-dir");
+    const migrations = sqlDir ? collectSqlDir(sqlDir, "lp") : undefined;
+    const res = await verifySchema(remoteD1(database), migrations, { readOnly: true });
     console.log(JSON.stringify({ target: `remote:${database}`, ...res }, null, 2));
     if (!res.ok) process.exit(1);
     return;

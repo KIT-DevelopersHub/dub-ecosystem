@@ -10,6 +10,7 @@ import { createGoogleAccountService, type GoogleAccountService } from "../src/go
 import { createInMemoryGoogleAccountStore } from "../src/google-account-store";
 import type { Env } from "../src/env";
 import { createMeetingsService } from "../src/meetings-service";
+import type { MeetingSyncState } from "../src/meeting-sync-state";
 import { createInMemoryMeetingStore } from "../src/meetings-store";
 import { createInMemoryAttendanceStore } from "../src/attendance-store";
 import { createAttendanceService, type MeetRecordsAccess } from "../src/attendance-service";
@@ -135,6 +136,7 @@ export function buildMeetings(opts: {
   meetReady?: boolean;
   attendance?: ReturnType<typeof createInMemoryAttendanceStore>;
   background?: (work: Promise<unknown>) => void;
+  syncState?: MeetingSyncState;
 } = {}) {
   const store = opts.store ?? createInMemoryMeetingStore();
   const calendar = opts.calendar ?? createMockCalendarClient();
@@ -163,6 +165,7 @@ export function buildMeetings(opts: {
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
     ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
     ...(opts.background ? { background: opts.background } : {}),
+    ...(opts.syncState ? { syncState: opts.syncState } : {}),
   });
   return { service, store, calendar, kicks, attendance };
 }

@@ -40,6 +40,7 @@ import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.ts
 import { lpRoutes, lpNav } from "../features/lp/index.tsx";
 import { hrRoutes, hrNav, HrProvider } from "../features/hr/index.tsx";
 import { sponsorRoutes, sponsorNav, SponsorProvider } from "../features/sponsor/index.tsx";
+import { goalsRoutes, goalsNav, GoalsProvider } from "../features/goals/index.tsx";
 import { LpProvider } from "../features/lp/LpProvider.tsx";
 import { commanderRoutes, commanderNav } from "../features/commander/index.tsx";
 import { CommanderProvider } from "../features/commander/CommanderProvider.tsx";
@@ -312,6 +313,8 @@ function adaptCalendar(api: ApiClient): FeatureModule {
 // hand-maintained 組織図 PDF). Like mail/usage it lives in the shell (features/members)
 // rather than a separate FE package. Nav sits after usage (order 47), before admin.
 // Route gate = identity:read; write actions are re-authorized server-side (identity:admin).
+const isMailRosterRoute = (r: SourceRoute): boolean => r.path.startsWith("/admin/users");
+
 function adaptMembers(api: ApiClient): FeatureModule {
   const provider = providerWrapper(MembersProvider, api);
   // サブナビ帯はシェルのレイアウトで永続表示するので、ここは Provider だけで包む（帯は敷かない）。
@@ -321,7 +324,12 @@ function adaptMembers(api: ApiClient): FeatureModule {
   // タイル内の共有サブナビ(MemberRosterNav)から横断する。ロール管理(/admin/roles) だけは独立タイル
   // として adaptAdmin が別に出す（ユーザー明示指示: ロールを外に括り出す）。
   const nav: NavEntry[] = membersNav.map((n) => ({ label: "運営メンバー・名簿", path: n.path, icon: n.icon, order: 47 }));
-  return { id: "members", routes, nav };
+  // メール名簿は実装こそ FE7 だが 運営メンバーアプリの範囲で開閉する (app:admin:view では制御しない)。
+  const rosterProvider = providerWrapper(RosterProviders, api);
+  const mailRoster = (adminModule.routes as readonly SourceRoute[])
+    .filter(isMailRosterRoute)
+    .map((r) => wrapRoute(r, rosterProvider));
+  return { id: "members", routes: [...routes, ...mailRoster], nav };
 }
 
 // ── participation (FE2-local feature module) ──────────────────────────────────
@@ -390,6 +398,16 @@ function adaptSponsor(api: ApiClient): FeatureModule {
   return { id: "sponsor", routes, nav };
 }
 
+// ── goals (FE2-local feature) ─────────────────────────────────────────────────
+// 目標管理: チームの月間目標と KPI。member-service /members/goals を読む/書くので GoalsProvider で包む。
+// nav はスポンサーの隣 (order 51)。未公開 (PUBLISHED_APPS 外) なので admin 以外はグレー。
+function adaptGoals(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(GoalsProvider, api);
+  const routes = (goalsRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = goalsNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 51 }));
+  return { id: "goals", routes, nav };
+}
+
 // ── commander (FE2-local feature) ─────────────────────────────────────────────
 // Commander drives the operator's LOCAL Claude Code exec bridge and gates demo→staging→
 // prod phase moves. Admin/dev tooling: it can spawn arbitrary Claude Code locally, so the
@@ -414,11 +432,11 @@ function adaptAdmin(api: ApiClient): FeatureModule {
   // 永続表示するので Provider だけで包む（帯はシェルが pathname=/admin/users で出し、/admin/roles では
   // 出さない）。ロール管理(/admin/roles*) は独立タイルとして単独で成立する（従来どおり帯なし）。
   const src = adminModule.routes as readonly SourceRoute[];
-  const routes = src.map((r) => wrapRoute(r, provider));
+  const routes = src.filter((r) => !isMailRosterRoute(r)).map((r) => wrapRoute(r, provider));
   // 独立ランチャータイルは「ロール管理」(/admin/roles) の 1 つだけ。名簿(/admin/users) は運営メンバー・
   // 名簿タイル内の共有サブナビ(MemberRosterNav)から開くので個別タイルを出さない。変更履歴(/admin/history)
   // の UI は撤去済み（ルート/コンポーネントごと削除・監査ログのデータ基盤は残置）。route ガード
-  // (requiredPermissions)・headerWidget は維持。app:admin:view が名簿タブとロール管理タイルの両方をガードする。
+  // (requiredPermissions)・headerWidget は維持。名簿のルートは adaptMembers が持つ。
   const nav: NavEntry[] = [{ label: "ロール管理", path: "/admin/roles", icon: "shield", order: 50 }];
   return withModulePerms(adminModule, { id: "admin", routes, nav });
 }
@@ -471,9 +489,10 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptLp(api),
     adaptHr(api),
     adaptSponsor(api),
+    adaptGoals(api),
     adaptAdmin(api),
     adaptCommander(api),
   ].map(withNavAppId).map(withAppAccessGate);
 }
 
-export { adaptEvents, adaptTasks, adaptGantt, adaptCalendar, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptHr, adaptSponsor, adaptAdmin, adaptCommander, toIcon };
+export { adaptEvents, adaptTasks, adaptGantt, adaptCalendar, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptHr, adaptSponsor, adaptGoals, adaptAdmin, adaptCommander, toIcon };

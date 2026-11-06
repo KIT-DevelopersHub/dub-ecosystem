@@ -10,6 +10,8 @@ import type { BlockKind } from "./mailModel.ts";
 
 export interface SenderBlocks {
   block(value: string, kind: BlockKind): void;
+  /** Block several addresses at once (a selection). Those that fail are rolled back alone. */
+  blockMany(emails: string[]): void;
   unblock(value: string): void;
 }
 
@@ -41,6 +43,30 @@ export function useSenderBlocks(): SenderBlocks {
     [api, current, dispatch],
   );
 
+  const blockMany = useCallback(
+    (emails: string[]): void => {
+      const snapshot = current;
+      const values = [...new Set(emails.map((e) => e.trim().toLowerCase()))].filter((v) => v && !snapshot.some((b) => b.value === v));
+      if (values.length === 0) return;
+      const now = new Date().toISOString();
+      const optimistic = values.map((value): mail.MailSenderBlock => ({ value, kind: "address", createdAt: now }));
+      dispatch({ type: "SET_BLOCKS", blocks: [...optimistic, ...snapshot] });
+      void Promise.allSettled(values.map((value) => api.addBlock({ value, kind: "address" }))).then((results) => {
+        const saved = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+        dispatch({ type: "SET_BLOCKS", blocks: [...saved, ...snapshot] });
+        const failed = values.length - saved.length;
+        dispatch({
+          type: "BLOCK_NOTICE",
+          notice:
+            failed > 0
+              ? { status: "failed", text: `${values.length}件中${failed}件の送信者をブロックできませんでした` }
+              : { status: "blocked", text: `${values.length}件の送信者をブロックしました` },
+        });
+      });
+    },
+    [api, current, dispatch],
+  );
+
   const unblock = useCallback(
     (value: string): void => {
       const target = current.find((b) => b.value === value);
@@ -56,5 +82,5 @@ export function useSenderBlocks(): SenderBlocks {
     [api, current, dispatch],
   );
 
-  return { block, unblock };
+  return { block, blockMany, unblock };
 }

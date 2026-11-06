@@ -40,10 +40,11 @@ export const membersRoutes: MembersSourceRoute[] = [
   },
   {
     // 運営名簿: 運営メンバー全員をフラットな一覧で並べる名簿ビュー（/members と同じ Provider・
-    // 共有サブナビ配下・同じゲート app:members:view）。
+    // 共有サブナビ配下）。個人情報を並べるので 閲覧範囲が メール名簿以外 以上のロールだけ。
     path: "/members/roster",
     lazy: () => Promise.resolve({ Component: MemberRosterPage }),
     auth: "required",
+    requiredPermissions: ["members:roster_view"],
   },
   {
     // 組織図: 共有サブナビの上タブ（旧 運営メンバー画面の内側タブ）。同じ Provider・同じゲート。

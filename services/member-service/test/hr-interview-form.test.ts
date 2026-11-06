@@ -7,8 +7,10 @@ import { call, createApp, fakeAuthz, makeDeps } from "./harness";
 type App = ReturnType<typeof createApp>;
 
 const ANSWERS = {
-  name: " 山田 太郎 ",
-  name_kana: "やまだ たろう",
+  last_name: " 山田 ",
+  first_name: "太郎",
+  last_name_kana: "やまだ",
+  first_name_kana: "たろう",
   email: "Taro@Example.com",
   department: "情報工学科",
   grade: "2年",
@@ -46,6 +48,43 @@ describe("人事: 面談申し込みフォームの定義", () => {
     const pub = await call(app, "GET", "/members/internal/hr/interview-form", { internal: true, userId: null });
     expect(pub.status).toBe(200);
     expect(Object.keys(pub.json).sort()).toEqual(["accepting", "description", "questions", "title"]);
+  });
+
+  it("serves a form saved in the old shape (氏名 1 欄) split, accepts answers to it, and saves it in the new shape", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const q = (id: string, type: string, binding: string, extra: object = {}) => ({
+      id, type, label: id, description: null, required: true, options: [], binding, ...extra,
+    });
+    await deps.hrFormRepo.insertForm({
+      orgId: deps.orgId,
+      formKey: "interview",
+      title: "旧フォーム",
+      description: null,
+      accepting: true,
+      version: 3,
+      updatedBy: "usr_x",
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+      questions: [q("name", "short_text", "name"), q("mail", "email", "email")] as unknown as hrForm.FormQuestion[],
+    });
+
+    const cur = (await call(app, "GET", "/members/hr/interview-form")).json as hrForm.InterviewForm;
+    expect(cur.questions.map((x) => x.binding)).toEqual(["lastName", "firstName", "email"]);
+
+    const res = await publicSubmit(app, { last_name: "山田", first_name: "太郎", mail: "taro@example.com" });
+    expect(res.status).toBe(201);
+    expect((await call(app, "GET", "/members/hr/applicants")).json.applicants[0]).toMatchObject({ name: "山田 太郎" });
+
+    expect((await saveForm(app)).status).toBe(200);
+    const stored = await deps.hrFormRepo.getForm(deps.orgId, "interview");
+    expect(stored?.questions.map((x) => x.binding)).toEqual(["lastName", "firstName", "email"]);
+  });
+
+  it("answers 400, not 500, to malformed questions", async () => {
+    const app = createApp(makeDeps());
+    const malformed = [null, { binding: "grade" }, { binding: "name" }] as unknown as hrForm.FormQuestion[];
+    expect((await saveForm(app, { questions: malformed })).status).toBe(400);
   });
 
   it("saves edits with optimistic locking and normalizes whitespace", async () => {
@@ -121,10 +160,10 @@ describe("人事: 面談申し込みフォームの回答", () => {
 
   it("validates answers with field errors", async () => {
     const app = createApp(makeDeps());
-    const res = await publicSubmit(app, { name: "", email: "nope", grade: "9年" });
+    const res = await publicSubmit(app, { last_name: "", email: "nope", grade: "9年" });
     expect(res.status).toBe(400);
     const fields = res.json.error.details.map((f: { field: string }) => f.field);
-    expect(fields).toEqual(expect.arrayContaining(["answers.name", "answers.email", "answers.grade"]));
+    expect(fields).toEqual(expect.arrayContaining(["answers.last_name", "answers.first_name", "answers.email", "answers.grade"]));
     expect((await call(app, "GET", "/members/hr/applicants")).json.applicants).toHaveLength(0);
   });
 

@@ -26,7 +26,7 @@ import {
   useRemoveApplicant,
   useUpdateApplicant,
 } from "./hrHooks.ts";
-import { ApplicantFormAnswers } from "./ApplicantFormAnswers.tsx";
+import { ApplicantFormAnswers, ParticipationLinkButton } from "./ApplicantFormAnswers.tsx";
 import styles from "./hr.module.css";
 
 export const STAGE_LABELS = hr.APPLICANT_STAGE_LABELS;
@@ -207,9 +207,9 @@ function eventLabel(e: hr.ApplicantEvent): string {
   }
 }
 
-/** 削除できるか: hr:admin で、名簿に結ばれていない (採用前の) 人だけ (サーバは採用済みに 409)。 */
+/** 削除できるか: hr:admin で、採用〜オンボーディング完了でない人だけ (サーバも同じ判定で 409)。 */
 export function canRemoveApplicant(a: hr.Applicant, canAdmin: boolean): boolean {
-  return canAdmin && a.memberId === null;
+  return canAdmin && !hr.blocksRemoval(a.stage, a.memberId !== null);
 }
 
 /**
@@ -233,7 +233,13 @@ export function RemoveApplicantDialog({
       open={applicant !== null}
       danger
       title="応募を削除しますか？"
-      message={applicant ? `${applicant.name} さんの応募を一覧から削除します。面談の履歴と申し込みフォームの回答は記録として残ります。` : ""}
+      message={
+        applicant
+          ? `${applicant.name} さんの応募を一覧から削除します。面談の履歴と申し込みフォームの回答は記録として残ります。${
+              applicant.memberId !== null ? "名簿の登録は解除されません。" : ""
+            }`
+          : ""
+      }
       confirmLabel="削除する"
       onCancel={onClose}
       onConfirm={() => {
@@ -258,7 +264,7 @@ export function RemoveApplicantButton({
   const allowed = canRemoveApplicant(applicant, canAdmin);
   const label = !canAdmin
     ? "応募の削除は人事の管理者のみできます"
-    : applicant.memberId !== null
+    : hr.blocksRemoval(applicant.stage, applicant.memberId !== null)
       ? "採用済み（名簿に追加済み）の人は削除できません"
       : `${applicant.name} さんの応募を削除`;
   return (
@@ -366,6 +372,8 @@ export function ApplicantDrawer({
         </dl>
 
         <ApplicantFormAnswers applicantId={a.id} />
+
+        <ParticipationLinkButton applicant={a} />
 
         {canWrite ? (
           <div>

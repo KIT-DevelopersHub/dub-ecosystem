@@ -85,7 +85,7 @@ export function ParticipationListPage(): JSX.Element {
   const { can } = usePermissions();
   const adminCap = useAppCapability("admin");
   const membersCap = useAppCapability("members");
-  const canIssueMail = adminCap.canEdit && membersCap.canEdit && can("identity:admin") && can("mail:admin");
+  const canIssueMail = adminCap.canEdit && membersCap.canEdit && can("identity:admin") && can("mail:admin") && can("members:mail_edit");
   const list = useParticipationList();
   const teamsQuery = useParticipationTeams();
   const resolveMut = useResolveParticipation();

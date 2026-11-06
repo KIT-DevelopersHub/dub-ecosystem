@@ -15,7 +15,7 @@ const set = (...keys: identity.PermissionKey[]): Set<identity.PermissionKey> =>
 describe("member-service RBAC — per-app keys are authoritative for the roster", () => {
   it("app:members:edit (+view) can OPEN and EDIT the roster (200) without identity:admin", async () => {
     // 統括ロール相当: per-app キーのみ保持(ドメイン identity:read/admin は無い)。
-    const authz = fakeAuthz(set("app:members:view", "app:members:edit"));
+    const authz = fakeAuthz(set("app:members:view", "app:members:edit", "members:roster_view", "members:roster_edit"));
     const app = createApp(makeDeps({ authz }));
 
     // read: overview 200
@@ -39,7 +39,7 @@ describe("member-service RBAC — per-app keys are authoritative for the roster"
   });
 
   it("app:members:view ONLY can read (200) but NOT edit (403)", async () => {
-    const authz = fakeAuthz(set("app:members:view"));
+    const authz = fakeAuthz(set("app:members:view", "members:roster_view"));
     const app = createApp(makeDeps({ authz }));
 
     const ov = await call(app, "GET", "/members/overview");
@@ -79,12 +79,12 @@ describe("member-service RBAC — per-app keys are authoritative for the roster"
     expect((await call(adminOnly, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(403);
 
     // What migration 0010 actually produces for a role that could write before: both keys.
-    const backfilled = createApp(makeDeps({ authz: fakeAuthz(set("identity:admin", "app:members:view", "app:members:edit")) }));
+    const backfilled = createApp(makeDeps({ authz: fakeAuthz(set("identity:admin", "app:members:view", "app:members:edit", "members:roster_view")) }));
     expect((await call(backfilled, "GET", "/members/overview")).status).toBe(200);
     expect((await call(backfilled, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(201);
 
     // ...and what it produces for a plain reader (member/organizer/maintainer): the view key.
-    const seededReader = createApp(makeDeps({ authz: fakeAuthz(set("identity:read", "app:members:view")) }));
+    const seededReader = createApp(makeDeps({ authz: fakeAuthz(set("identity:read", "app:members:view", "members:roster_view")) }));
     expect((await call(seededReader, "GET", "/members/overview")).status).toBe(200);
     expect((await call(seededReader, "POST", "/members/teams", { body: { name: "x" } })).status).toBe(403);
   });
@@ -92,11 +92,77 @@ describe("member-service RBAC — per-app keys are authoritative for the roster"
   it("no over-escalation: app:members:edit does NOT unlock 参加届 resolve (identity:admin)", async () => {
     // 参加届 resolve は別アプリ面 → identity:admin のまま。名簿編集者が勝手に届出審査に
     // 昇格しないこと(ゲートはハンドラ前に走るので id 実在は問わない)。
-    const authz = fakeAuthz(set("app:members:view", "app:members:edit"));
+    const authz = fakeAuthz(set("app:members:view", "app:members:edit", "members:roster_view", "members:roster_edit"));
     const app = createApp(makeDeps({ authz }));
     const res = await call(app, "POST", "/members/participation/part_x/resolve", {
       body: { action: "skip" },
     });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("member-service RBAC — 運営メンバーの範囲", () => {
+  const ORG_CHART_VIEW = set("app:members:view");
+  const ORG_CHART_EDIT = set("app:members:view", "app:members:edit");
+  const ROSTER_EDIT = set("app:members:view", "app:members:edit", "members:roster_view", "members:roster_edit");
+
+  async function seededPerson() {
+    const app = createApp(makeDeps({ authz: fakeAuthz(ROSTER_EDIT) }));
+    const person = await call(app, "POST", "/members/people", {
+      body: { name: "山田太郎", status: "added", teamIds: [], phone: "090-1234-5678", gmail: "yamada@gmail.com", note: "内緒" },
+    });
+    expect(person.status).toBe(201);
+    return { app, person: person.json };
+  }
+
+  it("組織図まで: overview は 403、org-overview は個人情報なしの行を返す", async () => {
+    const deps = makeDeps({ authz: fakeAuthz(ROSTER_EDIT) });
+    const writer = createApp(deps);
+    await call(writer, "POST", "/members/people", {
+      body: { name: "山田太郎", status: "added", teamIds: [], phone: "090-1234-5678", gmail: "yamada@gmail.com", note: "内緒" },
+    });
+    const app = createApp({ ...deps, authz: fakeAuthz(ORG_CHART_VIEW) });
+    expect((await call(app, "GET", "/members/overview")).status).toBe(403);
+    expect((await call(app, "GET", "/members/people/by-identity/usr_x")).status).toBe(403);
+
+    const org = await call(app, "GET", "/members/org-overview");
+    expect(org.status).toBe(200);
+    const [row] = org.json.members;
+    expect(row.name).toBe("山田太郎");
+    expect(row.phone).toBeNull();
+    expect(row.gmail).toBeNull();
+    expect(row.note).toBeNull();
+    expect(JSON.stringify(org.json)).not.toContain("090-1234-5678");
+  });
+
+  it("組織図までの編集: /org は運営での項目だけ反映し、本人の情報は無視して返さない", async () => {
+    const deps = makeDeps({ authz: fakeAuthz(ROSTER_EDIT) });
+    const writer = createApp(deps);
+    const created = await call(writer, "POST", "/members/people", {
+      body: { name: "山田太郎", status: "added", teamIds: [], phone: "090-1234-5678" },
+    });
+    const app = createApp({ ...deps, authz: fakeAuthz(ORG_CHART_EDIT) });
+
+    const denied = await call(app, "PATCH", `/members/people/${created.json.id}`, {
+      body: { phone: "000", version: created.json.version },
+    });
+    expect(denied.status).toBe(403);
+
+    const ok = await call(app, "PATCH", `/members/people/${created.json.id}/org`, {
+      body: { roleTitle: "会場リーダー", phone: "000", version: created.json.version },
+    });
+    expect(ok.status).toBe(200);
+    expect(ok.json.roleTitle).toBe("会場リーダー");
+    expect(ok.json.phone).toBeNull();
+
+    const full = await call(writer, "GET", "/members/overview");
+    expect(full.json.members[0].phone).toBe("090-1234-5678");
+  });
+
+  it("3 段階が閲覧なら /org も 403", async () => {
+    const { person } = await seededPerson();
+    const app = createApp(makeDeps({ authz: fakeAuthz(ORG_CHART_VIEW) }));
+    const res = await call(app, "PATCH", `/members/people/${person.id}/org`, { body: { roleTitle: "x", version: person.version } });
     expect(res.status).toBe(403);
   });
 });

@@ -129,6 +129,9 @@ describe("demo transport (人事の削除)", () => {
     expect((await api.list()).applicants.some((a) => a.id === pre.id)).toBe(false);
     await expect(api.remove(joined.id)).rejects.toMatchObject({ status: 409, code: "HR_APPLICANT_JOINED" });
     expect((await api.list()).applicants.some((a) => a.id === joined.id)).toBe(true);
+    const left = applicants.find((a) => a.stage === "withdrawn" && a.memberId !== null)!;
+    await api.remove(left.id);
+    expect((await api.list()).applicants.some((a) => a.id === left.id)).toBe(false);
   });
 });
 
@@ -185,6 +188,15 @@ describe("HrApplicantsScreen (応募の削除)", () => {
     expect(removeButton("app_1").disabled).toBe(false);
     expect(removeButton("app_3").disabled).toBe(true); // 採用済み
     expect(removeButton("app_3").getAttribute("aria-label")).toContain("採用済み");
+  });
+
+  it("can delete someone moved to 辞退 after joining, and says the roster stays", async () => {
+    const left = applicant({ id: "app_6", name: "野村 蓮", stage: "withdrawn", memberId: "m4" });
+    renderWith(<HrApplicantsScreen />, fakeApi({ list: () => Promise.resolve({ applicants: [left] }) }));
+    await screen.findByTestId("fe2-hr-row-app_6");
+    expect(removeButton("app_6").disabled).toBe(false);
+    fireEvent.click(removeButton("app_6"));
+    expect((await screen.findByTestId("fe2-hr-remove-confirm")).textContent).toContain("名簿の登録は解除されません");
   });
 
   it("a recruiter without hr:admin sees the button disabled", async () => {

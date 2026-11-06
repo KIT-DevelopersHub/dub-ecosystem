@@ -17,6 +17,7 @@ import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../au
 import { createParticipationApi, type ParticipationApi } from "./participationApi.tsx";
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
 import { ParticipationForm } from "./ParticipationForm.tsx";
+import { PUBLIC_PARTICIPATION_PATH, parsePrefillHash, prefillPath } from "./prefillLink.ts";
 import { OnboardingAdminPage } from "./OnboardingAdminPage.tsx";
 import { ParticipationListPage } from "./ParticipationListPage.tsx";
 import { PublicOnboardingPage } from "./PublicOnboardingPage.tsx";
@@ -69,6 +70,7 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
     list: vi.fn(() => Promise.resolve({ participations: [] })),
     candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
     overview: vi.fn(() => Promise.resolve({ teams: [], members: [] })),
+    orgOverview: vi.fn(() => Promise.resolve({ teams: [], members: [] })),
     resolve: vi.fn((id: string) =>
       Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const }, member: null }),
     ),
@@ -88,7 +90,7 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
 function wrap(
   ui: ReactNode,
   api: ParticipationApi,
-  permissions = editorPermissions("participation", ["identity:read", "identity:admin"]),
+  permissions = editorPermissions("participation", ["identity:read", "identity:admin", "members:roster_view"]),
 ): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
@@ -140,6 +142,34 @@ describe("createParticipationApi", () => {
     const { api, calls } = fakeApiClient({ participation: SUBMISSION, member: null });
     await createParticipationApi(api).resolve("p_1", { action: "create" });
     expect(calls[0]).toMatchObject({ method: "POST", path: "/api/v1/members/participation/p_1/resolve", body: { action: "create" } });
+  });
+});
+
+describe("参加届の入力済みリンク", () => {
+  const prefill = { lastName: "森", firstName: "結菜", lastNameKana: "もり", firstNameKana: "ゆいな", schoolEmail: "c1@st.example.ac.jp", grade: "2", department: "情報工学科" } as const;
+
+  it("round-trips Japanese values and fills romaji from kana", () => {
+    const hash = prefillPath(prefill).replace(PUBLIC_PARTICIPATION_PATH, "");
+    expect(parsePrefillHash(hash)).toMatchObject({ ...prefill, lastNameRomaji: "Mori", firstNameRomaji: "Yuina", gmail: "" });
+  });
+
+  it("ignores broken links and drops invalid values", () => {
+    expect(parsePrefillHash("")).toBeNull();
+    expect(parsePrefillHash("#prefill=%%%")).toBeNull();
+    expect(parsePrefillHash(`#prefill=${"a".repeat(5000)}`)).toBeNull();
+    const hash = prefillPath({ lastName: "森", gmail: "broken" }).replace(PUBLIC_PARTICIPATION_PATH, "");
+    expect(parsePrefillHash(hash)).toMatchObject({ lastName: "森", gmail: "" });
+  });
+
+  it("opens the form filled in and removes the data from the URL", async () => {
+    window.history.replaceState(null, "", prefillPath(prefill));
+    render(wrap(<ParticipationForm />, makeApi()));
+    expect(await screen.findByTestId("participation-prefilled")).toBeTruthy();
+    expect((screen.getByTestId("participation-last-name") as HTMLInputElement).value).toBe("森");
+    expect((screen.getByTestId("participation-last-name-romaji") as HTMLInputElement).value).toBe("Mori");
+    expect((screen.getByTestId("participation-school-email") as HTMLInputElement).value).toBe("c1@st.example.ac.jp");
+    expect(window.location.hash).toBe("");
+    window.history.replaceState(null, "", "/");
   });
 });
 
@@ -613,7 +643,7 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
   ];
   // 参加届・管理・運営メンバーの編集 + identity:admin + mail:admin = 発行まで出来る人。
   const issuer = [
-    ...editorPermissions("participation", ["identity:read", "identity:admin", "mail:admin"]),
+    ...editorPermissions("participation", ["identity:read", "identity:admin", "mail:admin", "members:mail_edit"]),
     ...editorPermissions("admin"),
     ...editorPermissions("members"),
   ];

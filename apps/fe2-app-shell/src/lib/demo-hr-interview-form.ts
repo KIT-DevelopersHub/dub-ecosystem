@@ -82,7 +82,7 @@ export function createHrInterviewFormDemoStore(deps: { createApplicant: CreateAp
     seeding ??= (async () => {
       await submit(
         {
-          name: "森 結菜", name_kana: "もり ゆいな", email: "yuina@example.com", department: "情報工学科", grade: "1年",
+          last_name: "森", first_name: "結菜", last_name_kana: "もり", first_name_kana: "ゆいな", email: "yuina@example.com", department: "情報工学科", grade: "1年",
           interests: ["イベント運営", "広報"], motivation: "先輩に誘われて興味を持ちました。イベントの裏側を見てみたいです。",
           preferred_date: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10),
         },
@@ -90,7 +90,7 @@ export function createHrInterviewFormDemoStore(deps: { createApplicant: CreateAp
         PUBLIC_ACTOR,
       );
       await submit(
-        { name: "林 大翔", email: "hiroto@example.com", department: "機械工学科", grade: "2年", interests: ["開発"], motivation: "説明会で話を聞いて応募（電話で聞き取り）" },
+        { last_name: "林", first_name: "大翔", email: "hiroto@example.com", department: "機械工学科", grade: "2年", interests: ["開発"], motivation: "説明会で話を聞いて応募（電話で聞き取り）" },
         "staff",
         ME,
       );
