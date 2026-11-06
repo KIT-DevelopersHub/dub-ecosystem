@@ -47,6 +47,7 @@ import {
   type ItemKind,
 } from "./calendar-model";
 import { recurrenceLabel } from "./meeting-occurrences";
+import { useItemDragContext } from "./useItemDrag.tsx";
 import { KIND_ICON, KIND_VISUALS, PRIORITY_LABEL, UNTITLED_TITLE, itemVisual, type CalendarLabel } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
@@ -591,11 +592,17 @@ export function rectOf(el: Element): AnchorRect {
 export function ItemButton({
   item,
   onSelect,
+  draggable = false,
+  resizable = false,
   className,
   style,
 }: {
   item: CalendarItem;
   onSelect: (it: CalendarItem, anchor: AnchorRect) => void;
+  /** Lives on the grid: can be picked up. (Not in the 他N件 list, which floats over it.) */
+  draggable?: boolean;
+  /** 終日 bars only: shows the right-edge handle. */
+  resizable?: boolean;
   className?: string;
   style?: CSSProperties;
 }): JSX.Element {
@@ -604,13 +611,18 @@ export function ItemButton({
   const cancelled = item.task.status === "cancelled" ? styles.cancelled : "";
   const banner = item.allDay || item.startDay !== item.endDay;
   const vacation = banner && isVacationTask(item.task) ? styles.vacation : "";
+  const drag = useItemDragContext();
+  const dragging = drag.draggingId === item.task.id ? styles.dragging : "";
   return (
     <button
       type="button"
-      className={`${banner ? styles.bar : styles.monthItem} ${cancelled} ${vacation} ${className ?? ""}`}
+      className={`${banner ? styles.bar : styles.monthItem} ${cancelled} ${vacation} ${dragging} ${className ?? ""}`}
       style={banner ? { backgroundColor: v.color, ...style } : style}
       title={`${title}（${formatItemWhen(item)}）`}
-      onPointerDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        if (draggable) drag.begin(e, item);
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onSelect(item, rectOf(e.currentTarget));
@@ -632,6 +644,9 @@ export function ItemButton({
             {title}
           </span>
         </>
+      )}
+      {resizable && item.allDay && drag.canDrag(item) && (
+        <span className={styles.resizeRight} data-cal-resize data-testid={`calendar-resize-${item.task.id}`} />
       )}
     </button>
   );

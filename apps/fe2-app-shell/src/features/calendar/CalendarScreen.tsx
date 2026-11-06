@@ -4,7 +4,7 @@
 // No new backend: reads GET /api/v1/tasks (self-scoped), writes POST/PATCH/DELETE.
 // ミーティング (drive-share-service /meetings) are drawn alongside as their own calendars.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Icon, IconButton, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
+import { Button, ConfirmDialog, Icon, IconButton, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { common, identity, meeting, task } from "@dub/types";
@@ -19,6 +19,7 @@ import {
   encodeDescription,
   formatRangeTitle,
   isMeetingTask,
+  isPendingMeetingTask,
   formatRangeTitleShort,
   isScheduleTask,
   itemsOnDay,
@@ -26,13 +27,16 @@ import {
   kindOf,
   labelOf,
   PERSONAL_LABEL,
+  sameDates,
   shiftAnchor,
+  toCalendarItem,
   toCalendarItems,
   VACATION_TITLE,
   visibleDays,
   type CalendarItem,
   type CalendarView,
   type EventDraft,
+  type ItemDates,
 } from "./calendar-model";
 import {
   AddTeamPicker,
@@ -50,7 +54,8 @@ import { MeetingFilter } from "./MeetingFilter.tsx";
 import { MeetingFormDialog } from "./MeetingFormDialog.tsx";
 import { useUserPref } from "./calendar-prefs";
 import { isMeetingTargetVisible, meetingFormFromDraft, parseMeetingTargetChoices, type MeetingFormValues, type MeetingTargetChoices } from "./meeting-form";
-import { meetingTasks, type MeetingOccurrence } from "./meeting-occurrences";
+import { formatOccurrence, meetingTasks, type MeetingOccurrence } from "./meeting-occurrences";
+import { ItemDragProvider, useItemDrag } from "./useItemDrag.tsx";
 import { useMeetingMutations, useMeetingTargetsQuery, useMeetingsAccess, useMeetingsQuery } from "./useMeetings.tsx";
 import {
   KIND_VISUALS,
@@ -417,6 +422,30 @@ export function CalendarScreen(): JSX.Element {
     onSettled: settle,
   });
 
+  // Drag & drop writes only the dates, so everything else on the task stays as stored.
+  const moveMut = useMutation({
+    mutationFn: ({ item, dates }: { item: CalendarItem; dates: ItemDates; undo?: boolean }) =>
+      api.updateTask(item.task.id, { version: item.task.version, startAt: dates.startAt ?? null, dueAt: dates.dueAt ?? null }),
+    onMutate: async ({ item, dates }) => {
+      const snap = await snapshot();
+      qc.setQueryData<task.Task[]>(snap.key, (old) => (old ?? []).map((t) => (t.id === item.task.id ? { ...t, ...dates } : t)));
+      return snap;
+    },
+    onError: (_e, _v, ctx) => rollback(ctx, "予定を移動できませんでした"),
+    onSuccess: (updated, { item, undo }, ctx) => {
+      if (!ctx) return;
+      qc.setQueryData<task.Task[]>(ctx.key, (old) => (old ?? []).map((t) => (t.id === updated.id ? updated : t)));
+      if (undo) return;
+      const before: ItemDates = { startAt: item.task.startAt ?? null, dueAt: item.task.dueAt ?? null };
+      toast.show({
+        kind: "success",
+        title: "予定を移動しました",
+        action: { label: "元に戻す", onClick: () => moveMut.mutate({ item: { ...item, task: updated }, dates: before, undo: true }) },
+      });
+    },
+    onSettled: settle,
+  });
+
   const deleteMut = useMutation({
     mutationFn: (item: CalendarItem) => api.deleteTask(item.task.id),
     onMutate: async (item) => {
@@ -460,10 +489,59 @@ export function CalendarScreen(): JSX.Element {
     }
   };
 
+  // ── drag & drop ──────────────────────────────────────────────────────────
+  // A 定例 has one row and one Google series, so a single occurrence cannot move on its own: those
+  // change through 編集. タスク belong to マイタスク. A row with a write in flight waits for its
+  // new version.
+  const moving = moveMut.isPending ? moveMut.variables?.item.task.id : undefined;
+  const meetingOccById = meetingOcc.byId;
+  const canDragItem = useCallback(
+    (it: CalendarItem) => {
+      if (isMeetingTask(it.task)) {
+        const occ = meetingOccById.get(it.task.id);
+        return access.canEdit && accountReady && !isPendingMeetingTask(it.task) && !updateMeeting.isPending && occ?.meeting.recurrence === "none";
+      }
+      return canWrite && isScheduleTask(it.task) && !it.task.id.startsWith("tmp_") && it.task.id !== moving;
+    },
+    [access.canEdit, accountReady, canWrite, meetingOccById, moving, updateMeeting.isPending],
+  );
+  const [meetingMove, setMeetingMove] = useState<{ item: CalendarItem; dates: ItemDates } | null>(null);
+  const { api: itemDrag, preview: dragPreview } = useItemDrag({
+    canDrag: canDragItem,
+    onStart: () => setPanel(null),
+    onDrop: (item, dates) => {
+      if (sameDates(item.task, dates)) return;
+      // Moving a meeting mails everyone invited, so it is asked first (Google asks too).
+      if (isMeetingTask(item.task)) setMeetingMove({ item, dates });
+      else moveMut.mutate({ item, dates });
+    },
+  });
+  const confirmMeetingMove = () => {
+    const move = meetingMove;
+    const occ = move && meetingOcc.byId.get(move.item.task.id);
+    setMeetingMove(null);
+    if (!move || !occ) return;
+    const startsAt = new Date(move.dates.startAt!).toISOString();
+    const durationMinutes = Math.round((Date.parse(move.dates.dueAt!) - Date.parse(startsAt)) / 60_000);
+    updateMeeting.mutate(
+      { id: occ.meeting.id, body: { startsAt, durationMinutes } },
+      { onSuccess: () => toast.show({ kind: "success", title: "ミーティングを移動しました" }) },
+    );
+  };
+  // The dragged item is simply drawn at its new dates, so every view lays it out as it would stay.
+  const previewed = dragPreview ?? (meetingMove ? { id: meetingMove.item.task.id, dates: meetingMove.dates } : null);
+  const shownItems = useMemo(
+    () =>
+      previewed
+        ? items.map((it) => (it.task.id === previewed.id ? (toCalendarItem({ ...it.task, ...previewed.dates }) ?? it) : it))
+        : items,
+    [items, previewed],
+  );
+
   // Google's single-key shortcuts: t 今日 / j,n 次 / k,p 前 / d w m a 表示 / c 作成.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target) || panel || meetingForm || selectedMeeting) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target) || panel || meetingForm || selectedMeeting || meetingMove) return;
       const k = e.key.toLowerCase();
       if (k === "t") setAnchorDay(today);
       else if (k === "j" || k === "n") setAnchorDay((a) => shiftAnchor(view, a, 1));
@@ -476,7 +554,7 @@ export function CalendarScreen(): JSX.Element {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [panel, view, today, anchorDay, canWrite, meetingForm, selectedMeeting]);
+  }, [panel, view, today, anchorDay, canWrite, meetingForm, selectedMeeting, meetingMove]);
 
   const meetingNotice = !access.canView ? null : meetingsQ.isError ? (
     <div className={styles.meetingNotice} role="alert" data-testid="calendar-meetings-error">
@@ -528,7 +606,7 @@ export function CalendarScreen(): JSX.Element {
       <MonthGrid
         anchorDay={anchorDay}
         today={today}
-        items={items}
+        items={shownItems}
         canCreate={canWrite}
         onCreateAllDay={(d) => openCreate(draftForAllDay(d))}
         onSelectItem={selectItem}
@@ -543,7 +621,7 @@ export function CalendarScreen(): JSX.Element {
       <TimeGrid
         days={days}
         today={today}
-        items={items}
+        items={shownItems}
         ghost={panel?.kind === "create" ? panel.ghost : null}
         canCreate={canWrite}
         onCreateTimed={(d, s, e) => openCreate(draftForSlot(d, s, e), { day: d, startMin: s, endMin: e })}
@@ -556,7 +634,8 @@ export function CalendarScreen(): JSX.Element {
 
   return (
     <ItemTitleProvider value={itemTitle}>
-      <div className={styles.app} data-app-bleed data-testid="fe2-calendar">
+      <ItemDragProvider value={itemDrag}>
+      <div className={`${styles.app} ${dragPreview ? styles.isDragging : ""}`} data-app-bleed data-testid="fe2-calendar">
         <header className={styles.topbar}>
           <IconButton
             name="menu"
@@ -878,7 +957,26 @@ export function CalendarScreen(): JSX.Element {
             onSubmit={submitMeeting}
           />
         )}
+
+        <ConfirmDialog
+          open={meetingMove != null}
+          title="ミーティングを移動しますか？"
+          message={
+            meetingMove && (
+              <>
+                「{meetingMove.item.task.title}」を{" "}
+                {formatOccurrence(meetingMove.dates.startAt!, Math.round((Date.parse(meetingMove.dates.dueAt!) - Date.parse(meetingMove.dates.startAt!)) / 60_000))}{" "}
+                に変更します。招待している全員に Google から変更の通知が届きます。
+              </>
+            )
+          }
+          confirmLabel="移動する"
+          onConfirm={confirmMeetingMove}
+          onCancel={() => setMeetingMove(null)}
+          testId="calendar-meeting-move-confirm"
+        />
       </div>
+      </ItemDragProvider>
     </ItemTitleProvider>
   );
 }

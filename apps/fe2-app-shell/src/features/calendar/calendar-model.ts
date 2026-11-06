@@ -17,6 +17,10 @@ const MS_PER_MIN = 60_000;
 const ALL_DAY_RE = /T00:00:00(?:\.0+)?Z$/;
 /** Shortest drawn block for a timed item (a bare 期限 has no duration). */
 export const MIN_TIMED_MINUTES = 30;
+/** Pixel height of one hour in the 日/週 time grid. */
+export const HOUR_PX = 48;
+/** Grid snap of the time grid: creating, moving and resizing all land on this. */
+export const SNAP_MINUTES = 15;
 
 export type CalendarView = "day" | "week" | "month" | "schedule";
 
@@ -530,7 +534,8 @@ export function draftFromItem(it: CalendarItem): EventDraft {
     description,
     allDay: false,
     startDate: dayKeyOf(it.startDay),
-    endDate: dayKeyOf(it.endDay),
+    // Not endDay: an item ending at 24:00 is stored as 00:00 of the next date.
+    endDate: dayKeyOf(dayIndexOf(it.end!)),
     startTime: formatHHMM(it.start!),
     endTime: formatHHMM(it.end!),
   };
@@ -556,6 +561,92 @@ export function draftToDates(d: EventDraft): { startAt: string; dueAt: string } 
     return { startAt: `${d.startDate}T00:00:00.000Z`, dueAt: `${d.endDate}T00:00:00.000Z` };
   }
   return { startAt: localIso(d.startDate, d.startTime), dueAt: localIso(d.endDate, d.endTime) };
+}
+
+// ── drag & drop (move / resize, Google's rules) ─────────────────────────────
+
+/** What is under the pointer: a time grid slot, the 終日 lane, or a 月 cell. */
+export type DropTarget =
+  | { kind: "timed"; day: number; /** minutes from local midnight, unsnapped */ minute: number }
+  | { kind: "allday"; day: number }
+  | { kind: "day"; day: number };
+
+export interface ItemDrag {
+  item: CalendarItem;
+  mode: "move" | "resize";
+  /** The day grabbed: multi-day items keep this day under the pointer. */
+  fromDay: number;
+  /** Timed grid only: minutes between the item's start and the grab point. */
+  grabMinute: number;
+}
+
+export type ItemDates = Pick<task.Task, "startAt" | "dueAt">;
+
+const snapMinutes = (m: number) => Math.round(m / SNAP_MINUTES) * SNAP_MINUTES;
+const DAY_MINUTES = 24 * 60;
+
+/** Local wall-clock instant, `minute` minutes after midnight of `day` (may pass 24:00). */
+function atMinute(day: number, minute: number): Date {
+  const d = dateOfDay(day);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, minute);
+}
+
+/** The timed ISO form: with the local offset, so it can never read as 終日 (see the header). */
+function timedIso(d: Date): string {
+  return `${dayKeyOf(dayIndexOf(d))}T${formatHHMM(d)}:00${offsetFor(d)}`;
+}
+
+function timedDates(start: Date, durationMs: number): ItemDates {
+  return { startAt: timedIso(start), dueAt: timedIso(new Date(start.getTime() + durationMs)) };
+}
+
+function allDayDates(startDay: number, endDay: number): ItemDates {
+  return draftToDates(draftForAllDay(startDay, endDay));
+}
+
+/** The stored duration: `end` is padded for drawing and would stretch a short item on save. */
+function storedDurationMs(it: CalendarItem): number {
+  const s = parse(it.task.startAt);
+  const e = parse(it.task.dueAt);
+  return s && e && e > s ? e.getTime() - s.getTime() : it.end!.getTime() - it.start!.getTime();
+}
+
+function movedDates(drag: ItemDrag, target: DropTarget): ItemDates | null {
+  const { item, fromDay, grabMinute } = drag;
+  const delta = target.day - fromDay;
+  if (item.allDay) {
+    if (target.kind === "timed") return timedDates(atMinute(target.day, snapMinutes(target.minute)), 60 * MS_PER_MIN);
+    return allDayDates(item.startDay + delta, item.endDay + delta);
+  }
+  const start = item.start!;
+  const duration = storedDurationMs(item);
+  const startMinute = minutesInDay(start, item.startDay);
+  // Items crossing midnight live in the 終日 lane: they only ever shift by whole days.
+  if (item.startDay !== item.endDay) return timedDates(atMinute(item.startDay + delta, startMinute), duration);
+  if (target.kind === "day") return timedDates(atMinute(target.day, startMinute), duration);
+  if (target.kind === "allday") return isMeetingTask(item.task) ? null : allDayDates(target.day, target.day);
+  const latest = DAY_MINUTES - Math.ceil(duration / MS_PER_MIN);
+  const minute = Math.max(0, Math.min(latest, snapMinutes(target.minute - grabMinute)));
+  return timedDates(atMinute(target.day, minute), duration);
+}
+
+function resizedDates({ item }: ItemDrag, target: DropTarget): ItemDates | null {
+  if (item.allDay) return allDayDates(item.startDay, Math.max(item.startDay, target.day));
+  if (target.kind !== "timed" || item.startDay !== item.endDay) return null;
+  const startMinute = minutesInDay(item.start!, item.startDay);
+  const end = Math.max(startMinute + SNAP_MINUTES, Math.min(DAY_MINUTES, snapMinutes(target.minute)));
+  return timedDates(item.start!, (end - startMinute) * MS_PER_MIN);
+}
+
+/** The dates a drag ends on, or null when this target cannot take the item. */
+export function datesAfterDrag(drag: ItemDrag, target: DropTarget): ItemDates | null {
+  return drag.mode === "move" ? movedDates(drag, target) : resizedDates(drag, target);
+}
+
+/** True when the dates describe the instant(s) the item already has. */
+export function sameDates(t: ItemDates, dates: ItemDates): boolean {
+  const same = (a: string | null | undefined, b: string | null | undefined) => (a && b ? Date.parse(a) === Date.parse(b) : a === b);
+  return same(t.startAt, dates.startAt) && same(t.dueAt, dates.dueAt);
 }
 
 /** Every 15 minutes, for the time pickers. */

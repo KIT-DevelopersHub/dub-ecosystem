@@ -355,6 +355,11 @@
 .tgEvent:hover { box-shadow: var(--dub-shadow-md); z-index: 2; }
 .tgEventTitle { font-weight: var(--dub-font-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tgEventTime { opacity: 0.95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.resizeBottom { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; cursor: ns-resize; }
+.resizeRight { position: absolute; top: 0; right: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.dragging { box-shadow: var(--dub-shadow-lg); opacity: 0.9; z-index: 5; }
+.isDragging { user-select: none; }
+.isDragging * { cursor: grabbing !important; }
 .tgGhost { box-shadow: var(--dub-shadow-lg); z-index: 3; pointer-events: none; }
 .nowLine {
   position: absolute;
