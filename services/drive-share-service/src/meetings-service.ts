@@ -9,8 +9,9 @@
 // shares in step with role membership, removing ONLY what we added (the invite / ACL ledgers) —
 // never a guest or share someone added by hand in Google Calendar.
 //
-// Workers allow few subrequests per invocation, so Google calls run against a budget: a run that
-// hits it stops cleanly and reports `complete: false`; the alarm picks up the rest a minute later.
+// Workers allow few subrequests per invocation, so Google calls run against a budget. Only the
+// meeting scan can leave a run `complete: false`, and it continues where it stopped (meetingCursor),
+// so a budget stop ends after one pass over the meetings instead of repeating the same ones.
 //
 // Writes answer as soon as the event and the D1 row exist: sharing the target calendar costs one
 // Google call per member and blew the gateway's 15 s limit (504 although the meeting was made), so
@@ -28,6 +29,12 @@
 // (state in MeetingSyncDO): while paused it makes no Calendar call, from the alarm or by hand. Only
 // Calendar counts: Meet REST (openMeet, the ingest) and Drive have quotas of their own, keep
 // running, and a limit on them pauses nothing.
+//
+// To stay under those limits the sync spends little: a calendar whose share list has not changed
+// costs no listAcl (one full check a day still catches changes made in Google), a share that failed
+// waits ACL_RETRY_WAIT_MS, share writes are paced (ACL_WRITES_PER_RUN every ACL_WRITE_INTERVAL_MS),
+// and a meeting leaves the sync ENDED_SYNC_GRACE_MS after its last occurrence. Once a meeting is over
+// its attendees are frozen: Google would mail every change (sendUpdates=all) about a past meeting.
 import { errors } from "@dub/errors";
 import { meeting } from "@dub/types";
 import { EventIdTaken, type CalendarAttendee, type CalendarClient, type CalendarEvent, type CalendarEventInput } from "./google/calendar-client";
@@ -35,8 +42,8 @@ import { GoogleQuotaError, isCalendarQuota } from "./drive-client";
 import type { AttendanceStore } from "./attendance-store";
 import type { MemberDirectory } from "./member-directory";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
-import { DESCRIPTION_MAX, DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
-import { createInMemorySyncState, type MeetingSyncState } from "./meeting-sync-state";
+import { DESCRIPTION_MAX, DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, lastEndMs, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
+import { createInMemorySyncState, type CalendarAclState, type MeetingSyncSnapshot, type MeetingSyncState } from "./meeting-sync-state";
 import type { RoleMembership } from "./role-membership";
 
 export const ALL_TARGET_NAME = "全体";
@@ -48,6 +55,17 @@ const LIST_SOON_MS = 15_000;
 const LIST_KICK_MIN_GAP_MS = 60_000;
 /** How long the sync leaves Google Calendar alone after a usage limit. */
 export const QUOTA_PAUSE_MS = 6 * 60 * 60 * 1000;
+/** A share Google refused (for any reason but a limit) is not retried sooner than this. */
+export const ACL_RETRY_WAIT_MS = 24 * 60 * 60 * 1000;
+/** A calendar is compared with Google this often even when its share list has not changed. */
+export const ACL_FULL_CHECK_MS = 24 * 60 * 60 * 1000;
+/** Share writes (add + remove, failed ones too) in one run… */
+export const ACL_WRITES_PER_RUN = 10;
+/** …and the wait before more. Google publishes no safe rate we could confirm, so this is cautious:
+ *  at most 40 writes an hour, against 35 every 2 minutes (1,050 an hour) before. */
+export const ACL_WRITE_INTERVAL_MS = 15 * 60 * 1000;
+/** A meeting stays in the sync this long after it ended, so edits made in Google still arrive. */
+export const ENDED_SYNC_GRACE_MS = 24 * 60 * 60 * 1000;
 const NO_CALENDAR_SCOPE =
   "Google アカウントにカレンダーの権限がありません。Drive共有 > 設定 で同じアカウントを「再接続」してください。";
 
@@ -93,6 +111,9 @@ export interface SyncResult extends meeting.SyncMeetingsResponse {
   /** Set when the sync is paused by a Calendar usage limit (epoch ms it ends). Not a reason to
    *  run again: the run is over, and the next one is the hourly alarm. */
   quotaPausedUntil?: number;
+  /** Shares are left for a paced continuation, due in this many ms. The run still counts as
+   *  complete: the wait is long, and the other phases must not sit behind it. */
+  aclContinueMs?: number;
 }
 
 export interface MeetingsService {
@@ -101,8 +122,9 @@ export interface MeetingsService {
   create(userId: string, body: unknown): Promise<meeting.Meeting>;
   update(id: string, body: unknown, userId?: string): Promise<meeting.Meeting>;
   remove(id: string): Promise<void>;
-  /** opts.system = the alarm: a not-ready account is skipped instead of a 409. */
-  sync(opts?: { system?: boolean }): Promise<SyncResult>;
+  /** opts.system = the alarm: a not-ready account is skipped instead of a 409.
+   *  opts.aclOnly = a paced continuation: only the calendar shares. */
+  sync(opts?: { system?: boolean; aclOnly?: boolean }): Promise<SyncResult>;
 }
 
 /** One member to invite. */
@@ -173,6 +195,13 @@ function fieldsFromEvent(m: MeetingRow, ev: CalendarEvent): Partial<MeetingField
   const rule = ev.recurrence ? fromRecurrence(ev.recurrence) : null;
   if (rule && (rule.recurrence !== m.recurrence || rule.until !== m.until)) Object.assign(out, rule);
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Hash, not the list itself: the state needs no addresses to tell that the list changed. */
+async function fingerprintOf(desired: Set<string>, ownerEmail: string | null): Promise<string> {
+  const text = JSON.stringify([ownerEmail, ...[...desired].sort()]);
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function log(event: string, fields: Record<string, unknown>): void {
@@ -306,9 +335,9 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
   /** Active members with their invite address (one identity listing + one 名簿 lookup). identity
    *  reads roles per listed user, so narrow to `roleId` whenever only one target is wanted. */
-  async function invitees(roleId?: string): Promise<Invitee[]> {
+  async function invitees(roleId?: string, strict?: boolean): Promise<Invitee[]> {
     const users = await deps.roster.listActiveUsers(roleId);
-    const google = await deps.directory.googleEmails(users.map((u) => u.id));
+    const google = await deps.directory.googleEmails(users.map((u) => u.id), strict ? { strict } : undefined);
     return users.map((u) => {
       const g = google.get(u.id);
       return { userId: u.id, email: lower(g?.gmail ?? u.email), name: u.name, roleIds: u.roleIds, hasGoogle: !!g?.gmail };
@@ -341,34 +370,86 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     return row.calendarId;
   }
 
-  /** Share one calendar read-only with exactly `desired` (plus whatever was shared by hand). */
-  async function reconcileAcl(cal: CalendarClient, calendarId: string, desired: Set<string>, ownerEmail: string | null): Promise<void> {
+  /** Past the last occurrence (a series with no end date never is). */
+  const isOver = (m: MeetingFields, nowMs: number) => {
+    const end = lastEndMs(m);
+    return end !== null && nowMs >= end;
+  };
+
+  /** Still worth reading from Google. */
+  const inSync = (m: MeetingRow, nowMs: number) => {
+    const end = lastEndMs(m);
+    return end === null || nowMs < end + ENDED_SYNC_GRACE_MS;
+  };
+
+  /** Share one calendar read-only with exactly `desired` (plus whatever was shared by hand). `st` is
+   *  updated in place, so the caller saves what was learned even when this throws. */
+  async function reconcileAcl(
+    cal: CalendarClient,
+    calendarId: string,
+    desired: Set<string>,
+    ownerEmail: string | null,
+    st: CalendarAclState,
+    pace: { left: number; deferred: boolean },
+    nowMs: number,
+  ): Promise<void> {
+    const fingerprint = await fingerprintOf(desired, ownerEmail);
+    const retryDue = Object.values(st.retryAt).some((at) => at <= nowMs);
+    if (st.fingerprint === fingerprint && nowMs - st.checkedAt < ACL_FULL_CHECK_MS && !retryDue) return;
+    if (pace.left <= 0) {
+      pace.deferred = true;
+      return;
+    }
     const rules = await cal.listAcl(calendarId);
     const shared = new Set(rules.map((r) => r.email).filter((e): e is string => !!e));
     const ledger = await store.listAcl(orgId, calendarId);
-    // One address Google refuses (e.g. it cannot take a share) must not block the others.
-    const each = async (email: string, op: () => Promise<void>) => {
-      try {
-        await op();
-      } catch (err) {
-        if (err instanceof BudgetExhausted || isCalendarQuota(err)) throw err;
-        log("meeting_calendar_acl_failed", { calendarId, email, message: err instanceof Error ? err.message : String(err) });
-      }
-    };
+    const writes: { key: string; email: string; op: () => Promise<void> }[] = [];
     for (const email of desired) {
       if (shared.has(email) || email === ownerEmail) continue;
-      await each(email, async () => {
-        const rule = await cal.insertAcl(calendarId, email);
-        await store.putAcl({ orgId, calendarId, email, ruleId: rule.id });
+      writes.push({
+        key: `add:${email}`,
+        email,
+        op: async () => {
+          const rule = await cal.insertAcl(calendarId, email);
+          await store.putAcl({ orgId, calendarId, email, ruleId: rule.id });
+        },
       });
     }
     for (const row of ledger) {
       if (desired.has(row.email)) continue;
-      await each(row.email, async () => {
-        await cal.deleteAcl(calendarId, row.ruleId);
-        await store.removeAcl(orgId, calendarId, row.email);
+      writes.push({
+        key: `remove:${row.email}`,
+        email: row.email,
+        op: async () => {
+          await cal.deleteAcl(calendarId, row.ruleId);
+          await store.removeAcl(orgId, calendarId, row.email);
+        },
       });
     }
+    // A wait ends with what it was for: someone who left and rejoined is tried at once.
+    const wanted = new Set(writes.map((w) => w.key));
+    for (const key of Object.keys(st.retryAt)) if (!wanted.has(key)) delete st.retryAt[key];
+
+    const due = writes.filter((w) => (st.retryAt[w.key] ?? 0) <= nowMs);
+    const batch = due.slice(0, pace.left);
+    for (const w of batch) {
+      pace.left--;
+      try {
+        await w.op();
+        delete st.retryAt[w.key];
+      } catch (err) {
+        if (err instanceof BudgetExhausted || isCalendarQuota(err)) throw err;
+        // One address Google refuses (e.g. it cannot take a share) must not block the others.
+        st.retryAt[w.key] = nowMs + ACL_RETRY_WAIT_MS;
+        log("meeting_calendar_acl_failed", { calendarId, email: w.email, message: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (batch.length < due.length) {
+      pace.deferred = true;
+      return; // unfinished: no fingerprint, so the continuation comes back here
+    }
+    st.fingerprint = fingerprint;
+    st.checkedAt = nowMs;
   }
 
   /** Mirror Google's state of one meeting into D1, then bring its attendees in line with its target. */
@@ -379,6 +460,12 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
   ): Promise<{ added: number; removed: number }> {
     let m = row;
     let ev = await cal.getEvent(m.calendarId, m.googleEventId);
+    const nowMs = Date.parse(deps.now());
+    if (!ev && m.syncedAt === null && isOver(m, nowMs)) {
+      // Finishing the create now would mail an invitation to a meeting that has passed.
+      log("meeting_sync_create_past_skipped", { meetingId: m.id });
+      return { added: 0, removed: 0 };
+    }
     if (!ev && m.syncedAt === null) {
       // The create was cut off before its event existed: finish it. A taken id = it was created and
       // already deleted in Google Calendar (falls through to the removal below).
@@ -402,6 +489,12 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     if (pulled) {
       m = { ...m, ...pulled, updatedAt: deps.now() };
       log("meeting_sync_pulled_from_google", { meetingId: m.id, fields: Object.keys(pulled) });
+    }
+    if (isOver(m, nowMs)) {
+      // Judged after the pull: a meeting moved forward in Google is live again.
+      if (ev.recurrence?.length && !fromRecurrence(ev.recurrence)) log("meeting_sync_recurrence_unrepresentable", { meetingId: m.id });
+      await store.updateMeetingIf({ ...m, meetUrl: m.meetUrl ?? ev.meetUrl, htmlLink: m.htmlLink ?? ev.htmlLink, syncedAt: deps.now() }, row.updatedAt);
+      return { added: 0, removed: 0 };
     }
 
     const ledger = await store.listInvites(m.id);
@@ -441,12 +534,51 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     return { added: toAdd.length, removed: removedFromEvent };
   }
 
+  /** The share step of the sync. Returns ms until a continuation is due, null = nothing left. What
+   *  was learned is saved even when a limit ends the step midway. */
+  async function syncShares(cal: CalendarClient, account: MeetingAccount, desired: Set<string>, state: MeetingSyncSnapshot): Promise<number | null> {
+    const nowMs = Date.parse(deps.now());
+    if (state.aclWritesNotBefore > nowMs) return state.aclWritesNotBefore - nowMs;
+    // Same reading as the attendees' empty target: a glitch, never a reason to unshare everyone.
+    if (desired.size === 0) {
+      log("meeting_sync_empty_members_skipped", {});
+      return null;
+    }
+    const owner = account.email ? lower(account.email) : null;
+    const pace = { left: ACL_WRITES_PER_RUN, deferred: false };
+    const touched: Record<string, CalendarAclState> = {};
+    try {
+      for (const c of await store.listCalendars(orgId, account.accountId)) {
+        const st: CalendarAclState = { fingerprint: null, checkedAt: 0, ...state.acl[c.calendarId], retryAt: { ...state.acl[c.calendarId]?.retryAt } };
+        const before = JSON.stringify(st);
+        try {
+          await reconcileAcl(cal, c.calendarId, desired, owner, st, pace, nowMs);
+        } catch (err) {
+          if (err instanceof BudgetExhausted) {
+            pace.deferred = true; // the paced continuation, not the two-minute one
+            break;
+          }
+          if (isCalendarQuota(err)) throw err;
+          log("meeting_calendar_acl_sync_failed", { calendarId: c.calendarId, message: err instanceof Error ? err.message : String(err) });
+        } finally {
+          if (JSON.stringify(st) !== before) touched[c.calendarId] = st;
+        }
+      }
+    } finally {
+      await syncState
+        .save({ acl: touched, ...(pace.deferred ? { aclWritesNotBefore: nowMs + ACL_WRITE_INTERVAL_MS } : {}) })
+        .catch((err: unknown) => log("meeting_acl_state_save_failed", { message: err instanceof Error ? err.message : String(err) }));
+    }
+    return pace.deferred ? ACL_WRITE_INTERVAL_MS : null;
+  }
+
   /** The Meet step of the sync (Meet REST, not Calendar: it also runs during a pause). */
   async function openMeets(cal: CalendarClient, account: MeetingAccount): Promise<void> {
+    const nowMs = Date.parse(deps.now());
     // Re-read: reconcile may have just filled in a Meet link.
     try {
       for (const m of await store.listMeetings(orgId)) {
-        if (m.accountId === account.accountId) await openMeet(cal, account, m.meetUrl);
+        if (m.accountId === account.accountId && inSync(m, nowMs)) await openMeet(cal, account, m.meetUrl);
       }
     } catch (err) {
       if (!(err instanceof BudgetExhausted)) throw err;
@@ -456,8 +588,11 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
   const service: MeetingsService = {
     async list() {
       const [rows, counts, regulars] = await Promise.all([store.listMeetings(orgId), store.inviteCounts(orgId), deps.attendance.listRegularIds(orgId)]);
-      const lastSync = Math.max(0, ...rows.map((r) => (r.syncedAt ? Date.parse(r.syncedAt) : 0)));
-      if (rows.length > 0 && Date.parse(deps.now()) - lastSync > LIST_KICK_MIN_GAP_MS) await kick(LIST_SOON_MS);
+      // Ended meetings never move syncedAt again: counting them would kick on every list.
+      const nowMs = Date.parse(deps.now());
+      const synced = rows.filter((r) => inSync(r, nowMs));
+      const lastSync = Math.max(0, ...synced.map((r) => (r.syncedAt ? Date.parse(r.syncedAt) : 0)));
+      if (synced.length > 0 && nowMs - lastSync > LIST_KICK_MIN_GAP_MS) await kick(LIST_SOON_MS);
       let names = new Map<string, string>();
       if (rows.some((r) => r.targetId !== meeting.ALL_MEMBERS_TARGET_ID)) {
         try {
@@ -634,36 +769,38 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         if (account.meetReady) await openMeets(cal, account);
         return { ...empty, quotaPausedUntil: state.pausedUntil };
       }
-      const all = await invitees();
-      const out = { ...empty, withoutGoogleAccount: uniqueEmails(all).filter((i) => !i.hasGoogle).map((i) => ({ userId: i.userId, name: i.name, email: i.email })) };
+      // Strict: without the 名簿 every Gmail would read as changed, and the sync would swap all
+      // invites and shares to login addresses, then back, mailing everyone both ways.
+      const all = await invitees(undefined, true);
+      const out: SyncResult = { ...empty, withoutGoogleAccount: uniqueEmails(all).filter((i) => !i.hasGoogle).map((i) => ({ userId: i.userId, name: i.name, email: i.email })) };
 
       try {
-        const rows = (await store.listMeetings(orgId)).filter((m) => m.accountId === account.accountId);
-        for (const m of rows) {
-          try {
-            const r = await reconcileMeeting(cal, m, forTarget(all, m.targetId));
-            out.meetings++;
-            out.invitedAdded += r.added;
-            out.invitedRemoved += r.removed;
-          } catch (err) {
-            if (err instanceof BudgetExhausted) break;
-            if (isCalendarQuota(err)) throw err;
-            log("meeting_sync_failed", { meetingId: m.id, message: err instanceof Error ? err.message : String(err) });
-          }
-        }
-
-        if (!cal.exhausted()) {
-          const desired = new Set(all.map((i) => i.email));
-          const owner = account.email ? lower(account.email) : null;
-          for (const c of await store.listCalendars(orgId, account.accountId)) {
+        if (!opts?.aclOnly) {
+          const nowMs = Date.parse(syncedAt);
+          const rows = (await store.listMeetings(orgId)).filter((m) => m.accountId === account.accountId && inSync(m, nowMs));
+          let stoppedAt: string | null = null;
+          for (const m of rows.slice(Math.max(0, rows.findIndex((r) => r.id === state.meetingCursor)))) {
             try {
-              await reconcileAcl(cal, c.calendarId, desired, owner);
+              const r = await reconcileMeeting(cal, m, forTarget(all, m.targetId));
+              out.meetings++;
+              out.invitedAdded += r.added;
+              out.invitedRemoved += r.removed;
             } catch (err) {
-              if (err instanceof BudgetExhausted) break;
+              if (err instanceof BudgetExhausted) {
+                stoppedAt = m.id;
+                break;
+              }
               if (isCalendarQuota(err)) throw err;
-              log("meeting_calendar_acl_sync_failed", { calendarId: c.calendarId, message: err instanceof Error ? err.message : String(err) });
+              log("meeting_sync_failed", { meetingId: m.id, message: err instanceof Error ? err.message : String(err) });
             }
           }
+          out.complete = stoppedAt === null;
+          if (stoppedAt !== state.meetingCursor) await syncState.save({ meetingCursor: stoppedAt });
+        }
+
+        if (out.complete) {
+          const continueMs = await syncShares(cal, account, new Set(all.map((i) => i.email)), state);
+          if (continueMs !== null) out.aclContinueMs = continueMs;
         }
       } catch (err) {
         if (!isCalendarQuota(err)) throw err;
@@ -672,8 +809,9 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         return { ...out, ...(until === null ? {} : { quotaPausedUntil: until }) };
       }
 
-      if (!cal.exhausted() && account.meetReady) await openMeets(cal, account);
-      out.complete = !cal.exhausted();
+      if (opts?.aclOnly) return out;
+      // Best-effort, and hourly is often enough: running out here is no reason to run again.
+      if (out.complete && account.meetReady) await openMeets(cal, account);
       // Keep the hourly loop alive; an unfinished run continues within a minute.
       if (!opts?.system) await kick(out.complete ? undefined : SOON_MS);
       return out;
