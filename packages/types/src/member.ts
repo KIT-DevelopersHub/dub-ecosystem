@@ -237,6 +237,39 @@ export function emptyPersonProfile(): PersonProfile {
   return Object.fromEntries(PERSON_PROFILE_KEYS.map((k) => [k, null])) as unknown as PersonProfile;
 }
 
+/** 運営が揃えておきたい項目 (未入力なら本人へ催促する対象)。任意の 希望する活動・備考 は含めない。 */
+export const PROFILE_REMINDER_KEYS = [
+  "lastName",
+  "firstName",
+  "lastNameKana",
+  "firstNameKana",
+  "lastNameRomaji",
+  "firstNameRomaji",
+  "schoolEmail",
+  "gmail",
+  "phone",
+  "grade",
+  "department",
+  "rosterNumber",
+  "studentNumber",
+] as const satisfies readonly PersonProfileKey[];
+
+/** 未入力の項目 (表示順)。空白だけの値も未入力として扱う。姓名に分かれる前の名簿行は
+ *  表示名 name があれば氏名は分かるので、姓・名を未入力に数えない。 */
+export function missingProfileKeys(p: Partial<PersonProfile> & { name?: string | null }): PersonProfileKey[] {
+  const hasName = !!p.name?.trim();
+  return PROFILE_REMINDER_KEYS.filter((k) => {
+    if (hasName && (k === "lastName" || k === "firstName")) return false;
+    return !(p[k] ?? "").trim();
+  });
+}
+
+/** POST /members/people/:id/profile-reminder の応答。同じ人への催促は 1 日 1 回まで。 */
+export interface SendProfileReminderResponse {
+  deduplicated: boolean;
+  missing: PersonProfileKey[];
+}
+
 /** 表示用の文字列 (学年・希望活動はラベル、未入力は "")。画面・通知で共通。 */
 export function formatPersonProfileValue(key: PersonProfileKey, p: Partial<PersonProfile>): string {
   if (key === "grade") return p.grade ? GRADE_LABEL[p.grade] : "";

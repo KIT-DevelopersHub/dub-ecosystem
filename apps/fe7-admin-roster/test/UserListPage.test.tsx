@@ -116,6 +116,24 @@ describe("UserListPage", () => {
     await waitFor(() => expect(screen.queryByTestId("fe7-role-chip-user_bob-role_member")).not.toBeInTheDocument());
   });
 
+  it("narrows the roster to users holding the selected role", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserListPage />);
+    const filter = await screen.findByTestId("fe7-users-role-filter");
+    const { rows, role } = await waitFor(() => {
+      const rendered = screen.getAllByTestId(/^fe7-role-chip-/);
+      const first = rendered[0]!.getAttribute("data-testid")!.replace("fe7-role-chip-", "");
+      return { rows: rendered.length, role: first.slice(first.indexOf("-") + 1) };
+    });
+    expect(rows).toBeGreaterThan(0);
+    await user.selectOptions(filter, role);
+    await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("件を表示"));
+    for (const chipsCell of screen.getAllByTestId(/^fe7-user-roles-/)) {
+      expect(within(chipsCell).getByTestId(new RegExp(`-${role}$`))).toBeInTheDocument();
+    }
+    window.history.replaceState(null, "", "/"); // 次のテストへ絞り込みを持ち越さない
+  });
+
   it("shows a count summary of the loaded roster", async () => {
     renderWithProviders(<UserListPage />);
     // mock seed = 3 users (alice/bob/carol); pristine view shows the total.
