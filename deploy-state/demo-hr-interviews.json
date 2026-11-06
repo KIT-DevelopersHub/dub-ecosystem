@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "hr-interviews",
+  "worker": "dub-demo-hr-interviews",
+  "url": "https://dub-demo-hr-interviews.developershub-site.workers.dev",
+  "deployedSha": "af5c70b1",
+  "branch": "commander/task-ctask_01M6RY27QH8Q8ZB8KXHXGFFK7C",
+  "actor": "ko-tarou",
+  "markers": ["fe2-hr-interviews-open-count","interview-booking-submit"],
+  "live": true,
+  "verifiedAt": "2026-11-06T18:05:46Z",
+  "updatedAt": "2026-11-06T18:05:46Z",
+  "note": "人事 面談タブ + 公開の日程選択"
+}
