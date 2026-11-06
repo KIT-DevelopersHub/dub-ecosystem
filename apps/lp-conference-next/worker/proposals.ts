@@ -3,15 +3,21 @@
 // vocabulary as /tickets (shared helpers in ./tickets.ts).
 // Pure logic + a dependency-injected handler: no runtime imports, so it runs under both
 // workerd and `node --test` (strip-only TS: no enums / parameter properties).
+import { isLpChoiceField, lpFieldAnswerProblem } from "../../../packages/types/src/lp.ts";
+import { SHARE_OPEN_BUTTON, renderShareDialog } from "./share.ts";
 import {
   BASE_HEADERS,
   CHECKBOX_YES,
+  CONF_NAME,
   HONEYPOT,
   ctaSwapScript,
   errMsg,
   escapeHtml,
+  fieldFormValue,
+  fieldInputName,
   hero,
   htmlResponse,
+  parseFieldList,
   redirect,
   renderField,
   reqMark,
@@ -55,9 +61,12 @@ export const DEMO_PROPOSAL_CONFIG: ProposalConfig = {
   enabled: true,
   preview: false,
   fields: [
-    { id: "format", label: "発表形式", type: "select", required: true, options: ["セッション（30分）", "LT（5分）"] },
+    { id: "format", label: "発表形式", type: "radio", required: true, options: ["セッション（30分）", "LT（5分）"] },
+    { id: "topics", label: "テーマ", description: "当てはまるものをすべて選んでください", type: "multiselect", required: false, options: ["Web", "モバイル", "インフラ", "AI"] },
     { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
     { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
+    { id: "unavailable", label: "登壇できない日", type: "date", required: false, options: [] },
+    { id: "phone", label: "当日の連絡先", type: "phone", required: false, options: [] },
   ],
 };
 
@@ -78,16 +87,7 @@ export function parseProposalConfig(raw: unknown): ProposalConfig | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.enabled !== "boolean" || !Array.isArray(o.fields)) return null;
-  const fields: TicketField[] = [];
-  for (const f of o.fields) {
-    if (!f || typeof f !== "object") continue;
-    const r = f as Record<string, unknown>;
-    if (typeof r.id !== "string" || typeof r.label !== "string") continue;
-    const type = r.type === "textarea" || r.type === "select" || r.type === "checkbox" ? r.type : "text";
-    const options = Array.isArray(r.options) ? r.options.filter((x): x is string => typeof x === "string") : [];
-    fields.push({ id: r.id, label: r.label, type, required: r.required === true, options });
-  }
-  return { enabled: o.enabled, preview: false, fields };
+  return { enabled: o.enabled, preview: false, fields: parseFieldList(o.fields) };
 }
 
 /**
@@ -128,14 +128,18 @@ export function parseProposalForm(form: URLSearchParams, config: ProposalConfig)
 
   const answers: Record<string, string> = {};
   for (const f of config.fields) {
-    const key = `f_${f.id}`;
-    const v = get(key);
+    const key = fieldInputName(f.id);
+    const v = fieldFormValue(form, f);
     values[key] = v;
-    if (f.required && !v) errors[key] = f.type === "checkbox" ? "チェックを入れてください" : `${f.label}を入力してください`;
-    else if ((f.type === "text" && v.length > TEXT_MAX) || (f.type === "textarea" && v.length > TEXTAREA_MAX)) {
+    if (f.required && !v) {
+      errors[key] = f.type === "checkbox" ? "チェックを入れてください" : isLpChoiceField(f.type) ? `${f.label}を選んでください` : `${f.label}を入力してください`;
+    } else if ((f.type === "text" && v.length > TEXT_MAX) || (f.type === "textarea" && v.length > TEXTAREA_MAX)) {
       errors[key] = `${f.label}が長すぎます`;
-    } else if (v && f.type === "select" && !f.options.includes(v)) errors[key] = `${f.label}を選び直してください`;
-    else if (v && f.type === "checkbox" && v !== CHECKBOX_YES) errors[key] = `${f.label}を確認してください`;
+    } else if (v && f.type === "checkbox" && v !== CHECKBOX_YES) errors[key] = `${f.label}を確認してください`;
+    else if (v) {
+      const problem = lpFieldAnswerProblem(f, v);
+      if (problem) errors[key] = `${f.label}: ${problem}`;
+    }
     answers[f.id] = v;
   }
   if (Object.keys(errors).length > 0) return { ok: false, spam: false, values, errors };
@@ -193,6 +197,9 @@ function abstractInput(values: FormValues, errors: FormErrors): string {
   );
 }
 
+/** Preview (?proposals=on) only lives in the URL / referer: keep it on our own POST targets and links. */
+const previewQuery = (config: ProposalConfig): string => (config.preview ? "?proposals=on" : "");
+
 export interface ProposalsPageOptions {
   config: ProposalConfig;
   values?: FormValues;
@@ -215,7 +222,7 @@ export function renderProposalsPage(o: ProposalsPageOptions): string {
   const alerts = errors._form ? `<div class="alert err" role="alert">${escapeHtml(errors._form)}</div>` : "";
   const extra = config.fields.map((f) => renderField(f, values, errors)).join("");
   const form =
-    `<form class="buy" method="post" action="/proposals/submit" novalidate data-lp-proposals-form>` +
+    `<form class="buy" method="post" action="/proposals/submit${previewQuery(config)}" novalidate data-lp-proposals-form>` +
     alerts +
     '<section class="card rv"><div class="shead"><span class="no">01</span><h2>発表の内容</h2><p>選考に使います</p></div>' +
     textInput("title", "発表タイトル", values, errors, `type="text" maxlength="${TITLE_MAX}" placeholder="例: 1 つの Worker で LP の全版を配信する"`) +
@@ -239,7 +246,7 @@ export function renderProposalsPage(o: ProposalsPageOptions): string {
   );
 }
 
-export function renderProposalThanksPage(o: { demo?: boolean }): string {
+export function renderProposalThanksPage(o: { demo?: boolean; origin: string }): string {
   return shell(
     "登壇応募",
     hero({ title: 'Thank <span class="g">you!</span>', ghost: "THANKS", eyebrow: "CALL FOR PROPOSALS", step: 2, steps: STEPS, small: true }) +
@@ -247,7 +254,15 @@ export function renderProposalThanksPage(o: { demo?: boolean }): string {
       '<div class="ico pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="ck" d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>' +
       "<h2>ご応募ありがとうございました</h2>" +
       '<p class="lead">内容を拝見し、選考結果はご登録のメールアドレスにお知らせします。</p>' +
-      '<div class="acts"><a class="btn1" href="/">トップへ戻る</a></div></section></div></div>',
+      '<div class="acts"><a class="btn1" href="/">トップへ戻る</a>' +
+      SHARE_OPEN_BUTTON +
+      "</div></section></div></div>" +
+      renderShareDialog({
+        key: "proposals",
+        origin: o.origin,
+        heading: "応募したことをシェアしませんか？",
+        message: `${CONF_NAME} に登壇応募しました！`,
+      }),
     !!o.demo,
     false,
     DEMO_NOTE,
@@ -320,7 +335,7 @@ export async function handleProposals(req: Request, deps: ProposalsDeps): Promis
   }
   if (route === "thanks") {
     if (req.method !== "GET" && req.method !== "HEAD") return null;
-    return htmlResponse(renderProposalThanksPage({ demo: deps.demo }));
+    return htmlResponse(renderProposalThanksPage({ demo: deps.demo, origin: url.origin }));
   }
 
   // route === "submit"
@@ -336,8 +351,9 @@ export async function handleProposals(req: Request, deps: ProposalsDeps): Promis
     if (parsed.spam) return redirect("/proposals/thanks");
     return page(parsed.errors, 400);
   }
+  // demo は何も保存しないので、プレビュー表示でも完了画面まで通して確認できる。
+  if (deps.demo) return redirect(`/proposals/thanks${previewQuery(config)}`);
   if (config.preview) return page({ _form: "プレビュー表示中のため、応募はできません。" }, 403);
-  if (deps.demo) return redirect("/proposals/thanks");
   if (!deps.internal) return page(mapSubmitError(503, null, config), 503);
 
   let res: Response;

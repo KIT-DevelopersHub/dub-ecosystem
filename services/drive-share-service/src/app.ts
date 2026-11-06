@@ -134,7 +134,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
 
   // Reconcile a grant against current role membership (add new, remove departed).
   app.post("/driveshare/files/:id/role-grants/:roleId/reapply", async (c) => {
-    return c.json(await deps.roleGrants.reapply(c.req.param("id"), c.req.param("roleId")));
+    const cursor = c.req.query("cursor");
+    return c.json(await deps.roleGrants.reapply(c.req.param("id"), c.req.param("roleId"), cursor));
   });
 
   // ---- link sharing on/off ----

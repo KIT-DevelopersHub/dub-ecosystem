@@ -954,3 +954,12 @@ test("preview with nothing selectable explains why (public just sees 受付準�
   const pub = renderTicketsPage({ config: { ...CFG, paymentReady: false, types: [CFG.types[0]] } });
   assert.doesNotMatch(pub, /data-lp-tk-preview-reason/);
 });
+
+test("renderThanksPage: 共有ダイアログは購入確定 (paid / free) のときだけ", () => {
+  const origin = "https://example.com";
+  assert.ok(renderThanksPage({ status: "paid", origin }).includes("data-lp-share"));
+  assert.ok(renderThanksPage({ status: "free", origin }).includes("data-lp-share"));
+  for (const status of ["pending", "expired", "unknown"] as const) {
+    assert.ok(!renderThanksPage({ status, origin }).includes("data-lp-share"), status);
+  }
+});
