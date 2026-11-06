@@ -218,7 +218,7 @@ export function newQuestionId(rand: () => number = Math.random): string {
 }
 
 /** 学年の選択肢 (参加届と同じ表記)。 */
-const GRADE_OPTIONS: string[] = GRADES.map((g) => GRADE_LABEL[g]);
+export const GRADE_OPTIONS: string[] = GRADES.map((g) => GRADE_LABEL[g]);
 
 /** 既定のフォーム (まだ保存されていないとき返す・編集の起点)。 */
 export function defaultInterviewForm(): Omit<InterviewForm, "version" | "updatedBy" | "updatedAt"> {

@@ -119,6 +119,21 @@ describe("公開ページ", () => {
 });
 
 describe("フォームの編集", () => {
+  it("keeps the grade binding: offers only its types, and choosing it fills the participation options", async () => {
+    renderWith(<HrInterviewFormScreen />, fakeFormApi());
+    await screen.findByTestId("fe2-hr-form-editor");
+    const typeOptions = within(screen.getByTestId("fe2-hr-form-q-grade-type")).getAllByRole("option");
+    expect(typeOptions.map((o) => (o as HTMLOptionElement).value).filter(Boolean).sort()).toEqual(["dropdown", "single_choice"]);
+
+    fireEvent.change(screen.getByTestId("fe2-hr-form-q-grade-binding"), { target: { value: "__none__" } });
+    fireEvent.click(screen.getByTestId("fe2-hr-form-add-question"));
+    const added = screen.getAllByTestId(/^fe2-hr-form-q-q_[a-z0-9]+$/)[0]!;
+    const id = added.getAttribute("data-testid")!.replace("fe2-hr-form-q-", "");
+    fireEvent.change(screen.getByTestId(`fe2-hr-form-q-${id}-binding`), { target: { value: "grade" } });
+    expect((screen.getByTestId(`fe2-hr-form-q-${id}-type`) as HTMLSelectElement).value).toBe("dropdown");
+    expect((screen.getByTestId(`fe2-hr-form-q-${id}-opt-4`) as HTMLInputElement).value).toBe("院生");
+  });
+
   it("locks name/email, adds a dropdown question and saves with expectedVersion", async () => {
     const save = vi.fn((body: hrForm.SaveInterviewFormRequest) => Promise.resolve({ ...baseForm(), ...body, version: 4 }));
     renderWith(<HrInterviewFormScreen />, fakeFormApi({ save }));
