@@ -33,6 +33,11 @@ export function useSponsorApi(): SponsorApi {
   return useCtx().api;
 }
 
+/** Provider の外 (メール画面の飾り) では null。 */
+export function useOptionalSponsorApi(): SponsorApi | null {
+  return useContext(Ctx)?.api ?? null;
+}
+
 export function useSponsorPending(): PendingStore {
   return useCtx().pending;
 }

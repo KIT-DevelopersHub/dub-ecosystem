@@ -33,9 +33,13 @@ function refetchIfGone(qc: QueryClient, err: unknown): void {
   if (ApiError.isApiError(err) && err.status === 404) void qc.invalidateQueries({ queryKey: LEADS_KEY });
 }
 
-export function useLeads() {
+/**
+ * 営業先の一覧。メールの送受信でサーバ側が自動で更新する (メール連携) ので、画面を開くたびに裏で読み直す
+ * (手元のキャッシュはすぐ出し、最新が来たら差し替える)。enabled = false で読み込みを後回しにできる。
+ */
+export function useLeads(enabled = true) {
   const api = useSponsorApi();
-  return useQuery({ queryKey: LEADS_KEY, queryFn: () => api.listLeads(), staleTime: 15_000 });
+  return useQuery({ queryKey: LEADS_KEY, queryFn: () => api.listLeads(), staleTime: 15_000, refetchOnMount: "always", enabled });
 }
 
 let tempSeq = 0;

@@ -22,6 +22,12 @@ export interface SponsorApi {
   removeLead(id: string): Promise<void>;
   listGoals(): Promise<sponsor.ListGoalsResponse>;
   putGoal(month: string, body: sponsor.PutGoalRequest): Promise<sponsor.MonthlyGoal>;
+  // メール連携: 紐付けたアドレス・自動更新の履歴・既存メールからの一括補完。
+  listMailLinks(): Promise<sponsor.ListMailLinksResponse>;
+  createMailLink(leadId: string, body: sponsor.CreateMailLinkRequest): Promise<sponsor.CreateMailLinkResponse>;
+  removeMailLink(id: string): Promise<void>;
+  listLeadActivity(leadId: string): Promise<sponsor.ListLeadActivityResponse>;
+  mailBackfill(body: sponsor.MailBackfillRequest): Promise<sponsor.MailBackfillResponse>;
 }
 
 const BASE = "/api/v1/members/sponsor";
@@ -57,5 +63,14 @@ export function createSponsorApi(api: ApiClient): SponsorApi {
     },
     listGoals: () => api.request<sponsor.ListGoalsResponse>({ method: "GET", path: `${BASE}/goals` }),
     putGoal: (month, body) => api.request<sponsor.MonthlyGoal, sponsor.PutGoalRequest>({ method: "PUT", path: `${BASE}/goals/${enc(month)}`, body }),
+    listMailLinks: () => api.request<sponsor.ListMailLinksResponse>({ method: "GET", path: `${BASE}/mail-links` }),
+    createMailLink: (leadId, body) =>
+      api.request<sponsor.CreateMailLinkResponse, sponsor.CreateMailLinkRequest>({ method: "POST", path: `${lead(leadId)}/mail-links`, body }),
+    removeMailLink: async (id) => {
+      await api.request<void>({ method: "DELETE", path: `${BASE}/mail-links/${enc(id)}` });
+    },
+    listLeadActivity: (leadId) => api.request<sponsor.ListLeadActivityResponse>({ method: "GET", path: `${lead(leadId)}/activity` }),
+    mailBackfill: (body) =>
+      api.request<sponsor.MailBackfillResponse, sponsor.MailBackfillRequest>({ method: "POST", path: `${BASE}/leads/mail-backfill`, body }),
   };
 }

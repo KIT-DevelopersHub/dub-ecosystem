@@ -44,6 +44,7 @@ import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
 import { useCanCompose, useMailApi } from "../MailProvider.tsx";
 import { LinkifiedText } from "../MailBody.tsx";
+import { SponsorMailLink } from "../../sponsor/SponsorMailLink.tsx";
 import { formatBytes, newIdempotencyKey, parseRecipients, saveBlob } from "../mailApi.tsx";
 
 const addressLine = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
@@ -640,6 +641,9 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             ))}
           </div>
         ) : null}
+
+        {/* スポンサー: 相手がどの営業先として数えられるか / 紐付け (sponsor:write のある人だけ)。 */}
+        <SponsorMailLink addresses={thread.messages.flatMap((m) => [m.from.email, ...m.to.map((p) => p.email), ...(m.cc ?? []).map((p) => p.email)])} threadId={thread.id} />
 
         <BlockedBanner thread={thread} />
 
