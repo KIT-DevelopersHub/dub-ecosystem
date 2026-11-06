@@ -16,8 +16,8 @@ workers_dev = false
 [observability]
 enabled = true
 
-# 専用 D1。REPLACE_AT_CUTOVER は切り替え時に `wrangler d1 create dub-tickets` の id へ置き換える
-# （置き換えるまで deploy-prod.sh は何もデプロイせず止まる）。staging は gen-staging-configs.sh が差し替える。
+# 専用 D1。手順は docs/runbooks/09-lp-tickets-cutover.md
+# staging の id は gen-staging-configs.sh が差し替える。
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-tickets"

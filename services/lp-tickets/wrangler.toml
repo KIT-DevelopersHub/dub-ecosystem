@@ -9,7 +9,7 @@ compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 
-# REPLACE_AT_CUTOVER: docs/runbooks/09-lp-tickets-cutover.md の手順で作った D1 の id に置き換える。
+# 専用 D1。手順は docs/runbooks/09-lp-tickets-cutover.md
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-tickets"
