@@ -142,7 +142,7 @@ export const APP_MANIFEST = [
   { id: "sponsor", label: "スポンサー", navPath: "/sponsor", domain: "sponsor", permissions: ["sponsor:read"], access: { view: "app:sponsor:view", edit: "app:sponsor:edit" },
     detailPermissions: ["sponsor:read", "sponsor:write", "sponsor:admin"] },
   // 目標管理: チームの月間目標と KPI (member-service /members/goals)。実績は各アプリのデータから自動で数える。
-  // 無効/閲覧/編集 がそのまま全部の設定。未公開アプリなので identity/0032 で admin のみ付与。
+  // 無効/閲覧/編集 がそのまま全部の設定。未公開アプリなので identity/0031 で admin のみ付与。
   { id: "goals", label: "目標管理", navPath: "/goals", domain: "goals", permissions: ["goals:read"], access: { view: "app:goals:view", edit: "app:goals:edit" },
     detailPermissions: ["goals:read"] },
 ] as const satisfies readonly AppManifestEntry[];
