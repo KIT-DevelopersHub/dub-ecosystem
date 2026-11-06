@@ -45,6 +45,13 @@ continues (the SPA does this automatically). The ledger is written member by mem
 going in before the Drive call, so a request cut off mid-way never turns our share into an
 "individual" one that 解除 would leave behind. Departed members are removed last.
 
+**Automatic follow**: the third phase of the `MeetingSyncDO` hourly alarm (after the meeting sync
+and the Meet ingest; `role_share_sync_alarm` in the logs) shares every role-granted file with
+members who joined the role. It is additive and only uses a 名簿 Gmail: it never removes access
+(「再適用」 does, and the drift card lists who left) and never tries a login address, where a
+failure could still mail an invite that cannot be recalled. A grant whose Gmail members are all in
+the ledger costs no Drive call. The first role grant arms the alarm.
+
 ## Getting the real Hackit refresh token (one-time, done by the operator)
 
 1. Google Cloud Console → create/pick a project (any account can own it).
