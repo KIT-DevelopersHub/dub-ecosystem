@@ -64,6 +64,12 @@ function fakeServer(initialBlocks: string[]) {
     getScheduled: vi.fn(),
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn(),
+    setReadState: vi.fn().mockResolvedValue(undefined),
+    listDrafts: vi.fn().mockResolvedValue([]),
+    saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
+    deleteDraft: vi.fn().mockResolvedValue(undefined),
+    addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
+    removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
     listBlocks: vi.fn().mockImplementation(() =>
       Promise.resolve([...blocks].map((v) => ({ value: v, kind: v.includes("@") ? "address" : "domain", createdAt: "2026-10-01T00:00:00.000Z" }))),
     ),

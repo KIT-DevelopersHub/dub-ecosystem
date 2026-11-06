@@ -240,13 +240,13 @@ export function createD1MeetingStore(db: DbClient): MeetingStore {
       return rows.map((r) => ({ meetingId: r.meeting_id, email: r.email, userId: r.user_id }));
     },
     async replaceInvites(meetingId, rows) {
-      await db.run(`DELETE FROM driveshare_meeting_invites WHERE meeting_id = ?`, meetingId);
-      for (const r of rows) {
-        await db.run(
-          `INSERT OR REPLACE INTO driveshare_meeting_invites (meeting_id, email, user_id) VALUES (?, ?, ?)`,
-          meetingId, r.email, r.userId,
-        );
-      }
+      await db.batch([
+        { sql: `DELETE FROM driveshare_meeting_invites WHERE meeting_id = ?`, binds: [meetingId] },
+        ...rows.map((r) => ({
+          sql: `INSERT OR REPLACE INTO driveshare_meeting_invites (meeting_id, email, user_id) VALUES (?, ?, ?)`,
+          binds: [meetingId, r.email, r.userId],
+        })),
+      ]);
     },
     async inviteCounts(orgId) {
       const rows = await db.all<{ meeting_id: string; n: number }>(

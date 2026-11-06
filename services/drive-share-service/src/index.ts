@@ -25,7 +25,7 @@ import { createD1GoogleAccountStore } from "./google-account-store";
 import { createGoogleAccountService, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
 import { importTokenKey } from "./google/crypto";
 import { mockForced, parseConfig, type Env } from "./env";
-import { buildAttendanceService, buildGoogleLinkService, buildMeetingsService } from "./meetings-wiring";
+import { buildAttendanceService, buildGoogleLinkService, buildMeetingsService, kickMeetingSync } from "./meetings-wiring";
 import { MeetingSyncDO } from "./meeting-sync-do";
 
 /** Pick the Drive client: real when an account is available (connected from Drive共有 > 設定, or
@@ -63,7 +63,7 @@ interface ReqCtx {
   userId?: string;
 }
 
-async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof createApp>> {
+async function buildApp(env: Env, reqCtx: ReqCtx, background: (work: Promise<unknown>) => void): Promise<ReturnType<typeof createApp>> {
   const orgId = common.DUB_DEFAULT_ORG_ID;
   const accountStore = createD1GoogleAccountStore(
     createDbClient(env.DB, { namespace: "driveshare", requestId: reqCtx.requestId }),
@@ -96,9 +96,10 @@ async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof cre
     orgId,
     now: nowIso,
     newId: () => newId("dsg"),
+    kick: () => kickMeetingSync(env),
   });
 
-  const meetings = () => buildMeetingsService(env, reqCtx);
+  const meetings = () => buildMeetingsService(env, reqCtx, { background });
   const attendance = () => buildAttendanceService(env, reqCtx);
   const googleLink = () => buildGoogleLinkService(env, reqCtx);
 
@@ -113,7 +114,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const requestId = request.headers.get("x-dub-request-id") ?? newRequestId();
     const userId = request.headers.get("x-dub-user-id") ?? undefined;
-    const app = await buildApp(env, { requestId, ...(userId ? { userId } : {}) });
+    const app = await buildApp(env, { requestId, ...(userId ? { userId } : {}) }, (work) => ctx.waitUntil(work));
     return app.fetch(request, env, ctx);
   },
 };

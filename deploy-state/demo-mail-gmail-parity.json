@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mail-gmail-parity",
+  "worker": "dub-demo-mail-gmail-parity",
+  "url": "https://dub-demo-mail-gmail-parity.developershub-site.workers.dev",
+  "deployedSha": "c8f707e1",
+  "branch": "commander/task-ctask_01M6QR22RC4S91FCPZXC19CNES",
+  "actor": "ko-tarou",
+  "markers": ["fe2-mail-drafts","fe2-mail-images-show","すべてのメール"],
+  "live": true,
+  "verifiedAt": "2026-11-06T08:21:19Z",
+  "updatedAt": "2026-11-06T08:21:19Z",
+  "note": "メール Gmail 準拠の動作修正"
+}

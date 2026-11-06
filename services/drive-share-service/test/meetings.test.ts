@@ -1,7 +1,8 @@
 // カレンダー > ミーティング: rules (RRULE / validation), create / update / delete over the mock and
 // the real (fetch-faked) Calendar client, reconcile that only ever removes what we added, the
 // calendar-scope gate, and the alarm scheduling rule.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { meeting } from "@dub/types";
 import { CommonErrorCodes } from "@dub/errors";
 import { createApp } from "../src/app";
 import { createDriveShareService } from "../src/service";
@@ -105,6 +106,53 @@ describe("validateMeeting", () => {
 });
 
 describe("create", () => {
+  it("lists only the target role's members (identity reads roles per listed user)", async () => {
+    const r = roster();
+    const asked: (string | undefined)[] = [];
+    const counting = { ...r, listActiveUsers: (roleId?: string) => (asked.push(roleId), r.listActiveUsers(roleId)) };
+    const { service } = buildMeetings({ roster: counting, directory: GMAIL });
+    await service.create("usr_admin", BASE);
+    expect(asked).toEqual(["role_dev"]);
+    await service.create("usr_admin", { ...BASE, targetId: meeting.ALL_MEMBERS_TARGET_ID });
+    expect(asked).toEqual(["role_dev", undefined]);
+  });
+
+  it("keeps an address shared with an account outside the target invited through the sync", async () => {
+    const shared = "same@gmail.com";
+    const users = [
+      { id: "u1", email: "u1@dub.example", name: "外", roleIds: [] },
+      { id: "u2", email: "u2@dub.example", name: "内", roleIds: ["role_dev"] },
+    ];
+    const directory = staticMemberDirectory({ u1: { gmail: shared, name: "外" }, u2: { gmail: shared, name: "内" } });
+    const { service, calendar } = buildMeetings({ roster: fakeRoster({}, { role_dev: "開発" }, users), directory });
+    await service.create("usr_admin", BASE);
+    await service.sync();
+    const cal = [...(calendar as ReturnType<typeof createMockCalendarClient>).state.calendars.values()][0]!;
+    expect([...cal.events.values()][0]!.attendees.map((a) => a.email)).toEqual([shared]);
+  });
+
+  it("a time change leaves a title and description edited in Google alone", async () => {
+    const { service, calendar } = buildMeetings({ roster: roster(), directory: GMAIL });
+    const m = await service.create("usr_admin", BASE);
+    const patch = vi.spyOn(calendar, "patchEvent");
+    await service.update(m.id, { startsAt: "2026-10-20T03:00:00.000Z", durationMinutes: 90 });
+    expect(Object.keys(patch.mock.calls[0]![2]).sort()).toEqual(["end", "start", "timeZone"]);
+  });
+
+  it("does not hold the response for opening the Meet", async () => {
+    const held: Promise<unknown>[] = [];
+    const { service, calendar } = buildMeetings({ roster: roster(), directory: GMAIL, background: (w) => held.push(w) });
+    const open = vi.spyOn(calendar, "openMeet");
+    let finish!: (v: boolean) => void;
+    open.mockReturnValue(new Promise((r) => (finish = r)));
+    const m = await service.create("usr_admin", BASE);
+    expect(m.meetUrl).toBeTruthy();
+    expect(held).toHaveLength(1);
+    finish(true);
+    await held[0];
+    expect(open).toHaveBeenCalledWith(m.meetUrl);
+  });
+
   it("creates the target calendar lazily, invites members at 名簿 Gmail else Dub address; the kicked sync shares it with everyone", async () => {
     const { service, store, calendar, kicks } = buildMeetings({ roster: roster(), directory: GMAIL });
     const m = await service.create("usr_admin", BASE);

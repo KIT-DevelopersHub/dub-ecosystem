@@ -84,6 +84,17 @@
   font-size: var(--dub-font-size-xs);
   color: var(--dub-color-text-secondary);
 }
+.action {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  color: var(--dub-color-text-link, inherit);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  text-decoration: underline;
+}
 .close {
   border: 0;
   background: transparent;

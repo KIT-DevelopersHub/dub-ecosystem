@@ -90,6 +90,7 @@ export function buildRoleGrants(opts: {
   store?: RoleGrantStore;
   directory?: MemberDirectory;
   clock?: () => number;
+  kick?: () => Promise<void>;
 }): { service: RoleGrantsService; store: RoleGrantStore } {
   const store = opts.store ?? createInMemoryRoleGrantStore();
   const service = createRoleGrantsService({
@@ -97,6 +98,7 @@ export function buildRoleGrants(opts: {
     roster: opts.roster,
     ...(opts.directory ? { directory: opts.directory } : {}),
     ...(opts.clock ? { clock: opts.clock } : {}),
+    ...(opts.kick ? { kick: opts.kick } : {}),
     store,
     orgId: common.DUB_DEFAULT_ORG_ID,
     now: () => `2026-08-13T00:00:${String(clock++ % 60).padStart(2, "0")}.000Z`,
@@ -132,6 +134,7 @@ export function buildMeetings(opts: {
   now?: () => string;
   meetReady?: boolean;
   attendance?: ReturnType<typeof createInMemoryAttendanceStore>;
+  background?: (work: Promise<unknown>) => void;
 } = {}) {
   const store = opts.store ?? createInMemoryMeetingStore();
   const calendar = opts.calendar ?? createMockCalendarClient();
@@ -159,6 +162,7 @@ export function buildMeetings(opts: {
     },
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
     ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
+    ...(opts.background ? { background: opts.background } : {}),
   });
   return { service, store, calendar, kicks, attendance };
 }

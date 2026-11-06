@@ -46,6 +46,24 @@ export interface RoleGrantsDeps {
   newId: () => string;
   /** Monotonic-enough clock for the per-call budget (injectable for tests). */
   clock?: () => number;
+  /** Make sure the hourly sync is running (MeetingSyncDO), once a grant exists to follow. */
+  kick?: () => Promise<void>;
+}
+
+/** Where an unfinished background sync continues: the grant, and the last member handled. */
+export interface RoleSyncResume {
+  grantId: string;
+  cursor: string;
+}
+
+export interface RoleSyncResult {
+  grants: number;
+  /** Grants that needed Drive this run. */
+  touched: number;
+  shared: number;
+  skipped: number;
+  /** null = every grant was visited. */
+  resume: RoleSyncResume | null;
 }
 
 export interface RoleGrantsService {
@@ -57,6 +75,8 @@ export interface RoleGrantsService {
   reapply(fileId: string, roleId: string, cursor?: string): Promise<RoleFileGrant>;
   /** Read-only: how the file's actual sharing differs from its role grants. */
   drift(fileId: string): Promise<FileShareDrift>;
+  /** The hourly follow of role membership: share with members added since the last run. */
+  syncMembers(opts: { budgetMs: number; maxWrites: number; resume?: RoleSyncResume }): Promise<RoleSyncResult>;
 }
 
 /** Index a file's Drive permissions by lowercased user email (ignores anyone/domain). */
@@ -111,6 +131,14 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     return [...out.values()];
   }
 
+  async function kickSync(): Promise<void> {
+    try {
+      await deps.kick?.();
+    } catch (err) {
+      console.warn(JSON.stringify({ service: "drive-share-service", event: "role_sync_kick_failed", message: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
   function assertAssignable(driveRole: string): asserts driveRole is AssignableDriveRole {
     if (!ASSIGNABLE.has(driveRole)) {
       throw errors.validationFailed([{ field: "driveRole", reason: "not_assignable" }], "指定できないロールです");
@@ -131,16 +159,19 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
   async function reconcile(
     grant: GrantRow,
     driveRole: AssignableDriveRole,
-    opts: { removeDeparted: boolean; cursor?: string },
-  ): Promise<{ skipped: SkippedMember[]; invited: InvitedMember[]; nextCursor: string | null; remaining: number }> {
+    opts: { removeDeparted: boolean; cursor?: string; onlyGoogle?: boolean; budgetMs?: number; maxWrites?: number },
+  ): Promise<{ skipped: SkippedMember[]; invited: InvitedMember[]; nextCursor: string | null; remaining: number; writes: number; created: number }> {
     const startedAt = clock();
+    const budgetMs = opts.budgetMs ?? WRITE_BUDGET_MS;
+    const maxWrites = opts.maxWrites ?? MAX_WRITES_PER_CALL;
     let writes = 0;
-    const budgetSpent = (): boolean => writes >= MAX_WRITES_PER_CALL || clock() - startedAt >= WRITE_BUDGET_MS;
+    let created = 0;
+    const budgetSpent = (): boolean => writes >= maxWrites || clock() - startedAt >= budgetMs;
 
     const prev = await store.listMembers(grant.id);
     const prevByEmail = new Map(prev.map((m) => [m.email, m]));
 
-    const targets = await shareTargets(grant.roleId);
+    const targets = (await shareTargets(grant.roleId)).filter((t) => !opts.onlyGoogle || t.hasGoogle);
     const emails = targets.map((t) => t.email).sort(); // already lowercased+deduped
     const emailSet = new Set(emails);
     const noGmail = new Set(targets.filter((t) => !t.hasGoogle).map((t) => t.email));
@@ -171,10 +202,11 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       await store.upsertMember({ grantId: grant.id, email, permissionId: null, createdByUs: 1 });
       writes++;
       try {
-        const created = await drive.createPermission(grant.fileId, { type: "user", role: driveRole, emailAddress: email });
+        const perm = await drive.createPermission(grant.fileId, { type: "user", role: driveRole, emailAddress: email });
         // Created only via the invite fallback (no Google account) → the access is pending.
-        if (created.invited) invited.push({ email });
-        await store.upsertMember({ grantId: grant.id, email, permissionId: created.id, createdByUs: 1 });
+        if (perm.invited) invited.push({ email });
+        await store.upsertMember({ grantId: grant.id, email, permissionId: perm.id, createdByUs: 1 });
+        created++;
       } catch (err) {
         await store.deleteMember(grant.id, email);
         throw err;
@@ -251,7 +283,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
 
     const remaining = nextCursor === null ? 0 : emails.filter((e) => e > nextCursor!).length;
     console.log(JSON.stringify({ service: "drive-share-service", event: "role_grant_reconciled", grantId: grant.id, members: emails.length, writes, skipped: skipped.length, remaining, ms: clock() - startedAt }));
-    return { skipped, invited, nextCursor, remaining };
+    return { skipped, invited, nextCursor, remaining, writes, created };
   }
 
   async function toRoleFileGrant(
@@ -308,7 +340,9 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
         grantedAt: existing?.grantedAt ?? ts,
         updatedAt: ts,
       });
-      return toRoleFileGrant(grant, await reconcile(grant, driveRole, { removeDeparted: false }));
+      const res = await reconcile(grant, driveRole, { removeDeparted: false });
+      await kickSync();
+      return toRoleFileGrant(grant, res);
     },
 
     async revoke(fileId, roleId): Promise<void> {
@@ -347,6 +381,48 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
         })),
       );
       return computeShareDrift(fileId, expected, perms.permissions);
+    },
+
+    // Additive only, and only at a 名簿 Gmail: nobody is watching, so it never takes access away
+    // (reapply does) and never tries a login address, which could mail an invite that cannot be
+    // recalled. A grant whose Gmail members are all in the ledger costs no Drive call.
+    async syncMembers({ budgetMs, maxWrites, resume }): Promise<RoleSyncResult> {
+      allTargets = null;
+      const startedAt = clock();
+      const grants = await store.listGrants(orgId);
+      const result: RoleSyncResult = { grants: grants.length, touched: 0, shared: 0, skipped: 0, resume: null };
+      const start = resume ? grants.findIndex((g) => g.id === resume.grantId) : 0;
+      let writesLeft = maxWrites;
+
+      for (const [i, grant] of grants.entries()) {
+        if (i < start) continue;
+        const cursor = resume && i === start ? resume.cursor : undefined;
+        const msLeft = budgetMs - (clock() - startedAt);
+        if (writesLeft <= 0 || msLeft <= 0) {
+          result.resume = { grantId: grant.id, cursor: cursor ?? "" };
+          break;
+        }
+        const recorded = new Set((await store.listMembers(grant.id)).filter((m) => m.permissionId !== null).map((m) => m.email));
+        const wanted = (await shareTargets(grant.roleId)).filter((t) => t.hasGoogle);
+        if (wanted.every((t) => recorded.has(t.email))) continue;
+
+        result.touched++;
+        const res = await reconcile(grant, grant.driveRole, {
+          removeDeparted: false,
+          onlyGoogle: true,
+          budgetMs: msLeft,
+          maxWrites: writesLeft,
+          ...(cursor ? { cursor } : {}),
+        });
+        writesLeft -= res.writes;
+        result.shared += res.created;
+        result.skipped += res.skipped.length;
+        if (res.nextCursor !== null) {
+          result.resume = { grantId: grant.id, cursor: res.nextCursor };
+          break;
+        }
+      }
+      return result;
     },
   };
 }

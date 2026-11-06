@@ -12,6 +12,7 @@ import { Button, TextField, ConfirmDialog, FormField, Divider } from "@dub/ui";
 import { RoleAssignmentList } from "./RoleAssignmentList";
 import { RoleAssignDialog } from "./RoleAssignDialog";
 import { UserPasswordSection } from "./UserPasswordSection";
+import { ImpersonateUserSection } from "./ImpersonateUserSection";
 import { usePatchUser, useOffboardUser } from "../hooks/useRosterApi";
 import { useCanAdminEdit } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
@@ -185,6 +186,9 @@ export function UserInlineEditor({
       <RoleAssignmentList userId={user.id} />
 
       {canAdmin ? <UserPasswordSection user={user} /> : null}
+
+      {/* 代理表示: its own key (identity:impersonate), independent of the 管理 app tier. */}
+      <ImpersonateUserSection user={user} />
 
       <RoleAssignDialog
         open={assignOpen}

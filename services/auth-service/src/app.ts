@@ -18,9 +18,10 @@
 // proves a credential presented in the request; it never consults a permission key. Removing
 // it would not simplify anything, it would unauthenticate login.
 import { Hono } from "hono";
-import { dubErrorHandler, errors, type FieldError } from "@dub/errors";
+import { dubErrorHandler, errors, toResponse, type FieldError } from "@dub/errors";
 import { extractContext, newRequestId, type RequestContext } from "@dub/http";
 import { policyGate, type PermissionGranter, type PolicyGateVars } from "@dub/policy-gate";
+import { auth as authRules } from "@dub/types";
 import type { auth, identity } from "@dub/types";
 import type { Deps } from "./deps";
 import type { AppConfig } from "./env";
@@ -174,6 +175,30 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
   const { config } = deps;
 
+  /** Audit a credential action refused inside an impersonation session (actor = the real admin). */
+  const auditImpersonationBlocked = (ctx: RequestContext, imp: auth.ImpersonationInfo, attempted: string): Promise<void> =>
+    deps.audit.record({
+      action: "auth.impersonation.blocked",
+      actorId: imp.actorId,
+      result: "denied",
+      requestId: ctx.requestId,
+      resourceType: "user",
+      resourceId: imp.subjectId,
+      details: { subjectId: imp.subjectId, attempted },
+    });
+
+  /** Audit the end of an impersonation (manual stop / refresh / expiry / logout). */
+  const auditImpersonationStopped = (ctx: RequestContext, imp: auth.ImpersonationInfo, reason: string): Promise<void> =>
+    deps.audit.record({
+      action: "auth.impersonation.stopped",
+      actorId: imp.actorId,
+      result: "success",
+      requestId: ctx.requestId,
+      resourceType: "user",
+      resourceId: imp.subjectId,
+      details: { subjectId: imp.subjectId, reason, startedAt: imp.startedAt, expiresAt: imp.expiresAt },
+    });
+
   // The authorization layer. First and only — every route below is gated by POLICY_TABLE,
   // including the conditionally registered /auth/demo-login further down.
   app.use("*", policyGate({ service: "auth-service", table: POLICY_TABLE, granted: granterFrom(deps) }));
@@ -263,6 +288,11 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     const verified = await deps.sessions.verify(token);
     if (!verified.valid || !verified.userId) throw authErrors.invalidToken();
     const userId = verified.userId;
+    // A credential change is never made AS someone else (admin impersonation).
+    if (verified.impersonation) {
+      await auditImpersonationBlocked(ctx, verified.impersonation, "auth.password.changed");
+      throw authErrors.impersonationActionBlocked();
+    }
 
     const body = await readJson<{ currentPassword?: string; newPassword?: string }>(c);
     const currentPassword = requireString(body.currentPassword, "currentPassword");
@@ -379,6 +409,101 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     return c.json({ userId: targetId, email, password });
   });
 
+  // ---- POST /internal/admin/users/:userId/impersonation (admin impersonation start) ----
+  // An admin opens a short, audited session AS another member to see exactly what they see.
+  // AUTHZ: `internalWithKeys(["identity:impersonate"])` in POLICY_TABLE (the gateway-owned
+  // POST /api/v1/admin/users/:userId/impersonation is the only caller). What stays here is
+  // the INSTANCE check (two-layer rule): is THIS target eligible — the shared rule in
+  // @dub/types (`auth.impersonationRefusal`) refuses self, non-active users, and anyone who
+  // holds identity:impersonate or role_sys_admin (no admin→admin escalation).
+  //
+  // The gateway forwards the admin's own session token as a bearer. It is parked inside the
+  // new record and handed back on stop/refresh — the admin never re-logs in. The response
+  // carries the Set-Cookie value for the gateway to relay (internal-only shape; the browser
+  // body is just `{ impersonation }`).
+  app.post("/internal/admin/users/:userId/impersonation", async (c) => {
+    const ctx = ctxOf(c);
+    const actor = c.get("userId");
+    const targetId = c.req.param("userId");
+    const actorToken = bearerToken(c.req.header("authorization")) ?? "";
+
+    const refuse = async (reason: string): Promise<never> => {
+      await deps.audit.record({
+        action: "auth.impersonation.started",
+        actorId: actor,
+        result: "denied",
+        requestId: ctx.requestId,
+        resourceType: "user",
+        resourceId: targetId,
+        details: { subjectId: targetId, reason },
+      });
+      throw authErrors.impersonationNotAllowed(reason);
+    };
+
+    const actorImp = await deps.sessions.impersonationOf(actorToken);
+    const target = await deps.identity.getUser(ctx, targetId);
+    if (!target) throw errors.notFound("user", targetId);
+    const refusal = authRules.impersonationRefusal({
+      actorId: actor,
+      actorImpersonating: actorImp !== null,
+      target: {
+        id: target.id,
+        status: target.status,
+        roleIds: target.roleIds,
+        holdsImpersonate: await deps.identity.hasPermission(ctx, target.id, authRules.IMPERSONATE_PERMISSION),
+      },
+    });
+    if (refusal) return refuse(refusal);
+
+    const started = await deps.sessions.startImpersonation(
+      actorToken,
+      actor,
+      target.id,
+      config.impersonationTtlSec,
+      config.impersonationRestoreGraceSec,
+    );
+    if ("error" in started) {
+      if (started.error === "nested") return refuse("nested");
+      throw authErrors.invalidToken("Admin session is not valid for impersonation");
+    }
+    await deps.audit.record({
+      action: "auth.impersonation.started",
+      actorId: actor,
+      result: "success",
+      requestId: ctx.requestId,
+      resourceType: "user",
+      resourceId: target.id,
+      details: { subjectId: target.id, startedAt: started.impersonation.startedAt, expiresAt: started.impersonation.expiresAt },
+    });
+    const maxAge = Math.max(0, Math.ceil((started.effectiveExpiresAt - Date.now()) / 1000));
+    return c.json({
+      impersonation: started.impersonation,
+      setCookie: buildSessionCookie(config.cookieName, started.token, config.cookieDomain, maxAge),
+    });
+  });
+
+  // ---- POST /auth/impersonation/stop (public; the impersonation cookie) ----
+  // 「自分に戻る」. Ends the impersonation and rotates the admin's PARKED session back into
+  // the cookie — no re-login. PUBLIC for the same reason as /auth/logout: holding the
+  // impersonation token is the whole credential, and ending it can only reduce access.
+  // If the admin's own session died meanwhile (revoked / idle), the cookie is cleared and
+  // 401 sends the browser to the login screen.
+  app.post("/auth/impersonation/stop", async (c) => {
+    const ctx = ctxOf(c);
+    const token = bearerToken(c.req.header("authorization")) ?? readCookie(c.req.header("cookie"), config.cookieName) ?? "";
+    const stopped = await deps.sessions.stopImpersonation(token);
+    if (!stopped) throw authErrors.notImpersonating();
+    await auditImpersonationStopped(ctx, stopped.impersonation, stopped.expired ? "expired" : "manual");
+    if ("error" in stopped.restored) {
+      // Built here rather than thrown: the cookie clear must ride on the 401 itself.
+      const res = toResponse(authErrors.sessionRevoked("Your own session has ended; please sign in again"), { requestId: ctx.requestId });
+      res.headers.append("set-cookie", clearSessionCookie(config.cookieName, config.cookieDomain));
+      return res;
+    }
+    setSessionCookie(c, config, stopped.restored);
+    return c.json({ session: stopped.restored.session });
+  });
+
   // ---- POST /verify (INTERNAL in the table: gateway / MO3 only) ----
   // No actor required: the gateway calls this to find out WHO the caller is.
   app.post("/verify", async (c) => {
@@ -402,6 +527,10 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if ("error" in result) {
       if (result.error === "malformed") throw authErrors.invalidToken();
       throw authErrors.sessionRevoked();
+    }
+    if (result.endedImpersonation) {
+      const { impersonation, expired } = result.endedImpersonation;
+      await auditImpersonationStopped(ctx, impersonation, expired ? "expired" : "refresh");
     }
     await deps.audit.record({
       action: "auth.session.refresh",
@@ -429,7 +558,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     const isBearerPath = Boolean(bearer || bodyToken);
     const token = bearer ?? bodyToken ?? cookieToken ?? "";
 
+    const imp = await deps.sessions.impersonationOf(token);
     await deps.sessions.logout(token);
+    if (imp) await auditImpersonationStopped(ctx, imp, "logout");
     await deps.audit.record({
       action: "auth.session.logout",
       actorId: ctx.userId ?? null,
@@ -567,10 +698,19 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (!deps.passkeys) throw authErrors.passkeyDisabled();
     return deps.passkeys;
   };
-  const sessionUserId = async (c: { req: { header: (n: string) => string | undefined } }): Promise<string> => {
+  // `mutating`: the route changes the account's sign-in methods, which is never done AS
+  // someone else — an impersonation session gets 403 (audited) instead of the user id.
+  const sessionUserId = async (
+    c: { req: { header: (n: string) => string | undefined; raw: Request } },
+    opts: { mutating?: string } = {},
+  ): Promise<string> => {
     const token = bearerToken(c.req.header("authorization")) ?? readCookie(c.req.header("cookie"), config.cookieName) ?? "";
     const verified = await deps.sessions.verify(token);
     if (!verified.valid || !verified.userId) throw authErrors.invalidToken();
+    if (opts.mutating && verified.impersonation) {
+      await auditImpersonationBlocked(ctxOf(c), verified.impersonation, opts.mutating);
+      throw authErrors.impersonationActionBlocked();
+    }
     return verified.userId;
   };
   const passkeyFailure = async (ctx: RequestContext, action: string, actorId: string | null, err: unknown, status: 400 | 401): Promise<never> => {
@@ -585,7 +725,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   app.post("/auth/passkey/register/options", async (c) => {
     const pk = passkeysOrThrow();
     const ctx = ctxOf(c);
-    const userId = await sessionUserId(c);
+    const userId = await sessionUserId(c, { mutating: "auth.passkey.registered" });
     const body = await readJson<{ password?: string }>(c);
     const password = requireString(body.password, "password");
     const me = await deps.identity.getUser(ctx, userId);
@@ -612,7 +752,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   app.post("/auth/passkey/register/verify", async (c) => {
     const pk = passkeysOrThrow();
     const ctx = ctxOf(c);
-    const userId = await sessionUserId(c);
+    const userId = await sessionUserId(c, { mutating: "auth.passkey.registered" });
     const body = await readJson<{ response?: RegistrationResponseJSON; label?: string }>(c);
     if (!body.response || typeof body.response !== "object") throw errors.validationFailed([{ field: "response", reason: "required" }]);
     const label = typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 64) : "パスキー";
@@ -696,7 +836,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   app.patch("/auth/passkeys/:id", async (c) => {
     passkeysOrThrow();
     const ctx = ctxOf(c);
-    const userId = await sessionUserId(c);
+    const userId = await sessionUserId(c, { mutating: "auth.passkey.renamed" });
     const body = await readJson<{ label?: string }>(c);
     const label = typeof body.label === "string" ? body.label.trim().slice(0, 64) : "";
     if (!label) throw errors.validationFailed([{ field: "label", reason: "required" }]);
@@ -711,7 +851,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   app.delete("/auth/passkeys/:id", async (c) => {
     passkeysOrThrow();
     const ctx = ctxOf(c);
-    const userId = await sessionUserId(c);
+    const userId = await sessionUserId(c, { mutating: "auth.passkey.deleted" });
     const id = c.req.param("id");
     const mine = await deps.identity.listPasskeys(ctx, userId);
     if (!mine.some((p) => p.id === id)) throw errors.notFound("passkey", id);
