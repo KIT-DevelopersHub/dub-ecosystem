@@ -613,7 +613,12 @@ function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: 
   return (
     <Card testId="fe2-driveshare-role-panel">
       <Stack gap={3}>
-        <strong>ロールで共有を追加</strong>
+        <Stack gap={1}>
+          <strong>ロールで共有を追加</strong>
+          <small data-testid="fe2-driveshare-role-auto-note" style={MUTED}>
+            ロールに加わったメンバーには、名簿に Gmail があれば1時間ほどで自動で共有されます。抜けたメンバーの権限は「再適用」で外します。
+          </small>
+        </Stack>
         {rolesQuery.isPending ? (
           <SkeletonLoader lines={2} />
         ) : rolesQuery.isError ? (

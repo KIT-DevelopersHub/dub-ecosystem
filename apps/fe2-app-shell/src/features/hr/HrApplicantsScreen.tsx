@@ -5,6 +5,7 @@
 //  - ステータスは行のプルダウンでその場で変えられる (楽観的 UI・失敗で戻る)。名簿にいない人を採用系に
 //    するときだけ確認ダイアログ → 名簿に追加。
 //  - 行を押すと詳細ドロワー (面談日・メモ・履歴)。
+//  - 行末のごみ箱で応募を削除 (確認 → 楽観的に消える)。hr:admin・採用前の人だけ押せる。
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -29,6 +30,8 @@ import {
   formatDate,
   formatDateTime,
   JoinConfirmDialog,
+  RemoveApplicantButton,
+  RemoveApplicantDialog,
   StageBadge,
   STAGE_LABELS,
   StatusSelect,
@@ -111,6 +114,7 @@ export function HrApplicantsScreen(): JSX.Element {
   const [sort, setSort] = useState<SortState>({ key: "updated", direction: "desc" });
   const [openId, setOpenId] = useState<string | null>(null);
   const [joinReq, setJoinReq] = useState<JoinRequest | null>(null);
+  const [removeReq, setRemoveReq] = useState<hr.Applicant | null>(null);
   const teamName = (id: string | null) => teams.data?.teams.find((t) => t.id === id)?.name ?? "";
 
   const all = list.data?.applicants ?? [];
@@ -165,6 +169,18 @@ export function HrApplicantsScreen(): JSX.Element {
       minWidth: "14rem",
       cell: (a) => <span className={styles.noteCell}>{a.latestNote ?? ""}</span>,
     },
+    ...(canWrite
+      ? [
+          {
+            key: "actions",
+            header: <span className={styles.visuallyHidden}>操作</span>,
+            align: "right",
+            noWrap: true,
+            width: "3.5rem",
+            cell: (a) => <RemoveApplicantButton applicant={a} onRequest={setRemoveReq} />,
+          } satisfies ColumnDef<hr.ApplicantListItem>,
+        ]
+      : []),
   ];
 
   let body: JSX.Element;
@@ -244,6 +260,7 @@ export function HrApplicantsScreen(): JSX.Element {
         {body}
         <ApplicantDrawer applicantId={openId} onClose={() => setOpenId(null)} onRequestJoin={setJoinReq} />
         <JoinConfirmDialog request={joinReq} onDone={() => setJoinReq(null)} />
+        <RemoveApplicantDialog applicant={removeReq} onClose={() => setRemoveReq(null)} />
       </>
     </HrFrame>
   );

@@ -170,6 +170,21 @@ describe("人事: 面談申し込みフォームの回答", () => {
     expect(r.questions.map((q: { id: string }) => q.id)).toContain("interests");
     expect(r.answers.interests).toEqual(["開発", "広報"]);
   });
+
+  it("keeps the answers of a deleted applicant (no name) and lets the same email apply again", async () => {
+    const app = createApp(makeDeps());
+    await publicSubmit(app);
+    const firstId = (await call(app, "GET", "/members/hr/applicants")).json.applicants[0].id as string;
+    expect((await call(app, "DELETE", `/members/hr/applicants/${firstId}`)).status).toBe(200);
+    const responses = await call(app, "GET", "/members/hr/interview-form/responses");
+    expect(responses.json.responses).toHaveLength(1);
+    expect(responses.json.responses[0]).toMatchObject({ applicantId: firstId, applicantName: null });
+
+    await publicSubmit(app);
+    const list = (await call(app, "GET", "/members/hr/applicants")).json.applicants;
+    expect(list).toHaveLength(1);
+    expect(list[0].id).not.toBe(firstId);
+  });
 });
 
 describe("人事: 面談申し込みフォームの権限", () => {

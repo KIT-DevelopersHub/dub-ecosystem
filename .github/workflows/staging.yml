@@ -159,6 +159,19 @@ jobs:
           D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'enforce' }}
         run: bash infra/d1/scripts/schema-gate.sh "${{ steps.origins.outputs.d1 }}"
 
+      # STAGING ONLY. Data-only migrations (new catalog keys for role_sys_admin) never reach
+      # staging — the schema sync only fills missing tables/columns — so re-assert the
+      # invariant role_sys_admin ⊇ PERMISSION_CATALOG from the tree being deployed.
+      - name: Grant staging admin every permission key
+        env:
+          WRANGLER_BIN: pnpm dlx wrangler@4.35.0
+        run: |
+          if [ ! -f infra/d1/scripts/grant-staging-admin.ts ]; then
+            echo "::notice::grant-staging-admin.ts not in this tree (PR predates it) — skipped"
+            exit 0
+          fi
+          cd infra/d1 && node --import tsx scripts/grant-staging-admin.ts "${{ steps.origins.outputs.d1 }}"
+
       - name: Deploy to staging
         run: bash infra/deploy/deploy-staging.sh
 

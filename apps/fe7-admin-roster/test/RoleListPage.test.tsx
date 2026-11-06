@@ -125,8 +125,9 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     renderWithProviders(<RoleListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-roles-list")).toBeInTheDocument());
 
-    // The role strip is a tablist; each tab reflects selection via aria-selected.
-    expect(screen.getByTestId("fe7-roles-list")).toHaveAttribute("role", "tablist");
+    // Each genre section's strip is a tablist; each tab reflects selection via aria-selected.
+    expect(screen.getByTestId("fe7-roles-group-list-system")).toHaveAttribute("role", "tablist");
+    expect(screen.getByTestId("fe7-roles-group-list-ops")).toHaveAttribute("role", "tablist");
     const organizerTab = screen.getByTestId("fe7-roles-open-role_organizer");
     expect(organizerTab).toHaveAttribute("role", "tab");
     expect(organizerTab).toHaveAttribute("aria-selected", "false");
