@@ -1910,7 +1910,9 @@ function createRosterStore() {
           return u ? json(detail(u)) : problem("NOT_FOUND", "user not found", 404);
         }
       }
-      if (pathname === "/api/v1/identity/roles") return json(page(roles));
+      if (pathname === "/api/v1/identity/roles") {
+        return json(page(roles.map((r) => ({ ...r, memberCount: users.filter((u) => u.roleIds.includes(r.id)).length }))));
+      }
       // 通知管理「誰に届くか」: derived from the LIVE demo roles, so toggling 「管理者向け通知を
       // 受け取る」 in ロール管理 changes this summary in the same session (mirrors identity
       // GET /internal/permission-holders behind notification GET /audiences).
@@ -2064,6 +2066,7 @@ function createRosterStore() {
           if (role.isSystem) return problem("CONFLICT", "システムロールは削除できません", 409);
           roles.splice(roles.indexOf(role), 1);
           for (const r of roles) r.mailVisibleRoleIds = r.mailVisibleRoleIds.filter((t) => t !== role.id);
+          for (const u of users) u.roleIds = u.roleIds.filter((t) => t !== role.id);
           audit("identity.role.deleted", "role", role.id, { name: role.name });
           return json(null, 204);
         }
@@ -5897,9 +5900,132 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     });
   };
 
+  // 営業進捗。企業はすべて架空。card_demo_1 / 5 と同じ会社名の行は詳細に名刺が出る。
+  type Lead = sponsorValues.SponsorLead;
+  const lead = (id: string, daysAgo: number, f: Partial<Lead> & Pick<Lead, "companyName">): Lead => ({
+    id, industry: "IT・SaaS", owner: null, contactName: null, contactRole: null, contactEmail: null, source: null, contactType: null,
+    evidence: null, priority: null, plan: null, status: "未接触", firstContactOn: null, lastContactOn: null, proposedOn: null, agreedOn: null, nextAction: null, nextActionOn: null,
+    expectedAmount: null, confidence: null, budgetPeriod: null, decisionPeriod: null, note: null,
+    version: 1, createdBy: "usr_sponsor" as Lead["createdBy"], createdByName: "鈴木 一郎", createdAt: at(daysAgo), updatedAt: at(daysAgo), ...f,
+  });
+  const dayOn = (offset: number): string => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+  const leads: Lead[] = [
+    lead("lead_demo_1", 1, {
+      companyName: "株式会社北陸テック", owner: "鈴木", contactName: "山田 太郎", contactRole: "事業開発部 部長", contactEmail: "yamada@hokuriku-tech.example.jp",
+      source: "北陸ITカンファレンス", contactType: "イベントで面識あり", priority: "S", plan: "Gold", status: "条件調整", firstContactOn: dayOn(-40), lastContactOn: dayOn(-3), proposedOn: dayOn(-3),
+      nextAction: "協賛内容の最終確認", nextActionOn: dayOn(4), expectedAmount: 300000, confidence: "高", budgetPeriod: "2026年度下期", decisionPeriod: "12月", note: "ロゴ掲載に加えて登壇枠を希望。",
+    }),
+    lead("lead_demo_2", 2, {
+      companyName: "金沢クラウド合同会社", owner: "前田", contactName: "中村 花", source: "紹介（OB）", contactType: "過去に協賛あり", priority: "A", plan: "Silver",
+      status: "内諾", firstContactOn: dayOn(-60), lastContactOn: dayOn(-7), proposedOn: dayOn(-30), agreedOn: dayOn(-1), nextAction: "契約書を送付", nextActionOn: dayOn(-2), expectedAmount: 100000, confidence: "高",
+    }),
+    lead("lead_demo_3", 3, {
+      companyName: "能登ソフトウェア株式会社", owner: "鈴木", source: "問い合わせフォーム", contactType: "問い合わせのみ", priority: "A", plan: "未定",
+      status: "社内検討", firstContactOn: dayOn(-20), lastContactOn: dayOn(-10), proposedOn: dayOn(-10), nextAction: "検討状況を確認", nextActionOn: dayOn(1),
+    }),
+    lead("lead_demo_4", 5, {
+      companyName: "加賀データサービス株式会社", owner: "森", source: "インターン", contactType: "インターン先", priority: "B", status: "提案予定",
+      firstContactOn: dayOn(-14), lastContactOn: dayOn(-5), nextAction: "協賛資料を作成", nextActionOn: dayOn(6),
+    }),
+    lead("lead_demo_5", 6, {
+      companyName: "白山モビリティ株式会社", industry: "製造", owner: "前田", source: "知人の紹介", contactType: "担当者を確認中", priority: "B", status: "返信あり",
+      firstContactOn: dayOn(-9), lastContactOn: dayOn(-4), nextAction: "打ち合わせ日程の調整",
+    }),
+    lead("lead_demo_6", 7, { companyName: "七尾ネットワークス株式会社", industry: "通信", owner: "森", source: "Hackit", priority: "B", status: "初回連絡", firstContactOn: dayOn(-6) }),
+    lead("lead_demo_7", 8, { companyName: "小松リサーチ株式会社", industry: "コンサル", source: "Hackit", status: "初回連絡", firstContactOn: dayOn(-5) }),
+    lead("lead_demo_8", 9, { companyName: "輪島メディア株式会社", industry: "広告・メディア", owner: "松島", source: "知人の紹介", status: "未接触" }),
+    lead("lead_demo_9", 10, { companyName: "珠洲エナジー株式会社", industry: "インフラ", source: "紹介候補", status: "未接触" }),
+    lead("lead_demo_10", 12, {
+      companyName: "松任システムズ株式会社", owner: "鈴木", source: "インターン", contactType: "インターン先", plan: "その他", status: "見送り",
+      firstContactOn: dayOn(-50), lastContactOn: dayOn(-30), expectedAmount: 0, note: "今年度の予算が確保できず見送り。",
+    }),
+  ];
+  // 今月は途中経過、先月は達成済みの見本。
+  const monthOf = (offset: number): string => {
+    const d = new Date();
+    return new Date(Date.UTC(d.getFullYear(), d.getMonth() + offset, 15)).toISOString().slice(0, 7);
+  };
+  type Goal = sponsorValues.MonthlyGoal;
+  const goal = (month: string, t: sponsorValues.GoalTargets): Goal => ({
+    ...t, month, version: 1, updatedBy: "usr_sponsor" as Goal["updatedBy"], updatedByName: "鈴木 一郎", updatedAt: at(1),
+  });
+  const goals: Goal[] = [
+    goal(monthOf(0), { contacted: 10, proposed: 4, agreed: 2, amount: 500000 }),
+    goal(monthOf(-1), { contacted: 2, proposed: 1, agreed: 1, amount: null }),
+  ];
+  let leadSeq = 0;
+  const LEAD_FIELDS = [
+    "companyName", "industry", "owner", "contactName", "contactRole", "contactEmail", "source", "contactType", "evidence", "priority", "plan", "status",
+    "firstContactOn", "lastContactOn", "proposedOn", "agreedOn", "nextAction", "nextActionOn", "expectedAmount", "confidence", "budgetPeriod", "decisionPeriod", "note",
+  ] as const;
+  const pickLead = (b: any): Partial<Lead> => Object.fromEntries(LEAD_FIELDS.filter((k) => b && k in b).map((k) => [k, b[k] === "" ? null : b[k]]));
+  const addLead = (b: any, at: string): Lead => {
+    const u = me();
+    const l: Lead = { ...lead(`lead_demo_new_${++leadSeq}`, 0, { companyName: "" }), ...pickLead(b), createdBy: u.id as Lead["createdBy"], createdByName: u.displayName, createdAt: at, updatedAt: at };
+    leads.push(l);
+    return l;
+  };
+
+  function handleLeads(method: string, pathname: string, body: any, now: string): Response | null {
+    const base = "/api/v1/members/sponsor/leads";
+    if (pathname === base) {
+      if (method === "GET") return json({ leads: [...leads].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((l) => ({ ...l })) });
+      if (method === "POST") {
+        const l = addLead(body, now);
+        Object.assign(l, sponsorValues.applyLeadMilestones("未接触", l, [], sponsorValues.jstDate(now)));
+        return json({ ...l }, 201);
+      }
+      return null;
+    }
+    if (pathname === `${base}/import` && method === "POST") {
+      const seen = new Set(leads.map((l) => sponsorValues.companyKey(l.companyName)));
+      const created: Lead[] = [];
+      for (const row of body?.leads ?? []) {
+        const key = sponsorValues.companyKey(row.companyName);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        created.push({ ...addLead(row, now) });
+      }
+      return json({ leads: created, skipped: (body?.leads?.length ?? 0) - created.length }, 201);
+    }
+    const l = leads.find((x) => x.id === decodeURIComponent(pathname.slice(base.length + 1)));
+    if (!l) return err("SPONSOR_LEAD_NOT_FOUND", 404);
+    if (method === "GET") return json({ ...l });
+    if (method === "PATCH") {
+      if (body?.expectedVersion !== l.version) return err("SPONSOR_VERSION_CONFLICT", 409);
+      const patch = pickLead(body);
+      const prevStatus = l.status;
+      Object.assign(l, sponsorValues.applyLeadMilestones(prevStatus, { ...l, ...patch }, Object.keys(patch), sponsorValues.jstDate(now)));
+      l.version += 1;
+      l.updatedAt = now;
+      return json({ ...l });
+    }
+    if (method === "DELETE") {
+      leads.splice(leads.indexOf(l), 1);
+      return json(null, 204);
+    }
+    return null;
+  }
+
   async function handle(method: string, pathname: string, body: any, raw: unknown, headers: Headers): Promise<Response | null> {
     if (!pathname.startsWith("/api/v1/members/sponsor/")) return null;
     const now = new Date().toISOString();
+    if (pathname.startsWith("/api/v1/members/sponsor/leads")) return handleLeads(method, pathname, body, now);
+    if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") return json({ goals: goals.map((g) => ({ ...g })) });
+    const goalPath = /^\/api\/v1\/members\/sponsor\/goals\/(\d{4}-\d{2})$/.exec(pathname);
+    if (goalPath && method === "PUT") {
+      const month = goalPath[1]!;
+      const cur = goals.find((g) => g.month === month);
+      if ((cur?.version ?? 0) !== body?.expectedVersion) return err("SPONSOR_VERSION_CONFLICT", 409);
+      const u = me();
+      const next: Goal = {
+        month, contacted: body.contacted, proposed: body.proposed, agreed: body.agreed, amount: body.amount, version: body.expectedVersion + 1,
+        updatedBy: u.id as Goal["updatedBy"], updatedByName: u.displayName, updatedAt: now,
+      };
+      if (cur) goals.splice(goals.indexOf(cur), 1);
+      goals.push(next);
+      return json({ ...next });
+    }
     if (pathname === "/api/v1/members/sponsor/cards") {
       if (method === "GET") return json({ cards: [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((c) => ({ ...c })) });
       if (method === "POST") {

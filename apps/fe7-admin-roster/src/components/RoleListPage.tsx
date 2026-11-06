@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
-import type { identity } from "@dub/types";
 import { PageHeader, Badge, Button, ConfirmDialog, EmptyState, ErrorState, Icon, SegmentedControl, SkeletonList, TextField } from "@dub/ui";
 import type { SegmentedOption } from "@dub/ui";
 import { useRoles, useDeleteRole } from "../hooks/useRosterApi";
 import { useCanAdminEdit } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { RolePermissionsEditor } from "./RolePermissionsEditor";
+import type { RoleView } from "../contracts/pending";
 import { errorMessage, displayError } from "../lib/errorDisplay";
-import { groupRoles, matchesRoleQuery, roleDisplayName, ROLE_GROUPS } from "../lib/roleGroups";
+import { groupRoles, matchesRoleQuery, roleDeleteMessage, roleDisplayName, ROLE_GROUPS } from "../lib/roleGroups";
 import type { RoleGroupId } from "../lib/roleGroups";
 import styles from "./RoleListPage.module.css";
 
@@ -62,7 +62,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
   const del = useDeleteRole();
   const canAdminEdit = useCanAdminEdit();
   const { toast } = useToast();
-  const [pendingDelete, setPendingDelete] = useState<identity.Role | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<RoleView | null>(null);
   // Explicit user pick. When null we fall back to the first role (effectiveId
   // below) so the panel is never empty on load and after a delete.
   // Deep link: ?role=<id>&app=<appId> opens that role with the app's 詳細設定 dialog, so a
@@ -109,7 +109,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
 
   // One segment per role. `controls` wires each tab to its permission panel
   // (aria-controls + aria-expanded); the count/badge live in the segment label.
-  const toOption = (r: identity.Role, group: RoleGroupId): SegmentedOption<string> => {
+  const toOption = (r: RoleView, group: RoleGroupId): SegmentedOption<string> => {
     const label = roleDisplayName(r, group);
     return {
       value: r.id,
@@ -135,7 +135,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
     <div>
       <PageHeader
         title="ロール管理"
-        description="上のタブでロールを切り替え、アプリごとに「無効 / 閲覧 / 編集」を選びます。"
+        description={`上のタブでロールを切り替え、アプリごとに「無効 / 閲覧 / 編集」を選びます。${canAdmin ? "ロールの削除は、選択したロールのパネル右上から行えます。" : ""}`}
         testId="fe7-roles-header"
         actions={canAdmin ? <Button variant="primary" onClick={onNew} testId="fe7-roles-new">ロールを作成</Button> : null}
       />
@@ -221,11 +221,13 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
                 <span style={nameStyle}>{active.name}</span>
                 {active.isSystem ? <Badge tone="neutral">システム</Badge> : <Badge tone="success">カスタム</Badge>}
                 <span style={{ flex: 1 }} />
-                {canAdmin && !active.isSystem ? (
+                {!canAdmin ? null : active.isSystem ? (
+                  <span style={metaStyle} data-testid="fe7-roles-delete-unavailable">削除できるのはシステム以外のロールです</span>
+                ) : (
                   <Button variant="danger" onClick={() => setPendingDelete(active)} testId={`fe7-roles-delete-${active.id}`}>
                     削除
                   </Button>
-                ) : null}
+                )}
               </div>
               {/* RolePermissionsEditor seeds its name/permissions from useState(role...)
                   at mount only; the changing key above also guarantees a fresh editor
@@ -237,7 +239,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
       )}
       <ConfirmDialog
         title="ロールを削除"
-        message={`「${pendingDelete?.name}」を削除します。よろしいですか？`}
+        message={pendingDelete ? roleDeleteMessage(pendingDelete) : ""}
         open={pendingDelete !== null}
         danger
         confirmLabel="削除する"

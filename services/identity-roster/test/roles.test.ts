@@ -75,6 +75,37 @@ describe("roles CRUD", () => {
     expect(res.status).toBe(204);
   });
 
+  describe("last-admin guard", () => {
+    async function customAdminRole(h: Awaited<ReturnType<typeof makeHarness>>) {
+      const res = await h.app.request("/identity/roles", jsonBody(asUser(h.adminId), "POST", { name: "co-admin", permissions: ["identity:admin", "app:admin:view", "app:admin:edit"] }));
+      return (await res.json()) as identity.Role;
+    }
+    const grant = (h: Awaited<ReturnType<typeof makeHarness>>, userId: string, roleId: string) =>
+      h.app.request(`/identity/users/${userId}/roles`, jsonBody(asUser(h.adminId), "POST", { roleId }));
+
+    it("refuses to delete the role that is the org's only remaining identity:admin grant", async () => {
+      const h = await makeHarness();
+      const role = await customAdminRole(h);
+      await grant(h, h.adminId, role.id);
+      const grants = (await (await h.app.request(`/identity/users/${h.adminId}/roles`, asUser(h.adminId))).json()) as { id: string; roleId: string }[];
+      const systemGrant = grants.find((a) => a.roleId === h.adminRoleId)!;
+      expect((await h.app.request(`/identity/users/${h.adminId}/roles/${systemGrant.id}`, { ...asUser(h.adminId), method: "DELETE" })).status).toBe(204);
+
+      const res = await h.app.request(`/identity/roles/${role.id}`, { ...asUser(h.adminId), method: "DELETE" });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: { details?: { code?: string } } }).error.details?.code).toBe("LAST_ADMIN");
+    });
+
+    it("allows the delete while another admin grant survives", async () => {
+      const h = await makeHarness();
+      const role = await customAdminRole(h);
+      await grant(h, h.adminId, role.id); // still holds the system admin role too
+      await grant(h, h.memberId, role.id);
+      const res = await h.app.request(`/identity/roles/${role.id}`, { ...asUser(h.adminId), method: "DELETE" });
+      expect(res.status).toBe(204);
+    });
+  });
+
   it("lists roles including the system roles (admin/maintainer/organizer/member)", async () => {
     const h = await makeHarness();
     const res = await h.app.request("/identity/roles", asUser(h.adminId));

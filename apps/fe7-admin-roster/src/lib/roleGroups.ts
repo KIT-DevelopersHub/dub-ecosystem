@@ -68,3 +68,18 @@ export function matchesRoleQuery(role: GroupableRole, query: string): boolean {
   const q = query.trim().toLowerCase();
   return q === "" || role.name.toLowerCase().includes(q);
 }
+
+/**
+ * Confirmation copy for deleting a role: who loses it, that it cannot be undone, and — for
+ * 名簿-managed roles — that the sync recreates the role while its team / 役職 still exists.
+ */
+export function roleDeleteMessage(role: GroupableRole & { memberCount?: number }): string {
+  const count = role.memberCount ?? 0;
+  const impact = count > 0 ? `付与中の ${count} 人からこのロールが外れます。` : "";
+  const group = roleGroupOf(role);
+  const managed =
+    group === "team" || group === "position"
+      ? "名簿に残っている場合は、次回の同期で権限なしのロールとして作り直されます。"
+      : "";
+  return `「${role.name}」を削除します。${impact}元に戻せません。${managed}`;
+}

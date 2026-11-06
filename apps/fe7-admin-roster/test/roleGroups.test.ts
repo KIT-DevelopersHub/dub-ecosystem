@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupRoles, matchesRoleQuery, roleDisplayName, roleGroupOf } from "../src/lib/roleGroups";
+import { groupRoles, matchesRoleQuery, roleDeleteMessage, roleDisplayName, roleGroupOf } from "../src/lib/roleGroups";
 
 const r = (id: string, name: string, isSystem = false) => ({ id, name, isSystem });
 
@@ -70,5 +70,18 @@ describe("roleDisplayName / matchesRoleQuery", () => {
     expect(matchesRoleQuery(r("a", "チーム: 開発チーム"), "チーム")).toBe(true);
     expect(matchesRoleQuery(r("a", "統括"), "開発")).toBe(false);
     expect(matchesRoleQuery(r("a", "統括"), "  ")).toBe(true);
+  });
+});
+
+describe("roleDeleteMessage", () => {
+  it("states the impact on holders only when someone holds the role", () => {
+    expect(roleDeleteMessage(r("role_x", "統括"))).toBe("「統括」を削除します。元に戻せません。");
+    expect(roleDeleteMessage({ ...r("role_x", "統括"), memberCount: 3 })).toContain("付与中の 3 人から");
+  });
+
+  it("warns that 名簿-managed roles come back on the next sync", () => {
+    expect(roleDeleteMessage(r("role_auto_team_dev", "チーム: 開発チーム"))).toContain("次回の同期");
+    expect(roleDeleteMessage(r("role_auto_position_member", "役職: Member"))).toContain("次回の同期");
+    expect(roleDeleteMessage(r("role_ops_lead", "統括"))).not.toContain("次回の同期");
   });
 });

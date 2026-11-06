@@ -1,16 +1,8 @@
 // 企業 = 名刺の会社名でまとめたもの (DB に企業テーブルは持たない)。
 // 「株式会社」「(株)」・全角/半角・空白の違いは同じ企業として扱い、入力時は既存の企業名を候補に出して表記を揃える。
-import type { sponsor } from "@dub/types";
+import { sponsor } from "@dub/types";
 
-const LEGAL_FORMS =
-  /株式会社|有限会社|合同会社|合資会社|合名会社|一般社団法人|一般財団法人|公益社団法人|公益財団法人|特定非営利活動法人|npo法人|\((株|有|同|資|名|社|財)\)/g;
-
-/** 会社名の照合キー。法人格・空白・記号を除いた NFKC 小文字。 */
-export function companyKey(name: string): string {
-  const base = name.normalize("NFKC").toLowerCase();
-  const key = base.replace(LEGAL_FORMS, "").replace(/[\s・.,、。'"]/g, "");
-  return key === "" ? base.trim() : key;
-}
+export const { companyKey } = sponsor;
 
 export interface Company {
   key: string;

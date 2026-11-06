@@ -34,3 +34,16 @@ export function useToast(): { toast: (opts: ToastOptions) => void } {
   const show = useToastStore((s) => s.show);
   return { toast: show };
 }
+
+/**
+ * Hands every toast to the shell's viewport (FE2 owns it in production; `ui/Toaster` is
+ * dev-harness only). Returns the unsubscribe function.
+ */
+export function forwardToasts(show: (opts: ToastOptions) => void): () => void {
+  return useToastStore.subscribe((state, prev) => {
+    for (const { id, ...opts } of state.toasts.slice(prev.toasts.length)) {
+      show(opts);
+      state.dismiss(id);
+    }
+  });
+}

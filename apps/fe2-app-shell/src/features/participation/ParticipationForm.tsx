@@ -3,7 +3,7 @@
 // サンクス view is intentionally generic (no roster/member echo). 氏名 + 学校メール + Gmail
 // + 役職 are required (both emails must be a valid mail address); 所属チームも名簿のチームが
 // あれば必須 (「まだ決まっていない」も可)。the rest is optional.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Form, FormField, Select, Skeleton } from "@dub/ui";
 import { usePublicOnboardingItems, useSubmitParticipation } from "./hooks.ts";
 import { MEMBER_POSITIONS, POSITION_LABEL, type MemberPosition, type PublicParticipationResponse } from "./contracts.ts";
@@ -15,6 +15,7 @@ import {
   type PersonProfileErrors,
   type PersonProfileKey,
 } from "../../lib/personProfile.tsx";
+import { clearPrefillHash, readPrefillDraft } from "./prefillLink.ts";
 import styles from "./participation.module.css";
 
 // 参加届で必須の項目 (残りは任意)。項目そのものは運営名簿と共通 (PersonProfile)。
@@ -30,7 +31,10 @@ export function ParticipationForm(): JSX.Element {
   // チームの選択肢は名簿のチーム (公開してよい部分だけを返す公開案内 API)。
   const guide = usePublicOnboardingItems();
   const teams = guide.data?.teams ?? [];
-  const [draft, setDraft] = useState(emptyProfileDraft);
+  // 人事の「入力済みリンク」(#prefill=...) で来たら、面談申し込みの内容を入れた状態で始める。
+  const [prefilled] = useState(readPrefillDraft);
+  const [draft, setDraft] = useState(() => prefilled ?? emptyProfileDraft());
+  useEffect(clearPrefillHash, []);
   const [errors, setErrors] = useState<PersonProfileErrors>({});
   const [team, setTeam] = useState("");
   const [teamError, setTeamError] = useState<string | null>(null);
@@ -119,6 +123,11 @@ export function ParticipationForm(): JSX.Element {
     <Card>
       <Form onSubmit={onSubmit}>
         <div className={styles.formStack}>
+          {prefilled ? (
+            <p className={styles.sectionHint} data-testid="participation-prefilled">
+              面談申し込みの内容を入力済みです。内容を確認して、残りの項目を入力してください。
+            </p>
+          ) : null}
           <PersonProfileFields
             draft={draft}
             onChange={setDraft}
