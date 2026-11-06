@@ -39,6 +39,7 @@ import {
   driftKindLabel,
   driveRoleLabel,
   driveRoleTone,
+  finishRoleGrant,
   isValidEmail,
   roleGrantChipLabel,
   roleLabel,
@@ -420,17 +421,20 @@ function RoleGrantRow({
   const queryClient = useQueryClient();
   const toast = useToast();
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [remaining, setRemaining] = useState(0);
 
   // Re-apply is optimistic: assume the sync reaches every member (appliedCount → memberCount).
   const reapply = useMutation(
     createOptimisticMutation<RoleFileGrant, void, ListRoleGrantsResult>(queryClient, {
-      mutationFn: () => driveApi.reapplyRoleGrant(fileId, grant.roleId),
+      mutationFn: async () => finishRoleGrant(driveApi, await driveApi.reapplyRoleGrant(fileId, grant.roleId), setRemaining),
       cacheKey: grantsKey,
       applyOptimistic: (prev) => ({
         ...prev,
         items: prev.items.map((g) => (g.roleId === grant.roleId ? { ...g, appliedCount: g.memberCount } : g)),
       }),
-      onErrorToast: (err) => toast.show({ kind: "error", title: "再適用できませんでした", description: err.message }),
+      // What already went through stays recorded, so pressing it again continues from there.
+      onErrorToast: () =>
+        toast.show({ kind: "error", title: "再適用が途中で止まりました", description: "ここまでの共有は保存されています。もう一度「再適用」を押すと続きから処理します。" }),
     }),
   );
 
@@ -472,7 +476,9 @@ function RoleGrantRow({
               {driveRoleLabel(grant.driveRole)}
             </Badge>
           </Stack>
-          <small data-testid="fe2-driveshare-role-grant-members">{grant.memberCount}人に展開</small>
+          <small data-testid="fe2-driveshare-role-grant-members">
+            {reapply.isPending && remaining > 0 ? `共有中… 残り${remaining}人` : `${grant.memberCount}人に展開`}
+          </small>
         </Stack>
         <Stack direction="row" gap={2} align="center">
           <Button
@@ -516,6 +522,7 @@ function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: 
   const toast = useToast();
   const [roleId, setRoleId] = useState("");
   const [driveRole, setDriveRole] = useState<DriveRole>("reader");
+  const [remaining, setRemaining] = useState(0);
 
   const rolesQuery = useQuery({
     queryKey: queryKeys.feature("driveshare", "roles"),
@@ -533,7 +540,7 @@ function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: 
   // Optimistic grant: insert a placeholder grant (memberCount unknown until refetch).
   const grantRole = useMutation(
     createOptimisticMutation<RoleFileGrant, { roleId: string; driveRole: DriveRole }, ListRoleGrantsResult>(queryClient, {
-      mutationFn: (req) => driveApi.grantRole(file.id, req),
+      mutationFn: async (req) => finishRoleGrant(driveApi, await driveApi.grantRole(file.id, req), setRemaining),
       cacheKey: grantsKey,
       applyOptimistic: (prev, req) => {
         const roleName = roles.find((r) => r.id === req.roleId)?.name ?? req.roleId;
@@ -642,6 +649,7 @@ function RolePermissionPanel({ file, grantsKey }: { file: DriveFile; grantsKey: 
             </Button>
           </Stack>
         )}
+        {grantRole.isPending && remaining > 0 ? <small data-testid="fe2-driveshare-role-progress">共有中… 残り{remaining}人</small> : null}
         {roleId && alreadyGranted.has(roleId) ? (
           <small style={{ color: "var(--dub-color-danger-fg, #b00)" }}>このロールには既に権限が設定されています</small>
         ) : null}

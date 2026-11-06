@@ -292,8 +292,11 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
         { id: "a", label: "y", type: "text", required: false, options: [] },
       ],
       [{ id: "a", label: "", type: "text", required: false, options: [] }],
-      [{ id: "a", label: "x", type: "date", required: false, options: [] }],
+      [{ id: "a", label: "x", type: "unknown", required: false, options: [] }],
       [{ id: "a", label: "x", type: "select", required: false, options: [] }],
+      [{ id: "a", label: "x", type: "radio", required: false, options: [] }],
+      [{ id: "a", label: "x", type: "multiselect", required: false, options: ["a\nb"] }],
+      [{ id: "a", label: "x", description: "長".repeat(201), type: "text", required: false, options: [] }],
       [{ id: "a", label: "x", type: "text", required: "yes", options: [] }],
       Array.from({ length: 21 }, (_, i) => ({ id: `f${i}`, label: "x", type: "text", required: false, options: [] })),
     ];

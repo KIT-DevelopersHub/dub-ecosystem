@@ -112,6 +112,30 @@ describe.each<RepoKind>(["memory", "d1"])("proposals (%s)", (kind) => {
     expect((await app.fetch(submit({ ...VALID, answers: { slides: "https://example.com" } }))).status).toBe(201);
   });
 
+  it("accepts the form-builder field types and validates their answers", async () => {
+    const { app } = await setup(kind);
+    const fields = [
+      { id: "topics", label: "テーマ", description: "複数可", type: "multiselect", required: true, options: ["Web", "AI"] },
+      { id: "format", label: "形式", type: "radio", required: true, options: ["LT"] },
+      { id: "day", label: "希望日", type: "date", required: false, options: [] },
+      { id: "mail", label: "連絡先", type: "email", required: false, options: [] },
+      { id: "tel", label: "電話", type: "phone", required: false, options: [] },
+    ];
+    const saved = await app.fetch(send("POST", "/lp/proposals/fields", { fields }));
+    expect(saved.status).toBe(200);
+    expect((await body<LpProposalsState>(saved)).fields).toEqual(fields);
+    await open(app);
+
+    const good = { topics: "Web\nAI", format: "LT", day: "2027-09-13", mail: "a@b.co", tel: "076-123-4567" };
+    expect((await app.fetch(submit({ ...VALID, answers: good }))).status).toBe(201);
+    const page = await body<LpProposalsPage>(await app.fetch(get("/lp/proposals/submissions")));
+    expect(page.items[0]!.answers).toContainEqual({ fieldId: "topics", label: "テーマ", value: "Web、AI" });
+
+    for (const bad of [{ topics: "Web\nGo" }, { topics: "Web\nWeb" }, { format: "x" }, { day: "2027-02-30" }, { day: "2027-13-45" }, { mail: "x" }, { tel: "abc" }]) {
+      expect((await app.fetch(submit({ ...VALID, answers: { ...good, ...bad } }))).status).toBe(400);
+    }
+  });
+
   it("sets the review status and counts it", async () => {
     const { app } = await setup(kind);
     await open(app);

@@ -311,3 +311,22 @@ export interface PutUserManagedRolesResponse {
   /** 既に手動で付いているので自動では付けなかったロール (手動を優先)。 */
   manual: RoleId[];
 }
+
+/** POST /internal/users/:id/activate — 名簿 (member-service) が「在籍 (added) でこの
+ *  アカウントに紐付いた」と確定した人の招待中アカウントを有効化する (invited -> active)。
+ *  invited 以外 (active / disabled / rejected) には触れない (冪等・停止を上書きしない)。 */
+export interface ActivateInvitedUserRequest {
+  /** どの経路で有効化したか (監査用・例 "participation.link")。 */
+  trigger: string;
+  /** true なら書き込まず、有効化される予定かだけを返す。 */
+  dryRun?: boolean;
+}
+export interface ActivateInvitedUserResponse {
+  dryRun: boolean;
+  /** invited -> active に変えた (dryRun なら変える予定)。 */
+  activated: boolean;
+  /** 呼び出し前の状態。 */
+  previousStatus: UserStatus;
+  /** 呼び出し後の状態 (dryRun なら previousStatus のまま)。 */
+  status: UserStatus;
+}

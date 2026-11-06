@@ -89,6 +89,12 @@ export class MemIdentityRepo implements IdentityRepo {
     if (!u) return;
     this.users.set(userId, { ...u, ...patch, updatedAt });
   }
+  async activateIfInvited(userId: string, updatedAt: string): Promise<boolean> {
+    const u = this.users.get(userId);
+    if (!u || u.status !== "invited") return false;
+    this.users.set(userId, { ...u, status: "active", updatedAt });
+    return true;
+  }
   async listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]> {
     return [...this.users.values()].filter((u) => u.orgId === orgId && u.source === source).map((u) => ({ ...u }));
   }
