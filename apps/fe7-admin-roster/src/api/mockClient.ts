@@ -22,6 +22,8 @@ export interface MockSeed {
   me?: gateway.MeResponse;
   /** Seed the /api/v1/mail/status rate-limit view (default: not limited). */
   mailRateLimit?: MailRateLimitStatus;
+  /** Replace the default role set (e.g. to exercise the grouped role list). */
+  roles?: RoleView[];
 }
 
 interface MockState {
@@ -46,6 +48,10 @@ function seedState(seed?: MockSeed): MockState {
     ["role_member", { id: "role_member", orgId: ORG, name: "member", permissions: ["identity:read", "event:read"], isSystem: true }],
     ["role_organizer", { id: "role_organizer", orgId: ORG, name: "organizer", permissions: ["event:read", "event:write"], isSystem: false }],
   ]);
+  if (seed?.roles) {
+    roles.clear();
+    for (const r of seed.roles) roles.set(r.id, r);
+  }
   const users = new Map<string, MockUser>([
     ["user_alice", { id: "user_alice", orgId: ORG, displayName: "Alice Admin", furigana: "アリス アドミン", email: "alice@developershub.jp", githubLogin: "alice", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_admin"], permissions: ["identity:read", "identity:admin", "audit:read", "event:read"], createdAt: now(), updatedAt: now() }],
     ["user_bob", { id: "user_bob", orgId: ORG, displayName: "Bob Member", furigana: "ボブ メンバー", email: "bob@developershub.jp", githubLogin: "bob", avatarUrl: null, status: "active", source: "manual", roleIds: ["role_member"], permissions: ["identity:read", "event:read"], createdAt: now(), updatedAt: now() }],
