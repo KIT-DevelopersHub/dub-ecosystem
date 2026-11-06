@@ -55,6 +55,7 @@ function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
     deleteMember: vi.fn(() => Promise.resolve()),
     linkIdentity: vi.fn(() => Promise.resolve(OVERVIEW.members[0]!)),
     listIdentityUsers: vi.fn(() => Promise.resolve({ items: [], nextCursor: null })),
+    sendProfileReminder: vi.fn(() => Promise.resolve({ deduplicated: false, missing: [] })),
     ...overrides,
   } as MembersApi;
 }
@@ -377,6 +378,27 @@ describe("ListView (運営名簿の表)", () => {
 });
 
 describe("MemberRosterPage (運営名簿から編集)", () => {
+  it("未入力があり紐付いた人だけへ催促し、未紐付けの人数を知らせる", async () => {
+    const person = { ...P0, orgId: "o", roleTitle: null, status: "added" as const, teamIds: [], contact: null, version: 1, createdAt: "t", updatedAt: "t" };
+    const overview: MembersOverview = {
+      teams: [],
+      members: [
+        { ...person, id: "linked", name: "紐付き", identityUserId: "u1", sortOrder: 1 },
+        { ...person, id: "unlinked", name: "未紐付け", identityUserId: null, sortOrder: 2 },
+      ],
+    };
+    const sendProfileReminder = vi.fn(() => Promise.resolve({ deduplicated: false, missing: [] }));
+    render(wrap(<MemberRosterPage />, makeApi({ getOverview: () => Promise.resolve(overview), sendProfileReminder })));
+    const button = await screen.findByTestId("member-roster-remind");
+    expect(button).toHaveTextContent("（1人）");
+    expect(screen.getByTestId("member-roster-unlinked-hint")).toHaveTextContent("1人");
+    await userEvent.click(button);
+    const dialog = await screen.findByTestId("member-roster-confirm-remind");
+    await userEvent.click(within(dialog).getByRole("button", { name: "催促を送る" }));
+    await waitFor(() => expect(sendProfileReminder).toHaveBeenCalledTimes(1));
+    expect(sendProfileReminder).toHaveBeenCalledWith("linked");
+  });
+
   it("行クリックで編集ダイアログが開き、保存で updateMember を呼ぶ", async () => {
     const api = makeApi();
     render(wrap(<MemberRosterPage />, api));
