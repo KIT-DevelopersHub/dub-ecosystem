@@ -1,11 +1,13 @@
-// LP管理 (lp-analytics). This service has no policy-table.ts yet: its routes are gated in
-// app.ts by requireAppAccess("lp", view|edit), which the catalog test reads instead.
+// LP管理 (lp-analytics + lp-tickets). lp-analytics has no policy-table.ts yet: its routes are gated
+// in app.ts by requireAppAccess("lp", view|edit), which the catalog test reads instead. /lp/tickets*
+// moved to lp-tickets, whose policy-table.ts is read like any other service's.
 // Every route needs query from/to (YYYY-MM-DD, JST, at most 92 days) — writes too, where
 // they set the range of the stats in the response.
 import type { AreaSpec } from "../catalog-types.ts";
 import { read } from "./helpers.ts";
 
 const S = "lp-analytics";
+const T = "lp-tickets";
 const VIEW = { keys: [], appLevel: { app: "lp", level: "view" } } as const;
 const EDIT = { keys: [], appLevel: { app: "lp", level: "edit" } } as const;
 const RANGE = "query.from・to 必須（YYYY-MM-DD・最大92日）";
@@ -108,7 +110,7 @@ export const LP: AreaSpec = {
       reason: "本番 LP の公開版を即座に切り替える操作（lp:publish 詳細キー）。依頼範囲（アクセスログ・流入 URL）の外で、入れ替えはオーナーが手で行う",
     },
     {
-      service: S,
+      service: T,
       route: "POST /lp/tickets/enabled",
       reason: "本番 LP のチケット販売ページを即座に公開/停止する操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
     },
@@ -118,27 +120,27 @@ export const LP: AreaSpec = {
       reason: "本番 LP の登壇者募集ページを即座に公開/停止する操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
     },
     {
-      service: S,
+      service: T,
       route: "POST /lp/tickets/cta",
       reason: "本番 LP の参加登録ボタンを即座にチケット購入へ差し替える操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
     },
     {
-      service: S,
+      service: T,
       route: "POST /lp/tickets/orders/:id/approve",
       reason: "要確認のチケット注文をお金と結び付けて支払い済みに確定する操作（lp:publish 詳細キー）。Stripe で入金を確かめたうえでオーナーが手で行う",
     },
     {
-      service: S,
+      service: T,
       route: "POST /lp/tickets/coupons",
       reason: "無料券のクーポンコードを発行する操作（コードは券と同じ価値・lp:publish 詳細キー）。発行はオーナーが LP管理 で手で行う",
     },
     {
-      service: S,
+      service: T,
       route: "PATCH /lp/tickets/coupons/:id",
       reason: "クーポンコードの停止/再開（lp:publish 詳細キー）。本番 LP で使えるかが即座に変わるので、オーナーが LP管理 で手で行う",
     },
     {
-      service: S,
+      service: T,
       route: "POST /lp/tickets/preview-token",
       reason: "LP管理プレビューでテスト購入するための一時トークン発行で、Dub のデータではない",
     },
@@ -150,12 +152,12 @@ export const LP: AreaSpec = {
   ],
   // チケットの設定・購入者一覧は未開放。
   pending: [
-    { service: S, route: "GET /lp/tickets" },
-    { service: S, route: "POST /lp/tickets/fields" },
-    { service: S, route: "POST /lp/tickets/types" },
-    { service: S, route: "PATCH /lp/tickets/types/:id" },
-    { service: S, route: "GET /lp/tickets/orders" },
-    { service: S, route: "GET /lp/tickets/coupons" },
+    { service: T, route: "GET /lp/tickets" },
+    { service: T, route: "POST /lp/tickets/fields" },
+    { service: T, route: "POST /lp/tickets/types" },
+    { service: T, route: "PATCH /lp/tickets/types/:id" },
+    { service: T, route: "GET /lp/tickets/orders" },
+    { service: T, route: "GET /lp/tickets/coupons" },
     // 登壇者募集の設定・応募一覧も未開放。
     { service: S, route: "GET /lp/proposals" },
     { service: S, route: "POST /lp/proposals/fields" },
