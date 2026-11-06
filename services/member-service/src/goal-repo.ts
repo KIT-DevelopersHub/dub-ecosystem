@@ -47,17 +47,20 @@ export interface GoalMetricSources {
   lpVisitors(ctx: RequestContext, month: string): Promise<number>;
 }
 
+/** 依存先が止まっても一覧は gateway の時間内に返す (失敗した KPI だけ「集計できません」)。 */
+const CALL = { timeoutMs: 3_000, retry: false } as const;
+
 export function createGoalSources(env: Pick<Env, "SVC_TASK" | "SVC_LP_ANALYTICS">): GoalMetricSources {
   return {
     async teamTasks(ctx, month) {
       if (!env.SVC_TASK) throw new Error("SVC_TASK binding is absent");
       const client = createServiceClient(env.SVC_TASK, { service: "task-service", caller: "member-service" });
-      return (await client.get<{ teams: TeamTaskCounts[] }>(ctx, `/internal/goal-metrics?month=${month}`)).teams;
+      return (await client.get<{ teams: TeamTaskCounts[] }>(ctx, `/internal/goal-metrics?month=${month}`, CALL)).teams;
     },
     async lpVisitors(ctx, month) {
       if (!env.SVC_LP_ANALYTICS) throw new Error("SVC_LP_ANALYTICS binding is absent");
       const client = createServiceClient(env.SVC_LP_ANALYTICS, { service: "lp-analytics", caller: "member-service" });
-      return (await client.get<{ visitors: number }>(ctx, `/lp/internal/goal-metrics?month=${month}`)).visitors;
+      return (await client.get<{ visitors: number }>(ctx, `/lp/internal/goal-metrics?month=${month}`, CALL)).visitors;
     },
   };
 }

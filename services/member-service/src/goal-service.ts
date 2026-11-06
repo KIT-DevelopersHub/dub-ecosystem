@@ -58,7 +58,7 @@ export function progressOf(kpi: goal.Kpi, teamId: string, a: Actuals): goal.KpiP
     if (a.tasks === null) return done("unavailable", null);
     const t = a.tasks.get(teamId) ?? { dueTotal: 0, dueDone: 0 };
     if (metric === "tasks_done") return done("ok", t.dueDone);
-    return t.dueTotal === 0 ? done("empty", null) : done("ok", Math.round((t.dueDone / t.dueTotal) * 100));
+    return t.dueTotal === 0 ? done("empty", null) : done("ok", Math.floor((t.dueDone * 100) / t.dueTotal));
   }
   return a.member === null ? done("unavailable", null) : done("ok", a.member[metric]);
 }

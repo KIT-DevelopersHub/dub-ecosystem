@@ -78,15 +78,19 @@ export interface PutGoalRequest {
   expectedVersion: number;
 }
 
-/** 達成率 (%)。実績が無ければ null。 */
+/** 達成率 (%)。切り捨て: 未達を四捨五入で 100% に見せない。実績が無ければ null。 */
 export const kpiPercent = (actual: number | null, target: number): number | null =>
-  actual === null ? null : Math.round((actual / target) * 100);
+  actual === null ? null : Math.floor((actual * 100) / target);
 
 /** チームの進捗。超過分で他の未達を隠さないよう、KPI ごとに 100 で頭打ちにして平均する。 */
 export function goalPercent(kpis: readonly Pick<KpiProgress, "percent">[]): number | null {
   const values = kpis.flatMap((k) => (k.percent === null ? [] : [Math.min(k.percent, 100)]));
-  return values.length === 0 ? null : Math.round(values.reduce((sum, p) => sum + p, 0) / values.length);
+  return values.length === 0 ? null : Math.floor(values.reduce((sum, p) => sum + p, 0) / values.length);
 }
+
+/** 達成 = 全 KPI を数えられて、すべて目標に届いた。集計できない KPI があるうちは達成と言わない。 */
+export const isAchieved = (g: Pick<TeamGoal, "kpis" | "percent">): boolean =>
+  g.percent === 100 && g.kpis.every((k) => k.status === "ok");
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const isMonth = (v: unknown): v is string => typeof v === "string" && MONTH_RE.test(v);

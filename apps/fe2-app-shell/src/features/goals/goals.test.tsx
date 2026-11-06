@@ -51,6 +51,7 @@ function mount(api: GoalsApi, permissions: readonly identity.PermissionKey[] = E
       </ToastProvider>
     </QueryClientProvider>,
   );
+  return qc;
 }
 
 describe("目標管理 demo transport", () => {
@@ -129,6 +130,32 @@ describe("GoalsScreen", () => {
   });
 });
 
+describe("GoalDrawer", () => {
+  it("keeps the input open when a save fails for another reason", async () => {
+    const put = vi.fn(async () => {
+      throw new ApiError(500, { error: { code: "INTERNAL", message: "boom" } } as never);
+    });
+    mount(fakeApi([teamGoal()], { put }));
+    fireEvent.click(await screen.findByTestId("fe2-goals-edit-team_a"));
+    fireEvent.change(screen.getByTestId("fe2-goals-title"), { target: { value: "入力した目標" } });
+    fireEvent.click(screen.getByTestId("fe2-goals-save"));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    await waitFor(() => expect(within(screen.getByTestId("fe2-goals-team-team_a")).getByText("機能を期日どおりに出す")).toBeInTheDocument());
+    expect(screen.getByTestId("fe2-goals-title")).toHaveValue("入力した目標");
+  });
+
+  it("sends the version the draft was opened from, even after a refetch", async () => {
+    const api = fakeApi([teamGoal({ version: 1 })]);
+    const qc = mount(api);
+    fireEvent.click(await screen.findByTestId("fe2-goals-edit-team_a"));
+    vi.mocked(api.list).mockResolvedValue({ month: MONTH, teams, goals: [teamGoal({ version: 2 })] });
+    await qc.invalidateQueries();
+    expect(api.list).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByTestId("fe2-goals-save"));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("team_a", MONTH, expect.objectContaining({ expectedVersion: 1 })));
+  });
+});
+
 describe("optimisticGoal", () => {
   it("keeps known actuals and leaves a newly chosen metric unknown", () => {
     const next = optimisticGoal("team_a", MONTH, {
@@ -140,6 +167,6 @@ describe("optimisticGoal", () => {
       ],
     }, teamGoal());
     expect(next.kpis.map((k) => k.percent)).toEqual([25, 50, null]);
-    expect(next.percent).toBe(38);
+    expect(next.percent).toBe(37);
   });
 });

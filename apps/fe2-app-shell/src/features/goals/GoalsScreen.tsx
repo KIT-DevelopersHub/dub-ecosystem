@@ -63,7 +63,7 @@ function TeamCard({ team, goal: g, month, pace, canEdit, onEdit }: {
           <p className={styles.title}>{g.title}</p>
           <div className={styles.total}>
             <span className={styles.totalPercent} data-testid={`fe2-goals-percent-${team.id}`}>{g.percent === null ? "—" : `${g.percent}%`}</span>
-            {g.percent !== null && g.percent >= 100 && <Badge tone="success">達成</Badge>}
+            {goal.isAchieved(g) && <Badge tone="success">達成</Badge>}
           </div>
           <Meter percent={g.percent} label={`${team.name}の進捗`} {...(pace === undefined ? {} : { pace })} />
           {g.kpis.length === 0 ? <p className={styles.note}>KPI がまだありません</p> : (

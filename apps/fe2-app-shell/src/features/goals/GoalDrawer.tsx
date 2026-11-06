@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Button, ConfirmDialog, Drawer, Form, FormField, IconButton, Select, Stack, TextField } from "@dub/ui";
 import { goal } from "@dub/types";
+import { ApiError } from "../../lib/api-client.tsx";
 import { useRemoveGoal, useSaveGoal } from "./goalsHooks.ts";
 import styles from "./goals.module.css";
 
@@ -32,6 +33,8 @@ export function GoalDrawer({ team, month, goal: current, onClose }: {
 }): JSX.Element {
   const [title, setTitle] = useState(current?.title ?? "");
   const [drafts, setDrafts] = useState<Draft[]>(() => (current ? current.kpis.map(toDraft) : [newDraft()]));
+  // 下書きと同じ時点の version。編集中の再取得で進めると、他の人の更新を黙って上書きする。
+  const [expectedVersion] = useState(current?.version ?? 0);
   const [confirming, setConfirming] = useState(false);
   const save = useSaveGoal(month, team.id);
   const remove = useRemoveGoal(month, team.id);
@@ -47,19 +50,24 @@ export function GoalDrawer({ team, month, goal: current, onClose }: {
     if (!valid) return;
     save.mutate({
       title: title.trim(),
-      expectedVersion: current?.version ?? 0,
+      expectedVersion,
       kpis: drafts.map((d) => ({
         name: d.name.trim(),
         metric: d.metric,
         target: Number(d.target),
         manualActual: d.metric === "manual" ? Number(d.manualActual) : 0,
       })),
+    }, {
+      onSuccess: onClose,
+      // 失敗しても入力は残す。ただし競合は同じ版で送り直せないので閉じて最新を見てもらう。
+      onError: (err) => {
+        if (ApiError.isApiError(err) && err.status === 409) onClose();
+      },
     });
-    onClose();
   };
 
   return (
-    <Drawer testId="fe2-goals-drawer" open onClose={onClose} title={`${team.name}の目標（${goal.monthLabel(month)}）`}>
+    <Drawer testId="fe2-goals-drawer" open onClose={confirming ? () => undefined : onClose} title={`${team.name}の目標（${goal.monthLabel(month)}）`}>
       <Form onSubmit={submit}>
         <Stack gap={5}>
           <FormField label="目標" htmlFor="goal-title" required>
@@ -100,7 +108,7 @@ export function GoalDrawer({ team, month, goal: current, onClose }: {
           <div className={styles.actions}>
             {current && <Button variant="ghost" onClick={() => setConfirming(true)} testId="fe2-goals-delete">この目標を削除</Button>}
             <Button variant="secondary" onClick={onClose}>キャンセル</Button>
-            <Button type="submit" disabled={!valid} testId="fe2-goals-save">保存</Button>
+            <Button type="submit" disabled={!valid} loading={save.isPending} testId="fe2-goals-save">保存</Button>
           </div>
         </Stack>
       </Form>

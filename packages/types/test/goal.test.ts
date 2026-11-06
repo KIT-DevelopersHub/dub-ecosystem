@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { goal } from "../src/index";
 
 describe("goal", () => {
-  it("rounds a KPI percent and allows going past 100", () => {
+  it("floors a KPI percent and allows going past 100", () => {
     expect(goal.kpiPercent(1, 3)).toBe(33);
+    expect(goal.kpiPercent(199, 200)).toBe(99);
+    expect(goal.kpiPercent(29, 100)).toBe(29);
     expect(goal.kpiPercent(15, 10)).toBe(150);
     expect(goal.kpiPercent(null, 10)).toBeNull();
   });
@@ -13,6 +15,13 @@ describe("goal", () => {
     expect(goal.goalPercent([{ percent: 40 }, { percent: null }])).toBe(40);
     expect(goal.goalPercent([{ percent: null }])).toBeNull();
     expect(goal.goalPercent([])).toBeNull();
+  });
+
+  it("calls a goal achieved only when every KPI was counted and reached", () => {
+    const ok = { status: "ok" as const, percent: 100 };
+    expect(goal.isAchieved({ percent: 100, kpis: [ok] as never })).toBe(true);
+    expect(goal.isAchieved({ percent: 100, kpis: [ok, { status: "unavailable", percent: null }] as never })).toBe(false);
+    expect(goal.isAchieved({ percent: 99, kpis: [ok] as never })).toBe(false);
   });
 
   it("uses the JST calendar for months", () => {

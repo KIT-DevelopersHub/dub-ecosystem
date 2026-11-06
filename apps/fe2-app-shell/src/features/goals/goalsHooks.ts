@@ -59,7 +59,7 @@ export function useSaveGoal(month: string, teamId: string) {
       patchGoals(qc, month, (goals) => (prev ? goals.map((g) => (g.teamId === teamId ? next : g)) : [...goals, next]));
       return { snapshot };
     },
-    onSuccess: (saved) => patchGoals(qc, month, (goals) => goals.map((g) => (g.teamId === teamId ? saved : g))),
+    onSuccess: (saved) => patchGoals(qc, month, (goals) => [...goals.filter((g) => g.teamId !== teamId), saved]),
     onError: (err, _body, c) => {
       qc.setQueryData(listKey(month), c?.snapshot);
       void qc.invalidateQueries({ queryKey: listKey(month) });
@@ -82,6 +82,7 @@ export function useRemoveGoal(month: string, teamId: string) {
     },
     onError: (err, _v, c) => {
       qc.setQueryData(listKey(month), c?.snapshot);
+      void qc.invalidateQueries({ queryKey: listKey(month) });
       toast.show({ kind: "error", title: "目標を削除できませんでした", description: messageFor(err, "もう一度お試しください。") });
     },
   });
