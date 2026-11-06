@@ -61,6 +61,7 @@ const linksStubs = {
   createTicketType: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   updateTicketType: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   listTicketOrders: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  exportTicketOrders: async () => new Blob(["x"]),
   approveTicketOrder: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   listTicketCoupons: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   createTicketCoupon: () => Promise.reject(new Error("not used by LpVisitLogScreen")),

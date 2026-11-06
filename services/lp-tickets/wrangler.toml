@@ -1,0 +1,47 @@
+# lp-tickets Worker — PAID topology. account_id filled by infra at Apply.
+# LP チケット販売。専用 D1 dub-tickets + identity-roster (policy gate)。
+# 到達経路は service binding だけ: api-gateway (/lp/tickets*)・公開 LP Worker・lp-analytics。
+#
+# FREE-TIER deploy uses wrangler.free.toml (name = "dub-lp-tickets").
+name = "lp-tickets"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+# 専用 D1。手順は docs/runbooks/09-lp-tickets-cutover.md
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-tickets"
+database_id = "3da6f8f0-42e8-4453-a6a6-4c8ab02314ae"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "identity-roster"
+
+[observability]
+enabled = true
+
+# 毎日のバックアップ。バケットはデプロイの前に作る: npx wrangler r2 bucket create dub-tickets-backup
+[[r2_buckets]]
+binding = "BACKUP"
+bucket_name = "dub-tickets-backup"
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+LP_BASE_URL = "https://hokuriku-it-conf.com"
+TICKET_MAIL_FROM = "北陸ITカンファレンス <info@developershub.jp>"
+# 購入後のチケット送付。secret が無くても注文は動き、メールは pending のまま待つ:
+#   npx wrangler secret put TICKET_TOKEN_SECRET   (変えると発行済みの URL がすべて無効になる)
+#   npx wrangler secret put RESEND_API_KEY
+#   npx wrangler secret put TICKET_OPS_EMAIL
+# チケット購入 (Stripe Checkout)。secret が無ければ「決済準備中」(有料券 503・無料券は動く):
+#   npx wrangler secret put STRIPE_SECRET_KEY
+#   npx wrangler secret put STRIPE_WEBHOOK_SECRET
+# sk_live_ は STRIPE_ALLOW_LIVE = "1" を足すまで拒否される（決済準備中扱い）。本物の決済開始時だけ足す。
+# PayPay は Stripe ダッシュボードで有効化（審査通過後）してから表記を出す: LP_PAYPAY_ENABLED = "1"
+
+# Ticket payment reconcile (TicketService.reconcile): settles pending orders from Stripe when the
+# webhook is missing / misconfigured. The free tier runs the same pass from a DO alarm (wrangler.free.toml).
+[triggers]
+crons = ["*/10 * * * *"]

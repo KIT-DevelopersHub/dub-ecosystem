@@ -199,3 +199,56 @@ describe("transparent routing", () => {
     expect((await post(36700161)).status).toBe(413);
   });
 });
+
+describe("/lp/tickets sub-route (lp-tickets)", () => {
+  function setup() {
+    const analytics = fakeBinding((req) => json(200, { via: "analytics", path: new URL(req.url).pathname }));
+    const tickets = fakeBinding((req) => json(200, { via: "tickets", path: new URL(req.url).pathname }));
+    const env = makeEnv({
+      SVC_AUTH: authBinding(validSession("usr_9")).fetcher,
+      SVC_LP_ANALYTICS: analytics.fetcher,
+      SVC_LP_TICKETS: tickets.fetcher,
+    });
+    const call = (path: string, init: RequestInit = {}) =>
+      app().fetch(
+        new Request(`https://api.developershub.jp${path}`, { ...init, headers: { authorization: "Bearer t", ...init.headers } }),
+        env,
+        execCtx,
+      );
+    return { analytics, tickets, call };
+  }
+
+  it.each(["/api/v1/lp/tickets", "/api/v1/lp/tickets/orders", "/api/v1/lp/tickets/types/tkt_1"])("%s goes to lp-tickets", async (path) => {
+    const { analytics, tickets, call } = setup();
+    const res = await call(path);
+    expect(res.status).toBe(200);
+    expect(await jsonOf<{ via: string; path: string }>(res)).toEqual({ via: "tickets", path: path.replace("/api/v1", "") });
+    expect(analytics.requests).toHaveLength(0);
+    expect(tickets.requests[0]!.headers.get(HDR_USER_ID)).toBe("usr_9");
+    expect(tickets.requests[0]!.headers.get(HDR_INTERNAL)).toBeNull();
+  });
+
+  it.each(["/api/v1/lp/ticketsfoo", "/api/v1/lp/stats", "/api/v1/lp/proposals", "/api/v1/lp/site-config"])("%s stays on lp-analytics", async (path) => {
+    const { analytics, tickets, call } = setup();
+    expect((await jsonOf<{ via: string }>(await call(path))).via).toBe("analytics");
+    expect(analytics.requests).toHaveLength(1);
+    expect(tickets.requests).toHaveLength(0);
+  });
+
+  it("/lp/internal/tickets* still 404s at the edge and reaches neither Worker", async () => {
+    const { analytics, tickets, call } = setup();
+    for (const path of ["/api/v1/lp/internal/tickets", "/api/v1/lp/internal/tickets/stripe-webhook", "/api/v1/lp/internal/tickets/release"]) {
+      expect((await call(path, { method: "POST" })).status).toBe(404);
+    }
+    expect(analytics.requests).toHaveLength(0);
+    expect(tickets.requests).toHaveLength(0);
+  });
+
+  it("needs a session like the rest of the segment", async () => {
+    const tickets = fakeBinding(() => json(200, {}));
+    const env = makeEnv({ SVC_AUTH: authBinding({ valid: false, userId: null, session: null, reason: "expired" } as never).fetcher, SVC_LP_TICKETS: tickets.fetcher });
+    const res = await app().fetch(new Request("https://api.developershub.jp/api/v1/lp/tickets"), env, execCtx);
+    expect(res.status).toBe(401);
+    expect(tickets.requests).toHaveLength(0);
+  });
+});
