@@ -254,9 +254,14 @@ export const PROFILE_REMINDER_KEYS = [
   "studentNumber",
 ] as const satisfies readonly PersonProfileKey[];
 
-/** 未入力の項目 (表示順)。空白だけの値も未入力として扱う。 */
-export function missingProfileKeys(p: Partial<PersonProfile>): PersonProfileKey[] {
-  return PROFILE_REMINDER_KEYS.filter((k) => !(p[k] ?? "").trim());
+/** 未入力の項目 (表示順)。空白だけの値も未入力として扱う。姓名に分かれる前の名簿行は
+ *  表示名 name があれば氏名は分かるので、姓・名を未入力に数えない。 */
+export function missingProfileKeys(p: Partial<PersonProfile> & { name?: string | null }): PersonProfileKey[] {
+  const hasName = !!p.name?.trim();
+  return PROFILE_REMINDER_KEYS.filter((k) => {
+    if (hasName && (k === "lastName" || k === "firstName")) return false;
+    return !(p[k] ?? "").trim();
+  });
 }
 
 /** POST /members/people/:id/profile-reminder の応答。同じ人への催促は 1 日 1 回まで。 */

@@ -46,6 +46,22 @@ describe("POST /members/people/:id/profile-reminder", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("辞退者には送らない", async () => {
+    const send = vi.fn();
+    const app = createApp(makeDeps({ sendProfileReminder: send }));
+    const id = await seed(app, { lastName: "辞", firstName: "退", status: "declined" }, "user_d");
+    expect((await call(app, "POST", `/members/people/${id}/profile-reminder`)).status).toBe(400);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("1 日の区切りは日本時間", async () => {
+    const send = vi.fn().mockResolvedValue({ deduplicated: false });
+    const app = createApp(makeDeps({ sendProfileReminder: send, now: () => "2026-11-06T15:30:00.000Z" }));
+    const id = await seed(app, { lastName: "時", firstName: "間" }, "user_t");
+    await call(app, "POST", `/members/people/${id}/profile-reminder`);
+    expect(send.mock.calls[0]![1].today).toBe("2026-11-07");
+  });
+
   it("通知の失敗を成功として返さない", async () => {
     const app = createApp(makeDeps({ sendProfileReminder: vi.fn().mockRejectedValue(new Error("down")) }));
     const id = await seed(app, { lastName: "失", firstName: "敗" }, "user_z");
@@ -74,5 +90,10 @@ describe("buildProfileReminder", () => {
 describe("missingProfileKeys", () => {
   it("空白だけの値も未入力、任意項目は対象外", () => {
     expect(member.missingProfileKeys({ ...FULL, gmail: "  " } as Partial<member.PersonProfile>)).toEqual(["gmail"]);
+  });
+  it("姓名に分かれていない行は表示名があれば姓・名を未入力にしない", () => {
+    const { lastName: _l, firstName: _f, ...rest } = FULL;
+    expect(member.missingProfileKeys({ ...rest, name: "山田 太郎" } as Partial<member.PersonProfile>)).toEqual([]);
+    expect(member.missingProfileKeys(rest as Partial<member.PersonProfile>)).toEqual(["lastName", "firstName"]);
   });
 });

@@ -26,7 +26,7 @@ export function buildProfileReminder(t: ProfileReminderTarget): notification.Not
       "次の項目が未入力です。",
       ...t.missing.map((k) => `・${member.PERSON_PROFILE_LABEL[k]}`),
       "",
-      "右上のアカウントメニューの「アカウント設定」を開き、「本人の情報」から入力してください。",
+      "右上の設定（歯車）から「アカウント設定」を開き、「本人の情報」に入力してください。",
     ].join("\n"),
     channels: ["in_app"],
     dedupKey: `${PROFILE_REMINDER_TYPE}:${t.memberId}:${t.today}`,

@@ -261,7 +261,7 @@ export function MemberRosterPage(): JSX.Element {
         onUnlink={(m) => unlinkIdentity.mutate({ id: m.id, version: m.version })}
         onSendAccountMail={openAccountMail}
         canSendAccountMail={(m) => mailTargetOf(m) !== null}
-        onRemind={(m) => setRemindTargets([m])}
+        {...(remind.isPending ? {} : { onRemind: (m: OrgMember) => setRemindTargets([m]) })}
       />
 
       <MemberFormDialog
