@@ -10,5 +10,8 @@ export interface Env {
   SVC_NOTIFICATION?: Fetcher;
   // R2 dub-file-attachments (sponsor/cards/<id> = 名刺写真)。Optional: 無ければ写真ルートだけ 503。
   SPONSOR_FILES?: R2Bucket;
+  // mail-gateway (POST /internal/sponsor/contacts) — スポンサーのメール連携で既存メールを集計する。
+  // Optional: 無ければメールアドレスの紐付けは保存だけ・一括補完は 503。
+  SVC_MAIL?: Fetcher;
   DUB_DEFAULT_ORG_ID?: string;
 }

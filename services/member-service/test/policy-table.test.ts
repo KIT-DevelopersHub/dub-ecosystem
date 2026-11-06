@@ -170,6 +170,8 @@ const SPONSOR_READS = [
   "GET /members/sponsor/goals",
   "GET /members/sponsor/leads",
   "GET /members/sponsor/leads/:id",
+  "GET /members/sponsor/leads/:id/activity",
+  "GET /members/sponsor/mail-links",
 ];
 const SPONSOR_WRITES = [
   "PATCH /members/sponsor/cards/:id",
@@ -177,10 +179,12 @@ const SPONSOR_WRITES = [
   "POST /members/sponsor/cards",
   "POST /members/sponsor/leads",
   "POST /members/sponsor/leads/import",
+  "POST /members/sponsor/leads/:id/mail-links",
+  "DELETE /members/sponsor/mail-links/:id",
   "PUT /members/sponsor/goals/:month",
   "PUT /members/sponsor/cards/:id/image",
 ];
-const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/sponsor/leads/:id"];
+const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/sponsor/leads/:id", "POST /members/sponsor/leads/mail-backfill"];
 // チーム・役職ロールの一括付与: ロール管理と同格 (管理 編集 + identity:admin)。
 const ROLE_SYNC_ADMIN = ["POST /members/role-sync/backfill"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
@@ -194,6 +198,7 @@ const INTERNAL_ROUTES = [
   "GET /members/internal/team-members",
   "POST /members/internal/google-emails",
   "POST /members/internal/hr/interview-form",
+  "POST /members/internal/sponsor/mail-activity",
   "POST /members/internal/me/participation",
   "POST /members/internal/participation",
 ];

@@ -82,6 +82,9 @@ export const POLICY_TABLE = definePolicyTable({
   // `reqCtx` check, which gate.ts prescribes for INTERNAL routes that need an actor).
   "GET /members/internal/me/participation": INTERNAL,
   "POST /members/internal/me/participation": INTERNAL,
+  // スポンサーのメール連携: mail-gateway が Dub のメールを送った / 受け取った時に呼ぶ (system origin・ユーザーなし)。
+  // 営業先の日付とステータスを決まりどおりに進めるだけで、本文・件名は受け取らない。
+  "POST /members/internal/sponsor/mail-activity": INTERNAL,
 
   // ---- 運営メンバー (名簿): reads = 閲覧 ----
   // The former gate was `requireAny(["identity:read", "app:members:view"])` (OR). There is no
@@ -199,4 +202,11 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /members/sponsor/leads/:id": appLevel("sponsor", "edit", "sponsor:admin"),
   "GET /members/sponsor/goals": appLevel("sponsor", "view", "sponsor:read"),
   "PUT /members/sponsor/goals/:month": appLevel("sponsor", "edit", "sponsor:write"),
+  // メール連携: 紐付けと自動更新の履歴は営業進捗と同じ段階。既存メールからの一括補完は全社の日付を
+  // 書き換えうるので削除と同じ sponsor:admin。
+  "GET /members/sponsor/mail-links": appLevel("sponsor", "view", "sponsor:read"),
+  "POST /members/sponsor/leads/:id/mail-links": appLevel("sponsor", "edit", "sponsor:write"),
+  "DELETE /members/sponsor/mail-links/:id": appLevel("sponsor", "edit", "sponsor:write"),
+  "GET /members/sponsor/leads/:id/activity": appLevel("sponsor", "view", "sponsor:read"),
+  "POST /members/sponsor/leads/mail-backfill": appLevel("sponsor", "edit", "sponsor:admin"),
 });

@@ -236,3 +236,6 @@ export function companyKey(name: string): string {
   const key = base.replace(LEGAL_FORMS, "").replace(/[\s・.,、。'"]/g, "");
   return key === "" ? base.trim() : key;
 }
+
+// メール連携 (照合・更新の決まり・wire 契約) は別ファイル。
+export * from "./sponsor-mail";

@@ -33,6 +33,13 @@ service = "dub-identity-roster"   # POST /authz/check (identity:read / identity:
 binding = "SVC_NOTIFICATION"
 service = "dub-notification-service"   # POST /notify — 参加届→管理者 in-app 通知（best-effort）
 
+# mail-gateway: スポンサーのメール連携で既存メールを集計する (POST /internal/sponsor/contacts)。
+# mail-gateway も SVC_MEMBER でこの Worker を束ねる (相互)。member-service が先にデプロイされるので、
+# 束ね先の mail-gateway が既に存在する環境 (本番・staging) でだけ有効 — 新規環境の初回は一度外してデプロイする (CF 10143)。
+[[services]]
+binding = "SVC_MAIL"
+service = "dub-mail-gateway"
+
 # R2 dub-file-attachments (chat-service / file-meta と同じ既存バケット): スポンサーの名刺写真
 # (sponsor/cards/<cardId>)。無い環境では写真ルートだけ 503 で他は動く。
 [[r2_buckets]]

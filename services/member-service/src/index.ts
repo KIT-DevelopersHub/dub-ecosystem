@@ -12,6 +12,8 @@ import { createD1HrRepo } from "./hr-repo";
 import { createD1HrFormRepo } from "./hr-form-repo";
 import { createD1SponsorRepo, r2ImageStore } from "./sponsor-repo";
 import { createD1SponsorLeadRepo } from "./sponsor-lead-repo";
+import { createD1SponsorMailRepo } from "./sponsor-mail-repo";
+import { mailContactsVia } from "./sponsor-mail-client";
 import { notifyAdminsOfParticipation } from "./participationNotify";
 import { sendProfileReminderVia } from "./profileReminder";
 import { createIdentityRoleSync } from "./roleSync";
@@ -57,6 +59,9 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newSponsorCardId: () => newId("card"),
     sponsorLeadRepo: createD1SponsorLeadRepo(db),
     newSponsorLeadId: () => newId("lead"),
+    sponsorMailRepo: createD1SponsorMailRepo(db),
+    newSponsorMailId: (prefix) => newId(prefix),
+    ...(env.SVC_MAIL ? { mailContacts: mailContactsVia(env.SVC_MAIL) } : {}),
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
     notifyParticipationSubmitted: (ctx, participation) =>
       notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),
