@@ -243,9 +243,9 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(screen.getByTestId("fe7-other-count").textContent).toContain(`1 / ${policy.otherPermissions().length}`);
     expect(screen.getByTestId("fe7-other-granted-infra").textContent).toBe("1 / 4");
 
-    // 「その他」に残るのは どのアプリにも属さない 4 分類だけ。アプリに引き取られた分類
+    // 「その他」に残るのは どのアプリにも属さない 5 分類だけ（代理表示 = identity:impersonate を含む）。アプリに引き取られた分類
     //（identity → 運営メンバー / file → Drive共有）はここに出ない。
-    expect(groups.map((g) => g.domain)).toEqual(["infra", "audit", "github", "webhook"]);
+    expect(groups.map((g) => g.domain)).toEqual(["infra", "audit", "github", "webhook", "impersonation"]);
     expect(within(other).queryByTestId("fe7-other-name-identity")).not.toBeInTheDocument();
     expect(within(other).queryByTestId("fe7-other-name-file")).not.toBeInTheDocument();
     expect(within(other).queryByTestId("fe7-other-name-drive")).not.toBeInTheDocument();

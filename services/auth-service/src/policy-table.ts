@@ -69,6 +69,12 @@ export const POLICY_TABLE = definePolicyTable({
   // nothing to revoke, and one caller can never log another user out (no subject parameter).
   "POST /auth/logout": PUBLIC,
 
+  // 「自分に戻る」 (end an admin impersonation). PUBLIC for exactly /auth/logout's reason: the
+  // gateway proxies the auth segment without verifying, the handler authenticates the
+  // impersonation token it was sent, and the only possible effect is LESS access (the
+  // impersonation ends; the admin's own parked session is rotated back).
+  "POST /auth/impersonation/stop": PUBLIC,
+
   // ---- passkeys (WebAuthn) — same two shapes as above, nothing new ----
   // login/options + login/verify are the passkey twin of /auth/password/login: they mint a
   // session, so they cannot require one. The signed assertion is the credential; the handler
@@ -155,6 +161,11 @@ export const POLICY_TABLE = definePolicyTable({
   // Plaintext password VIEW (decision B, risk accepted). Same rule as the setter — a read this
   // sensitive is not a weaker operation. Every successful view is audited by the handler.
   "GET /internal/admin/users/:userId/password": internalWithKeys(["identity:admin"]),
+  // Admin impersonation start. Same shape as the password pair: s2s from the gateway-owned
+  // POST /api/v1/admin/users/:userId/impersonation, AND the dedicated key — identity:admin
+  // alone is not enough (impersonation is granted separately, default role_sys_admin only).
+  // Target eligibility (self / inactive / privileged / nested) is the handler's instance check.
+  "POST /internal/admin/users/:userId/impersonation": internalWithKeys(["identity:impersonate"]),
 });
 
 /**
