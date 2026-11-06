@@ -33,6 +33,8 @@ export interface MembersApi {
   listIdentityUsers(): Promise<common.Paginated<identity.IdentityUser>>;
   /** アカウント発行メール: login + password to the linked member's Gmail (identity:admin). */
   sendAccountMail(identityUserId: string): Promise<auth.AdminSendAccountMailResponse>;
+  /** 情報が足りない本人へ入力を催促する (app:members:edit)。 */
+  sendProfileReminder(id: string): Promise<member.SendProfileReminderResponse>;
 }
 
 const BASE = "/api/v1/members";
@@ -63,6 +65,12 @@ export function createMembersApi(api: ApiClient): MembersApi {
       api.request<auth.AdminSendAccountMailResponse>({
         method: "POST",
         path: `/api/v1/admin/users/${encodeURIComponent(identityUserId)}/account-mail`,
+        body: {},
+      }),
+    sendProfileReminder: (id) =>
+      api.request<member.SendProfileReminderResponse>({
+        method: "POST",
+        path: `${BASE}/people/${encodeURIComponent(id)}/profile-reminder`,
         body: {},
       }),
   };

@@ -13,11 +13,12 @@ const STATUS_VALUES: readonly UserStatusFilter[] = ["all", "active", "invited", 
 // (e.g. router-managed params) is left untouched when we write back.
 const PARAM_Q = "q";
 const PARAM_STATUS = "status";
+const PARAM_ROLE = "role";
 const PARAM_SORT = "sort";
 const PARAM_DIR = "dir";
 
 export interface RosterViewState {
-  filters: Pick<UserListFilters, "search" | "status">;
+  filters: Pick<UserListFilters, "search" | "status" | "roleKey">;
   sort: SortState | undefined;
 }
 
@@ -36,7 +37,7 @@ export function parseRosterView(search: string): RosterViewState {
   const dir = p.get(PARAM_DIR) === "desc" ? "desc" : "asc";
   const sort: SortState | undefined = sortKey && isSortableUserKey(sortKey) ? { key: sortKey, direction: dir } : undefined;
 
-  return { filters: { search: q, status }, sort };
+  return { filters: { search: q, status, roleKey: p.get(PARAM_ROLE) || null }, sort };
 }
 
 /** Serialize roster view state to a query string, omitting default/empty values so a
@@ -49,6 +50,9 @@ export function serializeRosterView(state: RosterViewState, base = ""): string {
 
   if (state.filters.status !== "all") p.set(PARAM_STATUS, state.filters.status);
   else p.delete(PARAM_STATUS);
+
+  if (state.filters.roleKey) p.set(PARAM_ROLE, state.filters.roleKey);
+  else p.delete(PARAM_ROLE);
 
   if (state.sort) {
     p.set(PARAM_SORT, state.sort.key);
@@ -63,7 +67,8 @@ export function serializeRosterView(state: RosterViewState, base = ""): string {
 /** Read the current roster view from the browser URL (defaults when unavailable). */
 export function readRosterViewFromUrl(): RosterViewState {
   if (typeof window === "undefined" || !window.location) {
-    return { filters: { search: DEFAULT_USER_FILTERS.search, status: DEFAULT_USER_FILTERS.status }, sort: undefined };
+    const { search, status, roleKey } = DEFAULT_USER_FILTERS;
+    return { filters: { search, status, roleKey }, sort: undefined };
   }
   return parseRosterView(window.location.search);
 }

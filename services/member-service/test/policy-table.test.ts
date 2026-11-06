@@ -125,6 +125,7 @@ const ROSTER_WRITES = [
   "PATCH /members/teams/:id",
   "POST /members/people",
   "POST /members/people/:id/identity-link",
+  "POST /members/people/:id/profile-reminder",
   "POST /members/teams",
 ];
 // 参加届: 自分の届を出す (閲覧) / 他人の届を見る (閲覧 + identity:read) / 反映確定 (編集).

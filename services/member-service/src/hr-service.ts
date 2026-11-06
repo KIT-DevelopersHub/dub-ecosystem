@@ -21,6 +21,8 @@ const errVersionConflict = (id: string): DubError =>
   new DubError("HR_VERSION_CONFLICT", `Version conflict for ${id}`, { status: 409 });
 const errBadTransition = (from: string, to: string): DubError =>
   new DubError("HR_INVALID_TRANSITION", `Cannot move applicant from ${from} to ${to}`, { status: 409 });
+const errApplicantJoined = (id: string): DubError =>
+  new DubError("HR_APPLICANT_JOINED", `Applicant ${id} has joined the roster; remove the member instead`, { status: 409 });
 const errJoinRequired = (id: string): DubError =>
   new DubError("HR_JOIN_REQUIRED", `Applicant ${id} is not on the roster yet; use POST /join (採用) first`, { status: 409 });
 
@@ -209,10 +211,14 @@ export class HrService {
       if (!person || person.orgId !== this.deps.orgId || person.archivedAt !== null) {
         throw errors.validationFailed([{ field: "memberId", reason: "not_found" }]);
       }
+      let joined = person;
       if (person.status === "invited" || person.status === "considering") {
         const promoted = { ...person, status: "added" as const, version: person.version + 1, updatedAt: this.deps.now() };
         if (!(await this.deps.repo.updatePerson(promoted, person.version))) throw errVersionConflict(person.id);
+        joined = promoted;
       }
+      // 既にアカウントに紐付いた人なら、招待中のアカウントを有効化 (best-effort)。
+      await this.members.activateLinkedIdentity(ctx, joined, "hr.join");
       memberId = person.id;
     } else {
       const grade = cur.grade ? member.normalizeGrade(cur.grade) : null;
@@ -233,12 +239,17 @@ export class HrService {
     return { applicant: toApplicant(next), memberId };
   }
 
-  /** 論理削除 (履歴は残す)。 */
+  /**
+   * 論理削除 (archived_at)。一覧・詳細・フォーム回答の氏名から消えるが、履歴 (member_hr_events) と
+   * フォーム回答 (member_hr_form_responses) は FK で応募者行にぶら下がったまま残す (物理削除しない)。
+   * 名簿に結ばれた人 (採用済み) はオンボーディングの進捗がこの行を読むので 409 (名簿側で外す)。
+   */
   async remove(ctx: ReqCtx, id: string): Promise<void> {
     const cur = await this.load(id);
+    if (cur.memberId !== null) throw errApplicantJoined(id);
     const next: ApplicantRow = { ...cur, archivedAt: this.deps.now(), version: cur.version + 1, updatedAt: this.deps.now() };
     if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) throw errVersionConflict(id);
-    void ctx;
+    await this.event(ctx, id, "deleted", { fromStage: cur.stage });
   }
 
   /** 採用済み (採用 / オンボーディング調整 / オンボーディング完了) の人ごとのオンボーディング進捗。 */

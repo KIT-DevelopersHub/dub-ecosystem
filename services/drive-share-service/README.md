@@ -25,7 +25,7 @@ v3 `permissions.list/create/update/delete` and `files.list`.
 | PATCH | `/driveshare/files/:id/permissions/:permId` | `drive:write` | change a role |
 | DELETE | `/driveshare/files/:id/permissions/:permId` | `drive:write` | revoke |
 | PUT | `/driveshare/files/:id/link` | `drive:write` | link sharing on/off (`anyone`) |
-| GET | `/driveshare/files/:id/drift` | `drive:read` | actual sharing vs the file's role grants: shares outside the roles (incl. link), stronger / weaker role than granted, members without access |
+| GET | `/driveshare/files/:id/drift` | `drive:read` | actual sharing vs the file's role grants: shares outside the roles (incl. link; with no grant, every direct share), stronger / weaker role than granted, members without access |
 
 `drive:read` / `drive:write` are not yet in the frozen `PERMISSION_CATALOG` (same as
 drive-proxy); they are opaque wire strings passed to identity `/authz/check`. Roles must

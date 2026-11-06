@@ -1728,6 +1728,7 @@ function createRosterStore() {
   for (const [k, v] of Object.entries(SEED_USER_ROLES)) assignments[k] = v.map((a) => ({ ...a }));
   const audits: auditLog.AuditRecord[] = SEED_AUDITS.map((a) => ({ ...a }));
   const emails: DemoEmailAddress[] = SEED_EMAIL_ADDRESSES.map((a) => ({ ...a }));
+  let teamLists: mail.MailTeamList[] = [];
 
   const rid = (prefix: string): string => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
   const summaries = (): identity.UserSummary[] => users.map((u) => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
@@ -1800,6 +1801,7 @@ function createRosterStore() {
       // /issued-addresses（zone ルール由来）に合わせる。旧 /addresses（アカウント送信先）はもう
       // フロントから呼ばれない。
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") return json(page(emails));
+      if (pathname === "/api/v1/mail/admin/lists") return json({ items: teamLists });
       // 名簿同期のソース: 受信アドレス（address/destination/enabled）。sync/preview がまず取得する。
       if (pathname === "/api/v1/mail/admin/email-routing/roster-addresses") {
         return json({ items: emails.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })) });
@@ -1844,6 +1846,15 @@ function createRosterStore() {
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         // 実 identity-roster と同じ { user } 形 (InviteUserResponse)。
         return json({ user }, 201);
+      }
+      if (pathname === "/api/v1/mail/admin/lists") {
+        const req = body as mail.MailTeamListCreateRequest;
+        const localPart = req?.localPart?.trim().toLowerCase() ?? "";
+        if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
+        if (emails.some((a) => a.localPart === localPart) || teamLists.some((l) => l.localPart === localPart)) return problem("CONFLICT", "このアドレスは既に使われています", 409);
+        const list: mail.MailTeamList = { id: rid("list"), address: `${localPart}@${EMAIL_DOMAIN}`, localPart, teamId: req.teamId, createdAt: new Date().toISOString() };
+        teamLists.push(list);
+        return json(list);
       }
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
@@ -1938,6 +1949,11 @@ function createRosterStore() {
         }
       }
       {
+        const listId = seg(/^\/api\/v1\/mail\/admin\/lists\/([^/]+)$/);
+        if (listId) {
+          teamLists = teamLists.filter((l) => l.id !== listId);
+          return json({ id: listId });
+        }
         const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const idx = emails.findIndex((a) => a.id === id);
@@ -3713,8 +3729,6 @@ function createDriveShareStore() {
         }
       }
     }
-    const base = { fileId: f.id, grantCount: grants.length, expectedCount: expected.size };
-    if (grants.length === 0) return { ...base, matchedCount: 0, items: [] };
     const items: Record<string, unknown>[] = [];
     const seen = new Set<string>();
     let matchedCount = 0;
@@ -3737,7 +3751,7 @@ function createDriveShareStore() {
       if (seen.has(email)) continue;
       items.push({ kind: "missing", permissionId: null, granteeType: "user", email, displayName: null, domain: null, actualRole: null, expectedRole: exp.driveRole, roleNames: exp.roleNames });
     }
-    return { ...base, matchedCount, items };
+    return { fileId: f.id, grantCount: grants.length, expectedCount: expected.size, matchedCount, items };
   };
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
@@ -4242,6 +4256,9 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
+      // 本番と同じ: 名簿に結ばれた人 (採用済み) は 409。
+      if (a.memberId !== null) return err("HR_APPLICANT_JOINED", 409);
+      hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });
     }
@@ -4369,6 +4386,13 @@ function createMembersStore() {
       const iid = decodeURIComponent(m[1]!);
       const mem = members.find((x) => x.identityUserId === iid);
       return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
+    }
+    // 情報不足の催促。デモでは通知を作らず、応答だけ返す。
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/profile-reminder$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      return json({ deduplicated: false, missing: memberValues.missingProfileKeys(mem) });
     }
     // link / unlink to an identity account (#1).
     m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
