@@ -222,6 +222,26 @@ function replaceOrder(pages: OrderPages, id: string, patch: (o: LpTicketOrder) =
   return { ...pages, pages: pages.pages.map((p) => ({ ...p, items: p.items.map((o) => (o.id === id ? patch(o) : o)) })) };
 }
 
+/** 全注文の CSV を保存する。操作の結果はサーバーが決めるので楽観更新はしない。 */
+export function useExportTicketOrders() {
+  const api = useLpApi();
+  const toast = useToast();
+  return useMutation<void, unknown, void>({
+    mutationFn: async () => {
+      const url = URL.createObjectURL(await api.exportTicketOrders());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "lp-ticket-orders.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    },
+    onSuccess: () => toast.show({ kind: "success", title: "CSV を書き出しました" }),
+    onError: (err) => toast.show({ kind: "error", title: messageFor(err, "CSV を書き出せませんでした") }),
+  });
+}
+
 /** 要確認の注文を支払い済みに確定。先に行を「支払い済み」にし、失敗で戻す。販売数・売上はサーバー集計を取り直す。 */
 export function useApproveTicketOrder() {
   const api = useLpApi();

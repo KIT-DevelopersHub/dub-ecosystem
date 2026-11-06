@@ -81,7 +81,7 @@ export function createGoogleMeetRecordsClient(deps: { token: TokenProvider; fetc
     if (res.status === 401) res = await attempt(true);
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw mapGoogleError(res.status, body, Number(res.headers.get("retry-after")) || undefined);
+      throw mapGoogleError(res.status, body, { api: "meet", operation: "conferenceRecords" });
     }
     return (await res.json().catch(() => ({}))) as T;
   }

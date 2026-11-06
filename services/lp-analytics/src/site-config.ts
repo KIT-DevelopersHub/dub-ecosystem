@@ -1,6 +1,6 @@
 // SiteConfigService — LP の公開設定（セクションの layout + 本番反映の release）。
 // 下書きは lp_site_config.draft_json。本番の layout は published_json、本番の release は既存テーブル
-// （lp_publish / lp_ticket_settings / lp_proposal_settings）が正本で、ここでは組み立てるだけ。
+// （lp_publish / lp_proposal_settings）と lp-tickets（別 D1・s2s）が正本で、ここでは組み立てるだけ。
 import { errors } from "@dub/errors";
 import { lp } from "@dub/types";
 import type { AppDeps, ReqCtx, SiteConfigRow } from "./types";
@@ -52,13 +52,13 @@ export class SiteConfigService {
     const repo = this.deps.repo;
     const [pub, tickets, proposals] = await Promise.all([
       repo.getPublish(SITE_CONFIG_SITE),
-      repo.getTicketSettings(SITE_CONFIG_SITE),
+      this.deps.ticketRelease.get(),
       repo.getProposalSettings(SITE_CONFIG_SITE),
     ]);
     return {
       versionId: pub?.versionId ?? lp.LP_DEFAULT_PUBLISHED_VERSION,
-      ticketsEnabled: tickets?.enabled ?? false,
-      ticketsCtaEnabled: tickets?.ctaEnabled ?? false,
+      ticketsEnabled: tickets.ticketsEnabled,
+      ticketsCtaEnabled: tickets.ticketsCtaEnabled,
       proposalsEnabled: proposals?.enabled ?? false,
     };
   }
@@ -104,7 +104,13 @@ export class SiteConfigService {
     return this.getState();
   }
 
-  /** 本番反映（app.ts で lp:publish を検査）。layout と release を D1 batch 1 回で書き、履歴を 1 行残す。 */
+  /**
+   * 本番反映（app.ts で lp:publish を検査）。layout と release を D1 batch 1 回で書き、履歴を 1 行残す。
+   * チケットの販売状態だけは別 D1 なので同じトランザクションに入らない。revision を確かめた batch の
+   * 成功後に書く: 先に書くと、競合で 409 になった古い操作が販売状態だけ変えてしまう。lp-tickets への
+   * 書き込みが失敗すると 5xx を返し、販売状態は元のまま残る。getState は lp-tickets の実際の値を返すので、
+   * 読み直して再度本番反映すれば揃う。
+   */
   async publish(ctx: ReqCtx, body: unknown): Promise<lp.LpSiteConfigState> {
     const { config, revision } = parseWrite(body);
     const ok = await this.deps.repo.publishSiteConfig({
@@ -118,6 +124,8 @@ export class SiteConfigService {
       updatedAt: this.deps.now(),
     });
     if (!ok) throw stale();
+    const { ticketsEnabled, ticketsCtaEnabled } = config.release;
+    await this.deps.ticketRelease.set({ ticketsEnabled, ticketsCtaEnabled }, ctx.userId);
     return this.getState();
   }
 

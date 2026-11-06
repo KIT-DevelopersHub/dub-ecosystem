@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, lp as lpValues, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, goal as goalValues, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
@@ -86,6 +86,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "sponsor:read",
   "sponsor:write",
   "sponsor:admin",
+  "goals:read",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -4845,7 +4846,7 @@ function createMembersStore() {
     });
   }
 
-  return { handle, findByIdentity, selfEntry };
+  return { handle, findByIdentity, selfEntry, listTeams: () => teams.map((t) => ({ id: t.id, name: t.name, color: t.color })) };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -5552,6 +5553,12 @@ function createLpTicketsStore() {
       return problem("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", 409);
     }
 
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/orders/export") {
+      const head = "注文番号,氏名,メールアドレス,枚数,金額\n";
+      const lines = orders.map((o) => [o.id, o.buyerName, o.buyerEmail, o.quantity, o.amountJpy].join(",")).join("\n");
+      return new Response(`\ufeff${head}${lines}\n`, { status: 200, headers: { "content-type": "text/csv; charset=utf-8" } });
+    }
+
     if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
       const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
       const cursor = url.searchParams.get("cursor");
@@ -5836,6 +5843,70 @@ function createLpProposalsStore() {
   return { handle, settings };
 }
 
+// ── 目標管理 (member-service /members/goals の demo) ─────────────────────────────
+// 保存はメモリ上。実績は本物と同じ指標の見本値を月ごとに持ち、計算は @dub/types goal を使う。
+function createGoalsStore(me: () => { id: string; displayName: string }, teams: () => goalValues.GoalTeam[], sponsorGoal: (month: string) => sponsorValues.GoalTargets | null) {
+  type Row = Omit<goalValues.TeamGoal, "kpis" | "percent"> & { kpis: goalValues.Kpi[] };
+  const month = goalValues.currentMonth();
+  const prev = goalValues.shiftMonth(month, -1);
+  const kpi = (name: string, metric: goalValues.GoalMetric, target: number, manualActual = 0): goalValues.Kpi => ({ name, metric, target, manualActual });
+  const row = (teamId: string, m: string, title: string, kpis: goalValues.Kpi[]): Row => ({
+    teamId, month: m, title, kpis, version: 1, updatedBy: "usr_lead" as Row["updatedBy"], updatedByName: "統括 山本", updatedAt: `${m}-01T00:00:00.000Z`,
+  });
+  const rows: Row[] = [
+    row("team_dev", month, "参加者向け機能を期日どおりに出す", [kpi("期日までに終えるタスク", "tasks_done", 18), kpi("タスク完了率", "tasks_done_rate", 90)]),
+    row("team_sponsor", month, "協賛の打診を増やす", [kpi("新規接触数", "sponsor_contacted", 15), kpi("協賛額", "sponsor_amount", 1_000_000), kpi("お礼状の送付", "manual", 10, 4)]),
+    row("team_pr", month, "LP の認知を広げる", [kpi("LP の訪問者数", "lp_visitors", 1000), kpi("SNS 投稿数", "manual", 12, 13)]),
+    row("team_hq", month, "運営メンバーを増やす", [kpi("応募者数", "hr_applicants", 8), kpi("採用数", "hr_hired", 3)]),
+    row("team_dev", prev, "参加者向け機能の土台を作る", [kpi("期日までに終えるタスク", "tasks_done", 12)]),
+  ];
+  const actuals = (teamId: string, m: string): Partial<Record<goalValues.GoalMetric, number | null>> => {
+    const scale = m === month ? 1 : m === prev ? 1.3 : 0;
+    const team: Record<string, [number, number]> = { team_dev: [11, 15], team_sponsor: [2, 3], team_pr: [1, 4], team_hq: [3, 4] };
+    const [done, total] = team[teamId] ?? [0, 0];
+    return {
+      tasks_done: Math.round(done * scale),
+      tasks_done_rate: total === 0 || scale === 0 ? null : Math.round((Math.round(done * scale) / total) * 100),
+      hr_applicants: Math.round(5 * scale), hr_interviews: Math.round(4 * scale), hr_hired: Math.round(scale),
+      sponsor_cards: Math.round(13 * scale), sponsor_contacted: Math.round(9 * scale), sponsor_proposed: Math.round(4 * scale),
+      sponsor_agreed: Math.round(scale), sponsor_amount: Math.round(300_000 * scale), participations: Math.round(6 * scale), lp_visitors: Math.round(640 * scale),
+    };
+  };
+  const toGoal = ({ kpis, ...r }: Row): goalValues.TeamGoal => {
+    const a = actuals(r.teamId, r.month);
+    const linked = goalValues.linkedTargetsOf(sponsorGoal(r.month));
+    const progress = kpis.map((k): goalValues.KpiProgress => {
+      const actual = k.metric === "manual" ? k.manualActual : (a[k.metric] ?? null);
+      const target = linked[k.metric] ?? k.target;
+      return { ...k, target, status: actual === null ? "empty" : "ok", actual, linked: linked[k.metric] !== undefined, percent: goalValues.kpiPercent(actual, target) };
+    });
+    return { ...r, kpis: progress, percent: goalValues.goalPercent(progress) };
+  };
+  function handle(method: string, pathname: string, url: URL, body: any): Response | null {
+    if (pathname === "/api/v1/members/goals" && method === "GET") {
+      const m = url.searchParams.get("month") ?? month;
+      const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal), linkedTargets: goalValues.linkedTargetsOf(sponsorGoal(m)) };
+      return json(res);
+    }
+    const hit = /^\/api\/v1\/members\/goals\/([^/]+)\/(\d{4}-\d{2})$/.exec(pathname);
+    if (!hit) return null;
+    const [, teamId, m] = hit as unknown as [string, string, string];
+    const i = rows.findIndex((r) => r.teamId === teamId && r.month === m);
+    if (method === "DELETE") {
+      if (i < 0) return json({ error: { code: "GOAL_NOT_FOUND", message: "Goal not found" } }, 404);
+      rows.splice(i, 1);
+      return new Response(null, { status: 204 });
+    }
+    if (method !== "PUT") return null;
+    if ((rows[i]?.version ?? 0) !== body.expectedVersion) return json({ error: { code: "GOAL_VERSION_CONFLICT", message: "conflict" } }, 409);
+    const u = me();
+    const next: Row = { teamId, month: m, title: body.title, kpis: body.kpis, version: body.expectedVersion + 1, updatedBy: u.id as Row["updatedBy"], updatedByName: u.displayName, updatedAt: new Date().toISOString() };
+    if (i < 0) rows.push(next); else rows[i] = next;
+    return json(toGoal(next));
+  }
+  return { handle };
+}
+
 // ── スポンサー (member-service /members/sponsor/* の demo) ──────────────────────
 // 名刺の CRUD + 写真 (生バイト)。seed の写真は SVG で描いた名刺風の画像。撮影/選択した写真は
 // メモリにそのまま持ち、一覧・詳細に出る (リロードで消える)。
@@ -6086,7 +6157,7 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     return null;
   }
 
-  return { handle };
+  return { handle, goalOf: (month: string) => goals.find((g) => g.month === month) ?? null };
 }
 
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
@@ -6155,6 +6226,7 @@ export function createDemoFetch(): typeof fetch {
   const lpProposalsStore = createLpProposalsStore();
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
   const sponsorStore = createSponsorStore(() => currentMe().user);
+  const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.goalOf(m));
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
   const lpSiteConfigStore = createLpSiteConfigStore({
     publish: lpStore.publish,
@@ -6282,6 +6354,9 @@ export function createDemoFetch(): typeof fetch {
 
     const sponsorHit = await sponsorStore.handle(method, url.pathname, parsedBody, init?.body, new Headers(init?.headers));
     if (sponsorHit) return sponsorHit;
+
+    const goalsHit = goalsStore.handle(method, url.pathname, url, parsedBody);
+    if (goalsHit) return goalsHit;
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??

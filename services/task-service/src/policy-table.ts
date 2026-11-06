@@ -45,6 +45,9 @@ export const POLICY_TABLE = definePolicyTable({
   // bare INTERNAL and not `internalWithKeys`.
   "POST /internal/events-async": INTERNAL,
 
+  // member-service の目標管理が月ごとのチーム別件数を読む。件数だけで行の中身は返さない。
+  "GET /internal/goal-metrics": INTERNAL,
+
   // ---- reads: マイタスク 閲覧 + task:read ----
   "GET /tasks/dependencies": appLevel("tasks", "view", "task:read"),
   "GET /tasks": appLevel("tasks", "view", "task:read"),

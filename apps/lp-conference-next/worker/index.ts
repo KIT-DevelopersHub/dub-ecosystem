@@ -18,6 +18,7 @@ import {
 import {
   DEMO_CONFIG,
   handleTickets,
+  internalFetch,
   isTicketsPath,
   parseConfig,
   previewBar,
@@ -34,6 +35,7 @@ import {
   proposalsInjection,
   type ProposalConfig,
 } from "./proposals.ts";
+import { handlePass, matchPassRoute } from "./ticket-pass.ts";
 import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supportsSiteConfig } from "./site-config.ts";
 import { bridgeScript, parseExtraOrigins, shouldInjectBridge } from "./preview-bridge.ts";
 
@@ -43,6 +45,8 @@ interface Fetcher {
 interface Env {
   ASSETS: Fetcher;
   LP_FLAG?: Fetcher;
+  /** lp-tickets (dub-lp-tickets). No fallback to LP_FLAG: without it tickets are "unavailable". */
+  LP_TICKETS?: Fetcher;
   DEFAULT_VERSION?: string;
   TICKETS_DEMO?: string;
   /** LP管理のミニプレビュー連動で許可する追加の親オリジン（カンマ区切り・https のみ）。 */
@@ -91,7 +95,7 @@ async function publishedVersion(env: Env): Promise<string> {
 
 let ticketsCache: { value: TicketConfig | null; at: number } | null = null;
 
-// Demo has no lp-analytics: sales off, so only ?tickets=on (LP管理「プレビュー」タブ) shows them.
+// Demo has no lp-tickets: sales off, so only ?tickets=on (LP管理「プレビュー」タブ) shows them.
 const DEMO_PREVIEW: TicketConfig = { ...DEMO_CONFIG, enabled: false };
 
 /** Ticket config (30s cache). null = unavailable; never throws. */
@@ -101,8 +105,8 @@ async function ticketConfig(env: Env): Promise<TicketConfig | null> {
   if (ticketsCache && now - ticketsCache.at < FLAG_TTL_MS) return ticketsCache.value;
   let value: TicketConfig | null = null;
   try {
-    if (env.LP_FLAG) {
-      const res = await env.LP_FLAG.fetch("https://lp-analytics/lp/internal/tickets", {
+    if (env.LP_TICKETS) {
+      const res = await env.LP_TICKETS.fetch("https://lp-tickets/lp/internal/tickets", {
         headers: { "x-dub-internal": "1" },
         signal: AbortSignal.timeout(FLAG_TIMEOUT_MS),
       });
@@ -152,13 +156,12 @@ function siteLayout(env: Env, draft: boolean) {
 }
 
 function ticketsInternal(env: Env): ((path: string, init: RequestInit) => Promise<Response>) | null {
-  const flag = env.LP_FLAG;
-  if (!flag || env.TICKETS_DEMO === "1") return null;
-  return (path, init) => {
-    const headers = new Headers(init.headers);
-    headers.set("x-dub-internal", "1");
-    return flag.fetch(`https://lp-analytics${path}`, { ...init, headers });
-  };
+  return internalFetch(env.LP_TICKETS, "lp-tickets", env.TICKETS_DEMO === "1");
+}
+
+// 登壇者募集は lp-analytics のまま（チケットとは別の binding）。
+function proposalsInternal(env: Env): ((path: string, init: RequestInit) => Promise<Response>) | null {
+  return internalFetch(env.LP_FLAG, "lp-analytics", env.TICKETS_DEMO === "1");
 }
 
 async function notFound(env: Env, origin: string, version: string, req: Request): Promise<Response> {
@@ -173,12 +176,15 @@ async function notFound(env: Env, origin: string, version: string, req: Request)
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
+    // Before everything: tickets stay usable with sales off, and no cookie or version logic touches them.
+    const pass = matchPassRoute(url.pathname);
+    if (pass) return handlePass(req, pass, { demo: env.TICKETS_DEMO === "1", internal: ticketsInternal(env) });
     const ticketsPath = isTicketsPath(url.pathname);
     // LP管理「プレビュー」タブの ?tickets=on|off はこの閲覧者にだけ効く（公開中の LP は不変）。
     const mode = ticketsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
     const getConfig = async (): Promise<TicketConfig | null> => previewConfig(await ticketConfig(env), mode);
     const tkCookie = ticketsCookie(url);
-    // LP管理「プレビュー」(販売あり) のテスト購入トークン。検証は lp-analytics（Stripe テストキーの時だけ有効）。
+    // LP管理「プレビュー」(販売あり) のテスト購入トークン。検証は lp-tickets（Stripe テストキーの時だけ有効）。
     const tkToken = ticketsPreviewToken(url, req.headers.get("cookie"), req.headers.get("referer"));
     const tkTokenCookie = ticketsPreviewCookie(url);
     // 登壇者募集も同じ流儀（?proposals=on|off はこの閲覧者にだけ効く）。
@@ -193,7 +199,7 @@ export default {
       const handled = await handleProposals(req, {
         demo: env.TICKETS_DEMO === "1",
         getConfig: getProposals,
-        internal: ticketsInternal(env),
+        internal: proposalsInternal(env),
       });
       if (handled) return handled;
     }
