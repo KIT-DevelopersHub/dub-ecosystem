@@ -4233,6 +4233,9 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
+      // 本番と同じ: 名簿に結ばれた人 (採用済み) は 409。
+      if (a.memberId !== null) return err("HR_APPLICANT_JOINED", 409);
+      hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });
     }
