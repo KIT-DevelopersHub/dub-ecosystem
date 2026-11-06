@@ -141,6 +141,7 @@
       "POST /internal/webhooks/resend",
       "POST /mail/avatars",
       "POST /mail/blocks",
+      "POST /mail/bulk",
       "POST /mail/flags/{}",
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
