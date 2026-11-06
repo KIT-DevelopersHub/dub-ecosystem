@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "driveshare-role-auto",
+  "worker": "dub-demo-driveshare-role-auto",
+  "url": "https://dub-demo-driveshare-role-auto.developershub-site.workers.dev",
+  "deployedSha": "05f8804d",
+  "branch": "feat/driveshare-role-auto-sync",
+  "actor": "ko-tarou",
+  "markers": ["fe2-driveshare-role-auto-note"],
+  "live": true,
+  "verifiedAt": "2026-11-06T06:35:55Z",
+  "updatedAt": "2026-11-06T06:35:55Z",
+  "note": "Drive共有 ロール追加の自動共有"
+}

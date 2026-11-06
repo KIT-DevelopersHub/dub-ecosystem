@@ -83,7 +83,7 @@ export interface Applicant {
   updatedAt: ISODateTime;
 }
 
-export type ApplicantEventKind = "created" | "stage" | "note" | "joined";
+export type ApplicantEventKind = "created" | "stage" | "note" | "joined" | "deleted";
 
 /** 応募者の履歴 (ステータス変更・メモ・採用)。追記のみ。 */
 export interface ApplicantEvent {

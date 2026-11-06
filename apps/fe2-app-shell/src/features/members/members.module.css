@@ -14,6 +14,11 @@
 .searchField {
   min-width: 220px;
 }
+.rosterHint {
+  margin: 0 0 var(--dub-space-3);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+}
 
 /* team-grouped view */
 .teamGrid {
@@ -580,20 +585,33 @@
   color: var(--dub-color-text-muted);
 }
 
-/* print / PNG export: hide app chrome, print the org chart full-width on white */
+/* 印刷: 組織図だけを A4 横 1 枚に出す。組織図の親はスクロール枠や余白を外し、親以外の
+   アプリの枠(ヘッダー・タブ・見出し)は消す。倍率は orgChartPrint.ts が渡す。 */
 @media print {
-  .noPrint {
+  :has(.orgChart) {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  :has(.orgChart) > :not(:has(.orgChart), .orgChart) {
     display: none !important;
+  }
+  .orgChart {
+    width: max-content;
+    zoom: var(--org-print-zoom, 1);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .orgScroll {
     overflow: visible !important;
+    padding-bottom: 0;
   }
-  .orgCanvas {
-    min-width: 0 !important;
-    width: 100% !important;
-  }
-  .orgChart {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+  .orgCol {
+    box-shadow: none;
   }
 }

@@ -13,6 +13,7 @@ import { createD1HrFormRepo } from "./hr-form-repo";
 import { createD1SponsorRepo, r2ImageStore } from "./sponsor-repo";
 import { createD1SponsorLeadRepo } from "./sponsor-lead-repo";
 import { notifyAdminsOfParticipation } from "./participationNotify";
+import { sendProfileReminderVia } from "./profileReminder";
 import { createIdentityRoleSync } from "./roleSync";
 import { createIdentityActivation } from "./identityActivation";
 import type { Env } from "./env";
@@ -59,6 +60,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
     notifyParticipationSubmitted: (ctx, participation) =>
       notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),
+    ...(env.SVC_NOTIFICATION ? { sendProfileReminder: sendProfileReminderVia(env.SVC_NOTIFICATION) } : {}),
   };
 }
 

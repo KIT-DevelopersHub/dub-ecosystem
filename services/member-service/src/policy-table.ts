@@ -111,6 +111,7 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /members/teams/:id": appLevel("members", "edit"),
   "POST /members/people": appLevel("members", "edit"),
   "POST /members/people/:id/identity-link": appLevel("members", "edit"),
+  "POST /members/people/:id/profile-reminder": appLevel("members", "edit"),
   "PATCH /members/people/:id": appLevel("members", "edit"),
   "DELETE /members/people/:id": appLevel("members", "edit"),
 

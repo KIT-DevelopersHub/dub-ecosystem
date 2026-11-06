@@ -9,6 +9,7 @@ import type { HrFormRepo } from "./hr-form-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
 import type { SponsorLeadRepo } from "./sponsor-lead-repo";
 import type { RoleSyncPort } from "./roleSync";
+import type { ProfileReminderTarget } from "./profileReminder";
 import type { IdentityActivationPort } from "./identityActivation";
 
 export type MemberStatus = member.MemberStatus;
@@ -217,4 +218,7 @@ export interface AppDeps {
     ctx: { requestId: string; userId: string },
     participation: member.Participation,
   ) => Promise<void>;
+  /** 情報が足りない本人への催促 (notification-service)。best-effort ではなく、失敗は
+   *  操作した管理者へ返す。undefined なら催促できない (binding の無い環境)。 */
+  sendProfileReminder?: (ctx: { requestId: string; userId: string }, target: ProfileReminderTarget) => Promise<{ deduplicated: boolean }>;
 }
