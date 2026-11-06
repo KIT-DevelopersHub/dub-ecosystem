@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "154a1c88",
-  "branch": "commander/task-ctask_01M6R7Q3R7FWS2FESNH5MD0MKJ",
+  "deployedSha": "91388c14",
+  "branch": "commander/task-ctask_01M6RPXGVD8P8521MTEE51XFK5",
   "actor": "ko-tarou",
-  "markers": ["fe7-roles-delete-unavailable"],
+  "markers": ["gcp_calendar_requests_peak_minute", "gcp_meet_requests_peak_minute"],
   "live": true,
-  "verifiedAt": "2026-11-06T11:09:02Z",
-  "updatedAt": "2026-11-06T11:09:02Z",
-  "note": "ctask_01M6R7Q3R7FWS2FESNH5MD0MKJ: ロール削除の導線と締め出しガード"
+  "verifiedAt": "2026-11-06T15:22:04Z",
+  "updatedAt": "2026-11-06T15:22:04Z",
+  "note": "usage: Google Calendar/Meet API"
 }
