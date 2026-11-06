@@ -73,6 +73,7 @@ export interface AttachmentRow {
   r2_key: string;
   created_at: string;
   status: "stored" | "dropped_too_large" | "dropped_truncated"; // 0007: 'stored' default
+  content_id?: string | null; // 0025: Content-ID of an inbound part
 }
 
 // ---- opaque cursor codec (base64url of the row id; D3) ----
@@ -665,6 +666,31 @@ export async function markInboundRead(db: DbClient, id: string, scope: InboundSc
   return { found: true };
 }
 
+/** Set the signed-in user's OWN read state on these messages (POST /mail/read-state). Both
+ *  statements match on `self`, so a message seen only through oversight or role sharing is
+ *  never stamped. Idempotent, and a re-read keeps the first read_at. */
+export async function setInboundReadState(db: DbClient, ids: string[], self: string, read: boolean): Promise<void> {
+  const now = nowIso();
+  const list = JSON.stringify(ids);
+  const stamp = read ? "read_at = ?" : "read_at = NULL";
+  const stillDiffers = read ? "read_at IS NULL" : "read_at IS NOT NULL";
+  const stampBind = read ? [now] : [];
+  await db.run(
+    `UPDATE mail_inbound_delivery SET ${stamp}, updated_at = ? WHERE owner_user_id = ? AND ${stillDiffers} AND inbound_id IN (SELECT value FROM json_each(?))`,
+    ...stampBind,
+    now,
+    self,
+    list,
+  );
+  // Legacy primary-owner stamp (what read_all / role-sharing viewers see as "read").
+  await db.run(
+    `UPDATE mail_inbound SET ${stamp} WHERE owner_user_id = ? AND ${stillDiffers} AND id IN (SELECT value FROM json_each(?))`,
+    ...stampBind,
+    self,
+    list,
+  );
+}
+
 export async function listInbound(
   db: DbClient,
   q: { ownerUserId: InboundScope; viewer?: string; threadId?: string; cursor?: string; limit: number; q?: string },
@@ -746,12 +772,14 @@ export async function insertAttachment(
     // carries r2Key='' and records an attachment we could NOT persist so the UI can
     // surface it instead of the file vanishing silently (改善#2).
     status?: AttachmentRow["status"];
+    contentId?: string;
   },
 ): Promise<void> {
+  // content_id only when there is one, so plain attachments never depend on migration 0025.
   await db.run(
     `INSERT OR IGNORE INTO mail_attachments
-       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status${row.contentId ? ", content_id" : ""})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?${row.contentId ? ", ?" : ""})`,
     row.id,
     row.messageKind,
     row.messageId,
@@ -761,6 +789,7 @@ export async function insertAttachment(
     row.r2Key,
     row.createdAt,
     row.status ?? "stored",
+    ...(row.contentId ? [row.contentId] : []),
   );
 }
 

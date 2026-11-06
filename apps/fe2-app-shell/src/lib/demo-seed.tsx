@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, lp as lpValues, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
@@ -37,6 +37,8 @@ const ME_ID = "usr_demo";
 const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "identity:read",
   "identity:admin",
+  // 代理表示 (admin impersonation): メール名簿の「このメンバーとして表示」。
+  "identity:impersonate",
   "event:read",
   "event:write",
   "event:admin",
@@ -676,6 +678,33 @@ MAIL_DETAIL.msg_5 = {
   textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
 };
 
+// HTML mail: layout from the sender, an inline cid: image from its own attachments, a remote
+// image that stays off until 画像を表示, plus markup the sanitizer has to take out.
+const MSG_HTML: mail.MailMessageListItem = {
+  id: "msg_html", messageId: "<mhtml@demo>", threadId: "thr_html", from: { email: "news@conf.example", name: "カンファレンス事務局" },
+  to: [{ email: "demo@developershub.jp" }], subject: "【HTMLメール】カンファレンス開催のお知らせ",
+  snippet: "今年のカンファレンスの開催概要をお知らせします。", receivedAt: daysAgoIso(0.02), read: false, mine: true,
+};
+MAIL_DETAIL.msg_html = {
+  ...MSG_HTML,
+  textBody: "今年のカンファレンスの開催概要をお知らせします。\n日程: 11月30日\n会場: 金沢工業大学",
+  htmlBody:
+    `<script>alert("xss")</script>` +
+    `<form><input name="childNodes"><img src=x onerror="window.__mailXss=1"></form>` +
+    `<form name="body"><input name="childNodes"><img src=x onerror="window.__mailXss=2"></form>` +
+    `<form><input name="tagName"><input name="attributes"><img src=x onerror="window.__mailXss=3"></form>` +
+    `<table width="100%" cellpadding="0" cellspacing="0" style="position:fixed; top:0; background-color:#f4f6fb"><tr><td align="center" style="padding:24px">` +
+    `<img src="cid:logo@demo" alt="ロゴ" width="48" height="48">` +
+    `<h1 style="color:#1a56db; font-size:22px" onclick="alert(1)">カンファレンス開催のお知らせ</h1>` +
+    `<p style="color:#374151">今年のカンファレンスの開催概要をお知らせします。</p>` +
+    `<table style="border-collapse:collapse"><tr><td style="padding:4px 12px; border:1px solid #d1d5db">日程</td><td style="padding:4px 12px; border:1px solid #d1d5db">11月30日</td></tr>` +
+    `<tr><td style="padding:4px 12px; border:1px solid #d1d5db">会場</td><td style="padding:4px 12px; border:1px solid #d1d5db">金沢工業大学</td></tr></table>` +
+    `<p><img src="https://placehold.co/480x120/png?text=Dub+Conference" alt="バナー" width="480"></p>` +
+    `<p><a href="https://example.com/register" style="color:#fff; background-color:#1a56db; padding:8px 16px">参加登録</a> <a href="javascript:alert(1)">危険なリンク</a></p>` +
+    `</td></tr></table>`,
+  attachments: [{ ...seedMailImageBlob("mailatt_demo_logo", "logo.png", "image/png", DEMO_PNG_8x8), contentId: "logo@demo" }],
+};
+
 // Tricky-URL mail (ハイパーリンク表示の回帰確認用): long unbroken URLs, URLs glued to
 // Japanese brackets/punctuation, query/fragment/percent-encoding, Gmail-style
 // "label <url>" plain-text links and an angle-bracketed URL hard-wrapped across lines.
@@ -832,8 +861,58 @@ function isOversight(a: DemoAccount): boolean {
 
 const DEMO_ACCOUNT_STORAGE_KEY = "dub_demo_account";
 
-/** The active demo account (localStorage-selected, default admin). Read per request. */
+// ── 代理表示 (admin impersonation) — demo twin of auth-service + gateway ──────────
+// sessionStorage (this tab only, like a session cookie). While set, every request is
+// answered AS the subject (currentAccount) and /me names the real admin, exactly like the
+// gateway; the shared deny list (@dub/types) refuses the same high-risk actions.
+const DEMO_IMPERSONATION_KEY = "dub_demo_impersonation";
+
+interface DemoImpersonation {
+  actorId: string;
+  subject: { id: string; displayName: string; email: string; permissions: identity.PermissionKey[] };
+  startedAt: number;
+  expiresAt: number;
+}
+
+function readImpersonation(): DemoImpersonation | null {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(DEMO_IMPERSONATION_KEY);
+    if (!raw) return null;
+    const imp = JSON.parse(raw) as DemoImpersonation;
+    // Past the hard deadline it is over (the server would end it on the next refresh).
+    if (Date.now() >= imp.expiresAt) {
+      globalThis.sessionStorage?.removeItem(DEMO_IMPERSONATION_KEY);
+      return null;
+    }
+    return imp;
+  } catch {
+    return null;
+  }
+}
+
+function writeImpersonation(imp: DemoImpersonation | null): void {
+  try {
+    if (imp) globalThis.sessionStorage?.setItem(DEMO_IMPERSONATION_KEY, JSON.stringify(imp));
+    else globalThis.sessionStorage?.removeItem(DEMO_IMPERSONATION_KEY);
+  } catch {
+    // storage blocked: impersonation simply cannot persist across the reload
+  }
+}
+
+/** The account the request acts as: the impersonated member when 代理表示 is on. */
 function currentAccount(): DemoAccount {
+  const imp = readImpersonation();
+  if (imp) {
+    // Permissions are the ROSTER's (role-derived, captured at start) — what the member really
+    // holds — even when the member is also a switcher persona; the persona keeps its inbox.
+    const known = DEMO_ACCOUNTS.find((a) => a.id === imp.subject.id);
+    return known ? { ...known, permissions: imp.subject.permissions } : { ...imp.subject, inbox: [] };
+  }
+  return signedInAccount();
+}
+
+/** The active demo account (localStorage-selected, default admin). Read per request. */
+function signedInAccount(): DemoAccount {
   let key: string | null = null;
   try {
     // ?demo_account=<id|email> switches (and remembers) the account so a confirm link can
@@ -881,11 +960,16 @@ function demoAccountsResponse(): authTypes.DemoAccountsResponse {
 /** The /me session for the active account (drives RequireAuth + the shell header). */
 function currentMe(): gateway.MeResponse {
   const a = currentAccount();
+  const imp = readImpersonation();
+  const actor = imp ? signedInAccount() : null;
   return {
     user: { id: a.id, displayName: a.displayName, avatarUrl: null, email: a.email },
     orgId: ORG,
     permissions: driveSettingsOverride(a.permissions),
-    sessionExpiresAt: Date.now() + 60 * 60 * 1000,
+    sessionExpiresAt: imp ? imp.expiresAt : Date.now() + 60 * 60 * 1000,
+    ...(imp && actor
+      ? { impersonation: { actor: { id: actor.id, displayName: actor.displayName, avatarUrl: null }, startedAt: imp.startedAt, expiresAt: imp.expiresAt } }
+      : {}),
   };
 }
 
@@ -1099,11 +1183,12 @@ function createMailStore() {
   // Idempotency (x-dub-idempotency-key, scoped per account like the gateway): a repeated
   // submit returns the first send's ack instead of appending a second Sent row.
   const idemAcks = new Map<string, mail.SendMailResponse>();
+  const draftsByAccount: Record<string, mail.MailDraft[]> = {};
 
   function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
-      const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
+      const m = /^\/api\/v1\/mail\/(?:messages|sent|drafts)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const blob = DEMO_MAIL_BLOBS.get(decodeURIComponent(m[1]!));
         if (!blob) return notFound(`GET ${pathname}`);
@@ -1222,6 +1307,46 @@ function createMailStore() {
       if (m && method === "GET") {
         const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
         return found ? json(stampBlocked(found)) : notFound(`GET ${pathname}`);
+      }
+    }
+    // 既読 / 未読 for a selection: this account's own copies only, as on the gateway.
+    if (method === "POST" && pathname === "/api/v1/mail/read-state") {
+      const { ids, read } = body as mail.MailReadStateRequest;
+      const own = new Set(ids);
+      for (const r of inboxOf(me.id)) if (own.has(r.id)) r.read = read;
+      return json({ updated: ids.length, read });
+    }
+    // 下書き: per-account, in-session (a reload resets, like Sent).
+    {
+      const list = (draftsByAccount[me.id] ??= []);
+      if (pathname === "/api/v1/mail/drafts" && method === "GET") return json({ items: [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) });
+      const one = /^\/api\/v1\/mail\/drafts\/([^/]+)$/.exec(pathname);
+      if (one && method === "PUT") {
+        const id = decodeURIComponent(one[1]!);
+        const prev = list.find((d) => d.id === id);
+        const saved: mail.MailDraft = { ...(body as mail.MailDraftInput), id, updatedAt: new Date().toISOString(), attachments: prev?.attachments ?? [] };
+        draftsByAccount[me.id] = [saved, ...list.filter((d) => d.id !== id)];
+        return json(saved);
+      }
+      if (one && method === "DELETE") {
+        draftsByAccount[me.id] = list.filter((d) => d.id !== decodeURIComponent(one[1]!));
+        return json({ deleted: true });
+      }
+      const files = /^\/api\/v1\/mail\/drafts\/([^/]+)\/attachments(?:\/([^/]+))?$/.exec(pathname);
+      if (files && method !== "GET") {
+        const draft = list.find((d) => d.id === decodeURIComponent(files[1]!));
+        if (!draft) return notFound(`${method} ${pathname}`);
+        if (method === "DELETE") {
+          draft.attachments = draft.attachments.filter((a) => a.id !== decodeURIComponent(files[2] ?? ""));
+          return json({ deleted: true });
+        }
+        const input = body as mail.MailAttachmentInput;
+        const bytes = b64ToBytes(input.contentBase64);
+        const attId = `mailatt_draft_${++attSeq}`;
+        DEMO_MAIL_BLOBS.set(attId, { filename: input.filename, contentType: input.contentType, bytes });
+        const meta: mail.MailAttachment = { id: attId, filename: input.filename, contentType: input.contentType, sizeBytes: bytes.byteLength };
+        draft.attachments = [...draft.attachments, meta];
+        return json(meta);
       }
     }
     if (method === "POST") {
@@ -5913,6 +6038,45 @@ export function createDemoFetch(): typeof fetch {
         parsedBody = JSON.parse(init.body);
       } catch {
         parsedBody = undefined;
+      }
+    }
+    // 代理表示: the shared deny list, refused exactly as the gateway does.
+    {
+      const imp = readImpersonation();
+      const blocked = imp ? authValues.impersonationBlockReason(method, url.pathname) : null;
+      if (blocked) return problem("IMPERSONATION_ACTION_BLOCKED", authValues.IMPERSONATION_BLOCKED_MESSAGE, 403, { reason: blocked });
+      if (method === "POST" && url.pathname === "/api/v1/auth/impersonation/stop") {
+        if (!imp) return problem("AUTH_NOT_IMPERSONATING", "This session is not an impersonation", 409);
+        writeImpersonation(null);
+        const me = currentMe();
+        return json({ session: { userId: me.user.id, client: "web", sessionExpiresAt: me.sessionExpiresAt } });
+      }
+      const start = /^\/api\/v1\/admin\/users\/([^/]+)\/impersonation$/.exec(url.pathname);
+      if (start && method === "POST") {
+        const actor = signedInAccount();
+        if (!actor.permissions.includes(authValues.IMPERSONATE_PERMISSION)) return problem("FORBIDDEN", "missing identity:impersonate", 403);
+        const uid = decodeURIComponent(start[1]!);
+        const detailRes = roster.handle("GET", `/api/v1/identity/users/${encodeURIComponent(uid)}`, url, undefined);
+        if (!detailRes || !detailRes.ok) return problem("NOT_FOUND", "user not found", 404);
+        const target = (await detailRes.json()) as identity.IdentityUserDetail;
+        const refusal = authValues.impersonationRefusal({
+          actorId: actor.id,
+          actorImpersonating: imp !== null,
+          target: { id: target.id, status: target.status, roleIds: target.roleIds, holdsImpersonate: target.permissions.includes(authValues.IMPERSONATE_PERMISSION) },
+        });
+        if (refusal) return problem("AUTH_IMPERSONATION_NOT_ALLOWED", "This member cannot be impersonated", 403, { reason: refusal });
+        const startedAt = Date.now();
+        const next: DemoImpersonation = {
+          actorId: actor.id,
+          subject: { id: target.id, displayName: target.displayName, email: target.email, permissions: target.permissions },
+          startedAt,
+          expiresAt: startedAt + authValues.IMPERSONATION_DEFAULT_TTL_SEC * 1000,
+        };
+        writeImpersonation(next);
+        const res: authTypes.StartImpersonationResponse = {
+          impersonation: { actorId: actor.id, subjectId: target.id, startedAt, expiresAt: next.expiresAt },
+        };
+        return json(res);
       }
     }
     // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts

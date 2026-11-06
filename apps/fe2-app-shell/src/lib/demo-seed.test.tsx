@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 87-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 88-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(87);
+    expect(catalog).toHaveLength(88);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -759,5 +759,45 @@ describe("demo Gmail auto-forward (0023)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("demo 代理表示 (admin impersonation twin)", () => {
+  it("start → /me is the member + names the admin → blocked send → stop restores the admin", async () => {
+    globalThis.sessionStorage.removeItem("dub_demo_impersonation");
+    const a = api();
+    try {
+      const started = await a.request<{ impersonation: { subjectId: string; actorId: string } }>({
+        method: "POST",
+        path: "/api/v1/admin/users/usr_carol/impersonation",
+        body: {},
+      });
+      expect(started.impersonation).toMatchObject({ subjectId: "usr_carol", actorId: "usr_demo" });
+      const me = await a.auth.me();
+      expect(me.user.id).toBe("usr_carol");
+      expect(me.permissions).not.toContain("identity:admin");
+      expect(me.impersonation?.actor.displayName).toBe("デモ 管理者");
+
+      const err = await a
+        .request({ method: "POST", path: "/api/v1/mail/outbox", body: {} })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("IMPERSONATION_ACTION_BLOCKED");
+
+      await a.auth.stopImpersonation();
+      const back = await a.auth.me();
+      expect(back.user.id).toBe("usr_demo");
+      expect(back.impersonation).toBeUndefined();
+    } finally {
+      globalThis.sessionStorage.removeItem("dub_demo_impersonation");
+    }
+  });
+
+  it("refuses an admin target with the shared reason", async () => {
+    const err = await api()
+      .request({ method: "POST", path: "/api/v1/admin/users/usr_demo/impersonation", body: {} })
+      .catch((e: unknown) => e);
+    expect((err as ApiError).status).toBe(403);
+    expect((err as ApiError).details).toEqual({ reason: "self" });
   });
 });

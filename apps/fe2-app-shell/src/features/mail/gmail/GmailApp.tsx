@@ -1,23 +1,26 @@
 // Top-level Gmail-style mail experience. Composes the full-width search bar, the
 // left folder/label nav, the center list ↔ reading-pane swap, floating compose
-// windows and an undo toast. Owns keyboard shortcuts (c compose / e archive /
-// # delete / r reply / j·k move / x select / / focus search). State lives in the client
+// windows and an undo toast. Owns the keyboard shortcuts (shortcuts.ts; r / a / f sit in
+// ReadingPane, which owns the addressing). State lives in the client
 // MailStore, hydrated from the real gateway by useMailSync (inbox + Sent are live data).
 import { useEffect, useRef, useState } from "react";
-import { COARSE_POINTER_QUERY, Drawer, IconButton, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
+import { COARSE_POINTER_QUERY, Drawer, IconButton, Modal, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
 import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
 import { ScheduledList } from "./ScheduledList.tsx";
+import { DraftList } from "./DraftList.tsx";
 import { ReadingPane } from "./ReadingPane.tsx";
 import { BlockNoticeBar, BlockedSendersPanel } from "./BlockedSenders.tsx";
 import blockStyles from "./blocks.module.css";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
 import { SHARED_FOLDERS } from "./mailModel.ts";
-import { MailStoreProvider, folderUnread, selectVisible, showSharedFolders, useMailStore } from "./useMailStore.tsx";
+import { MailStoreProvider, composing, folderUnread, selectOrdered, showSharedFolders, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { useMailSync } from "./useMailSync.tsx";
+import { useReadState } from "./useReadState.tsx";
 import { deliver } from "./sendMail.ts";
-import { useMailApi } from "../MailProvider.tsx";
+import { SHORTCUTS, isTyping, modalOpen, shortcutsBlocked } from "./shortcuts.ts";
+import { useCanCompose, useMailApi } from "../MailProvider.tsx";
 
 /** P1-2 follow-up: floating compose windows are pure client state (useMailStore starts
  *  with composes: [] on every mount/reload) — a reload while typing loses the OPEN
@@ -47,7 +50,7 @@ function useRestoreComposeDraftsOnMount(): void {
       try {
         const raw = store.getItem(key);
         if (!raw) continue;
-        const draft = JSON.parse(raw) as { to?: string; cc?: string; bcc?: string; showCc?: boolean; showBcc?: boolean; subject?: string; body?: string };
+        const draft = JSON.parse(raw) as { to?: string; cc?: string; bcc?: string; showCc?: boolean; showBcc?: boolean; subject?: string; body?: string; mode?: ComposeState["mode"]; inReplyTo?: string };
         dispatch({
           type: "OPEN_COMPOSE",
           compose: {
@@ -59,6 +62,9 @@ function useRestoreComposeDraftsOnMount(): void {
             showBcc: draft.showBcc ?? false,
             subject: draft.subject ?? "",
             body: draft.body ?? "",
+            ...(draft.mode ? { mode: draft.mode } : {}),
+            ...(draft.inReplyTo ? { inReplyTo: draft.inReplyTo } : {}),
+            restored: true,
           },
         });
       } catch {
@@ -76,6 +82,7 @@ function SearchBar({ narrow, onOpenNav }: { narrow: boolean; onOpenNav: () => vo
   const ref = useRef<HTMLInputElement>(null);
   // iOS zooms the page when focusing an input under 16px.
   const coarse = useMediaQuery(COARSE_POINTER_QUERY);
+  const canCompose = useCanCompose();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: narrow ? 4 : 12, padding: narrow ? "8px 4px" : "8px 16px", flexShrink: 0 }}>
       {narrow ? (
@@ -116,7 +123,7 @@ function SearchBar({ narrow, onOpenNav }: { narrow: boolean; onOpenNav: () => vo
           </button>
         ) : null}
       </div>
-      {narrow ? (
+      {narrow && canCompose ? (
         <IconButton
           name="edit"
           aria-label="作成"
@@ -202,7 +209,7 @@ function SendNoticeBar(): JSX.Element | null {
         fontSize: "var(--dub-font-size-sm)",
       }}
     >
-      <span>{SEND_LABELS[notice.pending.kind][notice.status]}</span>
+      <span>{notice.reason ?? SEND_LABELS[notice.pending.kind][notice.status]}</span>
       {failed ? (
         <>
           <button
@@ -227,44 +234,74 @@ function SendNoticeBar(): JSX.Element | null {
   );
 }
 
-// An open modal (@dub/ui Modal/Drawer render aria-modal while open) owns the keyboard:
-// shortcuts must not act on the thread behind it.
-function modalOpen(target: EventTarget | null): boolean {
-  if (target instanceof Element && target.closest('[role="dialog"], [aria-modal="true"]')) return true;
-  return document.querySelector('[aria-modal="true"]') !== null;
+function ShortcutHelp({ onClose }: { onClose: () => void }): JSX.Element {
+  return (
+    <Modal open onClose={onClose} title="キーボード ショートカット" testId="fe2-mail-shortcuts">
+      <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "var(--dub-space-2) var(--dub-space-5)", margin: 0, fontSize: "var(--dub-font-size-sm)" }}>
+        {SHORTCUTS.map((s) => (
+          <div key={s.keys} style={{ display: "contents" }}>
+            <dt style={{ fontWeight: 600, color: "var(--dub-color-text-primary)" }}>{s.keys}</dt>
+            <dd style={{ margin: 0, color: "var(--dub-color-text-secondary)" }}>{s.label}</dd>
+          </div>
+        ))}
+      </dl>
+    </Modal>
+  );
 }
 
-function Shortcuts(): null {
+/** Gmail's keyboard map (SHORTCUTS). `open` and the cursor are the subject of a key; a bulk
+ *  selection takes over for the keys that act on many, as it does in Gmail. */
+function Shortcuts(): JSX.Element | null {
   const { state, dispatch } = useMailStore();
+  const setRead = useReadState();
+  const canCompose = useCanCompose();
+  const [help, setHelp] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (modalOpen(e.target)) return;
-      const el = e.target as HTMLElement | null;
-      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-      if (e.key === "/" && !typing) {
+      if (e.key === "/" && !isTyping(e)) {
         e.preventDefault();
         document.querySelector<HTMLInputElement>('[data-testid="fe2-mail-search"]')?.focus();
         return;
       }
-      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (shortcutsBlocked(e) || composing(state)) return;
 
-      const visible = selectVisible(state);
+      const rows = selectOrdered(state);
+      const onScreen = (id: string | null): id is string => rows.some((t) => t.id === id);
       const open = state.openThreadId;
+      // The cursor may be on a row that has since left the view; nothing acts on that.
+      const cursor = onScreen(state.cursorId) ? state.cursorId : null;
+      const focus = open ?? cursor;
+      const checked = [...state.checked].filter(onScreen);
+      const targets = !open && checked.length > 0 ? checked : focus ? [focus] : [];
 
-      if (e.key === "c") dispatch({ type: "OPEN_COMPOSE", compose: {} });
-      else if (open && e.key === "e") dispatch({ type: "ARCHIVE", ids: [open] });
-      else if (open && e.key === "#") dispatch({ type: "TRASH", ids: [open] });
-      else if (open && e.key === "u") dispatch({ type: "CLOSE_THREAD" });
-      else if (!open && (e.key === "j" || e.key === "k")) {
-        if (visible.length === 0) return;
-        const next = e.key === "j" ? visible[0] : visible[visible.length - 1];
-        if (next) dispatch({ type: "OPEN_THREAD", id: next.id });
-      }
+      if (e.key === "c" && canCompose) dispatch({ type: "OPEN_COMPOSE", compose: {} });
+      else if (e.key === "?") setHelp(true);
+      else if (e.key === "z") dispatch({ type: "UNDO" });
+      else if (e.key === "u" && open) dispatch({ type: "CLOSE_THREAD" });
+      else if (e.key === "j" || e.key === "k") {
+        if (rows.length === 0) return;
+        const at = rows.findIndex((t) => t.id === focus);
+        const step = e.key === "j" ? 1 : -1;
+        const next = at < 0 ? rows[0] : rows[Math.min(rows.length - 1, Math.max(0, at + step))];
+        if (!next || next.id === focus) return;
+        dispatch(open ? { type: "OPEN_THREAD", id: next.id } : { type: "SET_CURSOR", id: next.id });
+      } else if ((e.key === "o" || e.key === "Enter") && !open && cursor) {
+        // Enter on a focused control belongs to that control.
+        if (e.key === "Enter" && e.target instanceof HTMLElement && e.target.closest("button, a")) return;
+        dispatch({ type: "OPEN_THREAD", id: cursor });
+      } else if (e.key === "x" && !open && cursor) dispatch({ type: "TOGGLE_CHECK", id: cursor });
+      else if (e.key === "s" && focus) dispatch({ type: "TOGGLE_STAR", id: focus });
+      else if (targets.length === 0) return;
+      else if (e.key === "e") dispatch({ type: "ARCHIVE", ids: targets });
+      else if (e.key === "#") dispatch({ type: "TRASH", ids: targets });
+      else if (e.key === "I") setRead(targets, true);
+      else if (e.key === "U") setRead(targets, false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state, dispatch]);
-  return null;
+  }, [state, dispatch, setRead, canCompose]);
+  return help ? <ShortcutHelp onClose={() => setHelp(false)} /> : null;
 }
 
 function GmailBody(): JSX.Element {
@@ -282,6 +319,7 @@ function GmailBody(): JSX.Element {
     if (sharedHidden) dispatch({ type: "SET_FOLDER", folder: "inbox" });
   }, [sharedHidden, dispatch]);
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
+  const canCompose = useCanCompose();
   const [navOpen, setNavOpen] = useState(false);
   useEffect(() => {
     if (!narrow) setNavOpen(false);
@@ -294,6 +332,11 @@ function GmailBody(): JSX.Element {
       style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: narrow ? 0 : 560, background: "var(--dub-color-surface-sunken)" }}
     >
       <SearchBar narrow={narrow} onOpenNav={() => setNavOpen(true)} />
+      {canCompose ? null : (
+        <div role="status" data-testid="fe2-mail-readonly" style={{ margin: "0 16px 8px", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
+          メールは閲覧のみの権限です。送信が必要なら管理者に編集権限を依頼してください。
+        </div>
+      )}
       <div style={{ flex: 1, display: "flex", gap: 8, minHeight: 0, padding: "0 8px 8px" }}>
         {narrow ? (
           <Drawer open={navOpen} onClose={() => setNavOpen(false)} side="left" title="メール" testId="fe2-mail-nav-drawer">
@@ -304,8 +347,11 @@ function GmailBody(): JSX.Element {
         )}
         {state.folder === "scheduled" && !state.labelFilter && state.search.trim() === "" ? (
           <ScheduledList />
+        ) : state.folder === "drafts" && !state.labelFilter && state.search.trim() === "" ? (
+          <DraftList />
         ) : openThread ? (
-          <ReadingPane thread={openThread} labels={state.labels} />
+          // Keyed: j / k moves between conversations, and a half-typed reply must stay with its own.
+          <ReadingPane key={openThread.id} thread={openThread} labels={state.labels} />
         ) : state.folder === "blocked" && !state.labelFilter ? (
           <div className={blockStyles.blockedColumn}>
             <BlockedSendersPanel />

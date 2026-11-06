@@ -12,6 +12,7 @@ GATEWAY_VERSION = "0.1.0"
 ALLOWED_ORIGINS = "https://app.developershub.jp,https://dub-fe2-app-shell.developershub-site.workers.dev,http://localhost:5173,http://localhost:3000"
 DEFAULT_MAX_BODY_BYTES = "10485760"    # 10 MiB default request body cap
 FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8-6 numeric agreement)
+MAIL_MAX_BODY_BYTES = "36700160"       # 35 MiB: 25 MiB of mail attachments as base64 JSON
 # Rate-limit policy (optional; defaults 100 / 60000ms when unset). Wire-signal only — see §7.
 RATE_LIMIT_MAX = "100"
 RATE_LIMIT_WINDOW_MS = "60000"

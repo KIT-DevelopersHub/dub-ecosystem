@@ -123,6 +123,8 @@ const PUBLIC_ROUTES = [
   "GET /auth/passkeys",
   "PATCH /auth/passkeys/:id",
   "DELETE /auth/passkeys/:id",
+  // admin impersonation 「自分に戻る」: logout's twin — can only END an impersonation
+  "POST /auth/impersonation/stop",
 ].sort();
 
 // Reachable by NO external caller, whatever they hold: four bare INTERNAL plus the two
@@ -134,6 +136,7 @@ const INTERNAL_ROUTES = [
   "POST /internal/revoke-user",
   "POST /internal/admin/users/:userId/password",
   "GET /internal/admin/users/:userId/password",
+  "POST /internal/admin/users/:userId/impersonation",
 ].sort();
 
 /** Every permission key in the catalog — the strongest caller that could ever exist. */

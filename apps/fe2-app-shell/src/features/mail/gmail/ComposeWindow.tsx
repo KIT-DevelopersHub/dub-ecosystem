@@ -17,7 +17,8 @@
 // useRestoreComposeDraftsOnMount() re-opens any leftover draft found in storage
 // on mount so a restored window is reachable to show the notice/beforeunload
 // guard again.
-import { useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { ConfirmDialog } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { EmailAddressSelect, type EmailToken, DraftRestoredNotice, useDraftAutosave } from "@dub/app-ui";
 import { newIdempotencyKey, parseRecipients } from "../mailApi.tsx";
@@ -32,6 +33,7 @@ import { addressCandidates } from "./mailModel.ts";
 import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { deliver } from "./sendMail.ts";
 import { SchedulePicker } from "./SchedulePicker.tsx";
+import { useServerDraft } from "./useServerDraft.ts";
 import { useDraggableWindow, useIsNarrowViewport } from "./useDraggableWindow.ts";
 
 /** localStorage key prefix for a floating compose window's draft — one per compose.id
@@ -42,6 +44,12 @@ export function composeWindowDraftKey(id: string): string {
   return `${COMPOSE_WINDOW_DRAFT_PREFIX}${id}`;
 }
 
+/** Decode a stored base64 attachment back into a File for the tray. */
+function inputToFile(input: mail.MailAttachmentInput): File {
+  const bytes = Uint8Array.from(atob(input.contentBase64), (c) => c.charCodeAt(0));
+  return new File([bytes], input.filename, { type: input.contentType });
+}
+
 interface ComposeWindowDraft {
   to: string;
   cc: string;
@@ -50,6 +58,8 @@ interface ComposeWindowDraft {
   showBcc: boolean;
   subject: string;
   body: string;
+  mode?: ComposeState["mode"];
+  inReplyTo?: string;
 }
 
 export function ComposeWindow({ compose, offset }: { compose: ComposeState; offset: number }): JSX.Element {
@@ -72,6 +82,42 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   const [previewId, setPreviewId] = useState<string | null>(null);
   const dragDepth = useRef(0);
   const submitted = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
+  // Files arriving from a forward's original or a reopened draft: send waits for them.
+  const [seeding, setSeeding] = useState(Boolean(compose.seed));
+  const seedCount = useRef(0);
+  const { addFiles, addError } = att;
+  useEffect(() => {
+    let alive = true;
+    const { seed, seedInputs } = compose;
+    if (seedInputs && seedInputs.length > 0) {
+      const files = seedInputs.map((s) => ({ file: inputToFile(s.input), remoteId: s.remoteId }));
+      seedCount.current += files.length;
+      addFiles(files.map((f) => f.file), new Map(files.flatMap((f) => (f.remoteId ? [[f.file, f.remoteId] as const] : []))));
+    }
+    if (seed) {
+      void Promise.all(
+        seed.attachments.map(async (a) => {
+          const blob = await mailApi.downloadAttachment(seed.source, seed.messageId, a.id);
+          return { file: new File([blob], a.filename, { type: a.contentType }), remoteId: a.id };
+        }),
+      )
+        .then((files) => {
+          if (!alive) return;
+          seedCount.current += files.length;
+          // Only a draft's own files are already on it; a forward's belong to the original.
+          addFiles(files.map((f) => f.file), seed.source === "drafts" ? new Map(files.map((f) => [f.file, f.remoteId])) : undefined);
+        })
+        .catch(() => alive && addError("添付ファイルを読み込めませんでした。もう一度添付してください。"))
+        .finally(() => alive && setSeeding(false));
+    }
+    return () => {
+      alive = false;
+    };
+    // Once per window: the seed describes how it opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Dirty = there is text worth keeping/warning about (matches ComposeScreen's rule;
   // attachments alone still warn on leave since they'd otherwise vanish silently).
@@ -85,15 +131,83 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     att.items.length > 0;
   const draft = useDraftAutosave<ComposeWindowDraft>({
     storageKey: draftKey,
-    value: { to: compose.to, cc: compose.cc, bcc: compose.bcc, showCc: compose.showCc, showBcc: compose.showBcc, subject: compose.subject, body: compose.body },
+    value: {
+      to: compose.to,
+      cc: compose.cc,
+      bcc: compose.bcc,
+      showCc: compose.showCc,
+      showBcc: compose.showBcc,
+      subject: compose.subject,
+      body: compose.body,
+      mode: compose.mode,
+      ...(compose.inReplyTo ? { inReplyTo: compose.inReplyTo } : {}),
+    },
     dirty,
   });
 
-  // Discard/close (header ✕ or the trash "下書きを破棄" button): a deliberate close
-  // clears the draft so it never resurrects on a later reload/restore scan.
-  const closeAndDiscard = (): void => {
+  // Server copy (下書き folder). A reply/forward opens prefilled, so only a change from how the
+  // window opened makes it worth keeping; emptying it again removes the draft (Gmail).
+  const serverFields: mail.MailDraftInput = {
+    mode: compose.mode,
+    to: compose.to,
+    cc: compose.cc,
+    bcc: compose.bcc,
+    subject: compose.subject,
+    body: compose.body,
+    ...(compose.inReplyTo ? { inReplyTo: compose.inReplyTo } : {}),
+  };
+  const openedAs = useRef(JSON.stringify(serverFields));
+  const changed = JSON.stringify(serverFields) !== openedAs.current || att.items.length !== seedCount.current;
+  const keepable = dirty && (compose.persisted === true || compose.restored === true || changed);
+  const server = useServerDraft({ id: compose.id, draft: serverFields, active: keepable, persisted: compose.persisted === true, att });
+
+  // ✕ keeps the mail as a draft (Gmail); a failed save keeps the local copy so a reload
+  // restores the window instead of losing the text.
+  const closeAndSave = (): void => {
+    // A file still being read can't be saved yet, and closing would lose it unnoticed.
+    if (att.hasPending || seeding) {
+      setError("添付ファイルを処理中です。完了してから閉じてください。");
+      return;
+    }
+    dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
+    if (!keepable) {
+      draft.clear();
+      return;
+    }
+    void server.flush().then((ok) => {
+      if (ok) draft.clear();
+      else dispatch({ type: "BLOCK_NOTICE", notice: { status: "failed", text: "下書きを保存できませんでした" } });
+    });
+  };
+
+  // 下書きを破棄 (the trash button): gone everywhere, so it never resurrects on a reload.
+  const discard = (): void => {
+    server.discard();
     draft.clear();
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
+  };
+
+  /** Everything needed to reopen this compose if the send fails, files included. */
+  const snapshot = (): ComposeState => {
+    const { seed: _seed, ...rest } = compose;
+    void _seed;
+    const seedInputs = att.items.flatMap((it) => (it.input ? [{ input: it.input, ...(it.remoteId ? { remoteId: it.remoteId } : {}) }] : []));
+    return { ...rest, persisted: server.isSaved(), restored: true, seedInputs };
+  };
+
+  /** Gmail refuses a send it can't address, and says why. */
+  const recipientsOk = (): boolean => {
+    const bad = [compose.to, compose.cc, compose.bcc].flatMap((v) => parseRecipients(v).invalid);
+    if (bad.length > 0) {
+      setError(`アドレス「${bad[0]}」は認識されませんでした。すべてのアドレスが正しいことを確認してください。`);
+      return false;
+    }
+    if (parseRecipients(compose.to).recipients.length === 0) {
+      setError("少なくとも 1 人の宛先を指定してください。");
+      return false;
+    }
+    setError(null);
+    return true;
   };
 
   const onDragEnter = (e: DragEvent): void => {
@@ -120,16 +234,24 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   };
 
   const send = (): void => {
+    // Don't drop a file that is still being read: wait for the read to finish (Gmail keeps
+    // Send disabled until the upload settles). The button is disabled while hasPending.
+    if (submitted.current || att.hasPending || seeding || !recipientsOk()) return;
+    if (compose.subject.trim() === "" && compose.body.trim() === "") {
+      setConfirmEmpty(true);
+      return;
+    }
+    sendNow();
+  };
+
+  const sendNow = (): void => {
     // One send per window: a double click / repeated shortcut before the window closes
     // must not post the same mail twice.
     if (submitted.current) return;
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
     const bcc = parseRecipients(compose.bcc).recipients;
-    if (to.length === 0) return;
-    // Don't drop a file that is still being read: wait for the read to finish (Gmail keeps
-    // Send disabled until the upload settles). The button is disabled while hasPending.
-    if (att.hasPending) return;
+    const draftSettled = server.stop();
     draft.clear(); // restored from the PendingSend snapshot if the send fails
     // Optimistic: show it in Sent immediately; deliver() drops it again on failure.
     const threadId = uid("thread");
@@ -142,8 +264,9 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
     submitted.current = true;
+    const pendingCompose = snapshot();
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
-    void deliver(mailApi, dispatch, { kind: "send", req, compose, threadId, idempotencyKey: newIdempotencyKey() });
+    void deliver(mailApi, dispatch, { kind: "send", req, compose: pendingCompose, threadId, idempotencyKey: newIdempotencyKey(), draftSettled });
   };
 
   // Park the compose for a future time (SchedulePicker validated it is in the future).
@@ -154,7 +277,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     const cc = parseRecipients(compose.cc).recipients;
     const bcc = parseRecipients(compose.bcc).recipients;
     if (to.length === 0) return "宛先を入力してください";
-    if (att.hasPending) return "添付ファイルを処理中です…";
+    if (att.hasPending || seeding) return "添付ファイルを処理中です…";
     const req: mail.ScheduleMailRequest = {
       to,
       subject: compose.subject || "(件名なし)",
@@ -166,9 +289,11 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
+    const draftSettled = server.stop();
     draft.clear();
+    const pendingCompose = snapshot();
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
-    void deliver(mailApi, dispatch, { kind: "schedule", req, compose });
+    void deliver(mailApi, dispatch, { kind: "schedule", req, compose: pendingCompose, draftSettled });
     return null;
   };
 
@@ -209,7 +334,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         border: "1px solid var(--dub-color-border-strong)",
         borderRadius: pos && draggable ? "var(--dub-radius-lg)" : "var(--dub-radius-lg) var(--dub-radius-lg) 0 0",
         boxShadow: "var(--dub-shadow-overlay)",
-        zIndex: 1300,
+        zIndex: "var(--dub-zIndex-modal, 1300)",
         overflow: "hidden",
       }}
     >
@@ -266,7 +391,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         <button type="button" aria-label={maximized ? "元のサイズに戻す" : "全画面表示"} onClick={(e) => { e.stopPropagation(); patch({ maximized: !maximized, minimized: false }); }} style={hdrBtn}>
           <MailIcon name="expand" size={16} />
         </button>
-        <button type="button" data-testid="fe2-mail-compose-close" aria-label="閉じる" onClick={(e) => { e.stopPropagation(); closeAndDiscard(); }} style={hdrBtn}>
+        <button type="button" data-testid="fe2-mail-compose-close" aria-label="保存して閉じる" title="保存して閉じる" onClick={(e) => { e.stopPropagation(); closeAndSave(); }} style={hdrBtn}>
           <MailIcon name="x" size={16} />
         </button>
       </div>
@@ -323,6 +448,11 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             placeholder="本文を入力…"
             style={{ flex: 1, padding: 12, border: "none", outline: "none", resize: "none", background: "transparent", color: "var(--dub-color-text-primary)", fontSize: "var(--dub-font-size-md)", lineHeight: 1.6, fontFamily: "inherit" }}
           />
+          {error ? (
+            <div role="alert" data-testid="fe2-mail-compose-error" style={{ padding: "8px 12px", borderTop: "1px solid var(--dub-color-border-default)", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-danger-600)", flexShrink: 0 }}>
+              {error}
+            </div>
+          ) : null}
           {att.errors.length > 0 || att.items.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 12px", borderTop: "1px solid var(--dub-color-border-default)", maxHeight: 160, overflowY: "auto", flexShrink: 0 }}>
               <AttachmentErrors errors={att.errors} onDismiss={att.dismissErrors} />
@@ -335,16 +465,16 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
               type="button"
               data-testid="fe2-mail-compose-send"
               onClick={send}
-              disabled={att.hasPending}
-              title={att.hasPending ? "添付ファイルを処理中です…" : undefined}
-              style={{ all: "unset", cursor: att.hasPending ? "not-allowed" : "pointer", opacity: att.hasPending ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 24px", borderRadius: "var(--dub-radius-full)", background: "var(--dub-color-brand-500)", color: "#fff", fontWeight: 600, fontSize: "var(--dub-font-size-sm)" }}
+              disabled={att.hasPending || seeding}
+              title={att.hasPending || seeding ? "添付ファイルを処理中です…" : undefined}
+              style={{ all: "unset", cursor: att.hasPending || seeding ? "not-allowed" : "pointer", opacity: att.hasPending || seeding ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 24px", borderRadius: "var(--dub-radius-full)", background: "var(--dub-color-brand-500)", color: "#fff", fontWeight: 600, fontSize: "var(--dub-font-size-sm)" }}
             >
               送信 <MailIcon name="send" size={16} />
             </button>
             <SchedulePicker
               testIdPrefix="fe2-mail-compose-schedule"
               onSchedule={scheduleSend}
-              disabled={att.hasPending}
+              disabled={att.hasPending || seeding}
               disabledReason="添付ファイルを処理中です…"
               {...(att.items.length > 0 ? { hint: `添付ファイル ${att.items.length} 件も一緒に予約されます` } : {})}
             />
@@ -374,12 +504,27 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
               </span>
             ) : null}
             <span style={{ flex: 1 }} />
-            <button type="button" aria-label="下書きを破棄" onClick={closeAndDiscard} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)", padding: 6 }}>
+            <span data-testid="fe2-mail-compose-save-status" role="status" style={{ fontSize: "var(--dub-font-size-xs)", color: server.status === "failed" ? "var(--dub-color-danger-600)" : "var(--dub-color-text-muted)" }}>
+              {server.status === "saving" ? "保存中…" : server.status === "saved" ? "下書きを保存しました" : server.status === "failed" ? "保存できませんでした" : null}
+            </span>
+            <button type="button" aria-label="下書きを破棄" data-testid="fe2-mail-compose-discard" onClick={discard} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-muted)", padding: 6 }}>
               <MailIcon name="trash" size={18} />
             </button>
           </div>
         </>
       )}
+      <ConfirmDialog
+        open={confirmEmpty}
+        title="件名と本文がありません"
+        message="このメールを件名と本文なしで送信しますか？"
+        confirmLabel="送信"
+        onConfirm={() => {
+          setConfirmEmpty(false);
+          sendNow();
+        }}
+        onCancel={() => setConfirmEmpty(false)}
+        testId="fe2-mail-compose-empty-confirm"
+      />
     </div>
   );
 }

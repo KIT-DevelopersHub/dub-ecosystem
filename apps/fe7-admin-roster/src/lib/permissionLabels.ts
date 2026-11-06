@@ -28,6 +28,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   drive: "Google Drive",
   calendar: "カレンダー",
   webhook: "Webhook",
+  impersonation: "代理表示",
   app: "アプリのアクセス権",
 };
 
@@ -59,6 +60,7 @@ const APP_LABELS: { id: string; name: string }[] = appRegistry.APP_MANIFEST.map(
 const PERMISSION_LABELS: Record<string, { label: string; description: string }> = {
   "identity:read": { label: "名簿・ロールの閲覧", description: "メンバー一覧・ロール・権限の一覧を見られるようになります。" },
   "identity:admin": { label: "名簿・ロールの管理", description: "メンバーの招待・情報編集、ロールの作成/編集、権限の付与・剥奪ができるようになります。" },
+  "identity:impersonate": { label: "メンバーとして表示（代理表示）", description: "他のメンバーに見えている画面をそのまま確認できるようになります（60分・操作は記録・パスワード変更やメール送信は不可。この権限を持つ人は代理表示の対象外）。" },
   "event:read": { label: "イベントの閲覧", description: "イベントとその中のアクションを閲覧できるようになります（ガント表示も含む）。" },
   "event:write": { label: "イベントの作成・編集", description: "イベントやアクションを新規作成・編集できるようになります。" },
   "event:admin": { label: "イベントの管理", description: "イベントのアーカイブやクローズなど、状態の変更ができるようになります。" },

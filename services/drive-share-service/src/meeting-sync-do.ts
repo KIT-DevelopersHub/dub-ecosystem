@@ -8,7 +8,8 @@
 // be left as-is (usage-meter got stuck forever exactly that way).
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { newRequestId } from "@dub/http";
-import { buildMeetingsService, runScheduledMeetIngest } from "./meetings-wiring";
+import { buildMeetingsService, runScheduledMeetIngest, runScheduledRoleShareSync } from "./meetings-wiring";
+import type { RoleSyncResume } from "./role-grants-service";
 import type { Env } from "./env";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -24,6 +25,10 @@ const ALARM_TIME_LIMIT_MS = 5 * 60 * 1000;
  *  phase gets its own invocation, so each has the whole subrequest allowance. */
 const PHASE_KEY = "phase";
 const INGEST_AFTER_SYNC_MS = 60 * 1000;
+/** Drive共有 follows role membership in a third phase of the same hourly loop. */
+const ROLE_SHARES_AFTER_INGEST_MS = 60 * 1000;
+/** Storage key: where an unfinished Drive共有 follow continues. */
+const ROLE_RESUME_KEY = "roleShareResume";
 
 export function nextAlarmAt(pending: number | null, now: number, soonMs?: number): number | null {
   const target = now + (soonMs ?? HOUR_MS);
@@ -62,8 +67,13 @@ export class MeetingSyncDO {
   async alarm(): Promise<void> {
     // Reschedule FIRST so the loop survives a throwing run.
     await this.state.storage.setAlarm(Date.now() + HOUR_MS);
-    if ((await this.state.storage.get<string>(PHASE_KEY)) === "ingest") {
+    const phase = await this.state.storage.get<string>(PHASE_KEY);
+    if (phase === "ingest") {
       await this.ingest();
+      return;
+    }
+    if (phase === "roleShares") {
+      await this.roleShares();
       return;
     }
     // The ingest follows each sync a minute later.
@@ -91,11 +101,30 @@ export class MeetingSyncDO {
         await this.state.storage.setAlarm(Date.now() + CONTINUE_MS); // still phase "ingest"
         return;
       }
-      await this.state.storage.put(PHASE_KEY, "sync");
       console.log(JSON.stringify({ service: "drive-share-service", event: "meet_ingest_alarm", skipped: r === null, occurrences: r?.occurrences ?? 0, participants: r?.participants ?? 0 }));
     } catch (err) {
-      await this.state.storage.put(PHASE_KEY, "sync");
       console.warn(JSON.stringify({ service: "drive-share-service", event: "meet_ingest_alarm_failed", message: err instanceof Error ? err.message : String(err) }));
     }
+    await this.state.storage.put(PHASE_KEY, "roleShares");
+    await this.state.storage.setAlarm(Date.now() + ROLE_SHARES_AFTER_INGEST_MS);
+  }
+
+  /** Drive共有: share files with members who joined a role. Each continuation resumes past the
+   *  members already tried, so one that Drive keeps refusing cannot hold the loop here. */
+  private async roleShares(): Promise<void> {
+    try {
+      const resume = await this.state.storage.get<RoleSyncResume>(ROLE_RESUME_KEY);
+      const r = await runScheduledRoleShareSync(this.env, { budgetMs: ALARM_TIME_LIMIT_MS, maxWrites: ALARM_GOOGLE_BUDGET, ...(resume ? { resume } : {}) });
+      console.log(JSON.stringify({ service: "drive-share-service", event: "role_share_sync_alarm", skipped: r === null, grants: r?.grants ?? 0, touched: r?.touched ?? 0, shared: r?.shared ?? 0, refused: r?.skipped ?? 0, complete: !r?.resume }));
+      if (r?.resume) {
+        await this.state.storage.put(ROLE_RESUME_KEY, r.resume);
+        await this.state.storage.setAlarm(Date.now() + CONTINUE_MS); // still phase "roleShares"
+        return;
+      }
+    } catch (err) {
+      console.warn(JSON.stringify({ service: "drive-share-service", event: "role_share_sync_alarm_failed", message: err instanceof Error ? err.message : String(err) }));
+    }
+    await this.state.storage.delete(ROLE_RESUME_KEY);
+    await this.state.storage.put(PHASE_KEY, "sync");
   }
 }
