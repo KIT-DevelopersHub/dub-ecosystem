@@ -20,6 +20,9 @@ import { createD1AttendanceStore } from "./attendance-store";
 import { createAttendanceService, type AttendanceService, type MeetRecordsAccess } from "./attendance-service";
 import { createMeetingsService, type MeetingAccount, type MeetingsService } from "./meetings-service";
 import { createIdentityRoleMembership } from "./role-membership";
+import { createGoogleDriveShareClient } from "./google/client";
+import { createD1RoleGrantStore } from "./role-grants-store";
+import { createRoleGrantsService, type RoleSyncResult, type RoleSyncResume } from "./role-grants-service";
 import { SECRET_ACCOUNT_ID } from "./types";
 import { mockForced, type Env } from "./env";
 
@@ -163,6 +166,26 @@ export async function runScheduledMeetIngest(env: Env, opts: { budget: number; d
     { meetings: createD1MeetingStore(db), store: createD1AttendanceStore(db), client: access.client, orgId: common.DUB_DEFAULT_ORG_ID, now: nowIso },
     opts,
   );
+}
+
+/** The hourly Drive共有 follow of role membership (MeetingSyncDO alarm). null = skipped: the mock,
+ *  or no usable account — nothing real to share on. */
+export async function runScheduledRoleShareSync(env: Env, opts: { budgetMs: number; maxWrites: number; resume?: RoleSyncResume }): Promise<RoleSyncResult | null> {
+  const requestId = newId("req");
+  const orgId = common.DUB_DEFAULT_ORG_ID;
+  const db = createDbClient(env.DB, { namespace: "driveshare", requestId });
+  const key = await importTokenKey(env.DRIVESHARE_TOKEN_ENC_KEY);
+  const resolved = await resolveDriveCredentials({ env, store: createD1GoogleAccountStore(db), orgId, key });
+  if (mockForced(env) || resolved.source === "none" || resolved.source === "unusable") return null;
+  return createRoleGrantsService({
+    drive: createGoogleDriveShareClient({ token: createTokenProvider({ credentials: resolved.credentials }) }),
+    roster: createIdentityRoleMembership(env.SVC_IDENTITY, { requestId }),
+    directory: createMemberDirectory(env.SVC_MEMBER, { requestId }),
+    store: createD1RoleGrantStore(db),
+    orgId,
+    now: nowIso,
+    newId: () => newId("dsg"),
+  }).syncMembers(opts);
 }
 
 /** 「Googleと連携」 for the acting member. */
