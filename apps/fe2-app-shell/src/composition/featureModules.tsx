@@ -40,6 +40,7 @@ import { DriveShareProvider } from "../features/driveshare/DriveShareProvider.ts
 import { lpRoutes, lpNav } from "../features/lp/index.tsx";
 import { hrRoutes, hrNav, HrProvider } from "../features/hr/index.tsx";
 import { sponsorRoutes, sponsorNav, SponsorProvider } from "../features/sponsor/index.tsx";
+import { goalsRoutes, goalsNav, GoalsProvider } from "../features/goals/index.tsx";
 import { LpProvider } from "../features/lp/LpProvider.tsx";
 import { commanderRoutes, commanderNav } from "../features/commander/index.tsx";
 import { CommanderProvider } from "../features/commander/CommanderProvider.tsx";
@@ -397,6 +398,16 @@ function adaptSponsor(api: ApiClient): FeatureModule {
   return { id: "sponsor", routes, nav };
 }
 
+// ── goals (FE2-local feature) ─────────────────────────────────────────────────
+// 目標管理: チームの月間目標と KPI。member-service /members/goals を読む/書くので GoalsProvider で包む。
+// nav はスポンサーの隣 (order 51)。未公開 (PUBLISHED_APPS 外) なので admin 以外はグレー。
+function adaptGoals(api: ApiClient): FeatureModule {
+  const wrap = providerWrapper(GoalsProvider, api);
+  const routes = (goalsRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
+  const nav: NavEntry[] = goalsNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 51 }));
+  return { id: "goals", routes, nav };
+}
+
 // ── commander (FE2-local feature) ─────────────────────────────────────────────
 // Commander drives the operator's LOCAL Claude Code exec bridge and gates demo→staging→
 // prod phase moves. Admin/dev tooling: it can spawn arbitrary Claude Code locally, so the
@@ -478,9 +489,10 @@ export function assembleFeatureModules(api: ApiClient): FeatureModule[] {
     adaptLp(api),
     adaptHr(api),
     adaptSponsor(api),
+    adaptGoals(api),
     adaptAdmin(api),
     adaptCommander(api),
   ].map(withNavAppId).map(withAppAccessGate);
 }
 
-export { adaptEvents, adaptTasks, adaptGantt, adaptCalendar, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptHr, adaptSponsor, adaptAdmin, adaptCommander, toIcon };
+export { adaptEvents, adaptTasks, adaptGantt, adaptCalendar, adaptNotifications, adaptChat, adaptMail, adaptUsage, adaptMembers, adaptParticipation, adaptDriveShare, adaptLp, adaptHr, adaptSponsor, adaptGoals, adaptAdmin, adaptCommander, toIcon };

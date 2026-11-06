@@ -140,6 +140,9 @@ function patchGoals(qc: QueryClient, month: string, next: sponsor.MonthlyGoal | 
 }
 
 /** 月間目標の保存 (楽観的)。409 は他の人の更新 → 読み直して知らせる。 */
+/** 目標管理の KPI がこの目標値に連動しているので、保存後はそちらも読み直す。 */
+const GOALS_APP_KEY = queryKeys.feature("goals");
+
 export function usePutGoal() {
   const api = useSponsorApi();
   const qc = useQueryClient();
@@ -166,6 +169,9 @@ export function usePutGoal() {
       }
       toast.show({ kind: "error", title: messageFor(err, "目標を保存できませんでした") });
     },
-    onSuccess: (goal) => patchGoals(qc, goal.month, goal),
+    onSuccess: (goal) => {
+      patchGoals(qc, goal.month, goal);
+      void qc.invalidateQueries({ queryKey: GOALS_APP_KEY });
+    },
   });
 }

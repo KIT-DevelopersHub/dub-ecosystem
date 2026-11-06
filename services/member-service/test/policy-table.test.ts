@@ -82,6 +82,9 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
     "sponsor:read",
     "sponsor:write",
     "sponsor:admin",
+    "app:goals:view",
+    "app:goals:edit",
+    "goals:read",
   ],
   maintainer: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
   organizer: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
@@ -98,6 +101,10 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "sponsor-editor": ["app:sponsor:view", "app:sponsor:edit", "sponsor:read", "sponsor:write"],
   "sponsor-keys-but-app-disabled": ["sponsor:read", "sponsor:write", "sponsor:admin"],
   "sponsor-app-view-without-read": ["app:sponsor:view", "app:sponsor:edit"],
+  // 目標管理: 閲覧だけ / 編集 / アプリ無効で goals:read だけ持つ形。
+  "goals-viewer": ["app:goals:view", "goals:read"],
+  "goals-editor": ["app:goals:view", "app:goals:edit", "goals:read"],
+  "goals-read-but-app-disabled": ["goals:read"],
 };
 
 /**
@@ -185,6 +192,9 @@ const SPONSOR_WRITES = [
   "PUT /members/sponsor/cards/:id/image",
 ];
 const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/sponsor/leads/:id"];
+// 目標管理: 閲覧 (+goals:read) / 編集。
+const GOALS_READS = ["GET /members/goals"];
+const GOALS_WRITES = ["DELETE /members/goals/:teamId/:month", "PUT /members/goals/:teamId/:month"];
 // チーム・役職ロールの一括付与: ロール管理と同格 (管理 編集 + identity:admin)。
 const ROLE_SYNC_ADMIN = ["POST /members/role-sync/backfill"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
@@ -215,7 +225,7 @@ const FULL = [
   ...HR_ADMIN,
   ...SPONSOR_READS,
   ...SPONSOR_WRITES,
-  ...SPONSOR_ADMIN,
+  ...SPONSOR_ADMIN, ...GOALS_READS, ...GOALS_WRITES,
   ...ROLE_SYNC_ADMIN,
   ...SELF,
 ].sort();
@@ -252,6 +262,10 @@ describe("role x endpoint matrix (frozen)", () => {
     "sponsor-keys-but-app-disabled": [...SELF].sort(),
     // 逆に アプリの 閲覧/編集 だけで詳細キーが無ければ名刺 (社外の個人情報) は見えない。
     "sponsor-app-view-without-read": [...SELF].sort(),
+    "goals-viewer": [...GOALS_READS, ...SELF].sort(),
+    "goals-editor": [...GOALS_READS, ...GOALS_WRITES, ...SELF].sort(),
+    // 詳細キーだけではアプリが無効のまま。
+    "goals-read-but-app-disabled": [...SELF].sort(),
   };
 
   it("matches the committed matrix for every role", () => {
