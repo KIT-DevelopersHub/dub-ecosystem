@@ -331,7 +331,8 @@ describe("LpTicketsScreen", () => {
     URL.createObjectURL = vi.fn(() => "blob:x");
     URL.revokeObjectURL = vi.fn();
     renderScreen(fakeApi({ listTicketOrders: orders, exportTicketOrders: exportCsv }));
-    fireEvent.click(await screen.findByTestId("fe2-lp-ticket-orders-export"));
+    await screen.findByTestId("fe2-lp-ticket-orders-list");
+    fireEvent.click(screen.getByTestId("fe2-lp-ticket-orders-export"));
     await waitFor(() => expect(exportCsv).toHaveBeenCalledTimes(1));
     cleanup();
     renderScreen(fakeApi({ listTicketOrders: orders }), EDITOR);
