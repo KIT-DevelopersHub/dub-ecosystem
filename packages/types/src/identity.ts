@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (88 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (95 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -122,6 +122,12 @@ export const PERMISSION_CATALOG = [
   { key: "sponsor:admin", name: "Delete sponsor business cards", description: "Delete shared business cards (photo and contact details)", domain: "sponsor", dangerous: true },
   { key: "app:sponsor:view", name: "Open スポンサー app", description: "Open and view the スポンサー app", domain: "app", dangerous: false },
   { key: "app:sponsor:edit", name: "Edit in スポンサー app", description: "Act inside the スポンサー app (implies view)", domain: "app", dangerous: false },
+  // 運営メンバーアプリの「範囲」(組織図まで / メール名簿以外 / 全て)。ロール管理では 3 段の選択肢として
+  // 出す (policy.membersScopeOf)。鍵は積み上げ式で、mail ⇒ roster, edit ⇒ view (policy.normalizeAppAccessKeys)。
+  { key: "members:roster_view", name: "View 運営名簿", description: "Open the 運営名簿 tab and read members' personal details (contact, student number, notes)", domain: "members", dangerous: false },
+  { key: "members:roster_edit", name: "Edit 運営名簿", description: "Edit members' personal details and link login accounts (implies view)", domain: "members", dangerous: false },
+  { key: "members:mail_view", name: "View メール名簿", description: "Open the メール名簿 tab (implies 運営名簿 view)", domain: "members", dangerous: false },
+  { key: "members:mail_edit", name: "Edit メール名簿", description: "Required to change accounts in the メール名簿 tab, on top of ロール管理 edit + identity:admin (implies view)", domain: "members", dangerous: false },
   { key: "goals:read", name: "Read team goals", description: "View every team's monthly goals, KPIs and progress", domain: "goals", dangerous: false },
   { key: "app:goals:view", name: "Open 目標管理 app", description: "Open and view the 目標管理 app", domain: "app", dangerous: false },
   { key: "app:goals:edit", name: "Edit in 目標管理 app", description: "Set and change team goals and KPIs (implies view)", domain: "app", dangerous: false },
@@ -130,7 +136,7 @@ export const PERMISSION_CATALOG = [
   { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "impersonation", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 91 keys (open `${string}:${string}` template retired).
+// Closed union of the 95 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

@@ -28,6 +28,8 @@ export function fakeAuthz(granted: Set<identity.PermissionKey>): PermissionGrant
  *  automatically instead of drifting from production grants. */
 export function adminGrants(): Set<identity.PermissionKey> {
   return new Set<identity.PermissionKey>([
+    "members:roster_view",
+    "members:roster_edit",
     "identity:read",
     "identity:admin",
     ...policy.keysForAppLevel("members", "edit"),

@@ -70,6 +70,7 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
     list: vi.fn(() => Promise.resolve({ participations: [] })),
     candidates: vi.fn(() => Promise.resolve({ candidates: [] })),
     overview: vi.fn(() => Promise.resolve({ teams: [], members: [] })),
+    orgOverview: vi.fn(() => Promise.resolve({ teams: [], members: [] })),
     resolve: vi.fn((id: string) =>
       Promise.resolve({ participation: { ...SUBMISSION, id, reviewState: "added" as const }, member: null }),
     ),
@@ -89,7 +90,7 @@ function makeApi(overrides: Partial<ParticipationApi> = {}): ParticipationApi {
 function wrap(
   ui: ReactNode,
   api: ParticipationApi,
-  permissions = editorPermissions("participation", ["identity:read", "identity:admin"]),
+  permissions = editorPermissions("participation", ["identity:read", "identity:admin", "members:roster_view"]),
 ): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
@@ -642,7 +643,7 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
   ];
   // 参加届・管理・運営メンバーの編集 + identity:admin + mail:admin = 発行まで出来る人。
   const issuer = [
-    ...editorPermissions("participation", ["identity:read", "identity:admin", "mail:admin"]),
+    ...editorPermissions("participation", ["identity:read", "identity:admin", "mail:admin", "members:mail_edit"]),
     ...editorPermissions("admin"),
     ...editorPermissions("members"),
   ];
