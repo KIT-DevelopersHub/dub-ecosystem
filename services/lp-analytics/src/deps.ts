@@ -1,6 +1,6 @@
 // AppDeps wiring from the runtime env.
 import { createDbClient, newId, nowIso } from "@dub/db";
-import { createAuthClient } from "@dub/auth-client";
+import { sharedAuthzGranter } from "@dub/policy-gate";
 import { common } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createD1LpRepo } from "./d1-repo";
@@ -27,7 +27,8 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
   });
   return {
     repo: createD1LpRepo(db),
-    authz: createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "lp-analytics", mode: "trustedHeader" }),
+    // sharedAuthzGranter: the app is rebuilt per request, so the identity TTL cache must be per Env.
+    authz: sharedAuthzGranter(env, env.SVC_IDENTITY, { caller: "lp-analytics", ...(requestId ? { requestId } : {}) }),
     orgId: env.DUB_DEFAULT_ORG_ID ?? common.DUB_DEFAULT_ORG_ID,
     lpBaseUrl: env.LP_BASE_URL ?? DEFAULT_LP_BASE_URL,
     now: nowIso,

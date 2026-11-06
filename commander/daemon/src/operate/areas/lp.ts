@@ -1,6 +1,4 @@
-// LP管理 (lp-analytics + lp-tickets). lp-analytics has no policy-table.ts yet: its routes are gated
-// in app.ts by requireAppAccess("lp", view|edit), which the catalog test reads instead. /lp/tickets*
-// moved to lp-tickets, whose policy-table.ts is read like any other service's.
+// LP管理 (lp-analytics + lp-tickets). Both are read from their policy-table.ts like any other service.
 // Every route needs query from/to (YYYY-MM-DD, JST, at most 92 days) — writes too, where
 // they set the range of the stats in the response.
 import type { AreaSpec } from "../catalog-types.ts";
@@ -157,6 +155,7 @@ export const LP: AreaSpec = {
     { service: T, route: "POST /lp/tickets/types" },
     { service: T, route: "PATCH /lp/tickets/types/:id" },
     { service: T, route: "GET /lp/tickets/orders" },
+    { service: T, route: "GET /lp/tickets/orders/export" },
     { service: T, route: "GET /lp/tickets/coupons" },
     // 登壇者募集の設定・応募一覧も未開放。
     { service: S, route: "GET /lp/proposals" },

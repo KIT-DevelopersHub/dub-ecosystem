@@ -2,7 +2,8 @@
 // mirror the contract frozen by fe2 (apps/fe2-app-shell/src/features/lp/lpApi.tsx) —
 // that file and the demo transport answer exactly these, so keep them in lockstep.
 import type { MiddlewareHandler, Context } from "hono";
-import type { common, identity, lp, policy } from "@dub/types";
+import type { PermissionGranter } from "@dub/policy-gate";
+import type { common, identity, lp } from "@dub/types";
 import type { SiteTrafficSource } from "./site-traffic";
 
 export type LpDevice = "mobile" | "desktop" | "bot" | "unknown";
@@ -275,15 +276,6 @@ export interface ReqCtx {
   userId: common.UserId;
 }
 
-export interface Authz {
-  requireAuth(): MiddlewareHandler;
-  requireAppAccess(
-    app: string,
-    level: policy.AppAccessLevel,
-    extra?: { permission?: identity.PermissionKey; resolve?: (c: Context) => { orgId?: string } },
-  ): MiddlewareHandler;
-}
-
 /** lp-tickets が正本の release 2 項目（チケット販売 on/off・LP の CTA 差し替え）。 */
 export interface TicketRelease {
   ticketsEnabled: boolean;
@@ -298,7 +290,8 @@ export interface TicketReleaseClient {
 
 export interface AppDeps {
   repo: LpRepo;
-  authz: Authz;
+  /** Which of the requested permission keys the caller holds (identity /authz/check). */
+  authz: PermissionGranter;
   orgId: common.OrgId;
   /** 公開 LP の URL。流入URL はこれ + ?utm_source=<slug>。 */
   lpBaseUrl: string;

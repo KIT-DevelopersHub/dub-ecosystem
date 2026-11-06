@@ -11,25 +11,11 @@ import { createApp } from "../src/app";
 import { createD1LpRepo } from "../src/d1-repo";
 import { InMemoryLpRepo } from "../src/memory-repo";
 import type { SiteTrafficSource } from "../src/site-traffic";
-import type { AppDeps, Authz, LpRepo, TicketRelease, TicketReleaseClient } from "../src/types";
+import type { PermissionGranter } from "@dub/policy-gate";
+import type { AppDeps, LpRepo, TicketRelease, TicketReleaseClient } from "../src/types";
 
-export function fakeAuthz(granted: Set<identity.PermissionKey>): Authz {
-  return {
-    requireAuth(): MiddlewareHandler {
-      return async (c, next) => {
-        if (!c.req.header("x-dub-user-id")) throw new DubError("AUTH_INVALID_TOKEN", "x-dub-user-id absent", { status: 401 });
-        await next();
-      };
-    },
-    // Decide with the REAL policy module so tests share production semantics.
-    requireAppAccess(app, level, extra): MiddlewareHandler {
-      return async (_c, next) => {
-        const decision = policy.decide(granted, { app, level, ...(extra?.permission ? { permission: extra.permission } : {}) });
-        if (!decision.allowed) throw new DubError(CommonErrorCodes.FORBIDDEN, policy.denyMessage(decision), { status: 403 });
-        await next();
-      };
-    },
-  };
+export function fakeAuthz(granted: Set<identity.PermissionKey>): PermissionGranter {
+  return async (_userId, _orgId, keys) => keys.filter((k) => granted.has(k));
 }
 
 export const grants = (level: policy.AppAccessLevel): Set<identity.PermissionKey> =>

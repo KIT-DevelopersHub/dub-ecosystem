@@ -246,9 +246,9 @@ describe("site-config gate", () => {
     expect((await none.app.fetch(get("/lp/site-config"))).status).toBe(403);
   });
 
-  it("GET /lp/internal/site-config is s2s only (404 without x-dub-internal) and needs no user", async () => {
+  it("GET /lp/internal/site-config is s2s only (403 without x-dub-internal) and needs no user", async () => {
     const { app } = await makeApp("memory");
-    expect((await app.fetch(get("/lp/internal/site-config", {}))).status).toBe(404);
+    expect((await app.fetch(get("/lp/internal/site-config", {}))).status).toBe(403);
     expect((await app.fetch(get("/lp/internal/site-config", INTERNAL))).status).toBe(200);
   });
 

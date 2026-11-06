@@ -207,6 +207,6 @@ describe.each<RepoKind>(["memory", "d1"])("proposals (%s)", (kind) => {
 
   it("hides the internal routes from external callers", async () => {
     const { app } = await setup(kind);
-    expect((await app.fetch(get("/lp/internal/proposals"))).status).toBe(404);
+    expect((await app.fetch(get("/lp/internal/proposals"))).status).toBe(403);
   });
 });

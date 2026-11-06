@@ -28,7 +28,7 @@ importers:
         version: 5.9.3
       vite-tsconfig-paths:
         specifier: ^5.1.4
-        version: 5.1.4(typescript@5.9.3)(vite@5.4.21(@types/node@22.20.1))
+        version: 5.1.4(typescript@5.9.3)(vite@6.4.3(@types/node@22.20.1)(tsx@4.23.12))
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
@@ -1532,9 +1532,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4
         version: 4.20260702.1
-      '@dub/auth-client':
-        specifier: workspace:*
-        version: link:../../packages/auth-client
       '@dub/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -1547,6 +1544,9 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types

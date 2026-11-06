@@ -60,9 +60,9 @@ describe("publish gate", () => {
     expect((await none.app.fetch(get("/lp/publish"))).status).toBe(403);
   });
 
-  it("GET /lp/internal/publish is s2s only (404 without x-dub-internal) and needs no user", async () => {
+  it("GET /lp/internal/publish is s2s only (403 without x-dub-internal) and needs no user", async () => {
     const { app } = await makeApp("memory");
-    expect((await app.fetch(get("/lp/internal/publish", {}))).status).toBe(404);
+    expect((await app.fetch(get("/lp/internal/publish", {}))).status).toBe(403);
     const res = await app.fetch(get("/lp/internal/publish", INTERNAL));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ versionId: lp.LP_DEFAULT_PUBLISHED_VERSION });
