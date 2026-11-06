@@ -37,6 +37,7 @@ const NO_COUNTS: MemberMonthCounts = {
 
 export interface GoalRepo {
   list(orgId: common.OrgId, month: string): Promise<GoalRow[]>;
+  listAll(orgId: common.OrgId): Promise<GoalRow[]>;
   get(orgId: common.OrgId, teamId: common.TeamId, month: string): Promise<GoalRow | null>;
   /** 新規 = expectedVersion 0。楽観ロックに負けたら false。 */
   save(row: GoalRow, expectedVersion: number): Promise<boolean>;
@@ -107,6 +108,10 @@ export function createD1GoalRepo(db: DbClient): GoalRepo {
       const rows = await db.all<DbRow>(`SELECT * FROM member_goals WHERE org_id = ? AND month = ?`, orgId, month);
       return rows.map(toRow);
     },
+    async listAll(orgId) {
+      const rows = await db.all<DbRow>(`SELECT * FROM member_goals WHERE org_id = ?`, orgId);
+      return rows.map(toRow);
+    },
     async get(orgId, teamId, month) {
       const r = await db.first<DbRow>(`SELECT * FROM member_goals WHERE org_id = ? AND team_id = ? AND month = ?`, orgId, teamId, month);
       return r ? toRow(r) : null;
@@ -170,6 +175,9 @@ export class InMemoryGoalRepo implements GoalRepo {
 
   async list(orgId: string, month: string): Promise<GoalRow[]> {
     return [...this.rows.values()].filter((r) => r.orgId === orgId && r.month === month);
+  }
+  async listAll(orgId: string): Promise<GoalRow[]> {
+    return [...this.rows.values()].filter((r) => r.orgId === orgId);
   }
   async get(orgId: string, teamId: string, month: string): Promise<GoalRow | null> {
     return this.rows.get(this.key(orgId, teamId, month)) ?? null;

@@ -1,4 +1,4 @@
-// スポンサー営業進捗と月間目標のビジネスロジック。HTTP 非依存。項目と選択肢は @dub/types sponsor が SoT。
+// スポンサー営業進捗のビジネスロジック。HTTP 非依存。項目と選択肢は @dub/types sponsor が SoT。
 //
 // - 企業名だけ必須。ほかは trim して空なら null。
 // - 取り込みは全行を検証してからまとめて登録する (1 行でも不正なら何も入らない)。
@@ -67,13 +67,6 @@ function amount(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > sponsor.LEAD_AMOUNT_MAX) {
     throw invalid("expectedAmount");
   }
-  return value;
-}
-
-/** 目標値。空 = 目標なし。0 は無意味 (達成率が出ない) なので受け付けない。 */
-function target(value: unknown, field: string): number | null {
-  if (value === undefined || value === null || value === "") return null;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > sponsor.LEAD_AMOUNT_MAX) throw invalid(field);
   return value;
 }
 
@@ -208,27 +201,5 @@ export class SponsorLeadService {
     const now = this.deps.now();
     const next: LeadRow = { ...cur, archivedAt: now, version: cur.version + 1, updatedAt: now };
     if (!(await this.deps.sponsorLeadRepo.updateLead(next, cur.version))) throw errVersionConflict(id);
-  }
-
-  async listGoals(_ctx: ReqCtx): Promise<sponsor.ListGoalsResponse> {
-    return { goals: await this.deps.sponsorLeadRepo.listGoals(this.deps.orgId) };
-  }
-
-  async putGoal(ctx: ReqCtx, month: string, body: sponsor.PutGoalRequest): Promise<sponsor.MonthlyGoal> {
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw invalid("month");
-    const b = (body ?? {}) as unknown as Record<string, unknown>;
-    if (typeof b.expectedVersion !== "number" || !Number.isInteger(b.expectedVersion)) throw invalid("expectedVersion", "required");
-    const targets = Object.fromEntries(sponsor.GOAL_METRICS.map((m) => [m, target(b[m], m)])) as sponsor.GoalTargets;
-    const person = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, ctx.userId);
-    const goal: sponsor.MonthlyGoal = {
-      ...targets,
-      month,
-      version: b.expectedVersion + 1,
-      updatedBy: ctx.userId,
-      updatedByName: person?.name ?? null,
-      updatedAt: this.deps.now(),
-    };
-    if (!(await this.deps.sponsorLeadRepo.putGoal(this.deps.orgId, goal, b.expectedVersion))) throw errVersionConflict(month);
-    return goal;
   }
 }
