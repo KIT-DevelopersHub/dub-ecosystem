@@ -396,11 +396,18 @@ describe("ロールとの差分", () => {
     expect(await within(clean).findByTestId("fe2-driveshare-drift-clean")).toHaveTextContent("5人が一致");
   });
 
-  it("explains that a file without role grants has no baseline", async () => {
+  it("lists what is left on a file with no role grant", async () => {
+    const getShareDrift = () => Promise.resolve({ ...DRIFT, grantCount: 0, expectedCount: 0, matchedCount: 0, items: DRIFT.items.slice(0, 1) });
+    const card = await openBudget(stubApi({ getShareDrift }));
+    expect(await within(card).findByTestId("fe2-driveshare-drift-noroles")).toBeInTheDocument();
+    expect(within(card).getByTestId("fe2-driveshare-drift-badge")).toHaveTextContent("差分 1件");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("sponsor@example.com");
+  });
+
+  it("says a file with no role grant and no shares is clean", async () => {
     const getShareDrift = () => Promise.resolve({ ...NO_DRIFT, grantCount: 0, expectedCount: 0, matchedCount: 0 });
     const card = await openBudget(stubApi({ getShareDrift }));
-    expect(await within(card).findByTestId("fe2-driveshare-drift-nobaseline")).toBeInTheDocument();
-    expect(within(card).queryByTestId("fe2-driveshare-drift-badge")).toBeNull();
+    expect(await within(card).findByTestId("fe2-driveshare-drift-clean")).toHaveTextContent("ロール権限は無く");
   });
 
   it("再チェック fetches the drift again", async () => {
