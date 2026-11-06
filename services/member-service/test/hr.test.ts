@@ -97,12 +97,42 @@ describe("人事: applicants", () => {
     expect((await call(app, "POST", `/members/hr/applicants/${a.id}/notes`, { body: { body: "" } })).status).toBe(400);
   });
 
-  it("deletes (archives) an applicant", async () => {
+  it("deletes (archives) an applicant and keeps the history with a deleted event", async () => {
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const a = await newApplicant(app);
+    const keep = await newApplicant(app, { name: "残る 人" });
+    const res = await call(app, "DELETE", `/members/hr/applicants/${a.id}`);
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true });
+    expect((await call(app, "GET", `/members/hr/applicants/${a.id}`)).status).toBe(404);
+    const list = (await call(app, "GET", "/members/hr/applicants")).json.applicants;
+    expect(list.map((x: { id: string }) => x.id)).toEqual([keep.id]);
+    // 物理削除しない: 行は archived_at つきで残り、履歴の最後に deleted (誰が消したか) が付く。
+    expect((await deps.hrRepo.getApplicant(a.id))?.archivedAt).not.toBeNull();
+    const events = await deps.hrRepo.listEvents(a.id);
+    expect(events.at(-1)).toMatchObject({ kind: "deleted", fromStage: "scheduling", actorId: "user_caller" });
+  });
+
+  it("returns 404 when deleting an unknown or already-deleted applicant", async () => {
     const app = createApp(makeDeps());
+    const nope = await call(app, "DELETE", "/members/hr/applicants/app_nope");
+    expect(nope.status).toBe(404);
+    expect(nope.json.error.code).toBe("HR_APPLICANT_NOT_FOUND");
     const a = await newApplicant(app);
     expect((await call(app, "DELETE", `/members/hr/applicants/${a.id}`)).status).toBe(200);
-    expect((await call(app, "GET", `/members/hr/applicants/${a.id}`)).status).toBe(404);
-    expect((await call(app, "GET", "/members/hr/applicants")).json.applicants).toHaveLength(0);
+    expect((await call(app, "DELETE", `/members/hr/applicants/${a.id}`)).status).toBe(404);
+  });
+
+  it("refuses (409) to delete an applicant who has joined the roster", async () => {
+    const app = createApp(makeDeps());
+    const a = await newApplicant(app);
+    const v = await toInterviewed(app, a.id, a.version);
+    expect((await call(app, "POST", `/members/hr/applicants/${a.id}/join`, { body: { expectedVersion: v } })).status).toBe(200);
+    const res = await call(app, "DELETE", `/members/hr/applicants/${a.id}`);
+    expect(res.status).toBe(409);
+    expect(res.json.error.code).toBe("HR_APPLICANT_JOINED");
+    expect((await call(app, "GET", `/members/hr/applicants/${a.id}`)).status).toBe(200);
   });
 });
 

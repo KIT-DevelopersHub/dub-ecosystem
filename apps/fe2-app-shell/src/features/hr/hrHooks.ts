@@ -1,6 +1,6 @@
 // 人事のデータフック。ステータス変更・面談日・オンボーディングのチェックは楽観的 UI (先にキャッシュへ
-// 反映 → 失敗でスナップショットへ戻してエラートースト)。名簿を書き換える採用と削除は確認ダイアログの
-// 後ろで非楽観 (optimistic.tsx の規約: 破壊的操作は楽観にしない)。
+// 反映 → 失敗でスナップショットへ戻してエラートースト)。応募の削除も確認ダイアログの後ろで楽観的
+// (FRONTEND_GUIDE 5.3)。名簿を書き換える採用だけは確認ダイアログの後ろで非楽観。
 //
 // 制御コンポーネント (checkbox / select) は onMutate が走るまでの一瞬だけ古い値に戻って見えるので、
 // 画面側は usePendingOverlay (HrShared) で「押した値」を即座に重ねて表示する。
@@ -16,6 +16,8 @@ export const HR_DETAIL_KEY = (id: string) => queryKeys.feature("hr", "applicant"
 export const HR_ONBOARDING_KEY = queryKeys.feature("hr", "onboarding");
 export const HR_TEAMS_KEY = queryKeys.feature("hr", "teams");
 export const HR_ATTENDANCE_KEY = (from: string, to: string) => queryKeys.feature("hr", "attendance", `${from}_${to}`);
+/** interviewFormApi の RESPONSES_KEY と同じ prefix (interviewFormApi → hrHooks の向きの import を保つ)。 */
+const HR_FORM_RESPONSES_KEY = queryKeys.feature("hr", "interview-form-responses");
 /** 採用で名簿が変わるので、運営メンバーの overview も無効化する。 */
 const MEMBERS_OVERVIEW_KEY = queryKeys.feature("members", "overview");
 
@@ -147,19 +149,36 @@ export function useJoinApplicant() {
   });
 }
 
+/**
+ * 応募の削除 (論理削除)。確認ダイアログの後ろで楽観的: 先に一覧から消し、失敗したら元の一覧へ戻して
+ * エラートースト。名簿に結ばれた人 (採用済み) はサーバが 409 HR_APPLICANT_JOINED で断る。
+ */
 export function useRemoveApplicant() {
   const api = useHrApi();
   const qc = useQueryClient();
   const toast = useToast();
-  return useMutation<void, unknown, hr.Applicant>({
+  return useMutation<void, unknown, hr.Applicant, ListCtx>({
     mutationFn: (a) => api.remove(a.id),
+    onMutate: async (a) => {
+      await qc.cancelQueries({ queryKey: HR_LIST_KEY, exact: true });
+      const prev = qc.getQueryData<hr.ListApplicantsResponse>(HR_LIST_KEY);
+      if (prev) {
+        qc.setQueryData<hr.ListApplicantsResponse>(HR_LIST_KEY, {
+          applicants: prev.applicants.filter((x) => x.id !== a.id),
+        });
+      }
+      return { prev };
+    },
+    onError: (err, a, ctx) => {
+      if (ctx?.prev) qc.setQueryData(HR_LIST_KEY, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, `${a.name} さんの応募を削除できませんでした`) });
+    },
     onSuccess: (_r, a) => {
-      qc.setQueryData<hr.ListApplicantsResponse>(HR_LIST_KEY, (prev) =>
-        prev ? { applicants: prev.applicants.filter((x) => x.id !== a.id) } : prev,
-      );
+      qc.removeQueries({ queryKey: HR_DETAIL_KEY(a.id), exact: true });
+      // フォーム回答一覧の氏名が「削除済みの応募者」に変わる。
+      void qc.invalidateQueries({ queryKey: HR_FORM_RESPONSES_KEY });
       toast.show({ kind: "success", title: `${a.name} さんの応募を削除しました` });
     },
-    onError: (err) => toast.show({ kind: "error", title: messageFor(err, "削除できませんでした") }),
   });
 }
 
