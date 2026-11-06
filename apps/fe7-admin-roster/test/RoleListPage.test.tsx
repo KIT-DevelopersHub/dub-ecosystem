@@ -227,6 +227,28 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     expect(screen.queryByTestId("fe7-role-role_organizer-save")).not.toBeInTheDocument();
   });
 
+  it("カスタムロールは確認ダイアログ経由で削除でき、次のロールに選択が移る", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RoleListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
+
+    await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
+    await user.click(await screen.findByTestId("fe7-roles-delete-role_organizer"));
+    const dialog = await screen.findByTestId("fe7-roles-delete-confirm");
+    expect(within(dialog).getByText(/「organizer」を削除します。元に戻せません。/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "削除する" }));
+    await waitFor(() => expect(screen.queryByTestId("fe7-roles-open-role_organizer")).not.toBeInTheDocument());
+    expect(screen.getByTestId("fe7-roles-open-role_admin")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("システムロールには削除ボタンを出さず、削除できない理由を示す", async () => {
+    renderWithProviders(<RoleListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_admin")).toBeInTheDocument());
+    expect(screen.queryByTestId("fe7-roles-delete-role_admin")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe7-roles-delete-unavailable")).toBeInTheDocument();
+  });
+
   it("read-only user can view permissions inline but cannot edit or create", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RoleListPage />, { me: makeMe(["identity:read"]) });

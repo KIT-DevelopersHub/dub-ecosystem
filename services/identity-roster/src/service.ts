@@ -664,6 +664,9 @@ export class IdentityService {
     const role = await this.d.repo.getRole(roleId);
     if (!role || role.orgId !== orgId) throw errors.notFound("role", roleId);
     if (role.isSystem) throw errors.conflict("system roles are not deletable", { code: "SYSTEM_ROLE" });
+    if (role.permissions.includes(ADMIN) && !(await this.adminSurvivesRoleDelete(roleId, orgId))) {
+      throw errors.conflict("このロールを削除すると管理者が 0 人になるため削除できません", { code: "LAST_ADMIN" });
+    }
     await this.d.repo.deleteRole(roleId);
     await this.d.audit.publish(this.record("identity.role.deleted", "success", ctx, orgId, "role", roleId, {}));
   }
@@ -889,6 +892,16 @@ export class IdentityService {
     for (const a of stale) await this.d.repo.deleteAssignment(a.id);
     await this.d.audit.publish(this.record("identity.role.managed_synced", "success", ctx, orgId, "user", userId, { added, removed }));
     return { dryRun, added, removed, manual };
+  }
+
+  /** Lockout guard for deleteRole: does an active org-wide identity:admin remain without this role? */
+  private async adminSurvivesRoleDelete(roleId: string, orgId: string): Promise<boolean> {
+    const assignments = await this.d.repo.listAssignmentsByRole(roleId);
+    const holders = new Set(assignments.filter((a) => a.resourceType === null && a.resourceId === null).map((a) => a.userId));
+    for (const userId of await this.d.repo.usersWithOrgWidePermission(orgId, ADMIN)) {
+      if ((await this.countOrgWideAdminGrants(userId, orgId)) > (holders.has(userId) ? 1 : 0)) return true;
+    }
+    return false;
   }
 
   private async countOrgWideAdminGrants(userId: string, orgId: string): Promise<number> {
