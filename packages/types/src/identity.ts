@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (87 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (88 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -122,9 +122,12 @@ export const PERMISSION_CATALOG = [
   { key: "sponsor:admin", name: "Delete sponsor business cards", description: "Delete shared business cards (photo and contact details)", domain: "sponsor", dangerous: true },
   { key: "app:sponsor:view", name: "Open スポンサー app", description: "Open and view the スポンサー app", domain: "app", dangerous: false },
   { key: "app:sponsor:edit", name: "Edit in スポンサー app", description: "Act inside the スポンサー app (implies view)", domain: "app", dangerous: false },
+  // 代理表示 (admin impersonation). Own domain so ロール管理 shows it under 「その他」 as its own
+  // group (it is an org-wide capability, not part of the roster app's 詳細設定).
+  { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "impersonation", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 87 keys (open `${string}:${string}` template retired).
+// Closed union of the 88 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

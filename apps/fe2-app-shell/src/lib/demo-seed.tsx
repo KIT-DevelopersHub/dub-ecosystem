@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, lp as lpValues, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
@@ -37,6 +37,8 @@ const ME_ID = "usr_demo";
 const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "identity:read",
   "identity:admin",
+  // 代理表示 (admin impersonation): メール名簿の「このメンバーとして表示」。
+  "identity:impersonate",
   "event:read",
   "event:write",
   "event:admin",
@@ -832,8 +834,58 @@ function isOversight(a: DemoAccount): boolean {
 
 const DEMO_ACCOUNT_STORAGE_KEY = "dub_demo_account";
 
-/** The active demo account (localStorage-selected, default admin). Read per request. */
+// ── 代理表示 (admin impersonation) — demo twin of auth-service + gateway ──────────
+// sessionStorage (this tab only, like a session cookie). While set, every request is
+// answered AS the subject (currentAccount) and /me names the real admin, exactly like the
+// gateway; the shared deny list (@dub/types) refuses the same high-risk actions.
+const DEMO_IMPERSONATION_KEY = "dub_demo_impersonation";
+
+interface DemoImpersonation {
+  actorId: string;
+  subject: { id: string; displayName: string; email: string; permissions: identity.PermissionKey[] };
+  startedAt: number;
+  expiresAt: number;
+}
+
+function readImpersonation(): DemoImpersonation | null {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(DEMO_IMPERSONATION_KEY);
+    if (!raw) return null;
+    const imp = JSON.parse(raw) as DemoImpersonation;
+    // Past the hard deadline it is over (the server would end it on the next refresh).
+    if (Date.now() >= imp.expiresAt) {
+      globalThis.sessionStorage?.removeItem(DEMO_IMPERSONATION_KEY);
+      return null;
+    }
+    return imp;
+  } catch {
+    return null;
+  }
+}
+
+function writeImpersonation(imp: DemoImpersonation | null): void {
+  try {
+    if (imp) globalThis.sessionStorage?.setItem(DEMO_IMPERSONATION_KEY, JSON.stringify(imp));
+    else globalThis.sessionStorage?.removeItem(DEMO_IMPERSONATION_KEY);
+  } catch {
+    // storage blocked: impersonation simply cannot persist across the reload
+  }
+}
+
+/** The account the request acts as: the impersonated member when 代理表示 is on. */
 function currentAccount(): DemoAccount {
+  const imp = readImpersonation();
+  if (imp) {
+    // Permissions are the ROSTER's (role-derived, captured at start) — what the member really
+    // holds — even when the member is also a switcher persona; the persona keeps its inbox.
+    const known = DEMO_ACCOUNTS.find((a) => a.id === imp.subject.id);
+    return known ? { ...known, permissions: imp.subject.permissions } : { ...imp.subject, inbox: [] };
+  }
+  return signedInAccount();
+}
+
+/** The active demo account (localStorage-selected, default admin). Read per request. */
+function signedInAccount(): DemoAccount {
   let key: string | null = null;
   try {
     // ?demo_account=<id|email> switches (and remembers) the account so a confirm link can
@@ -881,11 +933,16 @@ function demoAccountsResponse(): authTypes.DemoAccountsResponse {
 /** The /me session for the active account (drives RequireAuth + the shell header). */
 function currentMe(): gateway.MeResponse {
   const a = currentAccount();
+  const imp = readImpersonation();
+  const actor = imp ? signedInAccount() : null;
   return {
     user: { id: a.id, displayName: a.displayName, avatarUrl: null, email: a.email },
     orgId: ORG,
     permissions: driveSettingsOverride(a.permissions),
-    sessionExpiresAt: Date.now() + 60 * 60 * 1000,
+    sessionExpiresAt: imp ? imp.expiresAt : Date.now() + 60 * 60 * 1000,
+    ...(imp && actor
+      ? { impersonation: { actor: { id: actor.id, displayName: actor.displayName, avatarUrl: null }, startedAt: imp.startedAt, expiresAt: imp.expiresAt } }
+      : {}),
   };
 }
 
@@ -5907,6 +5964,45 @@ export function createDemoFetch(): typeof fetch {
         parsedBody = JSON.parse(init.body);
       } catch {
         parsedBody = undefined;
+      }
+    }
+    // 代理表示: the shared deny list, refused exactly as the gateway does.
+    {
+      const imp = readImpersonation();
+      const blocked = imp ? authValues.impersonationBlockReason(method, url.pathname) : null;
+      if (blocked) return problem("IMPERSONATION_ACTION_BLOCKED", authValues.IMPERSONATION_BLOCKED_MESSAGE, 403, { reason: blocked });
+      if (method === "POST" && url.pathname === "/api/v1/auth/impersonation/stop") {
+        if (!imp) return problem("AUTH_NOT_IMPERSONATING", "This session is not an impersonation", 409);
+        writeImpersonation(null);
+        const me = currentMe();
+        return json({ session: { userId: me.user.id, client: "web", sessionExpiresAt: me.sessionExpiresAt } });
+      }
+      const start = /^\/api\/v1\/admin\/users\/([^/]+)\/impersonation$/.exec(url.pathname);
+      if (start && method === "POST") {
+        const actor = signedInAccount();
+        if (!actor.permissions.includes(authValues.IMPERSONATE_PERMISSION)) return problem("FORBIDDEN", "missing identity:impersonate", 403);
+        const uid = decodeURIComponent(start[1]!);
+        const detailRes = roster.handle("GET", `/api/v1/identity/users/${encodeURIComponent(uid)}`, url, undefined);
+        if (!detailRes || !detailRes.ok) return problem("NOT_FOUND", "user not found", 404);
+        const target = (await detailRes.json()) as identity.IdentityUserDetail;
+        const refusal = authValues.impersonationRefusal({
+          actorId: actor.id,
+          actorImpersonating: imp !== null,
+          target: { id: target.id, status: target.status, roleIds: target.roleIds, holdsImpersonate: target.permissions.includes(authValues.IMPERSONATE_PERMISSION) },
+        });
+        if (refusal) return problem("AUTH_IMPERSONATION_NOT_ALLOWED", "This member cannot be impersonated", 403, { reason: refusal });
+        const startedAt = Date.now();
+        const next: DemoImpersonation = {
+          actorId: actor.id,
+          subject: { id: target.id, displayName: target.displayName, email: target.email, permissions: target.permissions },
+          startedAt,
+          expiresAt: startedAt + authValues.IMPERSONATION_DEFAULT_TTL_SEC * 1000,
+        };
+        writeImpersonation(next);
+        const res: authTypes.StartImpersonationResponse = {
+          impersonation: { actorId: actor.id, subjectId: target.id, startedAt, expiresAt: next.expiresAt },
+        };
+        return json(res);
       }
     }
     // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
