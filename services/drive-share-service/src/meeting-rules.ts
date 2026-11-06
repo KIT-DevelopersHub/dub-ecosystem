@@ -10,6 +10,7 @@ export const TITLE_MAX = 200;
 export const DESCRIPTION_MAX = 5000;
 export const DURATION_MIN = 5;
 export const DURATION_MAX = 720;
+const LAST_OCCURRENCE_WINDOW_MS = 62 * 24 * 60 * 60 * 1000;
 
 /** The validated, normalised shape every write works on. */
 export interface MeetingFields {
@@ -91,7 +92,12 @@ export function endsAt(f: Pick<MeetingFields, "startsAt" | "durationMinutes">): 
 /** When the last occurrence can end at the latest (epoch ms); null = a series with no end date. */
 export function lastEndMs(m: Pick<MeetingFields, "startsAt" | "durationMinutes" | "recurrence" | "until">): number | null {
   if (m.recurrence === "none") return Date.parse(endsAt(m));
-  return m.until ? Date.parse(`${m.until}T23:59:59+09:00`) + m.durationMinutes * 60_000 : null;
+  if (!m.until) return null;
+  // Every kind repeats within this window; asking for it alone keeps a long series under the
+  // occurrence cap. Google-side edits of single instances are not seen (occurrenceStarts).
+  const from = jstDate(new Date(Date.parse(`${m.until}T00:00:00+09:00`) - LAST_OCCURRENCE_WINDOW_MS).toISOString());
+  const last = meeting.occurrenceStarts(m, from, m.until).at(-1);
+  return Date.parse(last?.startsAt ?? `${m.until}T23:59:59+09:00`) + m.durationMinutes * 60_000;
 }
 
 type Input = Partial<meeting.CreateMeetingRequest>;

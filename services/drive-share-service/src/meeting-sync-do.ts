@@ -66,8 +66,8 @@ export class MeetingSyncDO {
     const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
     const { pathname } = new URL(req.url);
     if (pathname === "/sync-state") return json(await this.syncState.load());
-    if (pathname === "/sync-state/acl") {
-      await this.syncState.saveAcl((await req.json()) as Parameters<MeetingSyncState["saveAcl"]>[0]);
+    if (pathname === "/sync-state/save") {
+      await this.syncState.save((await req.json()) as Parameters<MeetingSyncState["save"]>[0]);
       return json({ ok: true });
     }
     if (pathname === "/sync-state/pause") {
@@ -158,7 +158,8 @@ export class MeetingSyncDO {
     await this.state.storage.put(ACL_DUE_KEY, dueAt);
     await this.state.storage.put(CYCLE_AT_KEY, cycleAt);
     await this.state.storage.put(PHASE_KEY, "aclShares");
-    await this.state.storage.setAlarm(dueAt);
+    // Keep a kick that landed during the run: that alarm then runs the normal cycle.
+    await this.state.storage.setAlarm(Math.min(dueAt, (await this.state.storage.getAlarm()) ?? dueAt));
   }
 
   /** 人事 > 出席: read Meet participant records of ended 定例 occurrences (catch-up within retention). */

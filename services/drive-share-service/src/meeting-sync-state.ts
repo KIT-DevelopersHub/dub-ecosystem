@@ -19,14 +19,16 @@ export interface MeetingSyncSnapshot {
   aclWritesNotBefore: number;
   /** calendarId -> state. */
   acl: Record<string, CalendarAclState>;
+  /** The meeting a budget-stopped scan continues at; null = start over. */
+  meetingCursor: string | null;
 }
 
 export interface MeetingSyncState {
   load(): Promise<MeetingSyncSnapshot>;
   /** Pause until `until` unless a pause is already running at `now`. started = this call began it. */
   pause(now: number, until: number): Promise<{ until: number; started: boolean }>;
-  /** Merge per calendar: a run saves only the calendars it touched. */
-  saveAcl(update: { acl: Record<string, CalendarAclState>; aclWritesNotBefore?: number }): Promise<void>;
+  /** Merge: a run saves only the calendars it changed, and only the fields it passes. */
+  save(update: { acl?: Record<string, CalendarAclState>; aclWritesNotBefore?: number; meetingCursor?: string | null }): Promise<void>;
 }
 
 /** The subset of DurableObjectStorage used here. */
@@ -38,6 +40,7 @@ export interface SyncStorage {
 const PAUSED_UNTIL_KEY = "calendarPausedUntil";
 const ACL_NOT_BEFORE_KEY = "aclWritesNotBefore";
 const ACL_KEY = "aclState";
+const CURSOR_KEY = "meetingCursor";
 
 export function createStorageSyncState(storage: SyncStorage): MeetingSyncState {
   return {
@@ -46,6 +49,7 @@ export function createStorageSyncState(storage: SyncStorage): MeetingSyncState {
         pausedUntil: (await storage.get<number>(PAUSED_UNTIL_KEY)) ?? null,
         aclWritesNotBefore: (await storage.get<number>(ACL_NOT_BEFORE_KEY)) ?? 0,
         acl: (await storage.get<MeetingSyncSnapshot["acl"]>(ACL_KEY)) ?? {},
+        meetingCursor: (await storage.get<string | null>(CURSOR_KEY)) ?? null,
       };
     },
     async pause(now, until) {
@@ -54,10 +58,10 @@ export function createStorageSyncState(storage: SyncStorage): MeetingSyncState {
       await storage.put(PAUSED_UNTIL_KEY, until);
       return { until, started: true };
     },
-    async saveAcl(update) {
-      const acl = (await storage.get<MeetingSyncSnapshot["acl"]>(ACL_KEY)) ?? {};
-      await storage.put(ACL_KEY, { ...acl, ...update.acl });
+    async save(update) {
+      if (update.acl) await storage.put(ACL_KEY, { ...(await storage.get<MeetingSyncSnapshot["acl"]>(ACL_KEY)), ...update.acl });
       if (update.aclWritesNotBefore !== undefined) await storage.put(ACL_NOT_BEFORE_KEY, update.aclWritesNotBefore);
+      if (update.meetingCursor !== undefined) await storage.put(CURSOR_KEY, update.meetingCursor);
     },
   };
 }
@@ -82,6 +86,6 @@ export function createRemoteSyncState(call: (path: string, init?: RequestInit) =
   return {
     load: () => json("/sync-state"),
     pause: (now, until) => json("/sync-state/pause", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ now, until }) }),
-    saveAcl: async (update) => void (await json("/sync-state/acl", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(update) })),
+    save: async (update) => void (await json("/sync-state/save", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(update) })),
   };
 }
