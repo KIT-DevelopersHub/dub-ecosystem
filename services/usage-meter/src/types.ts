@@ -2,8 +2,7 @@
 // the FROZEN JSON contract shared with the fe2 dashboard — do not change field names or
 // the status/overflow vocabularies without updating the frontend in lockstep.
 
-// "gcp" is reserved (types-only, GCP-ready): the Provider union is additive, so a future
-// GCP collector + MASTER "gcp" rows need no wire-contract change. No GCP metrics exist yet.
+// "gcp" = the Google APIs behind カレンダー (Calendar, Meet REST). The Provider union is additive.
 export type Provider = "cloudflare" | "resend" | "gcp";
 
 /** What happens when a metric crosses 100% of its free-tier ceiling.

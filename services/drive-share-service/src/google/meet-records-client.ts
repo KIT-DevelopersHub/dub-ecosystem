@@ -6,6 +6,7 @@
 import { errors } from "@dub/errors";
 import { retryFetch } from "@dub/http";
 import { mapGoogleError } from "../drive-client";
+import type { GoogleCallRecorder } from "./api-usage";
 import type { TokenProvider } from "./token";
 
 const MEET_BASE = "https://meet.googleapis.com/v2";
@@ -64,12 +65,13 @@ export function mapParticipant(p: RawParticipant): MeetParticipantRecord | null 
 /** RFC 3339 filter string value (Meet wants quoted timestamps). */
 const q = (v: string) => `"${v.replace(/"/g, "")}"`;
 
-export function createGoogleMeetRecordsClient(deps: { token: TokenProvider; fetchImpl?: typeof fetch }): MeetRecordsClient {
+export function createGoogleMeetRecordsClient(deps: { token: TokenProvider; fetchImpl?: typeof fetch; recordCall?: GoogleCallRecorder }): MeetRecordsClient {
   const doFetch = deps.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => retryFetch(input, init));
 
   async function get<T>(url: URL): Promise<T> {
     const attempt = async (forceRefresh: boolean) => {
       const token = await deps.token.getAccessToken(forceRefresh ? { forceRefresh: true } : undefined);
+      await deps.recordCall?.("meet");
       try {
         return await doFetch(url.toString(), { method: "GET", headers: { authorization: `Bearer ${token}` } });
       } catch (cause) {

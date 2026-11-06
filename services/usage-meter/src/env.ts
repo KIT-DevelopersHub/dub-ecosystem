@@ -6,7 +6,8 @@ import type { D1Database, DurableObjectNamespace, Fetcher } from "@cloudflare/wo
 export interface Env {
   // ---- data ----
   // Shared dub-core D1. usage-meter WRITES only its usage_ namespace (usage_snapshot) and
-  // READS mail_send_log (mail_ namespace) for the Resend send count.
+  // READS mail_send_log (mail_ namespace) for the Resend send count and
+  // driveshare_google_api_usage (driveshare_ namespace) for the Google API peaks.
   DB?: D1Database;
 
   // ---- the daily-collection alarm loop (replaces a cron; the 5-cron account cap is full) ----
