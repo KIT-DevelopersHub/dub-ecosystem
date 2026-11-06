@@ -404,6 +404,13 @@ Response `200` — the upserted pair:
 
 ---
 
+### 5.7 `GET|POST /admin/lists`, `DELETE /admin/lists/:id`
+
+Team mailing lists (`mail:admin`). `POST` body: `{ localPart, teamId }`; `201` returns
+`MailTeamList` (`{ id, address, localPart, teamId, createdAt }`). `409
+MAIL_EMAIL_ROUTING_CONFLICT` when the address already has a routing rule or a roster user.
+`GET` returns `{ items: MailTeamList[] }`. See the mail-gateway README §3.4c.
+
 ## 6. Wire types (frozen `@dub/types` `mail`)
 
 ```ts

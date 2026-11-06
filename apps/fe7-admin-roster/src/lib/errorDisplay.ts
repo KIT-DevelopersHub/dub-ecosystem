@@ -19,6 +19,7 @@ const JA = {
   // 「発行済みアドレス」/ roster-sync surfaces instead of one generic line.
   unconfigured: "メール転送の管理設定が未完了です。管理者にお問い合わせください",
   upstream: "メール基盤に接続できませんでした。時間をおいて再試行してください",
+  addressInUse: "このアドレスは既に使われています。別のアドレスを指定してください",
 };
 
 // Service-specific codes the mail-gateway emits (see services/mail-gateway
@@ -26,6 +27,7 @@ const JA = {
 // Cloudflare's Email Routing API itself rejects the request.
 const MAIL_EMAIL_ROUTING_UNCONFIGURED = "MAIL_EMAIL_ROUTING_UNCONFIGURED";
 const MAIL_EMAIL_ROUTING_UPSTREAM = "MAIL_EMAIL_ROUTING_UPSTREAM";
+const MAIL_EMAIL_ROUTING_CONFLICT = "MAIL_EMAIL_ROUTING_CONFLICT";
 
 /**
  * Normalize any thrown/rejected value to the wire `ErrorResponse` envelope.
@@ -91,6 +93,8 @@ export function presentError(err: unknown): ErrorPresentation {
       };
     case CommonErrorCodes.CONFLICT:
       return { kind: "conflict", message: message || JA.conflict };
+    case MAIL_EMAIL_ROUTING_CONFLICT:
+      return { kind: "conflict", message: JA.addressInUse };
     // 未設定: a required CF_EMAIL_ROUTING_* secret is unset — not user-retryable.
     case MAIL_EMAIL_ROUTING_UNCONFIGURED:
       return { kind: "retry", message: JA.unconfigured, retryable: false };

@@ -162,7 +162,7 @@ export interface ShareDriftItem {
   roleNames: string[];
 }
 
-/** GET /driveshare/files/:id/drift. grantCount=0 means there is no baseline (items empty). */
+/** GET /driveshare/files/:id/drift. grantCount=0 = no role grant: every direct share is `unexpected`. */
 export interface FileShareDrift {
   fileId: string;
   grantCount: number;
