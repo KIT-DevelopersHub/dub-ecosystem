@@ -43,13 +43,13 @@ import {
   useOpenSections,
   type FilterRow,
 } from "./CalendarFilters.tsx";
-import { DayListPanel, DetailPanel, EventDialog, ItemTitleProvider, type AnchorRect } from "./CalendarPanels.tsx";
+import { DayListPanel, DetailPanel, EventDialog, ItemTitleProvider, canRepeat, type AnchorRect } from "./CalendarPanels.tsx";
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
 import { MeetingDetailDialog } from "./MeetingDetailDialog.tsx";
 import { MeetingFilter } from "./MeetingFilter.tsx";
 import { MeetingFormDialog } from "./MeetingFormDialog.tsx";
 import { useUserPref } from "./calendar-prefs";
-import { isMeetingTargetVisible, parseMeetingTargetChoices, type MeetingTargetChoices } from "./meeting-form";
+import { isMeetingTargetVisible, meetingFormFromDraft, parseMeetingTargetChoices, type MeetingFormValues, type MeetingTargetChoices } from "./meeting-form";
 import { meetingTasks, type MeetingOccurrence } from "./meeting-occurrences";
 import { useMeetingMutations, useMeetingTargetsQuery, useMeetingsAccess, useMeetingsQuery } from "./useMeetings.tsx";
 import {
@@ -116,7 +116,7 @@ export const MEETINGS_FEATURE_MARKER = "cal-meet-v1";
 const DRIVE_SETTINGS_URL = "/driveshare?setting=google-account";
 
 type Panel =
-  | { kind: "create"; draft: EventDraft; ghost: SlotGhost | null }
+  | { kind: "create"; draft: EventDraft; ghost: SlotGhost | null; recurrence: meeting.MeetingRecurrence }
   | { kind: "edit"; item: CalendarItem; draft: EventDraft }
   | { kind: "detail"; item: CalendarItem; anchor: AnchorRect | null }
   | { kind: "day"; day: number; anchor: AnchorRect | null };
@@ -199,10 +199,12 @@ export function CalendarScreen(): JSX.Element {
     (id: string) => isMeetingTargetVisible(id, targetChoices, targetState, createdTargets),
     [targetChoices, targetState, createdTargets],
   );
-  const [meetingForm, setMeetingForm] = useState<{ editing: meeting.Meeting | null } | null>(null);
+  const [meetingForm, setMeetingForm] = useState<{ editing: meeting.Meeting | null; initial?: MeetingFormValues } | null>(null);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingOccurrence | null>(null);
   const account = meetingsQ.data?.account ?? null;
   const accountReady = !!account?.email && account.calendarReady;
+  /** 繰り返し in the 作成 dialog: only where a 定例ミーティング can be set up. */
+  const repeatOffered = access.canEdit && accountReady;
   const firstKey = dayKeyOf(days[0]!);
   const lastKey = dayKeyOf(days[days.length - 1]!);
   const meetingOcc = useMemo(() => {
@@ -435,7 +437,7 @@ export function CalendarScreen(): JSX.Element {
     setView("day");
   };
   const openCreate = (draft: EventDraft, ghost: SlotGhost | null = null) => {
-    if (canWrite) setPanel({ kind: "create", draft, ghost });
+    if (canWrite) setPanel({ kind: "create", draft, ghost, recurrence: "none" });
   };
   const openCreateDialog = () => openCreate(nextHourDraft(anchorDay));
   const selectItem = (item: CalendarItem, anchor: AnchorRect) => {
@@ -785,10 +787,14 @@ export function CalendarScreen(): JSX.Element {
             onChange={(draft) => setPanel({ ...panel, draft })}
             onSave={() => {
               setPanel(null);
-              createMut.mutate(panel.draft);
+              // A repeating 予定 is a 定例ミーティング: hand what was typed to the meeting form.
+              if (repeatOffered && panel.recurrence !== "none" && canRepeat(panel.draft)) {
+                setMeetingForm({ editing: null, initial: meetingFormFromDraft(panel.draft, panel.recurrence, targets) });
+              } else createMut.mutate(panel.draft);
             }}
             onClose={close}
             saving={createMut.isPending}
+            {...(repeatOffered ? { repeat: { value: panel.recurrence, onChange: (recurrence) => setPanel({ ...panel, recurrence }) } } : {})}
           />
         )}
 
@@ -865,6 +871,7 @@ export function CalendarScreen(): JSX.Element {
           <MeetingFormDialog
             open={meetingForm != null}
             editing={meetingForm?.editing ?? null}
+            initial={meetingForm?.initial ?? null}
             targets={targets}
             accountEmail={account?.email ?? null}
             onClose={() => setMeetingForm(null)}

@@ -3608,7 +3608,7 @@ function createDriveShareStore() {
     // info@/admin@ are Cloudflare Email-Routing aliases with NO Google account (mirrors
     // the real bug): they ARE shared, but only via an invite, so their access is pending.
     role_admin: ["info@developershub.jp", "admin@developershub.jp"],
-    role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp"],
+    role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp", "ryoma@developershub.jp"],
     // The last address has no Google account AND is invalid: the fan-out applies the
     // others and reports this one as skipped, instead of failing the whole role.
     role_member: ["ichiro@developershub.jp", "jiro@developershub.jp", "ghost-no-account@example.invalid"],
@@ -3616,6 +3616,13 @@ function createDriveShareStore() {
   // Addresses that have no backing Google account → shareable only via an invite
   // (pending). Mirrors real Email-Routing aliases like info@/admin@developershub.jp.
   const NO_GOOGLE_ACCOUNT = new Set(["info@developershub.jp", "admin@developershub.jp"]);
+  // 名簿 Gmail: role sharing goes to it instead of the login address (mirrors the service).
+  const DEMO_GMAIL: Record<string, string> = { "ikeda@developershub.jp": "ikeda.h@gmail.com" };
+  // Login addresses Drive refuses outright (403 cannotInviteNonGoogleUser) while no Gmail is known.
+  const REFUSES_NON_GOOGLE = new Set(["ryoma@developershub.jp"]);
+  const NO_GMAIL_REASON =
+    "Google アカウントの無いアドレスのため共有できません。名簿にこのメンバーの Gmail を登録すると、そのアドレスで共有されます。";
+  const shareEmailOf = (email: string): string => DEMO_GMAIL[email] ?? email;
   interface DemoRoleGrant {
     id: string;
     fileId: string;
@@ -3630,7 +3637,8 @@ function createDriveShareStore() {
   }
   const roleGrants: DemoRoleGrant[] = [];
   // 「ロールとの差分」 sample: maintainer is 編集 on Hackit 2026 共有, but in Drive someone
-  // lowered araki to 閲覧, ikeda was never shared, and staff-a (no role) still has 編集.
+  // lowered araki to 閲覧, ikeda (名簿 Gmail) and ryoma (no Gmail) were never shared, and
+  // staff-a (no role) still has 編集.
   {
     const root = byId.get("fld_root")!;
     root.permissions.push(
@@ -3639,7 +3647,7 @@ function createDriveShareStore() {
     );
     roleGrants.push({
       id: "rg_seed_root", fileId: "fld_root", roleId: "role_maintainer", roleName: "maintainer", driveRole: "writer",
-      memberCount: 3, appliedCount: 2, grantedBy: "demo@developershub.jp", grantedAt: "2026-08-10T10:00:00Z",
+      memberCount: 4, appliedCount: 2, grantedBy: "demo@developershub.jp", grantedAt: "2026-08-10T10:00:00Z",
       permIds: ["perm_role_taro", "perm_role_araki"],
     });
   }
@@ -3659,7 +3667,12 @@ function createDriveShareStore() {
     const skipped: { email: string; reason: string }[] = [];
     const invited: { email: string }[] = [];
     let applied = 0;
-    for (const email of emails) {
+    for (const member of emails) {
+      const email = shareEmailOf(member);
+      if (REFUSES_NON_GOOGLE.has(email)) {
+        skipped.push({ email, reason: NO_GMAIL_REASON });
+        continue;
+      }
       if (!EMAIL_RE.test(email) || email.endsWith(".invalid")) {
         skipped.push({ email, reason: "このメールアドレスとは共有できませんでした（Googleアカウントが無い、または無効なアドレスです）。" });
         continue;
@@ -3691,7 +3704,8 @@ function createDriveShareStore() {
     const grants = roleGrants.filter((g) => g.fileId === f.id);
     const expected = new Map<string, { driveRole: DemoRoleGrant["driveRole"]; roleNames: string[] }>();
     for (const g of grants) {
-      for (const email of roleMembers[g.roleId] ?? []) {
+      for (const member of roleMembers[g.roleId] ?? []) {
+        const email = shareEmailOf(member);
         const cur = expected.get(email);
         if (!cur) expected.set(email, { driveRole: g.driveRole, roleNames: [g.roleName] });
         else {

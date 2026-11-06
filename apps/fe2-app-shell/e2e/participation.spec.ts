@@ -2,7 +2,7 @@
 // design the 社長 asked for:
 //   (a) the PUBLIC form at /participate (no login) accepts the two required emails and
 //       shows the サンクス — this is the one form participants use;
-//   (b) the in-shell /participation is the オンボーディング tab (items + team meetings + the
+//   (b) the in-shell /participation is the 人事 → オンボーディング案内 tab (items + team meetings + the
 //       public /onboarding URL, which asks for the team first), and 回答一覧 carries the
 //       public /participate URL instead;
 //   (c) the 運営専用 回答一覧 at /participation/list shows submitted 参加届 (氏名 / 学校メール /
@@ -40,10 +40,13 @@ test("(a) public /participate accepts split 姓/名 + emails + phone and confirm
   await page.screenshot({ path: shot("02-public-thanks.png"), fullPage: true });
 });
 
-test("(b) オンボーディング tab manages the items, team meetings and shares the public /onboarding page", async ({ page }) => {
+test("(b) 人事 → オンボーディング案内 tab manages the items, team meetings and shares the public /onboarding page", async ({ page }) => {
   await page.goto("/participation");
   await expect(page.getByTestId("onboarding-admin-page")).toBeVisible();
-  await expect(page.getByTestId("member-roster-subnav")).toContainText("オンボーディング");
+  // 運営メンバーのサブナビから人事のタブへ移った。
+  await expect(page.getByTestId("member-roster-subnav")).toHaveCount(0);
+  await expect(page.getByTestId("fe2-hr-tabs-tab-guide")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("fe2-hr-tabs-tab-participation")).toBeVisible();
   await expect(page.getByTestId("onboarding-share-url")).toHaveText(/\/onboarding$/);
   await expect(page.getByTestId("onboarding-admin-item-onb_demo_2")).toContainText("Slack に参加する");
   // ミーティング: 全体 + 名簿の各チーム。設定済みは日時、未設定は「未設定」。
@@ -222,4 +225,28 @@ test("(g) 追加する: 自動候補なし → 名簿から手動検索 → 招�
   await expect(page.getByTestId("members-orgchart").getByText("鈴木 一郎")).toHaveCount(1);
   await expect(page.getByTestId("members-orgchip-member_3")).not.toContainText("打診中");
   await page.screenshot({ path: shot("14-orgchart-manual-linked.png"), fullPage: true });
+});
+
+test("(f) 参加届の回答 / オンボーディング案内 は人事のタブにあり、運営メンバーのサブナビには無い", async ({ page }) => {
+  await page.goto("/members");
+  await expect(page.getByTestId("member-roster-subnav")).toBeVisible();
+  await expect(page.getByTestId("member-roster-subnav-tab-onboarding")).toHaveCount(0);
+  await expect(page.getByTestId("member-roster-subnav-tab-participation-list")).toHaveCount(0);
+
+  await page.goto("/hr");
+  await expect(page.getByTestId("fe2-hr-tabs")).toContainText("参加届の回答");
+  await expect(page.getByTestId("fe2-hr-tabs")).toContainText("オンボーディング案内");
+  await page.getByTestId("fe2-hr-tabs-tab-participation").click();
+  await expect(page).toHaveURL(/\/participation\/list$/);
+  await expect(page.getByTestId("participation-list-table")).toBeVisible();
+  await expect(page.getByTestId("fe2-hr-tabs-tab-participation")).toHaveAttribute("aria-selected", "true");
+  await page.screenshot({ path: shot("10-hr-participation.png"), fullPage: true });
+
+  await page.getByTestId("fe2-hr-tabs-tab-guide").click();
+  await expect(page).toHaveURL(/\/participation$/);
+  await expect(page.getByTestId("onboarding-admin-page")).toBeVisible();
+  await page.screenshot({ path: shot("11-hr-guide.png"), fullPage: true });
+
+  await page.getByTestId("fe2-hr-tabs-tab-onboarding").click();
+  await expect(page.getByTestId("fe2-hr-onboarding-screen")).toBeVisible();
 });

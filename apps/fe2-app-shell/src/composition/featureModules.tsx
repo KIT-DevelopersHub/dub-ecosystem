@@ -316,8 +316,8 @@ function adaptMembers(api: ApiClient): FeatureModule {
   const provider = providerWrapper(MembersProvider, api);
   // サブナビ帯はシェルのレイアウトで永続表示するので、ここは Provider だけで包む（帯は敷かない）。
   const routes = (membersRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, provider));
-  // 統合タイル「運営メンバー・名簿」。運営メンバー(member-service) と 名簿(FE7 /admin/users) と
-  // 参加届＋回答(participation) を同じアプリとして開く。名簿/参加届/回答 の個別タイルは廃止し、この
+  // 統合タイル「運営メンバー・名簿」。運営メンバー(member-service) と 名簿(FE7 /admin/users) を
+  // 同じアプリとして開く（参加届＋回答は人事タイルへ移した）。名簿の個別タイルは廃止し、この
   // タイル内の共有サブナビ(MemberRosterNav)から横断する。ロール管理(/admin/roles) だけは独立タイル
   // として adaptAdmin が別に出す（ユーザー明示指示: ロールを外に括り出す）。
   const nav: NavEntry[] = membersNav.map((n) => ({ label: "運営メンバー・名簿", path: n.path, icon: n.icon, order: 47 }));
@@ -333,11 +333,11 @@ function adaptMembers(api: ApiClient): FeatureModule {
 // write is re-authorized server-side by member-service.
 function adaptParticipation(api: ApiClient): FeatureModule {
   const provider = providerWrapper(ParticipationProvider, api);
-  // 参加届(提出) と 参加届の回答(管理) は「運営メンバー・名簿」統合アプリのセクション。共有サブナビ帯は
-  // シェルのレイアウトで永続表示するので、ここは Provider だけで包む（帯はシェルが pathname で出す）。
+  // オンボーディング案内 と 参加届の回答 は人事アプリのタブ (features/hr/HrTabs)。ページ側が
+  // 人事のタブ帯を描くので、ここは Provider だけで包む。
   const routes = (participationRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, provider));
-  // 個別ランチャータイルは廃止（nav=[]）。参加届は運営メンバー・名簿タイル内のサブナビからのみ横断する
-  // （ユーザー明示指示: 参加届＋回答管理を運営メンバーにまとめる）。ルート/Provider は維持し deep-link も生存。
+  // 個別ランチャータイルは廃止（nav=[]）。人事タイル内のタブからのみ横断する
+  // （ユーザー明示指示: 運営メンバーから人事へ移す）。ルート/Provider は維持し deep-link も生存。
   const nav: NavEntry[] = [];
   return { id: "participation", routes, nav };
 }
