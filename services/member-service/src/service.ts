@@ -76,6 +76,15 @@ function profilePatch(body: object): Partial<member.PersonProfile> {
   return value;
 }
 
+/** backfill の offset/limit。未指定は undefined、範囲外・非整数は検証エラー。 */
+function backfillInt(value: unknown, field: string, min: number, max: number): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+    throw errors.validationFailed([{ field, reason: "invalid" }]);
+  }
+  return value;
+}
+
 /** Upper bound on teams expanded in one チーム単位メンション lookup (see listTeamIdentityUserIds). */
 const MAX_TEAM_MENTION_EXPANSION = 20;
 /** Upper bound on identity ids resolved in one Google-address lookup (the whole org fits). */
@@ -290,39 +299,60 @@ export class MemberService {
   }
 
   /** 既存メンバーへの一括付与 (管理者)。dryRun なら identity に書かず差分だけ返す。
-   *  対象は名簿でアカウントに紐付いた全員 (在籍中以外は空集合 = 自動ロールを外す)。 */
+   *  対象は名簿でアカウントに紐付いた全員 (在籍中以外は空集合 = 自動ロールを外す)。
+   *  Workers の subrequest 上限 (無料 50/呼び出し) に収めるため offset/limit でページ分けし、
+   *  nextOffset が null になるまで呼び直す。ロール一覧の同期は offset 0 のページだけ。
+   *  activateOnly なら付与をせず、在籍で招待中のアカウントの有効化だけを行う。 */
   async backfillRoles(ctx: ReqCtx, body: member.RoleSyncBackfillRequest | null): Promise<member.RoleSyncBackfillResponse> {
+    const activateOnly = body?.activateOnly === true;
     const sync = this.deps.roleSync;
-    if (!sync) throw errRoleSyncUnavailable();
+    const activation = this.deps.identityActivation;
+    if (activateOnly ? !activation : !sync) throw errRoleSyncUnavailable();
     const dryRun = body?.dryRun === true;
+    const callsPerPerson = activateOnly ? 1 : 2;
+    const maxLimit = Math.floor(member.ROLE_SYNC_BACKFILL_CALL_BUDGET / callsPerPerson);
+    const offset = backfillInt(body?.offset, "offset", 0, Number.MAX_SAFE_INTEGER) ?? 0;
+    const limit = backfillInt(body?.limit, "limit", 1, maxLimit) ?? maxLimit;
     const orgId = this.deps.orgId;
     const [teams, people, links] = await Promise.all([
       this.deps.repo.listTeams(orgId),
       this.deps.repo.listPeople(orgId),
       this.deps.repo.teamLinksForOrg(orgId),
     ]);
-    const cat = await sync.syncCatalog(ctx, { roles: managedRoleCatalog(teams), dryRun });
+    // 対象 (順序は listPeople の sort_order, id で安定)。activateOnly は有効化の対象だけ。
+    const targets = people.filter((p) => (activateOnly ? shouldActivate(p) : !!p.identityUserId));
+    const page = targets.slice(offset, offset + limit);
+    const nextOffset = offset + limit < targets.length ? offset + limit : null;
+    const emptyCatalog = { created: [], renamed: [], deleted: [], kept: [] };
+    let catalog: member.RoleSyncBackfillResponse["catalog"] = emptyCatalog;
+    if (!activateOnly && offset === 0 && sync) {
+      const cat = await sync.syncCatalog(ctx, { roles: managedRoleCatalog(teams), dryRun });
+      catalog = { created: cat.created, renamed: cat.renamed, deleted: cat.deleted, kept: cat.kept };
+    }
     const teamsById = new Map(teams.map((t) => [t.id, t]));
     const out: member.RoleSyncBackfillPerson[] = [];
     let failed = 0;
     let activated = 0;
-    for (const p of people) {
-      if (!p.identityUserId) continue;
+    for (const p of page) {
+      const uid = p.identityUserId as string;
       const teamIds = links.filter((l) => l.personId === p.id).map((l) => l.teamId);
       const roles = desiredManagedRoles(p, teamIds, teamsById);
-      const base = { memberId: p.id, name: p.name, identityUserId: p.identityUserId, roleIds: roles.map((r) => r.id) };
+      const base = { memberId: p.id, name: p.name, identityUserId: uid, roleIds: roles.map((r) => r.id) };
       let row: member.RoleSyncBackfillPerson;
-      try {
-        const r = await sync.syncUser(ctx, p.identityUserId, { roles, dryRun });
-        row = { ...base, added: r.added, removed: r.removed };
-      } catch (err) {
-        row = { ...base, added: [], removed: [], error: errMessage(err) };
+      if (activateOnly || !sync) {
+        row = { ...base, added: [], removed: [] };
+      } else {
+        try {
+          const r = await sync.syncUser(ctx, uid, { roles, dryRun });
+          row = { ...base, added: r.added, removed: r.removed };
+        } catch (err) {
+          row = { ...base, added: [], removed: [], error: errMessage(err) };
+        }
       }
       // 在籍で紐付いているのに招待中のまま残ったアカウント (保存時の有効化が失敗した等) を直す。
-      const activation = this.deps.identityActivation;
       if (activation && shouldActivate(p)) {
         try {
-          const act = await activation.activate(ctx, p.identityUserId, { trigger: "member.backfill", dryRun });
+          const act = await activation.activate(ctx, uid, { trigger: "member.backfill", dryRun });
           if (act.activated) {
             activated++;
             row.activated = true;
@@ -334,13 +364,7 @@ export class MemberService {
       if (row.error) failed++;
       out.push(row);
     }
-    return {
-      dryRun,
-      catalog: { created: cat.created, renamed: cat.renamed, deleted: cat.deleted, kept: cat.kept },
-      people: out,
-      failed,
-      activated,
-    };
+    return { dryRun, activateOnly, catalog, people: out, failed, activated, offset, limit, total: targets.length, nextOffset };
   }
 
   // ---- people ----

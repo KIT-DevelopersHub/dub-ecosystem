@@ -674,10 +674,22 @@ export function positionRoleName(position: MemberPosition): string {
   return `${POSITION_ROLE_NAME_PREFIX}${POSITION_LABEL[position]}`;
 }
 
-/** POST /api/v1/members/role-sync/backfill — 既存メンバーへの一括付与 (管理者)。 */
+/** backfill 1 ページで identity に出す呼び出しの上限。Workers 無料枠の subrequest 上限 (50) から
+ *  認可チェック・ロール一覧同期 (offset 0 のみ) の分と余裕を引いた値。limit の上限 =
+ *  floor(これ / 1 人あたりの呼び出し数 (付与+有効化 = 2・activateOnly = 1))。 */
+export const ROLE_SYNC_BACKFILL_CALL_BUDGET = 30;
+
+/** POST /api/v1/members/role-sync/backfill — 既存メンバーへの一括付与 (管理者)。
+ *  ページ分け: nextOffset が null になるまで offset を進めて呼び直す。 */
 export interface RoleSyncBackfillRequest {
   /** true なら identity 側に書き込まず、付く/外れる予定だけを返す。 */
   dryRun?: boolean;
+  /** true ならロール付与をせず、在籍で招待中のアカウントの有効化だけ (対象も有効化対象の人だけ)。 */
+  activateOnly?: boolean;
+  /** 対象一覧の何人目から (既定 0)。ロール一覧の同期は 0 のページだけ。 */
+  offset?: number;
+  /** 1 ページの人数 (既定・上限 = 付与 15 / activateOnly 30)。 */
+  limit?: number;
 }
 export interface RoleSyncBackfillPerson {
   memberId: MemberId;
@@ -693,12 +705,21 @@ export interface RoleSyncBackfillPerson {
 }
 export interface RoleSyncBackfillResponse {
   dryRun: boolean;
-  /** チーム・役職ロール一覧の同期結果。 */
+  activateOnly: boolean;
+  /** チーム・役職ロール一覧の同期結果 (offset 0 のページだけ・それ以外と activateOnly は空)。 */
   catalog: { created: string[]; renamed: string[]; deleted: string[]; kept: string[] };
+  /** このページの人。 */
   people: RoleSyncBackfillPerson[];
+  /** このページで失敗した人数。 */
   failed: number;
-  /** 招待中のまま残っていたアカウントを有効化した人数 (dryRun なら予定人数)。 */
+  /** このページで招待中のまま残っていたアカウントを有効化した人数 (dryRun なら予定人数)。 */
   activated: number;
+  offset: number;
+  limit: number;
+  /** 全ページ合わせた対象人数。 */
+  total: number;
+  /** 次のページの offset。最後のページなら null。 */
+  nextOffset: number | null;
 }
 
 /** Internal id alias (plain string, like the other common ids). */
