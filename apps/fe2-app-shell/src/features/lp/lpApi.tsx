@@ -68,6 +68,15 @@ export interface LpStatsQuery {
   from: string;
   to: string;
   includeBots?: boolean;
+  /** 1 つの流入元に絞る（bySource は絞らず全候補を返す）。 */
+  source?: string;
+}
+
+/** `referrer` は byReferrer の label。totals / byDay をその流入元だけにする。 */
+export interface LpSiteTrafficQuery {
+  from: string;
+  to: string;
+  referrer?: string;
 }
 
 export interface LpVisitsQuery {
@@ -134,10 +143,12 @@ export interface LpPublishState {
 }
 
 // ── チケット販売（/tickets）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
-export type LpTicketFieldType = "text" | "textarea" | "select" | "checkbox";
+export type LpTicketFieldType = lp.LpFieldType;
 export interface LpTicketField {
   id: string;
   label: string;
+  /** 回答者に見せる補足説明（無ければキーごと持たない）。 */
+  description?: string;
   type: LpTicketFieldType;
   required: boolean;
   options: string[];
@@ -302,7 +313,7 @@ export interface LpApi {
   /** Aggregated visit counters for a day range (app:lp:view). */
   getStats(query: LpStatsQuery): Promise<LpStats>;
   /** Site-wide PV / visits / referrers from Cloudflare Web Analytics (app:lp:view). */
-  getSiteTraffic(query: LpLinksQuery): Promise<LpSiteTraffic>;
+  getSiteTraffic(query: LpSiteTrafficQuery): Promise<LpSiteTraffic>;
   /** One cursor page of raw visits, newest first (app:lp:view). */
   listVisits(query: LpVisitsQuery): Promise<LpVisitsPage>;
   /** Issued tracking links with their in-range counters (app:lp:view). */
@@ -366,14 +377,14 @@ export function createLpApi(api: ApiClient): LpApi {
     getStats: (query) => {
       const q: Record<string, string | number | boolean | undefined> = { from: query.from, to: query.to };
       if (query.includeBots !== undefined) q.includeBots = query.includeBots;
+      if (query.source !== undefined) q.source = query.source;
       return api.request<LpStats>({ method: "GET", path: `${BASE}/stats`, query: q });
     },
-    getSiteTraffic: (query) =>
-      api.request<LpSiteTraffic>({
-        method: "GET",
-        path: `${BASE}/site-traffic`,
-        query: { from: query.from, to: query.to },
-      }),
+    getSiteTraffic: (query) => {
+      const q: Record<string, string | number | boolean | undefined> = { from: query.from, to: query.to };
+      if (query.referrer !== undefined) q.referrer = query.referrer;
+      return api.request<LpSiteTraffic>({ method: "GET", path: `${BASE}/site-traffic`, query: q });
+    },
     listVisits: (query) => {
       const q: Record<string, string | number | boolean | undefined> = { from: query.from, to: query.to };
       if (query.source !== undefined) q.source = query.source;

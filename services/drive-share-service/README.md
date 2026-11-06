@@ -31,6 +31,20 @@ v3 `permissions.list/create/update/delete` and `files.list`.
 drive-proxy); they are opaque wire strings passed to identity `/authz/check`. Roles must
 grant these keys for real (non-mock) use — see below.
 
+**Role sharing address**: a role's members are shared at their 名簿 Gmail (member-service
+`POST /members/internal/google-emails`, binding `SVC_MEMBER`), else their Dub login address — the
+same rule as meeting invitations. A login address without a Google account (e.g. an Email-Routing
+alias) is refused by Drive (`cannotInviteNonGoogleUser`); such members are reported as skipped with
+"register their Gmail in 名簿". `reapply` moves a member from the login address to the Gmail once
+it is registered (our old share is removed). The drift view compares against the same addresses.
+
+**Large roles**: api-gateway cuts a request off at 15 s, Drive takes a second or more per share,
+and concurrent permission calls on one file are not safe. So apply / reapply stop at their budget
+(8 s or 25 Drive writes) and answer with `nextCursor` + `remaining`; `POST .../reapply?cursor=`
+continues (the SPA does this automatically). The ledger is written member by member, with the row
+going in before the Drive call, so a request cut off mid-way never turns our share into an
+"individual" one that 解除 would leave behind. Departed members are removed last.
+
 ## Getting the real Hackit refresh token (one-time, done by the operator)
 
 1. Google Cloud Console → create/pick a project (any account can own it).

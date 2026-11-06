@@ -46,6 +46,31 @@ export function emptyMeetingForm(now: Date = new Date()): MeetingFormValues {
   };
 }
 
+/** A repeating 予定 from the 作成 dialog, carried into the meeting form. A role label that is a
+ *  meeting target becomes the target (else 全体); the length snaps to the nearest 所要時間 option. */
+export function meetingFormFromDraft(
+  d: { title: string; description: string; label: string; startDate: string; startTime: string; endTime: string },
+  recurrence: meeting.MeetingRecurrence,
+  targets: readonly meeting.MeetingTarget[] = [],
+): MeetingFormValues {
+  const minutes = (s: string) => {
+    const [h, m] = s.split(":").map(Number);
+    return (h ?? 0) * 60 + (m ?? 0);
+  };
+  const length = minutes(d.endTime) - minutes(d.startTime);
+  const durationMinutes = DURATION_OPTIONS.reduce<number>((best, o) => (Math.abs(o - length) < Math.abs(best - length) ? o : best), DURATION_OPTIONS[0]);
+  return {
+    ...emptyMeetingForm(),
+    ...(targets.some((t) => t.id === d.label) ? { targetId: d.label } : {}),
+    title: d.title.trim().slice(0, TITLE_MAX),
+    date: d.startDate,
+    time: d.startTime,
+    durationMinutes,
+    recurrence,
+    description: d.description,
+  };
+}
+
 /** Form values for editing an existing meeting. */
 export function meetingToForm(m: meeting.Meeting): MeetingFormValues {
   const p = jstParts(m.startsAt);

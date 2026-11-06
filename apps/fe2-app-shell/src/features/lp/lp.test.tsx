@@ -16,7 +16,16 @@ import { createLpApi, type LpApi } from "./lpApi.tsx";
 import { LpApiProvider } from "./LpProvider.tsx";
 import { LpVisitLogScreen } from "./LpVisitLogScreen.tsx";
 import { niceScale } from "./TrafficLineChart.tsx";
-import { barPercent, formatDayLabel, rangeForDays, sharePercent, sourceLabel } from "./lpRange.ts";
+import {
+  barPercent,
+  customRangeError,
+  formatDayLabel,
+  formatRangeLabel,
+  rangeForDays,
+  sharePercent,
+  sourceLabel,
+  toDayKey,
+} from "./lpRange.ts";
 
 // LpTabs は router の useNavigate を使うだけなので、スクリーン単体では spy に差し替える。
 const navigateSpy = vi.fn();
@@ -157,7 +166,82 @@ describe("demo transport serves the LP visit wire contract", () => {
   });
 });
 
+describe("期間の指定 (pure)", () => {
+  it("validates a calendar range: order / future / max 92 days", () => {
+    const today = "2026-11-04";
+    expect(customRangeError("2026-10-01", "2026-10-31", today)).toBeNull();
+    expect(customRangeError("2026-10-01", null, today)).toMatch("選んでください");
+    expect(customRangeError("2026-10-31", "2026-10-01", today)).toMatch("前に");
+    expect(customRangeError("2026-11-01", "2026-11-05", today)).toMatch("未来");
+    expect(customRangeError("2026-08-04", "2026-11-03", today)).toBeNull(); // 92 日
+    expect(customRangeError("2026-08-03", "2026-11-03", today)).toMatch("92日間");
+  });
+
+  it("labels a range with the year only when it is not this year", () => {
+    expect(formatRangeLabel({ from: "2026-09-01", to: "2026-09-30" }, "2026-11-04")).toBe("9/1〜9/30");
+    expect(formatRangeLabel({ from: "2025-12-20", to: "2026-01-05" }, "2026-11-04")).toBe("2025/12/20〜2026/1/5");
+    expect(formatRangeLabel({ from: "2026-10-01", to: "2026-10-01" }, "2026-11-04")).toBe("10/1");
+  });
+});
+
 describe("LpVisitLogScreen", () => {
+  it("期間を指定: picking dates in the calendar refetches that exact range", async () => {
+    const getStats = vi.fn(emptyApi().getStats);
+    const listVisits = vi.fn(emptyApi().listVisits);
+    render(wrap({ ...emptyApi(), getStats, listVisits }));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-visits-empty")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("fe2-lp-range-custom"));
+    const sept = { from: "2026-09-01", to: "2026-09-30" };
+    fireEvent.change(screen.getByTestId("fe2-lp-range-from"), { target: { value: sept.from } });
+    fireEvent.change(screen.getByTestId("fe2-lp-range-to"), { target: { value: sept.to } });
+    await waitFor(() => expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining(sept)));
+    expect(listVisits).toHaveBeenLastCalledWith(expect.objectContaining(sept));
+    const label = formatRangeLabel(sept, toDayKey(new Date()));
+    expect(screen.getByTestId("fe2-lp-range-summary")).toHaveTextContent(label);
+
+    // 不正な期間（開始 > 終了）は取得せず、直前の期間のまま理由を出す。
+    const calls = getStats.mock.calls.length;
+    fireEvent.change(screen.getByTestId("fe2-lp-range-from"), { target: { value: "2026-10-15" } });
+    expect(screen.getByTestId("fe2-lp-range-error")).toHaveTextContent("開始日は終了日より前");
+    expect(getStats.mock.calls.length).toBe(calls);
+  });
+
+  it("流入元で絞り込み: stats + raw log ask for that source only, the picker keeps all options", async () => {
+    const api = demoLpApi();
+    const getStats = vi.fn(api.getStats);
+    const listVisits = vi.fn(api.listVisits);
+    render(wrap({ ...api, getStats, listVisits }));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-visits-body")).toBeInTheDocument());
+
+    const select = (): HTMLSelectElement => screen.getByTestId("fe2-lp-source-filter") as HTMLSelectElement;
+    const optionCount = select().options.length;
+    expect(optionCount).toBeGreaterThan(2);
+    fireEvent.change(select(), { target: { value: "instagram" } });
+    await waitFor(() => expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ source: "instagram" })));
+    expect(listVisits).toHaveBeenLastCalledWith(expect.objectContaining({ source: "instagram" }));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-visits-body")).toBeInTheDocument());
+    const table = screen.getByTestId("fe2-lp-visits-table");
+    expect(within(table).getAllByText("Instagram").length).toBeGreaterThan(0);
+    expect(within(table).queryByText("LINE")).toBeNull();
+    expect(select().options.length).toBe(optionCount);
+  });
+
+  it("サイト全体: the referrer filter asks for that referrer's totals", async () => {
+    const api = demoLpApi();
+    const getSiteTraffic = vi.fn(api.getSiteTraffic);
+    render(wrap({ ...api, getSiteTraffic }));
+    fireEvent.click(screen.getByTestId("fe2-lp-range-90"));
+    await waitFor(() => expect(screen.getByTestId("fe2-lp-site-body")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("fe2-lp-site-referrer-filter"), { target: { value: "X (Twitter)" } });
+    await waitFor(() =>
+      expect(getSiteTraffic).toHaveBeenLastCalledWith(expect.objectContaining({ referrer: "X (Twitter)" })),
+    );
+    await waitFor(() =>
+      expect(within(screen.getByTestId("fe2-lp-site-kpi-pv")).getByText(/X \(Twitter\)/)).toBeInTheDocument(),
+    );
+  });
+
   it("renders KPIs, source breakdown and raw log from the demo transport", async () => {
     render(wrap(demoLpApi()));
 

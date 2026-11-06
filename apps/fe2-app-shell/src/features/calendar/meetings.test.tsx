@@ -253,6 +253,53 @@ describe("定例ミーティングを設定", () => {
   });
 });
 
+describe("予定の作成で繰り返し", () => {
+  it("a repeating 予定 hands what was typed to the meeting form, which registers it", async () => {
+    const api = fakeApi();
+    render(wrap(<CalendarScreen />, api, EDIT));
+    await waitFor(() => expect(screen.getByTestId("calendar-meetings-create")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("calendar-create"));
+    const panel = await screen.findByTestId("calendar-create-panel");
+    await userEvent.type(within(panel).getByTestId("calendar-form-title"), "統括定例 Meeting");
+    await userEvent.selectOptions(within(panel).getByTestId("calendar-form-start-time"), "19:00");
+    await userEvent.selectOptions(within(panel).getByTestId("calendar-form-end-time"), "20:00");
+    expect(within(panel).getByTestId("calendar-form-save")).toHaveTextContent("保存");
+    await userEvent.selectOptions(within(panel).getByTestId("calendar-form-repeat"), "weekly");
+    expect(within(panel).getByTestId("calendar-form-repeat-note")).toHaveTextContent("定例ミーティング");
+    await userEvent.click(within(panel).getByTestId("calendar-form-save"));
+
+    expect(api.createTask).not.toHaveBeenCalled();
+    const dialog = await screen.findByTestId("calendar-meeting-form");
+    expect(within(dialog).getByTestId("calendar-meeting-form-title")).toHaveValue("統括定例 Meeting");
+    expect(within(dialog).getByTestId("calendar-meeting-form-time")).toHaveValue("19:00");
+    expect(within(dialog).getByTestId("calendar-meeting-form-duration")).toHaveValue("60");
+    expect(within(dialog).getByTestId("calendar-meeting-form-recurrence")).toHaveValue("weekly");
+    await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-target"), "role_lead");
+    await userEvent.click(within(dialog).getByTestId("calendar-meeting-form-submit"));
+    expect(api.createMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "統括定例 Meeting", targetId: "role_lead", durationMinutes: 60, recurrence: "weekly" }),
+    );
+  });
+
+  it("繰り返さない stays a plain 予定; no 繰り返し without meetings_edit", async () => {
+    const api = fakeApi({ createTask: vi.fn(() => new Promise<never>(() => undefined)) });
+    const { unmount } = render(wrap(<CalendarScreen />, api, EDIT));
+    await waitFor(() => expect(screen.getByTestId("calendar-meetings-create")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("calendar-create"));
+    const panel = await screen.findByTestId("calendar-create-panel");
+    await userEvent.type(within(panel).getByTestId("calendar-form-title"), "単発");
+    await userEvent.click(within(panel).getByTestId("calendar-form-save"));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalled());
+    expect(screen.queryByTestId("calendar-meeting-form")).not.toBeInTheDocument();
+    unmount();
+
+    render(wrap(<CalendarScreen />, fakeApi(), VIEW));
+    await userEvent.click(await screen.findByTestId("calendar-create"));
+    await screen.findByTestId("calendar-create-panel");
+    expect(screen.queryByTestId("calendar-form-repeat")).not.toBeInTheDocument();
+  });
+});
+
 describe("findCreatedMeeting", () => {
   const body: meeting.CreateMeetingRequest = { title: "全体定例", targetId: "all", startsAt: "2026-01-05T12:00:00Z", durationMinutes: 60, recurrence: "weekly" };
 

@@ -3,6 +3,7 @@ import type { meeting } from "@dub/types";
 import {
   emptyMeetingForm,
   isMeetingTargetVisible,
+  meetingFormFromDraft,
   parseMeetingTargetChoices,
   toMeetingRequest,
   validateMeetingForm,
@@ -67,6 +68,31 @@ describe("toMeetingRequest", () => {
   it("new form defaults to 全体 / 21:00 / 60 min / 毎週 on today's JST date", () => {
     const f = emptyMeetingForm(new Date("2026-10-13T16:00:00Z")); // 10/14 01:00 JST
     expect(f).toMatchObject({ targetId: "all", time: "21:00", durationMinutes: 60, recurrence: "weekly", date: "2026-10-14" });
+  });
+});
+
+describe("meetingFormFromDraft", () => {
+  const draft = { title: "  統括定例  ", description: "メモ", label: "personal", startDate: "2026-11-02", startTime: "19:00", endTime: "20:00" };
+  it("carries title / date / time / memo and the chosen 繰り返し (target 全体)", () => {
+    expect(meetingFormFromDraft(draft, "biweekly")).toMatchObject({
+      title: "統括定例",
+      description: "メモ",
+      date: "2026-11-02",
+      time: "19:00",
+      durationMinutes: 60,
+      recurrence: "biweekly",
+      targetId: "all",
+      until: "",
+    });
+  });
+  it("a role label that is a meeting target becomes the target", () => {
+    const targets: meeting.MeetingTarget[] = [{ id: "role_lead", name: "統括", memberCount: 2, isMine: true }];
+    expect(meetingFormFromDraft({ ...draft, label: "role_lead" }, "weekly", targets).targetId).toBe("role_lead");
+    expect(meetingFormFromDraft({ ...draft, label: "role_gone" }, "weekly", targets).targetId).toBe("all");
+  });
+  it("snaps the length to the nearest 所要時間 option", () => {
+    expect(meetingFormFromDraft({ ...draft, endTime: "19:50" }, "weekly").durationMinutes).toBe(45);
+    expect(meetingFormFromDraft({ ...draft, endTime: "23:00" }, "weekly").durationMinutes).toBe(120);
   });
 });
 

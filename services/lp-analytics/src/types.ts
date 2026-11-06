@@ -117,6 +117,8 @@ export interface AggregateQuery {
   from: string;
   to: string;
   includeBots: boolean;
+  /** Narrow to one source (utm_source slug / "direct"). Omitted = every source. */
+  source?: string;
 }
 
 export interface AggregateRow {
@@ -127,10 +129,12 @@ export interface AggregateRow {
 }
 
 // ---- tickets wire (lockstep with fe2 lpApi.tsx) ----
-export type LpTicketFieldType = "text" | "textarea" | "select" | "checkbox";
+export type LpTicketFieldType = lp.LpFieldType;
 export interface LpTicketField {
   id: string;
   label: string;
+  /** 回答者に見せる補足説明（無ければキーごと持たない）。 */
+  description?: string;
   type: LpTicketFieldType;
   required: boolean;
   options: string[];
