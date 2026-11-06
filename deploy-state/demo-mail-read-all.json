@@ -3,12 +3,12 @@
   "slug": "mail-read-all",
   "worker": "dub-demo-mail-read-all",
   "url": "https://dub-demo-mail-read-all.developershub-site.workers.dev",
-  "deployedSha": "4de96e56",
+  "deployedSha": "bbf380f7",
   "branch": "commander/task-ctask_01M6R7BWMXNPQHS3Y11T0TSVD5",
   "actor": "ko-tarou",
-  "markers": ["fe2-mail-read-all-confirm"],
+  "markers": ["fe2-mail-select-all-bar"],
   "live": true,
-  "verifiedAt": "2026-11-06T11:10:22Z",
-  "updatedAt": "2026-11-06T11:10:22Z",
-  "note": "メール: すべて既読にする"
+  "verifiedAt": "2026-11-06T11:55:07Z",
+  "updatedAt": "2026-11-06T11:55:07Z",
+  "note": "メール: 複数選択の一括操作と全件選択"
 }
