@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "63e5a3a2",
-  "branch": "commander/task-ctask_01M6R8BY2T0TKRG2V122197364",
+  "deployedSha": "154a1c88",
+  "branch": "commander/task-ctask_01M6R7Q3R7FWS2FESNH5MD0MKJ",
   "actor": "ko-tarou",
-  "markers": ["参加届の入力済みリンクをコピー", "participation-prefilled"],
+  "markers": ["fe7-roles-delete-unavailable"],
   "live": true,
-  "verifiedAt": "2026-11-06T11:30:41Z",
-  "updatedAt": "2026-11-06T11:30:41Z",
-  "note": "ctask_01M6R8BY2T0TKRG2V122197364: 申し込みフォームを参加届の形に統一 + 入力済みリンク"
+  "verifiedAt": "2026-11-06T11:09:02Z",
+  "updatedAt": "2026-11-06T11:09:02Z",
+  "note": "ctask_01M6R7Q3R7FWS2FESNH5MD0MKJ: ロール削除の導線と締め出しガード"
 }
