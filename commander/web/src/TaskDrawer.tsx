@@ -35,6 +35,7 @@ import {
   REFLECTION_COLOR,
 } from "./lib/reflection.ts";
 import { ArtifactLinks } from "./ArtifactLinks.tsx";
+import { PrCiBadge } from "./PrCiBadge.tsx";
 import { RunLog } from "./RunLog.tsx";
 import { Spinner, ProgressBar } from "./Spinner.tsx";
 import { btnDanger, btnGhost, btnPrimary, input, t } from "./lib/theme.ts";
@@ -275,6 +276,14 @@ export function TaskDrawer(props: TaskDrawerProps) {
           ))
         )}
       </div>
+
+      {/* CI status + 「確認」 (確認した label) for the task's target PR. Fetched only while the
+          detail is open — the board list never asks GitHub. */}
+      {api.prs && (item.prUrl ?? item.prUrls.at(-1)) && (
+        <div data-testid="drawer-ci" style={{ marginBottom: t.space4 }}>
+          <PrCiBadge prUrl={(item.prUrl ?? item.prUrls.at(-1))!} api={api.prs} />
+        </div>
+      )}
 
       {/* tabs */}
       <div role="tablist" style={{ display: "flex", gap: t.space2, marginBottom: t.space4 }}>
