@@ -99,7 +99,7 @@ if (useDemo && typeof document !== "undefined") {
   banner.setAttribute("role", "note");
   // Just under Modal so it never covers a dialog footer (full-height sheet on mobile).
   banner.style.cssText =
-    "position:fixed;left:0;right:0;bottom:0;z-index:calc(var(--dub-zIndex-modal, 1300) - 1);padding:6px 12px;font-size:12px;text-align:center;background:#7c2d12;color:#fff;font-family:system-ui,sans-serif";
+    "position:fixed;left:0;right:0;bottom:0;z-index:calc(var(--dub-zIndex-modal, 1300) - 1);padding:6px 12px;font-size:12px;text-align:center;background:#7c2d12;color:#fff;font-family:system-ui,sans-serif;pointer-events:none";
   document.body.appendChild(banner);
 }
 

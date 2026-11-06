@@ -334,7 +334,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
         border: "1px solid var(--dub-color-border-strong)",
         borderRadius: pos && draggable ? "var(--dub-radius-lg)" : "var(--dub-radius-lg) var(--dub-radius-lg) 0 0",
         boxShadow: "var(--dub-shadow-overlay)",
-        zIndex: 1300,
+        zIndex: "var(--dub-zIndex-modal, 1300)",
         overflow: "hidden",
       }}
     >
