@@ -120,6 +120,21 @@ export function parseReadStateRequest(body: unknown): mail.MailReadStateRequest 
   return { ids: ids as string[], read: read as boolean };
 }
 
+/** Validate POST /mail/bulk. */
+export function parseBulkRequest(body: unknown): mail.MailBulkRequest {
+  if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
+  const { folder, action } = body;
+  const fe: FieldError[] = [];
+  if (typeof folder !== "string" || !(mail.MAIL_FOLDER_VIEWS as readonly string[]).includes(folder)) {
+    fe.push({ field: "folder", reason: "invalid_enum", message: mail.MAIL_FOLDER_VIEWS.join("|") });
+  }
+  if (typeof action !== "string" || !(mail.MAIL_BULK_ACTIONS as readonly string[]).includes(action)) {
+    fe.push({ field: "action", reason: "invalid_enum", message: mail.MAIL_BULK_ACTIONS.join("|") });
+  }
+  if (fe.length > 0) throw mailInvalid(fe);
+  return { folder: folder as mail.MailFolderView, action: action as mail.MailBulkAction };
+}
+
 const DRAFT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const DRAFT_MODES: readonly string[] = ["new", "reply", "replyAll", "forward"];
 const DRAFT_ADDRESS_MAX = 10_000;

@@ -372,6 +372,8 @@ describe("reconcile (sync)", () => {
   it("stops at the Google call budget and reports incomplete (the alarm continues)", async () => {
     const { service } = buildMeetings({ roster: roster(), googleBudget: 2 });
     await expect(service.create("usr_admin", BASE)).resolves.toBeTruthy(); // calendar + event fit; sharing deferred
+    await service.create("usr_admin", { ...BASE, title: "2" });
+    await service.create("usr_admin", { ...BASE, title: "3" });
     const r = await service.sync();
     expect(r.complete).toBe(false);
   });
@@ -396,8 +398,10 @@ describe("reconcile (sync)", () => {
     expect(full.kicks).toEqual([undefined]);
     const cut = buildMeetings({ roster: roster(), googleBudget: 2 });
     await cut.service.create("usr_admin", BASE);
+    await cut.service.create("usr_admin", { ...BASE, title: "2" });
+    await cut.service.create("usr_admin", { ...BASE, title: "3" });
     await cut.service.sync();
-    expect(cut.kicks).toEqual([60_000, 60_000]);
+    expect(cut.kicks).toEqual([60_000, 60_000, 60_000, 60_000]);
   });
 
   it("an address Google refuses to share with does not block the others", async () => {

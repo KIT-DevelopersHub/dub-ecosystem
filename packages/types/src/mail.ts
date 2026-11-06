@@ -322,6 +322,15 @@ export interface MailReadStateRequest {
   read: boolean;
 }
 export const MAIL_READ_STATE_LIMIT = 500;
+/** POST /mail/bulk: apply one action to every conversation of a view, the pages the client
+ *  has not loaded included. Read state changes the viewer's own copies only (as read-state);
+ *  archive / trash are the viewer's personal flags. */
+export type MailBulkAction = "read" | "unread" | "archive" | "trash";
+export const MAIL_BULK_ACTIONS: readonly MailBulkAction[] = ["read", "unread", "archive", "trash"];
+export interface MailBulkRequest {
+  folder: MailFolderView;
+  action: MailBulkAction;
+}
 
 // ---- drafts (下書き, 0025) ----
 // A compose in progress, personal to its owner. Addresses are the raw field text: a draft may
