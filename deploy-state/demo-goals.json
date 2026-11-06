@@ -3,12 +3,12 @@
   "slug": "goals",
   "worker": "dub-demo-goals",
   "url": "https://dub-demo-goals.developershub-site.workers.dev",
-  "deployedSha": "524c6b4b",
+  "deployedSha": "fb791e71",
   "branch": "commander/task-ctask_01M6R5NP3YGSV0ZSM2JK0SMWTA",
   "actor": "ko-tarou",
-  "markers": ["fe2-goals-screen","sponsor_amount"],
+  "markers": ["fe2-goals-import-sponsor","fe2-sponsor-goals-link"],
   "live": true,
-  "verifiedAt": "2026-11-06T11:21:24Z",
-  "updatedAt": "2026-11-06T11:21:24Z",
-  "note": "目標管理アプリ"
+  "verifiedAt": "2026-11-06T11:48:44Z",
+  "updatedAt": "2026-11-06T11:48:44Z",
+  "note": "目標管理アプリ + 目標タブ連動"
 }
