@@ -51,7 +51,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn(),
     setReadState: vi.fn().mockResolvedValue(undefined),
-    markFolderRead: vi.fn().mockResolvedValue(undefined),
+    bulkAction: vi.fn().mockResolvedValue(undefined),
     listDrafts: vi.fn().mockResolvedValue([]),
     saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
     deleteDraft: vi.fn().mockResolvedValue(undefined),
@@ -245,7 +245,7 @@ describe("blocking a sender in the 3-pane mail app", () => {
     const api = fakeApi({
       listInbox: vi.fn().mockResolvedValue({ items: flagged, nextCursor: null }),
       setReadState: vi.fn().mockResolvedValue(undefined),
-      markFolderRead: vi.fn().mockResolvedValue(undefined),
+      bulkAction: vi.fn().mockResolvedValue(undefined),
       listDrafts: vi.fn().mockResolvedValue([]),
       saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
       deleteDraft: vi.fn().mockResolvedValue(undefined),

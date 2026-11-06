@@ -322,10 +322,14 @@ export interface MailReadStateRequest {
   read: boolean;
 }
 export const MAIL_READ_STATE_LIMIT = 500;
-/** POST /mail/read-all: mark every unread conversation of one view read for the viewer, the
- *  pages the client has not loaded included. Same own-copies-only rule as read-state. */
-export interface MailReadAllRequest {
+/** POST /mail/bulk: apply one action to every conversation of a view, the pages the client
+ *  has not loaded included. Read state changes the viewer's own copies only (as read-state);
+ *  archive / trash are the viewer's personal flags. */
+export type MailBulkAction = "read" | "unread" | "archive" | "trash";
+export const MAIL_BULK_ACTIONS: readonly MailBulkAction[] = ["read", "unread", "archive", "trash"];
+export interface MailBulkRequest {
   folder: MailFolderView;
+  action: MailBulkAction;
 }
 
 // ---- drafts (下書き, 0025) ----

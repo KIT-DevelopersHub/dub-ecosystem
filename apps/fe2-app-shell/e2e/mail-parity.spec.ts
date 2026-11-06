@@ -125,24 +125,42 @@ test("send errors explain themselves", async ({ page }) => {
   await expect(page.getByTestId("fe2-mail-compose-error")).toContainText("宛先");
 });
 
-test("すべて既読にする clears the folder after a confirmation", async ({ page }) => {
+test("the selection toolbar blocks the selected senders", async ({ page }) => {
   await open(page);
-  await expect(page.getByTestId("fe2-mail-gmail")).not.toHaveAttribute("data-unread", "0");
-  await shot(page, "read-all-before");
-  await page.getByTestId("fe2-mail-read-all").click();
-  const dialog = page.getByTestId("fe2-mail-read-all-confirm");
-  await expect(dialog).toContainText("受信トレイの未読の会話");
-  await shot(page, "read-all-confirm");
-  await dialog.getByRole("button", { name: "すべて既読にする" }).click();
-  await expect(page.getByTestId("fe2-mail-gmail")).toHaveAttribute("data-unread", "0");
-  await expect(page.getByTestId("fe2-mail-read-all")).toHaveCount(0);
-  await shot(page, "read-all-after");
+  await page.getByTestId("fe2-mail-select-all").click();
+  await shot(page, "bulk-selected");
+  await page.getByTestId("fe2-mail-block-bulk").click();
+  const dialog = page.getByTestId("fe2-mail-block-bulk-confirm");
+  await shot(page, "bulk-block-confirm");
+  await dialog.getByRole("button", { name: "ブロックする" }).click();
+  await expect(page.getByTestId("fe2-mail-inbox-empty")).toBeVisible();
+  await shot(page, "bulk-block-after");
 });
 
-test("すべて既読にする fits the toolbar on a phone without pushing the pager out", async ({ page }) => {
+test("全件選択 reaches past the loaded page and the toolbar fits a phone", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 720 });
-  await open(page);
-  await expect(page.getByTestId("fe2-mail-read-all")).toBeVisible();
-  await expect(page.getByTestId("fe2-mail-page-next")).toBeInViewport({ ratio: 1 });
-  await shot(page, "read-all-narrow");
+  await page.goto("/mail?demo_mail_bulk=120");
+  await expect(page.getByTestId("fe2-mail-inbox-item").first()).toBeVisible();
+  const selectAll = async (): Promise<void> => {
+    await page.getByTestId("fe2-mail-select-all").click();
+    await page.getByTestId("fe2-mail-select-all-bar-action").click();
+    await expect(page.getByTestId("fe2-mail-select-all-bar")).toContainText(/全1\d\d件を選択中/);
+  };
+  const confirm = () => page.getByTestId("fe2-mail-bulk-confirm").getByRole("button", { name: "実行する" }).click();
+
+  await selectAll();
+  await expect(page.getByTestId("fe2-mail-read-all")).toBeInViewport({ ratio: 1 });
+  await shot(page, "bulk-all-narrow");
+  await page.getByTestId("fe2-mail-read-all").click();
+  await shot(page, "bulk-all-confirm");
+  await confirm();
+  await expect(page.getByTestId("fe2-mail-gmail")).toHaveAttribute("data-unread", "0");
+  await expect(page.getByTestId("fe2-mail-select-all-bar")).toHaveCount(0);
+
+  // Archiving empties the folder only if the pages never loaded went too.
+  await selectAll();
+  await page.getByTestId("fe2-mail-archive-all").click();
+  await confirm();
+  await expect(page.getByTestId("fe2-mail-inbox-empty")).toBeVisible();
+  await shot(page, "bulk-all-archived");
 });

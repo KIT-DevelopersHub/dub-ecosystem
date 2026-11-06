@@ -24,16 +24,27 @@ export function useReadState(): (threadIds: string[], read: boolean) => void {
   );
 }
 
-/** すべて既読にする for the current folder. The loaded rows flip immediately; the server covers
- *  the pages not loaded, so the sync after it (either way) is what settles the badges. */
-export function useMarkFolderRead(): () => void {
+/** Apply one action to the whole folder (全件選択). The loaded rows move immediately; the
+ *  server covers the pages not loaded, and the sync after it, either way, settles the rest.
+ *  No undo: the snapshot would only cover the loaded page, so the toolbar confirms first. */
+export function useBulkAction(): (action: mail.MailBulkAction) => void {
   const api = useMailApi();
   const { state, dispatch } = useMailStore();
-  return useCallback(() => {
-    dispatch({ type: "SET_READ", ids: selectVisible(state).map((t) => t.id), read: true });
-    void api
-      .markFolderRead(serverViewOf(state.folder, null))
-      .catch(() => dispatch({ type: "BLOCK_NOTICE", notice: { status: "failed", text: "すべて既読にできませんでした" } }))
-      .finally(() => dispatch({ type: "REQUEST_SYNC" }));
-  }, [api, dispatch, state]);
+  return useCallback(
+    (action) => {
+      const ids = selectVisible(state).map((t) => t.id);
+      if (action === "read" || action === "unread") dispatch({ type: "SET_READ", ids, read: action === "read" });
+      else {
+        dispatch({ type: action === "archive" ? "ARCHIVE" : "TRASH", ids });
+        dispatch({ type: "DISMISS_UNDO" });
+        // The rows leave the view, so a page cursor past the first would point at nothing.
+        dispatch({ type: "SET_FOLDER", folder: state.folder });
+      }
+      void api
+        .bulkAction(serverViewOf(state.folder, null), action)
+        .catch(() => dispatch({ type: "BLOCK_NOTICE", notice: { status: "failed", text: "全件への操作を完了できませんでした" } }))
+        .finally(() => dispatch({ type: "REQUEST_SYNC" }));
+    },
+    [api, dispatch, state],
+  );
 }

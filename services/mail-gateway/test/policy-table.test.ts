@@ -127,7 +127,7 @@ const READS = [
   "POST /mail/blocks",
   "POST /mail/flags/:threadId",
   "POST /mail/messages/:id/read",
-  "POST /mail/read-all",
+  "POST /mail/bulk",
   "POST /mail/read-state",
   "PATCH /mail/forward",
   "PUT /mail/forward",

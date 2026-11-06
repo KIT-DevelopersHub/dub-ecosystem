@@ -22,6 +22,7 @@ import {
   inboundSelect,
   rowToListItem,
   setInboundReadState,
+  setThreadsFlag,
   type InboundRow,
   type InboundScope,
 } from "./repo";
@@ -148,21 +149,26 @@ export async function listInboundFolder(
   };
 }
 
-/** Mark every unread conversation of a view read for the viewer. The ids are resolved before
- *  stamping: the delivery stamp alone would take a thread out of `unread_n`, and the legacy
- *  stamp would then miss it. Batched and idempotent, so a retry finishes a partial failure.
- *  Returns the messages considered, like POST /mail/read-state. */
-export async function markFolderRead(db: DbClient, scope: InboundScope, viewer: string, folder: View): Promise<number> {
+/** Apply one action to every conversation of a view (POST /mail/bulk). Targets are resolved
+ *  before anything is written: the delivery stamp alone would take a thread out of `unread_n`,
+ *  and the legacy stamp would then miss it. Batched and idempotent, so a retry finishes a
+ *  partial failure. Returns the conversations (flags) or messages (read state) considered. */
+export async function applyBulkAction(db: DbClient, scope: InboundScope, viewer: string, folder: View, action: mail.MailBulkAction): Promise<number> {
   const from = viewFrom(scope, viewer, undefined);
-  const rows = await db.all<{ id: string }>(
-    `SELECT id FROM mail_inbound WHERE thread_id IN (SELECT t.thread_id ${from.sql} WHERE ${VIEW_PREDICATE[folder]} AND t.unread_n = 1)`,
-    ...from.binds,
-  );
-  const ids = rows.map((r) => r.id);
-  for (let i = 0; i < ids.length; i += mail.MAIL_READ_STATE_LIMIT) {
-    await setInboundReadState(db, ids.slice(i, i + mail.MAIL_READ_STATE_LIMIT), viewer, true);
+  const pred = VIEW_PREDICATE[folder];
+  const threadsSql = `SELECT t.thread_id AS thread_id ${from.sql} WHERE ${pred}`;
+  const inBatches = async (ids: string[], run: (batch: string[]) => Promise<void>): Promise<number> => {
+    for (let i = 0; i < ids.length; i += mail.MAIL_READ_STATE_LIMIT) await run(ids.slice(i, i + mail.MAIL_READ_STATE_LIMIT));
+    return ids.length;
+  };
+  if (action === "archive" || action === "trash") {
+    const rows = await db.all<{ thread_id: string }>(threadsSql, ...from.binds);
+    const flag = action === "archive" ? "archived" : "trashed";
+    return inBatches(rows.map((r) => r.thread_id), (ids) => setThreadsFlag(db, viewer, ids, flag));
   }
-  return ids.length;
+  const read = action === "read";
+  const rows = await db.all<{ id: string }>(`SELECT id FROM mail_inbound WHERE thread_id IN (${threadsSql}${read ? " AND t.unread_n = 1" : ""})`, ...from.binds);
+  return inBatches(rows.map((r) => r.id), (ids) => setInboundReadState(db, ids, viewer, read));
 }
 
 /** Conversations + unread conversations per view, for the sidebar (one aggregate query). */
