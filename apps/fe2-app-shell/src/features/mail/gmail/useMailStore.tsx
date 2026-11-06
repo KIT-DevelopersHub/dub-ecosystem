@@ -8,7 +8,8 @@
 // mutations stay optimistic and in-memory (server persistence is a later slice).
 import { createContext, useContext, useMemo, useReducer, type Dispatch, type ReactNode } from "react";
 import type { mail } from "@dub/types";
-import { SELF, hasSharedMail, inFolder, matchesQuery, senderMatcher, threadBlocked, threadUnread, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
+import type { AttachmentSource } from "../mailApi.tsx";
+import { SELF, hasSharedMail, inFolder, lastSentAt, matchesQuery, partitionNudged, pendingReplyIds, senderMatcher, threadBlocked, threadUnread, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 export interface ComposeState {
   id: string;
@@ -26,6 +27,12 @@ export interface ComposeState {
    *  SendMailRequest.inReplyTo so In-Reply-To/References are stamped and the thread links.
    *  Undefined for a brand-new compose or a forward. */
   inReplyTo?: string;
+  /** True when this window edits a draft already on the server. */
+  persisted?: boolean;
+  /** Stored files to pull in on open: a forward's originals, or a reopened draft's. */
+  seed?: { source: AttachmentSource; messageId: string; attachments: mail.MailAttachment[] };
+  /** Files read in a previous window of this compose (restored after a failed send). */
+  seedInputs?: { input: mail.MailAttachmentInput; remoteId?: string }[];
 }
 
 /** One outbound send/schedule, kept until the gateway answers so a failure can restore
@@ -37,6 +44,8 @@ export interface PendingSend {
   compose: ComposeState;
   /** Optimistic Sent entry to drop on failure. */
   threadId?: string;
+  /** Optimistic inline reply to drop from its thread on failure. */
+  appended?: { threadId: string; messageId: string };
   /** Idempotency key for a send: the retry bar re-sends with the SAME key, so a request
    *  that actually went out before failing on the wire is not delivered twice. */
   idempotencyKey?: string;
@@ -45,6 +54,8 @@ export interface PendingSend {
 export interface SendNotice {
   status: "sending" | "sent" | "failed";
   pending: PendingSend;
+  /** Why it failed, when that is something the user can act on. */
+  reason?: string;
 }
 
 export interface UndoState {
@@ -85,6 +96,7 @@ export function serverViewOf(folder: FolderId, labelFilter: string | null): mail
     case "archive":
     case "trash":
     case "blocked":
+    case "all":
       return folder;
     default:
       return "inbox";
@@ -117,7 +129,7 @@ export function showSharedFolders(state: MailState): boolean {
  *  so the badge moves instantly and the next sync reconciles. Falls back to the loaded
  *  threads when the gateway has no counts. ブロック済み never shows unread. */
 export function folderUnread(state: MailState, folder: FolderId): number {
-  if (folder === "blocked") return 0;
+  if (folder === "blocked" || folder === "all") return 0;
   const counted = (COUNTED_FOLDERS as readonly string[]).includes(folder);
   const now = clientUnread(state.threads, folder);
   if (!state.counts || !counted) return now;
@@ -147,6 +159,8 @@ export interface MailState {
   folder: FolderId;
   labelFilter: string | null; // active user-label filter (mutually exclusive-ish with folder)
   openThreadId: string | null;
+  /** Keyboard cursor over the list (j / k), independent of selection. */
+  cursorId: string | null;
   checked: Set<string>;
   search: string;
   composes: ComposeState[];
@@ -158,6 +172,9 @@ export interface MailState {
   /** Parked future sends (予約送信) — the Scheduled folder's list, loaded from the gateway
    *  (GET /mail/scheduled) by useMailSync. Not thread-backed: rendered by ScheduledList. */
   scheduled: mail.ScheduledSendListItem[];
+  /** Server drafts (GET /mail/drafts), newest first — the 下書き folder's list. Not
+   *  thread-backed; kept current by useServerDraft as a compose autosaves. */
+  drafts: mail.MailDraft[];
   pager: Record<PageSource, PagerState>;
   /** True while the list is (re)loading for a page change or the first load — shows the
    *  skeleton. Background refetches leave it false so the list never flickers. */
@@ -198,17 +215,22 @@ export type MailAction =
   | { type: "ARCHIVE"; ids: string[] }
   | { type: "TRASH"; ids: string[] }
   | { type: "PURGE"; ids: string[] } // 完全に削除: per-user permanent hide (no undo/restore)
-  | { type: "RESTORE"; ids: string[] }
+  | { type: "RESTORE"; ids: string[]; label?: string }
+  | { type: "SET_CURSOR"; id: string | null }
+  | { type: "HYDRATE_DRAFTS"; drafts: mail.MailDraft[] }
+  | { type: "UPSERT_DRAFT"; draft: mail.MailDraft }
+  | { type: "SET_DRAFT_ATTACHMENTS"; id: string; attachments: mail.MailAttachment[] }
+  | { type: "REMOVE_DRAFT"; id: string }
   | { type: "DISMISS_NUDGE"; ids: string[] } // 返信不要: drop from the reply nudge (undoable)
   | { type: "TOGGLE_LABEL"; id: string; label: string }
   | { type: "TOGGLE_CHECK"; id: string }
   | { type: "CHECK_ALL"; ids: string[] }
   | { type: "CLEAR_CHECKS" }
-  | { type: "ADD_MESSAGE"; threadId: string; body: string; to: MailPerson[]; cc?: MailPerson[]; bcc?: MailPerson[]; subject: string }
+  | { type: "ADD_MESSAGE"; threadId: string; messageId?: string; body: string; to: MailPerson[]; cc?: MailPerson[]; bcc?: MailPerson[]; subject: string }
   | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; bcc?: MailPerson[]; subject: string; body: string; threadId?: string }
   | { type: "SEND_STARTED"; pending: PendingSend }
   | { type: "SEND_OK"; pending: PendingSend }
-  | { type: "SEND_FAILED"; pending: PendingSend }
+  | { type: "SEND_FAILED"; pending: PendingSend; reason?: string }
   | { type: "DISMISS_SEND_NOTICE" }
   | { type: "OPEN_COMPOSE"; compose: Partial<ComposeState> }
   | { type: "UPDATE_COMPOSE"; id: string; patch: Partial<ComposeState> }
@@ -273,6 +295,18 @@ export function selectVisible(state: MailState): MailThreadModel[] {
     .sort((a, b) => latest(b).localeCompare(latest(a)));
 }
 
+/** The list rows in screen order: selectVisible, with the inbox's pinned 返信待ち group first
+ *  and Sent / すべてのメール (which merge two server lists) newest first. */
+export function selectOrdered(state: MailState, now: Date = new Date()): MailThreadModel[] {
+  const visible = selectVisible(state);
+  if (state.labelFilter || state.search.trim().length > 0) return visible;
+  if (state.folder === "sent") return [...visible].sort((a, b) => lastSentAt(b).localeCompare(lastSentAt(a)));
+  if (state.folder === "all") return [...visible].sort((a, b) => latest(b).localeCompare(latest(a)));
+  if (state.folder !== "inbox") return visible;
+  const { nudged, rest } = partitionNudged(visible, now, pendingReplyIds(state.scheduled));
+  return [...nudged, ...rest];
+}
+
 /** Re-derive `threads[].blocked` after any change to the threads or the block list. Keeps
  *  thread identity when nothing changed so memoized consumers don't re-render needlessly. */
 function withBlocked(prev: MailState, next: MailState): MailState {
@@ -306,6 +340,7 @@ function baseReducer(state: MailState, action: MailAction): MailState {
         folder: action.folder,
         labelFilter: null,
         openThreadId: null,
+        cursorId: null,
         search: "",
         checked: new Set(),
         ...(paged
@@ -383,6 +418,7 @@ function baseReducer(state: MailState, action: MailAction): MailState {
       return {
         ...state,
         openThreadId: action.id,
+        cursorId: action.id,
         threads: setRead(state.threads, new Set([action.id]), true),
       };
     case "CLOSE_THREAD":
@@ -393,7 +429,23 @@ function baseReducer(state: MailState, action: MailAction): MailState {
         threads: state.threads.map((t) => (t.id === action.id ? { ...t, starred: !t.starred } : t)),
       };
     case "SET_READ":
-      return { ...state, threads: setRead(state.threads, new Set(action.ids), action.read), checked: new Set() };
+      return {
+        ...state,
+        threads: setRead(state.threads, new Set(action.ids), action.read),
+        checked: new Set(),
+        // 未読にする on the open conversation goes back to the list (Gmail): staying would read it again.
+        openThreadId: !action.read && state.openThreadId && action.ids.includes(state.openThreadId) ? null : state.openThreadId,
+      };
+    case "SET_CURSOR":
+      return { ...state, cursorId: action.id };
+    case "HYDRATE_DRAFTS":
+      return { ...state, drafts: action.drafts };
+    case "UPSERT_DRAFT":
+      return { ...state, drafts: [action.draft, ...state.drafts.filter((d) => d.id !== action.draft.id)] };
+    case "SET_DRAFT_ATTACHMENTS":
+      return { ...state, drafts: state.drafts.map((d) => (d.id === action.id ? { ...d, attachments: action.attachments } : d)) };
+    case "REMOVE_DRAFT":
+      return { ...state, drafts: state.drafts.filter((d) => d.id !== action.id) };
     case "ARCHIVE": {
       const ids = new Set(action.ids);
       return {
@@ -438,7 +490,7 @@ function baseReducer(state: MailState, action: MailAction): MailState {
       const ids = new Set(action.ids);
       return {
         ...state,
-        undo: { label: `${ids.size}件のスレッドを受信トレイに戻しました`, prevThreads: state.threads },
+        undo: { label: action.label ?? `${ids.size}件のスレッドを受信トレイに戻しました`, prevThreads: state.threads },
         threads: state.threads.map((t) =>
           ids.has(t.id) ? { ...t, folder: t.messages.every((m) => m.outbound) ? "sent" : "inbox" } : t,
         ),
@@ -492,7 +544,7 @@ function baseReducer(state: MailState, action: MailAction): MailState {
                 messages: [
                   ...t.messages,
                   {
-                    id: uid("msg"),
+                    id: action.messageId ?? uid("msg"),
                     from: state.me,
                     to: action.to,
                     ...(action.cc && action.cc.length > 0 ? { cc: action.cc } : {}),
@@ -543,11 +595,15 @@ function baseReducer(state: MailState, action: MailAction): MailState {
     case "SEND_FAILED": {
       const { pending } = action;
       const reopened = state.composes.some((c) => c.id === pending.compose.id);
+      const appended = pending.appended;
+      const threads = pending.threadId ? state.threads.filter((t) => t.id !== pending.threadId) : state.threads;
       return {
         ...state,
-        threads: pending.threadId ? state.threads.filter((t) => t.id !== pending.threadId) : state.threads,
+        threads: appended
+          ? threads.map((t) => (t.id === appended.threadId ? { ...t, messages: t.messages.filter((m) => m.id !== appended.messageId) } : t))
+          : threads,
         composes: reopened ? state.composes : [...state.composes, { ...pending.compose, minimized: false }],
-        sendNotice: { status: "failed", pending },
+        sendNotice: { status: "failed", pending, ...(action.reason ? { reason: action.reason } : {}) },
       };
     }
     case "DISMISS_SEND_NOTICE":
@@ -672,6 +728,7 @@ export const initialMailState: MailState = {
   folder: "inbox",
   labelFilter: null,
   openThreadId: null,
+  cursorId: null,
   checked: new Set(),
   search: "",
   composes: [],
@@ -679,6 +736,7 @@ export const initialMailState: MailState = {
   sendNotice: null,
   syncNonce: 0,
   scheduled: [],
+  drafts: [],
   pager: { inbox: FIRST_PAGE, sent: FIRST_PAGE },
   listLoading: true,
   searchResults: NO_SEARCH,

@@ -1,13 +1,10 @@
 // Left navigation pane: compose button, primary folders with unread badges, and
 // user labels. Layout/behaviour follows Gmail; all visuals are @dub/tokens +
 // our own line icons (no Google assets).
-import { NAV_FOLDERS, SHARED_FOLDERS, inFolder, type FolderId } from "./mailModel.ts";
+import { NAV_FOLDERS, SHARED_FOLDERS } from "./mailModel.ts";
 import { MailIcon, type MailIconName } from "./icons.tsx";
 import { folderUnread, showSharedFolders, useMailStore } from "./useMailStore.tsx";
-
-function count(folder: FolderId, threads: ReturnType<typeof useMailStore>["state"]["threads"]): number {
-  return threads.filter((t) => inFolder(t, folder)).length;
-}
+import { useCanCompose } from "../MailProvider.tsx";
 
 /** `inDrawer`: rendered inside the phone nav drawer — fills it, rows grow to a
  *  44px touch height, and `onNavigate` closes the drawer after a pick. */
@@ -16,6 +13,7 @@ export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boole
   const rowHeight = inDrawer ? 44 : 32;
   // 自分宛て / 自分宛て以外 only appear for viewers who can see someone else's mail.
   const showShared = showSharedFolders(state);
+  const canCompose = useCanCompose();
 
   return (
     <nav
@@ -30,6 +28,7 @@ export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boole
         overflowY: "auto",
       }}
     >
+      {canCompose ? (
       <button
         type="button"
         data-testid="fe2-mail-compose-open"
@@ -58,14 +57,15 @@ export function MailSidebar({ inDrawer = false, onNavigate }: { inDrawer?: boole
         <MailIcon name="compose" size={20} />
         作成
       </button>
+      ) : null}
 
-      {NAV_FOLDERS.filter((f) => showShared || !SHARED_FOLDERS.has(f.id)).map((f) => {
+      {NAV_FOLDERS.filter((f) => (showShared || !SHARED_FOLDERS.has(f.id)) && (canCompose || f.id !== "drafts")).map((f) => {
         const active = state.labelFilter === null && state.folder === f.id;
         const unread =
           f.id === "scheduled"
             ? state.scheduled.length // 予約済み is not thread-backed: count the parked sends
             : f.id === "drafts"
-              ? count(f.id, state.threads)
+              ? state.drafts.length // 下書き is not thread-backed either
               : // Server counts (whole mailbox, same SQL as the folder list) + local changes;
                 // ブロック済み never shows unread.
                 folderUnread(state, f.id);

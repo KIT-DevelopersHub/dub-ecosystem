@@ -25,6 +25,12 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getScheduled: vi.fn(),
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn().mockResolvedValue({ id: "sch", status: "canceled" }),
+    setReadState: vi.fn().mockResolvedValue(undefined),
+    listDrafts: vi.fn().mockResolvedValue([]),
+    saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
+    deleteDraft: vi.fn().mockResolvedValue(undefined),
+    addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
+    removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
     listBlocks: vi.fn().mockResolvedValue([]),
     addBlock: vi.fn().mockImplementation((req: { value: string; kind?: "address" | "domain" }) => Promise.resolve({ value: req.value.toLowerCase(), kind: req.kind ?? "address", createdAt: "2026-01-01T00:00:00.000Z" })),
     getForward: vi.fn().mockResolvedValue({ target: null, status: "none", enabled: false, active: false, available: true, requestedAt: null, verifiedAt: null, lastResult: null, lastError: null, lastAt: null }),
@@ -153,6 +159,7 @@ describe("Bcc", () => {
     await userEvent.click(await screen.findByTestId("fe2-mail-compose-bcc-toggle"));
     await userEvent.type(screen.getByTestId("fe2-mail-compose-to"), "bob@example.com,");
     await userEvent.type(await screen.findByTestId("fe2-mail-compose-bcc"), "secret@example.com,");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-subject"), "件名");
     await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
     const bar = await screen.findByTestId("fe2-mail-send-notice");
     await waitFor(() => expect(bar).toHaveAttribute("data-status", "failed"));

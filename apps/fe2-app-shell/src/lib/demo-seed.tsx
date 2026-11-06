@@ -676,6 +676,30 @@ MAIL_DETAIL.msg_5 = {
   textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
 };
 
+// HTML mail: layout from the sender, an inline cid: image from its own attachments, a remote
+// image that stays off until 画像を表示, plus markup the sanitizer has to take out.
+const MSG_HTML: mail.MailMessageListItem = {
+  id: "msg_html", messageId: "<mhtml@demo>", threadId: "thr_html", from: { email: "news@conf.example", name: "カンファレンス事務局" },
+  to: [{ email: "demo@developershub.jp" }], subject: "【HTMLメール】カンファレンス開催のお知らせ",
+  snippet: "今年のカンファレンスの開催概要をお知らせします。", receivedAt: daysAgoIso(0.02), read: false, mine: true,
+};
+MAIL_DETAIL.msg_html = {
+  ...MSG_HTML,
+  textBody: "今年のカンファレンスの開催概要をお知らせします。\n日程: 11月30日\n会場: 金沢工業大学",
+  htmlBody:
+    `<script>alert("xss")</script>` +
+    `<table width="100%" cellpadding="0" cellspacing="0" style="position:fixed; top:0; background-color:#f4f6fb"><tr><td align="center" style="padding:24px">` +
+    `<img src="cid:logo@demo" alt="ロゴ" width="48" height="48">` +
+    `<h1 style="color:#1a56db; font-size:22px" onclick="alert(1)">カンファレンス開催のお知らせ</h1>` +
+    `<p style="color:#374151">今年のカンファレンスの開催概要をお知らせします。</p>` +
+    `<table style="border-collapse:collapse"><tr><td style="padding:4px 12px; border:1px solid #d1d5db">日程</td><td style="padding:4px 12px; border:1px solid #d1d5db">11月30日</td></tr>` +
+    `<tr><td style="padding:4px 12px; border:1px solid #d1d5db">会場</td><td style="padding:4px 12px; border:1px solid #d1d5db">金沢工業大学</td></tr></table>` +
+    `<p><img src="https://placehold.co/480x120/png?text=Dub+Conference" alt="バナー" width="480"></p>` +
+    `<p><a href="https://example.com/register" style="color:#fff; background-color:#1a56db; padding:8px 16px">参加登録</a> <a href="javascript:alert(1)">危険なリンク</a></p>` +
+    `</td></tr></table>`,
+  attachments: [{ ...seedMailImageBlob("mailatt_demo_logo", "logo.png", "image/png", DEMO_PNG_8x8), contentId: "logo@demo" }],
+};
+
 // Tricky-URL mail (ハイパーリンク表示の回帰確認用): long unbroken URLs, URLs glued to
 // Japanese brackets/punctuation, query/fragment/percent-encoding, Gmail-style
 // "label <url>" plain-text links and an angle-bracketed URL hard-wrapped across lines.
@@ -1099,11 +1123,12 @@ function createMailStore() {
   // Idempotency (x-dub-idempotency-key, scoped per account like the gateway): a repeated
   // submit returns the first send's ack instead of appending a second Sent row.
   const idemAcks = new Map<string, mail.SendMailResponse>();
+  const draftsByAccount: Record<string, mail.MailDraft[]> = {};
 
   function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
-      const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
+      const m = /^\/api\/v1\/mail\/(?:messages|sent|drafts)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const blob = DEMO_MAIL_BLOBS.get(decodeURIComponent(m[1]!));
         if (!blob) return notFound(`GET ${pathname}`);
@@ -1222,6 +1247,46 @@ function createMailStore() {
       if (m && method === "GET") {
         const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
         return found ? json(stampBlocked(found)) : notFound(`GET ${pathname}`);
+      }
+    }
+    // 既読 / 未読 for a selection: this account's own copies only, as on the gateway.
+    if (method === "POST" && pathname === "/api/v1/mail/read-state") {
+      const { ids, read } = body as mail.MailReadStateRequest;
+      const own = new Set(ids);
+      for (const r of inboxOf(me.id)) if (own.has(r.id)) r.read = read;
+      return json({ updated: ids.length, read });
+    }
+    // 下書き: per-account, in-session (a reload resets, like Sent).
+    {
+      const list = (draftsByAccount[me.id] ??= []);
+      if (pathname === "/api/v1/mail/drafts" && method === "GET") return json({ items: [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) });
+      const one = /^\/api\/v1\/mail\/drafts\/([^/]+)$/.exec(pathname);
+      if (one && method === "PUT") {
+        const id = decodeURIComponent(one[1]!);
+        const prev = list.find((d) => d.id === id);
+        const saved: mail.MailDraft = { ...(body as mail.MailDraftInput), id, updatedAt: new Date().toISOString(), attachments: prev?.attachments ?? [] };
+        draftsByAccount[me.id] = [saved, ...list.filter((d) => d.id !== id)];
+        return json(saved);
+      }
+      if (one && method === "DELETE") {
+        draftsByAccount[me.id] = list.filter((d) => d.id !== decodeURIComponent(one[1]!));
+        return json({ deleted: true });
+      }
+      const files = /^\/api\/v1\/mail\/drafts\/([^/]+)\/attachments(?:\/([^/]+))?$/.exec(pathname);
+      if (files && method !== "GET") {
+        const draft = list.find((d) => d.id === decodeURIComponent(files[1]!));
+        if (!draft) return notFound(`${method} ${pathname}`);
+        if (method === "DELETE") {
+          draft.attachments = draft.attachments.filter((a) => a.id !== decodeURIComponent(files[2] ?? ""));
+          return json({ deleted: true });
+        }
+        const input = body as mail.MailAttachmentInput;
+        const bytes = b64ToBytes(input.contentBase64);
+        const attId = `mailatt_draft_${++attSeq}`;
+        DEMO_MAIL_BLOBS.set(attId, { filename: input.filename, contentType: input.contentType, bytes });
+        const meta: mail.MailAttachment = { id: attId, filename: input.filename, contentType: input.contentType, sizeBytes: bytes.byteLength };
+        draft.attachments = [...draft.attachments, meta];
+        return json(meta);
       }
     }
     if (method === "POST") {

@@ -15,8 +15,72 @@ const ALLOWED_TAGS = new Set([
   "a", "b", "strong", "i", "em", "u", "s", "br", "p", "div", "span", "blockquote",
   "ul", "ol", "li", "pre", "code", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "img",
   "table", "thead", "tbody", "tr", "td", "th",
+  "center", "font", "small", "sub", "sup", "caption", "tfoot", "dl", "dt", "dd", "del", "ins", "mark", "strike",
 ]);
 const DROP_WHOLE = new Set(["script", "style", "iframe", "object", "embed", "noscript", "template", "svg", "math"]);
+
+/** Mail-view mode (HtmlMailBody): keep the layout the sender wrote, and take over images.
+ *  A remote image is a tracking pixel until proven otherwise, so its URL parks in data-src
+ *  until the reader asks for it; a cid: image parks in data-cid until its attachment loads. */
+export interface MailHtmlOptions {
+  remoteImages: boolean;
+}
+
+// Presentation only. No position / inset / transform / z-index, and nothing that can load a
+// URL, so a message can neither escape its pane nor overlay the app.
+const ALLOWED_STYLE = new Set([
+  "color", "background-color", "font-size", "font-weight", "font-style", "font-family", "text-align",
+  "text-decoration", "line-height", "letter-spacing", "vertical-align", "white-space", "display",
+  "width", "max-width", "min-width", "height", "max-height", "min-height",
+  "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+  "margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
+  "border", "border-top", "border-right", "border-bottom", "border-left", "border-color", "border-width",
+  "border-style", "border-radius", "border-collapse", "border-spacing",
+]);
+const UNSAFE_STYLE_VALUE = /url\s*\(|expression|javascript:|@import|behavior|[<>\\]/i;
+const NEGATIVE_MARGIN = /(^|\s)-\d/;
+
+function safeStyle(value: string): string {
+  const kept: string[] = [];
+  for (const decl of value.split(";")) {
+    const at = decl.indexOf(":");
+    if (at < 0) continue;
+    const prop = decl.slice(0, at).trim().toLowerCase();
+    const val = decl.slice(at + 1).trim();
+    if (!ALLOWED_STYLE.has(prop) || !val || UNSAFE_STYLE_VALUE.test(val)) continue;
+    if (prop.startsWith("margin") && NEGATIVE_MARGIN.test(val)) continue;
+    kept.push(`${prop}: ${val}`);
+  }
+  return kept.join("; ");
+}
+
+const LAYOUT_ATTRS: Record<string, ReadonlySet<string>> = {
+  table: new Set(["width", "height", "align", "bgcolor", "border", "cellpadding", "cellspacing"]),
+  tr: new Set(["align", "valign", "bgcolor"]),
+  td: new Set(["width", "height", "align", "valign", "bgcolor", "colspan", "rowspan"]),
+  th: new Set(["width", "height", "align", "valign", "bgcolor", "colspan", "rowspan"]),
+  img: new Set(["width", "height"]),
+  font: new Set(["color", "size", "face"]),
+  div: new Set(["align"]),
+  p: new Set(["align"]),
+};
+
+function scrubMailAttribute(el: Element, tag: string, name: string, value: string, opts: MailHtmlOptions): boolean {
+  if (name === "style") {
+    const style = safeStyle(value);
+    if (style) el.setAttribute("style", style);
+    else el.removeAttribute("style");
+    return true;
+  }
+  if (tag === "img" && name === "src") {
+    el.removeAttribute("src");
+    const cid = /^cid:(.+)$/i.exec(value.trim());
+    if (cid) el.setAttribute("data-cid", cid[1]!);
+    else if (safeUrl(value) && /^https?:/i.test(value.trim())) el.setAttribute(opts.remoteImages ? "src" : "data-src", value.trim());
+    return true;
+  }
+  return LAYOUT_ATTRS[tag]?.has(name) === true;
+}
 
 function safeUrl(value: string): string | null {
   const v = value.trim();
@@ -25,10 +89,11 @@ function safeUrl(value: string): string | null {
   return null;
 }
 
-function scrubAttributes(el: Element): void {
+function scrubAttributes(el: Element, mailOpts?: MailHtmlOptions): void {
   const tag = el.tagName.toLowerCase();
   for (const attr of Array.from(el.attributes)) {
     const name = attr.name.toLowerCase();
+    if (mailOpts && scrubMailAttribute(el, tag, name, attr.value, mailOpts)) continue;
     if (tag === "a" && (name === "href" || name === "title")) {
       if (name === "href") {
         const url = safeUrl(attr.value);
@@ -54,7 +119,7 @@ function scrubAttributes(el: Element): void {
   }
 }
 
-function walk(node: Node, doc: Document): void {
+function walk(node: Node, doc: Document, mailOpts?: MailHtmlOptions): void {
   // Iterate over a snapshot: we mutate the tree as we go.
   for (const child of Array.from(node.childNodes)) {
     if (child.nodeType === 3 /* text */ || child.nodeType === 8 /* comment */) {
@@ -73,7 +138,7 @@ function walk(node: Node, doc: Document): void {
     }
     if (!ALLOWED_TAGS.has(tag)) {
       // Unwrap: replace the element with its (recursively-sanitized) children.
-      walk(el, doc);
+      walk(el, doc, mailOpts);
       const parent = el.parentNode;
       if (parent) {
         while (el.firstChild) parent.insertBefore(el.firstChild, el);
@@ -81,16 +146,16 @@ function walk(node: Node, doc: Document): void {
       }
       continue;
     }
-    scrubAttributes(el);
-    walk(el, doc);
+    scrubAttributes(el, mailOpts);
+    walk(el, doc, mailOpts);
   }
 }
 
 /** Sanitize an untrusted HTML string into a safe subset. Returns "" when the platform
  *  DOM parser is unavailable (SSR) — callers fall back to the plain-text body. */
-export function sanitizeHtml(html: string): string {
+export function sanitizeHtml(html: string, mailOpts?: MailHtmlOptions): string {
   if (typeof DOMParser === "undefined") return "";
   const doc = new DOMParser().parseFromString(html, "text/html");
-  walk(doc.body, doc);
+  walk(doc.body, doc, mailOpts);
   return doc.body.innerHTML;
 }

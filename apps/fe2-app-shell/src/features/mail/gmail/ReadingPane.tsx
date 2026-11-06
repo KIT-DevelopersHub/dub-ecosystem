@@ -29,7 +29,12 @@ import { SenderAvatar, recipientIcon } from "./SenderAvatar.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
 import { BlockSenderMenu, BlockedBanner } from "./BlockedSenders.tsx";
-import { uid, useMailStore } from "./useMailStore.tsx";
+import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
+import { useReadState } from "./useReadState.tsx";
+import { useServerDraft } from "./useServerDraft.ts";
+import { openDraft } from "./DraftList.tsx";
+import { HtmlMailBody, inlineContentIds } from "./HtmlMailBody.tsx";
+import { shortcutsBlocked } from "./shortcuts.ts";
 import styles from "./replyNudge.module.css";
 import inlineStyles from "./InlineReply.module.css";
 import { SchedulePicker } from "./SchedulePicker.tsx";
@@ -37,9 +42,24 @@ import { deliver } from "./sendMail.ts";
 import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
 import { AttachmentPreview } from "../AttachmentPreview.tsx";
 import { useComposeAttachments } from "../useComposeAttachments.tsx";
-import { useMailApi } from "../MailProvider.tsx";
+import { useCanCompose, useMailApi } from "../MailProvider.tsx";
 import { LinkifiedText } from "../MailBody.tsx";
 import { formatBytes, newIdempotencyKey, parseRecipients, saveBlob } from "../mailApi.tsx";
+
+const addressLine = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
+
+/** Gmail's forward header above the original text. */
+function forwardBody(msg: MailMsg, subject: string): string {
+  const lines = [
+    "---------- Forwarded message ---------",
+    `From: ${addressLine([msg.from])}`,
+    `Date: ${fullDate(msg.date)}`,
+    `Subject: ${subject}`,
+    `To: ${addressLine(msg.to)}`,
+    ...(msg.cc && msg.cc.length > 0 ? [`Cc: ${addressLine(msg.cc)}`] : []),
+  ];
+  return `\n\n${lines.join("\n")}\n\n${msg.body}`;
+}
 
 function quote(msg: MailMsg): string {
   const when = fullDate(msg.date);
@@ -61,6 +81,7 @@ function quote(msg: MailMsg): string {
  *  fails (the generic download chip below still covers it). */
 function InlineImage({ msg, att, kind }: { msg: MailMsg; att: mail.MailAttachment; kind: "messages" | "sent" }): JSX.Element {
   const mailApi = useMailApi();
+  const { dispatch } = useMailStore();
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let url: string | null = null;
@@ -87,7 +108,7 @@ function InlineImage({ msg, att, kind }: { msg: MailMsg; att: mail.MailAttachmen
       const blob = await mailApi.downloadAttachment(kind, msg.id, att.id);
       saveBlob(blob, att.filename);
     } catch {
-      /* best-effort */
+      dispatch({ type: "BLOCK_NOTICE", notice: { status: "failed", text: `${att.filename} をダウンロードできませんでした` } });
     }
   };
   return (
@@ -127,8 +148,10 @@ function InlineImage({ msg, att, kind }: { msg: MailMsg; att: mail.MailAttachmen
 
 function Attachments({ msg }: { msg: MailMsg }): JSX.Element | null {
   const mailApi = useMailApi();
+  const { dispatch } = useMailStore();
   const [busy, setBusy] = useState<string | null>(null);
-  const list = msg.attachments ?? [];
+  const shownInBody = inlineContentIds(msg.html, msg.attachments ?? []);
+  const list = (msg.attachments ?? []).filter((a) => !shownInBody.has(a.id));
   if (list.length === 0) return null;
   const kind: "messages" | "sent" = msg.outbound ? "sent" : "messages";
   const download = async (att: mail.MailAttachment): Promise<void> => {
@@ -137,7 +160,8 @@ function Attachments({ msg }: { msg: MailMsg }): JSX.Element | null {
       const blob = await mailApi.downloadAttachment(kind, msg.id, att.id);
       saveBlob(blob, att.filename);
     } catch {
-      /* best-effort: a failed download leaves the chip enabled for a retry */
+      // The chip stays enabled for a retry.
+      dispatch({ type: "BLOCK_NOTICE", notice: { status: "failed", text: `${att.filename} をダウンロードできませんでした` } });
     } finally {
       setBusy(null);
     }
@@ -276,7 +300,9 @@ function MessageBlock({
           {fullDate(msg.date)}
         </span>
       </div>
-      {open ? (
+      {open && msg.html ? (
+        <HtmlMailBody html={msg.html} messageId={msg.id} attachments={msg.attachments ?? []} source={msg.outbound ? "sent" : "messages"} />
+      ) : open ? (
         <LinkifiedText
           testId="fe2-mail-body-text"
           text={msg.body}
@@ -313,10 +339,13 @@ function HeaderButton({ label, icon, onClick, testId }: { label: string; icon: P
 export function ReadingPane({ thread, labels }: { thread: MailThreadModel; labels: Label[] }): JSX.Element {
   const { dispatch, state } = useMailStore();
   const mailApi = useMailApi();
+  const setRead = useReadState();
+  const canCompose = useCanCompose();
   const [reply, setReply] = useState("");
   const [replyCc, setReplyCc] = useState("");
   const [replyBcc, setReplyBcc] = useState("");
   const [showCcBcc, setShowCcBcc] = useState(false);
+  const [replyFocused, setReplyFocused] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const inFlight = useRef<string | null>(null);
   // Inline-reply attachments: same shared hook/tray/preview as the floating compose.
@@ -351,46 +380,109 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   const openCompose = (mode: "reply" | "replyAll" | "forward"): void => {
     const to = mode === "forward" ? [] : mode === "replyAll" ? all.to : replyRecipients;
     const cc = mode === "replyAll" ? all.cc : [];
-    const fmt = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
+    // A forward carries the original's files with it; a reply never does (Gmail).
+    const files = (replyTo.attachments ?? []).filter((a) => a.status === undefined || a.status === "stored");
     dispatch({
       type: "OPEN_COMPOSE",
       compose: {
         mode,
-        to: fmt(to),
-        cc: fmt(cc),
+        to: addressLine(to),
+        cc: addressLine(cc),
         subject: `${mode === "forward" ? "Fwd" : "Re"}: ${thread.subject.replace(/^(Re|Fwd):\s*/i, "")}`,
-        body: quote(replyTo),
+        body: mode === "forward" ? forwardBody(replyTo, thread.subject) : quote(replyTo),
         showCc: cc.length > 0,
         // Reply/replyAll thread against the correspondent's Message-Id; a forward is new.
         ...(mode !== "forward" && parentId ? { inReplyTo: parentId } : {}),
+        ...(mode === "forward" && files.length > 0
+          ? { seed: { source: replyTo.outbound ? ("sent" as const) : ("messages" as const), messageId: replyTo.id, attachments: files } }
+          : {}),
       },
     });
   };
 
+  // r / a / f live here because the reading pane owns the addressing.
+  const openComposeRef = useRef(openCompose);
+  openComposeRef.current = openCompose;
+  useEffect(() => {
+    if (!canCompose) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (shortcutsBlocked(e)) return;
+      if (e.key === "r") openComposeRef.current("reply");
+      else if (e.key === "a") openComposeRef.current("replyAll");
+      else if (e.key === "f") openComposeRef.current("forward");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canCompose]);
+
   const replySubject = /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`;
+  const [inlineDraftId, setInlineDraftId] = useState(() => uid("reply"));
+  const server = useServerDraft({
+    id: inlineDraftId,
+    draft: {
+      mode: "reply",
+      to: addressLine(replyRecipients),
+      cc: replyCc,
+      bcc: replyBcc,
+      subject: replySubject,
+      body: reply,
+      ...(parentId ? { inReplyTo: parentId } : {}),
+    },
+    active: reply.trim() !== "" || replyCc.trim() !== "" || replyBcc.trim() !== "" || att.items.length > 0,
+    att,
+  });
+  // Leaving the conversation keeps what was typed, as a draft of this reply.
+  const flushRef = useRef(server.flush);
+  flushRef.current = server.flush;
+  useEffect(() => () => void flushRef.current(), []);
+
   const resetInline = (): void => {
     setReply("");
     setReplyCc("");
     setReplyBcc("");
     setShowCcBcc(false);
+    setReplyFocused(false);
     att.clear();
+    setInlineDraftId(uid("reply"));
   };
+
+  /** What a floating compose reopens with if this reply can't be delivered. */
+  const inlineCompose = (cc: MailPerson[], bcc: MailPerson[], body: string): ComposeState => ({
+    id: inlineDraftId,
+    mode: "reply",
+    to: addressLine(replyRecipients),
+    cc: addressLine(cc),
+    bcc: addressLine(bcc),
+    subject: replySubject,
+    body,
+    showCc: cc.length > 0,
+    showBcc: bcc.length > 0,
+    minimized: false,
+    maximized: false,
+    persisted: server.isSaved(),
+    seedInputs: att.items.flatMap((it) => (it.input ? [{ input: it.input, ...(it.remoteId ? { remoteId: it.remoteId } : {}) }] : [])),
+    ...(parentId ? { inReplyTo: parentId } : {}),
+  });
 
   const sendInline = (): void => {
     const body = reply.trim();
-    if (body.length === 0 || replyRecipients.length === 0) return;
+    const inputs = att.readyInputs();
+    // A reply may be files alone, but not nothing at all.
+    if ((body.length === 0 && inputs.length === 0) || replyRecipients.length === 0) return;
     if (att.hasPending) return;
     // Double click / click + shortcut can fire twice before the cleared box re-renders.
-    if (inFlight.current === body) return;
-    inFlight.current = body;
-    // Optimistic: append to the open thread immediately. Previously this was ALL that
-    // happened — the reply never reached the gateway, so nothing was delivered. Now we
-    // also POST it (with In-Reply-To via the parent Message-Id) and re-sync so the sent
-    // reply is server-backed and survives a reload.
+    const fingerprint = `${inlineDraftId}:${body}`;
+    if (inFlight.current === fingerprint) return;
+    inFlight.current = fingerprint;
+    // Optimistic: append to the open thread immediately. deliver() POSTs it (with In-Reply-To
+    // via the parent Message-Id) and re-syncs; a failure takes the reply back out of the
+    // thread, reopens it as a floating compose and shows 送信できませんでした + 再試行.
     const cc = parseRecipients(replyCc).recipients;
     const bcc = parseRecipients(replyBcc).recipients;
-    dispatch({ type: "ADD_MESSAGE", threadId: thread.id, body, to: replyRecipients, cc, bcc, subject: thread.subject });
-    const inputs = att.readyInputs();
+    const messageId = uid("msg");
+    dispatch({ type: "ADD_MESSAGE", threadId: thread.id, messageId, body, to: replyRecipients, cc, bcc, subject: thread.subject });
+    server.stop();
+    const compose = inlineCompose(cc, bcc, body);
     resetInline();
     const req: mail.SendMailRequest = {
       to: replyRecipients,
@@ -401,13 +493,15 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     if (bcc.length > 0) req.bcc = bcc;
     if (parentId) req.inReplyTo = parentId;
     if (inputs.length > 0) req.attachments = inputs;
-    void mailApi
-      .send(req, { idempotencyKey: newIdempotencyKey() })
-      .then(() => dispatch({ type: "REQUEST_SYNC" }))
-      .catch(() => undefined)
-      .finally(() => {
-        if (inFlight.current === body) inFlight.current = null;
-      });
+    void deliver(mailApi, dispatch, {
+      kind: "send",
+      req,
+      compose,
+      appended: { threadId: thread.id, messageId },
+      idempotencyKey: newIdempotencyKey(),
+    }).finally(() => {
+      if (inFlight.current === fingerprint) inFlight.current = null;
+    });
   };
 
   // 予約送信 for the inline reply: same picker as the compose window. The reply keeps its
@@ -416,7 +510,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   // A failed schedule reopens the reply as a floating compose (deliver()), never lost.
   const scheduleInline = (when: Date): string | null => {
     const body = reply.trim();
-    if (body.length === 0) return "本文を入力してください";
+    if (body.length === 0 && att.items.length === 0) return "本文を入力してください";
     if (replyRecipients.length === 0) return "宛先がありません";
     if (att.hasPending) return "添付ファイルを処理中です…";
     const cc = parseRecipients(replyCc).recipients;
@@ -427,21 +521,8 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     if (parentId) req.inReplyTo = parentId;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
-    const fmt = (ps: MailPerson[]): string => ps.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
-    const compose = {
-      id: uid("compose"),
-      mode: "reply" as const,
-      to: fmt(replyRecipients),
-      cc: fmt(cc),
-      bcc: fmt(bcc),
-      subject: replySubject,
-      body,
-      showCc: cc.length > 0,
-      showBcc: bcc.length > 0,
-      minimized: false,
-      maximized: false,
-      ...(parentId ? { inReplyTo: parentId } : {}),
-    };
+    server.stop();
+    const compose = inlineCompose(cc, bcc, body);
     resetInline();
     void deliver(mailApi, dispatch, { kind: "schedule", req, compose });
     return null;
@@ -450,9 +531,10 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   // Compared with and without the domain: a reply to our own Sent row carries `<log id>@domain`.
   const bareRef = (id: string): string => id.trim().replace(/^<|>$/g, "");
   const threadMessageIds = new Set(thread.messages.flatMap((m) => (m.messageId ? [bareRef(m.messageId), bareRef(m.messageId).split("@")[0]!] : [])).filter(Boolean));
-  const scheduledHere = state.scheduled.filter(
-    (s) => s.status === "scheduled" && s.inReplyTo && (threadMessageIds.has(bareRef(s.inReplyTo)) || threadMessageIds.has(bareRef(s.inReplyTo).split("@")[0]!)),
-  );
+  const repliesHere = (ref: string | null | undefined): boolean =>
+    Boolean(ref) && (threadMessageIds.has(bareRef(ref!)) || threadMessageIds.has(bareRef(ref!).split("@")[0]!));
+  const scheduledHere = state.scheduled.filter((s) => s.status === "scheduled" && repliesHere(s.inReplyTo));
+  const draftsHere = state.drafts.filter((d) => d.id !== inlineDraftId && repliesHere(d.inReplyTo));
 
   return (
     <section
@@ -483,7 +565,16 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           </>
         ) : (
           <>
-            <HeaderButton label="アーカイブ" icon="archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })} />
+            {thread.folder === "archive" ? (
+              <HeaderButton
+                label="受信トレイに移動"
+                icon="inbox"
+                onClick={() => dispatch({ type: "RESTORE", ids: [thread.id], label: "受信トレイに移動しました" })}
+                testId="fe2-mail-move-inbox"
+              />
+            ) : (
+              <HeaderButton label="アーカイブ" icon="archive" onClick={() => dispatch({ type: "ARCHIVE", ids: [thread.id] })} />
+            )}
             <HeaderButton label="削除" icon="trash" onClick={() => dispatch({ type: "TRASH", ids: [thread.id] })} />
           </>
         )}
@@ -491,7 +582,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           <HeaderButton
             label={threadUnread(thread) ? "既読にする" : "未読にする"}
             icon="mail-open"
-            onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: threadUnread(thread) })}
+            onClick={() => setRead([thread.id], threadUnread(thread))}
           />
         ) : null}
         <span style={{ flex: 1 }} />
@@ -536,9 +627,11 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           <div className={styles.banner} data-reply-nudge="fe2-mail-reply-nudge" data-testid="fe2-mail-reply-nudge-banner">
             <span className={styles.text}>{nudge.days}日前に受信したメールにまだ返信していません</span>
             <span className={styles.actions}>
-              <Button variant="secondary" size="sm" onClick={() => openCompose("reply")} testId="fe2-mail-reply-nudge-reply">
-                返信
-              </Button>
+              {canCompose ? (
+                <Button variant="secondary" size="sm" onClick={() => openCompose("reply")} testId="fe2-mail-reply-nudge-reply">
+                  返信
+                </Button>
+              ) : null}
               {/* Literal marker survives minification so verify:live can grep the bundle. */}
               <span data-reply-nudge-dismiss="fe2-mail-reply-nudge-dismiss" style={{ display: "contents" }}>
                 <Button
@@ -558,6 +651,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           <MessageBlock key={m.id} msg={m} defaultOpen={i === lastIdx} subject={thread.subject} own={own} />
         ))}
 
+        {canCompose ? (
         <div style={{ borderTop: "1px solid var(--dub-color-border-default)", padding: "16px 24px", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" data-testid="fe2-mail-reply" onClick={() => openCompose("reply")} style={actionBtn}>
             <MailIcon name="reply" size={16} /> 返信
@@ -569,6 +663,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             <MailIcon name="forward" size={16} /> 転送
           </button>
         </div>
+        ) : null}
 
         {scheduledHere.length > 0 ? (
           <ul className={inlineStyles.scheduledList} data-testid="fe2-mail-thread-scheduled">
@@ -589,6 +684,21 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           </ul>
         ) : null}
 
+        {draftsHere.length > 0 ? (
+          <ul className={inlineStyles.scheduledList} data-testid="fe2-mail-thread-drafts">
+            {draftsHere.map((d) => (
+              <li key={d.id} className={inlineStyles.scheduledItem}>
+                <MailIcon name="draft" size={14} />
+                <span>下書き: {snippet(d.body, 40) || "(本文なし)"}</span>
+                <button type="button" className={inlineStyles.linkBtn} data-testid="fe2-mail-thread-draft-open" onClick={() => openDraft(state, dispatch, d)}>
+                  続きを書く
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        {canCompose ? (
         <div style={{ padding: "0 24px 24px" }}>
           <div style={{ display: "flex", gap: 12, border: "1px solid var(--dub-color-border-strong)", borderRadius: "var(--dub-radius-lg)", padding: 12 }}>
             <SenderAvatar p={state.me} size={32} />
@@ -623,6 +733,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                 data-testid="fe2-mail-inline-reply"
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
+                onFocus={() => setReplyFocused(true)}
                 placeholder={`${displayName(replyRecipients[0] ?? state.me)} に返信…`}
                 rows={reply ? 4 : 1}
                 style={{
@@ -660,7 +771,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                   if (fileInputRef.current) fileInputRef.current.value = "";
                 }}
               />
-              {reply || att.items.length > 0 ? (
+              {reply || replyFocused || att.items.length > 0 ? (
                 <div className={inlineStyles.actions}>
                   <button
                     type="button"
@@ -702,6 +813,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
             </div>
           </div>
         </div>
+        ) : null}
       </div>
     </section>
   );

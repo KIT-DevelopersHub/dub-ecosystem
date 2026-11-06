@@ -23,6 +23,8 @@ export interface ComposeAttachmentItem {
   status: "reading" | "ready" | "error";
   progress: number; // 0..1 while reading
   input?: mail.MailAttachmentInput; // present once status === "ready"
+  /** This file's id on the server draft, once uploaded there. */
+  remoteId?: string;
 }
 
 let seq = 0;
@@ -51,8 +53,13 @@ function revokePreview(url: string | undefined): void {
 export interface UseComposeAttachments {
   items: ComposeAttachmentItem[];
   errors: string[];
-  /** Validate + ingest a set of picked/dropped files. Rejections populate `errors`. */
-  addFiles: (files: FileList | File[] | null) => void;
+  /** Validate + ingest a set of picked/dropped files. Rejections populate `errors`. `remoteIds`
+   *  marks files that came FROM the server draft, so they are not uploaded again. */
+  addFiles: (files: FileList | File[] | null, remoteIds?: ReadonlyMap<File, string>) => void;
+  /** Record a file's id on the server draft. */
+  setRemoteId: (id: string, remoteId: string) => void;
+  /** Surface an error in the same banner as a rejected file. */
+  addError: (message: string) => void;
   remove: (id: string) => void;
   clear: () => void;
   dismissErrors: () => void;
@@ -81,7 +88,7 @@ export function useComposeAttachments(): UseComposeAttachments {
   }, []);
 
   const addFiles = useCallback(
-    (files: FileList | File[] | null): void => {
+    (files: FileList | File[] | null, remoteIds?: ReadonlyMap<File, string>): void => {
       if (!files) return;
       const incoming = Array.from(files);
       if (incoming.length === 0) return;
@@ -104,6 +111,8 @@ export function useComposeAttachments(): UseComposeAttachments {
         };
         const previewUrl = makePreviewUrl(file, isImage);
         if (previewUrl) item.previewUrl = previewUrl;
+        const remoteId = remoteIds?.get(file);
+        if (remoteId) item.remoteId = remoteId;
         setItems((prev) => [...prev, item]);
         void fileToAttachmentWithProgress(file, (p) => patchItem(id, { progress: p }))
           .then((input) => patchItem(id, { status: "ready", progress: 1, input }))
@@ -129,6 +138,9 @@ export function useComposeAttachments(): UseComposeAttachments {
     setErrors([]);
   }, []);
 
+  const setRemoteId = useCallback((id: string, remoteId: string): void => patchItem(id, { remoteId }), [patchItem]);
+  const addError = useCallback((message: string): void => setErrors((prev) => [...prev, message]), []);
+
   const dismissErrors = useCallback((): void => setErrors([]), []);
 
   const readyInputs = useCallback(
@@ -140,6 +152,8 @@ export function useComposeAttachments(): UseComposeAttachments {
     items,
     errors,
     addFiles,
+    setRemoteId,
+    addError,
     remove,
     clear,
     dismissErrors,
