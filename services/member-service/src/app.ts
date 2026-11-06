@@ -190,6 +190,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     const body = await readJson<member.LinkIdentityRequest>(c);
     return c.json(await svc.linkIdentity(reqCtx(c), c.req.param("id"), body));
   });
+  app.post("/members/people/:id/profile-reminder", async (c) => {
+    return c.json(await svc.sendProfileReminder(reqCtx(c), c.req.param("id")));
+  });
   app.patch("/members/people/:id", async (c) => {
     const body = await readJson<member.UpdateMemberRequest>(c);
     return c.json(await svc.updateMember(reqCtx(c), c.req.param("id"), body));

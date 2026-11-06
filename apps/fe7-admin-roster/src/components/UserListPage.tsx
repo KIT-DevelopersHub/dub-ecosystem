@@ -58,6 +58,8 @@ const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
   { value: "rejected", label: "却下" },
 ];
 
+const ALL_ROLES = "all";
+
 const toolbarStyle: React.CSSProperties = { display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" };
 const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" };
 const noticeBodyStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
@@ -125,17 +127,19 @@ export function UserListPage() {
   const { can } = usePermissions();
   const canAdminEdit = useCanAdminEdit();
   const { me } = useRosterContext();
-  // Free-text search filters in memory (below); only status goes to the server, so typing
-  // never refetches the whole roster.
-  const query = useUsers({ ...filters, search: "" });
+  // Free-text search and role filter in memory (below); only status goes to the server, so
+  // typing never refetches the whole roster and a role edit shows up in the filter at once.
+  const query = useUsers({ ...filters, search: "", roleKey: null });
   // ⑤ Unfiltered total for the「X件中Y件」summary (cached; same query when not narrowed).
   const totalQuery = useUsers(DEFAULT_USER_FILTERS);
-  const { results: items } = useClientFilter(query.data?.items ?? NO_USERS, filters.search, userSearchText);
+  const { results: searched } = useClientFilter(query.data?.items ?? NO_USERS, filters.search, userSearchText);
+  const { roleKey } = filters;
+  const items = useMemo(() => (roleKey ? searched.filter((u) => u.roleIds.includes(roleKey)) : searched), [searched, roleKey]);
 
   // ⑧ Mirror the active filter + sort into the URL query (replace, not push).
   useEffect(() => {
-    writeRosterViewToUrl({ filters: { search: filters.search, status: filters.status }, sort });
-  }, [filters.search, filters.status, sort]);
+    writeRosterViewToUrl({ filters: { search: filters.search, status: filters.status, roleKey: filters.roleKey }, sort });
+  }, [filters.search, filters.status, filters.roleKey, sort]);
   const rolesQuery = useRoles();
   const sync = useSyncEmailRouting();
   const preview = usePreviewEmailRouting();
@@ -149,6 +153,7 @@ export function UserListPage() {
   const canManageRoles = canAdminEdit; // grant/revoke org-wide roles inline
   const canLinkMembers = canAdminEdit; // link/unlink 運営メンバー from the メール名簿 side
   const roles = rolesQuery.data?.items ?? [];
+  const roleOptions: SelectOption<string>[] = [{ value: ALL_ROLES, label: "すべて" }, ...roles.map((r) => ({ value: r.id, label: r.name }))];
   // identity userId -> the 運営メンバー linked to it (1:1). Drives the「運営メンバー」列.
   const memberByIdentity = new Map(
     (membersOverview.data?.members ?? [])
@@ -180,7 +185,7 @@ export function UserListPage() {
   // ⑤ Count summary: total (unfiltered) vs. currently shown (filtered) rows.
   const shownCount = items.length;
   const totalCount = totalQuery.data?.items.length ?? shownCount;
-  const isNarrowed = filters.search.trim() !== "" || filters.status !== "all";
+  const isNarrowed = filters.search.trim() !== "" || filters.status !== "all" || roleKey !== null;
   const pageRange =
     totalPages > 1 ? `（${(currentPage - 1) * PAGE_SIZE + 1}〜${(currentPage - 1) * PAGE_SIZE + pageItems.length}件目）` : "";
   const countSummary = (isNarrowed ? `${totalCount}件中 ${shownCount}件を表示` : `全 ${totalCount}件`) + pageRange;
@@ -348,6 +353,19 @@ export function UserListPage() {
               setFilters((f) => ({ ...f, status: v }));
             }}
             testId="fe7-users-status-filter"
+          />
+        </FormField>
+        <FormField label="ロール" htmlFor="fe7-users-role-filter">
+          <Select
+            id="fe7-users-role-filter"
+            value={roleKey ?? ALL_ROLES}
+            options={roleOptions}
+            onChange={(v) => {
+              setPage(1);
+              setSelectedIds([]);
+              setFilters((f) => ({ ...f, roleKey: v === ALL_ROLES ? null : v }));
+            }}
+            testId="fe7-users-role-filter"
           />
         </FormField>
       </div>

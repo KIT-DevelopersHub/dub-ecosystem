@@ -17,7 +17,8 @@ import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import { POSITION_LABEL, type MemberTeam, type OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
-import { hasStatusBadge } from "./memberStatus.ts";
+import { canRemind, hasStatusBadge } from "./memberStatus.ts";
+import { member } from "@dub/types";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 
 /** 1 行に収めつつ長い値は省略（…）+ ホバーで全文（title）。max はセルの上限幅. */
@@ -64,6 +65,7 @@ export function ListView({
   onUnlink,
   onSendAccountMail,
   canSendAccountMail,
+  onRemind,
 }: {
   members: OrgMember[];
   teamsById: Map<string, MemberTeam>;
@@ -81,6 +83,8 @@ export function ListView({
   onSendAccountMail?: (m: OrgMember) => void;
   /** Gmail・ログイン・@developershub.jp の3つが揃った行か。 */
   canSendAccountMail?: (m: OrgMember) => boolean;
+  /** 情報の入力を催促する (アカウントが紐付き、未入力がある行だけ表示)。 */
+  onRemind?: (m: OrgMember) => void;
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
@@ -152,10 +156,26 @@ export function ListView({
     },
     { key: "contact", header: "連絡先", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.contact ?? "—"} max="12rem" /> },
     {
+      key: "missing",
+      header: "未入力",
+      minWidth: "6rem",
+      noWrap: true,
+      cell: (m) => {
+        const missing = member.missingProfileKeys(m);
+        if (missing.length === 0) return <span data-testid={`members-missing-${m.id}`}>—</span>;
+        const labels = missing.map((k) => member.PERSON_PROFILE_LABEL[k]).join("、");
+        return (
+          <span title={labels} data-testid={`members-missing-${m.id}`}>
+            <Tag tone="warning">{missing.length}項目</Tag>
+          </span>
+        );
+      },
+    },
+    {
       key: "actions",
       header: "操作",
       align: "right",
-      minWidth: "8rem",
+      minWidth: "10rem",
       noWrap: true,
       hideable: false,
       cell: (m) => (
@@ -167,6 +187,15 @@ export function ListView({
               disabled={readOnly}
               onClick={() => onSendAccountMail(m)}
               testId={`members-account-mail-${m.id}`}
+            />
+          ) : null}
+          {onRemind && canRemind(m) ? (
+            <IconButton
+              name="bell"
+              aria-label={`${m.name} に情報の入力を催促する`}
+              disabled={readOnly}
+              onClick={() => onRemind(m)}
+              testId={`members-remind-${m.id}`}
             />
           ) : null}
           <IconButton name="edit" aria-label={`${m.name} を編集`} disabled={readOnly} onClick={() => onEdit(m)} testId={`members-edit-${m.id}`} />

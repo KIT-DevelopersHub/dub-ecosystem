@@ -4256,6 +4256,9 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
+      // 本番と同じ: 名簿に結ばれた人 (採用済み) は 409。
+      if (a.memberId !== null) return err("HR_APPLICANT_JOINED", 409);
+      hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });
     }
@@ -4383,6 +4386,13 @@ function createMembersStore() {
       const iid = decodeURIComponent(m[1]!);
       const mem = members.find((x) => x.identityUserId === iid);
       return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
+    }
+    // 情報不足の催促。デモでは通知を作らず、応答だけ返す。
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/profile-reminder$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      return json({ deduplicated: false, missing: memberValues.missingProfileKeys(mem) });
     }
     // link / unlink to an identity account (#1).
     m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
