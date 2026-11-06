@@ -14,7 +14,6 @@ import { SponsorLeadsScreen } from "./SponsorLeadsScreen.tsx";
 import { SponsorMailLink, externalAddresses } from "./SponsorMailLink.tsx";
 import { describeActivity } from "./LeadMailSection.tsx";
 import { runMailBackfill } from "./mailSyncHooks.ts";
-import { todayIso } from "./leads.ts";
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
 
@@ -180,7 +179,8 @@ describe("demo: 登録したアドレスにメールを送ると営業進捗が�
 
     expect((await send(fetchImpl, "tanaka@wajima-media.example.jp")).ok).toBe(true);
     const after = await api.getLead("lead_demo_8");
-    expect(after).toMatchObject({ status: "初回連絡", firstContactOn: todayIso(), lastContactOn: todayIso(), version: before.version + 1 });
+    const todayJst = sponsor.jstDate(new Date().toISOString());
+    expect(after).toMatchObject({ status: "初回連絡", firstContactOn: todayJst, lastContactOn: todayJst, version: before.version + 1 });
     const { activity } = await api.listLeadActivity("lead_demo_8");
     expect(activity).toHaveLength(1);
     const d = describeActivity(activity[0]!);
