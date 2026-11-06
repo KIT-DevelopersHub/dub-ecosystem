@@ -39,6 +39,11 @@ describe("goal", () => {
     expect(goal.elapsedDays("2026-12", now)).toBe(0);
   });
 
+  it("links only the sponsor tab targets that are set", () => {
+    expect(goal.linkedTargetsOf({ contacted: 15, proposed: null, agreed: 3, amount: null })).toEqual({ sponsor_contacted: 15, sponsor_agreed: 3 });
+    expect(goal.linkedTargetsOf(null)).toEqual({});
+  });
+
   it("validates months", () => {
     expect(goal.isMonth("2026-11")).toBe(true);
     expect(goal.isMonth("2026-13")).toBe(false);

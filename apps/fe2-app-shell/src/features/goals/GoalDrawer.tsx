@@ -25,10 +25,11 @@ const inRange = (v: string, min: number): boolean => {
 const kpiValid = (d: Draft): boolean =>
   d.name.trim().length > 0 && d.name.trim().length <= goal.KPI_NAME_MAX && inRange(d.target, Number.MIN_VALUE) && (d.metric !== "manual" || inRange(d.manualActual, 0));
 
-export function GoalDrawer({ team, month, goal: current, onClose }: {
+export function GoalDrawer({ team, month, goal: current, linkedTargets, onClose }: {
   team: goal.GoalTeam;
   month: string;
   goal: goal.TeamGoal | undefined;
+  linkedTargets: goal.LinkedTargets;
   onClose: () => void;
 }): JSX.Element {
   const [title, setTitle] = useState(current?.title ?? "");
@@ -45,13 +46,25 @@ export function GoalDrawer({ team, month, goal: current, onClose }: {
     patch(i, { metric, target: defaultTarget(metric) || d.target, ...(autoNamed ? { name: goal.metricOf(metric).label } : {}) });
   };
 
-  const valid = title.trim().length > 0 && title.trim().length <= goal.GOAL_TITLE_MAX && drafts.every(kpiValid);
+  // 連動する指標の目標値は目標タブの値で固定する。
+  const resolved = drafts.map((d) => {
+    const linked = linkedTargets[d.metric];
+    return linked === undefined ? d : { ...d, target: String(linked) };
+  });
+  const importable = (Object.keys(linkedTargets) as goal.GoalMetric[]).filter((m) => !drafts.some((d) => d.metric === m));
+  const importLinked = () =>
+    setDrafts((ds) => [
+      ...ds.filter((d) => d.target.trim() !== "" || linkedTargets[d.metric] !== undefined),
+      ...importable.map((m) => ({ name: goal.metricOf(m).label, metric: m, target: "", manualActual: "0" })),
+    ].slice(0, goal.KPI_MAX));
+
+  const valid = title.trim().length > 0 && title.trim().length <= goal.GOAL_TITLE_MAX && resolved.every(kpiValid);
   const submit = () => {
     if (!valid) return;
     save.mutate({
       title: title.trim(),
       expectedVersion,
-      kpis: drafts.map((d) => ({
+      kpis: resolved.map((d) => ({
         name: d.name.trim(),
         metric: d.metric,
         target: Number(d.target),
@@ -73,8 +86,14 @@ export function GoalDrawer({ team, month, goal: current, onClose }: {
           <FormField label="目標" htmlFor="goal-title" required>
             <TextField id="goal-title" value={title} onChange={setTitle} placeholder="例: 協賛を 3 社決める" testId="fe2-goals-title" />
           </FormField>
-          {drafts.map((d, i) => {
+          {importable.length > 0 && (
+            <div className={styles.linkBar}>
+              <Button variant="secondary" size="sm" onClick={importLinked} testId="fe2-goals-import-sponsor">スポンサーの目標タブから読み込む</Button>
+            </div>
+          )}
+          {resolved.map((d, i) => {
             const unit = goal.metricOf(d.metric).unit;
+            const linked = linkedTargets[d.metric] !== undefined;
             return (
               <fieldset key={i} className={styles.kpiForm} data-testid={`fe2-goals-kpi-form-${i}`}>
                 <legend className={styles.kpiLegend}>KPI {i + 1}</legend>
@@ -89,8 +108,8 @@ export function GoalDrawer({ team, month, goal: current, onClose }: {
                     <TextField id={`kpi-name-${i}`} value={d.name} onChange={(v) => patch(i, { name: v })} testId={`fe2-goals-kpi-name-${i}`} />
                   </FormField>
                   <div className={styles.kpiNumbers}>
-                    <FormField label={unit ? `目標値（${unit}）` : "目標値"} htmlFor={`kpi-target-${i}`} required>
-                      <TextField id={`kpi-target-${i}`} type="number" value={d.target} onChange={(v) => patch(i, { target: v })} testId={`fe2-goals-kpi-target-${i}`} />
+                    <FormField label={unit ? `目標値（${unit}）` : "目標値"} htmlFor={`kpi-target-${i}`} required {...(linked ? { help: "スポンサーの目標タブの値です" } : {})}>
+                      <TextField id={`kpi-target-${i}`} type="number" value={d.target} disabled={linked} onChange={(v) => patch(i, { target: v })} testId={`fe2-goals-kpi-target-${i}`} />
                     </FormField>
                     {d.metric === "manual" && (
                       <FormField label="今の実績" htmlFor={`kpi-actual-${i}`} required>

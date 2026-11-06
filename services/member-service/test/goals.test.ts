@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { goal } from "@dub/types";
 import type { GoalMetricSources } from "../src/goal-repo";
 import { InMemoryGoalRepo } from "../src/goal-repo";
+import { InMemorySponsorLeadRepo } from "../src/sponsor-lead-repo";
 import { call, createApp, makeDeps } from "./harness";
 
 const MONTH = "2026-11";
@@ -126,6 +127,25 @@ describe("目標管理", () => {
     expect((await call(app, "DELETE", path)).status).toBe(204);
     expect((await call(app, "GET", `/members/goals?month=${MONTH}`)).json.goals).toEqual([]);
     expect((await call(app, "DELETE", path)).status).toBe(404);
+  });
+
+  it("uses the sponsor goals tab as the target of a linked KPI, and falls back when it is cleared", async () => {
+    const goalRepo = new InMemoryGoalRepo();
+    goalRepo.counts = { ...goalRepo.counts, sponsor_contacted: 6 };
+    const app = createApp(makeDeps({ now: NOW, goalRepo, sponsorLeadRepo: new InMemorySponsorLeadRepo() }));
+    const { json: team } = await call(app, "POST", "/members/teams", { body: { key: "sp", name: "スポンサーチーム" } });
+    await call(app, "PUT", `/members/goals/${team.id}/${MONTH}`, put([{ metric: "sponsor_contacted", target: 10 }, { metric: "sponsor_proposed", target: 4 }]));
+
+    const tab = await call(app, "PUT", `/members/sponsor/goals/${MONTH}`, { body: { contacted: 12, proposed: null, agreed: null, amount: null, expectedVersion: 0 } });
+    expect(tab.status).toBe(200);
+    const linked = await call(app, "GET", `/members/goals?month=${MONTH}`);
+    expect(linked.json.linkedTargets).toEqual({ sponsor_contacted: 12 });
+    expect(linked.json.goals[0].kpis[0]).toMatchObject({ target: 12, linked: true, actual: 6, percent: 50 });
+    expect(linked.json.goals[0].kpis[1]).toMatchObject({ target: 4, linked: false });
+
+    await call(app, "PUT", `/members/sponsor/goals/${MONTH}`, { body: { contacted: null, proposed: null, agreed: null, amount: null, expectedVersion: tab.json.version } });
+    const cleared = await call(app, "GET", `/members/goals?month=${MONTH}`);
+    expect(cleared.json.goals[0].kpis[0]).toMatchObject({ target: 10, linked: false, percent: 60 });
   });
 
   it("defaults to the current JST month", async () => {

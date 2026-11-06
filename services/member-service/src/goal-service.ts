@@ -46,11 +46,15 @@ const LOCAL_METRICS: readonly goal.GoalMetric[] = [
   "hr_applicants", "hr_interviews", "hr_hired", "sponsor_cards", "sponsor_contacted", "sponsor_proposed", "sponsor_agreed", "sponsor_amount", "participations",
 ];
 
-export function progressOf(kpi: goal.Kpi, teamId: string, a: Actuals): goal.KpiProgress {
+export function progressOf(saved: goal.Kpi, teamId: string, a: Actuals, linkedTargets: goal.LinkedTargets): goal.KpiProgress {
+  // 目標タブに値があればそれが正。消されたら保存時の値に戻る。
+  const linkedTarget = linkedTargets[saved.metric];
+  const kpi = linkedTarget === undefined ? saved : { ...saved, target: linkedTarget };
   const done = (status: goal.KpiStatus, actual: number | null): goal.KpiProgress => ({
     ...kpi,
     status,
     actual,
+    linked: linkedTarget !== undefined,
     percent: goal.kpiPercent(actual, kpi.target),
   });
   const { metric } = kpi;
@@ -65,7 +69,7 @@ export function progressOf(kpi: goal.Kpi, teamId: string, a: Actuals): goal.KpiP
   return a.member === null ? done("unavailable", null) : done("ok", a.member[metric]);
 }
 
-export interface GoalDeps extends Pick<AppDeps, "orgId" | "now" | "repo"> {
+export interface GoalDeps extends Pick<AppDeps, "orgId" | "now" | "repo" | "sponsorLeadRepo"> {
   goalRepo: GoalRepo;
   goalSources: GoalMetricSources;
 }
@@ -84,9 +88,14 @@ export class GoalService {
     return { member, tasks: tasks && new Map(tasks.map((t) => [t.teamId, t])), lpVisitors };
   }
 
-  private toGoal(r: GoalRow, a: Actuals): goal.TeamGoal {
+  private async linkedTargets(month: string): Promise<goal.LinkedTargets> {
+    const monthly = (await this.deps.sponsorLeadRepo.listGoals(this.deps.orgId)).find((g) => g.month === month);
+    return goal.linkedTargetsOf(monthly ?? null);
+  }
+
+  private toGoal(r: GoalRow, a: Actuals, linked: goal.LinkedTargets): goal.TeamGoal {
     const { orgId: _o, kpis, ...rest } = r;
-    const progress = kpis.map((k) => progressOf(k, r.teamId, a));
+    const progress = kpis.map((k) => progressOf(k, r.teamId, a, linked));
     return { ...rest, kpis: progress, percent: goal.goalPercent(progress) };
   }
 
@@ -94,12 +103,13 @@ export class GoalService {
     const { goalRepo, orgId, repo } = this.deps;
     const target = month ?? goal.currentMonth(new Date(this.deps.now()));
     if (!goal.isMonth(target)) throw errors.validationFailed([{ field: "month", reason: "invalid" }]);
-    const [teams, rows] = await Promise.all([repo.listTeams(orgId), goalRepo.list(orgId, target)]);
+    const [teams, rows, linkedTargets] = await Promise.all([repo.listTeams(orgId), goalRepo.list(orgId, target), this.linkedTargets(target)]);
     const actuals = await this.collect(ctx, target, rows);
     return {
       month: target,
       teams: teams.map((t) => ({ id: t.id, name: t.name, color: t.color })),
-      goals: rows.map((r) => this.toGoal(r, actuals)),
+      goals: rows.map((r) => this.toGoal(r, actuals, linkedTargets)),
+      linkedTargets,
     };
   }
 
@@ -121,7 +131,8 @@ export class GoalService {
       updatedAt: now(),
     };
     if (!(await goalRepo.save(row, body.expectedVersion))) throw errVersionConflict();
-    return this.toGoal(row, await this.collect(ctx, month, [row]));
+    const [actuals, linkedTargets] = await Promise.all([this.collect(ctx, month, [row]), this.linkedTargets(month)]);
+    return this.toGoal(row, actuals, linkedTargets);
   }
 
   async remove(teamId: string, month: string): Promise<void> {

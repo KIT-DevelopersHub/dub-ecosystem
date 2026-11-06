@@ -5824,7 +5824,7 @@ function createLpProposalsStore() {
 
 // ── 目標管理 (member-service /members/goals の demo) ─────────────────────────────
 // 保存はメモリ上。実績は本物と同じ指標の見本値を月ごとに持ち、計算は @dub/types goal を使う。
-function createGoalsStore(me: () => { id: string; displayName: string }, teams: () => goalValues.GoalTeam[]) {
+function createGoalsStore(me: () => { id: string; displayName: string }, teams: () => goalValues.GoalTeam[], sponsorGoal: (month: string) => sponsorValues.GoalTargets | null) {
   type Row = Omit<goalValues.TeamGoal, "kpis" | "percent"> & { kpis: goalValues.Kpi[] };
   const month = goalValues.currentMonth();
   const prev = goalValues.shiftMonth(month, -1);
@@ -5853,16 +5853,18 @@ function createGoalsStore(me: () => { id: string; displayName: string }, teams: 
   };
   const toGoal = ({ kpis, ...r }: Row): goalValues.TeamGoal => {
     const a = actuals(r.teamId, r.month);
+    const linked = goalValues.linkedTargetsOf(sponsorGoal(r.month));
     const progress = kpis.map((k): goalValues.KpiProgress => {
       const actual = k.metric === "manual" ? k.manualActual : (a[k.metric] ?? null);
-      return { ...k, status: actual === null ? "empty" : "ok", actual, percent: goalValues.kpiPercent(actual, k.target) };
+      const target = linked[k.metric] ?? k.target;
+      return { ...k, target, status: actual === null ? "empty" : "ok", actual, linked: linked[k.metric] !== undefined, percent: goalValues.kpiPercent(actual, target) };
     });
     return { ...r, kpis: progress, percent: goalValues.goalPercent(progress) };
   };
   function handle(method: string, pathname: string, url: URL, body: any): Response | null {
     if (pathname === "/api/v1/members/goals" && method === "GET") {
       const m = url.searchParams.get("month") ?? month;
-      const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal) };
+      const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal), linkedTargets: goalValues.linkedTargetsOf(sponsorGoal(m)) };
       return json(res);
     }
     const hit = /^\/api\/v1\/members\/goals\/([^/]+)\/(\d{4}-\d{2})$/.exec(pathname);
@@ -6134,7 +6136,7 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     return null;
   }
 
-  return { handle };
+  return { handle, goalOf: (month: string) => goals.find((g) => g.month === month) ?? null };
 }
 
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
@@ -6203,7 +6205,7 @@ export function createDemoFetch(): typeof fetch {
   const lpProposalsStore = createLpProposalsStore();
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
   const sponsorStore = createSponsorStore(() => currentMe().user);
-  const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams());
+  const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.goalOf(m));
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
   const lpSiteConfigStore = createLpSiteConfigStore({
     publish: lpStore.publish,

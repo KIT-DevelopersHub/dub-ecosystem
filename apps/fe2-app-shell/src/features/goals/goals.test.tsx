@@ -23,7 +23,7 @@ const teams: goal.GoalTeam[] = [
 ];
 
 const kpi = (over: Partial<goal.KpiProgress> = {}): goal.KpiProgress => ({
-  name: "タスク完了数", metric: "tasks_done", target: 10, manualActual: 0, status: "ok", actual: 5, percent: 50, ...over,
+  name: "タスク完了数", metric: "tasks_done", target: 10, manualActual: 0, status: "ok", actual: 5, linked: false, percent: 50, ...over,
 });
 
 const teamGoal = (over: Partial<goal.TeamGoal> = {}): goal.TeamGoal => ({
@@ -31,9 +31,9 @@ const teamGoal = (over: Partial<goal.TeamGoal> = {}): goal.TeamGoal => ({
   updatedBy: "usr_1" as goal.TeamGoal["updatedBy"], updatedByName: null, updatedAt: "2026-11-01T00:00:00Z", ...over,
 });
 
-function fakeApi(goals: goal.TeamGoal[], over: Partial<GoalsApi> = {}): GoalsApi {
+function fakeApi(goals: goal.TeamGoal[], over: Partial<GoalsApi> = {}, linkedTargets: goal.LinkedTargets = {}): GoalsApi {
   return {
-    list: vi.fn(async (month) => ({ month, teams, goals })),
+    list: vi.fn(async (month) => ({ month, teams, goals, linkedTargets })),
     put: vi.fn(async (teamId, month, body) => teamGoal({ teamId, month, title: body.title, version: body.expectedVersion + 1 })),
     remove: vi.fn(async () => undefined),
     ...over,
@@ -148,11 +148,44 @@ describe("GoalDrawer", () => {
     const api = fakeApi([teamGoal({ version: 1 })]);
     const qc = mount(api);
     fireEvent.click(await screen.findByTestId("fe2-goals-edit-team_a"));
-    vi.mocked(api.list).mockResolvedValue({ month: MONTH, teams, goals: [teamGoal({ version: 2 })] });
+    vi.mocked(api.list).mockResolvedValue({ month: MONTH, teams, goals: [teamGoal({ version: 2 })], linkedTargets: {} });
     await qc.invalidateQueries();
     expect(api.list).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByTestId("fe2-goals-save"));
     await waitFor(() => expect(api.put).toHaveBeenCalledWith("team_a", MONTH, expect.objectContaining({ expectedVersion: 1 })));
+  });
+});
+
+describe("スポンサーの目標タブとの連動", () => {
+  const LINKED = { sponsor_contacted: 15, sponsor_amount: 1000000 };
+
+  it("imports the tab's targets and locks them", async () => {
+    const api = fakeApi([], {}, LINKED);
+    mount(api);
+    fireEvent.click(await screen.findByTestId("fe2-goals-set-team_a"));
+    fireEvent.click(screen.getByTestId("fe2-goals-import-sponsor"));
+    expect(screen.queryByTestId("fe2-goals-import-sponsor")).toBeNull();
+    expect(screen.getByTestId("fe2-goals-kpi-target-0")).toHaveValue(15);
+    expect(screen.getByTestId("fe2-goals-kpi-target-0")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("fe2-goals-title"), { target: { value: "協賛を増やす" } });
+    fireEvent.click(screen.getByTestId("fe2-goals-save"));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("team_a", MONTH, expect.objectContaining({
+      kpis: [
+        { name: "新規接触数", metric: "sponsor_contacted", target: 15, manualActual: 0 },
+        { name: "協賛額", metric: "sponsor_amount", target: 1000000, manualActual: 0 },
+      ],
+    })));
+  });
+
+  it("offers no import when the tab has no targets", async () => {
+    mount(fakeApi([]));
+    fireEvent.click(await screen.findByTestId("fe2-goals-set-team_a"));
+    expect(screen.queryByTestId("fe2-goals-import-sponsor")).toBeNull();
+  });
+
+  it("tells the reader a target comes from the tab", async () => {
+    mount(fakeApi([teamGoal({ kpis: [kpi({ metric: "sponsor_contacted", linked: true })] })], {}, LINKED));
+    expect(await screen.findByText("スポンサーから自動集計（全体）・目標は目標タブと連動")).toBeInTheDocument();
   });
 });
 

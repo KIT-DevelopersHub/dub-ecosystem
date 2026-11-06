@@ -26,10 +26,10 @@ export function useGoals(month: string) {
 }
 
 /** 保存直後は、指標を変えた KPI の実績がまだ分からない。手入力と変更なしの分だけ先に見せる。 */
-export function optimisticGoal(teamId: string, month: string, body: goal.PutGoalRequest, prev: goal.TeamGoal | undefined): goal.TeamGoal {
+export function optimisticGoal(teamId: string, month: string, body: goal.PutGoalRequest, prev: goal.TeamGoal | undefined, linkedTargets: goal.LinkedTargets = {}): goal.TeamGoal {
   const kpis = body.kpis.map((k): goal.KpiProgress => {
     const known = k.metric === "manual" ? k.manualActual : (prev?.kpis.find((p) => p.metric === k.metric)?.actual ?? null);
-    return { ...k, status: known === null ? "empty" : "ok", actual: known, percent: goal.kpiPercent(known, k.target) };
+    return { ...k, status: known === null ? "empty" : "ok", actual: known, linked: linkedTargets[k.metric] !== undefined, percent: goal.kpiPercent(known, k.target) };
   });
   return {
     teamId, month, title: body.title, kpis, percent: goal.goalPercent(kpis),
@@ -55,7 +55,7 @@ export function useSaveGoal(month: string, teamId: string) {
       await qc.cancelQueries({ queryKey: listKey(month) });
       const snapshot = qc.getQueryData<List>(listKey(month));
       const prev = snapshot?.goals.find((g) => g.teamId === teamId);
-      const next = optimisticGoal(teamId, month, body, prev);
+      const next = optimisticGoal(teamId, month, body, prev, snapshot?.linkedTargets);
       patchGoals(qc, month, (goals) => (prev ? goals.map((g) => (g.teamId === teamId ? next : g)) : [...goals, next]));
       return { snapshot };
     },
