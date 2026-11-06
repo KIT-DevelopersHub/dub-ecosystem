@@ -37,6 +37,10 @@ const ME_ID = "usr_demo";
 const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "identity:read",
   "identity:admin",
+  "members:roster_view",
+  "members:roster_edit",
+  "members:mail_view",
+  "members:mail_edit",
   // 代理表示 (admin impersonation): メール名簿の「このメンバーとして表示」。
   "identity:impersonate",
   "event:read",
@@ -845,12 +849,18 @@ const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filte
   (k) => k !== "chat:manage_sections" && k !== "chat:change_visibility",
 );
 
+// 運営メンバーの範囲の見え方を ?demo_account= で確かめる用。
+const MEMBERS_SCOPE_ORG_CHART_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:"));
+const MEMBERS_SCOPE_ROSTER_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:mail_"));
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: CHAT_EDITOR_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
+  { id: "usr_scope_org", displayName: "範囲 組織図まで", email: "scope-org@developershub.jp", permissions: MEMBERS_SCOPE_ORG_CHART_PERMISSIONS, inbox: [] },
+  { id: "usr_scope_roster", displayName: "範囲 メール名簿以外", email: "scope-roster@developershub.jp", permissions: MEMBERS_SCOPE_ROSTER_PERMISSIONS, inbox: [] },
   { id: "usr_lead", displayName: "統括 山本", email: "lead@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: LEAD_INBOX.map((m) => ({ ...m })), roleShareWith: ["usr_bob", "usr_sponsor"] },
 ];
 
@@ -4457,6 +4467,9 @@ function createMembersStore() {
     const hrRes = hrHandle(method, pathname, body);
     if (hrRes) return hrRes;
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
+    if (method === "GET" && pathname === "/api/v1/members/org-overview") {
+      return json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => memberValues.toOrgChartMember(m)) });
+    }
     // canonical team list other apps read
     if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
     // チーム単位メンション用 (self-scoped): チーム一覧 + ログイン中アカウントの所属。
@@ -4553,6 +4566,22 @@ function createMembersStore() {
       mem.version += 1;
       mem.updatedAt = isoNow();
       return json({ ...mem, teamIds: [...mem.teamIds] });
+    }
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/org$/.exec(pathname);
+    if (m && method === "PATCH") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (typeof body?.version === "number" && body.version !== mem.version) {
+        const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
+      if (body?.position !== undefined) mem.position = memberValues.isMemberPosition(body.position) ? body.position : null;
+      if (body?.status !== undefined) mem.status = body.status;
+      if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+      if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
+      mem.version += 1;
+      return json(memberValues.toOrgChartMember(mem));
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {

@@ -66,8 +66,8 @@ function roleNewRoute(): Promise<{ Component: ComponentType }> {
 // buildAuditQuery とバックエンドの収集）は壊さず残置している（他機能/将来の再利用のため）。
 
 export const routes: FeatureRoute[] = [
-  { path: "/admin/users", lazy: usersRoute, auth: "required", requiredPermissions: ["identity:read"] },
-  { path: "/admin/users/:userId", lazy: userDetailRoute, auth: "required", requiredPermissions: ["identity:read"] },
+  { path: "/admin/users", lazy: usersRoute, auth: "required", requiredPermissions: ["identity:read", "members:mail_view"] },
+  { path: "/admin/users/:userId", lazy: userDetailRoute, auth: "required", requiredPermissions: ["identity:read", "members:mail_view"] },
   { path: "/admin/roles", lazy: rolesRoute, auth: "required", requiredPermissions: ["identity:read"] },
   { path: "/admin/roles/new", lazy: roleNewRoute, auth: "required", requiredPermissions: ["identity:admin"] },
 ];

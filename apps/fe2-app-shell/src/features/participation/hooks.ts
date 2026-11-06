@@ -4,6 +4,7 @@
 // toasts and return the resolved outcome to the page for the サンクス view.
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useToast } from "@dub/ui";
+import { usePermissions } from "../../auth/AuthProvider.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useParticipationApi } from "./ParticipationProvider.tsx";
@@ -63,9 +64,13 @@ export function useParticipationCandidates(id: string | null) {
  *  (enabled)。自動候補に載らない相手（漢字違い等）も検索して link できるようにする。 */
 export function useParticipationRosterMembers(enabled: boolean) {
   const api = useParticipationApi();
+  const { can } = usePermissions();
+  // 運営メンバーの閲覧範囲が 組織図まで なら個人情報なしの一覧 (名前で探す)。キーを共有するので
+  // useMembersOverview と同じ分岐にしておく。
+  const canReadRoster = can("members:roster_view");
   return useQuery({
     queryKey: MEMBERS_OVERVIEW_KEY,
-    queryFn: () => api.overview(),
+    queryFn: () => (canReadRoster ? api.overview() : api.orgOverview()),
     enabled,
     staleTime: 30_000,
   });

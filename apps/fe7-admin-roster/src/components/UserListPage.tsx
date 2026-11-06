@@ -38,7 +38,7 @@ import {
   useMembersOverview,
   useUnlinkMemberIdentity,
 } from "../hooks/useRosterApi";
-import { usePermissions, useCanAdminEdit } from "../hooks/usePermissions";
+import { usePermissions, useCanMailRosterEdit } from "../hooks/usePermissions";
 import { useRosterContext } from "../providers/RosterProvider";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
 import { displayError } from "../lib/errorDisplay";
@@ -125,7 +125,7 @@ export function UserListPage() {
   // アカウント発行メール: asked right after a link when the member has a Gmail.
   const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
   const { can } = usePermissions();
-  const canAdminEdit = useCanAdminEdit();
+  const canEditRoster = useCanMailRosterEdit();
   const { me } = useRosterContext();
   // Free-text search and role filter in memory (below); only status goes to the server, so
   // typing never refetches the whole roster and a role edit shows up in the filter at once.
@@ -149,9 +149,9 @@ export function UserListPage() {
 
   const currentUserId = me?.user.id ?? "";
   // 管理アプリが「編集」でなければ書き込み UI は出さない(サーバの requireAdminEdit と同条件)。
-  const canInvite = canAdminEdit;
-  const canManageRoles = canAdminEdit; // grant/revoke org-wide roles inline
-  const canLinkMembers = canAdminEdit; // link/unlink 運営メンバー from the メール名簿 side
+  const canInvite = canEditRoster;
+  const canManageRoles = canEditRoster; // grant/revoke org-wide roles inline
+  const canLinkMembers = canEditRoster; // link/unlink 運営メンバー from the メール名簿 side
   const roles = rolesQuery.data?.items ?? [];
   const roleOptions: SelectOption<string>[] = [{ value: ALL_ROLES, label: "すべて" }, ...roles.map((r) => ({ value: r.id, label: r.name }))];
   // identity userId -> the 運営メンバー linked to it (1:1). Drives the「運営メンバー」列.
@@ -192,7 +192,7 @@ export function UserListPage() {
   // Selection acts on the currently-loaded rows; drop keys that left the filter.
   const visibleIds = new Set(items.map((u) => u.id));
   const effectiveSelected = selectedIds.filter((id) => visibleIds.has(id));
-  const canBulk = canAdminEdit;
+  const canBulk = canEditRoster;
   // Resolve the selection against the freshest list so the pane reflects saved edits
   // and closes itself if the selected user drops out of the current filter.
   const selectedUser = items.find((u) => u.id === selectedId) ?? null;

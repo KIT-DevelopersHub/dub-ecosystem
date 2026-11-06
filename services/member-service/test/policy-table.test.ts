@@ -68,6 +68,8 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
     "app:admin:edit",
     "app:members:view",
     "app:members:edit",
+    "members:roster_view",
+    "members:roster_edit",
     "app:participation:view",
     "app:participation:edit",
     "app:hr:view",
@@ -81,10 +83,10 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
     "sponsor:write",
     "sponsor:admin",
   ],
-  maintainer: ["identity:read", "app:members:view", "app:participation:view"],
-  organizer: ["identity:read", "app:members:view", "app:participation:view"],
-  member: ["identity:read", "app:members:view", "app:participation:view"],
-  "delegated-roster-editor": ["app:members:view", "app:members:edit"],
+  maintainer: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
+  organizer: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
+  member: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
+  "delegated-roster-editor": ["app:members:view", "app:members:edit", "members:roster_view", "members:roster_edit"],
   "participation-reviewer": ["identity:read", "app:participation:view", "app:participation:edit"],
   "disabled-tiers-with-legacy-identity-keys": ["identity:read", "identity:admin"],
   // 人事: 閲覧だけの面接官 / 段階を動かせるが参加確定はできない担当 / 人事アプリ無効で詳細キーだけ持つ形。
@@ -114,6 +116,7 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 
 // 運営メンバー (名簿): 閲覧 reads, 編集 writes.
 const ROSTER_READS = [
+  "GET /members/org-overview",
   "GET /members/overview",
   "GET /members/people/by-identity/:identityUserId",
   "GET /members/teams",
@@ -122,6 +125,7 @@ const ROSTER_WRITES = [
   "DELETE /members/people/:id",
   "DELETE /members/teams/:id",
   "PATCH /members/people/:id",
+  "PATCH /members/people/:id/org",
   "PATCH /members/teams/:id",
   "POST /members/people",
   "POST /members/people/:id/identity-link",

@@ -6,7 +6,9 @@ import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/
 import { useToast } from "@dub/ui";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { usePermissions } from "../../auth/AuthProvider.tsx";
 import { useMembersApi } from "./MembersProvider.tsx";
+import type { member } from "@dub/types";
 import type {
   CreateMemberRequest,
   CreateTeamRequest,
@@ -24,7 +26,14 @@ const EMPTY_OVERVIEW: MembersOverview = { teams: [], members: [] };
 
 export function useMembersOverview() {
   const api = useMembersApi();
-  return useQuery({ queryKey: OVERVIEW_KEY, queryFn: () => api.getOverview() });
+  const { can } = usePermissions();
+  const canReadRoster = can("members:roster_view");
+  return useQuery({
+    queryKey: OVERVIEW_KEY,
+    queryFn: () => (canReadRoster ? api.getOverview() : api.getOrgOverview()),
+    // /me が読めるまで can() は全部 false。範囲を決めてから取りにいく。
+    enabled: can("app:members:view"),
+  });
 }
 
 /** Roster login accounts — the candidate pool for linking (#1). Cached a bit longer
@@ -120,6 +129,22 @@ export function useUpdateMember() {
   const api = useMembersApi();
   return useOverviewMutation<{ id: string; patch: UpdateMemberRequest }, OrgMember>({
     mutationFn: ({ id, patch }) => api.updateMember(id, patch),
+    optimistic: (prev, { id, patch }) => ({
+      ...prev,
+      members: prev.members.map((m) =>
+        m.id === id ? { ...m, ...stripUndefined({ ...patch, version: undefined }) } : m,
+      ),
+    }),
+    successMessage: "メンバーを更新しました",
+    errorFallback: "メンバーを更新できませんでした",
+  });
+}
+
+/** 組織図までの編集。運営での項目だけ送る (optimistic は useUpdateMember と同じ)。 */
+export function useUpdateMemberOrg() {
+  const api = useMembersApi();
+  return useOverviewMutation<{ id: string; patch: member.UpdateMemberOrgRequest }, OrgMember>({
+    mutationFn: ({ id, patch }) => api.updateMemberOrg(id, patch),
     optimistic: (prev, { id, patch }) => ({
       ...prev,
       members: prev.members.map((m) =>

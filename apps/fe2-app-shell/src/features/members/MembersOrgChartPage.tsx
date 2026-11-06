@@ -10,7 +10,7 @@ import styles from "./members.module.css";
 export function MembersOrgChartPage(): JSX.Element {
   const overview = useMembersOverview();
 
-  if (overview.isLoading) return <SkeletonLoader testId="members-orgchart-loading" />;
+  if (overview.isPending) return <SkeletonLoader testId="members-orgchart-loading" />;
   if (overview.isError) {
     const display = ApiError.isApiError(overview.error)
       ? toDisplayableError(overview.error)
