@@ -993,3 +993,14 @@ test("worker wiring: tickets use LP_TICKETS with no LP_FLAG fallback; proposals 
   assert.match(fn("proposalsInternal"), /env\.LP_FLAG/);
   assert.match(src.slice(src.indexOf("handleProposals(req"), src.indexOf("if (ticketsPath)")), /internal: proposalsInternal\(env\)/);
 });
+
+test("thanks: shows the order number from confirm, escaped, only for a paid order", async () => {
+  const mk = (b: Record<string, unknown>) => deps({ internal: async () => Response.json(b) });
+  const url = "https://lp.example/tickets/thanks?session_id=cs_1";
+  const paid = await (await handleTickets(new Request(url), mk({ status: "paid", summary: "一般 ×1", orderNumber: "AB<CD" })))!.text();
+  assert.ok(paid.includes("注文番号 AB&lt;CD"));
+  const pending = await (await handleTickets(new Request(url), mk({ status: "pending", orderNumber: "ABCD" })))!.text();
+  assert.ok(!pending.includes("注文番号"));
+  const paidNoNumber = await (await handleTickets(new Request(url), mk({ status: "paid" })))!.text();
+  assert.ok(!paidNoNumber.includes("注文番号"));
+});

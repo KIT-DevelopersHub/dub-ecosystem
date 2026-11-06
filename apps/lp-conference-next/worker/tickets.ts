@@ -1365,7 +1365,14 @@ const ICON_OK = '<div class="ico pop"><svg viewBox="0 0 24 24" aria-hidden="true
 const ICON_WAIT = '<div class="ico wait pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>';
 const ICON_WARN = '<div class="ico warn pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6M12 17h.01"/></svg></div>';
 
-export function renderThanksPage(o: { status: ThanksStatus; summary?: string; demo?: boolean; test?: boolean; origin?: string }): string {
+export function renderThanksPage(o: {
+  status: ThanksStatus;
+  summary?: string;
+  orderNumber?: string;
+  demo?: boolean;
+  test?: boolean;
+  origin?: string;
+}): string {
   let inner: string;
   let acts = '<a class="btn1" href="/">トップへ戻る</a>';
   let step = 3;
@@ -1382,7 +1389,8 @@ export function renderThanksPage(o: { status: ThanksStatus; summary?: string; de
             .map((x) => `<b>${escapeHtml(x)}</b>`)
             .join("") +
           "</div><i>CONFIRMED</i></div>"
-        : "");
+        : "") +
+      (o.orderNumber ? `<p class="lead" style="margin-top:16px" data-lp-order-number>注文番号 ${escapeHtml(o.orderNumber)}</p>` : "");
   } else if (o.status === "pending") {
     inner = ICON_WAIT + '<h2>決済を確認中です</h2><p class="lead">決済を確認中です（数分後にメールをご確認ください）。</p>';
   } else if (o.status === "expired") {
@@ -1773,6 +1781,7 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
     // Never trust the query string: both paid (session_id) and free (order) are confirmed server-side.
     let status: ThanksStatus = "unknown";
     let summary: string | undefined;
+    let orderNumber: string | undefined;
     try {
       const res = await deps.internal("/lp/internal/tickets/confirm", {
         method: "POST",
@@ -1780,14 +1789,25 @@ export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Re
         body: JSON.stringify(sessionId ? { sessionId } : { orderId: order }),
       });
       if (res.ok) {
-        const b = (await res.json()) as { status?: unknown; summary?: unknown };
+        const b = (await res.json()) as { status?: unknown; summary?: unknown; orderNumber?: unknown };
         if (b.status === "paid" || b.status === "pending" || b.status === "expired") status = b.status;
         if (typeof b.summary === "string" && b.summary.trim()) summary = b.summary.trim();
+        if (typeof b.orderNumber === "string" && b.orderNumber) orderNumber = b.orderNumber;
       }
     } catch {
       // fall through to the generic message
     }
-    return htmlResponse(renderThanksPage({ status, summary: status === "paid" ? summary : undefined, demo: deps.demo, test, origin: url.origin }));
+    const paid = status === "paid";
+    return htmlResponse(
+      renderThanksPage({
+        status,
+        summary: paid ? summary : undefined,
+        orderNumber: paid ? orderNumber : undefined,
+        demo: deps.demo,
+        test,
+        origin: url.origin,
+      }),
+    );
   }
 
   if (!config || !config.enabled) return null;
