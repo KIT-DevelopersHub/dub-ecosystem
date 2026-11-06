@@ -8,6 +8,7 @@ import type { HrRepo } from "./hr-repo";
 import type { HrFormRepo } from "./hr-form-repo";
 import type { GoalMetricSources, GoalRepo } from "./goal-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
+import type { SponsorLeadRepo } from "./sponsor-lead-repo";
 import type { RoleSyncPort } from "./roleSync";
 import type { ProfileReminderTarget } from "./profileReminder";
 import type { IdentityActivationPort } from "./identityActivation";
@@ -201,6 +202,9 @@ export interface AppDeps {
   /** 名刺写真の置き場 (本番 R2 SPONSOR_FILES)。undefined なら写真ルートだけ 503。 */
   sponsorImages?: SponsorImageStore;
   newSponsorCardId: () => string;
+  /** スポンサー営業進捗 (member_sponsor_leads) の永続化 (sponsor-lead-repo.ts)。 */
+  sponsorLeadRepo: SponsorLeadRepo;
+  newSponsorLeadId: () => string;
   /** 目標管理 (member_goals) の永続化と、他サービスの実績の取り口 (goal-repo.ts)。 */
   goalRepo: GoalRepo;
   goalSources: GoalMetricSources;

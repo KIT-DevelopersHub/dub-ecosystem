@@ -42,7 +42,9 @@ interface Actuals {
   lpVisitors: number | null;
 }
 
-const LOCAL_METRICS: readonly goal.GoalMetric[] = ["hr_applicants", "hr_interviews", "hr_hired", "sponsor_cards", "participations"];
+const LOCAL_METRICS: readonly goal.GoalMetric[] = [
+  "hr_applicants", "hr_interviews", "hr_hired", "sponsor_cards", "sponsor_contacted", "sponsor_proposed", "sponsor_agreed", "sponsor_amount", "participations",
+];
 
 export function progressOf(kpi: goal.Kpi, teamId: string, a: Actuals): goal.KpiProgress {
   const done = (status: goal.KpiStatus, actual: number | null): goal.KpiProgress => ({

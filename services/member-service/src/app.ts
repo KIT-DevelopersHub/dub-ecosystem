@@ -26,6 +26,7 @@ import { registerHrInterviewFormRoutes } from "./hr-form-routes";
 import type { goal, hr, sponsor } from "@dub/types";
 import { GoalService } from "./goal-service";
 import { SponsorService } from "./sponsor-service";
+import { SponsorLeadService } from "./sponsor-lead-service";
 
 // Actor stamped on a 参加届 that arrives through the public (unauthenticated) path.
 // The gateway forwards it as a genuine service-to-service call (x-dub-internal), but
@@ -72,6 +73,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const svc = new MemberService(deps);
   const hrSvc = new HrService(deps, svc);
   const sponsorSvc = new SponsorService(deps);
+  const sponsorLeadSvc = new SponsorLeadService(deps);
   const goalSvc = new GoalService(deps);
   const app = new Hono<{ Variables: Vars }>();
 
@@ -312,6 +314,29 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
 
   // 認可は表 (スポンサーアプリの 閲覧/編集 + sponsor:read / sponsor:write / sponsor:admin)。
   // 写真は JSON ではなく生のバイト列 (Content-Type = 形式)。形式・サイズ・楽観ロックはハンドラ (sponsor-service)。
+  app.get("/members/sponsor/leads", async (c) => c.json(await sponsorLeadSvc.list(reqCtx(c))));
+  app.post("/members/sponsor/leads", async (c) => {
+    const body = await readJson<sponsor.CreateLeadRequest>(c);
+    return c.json(await sponsorLeadSvc.create(reqCtx(c), body), 201);
+  });
+  app.post("/members/sponsor/leads/import", async (c) => {
+    const body = await readJson<sponsor.ImportLeadsRequest>(c);
+    return c.json(await sponsorLeadSvc.importLeads(reqCtx(c), body), 201);
+  });
+  app.get("/members/sponsor/leads/:id", async (c) => c.json(await sponsorLeadSvc.get(reqCtx(c), c.req.param("id"))));
+  app.patch("/members/sponsor/leads/:id", async (c) => {
+    const body = await readJson<sponsor.UpdateLeadRequest>(c);
+    return c.json(await sponsorLeadSvc.update(reqCtx(c), c.req.param("id"), body));
+  });
+  app.delete("/members/sponsor/leads/:id", async (c) => {
+    await sponsorLeadSvc.remove(reqCtx(c), c.req.param("id"));
+    return c.body(null, 204);
+  });
+  app.get("/members/sponsor/goals", async (c) => c.json(await sponsorLeadSvc.listGoals(reqCtx(c))));
+  app.put("/members/sponsor/goals/:month", async (c) => {
+    const body = await readJson<sponsor.PutGoalRequest>(c);
+    return c.json(await sponsorLeadSvc.putGoal(reqCtx(c), c.req.param("month"), body));
+  });
   app.get("/members/sponsor/cards", async (c) => c.json(await sponsorSvc.list(reqCtx(c))));
   app.post("/members/sponsor/cards", async (c) => {
     const body = await readJson<sponsor.CreateCardRequest>(c);

@@ -10,6 +10,7 @@ import { InMemoryHrRepo } from "../src/hr-repo";
 import { InMemoryHrFormRepo } from "../src/hr-form-repo";
 import { InMemoryGoalRepo } from "../src/goal-repo";
 import { InMemorySponsorRepo, type SponsorImageStore } from "../src/sponsor-repo";
+import { InMemorySponsorLeadRepo } from "../src/sponsor-lead-repo";
 import type { AppDeps } from "../src/types";
 
 /**
@@ -79,6 +80,8 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     sponsorRepo: new InMemorySponsorRepo(),
     sponsorImages: new FakeImageStore(),
     newSponsorCardId: () => `card_${String(seq++).padStart(6, "0")}`,
+    sponsorLeadRepo: new InMemorySponsorLeadRepo(),
+    newSponsorLeadId: () => `lead_${String(seq++).padStart(6, "0")}`,
     goalRepo: new InMemoryGoalRepo(),
     goalSources: { teamTasks: async () => [], lpVisitors: async () => 0 },
     ...overrides,

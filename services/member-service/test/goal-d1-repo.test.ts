@@ -66,8 +66,19 @@ describe("createD1GoalRepo", () => {
       `INSERT INTO member_sponsor_cards (id, org_id, version, created_by, created_at, updated_at) VALUES ('c1', 'org_x', 1, 'usr', ?, ?)`,
     ).run("2026-11-02T00:00:00.000Z", "2026-11-02T00:00:00.000Z");
 
+    const lead = (id: string, status: string, firstContact: string | null, agreed: string | null, amount: number | null, archivedAt: string | null = null) =>
+      raw.prepare(
+        `INSERT INTO member_sponsor_leads (id, org_id, company_name, status, first_contact_on, agreed_on, expected_amount, version, archived_at, created_by, created_at, updated_at)
+         VALUES (?, 'org_x', '企業', ?, ?, ?, ?, 1, ?, 'usr', 't', 't')`,
+      ).run(id, status, firstContact, agreed, amount, archivedAt);
+    lead("l1", "内諾", "2026-11-01", "2026-11-20", 300000);
+    lead("l2", "見送り", "2026-11-02", "2026-11-21", 500000);
+    lead("l3", "内諾", "2026-11-03", "2026-11-22", 900000, "2026-11-23T00:00:00.000Z");
+    lead("l4", "内諾", "2026-10-30", "2026-12-01", 100000);
+
     expect(await repo.countMonth("org_x", "2026-11")).toEqual({
-      hr_applicants: 1, hr_interviews: 1, hr_hired: 1, sponsor_cards: 1, participations: 0,
+      hr_applicants: 1, hr_interviews: 1, hr_hired: 1, sponsor_cards: 1,
+      sponsor_contacted: 2, sponsor_proposed: 0, sponsor_agreed: 1, sponsor_amount: 300000, participations: 0,
     });
     expect((await repo.countMonth("org_x", "2026-12")).hr_applicants).toBe(1);
     expect((await repo.countMonth("org_y", "2026-11")).hr_applicants).toBe(0);

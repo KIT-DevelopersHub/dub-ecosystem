@@ -8,6 +8,10 @@
   margin: 0 auto;
 }
 
+.pageWide {
+  max-width: 1440px;
+}
+
 .note {
   margin: 0;
   color: var(--dub-color-text-muted);
@@ -116,10 +120,13 @@
 }
 
 /* ── 詳細 (ドロワー) ─────────────────────────────────────── */
+/* Drawer の本文は自前でスクロールしないので、ここをスクロール領域にする。 */
 .detail {
   display: flex;
   flex-direction: column;
   gap: var(--dub-space-6);
+  height: 100%;
+  overflow-y: auto;
   padding: var(--dub-space-2) 0;
 }
 
@@ -395,4 +402,191 @@
 .ocrText {
   flex: 1;
   min-width: 12em;
+}
+
+/* ── 営業 ─────────────────────────────────────────────── */
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--dub-space-4);
+  margin: 0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--dub-space-1);
+  padding: var(--dub-space-4) var(--dub-space-5);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+}
+
+.stat dt {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+.stat dd {
+  margin: 0;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-2xl);
+  font-weight: var(--dub-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.leadsLoading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.leadStatus {
+  display: inline-block;
+  min-width: 8.5rem;
+}
+
+.leadNext {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+/* セクションをまたいで値の位置を揃える。 */
+.leadFields {
+  grid-template-columns: 11rem minmax(0, 1fr);
+}
+
+.leadSectionTitle {
+  margin: 0;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.leadCards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+
+.importErrors {
+  margin: 0;
+  padding-left: var(--dub-space-5);
+  color: var(--dub-color-danger-600);
+  font-size: var(--dub-font-size-sm);
+}
+
+.importWarnings {
+  margin: 0;
+  padding-left: var(--dub-space-5);
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+/* ── 目標 ─────────────────────────────────────────────── */
+.monthNav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.monthLabel {
+  min-width: 7em;
+  text-align: center;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.goalGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--dub-space-4);
+}
+
+.goalCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-5);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+}
+
+.goalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  min-height: 1.5rem;
+}
+
+.goalLabel {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+.goalNumbers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--dub-space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.goalActual {
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-2xl);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.goalTarget {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+.meter {
+  height: 8px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-sunken);
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-brand-500);
+}
+
+.goalFoot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+}
+
+.goalRate {
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.goalNotes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
 }

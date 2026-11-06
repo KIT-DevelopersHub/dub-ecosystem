@@ -23,8 +23,17 @@ export interface MemberMonthCounts {
   hr_interviews: number;
   hr_hired: number;
   sponsor_cards: number;
+  sponsor_contacted: number;
+  sponsor_proposed: number;
+  sponsor_agreed: number;
+  sponsor_amount: number;
   participations: number;
 }
+
+const NO_COUNTS: MemberMonthCounts = {
+  hr_applicants: 0, hr_interviews: 0, hr_hired: 0, sponsor_cards: 0,
+  sponsor_contacted: 0, sponsor_proposed: 0, sponsor_agreed: 0, sponsor_amount: 0, participations: 0,
+};
 
 export interface GoalRepo {
   list(orgId: common.OrgId, month: string): Promise<GoalRow[]>;
@@ -134,12 +143,20 @@ export function createD1GoalRepo(db: DbClient): GoalRepo {
              WHERE a.org_id = ?1 AND a.archived_at IS NULL AND e.to_stage = 'hired' AND ${jstMonth("e.created_at")} = ?2) AS hr_hired,
            (SELECT COUNT(*) FROM member_sponsor_cards
              WHERE org_id = ?1 AND archived_at IS NULL AND ${jstMonth("created_at")} = ?2) AS sponsor_cards,
+           (SELECT COUNT(*) FROM member_sponsor_leads
+             WHERE org_id = ?1 AND archived_at IS NULL AND substr(first_contact_on, 1, 7) = ?2) AS sponsor_contacted,
+           (SELECT COUNT(*) FROM member_sponsor_leads
+             WHERE org_id = ?1 AND archived_at IS NULL AND substr(proposed_on, 1, 7) = ?2) AS sponsor_proposed,
+           (SELECT COUNT(*) FROM member_sponsor_leads
+             WHERE org_id = ?1 AND archived_at IS NULL AND status <> '見送り' AND substr(agreed_on, 1, 7) = ?2) AS sponsor_agreed,
+           (SELECT COALESCE(SUM(expected_amount), 0) FROM member_sponsor_leads
+             WHERE org_id = ?1 AND archived_at IS NULL AND status <> '見送り' AND substr(agreed_on, 1, 7) = ?2) AS sponsor_amount,
            (SELECT COUNT(*) FROM member_participations
              WHERE org_id = ?1 AND ${jstMonth("submitted_at")} = ?2) AS participations`,
         orgId,
         month,
       );
-      return r ?? { hr_applicants: 0, hr_interviews: 0, hr_hired: 0, sponsor_cards: 0, participations: 0 };
+      return r ?? { ...NO_COUNTS };
     },
   };
 }
@@ -147,7 +164,7 @@ export function createD1GoalRepo(db: DbClient): GoalRepo {
 /** テスト用。件数は counts を直接差し替える。 */
 export class InMemoryGoalRepo implements GoalRepo {
   rows = new Map<string, GoalRow>();
-  counts: MemberMonthCounts = { hr_applicants: 0, hr_interviews: 0, hr_hired: 0, sponsor_cards: 0, participations: 0 };
+  counts: MemberMonthCounts = { ...NO_COUNTS };
 
   private key = (orgId: string, teamId: string, month: string): string => `${orgId}|${teamId}|${month}`;
 
