@@ -52,6 +52,17 @@ members who joined the role. It is additive and only uses a 名簿 Gmail: it nev
 failure could still mail an invite that cannot be recalled. A grant whose Gmail members are all in
 the ledger costs no Drive call. The first role grant arms the alarm.
 
+**Google Calendar limits**: a usage limit from Calendar (`GOOGLE_QUOTA_EXCEEDED`, api `calendar`)
+ends the sync on the spot and pauses it for 6 hours (`QUOTA_PAUSE_MS`, `calendarPausedUntil` in
+`MeetingSyncDO` storage; log `meeting_sync_quota_paused`, once per pause). While paused the sync
+makes no Calendar call and `POST /meetings/sync` answers with the limit message; meeting writes
+still try Google. The Meet steps and the Drive共有 follow keep running: they are other APIs with
+other quotas. The sync also spends less (constants at the top of `meetings-service.ts`): an
+unchanged calendar costs no `listAcl` (one full check a day), a refused share waits 24 hours, a
+meeting leaves the sync 24 hours after its last occurrence and its attendees freeze when it ends
+(Google would mail any change), and share writes run at most 10 per 15 minutes. Those batches run
+between the hourly cycles (`aclShares` phase), so the ingest and the Drive共有 follow never wait.
+
 ## Getting the real Hackit refresh token (one-time, done by the operator)
 
 1. Google Cloud Console → create/pick a project (any account can own it).
