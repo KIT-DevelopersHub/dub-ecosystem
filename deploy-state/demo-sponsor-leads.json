@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "sponsor-leads",
+  "worker": "dub-demo-sponsor-leads",
+  "url": "https://dub-demo-sponsor-leads.developershub-site.workers.dev",
+  "deployedSha": "b206330b",
+  "branch": "commander/task-ctask_01M6QKSA10YENVP61KV72VXT67",
+  "actor": "ko-tarou",
+  "markers": ["fe2-sponsor-leads-table","fe2-sponsor-lead-stats","fe2-sponsor-lead-import-text"],
+  "live": true,
+  "verifiedAt": "2026-11-06T05:30:10Z",
+  "updatedAt": "2026-11-06T05:30:10Z",
+  "note": "スポンサー: 営業進捗の表"
+}
