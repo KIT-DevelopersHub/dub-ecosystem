@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "calendar-drag",
+  "worker": "dub-demo-calendar-drag",
+  "url": "https://dub-demo-calendar-drag.developershub-site.workers.dev",
+  "deployedSha": "a9e26493",
+  "branch": "commander/task-ctask_01M6QKKKRBW248FNJDDF75MDKW",
+  "actor": "ko-tarou",
+  "markers": ["権限不足で実行できません"],
+  "live": true,
+  "verifiedAt": "2026-11-06T09:41:35Z",
+  "updatedAt": "2026-11-06T09:41:35Z",
+  "note": "カレンダーのドラッグ移動+拒否表示"
+}

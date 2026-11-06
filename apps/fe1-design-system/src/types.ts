@@ -443,6 +443,8 @@ export interface ToastOptions {
   title: string;
   description?: string;
   durationMs?: number; // default 5000; error sticks until closed
+  /** One inline action (e.g. 元に戻す). Clicking it also dismisses the toast. */
+  action?: { label: string; onClick: () => void };
 }
 
 export type ThemeName = "light" | "dark";
