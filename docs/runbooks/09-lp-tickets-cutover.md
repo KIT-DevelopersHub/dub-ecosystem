@@ -73,7 +73,9 @@ pnpm dlx wrangler@4.35.0 secret put TICKET_OPS_EMAIL --name dub-lp-tickets
 ```
 
 - `TICKET_TOKEN_SECRET` は十分長い乱数にし、手元の保管場所にも控える。**変えると発行済みのチケット URL がすべて無効になる**。
-- `RESEND_API_KEY` は送信上限の足りるプランのキーを使う。無料枠のままだと確認メールが送信待ちで滞留する。
+- `RESEND_API_KEY` は Dub 本体と同じ Resend アカウントのキーでよい。
+- Resend が無料枠の間は `wrangler.free.toml` の `TICKET_MAIL_DAILY_CAP` がチケットのメールを 1 日 50 通までに抑える。超えた分は注文ごとに送信待ちで残り、翌日以降に購入者宛てから順に送られる。
+- 有料プランへ切り替えたら `TICKET_MAIL_DAILY_CAP` の行を消してデプロイする。消すまでは上限が効いたまま。
 - `TICKET_OPS_EMAIL` は購入データの控えと毎日の CSV の宛先。未設定の間、控えは送られず送信待ちのまま残る。
 
 - 値は `dub-lp-analytics` に入れたものと同じ。Cloudflare からは読み出せないので、Stripe ダッシュボードか手元の保管場所から取る。

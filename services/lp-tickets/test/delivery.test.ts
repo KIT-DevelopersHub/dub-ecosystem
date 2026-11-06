@@ -417,6 +417,24 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
     expect((await h.outbox(orders[2]!.id)).buyer_confirmation).toMatchObject({ attempts: 0, lastError: null, nextAttemptAt: NOW });
   });
 
+  it("daily cap: buyer mails go first, the rest wait without losing attempts, and the next JST day resumes", async () => {
+    const mail = fakeMailer(() => ({ ok: true, id: "re" }));
+    const h = await setup(kind, { mailer: mail.mailer, defer: null, ticketMailDailyCap: 2 });
+    const orders = [await h.buy(), await h.buy(), await h.buy()];
+    for (const o of orders) await h.paid(o);
+    const sum = await h.delivery.drainPass();
+    expect(mail.calls).toHaveLength(2);
+    expect(sum).toMatchObject({ mailSent: 2, mailBacklog: 4 });
+    expect(mail.ops()).toHaveLength(0);
+    await h.delivery.drainPass();
+    expect(mail.calls).toHaveLength(2);
+    expect((await h.outbox(orders[2]!.id)).buyer_confirmation).toMatchObject({ status: "pending", attempts: 0 });
+    h.clock.set(later(24 * 60 * 60 * 1000));
+    await h.delivery.drainPass();
+    expect(mail.calls).toHaveLength(4);
+    expect((await h.outbox(orders[2]!.id)).buyer_confirmation).toMatchObject({ status: "sent" });
+  });
+
   it("the immediate send asks for the alarm soon when Resend pushes back", async () => {
     const soon: boolean[] = [];
     const mail = fakeMailer(() => ({ ok: false, failure: "rate_limited", error: "resend_429_x" }));

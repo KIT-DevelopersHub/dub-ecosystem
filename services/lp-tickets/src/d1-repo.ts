@@ -704,6 +704,10 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
         ),
       );
     },
+    async countOutboxSentSince(since) {
+      const r = await db.first<{ c: number }>("SELECT COUNT(*) AS c FROM lp_ticket_outbox WHERE status = 'sent' AND sent_at >= ?", since);
+      return r?.c ?? 0;
+    },
     async claimOutbox(c) {
       if (c.kinds.length === 0) return [];
       const rows = await db.all<OutboxDbRow>(

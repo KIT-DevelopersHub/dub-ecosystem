@@ -72,6 +72,7 @@ export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext):
     ticketTokenSecret: env.TICKET_TOKEN_SECRET || null,
     ticketOpsEmail: env.TICKET_OPS_EMAIL || null,
     ticketMailFrom: env.TICKET_MAIL_FROM || DEFAULT_MAIL_FROM,
+    ticketMailDailyCap: Number(env.TICKET_MAIL_DAILY_CAP) > 0 ? Number(env.TICKET_MAIL_DAILY_CAP) : null,
     backup: backupStore(env),
     defer: ctx ? (work) => ctx.waitUntil(work) : null,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

@@ -38,5 +38,7 @@ CREATE TABLE IF NOT EXISTS lp_ticket_jobs (
 CREATE INDEX IF NOT EXISTS idx_lp_tickets_order ON lp_tickets(order_id);
 -- 送信待ちの取り出し（status='pending' かつ next_attempt_at が過去）。
 CREATE INDEX IF NOT EXISTS idx_lp_ticket_outbox_due ON lp_ticket_outbox(status, next_attempt_at);
+-- 1 日の送信数（TICKET_MAIL_DAILY_CAP）。
+CREATE INDEX IF NOT EXISTS idx_lp_ticket_outbox_sent ON lp_ticket_outbox(status, sent_at);
 -- 発行漏れの見直し（最近支払われた注文だけを読む）。
 CREATE INDEX IF NOT EXISTS idx_lp_ticket_orders_paid ON lp_ticket_orders(site, status, paid_at);

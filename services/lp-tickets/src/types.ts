@@ -285,6 +285,7 @@ export interface LpTicketRepo {
   ordersByIds(site: string, ids: readonly string[]): Promise<TicketOrderRow[]>;
   /** One conditional UPDATE: a row goes to exactly one caller however many drains run at once. */
   claimOutbox(c: OutboxClaim): Promise<OutboxRow[]>;
+  countOutboxSentSince(since: string): Promise<number>;
   applyOutboxUpdates(updates: readonly OutboxUpdate[]): Promise<void>;
   /** Pending rows per kind with next_attempt_at <= before. */
   outboxDue(before: string): Promise<Map<OutboxKind, number>>;
@@ -337,6 +338,8 @@ export interface AppDeps {
   /** null = TICKET_OPS_EMAIL unset: the ops copy stays pending. */
   ticketOpsEmail: string | null;
   ticketMailFrom: string;
+  /** Mails per JST day. null = no limit. The Resend free plan is shared with the rest of Dub. */
+  ticketMailDailyCap: number | null;
   /** null = no BACKUP binding. */
   backup: BackupStore | null;
   /** ctx.waitUntil of the current request. null outside a request (cron, alarm, tests). */

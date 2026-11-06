@@ -320,6 +320,9 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
   async ordersByIds(site: string, ids: readonly string[]) {
     return this.orders.filter((o) => o.site === site && ids.includes(o.id)).map(clone);
   }
+  async countOutboxSentSince(since: string) {
+    return this.outbox.filter((r) => r.status === "sent" && r.sentAt !== null && r.sentAt >= since).length;
+  }
   async claimOutbox(c: OutboxClaim) {
     const rows = this.outbox
       .filter(

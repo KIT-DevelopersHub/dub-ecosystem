@@ -44,6 +44,7 @@ export const SWEEP_RECENT_MS = 60 * 60 * 1000;
 
 const EXPORT_PAGE = 1000;
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const JOB_BACKUP_DAY = "backup_day";
 const JOB_SWEEP_DAY = "full_sweep_day";
 const JOB_CSV_SHA = "daily_csv_sha";
@@ -254,6 +255,14 @@ export class TicketDelivery {
     return { update: this.later(row, delay, res.error), stop: true };
   }
 
+  /** Mails left today under TICKET_MAIL_DAILY_CAP. Over the cap rows just wait: attempts are not counted. */
+  private async dailyAllowance(now: string): Promise<number> {
+    const cap = this.deps.ticketMailDailyCap;
+    if (cap === null) return DRAIN_BATCH_MAX;
+    const dayStart = Math.floor((Date.parse(now) + JST_OFFSET_MS) / DAY_MS) * DAY_MS - JST_OFFSET_MS;
+    return Math.max(0, cap - (await this.repo.countOutboxSentSince(new Date(dayStart).toISOString())));
+  }
+
   /** Sends due rows, paced. Two drains at once split the rows between them: the claim hands each to one. */
   async drain(o: { orderId?: string; limit?: number; budgetMs?: number } = {}): Promise<DrainResult> {
     const result: DrainResult = { sent: 0, retried: 0, failed: 0 };
@@ -261,11 +270,13 @@ export class TicketDelivery {
     if (kinds.length === 0) return result;
     const now = this.deps.now();
     const deadline = Date.parse(now) + (o.budgetMs ?? DRAIN_BUDGET_MS);
+    const allowance = await this.dailyAllowance(now);
+    if (allowance === 0) return result;
     const claimed = await this.repo.claimOutbox({
       now,
       leaseUntil: this.plusMs(OUTBOX_LEASE_MS),
       kinds,
-      limit: Math.min(o.limit ?? DRAIN_BATCH_MAX, DRAIN_BATCH_MAX),
+      limit: Math.min(o.limit ?? DRAIN_BATCH_MAX, DRAIN_BATCH_MAX, allowance),
       ...(o.orderId ? { orderId: o.orderId } : {}),
     });
     if (claimed.length === 0) return result;

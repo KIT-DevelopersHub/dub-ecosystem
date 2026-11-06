@@ -64,6 +64,7 @@ export async function makeApp(
     ticketTokenSecret: null,
     ticketOpsEmail: null,
     ticketMailFrom: "北陸ITカンファレンス <info@example.com>",
+    ticketMailDailyCap: null,
     backup: null,
     defer: null,
     sleep: async () => {},

@@ -29,6 +29,8 @@ export interface Env {
   TICKET_OPS_EMAIL?: string;
   /** 購入者へのメールの From。未設定なら既定の差出人。 */
   TICKET_MAIL_FROM?: string;
+  /** 1 日 (JST) に送るメールの上限。未設定なら無制限（Resend 有料プラン）。 */
+  TICKET_MAIL_DAILY_CAP?: string;
   /** R2 dub-tickets-backup。毎日のバックアップ。 */
   BACKUP?: R2Bucket;
 }
