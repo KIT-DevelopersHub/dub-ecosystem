@@ -24,6 +24,12 @@ service = "identity-roster"
 binding = "SVC_NOTIFICATION"
 service = "notification"
 
+# mail-gateway (POST /send): 面談の案内メール。mail-gateway 側も SVC_MEMBER を持つ相互 binding で、
+# どちらの Worker も既に存在するのでデプロイ順の制約は増えない。
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "mail-gateway"
+
 # 目標管理の実績 (チームのタスク件数 / LP の訪問者数)。件数だけを内部 API から読む。
 [[services]]
 binding = "SVC_TASK"
@@ -44,3 +50,5 @@ enabled = true
 
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
+# 公開ページの起点 (面談の日程選択 URL)。api-gateway の APP_BASE_URL と同じ値。
+APP_BASE_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev"

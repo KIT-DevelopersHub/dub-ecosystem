@@ -13,5 +13,9 @@ export interface Env {
   SVC_LP_ANALYTICS?: Fetcher;
   // R2 dub-file-attachments (sponsor/cards/<id> = 名刺写真)。Optional: 無ければ写真ルートだけ 503。
   SPONSOR_FILES?: R2Bucket;
+  // mail-gateway (POST /send): 面談の案内メール。Optional: 無ければメールは保留のまま。
+  SVC_MAIL_GATEWAY?: Fetcher;
+  // 公開ページの起点 (面談の日程選択 URL)。Optional: 無ければメールは保留のまま。
+  APP_BASE_URL?: string;
   DUB_DEFAULT_ORG_ID?: string;
 }

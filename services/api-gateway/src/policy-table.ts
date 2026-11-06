@@ -77,6 +77,8 @@ export const POLICY_TABLE = definePolicyTable({
   // Turnstile は token が来たときだけ検証する (上の CAVEAT と同じ弱さ・widget を出したら token 必須化を検討)。
   "GET /api/v1/public/hr-interview-form": PUBLIC,
   "POST /api/v1/public/hr-interview-form": PUBLIC,
+  "POST /api/v1/public/hr-interview-booking/view": PUBLIC,
+  "POST /api/v1/public/hr-interview-booking/book": PUBLIC,
   // LP visit beacon. The handler drops non-LP origins and forwards only a sanitized row to
   // lp-analytics s2s; there is no session to check and nothing readable comes back (204).
   "POST /api/v1/public/lp-visits": PUBLIC,

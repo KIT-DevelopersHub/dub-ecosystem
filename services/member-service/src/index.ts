@@ -10,6 +10,8 @@ import { createApp } from "./app";
 import { createD1MemberRepo } from "./d1-repo";
 import { createD1HrRepo } from "./hr-repo";
 import { createD1HrFormRepo } from "./hr-form-repo";
+import { createD1HrInterviewRepo } from "./hr-interview-repo";
+import { interviewerNotifierVia, sendHrMailVia } from "./hr-interview-mail";
 import { createD1GoalRepo, createGoalSources } from "./goal-repo";
 import { createD1SponsorRepo, r2ImageStore } from "./sponsor-repo";
 import { createD1SponsorLeadRepo } from "./sponsor-lead-repo";
@@ -48,6 +50,10 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newOnboardingItemId: () => newId("onb"),
     hrRepo: createD1HrRepo(db),
     hrFormRepo: createD1HrFormRepo(db),
+    hrInterviewRepo: createD1HrInterviewRepo(db),
+    ...(env.SVC_MAIL_GATEWAY ? { sendHrMail: sendHrMailVia(env.SVC_MAIL_GATEWAY) } : {}),
+    ...(env.SVC_NOTIFICATION ? { notifyInterviewer: interviewerNotifierVia(env.SVC_NOTIFICATION) } : {}),
+    ...(env.APP_BASE_URL ? { appBaseUrl: env.APP_BASE_URL } : {}),
     // 名簿のチーム・役職 -> identity の自動ロール (best-effort・PUT /internal/*managed-roles)。
     roleSync: createIdentityRoleSync(env.SVC_IDENTITY),
     // 在籍で紐付いた人の招待中アカウントを有効化 (best-effort・POST /internal/users/:id/activate)。

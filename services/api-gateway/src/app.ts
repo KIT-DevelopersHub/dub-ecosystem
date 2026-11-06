@@ -20,6 +20,7 @@ import { createPublicInquiryHandler } from "./handlers/public-inquiry";
 import { createPublicParticipationHandler } from "./handlers/public-participation";
 import { publicOnboardingHandler } from "./handlers/public-onboarding";
 import { publicHrInterviewFormGetHandler, createPublicHrInterviewFormSubmitHandler } from "./handlers/public-hr-interview-form";
+import { publicHrInterviewBookingHandler } from "./handlers/public-hr-interview-booking";
 import { publicLpVisitHandler } from "./handlers/public-lp-visit";
 import { publicResendWebhookHandler } from "./handlers/public-resend-webhook";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
@@ -98,6 +99,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   // Public 面談申し込みフォーム (人事): unauthenticated read / submit → member-service internal route.
   app.get(`${API_PREFIX}/public/hr-interview-form`, publicHrInterviewFormGetHandler);
   app.post(`${API_PREFIX}/public/hr-interview-form`, createPublicHrInterviewFormSubmitHandler(options.turnstile));
+  app.post(`${API_PREFIX}/public/hr-interview-booking/view`, publicHrInterviewBookingHandler("view"));
+  app.post(`${API_PREFIX}/public/hr-interview-booking/book`, publicHrInterviewBookingHandler("book"));
   // Public LP pageview beacon (sendBeacon from the conference LP) → lp-analytics internal route.
   app.post(`${API_PREFIX}/public/lp-visits`, publicLpVisitHandler);
   // Resend delivery-event webhook (Svix-signed) → mail-gateway internal route, raw bytes.

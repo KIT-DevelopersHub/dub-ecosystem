@@ -8,6 +8,7 @@ import { createApp } from "../src/app";
 import { InMemoryMemberRepo } from "../src/memory-repo";
 import { InMemoryHrRepo } from "../src/hr-repo";
 import { InMemoryHrFormRepo } from "../src/hr-form-repo";
+import { InMemoryHrInterviewRepo } from "../src/hr-interview-repo";
 import { InMemoryGoalRepo } from "../src/goal-repo";
 import { InMemorySponsorRepo, type SponsorImageStore } from "../src/sponsor-repo";
 import { InMemorySponsorLeadRepo } from "../src/sponsor-lead-repo";
@@ -78,6 +79,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     newOnboardingItemId: () => `onb_${String(seq++).padStart(6, "0")}`,
     hrRepo: new InMemoryHrRepo(),
     hrFormRepo: new InMemoryHrFormRepo(),
+    hrInterviewRepo: new InMemoryHrInterviewRepo(),
     newHrId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
     sponsorRepo: new InMemorySponsorRepo(),
     sponsorImages: new FakeImageStore(),

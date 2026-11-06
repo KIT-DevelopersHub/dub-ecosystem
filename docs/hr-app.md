@@ -10,6 +10,7 @@
 - [API](#api)
 - [フロントエンド](#フロントエンド)
 - [面談申し込みフォーム](#面談申し込みフォーム)
+- [面談の日程調整](#面談の日程調整)
 - [リリース手順と migration](#リリース手順と-migration)
 - [フェーズ2 以降の TODO](#フェーズ2-以降の-todo)
 
@@ -160,18 +161,41 @@ D1 `member` namespace に新規テーブル 3 つ（`infra/d1/migrations/member/
 - **応募者の登録口はこのフォームに一本化**: 旧「応募者を登録」ボタン/ダイアログは廃止。応募者タブの見出し（と空の状態）には「面談申し込みを代わりに入力」を置き、申し込みフォーム タブの代理入力を開いた状態（`/hr/form?enter=1`）へ移る。バックエンドの作成処理（`HrService.create`。フォームの受付がこれを通す）と `POST /members/hr/applicants` はそのまま残す。
 - **migration**: `infra/d1/migrations/member/0019_hr_interview_form.sql`（新規 2 テーブルのみの additive）。
 
+## 面談の日程調整
+
+申し込みの時点では日程を聞かず、案内メールの URL から人事が登録した候補を選んでもらう。人事の候補登録が終わる前に申し込みが来ても、候補が揃うまでメールを保留できる。
+
+1. 面談申し込みフォームへ回答 → 応募者（面談日程調整中）+ 招待（`member_hr_interview_invites`）を作る。代理入力でも同じ。
+2. 選べる候補が設定数以上なら、申し込みのお礼と日程選択 URL のメールをすぐ送る。足りなければ招待を保留する。
+3. 応募者が `/interview-book#t=<token>` で日時を選ぶ → 枠が埋まり、応募者は **面談確定** に動き、面談日が入る。確認メールと、担当者への in-app 通知が出る。
+
+- **候補の数え方**: 未来の空き枠を、同じ開始・終了ごとに 1 候補と数える（2 人が同じ時間に空いていても応募者には 1 行）。応募者に担当者は見せない。
+- **保留の解除**: 枠の追加・設定の変更・次の申し込みのたびに見直す。無料枠の Cron（アカウントで 5 本）は埋まっているので定期実行は足さない。送信に失敗した招待も保留のまま次の契機に送る。人事は面談タブの「今すぐ送る」で候補数に関係なく送れる。
+- **送信の上限**: 1 回 20 通、24 時間で 30 通。公開フォームは任意の宛先へメールを送らせられるので、mail-gateway の Resend 無料枠（100 通/日）を保護する。超えた分は保留に残る。
+- **送らない人**: 保留の間に辞退などで面談日程調整中でなくなった人。再回答（同じメールの重複）では再送しない。
+- **同時押し**: `bookSlot` の `UPDATE ... WHERE applicant_id IS NULL` と部分 UNIQUE（1 人 1 枠）で 1 人に絞る。負けた人には 409 `HR_SLOT_TAKEN` を返し、最新の候補を出し直す。
+- **予約の取り消し**: 予約のある枠は削除できない。面談タブの「予約を取り消す」で空きに戻し、応募者を面談日程調整中へ戻す。同じ URL で選び直せる。本人への連絡は人事が行う。
+- **トークン**: 32 バイトの乱数。漏れても面談を 1 件予約できるだけなので、再送で同じ URL を使えるよう平文で持つ（メール本文は mail-gateway の送信ログとアーカイブ CC にも残る）。人事の API にも返さない。URL の fragment に載せ、公開 API は body で受ける。
+- **メール**: mail-gateway の `POST /send`（Service Binding `SVC_MAIL_GATEWAY`）。`x-dub-user-id` があると本人の `mail:send` を要求されるので、ユーザー無しのシステム送信で呼ぶ。宛先の URL は `APP_BASE_URL`。どちらかが無い環境ではメールは保留のまま。
+- **API**: `GET /members/hr/interviews`（閲覧 + hr:read）・`PUT .../settings`・`POST .../slots`・`DELETE .../slots/:id`・`POST .../slots/:id/release`・`POST .../invites/:id/send`（編集 + hr:write）・公開は gateway `POST /api/v1/public/hr-interview-booking/{view,book}`（PUBLIC → member-service `/members/internal/hr/interview-booking/*` INTERNAL）。契約の SoT は `@dub/types` の `hrInterview`。
+- **画面**: 人事 → 面談 タブ（`/hr/interviews`）。候補数と保留の状況・送り始める候補数の設定・日程の登録・案内の一覧。
+- **demo**: メールは送らない。公開ページは `/interview-book#t=demo`。
+- **未対応**: 応募者自身による日程変更（確認メールに返信してもらい、人事が取り消す）、面談の場所・URL の案内、Google カレンダー連携、保留が続いたときの人事への通知。
+- **migration**: `infra/d1/migrations/member/0024_hr_interviews.sql`（新規 3 テーブルのみの additive）。
+
 ## リリース手順と migration
 
 1. demo で確認 → 本番デプロイ（admin のみ利用可）→ メンバー公開（`PUBLISHED_APPS` に `hr` を足す 1 行）。
 2. **本番デプロイ前に D1 migration を適用する**（前方のみ・additive）:
    - `infra/d1/migrations/member/0017_hr.sql`（新規テーブル 3 つ）
    - `infra/d1/migrations/identity/0025_hr_app_perms.sql`（admin への 5 キー付与）
+   - `infra/d1/migrations/member/0024_hr_interviews.sql`（面談の日程調整の新規テーブル 3 つ）
 
 ## フェーズ2 以降の TODO
 
 - 公開応募フォーム（未ログインで応募 → `面談日程調整中` で登録。Turnstile・レート制限は参加届と同じ gateway 経路）。
 - 参加届 → 応募者の取り込み（`participation_id` で紐付け）、または応募者 → 参加届フォームの案内メール送信。
-- 面談日程（カレンダー/ミーティング連携）と面談官のアサイン、評価欄。
+- 面談のカレンダー/ミーティング連携、評価欄。
 - ステータス変更時の通知（担当者・本人へのメール）とメールテンプレート。
 - 採用時のアカウント発行（参加届アプリの「メール発行 + 招待」フローを再利用）。
 - オンボーディング: 人事経由でない名簿メンバーも対象に（期間指定）、担当者・期限、全員完了の通知。

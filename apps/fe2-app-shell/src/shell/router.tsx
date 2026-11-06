@@ -30,8 +30,8 @@ import {
   PUBLIC_ONBOARDING_PATH,
   PUBLIC_PARTICIPATION_PATH,
 } from "../features/participation/index.tsx";
-import { PublicInterviewFormPage } from "../features/hr/index.tsx";
-import { hrForm } from "@dub/types";
+import { PublicInterviewBookingPage, PublicInterviewFormPage } from "../features/hr/index.tsx";
+import { hrForm, hrInterview } from "@dub/types";
 import { openNotificationDialog } from "@dub/fe5-notification-inbox";
 import { NotFoundScreen } from "./screens/NotFoundScreen.tsx";
 import { PermissionDeniedScreen } from "./screens/PermissionDeniedScreen.tsx";
@@ -174,6 +174,12 @@ export function createShellRouter(
     path: hrForm.PUBLIC_INTERVIEW_FORM_PATH,
     component: () => <PublicInterviewFormPage api={api} />,
   });
+  // 面談の日程選択: 案内メールの URL から開く。ログイン不要で、応募者本人かはトークンで判定する。
+  const publicInterviewBookingRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: hrInterview.PUBLIC_INTERVIEW_BOOKING_PATH,
+    component: () => <PublicInterviewBookingPage api={api} />,
+  });
 
   // Authenticated shell layout wraps the home screen and all feature routes.
   const shellRoute = createRoute({
@@ -223,6 +229,7 @@ export function createShellRouter(
     publicParticipationRoute,
     publicOnboardingRoute,
     publicInterviewFormRoute,
+    publicInterviewBookingRoute,
     shellRoute.addChildren([homeRoute, ...featureRoutes]),
   ]);
 
