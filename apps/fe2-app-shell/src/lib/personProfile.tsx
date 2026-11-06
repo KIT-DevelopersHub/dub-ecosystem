@@ -164,12 +164,8 @@ export const PROFILE_DISPLAY_COLUMNS: readonly ProfileDisplayColumn[] = [
   single("note"),
 ];
 
-/** 姓/名 が無い旧データ用: 表示名を最初の空白で 姓/名 に分ける (空白が無ければ全体を姓)。 */
-export function splitDisplayName(name: string): { lastName: string; firstName: string } {
-  const t = name.trim();
-  const m = /^(\S+)[\s　]+(.+)$/.exec(t);
-  return m ? { lastName: m[1]!, firstName: m[2]!.trim() } : { lastName: t, firstName: "" };
-}
+/** 姓/名 が無い旧データ用: 表示名を最初の空白で 姓/名 に分ける。 */
+export const splitDisplayName = member.splitDisplayName;
 
 function toKebab(key: string): string {
   return key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
