@@ -5,6 +5,8 @@
 //   /hr/form       → 面談申し込みフォーム (編集・公開 URL・回答・代理入力)
 //   /hr/onboarding → 新メンバーのオンボーディング (チェックリスト)
 //   /hr/attendance → 全体定例・チーム定例の出席 (Dub から Meet に参加した人を記録)
+// 参加届の回答 (/participation/list) と オンボーディング案内 (/participation) も人事のタブに並ぶが、
+// ルート・Provider・per-app ゲート (app:participation:view) は参加届モジュール側のまま。
 import type { ComponentType } from "react";
 import type { IconName } from "@dub/ui";
 import { HrApplicantsScreen } from "./HrApplicantsScreen.tsx";

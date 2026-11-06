@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "driveshare-gmail",
+  "worker": "dub-demo-driveshare-gmail",
+  "url": "https://dub-demo-driveshare-gmail.developershub-site.workers.dev",
+  "deployedSha": "2d372d42",
+  "branch": "fix/driveshare-role-google-email",
+  "actor": "ko-tarou",
+  "markers": ["名簿にこのメンバーの Gmail を登録"],
+  "live": true,
+  "verifiedAt": "2026-11-05T19:11:01Z",
+  "updatedAt": "2026-11-05T19:11:01Z",
+  "note": "Drive共有 ロール共有を名簿 Gmail 宛てに"
+}

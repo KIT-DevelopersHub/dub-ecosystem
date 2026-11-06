@@ -16,6 +16,7 @@ import { createDriveShareService } from "./service";
 import { createRoleGrantsService } from "./role-grants-service";
 import { createD1RoleGrantStore } from "./role-grants-store";
 import { createIdentityRoleMembership } from "./role-membership";
+import { createMemberDirectory } from "./member-directory";
 import { createMockDriveShareClient } from "./mock-client";
 import { createGoogleDriveShareClient } from "./google/client";
 import { createTokenProvider } from "./google/token";
@@ -90,6 +91,7 @@ async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof cre
   const roleGrants = createRoleGrantsService({
     drive: client,
     roster,
+    directory: createMemberDirectory(env.SVC_MEMBER, { requestId: reqCtx.requestId, ...(reqCtx.userId ? { userId: reqCtx.userId } : {}) }),
     store,
     orgId,
     now: nowIso,

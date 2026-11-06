@@ -9,6 +9,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+
+// 回答一覧 / オンボーディング案内 は人事のタブ帯 (HrTabs = useNavigate) の中に描かれる。
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { createParticipationApi, type ParticipationApi } from "./participationApi.tsx";

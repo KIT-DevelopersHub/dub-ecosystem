@@ -17,9 +17,10 @@
 //     grant on the same file still needs that email; then drop the grant + ledger.
 //   reapply (reconcile): apply + remove departed members' permissions (our-only, guarded).
 import { DubError, errors } from "@dub/errors";
-import type { DriveShareClient } from "./drive-client";
+import { NON_GOOGLE_USER_JA, type DriveShareClient } from "./drive-client";
 import type { GrantMemberRow, GrantRow, RoleGrantStore } from "./role-grants-store";
 import type { RoleMembership } from "./role-membership";
+import { staticMemberDirectory, type MemberDirectory } from "./member-directory";
 import { computeShareDrift } from "./share-drift";
 import type {
   AssignableDriveRole,
@@ -36,6 +37,9 @@ export interface RoleGrantsDeps {
   drive: DriveShareClient;
   /** Request-scoped role membership for the acting user (built in the composition root). */
   roster: RoleMembership;
+  /** 名簿 Gmail per member: a Dub login address (e.g. a Cloudflare Email-Routing alias) often has
+   *  no Google account, which Drive refuses outright (cannotInviteNonGoogleUser). */
+  directory?: MemberDirectory;
   store: RoleGrantStore;
   orgId: string;
   now: () => string;
@@ -61,8 +65,40 @@ function indexUserPermsByEmail(perms: readonly SharePermission[]): Map<string, S
   return byEmail;
 }
 
+/** The address a role member is shared at: their 名簿 Gmail, else their Dub login address. */
+interface ShareTarget {
+  email: string;
+  hasGoogle: boolean;
+}
+
+const NO_GMAIL_REASON =
+  "Google アカウントの無いアドレスのため共有できません。名簿にこのメンバーの Gmail を登録すると、そのアドレスで共有されます。";
+
 export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService {
   const { drive, roster, store, orgId, now, newId } = deps;
+  const directory = deps.directory ?? staticMemberDirectory();
+
+  // Same resolution as カレンダー > ミーティング invitations. Memoised per role within one call
+  // (each public method starts fresh, so a membership change between calls is seen).
+  const targetsByRole = new Map<string, Promise<ShareTarget[]>>();
+  function shareTargets(roleId: string): Promise<ShareTarget[]> {
+    let p = targetsByRole.get(roleId);
+    if (!p) {
+      p = (async () => {
+        const users = await roster.listActiveUsers(roleId);
+        const google = await directory.googleEmails(users.map((u) => u.id));
+        const out = new Map<string, ShareTarget>();
+        for (const u of users) {
+          const gmail = google.get(u.id)?.gmail ?? null;
+          const email = (gmail ?? u.email).trim().toLowerCase();
+          if (!out.has(email)) out.set(email, { email, hasGoogle: gmail !== null });
+        }
+        return [...out.values()];
+      })();
+      targetsByRole.set(roleId, p);
+    }
+    return p;
+  }
 
   function assertAssignable(driveRole: string): asserts driveRole is AssignableDriveRole {
     if (!ASSIGNABLE.has(driveRole)) {
@@ -87,8 +123,10 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     const prev = await store.listMembers(grant.id);
     const prevByEmail = new Map(prev.map((m) => [m.email, m]));
 
-    const emails = await roster.listActiveEmails(grant.roleId); // already lowercased+deduped
+    const targets = await shareTargets(grant.roleId);
+    const emails = targets.map((t) => t.email); // already lowercased+deduped
     const emailSet = new Set(emails);
+    const noGmail = new Set(targets.filter((t) => !t.hasGoogle).map((t) => t.email));
 
     const perms = (await drive.listPermissions(grant.fileId)).permissions;
     const permByEmail = indexUserPermsByEmail(perms);
@@ -98,8 +136,13 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     const invited: InvitedMember[] = [];
     // Per-member isolation: a member Drive refuses (bad/non-Google email) is recorded in
     // `skipped` and the loop continues, so the rest of the role is still applied.
-    const reasonFor = (err: unknown): string =>
-      err instanceof DubError ? err.message : "共有できませんでした。";
+    // A login address without a 名簿 Gmail that Drive refuses → say how to fix it.
+    const reasonFor = (email: string, err: unknown): string =>
+      noGmail.has(email) && err instanceof DubError && err.message === NON_GOOGLE_USER_JA
+        ? NO_GMAIL_REASON
+        : err instanceof DubError
+          ? err.message
+          : "共有できませんでした。";
     // A create that only went through via the invite fallback (no Google account) is
     // recorded so the operator learns the access is pending.
     const noteInvited = (email: string, perm: SharePermission): void => {
@@ -137,7 +180,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
           next.push({ grantId: grant.id, email, permissionId: created.id, createdByUs: 1 });
         }
       } catch (err) {
-        skipped.push({ email, reason: reasonFor(err) });
+        skipped.push({ email, reason: reasonFor(email, err) });
       }
     }
 
@@ -158,8 +201,8 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
   }
 
   async function toRoleFileGrant(grant: GrantRow, extra?: { skipped?: SkippedMember[]; invited?: InvitedMember[] }): Promise<RoleFileGrant> {
-    const [emails, members, roleName] = await Promise.all([
-      roster.listActiveEmails(grant.roleId),
+    const [targets, members, roleName] = await Promise.all([
+      shareTargets(grant.roleId),
       store.listMembers(grant.id),
       roster.roleName(grant.roleId),
     ]);
@@ -169,7 +212,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       roleId: grant.roleId,
       roleName: roleName ?? grant.roleId,
       driveRole: grant.driveRole,
-      memberCount: emails.length,
+      memberCount: targets.length,
       appliedCount: members.length,
       grantedBy: grant.grantedBy,
       grantedAt: grant.grantedAt,
@@ -180,16 +223,19 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
 
   return {
     async listAll(): Promise<RoleFileGrant[]> {
+      targetsByRole.clear();
       const grants = await store.listGrants(orgId);
       return Promise.all(grants.map((g) => toRoleFileGrant(g)));
     },
 
     async listByFile(fileId: string): Promise<RoleFileGrant[]> {
+      targetsByRole.clear();
       const grants = await store.listGrantsByFile(orgId, fileId);
       return Promise.all(grants.map((g) => toRoleFileGrant(g)));
     },
 
     async apply(fileId, actingUserId, roleId, driveRole): Promise<RoleFileGrant> {
+      targetsByRole.clear();
       assertRoleId(roleId);
       assertAssignable(driveRole);
       const existing = await store.getGrant(orgId, fileId, roleId);
@@ -209,6 +255,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     },
 
     async revoke(fileId, roleId): Promise<void> {
+      targetsByRole.clear();
       assertRoleId(roleId);
       const grant = await store.getGrant(orgId, fileId, roleId);
       if (!grant) return; // idempotent
@@ -222,6 +269,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     },
 
     async reapply(fileId, roleId): Promise<RoleFileGrant> {
+      targetsByRole.clear();
       assertRoleId(roleId);
       const grant = await store.getGrant(orgId, fileId, roleId);
       if (!grant) throw errors.notFound("driveRoleGrant", `${fileId}:${roleId}`);
@@ -232,12 +280,13 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     },
 
     async drift(fileId): Promise<FileShareDrift> {
+      targetsByRole.clear();
       const [grants, perms] = await Promise.all([store.listGrantsByFile(orgId, fileId), drive.listPermissions(fileId)]);
       const expected = await Promise.all(
         grants.map(async (g) => ({
           roleName: (await roster.roleName(g.roleId)) ?? g.roleId,
           driveRole: g.driveRole,
-          emails: await roster.listActiveEmails(g.roleId),
+          emails: (await shareTargets(g.roleId)).map((t) => t.email),
         })),
       );
       return computeShareDrift(fileId, expected, perms.permissions);
