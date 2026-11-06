@@ -134,6 +134,7 @@ export function buildMeetings(opts: {
   now?: () => string;
   meetReady?: boolean;
   attendance?: ReturnType<typeof createInMemoryAttendanceStore>;
+  background?: (work: Promise<unknown>) => void;
 } = {}) {
   const store = opts.store ?? createInMemoryMeetingStore();
   const calendar = opts.calendar ?? createMockCalendarClient();
@@ -161,6 +162,7 @@ export function buildMeetings(opts: {
     },
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
     ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
+    ...(opts.background ? { background: opts.background } : {}),
   });
   return { service, store, calendar, kicks, attendance };
 }
