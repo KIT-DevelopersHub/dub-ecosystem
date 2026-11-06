@@ -646,6 +646,19 @@ staging にもデプロイされていない**。根拠は 4 点とも不在で�
 
 ---
 
+### 2.23 lp-tickets (**採用済み**)
+
+LP チケット販売。lp-analytics から分離したときに `policy-table.ts` を持った（lp-analytics 本体は未移行）。
+`/lp/tickets*` は gateway の `lp` セグメントの `subRoutes` で届く。`/lp/internal/*` はエッジで 404。
+`workers_dev = false`・routes なしで、binding 以外から届かない。
+
+| 対象 | ルール |
+|---|---|
+| `GET /lp/tickets` | `appLevel("lp","view")` |
+| 券種・入力項目・購入者一覧・プレビュートークン | `appLevel("lp","edit")` |
+| 販売 on/off・CTA・クーポン・要確認の確定 | `appLevel("lp","edit","lp:publish")` |
+| `/lp/internal/tickets*`・`/internal/health` | `INTERNAL`（webhook は加えて Stripe 署名を検証） |
+
 ## 3. 要注意リスト
 
 ### (a) 現在どの認可もかかっておらず外部到達可能なルート

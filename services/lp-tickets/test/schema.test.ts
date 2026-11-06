@@ -2,8 +2,11 @@
 // infra/d1/migrations/lp/*: same columns in the same ORDER (wrangler d1 export INSERTs are loaded into
 // it), same types / NOT NULL / defaults / keys, same indexes.
 import { describe, it, expect } from "vitest";
+import { fileURLToPath } from "node:url";
 import { memoryD1 } from "../../../infra/d1/src/node-d1";
 import { applyAll } from "../../../infra/d1/src/apply";
+import { collectSqlDir } from "../../../infra/d1/src/collect";
+import { verifySchema } from "../../../infra/d1/src/verify-schema";
 import { INIT_SQL } from "./harness";
 
 const TABLES = ["lp_ticket_settings", "lp_ticket_types", "lp_ticket_orders", "lp_ticket_order_items", "lp_ticket_coupons"];
@@ -33,6 +36,19 @@ describe("db/0001_init.sql", () => {
     const migrated = memoryD1().db;
     await applyAll(migrated);
     expect(await shape(fresh)).toEqual(await shape(migrated));
+  });
+
+  it("the deploy schema gate reads this directory and finds nothing missing", async () => {
+    const dir = fileURLToPath(new URL("../db", import.meta.url));
+    const migrations = collectSqlDir(dir, "lp");
+    expect(migrations.map((m) => m.id)).toEqual(["0001_init"]);
+    const empty = await verifySchema(memoryD1().db, migrations, { readOnly: true });
+    expect(empty.missingTables.filter((t) => t !== "dub_migrations").sort()).toEqual([...TABLES].sort());
+    const { db } = memoryD1();
+    await db.exec(INIT_SQL);
+    const res = await verifySchema(db, migrations, { readOnly: true });
+    expect(res.missingTables.filter((t) => t !== "dub_migrations")).toEqual([]);
+    expect(res.missingColumns).toEqual([]);
   });
 
   it("creates only the ticket tables and can be re-run", async () => {

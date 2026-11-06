@@ -16,6 +16,7 @@ DevHub (Dub) エコシステムの運用手順書。**手順のみ** をまと�
 | [06-parallel-demo-staging-flow.md](./06-parallel-demo-staging-flow.md) | 並行開発フロー。使い捨て per-feature demo(`deploy:demo:feature`)→承認→`teardown:demo`→staging キュー(`staging:queue`)5件バッチ flush→統合ブランチ反映 |
 | [07-slack-history-import.md](./07-slack-history-import.md) | Slack履歴→fe6-chat D1移行。マッピング表・冪等性(処理済みtsレジャー)・必要トークンscope/対象ch・パイロット手順(`pnpm slack:import`) |
 | [08-visual-screens.md](./08-visual-screens.md) | 画面ビジュアル回帰（fe2 demo ビルドを Playwright で撮って pixel diff）。Phase 1 は警告のみ・PR コメントの読み方・ベースライン seed/更新・必須化計画 |
+| [09-lp-tickets-cutover.md](./09-lp-tickets-cutover.md) | LP チケット販売を dub-lp-tickets / D1 dub-tickets へ切り替える手順。販売停止・データコピー・デプロイ順・ロールバック |
 
 ## 前提知識（3 runbook 共通）
 

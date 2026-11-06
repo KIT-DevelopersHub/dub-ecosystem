@@ -168,6 +168,18 @@ jobs:
           D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'enforce' }}
         run: bash infra/d1/scripts/schema-gate.sh dub-core
 
+      # dub-tickets is its own D1 (schema in services/lp-tickets/db). Skipped while the config still
+      # has the placeholder: the DB does not exist yet, and deploy-prod.sh stops on it with a clear error.
+      - name: D1 schema gate (dub-tickets)
+        env:
+          D1_SCHEMA_GATE: ${{ vars.D1_SCHEMA_GATE || 'enforce' }}
+        run: |
+          if grep -q 'REPLACE_AT_CUTOVER' services/lp-tickets/wrangler.free.toml; then
+            echo "::notice::dub-tickets schema gate skipped: database_id is still a placeholder."
+            exit 0
+          fi
+          bash infra/d1/scripts/schema-gate.sh dub-tickets ../../services/lp-tickets/db
+
       # --- Deploy in dependency order with fail-fast health gating ---
       - name: Deploy to production
         run: bash infra/deploy/deploy-prod.sh

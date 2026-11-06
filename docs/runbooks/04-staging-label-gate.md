@@ -38,15 +38,15 @@ staging は本番と**同型の全複製**。各 Worker は本番の `wrangler.f
 
 | 環境 | Worker 名 | D1 | KV | 用途 |
 |---|---|---|---|---|
-| production | `dub-*`, `mo3-mobile-bff` | `dub-core` / `auth-outbox` | auth-session / drive-proxy-cache / gantt-cache | 本番 |
-| **staging** | `dub-*-staging`, `mo3-mobile-bff-staging` | `dub-core-staging` / `auth-outbox-staging` | `*-staging` ×3 | PR 確認用（本番同型・デモ seed） |
+| production | `dub-*`, `mo3-mobile-bff` | `dub-core` / `auth-outbox` / `dub-tickets` | auth-session / drive-proxy-cache / gantt-cache | 本番 |
+| **staging** | `dub-*-staging`, `mo3-mobile-bff-staging` | `dub-core-staging` / `auth-outbox-staging` / `dub-tickets-staging` | `*-staging` ×3 | PR 確認用（本番同型・デモ seed） |
 | demo | `fe2-demo` | なし（in-app mock） | なし | バックエンド無しの見せ物 |
 
-staging 対象 Worker（20本・`infra/deploy/staging-worker-set.sh` の順序＝本番と同じ依存順）:
+staging 対象 Worker（`infra/deploy/staging-worker-set.sh` の順序＝本番と同じ依存順）:
 identity-roster / auth-service / event-service / task-service / gantt-service / notification /
 file-meta / drive-proxy / drive-share-service / chat-service / mail-gateway / deploy-service /
-github-sync / audit-log / member-service / usage-meter / api-gateway / fe2-app-shell /
-mo3-mobile-bff / app-health-monitor。
+github-sync / audit-log / member-service / usage-meter / lp-tickets / lp-analytics / api-gateway /
+fe2-app-shell / mo3-mobile-bff / app-health-monitor（正は同ファイルの配列）。
 
 本番データは **コピーしない**（機密/PII 混入回避）。staging には代表的なデモ seed のみ投入（§8）。
 
@@ -175,7 +175,7 @@ bash infra/deploy/setup-staging-resources.sh
 
 - worker `name` → `+ -staging`（DO binding 名 `METER_DO`/`ChatRoom` 等は不変）
 - service binding target → `+ -staging`（staging は staging 上流を bind）
-- D1 `database_name` → `dub-core-staging` / `auth-outbox-staging`、id は staging id
+- D1 `database_name` → `dub-core-staging` / `auth-outbox-staging` / `dub-tickets-staging`、id は staging id
 - KV id → staging id、R2 `bucket_name` → `+ -staging`
 - api-gateway `ALLOWED_ORIGINS` → staging fe2 origin を追記（CORS）
 - `[triggers]`/`crons` → **除去**（5/5 cron 上限の回避・§3）
