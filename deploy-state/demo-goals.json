@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "goals",
+  "worker": "dub-demo-goals",
+  "url": "https://dub-demo-goals.developershub-site.workers.dev",
+  "deployedSha": "dfb2106e",
+  "branch": "commander/task-ctask_01M6R5NP3YGSV0ZSM2JK0SMWTA",
+  "actor": "ko-tarou",
+  "markers": ["fe2-goals-screen","fe2-goals-kpi"],
+  "live": true,
+  "verifiedAt": "2026-11-06T10:47:35Z",
+  "updatedAt": "2026-11-06T10:47:35Z",
+  "note": "目標管理アプリ"
+}
