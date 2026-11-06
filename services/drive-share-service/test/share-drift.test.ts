@@ -18,9 +18,22 @@ const perm = (over: Partial<SharePermission> & Pick<SharePermission, "id">): Sha
 const OWNER = perm({ id: "p_owner", role: "owner", emailAddress: "hackit@gmail.com" });
 
 describe("computeShareDrift", () => {
-  it("has no baseline (and no items) when the file has no role grant", () => {
-    const d = computeShareDrift("f", [], [OWNER, perm({ id: "p1", emailAddress: "x@example.com" })]);
-    expect(d).toEqual({ fileId: "f", grantCount: 0, expectedCount: 0, matchedCount: 0, items: [] });
+  it("reports every direct share of a file with no role grant, but not the owner or inherited ones", () => {
+    const d = computeShareDrift("f", [], [
+      OWNER,
+      perm({ id: "p1", emailAddress: "x@example.com", role: "writer" }),
+      perm({ id: "p_link", type: "anyone" }),
+      perm({ id: "p_inh", emailAddress: "parent@example.com", inherited: true }),
+    ]);
+    expect(d).toMatchObject({ grantCount: 0, expectedCount: 0, matchedCount: 0 });
+    expect(d.items.map((i) => [i.kind, i.permissionId])).toEqual([
+      ["unexpected", "p1"],
+      ["unexpected", "p_link"],
+    ]);
+  });
+
+  it("has nothing to report on an unshared file with no role grant", () => {
+    expect(computeShareDrift("f", [], [OWNER]).items).toEqual([]);
   });
 
   it("reports shares outside the roles, wrong roles and members without access", () => {
@@ -110,5 +123,19 @@ describe("RoleGrantsService.drift", () => {
       ["missing", "user", "dev2@example.com"],
     ]);
     expect(drifted.items[2]!.roleNames).toEqual(["開発"]);
+  });
+
+  it("still reports what stays behind after the last role is removed", async () => {
+    const drive = createMockDriveShareClient();
+    // sponsor@ holds an individual share and is also a member, so 解除 must not touch it.
+    const roster = fakeRoster({ role_dev: ["sponsor@example.com", "dev1@example.com"] }, { role_dev: "開発" });
+    const { service } = buildRoleGrants({ drive, roster });
+    await service.apply("fil_budget", "usr_admin", "role_dev", "writer");
+
+    await service.revoke("fil_budget", "role_dev");
+
+    const d = await service.drift("fil_budget");
+    expect(d.grantCount).toBe(0);
+    expect(d.items.map((i) => [i.kind, i.email])).toEqual([["unexpected", "sponsor@example.com"]]);
   });
 });
