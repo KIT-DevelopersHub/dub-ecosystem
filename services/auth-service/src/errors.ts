@@ -20,6 +20,9 @@ export const AuthErrorCodes = {
   STEP_UP_FAILED: "AUTH_STEP_UP_FAILED", // 403 password re-entry before a sensitive action was wrong
   PASSKEY_DUPLICATE: "AUTH_PASSKEY_DUPLICATE", // 409 this authenticator is already registered
   LAST_AUTH_METHOD: "AUTH_LAST_AUTH_METHOD", // 409 refusing to delete the user's only remaining way to sign in
+  IMPERSONATION_NOT_ALLOWED: "AUTH_IMPERSONATION_NOT_ALLOWED", // 403 target ineligible (details.reason: self/inactive/privileged/nested)
+  IMPERSONATION_ACTION_BLOCKED: "AUTH_IMPERSONATION_ACTION_BLOCKED", // 403 credential change attempted inside an impersonation session
+  NOT_IMPERSONATING: "AUTH_NOT_IMPERSONATING", // 409 stop called on a session that is not an impersonation
 } as const;
 
 export const authErrors = {
@@ -95,5 +98,16 @@ export const authErrors = {
   },
   lastAuthMethod(message = "Cannot remove the last remaining sign-in method"): DubError {
     return new DubError(AuthErrorCodes.LAST_AUTH_METHOD, message, { status: 409 });
+  },
+  // 403 with the shared reason code so the UI can say WHY (auth.IMPERSONATION_REFUSAL_LABEL).
+  impersonationNotAllowed(reason: string, message = "This member cannot be impersonated"): DubError {
+    return new DubError(AuthErrorCodes.IMPERSONATION_NOT_ALLOWED, message, { status: 403, details: { reason } });
+  },
+  // 403, not 401: the impersonation session itself is fine, only this action is refused.
+  impersonationActionBlocked(message = "This action is not allowed while viewing as another member"): DubError {
+    return new DubError(AuthErrorCodes.IMPERSONATION_ACTION_BLOCKED, message, { status: 403 });
+  },
+  notImpersonating(message = "This session is not an impersonation"): DubError {
+    return new DubError(AuthErrorCodes.NOT_IMPERSONATING, message, { status: 409 });
   },
 };

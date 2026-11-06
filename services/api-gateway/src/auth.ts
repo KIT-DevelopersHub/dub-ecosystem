@@ -9,6 +9,8 @@ import type { AuthClient } from "@dub/auth-client";
 export interface Authenticated {
   userId: string;
   session: authTypes.SessionInfo | null;
+  /** Non-null when this is an admin impersonation session (userId = the subject). */
+  impersonation: authTypes.ImpersonationInfo | null;
 }
 
 /** Extraction order is frozen: Authorization: Bearer wins, then dub_session cookie. */
@@ -45,5 +47,5 @@ export async function authenticate(client: AuthClient, ctx: RequestContext, head
   if (!res.valid || !res.userId) {
     throw errors.unauthenticated(`verify failed: ${res.reason ?? "invalid"}`);
   }
-  return { userId: res.userId, session: res.session };
+  return { userId: res.userId, session: res.session, impersonation: res.impersonation ?? null };
 }

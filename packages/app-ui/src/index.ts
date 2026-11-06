@@ -61,3 +61,10 @@ export {
   isDevhubAddress,
   type AccountMailDialogProps,
 } from "./components/AccountMailDialog";
+
+export {
+  SearchableMenu,
+  type SearchableMenuProps,
+  type SearchableMenuItem,
+} from "./components/SearchableMenu";
+export { ImpersonateConfirmDialog, type ImpersonateConfirmDialogProps } from "./components/ImpersonateConfirmDialog";

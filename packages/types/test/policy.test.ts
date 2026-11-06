@@ -238,8 +238,9 @@ describe("catalog partition — 詳細設定 vs その他", () => {
     expect(groups.length).toBeGreaterThan(0);
     expect(groups.flatMap((g) => g.entries).length).toBe(policy.otherPermissions().length);
     for (const g of groups) expect(g.entries.every((e) => e.domain === g.domain)).toBe(true);
-    // 残るドメインはこの4つだけ (出現順に依存しないよう集合で比較)
-    expect(new Set(groups.map((g) => g.domain))).toEqual(new Set(["infra", "audit", "github", "webhook"]));
+    // 残るドメインはこの5つだけ (出現順に依存しないよう集合で比較)。代理表示はアプリに属さない組織横断の権限
+    expect(new Set(groups.map((g) => g.domain))).toEqual(new Set(["infra", "audit", "github", "webhook", "impersonation"]));
+    expect(groups.find((g) => g.domain === "impersonation")?.entries.map((e) => e.key)).toEqual(["identity:impersonate"]);
   });
 
   it("名簿・ロールは運営メンバー、ファイル/Drive は Drive共有 の詳細設定が持つ", () => {

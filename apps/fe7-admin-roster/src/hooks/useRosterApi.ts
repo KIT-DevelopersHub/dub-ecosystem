@@ -154,6 +154,14 @@ export function useViewUserPassword(userId: common.UserId) {
   });
 }
 
+/** NON-optimistic: 代理表示 start (the session itself changes — the caller reloads). */
+export function useStartImpersonation() {
+  const { api } = useRosterContext();
+  return useMutation<auth.StartImpersonationResponse, unknown, common.UserId>({
+    mutationFn: (userId) => api.startImpersonation(userId),
+  });
+}
+
 /** NON-optimistic: send the アカウント発行メール (one-shot; the caller toasts + closes). */
 export function useSendAccountMail() {
   const { api } = useRosterContext();

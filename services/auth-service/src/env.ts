@@ -5,6 +5,7 @@
 // /mobile/exchange track. TTLs are vars (theme8).
 import type { KVNamespace, D1Database, Fetcher } from "@cloudflare/workers-types";
 import { buildDemoAccounts, type DemoAccountSpec } from "./demo-accounts";
+import { auth } from "@dub/types";
 
 export interface Env {
   // --- data ---
@@ -33,6 +34,8 @@ export interface Env {
   SESSION_ABS_MOBILE_TTL_SEC?: string; // mobile absolute, FIXED (default 15552000 = 180d)
   SESSION_IDLE_TTL_SEC?: string; // web idle expiry (default 2592000 = 30d) — see sessions.ts
   SESSION_REFRESH_GRACE_SEC?: string; // rotation grace window (default 60 = KV TTL floor) — see sessions.ts refresh()
+  IMPERSONATION_TTL_SEC?: string; // admin impersonation lifetime, hard (default 3600 = 60m; capped at 4h)
+  IMPERSONATION_RESTORE_GRACE_SEC?: string; // how long after expiry a refresh can still restore the admin (default 43200 = 12h)
   PWLOGIN_MAX_FAILURES?: string; // password-login failures per window before 429 (default 5)
   PWLOGIN_WINDOW_SEC?: string; // password-login rate-limit window (default 900 = 15m)
   PASSWORD_MIN_LENGTH?: string; // min length for user/admin-set passwords (default 8)
@@ -86,7 +89,15 @@ const DEFAULTS = {
   // smaller value cannot be honoured (sessions.ts floors it to 60 anyway); keeping the
   // default at the floor makes config and runtime agree.
   refreshGraceSec: 60,
+  // Admin impersonation. Short and NEVER extended: a refresh ends it (sessions.ts).
+  impersonationTtlSec: auth.IMPERSONATION_DEFAULT_TTL_SEC,
+  // After the deadline the record lingers this long ONLY so a late refresh (backgrounded
+  // tab) can hand the admin their own session back instead of logging them out.
+  impersonationRestoreGraceSec: 12 * 60 * 60,
 } as const;
+
+/** Upper bound for IMPERSONATION_TTL_SEC — a misconfigured var must not mint day-long sessions. */
+const IMPERSONATION_MAX_TTL_SEC = 4 * 60 * 60;
 
 export interface AppConfig {
   environment: string;
@@ -106,6 +117,8 @@ export interface AppConfig {
   absMobileTtlSec: number;
   idleTtlSec: number;
   refreshGraceSec: number;
+  impersonationTtlSec: number;
+  impersonationRestoreGraceSec: number;
   /** null => passkeys disabled in this environment. */
   webauthn: { rpId: string; rpName: string; origins: string[] } | null;
   passwordLogin: {
@@ -162,6 +175,8 @@ export function configFromEnv(env: Env): AppConfig {
     absMobileTtlSec: intVar(env.SESSION_ABS_MOBILE_TTL_SEC, DEFAULTS.absMobileTtlSec),
     idleTtlSec: intVar(env.SESSION_IDLE_TTL_SEC, DEFAULTS.idleTtlSec),
     refreshGraceSec: intVar(env.SESSION_REFRESH_GRACE_SEC, DEFAULTS.refreshGraceSec),
+    impersonationTtlSec: Math.min(intVar(env.IMPERSONATION_TTL_SEC, DEFAULTS.impersonationTtlSec), IMPERSONATION_MAX_TTL_SEC),
+    impersonationRestoreGraceSec: intVar(env.IMPERSONATION_RESTORE_GRACE_SEC, DEFAULTS.impersonationRestoreGraceSec),
     webauthn: webauthnConfig(env),
     passwordLogin: {
       maxFailures: intVar(env.PWLOGIN_MAX_FAILURES, 5),
