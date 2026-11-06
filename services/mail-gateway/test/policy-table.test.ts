@@ -110,6 +110,8 @@ const READS = [
   "DELETE /mail/forward",
   "GET /mail/blocks",
   "GET /mail/counts",
+  "GET /mail/drafts",
+  "GET /mail/drafts/:id/attachments/:attId",
   "GET /mail/flags",
   "GET /mail/forward",
   "GET /mail/messages",
@@ -125,15 +127,20 @@ const READS = [
   "POST /mail/blocks",
   "POST /mail/flags/:threadId",
   "POST /mail/messages/:id/read",
+  "POST /mail/read-state",
   "PATCH /mail/forward",
   "PUT /mail/forward",
 ].sort();
 // 編集 on メール + mail:send — everything that puts or queues a message on the wire.
 const WRITES = [
+  "DELETE /mail/drafts/:id",
+  "DELETE /mail/drafts/:id/attachments/:attId",
   "DELETE /mail/scheduled/:id",
   "PATCH /mail/scheduled/:id",
+  "POST /mail/drafts/:id/attachments",
   "POST /mail/outbox",
   "POST /mail/scheduled",
+  "PUT /mail/drafts/:id",
 ];
 // The Cloudflare Email Routing proxy — address issuance and forwarding rules. The subset
 // `mail:admin` guards that is reachable at a URL beginning /mail/admin/.
@@ -156,6 +163,7 @@ const ADMIN = [
   ...EMAIL_ROUTING_ADMIN,
   "GET /mail/mailboxes",
   "POST /mail/mailboxes/:id",
+  "GET /mail/status",
   "GET /mail/admin/canary/probes",
   "GET /mail/admin/lists",
   "POST /mail/admin/lists",
@@ -197,7 +205,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(49);
+    expect(everyRoute).toHaveLength(57);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing

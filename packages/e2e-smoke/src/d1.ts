@@ -63,6 +63,7 @@ export function allSchemas(): string[] {
     sqlFile("../../../services/mail-gateway/db/0022_sender_blocks_kind_index.sql"),
     sqlFile("../../../services/mail-gateway/db/0023_user_forward.sql"),
     sqlFile("../../../services/mail-gateway/db/0024_team_list.sql"),
+    sqlFile("../../../services/mail-gateway/db/0025_drafts_inline_cid.sql"),
   ];
 }
 

@@ -134,6 +134,7 @@
       "GET /mail/scheduled/{}",
       "GET /mail/sent",
       "GET /mail/sent/{}",
+      "GET /mail/status",
       "GET /mail/threads/{}",
       "PATCH /mail/forward",
       "PATCH /mail/scheduled/{}",
@@ -144,6 +145,7 @@
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
       "POST /mail/outbox",
+      "POST /mail/read-state",
       "POST /mail/scheduled",
       "PUT /mail/forward"
     ],

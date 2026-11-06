@@ -20,7 +20,8 @@ import {
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
 import { SenderAvatar } from "./SenderAvatar.tsx";
-import { PAGE_SIZE, pageSourceOf, selectVisible, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
+import { PAGE_SIZE, pageSourceOf, selectOrdered, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
+import { useReadState } from "./useReadState.tsx";
 
 // P25: exit-animation two-phase pattern (mirrors fe1 Toast.tsx's `leaving` + EXIT_MS).
 // Archive/trash marks the row `leaving` (slide-out + collapse plays via inline styles),
@@ -207,12 +208,20 @@ function ThreadRow({
   onDismissNudge?: () => void;
 }): JSX.Element {
   const { state, dispatch } = useMailStore();
+  const setRead = useReadState();
   const [hover, setHover] = useState(false);
   const unread = threadUnread(thread);
   const last = latest(thread);
   const checked = state.checked.has(thread.id);
   const nudge = replyNudge(thread, now, pendingReplies);
-  const people = thread.folder === "sent" || thread.folder === "drafts" ? last.to[0] ?? state.me : last.from;
+  // In 送信済み a row is named after who it went to, even in a conversation they started.
+  const lastSent = [...thread.messages].reverse().find((m) => m.outbound);
+  const people = (thread.folder === "sent" || state.folder === "sent") && lastSent ? lastSent.to[0] ?? state.me : last.from;
+  const cursor = state.cursorId === thread.id;
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (cursor) rowRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [cursor]);
 
   // 返信不要 inside the pinned group: always visible (phones have no hover); on phones it sits
   // under the date so the subject keeps its width. Literal marker survives minification.
@@ -242,9 +251,11 @@ function ThreadRow({
   // live-deploy check can grep the built bundle for this row without depending on RTL testids.
   return (
     <div
+      ref={rowRef}
       role="row"
       data-testid="fe2-mail-inbox-item"
       data-thread-row="fe2-mail-thread-row"
+      data-cursor={cursor ? "true" : undefined}
       data-leaving={leaving ? "true" : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -273,7 +284,7 @@ function ThreadRow({
           : unread
             ? "var(--dub-color-surface-base)"
             : "var(--dub-color-surface-sunken)",
-        boxShadow: hover && !leaving ? "inset 1px 0 0 var(--dub-color-border-strong), var(--dub-shadow-sm)" : "none",
+        boxShadow: cursor ? "inset 3px 0 0 var(--dub-color-brand-500)" : hover && !leaving ? "inset 1px 0 0 var(--dub-color-border-strong), var(--dub-shadow-sm)" : "none",
       }}
     >
       <StopClick label={checked ? "選択を解除" : "スレッドを選択"} onClick={() => dispatch({ type: "TOGGLE_CHECK", id: thread.id })}>
@@ -347,6 +358,12 @@ function ThreadRow({
               <Badge tone="info" testId="fe2-mail-shared-chip">{sharedRecipientLabel(thread)}</Badge>
             </span>
           )}
+          {/* すべてのメール mixes archived and inbox mail; the chip tells them apart (Gmail). */}
+          {state.folder === "all" && thread.folder === "inbox" ? (
+            <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+              <Badge tone="neutral" testId="fe2-mail-inbox-chip">受信トレイ</Badge>
+            </span>
+          ) : null}
           <LabelChips ids={thread.labels} labels={labels} />
           {/* Subject yields width (ellipsis) so the nudge badge after it never gets clipped. */}
           <span
@@ -406,9 +423,19 @@ function ThreadRow({
               </>
             ) : (
               <>
-                <StopClick label="アーカイブ" testId="fe2-mail-archive" onClick={onArchive}>
-                  <MailIcon name="archive" size={18} />
-                </StopClick>
+                {thread.folder === "archive" ? (
+                  <StopClick
+                    label="受信トレイに移動"
+                    testId="fe2-mail-move-inbox"
+                    onClick={() => dispatch({ type: "RESTORE", ids: [thread.id], label: "受信トレイに移動しました" })}
+                  >
+                    <MailIcon name="inbox" size={18} />
+                  </StopClick>
+                ) : (
+                  <StopClick label="アーカイブ" testId="fe2-mail-archive" onClick={onArchive}>
+                    <MailIcon name="archive" size={18} />
+                  </StopClick>
+                )}
                 <StopClick label="削除" testId="fe2-mail-trash" onClick={onTrash}>
                   <MailIcon name="trash" size={18} />
                 </StopClick>
@@ -417,7 +444,7 @@ function ThreadRow({
             {threadMine(thread) ? (
               <StopClick
                 label={unread ? "既読にする" : "未読にする"}
-                onClick={() => dispatch({ type: "SET_READ", ids: [thread.id], read: unread })}
+                onClick={() => setRead([thread.id], unread)}
               >
                 <MailIcon name={unread ? "mail-open" : "inbox"} size={18} />
               </StopClick>
@@ -442,6 +469,7 @@ function ThreadRow({
 
 export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
+  const setRead = useReadState();
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
   const now = new Date();
   const pendingReplies = pendingReplyIds(state.scheduled);
@@ -487,7 +515,7 @@ export function ThreadList(): JSX.Element {
 
   // 完全に削除 (purged) threads never show. With a search active this is the client
   // pre-filter plus the server matches (see selectVisible / useMailSync).
-  const visible = selectVisible(state);
+  const visible = selectOrdered(state, now);
   const searching = state.search.trim().length > 0;
   const search = state.searchResults;
   const searchPending = searching && (search.status === "loading" || search.status === "loadingMore");
@@ -518,6 +546,7 @@ export function ThreadList(): JSX.Element {
   const allChecked = shown.length > 0 && shown.every((t) => state.checked.has(t.id));
   const someChecked = state.checked.size > 0;
   const checkedInView = shown.filter((t) => state.checked.has(t.id)).map((t) => t.id);
+  const archivedInView = shown.filter((t) => state.checked.has(t.id) && t.folder === "archive").map((t) => t.id);
 
   return (
     <section
@@ -585,16 +614,30 @@ export function ThreadList(): JSX.Element {
               </>
             ) : (
               <>
-                <StopClick label="選択をアーカイブ" onClick={() => beginLeave(checkedInView, "ARCHIVE")}>
-                  <MailIcon name="archive" size={18} />
-                </StopClick>
+                {archivedInView.length > 0 ? (
+                  <StopClick
+                    label="選択を受信トレイに移動"
+                    testId="fe2-mail-move-inbox-bulk"
+                    onClick={() => dispatch({ type: "RESTORE", ids: archivedInView, label: "受信トレイに移動しました" })}
+                  >
+                    <MailIcon name="inbox" size={18} />
+                  </StopClick>
+                ) : null}
+                {archivedInView.length < checkedInView.length ? (
+                  <StopClick label="選択をアーカイブ" onClick={() => beginLeave(checkedInView.filter((id) => !archivedInView.includes(id)), "ARCHIVE")}>
+                    <MailIcon name="archive" size={18} />
+                  </StopClick>
+                ) : null}
                 <StopClick label="選択を削除" onClick={() => beginLeave(checkedInView, "TRASH")}>
                   <MailIcon name="trash" size={18} />
                 </StopClick>
               </>
             )}
-            <StopClick label="選択を既読にする" onClick={() => dispatch({ type: "SET_READ", ids: checkedInView, read: true })}>
+            <StopClick label="選択を既読にする" testId="fe2-mail-read-bulk" onClick={() => setRead(checkedInView, true)}>
               <MailIcon name="mail-open" size={18} />
+            </StopClick>
+            <StopClick label="選択を未読にする" testId="fe2-mail-unread-bulk" onClick={() => setRead(checkedInView, false)}>
+              <MailIcon name="inbox" size={18} />
             </StopClick>
             <span style={{ fontSize: "var(--dub-font-size-xs)", marginLeft: 4 }}>{state.checked.size}件を選択中</span>
           </div>

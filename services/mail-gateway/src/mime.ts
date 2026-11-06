@@ -192,7 +192,8 @@ export function canonicalText(s: string): string {
 /** Text for JSON-API providers (Resend/MailChannels build their own MIME): NFC + LF only.
  *  A stray CR ("\r\n" from a Windows paste) must not reach an ESP that adds its own CR. */
 export function apiText(s: string): string {
-  return nfc(s).replace(/\r\n|\r/g, "\n");
+  // JSON-API providers refuse an empty text part; a body-less mail (attachments only) is legal.
+  return nfc(s).replace(/\r\n|\r/g, "\n") || " ";
 }
 
 /** RFC 5322 date with a numeric zone ("+0000"), not the obsolete "GMT". */
@@ -486,6 +487,38 @@ function partToText(block: string): string {
   return /text\/html/i.test(ct) ? htmlToText(decoded) : decoded;
 }
 
+const isAttachmentPart = (headers: Record<string, string>): boolean =>
+  /^\s*attachment/i.test(headers["content-disposition"] ?? "");
+
+/** First text/html leaf of a MIME block, decoded (an attached .html file is not the body). */
+function partToHtml(block: string, depth: number): string | null {
+  if (depth > 12) return null;
+  const { headers, body } = splitHeadersBody(block);
+  const ct = headers["content-type"] ?? "text/plain";
+  const bMatch = /boundary="?([^";\n]+)"?/i.exec(ct);
+  if (/multipart\//i.test(ct) && bMatch && bMatch[1]) {
+    for (const raw of splitMultipart(body, bMatch[1])) {
+      const html = partToHtml(raw, depth + 1);
+      if (html) return html;
+    }
+    return null;
+  }
+  if (!/text\/html/i.test(ct) || isAttachmentPart(headers)) return null;
+  return decodeCte(body, headers["content-transfer-encoding"] ?? "", charsetOf(ct));
+}
+
+/** The HTML body as sent, UNSANITIZED (the client sanitizes before rendering). null when the
+ *  message has none, or is too large for a D1 row — the plain-text body still shows. */
+export function extractHtml(rawText: string, maxLen = 500_000): string | null {
+  let html: string | null;
+  try {
+    html = partToHtml(rawText, 0);
+  } catch {
+    return null;
+  }
+  return html && html.trim() && html.length <= maxLen ? html : null;
+}
+
 /** Old heuristic body extract — retained as the fallback when the MIME walk yields nothing. */
 function fallbackBody(rawText: string): string {
   const crlf = rawText.indexOf("\r\n\r\n");
@@ -538,6 +571,8 @@ export interface ExtractedAttachment {
   filename: string;
   contentType: string;
   bytes: Uint8Array;
+  /** Content-ID without its angle brackets (inline parts referenced by the HTML body). */
+  contentId?: string;
 }
 export interface ExtractLimits {
   maxCount: number;
@@ -615,7 +650,10 @@ function walkForAttachments(block: string, out: ExtractedAttachment[], dropped: 
   }
 
   const disposition = (headers["content-disposition"] ?? "").toLowerCase();
-  const filename = headerParam(headers["content-disposition"], "filename") ?? headerParam(ctype, "name");
+  const contentId = (headers["content-id"] ?? "").trim().replace(/^<|>$/g, "");
+  // An inline image often carries only a Content-ID; it still has to be stored to be shown.
+  const inlineName = contentId && media.startsWith("image/") ? `image-${contentId.split("@")[0]}.${media.slice("image/".length)}` : null;
+  const filename = headerParam(headers["content-disposition"], "filename") ?? headerParam(ctype, "name") ?? inlineName;
   const isAttachment = disposition.startsWith("attachment") || (filename !== null && !media.startsWith("text/"));
   if (!isAttachment || !filename) return;
 
@@ -629,7 +667,7 @@ function walkForAttachments(block: string, out: ExtractedAttachment[], dropped: 
     return;
   }
   state.total += bytes.byteLength;
-  out.push({ filename, contentType, bytes });
+  out.push({ filename, contentType, bytes, ...(contentId ? { contentId } : {}) });
 }
 
 /** Extract attachment parts + the ones dropped for size from a full RFC822 message. Pure/
