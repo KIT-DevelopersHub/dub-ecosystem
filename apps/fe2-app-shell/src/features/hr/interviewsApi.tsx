@@ -66,7 +66,7 @@ const OVERVIEW_KEY = queryKeys.feature("hr", "interviews");
 const BOOKING_KEY = (token: string) => queryKeys.feature("hr", "interview-booking", token);
 
 const ERROR_MESSAGES: Record<string, string> = {
-  HR_SLOT_DUPLICATE: "同じ時間の枠を既に登録しています",
+  HR_SLOT_DUPLICATE: "同じ時間に重なる枠を既に登録しています",
   HR_SLOT_BOOKED: "予約が入っている枠は削除できません。先に予約を取り消してください",
   HR_SLOT_TAKEN: "この日程は埋まりました。別の日程をお選びください",
   HR_BOOKING_CLOSED: "この URL では日程を選べなくなりました",

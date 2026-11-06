@@ -71,9 +71,17 @@ export function HrInterviewsScreen(): JSX.Element {
   return <HrFrame active="interviews">{body}</HrFrame>;
 }
 
-function statusMessage({ settings, openSlotCount, heldCount }: Overview): string {
+function statusMessage({ settings, openSlotCount, heldCount, invites }: Overview): string {
   const short = settings.minOpenSlots - openSlotCount;
-  if (short <= 0) return "候補が揃っています。申し込みがあると、すぐに案内メールを送ります。";
+  const waiting = invites.filter((i) => i.status === "sent").length;
+  if (openSlotCount === 0 && waiting > 0) {
+    return `メールを受け取った ${waiting} 人が、選べる候補がなく待っています。日程を追加してから、下の「再送」でお知らせできます。`;
+  }
+  if (short <= 0) {
+    return heldCount > 0
+      ? `候補は揃っていますが、${heldCount} 人にまだ送れていません。下の「今すぐ送る」で送るか、次の申し込みや日程の追加を待つと自動で送ります。`
+      : "候補が揃っています。申し込みがあると、すぐに案内メールを送ります。";
+  }
   const more = `あと ${short} 候補を登録すると、自動で送ります。`;
   return heldCount > 0 ? `候補が足りないため、${heldCount} 人への案内メールを保留しています。${more}` : `候補が揃うまで、案内メールは保留します。${more}`;
 }
@@ -262,7 +270,7 @@ function InvitesCard({ data, canWrite }: { data: Overview; canWrite: boolean }):
         header: "",
         noWrap: true,
         cell: (i) =>
-          canWrite && i.status !== "booked" ? (
+          canWrite && i.status !== "booked" && i.email ? (
             <Button
               size="sm"
               variant="secondary"

@@ -7,6 +7,13 @@ import { hrInterview, type mail, type notification } from "@dub/types";
 
 const SENDER = "DevelopersHub 人事チーム";
 
+/**
+ * mail-gateway は Resend を 15 秒 × 最大 3 回待つ。既定の 5 秒で打ち切って同じキーで再試行すると、処理中の
+ * pending が 200 で返り、届いていないのに送信済みにしてしまう。再試行はせず、人事の画面の proxy timeout
+ * (15 秒) より短く区切って失敗として扱う。次の送信は別のキーになる。
+ */
+const MAIL_TIMEOUT_MS = 12_000;
+
 export interface HrMailRequest {
   to: string;
   subject: string;
@@ -15,14 +22,15 @@ export interface HrMailRequest {
 export type HrMailSender = (requestId: string, mail: HrMailRequest, idempotencyKey: string) => Promise<void>;
 export type InterviewerNotifier = (requestId: string, req: notification.NotifyRequest) => Promise<void>;
 
-/** 申し込みの自動返信。日程選択 URL を載せる。 */
-export function renderInviteMail(name: string, email: string, url: string): HrMailRequest {
+/**
+ * 申し込みの自動返信。日程選択 URL を載せる。公開フォームは宛先も氏名も自由に入れられるので、第三者へ
+ * 好きな文面を届ける踏み台にならないよう、入力された文字列は本文に入れない。
+ */
+export function renderInviteMail(email: string, url: string): HrMailRequest {
   return {
     to: email,
     subject: "【DevelopersHub】面談のお申し込みありがとうございます",
     textBody: [
-      `${name} 様`,
-      "",
       "DevelopersHub の面談にお申し込みいただき、ありがとうございます。",
       "下の URL から、ご都合のよい面談日程をお選びください。",
       "",
@@ -75,7 +83,7 @@ export function sendHrMailVia(svcMailGateway: Fetcher): HrMailSender {
       { requestId },
       "/send",
       { to: [{ email: m.to }], subject: m.subject, textBody: m.textBody },
-      { idempotencyKey },
+      { idempotencyKey, timeoutMs: MAIL_TIMEOUT_MS, retry: false },
     );
   };
 }

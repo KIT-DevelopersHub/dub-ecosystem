@@ -23,6 +23,9 @@ const errBadTransition = (from: string, to: string): DubError =>
   new DubError("HR_INVALID_TRANSITION", `Cannot move applicant from ${from} to ${to}`, { status: 409 });
 const errApplicantJoined = (id: string): DubError =>
   new DubError("HR_APPLICANT_JOINED", `Applicant ${id} has joined the roster; remove the member instead`, { status: 409 });
+/** 応募者が日程を選べる状態ではない (辞退・選考が進んだなど)。 */
+export const errBookingClosed = (): DubError =>
+  new DubError("HR_BOOKING_CLOSED", "This booking link can no longer be used", { status: 409 });
 const errJoinRequired = (id: string): DubError =>
   new DubError("HR_JOIN_REQUIRED", `Applicant ${id} is not on the roster yet; use POST /join (採用) first`, { status: 409 });
 
@@ -188,9 +191,14 @@ export class HrService {
   async confirmInterview(ctx: ReqCtx, id: string, interviewAt: string, note: string): Promise<void> {
     for (let i = 0; i < 3; i++) {
       const cur = await this.load(id);
+      if (cur.stage !== "scheduling") throw errBookingClosed(); // 読み直した間に辞退された場合に上書きしない
       const next: ApplicantRow = { ...cur, stage: "interview_set", interviewAt, version: cur.version + 1, updatedAt: this.deps.now() };
       if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) continue;
-      await this.event(ctx, id, "stage", { fromStage: cur.stage, toStage: "interview_set", body: note });
+      // ここから先は確定済み。履歴だけ書けなくても呼び出し側に枠を解放させない。
+      await this.event(ctx, id, "stage", { fromStage: cur.stage, toStage: "interview_set", body: note }).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn(JSON.stringify({ level: "warn", service: "member-service", msg: "hr interview event failed", applicantId: id, requestId: ctx.requestId, error: String(err) }));
+      });
       return;
     }
     throw errVersionConflict(id);

@@ -110,6 +110,16 @@ describe("人事: 面談メールの保留", () => {
     expect(past.status).toBe(400);
   });
 
+  it("rejects the same interviewer's overlapping slot but allows back-to-back and another interviewer", async () => {
+    const { app } = setup();
+    const add = (startAt: string, durationMinutes: number, userId = "user_caller") =>
+      call(app, "POST", "/members/hr/interviews/slots", { userId, body: { startAt, durationMinutes } });
+    expect((await add("2026-09-01T05:00:00.000Z", 60)).status).toBe(201);
+    expect((await add("2026-09-01T05:30:00.000Z", 30)).json.error.code).toBe("HR_SLOT_DUPLICATE");
+    expect((await add("2026-09-01T06:00:00.000Z", 30)).status).toBe(201);
+    expect((await add("2026-09-01T05:30:00.000Z", 30, "user_b")).status).toBe(201);
+  });
+
   it("keeps the submission and the held invite when the mail fails, and retries on the next trigger", async () => {
     let down = true;
     const mails: string[] = [];
@@ -144,10 +154,46 @@ describe("人事: 面談メールの保留", () => {
     const { app, mails } = setup();
     for (let i = 0; i < 31; i++) await apply(app, `u${i}@example.com`);
     await withSlots(app, 5);
-    expect(mails).toHaveLength(20);
+    expect(mails).toHaveLength(10);
     await addSlot(app, 6);
+    await addSlot(app, 7);
+    expect(mails).toHaveLength(30);
+    await addSlot(app, 8);
     expect(mails).toHaveLength(30);
     expect((await overview(app)).heldCount).toBe(1);
+  });
+
+  it("skips an applicant without an address instead of blocking the queue", async () => {
+    const { app, mails, deps } = setup();
+    await apply(app);
+    await apply(app, "hanako@example.com");
+    const taro = (await deps.hrRepo.listApplicants(deps.orgId)).find((a) => a.email === "taro@example.com")!;
+    await deps.hrRepo.updateApplicant({ ...taro, email: null, version: taro.version + 1 }, taro.version);
+    await withSlots(app, 5);
+    expect(mails.map((m) => m.mail.to)).toEqual(["hanako@example.com"]);
+    expect((await overview(app)).heldCount).toBe(1);
+  });
+
+  it("does not put form input into the invite body, so the form cannot deliver arbitrary text", async () => {
+    const { app, mails } = setup();
+    await withSlots(app, 5);
+    await apply(app);
+    expect(mails[0]!.mail.textBody).not.toContain("山田");
+  });
+
+  it("runs mail after the response when deferring, and an invite failure reaches the submitter", async () => {
+    const deferred: Promise<void>[] = [];
+    const { app, mails, deps } = setup({ defer: (w) => void deferred.push(w) });
+    await withSlots(app, 5);
+    expect((await apply(app)).status).toBe(201);
+    expect(deferred).toHaveLength(1);
+    await Promise.all(deferred);
+    expect(mails).toHaveLength(1);
+
+    deps.hrInterviewRepo.addInvite = async () => {
+      throw new Error("d1 down");
+    };
+    expect((await apply(app, "other@example.com")).status).toBe(500);
   });
 
   it("「今すぐ送る」 ignores the slot count and surfaces a send failure", async () => {
@@ -226,6 +272,30 @@ describe("人事: 公開の日程選択", () => {
     expect((await view(app, token)).json.state).toBe("open");
     expect((await book(app, token, slotId)).status).toBe(200);
     expect((await call(app, "DELETE", `/members/hr/interviews/slots/${slotId}`)).status).toBe(409);
+  });
+
+  it("does not overwrite a withdrawal that lands while booking retries", async () => {
+    const { app, deps, token } = await ready();
+    const slotId = (await view(app, token)).json.slots[0].id;
+    const original = deps.hrRepo.updateApplicant.bind(deps.hrRepo);
+    deps.hrRepo.updateApplicant = async (next, expected) => {
+      deps.hrRepo.updateApplicant = original;
+      await original({ ...next, stage: "withdrawn" }, expected);
+      return false; // 人事の変更に負けた
+    };
+    expect((await book(app, token, slotId)).json.error.code).toBe("HR_BOOKING_CLOSED");
+    expect((await deps.hrRepo.listApplicants(deps.orgId))[0]!.stage).toBe("withdrawn");
+    expect((await deps.hrInterviewRepo.getSlot(slotId))!.applicantId).toBeNull();
+  });
+
+  it("keeps the booking when only the history write fails", async () => {
+    const { app, deps, token } = await ready();
+    const slotId = (await view(app, token)).json.slots[0].id;
+    deps.hrRepo.addEvent = async () => {
+      throw new Error("d1 down");
+    };
+    expect((await book(app, token, slotId)).status).toBe(200);
+    expect((await deps.hrInterviewRepo.getSlot(slotId))!.applicantId).not.toBeNull();
   });
 
   it("gives the slot back when the applicant cannot be moved", async () => {

@@ -205,6 +205,8 @@ export interface AppDeps {
   notifyInterviewer?: InterviewerNotifier;
   /** 日程選択 URL の起点 (env.APP_BASE_URL)。undefined ならメールは保留のまま。 */
   appBaseUrl?: string;
+  /** 応答のあとも続ける処理 (本番は ExecutionContext.waitUntil)。undefined なら待ってから応答する。 */
+  defer?: (work: Promise<void>) => void;
   /** 人事の id 採番 (app = 応募者 / hre = 履歴 / hfr = フォームの回答 / hsl = 面談枠 / hin = 招待)。 */
   newHrId: (prefix: "app" | "hre" | "hfr" | "hsl" | "hin") => string;
   /** スポンサー (member_sponsor_cards) の永続化 (sponsor-repo.ts)。 */

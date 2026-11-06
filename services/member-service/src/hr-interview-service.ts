@@ -6,7 +6,7 @@
 import { DubError, errors } from "@dub/errors";
 import { hrInterview } from "@dub/types";
 import type { ApplicantRow } from "./hr-repo";
-import type { HrService } from "./hr-service";
+import { errBookingClosed, type HrService } from "./hr-service";
 import type { InviteRow, SlotRow, HrInterviewRepo } from "./hr-interview-repo";
 import { buildBookedNotify, renderBookedMail, renderInviteMail } from "./hr-interview-mail";
 import type { MemberService, ReqCtx } from "./service";
@@ -14,8 +14,8 @@ import type { AppDeps } from "./types";
 
 export const PUBLIC_INTERVIEW_BOOKING_ACTOR = "system:public-hr-interview-booking";
 
-/** 一度に送る上限。超えた分は保留のまま次の契機に回す。 */
-const RELEASE_BATCH = 20;
+/** 一度に送る上限。人事の操作は送信を待つので、画面の timeout に収まる数にする。超えた分は次の契機に回す。 */
+const RELEASE_BATCH = 10;
 /** 公開フォームから任意の宛先へ送れるので、Resend の無料枠 (100 通/日) を食い潰されないよう 24 時間で区切る。 */
 const DAILY_INVITE_CAP = 30;
 const DAY_MS = 86_400_000;
@@ -25,12 +25,11 @@ const errSlotDuplicate = (): DubError => new DubError("HR_SLOT_DUPLICATE", "You 
 const errSlotBooked = (id: string): DubError => new DubError("HR_SLOT_BOOKED", `Slot ${id} is booked; release it first`, { status: 409 });
 const errSlotTaken = (): DubError => new DubError("HR_SLOT_TAKEN", "This slot is no longer available", { status: 409 });
 const errInviteNotFound = (): DubError => new DubError("HR_INVITE_NOT_FOUND", "Invite not found", { status: 404 });
-const errBookingClosed = (): DubError => new DubError("HR_BOOKING_CLOSED", "This booking link can no longer be used", { status: 409 });
 const errMailFailed = (): DubError => new DubError("HR_INVITE_SEND_FAILED", "Could not send the mail", { status: 502, retryable: true });
 
 export type HrInterviewDeps = Pick<
   AppDeps,
-  "orgId" | "now" | "hrRepo" | "newHrId" | "sendHrMail" | "notifyInterviewer" | "appBaseUrl"
+  "orgId" | "now" | "hrRepo" | "newHrId" | "sendHrMail" | "notifyInterviewer" | "appBaseUrl" | "defer"
 > & { hrInterviewRepo: HrInterviewRepo };
 
 function newToken(): string {
@@ -114,12 +113,16 @@ export class HrInterviewService {
     if (!hrInterview.SLOT_DURATIONS_MINUTES.includes(duration)) {
       throw errors.validationFailed([{ field: "durationMinutes", reason: "invalid" }]);
     }
+    const endAt = new Date(startMs + duration * 60_000).toISOString();
+    const startAt = new Date(startMs).toISOString();
+    const overlaps = (await this.slots()).some((s) => s.interviewerId === ctx.userId && s.startAt < endAt && s.endAt > startAt);
+    if (overlaps) throw errSlotDuplicate();
     const name = (await this.members.listGoogleEmails([ctx.userId])).items[0]?.name ?? "担当者";
     const added = await this.repo.addSlot({
       id: this.deps.newHrId("hsl"),
       orgId: this.deps.orgId,
-      startAt: new Date(startMs).toISOString(),
-      endAt: new Date(startMs + duration * 60_000).toISOString(),
+      startAt,
+      endAt,
       interviewerId: ctx.userId,
       interviewerName: name,
       applicantId: null,
@@ -148,6 +151,7 @@ export class HrInterviewService {
     const slot = await this.loadSlot(id);
     if (slot.applicantId && (await this.repo.releaseSlot(id, slot.applicantId))) {
       await this.hrSvc.cancelInterview(ctx, slot.applicantId, `面談の予約を取り消しました（${hrInterview.formatSlotJst(slot)}）`);
+      await this.releaseHeld(ctx);
     }
     return this.overview();
   }
@@ -160,26 +164,34 @@ export class HrInterviewService {
     return this.overview();
   }
 
-  /** フォームの回答が応募者に結ばれたあと。回答の保存は終わっているので、ここの失敗は回答者に見せない。 */
-  async onApplied(ctx: ReqCtx, applicantId: string): Promise<void> {
-    try {
-      const applicant = await this.deps.hrRepo.getApplicant(applicantId);
-      if (applicant?.stage !== "scheduling") return;
-      await this.repo.addInvite({
-        id: this.deps.newHrId("hin"),
-        orgId: this.deps.orgId,
-        applicantId,
-        token: newToken(),
-        attempts: 0,
-        sentAt: null,
-        lastError: null,
-        createdAt: this.deps.now(),
-      });
-      await this.releaseHeld(ctx);
-    } catch (err) {
+  /** 応答を待たせない処理。公開ページは gateway の timeout (5 秒) を超えられないので、メールは応答のあとに回す。 */
+  private async background(ctx: ReqCtx, label: string, work: Promise<void>): Promise<void> {
+    const guarded = work.catch((err: unknown) => {
       // eslint-disable-next-line no-console
-      console.warn(JSON.stringify({ level: "warn", service: "member-service", msg: "hr interview invite failed", applicantId, requestId: ctx.requestId, error: failureCode(err) }));
-    }
+      console.warn(JSON.stringify({ level: "warn", service: "member-service", msg: label, requestId: ctx.requestId, error: failureCode(err) }));
+    });
+    if (this.deps.defer) this.deps.defer(guarded);
+    else await guarded;
+  }
+
+  /**
+   * フォームの回答が応募者に結ばれたあと。招待を作れなければ回答者にも失敗を返す: 黙って進むと案内が届かないまま
+   * 人事の画面にも出ない。もう一度送れば同じ応募者に結ばれ、招待が作られる。
+   */
+  async onApplied(ctx: ReqCtx, applicantId: string): Promise<void> {
+    const applicant = await this.deps.hrRepo.getApplicant(applicantId);
+    if (applicant?.stage !== "scheduling") return;
+    await this.repo.addInvite({
+      id: this.deps.newHrId("hin"),
+      orgId: this.deps.orgId,
+      applicantId,
+      token: newToken(),
+      attempts: 0,
+      sentAt: null,
+      lastError: null,
+      createdAt: this.deps.now(),
+    });
+    await this.background(ctx, "hr interview invite failed", this.releaseHeld(ctx));
   }
 
   /** 招待メールを 1 通送る。設定されていない環境と送信失敗は false (招待は保留のまま)。 */
@@ -189,7 +201,7 @@ export class HrInterviewService {
     try {
       await this.deps.sendHrMail(
         ctx.requestId,
-        renderInviteMail(applicant.name, applicant.email, url),
+        renderInviteMail(applicant.email, url),
         // 回数で区切る: 同時に走った送信は 1 通に畳まれ、失敗後や手動の再送は別の送信になる。
         `hr-interview-invite:${invite.id}:${invite.attempts}`,
       );
@@ -210,7 +222,11 @@ export class HrInterviewService {
     if (quota <= 0) return;
     const applicants = await this.applicantMap();
     const held = (await this.repo.listInvites(this.deps.orgId))
-      .filter((i) => i.sentAt === null && applicants.get(i.applicantId)?.stage === "scheduling")
+      // メールの無い人は送れないので順番を塞がせない (画面には保留として残る)。
+      .filter((i) => {
+        const a = applicants.get(i.applicantId);
+        return i.sentAt === null && a?.stage === "scheduling" && a.email !== null;
+      })
       .sort((a, b) => a.attempts - b.attempts || (a.createdAt < b.createdAt ? -1 : 1))
       .slice(0, Math.min(RELEASE_BATCH, quota));
     for (const invite of held) {
@@ -263,10 +279,10 @@ export class HrInterviewService {
     try {
       await this.hrSvc.confirmInterview(ctx, applicant.id, slot.startAt, `応募者が面談日程を予約しました（${when}・担当 ${slot.interviewerName}）`);
     } catch (err) {
-      await this.repo.releaseSlot(slot.id, applicant.id);
+      await this.repo.releaseSlot(slot.id, applicant.id); // 応募者を動かせなかった = 確定していないので枠を返す
       throw err;
     }
-    await this.afterBooked(ctx, applicant, { ...slot, bookedAt });
+    await this.background(ctx, "hr interview booked follow-up failed", this.afterBooked(ctx, applicant, { ...slot, bookedAt }));
     return this.view(token);
   }
 

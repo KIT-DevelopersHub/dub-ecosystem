@@ -24,7 +24,7 @@ import type { AppDeps } from "./types";
 
 export type { Env } from "./env";
 
-export function buildDeps(env: Env, requestId?: string): AppDeps {
+export function buildDeps(env: Env, requestId?: string, exec?: ExecutionContext): AppDeps {
   const db = createDbClient(env.DB, {
     namespace: "member",
     ...(requestId ? { requestId } : {}),
@@ -54,6 +54,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     ...(env.SVC_MAIL_GATEWAY ? { sendHrMail: sendHrMailVia(env.SVC_MAIL_GATEWAY) } : {}),
     ...(env.SVC_NOTIFICATION ? { notifyInterviewer: interviewerNotifierVia(env.SVC_NOTIFICATION) } : {}),
     ...(env.APP_BASE_URL ? { appBaseUrl: env.APP_BASE_URL } : {}),
+    ...(exec ? { defer: (work: Promise<void>) => exec.waitUntil(work) } : {}),
     // 名簿のチーム・役職 -> identity の自動ロール (best-effort・PUT /internal/*managed-roles)。
     roleSync: createIdentityRoleSync(env.SVC_IDENTITY),
     // 在籍で紐付いた人の招待中アカウントを有効化 (best-effort・POST /internal/users/:id/activate)。
@@ -74,9 +75,9 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
 }
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
-    const app = createApp(buildDeps(env, requestId));
+    const app = createApp(buildDeps(env, requestId, exec));
     return app.fetch(request as unknown as Request) as unknown as Response;
   },
 };
