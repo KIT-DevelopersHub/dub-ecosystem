@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "aba4b657",
-  "branch": "commander/task-ctask_01M6K67DC307AVHF1CW1AEVVCC",
+  "deployedSha": "63e5a3a2",
+  "branch": "commander/task-ctask_01M6R8BY2T0TKRG2V122197364",
   "actor": "ko-tarou",
-  "markers": ["「オンボーディング案内」タブ"],
+  "markers": ["参加届の入力済みリンクをコピー", "participation-prefilled"],
   "live": true,
-  "verifiedAt": "2026-11-04T12:02:25Z",
-  "updatedAt": "2026-11-04T12:02:25Z",
-  "note": "ctask_01M6K67DC307AVHF1CW1AEVVCC: 参加届の回答/オンボーディング案内を人事タブへ"
+  "verifiedAt": "2026-11-06T11:30:41Z",
+  "updatedAt": "2026-11-06T11:30:41Z",
+  "note": "ctask_01M6R8BY2T0TKRG2V122197364: 申し込みフォームを参加届の形に統一 + 入力済みリンク"
 }
