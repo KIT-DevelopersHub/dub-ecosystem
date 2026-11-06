@@ -23,7 +23,8 @@ import { MemberService, type ReqCtx } from "./service";
 import { HrService } from "./hr-service";
 import { HrFormService } from "./hr-form-service";
 import { registerHrInterviewFormRoutes } from "./hr-form-routes";
-import type { hr, sponsor } from "@dub/types";
+import type { goal, hr, sponsor } from "@dub/types";
+import { GoalService } from "./goal-service";
 import { SponsorService } from "./sponsor-service";
 
 // Actor stamped on a 参加届 that arrives through the public (unauthenticated) path.
@@ -71,6 +72,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const svc = new MemberService(deps);
   const hrSvc = new HrService(deps, svc);
   const sponsorSvc = new SponsorService(deps);
+  const goalSvc = new GoalService(deps);
   const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "member-service" }));
@@ -297,6 +299,17 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
 
   // ---- スポンサー (フェーズ1 = 名刺の共有) ----
+  // 目標管理。認可は表、入力の検証と楽観ロックは goal-service。
+  app.get("/members/goals", async (c) => c.json(await goalSvc.list(reqCtx(c), c.req.query("month"))));
+  app.put("/members/goals/:teamId/:month", async (c) => {
+    const body = await readJson<goal.PutGoalRequest>(c);
+    return c.json(await goalSvc.put(reqCtx(c), c.req.param("teamId"), c.req.param("month"), body));
+  });
+  app.delete("/members/goals/:teamId/:month", async (c) => {
+    await goalSvc.remove(c.req.param("teamId"), c.req.param("month"));
+    return c.body(null, 204);
+  });
+
   // 認可は表 (スポンサーアプリの 閲覧/編集 + sponsor:read / sponsor:write / sponsor:admin)。
   // 写真は JSON ではなく生のバイト列 (Content-Type = 形式)。形式・サイズ・楽観ロックはハンドラ (sponsor-service)。
   app.get("/members/sponsor/cards", async (c) => c.json(await sponsorSvc.list(reqCtx(c))));

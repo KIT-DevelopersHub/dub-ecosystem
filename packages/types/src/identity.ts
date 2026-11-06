@@ -122,6 +122,9 @@ export const PERMISSION_CATALOG = [
   { key: "sponsor:admin", name: "Delete sponsor business cards", description: "Delete shared business cards (photo and contact details)", domain: "sponsor", dangerous: true },
   { key: "app:sponsor:view", name: "Open スポンサー app", description: "Open and view the スポンサー app", domain: "app", dangerous: false },
   { key: "app:sponsor:edit", name: "Edit in スポンサー app", description: "Act inside the スポンサー app (implies view)", domain: "app", dangerous: false },
+  { key: "goals:read", name: "Read team goals", description: "View every team's monthly goals, KPIs and progress", domain: "goals", dangerous: false },
+  { key: "app:goals:view", name: "Open 目標管理 app", description: "Open and view the 目標管理 app", domain: "app", dangerous: false },
+  { key: "app:goals:edit", name: "Edit in 目標管理 app", description: "Set and change team goals and KPIs (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
 // Closed union of the 87 keys (open `${string}:${string}` template retired).

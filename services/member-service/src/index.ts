@@ -10,6 +10,7 @@ import { createApp } from "./app";
 import { createD1MemberRepo } from "./d1-repo";
 import { createD1HrRepo } from "./hr-repo";
 import { createD1HrFormRepo } from "./hr-form-repo";
+import { createD1GoalRepo, createGoalSources } from "./goal-repo";
 import { createD1SponsorRepo, r2ImageStore } from "./sponsor-repo";
 import { notifyAdminsOfParticipation } from "./participationNotify";
 import { sendProfileReminderVia } from "./profileReminder";
@@ -54,6 +55,8 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     sponsorRepo: createD1SponsorRepo(db),
     ...(env.SPONSOR_FILES ? { sponsorImages: r2ImageStore(env.SPONSOR_FILES) } : {}),
     newSponsorCardId: () => newId("card"),
+    goalRepo: createD1GoalRepo(db),
+    goalSources: createGoalSources(env),
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
     notifyParticipationSubmitted: (ctx, participation) =>
       notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),

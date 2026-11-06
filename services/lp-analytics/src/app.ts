@@ -90,6 +90,13 @@ export function createApp(deps: AppDeps): Hono {
   // The public LP Worker asks which version to serve (service binding, x-dub-internal only;
   // no user / request id needed). Read-only, one row.
   app.get("/lp/internal/publish", async (c) => c.json({ versionId: (await svc.getPublish()).versionId }));
+  // 目標管理 (member-service) が月の訪問者数を読む。件数だけ。
+  app.get("/lp/internal/goal-metrics", async (c) => {
+    const month = c.req.query("month");
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) throw errors.validationFailed([{ field: "month", reason: "invalid" }]);
+    const total = await deps.repo.total({ orgId: deps.orgId, from: `${month}-01`, to: `${month}-31`, includeBots: false });
+    return c.json({ visitors: total.uniques });
+  });
   // チケット購入 (public LP Worker → service binding). Webhook reads the raw body first:
   // the Stripe signature covers the exact bytes.
   app.get("/lp/internal/tickets", async (c) => c.json(await tickets.getPublic()));
