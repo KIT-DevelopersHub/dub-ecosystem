@@ -1661,6 +1661,19 @@ const SEED_ROLES: DemoRole[] = [
   { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
   // 統括: also reads the maintainer + member roles' inbound mail (メール > 詳細設定).
   { id: "role_lead", orgId: ORG, name: "統括", permissions: [...MEMBER_PERMISSIONS, "app:mail:view", "mail:read"], isSystem: false, mailVisibleRoleIds: ["role_maintainer", "role_member"] },
+  // Prod-shaped extras so ロール管理's genre sections (運営 / チーム / 役職 / その他) all have rows.
+  ...[
+    ["role_ops_dev", "開発"],
+    ["role_ops_dayof", "当日運営"],
+    ["role_ops_sponsor", "スポンサー"],
+    ["role_ops_legal", "法務会計"],
+    ["role_auto_team_dev", "チーム: 開発チーム"],
+    ["role_auto_team_pr", "チーム: 広報チーム"],
+    ["role_auto_team_venue", "チーム: 会場チーム"],
+    ["role_auto_position_member", "役職: Member"],
+    ["role_auto_position_leader", "役職: Leader"],
+    ["role_demo_commander_bot", "commander-bot"],
+  ].map(([id, name]): DemoRole => ({ id: id!, orgId: ORG, name: name!, permissions: [...MEMBER_PERMISSIONS], isSystem: false, mailVisibleRoleIds: [] })),
 ];
 
 // FE7's RoleAssignment (contracts/pending) — org-wide (resource fields null) here.
@@ -4256,6 +4269,9 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
+      // 本番と同じ: 名簿に結ばれた人 (採用済み) は 409。
+      if (a.memberId !== null) return err("HR_APPLICANT_JOINED", 409);
+      hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });
     }

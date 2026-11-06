@@ -3,6 +3,7 @@
 //       寛容な遷移と /join 必須・採用で名簿に在籍が増える・チェックでステータスが自動で進む
 //   (2) 表: 全員表示 / 絞り込みと件数 (オンボーディング前 含む) / 並べ替え / 検索 / その場でステータス変更
 //       (楽観的・失敗で戻る) / 採用は確認ダイアログ経由 / 閲覧者はプルダウンなし
+//   (2b) 削除: 行のごみ箱 → 確認ダイアログ → 楽観的に消える / 失敗で戻る / 採用済み・hr:admin なしは押せない
 //   (3) オンボーディング: チェックが一瞬も外れない (押した値を即座に表示) / 進捗バーが埋まる
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -115,6 +116,87 @@ describe("demo transport (人事)", () => {
     for (const it of ob.items) p = await api.setCheck(res.memberId, it.id, true);
     expect(p).toMatchObject({ completed: true, stage: "onboarded" });
     expect((await api.get(target.id)).applicant.stage).toBe("onboarded");
+  });
+});
+
+describe("demo transport (人事の削除)", () => {
+  it("deletes a pre-hire applicant and refuses (409) one already on the roster", async () => {
+    const api = demoApi();
+    const { applicants } = await api.list();
+    const pre = applicants.find((a) => a.memberId === null)!;
+    const joined = applicants.find((a) => a.memberId !== null)!;
+    await api.remove(pre.id);
+    expect((await api.list()).applicants.some((a) => a.id === pre.id)).toBe(false);
+    await expect(api.remove(joined.id)).rejects.toMatchObject({ status: 409, code: "HR_APPLICANT_JOINED" });
+    expect((await api.list()).applicants.some((a) => a.id === joined.id)).toBe(true);
+  });
+});
+
+const EDITOR_NO_ADMIN = editorPermissions("hr", ["hr:read", "hr:write"]);
+const removeButton = (id: string) => screen.getByTestId(`fe2-hr-row-${id}-remove`) as HTMLButtonElement;
+
+describe("HrApplicantsScreen (応募の削除)", () => {
+  it("confirm → the row disappears immediately (optimistic), then the DELETE settles", async () => {
+    let resolve!: () => void;
+    const remove = vi.fn(() => new Promise<void>((r) => (resolve = r)));
+    renderWith(<HrApplicantsScreen />, fakeApi({ remove }));
+    await screen.findByTestId("fe2-hr-row-app_1");
+    fireEvent.click(removeButton("app_1"));
+    // 行クリック (詳細ドロワー) には伝わらない。
+    expect(screen.queryByTestId("fe2-hr-detail")).toBeNull();
+    expect(remove).not.toHaveBeenCalled();
+    const dialog = await screen.findByTestId("fe2-hr-remove-confirm");
+    expect(dialog.textContent).toContain("青木 陽向");
+    fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("app_1"));
+    // 応答前にもう消えている。
+    expect(screen.queryByTestId("fe2-hr-row-app_1")).toBeNull();
+    expect(countOf("all")).toBe("4");
+    await act(async () => resolve());
+    expect(screen.queryByTestId("fe2-hr-row-app_1")).toBeNull();
+    expect(await screen.findByText("青木 陽向 さんの応募を削除しました")).toBeTruthy();
+  });
+
+  it("cancel keeps the row and sends nothing", async () => {
+    const remove = vi.fn(() => Promise.resolve());
+    renderWith(<HrApplicantsScreen />, fakeApi({ remove }));
+    await screen.findByTestId("fe2-hr-row-app_2");
+    fireEvent.click(removeButton("app_2"));
+    const dialog = await screen.findByTestId("fe2-hr-remove-confirm");
+    fireEvent.click(within(dialog).getByRole("button", { name: "キャンセル" }));
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.getByTestId("fe2-hr-row-app_2")).toBeTruthy();
+  });
+
+  it("brings the row back with an error toast when the DELETE fails", async () => {
+    const remove = vi.fn(() => Promise.reject(new Error("boom")));
+    renderWith(<HrApplicantsScreen />, fakeApi({ remove }));
+    await screen.findByTestId("fe2-hr-row-app_1");
+    fireEvent.click(removeButton("app_1"));
+    fireEvent.click(within(await screen.findByTestId("fe2-hr-remove-confirm")).getByRole("button", { name: "削除する" }));
+    await waitFor(() => expect(remove).toHaveBeenCalled());
+    expect(await screen.findByTestId("fe2-hr-row-app_1")).toBeTruthy();
+    expect(await screen.findByText("青木 陽向 さんの応募を削除できませんでした")).toBeTruthy();
+  });
+
+  it("cannot delete people already on the roster, nor without hr:admin; viewers get no column", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi());
+    await screen.findByTestId("fe2-hr-row-app_1");
+    expect(removeButton("app_1").disabled).toBe(false);
+    expect(removeButton("app_3").disabled).toBe(true); // 採用済み
+    expect(removeButton("app_3").getAttribute("aria-label")).toContain("採用済み");
+  });
+
+  it("a recruiter without hr:admin sees the button disabled", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi(), EDITOR_NO_ADMIN);
+    await screen.findByTestId("fe2-hr-row-app_1");
+    expect(removeButton("app_1").disabled).toBe(true);
+  });
+
+  it("a viewer has no delete control", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi(), VIEWER);
+    await screen.findByTestId("fe2-hr-row-app_1");
+    expect(screen.queryByTestId("fe2-hr-row-app_1-remove")).toBeNull();
   });
 });
 
