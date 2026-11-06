@@ -8,6 +8,7 @@ import { createApp } from "../src/app";
 import { InMemoryMemberRepo } from "../src/memory-repo";
 import { InMemoryHrRepo } from "../src/hr-repo";
 import { InMemoryHrFormRepo } from "../src/hr-form-repo";
+import { InMemoryGoalRepo } from "../src/goal-repo";
 import { InMemorySponsorRepo, type SponsorImageStore } from "../src/sponsor-repo";
 import { InMemorySponsorLeadRepo } from "../src/sponsor-lead-repo";
 import { InMemorySponsorMailRepo } from "../src/sponsor-mail-repo";
@@ -37,6 +38,8 @@ export function adminGrants(): Set<identity.PermissionKey> {
     "hr:write",
     "hr:admin",
     ...policy.keysForAppLevel("sponsor", "edit"),
+    ...policy.keysForAppLevel("goals", "edit"),
+    "goals:read",
     "sponsor:read",
     "sponsor:write",
     "sponsor:admin",
@@ -83,6 +86,8 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     newSponsorLeadId: () => `lead_${String(seq++).padStart(6, "0")}`,
     sponsorMailRepo: new InMemorySponsorMailRepo(leadRepo),
     newSponsorMailId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
+    goalRepo: new InMemoryGoalRepo(),
+    goalSources: { teamTasks: async () => [], lpVisitors: async () => 0 },
     ...overrides,
   };
   return Object.assign(deps, { repo });

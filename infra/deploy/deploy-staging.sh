@@ -33,7 +33,7 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
 fi
 
 # Fail fast if the staging resources were never bootstrapped (placeholder ids).
-for v in STAGING_DUB_CORE_D1_ID STAGING_AUTH_OUTBOX_D1_ID STAGING_AUTH_KV_ID \
+for v in STAGING_DUB_CORE_D1_ID STAGING_AUTH_OUTBOX_D1_ID STAGING_TICKETS_D1_ID STAGING_AUTH_KV_ID \
          STAGING_DRIVE_PROXY_KV_ID STAGING_GANTT_KV_ID; do
   case "${!v:-}" in
     ""|REPLACE_ME*)
@@ -135,7 +135,7 @@ for dir in "${STAGING_WORKER_DIRS[@]}"; do
   extra_args=()
   if [ "${dir}" = "services/auth-service" ]; then extra_args=(--var "DEMO_AUTOLOGIN:1"); fi
   # STAGING ONLY: point LP管理's public links (e.g. /tickets) at the preview LP, not prod.
-  if [ "${dir}" = "services/lp-analytics" ]; then
+  if [ "${dir}" = "services/lp-analytics" ] || [ "${dir}" = "services/lp-tickets" ]; then
     extra_args=(--var "LP_BASE_URL:https://lp-conference-next-preview.developershub-site.workers.dev")
   fi
   deploy "${dir}/wrangler.staging.toml" "${extra_args[@]}"

@@ -31,6 +31,15 @@ service = "notification"
 binding = "SVC_MAIL"
 service = "mail-gateway"
 
+# 目標管理の実績 (チームのタスク件数 / LP の訪問者数)。件数だけを内部 API から読む。
+[[services]]
+binding = "SVC_TASK"
+service = "task-service"
+
+[[services]]
+binding = "SVC_LP_ANALYTICS"
+service = "lp-analytics"
+
 # R2 dub-file-attachments (chat-service / file-meta と同じ既存バケット): スポンサーの名刺写真
 # (sponsor/cards/<cardId>)。無い環境では写真ルートだけ 503 で他は動く。
 [[r2_buckets]]

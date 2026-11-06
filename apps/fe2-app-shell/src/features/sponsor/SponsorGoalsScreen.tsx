@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, DataTable, ErrorState, FormField, Modal, Skeleton, SkeletonTable, Stack, TextField, type ColumnDef } from "@dub/ui";
 import { DialogActions } from "@dub/app-ui";
 import { sponsor } from "@dub/types";
+import { useAppCapability } from "../../auth/AuthProvider.tsx";
 import { useGoals, useLeads, usePutGoal } from "./leadHooks.ts";
 import { achievement, currentMonth, formatMetric, METRICS, monthActuals, monthLabel, shiftMonth, undatedLeads, type Actuals } from "./goals.ts";
 import { parseAmount } from "./leadImport.ts";
@@ -146,6 +147,7 @@ export function SponsorGoalsScreen(): JSX.Element {
   const leads = useLeads();
   const goals = useGoals();
   const { canWrite } = useSponsorCapability();
+  const { canView: canViewGoalsApp } = useAppCapability("goals");
   const [month, setMonth] = useState(currentMonth);
   const [editing, setEditing] = useState(false);
 
@@ -204,6 +206,11 @@ export function SponsorGoalsScreen(): JSX.Element {
           />
         </Stack>
         <div className={styles.goalNotes}>
+          {canViewGoalsApp ? (
+            <p className={styles.note} data-testid="fe2-sponsor-goals-link">
+              ここで決めた目標は、<a href="/goals">目標管理</a>のチームの KPI にも反映されます。
+            </p>
+          ) : null}
           <p className={styles.note}>{METRICS.map((m) => `${m.label} = ${m.definition}`).join("。")}。</p>
           {undated > 0 ? (
             <p className={styles.note} data-testid="fe2-sponsor-goals-undated">

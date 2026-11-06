@@ -3,16 +3,17 @@
 import { DubError, errors, type FieldError } from "@dub/errors";
 import { consoleSink, type LogLevel } from "@dub/observability";
 import { lp } from "@dub/types";
-import { dayJst } from "./domain";
+import { TicketDelivery, jstDay, type DeliverySummary, type PublicPass } from "./delivery";
 import { issuePreviewToken, verifyPreviewToken } from "./preview-token";
 import { stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
+import { ordersCsv } from "./ticket-csv";
+import { isTestOrder, orderNumber } from "./ticket-mail";
 import type {
   AppDeps,
   LpTicketAnswer,
   LpTicketCoupon,
   LpTicketCouponsPage,
   LpTicketField,
-  LpTicketFieldType,
   LpTicketOrder,
   LpTicketOrderItem,
   LpTicketOrderStatus,
@@ -42,20 +43,9 @@ export const MAX_PER_ORDER_MAX = 20;
 export const DEFAULT_MAX_PER_ORDER = 10;
 /** 1 回の購入の合計枚数上限（券種をまたいで）。 */
 export const ORDER_QTY_MAX = 20;
-export const FIELDS_MAX = 20;
-export const FIELD_LABEL_MAX = 60;
-export const FIELD_OPTIONS_MAX = 20;
-export const FIELD_OPTION_MAX = 60;
-const FIELD_ID_RE = /^[a-z0-9_-]{1,40}$/;
 /** 氏名・メールは固定項目なのでカスタム項目の id に使わせない。 */
 const RESERVED_FIELD_IDS: ReadonlySet<string> = new Set(["name", "email"]);
-export const CHECKBOX_YES = "はい";
 
-export const BUYER_NAME_MAX = 100;
-export const BUYER_EMAIL_MAX = 254;
-export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-/** Hashed sender IP from the public LP Worker (clientKeyFor). Anything else is treated as absent. */
-export const CLIENT_KEY_RE = /^[a-f0-9]{16,64}$/;
 /**
  * Unpaid seats one sender may hold at once (pending orders inside the hold window). Stops one source
  * from locking a type's capacity with abandoned checkouts; real buyers pay within minutes, and a shared
@@ -72,17 +62,6 @@ export const COUPON_CODE_LEN = 10;
 const COUPON_CODE_RE = /^[A-Z0-9]{4,32}$/;
 export const COUPON_LABEL_MAX = 60;
 export const COUPON_MAX_USES_MAX = 1000;
-const ANSWER_MAX: Record<LpTicketFieldType, number> = {
-  text: 200,
-  textarea: 2000,
-  radio: FIELD_OPTION_MAX,
-  multiselect: (FIELD_OPTION_MAX + 1) * FIELD_OPTIONS_MAX,
-  select: FIELD_OPTION_MAX,
-  checkbox: 10,
-  date: 10,
-  email: BUYER_EMAIL_MAX,
-  phone: 30,
-};
 
 /** Stripe session lifetime. Stripe requires >= 30 min, so a minute of headroom for clock/network skew. */
 export const CHECKOUT_TTL_SEC = 31 * 60;
@@ -106,7 +85,7 @@ export const RECONCILE_LIMIT = 50;
 
 export type SettleOutcome = "paid" | "needs_review" | "expired" | "unchanged" | "ignored";
 
-export interface ReconcileSummary {
+export interface ReconcileSummary extends DeliverySummary {
   checked: number;
   paid: number;
   needsReview: number;
@@ -121,7 +100,7 @@ export interface ReconcileSummary {
 }
 
 function log(level: LogLevel, message: string, fields: Record<string, unknown>): void {
-  consoleSink({ level, message, service: "lp-analytics", fields });
+  consoleSink({ level, message, service: "lp-tickets", fields });
 }
 
 /**
@@ -191,46 +170,10 @@ export function parseTicketTypeInput(body: unknown, partial: boolean): Partial<L
   return out;
 }
 
-/** `reserved` = fixed-field ids the caller's form already has (custom fields must not reuse them). */
-export function parseFields(body: unknown, reserved: ReadonlySet<string> = RESERVED_FIELD_IDS): LpTicketField[] {
-  const raw = (body as { fields?: unknown } | null)?.fields;
-  if (!Array.isArray(raw)) throw errors.validationFailed([{ field: "fields", reason: "required" }]);
-  if (raw.length > FIELDS_MAX) throw errors.validationFailed([{ field: "fields", reason: "too_many" }]);
-  const bad: FieldError[] = [];
-  const seen = new Set<string>();
-  const out: LpTicketField[] = [];
-  raw.forEach((f0, i) => {
-    const f = (f0 ?? {}) as Record<string, unknown>;
-    const at = (k: string) => `fields[${i}].${k}`;
-    const before = bad.length;
-    const id = typeof f.id === "string" ? f.id : "";
-    if (!FIELD_ID_RE.test(id) || reserved.has(id)) bad.push({ field: at("id"), reason: "invalid" });
-    else if (seen.has(id)) bad.push({ field: at("id"), reason: "duplicate" });
-    seen.add(id);
-    const label = typeof f.label === "string" ? f.label.trim() : "";
-    if (label.length === 0) bad.push({ field: at("label"), reason: "required" });
-    else if (label.length > FIELD_LABEL_MAX) bad.push({ field: at("label"), reason: "too_long" });
-    const description = typeof f.description === "string" ? f.description.trim() : "";
-    if (description.length > lp.LP_FIELD_DESCRIPTION_MAX) bad.push({ field: at("description"), reason: "too_long" });
-    const type = f.type as LpTicketFieldType;
-    if (!lp.isLpFieldType(type)) bad.push({ field: at("type"), reason: "invalid" });
-    if (typeof f.required !== "boolean") bad.push({ field: at("required"), reason: "invalid" });
-    let options: string[] = [];
-    if (lp.isLpChoiceField(type)) {
-      const opts = Array.isArray(f.options) ? f.options : [];
-      options = opts.map((o) => (typeof o === "string" ? o.trim() : ""));
-      if (options.length < 1 || options.length > FIELD_OPTIONS_MAX) bad.push({ field: at("options"), reason: "invalid_count" });
-      else if (options.some((o) => o.length === 0 || o.length > FIELD_OPTION_MAX || o.includes(lp.LP_MULTISELECT_SEPARATOR))) {
-        bad.push({ field: at("options"), reason: "invalid" });
-      }
-      else if (new Set(options).size !== options.length) bad.push({ field: at("options"), reason: "duplicate" });
-    }
-    if (bad.length === before) {
-      out.push({ id, label, ...(description ? { description } : {}), type, required: f.required as boolean, options });
-    }
-  });
-  if (bad.length > 0) throw errors.validationFailed(bad);
-  return out;
+function parseFields(body: unknown): LpTicketField[] {
+  const { fields, issues } = lp.parseLpFields(body, RESERVED_FIELD_IDS);
+  if (issues.length > 0) throw errors.validationFailed(issues);
+  return fields;
 }
 
 export interface CheckoutItemInput {
@@ -320,10 +263,10 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
   if (items.reduce((n, i) => n + i.quantity, 0) > ORDER_QTY_MAX) bad.push({ field: "items", reason: "too_many" });
   const name = typeof b.name === "string" ? b.name.trim() : "";
   if (!name) bad.push({ field: "name", reason: "required" });
-  else if (name.length > BUYER_NAME_MAX) bad.push({ field: "name", reason: "too_long" });
+  else if (name.length > lp.LP_BUYER_NAME_MAX) bad.push({ field: "name", reason: "too_long" });
   const email = typeof b.email === "string" ? b.email.trim() : "";
   if (!email) bad.push({ field: "email", reason: "required" });
-  else if (email.length > BUYER_EMAIL_MAX || !EMAIL_RE.test(email)) bad.push({ field: "email", reason: "invalid" });
+  else if (email.length > lp.LP_BUYER_EMAIL_MAX || !lp.LP_EMAIL_RE.test(email)) bad.push({ field: "email", reason: "invalid" });
 
   let origin = "";
   try {
@@ -334,7 +277,7 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
   }
   if (!origin) bad.push({ field: "origin", reason: "invalid" });
 
-  const answers = parseAnswers(b.answers, fields, bad);
+  const answers = lp.parseLpAnswers(b.answers, fields, bad);
   const hasCoupon = b.couponCode !== undefined && b.couponCode !== null;
   const rawCoupon = typeof b.couponCode === "string" ? b.couponCode.trim() : "";
   const couponCode = rawCoupon ? normalizeCouponCode(rawCoupon) : null;
@@ -343,27 +286,8 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
     bad.push({ field: "couponCode", reason: "invalid" });
   }
   if (bad.length > 0) throw errors.validationFailed(bad);
-  const clientKey = typeof b.clientKey === "string" && CLIENT_KEY_RE.test(b.clientKey) ? b.clientKey : null;
+  const clientKey = typeof b.clientKey === "string" && lp.LP_CLIENT_KEY_RE.test(b.clientKey) ? b.clientKey : null;
   return { items, name, email, answers, origin, clientKey, couponCode };
-}
-
-/** Answers to the configured custom fields (label snapshot kept). Problems go to `bad`. */
-export function parseAnswers(raw: unknown, fields: readonly LpTicketField[], bad: FieldError[]): LpTicketAnswer[] {
-  const rawAnswers = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const answers: LpTicketAnswer[] = [];
-  for (const f of fields) {
-    const v0 = rawAnswers[f.id];
-    const value = typeof v0 === "string" ? v0.trim() : "";
-    const key = `answers.${f.id}`;
-    if (f.required && value === "") bad.push({ field: key, reason: "required" });
-    else if (value.length > ANSWER_MAX[f.type]) bad.push({ field: key, reason: "too_long" });
-    else if (value !== "" && lp.lpFieldAnswerProblem(f, value)) bad.push({ field: key, reason: "invalid" });
-    else if (value !== "" && f.type === "checkbox" && value !== CHECKBOX_YES) bad.push({ field: key, reason: "invalid" });
-    // 回答は表示用の 1 文字列で持つ（一覧・CSV はこのまま出す）。
-    const shown = f.type === "multiselect" ? value.split(lp.LP_MULTISELECT_SEPARATOR).join("、") : value;
-    answers.push({ fieldId: f.id, label: f.label, value: shown });
-  }
-  return answers;
 }
 
 export function statsFor(t: Pick<LpTicketType, "capacity">, agg: TicketTypeAgg | undefined): LpTicketTypeStats {
@@ -377,11 +301,6 @@ export function statsFor(t: Pick<LpTicketType, "capacity">, agg: TicketTypeAgg |
   };
 }
 
-/** JST midnight of the day containing `iso`, as a UTC ISO string (comparable to created_at). */
-export function jstDayStartIso(iso: string): string {
-  return new Date(`${dayJst(iso)}T00:00:00+09:00`).toISOString();
-}
-
 export function orderCursor(o: { createdAt: string; id: string }): string {
   return `${o.createdAt}~${o.id}`;
 }
@@ -390,8 +309,6 @@ const sortTypes = (a: TicketTypeRow, b: TicketTypeRow): number =>
   a.sortOrder - b.sortOrder || (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
 
 const toType = ({ site: _s, ...t }: TicketTypeRow): LpTicketType => t;
-/** Preview orders, or paid through Stripe test mode (cs_test_): no real charge. */
-const isTestOrder = (o: TicketOrderRow): boolean => o.preview || (o.stripeSessionId?.startsWith("cs_test_") ?? false);
 const toOrder = (row: TicketOrderRow): LpTicketOrder => {
   const {
     site: _s,
@@ -466,10 +383,16 @@ export interface PublicCoupon {
 export interface ConfirmResult {
   status: LpTicketOrderStatus | "unknown";
   summary?: string;
+  /** The number on the thanks page and in the mail. */
+  orderNumber?: string;
 }
 
 export class TicketService {
-  constructor(private readonly deps: AppDeps) {}
+  private readonly delivery: TicketDelivery;
+
+  constructor(private readonly deps: AppDeps) {
+    this.delivery = new TicketDelivery(deps);
+  }
 
   private get repo() {
     return this.deps.repo;
@@ -526,6 +449,23 @@ export class TicketService {
     if (typeof enabled !== "boolean") throw errors.validationFailed([{ field: "enabled", reason: "required" }]);
     await this.repo.setTicketCta(TICKET_SITE, enabled, ctx.userId, this.deps.now());
     return this.getState();
+  }
+
+  // ---- 公開設定の release（lp-analytics の本番反映から s2s で届く） ----
+
+  async getRelease(): Promise<{ ticketsEnabled: boolean; ticketsCtaEnabled: boolean }> {
+    const s = await this.repo.getTicketSettings(TICKET_SITE);
+    return { ticketsEnabled: s?.enabled ?? false, ticketsCtaEnabled: s?.ctaEnabled ?? false };
+  }
+
+  async setRelease(ctx: ReqCtx, body: unknown): Promise<{ ticketsEnabled: boolean; ticketsCtaEnabled: boolean }> {
+    const b = (body ?? {}) as { ticketsEnabled?: unknown; ticketsCtaEnabled?: unknown };
+    const bad: FieldError[] = [];
+    if (typeof b.ticketsEnabled !== "boolean") bad.push({ field: "ticketsEnabled", reason: "required" });
+    if (typeof b.ticketsCtaEnabled !== "boolean") bad.push({ field: "ticketsCtaEnabled", reason: "required" });
+    if (bad.length > 0) throw errors.validationFailed(bad);
+    await this.repo.setTicketRelease(TICKET_SITE, b.ticketsEnabled as boolean, b.ticketsCtaEnabled as boolean, ctx.userId, this.deps.now());
+    return this.getRelease();
   }
 
   async setFields(ctx: ReqCtx, body: unknown): Promise<LpTicketsState> {
@@ -660,9 +600,9 @@ export class TicketService {
     const stripe = this.deps.stripe;
     if (!free && !stripe) throw paymentNotConfigured();
 
-    if ((await this.repo.countOrdersSince(TICKET_SITE, jstDayStartIso(now))) >= this.deps.dailyCheckoutCap) {
-      throw errors.rateLimited(60);
-    }
+    // Test purchases prove the flow in LP管理; only real buyers wait for the mail to catch up.
+    if (!preview && !(await this.delivery.canAcceptOrder(this.pendingSince()))) throw errors.rateLimited(60);
+
     const quantity = items.reduce((n, i) => n + i.quantity, 0);
     if (
       !free &&
@@ -708,6 +648,11 @@ export class TicketService {
       } catch {
         // Display-only (0006 migration not applied yet): paid test orders still show as test via cs_test_.
       }
+    }
+    if (free) {
+      // After markOrderPreview: a preview order must not produce an ops copy.
+      await this.delivery.onPaid(row.id);
+      await this.armReconcile();
     }
     // Preview: the thanks / cancel pages need the token too (sales are off for everyone else).
     const pv = preview ? `&tickets_preview=${encodeURIComponent(previewToken as string)}` : "";
@@ -815,7 +760,7 @@ export class TicketService {
     return toCoupon(row, used);
   }
 
-  /** Best effort: a failure to arm must never fail a checkout (the next paid checkout retries). */
+  /** Best effort: a failure to arm must never fail a checkout (the next checkout retries). */
   private async armReconcile(): Promise<void> {
     if (!this.deps.armReconcile) return;
     try {
@@ -841,6 +786,8 @@ export class TicketService {
       throw errors.conflict("この注文は要確認ではありません", { reason: "not_needs_review", status: order.status });
     }
     log("warn", "lp ticket needs_review approved", { orderId: id, by: ctx.userId, reviewReason: order.reviewReason });
+    await this.delivery.onPaid(id);
+    await this.armReconcile();
     return toOrder((await this.repo.getOrder(TICKET_SITE, id))!);
   }
 
@@ -864,7 +811,7 @@ export class TicketService {
         // Stripe unreachable: answer the stored state; the webhook will settle it.
       }
     }
-    return { status: order.status, summary: orderSummary(order.items) };
+    return { status: order.status, summary: orderSummary(order.items), orderNumber: orderNumber(order.id) };
   }
 
   /** Webhook payloads don't expand payment_intent: fetch the used method (best effort, display only). */
@@ -931,6 +878,7 @@ export class TicketService {
         return "needs_review";
       }
       if (late) log("warn", "lp ticket settled paid after hold lapsed", ctx);
+      await this.delivery.onPaid(order.id);
       return "paid";
     }
     if (o.release || s.status === "expired") {
@@ -954,7 +902,13 @@ export class TicketService {
       errors: 0,
       sessionlessExpired: await this.repo.expireSessionlessPending(TICKET_SITE, this.pendingSince()),
       paymentIntentBackfilled: 0,
+      fulfilled: 0,
+      mailSent: 0,
+      mailRetried: 0,
+      mailFailed: 0,
+      mailBacklog: 0,
     };
+    let stripeCalls = 0;
     const stripe = this.deps.stripe;
     if (stripe) {
       const nowMs = Date.parse(this.deps.now());
@@ -973,6 +927,7 @@ export class TicketService {
       } as const satisfies Record<SettleOutcome, keyof ReconcileSummary>;
       for (const order of rows) {
         sum.checked++;
+        stripeCalls++;
         try {
           const s = await stripe.getCheckoutSession(order.stripeSessionId!);
           sum[key[await this.settle(order, s, { source: "reconcile" })]]++;
@@ -985,6 +940,7 @@ export class TicketService {
       // cannot find them. Bounded per run; only sessions of the key's mode (cs_live_ / cs_test_) so
       // rows Stripe would 404 never clog the batch. The list empties once every order is filled.
       for (const order of await this.repo.listMissingPaymentIntent(TICKET_SITE, stripe.livemode, RECONCILE_LIMIT)) {
+        stripeCalls++;
         try {
           const s = await stripe.getCheckoutSession(order.stripeSessionId!);
           if (s.livemode !== stripe.livemode || !s.paymentIntentId) continue;
@@ -996,8 +952,28 @@ export class TicketService {
         }
       }
     }
+    // Each Stripe call is followed by about one D1 write; the first 3 are the listing queries.
+    Object.assign(sum, await this.delivery.reconcilePass(3 + stripeCalls * 2));
     log(sum.errors > 0 || sum.needsReview > 0 ? "warn" : "info", "lp ticket reconcile finished", { ...sum });
     return sum;
+  }
+
+  /** Free plan: the minute-by-minute alarm while a mail backlog drains. Stripe is left to the 10-minute pass. */
+  drainMail(): Promise<{ mailBacklog: number }> {
+    return this.delivery.drainPass();
+  }
+
+  /** LP Worker: the public side of a ticket URL. Same 404 for anything that is not a real ticket. */
+  async pass(token: string): Promise<PublicPass> {
+    const pass = await this.delivery.pass(token);
+    if (!pass) throw errors.notFound("lp_ticket");
+    return pass;
+  }
+
+  /** LP管理: every order as one CSV. Personal data, so only the route's policy decides who gets it. */
+  async exportOrders(): Promise<{ csv: string; filename: string }> {
+    const [orders, settings] = await Promise.all([this.delivery.allOrders(), this.repo.getTicketSettings(TICKET_SITE)]);
+    return { csv: ordersCsv(orders, settings?.fields ?? []), filename: `lp-ticket-orders-${jstDay(this.deps.now())}.csv` };
   }
 
   /**
@@ -1020,7 +996,12 @@ export class TicketService {
       const status = typeof obj.status === "string" ? obj.status : "";
       if (status === "lost") await this.repo.markOrderRefunded(order.id, this.deps.now());
       // warning_closed = an inquiry that never became a chargeback: the money stayed with us.
-      else if (status === "won" || status === "warning_closed") await this.repo.approveOrder(order.id, "stripe", this.deps.now(), "dispute");
+      else if (
+        (status === "won" || status === "warning_closed") &&
+        (await this.repo.approveOrder(order.id, "stripe", this.deps.now(), "dispute"))
+      ) {
+        await this.delivery.onPaid(order.id);
+      }
       log("warn", "lp ticket dispute closed", { orderId: order.id, paymentIntent: pi, status });
       return;
     }

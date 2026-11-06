@@ -33,6 +33,11 @@ custom_domain = true
 binding = "LP_FLAG"
 service = "dub-lp-analytics"
 
+# Ticket sales: GET/POST https://lp-tickets/lp/internal/tickets*. No fallback to LP_FLAG.
+[[services]]
+binding = "LP_TICKETS"
+service = "dub-lp-tickets"
+
 [vars]
 DEFAULT_VERSION = "v3.4"
 

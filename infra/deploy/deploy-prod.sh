@@ -59,6 +59,13 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
   exit 1
 fi
 
+# lp-tickets の D1 id が未設定のまま進むと、途中の Worker だけ新しくなった状態で止まる。
+# 何もデプロイする前に止める（手順: docs/runbooks/09-lp-tickets-cutover.md）。
+if grep -q 'REPLACE_AT_CUTOVER' services/lp-tickets/wrangler.free.toml; then
+  echo "::error::services/lp-tickets/wrangler.free.toml still has REPLACE_AT_CUTOVER. Create dub-tickets and set its id first — see docs/runbooks/09-lp-tickets-cutover.md." >&2
+  exit 1
+fi
+
 deploy() {
   local name="$1" config="$2"
   if [ ! -f "$config" ]; then
@@ -123,14 +130,20 @@ deploy usage-meter     services/usage-meter/wrangler.free.toml
 # commander-relay binds SVC_IDENTITY (step 1) and is bound by api-gateway (SVC_COMMANDER_RELAY).
 # SQLite-DO WebSocket relay (hibernation), no cron slot.
 deploy commander-relay services/commander-relay/wrangler.free.toml
-# lp-analytics (LP管理: 流入URL + LP 訪問ログ) binds only SVC_IDENTITY (step 1) and is bound by
-# api-gateway (SVC_LP_ANALYTICS, step 4) — so it lands before the gateway (CF 10143 otherwise).
+# lp-tickets (LP チケット販売・専用 D1 dub-tickets) binds only SVC_IDENTITY (step 1) and is bound by
+# lp-analytics (just below), api-gateway (step 4) and the public LP Worker — so it lands before all
+# of them (CF 10143 otherwise). SQLite-DO alarm (TicketReconcileDO), no cron slot.
+# PRECONDITION (manual): services/lp-tickets/db/0001_init.sql applied to dub-tickets and its
+# Stripe secrets set — docs/runbooks/09-lp-tickets-cutover.md.
+deploy lp-tickets      services/lp-tickets/wrangler.free.toml
+# lp-analytics (LP管理: 流入URL + LP 訪問ログ) binds SVC_IDENTITY (step 1) + SVC_LP_TICKETS (above) and
+# is bound by api-gateway (SVC_LP_ANALYTICS, step 4) — so it lands before the gateway (CF 10143 otherwise).
 # PRECONDITION (manual, like every D1 change — this script never migrates): apply
 # infra/d1/migrations/lp/0001_init.sql to dub-core BEFORE the first deploy, else every LP
 # pageview beacon 5xx's at the gateway and the LP管理 screens error.
 deploy lp-analytics    services/lp-analytics/wrangler.free.toml
 
-# --- 4. api-gateway (binds all 18 upstreams — deploy only after they exist) ---
+# --- 4. api-gateway (binds all 19 upstreams — deploy only after they exist) ---
 deploy api-gateway services/api-gateway/wrangler.free.toml
 
 # --- 4b. gateway smoke — fail-fast BEFORE the public faces (fe2/mo3) go out ---

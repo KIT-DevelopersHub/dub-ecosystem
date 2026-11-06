@@ -474,22 +474,31 @@ CREATE TABLE member_sponsor_goals (
 `.trim(),
 };
 
-// 0023: スポンサーのメール連携 (紐付けたアドレス + 自動更新の履歴。新規テーブルのみ・additive)。Mirrors 0023_sponsor_mail_sync.sql (schema-lockstep).
+export const MEMBER_GOALS_MIGRATION: Migration = {
+  id: "0023_goals",
+  namespace: "member",
+  up: `
+CREATE TABLE member_goals (
+  org_id           TEXT NOT NULL,
+  team_id          TEXT NOT NULL,
+  month            TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  kpis_json        TEXT NOT NULL,
+  version          INTEGER NOT NULL,
+  updated_by       TEXT NOT NULL,
+  updated_by_name  TEXT,
+  updated_at       TEXT NOT NULL,
+  PRIMARY KEY (org_id, team_id, month)
+);
+CREATE INDEX idx_member_goals_org_month ON member_goals(org_id, month);
+`.trim(),
+};
+
+// 0024: スポンサーのメール連携 (メールからの自動更新の履歴。新規テーブルのみ・additive)。Mirrors 0024_sponsor_mail_sync.sql (schema-lockstep).
 export const MEMBER_SPONSOR_MAIL_SYNC_MIGRATION: Migration = {
   namespace: "member",
-  id: "0023_sponsor_mail_sync",
+  id: "0024_sponsor_mail_sync",
   up: `
-CREATE TABLE member_sponsor_mail_links (
-  id                TEXT PRIMARY KEY,
-  org_id            TEXT NOT NULL,
-  lead_id           TEXT NOT NULL,
-  address           TEXT NOT NULL,
-  thread_id         TEXT,
-  created_by        TEXT NOT NULL,
-  created_by_name   TEXT,
-  created_at        TEXT NOT NULL
-);
-CREATE UNIQUE INDEX idx_member_sponsor_mail_links_address ON member_sponsor_mail_links(org_id, address);
 CREATE TABLE member_sponsor_lead_activity (
   id                TEXT PRIMARY KEY,
   org_id            TEXT NOT NULL,
@@ -531,5 +540,6 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SPONSOR_CARDS_MIGRATION,
   MEMBER_SPONSOR_LEADS_MIGRATION,
   MEMBER_SPONSOR_GOALS_MIGRATION,
+  MEMBER_GOALS_MIGRATION,
   MEMBER_SPONSOR_MAIL_SYNC_MIGRATION,
 ];

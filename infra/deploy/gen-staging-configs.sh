@@ -13,8 +13,9 @@
 #     upstreams (e.g. webhook-ingest, which needs PAID Cloudflare Queues) are intentionally
 #     absent from the $0 free-tier staging replica; a binding to a Worker that will never be
 #     deployed makes the WHOLE api-gateway/app-health-monitor deploy fail (CF code 10143/10144).
-#   * D1 database_name         -> dub-core|auth-outbox + "-staging"
+#   * D1 database_name         -> dub-core|auth-outbox|dub-tickets + "-staging"
 #   * D1 database_id / KV id    -> the staging resource ids from staging-resources.env
+#                                  (dub-tickets: by database_name, its prod id may be a placeholder)
 #   * R2 bucket_name           -> bucket + "-staging"
 #   * api-gateway ALLOWED_ORIGINS -> + the staging fe2 origin (CORS)
 #   * [triggers] crons         -> DROPPED. The account is already at the free plan's 5/5
@@ -43,7 +44,7 @@ PROD_DPKV_ID="b969e6ef6c034ed4ab3b9800f1a0e9ce"
 PROD_GANTTKV_ID="fc2d133f9b9f458ab5746f7b40b4bcde"
 
 # Refuse to generate with placeholder ids — they would produce invalid tomls.
-for v in STAGING_DUB_CORE_D1_ID STAGING_AUTH_OUTBOX_D1_ID STAGING_AUTH_KV_ID \
+for v in STAGING_DUB_CORE_D1_ID STAGING_AUTH_OUTBOX_D1_ID STAGING_TICKETS_D1_ID STAGING_AUTH_KV_ID \
          STAGING_DRIVE_PROXY_KV_ID STAGING_GANTT_KV_ID STAGING_WORKERS_SUBDOMAIN; do
   val="${!v:-}"
   case "$val" in
@@ -97,6 +98,7 @@ gen_one() {
     awk \
       -v DUBCORE_ID="$PROD_DUBCORE_ID"       -v DUBCORE_STG="$STAGING_DUB_CORE_D1_ID" \
       -v AUTHOUTBOX_ID="$PROD_AUTHOUTBOX_ID" -v AUTHOUTBOX_STG="$STAGING_AUTH_OUTBOX_D1_ID" \
+      -v TICKETS_STG="$STAGING_TICKETS_D1_ID" \
       -v AUTHKV_ID="$PROD_AUTHKV_ID"         -v AUTHKV_STG="$STAGING_AUTH_KV_ID" \
       -v DPKV_ID="$PROD_DPKV_ID"             -v DPKV_STG="$STAGING_DRIVE_PROXY_KV_ID" \
       -v GANTTKV_ID="$PROD_GANTTKV_ID"       -v GANTTKV_STG="$STAGING_GANTT_KV_ID" \
@@ -121,6 +123,9 @@ gen_one() {
       # --- D1 logical names ---
       /^database_name = "dub-core"/    { print "database_name = \"dub-core" SFX "\""; next }
       /^database_name = "auth-outbox"/ { print "database_name = \"auth-outbox" SFX "\""; next }
+      # dub-tickets: the id follows its database_name line (prod id is a placeholder until cutover).
+      /^database_name = "dub-tickets"/ { print "database_name = \"dub-tickets" SFX "\""; tickets_db=1; next }
+      (tickets_db && /^database_id = "/) { print "database_id = \"" TICKETS_STG "\""; tickets_db=0; next }
       # --- R2 bucket names -> suffix -staging (preserve trailing comment) ---
       /^bucket_name = "/ {
         match($0, /"[^"]*"/); v=substr($0,RSTART+1,RLENGTH-2); rest=substr($0,RSTART+RLENGTH)

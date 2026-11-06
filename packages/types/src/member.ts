@@ -277,6 +277,13 @@ export function formatPersonProfileValue(key: PersonProfileKey, p: Partial<Perso
   return p[key] ?? "";
 }
 
+/** 姓/名 が無いデータ用: 表示名を最初の空白で 姓/名 に分ける (空白が無ければ全体を姓)。 */
+export function splitDisplayName(name: string): { lastName: string; firstName: string } {
+  const t = name.trim();
+  const m = /^(\S+)[\s　]+(.+)$/.exec(t);
+  return m ? { lastName: m[1]!, firstName: m[2]!.trim() } : { lastName: t, firstName: "" };
+}
+
 /** PersonProfile 部分だけを取り出す (Member / Participation から)。 */
 export function pickPersonProfile(src: PersonProfile): PersonProfile {
   return Object.fromEntries(PERSON_PROFILE_KEYS.map((k) => [k, src[k]])) as unknown as PersonProfile;

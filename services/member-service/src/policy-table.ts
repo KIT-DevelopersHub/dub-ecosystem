@@ -209,4 +209,9 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /members/sponsor/mail-links/:id": appLevel("sponsor", "edit", "sponsor:write"),
   "GET /members/sponsor/leads/:id/activity": appLevel("sponsor", "view", "sponsor:read"),
   "POST /members/sponsor/leads/mail-backfill": appLevel("sponsor", "edit", "sponsor:admin"),
+
+  // 目標管理。閲覧 + goals:read で全チームの進捗 (件数だけで個人情報は含まない) を読める。編集は 編集 のみ。
+  "GET /members/goals": appLevel("goals", "view", "goals:read"),
+  "PUT /members/goals/:teamId/:month": appLevel("goals", "edit"),
+  "DELETE /members/goals/:teamId/:month": appLevel("goals", "edit"),
 });

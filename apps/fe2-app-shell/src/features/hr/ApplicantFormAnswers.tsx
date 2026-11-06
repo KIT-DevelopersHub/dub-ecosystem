@@ -1,8 +1,9 @@
 // 面談申し込みフォームの回答の表示。応募者の詳細ドロワー (ApplicantFormAnswers) と回答一覧の詳細
 // (FormResponseView) で共有する。見出しは回答時点の質問 (スナップショット) を使うので、あとでフォームを
 // 編集しても過去の回答は崩れない。
-import { SkeletonLoader } from "@dub/ui";
-import { hrForm } from "@dub/types";
+import { Button, SkeletonLoader, useToast } from "@dub/ui";
+import { hrForm, type hr } from "@dub/types";
+import { prefillPath } from "../participation/prefillLink.ts";
 import { useApplicantFormResponses } from "./interviewFormApi.tsx";
 import styles from "./interview-form.module.css";
 
@@ -61,6 +62,28 @@ export function ApplicantFormAnswers({ applicantId }: { applicantId: string }): 
       {responses.map((r) => (
         <FormResponseView key={r.id} response={r} hideBound />
       ))}
+    </div>
+  );
+}
+
+/** 面談申し込みの内容を入力した状態で開く参加届のリンクをコピーする。本人に送ると入力し直さずに提出できる。 */
+export function ParticipationLinkButton({ applicant }: { applicant: hr.Applicant }): JSX.Element {
+  const q = useApplicantFormResponses(applicant.id);
+  const toast = useToast();
+  const copy = async (): Promise<void> => {
+    const prefill = hrForm.participationPrefill(applicant, q.data?.responses[0] ?? null);
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}${prefillPath(prefill)}`);
+      toast.show({ kind: "success", title: "参加届の入力済みリンクをコピーしました", description: "本人にだけ送ってください（氏名・メールが含まれます）" });
+    } catch {
+      toast.show({ kind: "error", title: "コピーできませんでした。もう一度お試しください" });
+    }
+  };
+  return (
+    <div>
+      <Button size="sm" variant="secondary" testId="fe2-hr-participation-link" disabled={q.isLoading} onClick={() => void copy()}>
+        参加届の入力済みリンクをコピー
+      </Button>
     </div>
   );
 }
