@@ -20,8 +20,6 @@ import {
   type Reflection,
 } from "./lib/reflection.ts";
 import { ArtifactLinks } from "./ArtifactLinks.tsx";
-import { PrCiBadge } from "./PrCiBadge.tsx";
-import type { PrChecksApi } from "./lib/prChecks.ts";
 import { Spinner } from "./Spinner.tsx";
 import { t } from "./lib/theme.ts";
 
@@ -35,8 +33,6 @@ interface TaskCardProps {
   pending?: boolean;
   /** demo 承認済みだが staging 枠が空かず未反映（合体の候補）。 */
   slotWaiting?: boolean;
-  /** PR CI badge + 「確認」. Absent => no badge (backend without PR support). */
-  prs?: PrChecksApi;
 }
 
 function basename(p: string): string {
@@ -55,7 +51,7 @@ function relTime(iso: string): string {
   return `${Math.round(m / 60)}時間前`;
 }
 
-export function TaskCard({ item, client, history, onOpen, onCancel, pending, slotWaiting, prs }: TaskCardProps) {
+export function TaskCard({ item, client, history, onOpen, onCancel, pending, slotWaiting }: TaskCardProps) {
   const lane = deriveLane(item);
   const isRunning = isRunningLane(lane) && !!item.latestRun;
   // A running deploy phase reads as 「反映中」 rather than a generic run, so the operator can
@@ -182,9 +178,6 @@ export function TaskCard({ item, client, history, onOpen, onCancel, pending, slo
         // 枠待ちは staging 未到達なので、固定 staging ホストの補完リンクを出さない。
         phase={slotWaiting ? "demo_review" : item.featurePhase}
       />
-
-      {/* PR CI status + 「確認」 (確認した label) */}
-      {prs && item.prUrl && !pending && <PrCiBadge prUrl={item.prUrl} api={prs} />}
 
       {/* deploy-in-progress banner: makes 「反映中」 explicit on the card */}
       {deployingLabel && (

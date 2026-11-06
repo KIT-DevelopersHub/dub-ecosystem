@@ -1,5 +1,6 @@
-// PR CI badge + 「確認」 on a task card: compact pass count, expandable per-check list with
-// links, and the button that adds the 確認した production-gate label (confirm dialog,
+// PR CI status + 「確認」 in the task detail (drawer) — never on the board list: compact
+// pass count, expandable per-check list with links, a refresh (bypasses the 45s cache),
+// and the button that adds the 確認した production-gate label (confirm dialog,
 // optimistic 「確認済み」 with rollback). Eligibility is decided by commander-service; the
 // button only mirrors it and shows the reason when it cannot be pressed.
 import { useCallback, useEffect, useState } from "react";
@@ -32,6 +33,7 @@ export function PrCiBadge({ prUrl, api, pollMs = 60_000 }: Props) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(
     async (fresh = false) => {
@@ -47,6 +49,19 @@ export function PrCiBadge({ prUrl, api, pollMs = 60_000 }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [api, ref?.repo, ref?.number],
   );
+
+  // Esc while the confirm dialog is open closes ONLY the dialog: the drawer behind it also
+  // closes on a document-level Esc, so take it first (capture) and stop it there.
+  useEffect(() => {
+    if (!asking) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopImmediatePropagation();
+      setAsking(false);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [asking]);
 
   const pending = view?.pr.summary.state === "pending";
   useEffect(() => {
@@ -96,12 +111,12 @@ export function PrCiBadge({ prUrl, api, pollMs = 60_000 }: Props) {
   };
 
   return (
-    // Stops clicks/keys (incl. ones bubbling from the dialog portal) from opening the card.
+    // Clicks from the dialog portal bubble through the React tree; keep them from reaching
+    // the drawer's scrim/handlers.
     <div
       data-testid={testId}
       data-ci-state={pr.summary.state}
       onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.stopPropagation()}
       style={{ marginTop: t.space2 }}
     >
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: t.space2 }}>
@@ -116,6 +131,30 @@ export function PrCiBadge({ prUrl, api, pollMs = 60_000 }: Props) {
           <Badge tone={badge.tone} testId={`${testId}-badge`}>
             CI {badge.text}
           </Badge>
+        </button>
+        <button
+          type="button"
+          data-testid={`${testId}-refresh`}
+          title="GitHub から最新を取得（キャッシュを使わない）"
+          disabled={refreshing}
+          onClick={async () => {
+            setRefreshing(true);
+            await load(true);
+            setRefreshing(false);
+          }}
+          style={{
+            background: "transparent",
+            border: `1px solid ${t.border}`,
+            borderRadius: "var(--dub-radius-sm, 8px)",
+            padding: `0 ${t.space2}`,
+            font: "inherit",
+            fontSize: 11,
+            lineHeight: "18px",
+            color: t.textMuted,
+            cursor: "pointer",
+          }}
+        >
+          {refreshing ? "更新中…" : "↻ 更新"}
         </button>
         {pr.staging.stagingへ && <Badge tone="info">stagingへ</Badge>}
         {pr.staging.staging2へ && <Badge tone="info">staging2へ</Badge>}

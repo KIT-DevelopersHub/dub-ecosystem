@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PrCiBadge } from "./PrCiBadge.tsx";
-import { TaskCard } from "./TaskCard.tsx";
+import { Board } from "./Board.tsx";
 import { makeFakePrApi, makePr } from "./lib/prFake.ts";
 import { badgeOf, parsePrRef } from "./lib/prChecks.ts";
 import { makeBoardItem, makeFakeApi, makeFakeClient } from "./test/fakes.ts";
@@ -107,36 +107,65 @@ describe("PrCiBadge", () => {
     expect(screen.getByTestId("pr-ci-101-confirm")).toBeInTheDocument();
   });
 
-  it("clicks inside the badge do not open the task card", async () => {
+  it("refresh bypasses the cache", async () => {
     const api = makeFakePrApi([makePr()]);
-    const onOpen = vi.fn();
-    render(
-      <TaskCard
-        item={makeBoardItem({ prUrl: URL, runStatus: "succeeded", featurePhase: "staging_review" })}
-        client={makeFakeClient()}
-        history={makeFakeApi()}
-        onOpen={onOpen}
-        onCancel={() => {}}
-        prs={api}
-      />,
+    const spy = vi.spyOn(api, "getChecks");
+    render(<PrCiBadge prUrl={URL} api={api} />);
+    await userEvent.click(await screen.findByTestId("pr-ci-101-refresh"));
+    await waitFor(() => expect(spy).toHaveBeenLastCalledWith(expect.anything(), { fresh: true }));
+  });
+});
+
+describe("placement: detail only, never the board list", () => {
+  function setup() {
+    const prs = makeFakePrApi([makePr()]);
+    const getChecks = vi.spyOn(prs, "getChecks");
+    const api = Object.assign(
+      makeFakeApi([
+        makeBoardItem({ taskId: "t-pr", featureId: "f-pr", prUrl: URL, prUrls: [URL], runStatus: "succeeded", featurePhase: "staging_review" }),
+        makeBoardItem({ taskId: "t-none", featureId: "f-none", prUrl: null, runStatus: "succeeded", featurePhase: "staging_review" }),
+      ]),
+      { prs },
     );
-    await userEvent.click(await screen.findByTestId("pr-ci-101-toggle"));
-    await userEvent.click(screen.getByTestId("pr-ci-101-confirm"));
-    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "キャンセル" }));
-    expect(onOpen).not.toHaveBeenCalled();
+    render(<Board client={makeFakeClient()} api={api} pollMs={0} />);
+    return { prs, getChecks };
+  }
+
+  it("the board shows no CI badge and never fetches checks", async () => {
+    const { getChecks } = setup();
+    await screen.findByTestId("task-card-t-pr");
+    expect(screen.queryByTestId(/^pr-ci-/)).toBeNull();
+    expect(getChecks).not.toHaveBeenCalled();
   });
 
-  it("no badge without a PR or without PR support", () => {
-    render(
-      <TaskCard
-        item={makeBoardItem({ prUrl: null, runStatus: "succeeded" })}
-        client={makeFakeClient()}
-        history={makeFakeApi()}
-        onOpen={() => {}}
-        onCancel={() => {}}
-        prs={makeFakePrApi([])}
-      />,
-    );
-    expect(screen.queryByTestId(/^pr-ci-/)).toBeNull();
+  it("opening the task detail shows CI and 確認 -> 確認済み", async () => {
+    const { prs, getChecks } = setup();
+    await userEvent.click(await screen.findByTestId("task-card-t-pr"));
+    const ci = await screen.findByTestId("drawer-ci");
+    expect(await within(ci).findByTestId("pr-ci-101-badge")).toHaveTextContent("✓ 2/2");
+    expect(getChecks).toHaveBeenCalledTimes(1);
+    await userEvent.click(within(ci).getByTestId("pr-ci-101-confirm"));
+    const dialog = await screen.findByRole("dialog", { name: "本番への承認（確認した）" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "確認したを付ける" }));
+    expect(await within(ci).findByTestId("pr-ci-101-confirmed")).toBeInTheDocument();
+    expect(prs.confirmCalls).toHaveLength(1);
+  });
+
+  it("Esc closes only the confirm dialog, not the drawer", async () => {
+    setup();
+    await userEvent.click(await screen.findByTestId("task-card-t-pr"));
+    const ci = await screen.findByTestId("drawer-ci");
+    await userEvent.click(await within(ci).findByTestId("pr-ci-101-confirm"));
+    await screen.findByRole("dialog", { name: "本番への承認（確認した）" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "本番への承認（確認した）" })).toBeNull());
+    expect(screen.getByTestId("task-drawer")).toBeInTheDocument();
+  });
+
+  it("a task without a PR has no CI section in its detail", async () => {
+    setup();
+    await userEvent.click(await screen.findByTestId("task-card-t-none"));
+    await screen.findByTestId("drawer-prs");
+    expect(screen.queryByTestId("drawer-ci")).toBeNull();
   });
 });
