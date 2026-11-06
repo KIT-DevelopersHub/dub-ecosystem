@@ -6,6 +6,7 @@
 // 同じ overview キャッシュを共有する（additive・非破壊）。書き込み(追加/編集/削除/紐付け) は
 // 既存ダイアログ・楽観的 mutation を再利用し、サーバ側で identity:admin を再認可する。
 import { useMemo, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import {
   PageHeader,
   Button,
@@ -29,11 +30,23 @@ import { ListView } from "./ListView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
 import type { OrgMember } from "./contracts.ts";
-import { ROSTER_FILTER_OPTIONS, matchesRosterFilter, type RosterStatusFilter } from "./memberStatus.ts";
+import { ROSTER_FILTER_OPTIONS, canRemind, hasMissingProfile, matchesRosterFilter, type RosterStatusFilter } from "./memberStatus.ts";
 import { orgChartOrder } from "./orgChartOrder.ts";
 import { buildRosterTable, exportRoster, type RosterExportFormat } from "./rosterExport.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import styles from "./members.module.css";
+
+type ProfileFilter = "all" | "missing";
+const PROFILE_FILTER_OPTIONS: SelectOption<ProfileFilter>[] = [
+  { value: "all", label: "すべて" },
+  { value: "missing", label: "未入力あり" },
+];
+const REMIND_CONCURRENCY = 4;
+
+function remindMessage(targets: OrgMember[]): string {
+  const who = targets.length === 1 ? `「${targets[0]?.name ?? ""}」さん` : `${targets.length}人`;
+  return `${who}に、未入力の項目を入力するよう通知を送ります。同じ人への通知は1日1回までです。`;
+}
 
 export function MemberRosterPage(): JSX.Element {
   // 書き込みは運営メンバータブと同じ要件 (app:members:edit)。閲覧のみなら操作を無効化する。
@@ -46,6 +59,8 @@ export function MemberRosterPage(): JSX.Element {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<RosterStatusFilter>("roster");
+  const [profileFilter, setProfileFilter] = useState<ProfileFilter>("all");
+  const [remindTargets, setRemindTargets] = useState<OrgMember[]>([]);
   const [memberDialog, setMemberDialog] = useState<{ open: boolean; editing: OrgMember | null }>({ open: false, editing: null });
   const [linkDialog, setLinkDialog] = useState<{ open: boolean; member: OrgMember | null }>({ open: false, member: null });
   const [confirm, setConfirm] = useState<OrgMember | null>(null);
@@ -85,7 +100,9 @@ export function MemberRosterPage(): JSX.Element {
   // 表示順 = 組織図順(オーガナイザー→各リーダー→配下→残り)。ステータスで絞ってから
   // 並べ替え、最後に検索で絞る(検索は順序を保つ)。既定は「在籍者(辞退以外)」。
   const filteredMembers = useMemo(() => {
-    const byStatus = members.filter((m) => matchesRosterFilter(m.status, statusFilter));
+    const byStatus = members.filter(
+      (m) => matchesRosterFilter(m.status, statusFilter) && (profileFilter === "all" || hasMissingProfile(m)),
+    );
     const ordered = orgChartOrder(byStatus);
     const q = search.trim().toLowerCase();
     if (!q) return ordered;
@@ -98,7 +115,7 @@ export function MemberRosterPage(): JSX.Element {
         ...PROFILE_DISPLAY_COLUMNS.map((c) => c.value(m)),
       ].some((v) => v.toLowerCase().includes(q)),
     );
-  }, [members, search, statusFilter]);
+  }, [members, search, statusFilter, profileFilter]);
 
   const STATUS_FILTER_OPTIONS: SelectOption<RosterStatusFilter>[] = ROSTER_FILTER_OPTIONS;
 
@@ -113,6 +130,34 @@ export function MemberRosterPage(): JSX.Element {
     } catch {
       toast.show({ kind: "error", title: "ダウンロードに失敗しました" });
     }
+  };
+
+  // 催促は画面に出ている人が対象。通知はログインへ届くので、未紐付けの人は件数で知らせる。
+  const missingMembers = filteredMembers.filter(hasMissingProfile);
+  const remindable = missingMembers.filter(canRemind);
+  const unlinkedCount = missingMembers.length - remindable.length;
+  const remind = useMutation({
+    mutationFn: async (targets: OrgMember[]) => {
+      const results: PromiseSettledResult<{ deduplicated: boolean }>[] = [];
+      for (let i = 0; i < targets.length; i += REMIND_CONCURRENCY) {
+        const batch = targets.slice(i, i + REMIND_CONCURRENCY);
+        results.push(...(await Promise.allSettled(batch.map((m) => membersApi.sendProfileReminder(m.id)))));
+      }
+      return results;
+    },
+    onSuccess: (results) => {
+      const count = (match: (r: PromiseSettledResult<{ deduplicated: boolean }>) => boolean) => results.filter(match).length;
+      const failed = count((r) => r.status === "rejected");
+      const skipped = count((r) => r.status === "fulfilled" && r.value.deduplicated);
+      const sent = results.length - failed - skipped;
+      if (failed > 0) toast.show({ kind: "error", title: `${results.length}人中 ${failed}人に送れませんでした` });
+      else if (sent === 0) toast.show({ kind: "info", title: "今日はすでに催促を送っています" });
+      else toast.show({ kind: "success", title: `${sent}人に入力の催促を送りました${skipped > 0 ? `（${skipped}人は本日送信済み）` : ""}` });
+    },
+  });
+  const confirmRemind = () => {
+    remind.mutate(remindTargets);
+    setRemindTargets([]);
   };
 
   const confirmDelete = () => {
@@ -153,6 +198,14 @@ export function MemberRosterPage(): JSX.Element {
                 { id: "pdf", label: "PDF（.pdf）", onSelect: () => download("pdf"), testId: "member-roster-export-pdf" },
               ]}
             />
+            <Button
+              variant="secondary"
+              disabled={!canEdit || remindable.length === 0 || remind.isPending}
+              onClick={() => setRemindTargets(remindable)}
+              testId="member-roster-remind"
+            >
+              {`未入力を催促（${remindable.length}人）`}
+            </Button>
             <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} disabled={!canEdit} onClick={openAddMember} testId="member-roster-add-member">
               メンバーを追加
             </Button>
@@ -179,7 +232,22 @@ export function MemberRosterPage(): JSX.Element {
             testId="member-roster-status-filter"
           />
         </FormField>
+        <FormField label="未入力" htmlFor="member-roster-profile-filter">
+          <Select<ProfileFilter>
+            id="member-roster-profile-filter"
+            value={profileFilter}
+            onChange={setProfileFilter}
+            options={PROFILE_FILTER_OPTIONS}
+            testId="member-roster-profile-filter"
+          />
+        </FormField>
       </div>
+
+      {unlinkedCount > 0 ? (
+        <p className={styles.rosterHint} data-testid="member-roster-unlinked-hint">
+          未入力があってもアカウント未紐付けの{unlinkedCount}人には催促を送れません。
+        </p>
+      ) : null}
 
       <ListView
         members={filteredMembers}
@@ -193,6 +261,7 @@ export function MemberRosterPage(): JSX.Element {
         onUnlink={(m) => unlinkIdentity.mutate({ id: m.id, version: m.version })}
         onSendAccountMail={openAccountMail}
         canSendAccountMail={(m) => mailTargetOf(m) !== null}
+        onRemind={(m) => setRemindTargets([m])}
       />
 
       <MemberFormDialog
@@ -216,6 +285,17 @@ export function MemberRosterPage(): JSX.Element {
       />
 
       <AccountMailPrompt target={mailTarget} send={membersApi.sendAccountMail} onClose={() => setMailTarget(null)} />
+
+      <ConfirmDialog
+        open={remindTargets.length > 0}
+        title="情報の入力を催促"
+        message={remindMessage(remindTargets)}
+        confirmLabel="催促を送る"
+        cancelLabel="キャンセル"
+        onConfirm={confirmRemind}
+        onCancel={() => setRemindTargets([])}
+        testId="member-roster-confirm-remind"
+      />
 
       <ConfirmDialog
         open={confirm !== null}

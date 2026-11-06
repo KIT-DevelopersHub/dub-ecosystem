@@ -401,6 +401,28 @@ export class MemberService {
     await this.syncRolesForIdentities(ctx, [cur.identityUserId]);
   }
 
+  /** 情報が足りない本人へ入力を催促する。未入力の判定は名簿の最新の行で行う。 */
+  async sendProfileReminder(ctx: ReqCtx, id: string): Promise<member.SendProfileReminderResponse> {
+    const cur = await this.deps.repo.getPerson(id);
+    if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
+    const send = this.deps.sendProfileReminder;
+    if (!send) throw errors.upstreamUnavailable("notification");
+    if (!cur.identityUserId) {
+      throw errors.validationFailed([{ field: "identityUserId", reason: "not_linked" }], "アカウントが紐付いていないため催促できません");
+    }
+    const missing = member.missingProfileKeys(cur);
+    if (missing.length === 0) {
+      throw errors.validationFailed([{ field: "profile", reason: "complete" }], "未入力の項目はありません");
+    }
+    const { deduplicated } = await send(ctx, {
+      memberId: cur.id,
+      identityUserId: cur.identityUserId,
+      missing,
+      today: this.deps.now().slice(0, 10),
+    });
+    return { deduplicated, missing };
+  }
+
   // ---- identity linking (#1: bridge 組織図 <-> RBAC 真実) ----
   /**
    * Validate an identityUserId assignment for `personId`. `null` unlinks. A non-empty

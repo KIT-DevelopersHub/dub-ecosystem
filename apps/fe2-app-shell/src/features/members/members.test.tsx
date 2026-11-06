@@ -262,6 +262,41 @@ describe("MembersPage", () => {
     expect(within(note).getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
   });
 
+  it("組織図 hides the 法人 team; a member also in another team stays in that team's column", async () => {
+    const person = { ...P0, orgId: "o", roleTitle: null, status: "added" as const, department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t" };
+    const overview: MembersOverview = {
+      teams: [
+        { id: "t1", key: "dev", name: "開発", color: "#0d9488", description: null },
+        { id: "corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: null },
+      ],
+      members: [
+        { ...person, id: "p_corp", name: "法人のみ", teamIds: ["corp"], sortOrder: 1 },
+        { ...person, id: "p_both", name: "兼任", teamIds: ["t1", "corp"], sortOrder: 2 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+    expect(screen.queryByTestId("members-orgcol-corp")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("members-orgchip-p_corp")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("members-orgcol-t1")).getByTestId("members-orgchip-p_both")).toBeInTheDocument();
+  });
+
+  it("組織図 puts 打診中 / 休み中 below active members", async () => {
+    const person = { ...P0, orgId: "o", roleTitle: null, department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t", teamIds: ["t1"] };
+    const overview: MembersOverview = {
+      teams: [{ id: "t1", key: "dev", name: "開発", color: "#0d9488", description: null }],
+      members: [
+        { ...person, id: "leave", name: "休み", status: "on_leave", sortOrder: 1 },
+        { ...person, id: "pending", name: "打診", status: "invited", sortOrder: 2 },
+        { ...person, id: "active", name: "活動", status: "added", sortOrder: 3 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    const col = await screen.findByTestId("members-orgcol-t1");
+    const ids = [...col.querySelectorAll("[data-testid^=members-orgchip-]")].map((e) => e.getAttribute("data-testid"));
+    expect(ids).toEqual(["members-orgchip-active", "members-orgchip-pending", "members-orgchip-leave"]);
+  });
+
   // FBの主眼: 同じチームに複数リーダーが居ても、各メンバーが「自分の leaderId が指す
   // リーダーの配下」としてネスト描画されること。DOM上、配下チップはそのリーダーの
   // nodeItem(li) の中に入り、別リーダーの li には入らない = 上下関係が構造で伝わる。
