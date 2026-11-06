@@ -14,6 +14,7 @@ import { createD1SponsorRepo, r2ImageStore } from "./sponsor-repo";
 import { createD1SponsorLeadRepo } from "./sponsor-lead-repo";
 import { notifyAdminsOfParticipation } from "./participationNotify";
 import { createIdentityRoleSync } from "./roleSync";
+import { createIdentityActivation } from "./identityActivation";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -47,6 +48,8 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     hrFormRepo: createD1HrFormRepo(db),
     // 名簿のチーム・役職 -> identity の自動ロール (best-effort・PUT /internal/*managed-roles)。
     roleSync: createIdentityRoleSync(env.SVC_IDENTITY),
+    // 在籍で紐付いた人の招待中アカウントを有効化 (best-effort・POST /internal/users/:id/activate)。
+    identityActivation: createIdentityActivation(env.SVC_IDENTITY),
     newHrId: (prefix) => newId(prefix),
     sponsorRepo: createD1SponsorRepo(db),
     ...(env.SPONSOR_FILES ? { sponsorImages: r2ImageStore(env.SPONSOR_FILES) } : {}),

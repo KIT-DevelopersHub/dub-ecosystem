@@ -36,10 +36,10 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
     expect(() => assertRouteCoverage(h.app, POLICY_TABLE)).not.toThrow();
   });
 
-  it("lists all 37 endpoints of this service", async () => {
+  it("lists all 38 endpoints of this service", async () => {
     const h = await makeHarness();
-    expect(protectableRouteKeys(h.app)).toHaveLength(37);
-    expect(Object.keys(POLICY_TABLE)).toHaveLength(37);
+    expect(protectableRouteKeys(h.app)).toHaveLength(38);
+    expect(Object.keys(POLICY_TABLE)).toHaveLength(38);
   });
 
   it("catches a new endpoint added without a table entry, and denies it at runtime", async () => {
@@ -131,6 +131,7 @@ const INTERNAL_ROUTES = [
   "POST /internal/users/lookup",
   "POST /internal/users/avatars",
   "POST /users/provision",
+  "POST /internal/users/:id/activate",
   "POST /internal/webauthn/challenges",
   "POST /internal/webauthn/challenges/take",
   "GET /internal/webauthn/users/:id/credentials",
@@ -240,6 +241,7 @@ describe("INTERNAL routes at runtime", () => {
     // The whole internal surface, with the most privileged possible external caller.
     const routes: [string, string][] = [
       ["POST", "/users/provision"],
+      ["POST", `/internal/users/${h.memberId}/activate`],
       ["GET", `/users/${h.memberId}`],
       ["POST", `/internal/users/${h.memberId}/profile`],
       ["GET", "/internal/users"],

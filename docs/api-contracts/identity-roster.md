@@ -521,6 +521,26 @@ Response `200` — `dto.EffectivePermissionsResponse`:
 An inactive or non-member subject yields `permissions: []` (not a 404).
 Resource-scoped grants are intentionally excluded (resolve those via §5.2).
 
+### 5.4 `POST /internal/users/:id/activate`
+
+Caller: member-service only. `invited` -> `active` for a user the 名簿 has confirmed as
+在籍 (`added`) and linked to this account — the Web replacement for the first-login
+activation §5.1 used to do (Web Google login is gone; password login only admits
+`active`). Keyed by user id from the roster link, never by an email.
+
+Request `identity.ActivateInvitedUserRequest`: `{ "trigger": "participation.link", "dryRun": false }`
+(`trigger` = `^[a-z][a-z0-9._-]{0,63}$`, recorded in the audit).
+
+Response `200` `identity.ActivateInvitedUserResponse`:
+`{ "dryRun": false, "activated": true, "previousStatus": "invited", "status": "active" }`.
+
+- Only an `invited` row changes, as a compare-and-set on `status = 'invited'` — a disable
+  that lands concurrently wins. `active` is a no-op (`activated: false`); `disabled` /
+  `rejected` are never overridden. Idempotent.
+- Write-ahead sync audit `identity.user.provisioned` `{ via: "member-roster", trigger }`
+  with the acting admin (`x-dub-user-id`) as actor; audit failure aborts (`502`).
+- `404` unknown user, `400` bad trigger.
+
 ---
 
 ## 6. Health
@@ -541,7 +561,7 @@ Unauthenticated liveness probe. Response `200`:
 |---|---|---|
 | `identity.user.invited` | §4.4 | async |
 | `identity.user.updated` | §4.5 | async |
-| `identity.user.provisioned` | §5.1 (`success`/`denied`) | write-ahead sync on transition |
+| `identity.user.provisioned` | §5.1 (`success`/`denied`), §5.4 (`via: member-roster`) | write-ahead sync on transition |
 | `identity.role.created` | §4.7 | async |
 | `identity.role.updated` | §4.8 | async |
 | `identity.role.deleted` | §4.9 | async |

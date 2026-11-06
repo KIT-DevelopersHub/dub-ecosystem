@@ -81,6 +81,9 @@ export interface IdentityRepo {
   listUsers(filter: ListUsersFilter): Promise<UserPage>;
   createUser(row: UserRow): Promise<void>;
   updateUser(userId: string, patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>, updatedAt: string): Promise<void>;
+  /** invited -> active only while the row is still invited (compare-and-set). false = it was
+   *  not invited at write time, so a concurrent disable is never overwritten. */
+  activateIfInvited(userId: string, updatedAt: string): Promise<boolean>;
   /** All users in the org with a given provenance (used by the Email Routing sync to
    *  find rows it owns and logically deactivate the ones no longer present). */
   listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]>;

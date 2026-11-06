@@ -9,6 +9,7 @@ import type { HrFormRepo } from "./hr-form-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
 import type { SponsorLeadRepo } from "./sponsor-lead-repo";
 import type { RoleSyncPort } from "./roleSync";
+import type { IdentityActivationPort } from "./identityActivation";
 
 export type MemberStatus = member.MemberStatus;
 export const MEMBER_STATUSES = ["added", "invited", "considering", "on_leave", "declined"] as const;
@@ -205,6 +206,9 @@ export interface AppDeps {
   /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
    *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
   roleSync?: RoleSyncPort;
+  /** 在籍で紐付いた人の招待中アカウントを有効化 (identity-roster)。index.ts で SVC_IDENTITY に
+   *  結線。undefined なら有効化しない (単体テスト等)。名簿の保存は成否に関わらず成功する。 */
+  identityActivation?: IdentityActivationPort;
   /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
    *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
    *  without the binding, in which case the submission simply skips the notify. Must
