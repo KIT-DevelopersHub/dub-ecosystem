@@ -688,6 +688,9 @@ MAIL_DETAIL.msg_html = {
   textBody: "今年のカンファレンスの開催概要をお知らせします。\n日程: 11月30日\n会場: 金沢工業大学",
   htmlBody:
     `<script>alert("xss")</script>` +
+    `<form><input name="childNodes"><img src=x onerror="window.__mailXss=1"></form>` +
+    `<form name="body"><input name="childNodes"><img src=x onerror="window.__mailXss=2"></form>` +
+    `<form><input name="tagName"><input name="attributes"><img src=x onerror="window.__mailXss=3"></form>` +
     `<table width="100%" cellpadding="0" cellspacing="0" style="position:fixed; top:0; background-color:#f4f6fb"><tr><td align="center" style="padding:24px">` +
     `<img src="cid:logo@demo" alt="ロゴ" width="48" height="48">` +
     `<h1 style="color:#1a56db; font-size:22px" onclick="alert(1)">カンファレンス開催のお知らせ</h1>` +

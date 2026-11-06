@@ -18,8 +18,9 @@ export interface ServerDraft {
   flush: () => Promise<boolean>;
   /** Forget the draft on the server (discarded). */
   discard: () => void;
-  /** Stop saving: the mail was handed to the send path, which removes the draft. */
-  stop: () => void;
+  /** Stop saving: the mail was handed to the send path, which removes the draft once the
+   *  returned promise resolves (nothing of this draft is on the wire after that). */
+  stop: () => Promise<unknown>;
   /** Does a row for this draft exist on the server right now? */
   isSaved: () => boolean;
 }
@@ -52,12 +53,17 @@ export function useServerDraft({
   latest.current = { draft, key };
   // Files known to be on the server: local item id -> stored metadata.
   const remote = useRef(new Map<string, mail.MailAttachment>());
-  const uploading = useRef(new Set<string>());
+  const uploading = useRef(new Map<string, Promise<unknown>>());
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
-  // The inline reply box moves to a fresh id after each send.
+  // The inline reply box moves to a fresh id after each send. Jobs still queued for the old id
+  // compare generations and bow out: `stopped` alone is reset here.
+  const generation = useRef(0);
   const currentId = useRef(id);
   if (currentId.current !== id) {
     currentId.current = id;
+    generation.current += 1;
     onServer.current = false;
     savedKey.current = "";
     stopped.current = false;
@@ -71,11 +77,11 @@ export function useServerDraft({
     return run;
   }, []);
 
-  const save = useCallback(
-    () =>
-      enqueue(async () => {
+  const save = useCallback(() => {
+    const myGeneration = generation.current;
+    return enqueue(async () => {
         const { draft: value, key: valueKey } = latest.current;
-        if (stopped.current || (onServer.current && valueKey === savedKey.current)) return;
+        if (generation.current !== myGeneration || stopped.current || (onServer.current && valueKey === savedKey.current)) return;
         setStatus("saving");
         try {
           const saved = await api.saveDraft(id, value);
@@ -87,17 +93,18 @@ export function useServerDraft({
           setStatus("failed");
           throw err;
         }
-      }),
-    [api, dispatch, enqueue, id],
-  );
+    });
+  }, [api, dispatch, enqueue, id]);
 
   const remove = useCallback(() => {
     onServer.current = false;
     savedKey.current = "";
     remote.current.clear();
+    att.forgetRemoteIds(); // the files went with the draft
     dispatch({ type: "REMOVE_DRAFT", id });
     void enqueue(() => api.deleteDraft(id)).catch(() => undefined);
     setStatus("idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, dispatch, enqueue, id]);
 
   // Debounced text save; emptied again -> the saved draft goes away.
@@ -123,11 +130,11 @@ export function useServerDraft({
       }
       const input = item.input;
       if (item.status !== "ready" || !input || item.remoteId || uploading.current.has(item.id)) continue;
-      uploading.current.add(item.id);
-      void save()
+      const myGeneration = generation.current;
+      const upload = save()
         .then(() =>
           enqueue(async () => {
-            if (stopped.current) return;
+            if (generation.current !== myGeneration || stopped.current) return;
             const meta = await api.addDraftAttachment(id, input);
             remote.current.set(item.id, meta);
             setRemoteId(item.id, meta.id);
@@ -139,6 +146,7 @@ export function useServerDraft({
           setStatus("failed");
         })
         .finally(() => uploading.current.delete(item.id));
+      uploading.current.set(item.id, upload);
     }
     const present = new Set(items.map((i) => i.id));
     for (const [localId, meta] of remote.current) {
@@ -151,7 +159,8 @@ export function useServerDraft({
 
   const flush = useCallback(async (): Promise<boolean> => {
     try {
-      if (!onServer.current || latest.current.key !== savedKey.current) await save();
+      if (activeRef.current && (!onServer.current || latest.current.key !== savedKey.current)) await save();
+      await Promise.all(uploading.current.values());
       await queue.current;
       return !uploadFailed.current;
     } catch {
@@ -166,6 +175,7 @@ export function useServerDraft({
 
   const stop = useCallback(() => {
     stopped.current = true;
+    return Promise.all(uploading.current.values()).then(() => queue.current);
   }, []);
 
   const isSaved = useCallback(() => onServer.current, []);

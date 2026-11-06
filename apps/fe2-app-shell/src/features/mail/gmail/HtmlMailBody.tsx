@@ -8,47 +8,76 @@ import { useMailApi } from "../MailProvider.tsx";
 import { sanitizeHtml } from "../sanitize.tsx";
 import styles from "../MailBody.module.css";
 
+/** The Content-IDs a sanitized body really uses. Read from the parsed markup, so an escaped
+ *  id (&amp;) matches its attachment. */
+export function usedContentIds(safeHtml: string): Set<string> {
+  if (typeof DOMParser === "undefined") return new Set();
+  const imgs = new DOMParser().parseFromString(safeHtml, "text/html").querySelectorAll("img[data-cid]");
+  return new Set(Array.from(imgs).map((img) => img.getAttribute("data-cid") ?? ""));
+}
+
+/** Sanitize, or null if the markup defeats the sanitizer: the caller shows the text body. */
+export function safeMailHtml(html: string, remoteImages: boolean): string | null {
+  try {
+    return sanitizeHtml(html, { remoteImages });
+  } catch {
+    return null;
+  }
+}
+
 export function HtmlMailBody({
+  safeHtml,
   html,
   messageId,
   attachments,
   source,
+  onInlineFailed,
 }: {
+  /** safeMailHtml(html, false): the caller needs it too, to pick the renderer. */
+  safeHtml: string;
   html: string;
   messageId: string;
   attachments: mail.MailAttachment[];
   source: AttachmentSource;
+  /** These inline images could not load, so their files need a chip after all. */
+  onInlineFailed: (attachmentId: string) => void;
 }): JSX.Element {
   const api = useMailApi();
   const [remoteImages, setRemoteImages] = useState(false);
-  const safe = useMemo(() => sanitizeHtml(html, { remoteImages }), [html, remoteImages]);
+  const safe = useMemo(() => (remoteImages ? (safeMailHtml(html, true) ?? safeHtml) : safeHtml), [html, remoteImages, safeHtml]);
   const blocked = !remoteImages && safe.includes("data-src=");
   const ref = useRef<HTMLDivElement>(null);
   const [cidUrls, setCidUrls] = useState<Record<string, string>>({});
 
-  const inline = useMemo(() => attachments.filter((a) => a.contentId && (a.status === undefined || a.status === "stored")), [attachments]);
+  const inline = useMemo(() => {
+    const used = usedContentIds(safe);
+    return attachments.filter((a) => a.contentId && used.has(a.contentId) && (a.status === undefined || a.status === "stored"));
+  }, [attachments, safe]);
   useEffect(() => {
     let alive = true;
     const urls: string[] = [];
     void Promise.all(
       inline.map(async (a) => {
-        if (!safe.includes(`data-cid="${a.contentId}"`)) return null;
-        const blob = await api.downloadAttachment(source, messageId, a.id);
-        if (typeof URL.createObjectURL !== "function") return null;
-        const url = URL.createObjectURL(blob);
-        urls.push(url);
-        return [a.contentId!, url] as const;
+        try {
+          const blob = await api.downloadAttachment(source, messageId, a.id);
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          return [a.contentId!, url] as const;
+        } catch {
+          if (alive) onInlineFailed(a.id);
+          return null;
+        }
       }),
-    )
-      .then((pairs) => {
-        if (alive) setCidUrls(Object.fromEntries(pairs.filter((p) => p !== null)));
-      })
-      .catch(() => undefined); // the image stays blank; its download chip is hidden only once shown
+    ).then((pairs) => {
+      if (alive) setCidUrls(Object.fromEntries(pairs.filter((p) => p !== null)));
+    });
     return () => {
       alive = false;
       urls.forEach((u) => URL.revokeObjectURL(u));
     };
-  }, [api, inline, messageId, safe, source]);
+    // onInlineFailed only adds to a set; a new identity is no reason to download again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, inline, messageId, source]);
 
   useLayoutEffect(() => {
     for (const img of Array.from(ref.current?.querySelectorAll<HTMLImageElement>("img[data-cid]") ?? [])) {
@@ -71,11 +100,4 @@ export function HtmlMailBody({
       <div ref={ref} data-testid="fe2-mail-body-html" className={styles.mailHtml} dangerouslySetInnerHTML={{ __html: safe }} />
     </div>
   );
-}
-
-/** Inline images shown in the body, which therefore need no chip in the attachment strip. */
-export function inlineContentIds(html: string | undefined, attachments: mail.MailAttachment[]): Set<string> {
-  const ids = new Set<string>();
-  if (html) for (const a of attachments) if (a.contentId && html.includes(`cid:${a.contentId}`)) ids.add(a.id);
-  return ids;
 }

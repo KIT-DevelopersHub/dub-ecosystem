@@ -158,13 +158,19 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   };
   const openedAs = useRef(JSON.stringify(serverFields));
   const changed = JSON.stringify(serverFields) !== openedAs.current || att.items.length !== seedCount.current;
-  const server = useServerDraft({ id: compose.id, draft: serverFields, active: dirty && (compose.persisted === true || changed), persisted: compose.persisted === true, att });
+  const keepable = dirty && (compose.persisted === true || compose.restored === true || changed);
+  const server = useServerDraft({ id: compose.id, draft: serverFields, active: keepable, persisted: compose.persisted === true, att });
 
   // ✕ keeps the mail as a draft (Gmail); a failed save keeps the local copy so a reload
   // restores the window instead of losing the text.
   const closeAndSave = (): void => {
+    // A file still being read can't be saved yet, and closing would lose it unnoticed.
+    if (att.hasPending || seeding) {
+      setError("添付ファイルを処理中です。完了してから閉じてください。");
+      return;
+    }
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
-    if (!dirty || !(compose.persisted === true || changed)) {
+    if (!keepable) {
       draft.clear();
       return;
     }
@@ -186,7 +192,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     const { seed: _seed, ...rest } = compose;
     void _seed;
     const seedInputs = att.items.flatMap((it) => (it.input ? [{ input: it.input, ...(it.remoteId ? { remoteId: it.remoteId } : {}) }] : []));
-    return { ...rest, persisted: server.isSaved(), seedInputs };
+    return { ...rest, persisted: server.isSaved(), restored: true, seedInputs };
   };
 
   /** Gmail refuses a send it can't address, and says why. */
@@ -245,7 +251,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     const to = parseRecipients(compose.to).recipients;
     const cc = parseRecipients(compose.cc).recipients;
     const bcc = parseRecipients(compose.bcc).recipients;
-    server.stop();
+    const draftSettled = server.stop();
     draft.clear(); // restored from the PendingSend snapshot if the send fails
     // Optimistic: show it in Sent immediately; deliver() drops it again on failure.
     const threadId = uid("thread");
@@ -260,7 +266,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     submitted.current = true;
     const pendingCompose = snapshot();
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
-    void deliver(mailApi, dispatch, { kind: "send", req, compose: pendingCompose, threadId, idempotencyKey: newIdempotencyKey() });
+    void deliver(mailApi, dispatch, { kind: "send", req, compose: pendingCompose, threadId, idempotencyKey: newIdempotencyKey(), draftSettled });
   };
 
   // Park the compose for a future time (SchedulePicker validated it is in the future).
@@ -283,11 +289,11 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
-    server.stop();
+    const draftSettled = server.stop();
     draft.clear();
     const pendingCompose = snapshot();
     dispatch({ type: "CLOSE_COMPOSE", id: compose.id });
-    void deliver(mailApi, dispatch, { kind: "schedule", req, compose: pendingCompose });
+    void deliver(mailApi, dispatch, { kind: "schedule", req, compose: pendingCompose, draftSettled });
     return null;
   };
 

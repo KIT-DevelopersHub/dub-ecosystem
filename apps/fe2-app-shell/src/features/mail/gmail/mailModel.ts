@@ -90,6 +90,8 @@ export interface MailThreadModel {
   folder: FolderId;
   starred: boolean;
   labels: string[]; // Label ids
+  /** The detail fetch has filled this thread: real bodies and attachments, not list snippets. */
+  full?: boolean;
   /** 完全に削除 (purge): the signed-in user permanently removed this conversation from THEIR
    *  mailbox (Gmail's "完全に削除" out of Trash). One-way, per-user, view-only — the thread
    *  stays in the store but is filtered out of every folder for this viewer. Never a physical

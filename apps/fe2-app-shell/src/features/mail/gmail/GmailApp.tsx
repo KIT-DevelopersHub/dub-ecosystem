@@ -15,7 +15,7 @@ import blockStyles from "./blocks.module.css";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
 import { SHARED_FOLDERS } from "./mailModel.ts";
-import { MailStoreProvider, folderUnread, selectOrdered, showSharedFolders, useMailStore, type ComposeState } from "./useMailStore.tsx";
+import { MailStoreProvider, composing, folderUnread, selectOrdered, showSharedFolders, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { useMailSync } from "./useMailSync.tsx";
 import { useReadState } from "./useReadState.tsx";
 import { deliver } from "./sendMail.ts";
@@ -64,6 +64,7 @@ function useRestoreComposeDraftsOnMount(): void {
             body: draft.body ?? "",
             ...(draft.mode ? { mode: draft.mode } : {}),
             ...(draft.inReplyTo ? { inReplyTo: draft.inReplyTo } : {}),
+            restored: true,
           },
         });
       } catch {
@@ -263,12 +264,16 @@ function Shortcuts(): JSX.Element | null {
         document.querySelector<HTMLInputElement>('[data-testid="fe2-mail-search"]')?.focus();
         return;
       }
-      if (shortcutsBlocked(e)) return;
+      if (shortcutsBlocked(e) || composing(state)) return;
 
       const rows = selectOrdered(state);
+      const onScreen = (id: string | null): id is string => rows.some((t) => t.id === id);
       const open = state.openThreadId;
-      const focus = open ?? state.cursorId;
-      const targets = !open && state.checked.size > 0 ? [...state.checked] : focus ? [focus] : [];
+      // The cursor may be on a row that has since left the view; nothing acts on that.
+      const cursor = onScreen(state.cursorId) ? state.cursorId : null;
+      const focus = open ?? cursor;
+      const checked = [...state.checked].filter(onScreen);
+      const targets = !open && checked.length > 0 ? checked : focus ? [focus] : [];
 
       if (e.key === "c" && canCompose) dispatch({ type: "OPEN_COMPOSE", compose: {} });
       else if (e.key === "?") setHelp(true);
@@ -281,11 +286,11 @@ function Shortcuts(): JSX.Element | null {
         const next = at < 0 ? rows[0] : rows[Math.min(rows.length - 1, Math.max(0, at + step))];
         if (!next || next.id === focus) return;
         dispatch(open ? { type: "OPEN_THREAD", id: next.id } : { type: "SET_CURSOR", id: next.id });
-      } else if ((e.key === "o" || e.key === "Enter") && !open && state.cursorId) {
+      } else if ((e.key === "o" || e.key === "Enter") && !open && cursor) {
         // Enter on a focused control belongs to that control.
         if (e.key === "Enter" && e.target instanceof HTMLElement && e.target.closest("button, a")) return;
-        dispatch({ type: "OPEN_THREAD", id: state.cursorId });
-      } else if (e.key === "x" && !open && state.cursorId) dispatch({ type: "TOGGLE_CHECK", id: state.cursorId });
+        dispatch({ type: "OPEN_THREAD", id: cursor });
+      } else if (e.key === "x" && !open && cursor) dispatch({ type: "TOGGLE_CHECK", id: cursor });
       else if (e.key === "s" && focus) dispatch({ type: "TOGGLE_STAR", id: focus });
       else if (targets.length === 0) return;
       else if (e.key === "e") dispatch({ type: "ARCHIVE", ids: targets });

@@ -33,6 +33,7 @@ export async function deliver(api: MailApi, dispatch: Dispatch<MailAction>, pend
   dispatch({ type: "SEND_OK", pending });
   // Before the sync below, so its GET /mail/drafts can't bring the sent draft back.
   dispatch({ type: "REMOVE_DRAFT", id: pending.compose.id });
+  await pending.draftSettled;
   await api.deleteDraft(pending.compose.id).catch(() => undefined);
   dispatch({ type: "REQUEST_SYNC" });
 }

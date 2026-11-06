@@ -31,6 +31,9 @@ export interface ComposeState {
   persisted?: boolean;
   /** Stored files to pull in on open: a forward's originals, or a reopened draft's. */
   seed?: { source: AttachmentSource; messageId: string; attachments: mail.MailAttachment[] };
+  /** Reopened with text the user wrote (failed send / reload), which must be kept even though
+   *  it matches how this window opened. */
+  restored?: boolean;
   /** Files read in a previous window of this compose (restored after a failed send). */
   seedInputs?: { input: mail.MailAttachmentInput; remoteId?: string }[];
 }
@@ -44,6 +47,9 @@ export interface PendingSend {
   compose: ComposeState;
   /** Optimistic Sent entry to drop on failure. */
   threadId?: string;
+  /** Resolves once this compose's autosave has finished: the draft is removed after that, so
+   *  a save still on the wire can't bring a sent draft back. */
+  draftSettled?: Promise<unknown>;
   /** Optimistic inline reply to drop from its thread on failure. */
   appended?: { threadId: string; messageId: string };
   /** Idempotency key for a send: the retry bar re-sends with the SAME key, so a request
@@ -129,7 +135,8 @@ export function showSharedFolders(state: MailState): boolean {
  *  so the badge moves instantly and the next sync reconciles. Falls back to the loaded
  *  threads when the gateway has no counts. ブロック済み never shows unread. */
 export function folderUnread(state: MailState, folder: FolderId): number {
-  if (folder === "blocked" || folder === "all") return 0;
+  // Conversations you replied in are in 送信済み too, but their unread mail is the inbox's.
+  if (folder === "blocked" || folder === "all" || folder === "sent") return 0;
   const counted = (COUNTED_FOLDERS as readonly string[]).includes(folder);
   const now = clientUnread(state.threads, folder);
   if (!state.counts || !counted) return now;
@@ -270,6 +277,11 @@ function clearSearch(state: MailState, next: SearchState = NO_SEARCH): Pick<Mail
 }
 
 const latest = (t: MailThreadModel): string => t.messages.reduce((m, x) => (x.date > m ? x.date : m), "");
+
+/** A compose window is up: stray keys belong to it, not to the mail behind it. */
+export function composing(state: MailState): boolean {
+  return state.composes.some((c) => !c.minimized);
+}
 
 /** Threads the list shows for the current view. With a search active it spans every folder
  *  except Trash (Gmail-style; inside Trash/a label it stays scoped there) and shows the
@@ -675,7 +687,7 @@ function baseReducer(state: MailState, action: MailAction): MailState {
     case "SET_THREAD_MESSAGES":
       return {
         ...state,
-        threads: state.threads.map((t) => (t.id === action.threadId ? { ...t, messages: action.messages } : t)),
+        threads: state.threads.map((t) => (t.id === action.threadId ? { ...t, messages: action.messages, full: true } : t)),
       };
     case "APPLY_FLAGS": {
       // Restore server-persisted flags after a hydrate (改善#8: star/archive/trash survive a

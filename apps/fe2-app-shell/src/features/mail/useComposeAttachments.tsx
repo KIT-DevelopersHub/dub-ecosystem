@@ -58,6 +58,8 @@ export interface UseComposeAttachments {
   addFiles: (files: FileList | File[] | null, remoteIds?: ReadonlyMap<File, string>) => void;
   /** Record a file's id on the server draft. */
   setRemoteId: (id: string, remoteId: string) => void;
+  /** The server draft is gone: every file counts as not uploaded again. */
+  forgetRemoteIds: () => void;
   /** Surface an error in the same banner as a rejected file. */
   addError: (message: string) => void;
   remove: (id: string) => void;
@@ -139,6 +141,9 @@ export function useComposeAttachments(): UseComposeAttachments {
   }, []);
 
   const setRemoteId = useCallback((id: string, remoteId: string): void => patchItem(id, { remoteId }), [patchItem]);
+  const forgetRemoteIds = useCallback((): void => {
+    setItems((prev) => prev.map(({ remoteId: _gone, ...it }) => it));
+  }, []);
   const addError = useCallback((message: string): void => setErrors((prev) => [...prev, message]), []);
 
   const dismissErrors = useCallback((): void => setErrors([]), []);
@@ -153,6 +158,7 @@ export function useComposeAttachments(): UseComposeAttachments {
     errors,
     addFiles,
     setRemoteId,
+    forgetRemoteIds,
     addError,
     remove,
     clear,

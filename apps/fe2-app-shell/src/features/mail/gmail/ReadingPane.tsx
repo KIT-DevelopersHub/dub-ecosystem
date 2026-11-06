@@ -29,11 +29,11 @@ import { SenderAvatar, recipientIcon } from "./SenderAvatar.tsx";
 import { MessageDetailsDialog, ownAddresses, recipientSummary } from "./MessageDetails.tsx";
 import { confirmPurge } from "./ThreadList.tsx";
 import { BlockSenderMenu, BlockedBanner } from "./BlockedSenders.tsx";
-import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
+import { composing, uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { useReadState } from "./useReadState.tsx";
 import { useServerDraft } from "./useServerDraft.ts";
 import { openDraft } from "./DraftList.tsx";
-import { HtmlMailBody, inlineContentIds } from "./HtmlMailBody.tsx";
+import { HtmlMailBody, safeMailHtml, usedContentIds } from "./HtmlMailBody.tsx";
 import { shortcutsBlocked } from "./shortcuts.ts";
 import styles from "./replyNudge.module.css";
 import inlineStyles from "./InlineReply.module.css";
@@ -146,12 +146,11 @@ function InlineImage({ msg, att, kind }: { msg: MailMsg; att: mail.MailAttachmen
   );
 }
 
-function Attachments({ msg }: { msg: MailMsg }): JSX.Element | null {
+function Attachments({ msg, inBody }: { msg: MailMsg; inBody: ReadonlySet<string> }): JSX.Element | null {
   const mailApi = useMailApi();
   const { dispatch } = useMailStore();
   const [busy, setBusy] = useState<string | null>(null);
-  const shownInBody = inlineContentIds(msg.html, msg.attachments ?? []);
-  const list = (msg.attachments ?? []).filter((a) => !shownInBody.has(a.id));
+  const list = (msg.attachments ?? []).filter((a) => !inBody.has(a.id));
   if (list.length === 0) return null;
   const kind: "messages" | "sent" = msg.outbound ? "sent" : "messages";
   const download = async (att: mail.MailAttachment): Promise<void> => {
@@ -228,6 +227,13 @@ function MessageBlock({
 }): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
   const [details, setDetails] = useState(false);
+  const safeHtml = useMemo(() => (msg.html ? safeMailHtml(msg.html, false) : null), [msg.html]);
+  // Inline images need no chip, unless they failed to load: the chip is then the only way in.
+  const [failedInline, setFailedInline] = useState<ReadonlySet<string>>(new Set());
+  const inBody = useMemo(() => {
+    const used = safeHtml ? usedContentIds(safeHtml) : new Set<string>();
+    return new Set((msg.attachments ?? []).filter((a) => a.contentId && used.has(a.contentId) && !failedInline.has(a.id)).map((a) => a.id));
+  }, [failedInline, msg.attachments, safeHtml]);
   return (
     <div
       data-testid="fe2-mail-thread-message"
@@ -300,8 +306,15 @@ function MessageBlock({
           {fullDate(msg.date)}
         </span>
       </div>
-      {open && msg.html ? (
-        <HtmlMailBody html={msg.html} messageId={msg.id} attachments={msg.attachments ?? []} source={msg.outbound ? "sent" : "messages"} />
+      {open && msg.html && safeHtml ? (
+        <HtmlMailBody
+          safeHtml={safeHtml}
+          html={msg.html}
+          messageId={msg.id}
+          attachments={msg.attachments ?? []}
+          source={msg.outbound ? "sent" : "messages"}
+          onInlineFailed={(id) => setFailedInline((prev) => new Set(prev).add(id))}
+        />
       ) : open ? (
         <LinkifiedText
           testId="fe2-mail-body-text"
@@ -315,7 +328,7 @@ function MessageBlock({
           }}
         />
       ) : null}
-      {open ? <Attachments msg={msg} /> : null}
+      {open ? <Attachments msg={msg} inBody={inBody} /> : null}
       {details ? <MessageDetailsDialog msg={msg} subject={subject} own={own} onClose={() => setDetails(false)} /> : null}
     </div>
   );
@@ -403,13 +416,18 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
   // r / a / f live here because the reading pane owns the addressing.
   const openComposeRef = useRef(openCompose);
   openComposeRef.current = openCompose;
+  const composingRef = useRef(false);
+  composingRef.current = composing(state);
+  const fullRef = useRef(false);
+  fullRef.current = thread.full === true;
   useEffect(() => {
     if (!canCompose) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (shortcutsBlocked(e)) return;
+      if (shortcutsBlocked(e) || composingRef.current) return;
       if (e.key === "r") openComposeRef.current("reply");
       else if (e.key === "a") openComposeRef.current("replyAll");
-      else if (e.key === "f") openComposeRef.current("forward");
+      // A forward needs the full body and the files, which the list row doesn't carry.
+      else if (e.key === "f" && fullRef.current) openComposeRef.current("forward");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -460,6 +478,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     minimized: false,
     maximized: false,
     persisted: server.isSaved(),
+    restored: true,
     seedInputs: att.items.flatMap((it) => (it.input ? [{ input: it.input, ...(it.remoteId ? { remoteId: it.remoteId } : {}) }] : [])),
     ...(parentId ? { inReplyTo: parentId } : {}),
   });
@@ -481,7 +500,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     const bcc = parseRecipients(replyBcc).recipients;
     const messageId = uid("msg");
     dispatch({ type: "ADD_MESSAGE", threadId: thread.id, messageId, body, to: replyRecipients, cc, bcc, subject: thread.subject });
-    server.stop();
+    const draftSettled = server.stop();
     const compose = inlineCompose(cc, bcc, body);
     resetInline();
     const req: mail.SendMailRequest = {
@@ -499,6 +518,7 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
       compose,
       appended: { threadId: thread.id, messageId },
       idempotencyKey: newIdempotencyKey(),
+      draftSettled,
     }).finally(() => {
       if (inFlight.current === fingerprint) inFlight.current = null;
     });
@@ -521,10 +541,10 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
     if (parentId) req.inReplyTo = parentId;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
-    server.stop();
+    const draftSettled = server.stop();
     const compose = inlineCompose(cc, bcc, body);
     resetInline();
-    void deliver(mailApi, dispatch, { kind: "schedule", req, compose });
+    void deliver(mailApi, dispatch, { kind: "schedule", req, compose, draftSettled });
     return null;
   };
   // Scheduled replies still waiting to go out for THIS thread (any message in it).
@@ -659,7 +679,14 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
           <button type="button" data-testid="fe2-mail-reply-all" onClick={() => openCompose("replyAll")} style={actionBtn}>
             <MailIcon name="reply-all" size={16} /> 全員に返信
           </button>
-          <button type="button" data-testid="fe2-mail-forward" onClick={() => openCompose("forward")} style={actionBtn}>
+          <button
+            type="button"
+            data-testid="fe2-mail-forward"
+            disabled={!thread.full}
+            title={thread.full ? undefined : "読み込み中…"}
+            onClick={() => openCompose("forward")}
+            style={{ ...actionBtn, ...(thread.full ? {} : { cursor: "default", opacity: 0.5 }) }}
+          >
             <MailIcon name="forward" size={16} /> 転送
           </button>
         </div>

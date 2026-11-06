@@ -153,9 +153,34 @@ function walk(node: Node, doc: Document, mailOpts?: MailHtmlOptions): void {
 
 /** Sanitize an untrusted HTML string into a safe subset. Returns "" when the platform
  *  DOM parser is unavailable (SSR) — callers fall back to the plain-text body. */
+// DOM clobbering: inside a <form>, a control or image named after a DOM property replaces that
+// property on the form (<input name="childNodes">), and <img name="body"> does the same to the
+// document. A walk reading the clobbered property skips subtrees, so their handlers survive.
+// jsdom does not model this; only a real browser shows it (e2e/mail-xss). So the document's
+// body and every form are reached through the prototypes, and no form survives into the walk.
+function accessor<T>(proto: object, prop: string): (self: object) => T {
+  const get = Object.getOwnPropertyDescriptor(proto, prop)?.get;
+  if (!get) throw new Error(`no ${prop} accessor`);
+  return (self) => get.call(self) as T;
+}
+
+function unwrapForms(body: Element): void {
+  const childNodes = accessor<NodeListOf<ChildNode>>(Node.prototype, "childNodes");
+  const parentNode = accessor<Node | null>(Node.prototype, "parentNode");
+  for (const form of Array.from(Element.prototype.querySelectorAll.call(body, "form"))) {
+    const parent = parentNode(form);
+    if (!parent) continue;
+    for (const child of Array.from(childNodes(form))) Node.prototype.insertBefore.call(parent, child, form);
+    Node.prototype.removeChild.call(parent, form);
+  }
+}
+
 export function sanitizeHtml(html: string, mailOpts?: MailHtmlOptions): string {
   if (typeof DOMParser === "undefined") return "";
   const doc = new DOMParser().parseFromString(html, "text/html");
-  walk(doc.body, doc, mailOpts);
-  return doc.body.innerHTML;
+  const body = accessor<HTMLElement | null>(Document.prototype, "body")(doc);
+  if (!body) return "";
+  unwrapForms(body);
+  walk(body, doc, mailOpts);
+  return accessor<string>(Element.prototype, "innerHTML")(body);
 }

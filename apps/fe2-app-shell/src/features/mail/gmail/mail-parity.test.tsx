@@ -454,9 +454,10 @@ describe("keyboard", () => {
     mount(fakeApi());
     await userEvent.click(await row());
     await screen.findByTestId("fe2-mail-thread");
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-forward")).not.toBeDisabled());
     await userEvent.keyboard("f");
     expect(await screen.findByTestId("fe2-mail-compose-subject")).toHaveValue("Fwd: 件名");
-    await userEvent.click(screen.getByTestId("fe2-mail-thread-back"));
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-close"));
     await userEvent.keyboard("?");
     expect(await screen.findByTestId("fe2-mail-shortcuts")).toHaveTextContent("全員に返信");
   });
@@ -468,5 +469,126 @@ describe("keyboard", () => {
     await userEvent.type(screen.getByTestId("fe2-mail-search"), "j");
     expect(screen.queryByTestId("fe2-mail-compose-window")).toBeNull();
     expect(screen.queryAllByTestId("fe2-mail-inbox-item").some((r) => r.hasAttribute("data-cursor"))).toBe(false);
+  });
+
+  it("nothing acts on a row that has left the view", async () => {
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue(list) });
+    mount(api);
+    await rows();
+    await userEvent.keyboard("j");
+    await userEvent.keyboard("#");
+    await waitFor(() => expect(api.setFlags).toHaveBeenCalledWith("ta", expect.objectContaining({ trashed: true })));
+    vi.mocked(api.setFlags).mockClear();
+    await userEvent.keyboard("e");
+    await userEvent.keyboard("s");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(api.setFlags).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet while a compose window is up, even with focus lost to the page", async () => {
+    const api = fakeApi();
+    mount(api);
+    await userEvent.click(await row());
+    await screen.findByTestId("fe2-mail-thread");
+    await userEvent.keyboard("c");
+    await screen.findByTestId("fe2-mail-compose-window");
+    (document.activeElement as HTMLElement | null)?.blur();
+    await userEvent.keyboard("e");
+    expect(screen.getByTestId("fe2-mail-thread")).toBeInTheDocument();
+    expect(api.setFlags).not.toHaveBeenCalled();
+  });
+});
+
+describe("review findings", () => {
+  it("merely opening a conversation saves no draft", async () => {
+    const api = fakeApi();
+    mount(api);
+    await userEvent.click(await row());
+    await screen.findByTestId("fe2-mail-thread");
+    await userEvent.click(screen.getByTestId("fe2-mail-thread-back"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(api.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it("✕ on a window restored from a failed send keeps the text as a draft", async () => {
+    const api = fakeApi({ send: vi.fn().mockRejectedValue(new Error("502")) });
+    mount(api);
+    await userEvent.click(await screen.findByTestId("fe2-mail-compose-open"));
+    await userEvent.type(await screen.findByTestId("fe2-mail-compose-to"), "bob@example.com,");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-subject"), "失いたくない");
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-send-notice")).toHaveAttribute("data-status", "failed"));
+    await screen.findByTestId("fe2-mail-compose-window");
+    vi.mocked(api.saveDraft).mockClear();
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-close"));
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalled());
+    expect(vi.mocked(api.saveDraft).mock.calls.at(-1)![1].subject).toBe("失いたくない");
+  });
+
+  it("refuses to close while a file is still being read", async () => {
+    let finish: (b: ArrayBuffer) => void = () => undefined;
+    const slow = new File(["x"], "slow.txt", { type: "text/plain" });
+    Object.defineProperty(slow, "slice", { value: undefined });
+    Object.defineProperty(slow, "arrayBuffer", { value: () => new Promise<ArrayBuffer>((r) => (finish = r)) });
+    mount(fakeApi());
+    await userEvent.click(await screen.findByTestId("fe2-mail-compose-open"));
+    fireEvent.change(await screen.findByTestId("fe2-mail-compose-attach-input"), { target: { files: [slow] } });
+    await screen.findByTestId("fe2-mail-attach-chip");
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-close"));
+    expect(await screen.findByTestId("fe2-mail-compose-error")).toHaveTextContent("添付ファイルを処理中");
+    expect(screen.getByTestId("fe2-mail-compose-window")).toBeInTheDocument();
+    finish(new ArrayBuffer(1));
+  });
+
+  it("a forward waits for the full message", async () => {
+    let resolve: (v: unknown) => void = () => undefined;
+    const api = fakeApi({ getThread: vi.fn().mockReturnValue(new Promise((r) => (resolve = r))) });
+    mount(api);
+    await userEvent.click(await row());
+    expect(await screen.findByTestId("fe2-mail-forward")).toBeDisabled();
+    await userEvent.keyboard("f");
+    expect(screen.queryByTestId("fe2-mail-compose-window")).toBeNull();
+    resolve({ id: "t1", messages: [detail()] });
+    await waitFor(() => expect(screen.getByTestId("fe2-mail-forward")).not.toBeDisabled());
+  });
+
+  it("a failed inline image gets its download chip back, and the others still load", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:ok");
+    URL.revokeObjectURL = vi.fn();
+    const files = [
+      { id: "a1", filename: "bad.png", contentType: "image/png", sizeBytes: 5, contentId: "bad&id@x" },
+      { id: "a2", filename: "ok.png", contentType: "image/png", sizeBytes: 5, contentId: "ok@x" },
+    ];
+    const api = fakeApi({
+      getThread: vi.fn().mockResolvedValue({ id: "t1", messages: [detail({ htmlBody: `<img src="cid:bad&amp;id@x"><img src="cid:ok@x">`, attachments: files })] }),
+      downloadAttachment: vi.fn().mockImplementation((_k: string, _m: string, id: string) => (id === "a1" ? Promise.reject(new Error("500")) : Promise.resolve(new Blob(["x"])))),
+    });
+    mount(api);
+    await userEvent.click(await row());
+    const body = await screen.findByTestId("fe2-mail-body-html");
+    await waitFor(() => expect(body.querySelector('img[data-cid="ok@x"]')).toHaveAttribute("src", "blob:ok"));
+    expect(await screen.findByLabelText("bad.png をダウンロード")).toBeInTheDocument();
+    expect(screen.queryByLabelText("ok.png をダウンロード")).toBeNull();
+  });
+
+  it("falls back to the text body when the markup can't be sanitized", async () => {
+    const original = DOMParser.prototype.parseFromString;
+    DOMParser.prototype.parseFromString = () => {
+      throw new Error("boom");
+    };
+    try {
+      mount(fakeApi({ getThread: vi.fn().mockResolvedValue({ id: "t1", messages: [detail({ htmlBody: "<p>x</p>" })] }) }));
+      await userEvent.click(await row());
+      expect(await screen.findByText("全文")).toBeInTheDocument();
+    } finally {
+      DOMParser.prototype.parseFromString = original;
+    }
+  });
+
+  it("送信済み carries no unread badge", async () => {
+    const reply = { id: "log2", threadId: "t1", to: [{ email: "alice@example.com" }], subject: "Re", snippet: "r", sentAt: "2026-11-06T01:00:00.000Z" };
+    mount(fakeApi({ listSent: vi.fn().mockResolvedValue({ items: [reply], nextCursor: null }) }));
+    await row();
+    expect(screen.getByTestId("fe2-mail-folder-sent")).toHaveTextContent(/^送信済み$/);
   });
 });
