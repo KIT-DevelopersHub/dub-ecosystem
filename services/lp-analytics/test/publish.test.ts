@@ -79,3 +79,14 @@ describe("publishable list matches the public LP bundle", () => {
     expect(manifest.default).toBe(lp.LP_DEFAULT_PUBLISHED_VERSION);
   });
 });
+
+describe.each<RepoKind>(["memory", "d1"])("GET /lp/internal/goal-metrics (%s repo)", (kind) => {
+  it("answers the month's visitor count to a service, and refuses anyone else", async () => {
+    const { app } = await makeApp(kind, "view");
+    const res = await app.fetch(get("/lp/internal/goal-metrics?month=2026-11", INTERNAL));
+    expect(res.status).toBe(200);
+    expect(await body<{ visitors: number }>(res)).toEqual({ visitors: 0 });
+    expect((await app.fetch(get("/lp/internal/goal-metrics?month=2026-11"))).status).toBe(403);
+    expect((await app.fetch(get("/lp/internal/goal-metrics?month=x", INTERNAL))).status).toBe(400);
+  });
+});
