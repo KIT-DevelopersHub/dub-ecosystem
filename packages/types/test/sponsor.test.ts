@@ -13,4 +13,9 @@ describe("sponsor business cards", () => {
     expect(sponsor.isCardImageType("image/jpeg")).toBe(true);
     expect(sponsor.isCardImageType("application/pdf")).toBe(false);
   });
+
+  it("matches company names across legal forms and width", () => {
+    expect(sponsor.companyKey("株式会社 北陸テック")).toBe(sponsor.companyKey("（株）北陸テック"));
+    expect(sponsor.companyKey("ＡＢＣ合同会社")).toBe("abc");
+  });
 });

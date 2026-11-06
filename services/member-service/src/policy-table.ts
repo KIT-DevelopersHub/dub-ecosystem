@@ -190,4 +190,13 @@ export const POLICY_TABLE = definePolicyTable({
   "PATCH /members/sponsor/cards/:id": appLevel("sponsor", "edit", "sponsor:write"),
   "PUT /members/sponsor/cards/:id/image": appLevel("sponsor", "edit", "sponsor:write"),
   "DELETE /members/sponsor/cards/:id": appLevel("sponsor", "edit", "sponsor:admin"),
+  // 営業進捗も名刺と同じ段階 (閲覧 = read・登録/編集/取り込み = write・削除 = admin)。
+  "GET /members/sponsor/leads": appLevel("sponsor", "view", "sponsor:read"),
+  "GET /members/sponsor/leads/:id": appLevel("sponsor", "view", "sponsor:read"),
+  "POST /members/sponsor/leads": appLevel("sponsor", "edit", "sponsor:write"),
+  "POST /members/sponsor/leads/import": appLevel("sponsor", "edit", "sponsor:write"),
+  "PATCH /members/sponsor/leads/:id": appLevel("sponsor", "edit", "sponsor:write"),
+  "DELETE /members/sponsor/leads/:id": appLevel("sponsor", "edit", "sponsor:admin"),
+  "GET /members/sponsor/goals": appLevel("sponsor", "view", "sponsor:read"),
+  "PUT /members/sponsor/goals/:month": appLevel("sponsor", "edit", "sponsor:write"),
 });

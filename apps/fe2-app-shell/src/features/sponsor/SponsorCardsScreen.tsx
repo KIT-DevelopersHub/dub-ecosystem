@@ -23,7 +23,7 @@ import { sponsor } from "@dub/types";
 import { isTempCard, useCards } from "./sponsorHooks.ts";
 import { CardDrawer } from "./CardDrawer.tsx";
 import { CardPhoto, formatDateTime, memberOf, memberOptions, RetryUpload, useSponsorCapability } from "./SponsorShared.tsx";
-import { SponsorTabs } from "./SponsorTabs.tsx";
+import { SponsorTabs, type SponsorTabId } from "./SponsorTabs.tsx";
 import styles from "./sponsor.module.css";
 
 export const SCAN_PATH = "/sponsor/scan";
@@ -51,14 +51,25 @@ function sortRows(rows: Card[], sort: SortState): Card[] {
   });
 }
 
-export function SponsorFrame({ active, actions, children }: { active: "cards" | "companies"; actions?: JSX.Element; children: JSX.Element }): JSX.Element {
+export function SponsorFrame({
+  active,
+  actions,
+  wide = false,
+  children,
+}: {
+  active: SponsorTabId;
+  actions?: JSX.Element;
+  /** 列の多い表向けに横幅を広げる。 */
+  wide?: boolean;
+  children: JSX.Element;
+}): JSX.Element {
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${wide ? styles.pageWide : ""}`}>
       <Stack gap={6} testId={`fe2-sponsor-${active}-screen`}>
         <PageHeader
           testId="fe2-sponsor-header"
           title="スポンサー"
-          description="スポンサーチームで受け取った名刺と、つながりのある企業を共有します。"
+          description="スポンサーチームで受け取った名刺と、つながりのある企業、営業の進捗と目標を共有します。"
           actions={actions}
         />
         <SponsorTabs active={active} />

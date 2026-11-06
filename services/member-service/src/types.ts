@@ -7,6 +7,7 @@ import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
 import type { HrFormRepo } from "./hr-form-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
+import type { SponsorLeadRepo } from "./sponsor-lead-repo";
 import type { RoleSyncPort } from "./roleSync";
 import type { ProfileReminderTarget } from "./profileReminder";
 import type { IdentityActivationPort } from "./identityActivation";
@@ -200,6 +201,9 @@ export interface AppDeps {
   /** 名刺写真の置き場 (本番 R2 SPONSOR_FILES)。undefined なら写真ルートだけ 503。 */
   sponsorImages?: SponsorImageStore;
   newSponsorCardId: () => string;
+  /** スポンサー営業進捗 (member_sponsor_leads) の永続化 (sponsor-lead-repo.ts)。 */
+  sponsorLeadRepo: SponsorLeadRepo;
+  newSponsorLeadId: () => string;
   /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
    *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
   roleSync?: RoleSyncPort;
