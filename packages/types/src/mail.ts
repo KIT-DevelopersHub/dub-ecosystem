@@ -373,6 +373,23 @@ export interface MailForwardRegisterRequest {
 export interface MailForwardPatch {
   enabled: boolean;
 }
+
+// ---- team mailing lists (チームのメーリングリスト, 0024) ----
+// A list address delivers to every Dub account linked to the team's 運営メンバー. Membership
+// is the team roster itself, so it is not part of this DTO.
+export interface MailTeamList {
+  id: string;
+  /** Lowercased full address, e.g. design@developershub.jp. */
+  address: string;
+  localPart: string;
+  teamId: string;
+  createdAt: ISODateTime;
+}
+/** POST /mail/admin/lists body. The address is always `${localPart}@` our own zone. */
+export interface MailTeamListCreateRequest {
+  localPart: string;
+  teamId: string;
+}
 /** Registrations (= verification mails) one account may trigger per UTC day. */
 export const MAIL_FORWARD_DAILY_REGISTER_LIMIT = 5;
 

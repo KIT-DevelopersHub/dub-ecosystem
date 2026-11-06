@@ -152,7 +152,15 @@ const EMAIL_ROUTING_ADMIN = [
   "POST /mail/admin/email-routing/rules",
 ];
 // Everything `mail:admin` guards: the routing proxy plus the shared-mailbox definitions.
-const ADMIN = [...EMAIL_ROUTING_ADMIN, "GET /mail/mailboxes", "POST /mail/mailboxes/:id", "GET /mail/admin/canary/probes"].sort();
+const ADMIN = [
+  ...EMAIL_ROUTING_ADMIN,
+  "GET /mail/mailboxes",
+  "POST /mail/mailboxes/:id",
+  "GET /mail/admin/canary/probes",
+  "GET /mail/admin/lists",
+  "POST /mail/admin/lists",
+  "DELETE /mail/admin/lists/:id",
+].sort();
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/status", "POST /internal/webhooks/resend", "POST /send"];
 // The one PUBLIC route, hence in EVERY row below including the empty-key one. Stated rather
@@ -189,7 +197,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(46);
+    expect(everyRoute).toHaveLength(49);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing
@@ -207,6 +215,8 @@ describe("role x endpoint matrix (frozen)", () => {
       expect(reachable).not.toContain("GET /mail/mailboxes");
       expect(reachable).not.toContain("POST /mail/mailboxes/:id");
       expect(reachable).not.toContain("GET /mail/admin/canary/probes");
+      // A list decides who receives mail, so it sits behind the same key.
+      expect(reachable).not.toContain("POST /mail/admin/lists");
     }
     // ...and the holder does reach all of them, so the assertion above is not vacuous.
     expect(allowedRoutes(["mail:admin"])).toEqual(ADMIN_ONLY);
