@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { memoryD1 } from "../../../infra/d1/src/node-d1";
 import {
   DRAIN_BATCH_MAX,
+  MAIL_BACKLOG_MAX,
   MAIL_MIN_INTERVAL_MS,
   OUTBOX_MAX_ATTEMPTS,
   PASS_SUBREQUEST_BUDGET,
@@ -419,9 +420,10 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
 
   it("daily cap: buyer mails go first, the rest wait without losing attempts, and the next JST day resumes", async () => {
     const mail = fakeMailer(() => ({ ok: true, id: "re" }));
-    const h = await setup(kind, { mailer: mail.mailer, defer: null, ticketMailDailyCap: 2 });
+    const h = await setup(kind, { mailer: mail.mailer, defer: null });
     const orders = [await h.buy(), await h.buy(), await h.buy()];
     for (const o of orders) await h.paid(o);
+    h.deps.ticketMailDailyCap = 2;
     const sum = await h.delivery.drainPass();
     expect(mail.calls).toHaveLength(2);
     expect(sum).toMatchObject({ mailSent: 2, mailBacklog: 4 });
@@ -433,6 +435,29 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
     await h.delivery.drainPass();
     expect(mail.calls).toHaveLength(4);
     expect((await h.outbox(orders[2]!.id)).buyer_confirmation).toMatchObject({ status: "sent" });
+  });
+
+  it("order gate: turns new orders away before payment when today's mail is used up, and reopens next JST day", async () => {
+    const h = await setup(kind, { ticketMailDailyCap: 4, defer: null });
+    const a = await h.buy();
+    await h.paid(a);
+    await h.delivery.drainPass();
+    // 2 mails sent, 1 unpaid order still needs 2: nothing left for a third order
+    await h.buy();
+    const refused = await h.app.fetch(h.checkoutBody({ items: [{ ticketTypeId: h.type.id, quantity: 1 }] }));
+    expect(refused.status).toBe(429);
+    h.clock.set(later(24 * 60 * 60 * 1000));
+    await h.buy();
+  });
+
+  it("order gate: stops on a mail backlog even without a daily cap, and when mail is not configured", async () => {
+    const stuck = await setup(kind, { defer: null });
+    vi.spyOn(stuck.repo, "countOutboxQueued").mockResolvedValue(MAIL_BACKLOG_MAX);
+    expect((await stuck.app.fetch(stuck.checkoutBody({ items: [{ ticketTypeId: stuck.type.id, quantity: 1 }] }))).status).toBe(429);
+    const noMail = await setup(kind, { mailer: null, defer: null });
+    expect((await noMail.app.fetch(noMail.checkoutBody({ items: [{ ticketTypeId: noMail.type.id, quantity: 1 }] }))).status).toBe(429);
+    const noSecret = await setup(kind, { ticketTokenSecret: null, defer: null });
+    expect((await noSecret.app.fetch(noSecret.checkoutBody({ items: [{ ticketTypeId: noSecret.type.id, quantity: 1 }] }))).status).toBe(429);
   });
 
   it("the immediate send asks for the alarm soon when Resend pushes back", async () => {
@@ -477,9 +502,10 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
 
   // ---- missing configuration ----
 
-  it("no TICKET_TOKEN_SECRET: orders work, buyer mail stays pending, nothing broken is sent", async () => {
-    const h = await setup(kind, { ticketTokenSecret: null, defer: null });
+  it("TICKET_TOKEN_SECRET gone after checkout: payment settles, buyer mail stays pending, nothing broken is sent", async () => {
+    const h = await setup(kind, { defer: null });
     const o = await h.buy();
+    h.deps.ticketTokenSecret = null;
     expect((await h.paid(o)).status).toBe(200);
     expect(await h.tickets(o.id)).toHaveLength(2);
     await h.dailyDone();
@@ -503,9 +529,10 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
     expect((await h.outbox(o.id)).ops_copy).toMatchObject({ status: "pending", sentAt: null });
   });
 
-  it("no RESEND_API_KEY: nothing sent, everything stays pending", async () => {
-    const h = await setup(kind, { mailer: null });
+  it("RESEND_API_KEY gone after checkout: nothing sent, everything stays pending", async () => {
+    const h = await setup(kind);
     const o = await h.buy();
+    h.deps.mailer = null;
     expect((await h.paid(o)).status).toBe(200);
     await h.flush();
     expect((await h.service.reconcile()).mailBacklog).toBe(0);
@@ -559,9 +586,10 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
   });
 
   it("after the day's full look, only recent orders are read; the next day finds old ones", async () => {
-    const h = await setup(kind, { defer: null, ticketOpsEmail: null, mailer: null });
+    const h = await setup(kind, { defer: null, ticketOpsEmail: null });
     await h.service.reconcile(); // today's full look is done
     const o = await h.buy();
+    h.deps.mailer = null;
     await h.repo.markOrderPaid(o.id, { paidAt: later(-2 * 60 * 60 * 1000), sessionId: null, paymentIntentId: null });
     expect((await h.service.reconcile()).fulfilled).toBe(0);
     h.clock.set(later(24 * 60 * 60 * 1000));
@@ -569,13 +597,14 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
   });
 
   it("a full look that hit its limit carries on in the next pass", async () => {
-    const h = await setup(kind, { defer: null, mailer: null });
+    const h = await setup(kind, { defer: null });
     const ids: string[] = [];
     for (let i = 0; i < SWEEP_LIMIT + 1; i++) {
       const o = await h.buy(1);
       await h.repo.markOrderPaid(o.id, { paidAt: later(-5 * 60 * 60 * 1000), sessionId: null, paymentIntentId: null });
       ids.push(o.id);
     }
+    h.deps.mailer = null;
     expect((await h.service.reconcile()).fulfilled).toBe(SWEEP_LIMIT);
     expect((await h.service.reconcile()).fulfilled).toBe(1);
   });

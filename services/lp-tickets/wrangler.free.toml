@@ -38,7 +38,8 @@ DUB_DEFAULT_ORG_ID = "org_devhub"
 LP_BASE_URL = "https://hokuriku-it-conf.com"
 # 購入者へのメールの差出人。Resend で検証済みのドメインにする。
 TICKET_MAIL_FROM = "北陸ITカンファレンス <info@developershub.jp>"
-# Resend 無料枠は Dub 全体で共有するので、チケットのメールが使い切らないように抑える。超えた分は翌日に送る。
+# Resend 無料枠は Dub 全体で共有するので、チケットのメールが使い切らないように抑える。
+# 枠が足りなくなると新しい申し込みを決済の前に止め、「時間をおいて」と案内する（翌日 0 時 JST に再開）。
 # 有料プランに切り替えたら、この行を消す（未設定 = 無制限）。
 TICKET_MAIL_DAILY_CAP = "50"
 # 購入後のチケット送付。secret が無くても注文は動き、メールは pending のまま待つ:

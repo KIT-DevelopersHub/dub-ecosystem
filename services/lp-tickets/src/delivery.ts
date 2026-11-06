@@ -31,6 +31,8 @@ export const OUTBOX_LEASE_MS = 2 * 60 * 1000;
 export const MAIL_MIN_INTERVAL_MS = 550;
 export const DRAIN_BUDGET_MS = 25 * 1000;
 export const DRAIN_BATCH_MAX = 30;
+/** Waiting mails at which new orders stop: mail is not getting out (about 2 minutes of normal sending). */
+export const MAIL_BACKLOG_MAX = 200;
 /** Rows due this soon count as backlog: the alarm comes back in a minute instead of ten. */
 export const BACKLOG_WINDOW_MS = 3 * 60 * 1000;
 /** Free plan: subrequests one reconcile pass may spend. Stripe, D1 and Resend all count. */
@@ -255,12 +257,40 @@ export class TicketDelivery {
     return { update: this.later(row, delay, res.error), stop: true };
   }
 
+  private sentTodayJst(now: string): Promise<number> {
+    const dayStart = Math.floor((Date.parse(now) + JST_OFFSET_MS) / DAY_MS) * DAY_MS - JST_OFFSET_MS;
+    return this.repo.countOutboxSentSince(new Date(dayStart).toISOString());
+  }
+
   /** Mails left today under TICKET_MAIL_DAILY_CAP. Over the cap rows just wait: attempts are not counted. */
   private async dailyAllowance(now: string): Promise<number> {
     const cap = this.deps.ticketMailDailyCap;
-    if (cap === null) return DRAIN_BATCH_MAX;
-    const dayStart = Math.floor((Date.parse(now) + JST_OFFSET_MS) / DAY_MS) * DAY_MS - JST_OFFSET_MS;
-    return Math.max(0, cap - (await this.repo.countOutboxSentSince(new Date(dayStart).toISOString())));
+    return cap === null ? DRAIN_BATCH_MAX : Math.max(0, cap - (await this.sentTodayJst(now)));
+  }
+
+  /**
+   * The ticket reaches the buyer only by mail, so a new order is turned away BEFORE payment when its
+   * mail could not go out today. Unpaid orders already in checkout count: each may become mail too.
+   */
+  async canAcceptOrder(pendingSince: string): Promise<boolean> {
+    const kinds = this.deliverableKinds();
+    if (!kinds.includes("buyer_confirmation")) {
+      log("error", "lp ticket order refused: mail is not configured", {});
+      return false;
+    }
+    const queued = await this.repo.countOutboxQueued(kinds);
+    if (queued >= MAIL_BACKLOG_MAX) {
+      log("error", "lp ticket order refused: mail backlog", { queued });
+      return false;
+    }
+    const cap = this.deps.ticketMailDailyCap;
+    if (cap === null) return true;
+    const now = this.deps.now();
+    const [sent, unpaid] = await Promise.all([this.sentTodayJst(now), this.repo.countPendingOrdersSince(SITE, pendingSince)]);
+    const left = cap - sent - queued - unpaid * kinds.length;
+    if (left >= kinds.length) return true;
+    log("warn", "lp ticket order refused: daily mail cap", { cap, sent, queued, unpaid });
+    return false;
   }
 
   /** Sends due rows, paced. Two drains at once split the rows between them: the claim hands each to one. */

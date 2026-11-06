@@ -214,6 +214,7 @@ export interface LpTicketRepo {
   ticketAggregates(site: string, pendingSince: string): Promise<TicketTypeAgg[]>;
   /** Tickets in this sender's pending orders created at/after `pendingSince` (seats it holds unpaid right now). */
   heldPendingByClient(site: string, clientKey: string, pendingSince: string): Promise<number>;
+  countPendingOrdersSince(site: string, pendingSince: string): Promise<number>;
   /**
    * Seat hold for every item: held (paid + fresh pending) + quantity <= capacity per type
    * (capacity null = unlimited). All-or-nothing: on a short item nothing stays held and that
@@ -286,6 +287,7 @@ export interface LpTicketRepo {
   /** One conditional UPDATE: a row goes to exactly one caller however many drains run at once. */
   claimOutbox(c: OutboxClaim): Promise<OutboxRow[]>;
   countOutboxSentSince(since: string): Promise<number>;
+  countOutboxQueued(kinds: readonly OutboxKind[]): Promise<number>;
   applyOutboxUpdates(updates: readonly OutboxUpdate[]): Promise<void>;
   /** Pending rows per kind with next_attempt_at <= before. */
   outboxDue(before: string): Promise<Map<OutboxKind, number>>;

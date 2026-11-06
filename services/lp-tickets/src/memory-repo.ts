@@ -86,6 +86,9 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
     }
     return [...m.values()];
   }
+  async countPendingOrdersSince(site: string, pendingSince: string) {
+    return this.orders.filter((o) => o.site === site && o.status === "pending" && o.createdAt >= pendingSince).length;
+  }
   async heldPendingByClient(site: string, clientKey: string, pendingSince: string) {
     return this.orders
       .filter((o) => o.site === site && o.clientKey === clientKey && o.status === "pending" && o.createdAt >= pendingSince)
@@ -319,6 +322,9 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
   }
   async ordersByIds(site: string, ids: readonly string[]) {
     return this.orders.filter((o) => o.site === site && ids.includes(o.id)).map(clone);
+  }
+  async countOutboxQueued(kinds: readonly OutboxKind[]) {
+    return this.outbox.filter((r) => r.status === "pending" && kinds.includes(r.kind)).length;
   }
   async countOutboxSentSince(since: string) {
     return this.outbox.filter((r) => r.status === "sent" && r.sentAt !== null && r.sentAt >= since).length;

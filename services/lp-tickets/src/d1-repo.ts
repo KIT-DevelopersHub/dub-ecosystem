@@ -334,6 +334,14 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
       );
       return rows.map((r) => ({ ticketTypeId: r.k, sold: r.sold ?? 0, pending: r.pending ?? 0, revenueJpy: r.revenue ?? 0 }));
     },
+    async countPendingOrdersSince(site, pendingSince) {
+      const r = await db.first<{ c: number }>(
+        "SELECT COUNT(*) AS c FROM lp_ticket_orders WHERE site = ? AND status = 'pending' AND created_at >= ?",
+        site,
+        pendingSince,
+      );
+      return r?.c ?? 0;
+    },
     async heldPendingByClient(site, clientKey, pendingSince) {
       const r = await db.first<{ n: number | null }>(
         `SELECT SUM(quantity) AS n FROM lp_ticket_orders
@@ -703,6 +711,14 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
           ...ids,
         ),
       );
+    },
+    async countOutboxQueued(kinds) {
+      if (kinds.length === 0) return 0;
+      const r = await db.first<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM lp_ticket_outbox WHERE status = 'pending' AND kind IN (${kinds.map(() => "?").join(", ")})`,
+        ...kinds,
+      );
+      return r?.c ?? 0;
     },
     async countOutboxSentSince(since) {
       const r = await db.first<{ c: number }>("SELECT COUNT(*) AS c FROM lp_ticket_outbox WHERE status = 'sent' AND sent_at >= ?", since);

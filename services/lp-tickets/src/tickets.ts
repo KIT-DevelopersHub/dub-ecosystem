@@ -600,6 +600,9 @@ export class TicketService {
     const stripe = this.deps.stripe;
     if (!free && !stripe) throw paymentNotConfigured();
 
+    // Test purchases prove the flow in LP管理; only real buyers wait for the mail to catch up.
+    if (!preview && !(await this.delivery.canAcceptOrder(this.pendingSince()))) throw errors.rateLimited(60);
+
     const quantity = items.reduce((n, i) => n + i.quantity, 0);
     if (
       !free &&

@@ -451,7 +451,7 @@ export function mapCheckoutError(status: number, body: unknown, config: TicketCo
     else errors.items = "選択された券種の残数が足りません";
     errors._form = "選択されたチケットの残数が足りなくなりました。枚数を減らすか、別の券種をお選びください。";
   } else if (status === 429) {
-    errors._form = "ただいまお申し込みが集中しています。しばらく時間をおいて再度お試しください。";
+    errors._form = "サーバーにアクセスが集中しているため、お申し込みを受け付けられませんでした。時間をおいて再度お試しください。";
   } else if (status === 503) {
     errors._form = "現在、決済の準備中です。有料チケットはしばらくお待ちください。";
   } else {

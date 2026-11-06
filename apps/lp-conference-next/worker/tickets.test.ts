@@ -256,7 +256,7 @@ test("mapCheckoutError maps 400 details (items / items.<id>) and statuses", () =
   assert.match(so.qty_student, /売り切れ/);
   assert.ok(so._form);
   assert.ok(mapCheckoutError(409, null, CFG).items);
-  assert.match(mapCheckoutError(429, null, CFG)._form, /集中/);
+  assert.match(mapCheckoutError(429, null, CFG)._form, /サーバーにアクセスが集中.*時間をおいて/);
   assert.match(mapCheckoutError(503, null, CFG)._form, /準備中/);
 });
 
