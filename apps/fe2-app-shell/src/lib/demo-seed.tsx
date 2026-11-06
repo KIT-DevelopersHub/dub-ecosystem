@@ -1911,7 +1911,9 @@ function createRosterStore() {
           return u ? json(detail(u)) : problem("NOT_FOUND", "user not found", 404);
         }
       }
-      if (pathname === "/api/v1/identity/roles") return json(page(roles));
+      if (pathname === "/api/v1/identity/roles") {
+        return json(page(roles.map((r) => ({ ...r, memberCount: users.filter((u) => u.roleIds.includes(r.id)).length }))));
+      }
       // 通知管理「誰に届くか」: derived from the LIVE demo roles, so toggling 「管理者向け通知を
       // 受け取る」 in ロール管理 changes this summary in the same session (mirrors identity
       // GET /internal/permission-holders behind notification GET /audiences).
@@ -2065,6 +2067,7 @@ function createRosterStore() {
           if (role.isSystem) return problem("CONFLICT", "システムロールは削除できません", 409);
           roles.splice(roles.indexOf(role), 1);
           for (const r of roles) r.mailVisibleRoleIds = r.mailVisibleRoleIds.filter((t) => t !== role.id);
+          for (const u of users) u.roleIds = u.roleIds.filter((t) => t !== role.id);
           audit("identity.role.deleted", "role", role.id, { name: role.name });
           return json(null, 204);
         }
