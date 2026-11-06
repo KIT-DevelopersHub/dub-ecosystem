@@ -203,28 +203,18 @@ export function applyLeadMilestones<T extends Pick<LeadFields, "status" | "first
 // ── 月間目標 ──────────────────────────────────────────────
 
 /** 目標を置く指標。金額だけ円、ほかは社数。 */
-export const GOAL_METRICS = ["contacted", "proposed", "agreed", "amount"] as const;
-export type GoalMetric = (typeof GOAL_METRICS)[number];
+export type GoalMetric = "contacted" | "proposed" | "agreed" | "amount";
 
 export type GoalTargets = Record<GoalMetric, number | null>;
 
-/** 1 か月の目標。null = その指標は目標なし。 */
+/** 1 か月の目標 (閲覧専用)。目標管理アプリの KPI から作る。null = その指標は目標なし。 */
 export interface MonthlyGoal extends GoalTargets {
   /** YYYY-MM。 */
   month: string;
-  version: number;
-  updatedBy: UserId;
-  updatedByName: string | null;
-  updatedAt: ISODateTime;
 }
 
 export interface ListGoalsResponse {
   goals: MonthlyGoal[];
-}
-
-export interface PutGoalRequest extends GoalTargets {
-  /** 新規は 0。 */
-  expectedVersion: number;
 }
 
 const LEGAL_FORMS =

@@ -184,7 +184,6 @@ const SPONSOR_WRITES = [
   "POST /members/sponsor/cards",
   "POST /members/sponsor/leads",
   "POST /members/sponsor/leads/import",
-  "PUT /members/sponsor/goals/:month",
   "PUT /members/sponsor/cards/:id/image",
 ];
 const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/sponsor/leads/:id"];

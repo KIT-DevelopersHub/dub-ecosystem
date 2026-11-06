@@ -1,20 +1,15 @@
-// スポンサー → 目標。月ごとに目標を置き、営業進捗の日付から数えた実績と達成率を見る。
-// 上 = 選んだ月の 4 指標 (実績 / 目標・達成率・メーター)、下 = 直近 6 か月の推移。目標の設定は sponsor:write の人だけ。
-import { useEffect, useMemo, useState } from "react";
-import { Badge, Button, DataTable, ErrorState, FormField, Modal, Skeleton, SkeletonTable, Stack, TextField, type ColumnDef } from "@dub/ui";
-import { DialogActions } from "@dub/app-ui";
-import { sponsor } from "@dub/types";
+// スポンサー → 目標。目標管理アプリで置いた目標に対する、営業進捗の日付から数えた実績と達成率を見る (閲覧専用)。
+// 上 = 選んだ月の 4 指標 (実績 / 目標・達成率・メーター)、下 = 直近 6 か月の推移。
+import { useMemo, useState } from "react";
+import { Badge, Button, DataTable, ErrorState, Skeleton, SkeletonTable, Stack, type ColumnDef } from "@dub/ui";
+import type { sponsor } from "@dub/types";
 import { useAppCapability } from "../../auth/AuthProvider.tsx";
-import { useGoals, useLeads, usePutGoal } from "./leadHooks.ts";
+import { useGoals, useLeads } from "./leadHooks.ts";
 import { achievement, currentMonth, formatMetric, METRICS, monthActuals, monthLabel, shiftMonth, undatedLeads, type Actuals } from "./goals.ts";
-import { parseAmount } from "./leadImport.ts";
-import { useSponsorCapability } from "./SponsorShared.tsx";
 import { SponsorFrame } from "./SponsorCardsScreen.tsx";
 import styles from "./sponsor.module.css";
 
 const HISTORY_MONTHS = 6;
-
-type FormValues = Record<sponsor.GoalMetric, string>;
 
 function GoalCard({ metric, actual, target }: { metric: (typeof METRICS)[number]; actual: number; target: number | null }): JSX.Element {
   const rate = achievement(actual, target);
@@ -57,62 +52,6 @@ function GoalCard({ metric, actual, target }: { metric: (typeof METRICS)[number]
   );
 }
 
-const isValidTarget = (v: string): boolean => v.trim() === "" || (parseAmount(v) ?? 0) > 0;
-
-function GoalDialog({ month, goal, open, onClose }: { month: string; goal: sponsor.MonthlyGoal | null; open: boolean; onClose: () => void }): JSX.Element {
-  const put = usePutGoal();
-  const [form, setForm] = useState<FormValues>({ contacted: "", proposed: "", agreed: "", amount: "" });
-  useEffect(() => {
-    if (open) {
-      setForm(Object.fromEntries(METRICS.map((m) => [m.key, goal?.[m.key]?.toString() ?? ""])) as FormValues);
-    }
-  }, [open, goal]);
-  const valid = METRICS.every((m) => isValidTarget(form[m.key]));
-  return (
-    <Modal testId="fe2-sponsor-goal-dialog" open={open} onClose={onClose} title={`${monthLabel(month)}の目標`} size="md">
-      <Stack gap={4}>
-        <p className={styles.note}>空欄の指標は目標なしになります。</p>
-        <div className={styles.formGrid}>
-          {METRICS.map((m) => (
-            <FormField
-              key={m.key}
-              label={`${m.label}（${m.unit}）`}
-              htmlFor={`sponsor-goal-${m.key}`}
-              help={m.definition}
-              error={isValidTarget(form[m.key]) ? undefined : "1 以上の数字で入力してください"}
-            >
-              <TextField
-                id={`sponsor-goal-${m.key}`}
-                testId={`fe2-sponsor-goal-field-${m.key}`}
-                value={form[m.key]}
-                onChange={(v) => setForm({ ...form, [m.key]: v })}
-                invalid={!isValidTarget(form[m.key])}
-              />
-            </FormField>
-          ))}
-        </div>
-        <DialogActions>
-          <Button variant="secondary" size="lg" testId="fe2-sponsor-goal-cancel" onClick={onClose}>
-            キャンセル
-          </Button>
-          <Button
-            size="lg"
-            testId="fe2-sponsor-goal-save"
-            disabled={!valid}
-            onClick={() => {
-              const targets = Object.fromEntries(METRICS.map((m) => [m.key, parseAmount(form[m.key])])) as sponsor.GoalTargets;
-              put.mutate({ month, targets, expectedVersion: goal?.version ?? 0 });
-              onClose();
-            }}
-          >
-            保存する
-          </Button>
-        </DialogActions>
-      </Stack>
-    </Modal>
-  );
-}
-
 interface HistoryRow {
   month: string;
   selected: boolean;
@@ -146,10 +85,8 @@ const HISTORY_COLUMNS: ColumnDef<HistoryRow>[] = [
 export function SponsorGoalsScreen(): JSX.Element {
   const leads = useLeads();
   const goals = useGoals();
-  const { canWrite } = useSponsorCapability();
   const { canView: canViewGoalsApp } = useAppCapability("goals");
   const [month, setMonth] = useState(currentMonth);
-  const [editing, setEditing] = useState(false);
 
   const all = useMemo(() => leads.data?.leads ?? [], [leads.data]);
   const goalOf = (m: string) => goals.data?.goals.find((g) => g.month === m) ?? null;
@@ -206,11 +143,9 @@ export function SponsorGoalsScreen(): JSX.Element {
           />
         </Stack>
         <div className={styles.goalNotes}>
-          {canViewGoalsApp ? (
-            <p className={styles.note} data-testid="fe2-sponsor-goals-link">
-              ここで決めた目標は、<a href="/goals">目標管理</a>のチームの KPI にも反映されます。
-            </p>
-          ) : null}
+          <p className={styles.note} data-testid="fe2-sponsor-goals-link">
+            {canViewGoalsApp ? <>目標は<a href="/goals">目標管理</a>アプリのチームの KPI で設定します。</> : "目標は目標管理アプリで設定します。"}
+          </p>
           <p className={styles.note}>{METRICS.map((m) => `${m.label} = ${m.definition}`).join("。")}。</p>
           {undated > 0 ? (
             <p className={styles.note} data-testid="fe2-sponsor-goals-undated">
@@ -223,17 +158,7 @@ export function SponsorGoalsScreen(): JSX.Element {
   }
 
   return (
-    <SponsorFrame
-      active="goals"
-      wide
-      actions={
-        canWrite && ready ? (
-          <Button testId="fe2-sponsor-goal-edit" onClick={() => setEditing(true)}>
-            {goal ? "目標を編集" : "目標を設定"}
-          </Button>
-        ) : undefined
-      }
-    >
+    <SponsorFrame active="goals" wide>
       <>
         <div className={styles.monthNav}>
           <Button variant="secondary" size="sm" testId="fe2-sponsor-goal-prev" onClick={() => setMonth(shiftMonth(month, -1))}>
@@ -252,7 +177,6 @@ export function SponsorGoalsScreen(): JSX.Element {
           ) : null}
         </div>
         {body}
-        <GoalDialog month={month} goal={goal} open={editing} onClose={() => setEditing(false)} />
       </>
     </SponsorFrame>
   );

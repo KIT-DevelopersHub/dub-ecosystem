@@ -24,25 +24,23 @@ test("sets a team goal and shows the progress percent", async ({ page }) => {
   await expect(page.getByTestId("fe2-goals-team-team_venue").getByText("この月の目標は未設定です")).toBeVisible();
 });
 
-test("the sponsor goals tab sets the target of a linked KPI", async ({ page }) => {
-  await page.goto("/sponsor/goals");
-  await page.getByTestId("fe2-sponsor-goal-edit").click();
-  await page.getByTestId("fe2-sponsor-goal-field-contacted").fill("30");
-  await page.getByTestId("fe2-sponsor-goal-save").click();
-  await page.getByTestId("fe2-sponsor-goals-link").getByRole("link", { name: "目標管理" }).waitFor();
+test("a target set in the goals app shows on the read-only sponsor tab", async ({ page }) => {
+  await page.goto("/goals");
+  await page.getByTestId("fe2-goals-edit-team_sponsor").click();
+  await expect(page.getByTestId("fe2-goals-kpi-target-0")).toBeEnabled();
+  await page.getByTestId("fe2-goals-kpi-target-0").fill("30");
+  await page.getByTestId("fe2-goals-save").click();
+  const actual = (await page.getByTestId("fe2-goals-team-team_sponsor").getByText(/\d+社 \/ 30社/).textContent())?.match(/^\d+/)?.[0];
 
   // リンクはページ遷移なので demo のメモリが消える。アプリ内の移動で確かめる。
   await page.evaluate(() => {
-    window.history.pushState({}, "", "/goals");
+    window.history.pushState({}, "", "/sponsor/goals");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
-  const sponsor = page.getByTestId("fe2-goals-team-team_sponsor");
-  await expect(sponsor.getByText("9社 / 30社")).toBeVisible();
-  await expect(sponsor.getByText(/目標は目標タブと連動/).first()).toBeVisible();
-
-  await page.getByTestId("fe2-goals-edit-team_sponsor").click();
-  await expect(page.getByTestId("fe2-goals-kpi-target-0")).toBeDisabled();
-  await expect(page.getByTestId("fe2-goals-kpi-target-0")).toHaveValue("30");
+  await expect(page.getByTestId("fe2-sponsor-goal-contacted")).toContainText("/ 30 社");
+  await expect(page.getByTestId("fe2-sponsor-goal-actual-contacted")).toHaveText(`${actual} 社`);
+  await expect(page.getByTestId("fe2-sponsor-goal-edit")).toHaveCount(0);
+  await expect(page.getByTestId("fe2-sponsor-goals-link").getByRole("link", { name: "目標管理" })).toBeVisible();
 });
 
 test("the save button stays reachable with many KPIs", async ({ page }) => {

@@ -343,52 +343,25 @@ describe("月間目標", () => {
     expect(monthLabel("2026-09")).toBe("2026年9月");
   });
 
-  it("sets a goal and shows the rate against actuals from the lead list", async () => {
-    let saved: sponsor.PutGoalRequest | null = null;
+  it("shows the rate of the goals app targets against actuals from the lead list", async () => {
     const month = currentMonth();
     const api: SponsorApi = {
       ...demoApi(),
-      listGoals: () => Promise.resolve({ goals: [] }),
+      listGoals: () => Promise.resolve({ goals: [{ month, contacted: 4, proposed: null, agreed: null, amount: 500000 }] }),
       listLeads: () => Promise.resolve({ leads: [lead({ firstContactOn: `${month}-01`, status: "初回連絡" })] }),
-      putGoal: (m, body) => {
-        saved = body;
-        return Promise.resolve({ ...body, month: m, version: 1, updatedBy: "u" as sponsor.MonthlyGoal["updatedBy"], updatedByName: null, updatedAt: "t" });
-      },
     };
     renderScreen(api, ADMIN, <SponsorGoalsScreen />);
-    fireEvent.click(await screen.findByTestId("fe2-sponsor-goal-edit"));
-    const save = (await screen.findByTestId("fe2-sponsor-goal-save")) as HTMLButtonElement;
-    fireEvent.change(screen.getByTestId("fe2-sponsor-goal-field-contacted"), { target: { value: "0" } });
-    expect(save.disabled).toBe(true);
-    fireEvent.change(screen.getByTestId("fe2-sponsor-goal-field-contacted"), { target: { value: "4" } });
-    fireEvent.change(screen.getByTestId("fe2-sponsor-goal-field-amount"), { target: { value: "¥500,000" } });
-    fireEvent.click(save);
     await waitFor(() => expect(screen.getByTestId("fe2-sponsor-goal-rate-contacted").textContent).toBe("25%"));
-    await waitFor(() => expect(saved).toEqual({ contacted: 4, proposed: null, agreed: null, amount: 500000, expectedVersion: 0 }));
+    expect(screen.getByTestId("fe2-sponsor-goal-amount").textContent).toContain("/ ¥500,000");
     expect(screen.queryByTestId("fe2-sponsor-goal-rate-proposed")).toBeNull();
   });
 
-  it("rolls the goal back with a notice on 409", async () => {
-    const month = currentMonth();
-    const goal = { month, contacted: 4, proposed: null, agreed: null, amount: null, version: 2, updatedBy: "u" as sponsor.MonthlyGoal["updatedBy"], updatedByName: null, updatedAt: "t" };
-    const api: SponsorApi = {
-      ...demoApi(),
-      listGoals: () => Promise.resolve({ goals: [goal] }),
-      listLeads: () => Promise.resolve({ leads: [] }),
-      putGoal: () => Promise.reject(new ApiError(409, { error: { code: "SPONSOR_VERSION_CONFLICT", message: "x", retryable: false } } as never)),
-    };
-    renderScreen(api, ADMIN, <SponsorGoalsScreen />);
-    fireEvent.click(await screen.findByTestId("fe2-sponsor-goal-edit"));
-    fireEvent.change(await screen.findByTestId("fe2-sponsor-goal-field-contacted"), { target: { value: "8" } });
-    fireEvent.click(screen.getByTestId("fe2-sponsor-goal-save"));
-    expect(await screen.findByText("他の人が更新しました")).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-goal-rate-contacted").textContent).toBe("0%"));
-  });
-
-  it("is read-only for viewers, and moves between months", async () => {
-    renderScreen(demoApi(), VIEWER, <SponsorGoalsScreen />);
+  it("cannot set goals here, even with write access, and moves between months", async () => {
+    renderScreen(demoApi(), ADMIN, <SponsorGoalsScreen />);
     expect(await screen.findByTestId("fe2-sponsor-goal-contacted")).toBeTruthy();
     expect(screen.queryByTestId("fe2-sponsor-goal-edit")).toBeNull();
+    expect(screen.queryByTestId("fe2-sponsor-goal-dialog")).toBeNull();
+    expect(screen.getByTestId("fe2-sponsor-goals-link").textContent).toBe("目標は目標管理アプリで設定します。");
     fireEvent.click(screen.getByTestId("fe2-sponsor-goal-prev"));
     expect(screen.getByTestId("fe2-sponsor-goal-month").textContent).toBe(monthLabel(shiftMonth(currentMonth(), -1)));
     fireEvent.click(screen.getByTestId("fe2-sponsor-goal-today"));

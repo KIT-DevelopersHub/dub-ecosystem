@@ -170,10 +170,6 @@
   overflow-y: auto;
 }
 
-.linkBar {
-  display: flex;
-}
-
 .kpiForm {
   position: relative;
   min-width: 0;
