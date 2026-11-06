@@ -21,6 +21,9 @@ type ScheduledSendListItem = mail.ScheduledSendListItem;
 type ScheduledSendDetail = mail.ScheduledSendDetail;
 type Paginated<T> = common.Paginated<T>;
 
+/** Where a stored attachment lives (its download route's collection). */
+export type AttachmentSource = "messages" | "sent" | "drafts";
+
 export interface InboxQuery {
   limit?: number;
   cursor?: string;
@@ -56,12 +59,24 @@ export interface MailApi {
   getThread(threadId: string): Promise<MailThread>;
   /** Mark a message read (idempotent). Returns the resulting read state (mail:read). */
   markRead(id: string): Promise<MailMessageState>;
+  /** Set the viewer's own read state on received messages (既読 / 未読; mail:read). */
+  setReadState(ids: string[], read: boolean): Promise<void>;
+  /** The signed-in user's drafts, newest first (mail:read). */
+  listDrafts(): Promise<mail.MailDraft[]>;
+  /** Create or update one draft under its client-minted id (mail:send). */
+  saveDraft(id: string, draft: mail.MailDraftInput): Promise<mail.MailDraft>;
+  /** Discard a draft and its files. Idempotent (mail:send). */
+  deleteDraft(id: string): Promise<void>;
+  /** Attach one file to a saved draft (mail:send). */
+  addDraftAttachment(id: string, input: mail.MailAttachmentInput): Promise<mail.MailAttachment>;
+  /** Remove one file from a draft (mail:send). */
+  removeDraftAttachment(id: string, attId: string): Promise<void>;
   /** List sent messages, newest first (mail:read). */
   listSent(query?: SentQuery): Promise<Paginated<MailSentListItem>>;
   /** Fetch one sent message's full detail — body + recipients (mail:read). */
   getSent(id: string): Promise<MailSentDetail>;
   /** Download one attachment's bytes as a Blob (session-authorized; mail:read). */
-  downloadAttachment(kind: "messages" | "sent", messageId: string, attId: string): Promise<Blob>;
+  downloadAttachment(kind: AttachmentSource, messageId: string, attId: string): Promise<Blob>;
   /** List the signed-in user's persisted thread flags (star/archive/trash) (mail:read). */
   listFlags(): Promise<mail.MailThreadFlags[]>;
   /** Persist a thread's flags (PATCH: only provided flags change). Returns the new state. */
@@ -126,6 +141,19 @@ export function createMailApi(api: ApiClient): MailApi {
     getMessage: (id) => api.request<MailMessageDetail>({ method: "GET", path: `${MAIL}/messages/${encodeURIComponent(id)}` }),
     getThread: (threadId) => api.request<MailThread>({ method: "GET", path: `${MAIL}/threads/${encodeURIComponent(threadId)}` }),
     markRead: (id) => api.request<MailMessageState>({ method: "POST", path: `${MAIL}/messages/${encodeURIComponent(id)}/read` }),
+    setReadState: async (ids, read) => {
+      await api.request<unknown, mail.MailReadStateRequest>({ method: "POST", path: `${MAIL}/read-state`, body: { ids, read } });
+    },
+    listDrafts: () => api.request<{ items: mail.MailDraft[] }>({ method: "GET", path: `${MAIL}/drafts` }).then((r) => r.items),
+    saveDraft: (id, draft) => api.request<mail.MailDraft, mail.MailDraftInput>({ method: "PUT", path: `${MAIL}/drafts/${encodeURIComponent(id)}`, body: draft }),
+    deleteDraft: async (id) => {
+      await api.request({ method: "DELETE", path: `${MAIL}/drafts/${encodeURIComponent(id)}` });
+    },
+    addDraftAttachment: (id, input) =>
+      api.request<mail.MailAttachment, mail.MailAttachmentInput>({ method: "POST", path: `${MAIL}/drafts/${encodeURIComponent(id)}/attachments`, body: input }),
+    removeDraftAttachment: async (id, attId) => {
+      await api.request({ method: "DELETE", path: `${MAIL}/drafts/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attId)}` });
+    },
     listSent: (query) => {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query?.limit !== undefined) q.limit = query.limit;
@@ -222,7 +250,7 @@ export async function fileToAttachment(file: File): Promise<mail.MailAttachmentI
 
 /** Same-origin download path for a stored attachment (the gateway streams the R2 body with
  *  a download disposition). Used by the MailApi download call (session-authorized fetch). */
-export function attachmentDownloadPath(kind: "messages" | "sent", messageId: string, attId: string): string {
+export function attachmentDownloadPath(kind: AttachmentSource, messageId: string, attId: string): string {
   return `${MAIL}/${kind}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attId)}`;
 }
 

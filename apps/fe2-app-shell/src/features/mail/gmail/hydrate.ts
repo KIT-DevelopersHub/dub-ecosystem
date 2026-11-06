@@ -91,6 +91,7 @@ export function sentItemsToThreads(items: mail.MailSentListItem[], me: MailPerso
     messages: [
       {
         id: it.id,
+        messageId: it.id, // bare send-log id: replyPlan rebuilds the wire Message-Id from it
         from: it.from ?? me,
         to: it.to,
         ...(it.cc && it.cc.length > 0 ? { cc: it.cc } : {}),
@@ -117,6 +118,7 @@ export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
     ...(m.cc && m.cc.length > 0 ? { cc: m.cc } : {}),
     date: m.receivedAt,
     body: m.textBody,
+    ...(m.htmlBody ? { html: m.htmlBody } : {}),
     read: m.read,
     ...(m.mine === false ? { mine: false } : {}),
     ...(m.blocked ? { blocked: true } : {}),
@@ -130,6 +132,7 @@ export function threadDetailToMessages(thread: mail.MailThread): MailMsg[] {
 export function sentDetailToMessage(detail: mail.MailSentDetail, me: MailPerson): MailMsg {
   return {
     id: detail.id,
+    messageId: detail.id,
     from: detail.from ?? me,
     to: detail.to,
     ...(detail.cc && detail.cc.length > 0 ? { cc: detail.cc } : {}),

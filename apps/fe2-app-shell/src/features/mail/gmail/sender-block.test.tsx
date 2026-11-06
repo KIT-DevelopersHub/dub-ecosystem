@@ -50,6 +50,12 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getScheduled: vi.fn(),
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn(),
+    setReadState: vi.fn().mockResolvedValue(undefined),
+    listDrafts: vi.fn().mockResolvedValue([]),
+    saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
+    deleteDraft: vi.fn().mockResolvedValue(undefined),
+    addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
+    removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
     listBlocks: vi.fn().mockResolvedValue([]),
     addBlock: vi.fn().mockImplementation((req: mail.MailSenderBlockRequest) =>
       Promise.resolve({ value: req.kind === "domain" ? req.value.split("@").pop()! : req.value, kind: req.kind ?? "address", createdAt: "2026-10-30T00:00:00.000Z" }),
@@ -237,6 +243,12 @@ describe("blocking a sender in the 3-pane mail app", () => {
     const flagged = INBOX.map((i) => (i.id === "spam" ? { ...i, blocked: true } : i));
     const api = fakeApi({
       listInbox: vi.fn().mockResolvedValue({ items: flagged, nextCursor: null }),
+      setReadState: vi.fn().mockResolvedValue(undefined),
+      listDrafts: vi.fn().mockResolvedValue([]),
+      saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
+      deleteDraft: vi.fn().mockResolvedValue(undefined),
+      addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
+      removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
       listBlocks: vi.fn().mockReturnValue(new Promise(() => undefined)),
     });
     renderApp(api);

@@ -106,6 +106,9 @@ export interface MailAttachment {
   // instead of the file silently vanishing. sizeBytes carries the DECLARED size when known
   // (0 when unknown, e.g. a truncated tail). Download routes reject a non-"stored" id.
   status?: "stored" | "dropped_too_large" | "dropped_truncated";
+  // ADDITIVE: Content-ID of an inbound part (no angle brackets), so an HTML body's
+  // <img src="cid:..."> resolves to this attachment.
+  contentId?: string;
 }
 export interface SendMailResponse {
   messageId: string;
@@ -310,6 +313,35 @@ export interface MailThreadFlagsPatch {
    *  false = clear it (undo). Absent = leave noReplyAt unchanged. */
   noReply?: boolean;
 }
+
+// ---- read state (既読 / 未読, ADDITIVE) ----
+/** POST /mail/read-state: set the viewer's OWN read state of these received messages. A
+ *  message the viewer only sees through oversight or role sharing is left untouched. */
+export interface MailReadStateRequest {
+  ids: string[];
+  read: boolean;
+}
+export const MAIL_READ_STATE_LIMIT = 500;
+
+// ---- drafts (下書き, 0025) ----
+// A compose in progress, personal to its owner. Addresses are the raw field text: a draft may
+// hold a half-typed recipient that would not pass the send validation yet.
+export type MailDraftMode = "new" | "reply" | "replyAll" | "forward";
+export interface MailDraftInput {
+  mode: MailDraftMode;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+  inReplyTo?: string;
+}
+export interface MailDraft extends MailDraftInput {
+  id: string;
+  updatedAt: ISODateTime;
+  attachments: MailAttachment[];
+}
+export const MAIL_DRAFT_LIMIT = 200;
 
 // ---- sender block list (この送信者をブロック, 0021) ----
 // Personal (per mailbox owner) list of blocked sender addresses / whole domains. Blocking

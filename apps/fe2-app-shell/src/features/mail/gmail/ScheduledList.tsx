@@ -6,7 +6,7 @@
 import { useState } from "react";
 import type { mail } from "@dub/types";
 import { Badge, ConfirmDialog } from "@dub/ui";
-import { useMailApi } from "../MailProvider.tsx";
+import { useCanCompose, useMailApi } from "../MailProvider.tsx";
 import { fullDate } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
 import { useMailStore } from "./useMailStore.tsx";
@@ -18,6 +18,7 @@ function addressLine(list: mail.MailAddress[]): string {
 export function ScheduledList(): JSX.Element {
   const { state, dispatch } = useMailStore();
   const api = useMailApi();
+  const canCompose = useCanCompose();
   const items = state.scheduled;
   // Editing reopens a compose and cancels the parked row; parked files cannot ride back
   // into the compose, so a row with attachments asks first (they must be re-attached).
@@ -35,11 +36,13 @@ export function ScheduledList(): JSX.Element {
   };
 
   const edit = (item: mail.ScheduledSendListItem): void => {
-    // Load the full body, open a prefilled compose, and cancel the parked row so the user
-    // edits + re-schedules from the compose window (single source of truth for compose).
+    // Load the full body, cancel the parked row, then open a prefilled compose so the user
+    // edits + re-schedules from the compose window (single source of truth for compose). In
+    // that order: a failed cancel must not leave the mail both parked and open for re-send.
     void api
       .getScheduled(item.id)
-      .then((detail) => {
+      .then(async (detail) => {
+        await api.cancelScheduled(item.id);
         dispatch({
           type: "OPEN_COMPOSE",
           compose: {
@@ -53,10 +56,9 @@ export function ScheduledList(): JSX.Element {
             ...(detail.inReplyTo ? { inReplyTo: detail.inReplyTo, mode: "reply" as const } : {}),
           },
         });
-        return api.cancelScheduled(item.id);
+        dispatch({ type: "REQUEST_SYNC" });
       })
-      .then(() => dispatch({ type: "REQUEST_SYNC" }))
-      .catch(() => undefined);
+      .catch(() => dispatch({ type: "BLOCK_NOTICE", notice: { status: "failed", text: "予約を編集できませんでした" } }));
   };
 
   return (
@@ -112,6 +114,7 @@ export function ScheduledList(): JSX.Element {
                   <span style={{ color: "var(--dub-color-text-secondary)", fontSize: "var(--dub-font-size-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.snippet}</span>
                 ) : null}
               </div>
+              {canCompose ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <button
                   type="button"
@@ -130,6 +133,7 @@ export function ScheduledList(): JSX.Element {
                   取消
                 </button>
               </div>
+              ) : null}
             </li>
           ))}
         </ul>

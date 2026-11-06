@@ -65,7 +65,7 @@ export function useMailSync(): void {
     flagsReady.current = false; // pause flag persistence while we (re)load
     void (async () => {
       try {
-        const [inbox, sent, scheduled, flags] = await Promise.all([
+        const [inbox, sent, scheduled, flags, drafts] = await Promise.all([
           api.listInbox({ limit: PAGE_SIZE, folder: view, ...(inboxCursor ? { cursor: inboxCursor } : {}) }),
           api.listSent({ limit: PAGE_SIZE, ...(sentCursor ? { cursor: sentCursor } : {}) }),
           // Scheduled (予約送信) is best-effort: an older gateway without the endpoint yields
@@ -74,6 +74,7 @@ export function useMailSync(): void {
           // Fetched WITH the page and applied in the same tick, so a Trash / Archive page is
           // never momentarily filed under the inbox (which would blank the view).
           api.listFlags().catch(() => []),
+          api.listDrafts().catch(() => null),
         ]);
         if (!alive) return;
         dispatch({
@@ -86,6 +87,7 @@ export function useMailSync(): void {
           },
         });
         dispatch({ type: "HYDRATE_SCHEDULED", scheduled: scheduled.items });
+        if (drafts) dispatch({ type: "HYDRATE_DRAFTS", drafts });
         loaded.current.clear(); // force the open thread to re-fetch its full body (+ any new reply)
         // Restore persisted flags on top of the freshly hydrated threads, then arm the
         // persist effect with the server's flag-state as the baseline (so applying them is
@@ -260,6 +262,9 @@ export function useMailSync(): void {
 
   // Lazily fill the full body when a thread is opened (list APIs carry only a snippet).
   useEffect(() => {
+    // Back on the list: forget what was loaded, so reopening marks it read again (未読にする
+    // on the server must not outlive the next open).
+    if (!openThreadId) loaded.current.clear();
     if (!openThreadId || loaded.current.has(openThreadId)) return;
     const thread = threads.find((t) => t.id === openThreadId);
     if (!thread) return;
@@ -269,7 +274,9 @@ export function useMailSync(): void {
     let done = false;
     void (async () => {
       try {
-        if (thread.folder === "sent") {
+        // Sent-only, wherever it is filed now: trashing or archiving one changes `folder`, but
+        // it is still a send-log row that GET /threads/:id has never heard of.
+        if (thread.messages.every((m) => m.outbound)) {
           const detail = await api.getSent(thread.id);
           if (alive) {
             done = true;

@@ -192,6 +192,14 @@ export function useAppCapability(appId: string): policy.AppCapability {
   };
 }
 
+/** May this viewer use the app's write surface for `permission`? null outside <AuthProvider>
+ *  (isolated feature tests), so a screen can default instead of throwing. */
+export function useOptionalCanEdit(appId: string, permission: PermissionKey): boolean | null {
+  const ctx = useContext(AuthCtx);
+  if (!ctx) return null;
+  return ctx.appLevel(appId) === policy.AppAccessLevel.Edit && ctx.can(permission);
+}
+
 /**
  * @deprecated Use {@link useAppCapability} — it adds `level` / `readOnly` (the 閲覧 flag) and
  * reads the server-derived map. Kept as a thin alias so existing call sites keep compiling.
