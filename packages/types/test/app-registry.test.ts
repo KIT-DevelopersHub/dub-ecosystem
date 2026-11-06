@@ -185,3 +185,40 @@ describe("withRequiredAppDomainKeys — per-app grant carries its domain read ke
     expect(appRegistry.withRequiredAppDomainKeys(["event:read", "event:write"])).toEqual(["event:read", "event:write"]);
   });
 });
+
+describe("policy — 運営メンバーの範囲", () => {
+  it("鍵が無ければ 組織図まで (既定で個人情報を出さない)", () => {
+    expect(policy.membersScopeOf(["app:members:view"], "view")).toBe("org_chart");
+    expect(policy.membersScopeOf(["app:members:edit"], "edit")).toBe("org_chart");
+  });
+
+  it("鍵は積み上げ式で読み書きが往復する", () => {
+    for (const mode of ["view", "edit"] as const) {
+      for (const scope of policy.MEMBERS_SCOPES) {
+        expect(policy.membersScopeOf(policy.setMembersScope([], mode, scope), mode)).toBe(scope);
+      }
+    }
+  });
+
+  it("編集を広げると閲覧も広がり、閲覧を狭めると編集も狭まる", () => {
+    const all = policy.setMembersScope([], "edit", "all");
+    expect(policy.membersScopeOf(all, "view")).toBe("all");
+    const narrowed = policy.setMembersScope(all, "view", "roster");
+    expect(policy.membersScopeOf(narrowed, "edit")).toBe("roster");
+  });
+
+  it("閲覧だけ広げても編集は広がらず、他の鍵に触らない", () => {
+    const next = policy.setMembersScope(["identity:read"], "view", "all");
+    expect(policy.membersScopeOf(next, "edit")).toBe("org_chart");
+    expect(next).toContain("identity:read");
+  });
+
+  it("normalizeAppAccessKeys は mail_edit から下の鍵を 1 周で全部補う", () => {
+    expect(policy.normalizeAppAccessKeys(["members:mail_edit"])).toEqual([
+      "members:mail_edit",
+      "members:mail_view",
+      "members:roster_edit",
+      "members:roster_view",
+    ]);
+  });
+});

@@ -3,8 +3,11 @@
 // subject + inline snippet, label chips, and a timestamp that swaps to row
 // actions (archive / delete / mark-read) on hover. Bulk selection lifts a toolbar.
 import { useEffect, useRef, useState } from "react";
-import { Badge, NARROW_VIEWPORT_QUERY, SkeletonList, useMediaQuery } from "@dub/ui";
+import type { mail } from "@dub/types";
+import { Badge, ConfirmDialog, NARROW_VIEWPORT_QUERY, SkeletonList, useMediaQuery } from "@dub/ui";
 import {
+  NAV_FOLDERS,
+  blockTarget,
   displayName,
   latest,
   partitionNudged,
@@ -20,8 +23,9 @@ import {
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
 import { SenderAvatar } from "./SenderAvatar.tsx";
-import { PAGE_SIZE, pageSourceOf, selectOrdered, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
-import { useReadState } from "./useReadState.tsx";
+import { PAGE_SIZE, canSelectAllInView, pageSourceOf, selectOrdered, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
+import { useBulkAction, useReadState } from "./useReadState.tsx";
+import { useSenderBlocks } from "./useSenderBlocks.tsx";
 
 // P25: exit-animation two-phase pattern (mirrors fe1 Toast.tsx's `leaving` + EXIT_MS).
 // Archive/trash marks the row `leaving` (slide-out + collapse plays via inline styles),
@@ -87,6 +91,35 @@ function StopClick({ children, onClick, label, testId }: { children: JSX.Element
     >
       {children}
     </button>
+  );
+}
+
+const BULK_VERB: Record<mail.MailBulkAction, string> = { read: "既読にする", unread: "未読にする", archive: "アーカイブ", trash: "ゴミ箱に移動" };
+
+/** Gmail's bar under the toolbar: a checked page offers the whole folder, and the whole folder
+ *  can be left again. A link-style button, like this file's other inline controls. */
+function SelectAllBar({ text, action, onClick }: { text: string; action: string; onClick: () => void }): JSX.Element {
+  return (
+    <div
+      data-testid="fe2-mail-select-all-bar"
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--dub-color-border-default)",
+        background: "var(--dub-color-surface-sunken, var(--dub-color-surface-base))",
+        color: "var(--dub-color-text-secondary)",
+        fontSize: "var(--dub-font-size-sm)",
+      }}
+    >
+      <span>{text}</span>
+      <button type="button" data-testid="fe2-mail-select-all-bar-action" onClick={onClick} style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-brand-500)", fontWeight: 600 }}>
+        {action}
+      </button>
+    </div>
   );
 }
 
@@ -470,6 +503,10 @@ function ThreadRow({
 export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
   const setRead = useReadState();
+  const bulkAction = useBulkAction();
+  const { blockMany } = useSenderBlocks();
+  const [pendingBulk, setPendingBulk] = useState<mail.MailBulkAction | null>(null);
+  const [pendingBlock, setPendingBlock] = useState<string[]>([]);
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
   const now = new Date();
   const pendingReplies = pendingReplyIds(state.scheduled);
@@ -547,6 +584,19 @@ export function ThreadList(): JSX.Element {
   const someChecked = state.checked.size > 0;
   const checkedInView = shown.filter((t) => state.checked.has(t.id)).map((t) => t.id);
   const archivedInView = shown.filter((t) => state.checked.has(t.id) && t.folder === "archive").map((t) => t.id);
+  const folderLabel = NAV_FOLDERS.find((f) => f.id === state.folder)?.label ?? "このフォルダ";
+  const viewTotal = state.pager.inbox.total ?? 0;
+  const pageChecked = allChecked && canSelectAllInView(state) && viewTotal > shown.length;
+  const allInView = state.allInView && pageChecked;
+  const me = state.me.email.trim().toLowerCase();
+  const blockableSenders = [
+    ...new Set(
+      shown
+        .filter((t) => state.checked.has(t.id) && !t.blocked)
+        .flatMap((t) => blockTarget(t)?.email.trim().toLowerCase() ?? [])
+        .filter((email) => email !== me),
+    ),
+  ];
 
   return (
     <section
@@ -597,7 +647,27 @@ export function ThreadList(): JSX.Element {
           </span>
         </StopClick>
 
-        {someChecked ? (
+        {allInView ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--dub-color-text-secondary)" }}>
+            {state.folder === "trash" ? null : (
+              <>
+                <StopClick label="すべてアーカイブ" testId="fe2-mail-archive-all" onClick={() => setPendingBulk("archive")}>
+                  <MailIcon name="archive" size={18} />
+                </StopClick>
+                <StopClick label="すべて削除" testId="fe2-mail-trash-all" onClick={() => setPendingBulk("trash")}>
+                  <MailIcon name="trash" size={18} />
+                </StopClick>
+              </>
+            )}
+            <StopClick label="すべて既読にする" testId="fe2-mail-read-all" onClick={() => setPendingBulk("read")}>
+              <MailIcon name="mail-open" size={18} />
+            </StopClick>
+            <StopClick label="すべて未読にする" testId="fe2-mail-unread-all" onClick={() => setPendingBulk("unread")}>
+              <MailIcon name="inbox" size={18} />
+            </StopClick>
+            <span style={{ fontSize: "var(--dub-font-size-xs)", marginLeft: 4 }}>全{viewTotal}件を選択中</span>
+          </div>
+        ) : someChecked ? (
           <div style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--dub-color-text-secondary)" }}>
             {state.folder === "trash" ? (
               <>
@@ -633,6 +703,11 @@ export function ThreadList(): JSX.Element {
                 </StopClick>
               </>
             )}
+            {state.folder !== "trash" && blockableSenders.length > 0 ? (
+              <StopClick label="選択の送信者をブロック" testId="fe2-mail-block-bulk" onClick={() => setPendingBlock(blockableSenders)}>
+                <MailIcon name="block" size={18} />
+              </StopClick>
+            ) : null}
             <StopClick label="選択を既読にする" testId="fe2-mail-read-bulk" onClick={() => setRead(checkedInView, true)}>
               <MailIcon name="mail-open" size={18} />
             </StopClick>
@@ -652,8 +727,40 @@ export function ThreadList(): JSX.Element {
             <MailIcon name="refresh" size={18} />
           </button>
         )}
-        {searching ? null : <PageNav pager={state.pager[pageSourceOf(state.folder)]} source={pageSourceOf(state.folder)} loading={state.listLoading} />}
+        {/* The selection tools need the width on a phone; the pager comes back with it cleared. */}
+        {searching || (narrow && someChecked) ? null : <PageNav pager={state.pager[pageSourceOf(state.folder)]} source={pageSourceOf(state.folder)} loading={state.listLoading} />}
       </div>
+      {allInView ? (
+        <SelectAllBar text={`${folderLabel}の全${viewTotal}件を選択中です。`} action="選択を解除" onClick={() => dispatch({ type: "CLEAR_CHECKS" })} />
+      ) : pageChecked ? (
+        <SelectAllBar text={`このページの${shown.length}件を選択中です。`} action={`${folderLabel}の全${viewTotal}件を選択`} onClick={() => dispatch({ type: "SELECT_ALL_IN_VIEW" })} />
+      ) : null}
+      <ConfirmDialog
+        open={pendingBulk !== null}
+        title={`全${viewTotal}件を${pendingBulk ? BULK_VERB[pendingBulk] : ""}`}
+        message={`${folderLabel}のすべての会話が対象です。他のページの会話も含まれ、まとめて元に戻すことはできません。`}
+        confirmLabel="実行する"
+        testId="fe2-mail-bulk-confirm"
+        onCancel={() => setPendingBulk(null)}
+        onConfirm={() => {
+          if (pendingBulk) bulkAction(pendingBulk);
+          setPendingBulk(null);
+        }}
+      />
+      <ConfirmDialog
+        open={pendingBlock.length > 0}
+        title={`${pendingBlock.length}件の送信者をブロックしますか？`}
+        message={`${pendingBlock.slice(0, 5).join("、")}${pendingBlock.length > 5 ? ` ほか${pendingBlock.length - 5}件` : ""} から届くメールは受信トレイに表示されず、「ブロック済み」に振り分けられます。メールは削除されず、いつでも解除できます。`}
+        confirmLabel="ブロックする"
+        danger
+        testId="fe2-mail-block-bulk-confirm"
+        onCancel={() => setPendingBlock([])}
+        onConfirm={() => {
+          blockMany(pendingBlock);
+          setPendingBlock([]);
+          dispatch({ type: "CLEAR_CHECKS" });
+        }}
+      />
 
       {state.listLoading && !searching ? (
         <div data-testid="fe2-mail-list-loading" style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>

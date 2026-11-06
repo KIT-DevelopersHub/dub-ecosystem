@@ -1,7 +1,8 @@
 // 名簿 Gmail lookup via the member-service Service Binding (POST /members/internal/google-emails).
 // カレンダー > ミーティング invites each member at their 名簿 Gmail (a Google account, so the event
 // lands in their own calendar), falling back to their Dub login address. Never fails a meeting:
-// a missing binding or a member-service error simply means "no Gmail known for anyone".
+// a missing binding or a member-service error simply means "no Gmail known for anyone". `strict`
+// is for callers that act on the absence (the sync): there the error is thrown.
 import { createServiceClient, type RequestContext } from "@dub/http";
 import type { Fetcher } from "@cloudflare/workers-types";
 
@@ -12,7 +13,7 @@ export interface MemberGoogleInfo {
 
 export interface MemberDirectory {
   /** userId -> 名簿 info, for the linked rows only. */
-  googleEmails(userIds: readonly string[]): Promise<Map<string, MemberGoogleInfo>>;
+  googleEmails(userIds: readonly string[], opts?: { strict?: boolean }): Promise<Map<string, MemberGoogleInfo>>;
 }
 
 interface GoogleEmailsResponse {
@@ -21,7 +22,7 @@ interface GoogleEmailsResponse {
 
 export function createMemberDirectory(binding: Fetcher | undefined, ctx: RequestContext): MemberDirectory {
   return {
-    async googleEmails(userIds) {
+    async googleEmails(userIds, opts) {
       const out = new Map<string, MemberGoogleInfo>();
       if (!binding || userIds.length === 0) return out;
       try {
@@ -33,6 +34,7 @@ export function createMemberDirectory(binding: Fetcher | undefined, ctx: Request
         }
       } catch (err) {
         console.warn(JSON.stringify({ service: "drive-share-service", event: "member_google_emails_failed", message: err instanceof Error ? err.message : String(err) }));
+        if (opts?.strict) throw err;
       }
       return out;
     },

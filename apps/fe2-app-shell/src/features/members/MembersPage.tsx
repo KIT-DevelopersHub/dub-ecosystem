@@ -17,7 +17,7 @@ import {
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useAppCapability } from "../../auth/AuthProvider.tsx";
+import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
 import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
 import { TeamsView } from "./TeamsView.tsx";
@@ -28,6 +28,7 @@ import styles from "./members.module.css";
 
 export function MembersPage(): JSX.Element {
   const { canEdit } = useAppCapability("members");
+  const { can } = usePermissions();
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
@@ -58,7 +59,7 @@ export function MembersPage(): JSX.Element {
     setConfirm(null);
   };
 
-  if (overview.isLoading) return <SkeletonLoader testId="members-loading" />;
+  if (overview.isPending) return <SkeletonLoader testId="members-loading" />;
   if (overview.isError) {
     const display = ApiError.isApiError(overview.error)
       ? toDisplayableError(overview.error)
@@ -102,6 +103,7 @@ export function MembersPage(): JSX.Element {
         teams={teams}
         editing={memberDialog.editing}
         members={members}
+        orgOnly={!can("members:roster_edit")}
       />
       <TeamFormDialog
         open={teamDialog.open}

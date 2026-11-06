@@ -38,6 +38,10 @@ const ME_ID = "usr_demo";
 const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "identity:read",
   "identity:admin",
+  "members:roster_view",
+  "members:roster_edit",
+  "members:mail_view",
+  "members:mail_edit",
   // 代理表示 (admin impersonation): メール名簿の「このメンバーとして表示」。
   "identity:impersonate",
   "event:read",
@@ -847,12 +851,18 @@ const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filte
   (k) => k !== "chat:manage_sections" && k !== "chat:change_visibility",
 );
 
+// 運営メンバーの範囲の見え方を ?demo_account= で確かめる用。
+const MEMBERS_SCOPE_ORG_CHART_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:"));
+const MEMBERS_SCOPE_ROSTER_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:mail_"));
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: CHAT_EDITOR_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
+  { id: "usr_scope_org", displayName: "範囲 組織図まで", email: "scope-org@developershub.jp", permissions: MEMBERS_SCOPE_ORG_CHART_PERMISSIONS, inbox: [] },
+  { id: "usr_scope_roster", displayName: "範囲 メール名簿以外", email: "scope-roster@developershub.jp", permissions: MEMBERS_SCOPE_ROSTER_PERMISSIONS, inbox: [] },
   { id: "usr_lead", displayName: "統括 山本", email: "lead@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: LEAD_INBOX.map((m) => ({ ...m })), roleShareWith: ["usr_bob", "usr_sponsor"] },
 ];
 
@@ -1317,6 +1327,21 @@ function createMailStore() {
       const own = new Set(ids);
       for (const r of inboxOf(me.id)) if (own.has(r.id)) r.read = read;
       return json({ updated: ids.length, read });
+    }
+    if (method === "POST" && pathname === "/api/v1/mail/bulk") {
+      const { folder, action } = body as mail.MailBulkRequest;
+      const hit = folderThreads(readInbox).filter((t) => inView(t, folder));
+      if (action === "read" || action === "unread") {
+        for (const t of hit) for (const m of t.msgs) if (m.mine !== false) m.read = action === "read";
+      } else {
+        const flags = new Map(loadFlags().map((f) => [f.threadId, f]));
+        for (const t of hit) {
+          const f = flags.get(t.threadId) ?? { threadId: t.threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
+          flags.set(t.threadId, { ...f, ...(action === "archive" ? { archived: true } : { trashed: true }) });
+        }
+        saveFlags([...flags.values()]);
+      }
+      return json({ updated: hit.length });
     }
     // 下書き: per-account, in-session (a reload resets, like Sent).
     {
@@ -4289,6 +4314,7 @@ function createMembersStore() {
   members.push(mk("member_hr1", "小林 葵", "メンバー", "added", ["team_dev"], members.length, "aoi@example.com", "情報工学科", "1年"));
   members.push(mk("member_hr2", "佐野 陸", "メンバー", "added", ["team_pr"], members.length, "riku@example.com", "メディア情報学科", "2年"));
   members.push(mk("member_hr3", "高橋 美咲", "メンバー", "added", ["team_venue"], members.length, "misaki@example.com", "建築学科", "1年"));
+  members.push(mk("member_hr4", "野村 蓮", "メンバー", "added", ["team_dev"], members.length, "ren@example.com", "情報工学科", "2年"));
   const applicants: DemoApplicant[] = [
     applicant("app_demo_1", "青木 陽向", "scheduling", 1, { nameKana: "あおき ひなた", email: "hinata@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", motivation: "運営ツールの開発に関わりたいです。" }),
     applicant("app_demo_2", "井上 さくら", "scheduling", 2, { nameKana: "いのうえ さくら", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", source: "紹介" }),
@@ -4300,6 +4326,8 @@ function createMembersStore() {
     applicant("app_demo_8", "佐野 陸", "onboarding", 3, { nameKana: "さの りく", email: "riku@example.com", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", memberId: "member_hr2", version: 5, interviewAt: hrAt(12, 18) }),
     applicant("app_demo_9", "高橋 美咲", "onboarded", 6, { nameKana: "たかはし みさき", email: "misaki@example.com", department: "建築学科", grade: "1年", desiredTeamId: "team_venue", memberId: "member_hr3", version: 6, interviewAt: hrAt(20, 18) }),
     applicant("app_demo_10", "千葉 拓海", "withdrawn", 5, { nameKana: "ちば たくみ", department: "電気電子工学科", grade: "1年", source: "紹介" }),
+    // 採用後に辞退へ動かした人 (memberId が残る)。
+    applicant("app_demo_11", "野村 蓮", "withdrawn", 4, { nameKana: "のむら れん", email: "ren@example.com", department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", memberId: "member_hr4", version: 5, interviewAt: hrAt(11, 18) }),
   ];
   const hrEvents: hr.ApplicantEvent[] = [];
   let hrSeq = 0;
@@ -4399,8 +4427,8 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
-      // 本番と同じ: 名簿に結ばれた人 (採用済み) は 409。
-      if (a.memberId !== null) return err("HR_APPLICANT_JOINED", 409);
+      // 本番と同じ: 採用〜オンボーディング完了の人は 409。
+      if (hr.blocksRemoval(a.stage, a.memberId !== null)) return err("HR_APPLICANT_JOINED", 409);
       hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });
@@ -4459,6 +4487,9 @@ function createMembersStore() {
     const hrRes = hrHandle(method, pathname, body);
     if (hrRes) return hrRes;
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
+    if (method === "GET" && pathname === "/api/v1/members/org-overview") {
+      return json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => memberValues.toOrgChartMember(m)) });
+    }
     // canonical team list other apps read
     if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
     // チーム単位メンション用 (self-scoped): チーム一覧 + ログイン中アカウントの所属。
@@ -4555,6 +4586,22 @@ function createMembersStore() {
       mem.version += 1;
       mem.updatedAt = isoNow();
       return json({ ...mem, teamIds: [...mem.teamIds] });
+    }
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/org$/.exec(pathname);
+    if (m && method === "PATCH") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (typeof body?.version === "number" && body.version !== mem.version) {
+        const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
+      if (body?.position !== undefined) mem.position = memberValues.isMemberPosition(body.position) ? body.position : null;
+      if (body?.status !== undefined) mem.status = body.status;
+      if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+      if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
+      mem.version += 1;
+      return json(memberValues.toOrgChartMember(mem));
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {

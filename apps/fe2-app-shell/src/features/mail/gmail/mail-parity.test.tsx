@@ -25,6 +25,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getThread: vi.fn().mockResolvedValue({ id: "t1", messages: [detail()] }),
     markRead: vi.fn().mockResolvedValue({ read: true }),
     setReadState: vi.fn().mockResolvedValue(undefined),
+    bulkAction: vi.fn().mockResolvedValue(undefined),
     listDrafts: vi.fn().mockResolvedValue([]),
     saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve(savedDraft(id, d))),
     deleteDraft: vi.fn().mockResolvedValue(undefined),
@@ -55,6 +56,114 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
 const mount = (api: MailApi) => render(<MailApiProvider value={api}><GmailApp /></MailApiProvider>);
 const row = () => screen.findByTestId("fe2-mail-inbox-item");
 afterEach(() => localStorage.clear());
+
+describe("複数選択", () => {
+  const threads = (n: number, from = (i: number) => `s${i}@example.com`) =>
+    Array.from({ length: n }, (_, i) => inbound({ id: `in${i}`, threadId: `t${i}`, from: { email: from(i) } }));
+  const paged = (n: number, total: number) => ({ items: threads(n), nextCursor: "c", total });
+  const selectPage = async () => {
+    await row().catch(() => undefined);
+    await screen.findAllByTestId("fe2-mail-inbox-item");
+    await userEvent.click(screen.getByTestId("fe2-mail-select-all"));
+  };
+  const selectFolder = async () => {
+    await selectPage();
+    await userEvent.click(await screen.findByTestId("fe2-mail-select-all-bar-action"));
+  };
+
+  it("全件選択 offers the whole folder, and the action goes to the server after a confirmation", async () => {
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue(paged(2, 120)) });
+    mount(api);
+    await selectPage();
+    expect(screen.getByTestId("fe2-mail-select-all-bar")).toHaveTextContent("このページの2件を選択中です。");
+    await userEvent.click(screen.getByTestId("fe2-mail-select-all-bar-action"));
+    expect(screen.getByTestId("fe2-mail-select-all-bar")).toHaveTextContent("受信トレイの全120件を選択中です。");
+    await userEvent.click(screen.getByTestId("fe2-mail-read-all"));
+    const dialog = await screen.findByTestId("fe2-mail-bulk-confirm");
+    expect(dialog).toHaveTextContent("全120件を既読にする");
+    expect(api.bulkAction).not.toHaveBeenCalled();
+    vi.mocked(api.listInbox).mockClear();
+    await userEvent.click(within(dialog).getByRole("button", { name: "実行する" }));
+    expect(api.bulkAction).toHaveBeenCalledWith("inbox", "read");
+    expect(api.setReadState).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.listInbox).toHaveBeenCalled());
+  });
+
+  it("archive of the whole folder moves the loaded rows at once and offers no partial undo", async () => {
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue(paged(2, 120)), bulkAction: vi.fn(() => new Promise<void>(() => undefined)) });
+    mount(api);
+    await selectFolder();
+    await userEvent.click(screen.getByTestId("fe2-mail-archive-all"));
+    await userEvent.click(within(await screen.findByTestId("fe2-mail-bulk-confirm")).getByRole("button", { name: "実行する" }));
+    expect(api.bulkAction).toHaveBeenCalledWith("inbox", "archive");
+    await waitFor(() => expect(screen.queryAllByTestId("fe2-mail-inbox-item")).toHaveLength(0));
+    expect(screen.queryByTestId("fe2-mail-undo")).toBeNull();
+  });
+
+  it("unchecking one row leaves 全件選択, so the next action only touches what is checked", async () => {
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue(paged(2, 120)) });
+    mount(api);
+    await selectFolder();
+    const [first] = await screen.findAllByTestId("fe2-mail-inbox-item");
+    await userEvent.click(within(first!).getByLabelText("選択を解除"));
+    expect(screen.queryByTestId("fe2-mail-read-all")).toBeNull();
+    expect(screen.queryByTestId("fe2-mail-select-all-bar")).toBeNull();
+  });
+
+  it("the keyboard never applies 全件選択 to just the loaded page", async () => {
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue(paged(2, 120)) });
+    mount(api);
+    await selectFolder();
+    fireEvent.keyDown(window, { key: "e" });
+    fireEvent.keyDown(window, { key: "I" });
+    expect(api.setFlags).not.toHaveBeenCalled();
+    expect(api.setReadState).not.toHaveBeenCalled();
+    expect(api.bulkAction).not.toHaveBeenCalled();
+  });
+
+  it("no 全件選択 when the folder fits on the page", async () => {
+    mount(fakeApi({ listInbox: vi.fn().mockResolvedValue(page(threads(2))) }));
+    await selectPage();
+    expect(screen.queryByTestId("fe2-mail-select-all-bar")).toBeNull();
+  });
+
+  it("a failed whole-folder action says so", async () => {
+    const api = fakeApi({ listInbox: vi.fn().mockResolvedValue(paged(2, 120)), bulkAction: vi.fn().mockRejectedValue(new Error("x")) });
+    mount(api);
+    await selectFolder();
+    await userEvent.click(screen.getByTestId("fe2-mail-read-all"));
+    await userEvent.click(within(await screen.findByTestId("fe2-mail-bulk-confirm")).getByRole("button", { name: "実行する" }));
+    expect(await screen.findByText("全件への操作を完了できませんでした")).toBeInTheDocument();
+  });
+
+  it("blocks each selected sender once after a confirmation", async () => {
+    const addBlock = vi.fn().mockImplementation((b: { value: string }) => Promise.resolve({ ...b, kind: "address", createdAt: "t" }));
+    const api = fakeApi({ addBlock, listInbox: vi.fn().mockResolvedValue(page(threads(3, (i) => (i < 2 ? "Same@Example.com" : "other@example.com")))) });
+    mount(api);
+    await selectPage();
+    await userEvent.click(screen.getByTestId("fe2-mail-block-bulk"));
+    const dialog = await screen.findByTestId("fe2-mail-block-bulk-confirm");
+    expect(dialog).toHaveTextContent("2件の送信者をブロックしますか？");
+    await userEvent.click(within(dialog).getByRole("button", { name: "ブロックする" }));
+    await waitFor(() => expect(addBlock).toHaveBeenCalledTimes(2));
+    expect(addBlock).toHaveBeenCalledWith({ value: "same@example.com", kind: "address" });
+    expect(await screen.findByText("2件の送信者をブロックしました")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId("fe2-mail-inbox-item")).toHaveLength(0));
+  });
+
+  it("a sender that fails to block goes back to the inbox, the others stay blocked", async () => {
+    const addBlock = vi.fn().mockImplementation((b: { value: string }) =>
+      b.value === "s0@example.com" ? Promise.reject(new Error("x")) : Promise.resolve({ ...b, kind: "address", createdAt: "t" }),
+    );
+    const api = fakeApi({ addBlock, listInbox: vi.fn().mockResolvedValue(page(threads(2))) });
+    mount(api);
+    await selectPage();
+    await userEvent.click(screen.getByTestId("fe2-mail-block-bulk"));
+    await userEvent.click(within(await screen.findByTestId("fe2-mail-block-bulk-confirm")).getByRole("button", { name: "ブロックする" }));
+    expect(await screen.findByText("2件中1件の送信者をブロックできませんでした")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId("fe2-mail-inbox-item")).toHaveLength(1));
+  });
+});
 
 describe("read state", () => {
   it("既読にする reaches the server", async () => {

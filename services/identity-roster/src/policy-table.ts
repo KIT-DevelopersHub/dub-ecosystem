@@ -23,6 +23,12 @@ import { definePolicyTable, appLevel, AUTHENTICATED, INTERNAL, PUBLIC } from "@d
 /** 管理 (ロール管理 / メール名簿) at 編集 + the fine-grained admin key — every roster write. */
 const ADMIN_EDIT = appLevel("admin", "edit", "identity:admin");
 
+/**
+ * メール名簿の書き込み: ADMIN_EDIT に加えて、運営メンバーの編集範囲が「全て」であること。範囲は絞る方向に
+ * だけ効く (identity:admin の無いロールに書き込みを渡さない)。
+ */
+const MAIL_ROSTER_EDIT = appLevel("admin", "edit", "identity:admin", "app:members:edit", "members:mail_edit");
+
 /** Roster read: the shared, cross-app read key. */
 const ROSTER_READ = ["identity:read"] as const;
 
@@ -72,15 +78,15 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /identity/permissions/catalog": ROSTER_READ,
 
   // ===================== external writes (/identity/*) =====================
-  "POST /identity/users/invite": ADMIN_EDIT,
-  "POST /identity/users/sync-email-routing/preview": ADMIN_EDIT,
-  "POST /identity/users/sync-email-routing": ADMIN_EDIT,
+  "POST /identity/users/invite": MAIL_ROSTER_EDIT,
+  "POST /identity/users/sync-email-routing/preview": MAIL_ROSTER_EDIT,
+  "POST /identity/users/sync-email-routing": MAIL_ROSTER_EDIT,
   // The LAST_ADMIN invariant (the last identity:admin holder cannot be disabled / offboarded /
   // stripped) is NOT expressible as a key and stays in the service layer, which is where the
   // admin count is already loaded — the same two-layer rule gate.ts states. This line removes
   // only the key check that used to sit in middleware.
-  "PATCH /identity/users/:id": ADMIN_EDIT,
-  "POST /identity/users/:id/offboard": ADMIN_EDIT,
+  "PATCH /identity/users/:id": MAIL_ROSTER_EDIT,
+  "POST /identity/users/:id/offboard": MAIL_ROSTER_EDIT,
   "POST /identity/roles": ADMIN_EDIT,
   "PATCH /identity/roles/:id": ADMIN_EDIT,
   "DELETE /identity/roles/:id": ADMIN_EDIT,

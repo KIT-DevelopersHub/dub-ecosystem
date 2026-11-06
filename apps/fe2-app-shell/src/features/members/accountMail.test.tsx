@@ -37,6 +37,7 @@ const USERS: identity.IdentityUser[] = [
 function makeApi(): MembersApi & { sendAccountMail: ReturnType<typeof vi.fn> } {
   return {
     getOverview: () => Promise.resolve(OVERVIEW),
+    getOrgOverview: () => Promise.resolve(OVERVIEW),
     listTeams: () => Promise.resolve({ teams: [] }),
     createTeam: vi.fn(),
     updateTeam: vi.fn(),
@@ -58,7 +59,7 @@ function wrap(ui: ReactNode, api: MembersApi): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={client}>
-      <FakeAuthProvider permissions={editorPermissions("members", ["identity:read", "identity:admin"])}>
+      <FakeAuthProvider permissions={editorPermissions("members", ["identity:read", "identity:admin", "members:roster_view", "members:roster_edit"])}>
         <ToastProvider>
           <MembersApiProvider value={api}>{ui}</MembersApiProvider>
         </ToastProvider>

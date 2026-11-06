@@ -97,11 +97,15 @@ export const POLICY_TABLE = definePolicyTable({
   // `app:members:view` (the delegated 統括 role #526 enabled) passed the OR and passes this
   // rule too, so collapsing to the per-app tier loses nobody and makes ロール管理 authoritative.
   // See docs/policy-coverage-inventory.md b-6.
-  "GET /members/overview": appLevel("members", "view"),
+  //
+  // overview は名簿の全項目を返すので 運営名簿 の範囲 (members:roster_view) を重ねる。組織図までの
+  // ロールは org-overview を読む: 同じ形で個人情報の項目だけ落としたもの (service.getOrgOverview)。
+  "GET /members/overview": appLevel("members", "view", "members:roster_view"),
+  "GET /members/org-overview": appLevel("members", "view"),
   // The CANONICAL team list other apps (gantt 等) read for their own team switchers.
   "GET /members/teams": appLevel("members", "view"),
   // 名簿行の逆引き (identity user -> member row).
-  "GET /members/people/by-identity/:identityUserId": appLevel("members", "view"),
+  "GET /members/people/by-identity/:identityUserId": appLevel("members", "view", "members:roster_view"),
 
   // ---- 運営メンバー (名簿): writes = 編集 ----
   // The app's 編集 tier is the WHOLE requirement — deliberately NOT "編集 AND identity:admin".
@@ -113,9 +117,13 @@ export const POLICY_TABLE = definePolicyTable({
   "PATCH /members/teams/:id": appLevel("members", "edit"),
   "DELETE /members/teams/:id": appLevel("members", "edit"),
   "POST /members/people": appLevel("members", "edit"),
-  "POST /members/people/:id/identity-link": appLevel("members", "edit"),
-  "POST /members/people/:id/profile-reminder": appLevel("members", "edit"),
-  "PATCH /members/people/:id": appLevel("members", "edit"),
+  // 本人の情報に触る書き込みは 運営名簿 の編集範囲を重ねる。組織図までの編集は /org (運営での項目だけを
+  // 受け付け、個人情報を落として返す) と チーム・メンバーの追加削除まで。追加は書くだけで他人の情報を
+  // 読まず、削除も内容を返さないので 運営メンバータブの編集として残す。
+  "POST /members/people/:id/identity-link": appLevel("members", "edit", "members:roster_edit"),
+  "POST /members/people/:id/profile-reminder": appLevel("members", "edit", "members:roster_edit"),
+  "PATCH /members/people/:id": appLevel("members", "edit", "members:roster_edit"),
+  "PATCH /members/people/:id/org": appLevel("members", "edit"),
   "DELETE /members/people/:id": appLevel("members", "edit"),
 
   // チーム・役職ロールの一括付与。全員のロール割当を書き換えるので、ロール管理と同じ
