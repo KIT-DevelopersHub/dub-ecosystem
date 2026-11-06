@@ -7,8 +7,11 @@ import type {
   LpTicketOrderItem,
   LpTicketOrderStatus,
   LpTicketRepo,
+  OutboxKind,
+  OutboxRow,
   TicketOrderRow,
   TicketCouponRow,
+  TicketRow,
   TicketTypeRow,
 } from "./types";
 
@@ -70,6 +73,28 @@ interface TicketItemDbRow {
   day_label: string;
   unit_price_jpy: number;
   quantity: number;
+}
+
+interface TicketDbRow {
+  id: string;
+  order_id: string;
+  ticket_type_id: string;
+  ticket_type_name: string;
+  day_label: string;
+  status: string;
+  created_at: string;
+  voided_at: string | null;
+}
+interface OutboxDbRow {
+  id: string;
+  order_id: string;
+  kind: string;
+  status: string;
+  attempts: number;
+  next_attempt_at: string;
+  last_error: string | null;
+  sent_at: string | null;
+  created_at: string;
 }
 
 function parseJsonArray<T>(raw: string | null | undefined): T[] {
@@ -146,6 +171,33 @@ const toCoupon = (r: TicketCouponDbRow): TicketCouponRow => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
+
+const toTicket = (r: TicketDbRow): TicketRow => ({
+  id: r.id,
+  orderId: r.order_id,
+  ticketTypeId: r.ticket_type_id,
+  ticketTypeName: r.ticket_type_name,
+  dayLabel: r.day_label,
+  status: r.status as TicketRow["status"],
+  createdAt: r.created_at,
+  voidedAt: r.voided_at,
+});
+
+const toOutbox = (r: OutboxDbRow): OutboxRow => ({
+  id: r.id,
+  orderId: r.order_id,
+  kind: r.kind as OutboxKind,
+  status: r.status as OutboxRow["status"],
+  attempts: r.attempts,
+  nextAttemptAt: r.next_attempt_at,
+  lastError: r.last_error,
+  sentAt: r.sent_at,
+  createdAt: r.created_at,
+});
+
+/** Same order the drain and the memory repo use: every buyer mail before any ops copy. */
+const outboxOrder = (a: OutboxRow, b: OutboxRow): number =>
+  `${a.kind}~${a.nextAttemptAt}~${a.id}` < `${b.kind}~${b.nextAttemptAt}~${b.id}` ? -1 : 1;
 
 // Seats held = items of paid / needs_review orders + of pending orders still inside the hold window (alias o).
 const HELD = "(o.status IN ('paid', 'needs_review') OR (o.status = 'pending' AND o.created_at >= ?))";
@@ -489,12 +541,17 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
       return res.meta.changes > 0;
     },
     async markOrderRefunded(id, refundedAt) {
-      const res = await db.run(
-        "UPDATE lp_ticket_orders SET status = 'refunded', refunded_at = ? WHERE id = ? AND status IN ('paid', 'needs_review')",
-        refundedAt,
-        id,
-      );
-      return res.meta.changes > 0;
+      const [res] = await db.batch([
+        {
+          sql: "UPDATE lp_ticket_orders SET status = 'refunded', refunded_at = ? WHERE id = ? AND status IN ('paid', 'needs_review')",
+          binds: [refundedAt, id],
+        },
+        {
+          sql: "UPDATE lp_tickets SET status = 'void', voided_at = ? WHERE order_id = ? AND status = 'valid'",
+          binds: [refundedAt, id],
+        },
+      ]);
+      return (res?.meta.changes ?? 0) > 0;
     },
     async approveOrder(id, resolvedBy, resolvedAt, onlyReason) {
       const res = await db.run(
@@ -561,6 +618,143 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
       sql += " ORDER BY created_at DESC, id DESC LIMIT ?";
       binds.push(limit);
       return withItems(await db.all<TicketOrderDbRow>(sql, ...binds));
+    },
+    async listOrdersAscending(site, cursor, limit) {
+      // Items come through the same page as a subquery: D1 caps bound parameters, so no IN (?, ?, ...) here.
+      const c = cursor ? parseCursor(cursor) : null;
+      const after = c ? " AND (created_at > ? OR (created_at = ? AND id > ?))" : "";
+      const afterBinds = c ? [c.day, c.day, c.id] : [];
+      const page = `FROM lp_ticket_orders WHERE site = ?${after} ORDER BY created_at, id LIMIT ?`;
+      const rows = await db.all<TicketOrderDbRow>(`SELECT * ${page}`, site, ...afterBinds, limit);
+      const items = await db.all<TicketItemDbRow>(
+        `SELECT * FROM lp_ticket_order_items WHERE order_id IN (SELECT id ${page}) ORDER BY order_id, rowid`,
+        site,
+        ...afterBinds,
+        limit,
+      );
+      const byOrder = new Map<string, LpTicketOrderItem[]>();
+      for (const i of items) {
+        const list = byOrder.get(i.order_id);
+        if (list) list.push(toItem(i));
+        else byOrder.set(i.order_id, [toItem(i)]);
+      }
+      return rows.map((r) => toTicketOrder(r, byOrder.get(r.id) ?? []));
+    },
+    async issueFulfilment(orderId, tickets, outbox) {
+      const paid = "EXISTS (SELECT 1 FROM lp_ticket_orders WHERE id = ? AND status = 'paid')";
+      await db.batch([
+        ...tickets.map((t) => ({
+          sql: `INSERT OR IGNORE INTO lp_tickets (id, order_id, ticket_type_id, ticket_type_name, day_label, status, created_at)
+                SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${paid}`,
+          binds: [t.id, t.orderId, t.ticketTypeId, t.ticketTypeName, t.dayLabel, t.status, t.createdAt, orderId],
+        })),
+        ...outbox.map((r) => ({
+          sql: `INSERT OR IGNORE INTO lp_ticket_outbox (id, order_id, kind, status, attempts, next_attempt_at, created_at)
+                SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${paid}`,
+          binds: [r.id, r.orderId, r.kind, r.status, r.attempts, r.nextAttemptAt, r.createdAt, orderId],
+        })),
+      ]);
+    },
+    async listUnfulfilled(site, paidSince, limit) {
+      return withItems(
+        await db.all<TicketOrderDbRow>(
+          `SELECT o.* FROM lp_ticket_orders o
+           WHERE o.site = ? AND o.status = 'paid' AND (? IS NULL OR o.paid_at >= ?)
+             AND (
+               (SELECT COUNT(*) FROM lp_tickets t WHERE t.order_id = o.id) < o.quantity
+               OR NOT EXISTS (SELECT 1 FROM lp_ticket_outbox r WHERE r.order_id = o.id AND r.kind = 'buyer_confirmation')
+               OR (
+                 COALESCE(o.preview, 0) = 0 AND COALESCE(o.stripe_session_id, '') NOT LIKE 'cs_test_%'
+                 AND NOT EXISTS (SELECT 1 FROM lp_ticket_outbox r WHERE r.order_id = o.id AND r.kind = 'ops_copy')
+               )
+             )
+           ORDER BY o.paid_at, o.id LIMIT ?`,
+          site,
+          paidSince,
+          paidSince,
+          limit,
+        ),
+      );
+    },
+    async getTicket(id) {
+      const r = await db.first<TicketDbRow>("SELECT * FROM lp_tickets WHERE id = ?", id);
+      return r ? toTicket(r) : null;
+    },
+    async ticketsForOrders(orderIds) {
+      if (orderIds.length === 0) return [];
+      return (
+        await db.all<TicketDbRow>(
+          `SELECT * FROM lp_tickets WHERE order_id IN (${orderIds.map(() => "?").join(", ")}) ORDER BY order_id, rowid`,
+          ...orderIds,
+        )
+      ).map(toTicket);
+    },
+    async listTickets(cursor, limit) {
+      return (
+        await db.all<TicketDbRow>("SELECT * FROM lp_tickets WHERE id > ? ORDER BY id LIMIT ?", cursor ?? "", limit)
+      ).map(toTicket);
+    },
+    async ordersByIds(site, ids) {
+      if (ids.length === 0) return [];
+      return withItems(
+        await db.all<TicketOrderDbRow>(
+          `SELECT * FROM lp_ticket_orders WHERE site = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+          site,
+          ...ids,
+        ),
+      );
+    },
+    async claimOutbox(c) {
+      if (c.kinds.length === 0) return [];
+      const rows = await db.all<OutboxDbRow>(
+        `UPDATE lp_ticket_outbox SET next_attempt_at = ?
+         WHERE id IN (
+           SELECT id FROM lp_ticket_outbox
+           WHERE status = 'pending' AND next_attempt_at <= ? AND kind IN (${c.kinds.map(() => "?").join(", ")})
+             AND (? IS NULL OR order_id = ?)
+           ORDER BY kind, next_attempt_at, id LIMIT ?
+         )
+         RETURNING *`,
+        c.leaseUntil,
+        c.now,
+        ...c.kinds,
+        c.orderId ?? null,
+        c.orderId ?? null,
+        c.limit,
+      );
+      return rows.map(toOutbox).sort(outboxOrder);
+    },
+    async applyOutboxUpdates(updates) {
+      if (updates.length === 0) return;
+      await db.batch(
+        updates.map((u) => ({
+          sql: "UPDATE lp_ticket_outbox SET status = ?, attempts = ?, next_attempt_at = ?, last_error = ?, sent_at = ? WHERE id = ?",
+          binds: [u.status, u.attempts, u.nextAttemptAt, u.lastError, u.sentAt, u.id],
+        })),
+      );
+    },
+    async outboxDue(before) {
+      const rows = await db.all<{ kind: OutboxKind; n: number }>(
+        "SELECT kind, COUNT(*) AS n FROM lp_ticket_outbox WHERE status = 'pending' AND next_attempt_at <= ? GROUP BY kind",
+        before,
+      );
+      return new Map(rows.map((r) => [r.kind, r.n]));
+    },
+    async listOrderOutbox(orderId) {
+      return (await db.all<OutboxDbRow>("SELECT * FROM lp_ticket_outbox WHERE order_id = ? ORDER BY kind", orderId)).map(toOutbox);
+    },
+    async getJobStates() {
+      const rows = await db.all<{ key: string; value: string }>("SELECT key, value FROM lp_ticket_jobs");
+      return new Map(rows.map((r) => [r.key, r.value]));
+    },
+    async setJobState(key, value, updatedAt) {
+      await db.run(
+        `INSERT INTO lp_ticket_jobs (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        key,
+        value,
+        updatedAt,
+      );
     },
   };
 }

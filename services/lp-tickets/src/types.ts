@@ -2,6 +2,7 @@
 // by fe2 (apps/fe2-app-shell/src/features/lp/lpApi.tsx) — keep them in lockstep.
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { common, lp } from "@dub/types";
+import type { Mailer } from "./mailer";
 import type { StripeClient } from "./stripe";
 
 // ---- tickets wire (lockstep with fe2 lpApi.tsx) ----
@@ -151,6 +152,41 @@ export interface TicketTypeAgg {
   revenueJpy: number;
 }
 
+/** 1 席 1 行。URL のトークンは保存しない（ticket-token.ts で導出する）。 */
+export interface TicketRow {
+  id: string;
+  orderId: string;
+  ticketTypeId: string;
+  ticketTypeName: string;
+  dayLabel: string;
+  status: "valid" | "void";
+  createdAt: string;
+  voidedAt: string | null;
+}
+export type OutboxKind = "buyer_confirmation" | "ops_copy";
+export interface OutboxRow {
+  id: string;
+  orderId: string;
+  kind: OutboxKind;
+  status: "pending" | "sent" | "failed";
+  attempts: number;
+  nextAttemptAt: string;
+  /** A short reason code. Never a mail body, an address or a token. */
+  lastError: string | null;
+  sentAt: string | null;
+  createdAt: string;
+}
+export type OutboxUpdate = Pick<OutboxRow, "id" | "status" | "attempts" | "nextAttemptAt" | "lastError" | "sentAt">;
+export interface OutboxClaim {
+  now: string;
+  /** Claimed rows are invisible to other drains until this time. */
+  leaseUntil: string;
+  kinds: readonly OutboxKind[];
+  limit: number;
+  /** Only this order's rows (the send right after payment). */
+  orderId?: string;
+}
+
 export interface PaidSettlement {
   paidAt: string;
   sessionId: string | null;
@@ -213,7 +249,7 @@ export interface LpTicketRepo {
   markOrderExpired(id: string): Promise<boolean>;
   /** pending|expired|paid -> needs_review. */
   markOrderNeedsReview(id: string, reason: string, paymentIntentId?: string | null): Promise<boolean>;
-  /** paid|needs_review -> refunded (releases the seat). */
+  /** paid|needs_review -> refunded (releases the seat) and, in the same transaction, voids the order's tickets. */
   markOrderRefunded(id: string, refundedAt: string): Promise<boolean>;
   /** needs_review -> paid (paid_at kept if set). `onlyReason` restricts it to that review_reason. */
   approveOrder(id: string, resolvedBy: string, resolvedAt: string, onlyReason?: string): Promise<boolean>;
@@ -230,11 +266,42 @@ export interface LpTicketRepo {
   markOrderPreview(id: string): Promise<void>;
   /** Newest first, keyset by (created_at, id). */
   listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
+  /** Oldest first, keyset by (created_at, id). No per-id binds, so a page may be far larger than listOrders'. */
+  listOrdersAscending(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
+
+  // ---- 受け渡し（チケット + 送信 outbox） ----
+  /**
+   * One transaction, only while the order is still paid: inserts what is missing and leaves what
+   * exists alone, so replays and concurrent calls end with the same rows.
+   */
+  issueFulfilment(orderId: string, tickets: readonly TicketRow[], outbox: readonly OutboxRow[]): Promise<void>;
+  /** Paid orders missing tickets or an expected mail. `paidSince` null = all of them. Oldest first. */
+  listUnfulfilled(site: string, paidSince: string | null, limit: number): Promise<TicketOrderRow[]>;
+  getTicket(id: string): Promise<TicketRow | null>;
+  /** By id, sequence order inside an order. */
+  ticketsForOrders(orderIds: readonly string[]): Promise<TicketRow[]>;
+  /** Keyset by id. */
+  listTickets(cursor: string | null, limit: number): Promise<TicketRow[]>;
+  ordersByIds(site: string, ids: readonly string[]): Promise<TicketOrderRow[]>;
+  /** One conditional UPDATE: a row goes to exactly one caller however many drains run at once. */
+  claimOutbox(c: OutboxClaim): Promise<OutboxRow[]>;
+  applyOutboxUpdates(updates: readonly OutboxUpdate[]): Promise<void>;
+  /** Pending rows per kind with next_attempt_at <= before. */
+  outboxDue(before: string): Promise<Map<OutboxKind, number>>;
+  listOrderOutbox(orderId: string): Promise<OutboxRow[]>;
+  getJobStates(): Promise<Map<string, string>>;
+  setJobState(key: string, value: string, updatedAt: string): Promise<void>;
 }
 
 export interface ReqCtx {
   requestId: string;
   userId: common.UserId;
+}
+
+/** The R2 calls the daily backup needs (bucket dub-tickets-backup). */
+export interface BackupStore {
+  exists(key: string): Promise<boolean>;
+  put(key: string, json: string): Promise<void>;
 }
 
 export interface AppDeps {
@@ -251,8 +318,11 @@ export interface AppDeps {
   stripe: StripeClient | null;
   /** STRIPE_WEBHOOK_SECRET。null なら webhook は常に 400。 */
   stripeWebhookSecret: string | null;
-  /** Free plan: arms the reconcile alarm loop (TicketReconcileDO). null = cron drives reconcile (paid) / tests. */
-  armReconcile: (() => Promise<void>) | null;
+  /**
+   * Free plan: arms the reconcile alarm loop (TicketReconcileDO). `soon` brings the next run forward
+   * for a mail backlog. null = cron drives reconcile (paid) / tests.
+   */
+  armReconcile: ((opts?: { soon?: boolean }) => Promise<void>) | null;
   /**
    * LP管理「プレビュー」のテスト購入トークンの鍵（Stripe のテストキー sk_test_ / rk_test_）。
    * 未設定・本番キーなら null = テスト購入トークンを発行も検証もしない。
@@ -260,4 +330,16 @@ export interface AppDeps {
   ticketPreviewKey: string | null;
   /** LP_PAYPAY_ENABLED="1": PayPay is on in the Stripe Dashboard, so the LP / LP管理 advertise it. */
   paypayEnabled: boolean;
+  /** null = RESEND_API_KEY unset: nothing is sent, the outbox stays pending. */
+  mailer: Mailer | null;
+  /** null = TICKET_TOKEN_SECRET unset: no ticket URL can be produced, buyer mail stays pending. */
+  ticketTokenSecret: string | null;
+  /** null = TICKET_OPS_EMAIL unset: the ops copy stays pending. */
+  ticketOpsEmail: string | null;
+  ticketMailFrom: string;
+  /** null = no BACKUP binding. */
+  backup: BackupStore | null;
+  /** ctx.waitUntil of the current request. null outside a request (cron, alarm, tests). */
+  defer: ((work: Promise<unknown>) => void) | null;
+  sleep: (ms: number) => Promise<void>;
 }

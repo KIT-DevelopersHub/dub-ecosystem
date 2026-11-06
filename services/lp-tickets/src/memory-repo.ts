@@ -3,9 +3,14 @@ import type {
   LpTicketField,
   LpTicketOrderStatus,
   LpTicketRepo,
+  OutboxClaim,
+  OutboxKind,
+  OutboxRow,
+  OutboxUpdate,
   PaidSettlement,
   TicketOrderRow,
   TicketCouponRow,
+  TicketRow,
   TicketSettingsRow,
   TicketTypeAgg,
   TicketTypeRow,
@@ -18,6 +23,9 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
   ticketTypes: TicketTypeRow[] = [];
   orders: TicketOrderRow[] = [];
   coupons: TicketCouponRow[] = [];
+  tickets: TicketRow[] = [];
+  outbox: OutboxRow[] = [];
+  jobs = new Map<string, string>();
 
   async getTicketSettings(site: string) {
     const r = this.ticketSettings.get(site);
@@ -207,7 +215,13 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
     });
   }
   async markOrderRefunded(id: string, refundedAt: string) {
-    return this.transition(id, ["paid", "needs_review"], { status: "refunded", refundedAt });
+    const ok = this.transition(id, ["paid", "needs_review"], { status: "refunded", refundedAt });
+    if (ok) {
+      for (const t of this.tickets) {
+        if (t.orderId === id && t.status === "valid") Object.assign(t, { status: "void", voidedAt: refundedAt });
+      }
+    }
+    return ok;
   }
   async approveOrder(id: string, resolvedBy: string, resolvedAt: string, onlyReason?: string) {
     const o = this.orders.find((x) => x.id === id);
@@ -256,5 +270,90 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
       .sort((a, b) => (key(a) < key(b) ? 1 : -1))
       .slice(0, limit)
       .map(clone);
+  }
+  async listOrdersAscending(site: string, cursor: string | null, limit: number) {
+    const key = (o: TicketOrderRow) => `${o.createdAt}~${o.id}`;
+    return this.orders
+      .filter((o) => o.site === site && (cursor ? key(o) > cursor : true))
+      .sort((a, b) => (key(a) < key(b) ? -1 : 1))
+      .slice(0, limit)
+      .map(clone);
+  }
+  async issueFulfilment(orderId: string, tickets: readonly TicketRow[], outbox: readonly OutboxRow[]) {
+    if (!this.orders.some((o) => o.id === orderId && o.status === "paid")) return;
+    for (const t of tickets) if (!this.tickets.some((x) => x.id === t.id)) this.tickets.push(clone(t));
+    for (const r of outbox) {
+      if (!this.outbox.some((x) => x.id === r.id || (x.orderId === r.orderId && x.kind === r.kind))) this.outbox.push(clone(r));
+    }
+  }
+  async listUnfulfilled(site: string, paidSince: string | null, limit: number) {
+    const has = (o: TicketOrderRow, kind: OutboxKind) => this.outbox.some((r) => r.orderId === o.id && r.kind === kind);
+    const test = (o: TicketOrderRow) => o.preview || (o.stripeSessionId?.startsWith("cs_test_") ?? false);
+    return this.orders
+      .filter(
+        (o) =>
+          o.site === site &&
+          o.status === "paid" &&
+          (paidSince === null || (o.paidAt !== null && o.paidAt >= paidSince)) &&
+          (this.tickets.filter((t) => t.orderId === o.id).length < o.quantity ||
+            !has(o, "buyer_confirmation") ||
+            (!test(o) && !has(o, "ops_copy"))),
+      )
+      .sort((a, b) => (`${a.paidAt}~${a.id}` < `${b.paidAt}~${b.id}` ? -1 : 1))
+      .slice(0, limit)
+      .map(clone);
+  }
+  async getTicket(id: string) {
+    const t = this.tickets.find((x) => x.id === id);
+    return t ? clone(t) : null;
+  }
+  async ticketsForOrders(orderIds: readonly string[]) {
+    return this.tickets.filter((t) => orderIds.includes(t.orderId)).map(clone);
+  }
+  async listTickets(cursor: string | null, limit: number) {
+    return this.tickets
+      .filter((t) => (cursor ? t.id > cursor : true))
+      .sort((a, b) => (a.id < b.id ? -1 : 1))
+      .slice(0, limit)
+      .map(clone);
+  }
+  async ordersByIds(site: string, ids: readonly string[]) {
+    return this.orders.filter((o) => o.site === site && ids.includes(o.id)).map(clone);
+  }
+  async claimOutbox(c: OutboxClaim) {
+    const rows = this.outbox
+      .filter(
+        (r) =>
+          r.status === "pending" &&
+          r.nextAttemptAt <= c.now &&
+          c.kinds.includes(r.kind) &&
+          (c.orderId === undefined || r.orderId === c.orderId),
+      )
+      .sort((a, b) => (`${a.kind}~${a.nextAttemptAt}~${a.id}` < `${b.kind}~${b.nextAttemptAt}~${b.id}` ? -1 : 1))
+      .slice(0, c.limit);
+    for (const r of rows) r.nextAttemptAt = c.leaseUntil;
+    return rows.map(clone);
+  }
+  async applyOutboxUpdates(updates: readonly OutboxUpdate[]) {
+    for (const u of updates) {
+      const r = this.outbox.find((x) => x.id === u.id);
+      if (r) Object.assign(r, u);
+    }
+  }
+  async outboxDue(before: string) {
+    const m = new Map<OutboxKind, number>();
+    for (const r of this.outbox) {
+      if (r.status === "pending" && r.nextAttemptAt <= before) m.set(r.kind, (m.get(r.kind) ?? 0) + 1);
+    }
+    return m;
+  }
+  async listOrderOutbox(orderId: string) {
+    return this.outbox.filter((r) => r.orderId === orderId).map(clone);
+  }
+  async getJobStates() {
+    return new Map(this.jobs);
+  }
+  async setJobState(key: string, value: string) {
+    this.jobs.set(key, value);
   }
 }

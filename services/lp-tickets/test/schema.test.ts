@@ -7,9 +7,10 @@ import { memoryD1 } from "../../../infra/d1/src/node-d1";
 import { applyAll } from "../../../infra/d1/src/apply";
 import { collectSqlDir } from "../../../infra/d1/src/collect";
 import { verifySchema } from "../../../infra/d1/src/verify-schema";
-import { INIT_SQL } from "./harness";
+import { DELIVERY_SQL, INIT_SQL } from "./harness";
 
 const TABLES = ["lp_ticket_settings", "lp_ticket_types", "lp_ticket_orders", "lp_ticket_order_items", "lp_ticket_coupons"];
+const DELIVERY_TABLES = ["lp_ticket_jobs", "lp_ticket_outbox", "lp_tickets"];
 type D1 = ReturnType<typeof memoryD1>["db"];
 
 async function all(db: D1, sql: string): Promise<unknown[]> {
@@ -41,11 +42,12 @@ describe("db/0001_init.sql", () => {
   it("the deploy schema gate reads this directory and finds nothing missing", async () => {
     const dir = fileURLToPath(new URL("../db", import.meta.url));
     const migrations = collectSqlDir(dir, "lp");
-    expect(migrations.map((m) => m.id)).toEqual(["0001_init"]);
+    expect(migrations.map((m) => m.id)).toEqual(["0001_init", "0002_delivery"]);
     const empty = await verifySchema(memoryD1().db, migrations, { readOnly: true });
-    expect(empty.missingTables.filter((t) => t !== "dub_migrations").sort()).toEqual([...TABLES].sort());
+    expect(empty.missingTables.filter((t) => t !== "dub_migrations").sort()).toEqual([...TABLES, ...DELIVERY_TABLES].sort());
     const { db } = memoryD1();
     await db.exec(INIT_SQL);
+    await db.exec(DELIVERY_SQL);
     const res = await verifySchema(db, migrations, { readOnly: true });
     expect(res.missingTables.filter((t) => t !== "dub_migrations")).toEqual([]);
     expect(res.missingColumns).toEqual([]);
@@ -54,8 +56,22 @@ describe("db/0001_init.sql", () => {
   it("creates only the ticket tables and can be re-run", async () => {
     const { db } = memoryD1();
     await db.exec(INIT_SQL);
+    await db.exec(DELIVERY_SQL);
     await db.exec(INIT_SQL);
+    await db.exec(DELIVERY_SQL);
     const rows = (await all(db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")) as { name: string }[];
-    expect(rows.map((r) => r.name)).toEqual([...TABLES].sort());
+    expect(rows.map((r) => r.name)).toEqual([...TABLES, ...DELIVERY_TABLES].sort());
+  });
+
+  it("0002 is purely additive: 0001's tables keep their exact columns and rows", async () => {
+    const { db } = memoryD1();
+    await db.exec(INIT_SQL);
+    await db.prepare("INSERT INTO lp_ticket_settings (site, updated_at) VALUES ('s', 't')").run();
+    const before = await shape(db);
+    await db.exec(DELIVERY_SQL);
+    const after = (await shape(db)) as Record<string, { columns: unknown; indexes: { name: string }[] }>;
+    for (const t of TABLES) expect(after[t]!.columns).toEqual((before as typeof after)[t]!.columns);
+    expect(after.lp_ticket_orders!.indexes.map((i) => i.name)).toContain("idx_lp_ticket_orders_paid");
+    expect(await all(db, "SELECT site FROM lp_ticket_settings")).toEqual([{ site: "s" }]);
   });
 });
