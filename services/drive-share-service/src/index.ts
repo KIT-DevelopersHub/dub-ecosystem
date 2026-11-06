@@ -25,7 +25,7 @@ import { createD1GoogleAccountStore } from "./google-account-store";
 import { createGoogleAccountService, reconnectRequired, resolveDriveCredentials, type ResolvedCredentials } from "./google-account";
 import { importTokenKey } from "./google/crypto";
 import { mockForced, parseConfig, type Env } from "./env";
-import { buildAttendanceService, buildGoogleLinkService, buildMeetingsService } from "./meetings-wiring";
+import { buildAttendanceService, buildGoogleLinkService, buildMeetingsService, kickMeetingSync } from "./meetings-wiring";
 import { MeetingSyncDO } from "./meeting-sync-do";
 
 /** Pick the Drive client: real when an account is available (connected from Drive共有 > 設定, or
@@ -96,6 +96,7 @@ async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof cre
     orgId,
     now: nowIso,
     newId: () => newId("dsg"),
+    kick: () => kickMeetingSync(env),
   });
 
   const meetings = () => buildMeetingsService(env, reqCtx);
