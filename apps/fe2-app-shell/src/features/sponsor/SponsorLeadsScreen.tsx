@@ -11,6 +11,7 @@ import {
   FilterBar,
   FilterChips,
   Select,
+  Skeleton,
   SkeletonTable,
   TextField,
   type ColumnDef,
@@ -40,6 +41,9 @@ function StatusCell({ lead }: { lead: Lead }): JSX.Element {
   if (!canWrite || isTempLead(lead)) return <Badge tone={STATUS_TONE[lead.status]}>{lead.status}</Badge>;
   return (
     <span className={styles.leadStatus} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <label className={styles.srOnly} htmlFor={`sponsor-lead-status-${lead.id}`}>
+        {lead.companyName}のステータス
+      </label>
       <Select<sponsor.LeadStatus>
         id={`sponsor-lead-status-${lead.id}`}
         testId={`fe2-sponsor-lead-status-${lead.id}`}
@@ -198,7 +202,12 @@ export function SponsorLeadsScreen(): JSX.Element {
   let body: JSX.Element;
   if (list.isLoading) {
     body = (
-      <div data-testid="fe2-sponsor-leads-loading" aria-busy="true" aria-label="営業の進捗を読み込み中">
+      <div className={styles.leadsLoading} data-testid="fe2-sponsor-leads-loading" aria-busy="true" aria-label="営業の進捗を読み込み中">
+        <div className={styles.statGrid}>
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} variant="rect" width="100%" height="5.5rem" />
+          ))}
+        </div>
         <SkeletonTable rows={8} columns={8} />
       </div>
     );
@@ -257,7 +266,7 @@ export function SponsorLeadsScreen(): JSX.Element {
   }
 
   return (
-    <SponsorFrame active="leads" wide actions={canWrite ? addButtons : undefined}>
+    <SponsorFrame active="leads" wide actions={canWrite && list.data ? addButtons : undefined}>
       <>
         {all.length > 0 ? <Stats leads={all} /> : null}
         {all.length > 0 ? (

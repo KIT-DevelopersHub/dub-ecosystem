@@ -435,6 +435,21 @@
   font-variant-numeric: tabular-nums;
 }
 
+.leadsLoading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .leadStatus {
   display: inline-block;
   min-width: 8.5rem;
@@ -463,6 +478,13 @@
   display: flex;
   flex-direction: column;
   gap: var(--dub-space-2);
+}
+
+.importErrors {
+  margin: 0;
+  padding-left: var(--dub-space-5);
+  color: var(--dub-color-danger-600);
+  font-size: var(--dub-font-size-sm);
 }
 
 .importWarnings {

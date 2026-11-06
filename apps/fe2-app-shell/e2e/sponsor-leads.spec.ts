@@ -9,7 +9,7 @@ const stat = (page: import("@playwright/test").Page, key: string) => page.getByT
 
 const SHEET = [
   "No.\t企業名\t業界\t営業担当\tステータス\t想定協賛額（任意）\t次回アクション日",
-  "1\t（株）北陸テック\tIT・SaaS\t吉岡\t未接触\t\t",
+  "1\t（株）北陸テック\tIT・SaaS\t鈴木\t未接触\t\t",
   '2\t貼付テスト株式会社\tその他\t松島\t提案済\t¥150,000\t"2026/12/1"',
   "3\t\t\t\t\t\t",
 ].join("\n");

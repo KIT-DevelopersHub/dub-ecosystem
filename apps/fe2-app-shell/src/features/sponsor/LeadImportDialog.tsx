@@ -25,6 +25,7 @@ export function LeadImportDialog({ open, onClose, existing }: { open: boolean; o
   }, [parsed, existing]);
   const skipped = (parsed?.leads.length ?? 0) - fresh.length;
   const tooMany = fresh.length > sponsor.LEAD_IMPORT_MAX;
+  const errors = parsed?.errors ?? [];
 
   const close = () => {
     setText("");
@@ -52,6 +53,15 @@ export function LeadImportDialog({ open, onClose, existing }: { open: boolean; o
               {fresh.length} 社を追加します{skipped > 0 ? `（登録済みの ${skipped} 社は飛ばします）` : ""}。
               {tooMany ? ` 一度に取り込めるのは ${sponsor.LEAD_IMPORT_MAX} 社までです。` : ""}
             </p>
+            {errors.length > 0 ? (
+              <ul className={styles.importErrors} role="alert" data-testid="fe2-sponsor-lead-import-errors">
+                {errors.slice(0, WARNINGS_SHOWN).map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+                {errors.length > WARNINGS_SHOWN ? <li>ほか {errors.length - WARNINGS_SHOWN} 件</li> : null}
+                <li>シート側で短くしてから貼り直してください。</li>
+              </ul>
+            ) : null}
             {parsed.warnings.length > 0 ? (
               <ul className={styles.importWarnings} data-testid="fe2-sponsor-lead-import-warnings">
                 {parsed.warnings.slice(0, WARNINGS_SHOWN).map((w) => (
@@ -69,7 +79,7 @@ export function LeadImportDialog({ open, onClose, existing }: { open: boolean; o
           <Button
             size="lg"
             testId="fe2-sponsor-lead-import-submit"
-            disabled={fresh.length === 0 || tooMany || importLeads.isPending}
+            disabled={fresh.length === 0 || tooMany || errors.length > 0 || importLeads.isPending}
             onClick={() => importLeads.mutate(fresh, { onSuccess: close })}
           >
             {importLeads.isPending ? "取り込み中…" : `${fresh.length} 社を取り込む`}

@@ -5727,32 +5727,32 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
   const dayOn = (offset: number): string => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
   const leads: Lead[] = [
     lead("lead_demo_1", 1, {
-      companyName: "株式会社北陸テック", owner: "吉岡", contactName: "山田 太郎", contactRole: "事業開発部 部長", contactEmail: "yamada@hokuriku-tech.example.jp",
-      source: "北陸ITカンファレンス", contactType: "個人と直接（イベント）", priority: "S", plan: "Gold", status: "条件調整", firstContactOn: dayOn(-40), lastContactOn: dayOn(-3),
+      companyName: "株式会社北陸テック", owner: "鈴木", contactName: "山田 太郎", contactRole: "事業開発部 部長", contactEmail: "yamada@hokuriku-tech.example.jp",
+      source: "北陸ITカンファレンス", contactType: "イベントで面識あり", priority: "S", plan: "Gold", status: "条件調整", firstContactOn: dayOn(-40), lastContactOn: dayOn(-3),
       nextAction: "協賛内容の最終確認", nextActionOn: dayOn(4), expectedAmount: 300000, confidence: "高", budgetPeriod: "2026年度下期", decisionPeriod: "12月", note: "ロゴ掲載に加えて登壇枠を希望。",
     }),
     lead("lead_demo_2", 2, {
-      companyName: "金沢クラウド合同会社", owner: "前田", contactName: "中村 花", source: "紹介（OB）", contactType: "個人と直接（協賛実績）", priority: "A", plan: "Silver",
+      companyName: "金沢クラウド合同会社", owner: "前田", contactName: "中村 花", source: "紹介（OB）", contactType: "過去に協賛あり", priority: "A", plan: "Silver",
       status: "内諾", firstContactOn: dayOn(-60), lastContactOn: dayOn(-7), nextAction: "契約書を送付", nextActionOn: dayOn(-2), expectedAmount: 100000, confidence: "高",
     }),
     lead("lead_demo_3", 3, {
-      companyName: "能登ソフトウェア株式会社", owner: "吉岡", source: "問い合わせフォーム", contactType: "問い合わせ受付のみ", priority: "A", plan: "未定",
+      companyName: "能登ソフトウェア株式会社", owner: "鈴木", source: "問い合わせフォーム", contactType: "問い合わせのみ", priority: "A", plan: "未定",
       status: "社内検討", firstContactOn: dayOn(-20), lastContactOn: dayOn(-10), nextAction: "検討状況を確認", nextActionOn: dayOn(1),
     }),
     lead("lead_demo_4", 5, {
-      companyName: "加賀データサービス株式会社", owner: "森", source: "インターン", contactType: "個人と直接（インターン）", priority: "B", status: "提案予定",
+      companyName: "加賀データサービス株式会社", owner: "森", source: "インターン", contactType: "インターン先", priority: "B", status: "提案予定",
       firstContactOn: dayOn(-14), lastContactOn: dayOn(-5), nextAction: "協賛資料を作成", nextActionOn: dayOn(6),
     }),
     lead("lead_demo_5", 6, {
-      companyName: "白山モビリティ株式会社", industry: "製造", owner: "前田", source: "親戚", contactType: "初回連絡済み（個人未確認）", priority: "B", status: "返信あり",
+      companyName: "白山モビリティ株式会社", industry: "製造", owner: "前田", source: "知人の紹介", contactType: "担当者を確認中", priority: "B", status: "返信あり",
       firstContactOn: dayOn(-9), lastContactOn: dayOn(-4), nextAction: "打ち合わせ日程の調整",
     }),
     lead("lead_demo_6", 7, { companyName: "七尾ネットワークス株式会社", industry: "通信", owner: "森", source: "Hackit", priority: "B", status: "初回連絡", firstContactOn: dayOn(-6) }),
     lead("lead_demo_7", 8, { companyName: "小松リサーチ株式会社", industry: "コンサル", source: "Hackit", status: "初回連絡", firstContactOn: dayOn(-5) }),
-    lead("lead_demo_8", 9, { companyName: "輪島メディア株式会社", industry: "広告・メディア", owner: "松島", source: "親戚", status: "未接触" }),
+    lead("lead_demo_8", 9, { companyName: "輪島メディア株式会社", industry: "広告・メディア", owner: "松島", source: "知人の紹介", status: "未接触" }),
     lead("lead_demo_9", 10, { companyName: "珠洲エナジー株式会社", industry: "インフラ", source: "紹介候補", status: "未接触" }),
     lead("lead_demo_10", 12, {
-      companyName: "松任システムズ株式会社", owner: "吉岡", source: "インターン", contactType: "個人と直接（インターン）", plan: "その他", status: "見送り",
+      companyName: "松任システムズ株式会社", owner: "鈴木", source: "インターン", contactType: "インターン先", plan: "その他", status: "見送り",
       firstContactOn: dayOn(-50), lastContactOn: dayOn(-30), expectedAmount: 0, note: "今年度の予算が確保できず見送り。",
     }),
   ];

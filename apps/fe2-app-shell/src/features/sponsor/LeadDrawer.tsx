@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { Button, ConfirmDialog, DatePicker, Drawer, FormField, Select, TextField, Textarea } from "@dub/ui";
 import { DialogActions } from "@dub/app-ui";
 import { sponsor } from "@dub/types";
+import { ApiError } from "../../lib/api-client.tsx";
 import { useCompanies } from "./sponsorHooks.ts";
 import { useCreateLead, useRemoveLead, useUpdateLead } from "./leadHooks.ts";
 import { formatAmount, formatOn } from "./leads.ts";
@@ -150,7 +151,8 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
   const update = useUpdateLead();
   const remove = useRemoveLead();
   const { companies } = useCompanies();
-  const [editing, setEditing] = useState<LeadFormValues | null>(null);
+  // base = 編集を開いた時点の行。差分と expectedVersion の基準を固定し、途中の再取得で他の人の更新を上書きしない。
+  const [editing, setEditing] = useState<{ base: Lead; form: LeadFormValues } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [cardId, setCardId] = useState<string | null>(null);
 
@@ -163,12 +165,18 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
     return companies.find((c) => c.key === key)?.cards ?? [];
   }, [companies, lead]);
 
-  const save = (l: Lead, form: LeadFormValues) => {
+  const save = ({ base, form }: { base: Lead; form: LeadFormValues }) => {
     // 変えた項目だけ送る (無駄な version 更新で他の人の編集を 409 にしない)。
-    const before = fieldsFromForm(formFromLead(l));
+    const before = fieldsFromForm(formFromLead(base));
     const after = fieldsFromForm(form);
     const changed: Partial<sponsor.LeadFields> = Object.fromEntries(ALL_KEYS.filter((k) => after[k] !== before[k]).map((k) => [k, after[k]]));
-    if (Object.keys(changed).length > 0) update.mutate({ lead: l, fields: changed });
+    if (Object.keys(changed).length > 0) {
+      update.mutate(
+        { lead: base, fields: changed },
+        // 通信失敗なら入力を戻す。409 は最新を読み直して見てもらうので戻さない。
+        { onError: (err) => !(ApiError.isApiError(err) && err.status === 409) && setEditing({ base, form }) },
+      );
+    }
     setEditing(null);
   };
 
@@ -179,12 +187,12 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
           <div className={styles.detail} data-testid="fe2-sponsor-lead-detail">
             {editing ? (
               <div className={styles.detailSection}>
-                <LeadForm idPrefix={`sponsor-lead-${lead.id}`} value={editing} onChange={setEditing} />
+                <LeadForm idPrefix={`sponsor-lead-${lead.id}`} value={editing.form} onChange={(form) => setEditing({ ...editing, form })} />
                 <DialogActions>
                   <Button variant="secondary" size="lg" testId="fe2-sponsor-lead-edit-cancel" onClick={() => setEditing(null)}>
                     キャンセル
                   </Button>
-                  <Button size="lg" testId="fe2-sponsor-lead-edit-save" disabled={!formValid(editing)} onClick={() => save(lead, editing)}>
+                  <Button size="lg" testId="fe2-sponsor-lead-edit-save" disabled={!formValid(editing.form)} onClick={() => save(editing)}>
                     保存する
                   </Button>
                 </DialogActions>
@@ -221,7 +229,7 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
                 {canWrite || canAdmin ? (
                   <div className={styles.inlineActions}>
                     {canWrite ? (
-                      <Button testId="fe2-sponsor-lead-edit" onClick={() => setEditing(formFromLead(lead))}>
+                      <Button testId="fe2-sponsor-lead-edit" onClick={() => setEditing({ base: lead, form: formFromLead(lead) })}>
                         編集する
                       </Button>
                     ) : null}

@@ -15,7 +15,6 @@ export const isTempLead = (l: Pick<sponsor.SponsorLead, "id">): boolean => l.id.
 
 type Lead = sponsor.SponsorLead;
 type List = sponsor.ListLeadsResponse;
-type ListCtx = { prev: List | undefined };
 
 function messageFor(err: unknown, fallback: string): string {
   return ApiError.isApiError(err) ? toDisplayableError(err).message : fallback;
@@ -26,9 +25,11 @@ function patchList(qc: QueryClient, fn: (leads: Lead[]) => Lead[]): void {
 }
 const replaceLead = (qc: QueryClient, id: string, next: Lead) => patchList(qc, (leads) => leads.map((l) => (l.id === id ? next : l)));
 
-async function snapshot(qc: QueryClient): Promise<ListCtx> {
-  await qc.cancelQueries({ queryKey: LEADS_KEY, exact: true });
-  return { prev: qc.getQueryData<List>(LEADS_KEY) };
+const cancelRefetch = (qc: QueryClient) => qc.cancelQueries({ queryKey: LEADS_KEY, exact: true });
+
+/** 他の人が消した行 (404) は一覧を読み直して消す。 */
+function refetchIfGone(qc: QueryClient, err: unknown): void {
+  if (ApiError.isApiError(err) && err.status === 404) void qc.invalidateQueries({ queryKey: LEADS_KEY });
 }
 
 export function useLeads() {
@@ -44,10 +45,10 @@ export function useCreateLead() {
   const toast = useToast();
   const auth = useAuth();
   const me = auth.status === "authenticated" ? auth.me.user : null;
-  return useMutation<Lead, unknown, sponsor.LeadFields, ListCtx & { tempId: string }>({
+  return useMutation<Lead, unknown, sponsor.LeadFields, { tempId: string }>({
     mutationFn: (fields) => api.createLead(fields),
     onMutate: async (fields) => {
-      const ctx = await snapshot(qc);
+      await cancelRefetch(qc);
       const now = new Date().toISOString();
       const tempId = `${TEMP_PREFIX}${Date.now()}_${++tempSeq}`;
       const temp: Lead = {
@@ -55,10 +56,10 @@ export function useCreateLead() {
         createdAt: now, updatedAt: now,
       };
       patchList(qc, (leads) => [temp, ...leads]);
-      return { ...ctx, tempId };
+      return { tempId };
     },
     onError: (err, _fields, ctx) => {
-      if (ctx?.prev) qc.setQueryData(LEADS_KEY, ctx.prev);
+      if (ctx) patchList(qc, (leads) => leads.filter((l) => l.id !== ctx.tempId));
       toast.show({ kind: "error", title: messageFor(err, "企業を追加できませんでした") });
     },
     onSuccess: (lead, _fields, ctx) => replaceLead(qc, ctx.tempId, lead),
@@ -70,15 +71,15 @@ export function useUpdateLead() {
   const api = useSponsorApi();
   const qc = useQueryClient();
   const toast = useToast();
-  return useMutation<Lead, unknown, { lead: Lead; fields: Partial<sponsor.LeadFields> }, ListCtx>({
+  return useMutation<Lead, unknown, { lead: Lead; fields: Partial<sponsor.LeadFields> }>({
     mutationFn: ({ lead, fields }) => api.updateLead(lead.id, { ...fields, expectedVersion: lead.version }),
     onMutate: async ({ lead, fields }) => {
-      const ctx = await snapshot(qc);
+      await cancelRefetch(qc);
       replaceLead(qc, lead.id, { ...lead, ...fields });
-      return ctx;
     },
-    onError: (err, { lead }, ctx) => {
-      if (ctx?.prev) qc.setQueryData(LEADS_KEY, ctx.prev);
+    onError: (err, { lead }) => {
+      replaceLead(qc, lead.id, lead);
+      refetchIfGone(qc, err);
       if (ApiError.isApiError(err) && err.status === 409) {
         toast.show({ kind: "error", title: "他の人が更新しました", description: "最新の内容を読み込みました。確認してからもう一度編集してください。" });
         void api.getLead(lead.id).then(
@@ -97,15 +98,15 @@ export function useRemoveLead() {
   const api = useSponsorApi();
   const qc = useQueryClient();
   const toast = useToast();
-  return useMutation<void, unknown, Lead, ListCtx>({
+  return useMutation<void, unknown, Lead>({
     mutationFn: (lead) => api.removeLead(lead.id),
     onMutate: async (lead) => {
-      const ctx = await snapshot(qc);
+      await cancelRefetch(qc);
       patchList(qc, (leads) => leads.filter((l) => l.id !== lead.id));
-      return ctx;
     },
-    onError: (err, _lead, ctx) => {
-      if (ctx?.prev) qc.setQueryData(LEADS_KEY, ctx.prev);
+    onError: (err, lead) => {
+      patchList(qc, (leads) => [lead, ...leads]);
+      refetchIfGone(qc, err);
       toast.show({ kind: "error", title: messageFor(err, "削除できませんでした") });
     },
   });

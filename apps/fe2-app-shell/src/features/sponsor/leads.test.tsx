@@ -24,7 +24,7 @@ const VIEWER = viewerPermissions("sponsor", ["sponsor:read"]);
 
 function lead(over: Partial<sponsor.SponsorLead> = {}): sponsor.SponsorLead {
   return {
-    id: "lead_1", companyName: "株式会社北陸テック", industry: null, owner: "吉岡", contactName: null, contactRole: null, contactEmail: null,
+    id: "lead_1", companyName: "株式会社北陸テック", industry: null, owner: "鈴木", contactName: null, contactRole: null, contactEmail: null,
     source: null, contactType: null, evidence: null, priority: null, plan: null, status: "未接触", firstContactOn: null, lastContactOn: null,
     nextAction: null, nextActionOn: null, expectedAmount: null, confidence: null, budgetPeriod: null, decisionPeriod: null, note: null,
     version: 1, createdBy: "usr_1" as sponsor.SponsorLead["createdBy"], createdByName: "鈴木 一郎",
@@ -90,11 +90,17 @@ describe("貼り付けの解釈", () => {
     ]);
     // 値の途中や閉じていない " はそのまま。
     expect(parseTsv('5" monitor\tb\n"open\tc')).toEqual([['5" monitor', "b"], ['"open', "c"]]);
+    // 不揃いの " で次の行を飲み込まない。
+    expect(parseTsv('A\t"至急\t担当\nB\tメモ\t確認済"\n')).toEqual([
+      ["A", '"至急', "担当"],
+      ["B", "メモ", '確認済"'],
+    ]);
   });
 
   it("parses dates and yen", () => {
     expect(parseDate("2026/9/1")).toBe("2026-09-01");
     expect(parseDate("2026-09-01")).toBe("2026-09-01");
+    expect(parseDate("2026年9月1日")).toBe("2026-09-01");
     expect(parseDate("9/1")).toBeNull();
     expect(parseDate("2026/02/31")).toBeNull();
     expect(parseAmount("¥300,000")).toBe(300000);
@@ -112,7 +118,7 @@ describe("貼り付けの解釈", () => {
     ].join("\n");
     const { leads, noHeader, warnings } = parseLeadSheet(sheet);
     expect(noHeader).toBe(false);
-    expect(warnings).toEqual([]);
+    expect(warnings).toEqual(["次の列は読み取りません: 謎の列"]);
     expect(leads).toEqual([
       { status: "内諾", companyName: "株式会社A", expectedAmount: 100000, contactEmail: "a@example.jp／b@example.jp（CC）", nextActionOn: "2026-11-30" },
       { status: "未接触", companyName: "B" },
@@ -127,6 +133,23 @@ describe("貼り付けの解釈", () => {
     expect(warnings[0]).toContain("ステータス「商談中」");
     expect(warnings[0]).toContain("検討プラン「Diamond」");
     expect(warnings[0]).toContain("初回連絡日「来週」");
+  });
+
+  it("treats なし / - as blank in every column, but keeps 未定 as a plan", () => {
+    const { leads, warnings } = parseLeadSheet("企業名\t営業担当\t検討プラン\t確度\t次回アクション\nA\t-\t未定\tなし\tなし");
+    expect(leads).toEqual([{ companyName: "A", plan: "未定" }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("reads half-width and spaced headers", () => {
+    const { leads, warnings } = parseLeadSheet("企業名\t想定協賛額(任意)\t確度 （任意）\nA\t100\t高");
+    expect(leads).toEqual([{ companyName: "A", expectedAmount: 100, confidence: "高" }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("reports values too long to save instead of letting the whole import fail", () => {
+    const { errors } = parseLeadSheet(`企業名\t次回アクション\tメモ\nA\t${"x".repeat(201)}\t${"y".repeat(2000)}`);
+    expect(errors).toEqual(["A: 次回アクション が長すぎます"]);
   });
 
   it("reports a missing header", () => {
@@ -193,6 +216,46 @@ describe("営業タブ", () => {
     await act(async () => reject(new ApiError(409, { error: { code: "SPONSOR_VERSION_CONFLICT", message: "x", retryable: false } } as never)));
     expect(await screen.findByText("他の人が更新しました")).toBeTruthy();
     await waitFor(() => expect((screen.getByTestId("fe2-sponsor-lead-status-lead_1") as HTMLSelectElement).value).toBe("返信あり"));
+  });
+
+  it("keeps the base version while editing, so a refetch cannot silently overwrite someone else's change", async () => {
+    const update = vi.fn((_id: string, _body: sponsor.UpdateLeadRequest) => Promise.reject(new ApiError(409, { error: { code: "SPONSOR_VERSION_CONFLICT", message: "x", retryable: false } } as never)));
+    let current = lead({ nextAction: "A の値" });
+    const api: SponsorApi = {
+      ...demoApi(),
+      listLeads: () => Promise.resolve({ leads: [current] }),
+      getLead: () => Promise.resolve(current),
+      updateLead: update as never,
+    };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <FakeAuthProvider permissions={ADMIN}>
+            <SponsorApiProvider value={api}>
+              <SponsorLeadsScreen />
+            </SponsorApiProvider>
+          </FakeAuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-lead-lead_1"));
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-lead-edit"));
+    fireEvent.change(screen.getByTestId("fe2-sponsor-lead-field-owner"), { target: { value: "佐藤" } });
+    // 編集中に他の人の更新が届く。
+    current = lead({ nextAction: "B の値", version: 2 });
+    await act(async () => client.invalidateQueries());
+    fireEvent.click(screen.getByTestId("fe2-sponsor-lead-edit-save"));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0]![1]).toEqual({ owner: "佐藤", expectedVersion: 1 });
+  });
+
+  it("blocks the import while a value is too long", async () => {
+    renderScreen(demoApi());
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-lead-import-open"));
+    fireEvent.change(await screen.findByTestId("fe2-sponsor-lead-import-text"), { target: { value: `企業名\t次回アクション\n長い株式会社\t${"x".repeat(201)}` } });
+    expect(screen.getByTestId("fe2-sponsor-lead-import-errors").textContent).toContain("長い株式会社: 次回アクション が長すぎます");
+    expect((screen.getByTestId("fe2-sponsor-lead-import-submit") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("adds a company through the form, and requires a name", async () => {
