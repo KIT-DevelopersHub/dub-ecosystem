@@ -43,7 +43,7 @@ describe("role x endpoint matrix (frozen)", () => {
 
   it("every internal route is INTERNAL (no key opens them)", () => {
     const internal = Object.entries(POLICY_TABLE).filter(([route]) => route.includes("/internal/"));
-    expect(internal.length).toBe(6);
+    expect(internal.length).toBe(7);
     for (const [, rule] of internal) expect(rule).toBe("internal");
   });
 });

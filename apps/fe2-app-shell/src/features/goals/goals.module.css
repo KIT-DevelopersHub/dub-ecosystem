@@ -1,0 +1,209 @@
+/* 目標管理のローカルスタイル。色・余白・字は @dub/tokens の CSS 変数を使う。 */
+.page {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.note {
+  margin: 0;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}
+
+.monthBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+.month {
+  min-width: 7em;
+  text-align: center;
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.flip {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  gap: var(--dub-space-5);
+  align-items: start;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-5);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-raised);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  min-height: 32px;
+}
+
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-border-strong);
+}
+
+.teamName {
+  flex: 1;
+  margin: 0;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-md);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.title {
+  margin: 0;
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.total {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+.totalPercent {
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-2xl);
+  font-weight: var(--dub-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  position: relative;
+  height: 8px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-border-default);
+}
+
+.meterFill {
+  height: 100%;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-brand-500);
+  transition: width 0.2s ease;
+}
+
+/* 月の経過の目印。棒の色と重なっても見えるよう、地の色の縁を付ける。 */
+.meterPace {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--dub-color-text-primary);
+  box-shadow: 0 0 0 1px var(--dub-color-surface-raised);
+}
+
+.kpis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+  margin: var(--dub-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+
+.kpiHead,
+.kpiFoot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+}
+
+.kpiName {
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.kpiPercent {
+  flex: none;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpiFoot {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+
+.unset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--dub-space-3);
+}
+
+/* ── 編集ドロワー ───────────────────────────────────── */
+/* Drawer の本文は自前でスクロールしないので、ここをスクロール領域にする。 */
+.drawerScroll {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.linkBar {
+  display: flex;
+}
+
+.kpiForm {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+  padding: var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+}
+
+.kpiLegend {
+  padding: 0 var(--dub-space-1);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}
+
+.kpiRemove {
+  position: absolute;
+  top: var(--dub-space-2);
+  right: var(--dub-space-2);
+}
+
+.kpiNumbers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--dub-space-3);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--dub-space-3);
+}

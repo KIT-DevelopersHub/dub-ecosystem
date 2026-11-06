@@ -141,6 +141,22 @@ export class InMemoryTaskRepo implements TaskRepo {
       .map((r) => ({ id: r.id, teamId: r.teamId ?? null }));
   }
 
+  async teamMonthCounts(month: string): Promise<Array<{ teamId: string; dueTotal: number; dueDone: number }>> {
+    const live = [...this.rows.values()].filter((r) => r.archivedAt === null);
+    const parents = new Set(live.map((r) => r.parentTaskId));
+    const counts = new Map<string, { teamId: string; dueTotal: number; dueDone: number }>();
+    for (const r of live) {
+      if (!r.teamId || r.status === "cancelled" || !r.dueAt || parents.has(r.id)) continue;
+      const jst = new Date(Date.parse(r.dueAt) + 9 * 3_600_000).toISOString().slice(0, 7);
+      if (jst !== month) continue;
+      const c = counts.get(r.teamId) ?? { teamId: r.teamId, dueTotal: 0, dueDone: 0 };
+      c.dueTotal += 1;
+      if (r.status === "done") c.dueDone += 1;
+      counts.set(r.teamId, c);
+    }
+    return [...counts.values()];
+  }
+
   async liveChildrenTeams(parentId: string): Promise<Array<common.TeamId | null>> {
     const teams = new Set<common.TeamId | null>();
     for (const r of this.rows.values()) {

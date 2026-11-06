@@ -203,6 +203,7 @@
   "task-service": {
     "missingInSpec": [
       "DELETE /tasks/calendar-events/{}",
+      "GET /internal/goal-metrics",
       "PATCH /tasks/calendar-events/{}",
       "POST /tasks/calendar-events"
     ],
