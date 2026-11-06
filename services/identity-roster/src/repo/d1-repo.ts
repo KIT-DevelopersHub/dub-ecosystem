@@ -227,6 +227,14 @@ export class D1IdentityRepo implements IdentityRepo {
     binds.push(userId);
     await this.db.run(`UPDATE identity_users SET ${sets.join(", ")} WHERE id = ?`, ...binds);
   }
+  async activateIfInvited(userId: string, updatedAt: string): Promise<boolean> {
+    const res = await this.db.run(
+      "UPDATE identity_users SET status = 'active', updated_at = ? WHERE id = ? AND status = 'invited'",
+      updatedAt,
+      userId,
+    );
+    return res.meta.changes > 0;
+  }
   async listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]> {
     const rows = await this.db.all<UserDb>(
       "SELECT * FROM identity_users WHERE org_id = ? AND source = ? ORDER BY id",

@@ -8,6 +8,8 @@ import type { HrRepo } from "./hr-repo";
 import type { HrFormRepo } from "./hr-form-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
 import type { RoleSyncPort } from "./roleSync";
+import type { ProfileReminderTarget } from "./profileReminder";
+import type { IdentityActivationPort } from "./identityActivation";
 
 export type MemberStatus = member.MemberStatus;
 export const MEMBER_STATUSES = ["added", "invited", "considering", "on_leave", "declined"] as const;
@@ -201,6 +203,9 @@ export interface AppDeps {
   /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
    *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
   roleSync?: RoleSyncPort;
+  /** 在籍で紐付いた人の招待中アカウントを有効化 (identity-roster)。index.ts で SVC_IDENTITY に
+   *  結線。undefined なら有効化しない (単体テスト等)。名簿の保存は成否に関わらず成功する。 */
+  identityActivation?: IdentityActivationPort;
   /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
    *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
    *  without the binding, in which case the submission simply skips the notify. Must
@@ -209,4 +214,7 @@ export interface AppDeps {
     ctx: { requestId: string; userId: string },
     participation: member.Participation,
   ) => Promise<void>;
+  /** 情報が足りない本人への催促 (notification-service)。best-effort ではなく、失敗は
+   *  操作した管理者へ返す。undefined なら催促できない (binding の無い環境)。 */
+  sendProfileReminder?: (ctx: { requestId: string; userId: string }, target: ProfileReminderTarget) => Promise<{ deduplicated: boolean }>;
 }

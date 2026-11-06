@@ -292,6 +292,7 @@ export const MEMBER: AreaSpec = {
   excluded: [
     { service: M, route: "POST /members/teams", reason: "依頼範囲外。チームの削除を開放しないため、作ったチームを取り消せない" },
     { service: M, route: "DELETE /members/teams/:id", reason: "チームを物理削除し、所属の紐付けも消える（不可逆）" },
+    { service: M, route: "POST /members/people/:id/profile-reminder", reason: "本人の受信箱とプッシュに直接届き、送った通知は取り消せない（運営名簿で管理者が対象を確認して送る操作）" },
     { service: M, route: "DELETE /members/people/:id", reason: "アーカイブ後は API から見えず戻せない。チーム所属も物理削除される（不可逆）" },
     { service: M, route: "POST /members/participation/:id/resolve", reason: "参加届の紐付け。取り消す API が無い（不可逆）" },
     { service: M, route: "POST /members/participation", reason: "参加届を出す側の操作で、ボットが出す用途が無い" },

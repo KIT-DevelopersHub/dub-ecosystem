@@ -35,8 +35,26 @@ test("drift card lists shares that differ from the role grants and follows a fix
   await expect(page.getByTestId("fe2-driveshare-permission").filter({ hasText: "ikeda.h@gmail.com" })).toBeVisible();
   await card.screenshot({ path: test.info().outputPath("02-clean.png") });
 
-  // A file without any role grant has nothing to compare with.
+  // A file without any role grant: whoever it is still shared with is outside the roles.
   await page.getByTestId("fe2-driveshare-search").fill("予算管理");
   await page.getByTestId("fe2-driveshare-file").filter({ hasText: "予算管理" }).click();
-  await expect(card.getByTestId("fe2-driveshare-drift-nobaseline")).toBeVisible();
+  await expect(card.getByTestId("fe2-driveshare-drift-noroles")).toBeVisible();
+  await expect(card.getByTestId("fe2-driveshare-drift-unexpected")).toContainText("sponsor@example.com");
+});
+
+test("removing every role from a file still shows the shares left behind", async ({ page }) => {
+  await page.goto("/driveshare");
+  await page.getByTestId("fe2-driveshare-search").fill("Hackit 2026");
+  await page.getByTestId("fe2-driveshare-file").filter({ hasText: "Hackit 2026 共有" }).click();
+
+  const card = page.getByTestId("fe2-driveshare-drift");
+  await expect(card.getByTestId("fe2-driveshare-drift-badge")).toHaveText("差分 4件");
+
+  await page.getByTestId("fe2-driveshare-role-grant-revoke").click();
+  await page.getByRole("button", { name: "解除する" }).click();
+
+  await expect(card.getByTestId("fe2-driveshare-drift-noroles")).toBeVisible();
+  await expect(card.getByTestId("fe2-driveshare-drift-badge")).toHaveText("差分 1件");
+  await expect(card.getByTestId("fe2-driveshare-drift-unexpected")).toContainText("staff-a@example.com");
+  await card.screenshot({ path: test.info().outputPath("03-no-roles.png") });
 });

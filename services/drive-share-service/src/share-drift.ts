@@ -10,7 +10,8 @@
 //   • an INHERITED permission is decided by the ancestor folder, not this item, so it is
 //     never reported as unexpected / stronger-than-the-role here (it still counts as access
 //     for the "missing" check — the member can open the file);
-//   • a file with no role grant has no baseline -> no items (every share would be "drift").
+//   • a file with no role grant expects nobody, so every direct share on it is unexpected —
+//     that is exactly what is left behind after the last role is removed.
 import type {
   AssignableDriveRole,
   FileShareDrift,
@@ -49,9 +50,6 @@ export function computeShareDrift(
       }
     }
   }
-
-  const base = { fileId, grantCount: grants.length, expectedCount: expected.size };
-  if (grants.length === 0) return { ...base, matchedCount: 0, items: [] };
 
   const items: ShareDriftItem[] = [];
   const seen = new Set<string>();
@@ -102,5 +100,5 @@ export function computeShareDrift(
     });
   }
 
-  return { ...base, matchedCount, items };
+  return { fileId, grantCount: grants.length, expectedCount: expected.size, matchedCount, items };
 }

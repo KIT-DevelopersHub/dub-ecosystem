@@ -105,7 +105,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.get("/members/internal/team-members", async (c) => {
     const raw = c.req.query("teamIds") ?? "";
     const teamIds = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-    return c.json(await svc.listTeamIdentityUserIds(teamIds));
+    // excludeDeclined: a team mailing list delivers mail bodies, so someone who left must not
+    // keep receiving them. Mentions omit it and keep notifying the whole roster as before.
+    return c.json(await svc.listTeamIdentityUserIds(teamIds, { excludeDeclined: c.req.query("excludeDeclined") === "1" }));
   });
 
   // 名簿の Gmail 逆引き (drive-share-service → member-service, s2s のみ). カレンダー > ミーティングの
@@ -187,6 +189,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.post("/members/people/:id/identity-link", async (c) => {
     const body = await readJson<member.LinkIdentityRequest>(c);
     return c.json(await svc.linkIdentity(reqCtx(c), c.req.param("id"), body));
+  });
+  app.post("/members/people/:id/profile-reminder", async (c) => {
+    return c.json(await svc.sendProfileReminder(reqCtx(c), c.req.param("id")));
   });
   app.patch("/members/people/:id", async (c) => {
     const body = await readJson<member.UpdateMemberRequest>(c);
