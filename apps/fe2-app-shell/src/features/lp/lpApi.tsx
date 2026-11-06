@@ -143,10 +143,12 @@ export interface LpPublishState {
 }
 
 // ── チケット販売（/tickets）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
-export type LpTicketFieldType = "text" | "textarea" | "select" | "checkbox";
+export type LpTicketFieldType = lp.LpFieldType;
 export interface LpTicketField {
   id: string;
   label: string;
+  /** 回答者に見せる補足説明（無ければキーごと持たない）。 */
+  description?: string;
   type: LpTicketFieldType;
   required: boolean;
   options: string[];
