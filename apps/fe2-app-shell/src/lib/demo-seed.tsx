@@ -1661,6 +1661,19 @@ const SEED_ROLES: DemoRole[] = [
   { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
   // 統括: also reads the maintainer + member roles' inbound mail (メール > 詳細設定).
   { id: "role_lead", orgId: ORG, name: "統括", permissions: [...MEMBER_PERMISSIONS, "app:mail:view", "mail:read"], isSystem: false, mailVisibleRoleIds: ["role_maintainer", "role_member"] },
+  // Prod-shaped extras so ロール管理's genre sections (運営 / チーム / 役職 / その他) all have rows.
+  ...[
+    ["role_ops_dev", "開発"],
+    ["role_ops_dayof", "当日運営"],
+    ["role_ops_sponsor", "スポンサー"],
+    ["role_ops_legal", "法務会計"],
+    ["role_auto_team_dev", "チーム: 開発チーム"],
+    ["role_auto_team_pr", "チーム: 広報チーム"],
+    ["role_auto_team_venue", "チーム: 会場チーム"],
+    ["role_auto_position_member", "役職: Member"],
+    ["role_auto_position_leader", "役職: Leader"],
+    ["role_demo_commander_bot", "commander-bot"],
+  ].map(([id, name]): DemoRole => ({ id: id!, orgId: ORG, name: name!, permissions: [...MEMBER_PERMISSIONS], isSystem: false, mailVisibleRoleIds: [] })),
 ];
 
 // FE7's RoleAssignment (contracts/pending) — org-wide (resource fields null) here.
@@ -1728,6 +1741,7 @@ function createRosterStore() {
   for (const [k, v] of Object.entries(SEED_USER_ROLES)) assignments[k] = v.map((a) => ({ ...a }));
   const audits: auditLog.AuditRecord[] = SEED_AUDITS.map((a) => ({ ...a }));
   const emails: DemoEmailAddress[] = SEED_EMAIL_ADDRESSES.map((a) => ({ ...a }));
+  let teamLists: mail.MailTeamList[] = [];
 
   const rid = (prefix: string): string => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
   const summaries = (): identity.UserSummary[] => users.map((u) => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
@@ -1800,6 +1814,7 @@ function createRosterStore() {
       // /issued-addresses（zone ルール由来）に合わせる。旧 /addresses（アカウント送信先）はもう
       // フロントから呼ばれない。
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") return json(page(emails));
+      if (pathname === "/api/v1/mail/admin/lists") return json({ items: teamLists });
       // 名簿同期のソース: 受信アドレス（address/destination/enabled）。sync/preview がまず取得する。
       if (pathname === "/api/v1/mail/admin/email-routing/roster-addresses") {
         return json({ items: emails.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })) });
@@ -1844,6 +1859,15 @@ function createRosterStore() {
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         // 実 identity-roster と同じ { user } 形 (InviteUserResponse)。
         return json({ user }, 201);
+      }
+      if (pathname === "/api/v1/mail/admin/lists") {
+        const req = body as mail.MailTeamListCreateRequest;
+        const localPart = req?.localPart?.trim().toLowerCase() ?? "";
+        if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
+        if (emails.some((a) => a.localPart === localPart) || teamLists.some((l) => l.localPart === localPart)) return problem("CONFLICT", "このアドレスは既に使われています", 409);
+        const list: mail.MailTeamList = { id: rid("list"), address: `${localPart}@${EMAIL_DOMAIN}`, localPart, teamId: req.teamId, createdAt: new Date().toISOString() };
+        teamLists.push(list);
+        return json(list);
       }
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
@@ -1938,6 +1962,11 @@ function createRosterStore() {
         }
       }
       {
+        const listId = seg(/^\/api\/v1\/mail\/admin\/lists\/([^/]+)$/);
+        if (listId) {
+          teamLists = teamLists.filter((l) => l.id !== listId);
+          return json({ id: listId });
+        }
         const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const idx = emails.findIndex((a) => a.id === id);
@@ -3608,7 +3637,7 @@ function createDriveShareStore() {
     // info@/admin@ are Cloudflare Email-Routing aliases with NO Google account (mirrors
     // the real bug): they ARE shared, but only via an invite, so their access is pending.
     role_admin: ["info@developershub.jp", "admin@developershub.jp"],
-    role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp"],
+    role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp", "ryoma@developershub.jp"],
     // The last address has no Google account AND is invalid: the fan-out applies the
     // others and reports this one as skipped, instead of failing the whole role.
     role_member: ["ichiro@developershub.jp", "jiro@developershub.jp", "ghost-no-account@example.invalid"],
@@ -3616,6 +3645,13 @@ function createDriveShareStore() {
   // Addresses that have no backing Google account → shareable only via an invite
   // (pending). Mirrors real Email-Routing aliases like info@/admin@developershub.jp.
   const NO_GOOGLE_ACCOUNT = new Set(["info@developershub.jp", "admin@developershub.jp"]);
+  // 名簿 Gmail: role sharing goes to it instead of the login address (mirrors the service).
+  const DEMO_GMAIL: Record<string, string> = { "ikeda@developershub.jp": "ikeda.h@gmail.com" };
+  // Login addresses Drive refuses outright (403 cannotInviteNonGoogleUser) while no Gmail is known.
+  const REFUSES_NON_GOOGLE = new Set(["ryoma@developershub.jp"]);
+  const NO_GMAIL_REASON =
+    "Google アカウントの無いアドレスのため共有できません。名簿にこのメンバーの Gmail を登録すると、そのアドレスで共有されます。";
+  const shareEmailOf = (email: string): string => DEMO_GMAIL[email] ?? email;
   interface DemoRoleGrant {
     id: string;
     fileId: string;
@@ -3630,7 +3666,8 @@ function createDriveShareStore() {
   }
   const roleGrants: DemoRoleGrant[] = [];
   // 「ロールとの差分」 sample: maintainer is 編集 on Hackit 2026 共有, but in Drive someone
-  // lowered araki to 閲覧, ikeda was never shared, and staff-a (no role) still has 編集.
+  // lowered araki to 閲覧, ikeda (名簿 Gmail) and ryoma (no Gmail) were never shared, and
+  // staff-a (no role) still has 編集.
   {
     const root = byId.get("fld_root")!;
     root.permissions.push(
@@ -3639,7 +3676,7 @@ function createDriveShareStore() {
     );
     roleGrants.push({
       id: "rg_seed_root", fileId: "fld_root", roleId: "role_maintainer", roleName: "maintainer", driveRole: "writer",
-      memberCount: 3, appliedCount: 2, grantedBy: "demo@developershub.jp", grantedAt: "2026-08-10T10:00:00Z",
+      memberCount: 4, appliedCount: 2, grantedBy: "demo@developershub.jp", grantedAt: "2026-08-10T10:00:00Z",
       permIds: ["perm_role_taro", "perm_role_araki"],
     });
   }
@@ -3654,12 +3691,16 @@ function createDriveShareStore() {
   // real service: a malformed email is skipped with a reason; a no-Google-account address
   // is applied but flagged `invited` (pending); the rest apply normally — a partial
   // success, never an all-or-nothing failure.
-  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant): FanResult => {
-    const emails = roleMembers[g.roleId] ?? [];
+  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant, emails: readonly string[] = roleMembers[g.roleId] ?? []): FanResult => {
     const skipped: { email: string; reason: string }[] = [];
     const invited: { email: string }[] = [];
     let applied = 0;
-    for (const email of emails) {
+    for (const member of emails) {
+      const email = shareEmailOf(member);
+      if (REFUSES_NON_GOOGLE.has(email)) {
+        skipped.push({ email, reason: NO_GMAIL_REASON });
+        continue;
+      }
       if (!EMAIL_RE.test(email) || email.endsWith(".invalid")) {
         skipped.push({ email, reason: "このメールアドレスとは共有できませんでした（Googleアカウントが無い、または無効なアドレスです）。" });
         continue;
@@ -3670,7 +3711,7 @@ function createDriveShareStore() {
       applied++;
       if (NO_GOOGLE_ACCOUNT.has(email)) invited.push({ email }); // shared via invite → pending
     }
-    g.appliedCount = applied;
+    g.appliedCount += applied;
     return { skipped, invited };
   };
   const clearFan = (f: DemoDriveFile, g: DemoRoleGrant): void => {
@@ -3691,7 +3732,8 @@ function createDriveShareStore() {
     const grants = roleGrants.filter((g) => g.fileId === f.id);
     const expected = new Map<string, { driveRole: DemoRoleGrant["driveRole"]; roleNames: string[] }>();
     for (const g of grants) {
-      for (const email of roleMembers[g.roleId] ?? []) {
+      for (const member of roleMembers[g.roleId] ?? []) {
+        const email = shareEmailOf(member);
         const cur = expected.get(email);
         if (!cur) expected.set(email, { driveRole: g.driveRole, roleNames: [g.roleName] });
         else {
@@ -3700,8 +3742,6 @@ function createDriveShareStore() {
         }
       }
     }
-    const base = { fileId: f.id, grantCount: grants.length, expectedCount: expected.size };
-    if (grants.length === 0) return { ...base, matchedCount: 0, items: [] };
     const items: Record<string, unknown>[] = [];
     const seen = new Set<string>();
     let matchedCount = 0;
@@ -3724,7 +3764,7 @@ function createDriveShareStore() {
       if (seen.has(email)) continue;
       items.push({ kind: "missing", permissionId: null, granteeType: "user", email, displayName: null, domain: null, actualRole: null, expectedRole: exp.driveRole, roleNames: exp.roleNames });
     }
-    return { ...base, matchedCount, items };
+    return { fileId: f.id, grantCount: grants.length, expectedCount: expected.size, matchedCount, items };
   };
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
@@ -3742,9 +3782,19 @@ function createDriveShareStore() {
       const f = byId.get(reapplyMatch[1]!);
       const g = roleGrants.find((x) => x.fileId === reapplyMatch[1]! && x.roleId === decodeURIComponent(reapplyMatch[2]!));
       if (!f || !g) return notFound(`${method} ${pathname}`);
-      clearFan(f, g);
-      const result = fanOut(f, g);
-      return json(grantView(g, result));
+      // Mirrors the service's per-request budget: two members per call, continued by cursor.
+      const members = roleMembers[g.roleId] ?? [];
+      const from = Number(url.searchParams.get("cursor") ?? 0);
+      if (from === 0) {
+        clearFan(f, g);
+        g.appliedCount = 0;
+      }
+      const result = fanOut(f, g, members.slice(from, from + 2));
+      const next = from + 2;
+      return json({
+        ...grantView(g, result),
+        ...(next < members.length ? { nextCursor: String(next), remaining: members.length - next } : {}),
+      });
     }
     const roleGrantItemMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)$/.exec(pathname);
     if (roleGrantItemMatch && method === "DELETE") {
@@ -4219,6 +4269,9 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
+      // 本番と同じ: 名簿に結ばれた人 (採用済み) は 409。
+      if (a.memberId !== null) return err("HR_APPLICANT_JOINED", 409);
+      hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });
     }
@@ -4346,6 +4399,13 @@ function createMembersStore() {
       const iid = decodeURIComponent(m[1]!);
       const mem = members.find((x) => x.identityUserId === iid);
       return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
+    }
+    // 情報不足の催促。デモでは通知を作らず、応答だけ返す。
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/profile-reminder$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      return json({ deduplicated: false, missing: memberValues.missingProfileKeys(mem) });
     }
     // link / unlink to an identity account (#1).
     m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
@@ -5031,7 +5091,7 @@ function createLpStore() {
 // Demo starts PUBLISHED but with paymentReady=false so the 「決済 未設定」 state is visible.
 // Event = 2027-09-13(月) / 14(火): 一般・学生は Day 別の券種。sold/pending are TICKET counts.
 // Orders are fixed (not random) so the stats a reviewer sees are the same every load.
-type DemoTicketField = { id: string; label: string; type: "text" | "textarea" | "select" | "checkbox"; required: boolean; options: string[] };
+type DemoTicketField = { id: string; label: string; description?: string; type: lpValues.LpFieldType; required: boolean; options: string[] };
 type DemoTicketType = {
   id: string;
   name: string;
@@ -5111,18 +5171,20 @@ function validDemoFields(raw: unknown, reserved: readonly string[]): DemoTicketF
         typeof f.label === "string" &&
         f.label.trim().length >= 1 &&
         f.label.length <= 60 &&
-        ["text", "textarea", "select", "checkbox"].includes(f.type) &&
+        lpValues.isLpFieldType(f.type) &&
+        (f.description === undefined || (typeof f.description === "string" && f.description.length <= lpValues.LP_FIELD_DESCRIPTION_MAX)) &&
         typeof f.required === "boolean" &&
         Array.isArray(f.options) &&
-        (f.type !== "select" || (f.options.length >= 1 && f.options.length <= 20)),
+        (!lpValues.isLpChoiceField(f.type) || (f.options.length >= 1 && f.options.length <= 20)),
     );
   if (!ok) return null;
   return (raw as DemoTicketField[]).map((f) => ({
     id: f.id,
     label: f.label.trim(),
+    ...(f.description ? { description: f.description } : {}),
     type: f.type,
     required: f.required,
-    options: f.type === "select" ? [...f.options] : [],
+    options: lpValues.isLpChoiceField(f.type) ? [...f.options] : [],
   }));
 }
 
@@ -5535,9 +5597,11 @@ function createLpProposalsStore() {
     enabled: false,
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/proposals`,
     fields: [
-      { id: "format", label: "発表形式", type: "select", required: true, options: ["セッション（30分）", "LT（5分）"] },
+      { id: "format", label: "発表形式", type: "radio", required: true, options: ["セッション（30分）", "LT（5分）"] },
+      { id: "topics", label: "テーマ", description: "当てはまるものをすべて選んでください", type: "multiselect", required: false, options: ["Web", "モバイル", "インフラ", "AI"] },
       { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
       { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
+      { id: "unavailable", label: "登壇できない日", type: "date", required: false, options: [] },
     ] as DemoTicketField[],
     updatedAt: null as string | null,
     updatedBy: null as string | null,

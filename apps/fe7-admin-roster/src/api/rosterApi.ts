@@ -2,7 +2,7 @@
 // `/api/v1/*` boundary (design §2-4). This unit implements against the contract
 // types only; the concrete transport (auth cookie, base URL, error reconstruction)
 // is FE2's ResourceClient.
-import type { identity, common, auditLog, auth, member } from "@dub/types";
+import type { identity, common, auditLog, auth, mail, member } from "@dub/types";
 import type { ResourceClient } from "../shell/contract";
 import type {
   CreateRoleRequest,
@@ -86,6 +86,9 @@ export interface RosterApi {
   // ---- Email Routing (@developershub.jp address management) ----
   listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
   createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
+  listTeamLists(): Promise<{ items: mail.MailTeamList[] }>;
+  createTeamList(req: mail.MailTeamListCreateRequest): Promise<mail.MailTeamList>;
+  deleteTeamList(id: string): Promise<unknown>;
   deleteEmailAddress(id: string): Promise<void>;
 }
 
@@ -142,6 +145,9 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     // Cloudflare feature). Issuing here also sends a confirmation mail to the new address.
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/issued-addresses`),
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/issued-addresses`, req),
+    listTeamLists: () => client.get<{ items: mail.MailTeamList[] }>(`${BASE}/mail/admin/lists`),
+    createTeamList: (req) => client.post<mail.MailTeamList>(`${BASE}/mail/admin/lists`, req),
+    deleteTeamList: (id) => client.delete(`${BASE}/mail/admin/lists/${encodeURIComponent(id)}`),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/issued-addresses/${id}`),
   };
 }

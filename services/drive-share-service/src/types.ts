@@ -133,6 +133,11 @@ export interface RoleFileGrant {
   /** Members shared only via an invite (no Google account yet) — present on the
    *  apply/reapply response so the manager can warn that their access is pending. */
   invited?: InvitedMember[];
+  /** Present on an apply/reapply that ran out of its per-request budget: POST reapply with
+   *  `?cursor=` this value to continue. Absent = finished. */
+  nextCursor?: string;
+  /** Members still to process when `nextCursor` is present. */
+  remaining?: number;
 }
 
 /** How one sharing entry differs from what the file's role grants say.
@@ -157,7 +162,7 @@ export interface ShareDriftItem {
   roleNames: string[];
 }
 
-/** GET /driveshare/files/:id/drift. grantCount=0 means there is no baseline (items empty). */
+/** GET /driveshare/files/:id/drift. grantCount=0 = no role grant: every direct share is `unexpected`. */
 export interface FileShareDrift {
   fileId: string;
   grantCount: number;

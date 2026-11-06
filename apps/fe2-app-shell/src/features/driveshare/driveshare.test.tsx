@@ -17,6 +17,7 @@ import {
   driftDetail,
   driftGranteeLabel,
   driveRoleLabel,
+  finishRoleGrant,
   isValidEmail,
   roleGrantChipLabel,
   roleLabel,
@@ -336,6 +337,40 @@ describe("DriveShareScreen", () => {
   });
 });
 
+describe("finishRoleGrant (a role larger than one request can handle)", () => {
+  it("follows the cursor to the end, reporting progress and accumulating skipped members", async () => {
+    const reapply = vi.fn((_f: string, _r: string, cursor?: string) =>
+      Promise.resolve(
+        cursor === "c1"
+          ? { ...DEV_GRANT, nextCursor: "c2", remaining: 1, skipped: [{ email: "b@x.jp", reason: "拒否" }] }
+          : { ...DEV_GRANT, appliedCount: 5, invited: [{ email: "c@x.jp" }] },
+      ),
+    );
+    const progress: number[] = [];
+    const first = { ...DEV_GRANT, nextCursor: "c1", remaining: 3, skipped: [{ email: "a@x.jp", reason: "拒否" }] };
+
+    const done = await finishRoleGrant({ reapplyRoleGrant: reapply }, first, (n) => progress.push(n));
+
+    expect(reapply.mock.calls.map((c) => c[2])).toEqual(["c1", "c2"]);
+    expect(progress).toEqual([3, 1, 0]);
+    expect(done.nextCursor).toBeUndefined();
+    expect(done.skipped?.map((s) => s.email)).toEqual(["a@x.jp", "b@x.jp"]);
+    expect(done.invited).toEqual([{ email: "c@x.jp" }]);
+  });
+
+  it("stops instead of spinning when the cursor does not move", async () => {
+    const reapply = vi.fn(() => Promise.resolve({ ...DEV_GRANT, nextCursor: "c1", remaining: 2 }));
+    await finishRoleGrant({ reapplyRoleGrant: reapply }, { ...DEV_GRANT, nextCursor: "c1", remaining: 2 }, () => {});
+    expect(reapply).toHaveBeenCalledTimes(1);
+  });
+
+  it("a reapply request carries the cursor as a query parameter", async () => {
+    const { api, calls } = fakeApi(DEV_GRANT);
+    await createDriveShareApi(api).reapplyRoleGrant("fil_budget", "role_dev", "c1");
+    expect(calls[0]).toMatchObject({ method: "POST", query: { cursor: "c1" } });
+  });
+});
+
 describe("ロールとの差分", () => {
   async function openBudget(api: DriveShareApi): Promise<HTMLElement> {
     const user = userEvent.setup();
@@ -361,11 +396,18 @@ describe("ロールとの差分", () => {
     expect(await within(clean).findByTestId("fe2-driveshare-drift-clean")).toHaveTextContent("5人が一致");
   });
 
-  it("explains that a file without role grants has no baseline", async () => {
+  it("lists what is left on a file with no role grant", async () => {
+    const getShareDrift = () => Promise.resolve({ ...DRIFT, grantCount: 0, expectedCount: 0, matchedCount: 0, items: DRIFT.items.slice(0, 1) });
+    const card = await openBudget(stubApi({ getShareDrift }));
+    expect(await within(card).findByTestId("fe2-driveshare-drift-noroles")).toBeInTheDocument();
+    expect(within(card).getByTestId("fe2-driveshare-drift-badge")).toHaveTextContent("差分 1件");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("sponsor@example.com");
+  });
+
+  it("says a file with no role grant and no shares is clean", async () => {
     const getShareDrift = () => Promise.resolve({ ...NO_DRIFT, grantCount: 0, expectedCount: 0, matchedCount: 0 });
     const card = await openBudget(stubApi({ getShareDrift }));
-    expect(await within(card).findByTestId("fe2-driveshare-drift-nobaseline")).toBeInTheDocument();
-    expect(within(card).queryByTestId("fe2-driveshare-drift-badge")).toBeNull();
+    expect(await within(card).findByTestId("fe2-driveshare-drift-clean")).toHaveTextContent("ロール権限は無く");
   });
 
   it("再チェック fetches the drift again", async () => {

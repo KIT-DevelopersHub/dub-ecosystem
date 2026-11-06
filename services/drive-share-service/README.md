@@ -25,11 +25,25 @@ v3 `permissions.list/create/update/delete` and `files.list`.
 | PATCH | `/driveshare/files/:id/permissions/:permId` | `drive:write` | change a role |
 | DELETE | `/driveshare/files/:id/permissions/:permId` | `drive:write` | revoke |
 | PUT | `/driveshare/files/:id/link` | `drive:write` | link sharing on/off (`anyone`) |
-| GET | `/driveshare/files/:id/drift` | `drive:read` | actual sharing vs the file's role grants: shares outside the roles (incl. link), stronger / weaker role than granted, members without access |
+| GET | `/driveshare/files/:id/drift` | `drive:read` | actual sharing vs the file's role grants: shares outside the roles (incl. link; with no grant, every direct share), stronger / weaker role than granted, members without access |
 
 `drive:read` / `drive:write` are not yet in the frozen `PERMISSION_CATALOG` (same as
 drive-proxy); they are opaque wire strings passed to identity `/authz/check`. Roles must
 grant these keys for real (non-mock) use — see below.
+
+**Role sharing address**: a role's members are shared at their 名簿 Gmail (member-service
+`POST /members/internal/google-emails`, binding `SVC_MEMBER`), else their Dub login address — the
+same rule as meeting invitations. A login address without a Google account (e.g. an Email-Routing
+alias) is refused by Drive (`cannotInviteNonGoogleUser`); such members are reported as skipped with
+"register their Gmail in 名簿". `reapply` moves a member from the login address to the Gmail once
+it is registered (our old share is removed). The drift view compares against the same addresses.
+
+**Large roles**: api-gateway cuts a request off at 15 s, Drive takes a second or more per share,
+and concurrent permission calls on one file are not safe. So apply / reapply stop at their budget
+(8 s or 25 Drive writes) and answer with `nextCursor` + `remaining`; `POST .../reapply?cursor=`
+continues (the SPA does this automatically). The ledger is written member by member, with the row
+going in before the Drive call, so a request cut off mid-way never turns our share into an
+"individual" one that 解除 would leave behind. Departed members are removed last.
 
 ## Getting the real Hackit refresh token (one-time, done by the operator)
 

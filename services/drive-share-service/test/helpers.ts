@@ -48,7 +48,24 @@ export function fakeRoster(
 ): RoleMembership {
   return {
     async listActiveUsers(roleId?: string): Promise<ActiveUser[]> {
-      return users.filter((u) => !roleId || u.roleIds.includes(roleId)).map((u) => ({ ...u, roleIds: [...u.roleIds] }));
+      const out = users.filter((u) => !roleId || u.roleIds.includes(roleId)).map((u) => ({ ...u, roleIds: [...u.roleIds] }));
+      // Role members given only by email become users with a derived id (usr:<email>).
+      const byEmail = new Map(out.map((u) => [u.email, u]));
+      for (const [rid, emails] of Object.entries(members)) {
+        if (roleId && rid !== roleId) continue;
+        for (const raw of emails) {
+          const email = raw.trim().toLowerCase();
+          const known = byEmail.get(email);
+          if (known) {
+            if (!known.roleIds.includes(rid)) known.roleIds.push(rid);
+            continue;
+          }
+          const user = { id: `usr:${email}`, email, name: email, roleIds: [rid] };
+          byEmail.set(email, user);
+          out.push(user);
+        }
+      }
+      return out;
     },
     async listRoles() {
       return Object.entries(names).map(([id, name]) => ({ id, name }));
@@ -71,11 +88,15 @@ export function buildRoleGrants(opts: {
   drive: DriveShareClient;
   roster: RoleMembership;
   store?: RoleGrantStore;
+  directory?: MemberDirectory;
+  clock?: () => number;
 }): { service: RoleGrantsService; store: RoleGrantStore } {
   const store = opts.store ?? createInMemoryRoleGrantStore();
   const service = createRoleGrantsService({
     drive: opts.drive,
     roster: opts.roster,
+    ...(opts.directory ? { directory: opts.directory } : {}),
+    ...(opts.clock ? { clock: opts.clock } : {}),
     store,
     orgId: common.DUB_DEFAULT_ORG_ID,
     now: () => `2026-08-13T00:00:${String(clock++ % 60).padStart(2, "0")}.000Z`,

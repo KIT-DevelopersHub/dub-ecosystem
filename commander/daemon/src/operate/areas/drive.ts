@@ -61,7 +61,7 @@ export const DRIVE: AreaSpec = {
       service: SHARE,
       requires: DRIVE_VIEW,
       description: "ファイル1件の実際の共有とロール単位の共有設定の差分を取得する",
-      hint: "items[].kind(unexpected|excess_role|insufficient_role|missing)・email・actualRole・expectedRole・roleNames。grantCount=0 は比較対象なし",
+      hint: "items[].kind(unexpected|excess_role|insufficient_role|missing)・email・actualRole・expectedRole・roleNames。grantCount=0 はロール権限が無く、直接の共有はすべて unexpected",
     }),
     read({
       id: "drive.files.list",
@@ -243,7 +243,8 @@ export const DRIVE: AreaSpec = {
       reversible: false,
       risk: "high",
       description: "ロール単位の共有を今の所属メンバーに合わせ直す",
-      hint: "新しく所属した人に共有し、抜けた人からはロール共有で付けた権限を外す。memberCount と appliedCount がずれている時に使う。未設定のロールは404",
+      hint: "新しく所属した人に共有し、抜けた人からはロール共有で付けた権限を外す。memberCount と appliedCount がずれている時に使う。応答に nextCursor があれば未完了なので query.cursor に渡して続ける。未設定のロールは404",
+      query: ["cursor"],
       impact: `{count}件のロールについて、新しく所属した人がファイルを開けるようになり、抜けた人は開けなくなります。${INVITE_NOTE}外れた人には個別に共有すれば戻せます。`,
       verify: {
         read: "driveshare.fileRoleGrants.list",

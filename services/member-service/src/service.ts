@@ -17,6 +17,7 @@ import {
   toTeam,
 } from "./domain";
 import { desiredManagedRoles, errRoleSyncUnavailable, managedRoleCatalog, warnRoleSync } from "./roleSync";
+import { shouldActivate, warnActivation, type ActivationTrigger } from "./identityActivation";
 
 export interface ReqCtx {
   requestId: string;
@@ -25,6 +26,7 @@ export interface ReqCtx {
 
 const errVersionConflict = (id: string): DubError =>
   new DubError("MEMBER_VERSION_CONFLICT", `Version conflict for ${id}`, { status: 409 });
+const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const errTeamNotFound = (id: string): DubError =>
   new DubError("MEMBER_TEAM_NOT_FOUND", `Team not found: ${id}`, { status: 404 });
 const errPersonNotFound = (id: string): DubError =>
@@ -74,10 +76,24 @@ function profilePatch(body: object): Partial<member.PersonProfile> {
   return value;
 }
 
+/** backfill の offset/limit。未指定は undefined、範囲外・非整数は検証エラー。 */
+function backfillInt(value: unknown, field: string, min: number, max: number): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+    throw errors.validationFailed([{ field, reason: "invalid" }]);
+  }
+  return value;
+}
+
 /** Upper bound on teams expanded in one チーム単位メンション lookup (see listTeamIdentityUserIds). */
 const MAX_TEAM_MENTION_EXPANSION = 20;
 /** Upper bound on identity ids resolved in one Google-address lookup (the whole org fits). */
 const MAX_GOOGLE_EMAIL_LOOKUP = 2000;
+
+/** 催促の「1 日」は日本時間で区切る。 */
+function jstDate(iso: string): string {
+  return new Date(Date.parse(iso) + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 export class MemberService {
   constructor(private readonly deps: AppDeps) {}
@@ -137,7 +153,7 @@ export class MemberService {
    * with no linked identity account are skipped (nothing to notify); ids are unique and
    * returned in roster order. Read-only, internal-only (see /members/internal/*).
    */
-  async listTeamIdentityUserIds(teamIds: readonly string[]): Promise<{ userIds: string[] }> {
+  async listTeamIdentityUserIds(teamIds: readonly string[], opts: { excludeDeclined?: boolean } = {}): Promise<{ userIds: string[] }> {
     // One message can only mention so many teams; bound the request so a crafted body
     // cannot turn one post into an unbounded roster scan.
     const wanted = new Set(teamIds.filter((id) => id.length > 0).slice(0, MAX_TEAM_MENTION_EXPANSION));
@@ -150,6 +166,7 @@ export class MemberService {
     for (const p of people) {
       const uid = p.identityUserId;
       if (!uid || !inTeam.has(p.id) || seen.has(uid)) continue;
+      if (opts.excludeDeclined && p.status === "declined") continue;
       seen.add(uid);
       userIds.push(uid);
     }
@@ -272,41 +289,87 @@ export class MemberService {
     }
   }
 
+  /** 在籍 (added) でアカウントに紐付いた名簿行なら、identity の招待中アカウントを有効化する。
+   *  名簿の保存後に呼ぶ best-effort (失敗しても保存は成功・警告ログ)。identity 側が invited
+   *  だけを active にするので冪等で、停止中のアカウントには触れない。在籍の行を保存するたびに
+   *  呼ばれるので、失敗しても次の保存か一括付与 (backfillRoles) で再試行される。 */
+  async activateLinkedIdentity(ctx: ReqCtx, person: PersonRow | null, trigger: ActivationTrigger): Promise<void> {
+    const port = this.deps.identityActivation;
+    if (!port || !shouldActivate(person)) return;
+    try {
+      await port.activate(ctx, person.identityUserId, { trigger });
+    } catch (err) {
+      warnActivation(ctx, person.identityUserId, trigger, err);
+    }
+  }
+
   /** 既存メンバーへの一括付与 (管理者)。dryRun なら identity に書かず差分だけ返す。
-   *  対象は名簿でアカウントに紐付いた全員 (在籍中以外は空集合 = 自動ロールを外す)。 */
+   *  対象は名簿でアカウントに紐付いた全員 (在籍中以外は空集合 = 自動ロールを外す)。
+   *  Workers の subrequest 上限 (無料 50/呼び出し) に収めるため offset/limit でページ分けし、
+   *  nextOffset が null になるまで呼び直す。ロール一覧の同期は offset 0 のページだけ。
+   *  activateOnly なら付与をせず、在籍で招待中のアカウントの有効化だけを行う。 */
   async backfillRoles(ctx: ReqCtx, body: member.RoleSyncBackfillRequest | null): Promise<member.RoleSyncBackfillResponse> {
+    const activateOnly = body?.activateOnly === true;
     const sync = this.deps.roleSync;
-    if (!sync) throw errRoleSyncUnavailable();
+    const activation = this.deps.identityActivation;
+    if (activateOnly ? !activation : !sync) throw errRoleSyncUnavailable();
     const dryRun = body?.dryRun === true;
+    const callsPerPerson = activateOnly ? 1 : 2;
+    const maxLimit = Math.floor(member.ROLE_SYNC_BACKFILL_CALL_BUDGET / callsPerPerson);
+    const offset = backfillInt(body?.offset, "offset", 0, Number.MAX_SAFE_INTEGER) ?? 0;
+    const limit = backfillInt(body?.limit, "limit", 1, maxLimit) ?? maxLimit;
     const orgId = this.deps.orgId;
     const [teams, people, links] = await Promise.all([
       this.deps.repo.listTeams(orgId),
       this.deps.repo.listPeople(orgId),
       this.deps.repo.teamLinksForOrg(orgId),
     ]);
-    const cat = await sync.syncCatalog(ctx, { roles: managedRoleCatalog(teams), dryRun });
+    // 対象 (順序は listPeople の sort_order, id で安定)。activateOnly は有効化の対象だけ。
+    const targets = people.filter((p) => (activateOnly ? shouldActivate(p) : !!p.identityUserId));
+    const page = targets.slice(offset, offset + limit);
+    const nextOffset = offset + limit < targets.length ? offset + limit : null;
+    const emptyCatalog = { created: [], renamed: [], deleted: [], kept: [] };
+    let catalog: member.RoleSyncBackfillResponse["catalog"] = emptyCatalog;
+    if (!activateOnly && offset === 0 && sync) {
+      const cat = await sync.syncCatalog(ctx, { roles: managedRoleCatalog(teams), dryRun });
+      catalog = { created: cat.created, renamed: cat.renamed, deleted: cat.deleted, kept: cat.kept };
+    }
     const teamsById = new Map(teams.map((t) => [t.id, t]));
     const out: member.RoleSyncBackfillPerson[] = [];
     let failed = 0;
-    for (const p of people) {
-      if (!p.identityUserId) continue;
+    let activated = 0;
+    for (const p of page) {
+      const uid = p.identityUserId as string;
       const teamIds = links.filter((l) => l.personId === p.id).map((l) => l.teamId);
       const roles = desiredManagedRoles(p, teamIds, teamsById);
-      const base = { memberId: p.id, name: p.name, identityUserId: p.identityUserId, roleIds: roles.map((r) => r.id) };
-      try {
-        const r = await sync.syncUser(ctx, p.identityUserId, { roles, dryRun });
-        out.push({ ...base, added: r.added, removed: r.removed });
-      } catch (err) {
-        failed++;
-        out.push({ ...base, added: [], removed: [], error: err instanceof Error ? err.message : String(err) });
+      const base = { memberId: p.id, name: p.name, identityUserId: uid, roleIds: roles.map((r) => r.id) };
+      let row: member.RoleSyncBackfillPerson;
+      if (activateOnly || !sync) {
+        row = { ...base, added: [], removed: [] };
+      } else {
+        try {
+          const r = await sync.syncUser(ctx, uid, { roles, dryRun });
+          row = { ...base, added: r.added, removed: r.removed };
+        } catch (err) {
+          row = { ...base, added: [], removed: [], error: errMessage(err) };
+        }
       }
+      // 在籍で紐付いているのに招待中のまま残ったアカウント (保存時の有効化が失敗した等) を直す。
+      if (activation && shouldActivate(p)) {
+        try {
+          const act = await activation.activate(ctx, uid, { trigger: "member.backfill", dryRun });
+          if (act.activated) {
+            activated++;
+            row.activated = true;
+          }
+        } catch (err) {
+          row.error = row.error ? `${row.error}; ${errMessage(err)}` : errMessage(err);
+        }
+      }
+      if (row.error) failed++;
+      out.push(row);
     }
-    return {
-      dryRun,
-      catalog: { created: cat.created, renamed: cat.renamed, deleted: cat.deleted, kept: cat.kept },
-      people: out,
-      failed,
-    };
+    return { dryRun, activateOnly, catalog, people: out, failed, activated, offset, limit, total: targets.length, nextOffset };
   }
 
   // ---- people ----
@@ -390,6 +453,7 @@ export class MemberService {
     const ok = await this.deps.repo.updatePerson(next, body.version, teamIds);
     if (!ok) throw errVersionConflict(id);
     await this.syncRolesForIdentities(ctx, [cur.identityUserId, next.identityUserId]);
+    await this.activateLinkedIdentity(ctx, next, "member.update");
     const finalTeamIds = teamIds ?? (await this.currentTeamIds(id));
     return toMember(next, finalTeamIds);
   }
@@ -399,6 +463,31 @@ export class MemberService {
     if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
     await this.deps.repo.archivePerson(id);
     await this.syncRolesForIdentities(ctx, [cur.identityUserId]);
+  }
+
+  /** 情報が足りない本人へ入力を催促する。未入力の判定は名簿の最新の行で行う。 */
+  async sendProfileReminder(ctx: ReqCtx, id: string): Promise<member.SendProfileReminderResponse> {
+    const cur = await this.deps.repo.getPerson(id);
+    if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
+    const send = this.deps.sendProfileReminder;
+    if (!send) throw errors.upstreamUnavailable("notification");
+    if (!cur.identityUserId) {
+      throw errors.validationFailed([{ field: "identityUserId", reason: "not_linked" }], "アカウントが紐付いていないため催促できません");
+    }
+    if (cur.status === "declined") {
+      throw errors.validationFailed([{ field: "status", reason: "declined" }], "辞退したメンバーには催促できません");
+    }
+    const missing = member.missingProfileKeys(cur);
+    if (missing.length === 0) {
+      throw errors.validationFailed([{ field: "profile", reason: "complete" }], "未入力の項目はありません");
+    }
+    const { deduplicated } = await send(ctx, {
+      memberId: cur.id,
+      identityUserId: cur.identityUserId,
+      missing,
+      today: jstDate(this.deps.now()),
+    });
+    return { deduplicated, missing };
   }
 
   // ---- identity linking (#1: bridge 組織図 <-> RBAC 真実) ----
@@ -453,6 +542,7 @@ export class MemberService {
     const ok = await this.deps.repo.updatePerson(next, body.version);
     if (!ok) throw errVersionConflict(id);
     await this.syncRolesForIdentities(ctx, [cur.identityUserId, identityUserId]);
+    await this.activateLinkedIdentity(ctx, next, "member.link");
     return toMember(next, await this.currentTeamIds(id));
   }
 
@@ -713,6 +803,7 @@ export class MemberService {
     const ok = await this.deps.repo.updatePerson(next, expectedVersion, mergedTeamIds);
     if (!ok) throw errVersionConflict(match.id);
     await this.syncRolesForIdentities(ctx, [next.identityUserId]);
+    await this.activateLinkedIdentity(ctx, next, "participation.link");
     return toMember(next, mergedTeamIds);
   }
 

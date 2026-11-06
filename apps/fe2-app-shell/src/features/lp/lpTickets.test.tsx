@@ -30,6 +30,7 @@ import {
   couponExpiryIso,
   couponState,
   groupTicketTypesByDay,
+  normalizeTicketFields,
   paymentMethodLabel,
   paymentMethodsLabel,
   todayJst,
@@ -792,5 +793,24 @@ describe("LpTicketsScreen coupons", () => {
     expect(await screen.findByTestId("fe2-lp-coupons-table")).toHaveTextContent("SPKR7Q2M9X");
     expect(screen.getByTestId("fe2-lp-coupon-state-cpn_sponsor_a")).toHaveTextContent("上限に達した");
     await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-coupon-ord_011")).toHaveTextContent("クーポン SPKR7Q2M9X"));
+  });
+});
+
+describe("LP form field vocabulary", () => {
+  it("validates the options of every choice type and the description length", () => {
+    for (const type of ["radio", "multiselect", "select"] as const) {
+      expect(validateTicketFields([{ id: "f_a", label: "区分", type, required: true, options: [] }]).f_a).toMatch(/選択肢/);
+    }
+    const description = "長".repeat(201);
+    expect(validateTicketFields([{ id: "f_a", label: "区分", description, type: "text", required: false, options: [] }]).f_a).toMatch(/補足説明/);
+  });
+
+  it("keeps options for choice types only and drops an empty description", () => {
+    const [choice, date] = normalizeTicketFields([
+      { id: "a", label: " 形式 ", description: " 1 つ ", type: "radio", required: true, options: [" LT ", ""] },
+      { id: "b", label: "日", description: "  ", type: "date", required: false, options: ["x"] },
+    ]);
+    expect(choice).toEqual({ id: "a", label: "形式", description: "1 つ", type: "radio", required: true, options: ["LT"] });
+    expect(date).toEqual({ id: "b", label: "日", type: "date", required: false, options: [] });
   });
 });

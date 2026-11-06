@@ -1,4 +1,4 @@
-// オンボーディング (運営メンバー・名簿 → オンボーディング タブ)。新しく入った人に最初に
+// オンボーディング案内 (人事 → オンボーディング案内 タブ)。新しく入った人に最初に
 // やってほしいことを並べ、ログイン不要の公開ページ (/onboarding) で共有する。項目の追加・
 // 編集・削除・ドラッグ並び替えは 参加届アプリの「編集」、閲覧だけなら一覧と共有 URL のみ。
 // 編集系は楽観的 UI (hooks.ts の useOnboardingMutation が失敗時にロールバック)。
@@ -14,7 +14,6 @@ import {
   Icon,
   IconButton,
   Modal,
-  PageHeader,
   SkeletonList,
   SortableList,
   TextField,
@@ -46,6 +45,7 @@ import {
 } from "./contracts.ts";
 import { PUBLIC_ONBOARDING_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
+import { HrFrame } from "../hr/HrApplicantsScreen.tsx";
 import styles from "./participation.module.css";
 
 export function OnboardingAdminPage(): JSX.Element {
@@ -149,60 +149,59 @@ export function OnboardingAdminPage(): JSX.Element {
   }
 
   return (
-    <div className={styles.onboardingPage} data-testid="onboarding-admin-page">
-      <AppReadOnlyNotice appId="participation" testId="onboarding-readonly-notice" />
-      <PageHeader
-        title="オンボーディング"
-        description="新しく入った人に最初にやってほしいことをまとめ、ログイン不要の案内ページで共有します。"
-      />
+    <HrFrame active="guide">
+      <div className={styles.onboardingPage} data-testid="onboarding-admin-page">
+        <AppReadOnlyNotice appId="participation" testId="onboarding-readonly-notice" />
+        <p className={styles.sectionHint}>新しく入った人に最初にやってほしいことをまとめ、ログイン不要の案内ページで共有します。</p>
 
-      <PublicUrlCard
-        title="案内ページの URL"
-        hint="このページはアプリのアカウントが無くても開けます。新しく入った人に送ってください。"
-        path={PUBLIC_ONBOARDING_PATH}
-        testId="onboarding-share"
-      />
+        <PublicUrlCard
+          title="案内ページの URL"
+          hint="このページはアプリのアカウントが無くても開けます。新しく入った人に送ってください。"
+          path={PUBLIC_ONBOARDING_PATH}
+          testId="onboarding-share"
+        />
 
-      <Card
-        header={
-          <div className={styles.sectionHeader}>
-            <span>案内する項目</span>
-            {canEdit ? (
-              <Button size="sm" iconLeft={<Icon name="plus" />} onClick={() => setEditing("new")} testId="onboarding-admin-add">
-                項目を追加
-              </Button>
-            ) : null}
-          </div>
-        }
-        testId="onboarding-admin-items"
-      >
-        {canEdit && items.length > 1 ? (
-          <p className={styles.sectionHint}>左端のつまみをドラッグすると、案内ページでの順番を入れ替えられます。</p>
+        <Card
+          header={
+            <div className={styles.sectionHeader}>
+              <span>案内する項目</span>
+              {canEdit ? (
+                <Button size="sm" iconLeft={<Icon name="plus" />} onClick={() => setEditing("new")} testId="onboarding-admin-add">
+                  項目を追加
+                </Button>
+              ) : null}
+            </div>
+          }
+          testId="onboarding-admin-items"
+        >
+          {canEdit && items.length > 1 ? (
+            <p className={styles.sectionHint}>左端のつまみをドラッグすると、案内ページでの順番を入れ替えられます。</p>
+          ) : null}
+          {body}
+        </Card>
+
+        {list.data ? <MeetingsCard guide={list.data} canEdit={canEdit} /> : null}
+
+        {editing !== null ? (
+          <ItemDialog item={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSave={onSave} />
         ) : null}
-        {body}
-      </Card>
 
-      {list.data ? <MeetingsCard guide={list.data} canEdit={canEdit} /> : null}
-
-      {editing !== null ? (
-        <ItemDialog item={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSave={onSave} />
-      ) : null}
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        title="項目を削除する"
-        message={deleteTarget ? `「${deleteTarget.title}」を案内ページから削除します。元に戻せません。よろしいですか？` : ""}
-        confirmLabel="削除する"
-        cancelLabel="キャンセル"
-        danger
-        onConfirm={() => {
-          if (deleteTarget) deleteMut.mutate(deleteTarget.id);
-          setDeleteTarget(null);
-        }}
-        onCancel={() => setDeleteTarget(null)}
-        testId="onboarding-admin-delete-confirm"
-      />
-    </div>
+        <ConfirmDialog
+          open={deleteTarget !== null}
+          title="項目を削除する"
+          message={deleteTarget ? `「${deleteTarget.title}」を案内ページから削除します。元に戻せません。よろしいですか？` : ""}
+          confirmLabel="削除する"
+          cancelLabel="キャンセル"
+          danger
+          onConfirm={() => {
+            if (deleteTarget) deleteMut.mutate(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+          onCancel={() => setDeleteTarget(null)}
+          testId="onboarding-admin-delete-confirm"
+        />
+      </div>
+    </HrFrame>
   );
 }
 

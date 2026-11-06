@@ -237,6 +237,39 @@ export function emptyPersonProfile(): PersonProfile {
   return Object.fromEntries(PERSON_PROFILE_KEYS.map((k) => [k, null])) as unknown as PersonProfile;
 }
 
+/** 運営が揃えておきたい項目 (未入力なら本人へ催促する対象)。任意の 希望する活動・備考 は含めない。 */
+export const PROFILE_REMINDER_KEYS = [
+  "lastName",
+  "firstName",
+  "lastNameKana",
+  "firstNameKana",
+  "lastNameRomaji",
+  "firstNameRomaji",
+  "schoolEmail",
+  "gmail",
+  "phone",
+  "grade",
+  "department",
+  "rosterNumber",
+  "studentNumber",
+] as const satisfies readonly PersonProfileKey[];
+
+/** 未入力の項目 (表示順)。空白だけの値も未入力として扱う。姓名に分かれる前の名簿行は
+ *  表示名 name があれば氏名は分かるので、姓・名を未入力に数えない。 */
+export function missingProfileKeys(p: Partial<PersonProfile> & { name?: string | null }): PersonProfileKey[] {
+  const hasName = !!p.name?.trim();
+  return PROFILE_REMINDER_KEYS.filter((k) => {
+    if (hasName && (k === "lastName" || k === "firstName")) return false;
+    return !(p[k] ?? "").trim();
+  });
+}
+
+/** POST /members/people/:id/profile-reminder の応答。同じ人への催促は 1 日 1 回まで。 */
+export interface SendProfileReminderResponse {
+  deduplicated: boolean;
+  missing: PersonProfileKey[];
+}
+
 /** 表示用の文字列 (学年・希望活動はラベル、未入力は "")。画面・通知で共通。 */
 export function formatPersonProfileValue(key: PersonProfileKey, p: Partial<PersonProfile>): string {
   if (key === "grade") return p.grade ? GRADE_LABEL[p.grade] : "";
@@ -674,10 +707,22 @@ export function positionRoleName(position: MemberPosition): string {
   return `${POSITION_ROLE_NAME_PREFIX}${POSITION_LABEL[position]}`;
 }
 
-/** POST /api/v1/members/role-sync/backfill — 既存メンバーへの一括付与 (管理者)。 */
+/** backfill 1 ページで identity に出す呼び出しの上限。Workers 無料枠の subrequest 上限 (50) から
+ *  認可チェック・ロール一覧同期 (offset 0 のみ) の分と余裕を引いた値。limit の上限 =
+ *  floor(これ / 1 人あたりの呼び出し数 (付与+有効化 = 2・activateOnly = 1))。 */
+export const ROLE_SYNC_BACKFILL_CALL_BUDGET = 30;
+
+/** POST /api/v1/members/role-sync/backfill — 既存メンバーへの一括付与 (管理者)。
+ *  ページ分け: nextOffset が null になるまで offset を進めて呼び直す。 */
 export interface RoleSyncBackfillRequest {
   /** true なら identity 側に書き込まず、付く/外れる予定だけを返す。 */
   dryRun?: boolean;
+  /** true ならロール付与をせず、在籍で招待中のアカウントの有効化だけ (対象も有効化対象の人だけ)。 */
+  activateOnly?: boolean;
+  /** 対象一覧の何人目から (既定 0)。ロール一覧の同期は 0 のページだけ。 */
+  offset?: number;
+  /** 1 ページの人数 (既定・上限 = 付与 15 / activateOnly 30)。 */
+  limit?: number;
 }
 export interface RoleSyncBackfillPerson {
   memberId: MemberId;
@@ -687,14 +732,27 @@ export interface RoleSyncBackfillPerson {
   roleIds: string[];
   added: string[];
   removed: string[];
+  /** 在籍で紐付いているのにアカウントが招待中だったので有効化した (dryRun なら有効化する予定)。 */
+  activated?: boolean;
   error?: string;
 }
 export interface RoleSyncBackfillResponse {
   dryRun: boolean;
-  /** チーム・役職ロール一覧の同期結果。 */
+  activateOnly: boolean;
+  /** チーム・役職ロール一覧の同期結果 (offset 0 のページだけ・それ以外と activateOnly は空)。 */
   catalog: { created: string[]; renamed: string[]; deleted: string[]; kept: string[] };
+  /** このページの人。 */
   people: RoleSyncBackfillPerson[];
+  /** このページで失敗した人数。 */
   failed: number;
+  /** このページで招待中のまま残っていたアカウントを有効化した人数 (dryRun なら予定人数)。 */
+  activated: number;
+  offset: number;
+  limit: number;
+  /** 全ページ合わせた対象人数。 */
+  total: number;
+  /** 次のページの offset。最後のページなら null。 */
+  nextOffset: number | null;
 }
 
 /** Internal id alias (plain string, like the other common ids). */

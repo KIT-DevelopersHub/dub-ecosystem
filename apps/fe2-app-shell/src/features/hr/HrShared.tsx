@@ -9,6 +9,7 @@ import {
   Drawer,
   ErrorState,
   FormField,
+  IconButton,
   Select,
   SkeletonLoader,
   Textarea,
@@ -201,7 +202,78 @@ function eventLabel(e: hr.ApplicantEvent): string {
       return "採用（名簿に追加）";
     case "note":
       return "メモ";
+    case "deleted":
+      return "応募を削除";
   }
+}
+
+/** 削除できるか: hr:admin で、名簿に結ばれていない (採用前の) 人だけ (サーバは採用済みに 409)。 */
+export function canRemoveApplicant(a: hr.Applicant, canAdmin: boolean): boolean {
+  return canAdmin && a.memberId === null;
+}
+
+/**
+ * 応募の削除の確認。確定した瞬間にダイアログを閉じて一覧から消し (楽観的)、失敗したら戻る。
+ * 履歴とフォーム回答はサーバに残る (論理削除)。
+ */
+export function RemoveApplicantDialog({
+  applicant,
+  onClose,
+  onConfirmed,
+}: {
+  applicant: hr.Applicant | null;
+  onClose: () => void;
+  /** 確定の直後 (送信前) に呼ぶ。ドロワーを閉じるなど。 */
+  onConfirmed?: () => void;
+}): JSX.Element {
+  const remove = useRemoveApplicant();
+  return (
+    <ConfirmDialog
+      testId="fe2-hr-remove-confirm"
+      open={applicant !== null}
+      danger
+      title="応募を削除しますか？"
+      message={applicant ? `${applicant.name} さんの応募を一覧から削除します。面談の履歴と申し込みフォームの回答は記録として残ります。` : ""}
+      confirmLabel="削除する"
+      onCancel={onClose}
+      onConfirm={() => {
+        if (!applicant) return;
+        remove.mutate(applicant);
+        onConfirmed?.();
+        onClose();
+      }}
+    />
+  );
+}
+
+/** 表の行の削除ボタン。行クリック (詳細を開く) には伝えない。 */
+export function RemoveApplicantButton({
+  applicant,
+  onRequest,
+}: {
+  applicant: hr.Applicant;
+  onRequest: (a: hr.Applicant) => void;
+}): JSX.Element {
+  const { canAdmin } = useHrCapability();
+  const allowed = canRemoveApplicant(applicant, canAdmin);
+  const label = !canAdmin
+    ? "応募の削除は人事の管理者のみできます"
+    : applicant.memberId !== null
+      ? "採用済み（名簿に追加済み）の人は削除できません"
+      : `${applicant.name} さんの応募を削除`;
+  return (
+    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <IconButton
+        name="trash"
+        size="sm"
+        variant="ghost"
+        aria-label={label}
+        disabled={!allowed}
+        testId={`fe2-hr-row-${applicant.id}-remove`}
+        onClick={() => onRequest(applicant)}
+      />
+    </span>
+  );
 }
 
 /** 応募者の詳細 + ステータス + 面談日 + メモ + 履歴。 */
@@ -220,7 +292,6 @@ export function ApplicantDrawer({
   const { canWrite, canAdmin } = useHrCapability();
   const addNote = useAddNote();
   const update = useUpdateApplicant();
-  const remove = useRemoveApplicant();
   const [note, setNote] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
 
@@ -329,7 +400,7 @@ export function ApplicantDrawer({
           </ol>
         </div>
 
-        {canAdmin && a.memberId === null ? (
+        {canRemoveApplicant(a, canAdmin) ? (
           <div>
             <Button variant="danger" size="sm" testId="fe2-hr-remove" onClick={() => setConfirmRemove(true)}>
               応募を削除
@@ -337,18 +408,10 @@ export function ApplicantDrawer({
           </div>
         ) : null}
 
-        <ConfirmDialog
-          testId="fe2-hr-remove-confirm"
-          open={confirmRemove}
-          danger
-          title="応募を削除しますか？"
-          message={`${a.name} さんの応募を一覧から削除します。`}
-          confirmLabel="削除する"
-          onCancel={() => setConfirmRemove(false)}
-          onConfirm={async () => {
-            await remove.mutateAsync(a).then(onClose).catch(() => undefined);
-            setConfirmRemove(false);
-          }}
+        <RemoveApplicantDialog
+          applicant={confirmRemove ? a : null}
+          onClose={() => setConfirmRemove(false)}
+          onConfirmed={onClose}
         />
       </div>
     );

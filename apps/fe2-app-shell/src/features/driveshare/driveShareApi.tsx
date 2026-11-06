@@ -99,6 +99,11 @@ export interface RoleFileGrant {
   grantedAt: string;
   skipped?: SkippedMember[];
   invited?: InvitedMember[];
+  /** Present when one request could not finish the role (Drive takes a second or more per
+   *  share): reapply with this cursor to continue. Absent = finished. */
+  nextCursor?: string;
+  /** Members still to process while `nextCursor` is present. */
+  remaining?: number;
 }
 
 export interface ListRoleGrantsResult {
@@ -123,7 +128,7 @@ export interface ShareDriftItem {
   roleNames: string[];
 }
 
-/** GET /driveshare/files/:id/drift. grantCount=0 = no role grant, so nothing to compare. */
+/** GET /driveshare/files/:id/drift. grantCount=0 = no role grant: every direct share is `unexpected`. */
 export interface FileShareDrift {
   fileId: string;
   grantCount: number;
@@ -182,7 +187,7 @@ export interface DriveShareApi {
   /** Revoke a role grant from a file (drive:write). */
   revokeRoleGrant(fileId: string, roleId: string): Promise<void>;
   /** Re-apply a role grant so every current member is (re)synced (drive:write). */
-  reapplyRoleGrant(fileId: string, roleId: string): Promise<RoleFileGrant>;
+  reapplyRoleGrant(fileId: string, roleId: string, cursor?: string): Promise<RoleFileGrant>;
   /** Actual sharing vs the file's role grants (drive:read). */
   getShareDrift(fileId: string): Promise<FileShareDrift>;
   getGoogleAccounts(): Promise<DriveGoogleAccountsStatus>;
@@ -256,10 +261,11 @@ export function createDriveShareApi(api: ApiClient): DriveShareApi {
         method: "DELETE",
         path: `${BASE}/files/${encodeURIComponent(fileId)}/role-grants/${encodeURIComponent(roleId)}`,
       }),
-    reapplyRoleGrant: (fileId, roleId) =>
+    reapplyRoleGrant: (fileId, roleId, cursor) =>
       api.request<RoleFileGrant>({
         method: "POST",
         path: `${BASE}/files/${encodeURIComponent(fileId)}/role-grants/${encodeURIComponent(roleId)}/reapply`,
+        ...(cursor !== undefined ? { query: { cursor } } : {}),
       }),
     getShareDrift: (fileId) =>
       api.request<FileShareDrift>({ method: "GET", path: `${BASE}/files/${encodeURIComponent(fileId)}/drift` }),
@@ -276,6 +282,33 @@ export function createDriveShareApi(api: ApiClient): DriveShareApi {
       api.request<DriveGoogleAccountsStatus>({ method: "POST", path: `${GOOGLE}/active`, body: { accountId } }),
     removeGoogleAccount: (accountId) =>
       api.request<void>({ method: "DELETE", path: `${GOOGLE}/accounts/${encodeURIComponent(accountId)}` }),
+  };
+}
+
+/** Drive a role apply/reapply to completion: one request does what fits in its budget, so keep
+ *  calling with the returned cursor, reporting who is left. Skipped / invited accumulate over
+ *  the calls. A stalled cursor ends the loop rather than spinning. */
+export async function finishRoleGrant(
+  api: Pick<DriveShareApi, "reapplyRoleGrant">,
+  first: RoleFileGrant,
+  onProgress: (remaining: number) => void,
+): Promise<RoleFileGrant> {
+  const skipped = [...(first.skipped ?? [])];
+  const invited = [...(first.invited ?? [])];
+  let result = first;
+  while (result.nextCursor !== undefined) {
+    const cursor: string = result.nextCursor;
+    onProgress(result.remaining ?? 0);
+    result = await api.reapplyRoleGrant(result.fileId, result.roleId, cursor);
+    skipped.push(...(result.skipped ?? []));
+    invited.push(...(result.invited ?? []));
+    if (result.nextCursor === cursor) break;
+  }
+  onProgress(0);
+  return {
+    ...result,
+    ...(skipped.length > 0 ? { skipped } : {}),
+    ...(invited.length > 0 ? { invited } : {}),
   };
 }
 

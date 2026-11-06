@@ -7,6 +7,7 @@ import { useSaveTicketFields } from "./lpTicketsHooks.ts";
 import {
   FIELD_TYPE_LABELS,
   TICKET_FIELDS_MAX,
+  isChoiceField,
   moveItem,
   newFieldId,
   normalizeTicketFields,
@@ -226,7 +227,15 @@ function FieldRow({
           </div>
         ) : null}
       </div>
-      {f.type === "select" ? (
+      <TextField
+        id={`${tid}-description`}
+        testId={`${tid}-description`}
+        value={f.description ?? ""}
+        placeholder="補足説明（任意）"
+        disabled={!canEdit}
+        onChange={(v) => onPatch({ description: v })}
+      />
+      {isChoiceField(f.type) ? (
         <div className={styles.fieldOptions}>
           <span className={styles.kpiLabel}>選択肢（1 行に 1 つ）</span>
           <Textarea

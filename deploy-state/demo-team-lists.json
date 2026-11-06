@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "team-lists",
+  "worker": "dub-demo-team-lists",
+  "url": "https://dub-demo-team-lists.developershub-site.workers.dev",
+  "deployedSha": "1a70c20f",
+  "branch": "commander/task-ctask_01M6PKJGFMGFGN26HHB1EX5EXV",
+  "actor": "ko-tarou",
+  "markers": ["fe7-team-list-form-loading"],
+  "live": true,
+  "verifiedAt": "2026-11-05T20:07:36Z",
+  "updatedAt": "2026-11-05T20:07:36Z",
+  "note": "チームのメーリングリスト"
+}
