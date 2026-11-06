@@ -82,6 +82,44 @@ export interface MembersOverview {
   members: Member[];
 }
 
+/**
+ * 組織図までのロールに返す行。組織図・運営メンバータブに要る項目だけを残し、個人情報を空にする。
+ * 新しい項目を足したら既定で落ちるよう、残す側を列挙する。grade は組織図のチップに出す。
+ */
+export function toOrgChartMember(m: Member): Member {
+  return {
+    id: m.id,
+    orgId: m.orgId,
+    name: m.name,
+    roleTitle: m.roleTitle,
+    position: m.position ?? null,
+    status: m.status,
+    teamIds: m.teamIds,
+    leaderId: m.leaderId ?? null,
+    sortOrder: m.sortOrder,
+    version: m.version,
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+    grade: m.grade,
+    identityUserId: null,
+    contact: null,
+    lastName: null,
+    firstName: null,
+    lastNameKana: null,
+    firstNameKana: null,
+    lastNameRomaji: null,
+    firstNameRomaji: null,
+    schoolEmail: null,
+    gmail: null,
+    phone: null,
+    department: null,
+    rosterNumber: null,
+    studentNumber: null,
+    desiredActivity: null,
+    note: null,
+  };
+}
+
 /** Dedicated team-list response (GET /api/v1/members/teams) — the source other apps read. */
 export interface ListTeamsResponse {
   teams: Team[];
@@ -102,6 +140,16 @@ export interface UpdateTeamRequest {
   description?: string | null;
   sortOrder?: number;
 }
+/** 組織図までの編集 (PATCH /members/people/:id/org)。運営での項目だけ。 */
+export interface UpdateMemberOrgRequest {
+  roleTitle?: string | null;
+  position?: MemberPosition | null;
+  status?: MemberStatus;
+  leaderId?: string | null;
+  teamIds?: string[];
+  version: number;
+}
+
 /** 追加。人物プロフィール項目は PersonProfile と共通 (任意・省略は null)。`name` は
  *  姓/名 から合成するので、姓/名 を送るなら省略可。 */
 export interface CreateMemberRequest extends Partial<PersonProfile> {

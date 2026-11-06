@@ -118,6 +118,12 @@ export class MemberService {
     };
   }
 
+  /** 組織図まで: overview から個人情報を落としたもの (members:roster_view を持たないロール向け)。 */
+  async getOrgOverview(ctx: ReqCtx): Promise<member.MembersOverview> {
+    const overview = await this.getOverview(ctx);
+    return { ...overview, members: overview.members.map(member.toOrgChartMember) };
+  }
+
   // ---- teams (member_teams is the canonical source read by other apps) ----
   async listTeams(_ctx: ReqCtx): Promise<member.ListTeamsResponse> {
     const teams = await this.deps.repo.listTeams(this.deps.orgId);
@@ -414,6 +420,17 @@ export class MemberService {
     };
     await this.deps.repo.createPerson(row, teamIds);
     return toMember(row, teamIds);
+  }
+
+  /** 組織図までの編集: 運営での項目だけを受け付け、応答からも個人情報を落とす。 */
+  async updateMemberOrg(ctx: ReqCtx, id: string, body: member.UpdateMemberOrgRequest): Promise<member.Member> {
+    const patch: member.UpdateMemberRequest = { version: body.version };
+    if (body.roleTitle !== undefined) patch.roleTitle = body.roleTitle;
+    if (body.position !== undefined) patch.position = body.position;
+    if (body.status !== undefined) patch.status = body.status;
+    if (body.leaderId !== undefined) patch.leaderId = body.leaderId;
+    if (body.teamIds !== undefined) patch.teamIds = body.teamIds;
+    return member.toOrgChartMember(await this.updateMember(ctx, id, patch));
   }
 
   async updateMember(ctx: ReqCtx, id: string, body: member.UpdateMemberRequest): Promise<member.Member> {

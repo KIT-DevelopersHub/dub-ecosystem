@@ -130,6 +130,11 @@ export function setAppAccessLevel(
 const IMPLIED_DETAIL_KEYS: readonly (readonly [PermissionKey, PermissionKey])[] = [
   ["drive:settings_edit", "drive:settings_view"],
   ["calendar:meetings_edit", "calendar:meetings_view"],
+  // 運営メンバーの範囲は積み上げ式。1 周で閉じるよう上位の鍵から順に並べる。
+  ["members:mail_edit", "members:mail_view"],
+  ["members:mail_edit", "members:roster_edit"],
+  ["members:mail_view", "members:roster_view"],
+  ["members:roster_edit", "members:roster_view"],
 ];
 
 /**
@@ -153,6 +158,82 @@ export function appAccessMap(granted: Iterable<PermissionKey>): Record<AppId, Ap
   const out = {} as Record<AppId, AppAccessLevel>;
   for (const app of APP_MANIFEST) out[app.id as AppId] = appAccessLevelOf(set, app.id);
   return out;
+}
+
+// ── 運営メンバーの範囲 ────────────────────────────────────────────────────────
+/**
+ * 運営メンバーアプリの中で届くタブの範囲。閲覧・編集それぞれに 1 つ選ぶ。app:members:* の 3 段階とは
+ * 別の軸で、3 段階が「閲覧」なら編集範囲は効かない (サーバの表が app:members:edit も要求する)。
+ *   org_chart = 運営メンバー + 組織図 (個人情報は返さない)
+ *   roster    = + 運営名簿
+ *   all       = + メール名簿
+ */
+export const MembersScope = { OrgChart: "org_chart", Roster: "roster", All: "all" } as const;
+export type MembersScope = (typeof MembersScope)[keyof typeof MembersScope];
+export type MembersScopeMode = "view" | "edit";
+
+/** 狭い順。ロール管理の選択肢の並びを兼ねる。 */
+export const MEMBERS_SCOPES: readonly MembersScope[] = ["org_chart", "roster", "all"];
+
+export const MEMBERS_SCOPE_LABELS: Record<MembersScope, string> = {
+  org_chart: "組織図まで",
+  roster: "メール名簿以外",
+  all: "全て",
+};
+
+export const MEMBERS_SCOPE_DESCRIPTIONS: Record<MembersScopeMode, Record<MembersScope, string>> = {
+  view: {
+    org_chart: "運営メンバーと組織図のタブだけ。このアプリでは連絡先などの本人の情報を表示しません",
+    roster: "運営名簿のタブまで。本人の情報も表示します。メール名簿のタブは出ません",
+    all: "メール名簿のタブまで全部",
+  },
+  edit: {
+    org_chart: "チーム、運営での項目（担当・役職など）、メンバーの追加と削除まで。本人の情報は変更できません",
+    roster: "運営名簿のタブまで。本人の情報の変更やアカウントの紐付けもできます",
+    all: "メール名簿のタブまで全部",
+  },
+};
+
+const MEMBERS_SCOPE_KEYS: Record<MembersScopeMode, { roster: PermissionKey; mail: PermissionKey }> = {
+  view: { roster: "members:roster_view", mail: "members:mail_view" },
+  edit: { roster: "members:roster_edit", mail: "members:mail_edit" },
+};
+
+/** `granted` が `mode` で届く範囲。鍵が無ければ最も狭い 組織図まで (既定で個人情報を出さない)。 */
+export function membersScopeOf(granted: Iterable<PermissionKey>, mode: MembersScopeMode): MembersScope {
+  const set = granted instanceof Set ? granted : new Set(granted);
+  const keys = MEMBERS_SCOPE_KEYS[mode];
+  if (set.has(keys.mail)) return MembersScope.All;
+  if (set.has(keys.roster)) return MembersScope.Roster;
+  return MembersScope.OrgChart;
+}
+
+/**
+ * `mode` の範囲を `scope` にした新しい鍵集合。編集範囲は閲覧範囲を超えられないので、編集を広げると
+ * 閲覧も広がり、閲覧を狭めると編集も狭まる。他の鍵には触らない。
+ */
+export function setMembersScope(
+  granted: readonly PermissionKey[],
+  mode: MembersScopeMode,
+  scope: MembersScope,
+): PermissionKey[] {
+  const rank = MEMBERS_SCOPES.indexOf(scope);
+  const current = {
+    view: MEMBERS_SCOPES.indexOf(membersScopeOf(granted, "view")),
+    edit: MEMBERS_SCOPES.indexOf(membersScopeOf(granted, "edit")),
+  };
+  const next =
+    mode === "edit"
+      ? { view: Math.max(current.view, rank), edit: rank }
+      : { view: rank, edit: Math.min(current.edit, rank) };
+  const set = new Set(granted);
+  for (const m of ["view", "edit"] as const) {
+    set.delete(MEMBERS_SCOPE_KEYS[m].roster);
+    set.delete(MEMBERS_SCOPE_KEYS[m].mail);
+    if (next[m] >= 1) set.add(MEMBERS_SCOPE_KEYS[m].roster);
+    if (next[m] >= 2) set.add(MEMBERS_SCOPE_KEYS[m].mail);
+  }
+  return [...set].sort();
 }
 
 // ── capability flags (what the UI disables buttons with) ──────────────────────
@@ -321,9 +402,16 @@ export function claimedDetailKeys(): PermissionKey[] {
  *     app's 3 段階 (APP_MANIFEST `permissions`, bundled on save), so a separate toggle could
  *     only produce the broken "通知 is on but the inbox 403s" state.
  *   - notif:send — gates nothing (POST /notify is INTERNAL in the notification policy table).
+ *   - members:roster_* / members:mail_* — 運営メンバーの 詳細設定で範囲の選択肢として出す (MembersScope)。
+ *     個別のトグルにすると「閲覧は無いのに編集はある」状態を作れてしまう。
  * Each entry needs a reason; the partition test treats this as the 4th bucket.
  */
-export const HIDDEN_PERMISSION_KEYS: readonly PermissionKey[] = ["notif:inbox:self", "notif:prefs:self", "notif:send"];
+export const HIDDEN_PERMISSION_KEYS: readonly PermissionKey[] = [
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "notif:send",
+  ...Object.values(MEMBERS_SCOPE_KEYS).flatMap((k) => [k.roster, k.mail]),
+];
 
 /**
  * 「その他」: catalog keys that belong to NO app — org-wide capabilities (インフラ/デプロイ,

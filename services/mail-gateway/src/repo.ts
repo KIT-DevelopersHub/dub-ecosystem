@@ -840,6 +840,22 @@ export async function listUserFlags(db: DbClient, ownerUserId: string): Promise<
   return rows.map(rowToFlags);
 }
 
+/** Raise one flag on many threads at once for a user (POST /mail/bulk). Same result as
+ *  upsertUserFlags per thread, without its read-modify-write round trips: missing rows are
+ *  created with the defaults, then only this flag moves. */
+export async function setThreadsFlag(db: DbClient, ownerUserId: string, threadIds: string[], flag: "archived" | "trashed"): Promise<void> {
+  const now = nowIso();
+  const list = JSON.stringify(threadIds);
+  await db.run(
+    `INSERT OR IGNORE INTO mail_user_flags (owner_user_id, thread_id, created_at, updated_at) SELECT ?, value, ?, ? FROM json_each(?)`,
+    ownerUserId,
+    now,
+    now,
+    list,
+  );
+  await db.run(`UPDATE mail_user_flags SET ${flag} = 1, updated_at = ? WHERE owner_user_id = ? AND thread_id IN (SELECT value FROM json_each(?))`, now, ownerUserId, list);
+}
+
 /** Upsert one thread's flags for a user (PATCH semantics: only provided flags change; a
  *  first write defaults the others to false). Returns the resulting full flag state.
  *  Read-modify-write with INSERT OR REPLACE (the @dub/db namespace guard rejects

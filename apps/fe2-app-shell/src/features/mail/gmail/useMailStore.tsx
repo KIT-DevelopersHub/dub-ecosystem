@@ -109,6 +109,13 @@ export function serverViewOf(folder: FolderId, labelFilter: string | null): mail
   }
 }
 
+const MAIL_VIEW_FOLDERS = ["inbox", "mine", "others", "starred", "trash", "blocked", "all"] as const;
+
+/** 全件選択 needs a server view that is exactly the list on screen: a label is client-only, a
+ *  search is a subset, and 送信済み / 下書き / 予約済み are not folder views at all. */
+export function canSelectAllInView(state: MailState): boolean {
+  return !state.labelFilter && state.search.trim().length === 0 && (MAIL_VIEW_FOLDERS as readonly string[]).includes(state.folder);
+}
 /** Search spans everything but Trash / ブロック済み, which stay scoped to themselves. */
 export function searchViewOf(folder: FolderId, labelFilter: string | null): mail.MailFolderView {
   if (labelFilter) return "all";
@@ -169,6 +176,9 @@ export interface MailState {
   /** Keyboard cursor over the list (j / k), independent of selection. */
   cursorId: string | null;
   checked: Set<string>;
+  /** 全件選択: the selection means the whole server view, not just the checked rows on this
+   *  page. Any change to `checked` ends it (see reducer). */
+  allInView: boolean;
   search: string;
   composes: ComposeState[];
   undo: UndoState | null;
@@ -233,6 +243,7 @@ export type MailAction =
   | { type: "TOGGLE_CHECK"; id: string }
   | { type: "CHECK_ALL"; ids: string[] }
   | { type: "CLEAR_CHECKS" }
+  | { type: "SELECT_ALL_IN_VIEW" }
   | { type: "ADD_MESSAGE"; threadId: string; messageId?: string; body: string; to: MailPerson[]; cc?: MailPerson[]; bcc?: MailPerson[]; subject: string }
   | { type: "SEND"; to: MailPerson[]; cc: MailPerson[]; bcc?: MailPerson[]; subject: string; body: string; threadId?: string }
   | { type: "SEND_STARTED"; pending: PendingSend }
@@ -335,7 +346,8 @@ function withBlocked(prev: MailState, next: MailState): MailState {
 }
 
 export function reducer(state: MailState, action: MailAction): MailState {
-  return withBlocked(state, baseReducer(state, action));
+  const next = withBlocked(state, baseReducer(state, action));
+  return next.allInView && next.checked !== state.checked ? { ...next, allInView: false } : next;
 }
 
 function baseReducer(state: MailState, action: MailAction): MailState {
@@ -546,6 +558,8 @@ function baseReducer(state: MailState, action: MailAction): MailState {
       return { ...state, checked: new Set(action.ids) };
     case "CLEAR_CHECKS":
       return { ...state, checked: new Set() };
+    case "SELECT_ALL_IN_VIEW":
+      return { ...state, allInView: true };
     case "ADD_MESSAGE": {
       return {
         ...state,
@@ -742,6 +756,7 @@ export const initialMailState: MailState = {
   openThreadId: null,
   cursorId: null,
   checked: new Set(),
+  allInView: false,
   search: "",
   composes: [],
   undo: null,

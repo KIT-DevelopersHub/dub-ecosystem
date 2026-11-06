@@ -40,6 +40,16 @@ export function usePermissions(): UsePermissions {
   return { can, canAll: all, appCan, decide, ready: me !== null };
 }
 
+/**
+ * メール名簿を編集できるか — identity-roster の MAIL_ROSTER_EDIT と同条件。
+ * 管理の編集に加えて、運営メンバーの編集範囲が「全て」であること。
+ */
+export function useCanMailRosterEdit(): boolean {
+  const { decide } = usePermissions();
+  const canAdminEdit = useCanAdminEdit();
+  return canAdminEdit && decide({ app: "members", level: policy.AppAccessLevel.Edit, permission: "members:mail_edit" }).allowed;
+}
+
 /** 管理アプリ(ロール管理 / メール名簿)を編集できるか — identity-roster の requireAdminEdit と同条件。 */
 export function useCanAdminEdit(): boolean {
   const { decide } = usePermissions();

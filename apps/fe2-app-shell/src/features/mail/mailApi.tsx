@@ -61,6 +61,8 @@ export interface MailApi {
   markRead(id: string): Promise<MailMessageState>;
   /** Set the viewer's own read state on received messages (既読 / 未読; mail:read). */
   setReadState(ids: string[], read: boolean): Promise<void>;
+  /** Apply one action to every conversation of a view, unloaded pages included (mail:read). */
+  bulkAction(folder: mail.MailFolderView, action: mail.MailBulkAction): Promise<void>;
   /** The signed-in user's drafts, newest first (mail:read). */
   listDrafts(): Promise<mail.MailDraft[]>;
   /** Create or update one draft under its client-minted id (mail:send). */
@@ -141,6 +143,9 @@ export function createMailApi(api: ApiClient): MailApi {
     getMessage: (id) => api.request<MailMessageDetail>({ method: "GET", path: `${MAIL}/messages/${encodeURIComponent(id)}` }),
     getThread: (threadId) => api.request<MailThread>({ method: "GET", path: `${MAIL}/threads/${encodeURIComponent(threadId)}` }),
     markRead: (id) => api.request<MailMessageState>({ method: "POST", path: `${MAIL}/messages/${encodeURIComponent(id)}/read` }),
+    bulkAction: async (folder, action) => {
+      await api.request<unknown, mail.MailBulkRequest>({ method: "POST", path: `${MAIL}/bulk`, body: { folder, action } });
+    },
     setReadState: async (ids, read) => {
       await api.request<unknown, mail.MailReadStateRequest>({ method: "POST", path: `${MAIL}/read-state`, body: { ids, read } });
     },
