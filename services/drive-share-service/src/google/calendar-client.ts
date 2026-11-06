@@ -5,6 +5,7 @@
 import { errors } from "@dub/errors";
 import { retryFetch } from "@dub/http";
 import { mapGoogleError, type GoogleErrorSource } from "../drive-client";
+import type { GoogleCallRecorder } from "./api-usage";
 import type { TokenProvider } from "./token";
 
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
@@ -135,7 +136,7 @@ function eventBody(p: Partial<CalendarEventInput>): Record<string, unknown> {
   return body;
 }
 
-export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchImpl?: typeof fetch; newRequestId?: () => string }): CalendarClient {
+export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchImpl?: typeof fetch; newRequestId?: () => string; recordCall?: GoogleCallRecorder }): CalendarClient {
   const doFetch = deps.fetchImpl ?? ((input: string | URL | Request, init?: RequestInit) => retryFetch(input, { ...init, retry: { retryOn } }));
   const requestId = deps.newRequestId ?? (() => crypto.randomUUID());
 
@@ -145,6 +146,7 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
       const headers = new Headers(init.headers);
       headers.set("authorization", `Bearer ${token}`);
       if (init.body !== undefined) headers.set("content-type", "application/json");
+      await deps.recordCall?.(url.startsWith(MEET_BASE) ? "meet" : "calendar");
       try {
         return await doFetch(url, { ...init, headers });
       } catch (cause) {

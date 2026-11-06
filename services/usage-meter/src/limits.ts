@@ -1,6 +1,6 @@
 // Free-tier master — the STATIC source of truth for every metric we guard: its ceiling,
 // unit, reset cadence and overflow behavior. Values are the 2026 Cloudflare Workers Free
-// and Resend Free published limits.
+// and Resend Free published limits, plus the Google API quotas.
 //
 // !! REQUIRES PERIODIC RE-CHECK !! These numbers are hard-coded from public 2026 pricing
 // pages; Cloudflare/Resend can change free-tier ceilings. Each entry's `source` notes where
@@ -138,10 +138,31 @@ export const MASTER: readonly MetricDef[] = [
     reset: "daily",
     source: "Cloudflare Durable Objects Free: 100,000 requests/day (2026, re-check)",
   },
-  // ---- GCP (future) ----
-  // When a GCP collector lands (collectors/gcp.ts + one line in COLLECTORS), add its
-  // free-tier metric rows here with provider: "gcp" — e.g. a "gcp_cloud_run_requests_month"
-  // row mirroring the shape above. Nothing else needs to change.
+  // ---- Google APIs (カレンダー > ミーティング / 出席) ----
+  // No charge at these limits: Google answers 429/403 at the ceiling (halt). The quotas are
+  // per minute and every call comes from one shared account, so `used` is the busiest minute of
+  // the last 24h compared to the per-user limit — a daily total would hide the real wall.
+  // !! NOT VERIFIED against Google's docs or the GCP console quota page: confirm before staging.
+  {
+    provider: "gcp",
+    metricKey: "gcp_calendar_requests_peak_minute",
+    label: "Google Calendar API リクエスト(ピーク/分)",
+    limit: 600,
+    unit: "req/min",
+    overflowBehavior: "halt",
+    reset: "daily",
+    source: "Google Calendar API: per-minute per-user quota (unverified, re-check)",
+  },
+  {
+    provider: "gcp",
+    metricKey: "gcp_meet_requests_peak_minute",
+    label: "Google Meet API リクエスト(ピーク/分)",
+    limit: 600,
+    unit: "req/min",
+    overflowBehavior: "halt",
+    reset: "daily",
+    source: "Google Meet REST API: per-minute per-user read quota (unverified, re-check)",
+  },
   // ---- Resend (transactional email) ----
   {
     provider: "resend",
