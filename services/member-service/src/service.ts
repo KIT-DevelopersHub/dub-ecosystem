@@ -81,6 +81,11 @@ const MAX_TEAM_MENTION_EXPANSION = 20;
 /** Upper bound on identity ids resolved in one Google-address lookup (the whole org fits). */
 const MAX_GOOGLE_EMAIL_LOOKUP = 2000;
 
+/** 催促の「1 日」は日本時間で区切る。 */
+function jstDate(iso: string): string {
+  return new Date(Date.parse(iso) + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 export class MemberService {
   constructor(private readonly deps: AppDeps) {}
 
@@ -139,7 +144,7 @@ export class MemberService {
    * with no linked identity account are skipped (nothing to notify); ids are unique and
    * returned in roster order. Read-only, internal-only (see /members/internal/*).
    */
-  async listTeamIdentityUserIds(teamIds: readonly string[]): Promise<{ userIds: string[] }> {
+  async listTeamIdentityUserIds(teamIds: readonly string[], opts: { excludeDeclined?: boolean } = {}): Promise<{ userIds: string[] }> {
     // One message can only mention so many teams; bound the request so a crafted body
     // cannot turn one post into an unbounded roster scan.
     const wanted = new Set(teamIds.filter((id) => id.length > 0).slice(0, MAX_TEAM_MENTION_EXPANSION));
@@ -152,6 +157,7 @@ export class MemberService {
     for (const p of people) {
       const uid = p.identityUserId;
       if (!uid || !inTeam.has(p.id) || seen.has(uid)) continue;
+      if (opts.excludeDeclined && p.status === "declined") continue;
       seen.add(uid);
       userIds.push(uid);
     }
@@ -433,6 +439,31 @@ export class MemberService {
     if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
     await this.deps.repo.archivePerson(id);
     await this.syncRolesForIdentities(ctx, [cur.identityUserId]);
+  }
+
+  /** 情報が足りない本人へ入力を催促する。未入力の判定は名簿の最新の行で行う。 */
+  async sendProfileReminder(ctx: ReqCtx, id: string): Promise<member.SendProfileReminderResponse> {
+    const cur = await this.deps.repo.getPerson(id);
+    if (!cur || cur.orgId !== this.deps.orgId) throw errPersonNotFound(id);
+    const send = this.deps.sendProfileReminder;
+    if (!send) throw errors.upstreamUnavailable("notification");
+    if (!cur.identityUserId) {
+      throw errors.validationFailed([{ field: "identityUserId", reason: "not_linked" }], "アカウントが紐付いていないため催促できません");
+    }
+    if (cur.status === "declined") {
+      throw errors.validationFailed([{ field: "status", reason: "declined" }], "辞退したメンバーには催促できません");
+    }
+    const missing = member.missingProfileKeys(cur);
+    if (missing.length === 0) {
+      throw errors.validationFailed([{ field: "profile", reason: "complete" }], "未入力の項目はありません");
+    }
+    const { deduplicated } = await send(ctx, {
+      memberId: cur.id,
+      identityUserId: cur.identityUserId,
+      missing,
+      today: jstDate(this.deps.now()),
+    });
+    return { deduplicated, missing };
   }
 
   // ---- identity linking (#1: bridge 組織図 <-> RBAC 真実) ----

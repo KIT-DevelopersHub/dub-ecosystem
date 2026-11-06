@@ -12,7 +12,7 @@ export type UserStatusFilter = identity.UserStatus | "all";
 export interface UserListFilters {
   search: string;
   status: UserStatusFilter;
-  roleKey: string | null; // PermissionKey-ish role filter; null = no filter
+  roleKey: string | null; // role id; null = no filter
   cursor?: string;
   limit?: number;
 }

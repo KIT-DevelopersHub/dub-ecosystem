@@ -3,7 +3,7 @@
 // roll back on error; revoke / permission-bundle save / status change wait for the
 // server (called after a ConfirmDialog).
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import type { identity, common, auditLog, auth, member } from "@dub/types";
+import type { identity, common, auditLog, auth, mail, member } from "@dub/types";
 import { useRosterContext } from "../providers/RosterProvider";
 import { useToast } from "./useToast";
 import { queryKeys } from "../lib/queryKeys";
@@ -445,6 +445,42 @@ export function useDeleteEmailAddress() {
   return useMutation({
     mutationFn: (id: string) => api.deleteEmailAddress(id),
     onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.emailAddresses() }),
+  });
+}
+
+/** メーリングリスト (one address per team). Read only while its dialog is open: the route
+ *  needs mail:admin, which most viewers of this page do not hold. */
+export function useTeamLists(enabled: boolean): UseQueryResult<{ items: mail.MailTeamList[] }> {
+  const { api } = useRosterContext();
+  return useQuery({ queryKey: queryKeys.teamLists(), queryFn: () => api.listTeamLists(), enabled });
+}
+
+export function useCreateTeamList() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: mail.MailTeamListCreateRequest) => api.createTeamList(req),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.teamLists() }),
+  });
+}
+
+/** Optimistic: the row goes at once and comes back if the server refuses. */
+export function useDeleteTeamList() {
+  const { api } = useRosterContext();
+  const qc = useQueryClient();
+  const key = queryKeys.teamLists();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteTeamList(id),
+    onMutate: async (id: string) => {
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<{ items: mail.MailTeamList[] }>(key);
+      if (previous) qc.setQueryData(key, { items: previous.items.filter((l) => l.id !== id) });
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) qc.setQueryData(key, context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: key }),
   });
 }
 

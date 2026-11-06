@@ -22,6 +22,7 @@ import { persistAttachments, persistDroppedAttachments, type DroppedReason } fro
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
 import { archiveRawEml } from "./raw-eml";
+import { deliverToTeam, findActiveTeamList } from "./team-list";
 import { loadMatcher } from "./blocks";
 import type { InboundDeps, OwnerAddressPolicy, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
@@ -201,6 +202,15 @@ function ownerCandidatesFor(
  * `processed` = this call stored the body row (the first copy).
  */
 export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
+  const list = await findActiveTeamList(deps.db, parseAddress(raw.to).email);
+  const result = await ingestCopy(deps, raw, list !== null);
+  // Last, and on both the first-copy and already-stored paths: a mail To one member and Cc
+  // the list usually reaches the list second. Throws on failure, like a failed publish.
+  if (list) await deliverToTeam(deps, list, result.message);
+  return result;
+}
+
+async function ingestCopy(deps: InboundDeps, raw: RawInbound, isListCopy: boolean): Promise<{ processed: boolean; message: mail.MailMessage }> {
   const parsed = parseInbound(raw, {
     archiveAddress: deps.archiveAddress ?? null,
     sharedAddress: deps.sharedAddress ?? null,
@@ -217,7 +227,11 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   // Per-account Inbox scope: resolve the owning roster user of THIS copy from its delivery
   // address(es), envelope recipient first (see parseInbound). null when no roster user
   // matches, or for the archive@ copy (fail-closed: visible to mail:read_all only).
-  const ownerUserId = await resolveInboundOwner(deps.identity, deps.ctx, ownerCandidates);
+  // A list copy has no single owner: its deliveries are the team's (see deliverToTeam), and
+  // falling back to the To: header would hand it to whoever else the mail was addressed to.
+  const ownerUserId = isListCopy ? null : await resolveInboundOwner(deps.identity, deps.ctx, ownerCandidates);
+  // The body row is shared: a list address here would read as every member's own address.
+  if (isListCopy) delete headerMeta.deliveredTo;
   const envelopeTo = parseAddress(raw.to).email.trim().toLowerCase();
 
   const changes = await insertInbound(deps.db, message, {
