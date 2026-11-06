@@ -3,7 +3,6 @@
 import { DubError, errors, type FieldError } from "@dub/errors";
 import { consoleSink, type LogLevel } from "@dub/observability";
 import { lp } from "@dub/types";
-import { dayJst } from "./domain";
 import { issuePreviewToken, verifyPreviewToken } from "./preview-token";
 import { stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
 import type {
@@ -12,7 +11,6 @@ import type {
   LpTicketCoupon,
   LpTicketCouponsPage,
   LpTicketField,
-  LpTicketFieldType,
   LpTicketOrder,
   LpTicketOrderItem,
   LpTicketOrderStatus,
@@ -42,20 +40,9 @@ export const MAX_PER_ORDER_MAX = 20;
 export const DEFAULT_MAX_PER_ORDER = 10;
 /** 1 回の購入の合計枚数上限（券種をまたいで）。 */
 export const ORDER_QTY_MAX = 20;
-export const FIELDS_MAX = 20;
-export const FIELD_LABEL_MAX = 60;
-export const FIELD_OPTIONS_MAX = 20;
-export const FIELD_OPTION_MAX = 60;
-const FIELD_ID_RE = /^[a-z0-9_-]{1,40}$/;
 /** 氏名・メールは固定項目なのでカスタム項目の id に使わせない。 */
 const RESERVED_FIELD_IDS: ReadonlySet<string> = new Set(["name", "email"]);
-export const CHECKBOX_YES = "はい";
 
-export const BUYER_NAME_MAX = 100;
-export const BUYER_EMAIL_MAX = 254;
-export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-/** Hashed sender IP from the public LP Worker (clientKeyFor). Anything else is treated as absent. */
-export const CLIENT_KEY_RE = /^[a-f0-9]{16,64}$/;
 /**
  * Unpaid seats one sender may hold at once (pending orders inside the hold window). Stops one source
  * from locking a type's capacity with abandoned checkouts; real buyers pay within minutes, and a shared
@@ -72,17 +59,6 @@ export const COUPON_CODE_LEN = 10;
 const COUPON_CODE_RE = /^[A-Z0-9]{4,32}$/;
 export const COUPON_LABEL_MAX = 60;
 export const COUPON_MAX_USES_MAX = 1000;
-const ANSWER_MAX: Record<LpTicketFieldType, number> = {
-  text: 200,
-  textarea: 2000,
-  radio: FIELD_OPTION_MAX,
-  multiselect: (FIELD_OPTION_MAX + 1) * FIELD_OPTIONS_MAX,
-  select: FIELD_OPTION_MAX,
-  checkbox: 10,
-  date: 10,
-  email: BUYER_EMAIL_MAX,
-  phone: 30,
-};
 
 /** Stripe session lifetime. Stripe requires >= 30 min, so a minute of headroom for clock/network skew. */
 export const CHECKOUT_TTL_SEC = 31 * 60;
@@ -191,46 +167,10 @@ export function parseTicketTypeInput(body: unknown, partial: boolean): Partial<L
   return out;
 }
 
-/** `reserved` = fixed-field ids the caller's form already has (custom fields must not reuse them). */
-export function parseFields(body: unknown, reserved: ReadonlySet<string> = RESERVED_FIELD_IDS): LpTicketField[] {
-  const raw = (body as { fields?: unknown } | null)?.fields;
-  if (!Array.isArray(raw)) throw errors.validationFailed([{ field: "fields", reason: "required" }]);
-  if (raw.length > FIELDS_MAX) throw errors.validationFailed([{ field: "fields", reason: "too_many" }]);
-  const bad: FieldError[] = [];
-  const seen = new Set<string>();
-  const out: LpTicketField[] = [];
-  raw.forEach((f0, i) => {
-    const f = (f0 ?? {}) as Record<string, unknown>;
-    const at = (k: string) => `fields[${i}].${k}`;
-    const before = bad.length;
-    const id = typeof f.id === "string" ? f.id : "";
-    if (!FIELD_ID_RE.test(id) || reserved.has(id)) bad.push({ field: at("id"), reason: "invalid" });
-    else if (seen.has(id)) bad.push({ field: at("id"), reason: "duplicate" });
-    seen.add(id);
-    const label = typeof f.label === "string" ? f.label.trim() : "";
-    if (label.length === 0) bad.push({ field: at("label"), reason: "required" });
-    else if (label.length > FIELD_LABEL_MAX) bad.push({ field: at("label"), reason: "too_long" });
-    const description = typeof f.description === "string" ? f.description.trim() : "";
-    if (description.length > lp.LP_FIELD_DESCRIPTION_MAX) bad.push({ field: at("description"), reason: "too_long" });
-    const type = f.type as LpTicketFieldType;
-    if (!lp.isLpFieldType(type)) bad.push({ field: at("type"), reason: "invalid" });
-    if (typeof f.required !== "boolean") bad.push({ field: at("required"), reason: "invalid" });
-    let options: string[] = [];
-    if (lp.isLpChoiceField(type)) {
-      const opts = Array.isArray(f.options) ? f.options : [];
-      options = opts.map((o) => (typeof o === "string" ? o.trim() : ""));
-      if (options.length < 1 || options.length > FIELD_OPTIONS_MAX) bad.push({ field: at("options"), reason: "invalid_count" });
-      else if (options.some((o) => o.length === 0 || o.length > FIELD_OPTION_MAX || o.includes(lp.LP_MULTISELECT_SEPARATOR))) {
-        bad.push({ field: at("options"), reason: "invalid" });
-      }
-      else if (new Set(options).size !== options.length) bad.push({ field: at("options"), reason: "duplicate" });
-    }
-    if (bad.length === before) {
-      out.push({ id, label, ...(description ? { description } : {}), type, required: f.required as boolean, options });
-    }
-  });
-  if (bad.length > 0) throw errors.validationFailed(bad);
-  return out;
+function parseFields(body: unknown): LpTicketField[] {
+  const { fields, issues } = lp.parseLpFields(body, RESERVED_FIELD_IDS);
+  if (issues.length > 0) throw errors.validationFailed(issues);
+  return fields;
 }
 
 export interface CheckoutItemInput {
@@ -320,10 +260,10 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
   if (items.reduce((n, i) => n + i.quantity, 0) > ORDER_QTY_MAX) bad.push({ field: "items", reason: "too_many" });
   const name = typeof b.name === "string" ? b.name.trim() : "";
   if (!name) bad.push({ field: "name", reason: "required" });
-  else if (name.length > BUYER_NAME_MAX) bad.push({ field: "name", reason: "too_long" });
+  else if (name.length > lp.LP_BUYER_NAME_MAX) bad.push({ field: "name", reason: "too_long" });
   const email = typeof b.email === "string" ? b.email.trim() : "";
   if (!email) bad.push({ field: "email", reason: "required" });
-  else if (email.length > BUYER_EMAIL_MAX || !EMAIL_RE.test(email)) bad.push({ field: "email", reason: "invalid" });
+  else if (email.length > lp.LP_BUYER_EMAIL_MAX || !lp.LP_EMAIL_RE.test(email)) bad.push({ field: "email", reason: "invalid" });
 
   let origin = "";
   try {
@@ -334,7 +274,7 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
   }
   if (!origin) bad.push({ field: "origin", reason: "invalid" });
 
-  const answers = parseAnswers(b.answers, fields, bad);
+  const answers = lp.parseLpAnswers(b.answers, fields, bad);
   const hasCoupon = b.couponCode !== undefined && b.couponCode !== null;
   const rawCoupon = typeof b.couponCode === "string" ? b.couponCode.trim() : "";
   const couponCode = rawCoupon ? normalizeCouponCode(rawCoupon) : null;
@@ -343,27 +283,8 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
     bad.push({ field: "couponCode", reason: "invalid" });
   }
   if (bad.length > 0) throw errors.validationFailed(bad);
-  const clientKey = typeof b.clientKey === "string" && CLIENT_KEY_RE.test(b.clientKey) ? b.clientKey : null;
+  const clientKey = typeof b.clientKey === "string" && lp.LP_CLIENT_KEY_RE.test(b.clientKey) ? b.clientKey : null;
   return { items, name, email, answers, origin, clientKey, couponCode };
-}
-
-/** Answers to the configured custom fields (label snapshot kept). Problems go to `bad`. */
-export function parseAnswers(raw: unknown, fields: readonly LpTicketField[], bad: FieldError[]): LpTicketAnswer[] {
-  const rawAnswers = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const answers: LpTicketAnswer[] = [];
-  for (const f of fields) {
-    const v0 = rawAnswers[f.id];
-    const value = typeof v0 === "string" ? v0.trim() : "";
-    const key = `answers.${f.id}`;
-    if (f.required && value === "") bad.push({ field: key, reason: "required" });
-    else if (value.length > ANSWER_MAX[f.type]) bad.push({ field: key, reason: "too_long" });
-    else if (value !== "" && lp.lpFieldAnswerProblem(f, value)) bad.push({ field: key, reason: "invalid" });
-    else if (value !== "" && f.type === "checkbox" && value !== CHECKBOX_YES) bad.push({ field: key, reason: "invalid" });
-    // 回答は表示用の 1 文字列で持つ（一覧・CSV はこのまま出す）。
-    const shown = f.type === "multiselect" ? value.split(lp.LP_MULTISELECT_SEPARATOR).join("、") : value;
-    answers.push({ fieldId: f.id, label: f.label, value: shown });
-  }
-  return answers;
 }
 
 export function statsFor(t: Pick<LpTicketType, "capacity">, agg: TicketTypeAgg | undefined): LpTicketTypeStats {
@@ -375,11 +296,6 @@ export function statsFor(t: Pick<LpTicketType, "capacity">, agg: TicketTypeAgg |
     revenueJpy: agg?.revenueJpy ?? 0,
     remaining: t.capacity === null ? null : Math.max(0, t.capacity - sold - pending),
   };
-}
-
-/** JST midnight of the day containing `iso`, as a UTC ISO string (comparable to created_at). */
-export function jstDayStartIso(iso: string): string {
-  return new Date(`${dayJst(iso)}T00:00:00+09:00`).toISOString();
 }
 
 export function orderCursor(o: { createdAt: string; id: string }): string {

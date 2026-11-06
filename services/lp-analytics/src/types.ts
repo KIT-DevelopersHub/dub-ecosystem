@@ -130,15 +130,7 @@ export interface AggregateRow {
 
 // ---- tickets wire (lockstep with fe2 lpApi.tsx) ----
 export type LpTicketFieldType = lp.LpFieldType;
-export interface LpTicketField {
-  id: string;
-  label: string;
-  /** 回答者に見せる補足説明（無ければキーごと持たない）。 */
-  description?: string;
-  type: LpTicketFieldType;
-  required: boolean;
-  options: string[];
-}
+export type LpTicketField = lp.LpFormField;
 export interface LpTicketType {
   id: string;
   name: string;
@@ -186,11 +178,7 @@ export interface LpTicketsState {
 }
 /** needs_review = Stripe says paid but amount/currency mismatched, or disputed: a human must look (seat kept). */
 export type LpTicketOrderStatus = "pending" | "paid" | "expired" | "refunded" | "needs_review";
-export interface LpTicketAnswer {
-  fieldId: string;
-  label: string;
-  value: string;
-}
+export type LpTicketAnswer = lp.LpFormAnswer;
 export interface LpTicketOrderItem {
   ticketTypeId: string;
   ticketTypeName: string;
