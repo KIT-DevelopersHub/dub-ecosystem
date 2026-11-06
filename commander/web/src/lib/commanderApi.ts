@@ -1,3 +1,5 @@
+import type { PrChecksApi, PrChecksView } from "./prChecks.ts";
+
 // Client for the commander-service phase-gate API. In local/dev the operator runs the
 // worker (wrangler dev, default :8787); the base is overridable via VITE_COMMANDER_API.
 // The phase gate itself is enforced server-side (@dub/commander-phases): this client
@@ -212,6 +214,8 @@ export function checkBundleLocally(taskIds: string[], items: BoardItem[]): Bundl
 export interface CommanderApi {
   /** staging 合体。未対応のバックエンドでは undefined（ボードは合体 UI を出さない）。 */
   bundles?: BundleApi;
+  /** PR の CI 状況と「確認」(確認した ラベル)。未対応なら undefined（カードにバッジを出さない）。 */
+  prs?: PrChecksApi;
   listFeatures(): Promise<Feature[]>;
   createFeature(input: { title: string; ledgerRef?: string }): Promise<Result<Feature>>;
   getFeature(id: string): Promise<FeatureDetail>;
@@ -306,6 +310,15 @@ export class HttpCommanderApi implements CommanderApi {
     },
   };
 
+  readonly prs: PrChecksApi = {
+    getChecks: (ref, opts) => {
+      const q = new URLSearchParams({ repo: ref.repo, ...(opts?.fresh ? { fresh: "1" } : {}) });
+      return this.send<PrChecksView>("GET", `/prs/${ref.number}/checks?${q.toString()}`);
+    },
+    confirm: (ref, headSha) =>
+      this.send("POST", `/prs/${ref.number}/confirm`, { headSha, repo: ref.repo }),
+  };
+
   private async bundleCall(method: string, path: string, body: unknown): Promise<Result<StagingBundle>> {
     const r = await this.send<{ bundle: StagingBundle }>(method, path, body);
     return r.ok ? { ok: true, value: r.value.bundle } : r;
@@ -314,11 +327,14 @@ export class HttpCommanderApi implements CommanderApi {
   private async send<T>(method: string, path: string, body?: unknown): Promise<Result<T>> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
-      headers: this.headers(),
+      headers: body === undefined ? this.auth() : this.headers(),
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!res.ok) return { ok: false, error: { status: res.status, error: String(json.error ?? "error") } };
+    if (!res.ok) {
+      const message = typeof json.message === "string" ? json.message : undefined;
+      return { ok: false, error: { status: res.status, error: String(json.error ?? "error"), ...(message ? { message } : {}) } };
+    }
     return { ok: true, value: json as T };
   }
 
