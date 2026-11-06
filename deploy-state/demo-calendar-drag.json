@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "calendar-drag",
+  "worker": "dub-demo-calendar-drag",
+  "url": "https://dub-demo-calendar-drag.developershub-site.workers.dev",
+  "deployedSha": "ad5763eb",
+  "branch": "commander/task-ctask_01M6QKKKRBW248FNJDDF75MDKW",
+  "actor": "ko-tarou",
+  "markers": ["calendar-meeting-move-confirm"],
+  "live": true,
+  "verifiedAt": "2026-11-06T05:29:15Z",
+  "updatedAt": "2026-11-06T05:29:15Z",
+  "note": "カレンダーのドラッグ移動"
+}
