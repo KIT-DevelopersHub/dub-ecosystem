@@ -62,6 +62,27 @@ export function useAnswerDraft(questions: readonly hrForm.FormQuestion[]) {
   return { answers, errors, setAnswer, setErrors, validate, reset };
 }
 
+/** 参加届と同じく、姓と名は 1 行に並べる。 */
+const PAIR_START: Partial<Record<hrForm.ApplicantBinding, hrForm.ApplicantBinding>> = {
+  lastName: "firstName",
+  lastNameKana: "firstNameKana",
+};
+
+function toRows(questions: readonly hrForm.FormQuestion[]): hrForm.FormQuestion[][] {
+  const rows: hrForm.FormQuestion[][] = [];
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i]!;
+    const next = questions[i + 1];
+    if (q.binding && next && PAIR_START[q.binding] === next.binding) {
+      rows.push([q, next]);
+      i++;
+    } else {
+      rows.push([q]);
+    }
+  }
+  return rows;
+}
+
 export function InterviewFormFields({
   questions,
   answers,
@@ -78,9 +99,18 @@ export function InterviewFormFields({
 }): JSX.Element {
   return (
     <div className={styles.answerList} data-testid={`${idPrefix}-fields`}>
-      {questions.map((q) => (
-        <QuestionInput key={q.id} q={q} value={answers[q.id]} error={errors[q.id]} onChange={(v) => onChange(q.id, v)} idPrefix={idPrefix} />
-      ))}
+      {toRows(questions).map((row) => {
+        const inputs = row.map((q) => (
+          <QuestionInput key={q.id} q={q} value={answers[q.id]} error={errors[q.id]} onChange={(v) => onChange(q.id, v)} idPrefix={idPrefix} />
+        ));
+        return row.length > 1 ? (
+          <div key={row[0]!.id} className={styles.answerRow}>
+            {inputs}
+          </div>
+        ) : (
+          inputs
+        );
+      })}
     </div>
   );
 }

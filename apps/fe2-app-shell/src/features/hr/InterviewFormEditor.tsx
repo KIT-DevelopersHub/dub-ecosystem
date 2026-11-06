@@ -1,6 +1,6 @@
 // 面談申し込みフォームの編集 (Google フォーム風)。タイトル・説明・受付の開閉と、質問の追加・削除・並べ替え
 // (ドラッグ / キーボード)・形式・必須・選択肢・「応募者のどの項目に入れるか」を下書きで編集して保存する。
-// 検証は @dub/types hrForm.validateFormDefinition (サービスと同じ関数)。氏名とメールの質問は消せず必須固定。
+// 検証は @dub/types hrForm.validateFormDefinition (サービスと同じ関数)。姓・名とメールの質問は消せず必須固定。
 // 保存は楽観的 (useSaveInterviewForm)。閲覧のみの権限では全コントロールが disabled。
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -15,7 +15,7 @@ import {
   TextField,
   Textarea,
 } from "@dub/ui";
-import { hrForm } from "@dub/types";
+import { hrForm, member } from "@dub/types";
 import { useSaveInterviewForm } from "./interviewFormApi.tsx";
 import styles from "./interview-form.module.css";
 
@@ -32,8 +32,9 @@ const isLocked = (q: hrForm.FormQuestion) => q.binding !== null && hrForm.REQUIR
 
 function errorText(field: string, reason: string): string {
   if (field === "title") return "フォームのタイトルを入力してください";
-  if (reason === "missing_name") return "氏名を入れる質問が必要です";
+  if (reason === "missing_lastName" || reason === "missing_firstName") return "苗字と名前を入れる質問が必要です";
   if (reason === "missing_email") return "メールアドレスを入れる質問が必要です";
+  if (reason === "grade_options") return `学年は参加届と同じ選択肢（${member.GRADES.map((g) => member.GRADE_LABEL[g]).join("・")}）から作ってください`;
   if (field.endsWith(".label")) return "質問文を入力してください";
   if (field.endsWith(".options")) return "選択肢を 1 つ以上、重複なしで入力してください";
   if (field.endsWith(".binding")) return "この形式では選べない項目か、別の質問ですでに使っています";

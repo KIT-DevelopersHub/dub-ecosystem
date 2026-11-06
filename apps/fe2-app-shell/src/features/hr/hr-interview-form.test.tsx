@@ -9,6 +9,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import { hrForm, type hr, type identity } from "@dub/types";
+import { parsePrefillHash } from "../participation/prefillLink.ts";
 import { describe, expect, it, vi } from "vitest";
 import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { createApiClient, type ApiClient } from "../../lib/api-client.tsx";
@@ -90,12 +91,12 @@ describe("demo transport (面談申し込みフォーム)", () => {
     const api = demoClient();
     const formApi = createInterviewFormApi(api);
     const before = (await createHrApi(api).list()).applicants.length;
-    await formApi.submitPublic({ answers: { name: "新井 陽", email: "you@example.com" } });
-    await formApi.submitPublic({ answers: { name: "新井 陽", email: "YOU@example.com" } });
+    await formApi.submitPublic({ answers: { last_name: "新井", first_name: "陽", email: "you@example.com" } });
+    await formApi.submitPublic({ answers: { last_name: "新井", first_name: "陽", email: "YOU@example.com" } });
     const after = (await createHrApi(api).list()).applicants;
     expect(after.length).toBe(before + 1);
     expect(after.find((a) => a.email === "you@example.com")).toMatchObject({ stage: "scheduling", source: hrForm.SOURCE_PUBLIC });
-    await expect(formApi.submitPublic({ answers: { name: "", email: "x" } })).rejects.toMatchObject({ status: 400 });
+    await expect(formApi.submitPublic({ answers: { last_name: "", email: "x" } })).rejects.toMatchObject({ status: 400 });
     const form = await formApi.get();
     await expect(formApi.save({ ...form, expectedVersion: form.version - 1 })).rejects.toMatchObject({ status: 409 });
   });
@@ -107,8 +108,9 @@ describe("公開ページ", () => {
     renderWith(<PublicInterviewFormPage api={demoClient()} />, fakeFormApi());
     expect(await screen.findByText("面談申し込みフォーム")).toBeTruthy();
     fireEvent.click(screen.getByTestId("interview-form-public-submit"));
-    expect(await screen.findAllByText("入力してください")).toHaveLength(2); // 氏名 + メール
-    fireEvent.change(screen.getByTestId("interview-form-public-q-name"), { target: { value: "山田 太郎" } });
+    expect(await screen.findAllByText("入力してください")).toHaveLength(3); // 氏名 + メール
+    fireEvent.change(screen.getByTestId("interview-form-public-q-last_name"), { target: { value: "山田" } });
+    fireEvent.change(screen.getByTestId("interview-form-public-q-first_name"), { target: { value: "太郎" } });
     fireEvent.change(screen.getByTestId("interview-form-public-q-email"), { target: { value: "taro@example.com" } });
     fireEvent.click(screen.getByTestId("interview-form-public-q-interests-1"));
     fireEvent.click(screen.getByTestId("interview-form-public-submit"));
@@ -121,7 +123,7 @@ describe("フォームの編集", () => {
     const save = vi.fn((body: hrForm.SaveInterviewFormRequest) => Promise.resolve({ ...baseForm(), ...body, version: 4 }));
     renderWith(<HrInterviewFormScreen />, fakeFormApi({ save }));
     await screen.findByTestId("fe2-hr-form-editor");
-    expect(screen.queryByTestId("fe2-hr-form-q-name-delete")).toBeNull();
+    expect(screen.queryByTestId("fe2-hr-form-q-last_name-delete")).toBeNull();
     expect((screen.getByTestId("fe2-hr-form-q-email-type") as HTMLSelectElement).disabled).toBe(true);
     expect(screen.getByTestId("fe2-hr-form-q-interests-delete")).toBeTruthy();
 
@@ -171,7 +173,8 @@ describe("代理入力", () => {
     renderWith(<HrInterviewFormScreen />, fakeFormApi({ submitOnBehalf }), { client });
     await screen.findByTestId("fe2-hr-form-editor");
     fireEvent.click(screen.getByTestId("fe2-hr-form-enter"));
-    fireEvent.change(await screen.findByTestId("fe2-hr-form-enter-q-name"), { target: { value: "電話 一郎" } });
+    fireEvent.change(await screen.findByTestId("fe2-hr-form-enter-q-last_name"), { target: { value: "電話" } });
+    fireEvent.change(screen.getByTestId("fe2-hr-form-enter-q-first_name"), { target: { value: "一郎" } });
     fireEvent.change(screen.getByTestId("fe2-hr-form-enter-q-email"), { target: { value: "ichiro@example.com" } });
     fireEvent.click(screen.getByTestId("fe2-hr-form-enter-submit"));
     await waitFor(() => expect(submitOnBehalf).toHaveBeenCalledTimes(1));
@@ -186,6 +189,32 @@ describe("代理入力", () => {
 });
 
 describe("応募者の詳細", () => {
+  it("copies a participation link prefilled from the latest answer", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const api = demoClient();
+    const formApi = createInterviewFormApi(api);
+    const { responses } = await formApi.responses();
+    const publicOne = responses.find((r) => r.via === "public")!;
+    renderWith(<ApplicantDrawer applicantId={publicOne.applicantId} onClose={() => undefined} onRequestJoin={() => undefined} />, formApi, {
+      hrClient: api,
+    });
+    await screen.findByTestId("fe2-hr-detail-answers");
+    fireEvent.click(screen.getByTestId("fe2-hr-participation-link"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const url = new URL((writeText.mock.calls[0] as unknown as [string])[0]);
+    expect(url.pathname).toBe("/participate");
+    expect(parsePrefillHash(url.hash)).toMatchObject({
+      lastName: "森",
+      firstName: "結菜",
+      lastNameKana: "もり",
+      firstNameRomaji: "Yuina",
+      schoolEmail: "yuina@example.com",
+      grade: "1",
+      department: "情報工学科",
+    });
+  });
+
   it("shows the interview-form answers of the applicant", async () => {
     const api = demoClient();
     const formApi = createInterviewFormApi(api);

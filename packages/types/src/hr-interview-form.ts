@@ -4,11 +4,14 @@
 //  - フォームの定義 (タイトル・説明・質問) は人事アプリで編集する (member-service /members/hr/interview-form)。
 //  - 回答は本人が公開ページから (api-gateway /api/v1/public/hr-interview-form) 送るのが基本。
 //    人事が代わりに入力することもできる (/members/hr/interview-form/responses)。
-//  - 質問に binding を付けると、その回答が応募者の列 (氏名・メール・学科…) に入る。氏名とメールは必須。
+//  - 質問に binding を付けると、その回答が応募者の列 (氏名・メール・学科…) に入る。姓・名とメールは必須。
 //    binding の無い質問の回答は回答 (JSON) として応募者に結びつき、詳細に表示される。
+//  - 参加届と重なる項目 (姓/名・ふりがな・学年) は参加届 (member.PersonProfile) と同じ形に揃える。回答はそのまま
+//    参加届の入力済みリンクに引き継げる (participationPrefill)。
 // 検証 (validateFormDefinition / validateAnswers) はフロントとサービスで同じ関数を使う。
 import type { ISODateTime, UserId } from "./common";
-import type { CreateApplicantRequest } from "./hr";
+import type { Applicant, CreateApplicantRequest } from "./hr";
+import { GRADES, GRADE_LABEL, PERSON_PROFILE_LABEL, normalizeGrade, splitDisplayName, type PersonProfile } from "./member";
 
 export const FORM_QUESTION_TYPES = [
   "short_text",
@@ -41,12 +44,23 @@ export function isFormQuestionType(v: unknown): v is FormQuestionType {
 }
 
 /** 回答を応募者のどの列に入れるか。 */
-export const APPLICANT_BINDINGS = ["name", "nameKana", "email", "department", "grade", "motivation"] as const;
+export const APPLICANT_BINDINGS = [
+  "lastName",
+  "firstName",
+  "lastNameKana",
+  "firstNameKana",
+  "email",
+  "department",
+  "grade",
+  "motivation",
+] as const;
 export type ApplicantBinding = (typeof APPLICANT_BINDINGS)[number];
 
 export const APPLICANT_BINDING_LABELS: Record<ApplicantBinding, string> = {
-  name: "氏名",
-  nameKana: "フリガナ",
+  lastName: PERSON_PROFILE_LABEL.lastName,
+  firstName: PERSON_PROFILE_LABEL.firstName,
+  lastNameKana: PERSON_PROFILE_LABEL.lastNameKana,
+  firstNameKana: PERSON_PROFILE_LABEL.firstNameKana,
   email: "メールアドレス",
   department: "学科",
   grade: "学年",
@@ -54,22 +68,26 @@ export const APPLICANT_BINDING_LABELS: Record<ApplicantBinding, string> = {
 };
 
 /** フォームに必ず含める binding (消せない・必須固定・形式固定)。 */
-export const REQUIRED_BINDINGS: readonly ApplicantBinding[] = ["name", "email"];
+export const REQUIRED_BINDINGS: readonly ApplicantBinding[] = ["lastName", "firstName", "email"];
 
 /** binding ごとに選べる質問の形式。 */
 export const BINDING_TYPES: Record<ApplicantBinding, readonly FormQuestionType[]> = {
-  name: ["short_text"],
-  nameKana: ["short_text"],
+  lastName: ["short_text"],
+  firstName: ["short_text"],
+  lastNameKana: ["short_text"],
+  firstNameKana: ["short_text"],
   email: ["email"],
   department: ["short_text", "dropdown", "single_choice"],
-  grade: ["short_text", "dropdown", "single_choice"],
+  grade: ["dropdown", "single_choice"],
   motivation: ["long_text", "short_text"],
 };
 
-/** 応募者の列の長さ上限 (member-service hr-service と同じ)。 */
+/** 応募者の列の長さ上限 (member-service hr-service と同じ)。姓名は "姓 名" に合成して 100 文字以内に収める。 */
 const BINDING_MAX: Record<ApplicantBinding, number> = {
-  name: 100,
-  nameKana: 100,
+  lastName: 50,
+  firstName: 49,
+  lastNameKana: 50,
+  firstNameKana: 49,
   email: 200,
   department: 100,
   grade: 20,
@@ -90,7 +108,7 @@ export interface FormQuestion {
   required: boolean;
   /** 選択肢 (CHOICE_TYPES のときだけ・それ以外は空)。 */
   options: string[];
-  /** 応募者の列に入れる場合のみ。 */
+  /** 応募者の列に入れる場合のみ。過去の回答のスナップショットには旧 binding (氏名 1 欄) が残っている。 */
   binding: ApplicantBinding | null;
 }
 
@@ -199,6 +217,9 @@ export function newQuestionId(rand: () => number = Math.random): string {
   return `q_${Math.floor(rand() * 36 ** 8).toString(36).padStart(8, "0")}`;
 }
 
+/** 学年の選択肢 (参加届と同じ表記)。 */
+const GRADE_OPTIONS: string[] = GRADES.map((g) => GRADE_LABEL[g]);
+
 /** 既定のフォーム (まだ保存されていないとき返す・編集の起点)。 */
 export function defaultInterviewForm(): Omit<InterviewForm, "version" | "updatedBy" | "updatedAt"> {
   const q = (
@@ -213,16 +234,60 @@ export function defaultInterviewForm(): Omit<InterviewForm, "version" | "updated
       "DevelopersHub の運営メンバーに興味を持っていただきありがとうございます。参加届の前に、まずは面談でお話ししましょう。以下を入力して送信してください。担当者から面談日程のご連絡をします。",
     accepting: true,
     questions: [
-      q("name", "short_text", "お名前", { required: true, binding: "name", description: "例: 山田 太郎" }),
-      q("name_kana", "short_text", "フリガナ", { binding: "nameKana", description: "例: やまだ たろう" }),
+      ...splitQuestions("name", true),
+      ...splitQuestions("nameKana", false),
       q("email", "email", "メールアドレス", { required: true, binding: "email", description: "面談日程の連絡に使います" }),
       q("department", "short_text", "学科", { binding: "department" }),
-      q("grade", "single_choice", "学年", { binding: "grade", options: ["1年", "2年", "3年", "4年", "5年", "専攻科"] }),
+      q("grade", "dropdown", "学年", { binding: "grade", options: GRADE_OPTIONS }),
       q("interests", "multiple_choice", "興味のある活動", { options: ["イベント運営", "開発", "広報", "デザイン"] }),
       q("motivation", "long_text", "志望動機・聞いてみたいこと", { binding: "motivation" }),
       q("preferred_date", "date", "面談の希望日（あれば）"),
     ],
   };
+}
+
+/** 旧フォームの「氏名 1 欄」→ 参加届と同じ 姓/名 2 欄。 */
+function splitQuestions(legacy: "name" | "nameKana", required: boolean): FormQuestion[] {
+  const parts: [ApplicantBinding, string, string][] =
+    legacy === "name"
+      ? [
+          ["lastName", "last_name", "例: 山田"],
+          ["firstName", "first_name", "例: 太郎"],
+        ]
+      : [
+          ["lastNameKana", "last_name_kana", "例: やまだ"],
+          ["firstNameKana", "first_name_kana", "例: たろう"],
+        ];
+  return parts.map(([binding, id, description]) => ({
+    id,
+    type: "short_text",
+    label: APPLICANT_BINDING_LABELS[binding],
+    description,
+    required,
+    options: [],
+    binding,
+  }));
+}
+
+/**
+ * 保存済みのフォームを参加届と同じ形に直す (D1 の行は書き換えず、読むたび・保存のたびに通す)。
+ *  - 氏名 / フリガナの 1 欄 → 姓/名の 2 欄
+ *  - 学年 → 参加届の選択肢で表せない形式・選択肢 (自由記述・「専攻科」など) なら参加届の選択肢に置き換える
+ * 過去の回答はスナップショットを持っているので影響しない。PUT の検証前の入力も通るので、壊れた要素はそのまま
+ * 返して validateFormDefinition に落とさせる。
+ */
+export function upgradeQuestions(questions: readonly FormQuestion[]): FormQuestion[] {
+  return questions.flatMap((q): FormQuestion[] => {
+    const binding: unknown = (q as Partial<FormQuestion> | null)?.binding;
+    if (binding === "name") return splitQuestions("name", true);
+    if (binding === "nameKana") return splitQuestions("nameKana", q.required);
+    if (binding === "grade" && !isGradeQuestion(q)) return [{ ...q, type: "dropdown", options: GRADE_OPTIONS }];
+    return [q];
+  });
+}
+
+function isGradeQuestion(q: Pick<FormQuestion, "type" | "options">): boolean {
+  return BINDING_TYPES.grade.includes(q.type) && Array.isArray(q.options) && q.options.every((o) => typeof o === "string" && !!normalizeGrade(o));
 }
 
 function strLen(v: unknown, max: number): boolean {
@@ -281,6 +346,9 @@ export function validateFormDefinition(input: {
       } else {
         bindings.add(q.binding);
         if (REQUIRED_BINDINGS.includes(q.binding) && q.required !== true) errs.push({ field: at("required"), reason: "required_binding" });
+        if (q.binding === "grade" && options !== null && !isGradeQuestion({ type: q.type, options })) {
+          errs.push({ field: at("options"), reason: "grade_options" });
+        }
       }
     }
   });
@@ -373,25 +441,66 @@ export function validateAnswers(
   return { value, errors };
 }
 
-/** 検証済みの回答から応募者の列を取り出す (binding のある質問だけ)。応募経路は呼び出し側が入れる。 */
-export function applicantFieldsFromAnswers(
-  questions: readonly FormQuestion[],
-  answers: FormAnswers,
-): Pick<CreateApplicantRequest, ApplicantBinding> & { name: string } {
+function boundAnswers(questions: readonly FormQuestion[], answers: FormAnswers): Partial<Record<ApplicantBinding, string>> {
   const out: Partial<Record<ApplicantBinding, string>> = {};
   for (const q of questions) {
     if (!q.binding) continue;
     const v = answers[q.id];
     if (typeof v === "string" && v !== "") out[q.binding] = v;
   }
+  return out;
+}
+
+const joinName = (a: string | undefined, b: string | undefined): string => [a, b].filter(Boolean).join(" ");
+
+/** 検証済みの回答から応募者の列を取り出す (binding のある質問だけ)。姓/名は応募者の 1 列に合成する。応募経路は呼び出し側が入れる。 */
+export function applicantFieldsFromAnswers(
+  questions: readonly FormQuestion[],
+  answers: FormAnswers,
+): Pick<CreateApplicantRequest, "nameKana" | "email" | "department" | "grade" | "motivation"> & { name: string } {
+  const out = boundAnswers(questions, answers);
   return {
-    name: out.name ?? "",
-    nameKana: out.nameKana ?? null,
+    name: joinName(out.lastName, out.firstName),
+    nameKana: joinName(out.lastNameKana, out.firstNameKana) || null,
     email: out.email ?? null,
     department: out.department ?? null,
     grade: out.grade ?? null,
     motivation: out.motivation ?? null,
   };
+}
+
+/** 参加届へ引き継ぐ項目。 */
+export type ParticipationPrefill = Partial<
+  Pick<
+    PersonProfile,
+    "lastName" | "firstName" | "lastNameKana" | "firstNameKana" | "schoolEmail" | "gmail" | "grade" | "department"
+  >
+>;
+
+/**
+ * 応募者 (と最新の回答) を参加届の項目に写す。正は応募者の列で (人事が直している場合があるため)、姓/名の境目だけ
+ * 回答から取る。回答が無い・旧フォームの回答なら空白で分ける。メールは 1 欄なので Gmail か学校メールに振り分ける。
+ */
+export function participationPrefill(
+  applicant: Pick<Applicant, "name" | "nameKana" | "email" | "department" | "grade">,
+  response: Pick<InterviewFormResponse, "questions" | "answers"> | null,
+): ParticipationPrefill {
+  const out = response ? boundAnswers(response.questions, response.answers) : {};
+  const split = (whole: string, last: string | undefined, first: string | undefined) =>
+    last && first && joinName(last, first) === whole ? { lastName: last, firstName: first } : splitDisplayName(whole);
+  const name = split(applicant.name, out.lastName, out.firstName);
+  const kana = split(applicant.nameKana ?? "", out.lastNameKana, out.firstNameKana);
+  const email = applicant.email?.trim() || null;
+  const prefill: ParticipationPrefill = {
+    lastName: name.lastName || null,
+    firstName: name.firstName || null,
+    lastNameKana: kana.lastName || null,
+    firstNameKana: kana.firstName || null,
+    ...(email ? (/@gmail\.com$/i.test(email) ? { gmail: email } : { schoolEmail: email }) : {}),
+    grade: applicant.grade ? (normalizeGrade(applicant.grade) ?? null) : null,
+    department: applicant.department?.trim() || null,
+  };
+  return Object.fromEntries(Object.entries(prefill).filter(([, v]) => v !== null)) as ParticipationPrefill;
 }
 
 /** 回答を表示用の文字列にする (チェックボックスは「、」区切り)。 */
