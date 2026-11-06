@@ -117,4 +117,8 @@ environment = "production"
 [[services]]
 binding = "SVC_LP_ANALYTICS"
 service = "dub-lp-analytics"
+
+[[services]]
+binding = "SVC_LP_TICKETS"
+service = "dub-lp-tickets"
 environment = "production"
