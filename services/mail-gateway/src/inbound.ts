@@ -12,6 +12,7 @@ import { SERVICE_NAME } from "./config";
 import {
   decodeHeaderWord,
   extractAttachmentsDetailed,
+  extractHtml,
   extractBody,
   extractSnippet,
   parseAddress,
@@ -139,13 +140,13 @@ export function parseInbound(raw: RawInbound, policy: OwnerAddressPolicy = {}): 
 
   // Body is persisted for the inbox detail view (frozen MailMessage still carries only
   // the snippet). Email Routing hands us the raw RFC822 as text; we keep the plain-text
-  // body. HTML-part extraction is out of this slice's scope → htmlBody stays null.
+  // body for search / quoting and the HTML part (unsanitized; the client sanitizes) for display.
   return {
     message,
     loop,
     mailbox: localPart(raw.to),
     bodyText: extractBody(raw.rawText),
-    htmlBody: null,
+    htmlBody: extractHtml(raw.rawText),
     cc,
     headerMeta: headerMetaFor(raw),
     references,

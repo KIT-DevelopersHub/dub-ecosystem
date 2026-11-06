@@ -123,4 +123,9 @@ export const POLICY_TABLE = definePolicyTable({
   // Same subject shape (`:userId` from the caller) and the same secret: the account-issue
   // mail carries that user's password to their Gmail, so it needs exactly the view right.
   "POST /api/v1/admin/users/:userId/account-mail": ["identity:admin"],
+  // 代理表示 (admin impersonation) start. Same `:userId`-subject shape; demands the dedicated
+  // key, not identity:admin (granted separately, default role_sys_admin only). Target
+  // eligibility (self / inactive / privileged / nested) is auth-service's instance check, and
+  // while impersonating the subject never holds this key, so a nested start 403s here first.
+  "POST /api/v1/admin/users/:userId/impersonation": ["identity:impersonate"],
 });

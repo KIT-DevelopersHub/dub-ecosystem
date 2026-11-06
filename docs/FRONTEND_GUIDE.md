@@ -77,6 +77,8 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 | `RolePicker` | ロール一覧 → ラベル付き Select。`includeNone`/`placeholder` 対応 | FE7 招待・ロール付与 |
 | `DialogActions` | ダイアログ末尾のボタン行（右寄せ等） | FE7 招待・付与・アドレス発行 |
 | `FormError` | `role="alert"` のフォームエラー段落（空なら何も描画しない） | FE7 招待・付与・アドレス発行 |
+| `SearchableMenu` | 検索欄つきドロップダウン（候補の絞り込み・矢印キー/Enter・対象外は理由付き disabled・読み込み中はスケルトン） | FE2 ヘッダーのメンバー切り替え（代理表示） |
+| `ImpersonateConfirmDialog` | 「このメンバーとして表示」の確認ダイアログ（文言を一本化） | FE7 メール名簿・FE2 ヘッダー |
 
 ## 3. 新しいコンポーネントの足し方
 

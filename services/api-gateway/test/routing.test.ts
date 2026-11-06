@@ -189,4 +189,13 @@ describe("transparent routing", () => {
     const fileOk = await a.fetch(new Request("https://x/api/v1/files/upload", { method: "POST", headers: { authorization: "Bearer t", "content-length": "2000000" }, body: "x" }), env, execCtx);
     expect(fileOk.status).toBe(200);
   });
+
+  it("body cap: /mail fits 25 MiB of attachments as base64 JSON, and no more", async () => {
+    const mail = fakeBinding(() => json(200, {}));
+    const env = makeEnv({ SVC_AUTH: authBinding(validSession()).fetcher, SVC_MAIL_GATEWAY: mail.fetcher });
+    const post = (bytes: number) =>
+      app().fetch(new Request("https://x/api/v1/mail/outbox", { method: "POST", headers: { authorization: "Bearer t", "content-length": String(bytes) }, body: "x" }), env, execCtx);
+    expect((await post(Math.ceil((25 * 1024 * 1024 * 4) / 3) + 4096)).status).toBe(200);
+    expect((await post(36700161)).status).toBe(413);
+  });
 });

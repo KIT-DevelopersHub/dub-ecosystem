@@ -14,15 +14,19 @@ import { getRequestId, gatewayError, GATEWAY_ROUTE_NOT_FOUND, GATEWAY_WEBSOCKET_
 import { routeForSegment, stripApiPrefix, firstSegment, isInternalOnly, GATEWAY_OWNED_SEGMENTS } from "./routes";
 import { authenticateOnce } from "./policy";
 import { forwardRequest } from "./proxy";
+import { enforceImpersonationPolicy, auditLogSink, type ImpersonationAuditSink } from "./impersonation";
 
 function bodyCap(env: GatewayEnv, segment: string): number {
   const def = Number(env.DEFAULT_MAX_BODY_BYTES ?? "10485760");
   if (segment === "files") return Number(env.FILES_MAX_BODY_BYTES ?? "26214400");
+  // A mail send carries its attachments as base64 JSON: 25 MiB of files is ~33.4 MiB on the wire.
+  if (segment === "mail") return Number(env.MAIL_MAX_BODY_BYTES ?? "36700160");
   return def;
 }
 
 export async function gatewayRouteHandler(
   c: Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>,
+  impersonationAudit: ImpersonationAuditSink = auditLogSink,
 ): Promise<Response> {
   const requestId = getRequestId(c);
   const pathname = new URL(c.req.url).pathname;
@@ -68,6 +72,8 @@ export async function gatewayRouteHandler(
   let userId: string | undefined;
   if (route.auth === "required") {
     userId = (await authenticateOnce(c)).userId;
+    // Admin impersonation: high-risk actions are never forwarded AS the member.
+    enforceImpersonationPolicy(c, impersonationAudit);
   }
 
   const binding = bindingByName(c.env, route.binding);

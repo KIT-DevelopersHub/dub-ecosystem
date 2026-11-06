@@ -8,11 +8,12 @@
 // (mailModel.fixtures.ts).
 import type { mail } from "@dub/types";
 
-export type FolderId = "inbox" | "mine" | "others" | "starred" | "sent" | "scheduled" | "drafts" | "trash" | "archive" | "blocked";
+export type FolderId = "inbox" | "mine" | "others" | "starred" | "sent" | "scheduled" | "drafts" | "all" | "trash" | "archive" | "blocked";
 
-/** Folders that appear in the left nav (archive is Gmail's "All Mail"-ish sink).
- *  `scheduled` (予約済み) is NOT thread-backed — it lists parked future sends from a
- *  separate store slice (see ScheduledList), so it renders its own pane.
+/** Folders that appear in the left nav. Archiving only takes a thread out of the inbox, so
+ *  archived mail lives under `all` (Gmail's すべてのメール); `archive` is a thread's placement,
+ *  not a nav folder. `scheduled` (予約済み) and `drafts` (下書き) are NOT thread-backed — each
+ *  lists its own store slice in its own pane (ScheduledList / DraftList).
  *  `mine` / `others` are filter views over the inbox (自分宛て / ロール共有・監督で見えるもの);
  *  the sidebar hides them unless the viewer actually has a non-mine thread (SHARED_FOLDERS). */
 export const NAV_FOLDERS: { id: FolderId; label: string; icon: string }[] = [
@@ -23,6 +24,7 @@ export const NAV_FOLDERS: { id: FolderId; label: string; icon: string }[] = [
   { id: "sent", label: "送信済み", icon: "send" },
   { id: "scheduled", label: "予約済み", icon: "clock" },
   { id: "drafts", label: "下書き", icon: "draft" },
+  { id: "all", label: "すべてのメール", icon: "archive" },
   { id: "trash", label: "ゴミ箱", icon: "trash" },
   { id: "blocked", label: "ブロック済み", icon: "block" },
 ];
@@ -55,6 +57,9 @@ export interface MailMsg {
   bcc?: MailPerson[];
   date: string; // ISO
   body: string; // plain text (pre-wrap)
+  /** HTML part as received, UNSANITIZED — render through HtmlMailBody only. From the detail
+   *  fetch (getThread); absent for plain-text mail and for list-derived rows. */
+  html?: string;
   read: boolean;
   /** True when WE sent this message (compose/reply/folded Sent row). Used to (a) keep our
    *  replies visible in a conversation across a getThread refresh and (b) target a reply
@@ -85,6 +90,8 @@ export interface MailThreadModel {
   folder: FolderId;
   starred: boolean;
   labels: string[]; // Label ids
+  /** The detail fetch has filled this thread: real bodies and attachments, not list snippets. */
+  full?: boolean;
   /** 完全に削除 (purge): the signed-in user permanently removed this conversation from THEIR
    *  mailbox (Gmail's "完全に削除" out of Trash). One-way, per-user, view-only — the thread
    *  stays in the store but is filtered out of every folder for this viewer. Never a physical
@@ -177,9 +184,17 @@ export function inFolder(t: MailThreadModel, folder: FolderId): boolean {
   if (folder === "blocked") return t.blocked === true && t.folder !== "trash" && t.folder !== "sent";
   if (t.blocked && folder !== "trash" && folder !== "sent" && folder !== "drafts") return false;
   if (folder === "starred") return t.starred && t.folder !== "trash";
+  if (folder === "all") return t.folder !== "trash";
+  // A conversation you replied in is in Sent as well as wherever else it lives (Gmail).
+  if (folder === "sent") return t.folder === "sent" || (t.folder !== "trash" && t.messages.some((m) => m.outbound && m.mine !== false));
   if (folder === "mine") return t.folder === "inbox" && threadMine(t);
   if (folder === "others") return t.folder === "inbox" && !threadMine(t);
   return t.folder === folder;
+}
+
+/** Newest time the viewer sent something in this conversation (sorts 送信済み). */
+export function lastSentAt(t: MailThreadModel): string {
+  return t.messages.reduce((at, m) => (m.outbound && m.date > at ? m.date : at), "");
 }
 
 /** Free-text search across subject / participants / bodies (excludes trash). */

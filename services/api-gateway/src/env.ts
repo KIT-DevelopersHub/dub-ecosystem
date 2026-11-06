@@ -43,6 +43,7 @@ export interface GatewayEnv {
   ALLOWED_ORIGINS?: string;
   DEFAULT_MAX_BODY_BYTES?: string;
   FILES_MAX_BODY_BYTES?: string;
+  MAIL_MAX_BODY_BYTES?: string;
   TURNSTILE_SECRET?: string;
   // Origins whose LP pageview beacons are recorded (comma-separated). Default = the
   // production conference LP (handlers/public-lp-visit.ts DEFAULT_LP_ORIGINS).
