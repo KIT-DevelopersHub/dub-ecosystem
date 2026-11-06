@@ -88,6 +88,12 @@ export function endsAt(f: Pick<MeetingFields, "startsAt" | "durationMinutes">): 
   return new Date(Date.parse(f.startsAt) + f.durationMinutes * 60_000).toISOString();
 }
 
+/** When the last occurrence can end at the latest (epoch ms); null = a series with no end date. */
+export function lastEndMs(m: Pick<MeetingFields, "startsAt" | "durationMinutes" | "recurrence" | "until">): number | null {
+  if (m.recurrence === "none") return Date.parse(endsAt(m));
+  return m.until ? Date.parse(`${m.until}T23:59:59+09:00`) + m.durationMinutes * 60_000 : null;
+}
+
 type Input = Partial<meeting.CreateMeetingRequest>;
 
 /**

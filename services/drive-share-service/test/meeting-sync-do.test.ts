@@ -1,6 +1,6 @@
 // The hourly alarm loop: meeting sync -> Meet ingest -> Drive共有 role follow, each in its own
 // invocation. A phase that fails must not stop the others or strand the loop.
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Env } from "../src/env";
 
 const wiring = vi.hoisted(() => ({
@@ -141,7 +141,7 @@ describe("MeetingSyncDO phases", () => {
     expect(first).toEqual({ until: now + 6 * HOUR, started: true });
     expect(again).toEqual({ until: now + 6 * HOUR, started: false });
     const state = await (await dob.fetch(new Request("https://meeting-sync/sync-state"))).json();
-    expect(state).toEqual({ pausedUntil: now + 6 * HOUR });
+    expect(state).toMatchObject({ pausedUntil: now + 6 * HOUR });
     expect(fake.alarm()).toBeNull();
   });
 
@@ -151,6 +151,81 @@ describe("MeetingSyncDO phases", () => {
     await dob.fetch(new Request("https://meeting-sync/sync-state/pause", { method: "POST", body: JSON.stringify({ now, until: now + 6 * HOUR }) }));
     await dob.fetch(new Request("https://meeting-sync/kick", { method: "POST", body: JSON.stringify({ soonMs: 15_000 }) }));
     expect(untilNext()).toBeGreaterThan(50 * MIN);
+  });
+
+  describe("paced calendar shares", () => {
+    const PACE = 15 * MIN;
+    afterEach(() => vi.useRealTimers());
+
+    /** Fire the alarm at its scheduled time. */
+    const fire = async (dob: MeetingSyncDO, alarmAt: () => number | null) => {
+      vi.setSystemTime(alarmAt() as number);
+      await dob.alarm();
+    };
+
+    it("do not hold up the cycle: the ingest and the role follow run, then the next batch writes shares only", async () => {
+      vi.useFakeTimers();
+      wiring.sync.mockResolvedValueOnce({ ...DONE, aclContinueMs: PACE });
+      const { dob, fake } = build();
+      const start = Date.now();
+
+      await dob.alarm();
+      await fire(dob, fake.alarm); // ingest
+      await fire(dob, fake.alarm); // role follow
+      expect(wiring.ingest).toHaveBeenCalledTimes(1);
+      expect(wiring.roleShares).toHaveBeenCalledTimes(1);
+      expect(fake.alarm()).toBe(start + PACE);
+      expect(fake.kv.get("phase")).toBe("aclShares");
+
+      wiring.sync.mockResolvedValueOnce({ ...DONE, aclContinueMs: PACE });
+      await fire(dob, fake.alarm);
+      expect(wiring.sync).toHaveBeenLastCalledWith({ system: true, aclOnly: true });
+      expect(fake.alarm()).toBe(start + 2 * PACE);
+    });
+
+    it("the hourly cycle keeps its time: a batch past it is left to the cycle's sync", async () => {
+      vi.useFakeTimers();
+      wiring.sync.mockResolvedValueOnce({ ...DONE, aclContinueMs: PACE });
+      const { dob, fake } = build();
+      await dob.alarm();
+      await fire(dob, fake.alarm);
+      await fire(dob, fake.alarm);
+      const cycleAt = (fake.kv.get("cycleAt") as number);
+
+      wiring.sync.mockResolvedValue({ ...DONE, aclContinueMs: 2 * HOUR });
+      await fire(dob, fake.alarm);
+      expect(fake.alarm()).toBe(cycleAt);
+      expect(fake.kv.get("phase")).toBe("sync");
+
+      wiring.sync.mockResolvedValue(DONE);
+      await fire(dob, fake.alarm);
+      expect(wiring.sync).toHaveBeenLastCalledWith({ system: true });
+    });
+
+    it("a kick that pulls the alarm early runs the normal sync, not a share batch", async () => {
+      vi.useFakeTimers();
+      wiring.sync.mockResolvedValueOnce({ ...DONE, aclContinueMs: PACE });
+      const { dob, fake } = build();
+      await dob.alarm();
+      await fire(dob, fake.alarm);
+      await fire(dob, fake.alarm);
+      await dob.fetch(new Request("https://meeting-sync/kick", { method: "POST", body: JSON.stringify({ soonMs: 15_000 }) }));
+      await fire(dob, fake.alarm);
+      expect(wiring.sync).toHaveBeenLastCalledWith({ system: true });
+    });
+
+    it("a batch that throws leaves the loop on its hourly time", async () => {
+      vi.useFakeTimers();
+      wiring.sync.mockResolvedValueOnce({ ...DONE, aclContinueMs: PACE });
+      const { dob, fake } = build();
+      await dob.alarm();
+      await fire(dob, fake.alarm);
+      await fire(dob, fake.alarm);
+      wiring.sync.mockRejectedValueOnce(new Error("identity down"));
+      await fire(dob, fake.alarm);
+      expect(fake.kv.get("phase")).toBe("sync");
+      expect(fake.alarm()).toBe(fake.kv.get("cycleAt"));
+    });
   });
 
   it("skips quietly when there is no usable Google account", async () => {
