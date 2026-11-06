@@ -23,7 +23,7 @@ export function makeMe(
   const all = new Set<identity.PermissionKey>(permissions);
   if (!opts.exact && all.has("identity:admin")) {
     for (const key of policy.keysForAppLevel("admin", policy.AppAccessLevel.Edit)) all.add(key);
-    // 同じく migration 0031: 管理の編集 + 運営メンバーの編集を持つロールは編集範囲が「全て」。
+    // 同じく migration 0032: 管理の編集 + 運営メンバーの編集を持つロールは編集範囲が「全て」。
     for (const key of policy.setMembersScope(policy.keysForAppLevel("members", policy.AppAccessLevel.Edit), "edit", "all")) all.add(key);
   }
   return {

@@ -54,7 +54,7 @@ export function computeAppAccessKeys(perms: readonly PermissionKey[]): Permissio
 /** A role's base (domain) permission bundle plus its computed per-app access keys. */
 function withAppAccess(base: PermissionKey[]): PermissionKey[] {
   const out = new Set([...base, ...computeAppAccessKeys(base)]);
-  // 既定のシステムロールは運営名簿まで (identity/0031 と同じ)。バックフィルが使う
+  // 既定のシステムロールは運営名簿まで (identity/0032 と同じ)。バックフィルが使う
   // computeAppAccessKeys には入れない: 組織図までに絞ったロールへ付け直してしまうため。
   if (out.has("app:members:view")) out.add("members:roster_view");
   if (out.has("app:members:edit")) out.add("members:roster_edit");
