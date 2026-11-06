@@ -46,7 +46,7 @@ test("HTML mail renders with its layout and runs nothing", async ({ page }) => {
 test("a draft survives ✕ with its attachment and goes away on send", async ({ page }) => {
   await open(page);
   await page.getByTestId("fe2-mail-compose-open").click();
-  await page.getByTestId("fe2-mail-compose-to").locator("input").fill("bob@example.com,");
+  await page.getByTestId("fe2-mail-compose-to").fill("bob@example.com,");
   await page.getByTestId("fe2-mail-compose-subject").fill("書きかけのメール");
   await page.getByTestId("fe2-mail-compose-attach-input").setInputFiles({ name: "memo.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
   await expect(page.getByTestId("fe2-mail-attach-chip")).toHaveAttribute("data-status", "ready");
