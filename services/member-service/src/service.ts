@@ -17,6 +17,7 @@ import {
   toTeam,
 } from "./domain";
 import { desiredManagedRoles, errRoleSyncUnavailable, managedRoleCatalog, warnRoleSync } from "./roleSync";
+import { shouldActivate, warnActivation, type ActivationTrigger } from "./identityActivation";
 
 export interface ReqCtx {
   requestId: string;
@@ -25,6 +26,7 @@ export interface ReqCtx {
 
 const errVersionConflict = (id: string): DubError =>
   new DubError("MEMBER_VERSION_CONFLICT", `Version conflict for ${id}`, { status: 409 });
+const errMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const errTeamNotFound = (id: string): DubError =>
   new DubError("MEMBER_TEAM_NOT_FOUND", `Team not found: ${id}`, { status: 404 });
 const errPersonNotFound = (id: string): DubError =>
@@ -277,6 +279,20 @@ export class MemberService {
     }
   }
 
+  /** 在籍 (added) でアカウントに紐付いた名簿行なら、identity の招待中アカウントを有効化する。
+   *  名簿の保存後に呼ぶ best-effort (失敗しても保存は成功・警告ログ)。identity 側が invited
+   *  だけを active にするので冪等で、停止中のアカウントには触れない。在籍の行を保存するたびに
+   *  呼ばれるので、失敗しても次の保存か一括付与 (backfillRoles) で再試行される。 */
+  async activateLinkedIdentity(ctx: ReqCtx, person: PersonRow | null, trigger: ActivationTrigger): Promise<void> {
+    const port = this.deps.identityActivation;
+    if (!port || !shouldActivate(person)) return;
+    try {
+      await port.activate(ctx, person.identityUserId, { trigger });
+    } catch (err) {
+      warnActivation(ctx, person.identityUserId, trigger, err);
+    }
+  }
+
   /** 既存メンバーへの一括付与 (管理者)。dryRun なら identity に書かず差分だけ返す。
    *  対象は名簿でアカウントに紐付いた全員 (在籍中以外は空集合 = 自動ロールを外す)。 */
   async backfillRoles(ctx: ReqCtx, body: member.RoleSyncBackfillRequest | null): Promise<member.RoleSyncBackfillResponse> {
@@ -293,24 +309,41 @@ export class MemberService {
     const teamsById = new Map(teams.map((t) => [t.id, t]));
     const out: member.RoleSyncBackfillPerson[] = [];
     let failed = 0;
+    let activated = 0;
     for (const p of people) {
       if (!p.identityUserId) continue;
       const teamIds = links.filter((l) => l.personId === p.id).map((l) => l.teamId);
       const roles = desiredManagedRoles(p, teamIds, teamsById);
       const base = { memberId: p.id, name: p.name, identityUserId: p.identityUserId, roleIds: roles.map((r) => r.id) };
+      let row: member.RoleSyncBackfillPerson;
       try {
         const r = await sync.syncUser(ctx, p.identityUserId, { roles, dryRun });
-        out.push({ ...base, added: r.added, removed: r.removed });
+        row = { ...base, added: r.added, removed: r.removed };
       } catch (err) {
-        failed++;
-        out.push({ ...base, added: [], removed: [], error: err instanceof Error ? err.message : String(err) });
+        row = { ...base, added: [], removed: [], error: errMessage(err) };
       }
+      // 在籍で紐付いているのに招待中のまま残ったアカウント (保存時の有効化が失敗した等) を直す。
+      const activation = this.deps.identityActivation;
+      if (activation && shouldActivate(p)) {
+        try {
+          const act = await activation.activate(ctx, p.identityUserId, { trigger: "member.backfill", dryRun });
+          if (act.activated) {
+            activated++;
+            row.activated = true;
+          }
+        } catch (err) {
+          row.error = row.error ? `${row.error}; ${errMessage(err)}` : errMessage(err);
+        }
+      }
+      if (row.error) failed++;
+      out.push(row);
     }
     return {
       dryRun,
       catalog: { created: cat.created, renamed: cat.renamed, deleted: cat.deleted, kept: cat.kept },
       people: out,
       failed,
+      activated,
     };
   }
 
@@ -395,6 +428,7 @@ export class MemberService {
     const ok = await this.deps.repo.updatePerson(next, body.version, teamIds);
     if (!ok) throw errVersionConflict(id);
     await this.syncRolesForIdentities(ctx, [cur.identityUserId, next.identityUserId]);
+    await this.activateLinkedIdentity(ctx, next, "member.update");
     const finalTeamIds = teamIds ?? (await this.currentTeamIds(id));
     return toMember(next, finalTeamIds);
   }
@@ -483,6 +517,7 @@ export class MemberService {
     const ok = await this.deps.repo.updatePerson(next, body.version);
     if (!ok) throw errVersionConflict(id);
     await this.syncRolesForIdentities(ctx, [cur.identityUserId, identityUserId]);
+    await this.activateLinkedIdentity(ctx, next, "member.link");
     return toMember(next, await this.currentTeamIds(id));
   }
 
@@ -743,6 +778,7 @@ export class MemberService {
     const ok = await this.deps.repo.updatePerson(next, expectedVersion, mergedTeamIds);
     if (!ok) throw errVersionConflict(match.id);
     await this.syncRolesForIdentities(ctx, [next.identityUserId]);
+    await this.activateLinkedIdentity(ctx, next, "participation.link");
     return toMember(next, mergedTeamIds);
   }
 

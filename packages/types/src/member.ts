@@ -720,6 +720,8 @@ export interface RoleSyncBackfillPerson {
   roleIds: string[];
   added: string[];
   removed: string[];
+  /** 在籍で紐付いているのにアカウントが招待中だったので有効化した (dryRun なら有効化する予定)。 */
+  activated?: boolean;
   error?: string;
 }
 export interface RoleSyncBackfillResponse {
@@ -728,6 +730,8 @@ export interface RoleSyncBackfillResponse {
   catalog: { created: string[]; renamed: string[]; deleted: string[]; kept: string[] };
   people: RoleSyncBackfillPerson[];
   failed: number;
+  /** 招待中のまま残っていたアカウントを有効化した人数 (dryRun なら予定人数)。 */
+  activated: number;
 }
 
 /** Internal id alias (plain string, like the other common ids). */
