@@ -373,7 +373,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     });
     const orderId = new URL(redirectUrl).searchParams.get("order");
     const confirmed = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId }, INTERNAL));
-    expect(await confirmed.json()).toEqual({ status: "paid", summary: "招待 ×1" });
+    expect(await confirmed.json()).toMatchObject({ status: "paid", summary: "招待 ×1" });
   });
 
   it("checkout disabled → 404; paid ticket without Stripe → 503; free still works", async () => {
@@ -457,7 +457,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(s.types[0]!.stats.remaining).toBe(8);
 
     const confirmed = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
-    expect(await confirmed.json()).toEqual({ status: "paid", summary: "一般 Day 1 ×2、一般 Day 2 ×1" });
+    expect(await confirmed.json()).toMatchObject({ status: "paid", summary: "一般 Day 1 ×2、一般 Day 2 ×1" });
     s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
     expect(s.totals).toEqual({ sold: 3, revenueJpy: 9000 });
     const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
@@ -611,7 +611,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const { redirectUrl } = await body<{ redirectUrl: string }>(await app.fetch(checkout({ ticketTypeId: t.id, couponCode: code })));
     const orderId = new URL(redirectUrl).searchParams.get("order");
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "paid", summary: "招待 ×1" });
+    expect(await res.json()).toMatchObject({ status: "paid", summary: "招待 ×1" });
     const unknown = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId: "tko_nope" }, INTERNAL));
     expect(await unknown.json()).toEqual({ status: "unknown" });
   });
@@ -623,7 +623,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const t = await addType(app, { name: "一般", priceJpy: 3000 });
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "paid", summary: "一般 ×1" });
+    expect(await res.json()).toMatchObject({ status: "paid", summary: "一般 ×1" });
     expect(stripe.calls[1]).toMatchObject({
       method: "GET",
       url: "https://api.stripe.com/v1/checkout/sessions/cs_test_0?expand%5B%5D=payment_intent.payment_method",
@@ -643,7 +643,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const t = await addType(app, { name: "一般", priceJpy: 3000 });
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "pending", summary: "一般 ×1" });
+    expect(await res.json()).toMatchObject({ status: "pending", summary: "一般 ×1" });
   });
 
   it("orders: newest first with cursor paging", async () => {
@@ -980,22 +980,23 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect((await buy(t.id, 1, k1)).status).toBe(200);
   });
 
-  it("checkout arms the reconcile alarm on paid orders only; an arm failure never fails the sale", async () => {
+  it("checkout arms the reconcile alarm on paid and free orders; an arm failure never fails the sale", async () => {
     let arms = 0;
     const ok = await paidSetup({ deps: { armReconcile: async () => void arms++ } });
     await ok.buy();
+    expect(arms).toBe(1);
     const free = await addType(ok.app, { name: "招待", priceJpy: 0 });
     const code = (await issueCoupon(ok.app, free.id)).code;
     expect((await ok.app.fetch(checkout({ ticketTypeId: free.id, couponCode: code }))).status).toBe(200);
-    expect(arms).toBe(1);
+    expect(arms).toBe(2);
 
     // a verified webhook arms it too (refunds on old orders before the next sale); an unsigned one does not
     await webhook(ok.app, { id: "evt_other", type: "payment_intent.created", data: { object: {} } });
-    expect(arms).toBe(1);
+    expect(arms).toBe(2);
     await webhook(ok.app, completed("cs_test_0", "tko_unknown"));
-    expect(arms).toBe(2);
+    expect(arms).toBe(3);
     expect((await webhook(ok.app, completed("cs_test_0", "x"), "t=1,v1=bad")).status).toBe(400);
-    expect(arms).toBe(2);
+    expect(arms).toBe(3);
 
     const failing = await paidSetup({ deps: { armReconcile: async () => Promise.reject(new Error("do down")) } });
     await failing.buy();

@@ -1,5 +1,5 @@
 // Test harness: drives the real Hono app over either the in-memory repo or the REAL D1 repo on
-// node:sqlite with db/0001_init.sql applied (the schema dub-tickets actually gets, so the SQL is
+// node:sqlite with db/0001_init.sql + 0002_delivery.sql applied (the schema dub-tickets actually gets, so the SQL is
 // exercised against it).
 import { readFileSync } from "node:fs";
 import { createDbClient } from "@dub/db";
@@ -13,6 +13,7 @@ import { InMemoryLpTicketRepo } from "../src/memory-repo";
 import type { AppDeps, LpTicketRepo } from "../src/types";
 
 export const INIT_SQL = readFileSync(new URL("../db/0001_init.sql", import.meta.url), "utf8");
+export const DELIVERY_SQL = readFileSync(new URL("../db/0002_delivery.sql", import.meta.url), "utf8");
 
 export function fakeAuthz(granted: Set<identity.PermissionKey>): PermissionGranter {
   return async (_userId, _orgId, keys) => keys.filter((k) => granted.has(k));
@@ -27,6 +28,7 @@ export async function makeRepo(kind: RepoKind): Promise<LpTicketRepo> {
   if (kind === "memory") return new InMemoryLpTicketRepo();
   const { db } = memoryD1();
   await db.exec(INIT_SQL);
+  await db.exec(DELIVERY_SQL);
   return createD1TicketRepo(createDbClient(db, { namespace: "lp" }));
 }
 
@@ -58,6 +60,13 @@ export async function makeApp(
     armReconcile: null,
     paypayEnabled: false,
     ticketPreviewKey: null,
+    mailer: null,
+    ticketTokenSecret: null,
+    ticketOpsEmail: null,
+    ticketMailFrom: "北陸ITカンファレンス <info@example.com>",
+    backup: null,
+    defer: null,
+    sleep: async () => {},
     ...overrides,
   };
   const app = createApp(deps);

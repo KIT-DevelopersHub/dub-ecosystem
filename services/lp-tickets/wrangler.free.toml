@@ -6,6 +6,7 @@
 # deploy-prod.sh が api-gateway より前に流す。初回の切り替えは docs/runbooks/09-lp-tickets-cutover.md
 # の順に行う。スキーマの適用は手動:
 #   npx wrangler d1 execute dub-tickets --remote --file services/lp-tickets/db/0001_init.sql
+#   npx wrangler d1 execute dub-tickets --remote --file services/lp-tickets/db/0002_delivery.sql
 name = "dub-lp-tickets"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
@@ -26,9 +27,21 @@ database_id = "REPLACE_AT_CUTOVER"
 binding = "SVC_IDENTITY"
 service = "dub-identity-roster"   # POST /authz/check (app:lp:view / app:lp:edit / lp:publish)
 
+# 毎日のバックアップ。バケットはデプロイの前に作る（無いとデプロイが失敗する）:
+#   npx wrangler r2 bucket create dub-tickets-backup
+[[r2_buckets]]
+binding = "BACKUP"
+bucket_name = "dub-tickets-backup"
+
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
 LP_BASE_URL = "https://hokuriku-it-conf.com"
+# 購入者へのメールの差出人。Resend で検証済みのドメインにする。
+TICKET_MAIL_FROM = "北陸ITカンファレンス <info@developershub.jp>"
+# 購入後のチケット送付。secret が無くても注文は動き、メールは pending のまま待つ:
+#   npx wrangler secret put TICKET_TOKEN_SECRET   (チケット URL の署名鍵。変えると発行済みの URL がすべて無効になる)
+#   npx wrangler secret put RESEND_API_KEY
+#   npx wrangler secret put TICKET_OPS_EMAIL      (購入データの控えと毎日の CSV の宛先)
 # チケット購入 (Stripe Checkout)。secret が無ければ「決済準備中」(有料券 503・無料券はクーポンで動く):
 #   npx wrangler secret put STRIPE_SECRET_KEY       (sk_test_... = サンドボックス / sk_live_... = 本物の決済)
 # sk_live_ は STRIPE_ALLOW_LIVE = "1" を足すまで拒否される（決済準備中扱い）。本物の決済開始時だけ足す。
@@ -41,7 +54,8 @@ LP_BASE_URL = "https://hokuriku-it-conf.com"
 # --- Ticket payment reconcile via a Durable Object ALARM, NOT a Cron Trigger. The account is at
 # the Workers FREE plan's 5/5 cron cap (a 6th cron makes CF reject this deploy); a DO alarm does
 # not count against it. Same pattern as github-sync's GithubReconcileDO. No manual bootstrap:
-# every paid checkout arms the loop (src/reconcile-do.ts), then it reschedules itself every 10 min.
+# every checkout that holds or sells a seat arms the loop (src/reconcile-do.ts), then it reschedules
+# itself every 10 min (every minute while mail is backed up).
 [[durable_objects.bindings]]
 name = "TICKET_RECONCILE_DO"
 class_name = "TicketReconcileDO"

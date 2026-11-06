@@ -22,9 +22,19 @@ service = "identity-roster"
 [observability]
 enabled = true
 
+# 毎日のバックアップ。バケットはデプロイの前に作る: npx wrangler r2 bucket create dub-tickets-backup
+[[r2_buckets]]
+binding = "BACKUP"
+bucket_name = "dub-tickets-backup"
+
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
 LP_BASE_URL = "https://hokuriku-it-conf.com"
+TICKET_MAIL_FROM = "北陸ITカンファレンス <info@developershub.jp>"
+# 購入後のチケット送付。secret が無くても注文は動き、メールは pending のまま待つ:
+#   npx wrangler secret put TICKET_TOKEN_SECRET   (変えると発行済みの URL がすべて無効になる)
+#   npx wrangler secret put RESEND_API_KEY
+#   npx wrangler secret put TICKET_OPS_EMAIL
 # チケット購入 (Stripe Checkout)。secret が無ければ「決済準備中」(有料券 503・無料券は動く):
 #   npx wrangler secret put STRIPE_SECRET_KEY
 #   npx wrangler secret put STRIPE_WEBHOOK_SECRET

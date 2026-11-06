@@ -9,9 +9,9 @@ import type { Env } from "./env";
 export type { Env } from "./env";
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
-    const app = createApp(buildDeps(env, requestId));
+    const app = createApp(buildDeps(env, requestId, ctx));
     return app.fetch(request as unknown as Request) as unknown as Response;
   },
   // Ticket payment reconcile (safety net when the Stripe webhook is missing / misconfigured).

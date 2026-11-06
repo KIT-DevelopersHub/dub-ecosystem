@@ -1,6 +1,6 @@
 // Worker bindings for lp-tickets: its own dub-tickets D1 + identity-roster for the policy gate
 // (+ the free-plan reconcile DO). No queues / events.
-import type { D1Database, DurableObjectNamespace, Fetcher } from "@cloudflare/workers-types";
+import type { D1Database, DurableObjectNamespace, Fetcher, R2Bucket } from "@cloudflare/workers-types";
 
 export interface Env {
   DB: D1Database;
@@ -21,4 +21,14 @@ export interface Env {
   LP_PAYPAY_ENABLED?: string;
   /** Free plan only: alarm loop that runs the ticket payment reconcile (no cron slot left). */
   TICKET_RECONCILE_DO?: DurableObjectNamespace;
+  /** secret: チケット URL の署名鍵。変えると発行済みの URL がすべて無効になる。未設定ならメールは pending のまま。 */
+  TICKET_TOKEN_SECRET?: string;
+  /** secret: Resend の API キー。未設定なら何も送らない（注文は動く）。 */
+  RESEND_API_KEY?: string;
+  /** secret: 購入データの控えと毎日の CSV の宛先。未設定なら控えは pending のまま。 */
+  TICKET_OPS_EMAIL?: string;
+  /** 購入者へのメールの From。未設定なら既定の差出人。 */
+  TICKET_MAIL_FROM?: string;
+  /** R2 dub-tickets-backup。毎日のバックアップ。 */
+  BACKUP?: R2Bucket;
 }

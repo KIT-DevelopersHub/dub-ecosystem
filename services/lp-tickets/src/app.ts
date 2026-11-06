@@ -48,6 +48,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.post("/lp/internal/tickets/coupon", async (c) => c.json(await tickets.checkCoupon(await readJson(c))));
   app.post("/lp/internal/tickets/preview", async (c) => c.json(await tickets.checkPreview(await readJson(c))));
   app.post("/lp/internal/tickets/confirm", async (c) => c.json(await tickets.confirm(await readJson(c))));
+  app.get("/lp/internal/tickets/pass/:token", async (c) => c.json(await tickets.pass(c.req.param("token"))));
   app.post("/lp/internal/tickets/stripe-webhook", async (c) => {
     const raw = await c.req.text();
     return c.json(await tickets.webhook(raw, c.req.header("stripe-signature")));
@@ -66,6 +67,15 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   // プレビューのテスト購入トークン（Stripe テストキーの時だけ・1 時間）。
   app.post("/lp/tickets/preview-token", async (c) => c.json(await tickets.issuePreview()));
   app.get("/lp/tickets/orders", async (c) => c.json(await tickets.listOrders(c.req.query())));
+  // 全注文の CSV。購入者の個人情報を一度に持ち出せるので lp:publish。
+  app.get("/lp/tickets/orders/export", async (c) => {
+    const { csv, filename } = await tickets.exportOrders();
+    return c.body(csv, 200, {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="${filename}"`,
+      "cache-control": "no-store",
+    });
+  });
   // 要確認 -> 支払い済み の確定はお金と券を結び付ける操作なので、販売 on/off と同じ lp:publish。
   app.post("/lp/tickets/orders/:id/approve", async (c) => c.json(await tickets.approve(reqCtx(c), c.req.param("id"))));
 
