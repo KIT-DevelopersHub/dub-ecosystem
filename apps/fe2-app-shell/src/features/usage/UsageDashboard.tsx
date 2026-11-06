@@ -91,6 +91,7 @@ export function UsageDashboard(): JSX.Element {
           Cloudflare の無料プランは上限を超えると<strong>停止（429を返す）</strong>し、
           <strong>勝手に課金されることはありません</strong>。課金が発生するのは、Paid プランへ
           <strong>手動でアップグレードした時だけ</strong>です。
+          Google Calendar API / Google Meet API も上限に達すると一時的に拒否されるだけで、課金はされません。
           このダッシュボードの本当の役割は「請求爆発の防止」よりも、
           <strong>無料枠の上限に達して機能が止まる予兆を早く掴むこと</strong>にあります。
         </p>
