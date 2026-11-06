@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "members-org-remind",
+  "worker": "dub-demo-members-org-remind",
+  "url": "https://dub-demo-members-org-remind.developershub-site.workers.dev",
+  "deployedSha": "9b8b67ef",
+  "branch": "commander/task-ctask_01M6QM0S3REWRYPWYS4RDA37FA",
+  "actor": "ko-tarou",
+  "markers": ["member-roster-remind","fe7-users-role-filter","member-roster-unlinked-hint"],
+  "live": true,
+  "verifiedAt": "2026-11-06T05:37:45Z",
+  "updatedAt": "2026-11-06T05:37:45Z",
+  "note": "ctask_01M6QM0S3REWRYPWYS4RDA37FA 運営メンバーアプリ修正"
+}
