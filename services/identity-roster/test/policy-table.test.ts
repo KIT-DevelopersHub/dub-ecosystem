@@ -66,7 +66,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 // app:admin:* key at all. The last three rows are not roles but the shapes this table had to
 // get right (and that roles.test.ts exercises at runtime).
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  admin: ["identity:read", "identity:admin", "app:admin:view", "app:admin:edit"],
+  admin: ["identity:read", "identity:admin", "app:admin:view", "app:admin:edit", "app:members:view", "app:members:edit", "members:mail_edit"],
   maintainer: ["identity:read"],
   organizer: ["identity:read"],
   member: ["identity:read"],
@@ -175,6 +175,17 @@ describe("role x endpoint matrix (frozen)", () => {
   it("no role, however privileged, reaches an INTERNAL route from outside", () => {
     const everyKey = [...new Set(Object.values(ROLE_KEYS).flat())];
     for (const route of INTERNAL_ROUTES) expect(allowedRoutes(everyKey)).not.toContain(route);
+  });
+
+  it("メール名簿の書き込みは編集範囲「全て」が要り、ロール管理の書き込みには影響しない", () => {
+    const narrowed = ROLE_KEYS.admin!.filter((k) => k !== "members:mail_edit");
+    const routes = allowedRoutes(narrowed);
+    expect(routes).not.toContain("PATCH /identity/users/:id");
+    expect(routes).not.toContain("POST /identity/users/invite");
+    expect(routes).toContain("PATCH /identity/roles/:id");
+    expect(routes).toContain("POST /identity/users/:id/roles");
+    // 範囲だけでは足りない: identity:admin の無いロールには書き込みを渡さない。
+    expect(allowedRoutes(["app:members:view", "app:members:edit", "members:mail_edit"])).not.toContain("PATCH /identity/users/:id");
   });
 
   // The single most dangerous line in the table: assigning a role is how every permission in

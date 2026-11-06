@@ -14,7 +14,7 @@ import { RoleAssignDialog } from "./RoleAssignDialog";
 import { UserPasswordSection } from "./UserPasswordSection";
 import { ImpersonateUserSection } from "./ImpersonateUserSection";
 import { usePatchUser, useOffboardUser } from "../hooks/useRosterApi";
-import { useCanAdminEdit } from "../hooks/usePermissions";
+import { useCanMailRosterEdit } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { errorMessage } from "../lib/errorDisplay";
 import type { OffboardOutcome } from "../lib/offboard";
@@ -41,9 +41,8 @@ export function UserInlineEditor({
 }) {
   const patch = usePatchUser(user.id);
   const offboard = useOffboardUser();
-  const canAdminEdit = useCanAdminEdit();
   const { toast } = useToast();
-  const canAdmin = canAdminEdit;
+  const canAdmin = useCanMailRosterEdit();
 
   const [displayName, setDisplayName] = useState(user.displayName);
   const [furigana, setFurigana] = useState(user.furigana ?? "");

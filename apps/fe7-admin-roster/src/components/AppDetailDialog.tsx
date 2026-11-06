@@ -3,6 +3,7 @@
 //   1. このアプリの権限        … 無効 / 閲覧 / 編集 の 3 段階
 //   2. 細かい権限              … APP_MANIFEST の detailPermissions（チャットの「他人の投稿を削除」等）
 //   3. 別のロール宛てのメール  … メールだけ。ロール間の設定（権限キーではない）
+//   4. 見られる・編集できる範囲 … 運営メンバーだけ。組織図まで / メール名簿以外 / 全て
 //
 // どちらも policy / APP_MANIFEST 由来なので、アプリや権限を足せばこのダイアログに自動で現れる。
 // 細かい権限は「アプリが有効（閲覧以上）」のときだけ触れる = アプリを OFF にしたまま配下だけ
@@ -13,6 +14,7 @@ import { Badge, Button, Modal, SegmentedControl } from "@dub/ui";
 import { levelLabel, levelDescription, levelTone, type Level } from "../lib/policyLabels";
 import { PermissionToggleList } from "./PermissionToggleList";
 import { MailCrossRoleSection } from "./MailCrossRoleSection";
+import { MembersScopeSection } from "./MembersScopeSection";
 import type { MailVisibilityProps } from "./RolePolicyEditor";
 
 const blockStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)", marginBottom: "var(--dub-space-5, 20px)" };
@@ -79,6 +81,10 @@ export function AppDetailDialog({
         />
         {levelLocked ? <p style={hintStyle}>このアプリは締め出し防止のため固定されています（変更できません）。</p> : null}
       </div>
+
+      {appId === "members" ? (
+        <MembersScopeSection selected={selected} level={app.level} disabled={disabled} onChange={onChange} idPrefix={idPrefix} />
+      ) : null}
 
       <div style={blockStyle}>
         <h3 style={headingStyle}>細かい権限</h3>

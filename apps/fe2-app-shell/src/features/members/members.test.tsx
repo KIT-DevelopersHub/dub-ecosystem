@@ -46,6 +46,7 @@ const OVERVIEW: MembersOverview = {
 function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
   return {
     getOverview: () => Promise.resolve(OVERVIEW),
+    getOrgOverview: () => Promise.resolve(OVERVIEW),
     listTeams: () => Promise.resolve({ teams: OVERVIEW.teams }),
     createTeam: vi.fn(),
     updateTeam: vi.fn(),
@@ -62,7 +63,7 @@ function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
 
 // Default subject: 運営メンバー app at 編集 (+ identity:admin) — what member-service now
 // demands for a write. Pass `permissions` to render as a 閲覧 subject instead.
-function wrap(ui: ReactNode, api: MembersApi, permissions = editorPermissions("members", ["identity:read", "identity:admin"])): JSX.Element {
+function wrap(ui: ReactNode, api: MembersApi, permissions = editorPermissions("members", ["identity:read", "identity:admin", "members:roster_view", "members:roster_edit"])): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={client}>
@@ -95,6 +96,40 @@ describe("createMembersApi", () => {
     await m.deleteTeam("t1");
     expect(calls[0]).toMatchObject({ method: "PATCH", path: "/api/v1/members/people/m1" });
     expect(calls[1]).toMatchObject({ method: "DELETE", path: "/api/v1/members/teams/t1" });
+  });
+});
+
+describe("MembersPage — 運営メンバーの範囲", () => {
+  it("組織図まで: 個人情報なしの overview を読み、編集は運営での項目だけ /org へ送る", async () => {
+    const getOverview = vi.fn(() => Promise.resolve(OVERVIEW));
+    const getOrgOverview = vi.fn(() => Promise.resolve(OVERVIEW));
+    const updateMemberOrg = vi.fn<MembersApi["updateMemberOrg"]>(() => Promise.resolve(OVERVIEW.members[0]!));
+    const updateMember = vi.fn();
+    const api = makeApi({ getOverview, getOrgOverview, updateMemberOrg, updateMember });
+    render(wrap(<MembersPage />, api, editorPermissions("members", ["identity:read"])));
+
+    expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
+    expect(getOrgOverview).toHaveBeenCalled();
+    expect(getOverview).not.toHaveBeenCalled();
+
+    const first = OVERVIEW.members[0]!;
+    await userEvent.click(screen.getByRole("button", { name: `${first.name} を編集` }));
+    expect(screen.queryByTestId("members-form-profile-section")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("連絡先")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("members-form-submit"));
+    await waitFor(() => expect(updateMemberOrg).toHaveBeenCalledTimes(1));
+    expect(updateMember).not.toHaveBeenCalled();
+    const patch = updateMemberOrg.mock.calls[0]![1];
+    expect(Object.keys(patch).sort()).toEqual(["leaderId", "position", "roleTitle", "status", "teamIds", "version"]);
+  });
+
+  it("運営名簿: 閲覧だけの範囲なら書き込みは無効", async () => {
+    render(wrap(<MemberRosterPage />, makeApi(), editorPermissions("members", ["identity:read", "members:roster_view"])));
+    const add = await screen.findByTestId("member-roster-add-member");
+    expect((add as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("member-roster-remind") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("member-roster-scope-notice")).toBeInTheDocument();
   });
 });
 
@@ -417,7 +452,7 @@ describe("MemberRosterPage (運営名簿から編集)", () => {
   });
 
   it("閲覧のみ: 行クリックで編集を開かず、書き込み操作は無効", async () => {
-    render(wrap(<MemberRosterPage />, makeApi(), viewerPermissions("members", ["identity:read"])));
+    render(wrap(<MemberRosterPage />, makeApi(), viewerPermissions("members", ["identity:read", "members:roster_view"])));
     await userEvent.click(await screen.findByText("山田太郎"));
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
     expect(screen.getByTestId("member-roster-readonly-notice")).toBeInTheDocument();

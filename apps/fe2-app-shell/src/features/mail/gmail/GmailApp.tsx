@@ -292,7 +292,7 @@ function Shortcuts(): JSX.Element | null {
         dispatch({ type: "OPEN_THREAD", id: cursor });
       } else if (e.key === "x" && !open && cursor) dispatch({ type: "TOGGLE_CHECK", id: cursor });
       else if (e.key === "s" && focus) dispatch({ type: "TOGGLE_STAR", id: focus });
-      else if (targets.length === 0) return;
+      else if (targets.length === 0 || state.allInView) return; // 全件選択 confirms in the toolbar first
       else if (e.key === "e") dispatch({ type: "ARCHIVE", ids: targets });
       else if (e.key === "#") dispatch({ type: "TRASH", ids: targets });
       else if (e.key === "I") setRead(targets, true);

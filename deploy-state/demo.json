@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "91388c14",
-  "branch": "commander/task-ctask_01M6RPXGVD8P8521MTEE51XFK5",
+  "deployedSha": "99bc44cd",
+  "branch": "commander/task-ctask_01M6RBR2HBF86HD9PM7MF6JTVG",
   "actor": "ko-tarou",
-  "markers": ["gcp_calendar_requests_peak_minute", "gcp_meet_requests_peak_minute"],
+  "markers": ["メール名簿以外", "members-scope-edit-locked", "member-roster-scope-notice"],
   "live": true,
-  "verifiedAt": "2026-11-06T15:22:04Z",
-  "updatedAt": "2026-11-06T15:22:04Z",
-  "note": "usage: Google Calendar/Meet API"
+  "verifiedAt": "2026-11-06T12:41:50Z",
+  "updatedAt": "2026-11-06T12:41:50Z",
+  "note": "ctask_01M6RBR2HBF86HD9PM7MF6JTVG 運営メンバーの範囲"
 }

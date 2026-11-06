@@ -202,3 +202,96 @@ describe("GET /mail/counts", () => {
     expect(c.blocked.unread).toBe(0);
   });
 });
+
+describe("POST /mail/bulk", () => {
+  const bulk = (e: ReturnType<typeof env>["env"], folder: unknown, action: unknown = "read") =>
+    app.fetch(new Request("https://svc/mail/bulk", { method: "POST", headers: hdr(), body: JSON.stringify({ folder, action }) }), e);
+  const counts = async (e: ReturnType<typeof env>["env"]) =>
+    (await (await app.fetch(new Request("https://svc/mail/counts", { headers: hdr() }), e)).json()) as mail.MailFolderCounts;
+  const flag = (e: ReturnType<typeof env>["env"], thread: string, body: object) =>
+    app.fetch(new Request(`https://svc/mail/flags/${thread}`, { method: "POST", headers: hdr(), body: JSON.stringify(body) }), e);
+
+  it("clears every page of the view, and a thread's older unread messages with it", async () => {
+    const { env: e, raw } = env();
+    for (let i = 0; i < 120; i++) addMail(raw, { from: `friend${i}@ok.example` });
+    addMail(raw, { from: "a@ok.example", thread: "thr_multi" });
+    addMail(raw, { from: "b@ok.example", thread: "thr_multi" });
+    expect((await counts(e)).inbox.unread).toBe(121);
+    const res = await bulk(e, "inbox");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ updated: 122 });
+    expect((await counts(e)).inbox.unread).toBe(0);
+    expect((raw.prepare(`SELECT COUNT(*) AS n FROM mail_inbound WHERE read_at IS NULL`).get() as { n: number }).n).toBe(0);
+  });
+
+  it("stays inside the view: archived, trashed and blocked mail keep their unread state", async () => {
+    const { env: e, raw } = env();
+    addMail(raw, { from: "in@ok.example" });
+    const archived = addMail(raw, { from: "arc@ok.example" });
+    const trashed = addMail(raw, { from: "trash@ok.example" });
+    const blocked = addMail(raw, { from: "bad@x.example" });
+    await flag(e, `thr_${archived}`, { archived: true });
+    await flag(e, `thr_${trashed}`, { trashed: true });
+    await block(e, "bad@x.example");
+    await bulk(e, "inbox");
+    const unread = raw.prepare(`SELECT id FROM mail_inbound WHERE read_at IS NULL ORDER BY id`).all() as { id: string }[];
+    expect(unread.map((r) => r.id)).toEqual([archived, trashed, blocked]);
+  });
+
+  it("stamps only the caller's copies: a co-recipient's delivery and another account's mail stay unread", async () => {
+    const { env: e, raw } = env();
+    const shared = addMail(raw, { from: "a@ok.example" });
+    const theirs = addMail(raw, { from: "b@ok.example", owner: "usr_other" });
+    const delivery = raw.prepare(
+      `INSERT INTO mail_inbound_delivery (id, inbound_id, owner_user_id, envelope_to, read_at, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 't', 't')`,
+    );
+    delivery.run("d_me", shared, ME, "me@developershub.jp");
+    delivery.run("d_other", shared, "usr_other", "other@developershub.jp");
+    await bulk(e, "inbox");
+    const readAt = (id: string) => (raw.prepare(`SELECT read_at FROM mail_inbound_delivery WHERE id = ?`).get(id) as { read_at: string | null }).read_at;
+    expect(readAt("d_me")).not.toBeNull();
+    expect(readAt("d_other")).toBeNull();
+    // The legacy per-message stamp moves with the delivery, or read_all viewers keep seeing it unread.
+    expect((raw.prepare(`SELECT read_at FROM mail_inbound WHERE id = ?`).get(shared) as { read_at: string | null }).read_at).not.toBeNull();
+    expect((raw.prepare(`SELECT read_at FROM mail_inbound WHERE id = ?`).get(theirs) as { read_at: string | null }).read_at).toBeNull();
+  });
+
+  it("archives and trashes every page, keeping a thread's other flags", async () => {
+    const { env: e, raw } = env();
+    const ids = Array.from({ length: 120 }, (_, i) => addMail(raw, { from: `friend${i}@ok.example` }));
+    await flag(e, `thr_${ids[0]}`, { starred: true });
+    expect(await (await bulk(e, "inbox", "archive")).json()).toEqual({ updated: 120 });
+    expect((await counts(e)).inbox.total).toBe(0);
+    expect((await counts(e)).archive.total).toBe(120);
+    expect((await counts(e)).starred.total).toBe(1);
+    await bulk(e, "starred", "trash");
+    const c = await counts(e);
+    expect(c.trash.total).toBe(1);
+    expect(c.archive.total).toBe(119);
+  });
+
+  it("unread reaches every message of the caller's own, and undoes a bulk read", async () => {
+    const { env: e, raw } = env();
+    for (let i = 0; i < 60; i++) addMail(raw, { from: `friend${i}@ok.example`, read: true });
+    addMail(raw, { from: "b@ok.example", owner: "usr_other", read: true });
+    await bulk(e, "inbox", "unread");
+    expect((await counts(e)).inbox.unread).toBe(60);
+    expect((raw.prepare(`SELECT COUNT(*) AS n FROM mail_inbound WHERE read_at IS NOT NULL`).get() as { n: number }).n).toBe(1);
+  });
+
+  it("flags are the caller's: another account's view of the same thread is untouched", async () => {
+    const { env: e, raw } = env();
+    addMail(raw, { from: "a@ok.example", thread: "thr_shared" });
+    await bulk(e, "inbox", "archive");
+    const rows = raw.prepare(`SELECT owner_user_id, archived FROM mail_user_flags`).all();
+    expect(rows).toEqual([{ owner_user_id: ME, archived: 1 }]);
+  });
+
+  it("rejects an unknown folder or action", async () => {
+    const { env: e } = env();
+    expect((await bulk(e, "nope")).status).toBe(400);
+    expect((await bulk(e, undefined)).status).toBe(400);
+    expect((await bulk(e, "inbox", "purge")).status).toBe(400);
+    expect((await bulk(e, "inbox", null)).status).toBe(400);
+  });
+});

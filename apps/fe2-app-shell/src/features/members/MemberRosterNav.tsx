@@ -35,17 +35,16 @@ interface SectionTab {
 // 順序 = 表示順。active 判定は「pathname が path で始まる最長一致」なので、より深い
 // パス（例: /admin/users/:id）は親タブにハイライトが乗る。
 // 各タブの requiredPermissions は、対応ルートが registry.flatten で AND される実効権限と
-// 一致させる = per-app view キー（app:members:view / app:admin:view,
-// withAppAccessGate 由来）が AUTHORITATIVE な 有効化ゲート。運営メンバー/運営名簿タブは
-// app:members:view のみでガードする（組織図タブも同じ）（ドメイン identity:read は要求しない）ので、統括ロールが
-// app:members:view だけで名簿を開ける。メール名簿(/admin/users)は対応ルートが
-// なお identity:read を AND するためタブ側もそれに合わせる。これでタブの表示可否がルート
-// ガードと厳密に一致し、「見えるのに開くと 403」というデッドタブを作らない（fail-closed）。
+// 一致させる = per-app view キー（app:members:view, withAppAccessGate 由来）が AUTHORITATIVE な
+// 有効化ゲートで、タブごとの範囲は ロール管理の 組織図まで / メール名簿以外 / 全て（policy.MembersScope）
+// が決める。運営メンバー/組織図タブは app:members:view だけ、運営名簿は members:roster_view、
+// メール名簿は members:mail_view を重ねる（メール名簿のルートは identity:read も AND する）。これで
+// タブの表示可否がルートガードと厳密に一致し、「見えるのに開くと 403」というデッドタブを作らない（fail-closed）。
 const SECTIONS: SectionTab[] = [
   { id: "members", label: "運営メンバー", path: "/members", requiredPermissions: ["app:members:view"] },
   { id: "org-chart", label: "組織図", path: "/members/org-chart", requiredPermissions: ["app:members:view"] },
-  { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["app:members:view"] },
-  { id: "roster", label: "メール名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:admin:view"] },
+  { id: "member-roster", label: "運営名簿", path: "/members/roster", requiredPermissions: ["app:members:view", "members:roster_view"] },
+  { id: "roster", label: "メール名簿", path: "/admin/users", requiredPermissions: ["identity:read", "app:members:view", "members:mail_view"] },
 ];
 
 /** pathname に最も長く前方一致するセクションの id（統合アプリ外なら null）。 */

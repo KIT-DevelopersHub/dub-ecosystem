@@ -134,6 +134,22 @@ describe("人事: applicants", () => {
     expect(res.json.error.code).toBe("HR_APPLICANT_JOINED");
     expect((await call(app, "GET", `/members/hr/applicants/${a.id}`)).status).toBe(200);
   });
+
+  it("deletes a hired applicant moved to 辞退, keeping the roster row", async () => {
+    const app = createApp(makeDeps());
+    const a = await newApplicant(app);
+    const v = await toInterviewed(app, a.id, a.version);
+    const joined = await call(app, "POST", `/members/hr/applicants/${a.id}/join`, { body: { expectedVersion: v } });
+    const { memberId } = joined.json;
+    const moved = await call(app, "POST", `/members/hr/applicants/${a.id}/stage`, {
+      body: { stage: "withdrawn", expectedVersion: joined.json.applicant.version },
+    });
+    expect(moved.status).toBe(200);
+    expect((await call(app, "DELETE", `/members/hr/applicants/${a.id}`)).status).toBe(200);
+    expect((await call(app, "GET", `/members/hr/applicants/${a.id}`)).status).toBe(404);
+    const overview = await call(app, "GET", "/members/overview");
+    expect(overview.json.members.some((x: { id: string }) => x.id === memberId)).toBe(true);
+  });
 });
 
 describe("人事: 採用 → 名簿", () => {
