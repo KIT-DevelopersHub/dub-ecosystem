@@ -3729,8 +3729,6 @@ function createDriveShareStore() {
         }
       }
     }
-    const base = { fileId: f.id, grantCount: grants.length, expectedCount: expected.size };
-    if (grants.length === 0) return { ...base, matchedCount: 0, items: [] };
     const items: Record<string, unknown>[] = [];
     const seen = new Set<string>();
     let matchedCount = 0;
@@ -3753,7 +3751,7 @@ function createDriveShareStore() {
       if (seen.has(email)) continue;
       items.push({ kind: "missing", permissionId: null, granteeType: "user", email, displayName: null, domain: null, actualRole: null, expectedRole: exp.driveRole, roleNames: exp.roleNames });
     }
-    return { ...base, matchedCount, items };
+    return { fileId: f.id, grantCount: grants.length, expectedCount: expected.size, matchedCount, items };
   };
 
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {

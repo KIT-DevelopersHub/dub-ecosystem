@@ -128,7 +128,7 @@ export interface ShareDriftItem {
   roleNames: string[];
 }
 
-/** GET /driveshare/files/:id/drift. grantCount=0 = no role grant, so nothing to compare. */
+/** GET /driveshare/files/:id/drift. grantCount=0 = no role grant: every direct share is `unexpected`. */
 export interface FileShareDrift {
   fileId: string;
   grantCount: number;

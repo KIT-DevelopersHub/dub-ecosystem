@@ -61,7 +61,7 @@ export const DRIVE: AreaSpec = {
       service: SHARE,
       requires: DRIVE_VIEW,
       description: "ファイル1件の実際の共有とロール単位の共有設定の差分を取得する",
-      hint: "items[].kind(unexpected|excess_role|insufficient_role|missing)・email・actualRole・expectedRole・roleNames。grantCount=0 は比較対象なし",
+      hint: "items[].kind(unexpected|excess_role|insufficient_role|missing)・email・actualRole・expectedRole・roleNames。grantCount=0 はロール権限が無く、直接の共有はすべて unexpected",
     }),
     read({
       id: "drive.files.list",
