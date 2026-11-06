@@ -89,7 +89,7 @@ test("目標タブ: 目標を設定すると達成率が出て、ステータス
   await page.getByRole("tab", { name: "目標" }).click();
   await expect(page.getByTestId("fe2-sponsor-goal-actual-contacted")).toHaveText(`${before + 1} 社`);
 
-  // 履歴の行から月を移れる。
+  // 前の月へ移れる。
   await page.getByTestId("fe2-sponsor-goal-prev").click();
   await expect(page.getByTestId("fe2-sponsor-goals-history")).toBeVisible();
   await shot(page, "09-prev-month");

@@ -23,22 +23,23 @@ export function monthActuals(leads: readonly Lead[], month: string): Actuals {
   };
 }
 
-/** 接触済なのに初回連絡日が無い企業 = どの月の実績にも入らない企業 (スプレッドシートから移した過去分など)。 */
+/** 達した節目の日付が空の企業 = 実績に入らない分がある企業 (スプレッドシートから移した過去分など)。見送りは節目が分からないので除く。 */
 export function undatedLeads(leads: readonly Lead[]): number {
-  return leads.filter((l) => l.status !== "未接触" && l.firstContactOn === null).length;
+  return leads.filter((l) =>
+    sponsor.LEAD_MILESTONES.some((m) => sponsor.leadStatusRank(l.status) >= sponsor.leadStatusRank(m.reachedAt) && l[m.field] === null),
+  ).length;
 }
 
-/** 達成率 (%)。目標なしは null。 */
+/** 達成率 (%)。100% は達成した時だけ見せるので切り捨てる。目標なしは null。 */
 export const achievement = (actual: number, target: number | null): number | null =>
-  target === null ? null : Math.round((actual / target) * 100);
+  target === null ? null : Math.floor((actual / target) * 100);
 
-export function currentMonth(now: Date = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
+/** 今月 (日本時間)。節目の日付と同じ暦で数える。 */
+export const currentMonth = (now: Date = new Date()): string => sponsor.jstDate(now.toISOString()).slice(0, 7);
 
 export function shiftMonth(month: string, by: number): string {
   const [y, m] = month.split("-").map(Number) as [number, number];
-  return currentMonth(new Date(y, m - 1 + by, 1));
+  return new Date(Date.UTC(y, m - 1 + by, 1)).toISOString().slice(0, 7);
 }
 
 /** 2026-11 → 2026年11月 */

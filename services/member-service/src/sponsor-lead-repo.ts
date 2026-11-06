@@ -171,15 +171,14 @@ const toGoal = (r: GoalDbRow): sponsor.MonthlyGoal => ({
   updatedAt: r.updated_at,
 });
 
-// 新規は INSERT、既存は version が合うときだけ上書き (合わなければ changes = 0)。
-const PUT_GOAL_SQL = `INSERT INTO member_sponsor_goals
-    (org_id, month, contacted_target, proposed_target, agreed_target, amount_target, version, updated_by, updated_by_name, updated_at)
+// 新規 (expectedVersion = 0) は既に行があれば入れない。更新は version が合うときだけ。どちらも失敗は changes = 0。
+const INSERT_GOAL_SQL = `INSERT INTO member_sponsor_goals
+    (contacted_target, proposed_target, agreed_target, amount_target, version, updated_by, updated_by_name, updated_at, org_id, month)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT (org_id, month) DO UPDATE SET
-    contacted_target = excluded.contacted_target, proposed_target = excluded.proposed_target,
-    agreed_target = excluded.agreed_target, amount_target = excluded.amount_target, version = excluded.version,
-    updated_by = excluded.updated_by, updated_by_name = excluded.updated_by_name, updated_at = excluded.updated_at
-  WHERE member_sponsor_goals.version = ?`;
+  ON CONFLICT (org_id, month) DO NOTHING`;
+const UPDATE_GOAL_SQL = `UPDATE member_sponsor_goals SET
+    contacted_target = ?, proposed_target = ?, agreed_target = ?, amount_target = ?, version = ?, updated_by = ?, updated_by_name = ?, updated_at = ?
+  WHERE org_id = ? AND month = ? AND version = ?`;
 
 export function createD1SponsorLeadRepo(db: DbClient): SponsorLeadRepo {
   return {
@@ -212,10 +211,8 @@ export function createD1SponsorLeadRepo(db: DbClient): SponsorLeadRepo {
       return rows.map(toGoal);
     },
     async putGoal(orgId, g, expectedVersion) {
-      const res = await db.run(
-        PUT_GOAL_SQL,
-        orgId, g.month, g.contacted, g.proposed, g.agreed, g.amount, g.version, g.updatedBy, g.updatedByName, g.updatedAt, expectedVersion,
-      );
+      const binds = [g.contacted, g.proposed, g.agreed, g.amount, g.version, g.updatedBy, g.updatedByName, g.updatedAt, orgId, g.month];
+      const res = expectedVersion === 0 ? await db.run(INSERT_GOAL_SQL, ...binds) : await db.run(UPDATE_GOAL_SQL, ...binds, expectedVersion);
       return res.meta.changes > 0;
     },
   };

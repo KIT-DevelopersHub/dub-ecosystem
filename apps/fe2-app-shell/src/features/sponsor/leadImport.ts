@@ -128,7 +128,7 @@ const CHOICES: Partial<Record<Key, readonly string[]>> = {
 
 const LONG_KEYS: readonly Key[] = ["note", "evidence"];
 
-const normalizeHeader = (h: string): string => h.normalize("NFKC").replace(/\s/g, "").replace(/\(任意\)$/, "");
+export const normalizeHeader = (h: string): string => h.normalize("NFKC").replace(/\s/g, "").replace(/\(任意\)$/, "");
 
 function labelOf(key: Key): string {
   return Object.keys(HEADERS).find((h) => HEADERS[h] === key) ?? key;

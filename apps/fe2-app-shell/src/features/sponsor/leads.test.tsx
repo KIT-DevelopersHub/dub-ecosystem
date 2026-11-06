@@ -313,18 +313,28 @@ describe("月間目標", () => {
     lead({ id: "c", firstContactOn: "2026-10-31", status: "初回連絡" }),
     lead({ id: "d", status: "社内検討" }),
     lead({ id: "e", status: "未接触" }),
+    lead({ id: "f", status: "見送り" }),
+    lead({ id: "g", status: "提案済", firstContactOn: "2026-09-01" }),
   ];
 
   it("counts by the milestone dates of that month, leaving 見送り out of 内諾 and 協賛額", () => {
     expect(monthActuals(leads, M)).toEqual({ contacted: 2, proposed: 1, agreed: 1, amount: 300000 });
     expect(monthActuals(leads, "2026-10")).toEqual({ contacted: 1, proposed: 1, agreed: 0, amount: 0 });
-    expect(undatedLeads(leads)).toBe(1);
+    // d (全部空) と g (提案日が空)。未接触と見送りは数えない。
+    expect(undatedLeads(leads)).toBe(2);
   });
 
   it("computes the rate, over 100% included, and none without a target", () => {
     expect(achievement(1, 3)).toBe(33);
     expect(achievement(5, 4)).toBe(125);
     expect(achievement(5, null)).toBeNull();
+    // 丸めで未達が 100% に見えない。
+    expect(achievement(996000, 1000000)).toBe(99);
+  });
+
+  it("uses the Japan calendar for this month", () => {
+    expect(currentMonth(new Date("2026-10-31T15:00:00Z"))).toBe("2026-11");
+    expect(currentMonth(new Date("2026-10-31T14:59:00Z"))).toBe("2026-10");
   });
 
   it("moves across years", () => {

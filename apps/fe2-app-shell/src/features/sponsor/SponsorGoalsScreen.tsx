@@ -22,7 +22,7 @@ function GoalCard({ metric, actual, target }: { metric: (typeof METRICS)[number]
     <div className={styles.goalCard} data-testid={`fe2-sponsor-goal-${metric.key}`}>
       <div className={styles.goalHead}>
         <span className={styles.goalLabel}>{metric.label}</span>
-        {rate !== null && rate >= 100 ? <Badge tone="success">達成</Badge> : null}
+        {target !== null && actual >= target ? <Badge tone="success">達成</Badge> : null}
       </div>
       <div className={styles.goalNumbers}>
         <span className={styles.goalActual} data-testid={`fe2-sponsor-goal-actual-${metric.key}`}>
@@ -114,6 +114,7 @@ function GoalDialog({ month, goal, open, onClose }: { month: string; goal: spons
 
 interface HistoryRow {
   month: string;
+  selected: boolean;
   actuals: Actuals;
   goal: sponsor.MonthlyGoal | null;
 }
@@ -130,8 +131,11 @@ const HISTORY_COLUMNS: ColumnDef<HistoryRow>[] = [
     header: "月",
     noWrap: true,
     cell: (r) => (
-      <span className={styles.rowName} data-testid={`fe2-sponsor-goal-month-${r.month}`}>
-        {monthLabel(r.month)}
+      <span className={styles.leadNext}>
+        <span className={styles.rowName} data-testid={`fe2-sponsor-goal-month-${r.month}`}>
+          {monthLabel(r.month)}
+        </span>
+        {r.selected ? <Badge tone="info">表示中</Badge> : null}
       </span>
     ),
   },
@@ -152,9 +156,10 @@ export function SponsorGoalsScreen(): JSX.Element {
   const undated = undatedLeads(all);
   const ready = leads.data !== undefined && goals.data !== undefined;
 
+  // 基準は今月で固定 (行を押しても表が動かない)。
   const history: HistoryRow[] = Array.from({ length: HISTORY_MONTHS }, (_, i) => {
-    const m = shiftMonth(month, -i);
-    return { month: m, actuals: monthActuals(all, m), goal: goalOf(m) };
+    const m = shiftMonth(currentMonth(), -i);
+    return { month: m, selected: m === month, actuals: monthActuals(all, m), goal: goalOf(m) };
   });
 
   let body: JSX.Element;
@@ -189,7 +194,7 @@ export function SponsorGoalsScreen(): JSX.Element {
           ))}
         </div>
         <Stack gap={3}>
-          <h3 className={styles.leadSectionTitle}>月ごとの推移</h3>
+          <h3 className={styles.leadSectionTitle}>直近 {HISTORY_MONTHS} か月の推移</h3>
           <DataTable<HistoryRow>
             testId="fe2-sponsor-goals-history"
             columns={HISTORY_COLUMNS}
@@ -202,7 +207,7 @@ export function SponsorGoalsScreen(): JSX.Element {
           <p className={styles.note}>{METRICS.map((m) => `${m.label} = ${m.definition}`).join("。")}。</p>
           {undated > 0 ? (
             <p className={styles.note} data-testid="fe2-sponsor-goals-undated">
-              接触済のうち初回連絡日が空の {undated} 社は、月の実績に入っていません（「営業」タブの詳細から日付を入れると数えられます）。
+              初回連絡日・提案日・内諾日のいずれかが空の {undated} 社は、その分が月の実績に入っていません（「営業」タブの詳細から日付を入れると数えられます）。
             </p>
           ) : null}
         </div>

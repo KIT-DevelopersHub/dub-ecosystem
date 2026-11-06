@@ -5799,7 +5799,11 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     const base = "/api/v1/members/sponsor/leads";
     if (pathname === base) {
       if (method === "GET") return json({ leads: [...leads].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((l) => ({ ...l })) });
-      if (method === "POST") return json({ ...addLead(body, now) }, 201);
+      if (method === "POST") {
+        const l = addLead(body, now);
+        Object.assign(l, sponsorValues.applyLeadMilestones("未接触", l, [], sponsorValues.jstDate(now)));
+        return json({ ...l }, 201);
+      }
       return null;
     }
     if (pathname === `${base}/import` && method === "POST") {

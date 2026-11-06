@@ -115,6 +115,16 @@ describe("スポンサー: 節目の日付", () => {
     });
   });
 
+  it("clears later milestones when moved back out of 見送り", async () => {
+    const a = app();
+    const l = await add(a);
+    await patch(a, l.id, { status: "内諾", expectedVersion: 1 });
+    await patch(a, l.id, { status: "見送り", expectedVersion: 2 });
+    expect(await patch(a, l.id, { status: "提案予定", expectedVersion: 3 })).toMatchObject({
+      firstContactOn: "2026-11-07", proposedOn: null, agreedOn: null,
+    });
+  });
+
   it("stamps a company added by hand at an advanced status", async () => {
     expect(await add(app(), { status: "提案済" })).toMatchObject({ firstContactOn: "2026-11-07", proposedOn: "2026-11-07", agreedOn: null });
   });
@@ -148,6 +158,7 @@ describe("スポンサー: 月間目標", () => {
     expect(created.status).toBe(200);
     expect(created.json).toMatchObject({ month: "2026-11", contacted: 10, agreed: null, version: 1 });
     expect((await call(app, "PUT", `${GOALS}/2026-11`, { body })).status).toBe(409);
+    expect((await call(app, "PUT", `${GOALS}/2027-01`, { body: { ...body, expectedVersion: 5 } })).status).toBe(409);
     expect((await call(app, "PUT", `${GOALS}/2026-11`, { body: { ...body, contacted: 12, expectedVersion: 1 } })).json).toMatchObject({ contacted: 12, version: 2 });
     await call(app, "PUT", `${GOALS}/2026-12`, { body });
     expect((await call(app, "GET", GOALS)).json.goals.map((g: { month: string }) => g.month)).toEqual(["2026-12", "2026-11"]);

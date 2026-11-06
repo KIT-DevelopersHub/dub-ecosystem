@@ -172,7 +172,7 @@ export function jstDate(iso: string): string {
 }
 
 /** そのステータスに達した日を持つ項目。 */
-const MILESTONES = [
+export const LEAD_MILESTONES = [
   { field: "firstContactOn", reachedAt: "初回連絡" },
   { field: "proposedOn", reachedAt: "提案済" },
   { field: "agreedOn", reachedAt: "内諾" },
@@ -180,7 +180,7 @@ const MILESTONES = [
 
 /**
  * ステータスの変更に合わせて節目の日付を埋める。進んだら今日を入れ (既に日付があれば残す)、節目より手前へ戻したら消す。
- * 見送りは過去の節目を残す。explicit = 今回の更新で手入力された項目 (触らない)。
+ * 見送りにする時は過去の節目を残し、見送りから戻す時は戻した先より後の節目を消す。explicit = 今回の更新で手入力された項目 (触らない)。
  */
 export function applyLeadMilestones<T extends Pick<LeadFields, "status" | "firstContactOn" | "proposedOn" | "agreedOn">>(
   prevStatus: LeadStatus,
@@ -190,12 +190,12 @@ export function applyLeadMilestones<T extends Pick<LeadFields, "status" | "first
 ): T {
   if (next.status === "見送り" || next.status === prevStatus) return next;
   const out = { ...next };
-  for (const { field, reachedAt } of MILESTONES) {
+  for (const { field, reachedAt } of LEAD_MILESTONES) {
     if (explicit.includes(field)) continue;
     const reached = leadStatusRank(next.status) >= leadStatusRank(reachedAt);
     const wasReached = leadStatusRank(prevStatus) >= leadStatusRank(reachedAt);
     if (reached && !wasReached) out[field] ??= today;
-    if (!reached && wasReached) out[field] = null;
+    if (!reached && (wasReached || prevStatus === "見送り")) out[field] = null;
   }
   return out;
 }
