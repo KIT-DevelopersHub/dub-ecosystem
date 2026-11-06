@@ -14,7 +14,10 @@ const MEMBERS_VIEW = { keys: [], appLevel: { app: "members", level: "view" } } a
 const ROSTER = { keys: ["identity:read"] } as const;
 const MAIL_ADMIN = { keys: ["mail:admin"] } as const;
 const MEMBERS_EDIT = { keys: [], appLevel: { app: "members", level: "edit" } } as const;
+const ROSTER_VIEW = { keys: ["members:roster_view"], appLevel: { app: "members", level: "view" } } as const;
+const ROSTER_EDIT = { keys: ["members:roster_edit"], appLevel: { app: "members", level: "edit" } } as const;
 const ADMIN_EDIT = { keys: ["identity:admin"], appLevel: { app: "admin", level: "edit" } } as const;
+const MAIL_ROSTER_EDIT = { keys: ["identity:admin", "app:members:edit", "members:mail_edit"], appLevel: { app: "admin", level: "edit" } } as const;
 
 // 名簿 (member_people) の中身: 氏名・連絡先・プロフィール各項目。プロフィール項目は
 // 共通契約 (@dub/types) を正典にし、項目追加がここへ自動で届くようにする。
@@ -45,7 +48,7 @@ export const MEMBER: AreaSpec = {
       area: "member",
       path: "/members/overview",
       service: M,
-      requires: MEMBERS_VIEW,
+      requires: ROSTER_VIEW,
       description: "メンバー名簿（チームと所属メンバー）を取得する",
       hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・gmail・phone・grade・department・rosterNumber・studentNumber・version（gmail 等の空欄は未登録）。identityUserId = ログインアカウントの id（tasks の assigneeId・users の id と同じ。null はアカウント未紐付けで担当を照合できない）",
     }),
@@ -63,7 +66,7 @@ export const MEMBER: AreaSpec = {
       area: "member",
       path: "/members/people/by-identity/:identityUserId",
       service: M,
-      requires: MEMBERS_VIEW,
+      requires: ROSTER_VIEW,
       description: "ログインアカウントに紐づく名簿のメンバーを取得する",
       hint: "{ member | null }。紐付けが無ければ null",
     }),
@@ -225,7 +228,7 @@ export const MEMBER: AreaSpec = {
       method: "PATCH",
       path: "/members/people/:id",
       service: M,
-      requires: MEMBERS_EDIT,
+      requires: ROSTER_EDIT,
       kind: "write",
       reversible: true,
       risk: "mid",
@@ -242,7 +245,7 @@ export const MEMBER: AreaSpec = {
       method: "POST",
       path: "/members/people/:id/identity-link",
       service: M,
-      requires: MEMBERS_EDIT,
+      requires: ROSTER_EDIT,
       kind: "write",
       reversible: true,
       risk: "mid",
@@ -259,7 +262,7 @@ export const MEMBER: AreaSpec = {
       method: "POST",
       path: "/identity/users/invite",
       service: I,
-      requires: ADMIN_EDIT,
+      requires: MAIL_ROSTER_EDIT,
       kind: "write",
       reversible: false,
       risk: "mid",
@@ -276,7 +279,7 @@ export const MEMBER: AreaSpec = {
       method: "PATCH",
       path: "/identity/users/:id",
       service: I,
-      requires: ADMIN_EDIT,
+      requires: MAIL_ROSTER_EDIT,
       kind: "write",
       reversible: true,
       risk: "mid",
@@ -290,6 +293,8 @@ export const MEMBER: AreaSpec = {
     },
   ],
   excluded: [
+    { service: M, route: "GET /members/org-overview", reason: "組織図までのロールの画面用。members.overview から個人情報を落としただけで、ボットには overview で足りる" },
+    { service: M, route: "PATCH /members/people/:id/org", reason: "組織図までのロールの画面用。同じ更新は members.people.update でできる" },
     { service: M, route: "POST /members/teams", reason: "依頼範囲外。チームの削除を開放しないため、作ったチームを取り消せない" },
     { service: M, route: "DELETE /members/teams/:id", reason: "チームを物理削除し、所属の紐付けも消える（不可逆）" },
     { service: M, route: "POST /members/people/:id/profile-reminder", reason: "本人の受信箱とプッシュに直接届き、送った通知は取り消せない（運営名簿で管理者が対象を確認して送る操作）" },
