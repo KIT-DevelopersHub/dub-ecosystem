@@ -13,7 +13,7 @@
 // the same rule the client uses for its optimistic re-filing — so a mixed conversation stays
 // in the inbox. Read-only: nothing is stamped on any row; unblocking restores everything.
 import type { DbClient } from "@dub/db";
-import type { mail } from "@dub/types";
+import { mail } from "@dub/types";
 import {
   decodeCursor,
   encodeCursor,
@@ -21,6 +21,7 @@ import {
   inboundSearchClause,
   inboundSelect,
   rowToListItem,
+  setInboundReadState,
   type InboundRow,
   type InboundScope,
 } from "./repo";
@@ -145,6 +146,23 @@ export async function listInboundFolder(
     nextCursor: hasMore ? encodeCursor(last.last_id) : null,
     total,
   };
+}
+
+/** Mark every unread conversation of a view read for the viewer. The ids are resolved before
+ *  stamping: the delivery stamp alone would take a thread out of `unread_n`, and the legacy
+ *  stamp would then miss it. Batched and idempotent, so a retry finishes a partial failure.
+ *  Returns the messages considered, like POST /mail/read-state. */
+export async function markFolderRead(db: DbClient, scope: InboundScope, viewer: string, folder: View): Promise<number> {
+  const from = viewFrom(scope, viewer, undefined);
+  const rows = await db.all<{ id: string }>(
+    `SELECT id FROM mail_inbound WHERE thread_id IN (SELECT t.thread_id ${from.sql} WHERE ${VIEW_PREDICATE[folder]} AND t.unread_n = 1)`,
+    ...from.binds,
+  );
+  const ids = rows.map((r) => r.id);
+  for (let i = 0; i < ids.length; i += mail.MAIL_READ_STATE_LIMIT) {
+    await setInboundReadState(db, ids.slice(i, i + mail.MAIL_READ_STATE_LIMIT), viewer, true);
+  }
+  return ids.length;
 }
 
 /** Conversations + unread conversations per view, for the sidebar (one aggregate query). */

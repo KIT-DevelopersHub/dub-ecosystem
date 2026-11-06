@@ -28,6 +28,7 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn().mockResolvedValue({ id: "sch", status: "canceled" }),
     setReadState: vi.fn().mockResolvedValue(undefined),
+    markFolderRead: vi.fn().mockResolvedValue(undefined),
     listDrafts: vi.fn().mockResolvedValue([]),
     saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
     deleteDraft: vi.fn().mockResolvedValue(undefined),

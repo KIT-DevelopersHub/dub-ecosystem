@@ -3,8 +3,9 @@
 // subject + inline snippet, label chips, and a timestamp that swaps to row
 // actions (archive / delete / mark-read) on hover. Bulk selection lifts a toolbar.
 import { useEffect, useRef, useState } from "react";
-import { Badge, NARROW_VIEWPORT_QUERY, SkeletonList, useMediaQuery } from "@dub/ui";
+import { Badge, Button, ConfirmDialog, NARROW_VIEWPORT_QUERY, SkeletonList, useMediaQuery } from "@dub/ui";
 import {
+  NAV_FOLDERS,
   displayName,
   latest,
   partitionNudged,
@@ -20,8 +21,8 @@ import {
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
 import { SenderAvatar } from "./SenderAvatar.tsx";
-import { PAGE_SIZE, pageSourceOf, selectOrdered, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
-import { useReadState } from "./useReadState.tsx";
+import { PAGE_SIZE, markableUnread, pageSourceOf, selectOrdered, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
+import { useMarkFolderRead, useReadState } from "./useReadState.tsx";
 
 // P25: exit-animation two-phase pattern (mirrors fe1 Toast.tsx's `leaving` + EXIT_MS).
 // Archive/trash marks the row `leaving` (slide-out + collapse plays via inline styles),
@@ -470,6 +471,8 @@ function ThreadRow({
 export function ThreadList(): JSX.Element {
   const { state, dispatch } = useMailStore();
   const setRead = useReadState();
+  const markFolderRead = useMarkFolderRead();
+  const [confirmReadAll, setConfirmReadAll] = useState(false);
   const narrow = useMediaQuery(NARROW_VIEWPORT_QUERY);
   const now = new Date();
   const pendingReplies = pendingReplyIds(state.scheduled);
@@ -547,6 +550,8 @@ export function ThreadList(): JSX.Element {
   const someChecked = state.checked.size > 0;
   const checkedInView = shown.filter((t) => state.checked.has(t.id)).map((t) => t.id);
   const archivedInView = shown.filter((t) => state.checked.has(t.id) && t.folder === "archive").map((t) => t.id);
+  const unreadToMark = markableUnread(state);
+  const folderLabel = NAV_FOLDERS.find((f) => f.id === state.folder)?.label ?? "このフォルダ";
 
   return (
     <section
@@ -642,18 +647,41 @@ export function ThreadList(): JSX.Element {
             <span style={{ fontSize: "var(--dub-font-size-xs)", marginLeft: 4 }}>{state.checked.size}件を選択中</span>
           </div>
         ) : (
-          <button
-            type="button"
-            aria-label="更新"
-            data-testid="fe2-mail-refresh"
-            onClick={() => dispatch({ type: "REQUEST_SYNC" })}
-            style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-secondary)", padding: 4 }}
-          >
-            <MailIcon name="refresh" size={18} />
-          </button>
+          <>
+            <button
+              type="button"
+              aria-label="更新"
+              data-testid="fe2-mail-refresh"
+              onClick={() => dispatch({ type: "REQUEST_SYNC" })}
+              style={{ all: "unset", cursor: "pointer", color: "var(--dub-color-text-secondary)", padding: 4 }}
+            >
+              <MailIcon name="refresh" size={18} />
+            </button>
+            {unreadToMark === 0 ? null : narrow ? (
+              <StopClick label="すべて既読にする" testId="fe2-mail-read-all" onClick={() => setConfirmReadAll(true)}>
+                <MailIcon name="mail-open" size={18} />
+              </StopClick>
+            ) : (
+              <Button variant="ghost" size="sm" testId="fe2-mail-read-all" onClick={() => setConfirmReadAll(true)}>
+                すべて既読にする
+              </Button>
+            )}
+          </>
         )}
         {searching ? null : <PageNav pager={state.pager[pageSourceOf(state.folder)]} source={pageSourceOf(state.folder)} loading={state.listLoading} />}
       </div>
+      <ConfirmDialog
+        open={confirmReadAll}
+        title="すべて既読にしますか？"
+        message={`${folderLabel}の未読の会話 ${unreadToMark} 件をすべて既読にします。他のページの会話も含まれます。まとめて未読に戻すことはできません。`}
+        confirmLabel="すべて既読にする"
+        testId="fe2-mail-read-all-confirm"
+        onCancel={() => setConfirmReadAll(false)}
+        onConfirm={() => {
+          setConfirmReadAll(false);
+          markFolderRead();
+        }}
+      />
 
       {state.listLoading && !searching ? (
         <div data-testid="fe2-mail-list-loading" style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>

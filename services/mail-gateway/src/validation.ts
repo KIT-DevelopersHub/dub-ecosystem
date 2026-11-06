@@ -120,6 +120,16 @@ export function parseReadStateRequest(body: unknown): mail.MailReadStateRequest 
   return { ids: ids as string[], read: read as boolean };
 }
 
+/** Validate POST /mail/read-all. */
+export function parseReadAllRequest(body: unknown): mail.MailReadAllRequest {
+  if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
+  const { folder } = body;
+  if (typeof folder !== "string" || !(mail.MAIL_FOLDER_VIEWS as readonly string[]).includes(folder)) {
+    throw mailInvalid([{ field: "folder", reason: "invalid_enum", message: mail.MAIL_FOLDER_VIEWS.join("|") }]);
+  }
+  return { folder: folder as mail.MailFolderView };
+}
+
 const DRAFT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const DRAFT_MODES: readonly string[] = ["new", "reply", "replyAll", "forward"];
 const DRAFT_ADDRESS_MAX = 10_000;

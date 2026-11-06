@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { mail } from "@dub/types";
 import { useMailApi } from "../MailProvider.tsx";
-import { useMailStore } from "./useMailStore.tsx";
+import { selectVisible, serverViewOf, useMailStore } from "./useMailStore.tsx";
 
 export function useReadState(): (threadIds: string[], read: boolean) => void {
   const api = useMailApi();
@@ -22,4 +22,18 @@ export function useReadState(): (threadIds: string[], read: boolean) => void {
     },
     [api, dispatch, threads],
   );
+}
+
+/** すべて既読にする for the current folder. The loaded rows flip immediately; the server covers
+ *  the pages not loaded, so the sync after it (either way) is what settles the badges. */
+export function useMarkFolderRead(): () => void {
+  const api = useMailApi();
+  const { state, dispatch } = useMailStore();
+  return useCallback(() => {
+    dispatch({ type: "SET_READ", ids: selectVisible(state).map((t) => t.id), read: true });
+    void api
+      .markFolderRead(serverViewOf(state.folder, null))
+      .catch(() => dispatch({ type: "BLOCK_NOTICE", notice: { status: "failed", text: "すべて既読にできませんでした" } }))
+      .finally(() => dispatch({ type: "REQUEST_SYNC" }));
+  }, [api, dispatch, state]);
 }

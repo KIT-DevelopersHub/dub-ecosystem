@@ -1316,6 +1316,12 @@ function createMailStore() {
       for (const r of inboxOf(me.id)) if (own.has(r.id)) r.read = read;
       return json({ updated: ids.length, read });
     }
+    if (method === "POST" && pathname === "/api/v1/mail/read-all") {
+      const { folder } = body as mail.MailReadAllRequest;
+      const hit = folderThreads(inboxOf(me.id)).filter((t) => inView(t, folder) && t.unread);
+      for (const t of hit) for (const m of t.msgs) m.read = true;
+      return json({ updated: hit.length });
+    }
     // 下書き: per-account, in-session (a reload resets, like Sent).
     {
       const list = (draftsByAccount[me.id] ??= []);

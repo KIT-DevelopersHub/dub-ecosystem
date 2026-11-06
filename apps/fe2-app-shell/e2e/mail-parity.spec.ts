@@ -124,3 +124,25 @@ test("send errors explain themselves", async ({ page }) => {
   await page.getByTestId("fe2-mail-compose-send").click();
   await expect(page.getByTestId("fe2-mail-compose-error")).toContainText("宛先");
 });
+
+test("すべて既読にする clears the folder after a confirmation", async ({ page }) => {
+  await open(page);
+  await expect(page.getByTestId("fe2-mail-gmail")).not.toHaveAttribute("data-unread", "0");
+  await shot(page, "read-all-before");
+  await page.getByTestId("fe2-mail-read-all").click();
+  const dialog = page.getByTestId("fe2-mail-read-all-confirm");
+  await expect(dialog).toContainText("受信トレイの未読の会話");
+  await shot(page, "read-all-confirm");
+  await dialog.getByRole("button", { name: "すべて既読にする" }).click();
+  await expect(page.getByTestId("fe2-mail-gmail")).toHaveAttribute("data-unread", "0");
+  await expect(page.getByTestId("fe2-mail-read-all")).toHaveCount(0);
+  await shot(page, "read-all-after");
+});
+
+test("すべて既読にする fits the toolbar on a phone without pushing the pager out", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 720 });
+  await open(page);
+  await expect(page.getByTestId("fe2-mail-read-all")).toBeVisible();
+  await expect(page.getByTestId("fe2-mail-page-next")).toBeInViewport({ ratio: 1 });
+  await shot(page, "read-all-narrow");
+});

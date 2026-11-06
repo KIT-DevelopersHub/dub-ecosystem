@@ -322,6 +322,11 @@ export interface MailReadStateRequest {
   read: boolean;
 }
 export const MAIL_READ_STATE_LIMIT = 500;
+/** POST /mail/read-all: mark every unread conversation of one view read for the viewer, the
+ *  pages the client has not loaded included. Same own-copies-only rule as read-state. */
+export interface MailReadAllRequest {
+  folder: MailFolderView;
+}
 
 // ---- drafts (下書き, 0025) ----
 // A compose in progress, personal to its owner. Addresses are the raw field text: a draft may

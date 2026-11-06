@@ -45,6 +45,7 @@ function fakeApi(listInbox: MailApi["listInbox"], over: Partial<MailApi> = {}): 
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn(),
     setReadState: vi.fn().mockResolvedValue(undefined),
+    markFolderRead: vi.fn().mockResolvedValue(undefined),
     listDrafts: vi.fn().mockResolvedValue([]),
     saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
     deleteDraft: vi.fn().mockResolvedValue(undefined),

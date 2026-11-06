@@ -144,6 +144,15 @@ export function folderUnread(state: MailState, folder: FolderId): number {
   return Math.max(0, state.counts[f].unread + now - (state.countsBaseline[f] ?? 0));
 }
 
+/** Unread conversations すべて既読にする would clear: 0 hides it. A label is client-only and a
+ *  search is a subset, so neither has a server view to mark; 選択 covers those. すべてのメール
+ *  has no count of its own, but it is exactly 受信トレイ + the archive. */
+export function markableUnread(state: MailState): number {
+  if (state.labelFilter || state.search.trim().length > 0) return 0;
+  if (state.folder === "all") return state.counts ? state.counts.inbox.unread + state.counts.archive.unread : 0;
+  return folderUnread(state, state.folder);
+}
+
 /** Server-side search (GET /mail/messages?q= + GET /mail/sent?q=). The list endpoints are
  *  paginated and carry only a snippet, so the client filter alone can't find older mail or
  *  body text; useMailSync fetches matches (debounced) and SEARCH_RESULTS merges them into
