@@ -13,7 +13,7 @@ workers_dev = false
 [[d1_databases]]
 binding = "DB"
 database_name = "dub-tickets"
-database_id = "REPLACE_AT_CUTOVER"
+database_id = "3da6f8f0-42e8-4453-a6a6-4c8ab02314ae"
 
 [[services]]
 binding = "SVC_IDENTITY"
