@@ -68,6 +68,8 @@ test("resizes from the bottom edge, and Esc cancels a drag", async ({ page }) =>
   const b = (await handle.boundingBox())!;
   await dragTo(page, { x: b.x + b.width / 2, y: b.y + 3 }, { x: b.x + b.width / 2, y: b.y + 3 + HOUR_PX / 2 });
   await expect(item).toContainText("13:00～14:30");
+  // A row with a write in flight waits for its new version before it can be picked up again.
+  await expect(page.getByTestId("toast-success").filter({ hasText: "予定の時間を変更しました" })).toBeVisible();
 
   const from = await center(item);
   await dragTo(page, from, { x: from.x, y: from.y + HOUR_PX * 2 }, false);
