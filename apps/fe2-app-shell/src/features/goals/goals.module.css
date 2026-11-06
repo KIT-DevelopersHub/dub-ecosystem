@@ -164,6 +164,12 @@
 }
 
 /* ── 編集ドロワー ───────────────────────────────────── */
+/* Drawer の本文は自前でスクロールしないので、ここをスクロール領域にする。 */
+.drawerScroll {
+  height: 100%;
+  overflow-y: auto;
+}
+
 .linkBar {
   display: flex;
 }

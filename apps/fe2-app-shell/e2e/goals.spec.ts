@@ -44,3 +44,15 @@ test("the sponsor goals tab sets the target of a linked KPI", async ({ page }) =
   await expect(page.getByTestId("fe2-goals-kpi-target-0")).toBeDisabled();
   await expect(page.getByTestId("fe2-goals-kpi-target-0")).toHaveValue("30");
 });
+
+test("the save button stays reachable with many KPIs", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.goto("/goals");
+  await page.getByTestId("fe2-goals-set-team_venue").click();
+  await page.getByTestId("fe2-goals-title").fill("設営の準備を終える");
+  for (let i = 0; i < 5; i += 1) await page.getByTestId("fe2-goals-kpi-add").click();
+  for (let i = 0; i < 6; i += 1) await page.getByTestId(`fe2-goals-kpi-target-${i}`).fill("5");
+  await page.getByTestId("fe2-goals-save").click();
+  await expect(page.getByTestId("fe2-goals-drawer")).toBeHidden();
+  await expect(page.getByTestId("fe2-goals-percent-team_venue")).toHaveText(/\d+%/);
+});

@@ -81,7 +81,8 @@ export function GoalDrawer({ team, month, goal: current, linkedTargets, onClose 
 
   return (
     <Drawer testId="fe2-goals-drawer" open onClose={confirming ? () => undefined : onClose} title={`${team.name}の目標（${goal.monthLabel(month)}）`}>
-      <Form onSubmit={submit}>
+      <div className={styles.drawerScroll}>
+        <Form onSubmit={submit}>
         <Stack gap={5}>
           <FormField label="目標" htmlFor="goal-title" required>
             <TextField id="goal-title" value={title} onChange={setTitle} placeholder="例: 協賛を 3 社決める" testId="fe2-goals-title" />
@@ -130,7 +131,8 @@ export function GoalDrawer({ team, month, goal: current, linkedTargets, onClose 
             <Button type="submit" disabled={!valid} loading={save.isPending} testId="fe2-goals-save">保存</Button>
           </div>
         </Stack>
-      </Form>
+        </Form>
+      </div>
       <ConfirmDialog
         open={confirming}
         title="目標を削除しますか"
