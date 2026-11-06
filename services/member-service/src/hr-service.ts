@@ -242,11 +242,12 @@ export class HrService {
   /**
    * 論理削除 (archived_at)。一覧・詳細・フォーム回答の氏名から消えるが、履歴 (member_hr_events) と
    * フォーム回答 (member_hr_form_responses) は FK で応募者行にぶら下がったまま残す (物理削除しない)。
-   * 名簿に結ばれた人 (採用済み) はオンボーディングの進捗がこの行を読むので 409 (名簿側で外す)。
+   * 採用〜オンボーディング完了の人はオンボーディングの進捗がこの行を読むので 409 (名簿側で外す)。
+   * 辞退などに動かした人は memberId が残っていても消せる。名簿の行には触らない。
    */
   async remove(ctx: ReqCtx, id: string): Promise<void> {
     const cur = await this.load(id);
-    if (cur.memberId !== null) throw errApplicantJoined(id);
+    if (hr.blocksRemoval(cur.stage, cur.memberId !== null)) throw errApplicantJoined(id);
     const next: ApplicantRow = { ...cur, archivedAt: this.deps.now(), version: cur.version + 1, updatedAt: this.deps.now() };
     if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) throw errVersionConflict(id);
     await this.event(ctx, id, "deleted", { fromStage: cur.stage });
