@@ -42,6 +42,8 @@ const MAX_DISPLAY_NAME_LEN = 80;
 // Stop-gap cap for an inline data: URL avatar (≈512KB of base64). 本番課題(TODO): store
 // avatar images in R2 and persist only the object URL, dropping this inline path.
 const MAX_AVATAR_URL_LEN = 700_000;
+/** activateInvited's audit trigger label (e.g. "participation.link"). */
+const TRIGGER_RE = /^[a-z][a-z0-9._-]{0,63}$/;
 
 export class IdentityService {
   constructor(private readonly d: Deps) {}
@@ -273,6 +275,37 @@ export class IdentityService {
     const updated = (await this.d.repo.getUser(existing.id))!;
     const assignments = await this.d.repo.listAssignmentsByUser(updated.id, orgId);
     return { status: "provisioned", user: this.toIdentityUser(updated, assignments) };
+  }
+
+  /**
+   * invited -> active for a user the 名簿 (member-service) has confirmed as 在籍 and linked to
+   * this account. Keyed by user id only (never by an email from a form). Touches nothing but
+   * an `invited` row: active is a no-op, disabled / rejected are left alone. The write is a
+   * compare-and-set on status = 'invited', so a disable that lands between the read and the
+   * write wins. Same write-ahead sync audit as provision() (fail-close), with the trigger.
+   */
+  async activateInvited(
+    userId: string,
+    orgId: string,
+    req: identity.ActivateInvitedUserRequest,
+    ctx: RequestCtx,
+  ): Promise<identity.ActivateInvitedUserResponse> {
+    const trigger = typeof req?.trigger === "string" ? req.trigger.trim() : "";
+    if (!TRIGGER_RE.test(trigger)) throw errors.validationFailed([{ field: "trigger", reason: "invalid" }]);
+    const dryRun = req.dryRun === true;
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
+    if (user.status !== "invited") {
+      return { dryRun, activated: false, previousStatus: user.status, status: user.status };
+    }
+    if (dryRun) return { dryRun, activated: true, previousStatus: "invited", status: "invited" };
+
+    await this.d.audit.logSync(
+      this.record("identity.user.provisioned", "success", ctx, orgId, "user", userId, { via: "member-roster", trigger }),
+    );
+    const activated = await this.d.repo.activateIfInvited(userId, this.d.now());
+    const after = (await this.d.repo.getUser(userId))!;
+    return { dryRun, activated, previousStatus: "invited", status: after.status };
   }
 
   async updateUser(userId: string, orgId: string, req: UpdateUserRequest, ctx: RequestCtx): Promise<identity.IdentityUser> {

@@ -12,7 +12,8 @@
 //   バッジで区別する。ラベル文言を変えたい時はこの MEMBER_STATUS_LABEL だけを直せば全画面
 //   (バッジ/フォーム/フィルタ)に反映される。
 import type { BadgeTone } from "@dub/ui";
-import type { MemberStatus } from "./contracts.ts";
+import { member } from "@dub/types";
+import type { MemberStatus, OrgMember } from "./contracts.ts";
 
 /** 表示グループ(畳んだ後のステータス)。member = 通常(バッジなし)。 */
 export type StatusGroup = "member" | "pending" | "onLeave" | "declined";
@@ -61,6 +62,12 @@ export function isOnRoster(s: MemberStatus): boolean {
   return s !== "declined";
 }
 
+/** 組織図の並び順: 活動中 → 打診中 → 休み中。 */
+const ACTIVITY_RANK: Record<StatusGroup, number> = { member: 0, pending: 1, onLeave: 2, declined: 3 };
+export function activityRank(s: MemberStatus): number {
+  return ACTIVITY_RANK[statusGroup(s)];
+}
+
 // ---- フォームで「書き込める」正準ステータス --------------------------------------------
 // 通常メンバー = "added"、打診中 = "invited"(検討中は打診中へ統合)、休み中 = "on_leave"、
 // 辞退 = "declined"。既存の considering 行は読取りでは「打診中」と表示され、編集して保存すると
@@ -107,4 +114,14 @@ export function matchesRosterFilter(s: MemberStatus, f: RosterStatusFilter): boo
     case "declined":
       return statusGroup(s) === "declined";
   }
+}
+
+// ---- 情報不足の催促 ----------------------------------------------------------------------
+/** 未入力があり、まだ在籍している人か (辞退者には催促しない)。 */
+export function hasMissingProfile(m: OrgMember): boolean {
+  return isOnRoster(m.status) && member.missingProfileKeys(m).length > 0;
+}
+/** 実際に通知を届けられる人か。通知はログインアカウントへ届くので、紐付けが要る。 */
+export function canRemind(m: OrgMember): boolean {
+  return hasMissingProfile(m) && !!m.identityUserId;
 }

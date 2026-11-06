@@ -96,6 +96,7 @@ export function rosterAddressesFromRules(rules: CfRoutingRule[], zoneName: strin
   const suffix = `@${zoneName.trim().toLowerCase()}`;
   const byAddress = new Map<string, RosterEmailAddress>();
   for (const rule of rules ?? []) {
+    if (isTeamListRule(rule)) continue; // a list is not a person: never a roster account
     const destination = firstForwardTarget(rule);
     for (const m of rule.matchers ?? []) {
       if (m.type !== "literal" || m.field !== "to" || typeof m.value !== "string") continue;
@@ -110,6 +111,14 @@ export function rosterAddressesFromRules(rules: CfRoutingRule[], zoneName: strin
     }
   }
   return [...byAddress.values()];
+}
+
+/** Rule name of a team mailing list. Lets the roster sync and 発行済みアドレス tell a list
+ *  from a person's address without a D1 read. */
+export const TEAM_LIST_RULE_PREFIX = "dub-list:";
+
+export function isTeamListRule(rule: CfRoutingRule): boolean {
+  return (rule.name ?? "").startsWith(TEAM_LIST_RULE_PREFIX);
 }
 
 /** The first `forward` action's first target, or null (worker/drop actions have none). */
@@ -152,6 +161,7 @@ export interface IssuedEmailAddress {
 /** Map one routing rule to an issued-address view, or null when the rule has no literal
  *  `to` matcher in our zone (catch-all / archive-only / other rules are not issued addresses). */
 export function issuedAddressFromRule(rule: CfRoutingRule, zoneName: string): IssuedEmailAddress | null {
+  if (isTeamListRule(rule)) return null; // managed from メーリングリスト, not 発行済みアドレス
   const address = firstZoneReceiver(rule, zoneName);
   if (!address) return null;
   const destination = hasWorkerAction(rule) ? MAIL_WORKER_DESTINATION_LABEL : (firstForwardTarget(rule) ?? MAIL_WORKER_DESTINATION_LABEL);
@@ -184,6 +194,11 @@ export function issueReceivingRuleInput(address: string, localPart: string, work
     matchers: [{ type: "literal", field: "to", value: address }],
     actions: [{ type: "worker", value: [workerName] }],
   };
+}
+
+/** The rule that hands a team list's address to the mail Worker. */
+export function teamListRuleInput(address: string, localPart: string, workerName: string): CreateRuleInput {
+  return { ...issueReceivingRuleInput(address, localPart, workerName), name: `${TEAM_LIST_RULE_PREFIX}${localPart}` };
 }
 
 interface CfEnvelope<T> {

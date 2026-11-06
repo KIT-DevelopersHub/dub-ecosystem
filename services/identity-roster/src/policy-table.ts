@@ -100,6 +100,10 @@ export const POLICY_TABLE = definePolicyTable({
   // came from one of our Workers, and api-gateway strips every inbound x-dub-* so it cannot
   // be forged from outside.
   "POST /users/provision": INTERNAL,
+  // member-service: 在籍 (added) で紐付いた名簿行の招待中アカウントを有効化。INTERNAL のみ —
+  // 名簿の確定 (members/participation の編集権限) は member-service 側の表が既に検査済みで、
+  // ここは invited -> active しかできない (停止中は触らない・service が保証)。
+  "POST /internal/users/:id/activate": INTERNAL,
   "GET /users/:id": INTERNAL,
   "POST /internal/users/:id/profile": INTERNAL,
   "GET /internal/users": INTERNAL,

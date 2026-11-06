@@ -3,7 +3,7 @@
 // 実装時の依存先はモックサーバ(契約準拠スタブ)"). NOT shipped to production —
 // FE2 provides the real ResourceClient there.
 import { identity, member, common as commonValues } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
-import type { common, auditLog, auth, gateway } from "@dub/types";
+import type { common, auditLog, auth, gateway, mail } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
 import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview, RoleView } from "../contracts/pending";
 import { EMAIL_ROUTING_DOMAIN, MAIL_WORKER_DESTINATION } from "../contracts/pending";
@@ -32,6 +32,8 @@ interface MockState {
   assignments: Map<string, RoleAssignment[]>; // userId -> assignments
   audits: auditLog.AuditRecord[];
   emailAddresses: EmailRoutingAddress[];
+  teamLists: mail.MailTeamList[];
+  teams: member.Team[];
   members: member.Member[]; // 運営メンバー (member-service) — for #1/#2 link + offboard
   me: gateway.MeResponse;
   mailRateLimit: MailRateLimitStatus;
@@ -74,8 +76,8 @@ function seedState(seed?: MockSeed): MockState {
   // 運営メンバー: 佐藤 太郎 is linked to user_bob (#1) so退任 fans out to the org-chart.
   // 山田 花子 / 鈴木 一郎 are UNLINKED so the メール名簿「運営メンバーと紐付け」flow has candidates.
   const members: member.Member[] = [
-    { ...member.emptyPersonProfile(), gmail: "taro.sato@gmail.com", id: "member_bob", orgId: ORG, name: "佐藤 太郎", roleTitle: "会場リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1024, version: 1, createdAt: now(), updatedAt: now() },
-    { ...member.emptyPersonProfile(), gmail: "hanako.yamada@gmail.com", id: "member_hanako", orgId: ORG, name: "山田 花子", roleTitle: "広報担当", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2048, version: 1, createdAt: now(), updatedAt: now() },
+    { ...member.emptyPersonProfile(), gmail: "taro.sato@gmail.com", id: "member_bob", orgId: ORG, name: "佐藤 太郎", roleTitle: "会場リーダー", status: "added", teamIds: ["team_design"], department: null, grade: null, identityUserId: "user_bob", contact: null, note: null, sortOrder: 1024, version: 1, createdAt: now(), updatedAt: now() },
+    { ...member.emptyPersonProfile(), gmail: "hanako.yamada@gmail.com", id: "member_hanako", orgId: ORG, name: "山田 花子", roleTitle: "広報担当", status: "added", teamIds: ["team_design"], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 2048, version: 1, createdAt: now(), updatedAt: now() },
     { ...member.emptyPersonProfile(), id: "member_ichiro", orgId: ORG, name: "鈴木 一郎", roleTitle: "開発リーダー", status: "added", teamIds: [], department: null, grade: null, identityUserId: null, contact: null, note: null, sortOrder: 3072, version: 1, createdAt: now(), updatedAt: now() },
   ];
   const me: gateway.MeResponse = seed?.me ?? {
@@ -87,7 +89,14 @@ function seedState(seed?: MockSeed): MockState {
   // user_alice starts with a viewable credential (demo/E2E); others are unset until an
   // admin issues one (view then rejects with PASSWORD_NOT_VIEWABLE, like the backend).
   const passwords = new Map<string, string>([["user_alice", "Alice-Init-0001"]]);
-  return { users, roles, assignments, audits, emailAddresses, members, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords };
+  const teams: member.Team[] = [
+    { id: "team_design", key: "design", name: "デザインチーム", color: null, description: null },
+    { id: "team_pr", key: "pr", name: "広報チーム", color: null, description: null },
+  ];
+  const teamLists: mail.MailTeamList[] = [
+    { id: "list_1", address: `design@${EMAIL_ROUTING_DOMAIN}`, localPart: "design", teamId: "team_design", createdAt: now() },
+  ];
+  return { users, roles, assignments, audits, emailAddresses, teamLists, teams, members, me, mailRateLimit: seed?.mailRateLimit ?? CLEAR_MAIL_RATE_LIMIT, passwords };
 }
 
 function paginate<T>(items: T[]): common.Paginated<T> {
@@ -134,7 +143,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     }
     if (path.endsWith("/members/overview")) {
       // 運営メンバー overview — powers the メール名簿「運営メンバー」列 + 紐付けピッカー.
-      return { teams: [], members: [...s.members] } as unknown as T;
+      return { teams: [...s.teams], members: [...s.members] } as unknown as T;
     }
     if (path.endsWith("/admin/email-routing/roster-addresses")) {
       // roster sync source: the RECEIVING addresses (one per issued rule), not destinations.
@@ -145,6 +154,7 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
     if (path.endsWith("/admin/email-routing/issued-addresses")) {
       return paginate([...s.emailAddresses]) as unknown as T;
     }
+    if (path.endsWith("/mail/admin/lists")) return { items: [...s.teamLists] } as unknown as T;
     if (path.endsWith("/audit/logs")) {
       const action = (query?.action as string | undefined) ?? "identity.";
       const filtered = s.audits.filter((a) => a.action.startsWith(action));
@@ -321,6 +331,13 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       s.emailAddresses.push(addr);
       return addr as unknown as T;
     }
+    if (path.endsWith("/mail/admin/lists")) {
+      const req = body as mail.MailTeamListCreateRequest;
+      if (s.teamLists.some((l) => l.localPart === req.localPart)) throw err("MAIL_EMAIL_ROUTING_CONFLICT", "address already in use");
+      const list: mail.MailTeamList = { id: `list_${Math.random().toString(36).slice(2, 8)}`, address: `${req.localPart}@${EMAIL_ROUTING_DOMAIN}`, localPart: req.localPart, teamId: req.teamId, createdAt: now() };
+      s.teamLists.push(list);
+      return list as unknown as T;
+    }
     const linkMatch = path.match(/\/members\/people\/([^/]+)\/identity-link$/);
     if (linkMatch) {
       const idx = s.members.findIndex((m) => m.id === linkMatch[1]!);
@@ -477,6 +494,11 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
           if (u) s.users.set(userId!, { ...u, roleIds: u.roleIds.filter((r) => r !== removed.roleId), updatedAt: now() });
         }
       }
+      return;
+    }
+    const listMatch = path.match(/\/mail\/admin\/lists\/([^/]+)$/);
+    if (listMatch) {
+      s.teamLists = s.teamLists.filter((l) => l.id !== listMatch[1]!);
       return;
     }
     const emailMatch = path.match(/\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
