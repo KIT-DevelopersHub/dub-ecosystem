@@ -72,6 +72,8 @@ export interface MeetingsDeps {
   syncTimeLimitMs?: number;
   /** Meet links already confirmed open (shared per isolate so the sync checks each once). */
   openedMeets?: Set<string>;
+  /** Keeps work alive after the response (waitUntil). Absent = run it inline. */
+  background?: (work: Promise<unknown>) => void;
 }
 
 export interface SyncResult extends meeting.SyncMeetingsResponse {
@@ -264,9 +266,10 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     return name;
   }
 
-  /** Every active member with their invite address (one identity listing + one 名簿 lookup). */
-  async function invitees(): Promise<Invitee[]> {
-    const users = await deps.roster.listActiveUsers();
+  /** Active members with their invite address (one identity listing + one 名簿 lookup). identity
+   *  reads roles per listed user, so narrow to `roleId` whenever only one target is wanted. */
+  async function invitees(roleId?: string): Promise<Invitee[]> {
+    const users = await deps.roster.listActiveUsers(roleId);
     const google = await deps.directory.googleEmails(users.map((u) => u.id));
     const out: Invitee[] = [];
     const seen = new Set<string>();
@@ -282,6 +285,16 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
   const forTarget = (all: Invitee[], targetId: string) =>
     targetId === meeting.ALL_MEMBERS_TARGET_ID ? all : all.filter((i) => i.roleIds.includes(targetId));
+
+  const inviteesOf = async (targetId: string) =>
+    forTarget(await invitees(targetId === meeting.ALL_MEMBERS_TARGET_ID ? undefined : targetId), targetId);
+
+  /** Open the Meet without holding the response; the sync retries one that did not get through. */
+  async function openMeetAfterResponse(account: MeetingAccount, meetUrl: string | null): Promise<void> {
+    const work = openMeet(account.calendar, account, meetUrl);
+    if (deps.background) deps.background(work);
+    else await work;
+  }
 
   /** The target's calendar on this account, created on first use. */
   async function ensureCalendar(cal: CalendarClient, accountId: string, targetId: string, name: string): Promise<string> {
@@ -438,12 +451,13 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     async create(userId, body) {
       const f = validateMeeting(body);
       const track = trackAttendanceOf(body) ?? false;
-      const name = await requireTargetName(f.targetId);
-      const account = await readyAccount();
+      const began = Date.now();
+      const [name, account, members] = await Promise.all([requireTargetName(f.targetId), readyAccount(), inviteesOf(f.targetId)]);
       const cal = budgeted(account.calendar, budgetLimit);
-      const members = forTarget(await invitees(), f.targetId);
+      const preparedAt = Date.now();
 
       const calendarId = await ensureCalendar(cal, account.accountId, f.targetId, name);
+      const calendarAt = Date.now();
       const at = deps.now();
       const id = deps.newId();
       const row: MeetingRow = {
@@ -469,10 +483,13 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       };
       await store.insertMeeting(row);
       let done: MeetingRow;
+      let insertMs: number;
       try {
         await store.replaceInvites(row.id, members.map((m) => ({ meetingId: row.id, email: m.email, userId: m.userId })));
         await kick(SOON_MS);
+        const insertAt = Date.now();
         const ev = await cal.insertEvent(calendarId, { ...eventInput(f), id: row.googleEventId, attendees: members.map((m) => ({ email: m.email })) });
+        insertMs = Date.now() - insertAt;
         done = { ...row, meetUrl: ev.meetUrl, htmlLink: ev.htmlLink, syncedAt: deps.now() };
         await store.updateMeeting(done);
       } catch (err) {
@@ -481,8 +498,9 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         await store.deleteMeeting(row.id).catch(() => undefined);
         throw err;
       }
-      await openMeet(account.calendar, account, done.meetUrl);
+      await openMeetAfterResponse(account, done.meetUrl);
       if (track) await deps.attendance.setRegular(orgId, done.id, true, userId, deps.now());
+      log("meeting_create_timing", { meetingId: id, attendees: members.length, prepareMs: preparedAt - began, calendarMs: calendarAt - preparedAt, insertEventMs: insertMs, totalMs: Date.now() - began });
       return toMeeting(done, name, members.length, track);
     },
 
@@ -503,13 +521,13 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
       if (f.targetId !== row.targetId) {
         // Moving target = a new event on the other calendar (new Meet link), then drop the old one.
-        const members = forTarget(await invitees(), f.targetId);
+        const members = await inviteesOf(f.targetId);
         const calendarId = await ensureCalendar(cal, account.accountId, f.targetId, name);
         const ev = await cal.insertEvent(calendarId, { ...eventInput(f), attendees: members.map((m) => ({ email: m.email })) });
         next = { ...row, ...f, calendarId, googleEventId: ev.id, meetUrl: ev.meetUrl, htmlLink: ev.htmlLink, updatedAt: at, syncedAt: at };
         await store.updateMeeting(next);
         await store.replaceInvites(row.id, members.map((m) => ({ meetingId: row.id, email: m.email, userId: m.userId })));
-        await openMeet(account.calendar, account, next.meetUrl);
+        await openMeetAfterResponse(account, next.meetUrl);
         try {
           await account.calendar.deleteEvent(row.calendarId, row.googleEventId);
         } catch (err) {

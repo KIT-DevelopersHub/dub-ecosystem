@@ -63,7 +63,7 @@ interface ReqCtx {
   userId?: string;
 }
 
-async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof createApp>> {
+async function buildApp(env: Env, reqCtx: ReqCtx, background: (work: Promise<unknown>) => void): Promise<ReturnType<typeof createApp>> {
   const orgId = common.DUB_DEFAULT_ORG_ID;
   const accountStore = createD1GoogleAccountStore(
     createDbClient(env.DB, { namespace: "driveshare", requestId: reqCtx.requestId }),
@@ -98,7 +98,7 @@ async function buildApp(env: Env, reqCtx: ReqCtx): Promise<ReturnType<typeof cre
     newId: () => newId("dsg"),
   });
 
-  const meetings = () => buildMeetingsService(env, reqCtx);
+  const meetings = () => buildMeetingsService(env, reqCtx, { background });
   const attendance = () => buildAttendanceService(env, reqCtx);
   const googleLink = () => buildGoogleLinkService(env, reqCtx);
 
@@ -113,7 +113,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const requestId = request.headers.get("x-dub-request-id") ?? newRequestId();
     const userId = request.headers.get("x-dub-user-id") ?? undefined;
-    const app = await buildApp(env, { requestId, ...(userId ? { userId } : {}) });
+    const app = await buildApp(env, { requestId, ...(userId ? { userId } : {}) }, (work) => ctx.waitUntil(work));
     return app.fetch(request, env, ctx);
   },
 };

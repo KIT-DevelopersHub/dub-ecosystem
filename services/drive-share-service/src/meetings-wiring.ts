@@ -91,7 +91,7 @@ export async function kickMeetingSync(env: Env, soonMs?: number): Promise<void> 
 export async function buildMeetingsService(
   env: Env,
   ctx: { requestId: string; userId?: string },
-  opts: { system?: boolean; googleBudget?: number; syncTimeLimitMs?: number } = {},
+  opts: { system?: boolean; googleBudget?: number; syncTimeLimitMs?: number; background?: (work: Promise<unknown>) => void } = {},
 ): Promise<MeetingsService> {
   const orgId = common.DUB_DEFAULT_ORG_ID;
   const accountStore = createD1GoogleAccountStore(createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId }));
@@ -112,6 +112,7 @@ export async function buildMeetingsService(
     ...(opts.system ? {} : { kick: (soonMs?: number) => kickMeetingSync(env, soonMs) }),
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
     ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
+    ...(opts.background ? { background: opts.background } : {}),
   });
 }
 
