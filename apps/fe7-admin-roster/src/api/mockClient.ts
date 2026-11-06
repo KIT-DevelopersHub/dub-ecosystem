@@ -2,7 +2,7 @@
 // Powers the standalone dev harness and component/E2E tests (design §5: "P1
 // 実装時の依存先はモックサーバ(契約準拠スタブ)"). NOT shipped to production —
 // FE2 provides the real ResourceClient there.
-import { identity, member, common as commonValues } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
+import { identity, member, common as commonValues, auth as authValues } from "@dub/types"; // value import: identity.PERMISSION_CATALOG
 import type { common, auditLog, auth, gateway } from "@dub/types";
 import type { ResourceClient, ErrorResponse } from "../shell/contract";
 import type { RoleAssignment, EmailRoutingAddress, UserSource, SyncEmailRoutingResult, OffboardUserResult, EmailRoutingSyncPreview, RoleView } from "../contracts/pending";
@@ -362,6 +362,24 @@ export function createMockClient(seed?: MockSeed, latencyMs = 0): ResourceClient
       steps.push(alreadyDisabled ? { step: "disable-account", status: "skipped", detail: u.status } : { step: "disable-account", status: "done" });
       const result: OffboardUserResult = { user: stripDetail(disabled), revokedAssignments: assignments.length, alreadyDisabled, steps };
       return result as unknown as T;
+    }
+    const impersonateMatch = path.match(/\/admin\/users\/([^/]+)\/impersonation$/);
+    if (impersonateMatch) {
+      // Mirrors auth-service: the shared eligibility rule decides; the cookie swap is a no-op here.
+      const u = s.users.get(impersonateMatch[1]!);
+      if (!u) throw err("NOT_FOUND", "user not found");
+      const actorId = s.me?.user.id ?? "";
+      const refusal = authValues.impersonationRefusal({
+        actorId,
+        actorImpersonating: Boolean(s.me?.impersonation),
+        target: { id: u.id, status: u.status, roleIds: u.roleIds, holdsImpersonate: u.permissions.includes(authValues.IMPERSONATE_PERMISSION) },
+      });
+      if (refusal) throw err("AUTH_IMPERSONATION_NOT_ALLOWED", "This member cannot be impersonated", { reason: refusal });
+      const t = Date.now();
+      const res: auth.StartImpersonationResponse = {
+        impersonation: { actorId, subjectId: u.id, startedAt: t, expiresAt: t + authValues.IMPERSONATION_DEFAULT_TTL_SEC * 1000 },
+      };
+      return res as unknown as T;
     }
     const accountMailMatch = path.match(/\/admin\/users\/([^/]+)\/account-mail$/);
     if (accountMailMatch) {

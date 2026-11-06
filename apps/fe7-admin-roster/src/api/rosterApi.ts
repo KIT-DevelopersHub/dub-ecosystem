@@ -79,6 +79,9 @@ export interface RosterApi {
   /** Admin: アカウント発行メール — login + password to the linked member's Gmail (cc the
    *  @developershub.jp address). Reuses the current password or issues one server-side. */
   sendAccountMail(userId: common.UserId): Promise<auth.AdminSendAccountMailResponse>;
+  /** Admin: 代理表示 — start viewing the app AS this member (identity:impersonate). The
+   *  server swaps the session cookie; the caller reloads the shell into the member view. */
+  startImpersonation(userId: common.UserId): Promise<auth.StartImpersonationResponse>;
   permissionCatalog(): Promise<identity.PermissionCatalogEntry[]>;
   auditLogs(filters: AuditFilters): Promise<auditLog.AuditLogPage>;
   /** Mail-gateway rate-limit status, via the gateway boundary (proxied to /internal/status). */
@@ -131,6 +134,8 @@ export function createRosterApi(client: ResourceClient): RosterApi {
       client.get<auth.AdminViewPasswordResponse>(`${ADMIN}/users/${userId}/password`),
     sendAccountMail: (userId) =>
       client.post<auth.AdminSendAccountMailResponse>(`${ADMIN}/users/${userId}/account-mail`, {}),
+    startImpersonation: (userId) =>
+      client.post<auth.StartImpersonationResponse>(`${ADMIN}/users/${userId}/impersonation`, {}),
     permissionCatalog: () =>
       client.get<identity.PermissionCatalogEntry[]>(`${IDENTITY}/permissions/catalog`),
     auditLogs: (filters) =>

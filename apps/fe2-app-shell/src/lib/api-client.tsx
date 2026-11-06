@@ -153,6 +153,10 @@ export interface ApiClient {
      *  (member-service getSelfParticipation / updateSelfParticipation). */
     getSelfParticipation(): Promise<SelfParticipation>;
     updateSelfParticipation(input: Partial<SelfParticipation>): Promise<SelfParticipation>;
+    /** 代理表示 (admin impersonation) 「自分に戻る」: ends the impersonation and restores the
+     *  admin's own session cookie server-side (POST /api/v1/auth/impersonation/stop). The
+     *  caller reloads the shell afterwards so every cache is re-read as the admin. */
+    stopImpersonation(): Promise<void>;
     /** Passkeys (WebAuthn). Raw JSON in/out — lib/passkey.tsx drives the browser half. */
     passkeys: {
       loginOptions(): Promise<PublicKeyCredentialRequestOptionsJSON>;
@@ -412,6 +416,8 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
           path: "/api/v1/me/participation",
           body: input,
         }),
+      stopImpersonation: () =>
+        request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/impersonation/stop", body: {} }),
       passkeys: {
         loginOptions: () =>
           request<PublicKeyCredentialRequestOptionsJSON, Record<string, never>>({ method: "POST", path: "/api/v1/auth/passkey/login/options", body: {} }),

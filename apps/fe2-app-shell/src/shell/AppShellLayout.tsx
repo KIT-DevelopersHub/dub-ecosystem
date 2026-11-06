@@ -22,6 +22,7 @@ import { ForwardSettingsDialog } from "../features/mail/forward/ForwardSettingsD
 import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
 import { createGlobalContentSearch } from "./globalContentSearch.ts";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
+import { ImpersonationBanner } from "./ImpersonationBanner.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 
 type Can = (permission: identity.PermissionKey) => boolean;
@@ -296,7 +297,7 @@ export function AppShellLayout({
     </span>
   );
 
-  const header = (
+  const pageHeader = (
     <PageHeader
       testId="fe2-shell-header"
       title={brand}
@@ -335,6 +336,14 @@ export function AppShellLayout({
         </>
       }
     />
+  );
+
+  // 代理表示中は ヘッダー最上段にバナー (sticky なのでどの画面でも常に見える)。
+  const header = (
+    <>
+      {api ? <ImpersonationBanner api={api} /> : null}
+      {pageHeader}
+    </>
   );
 
   // Cmd/Ctrl+K palette: apps mirror the launcher (same gating), actions mirror the ⚙

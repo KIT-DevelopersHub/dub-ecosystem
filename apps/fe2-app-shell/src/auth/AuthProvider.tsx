@@ -76,8 +76,13 @@ export function AuthProvider({
   // Primitive dep (not query.data): a refetch returning an equal expiry must NOT tear down
   // and re-create the timer, and a new expiry must.
   const sessionExpiresAt = query.data?.sessionExpiresAt ?? null;
+  // 代理表示 (admin impersonation) has a hard deadline and NO refresh — a refresh would END
+  // it server-side. So no proactive rotation while impersonating; ImpersonationBanner owns
+  // the countdown and returns the admin to their own account at the deadline.
+  const impersonating = Boolean(query.data?.impersonation);
 
   useEffect(() => {
+    if (impersonating) return undefined;
     if (sessionExpiresAt === null || !Number.isFinite(sessionExpiresAt)) return undefined;
 
     let disposed = false;
@@ -119,7 +124,7 @@ export function AuthProvider({
       clearTimeout(timer);
       doc?.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [sessionExpiresAt, queryClient]);
+  }, [sessionExpiresAt, impersonating, queryClient]);
 
   const value = useMemo<AuthContextValue>(() => {
     const perms = state.status === "authenticated" ? new Set<string>(state.me.permissions) : null;
