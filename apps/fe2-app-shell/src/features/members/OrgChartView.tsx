@@ -5,10 +5,11 @@
 //     インデントでぶら下げる。これで「複数リーダーが居るチームでも、どのメンバーが
 //     どのリーダーの下に付くか」が構造として即座に読める（FBの主眼）。
 //   tier(役割段) は色の濃淡/枠の強さで補助表現し、上下関係そのものはネストで表す。
-import type { CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { tierOf, type Tier } from "./orgChartOrder.ts";
-import { statusGroup, statusLabel } from "./memberStatus.ts";
+import { activityRank, statusGroup, statusLabel } from "./memberStatus.ts";
+import { ORG_CHART_PAGE_CSS, useFitChartToPrintedPage } from "./orgChartPrint.ts";
 import styles from "./members.module.css";
 
 const HQ_NAVY = "#1e3a5f";
@@ -16,6 +17,11 @@ const HQ_NAVY = "#1e3a5f";
 /** 統括チームの判定（名前/keyに「統括」相当を含む）。 */
 function isHqTeam(t: MemberTeam): boolean {
   return /統括/.test(t.name) || t.key === "soukatsu" || t.key === "hq";
+}
+
+/** 法人チームの判定。組織図には載せない（運営メンバー画面のチーム別には残す）。 */
+function isCorporateTeam(t: MemberTeam): boolean {
+  return /法人/.test(t.name) || t.key === "houjin";
 }
 
 /**
@@ -31,8 +37,9 @@ const TIER_RANK: Record<Tier, number> = { organizer: 0, leader: 1, member: 2 };
 function bySortOrder(a: OrgMember, b: OrgMember): number {
   return a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
-function byTierThenSort(a: OrgMember, b: OrgMember): number {
-  return TIER_RANK[tierOf(a)] - TIER_RANK[tierOf(b)] || bySortOrder(a, b);
+/** 打診中・休み中は活動中の人の下に回す。 */
+function byActivityThenTier(a: OrgMember, b: OrgMember): number {
+  return activityRank(a.status) - activityRank(b.status) || TIER_RANK[tierOf(a)] - TIER_RANK[tierOf(b)] || bySortOrder(a, b);
 }
 
 type TreeNode = { m: OrgMember; children: TreeNode[] };
@@ -57,8 +64,8 @@ function buildTeamTree(members: OrgMember[]): TreeNode[] {
       roots.push(m);
     }
   }
-  for (const arr of childrenOf.values()) arr.sort(byTierThenSort);
-  roots.sort(byTierThenSort);
+  for (const arr of childrenOf.values()) arr.sort(byActivityThenTier);
+  roots.sort(byActivityThenTier);
 
   const seen = new Set<string>();
   const build = (m: OrgMember): TreeNode => {
@@ -68,7 +75,7 @@ function buildTeamTree(members: OrgMember[]): TreeNode[] {
   };
   const tree = roots.map(build);
   // cycle fallback: どのツリーにも入らなかった人（相互参照など）を root として拾う。
-  for (const m of members.filter((x) => !seen.has(x.id)).sort(byTierThenSort)) {
+  for (const m of members.filter((x) => !seen.has(x.id)).sort(byActivityThenTier)) {
     tree.push(build(m));
   }
   return tree;
@@ -147,9 +154,15 @@ function Connector({ n }: { n: number }): JSX.Element {
   );
 }
 
-export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members: OrgMember[] }): JSX.Element {
+export function OrgChartView({ teams: allTeams, members }: { teams: MemberTeam[]; members: OrgMember[] }): JSX.Element {
+  const chartRef = useRef<HTMLDivElement>(null);
+  useFitChartToPrintedPage(chartRef);
+  const teams = allTeams.filter((t) => !isCorporateTeam(t));
+  const corporateIds = new Set(allTeams.filter(isCorporateTeam).map((t) => t.id));
+  // 法人チームにしか所属しない人は載せない。他チームにも居る人はそのチームの列に残す。
+  const onlyCorporate = (m: OrgMember): boolean => m.teamIds.length > 0 && m.teamIds.every((id) => corporateIds.has(id));
   // 辞退(declined)は体制図に出さない。
-  const active = members.filter((m) => m.status !== "declined");
+  const active = members.filter((m) => m.status !== "declined" && !onlyCorporate(m));
   // 統括チームは他チームと同じ列として右端に並べる。
   const columnTeams = [...teams.filter((t) => !isHqTeam(t)), ...teams.filter(isHqTeam)];
   const inTeam = (teamId: string): OrgMember[] => active.filter((m) => m.teamIds.includes(teamId));
@@ -164,13 +177,14 @@ export function OrgChartView({ teams, members }: { teams: MemberTeam[]; members:
   });
   // 取りこぼし防止（母集団の一致を保証）: HQにも列にも入らなかった active メンバーを全て拾い、
   // 体制図の下部に控えめな注記として並べる（チーム色・階層を持たせない）。
-  const unassigned = active.filter((m) => !placed.has(m.id));
+  const unassigned = active.filter((m) => !placed.has(m.id)).sort(byActivityThenTier);
 
   const totalConfirmed = active.filter((m) => m.status === "added").length;
   const totalTent = active.length - totalConfirmed;
 
   return (
-    <div className={styles.orgChart} data-testid="members-orgchart">
+    <div ref={chartRef} className={styles.orgChart} data-testid="members-orgchart">
+      <style>{ORG_CHART_PAGE_CSS}</style>
       <div className={styles.orgHead}>
         <div className={styles.orgTitle}>全体組織体制図</div>
         <div className={styles.orgSub}>

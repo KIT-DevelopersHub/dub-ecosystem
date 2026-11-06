@@ -4387,6 +4387,13 @@ function createMembersStore() {
       const mem = members.find((x) => x.identityUserId === iid);
       return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
     }
+    // 情報不足の催促。デモでは通知を作らず、応答だけ返す。
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/profile-reminder$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      return json({ deduplicated: false, missing: memberValues.missingProfileKeys(mem) });
+    }
     // link / unlink to an identity account (#1).
     m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
     if (m && method === "POST") {
