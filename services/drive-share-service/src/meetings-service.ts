@@ -23,13 +23,20 @@
 //
 // Every Meet is opened to anyone with the link (Meet REST, best-effort): right after the event is
 // made, and by the sync for meetings made before that or while the Meet scope was missing.
+//
+// A Google Calendar usage limit ends the run on the spot and pauses the sync for QUOTA_PAUSE_MS
+// (state in MeetingSyncDO): while paused it makes no Calendar call, from the alarm or by hand. Only
+// Calendar counts: Meet REST (openMeet, the ingest) and Drive have quotas of their own, keep
+// running, and a limit on them pauses nothing.
 import { errors } from "@dub/errors";
 import { meeting } from "@dub/types";
 import { EventIdTaken, type CalendarAttendee, type CalendarClient, type CalendarEvent, type CalendarEventInput } from "./google/calendar-client";
+import { GoogleQuotaError, isCalendarQuota } from "./drive-client";
 import type { AttendanceStore } from "./attendance-store";
 import type { MemberDirectory } from "./member-directory";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
 import { DESCRIPTION_MAX, DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
+import { createInMemorySyncState, type MeetingSyncState } from "./meeting-sync-state";
 import type { RoleMembership } from "./role-membership";
 
 export const ALL_TARGET_NAME = "全体";
@@ -39,6 +46,8 @@ const SYNC_TIME_LIMIT_MS = 8_000;
 const LIST_SOON_MS = 15_000;
 /** …unless a sync ran this recently (open tabs must not keep Google busy). */
 const LIST_KICK_MIN_GAP_MS = 60_000;
+/** How long the sync leaves Google Calendar alone after a usage limit. */
+export const QUOTA_PAUSE_MS = 6 * 60 * 60 * 1000;
 const NO_CALENDAR_SCOPE =
   "Google アカウントにカレンダーの権限がありません。Drive共有 > 設定 で同じアカウントを「再接続」してください。";
 
@@ -74,11 +83,16 @@ export interface MeetingsDeps {
   openedMeets?: Set<string>;
   /** Keeps work alive after the response (waitUntil). Absent = run it inline. */
   background?: (work: Promise<unknown>) => void;
+  /** The quota pause (MeetingSyncDO). Absent = per isolate. */
+  syncState?: MeetingSyncState;
 }
 
 export interface SyncResult extends meeting.SyncMeetingsResponse {
   /** false = stopped at the Google call budget; run again to finish. */
   complete: boolean;
+  /** Set when the sync is paused by a Calendar usage limit (epoch ms it ends). Not a reason to
+   *  run again: the run is over, and the next one is the hourly alarm. */
+  quotaPausedUntil?: number;
 }
 
 export interface MeetingsService {
@@ -223,6 +237,30 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
   const budgetLimit = deps.googleBudget ?? 25;
   const syncTimeLimit = deps.syncTimeLimitMs ?? SYNC_TIME_LIMIT_MS;
   const openedMeets = deps.openedMeets ?? new Set<string>();
+  const syncState = deps.syncState ?? createInMemorySyncState();
+
+  /** Start the pause. Never throws: the limit itself is what the caller must report. */
+  async function pauseSync(err: GoogleQuotaError): Promise<number | null> {
+    try {
+      const now = Date.parse(deps.now());
+      const { until, started } = await syncState.pause(now, now + QUOTA_PAUSE_MS);
+      if (started) log("meeting_sync_quota_paused", { pausedUntil: new Date(until).toISOString(), reason: err.reason, operation: err.operation, googleMessage: err.googleMessage });
+      return until;
+    } catch (cause) {
+      log("meeting_sync_quota_pause_failed", { message: cause instanceof Error ? cause.message : String(cause) });
+      return null;
+    }
+  }
+
+  /** A write that hits the limit tells the sync too: it would only hit the same limit. */
+  async function pausingOnQuota<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (err) {
+      if (isCalendarQuota(err)) await pauseSync(err);
+      throw err;
+    }
+  }
 
   /** After a write: run the sync within a minute (shares the calendar, follows membership). */
   async function kick(soonMs: number | undefined): Promise<void> {
@@ -313,7 +351,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       try {
         await op();
       } catch (err) {
-        if (err instanceof BudgetExhausted) throw err;
+        if (err instanceof BudgetExhausted || isCalendarQuota(err)) throw err;
         log("meeting_calendar_acl_failed", { calendarId, email, message: err instanceof Error ? err.message : String(err) });
       }
     };
@@ -403,7 +441,19 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     return { added: toAdd.length, removed: removedFromEvent };
   }
 
-  return {
+  /** The Meet step of the sync (Meet REST, not Calendar: it also runs during a pause). */
+  async function openMeets(cal: CalendarClient, account: MeetingAccount): Promise<void> {
+    // Re-read: reconcile may have just filled in a Meet link.
+    try {
+      for (const m of await store.listMeetings(orgId)) {
+        if (m.accountId === account.accountId) await openMeet(cal, account, m.meetUrl);
+      }
+    } catch (err) {
+      if (!(err instanceof BudgetExhausted)) throw err;
+    }
+  }
+
+  const service: MeetingsService = {
     async list() {
       const [rows, counts, regulars] = await Promise.all([store.listMeetings(orgId), store.inviteCounts(orgId), deps.attendance.listRegularIds(orgId)]);
       const lastSync = Math.max(0, ...rows.map((r) => (r.syncedAt ? Date.parse(r.syncedAt) : 0)));
@@ -491,8 +541,9 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         done = { ...row, meetUrl: ev.meetUrl, htmlLink: ev.htmlLink, syncedAt: deps.now() };
         await store.updateMeeting(done);
       } catch (err) {
-        // Neither half may outlive a failed create.
-        await account.calendar.deleteEvent(calendarId, row.googleEventId).catch(() => undefined);
+        // Neither half may outlive a failed create. A refused insert left no event, and one more
+        // call would only spend more of the limit.
+        if (!isCalendarQuota(err)) await account.calendar.deleteEvent(calendarId, row.googleEventId).catch(() => undefined);
         await store.deleteMeeting(row.id).catch(() => undefined);
         throw err;
       }
@@ -529,6 +580,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         try {
           await account.calendar.deleteEvent(row.calendarId, row.googleEventId);
         } catch (err) {
+          if (isCalendarQuota(err)) await pauseSync(err);
           log("meeting_old_event_delete_failed", { meetingId: row.id, message: err instanceof Error ? err.message : String(err) });
         }
         attendeeCount = members.length;
@@ -576,49 +628,62 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         throw errors.conflict(NO_CALENDAR_SCOPE, { reason: "calendar_scope_missing" });
       }
       const cal = budgeted(account.calendar, budgetLimit, Date.now() + syncTimeLimit);
+      const state = await syncState.load();
+      if (state.pausedUntil !== null && state.pausedUntil > Date.parse(syncedAt)) {
+        if (!opts?.system) throw new GoogleQuotaError("calendar", "sync_paused");
+        if (account.meetReady) await openMeets(cal, account);
+        return { ...empty, quotaPausedUntil: state.pausedUntil };
+      }
       const all = await invitees();
       const out = { ...empty, withoutGoogleAccount: uniqueEmails(all).filter((i) => !i.hasGoogle).map((i) => ({ userId: i.userId, name: i.name, email: i.email })) };
 
-      const rows = (await store.listMeetings(orgId)).filter((m) => m.accountId === account.accountId);
-      for (const m of rows) {
-        try {
-          const r = await reconcileMeeting(cal, m, forTarget(all, m.targetId));
-          out.meetings++;
-          out.invitedAdded += r.added;
-          out.invitedRemoved += r.removed;
-        } catch (err) {
-          if (err instanceof BudgetExhausted) break;
-          log("meeting_sync_failed", { meetingId: m.id, message: err instanceof Error ? err.message : String(err) });
-        }
-      }
-
-      if (!cal.exhausted()) {
-        const desired = new Set(all.map((i) => i.email));
-        const owner = account.email ? lower(account.email) : null;
-        for (const c of await store.listCalendars(orgId, account.accountId)) {
+      try {
+        const rows = (await store.listMeetings(orgId)).filter((m) => m.accountId === account.accountId);
+        for (const m of rows) {
           try {
-            await reconcileAcl(cal, c.calendarId, desired, owner);
+            const r = await reconcileMeeting(cal, m, forTarget(all, m.targetId));
+            out.meetings++;
+            out.invitedAdded += r.added;
+            out.invitedRemoved += r.removed;
           } catch (err) {
             if (err instanceof BudgetExhausted) break;
-            log("meeting_calendar_acl_sync_failed", { calendarId: c.calendarId, message: err instanceof Error ? err.message : String(err) });
+            if (isCalendarQuota(err)) throw err;
+            log("meeting_sync_failed", { meetingId: m.id, message: err instanceof Error ? err.message : String(err) });
           }
         }
+
+        if (!cal.exhausted()) {
+          const desired = new Set(all.map((i) => i.email));
+          const owner = account.email ? lower(account.email) : null;
+          for (const c of await store.listCalendars(orgId, account.accountId)) {
+            try {
+              await reconcileAcl(cal, c.calendarId, desired, owner);
+            } catch (err) {
+              if (err instanceof BudgetExhausted) break;
+              if (isCalendarQuota(err)) throw err;
+              log("meeting_calendar_acl_sync_failed", { calendarId: c.calendarId, message: err instanceof Error ? err.message : String(err) });
+            }
+          }
+        }
+      } catch (err) {
+        if (!isCalendarQuota(err)) throw err;
+        const until = await pauseSync(err);
+        if (!opts?.system) throw err;
+        return { ...out, ...(until === null ? {} : { quotaPausedUntil: until }) };
       }
 
-      if (!cal.exhausted() && account.meetReady) {
-        // Re-read: reconcile above may have just filled in a Meet link.
-        try {
-          for (const m of await store.listMeetings(orgId)) {
-            if (m.accountId === account.accountId) await openMeet(cal, account, m.meetUrl);
-          }
-        } catch (err) {
-          if (!(err instanceof BudgetExhausted)) throw err;
-        }
-      }
+      if (!cal.exhausted() && account.meetReady) await openMeets(cal, account);
       out.complete = !cal.exhausted();
       // Keep the hourly loop alive; an unfinished run continues within a minute.
       if (!opts?.system) await kick(out.complete ? undefined : SOON_MS);
       return out;
     },
+  };
+
+  return {
+    ...service,
+    create: (userId, body) => pausingOnQuota(() => service.create(userId, body)),
+    update: (id, body, userId) => pausingOnQuota(() => service.update(id, body, userId)),
+    remove: (id) => pausingOnQuota(() => service.remove(id)),
   };
 }

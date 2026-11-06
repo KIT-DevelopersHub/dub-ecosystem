@@ -6,8 +6,14 @@
 // Every meeting write and /meetings/sync kicks it (POST /kick { soonMs }). ensureAlarm reschedules
 // when no alarm is pending OR the pending one is already in the past — an overdue alarm must never
 // be left as-is (usage-meter got stuck forever exactly that way).
+//
+// It also holds the calendar sync's state (meeting-sync-state.ts): a Calendar usage limit pauses the
+// sync, not the loop — the run counts as finished, so nothing re-runs it, and the Meet ingest and the
+// Drive共有 follow (other APIs, other quotas) keep their hourly turn. During a pause a kick only
+// keeps the alarm alive: pulling it earlier would run those phases for nothing.
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { newRequestId } from "@dub/http";
+import { createStorageSyncState, type MeetingSyncState } from "./meeting-sync-state";
 import { buildMeetingsService, runScheduledMeetIngest, runScheduledRoleShareSync } from "./meetings-wiring";
 import type { RoleSyncResume } from "./role-grants-service";
 import type { Env } from "./env";
@@ -40,20 +46,33 @@ export function nextAlarmAt(pending: number | null, now: number, soonMs?: number
 export class MeetingSyncDO {
   private readonly state: DurableObjectState;
   private readonly env: Env;
+  private readonly syncState: MeetingSyncState;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
+    this.syncState = createStorageSyncState(state.storage);
   }
 
   async fetch(req: Request): Promise<Response> {
+    const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+    const { pathname } = new URL(req.url);
+    if (pathname === "/sync-state") return json(await this.syncState.load());
+    if (pathname === "/sync-state/pause") {
+      const { now, until } = (await req.json()) as { now: number; until: number };
+      return json(await this.syncState.pause(now, until));
+    }
     let soonMs: number | undefined;
     if (req.method === "POST") {
       const body = (await req.json().catch(() => null)) as { soonMs?: unknown } | null;
       if (typeof body?.soonMs === "number" && body.soonMs >= 0) soonMs = body.soonMs;
     }
+    if (soonMs !== undefined) {
+      const { pausedUntil } = await this.syncState.load();
+      if (pausedUntil !== null && pausedUntil > Date.now()) soonMs = undefined;
+    }
     const alarmAt = await this.ensureAlarm(soonMs);
-    return new Response(JSON.stringify({ ok: true, alarmAt }), { headers: { "content-type": "application/json" } });
+    return json({ ok: true, alarmAt });
   }
 
   async ensureAlarm(soonMs?: number): Promise<number> {
@@ -80,14 +99,14 @@ export class MeetingSyncDO {
     await this.state.storage.put(PHASE_KEY, "ingest");
     await this.state.storage.setAlarm(Date.now() + INGEST_AFTER_SYNC_MS);
     try {
-      const svc = await buildMeetingsService(this.env, { requestId: newRequestId() }, { system: true, googleBudget: ALARM_GOOGLE_BUDGET, syncTimeLimitMs: ALARM_TIME_LIMIT_MS });
+      const svc = await buildMeetingsService(this.env, { requestId: newRequestId() }, { system: true, googleBudget: ALARM_GOOGLE_BUDGET, syncTimeLimitMs: ALARM_TIME_LIMIT_MS, syncState: this.syncState });
       const r = await svc.sync({ system: true });
       if (!r.complete) {
         // Finish the sync first; the ingest waits for its turn.
         await this.state.storage.put(PHASE_KEY, "sync");
         await this.state.storage.setAlarm(Date.now() + CONTINUE_MS);
       }
-      console.log(JSON.stringify({ service: "drive-share-service", event: "meeting_sync_alarm", meetings: r.meetings, added: r.invitedAdded, removed: r.invitedRemoved, complete: r.complete }));
+      console.log(JSON.stringify({ service: "drive-share-service", event: "meeting_sync_alarm", meetings: r.meetings, added: r.invitedAdded, removed: r.invitedRemoved, complete: r.complete, ...(r.quotaPausedUntil ? { quotaPausedUntil: new Date(r.quotaPausedUntil).toISOString() } : {}) }));
     } catch (err) {
       console.warn(JSON.stringify({ service: "drive-share-service", event: "meeting_sync_alarm_failed", message: err instanceof Error ? err.message : String(err) }));
     }

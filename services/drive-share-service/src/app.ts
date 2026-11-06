@@ -178,7 +178,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
 
   // Reconcile invitations / calendar shares with role membership now (the alarm does it hourly).
   app.post("/meetings/sync", async (c) => {
-    const { complete: _complete, ...res } = await (await deps.meetings()).sync();
+    const { complete: _complete, quotaPausedUntil: _paused, ...res } = await (await deps.meetings()).sync();
     return c.json(res);
   });
 

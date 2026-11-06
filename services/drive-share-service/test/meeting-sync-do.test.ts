@@ -110,6 +110,49 @@ describe("MeetingSyncDO phases", () => {
     expect(wiring.sync).toHaveBeenCalledTimes(2);
   });
 
+  it("a run paused by a calendar limit is not re-run: the ingest and the role follow keep their turn", async () => {
+    wiring.sync.mockResolvedValue({ ...DONE, quotaPausedUntil: Date.now() + 6 * HOUR });
+    const { dob, fake, untilNext } = build();
+    await dob.alarm();
+    expect(fake.kv.get("phase")).toBe("ingest");
+    expect(untilNext()).toBeLessThanOrEqual(MIN);
+    await dob.alarm();
+    await dob.alarm();
+    expect(wiring.ingest).toHaveBeenCalledTimes(1);
+    expect(wiring.roleShares).toHaveBeenCalledTimes(1);
+    expect(wiring.sync).toHaveBeenCalledTimes(1);
+    expect(untilNext()).toBeGreaterThan(50 * MIN);
+  });
+
+  it("a budget stop still continues in two minutes", async () => {
+    wiring.sync.mockResolvedValue({ ...DONE, complete: false });
+    const { dob, fake, untilNext } = build();
+    await dob.alarm();
+    expect(fake.kv.get("phase")).toBe("sync");
+    expect(untilNext()).toBeLessThanOrEqual(2 * MIN);
+  });
+
+  it("holds the pause for the request path; a second pause neither moves nor restarts it", async () => {
+    const { dob, fake } = build();
+    const post = (path: string, body: unknown) => dob.fetch(new Request(`https://meeting-sync${path}`, { method: "POST", body: JSON.stringify(body) }));
+    const now = Date.now();
+    const first = await (await post("/sync-state/pause", { now, until: now + 6 * HOUR })).json();
+    const again = await (await post("/sync-state/pause", { now: now + HOUR, until: now + 7 * HOUR })).json();
+    expect(first).toEqual({ until: now + 6 * HOUR, started: true });
+    expect(again).toEqual({ until: now + 6 * HOUR, started: false });
+    const state = await (await dob.fetch(new Request("https://meeting-sync/sync-state"))).json();
+    expect(state).toEqual({ pausedUntil: now + 6 * HOUR });
+    expect(fake.alarm()).toBeNull();
+  });
+
+  it("a kick during a pause does not pull the alarm (open tabs must not run the phases early)", async () => {
+    const { dob, untilNext } = build();
+    const now = Date.now();
+    await dob.fetch(new Request("https://meeting-sync/sync-state/pause", { method: "POST", body: JSON.stringify({ now, until: now + 6 * HOUR }) }));
+    await dob.fetch(new Request("https://meeting-sync/kick", { method: "POST", body: JSON.stringify({ soonMs: 15_000 }) }));
+    expect(untilNext()).toBeGreaterThan(50 * MIN);
+  });
+
   it("skips quietly when there is no usable Google account", async () => {
     wiring.roleShares.mockResolvedValue(null);
     const { dob, fake } = build();
