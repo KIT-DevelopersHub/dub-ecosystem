@@ -6,6 +6,7 @@
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { common } from "@dub/types";
 import { createMockCalendarClient, createMockCalendarState } from "./calendar-mock-client";
+import { createGoogleCallRecorder } from "./google/api-usage";
 import { createGoogleCalendarClient, type CalendarClient } from "./google/calendar-client";
 import { createTokenProvider, isInvalidGrant } from "./google/token";
 import { importTokenKey } from "./google/crypto";
@@ -76,7 +77,7 @@ export async function resolveMeetingAccount(env: Env, resolved: ResolvedCredenti
     email: resolved.source === "connected" ? resolved.row.email : null,
     calendarReady,
     meetReady,
-    calendar: createGoogleCalendarClient({ token, ...(fetchImpl ? { fetchImpl } : {}) }),
+    calendar: createGoogleCalendarClient({ token, recordCall: createGoogleCallRecorder(env.DB), ...(fetchImpl ? { fetchImpl } : {}) }),
   };
 }
 
@@ -137,7 +138,7 @@ export async function resolveMeetRecords(env: Env, resolved: ResolvedCredentials
   } catch {
     ready = false;
   }
-  return { ready, client: createGoogleMeetRecordsClient({ token, ...(fetchImpl ? { fetchImpl } : {}) }) };
+  return { ready, client: createGoogleMeetRecordsClient({ token, recordCall: createGoogleCallRecorder(env.DB), ...(fetchImpl ? { fetchImpl } : {}) }) };
 }
 
 async function meetRecordsFor(env: Env, requestId: string): Promise<MeetRecordsAccess> {

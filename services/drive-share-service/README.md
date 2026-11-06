@@ -52,6 +52,10 @@ members who joined the role. It is additive and only uses a 名簿 Gmail: it nev
 failure could still mail an invite that cannot be recalled. A grant whose Gmail members are all in
 the ledger costs no Drive call. The first role grant arms the alarm.
 
+**Usage on the 無料枠 dashboard**: every Calendar / Meet call adds to
+`driveshare_google_api_usage` (one row per API per UTC minute, best-effort). usage-meter shows the
+busiest minute of the last 24 hours. Drive calls are not counted.
+
 **Google Calendar limits**: a usage limit from Calendar (`GOOGLE_QUOTA_EXCEEDED`, api `calendar`)
 ends the sync on the spot and pauses it for 6 hours (`QUOTA_PAUSE_MS`, `calendarPausedUntil` in
 `MeetingSyncDO` storage; log `meeting_sync_quota_paused`, once per pause). While paused the sync
