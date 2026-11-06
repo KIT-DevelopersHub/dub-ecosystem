@@ -271,20 +271,18 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
   async function invitees(roleId?: string): Promise<Invitee[]> {
     const users = await deps.roster.listActiveUsers(roleId);
     const google = await deps.directory.googleEmails(users.map((u) => u.id));
-    const out: Invitee[] = [];
-    const seen = new Set<string>();
-    for (const u of users) {
+    return users.map((u) => {
       const g = google.get(u.id);
-      const email = lower(g?.gmail ?? u.email);
-      if (seen.has(email)) continue;
-      seen.add(email);
-      out.push({ userId: u.id, email, name: u.name, roleIds: u.roleIds, hasGoogle: !!g?.gmail });
-    }
-    return out;
+      return { userId: u.id, email: lower(g?.gmail ?? u.email), name: u.name, roleIds: u.roleIds, hasGoogle: !!g?.gmail };
+    });
   }
 
+  /** One invite per address. After the target filter: two accounts can share a Gmail, and the
+   *  one kept must belong to the target, or the sync would uninvite the address. */
+  const uniqueEmails = (list: Invitee[]) => [...new Map([...list].reverse().map((i) => [i.email, i])).values()].reverse();
+
   const forTarget = (all: Invitee[], targetId: string) =>
-    targetId === meeting.ALL_MEMBERS_TARGET_ID ? all : all.filter((i) => i.roleIds.includes(targetId));
+    uniqueEmails(targetId === meeting.ALL_MEMBERS_TARGET_ID ? all : all.filter((i) => i.roleIds.includes(targetId)));
 
   const inviteesOf = async (targetId: string) =>
     forTarget(await invitees(targetId === meeting.ALL_MEMBERS_TARGET_ID ? undefined : targetId), targetId);
@@ -535,7 +533,15 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         }
         attendeeCount = members.length;
       } else {
-        const ev = await cal.patchEvent(row.calendarId, row.googleEventId, eventInput(f));
+        // Only what changed: a time change must not write back a title or description edited in
+        // Google Calendar that the sync has not pulled yet (or never will: HTML descriptions).
+        const { summary, description, recurrence, ...when } = eventInput(f);
+        const ev = await cal.patchEvent(row.calendarId, row.googleEventId, {
+          ...when,
+          ...(f.title !== row.title ? { summary } : {}),
+          ...(f.description !== row.description ? { description } : {}),
+          ...(f.recurrence !== row.recurrence || f.until !== row.until ? { recurrence } : {}),
+        });
         next = { ...row, ...f, meetUrl: ev.meetUrl ?? row.meetUrl, htmlLink: ev.htmlLink ?? row.htmlLink, updatedAt: at };
         await store.updateMeeting(next);
         attendeeCount = (await store.listInvites(row.id)).length;
@@ -571,7 +577,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       }
       const cal = budgeted(account.calendar, budgetLimit, Date.now() + syncTimeLimit);
       const all = await invitees();
-      const out = { ...empty, withoutGoogleAccount: all.filter((i) => !i.hasGoogle).map((i) => ({ userId: i.userId, name: i.name, email: i.email })) };
+      const out = { ...empty, withoutGoogleAccount: uniqueEmails(all).filter((i) => !i.hasGoogle).map((i) => ({ userId: i.userId, name: i.name, email: i.email })) };
 
       const rows = (await store.listMeetings(orgId)).filter((m) => m.accountId === account.accountId);
       for (const m of rows) {

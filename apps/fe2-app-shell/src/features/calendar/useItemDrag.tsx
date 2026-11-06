@@ -68,7 +68,9 @@ export function useItemDrag({
 
   const begin = useCallback(
     (e: ReactPointerEvent, item: CalendarItem) => {
-      if (e.button !== 0 || e.pointerType === "touch" || !canDrag(item)) return;
+      // ctrl+click is a right click on macOS: its pointerup may never come.
+      if (e.button !== 0 || e.ctrlKey || e.pointerType === "touch" || !canDrag(item)) return;
+      cleanupRef.current?.();
       const origin = { x: e.clientX, y: e.clientY };
       const pointer = { ...origin };
       const mode = (e.target as Element).closest("[data-cal-resize]") ? "resize" : "move";
@@ -93,7 +95,8 @@ export function useItemDrag({
         const box = document.querySelector("[data-cal-scroll]");
         if (!box) return;
         const r = box.getBoundingClientRect();
-        if (pointer.x < r.left || pointer.x > r.right) return;
+        // Only from inside the grid: a bar in the 終日 lane sits above it the whole way.
+        if (pointer.x < r.left || pointer.x > r.right || pointer.y < r.top || pointer.y > r.bottom) return;
         const step = pointer.y < r.top + EDGE_PX ? -SCROLL_STEP_PX : pointer.y > r.bottom - EDGE_PX ? SCROLL_STEP_PX : 0;
         if (step === 0) return;
         box.scrollTop += step;
@@ -102,6 +105,7 @@ export function useItemDrag({
       let scrollTimer: number | undefined;
 
       const onMove = (ev: PointerEvent) => {
+        if (ev.buttons === 0) return finish(false); // the release was lost (left the window)
         pointer.x = ev.clientX;
         pointer.y = ev.clientY;
         if (!drag) {
@@ -115,9 +119,13 @@ export function useItemDrag({
       const finish = (commit: boolean) => {
         cleanupRef.current?.();
         const last = previewRef.current;
-        if (drag) swallowNextClick();
-        if (commit && last) latest.current.onDrop(item, last.dates);
-        show(null);
+        if (drag && !last) swallowNextClick();
+        if (commit && last) {
+          swallowNextClick();
+          latest.current.onDrop(item, last.dates);
+          // After the optimistic write (a microtask or two), so it never flashes back.
+          window.setTimeout(() => show(null));
+        } else show(null);
       };
       const onUp = () => finish(true);
       const onCancel = () => finish(false);
@@ -125,6 +133,8 @@ export function useItemDrag({
         if (ev.key !== "Escape") return;
         ev.stopPropagation();
         finish(false);
+        // The button is still down: the release that follows is not a click on an item.
+        if (drag) window.addEventListener("pointerup", swallowNextClick, { once: true });
       };
 
       cleanupRef.current = () => {

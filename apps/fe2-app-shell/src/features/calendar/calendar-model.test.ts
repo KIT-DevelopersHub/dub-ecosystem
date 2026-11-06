@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { common, task } from "@dub/types";
 import {
   datesAfterDrag,
+  dragPatch,
   dayFromKey,
   dayIndexOf,
   dayKeyOf,
@@ -314,9 +315,30 @@ describe("datesAfterDrag", () => {
     expect(datesAfterDrag(move(meet), { kind: "allday", day })).toBeNull();
   });
 
-  it("resizes a timed item's end, never below 15 minutes or past 24:00", () => {
+  it("a 終日 item dropped at the very bottom stays on that day", () => {
+    const allDay = itemOf(task("2026-11-04T00:00:00.000Z", "2026-11-04T00:00:00.000Z"));
+    const got = datesAfterDrag(move(allDay), { kind: "timed", day, minute: 23 * 60 + 50 })!;
+    expect(toCalendarItem({ ...allDay.task, ...got })).toMatchObject({ allDay: false, startDay: day, endDay: day });
+  });
+
+  it("a meeting cannot be stretched past what the server accepts", () => {
+    const meet = slot(9 * 60, 10 * 60, "meet:m1:2026-11-04");
+    expect(hhmm(datesAfterDrag(resize(meet), { kind: "timed", day, minute: 23 * 60 })!.dueAt)).toBe("21:00");
+  });
+
+  it("a 予定 saved before kinds existed keeps being a 予定 when made 終日", () => {
+    const d = draftToDates(draftForSlot(day, 600, 660));
+    const legacy = itemOf({ ...task(d.startAt, d.dueAt), description: "メモ" } as task.Task);
+    const dates = datesAfterDrag(move(legacy), { kind: "allday", day })!;
+    const patch = dragPatch(legacy, dates);
+    expect(patch.description).toBe("#予定\nメモ");
+    expect(isScheduleTask({ ...legacy.task, ...patch })).toBe(true);
+    expect(dragPatch(timed, datesAfterDrag(move(timed), { kind: "allday", day })!).description).toBeUndefined();
+  });
+
+  it("resizes a timed item's end, never below the shortest block or past 24:00", () => {
     expect(hhmm(datesAfterDrag(resize(timed), { kind: "timed", day, minute: 12 * 60 + 8 })!.dueAt)).toBe("12:15");
-    expect(hhmm(datesAfterDrag(resize(timed), { kind: "timed", day, minute: 60 })!.dueAt)).toBe("10:15");
+    expect(hhmm(datesAfterDrag(resize(timed), { kind: "timed", day, minute: 60 })!.dueAt)).toBe("10:30");
     expect(datesAfterDrag(resize(timed), { kind: "timed", day, minute: 24 * 60 + 60 })!.dueAt!.slice(0, 16)).toBe("2026-11-05T00:00");
   });
 

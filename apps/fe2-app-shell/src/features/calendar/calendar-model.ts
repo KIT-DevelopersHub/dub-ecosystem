@@ -584,6 +584,10 @@ export type ItemDates = Pick<task.Task, "startAt" | "dueAt">;
 
 const snapMinutes = (m: number) => Math.round(m / SNAP_MINUTES) * SNAP_MINUTES;
 const DAY_MINUTES = 24 * 60;
+/** A dropped 終日 item takes this long, like Google. */
+const DEFAULT_TIMED_MINUTES = 60;
+/** drive-share-service DURATION_MAX: a longer meeting is refused. */
+const MEETING_MAX_MINUTES = 720;
 
 /** Local wall-clock instant, `minute` minutes after midnight of `day` (may pass 24:00). */
 function atMinute(day: number, minute: number): Date {
@@ -615,7 +619,10 @@ function movedDates(drag: ItemDrag, target: DropTarget): ItemDates | null {
   const { item, fromDay, grabMinute } = drag;
   const delta = target.day - fromDay;
   if (item.allDay) {
-    if (target.kind === "timed") return timedDates(atMinute(target.day, snapMinutes(target.minute)), 60 * MS_PER_MIN);
+    if (target.kind === "timed") {
+      const minute = Math.min(DAY_MINUTES - DEFAULT_TIMED_MINUTES, snapMinutes(target.minute));
+      return timedDates(atMinute(target.day, minute), DEFAULT_TIMED_MINUTES * MS_PER_MIN);
+    }
     return allDayDates(item.startDay + delta, item.endDay + delta);
   }
   const start = item.start!;
@@ -634,13 +641,22 @@ function resizedDates({ item }: ItemDrag, target: DropTarget): ItemDates | null 
   if (item.allDay) return allDayDates(item.startDay, Math.max(item.startDay, target.day));
   if (target.kind !== "timed" || item.startDay !== item.endDay) return null;
   const startMinute = minutesInDay(item.start!, item.startDay);
-  const end = Math.max(startMinute + SNAP_MINUTES, Math.min(DAY_MINUTES, snapMinutes(target.minute)));
+  const longest = isMeetingTask(item.task) ? startMinute + MEETING_MAX_MINUTES : DAY_MINUTES;
+  // Not below the shortest drawn block: a shorter one would show a time it does not have.
+  const end = Math.max(startMinute + MIN_TIMED_MINUTES, Math.min(longest, DAY_MINUTES, snapMinutes(target.minute)));
   return timedDates(item.start!, (end - startMinute) * MS_PER_MIN);
 }
 
 /** The dates a drag ends on, or null when this target cannot take the item. */
 export function datesAfterDrag(drag: ItemDrag, target: DropTarget): ItemDates | null {
   return drag.mode === "move" ? movedDates(drag, target) : resizedDates(drag, target);
+}
+
+/** What a drag writes: the dates, plus the kind tag when they alone would turn a 予定 saved before
+ *  kinds existed into a タスク (a 予定 with only 終日 dates needs the tag, see encodeDescription). */
+export function dragPatch(it: CalendarItem, dates: ItemDates): ItemDates & { description?: string } {
+  if (isScheduleTask({ ...it.task, ...dates })) return dates;
+  return { ...dates, description: encodeDescription(draftFromItem(it)) };
 }
 
 /** True when the dates describe the instant(s) the item already has. */
