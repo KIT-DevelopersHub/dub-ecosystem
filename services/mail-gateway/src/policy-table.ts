@@ -79,6 +79,15 @@ export const POLICY_TABLE = definePolicyTable({
   "PATCH /mail/scheduled/:id": appLevel("mail", "edit", "mail:send"),
   "DELETE /mail/scheduled/:id": appLevel("mail", "edit", "mail:send"),
 
+  // Drafts (0025) exist to be sent, so writing one needs the same tier as sending. Every row is
+  // keyed on the caller (drafts.ts), so listing and reading them back needs only 閲覧.
+  "PUT /mail/drafts/:id": appLevel("mail", "edit", "mail:send"),
+  "DELETE /mail/drafts/:id": appLevel("mail", "edit", "mail:send"),
+  "POST /mail/drafts/:id/attachments": appLevel("mail", "edit", "mail:send"),
+  "DELETE /mail/drafts/:id/attachments/:attId": appLevel("mail", "edit", "mail:send"),
+  "GET /mail/drafts": appLevel("mail", "view", "mail:read"),
+  "GET /mail/drafts/:id/attachments/:attId": appLevel("mail", "view", "mail:read"),
+
   // 閲覧 on メール + mail:read — reads, and the two mutations that only touch the reader's
   // own view of mail they can already see (the read flag of one message; their personal
   // star/archive/trash flags). Both are per-user state, never another account's, which is
@@ -87,6 +96,7 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /mail/messages/:id": appLevel("mail", "view", "mail:read"),
   "GET /mail/counts": appLevel("mail", "view", "mail:read"),
   "POST /mail/messages/:id/read": appLevel("mail", "view", "mail:read"),
+  "POST /mail/read-state": appLevel("mail", "view", "mail:read"),
   "GET /mail/messages/:id/attachments/:attId": appLevel("mail", "view", "mail:read"),
   "GET /mail/sent": appLevel("mail", "view", "mail:read"),
   "GET /mail/sent/:id": appLevel("mail", "view", "mail:read"),
@@ -119,6 +129,7 @@ export const POLICY_TABLE = definePolicyTable({
   // メール app is set to 無効", which is a different app's switch deciding this one.
   // `mail:admin` is `dangerous: true` in PERMISSION_CATALOG, so the granter re-asks identity
   // on every request rather than trusting a cached decision.
+  "GET /mail/status": ["mail:admin"],
   "GET /mail/mailboxes": ["mail:admin"],
   "POST /mail/mailboxes/:id": ["mail:admin"],
   "GET /mail/admin/email-routing/addresses": ["mail:admin"],

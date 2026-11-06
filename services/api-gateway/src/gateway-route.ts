@@ -18,6 +18,8 @@ import { forwardRequest } from "./proxy";
 function bodyCap(env: GatewayEnv, segment: string): number {
   const def = Number(env.DEFAULT_MAX_BODY_BYTES ?? "10485760");
   if (segment === "files") return Number(env.FILES_MAX_BODY_BYTES ?? "26214400");
+  // A mail send carries its attachments as base64 JSON: 25 MiB of files is ~33.4 MiB on the wire.
+  if (segment === "mail") return Number(env.MAIL_MAX_BODY_BYTES ?? "36700160");
   return def;
 }
 
