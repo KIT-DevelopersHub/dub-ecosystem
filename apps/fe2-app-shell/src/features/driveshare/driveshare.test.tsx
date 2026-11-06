@@ -17,6 +17,7 @@ import {
   driftDetail,
   driftGranteeLabel,
   driveRoleLabel,
+  finishRoleGrant,
   isValidEmail,
   roleGrantChipLabel,
   roleLabel,
@@ -333,6 +334,40 @@ describe("DriveShareScreen", () => {
     await screen.findByTestId("fe2-driveshare-link-switch");
     await user.click(screen.getByTestId("fe2-driveshare-link-switch"));
     await waitFor(() => expect(setLinkSharing).toHaveBeenCalledWith("fil_budget", { enabled: true, role: "reader" }));
+  });
+});
+
+describe("finishRoleGrant (a role larger than one request can handle)", () => {
+  it("follows the cursor to the end, reporting progress and accumulating skipped members", async () => {
+    const reapply = vi.fn((_f: string, _r: string, cursor?: string) =>
+      Promise.resolve(
+        cursor === "c1"
+          ? { ...DEV_GRANT, nextCursor: "c2", remaining: 1, skipped: [{ email: "b@x.jp", reason: "拒否" }] }
+          : { ...DEV_GRANT, appliedCount: 5, invited: [{ email: "c@x.jp" }] },
+      ),
+    );
+    const progress: number[] = [];
+    const first = { ...DEV_GRANT, nextCursor: "c1", remaining: 3, skipped: [{ email: "a@x.jp", reason: "拒否" }] };
+
+    const done = await finishRoleGrant({ reapplyRoleGrant: reapply }, first, (n) => progress.push(n));
+
+    expect(reapply.mock.calls.map((c) => c[2])).toEqual(["c1", "c2"]);
+    expect(progress).toEqual([3, 1, 0]);
+    expect(done.nextCursor).toBeUndefined();
+    expect(done.skipped?.map((s) => s.email)).toEqual(["a@x.jp", "b@x.jp"]);
+    expect(done.invited).toEqual([{ email: "c@x.jp" }]);
+  });
+
+  it("stops instead of spinning when the cursor does not move", async () => {
+    const reapply = vi.fn(() => Promise.resolve({ ...DEV_GRANT, nextCursor: "c1", remaining: 2 }));
+    await finishRoleGrant({ reapplyRoleGrant: reapply }, { ...DEV_GRANT, nextCursor: "c1", remaining: 2 }, () => {});
+    expect(reapply).toHaveBeenCalledTimes(1);
+  });
+
+  it("a reapply request carries the cursor as a query parameter", async () => {
+    const { api, calls } = fakeApi(DEV_GRANT);
+    await createDriveShareApi(api).reapplyRoleGrant("fil_budget", "role_dev", "c1");
+    expect(calls[0]).toMatchObject({ method: "POST", query: { cursor: "c1" } });
   });
 });
 
