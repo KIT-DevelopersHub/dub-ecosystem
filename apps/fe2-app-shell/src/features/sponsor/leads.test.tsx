@@ -361,7 +361,7 @@ describe("月間目標", () => {
     expect(await screen.findByTestId("fe2-sponsor-goal-contacted")).toBeTruthy();
     expect(screen.queryByTestId("fe2-sponsor-goal-edit")).toBeNull();
     expect(screen.queryByTestId("fe2-sponsor-goal-dialog")).toBeNull();
-    expect(screen.getByTestId("fe2-sponsor-goals-link").textContent).toBe("目標は目標管理アプリで設定します。");
+    expect(screen.getByTestId("fe2-sponsor-goals-link").textContent).toBe("目標は目標管理アプリで設定します。設定や変更は、目標管理アプリの権限を持つ人に依頼してください。");
     fireEvent.click(screen.getByTestId("fe2-sponsor-goal-prev"));
     expect(screen.getByTestId("fe2-sponsor-goal-month").textContent).toBe(monthLabel(shiftMonth(currentMonth(), -1)));
     fireEvent.click(screen.getByTestId("fe2-sponsor-goal-today"));

@@ -144,7 +144,7 @@ export function SponsorGoalsScreen(): JSX.Element {
         </Stack>
         <div className={styles.goalNotes}>
           <p className={styles.note} data-testid="fe2-sponsor-goals-link">
-            {canViewGoalsApp ? <>目標は<a href="/goals">目標管理</a>アプリのチームの KPI で設定します。</> : "目標は目標管理アプリで設定します。"}
+            {canViewGoalsApp ? <>目標は<a href="/goals">目標管理</a>アプリのチームの KPI で設定します。</> : "目標は目標管理アプリで設定します。設定や変更は、目標管理アプリの権限を持つ人に依頼してください。"}
           </p>
           <p className={styles.note}>{METRICS.map((m) => `${m.label} = ${m.definition}`).join("。")}。</p>
           {undated > 0 ? (

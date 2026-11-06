@@ -80,7 +80,7 @@ API: `GET /members/goals?month=YYYY-MM`、`PUT /members/goals/:teamId/:month`、
 | キー | 意味 | 既定 |
 |---|---|---|
 | `app:goals:view` / `app:goals:edit` | 無効/閲覧/編集 | admin のみ |
-| `goals:read` | 目標と進捗の閲覧（閲覧を付けると自動で入る） | admin のみ |
+| `goals:read` | 目標と進捗の閲覧（無効/閲覧/編集の表とは別に付ける。無いと閲覧・編集のどちらでも一覧を読めない） | admin のみ |
 
 編集できる人は全チームの目標を編集できる（チームごとの制限は無い）。
 
