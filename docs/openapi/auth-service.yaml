@@ -152,6 +152,60 @@ paths:
       security:
         - sessionCookie: []
         - gatewayIdentity: []
+  /auth/impersonation/stop:
+    post:
+      operationId: authStopImpersonation
+      summary: End an admin impersonation and restore the admin's own session
+      tags:
+        - auth
+      description: Authenticated by the impersonation token itself (cookie or bearer). Rotates the parked admin session back into the cookie (no re-login). 409 when the session is not an impersonation; 401 (cookie cleared) when the admin's own session has ended.
+      responses:
+        '200':
+          description: Restored admin session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      security:
+        - sessionCookie: []
+  /internal/admin/users/{userId}/impersonation:
+    post:
+      operationId: authStartImpersonation
+      summary: Mint an impersonation session for a member (gateway-only)
+      tags:
+        - auth
+      description: 'Internal-only: x-dub-internal + identity:impersonate on the acting admin (x-dub-user-id). The admin''s own session token comes as a bearer and is parked for restore. Refuses self / inactive / privileged targets and nested starts (403 AUTH_IMPERSONATION_NOT_ALLOWED, details.reason). Returns the Set-Cookie value for the gateway to relay.'
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Impersonation info + the cookie to relay.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - impersonation
+                  - setCookie
+                properties:
+                  impersonation:
+                    $ref: '#/components/schemas/ImpersonationInfo'
+                  setCookie:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /auth/test-login:
     post:
       operationId: authTestLogin
@@ -347,6 +401,30 @@ components:
             - expired
             - revoked
             - null
+        impersonation:
+          description: Non-null only for an admin impersonation session (userId = subject).
+          oneOf:
+            - $ref: '#/components/schemas/ImpersonationInfo'
+            - type: 'null'
+    ImpersonationInfo:
+      type: object
+      description: Admin impersonation (代理表示). userId of the session is the subject; actorId is the real admin.
+      required:
+        - actorId
+        - subjectId
+        - startedAt
+        - expiresAt
+      properties:
+        actorId:
+          type: string
+        subjectId:
+          type: string
+        startedAt:
+          type: integer
+          description: epoch-ms
+        expiresAt:
+          type: integer
+          description: epoch-ms (hard deadline, never extended)
     AuthRefreshRequest:
       type: object
       description: refreshToken is the mobile path; web uses the session cookie.

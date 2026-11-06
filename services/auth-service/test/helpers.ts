@@ -91,6 +91,8 @@ export class FakeIdentity implements IdentityClient {
   users = new Map<string, identity.IdentityUser>();
   // userIds that hold identity:admin
   admins = new Set<string>();
+  // userIds that hold identity:impersonate (admin impersonation)
+  impersonators = new Set<string>();
 
   async provision(_ctx: RequestContext, input: identity.ProvisionUserRequest): Promise<ProvisionResult> {
     this.calls.push(input);
@@ -104,7 +106,9 @@ export class FakeIdentity implements IdentityClient {
     return this.users.get(userId) ?? null;
   }
   async hasPermission(_ctx: RequestContext, userId: string, permission: identity.PermissionKey): Promise<boolean> {
-    return permission === "identity:admin" ? this.admins.has(userId) : true;
+    if (permission === "identity:admin") return this.admins.has(userId);
+    if (permission === "identity:impersonate") return this.impersonators.has(userId);
+    return true;
   }
 
   // passkey store (identity /internal/webauthn/* twin)

@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (87 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (88 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -29,6 +29,7 @@ export interface PermissionCatalogEntry {
 export const PERMISSION_CATALOG = [
   { key: "identity:read", name: "Read roster", description: "View roster, roles and the permission catalog", domain: "identity", dangerous: false },
   { key: "identity:admin", name: "Administer identity", description: "Update users, invite, role CRUD, grant/revoke", domain: "identity", dangerous: true },
+  { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "identity", dangerous: true },
   { key: "event:read", name: "Read events", description: "View events/actions (gantt view reuses this)", domain: "event", dangerous: false },
   { key: "event:write", name: "Write events", description: "Create/update events and actions", domain: "event", dangerous: false },
   { key: "event:admin", name: "Administer events", description: "Archive and closed-phase transitions", domain: "event", dangerous: true },
@@ -124,7 +125,7 @@ export const PERMISSION_CATALOG = [
   { key: "app:sponsor:edit", name: "Edit in スポンサー app", description: "Act inside the スポンサー app (implies view)", domain: "app", dangerous: false },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 87 keys (open `${string}:${string}` template retired).
+// Closed union of the 88 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

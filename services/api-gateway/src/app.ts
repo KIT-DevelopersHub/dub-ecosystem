@@ -24,6 +24,8 @@ import { publicLpVisitHandler } from "./handlers/public-lp-visit";
 import { publicResendWebhookHandler } from "./handlers/public-resend-webhook";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
 import { adminSendAccountMailHandler } from "./handlers/account-mail";
+import { startImpersonationHandler } from "./handlers/impersonation";
+import { impersonationGuard, auditLogSink, type ImpersonationAuditSink } from "./impersonation";
 import { getSelfProfileHandler, updateSelfProfileHandler } from "./handlers/self-profile";
 import { getSelfParticipationHandler, updateSelfParticipationHandler } from "./handlers/self-participation";
 import { gatewayRouteHandler } from "./gateway-route";
@@ -39,6 +41,8 @@ export interface CreateAppOptions {
   rateLimiter?: RateLimiter;
   /** override the permission source the policy gate consults (tests). Defaults to identity. */
   authz?: PermissionGranter;
+  /** override where impersonation audit tags go (tests). Defaults to audit-log. */
+  impersonationAudit?: ImpersonationAuditSink;
 }
 
 export type GatewayApp = Hono<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
@@ -73,6 +77,12 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   // place where one is made.
   app.use("*", gatewayPolicyGate(options.authz ? { authz: options.authz } : {}));
 
+  // Admin impersonation: deny-list for high-risk actions + audit tag on every mutating
+  // request made AS a member. Not an authorization layer (the subject's own permissions
+  // still decide everything else) — see impersonation.ts.
+  const impersonationAudit = options.impersonationAudit ?? auditLogSink;
+  app.use("*", impersonationGuard(impersonationAudit));
+
   // liveness (public, deliberately NOT under API_PREFIX — root-mounted probe).
   app.get("/healthz", healthzHandler);
 
@@ -101,6 +111,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.get(`${API_PREFIX}/admin/users/:userId/password`, adminViewPasswordHandler);
   // アカウント発行メール: member Gmail <- login + password, cc the devhub address.
   app.post(`${API_PREFIX}/admin/users/:userId/account-mail`, adminSendAccountMailHandler);
+  // 代理表示 (admin impersonation) start. Stop lives on the auth segment (/auth/impersonation/stop).
+  app.post(`${API_PREFIX}/admin/users/:userId/impersonation`, startImpersonationHandler);
 
   // Self service (アカウント設定): the signed-in user reads/edits their OWN profile (表示名/
   // アバター → identity-roster) and 参加届 (参加情報 → member-service). Gateway-owned because
@@ -117,7 +129,7 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   // which is exactly what Hono's ALL + "/*" registration means to `matchedRouteKey`. The
   // concrete-method routes above always win the same match, so they stay gated. Full
   // reasoning, and the test that keeps this from becoming a loophole, in policy-table.ts.
-  app.all(`${API_PREFIX}/*`, gatewayRouteHandler);
+  app.all(`${API_PREFIX}/*`, (c) => gatewayRouteHandler(c, impersonationAudit));
 
   // anything not under the API prefix
   app.all("*", (c) => {
