@@ -236,7 +236,10 @@ function adaptChat(api: ApiClient): FeatureModule {
 // wrapped in MailProvider (MailApi built from the one shell api-client); nav sits
 // after chat (order 45) and before admin.
 function adaptMail(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(MailProvider, api);
+  // スポンサーの Provider も重ねる: スレッドから営業先へメールアドレスを紐付ける (SponsorMailLink)。
+  const withSponsor = providerWrapper(SponsorProvider, api);
+  const withMail = providerWrapper(MailProvider, api);
+  const wrap: ElementWrapper = (node) => withMail(withSponsor(node));
   const routes = (mailRoutes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
   const nav: NavEntry[] = mailNav.map((n) => ({ label: n.label, path: n.path, icon: n.icon, order: 45 }));
   return { id: "mail", routes, nav };
