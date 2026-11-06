@@ -340,6 +340,8 @@ export interface LpApi {
   updateTicketType(id: string, input: Partial<LpTicketTypeInput>): Promise<LpTicketTypeSummary>;
   /** 購入者一覧・新しい順 (app:lp:edit = 個人情報)。 */
   listTicketOrders(query: { cursor?: string; limit?: number }): Promise<LpTicketOrdersPage>;
+  /** 全注文の CSV (app:lp:edit + lp:publish。購入者の個人情報を一括で含むため)。 */
+  exportTicketOrders(): Promise<Blob>;
   /** 要確認(needs_review)の注文を支払い済みに確定 (app:lp:edit + lp:publish)。要確認でなければ 409。 */
   approveTicketOrder(id: string): Promise<LpTicketOrder>;
   /** 無料券のクーポン一覧・新しい順 (app:lp:edit + lp:publish。コードが見えるため)。 */
@@ -432,6 +434,7 @@ export function createLpApi(api: ApiClient): LpApi {
         path: `${BASE}/tickets/types/${encodeURIComponent(id)}`,
         body: input,
       }),
+    exportTicketOrders: () => api.download("/api/v1/lp/tickets/orders/export"),
     listTicketOrders: (query) => {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query.cursor !== undefined) q.cursor = query.cursor;

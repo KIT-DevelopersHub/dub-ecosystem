@@ -8,7 +8,7 @@
 //   v3: 要確認（needs_review）の理由表示と「確認して確定する」（lp:publish 必須・楽観更新 + ロールバック）
 //   v4: 無料券のクーポン（一覧/発行/停止は lp:publish 必須・状態バッジ・停止の楽観更新 + ロールバック・
 //       購入者のクーポンバッジ・0 円券種の補足）
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { identity } from "@dub/types";
@@ -101,6 +101,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: () => Promise.resolve({ items: [], nextCursor: null }),
+    exportTicketOrders: async () => new Blob(["x"]),
     approveTicketOrder: unused,
     listTicketCoupons: () => Promise.resolve({ items: [] }),
     createTicketCoupon: unused,
@@ -316,6 +317,26 @@ describe("LpTicketsScreen", () => {
 
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({ name: "学生", priceJpy: 1000, dayLabel: "Day 1 · 9/13(月)", maxPerOrder: 4 });
+  });
+
+  it("demo transport serves the orders CSV", async () => {
+    const blob = await demoLpApi().exportTicketOrders();
+    expect(blob.size).toBeGreaterThan(0);
+  });
+
+  it("shows the CSV export to lp:publish holders only and calls the API", async () => {
+    const demo = await demoLpApi().listTicketOrders({});
+    const orders = () => Promise.resolve(demo);
+    const exportCsv = vi.fn(() => Promise.resolve(new Blob(["x"])));
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    renderScreen(fakeApi({ listTicketOrders: orders, exportTicketOrders: exportCsv }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-ticket-orders-export"));
+    await waitFor(() => expect(exportCsv).toHaveBeenCalledTimes(1));
+    cleanup();
+    renderScreen(fakeApi({ listTicketOrders: orders }), EDITOR);
+    await screen.findByTestId("fe2-lp-ticket-orders-list");
+    expect(screen.queryByTestId("fe2-lp-ticket-orders-export")).toBeNull();
   });
 
   it("renders the demo transport end to end (not a blank screen)", async () => {

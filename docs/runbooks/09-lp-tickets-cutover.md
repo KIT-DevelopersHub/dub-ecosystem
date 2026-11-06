@@ -58,6 +58,8 @@ pnpm dlx wrangler@4.35.0 d1 execute dub-core --remote --json --command \
 ```sh
 pnpm dlx wrangler@4.35.0 d1 create dub-tickets
 pnpm dlx wrangler@4.35.0 d1 execute dub-tickets --remote --yes --file services/lp-tickets/db/0001_init.sql
+pnpm dlx wrangler@4.35.0 d1 execute dub-tickets --remote --yes --file services/lp-tickets/db/0002_delivery.sql
+pnpm dlx wrangler@4.35.0 r2 bucket create dub-tickets-backup
 ```
 
 ## 4. secret を入れる
@@ -65,7 +67,14 @@ pnpm dlx wrangler@4.35.0 d1 execute dub-tickets --remote --yes --file services/l
 ```sh
 pnpm dlx wrangler@4.35.0 secret put STRIPE_SECRET_KEY --name dub-lp-tickets
 pnpm dlx wrangler@4.35.0 secret put STRIPE_WEBHOOK_SECRET --name dub-lp-tickets
+pnpm dlx wrangler@4.35.0 secret put TICKET_TOKEN_SECRET --name dub-lp-tickets
+pnpm dlx wrangler@4.35.0 secret put RESEND_API_KEY --name dub-lp-tickets
+pnpm dlx wrangler@4.35.0 secret put TICKET_OPS_EMAIL --name dub-lp-tickets
 ```
+
+- `TICKET_TOKEN_SECRET` は十分長い乱数にし、手元の保管場所にも控える。**変えると発行済みのチケット URL がすべて無効になる**。
+- `RESEND_API_KEY` は送信上限の足りるプランのキーを使う。無料枠のままだと確認メールが送信待ちで滞留する。
+- `TICKET_OPS_EMAIL` は購入データの控えと毎日の CSV の宛先。未設定の間、控えは送られず送信待ちのまま残る。
 
 - 値は `dub-lp-analytics` に入れたものと同じ。Cloudflare からは読み出せないので、Stripe ダッシュボードか手元の保管場所から取る。
 - Worker がまだ無いと作成を聞かれるので作る。失敗したら工程 6 の直後に入れてよい（販売停止中なので購入には影響しない。Stripe の webhook は再送される）。
@@ -126,6 +135,15 @@ LP管理で販売と CTA を元に戻す。最初の有料 checkout で照合 al
 - `dub-lp-analytics` の Stripe secret を消す
 - `infra/d1/migrations/lp/` の `lp_ticket_*` を落とす migration と `registry.ts` の整理（`dub-core` のデータはそれまで残す）
 - `staging-schema-sync.yml` は `dub-core` だけを見る。`services/lp-tickets/db/` に新しい SQL を足した時は staging にも手で適用する
+
+## バックアップからの復元
+
+結論: 直近の誤操作は D1 の Time Travel で戻し、それより前や D1 自体の障害には R2 の日次 JSON を使う。
+
+- D1 が `dub-tickets` だけになったので、Time Travel で戻してもチャットなど他機能は巻き戻らない。
+- 日次の控えは R2 `dub-tickets-backup` の `tickets/<YYYY-MM-DD>.json` にある。設定・券種・クーポン・注文・明細・チケットを含み、チケット URL は含まない。
+- URL は `TICKET_TOKEN_SECRET` とチケット ID から再計算するので、secret が同じなら復元後も同じ URL が使える。
+- 復元中は販売を止める。復元後は Stripe ダッシュボードの決済と注文を突き合わせ、バックアップ後の注文を確認する。
 
 ## ロールバック
 
