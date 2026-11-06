@@ -151,7 +151,7 @@ export function useJoinApplicant() {
 
 /**
  * 応募の削除 (論理削除)。確認ダイアログの後ろで楽観的: 先に一覧から消し、失敗したら元の一覧へ戻して
- * エラートースト。名簿に結ばれた人 (採用済み) はサーバが 409 HR_APPLICANT_JOINED で断る。
+ * エラートースト。採用〜オンボーディング完了の人はサーバが 409 HR_APPLICANT_JOINED で断る。
  */
 export function useRemoveApplicant() {
   const api = useHrApi();

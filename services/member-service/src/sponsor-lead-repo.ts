@@ -1,4 +1,4 @@
-// スポンサー営業進捗 (member_sponsor_leads) と月間目標 (member_sponsor_goals) の永続化。名刺のリポジトリとは分け、同じ D1 `member` namespace を共有する。
+// スポンサー営業進捗 (member_sponsor_leads) の永続化。名刺のリポジトリとは分け、同じ D1 `member` namespace を共有する。
 import type { DbClient } from "@dub/db";
 import type { common, sponsor } from "@dub/types";
 
@@ -15,9 +15,6 @@ export interface SponsorLeadRepo {
   listLeads(orgId: common.OrgId): Promise<LeadRow[]>;
   /** 楽観ロック: version が expectedVersion のときだけ更新し true。 */
   updateLead(next: LeadRow, expectedVersion: number): Promise<boolean>;
-  listGoals(orgId: common.OrgId): Promise<sponsor.MonthlyGoal[]>;
-  /** 楽観ロック: 今の version (無ければ 0) が expectedVersion のときだけ保存し true。 */
-  putGoal(orgId: common.OrgId, goal: sponsor.MonthlyGoal, expectedVersion: number): Promise<boolean>;
 }
 
 const byUpdatedDesc = (a: LeadRow, b: LeadRow): number =>
@@ -25,7 +22,6 @@ const byUpdatedDesc = (a: LeadRow, b: LeadRow): number =>
 
 export class InMemorySponsorLeadRepo implements SponsorLeadRepo {
   private leads = new Map<string, LeadRow>();
-  private goals = new Map<string, sponsor.MonthlyGoal>();
 
   async createLeads(rows: readonly LeadRow[]): Promise<void> {
     for (const r of rows) this.leads.set(r.id, { ...r });
@@ -44,18 +40,6 @@ export class InMemorySponsorLeadRepo implements SponsorLeadRepo {
     const cur = this.leads.get(next.id);
     if (!cur || cur.version !== expectedVersion) return false;
     this.leads.set(next.id, { ...next });
-    return true;
-  }
-  async listGoals(orgId: common.OrgId): Promise<sponsor.MonthlyGoal[]> {
-    return [...this.goals]
-      .filter(([k]) => k.startsWith(`${orgId}/`))
-      .map(([, g]) => ({ ...g }))
-      .sort((a, b) => b.month.localeCompare(a.month));
-  }
-  async putGoal(orgId: common.OrgId, goal: sponsor.MonthlyGoal, expectedVersion: number): Promise<boolean> {
-    const key = `${orgId}/${goal.month}`;
-    if ((this.goals.get(key)?.version ?? 0) !== expectedVersion) return false;
-    this.goals.set(key, { ...goal });
     return true;
   }
 }
@@ -147,39 +131,6 @@ const INSERT_COLUMNS = ["id", "org_id", ...FIELD_COLUMNS, "version", "created_by
 const INSERT_SQL = `INSERT INTO member_sponsor_leads (${INSERT_COLUMNS.join(", ")}) VALUES (${INSERT_COLUMNS.map(() => "?").join(", ")})`;
 export const UPDATE_SQL = `UPDATE member_sponsor_leads SET ${FIELD_COLUMNS.map((c) => `${c} = ?`).join(", ")}, version = ?, updated_at = ?, archived_at = ? WHERE id = ? AND version = ?`;
 
-interface GoalDbRow {
-  month: string;
-  contacted_target: number | null;
-  proposed_target: number | null;
-  agreed_target: number | null;
-  amount_target: number | null;
-  version: number;
-  updated_by: string;
-  updated_by_name: string | null;
-  updated_at: string;
-}
-
-const toGoal = (r: GoalDbRow): sponsor.MonthlyGoal => ({
-  month: r.month,
-  contacted: r.contacted_target,
-  proposed: r.proposed_target,
-  agreed: r.agreed_target,
-  amount: r.amount_target,
-  version: r.version,
-  updatedBy: r.updated_by,
-  updatedByName: r.updated_by_name,
-  updatedAt: r.updated_at,
-});
-
-// 新規 (expectedVersion = 0) は既に行があれば入れない。更新は version が合うときだけ。どちらも失敗は changes = 0。
-const INSERT_GOAL_SQL = `INSERT INTO member_sponsor_goals
-    (contacted_target, proposed_target, agreed_target, amount_target, version, updated_by, updated_by_name, updated_at, org_id, month)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT (org_id, month) DO NOTHING`;
-const UPDATE_GOAL_SQL = `UPDATE member_sponsor_goals SET
-    contacted_target = ?, proposed_target = ?, agreed_target = ?, amount_target = ?, version = ?, updated_by = ?, updated_by_name = ?, updated_at = ?
-  WHERE org_id = ? AND month = ? AND version = ?`;
-
 export function createD1SponsorLeadRepo(db: DbClient): SponsorLeadRepo {
   return {
     async createLeads(rows) {
@@ -204,15 +155,6 @@ export function createD1SponsorLeadRepo(db: DbClient): SponsorLeadRepo {
     },
     async updateLead(l, expectedVersion) {
       const res = await db.run(UPDATE_SQL, ...fieldValues(l), l.version, l.updatedAt, l.archivedAt, l.id, expectedVersion);
-      return res.meta.changes > 0;
-    },
-    async listGoals(orgId) {
-      const rows = await db.all<GoalDbRow>(`SELECT * FROM member_sponsor_goals WHERE org_id = ? ORDER BY month DESC`, orgId);
-      return rows.map(toGoal);
-    },
-    async putGoal(orgId, g, expectedVersion) {
-      const binds = [g.contacted, g.proposed, g.agreed, g.amount, g.version, g.updatedBy, g.updatedByName, g.updatedAt, orgId, g.month];
-      const res = expectedVersion === 0 ? await db.run(INSERT_GOAL_SQL, ...binds) : await db.run(UPDATE_GOAL_SQL, ...binds, expectedVersion);
       return res.meta.changes > 0;
     },
   };

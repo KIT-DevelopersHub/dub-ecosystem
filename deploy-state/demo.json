@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "154a1c88",
-  "branch": "commander/task-ctask_01M6R7Q3R7FWS2FESNH5MD0MKJ",
+  "deployedSha": "99bc44cd",
+  "branch": "commander/task-ctask_01M6RBR2HBF86HD9PM7MF6JTVG",
   "actor": "ko-tarou",
-  "markers": ["fe7-roles-delete-unavailable"],
+  "markers": ["メール名簿以外", "members-scope-edit-locked", "member-roster-scope-notice"],
   "live": true,
-  "verifiedAt": "2026-11-06T11:09:02Z",
-  "updatedAt": "2026-11-06T11:09:02Z",
-  "note": "ctask_01M6R7Q3R7FWS2FESNH5MD0MKJ: ロール削除の導線と締め出しガード"
+  "verifiedAt": "2026-11-06T12:41:50Z",
+  "updatedAt": "2026-11-06T12:41:50Z",
+  "note": "ctask_01M6RBR2HBF86HD9PM7MF6JTVG 運営メンバーの範囲"
 }

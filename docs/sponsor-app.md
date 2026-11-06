@@ -45,7 +45,7 @@ D1 `member` namespace のテーブル（いずれも additive）。
 |---|---|
 | `member_sponsor_cards` | 名刺。会社名・氏名・部署・役職・メール・電話・メモ・写真の形式（`image_content_type`、NULL = 写真なし）・登録者（`created_by` と登録時点の名簿上の氏名 `created_by_name`）・`version`（楽観ロック）・`archived_at`（論理削除） |
 | `member_sponsor_leads` | 営業先（スプレッドシートの 1 行 = 1 社）。`infra/d1/migrations/member/0021_sponsor_leads.sql`。[営業進捗](#営業進捗)を参照 |
-| `member_sponsor_goals` | 月間目標（1 か月 1 行）。`infra/d1/migrations/member/0022_sponsor_goals.sql`。[月間目標](#月間目標)を参照 |
+| `member_sponsor_goals` | 未使用。目標値は目標管理の `member_goals` に移した（本番は 0 行のまま切り替え）。`infra/d1/migrations/member/0022_sponsor_goals.sql` |
 | `member_sponsor_lead_activity` | メール連携の自動更新の履歴。`infra/d1/migrations/member/0024_sponsor_mail_sync.sql`。[メール連携](#メール連携送受信から進捗を自動更新)を参照 |
 
 写真本体は R2（既存バケット `dub-file-attachments`、キー `sponsor/cards/<cardId>`、バインディング `SPONSOR_FILES`）。
@@ -164,7 +164,7 @@ D1 `member` namespace のテーブル（いずれも additive）。
 
 ## 月間目標
 
-月ごとの目標に対する達成率を見る。`/sponsor/goals`（「目標」タブ）。`features/sponsor/SponsorGoalsScreen.tsx` / `goals.ts`。
+目標管理アプリで置いた目標に対する達成率を見る（閲覧専用）。`/sponsor/goals`（「目標」タブ）。`features/sponsor/SponsorGoalsScreen.tsx` / `goals.ts`。
 
 - **指標は 4 つ**。実績は保存せず、営業進捗の日付から数える（`monthActuals`）。
 
@@ -177,8 +177,7 @@ D1 `member` namespace のテーブル（いずれも additive）。
 
 - **日付の記録**: ステータスが進むと、初回連絡日・提案日・内諾日を日本時間の今日で自動で埋める（`sponsor.applyLeadMilestones`）。既に日付があれば残し、手前へ戻すと消す。見送りにする時は残し、見送りから戻す時は戻した先より後の日付を消す。詳細から手で直せる。
   取り込みと初期データでは埋めない（過去の日付は分からないため）。達した節目の日付が空の企業はその分が月の実績に入らず、画面に社数を出す。
-- **目標**: 指標ごとに任意（空欄は目標なしで、達成率を出さない）。保存は `PUT /members/sponsor/goals/:month`（`expectedVersion`、新規は 0・409）。閲覧 = `sponsor:read`、設定 = `sponsor:write`。
-- **目標管理アプリと連動**: ここで置いた目標値は、目標管理のスポンサー 4 指標の KPI の目標値になる（[詳細](goals-app.md#スポンサーの目標タブとの連動)）。
+- **目標**: 目標管理アプリの KPI（スポンサー 4 指標）で設定する。このタブと API は読むだけで、書き込みのルートは無い。KPI が無い指標は目標なしで、達成率を出さない。閲覧 = `sponsor:read`、設定 = `app:goals:edit` + `goals:read`（[詳細](goals-app.md#スポンサーの目標タブへの表示)）。
 - 達成率は切り捨てで、100% を超えても数値はそのまま出し、メーターは 100% で止める。月の区切りは日本時間。
 
 ## メール連携（送受信から進捗を自動更新）

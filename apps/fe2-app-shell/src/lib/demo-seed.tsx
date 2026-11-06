@@ -38,6 +38,10 @@ const ME_ID = "usr_demo";
 const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "identity:read",
   "identity:admin",
+  "members:roster_view",
+  "members:roster_edit",
+  "members:mail_view",
+  "members:mail_edit",
   // 代理表示 (admin impersonation): メール名簿の「このメンバーとして表示」。
   "identity:impersonate",
   "event:read",
@@ -847,12 +851,18 @@ const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filte
   (k) => k !== "chat:manage_sections" && k !== "chat:change_visibility",
 );
 
+// 運営メンバーの範囲の見え方を ?demo_account= で確かめる用。
+const MEMBERS_SCOPE_ORG_CHART_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:"));
+const MEMBERS_SCOPE_ROSTER_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:mail_"));
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: CHAT_EDITOR_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
+  { id: "usr_scope_org", displayName: "範囲 組織図まで", email: "scope-org@developershub.jp", permissions: MEMBERS_SCOPE_ORG_CHART_PERMISSIONS, inbox: [] },
+  { id: "usr_scope_roster", displayName: "範囲 メール名簿以外", email: "scope-roster@developershub.jp", permissions: MEMBERS_SCOPE_ROSTER_PERMISSIONS, inbox: [] },
   { id: "usr_lead", displayName: "統括 山本", email: "lead@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: LEAD_INBOX.map((m) => ({ ...m })), roleShareWith: ["usr_bob", "usr_sponsor"] },
 ];
 
@@ -1317,6 +1327,21 @@ function createMailStore() {
       const own = new Set(ids);
       for (const r of inboxOf(me.id)) if (own.has(r.id)) r.read = read;
       return json({ updated: ids.length, read });
+    }
+    if (method === "POST" && pathname === "/api/v1/mail/bulk") {
+      const { folder, action } = body as mail.MailBulkRequest;
+      const hit = folderThreads(readInbox).filter((t) => inView(t, folder));
+      if (action === "read" || action === "unread") {
+        for (const t of hit) for (const m of t.msgs) if (m.mine !== false) m.read = action === "read";
+      } else {
+        const flags = new Map(loadFlags().map((f) => [f.threadId, f]));
+        for (const t of hit) {
+          const f = flags.get(t.threadId) ?? { threadId: t.threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
+          flags.set(t.threadId, { ...f, ...(action === "archive" ? { archived: true } : { trashed: true }) });
+        }
+        saveFlags([...flags.values()]);
+      }
+      return json({ updated: hit.length });
     }
     // 下書き: per-account, in-session (a reload resets, like Sent).
     {
@@ -4289,6 +4314,7 @@ function createMembersStore() {
   members.push(mk("member_hr1", "小林 葵", "メンバー", "added", ["team_dev"], members.length, "aoi@example.com", "情報工学科", "1年"));
   members.push(mk("member_hr2", "佐野 陸", "メンバー", "added", ["team_pr"], members.length, "riku@example.com", "メディア情報学科", "2年"));
   members.push(mk("member_hr3", "高橋 美咲", "メンバー", "added", ["team_venue"], members.length, "misaki@example.com", "建築学科", "1年"));
+  members.push(mk("member_hr4", "野村 蓮", "メンバー", "added", ["team_dev"], members.length, "ren@example.com", "情報工学科", "2年"));
   const applicants: DemoApplicant[] = [
     applicant("app_demo_1", "青木 陽向", "scheduling", 1, { nameKana: "あおき ひなた", email: "hinata@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", motivation: "運営ツールの開発に関わりたいです。" }),
     applicant("app_demo_2", "井上 さくら", "scheduling", 2, { nameKana: "いのうえ さくら", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", source: "紹介" }),
@@ -4300,6 +4326,8 @@ function createMembersStore() {
     applicant("app_demo_8", "佐野 陸", "onboarding", 3, { nameKana: "さの りく", email: "riku@example.com", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", memberId: "member_hr2", version: 5, interviewAt: hrAt(12, 18) }),
     applicant("app_demo_9", "高橋 美咲", "onboarded", 6, { nameKana: "たかはし みさき", email: "misaki@example.com", department: "建築学科", grade: "1年", desiredTeamId: "team_venue", memberId: "member_hr3", version: 6, interviewAt: hrAt(20, 18) }),
     applicant("app_demo_10", "千葉 拓海", "withdrawn", 5, { nameKana: "ちば たくみ", department: "電気電子工学科", grade: "1年", source: "紹介" }),
+    // 採用後に辞退へ動かした人 (memberId が残る)。
+    applicant("app_demo_11", "野村 蓮", "withdrawn", 4, { nameKana: "のむら れん", email: "ren@example.com", department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", memberId: "member_hr4", version: 5, interviewAt: hrAt(11, 18) }),
   ];
   const hrEvents: hr.ApplicantEvent[] = [];
   let hrSeq = 0;
@@ -4399,8 +4427,8 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
-      // 本番と同じ: 名簿に結ばれた人 (採用済み) は 409。
-      if (a.memberId !== null) return err("HR_APPLICANT_JOINED", 409);
+      // 本番と同じ: 採用〜オンボーディング完了の人は 409。
+      if (hr.blocksRemoval(a.stage, a.memberId !== null)) return err("HR_APPLICANT_JOINED", 409);
       hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });
@@ -4459,6 +4487,9 @@ function createMembersStore() {
     const hrRes = hrHandle(method, pathname, body);
     if (hrRes) return hrRes;
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
+    if (method === "GET" && pathname === "/api/v1/members/org-overview") {
+      return json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => memberValues.toOrgChartMember(m)) });
+    }
     // canonical team list other apps read
     if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
     // チーム単位メンション用 (self-scoped): チーム一覧 + ログイン中アカウントの所属。
@@ -4555,6 +4586,22 @@ function createMembersStore() {
       mem.version += 1;
       mem.updatedAt = isoNow();
       return json({ ...mem, teamIds: [...mem.teamIds] });
+    }
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/org$/.exec(pathname);
+    if (m && method === "PATCH") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (typeof body?.version === "number" && body.version !== mem.version) {
+        const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
+      if (body?.position !== undefined) mem.position = memberValues.isMemberPosition(body.position) ? body.position : null;
+      if (body?.status !== undefined) mem.status = body.status;
+      if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+      if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
+      mem.version += 1;
+      return json(memberValues.toOrgChartMember(mem));
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {
@@ -5831,7 +5878,11 @@ function createLpProposalsStore() {
 
 // ── 目標管理 (member-service /members/goals の demo) ─────────────────────────────
 // 保存はメモリ上。実績は本物と同じ指標の見本値を月ごとに持ち、計算は @dub/types goal を使う。
-function createGoalsStore(me: () => { id: string; displayName: string }, teams: () => goalValues.GoalTeam[], sponsorGoal: (month: string) => sponsorValues.GoalTargets | null) {
+function createGoalsStore(
+  me: () => { id: string; displayName: string },
+  teams: () => goalValues.GoalTeam[],
+  sponsorActuals: (month: string) => Partial<Record<goalValues.GoalMetric, number>>,
+) {
   type Row = Omit<goalValues.TeamGoal, "kpis" | "percent"> & { kpis: goalValues.Kpi[] };
   const month = goalValues.currentMonth();
   const prev = goalValues.shiftMonth(month, -1);
@@ -5841,10 +5892,11 @@ function createGoalsStore(me: () => { id: string; displayName: string }, teams: 
   });
   const rows: Row[] = [
     row("team_dev", month, "参加者向け機能を期日どおりに出す", [kpi("期日までに終えるタスク", "tasks_done", 18), kpi("タスク完了率", "tasks_done_rate", 90)]),
-    row("team_sponsor", month, "協賛の打診を増やす", [kpi("新規接触数", "sponsor_contacted", 15), kpi("協賛額", "sponsor_amount", 1_000_000), kpi("お礼状の送付", "manual", 10, 4)]),
+    row("team_sponsor", month, "協賛の打診を増やす", [kpi("新規接触数", "sponsor_contacted", 15), kpi("提案数", "sponsor_proposed", 4), kpi("内諾・契約数", "sponsor_agreed", 2), kpi("協賛額", "sponsor_amount", 1_000_000), kpi("お礼状の送付", "manual", 10, 4)]),
     row("team_pr", month, "LP の認知を広げる", [kpi("LP の訪問者数", "lp_visitors", 1000), kpi("SNS 投稿数", "manual", 12, 13)]),
     row("team_hq", month, "運営メンバーを増やす", [kpi("応募者数", "hr_applicants", 8), kpi("採用数", "hr_hired", 3)]),
     row("team_dev", prev, "参加者向け機能の土台を作る", [kpi("期日までに終えるタスク", "tasks_done", 12)]),
+    row("team_sponsor", prev, "協賛の打診を始める", [kpi("新規接触数", "sponsor_contacted", 2), kpi("提案数", "sponsor_proposed", 1), kpi("内諾・契約数", "sponsor_agreed", 1)]),
   ];
   const actuals = (teamId: string, m: string): Partial<Record<goalValues.GoalMetric, number | null>> => {
     const scale = m === month ? 1 : m === prev ? 1.3 : 0;
@@ -5854,24 +5906,22 @@ function createGoalsStore(me: () => { id: string; displayName: string }, teams: 
       tasks_done: Math.round(done * scale),
       tasks_done_rate: total === 0 || scale === 0 ? null : Math.round((Math.round(done * scale) / total) * 100),
       hr_applicants: Math.round(5 * scale), hr_interviews: Math.round(4 * scale), hr_hired: Math.round(scale),
-      sponsor_cards: Math.round(13 * scale), sponsor_contacted: Math.round(9 * scale), sponsor_proposed: Math.round(4 * scale),
-      sponsor_agreed: Math.round(scale), sponsor_amount: Math.round(300_000 * scale), participations: Math.round(6 * scale), lp_visitors: Math.round(640 * scale),
+      sponsor_cards: Math.round(13 * scale), participations: Math.round(6 * scale), lp_visitors: Math.round(640 * scale),
+      ...sponsorActuals(m),
     };
   };
   const toGoal = ({ kpis, ...r }: Row): goalValues.TeamGoal => {
     const a = actuals(r.teamId, r.month);
-    const linked = goalValues.linkedTargetsOf(sponsorGoal(r.month));
     const progress = kpis.map((k): goalValues.KpiProgress => {
       const actual = k.metric === "manual" ? k.manualActual : (a[k.metric] ?? null);
-      const target = linked[k.metric] ?? k.target;
-      return { ...k, target, status: actual === null ? "empty" : "ok", actual, linked: linked[k.metric] !== undefined, percent: goalValues.kpiPercent(actual, target) };
+      return { ...k, status: actual === null ? "empty" : "ok", actual, percent: goalValues.kpiPercent(actual, k.target) };
     });
     return { ...r, kpis: progress, percent: goalValues.goalPercent(progress) };
   };
   function handle(method: string, pathname: string, url: URL, body: any): Response | null {
     if (pathname === "/api/v1/members/goals" && method === "GET") {
       const m = url.searchParams.get("month") ?? month;
-      const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal), linkedTargets: goalValues.linkedTargetsOf(sponsorGoal(m)) };
+      const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal) };
       return json(res);
     }
     const hit = /^\/api\/v1\/members\/goals\/([^/]+)\/(\d{4}-\d{2})$/.exec(pathname);
@@ -5890,7 +5940,7 @@ function createGoalsStore(me: () => { id: string; displayName: string }, teams: 
     if (i < 0) rows.push(next); else rows[i] = next;
     return json(toGoal(next));
   }
-  return { handle };
+  return { handle, sponsorGoals: () => goalValues.sponsorGoalsOf(rows) };
 }
 
 // ── スポンサー (member-service /members/sponsor/* の demo) ──────────────────────
@@ -5910,7 +5960,7 @@ function demoCardSvg(company: string, person: string, title: string, accent: str
     `<circle cx="790" cy="150" r="56" fill="${accent}" opacity="0.85"/></svg>`;
 }
 
-function createSponsorStore(me: () => { id: string; displayName: string }) {
+function createSponsorStore(me: () => { id: string; displayName: string }, sponsorGoals: () => sponsorValues.MonthlyGoal[]) {
   // 常に過去 (今日の分も 30 分前) にして、新しく登録した名刺が先頭に来るようにする。
   const at = (daysAgo: number): string => new Date(Date.now() - daysAgo * 86_400_000 - 30 * 60_000).toISOString();
   const enc = new TextEncoder();
@@ -6021,19 +6071,17 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     }),
   ];
   const mailDemo = createSponsorMailDemo(leads, cards);
-  // 今月は途中経過、先月は達成済みの見本。
-  const monthOf = (offset: number): string => {
-    const d = new Date();
-    return new Date(Date.UTC(d.getFullYear(), d.getMonth() + offset, 15)).toISOString().slice(0, 7);
+  // 目標管理の実績。スポンサーの目標タブと同じ数字になるよう、同じ見本の企業から数える。
+  const actuals = (month: string): Partial<Record<goalValues.GoalMetric, number>> => {
+    const inMonth = (on: string | null) => on?.startsWith(`${month}-`) ?? false;
+    const agreed = leads.filter((l) => inMonth(l.agreedOn) && l.status !== "見送り");
+    return {
+      sponsor_contacted: leads.filter((l) => inMonth(l.firstContactOn)).length,
+      sponsor_proposed: leads.filter((l) => inMonth(l.proposedOn)).length,
+      sponsor_agreed: agreed.length,
+      sponsor_amount: agreed.reduce((sum, l) => sum + (l.expectedAmount ?? 0), 0),
+    };
   };
-  type Goal = sponsorValues.MonthlyGoal;
-  const goal = (month: string, t: sponsorValues.GoalTargets): Goal => ({
-    ...t, month, version: 1, updatedBy: "usr_sponsor" as Goal["updatedBy"], updatedByName: "鈴木 一郎", updatedAt: at(1),
-  });
-  const goals: Goal[] = [
-    goal(monthOf(0), { contacted: 10, proposed: 4, agreed: 2, amount: 500000 }),
-    goal(monthOf(-1), { contacted: 2, proposed: 1, agreed: 1, amount: null }),
-  ];
   let leadSeq = 0;
   const LEAD_FIELDS = [
     "companyName", "industry", "owner", "contactName", "contactRole", "contactEmail", "source", "contactType", "evidence", "priority", "plan", "status",
@@ -6094,21 +6142,7 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     const mailHit = mailDemo.handle(method, pathname, body);
     if (mailHit) return mailHit;
     if (pathname.startsWith("/api/v1/members/sponsor/leads")) return handleLeads(method, pathname, body, now);
-    if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") return json({ goals: goals.map((g) => ({ ...g })) });
-    const goalPath = /^\/api\/v1\/members\/sponsor\/goals\/(\d{4}-\d{2})$/.exec(pathname);
-    if (goalPath && method === "PUT") {
-      const month = goalPath[1]!;
-      const cur = goals.find((g) => g.month === month);
-      if ((cur?.version ?? 0) !== body?.expectedVersion) return err("SPONSOR_VERSION_CONFLICT", 409);
-      const u = me();
-      const next: Goal = {
-        month, contacted: body.contacted, proposed: body.proposed, agreed: body.agreed, amount: body.amount, version: body.expectedVersion + 1,
-        updatedBy: u.id as Goal["updatedBy"], updatedByName: u.displayName, updatedAt: now,
-      };
-      if (cur) goals.splice(goals.indexOf(cur), 1);
-      goals.push(next);
-      return json({ ...next });
-    }
+    if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") return json({ goals: sponsorGoals() });
     if (pathname === "/api/v1/members/sponsor/cards") {
       if (method === "GET") return json({ cards: [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((c) => ({ ...c })) });
       if (method === "POST") {
@@ -6160,7 +6194,7 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     return null;
   }
 
-  return { handle, recordMail: mailDemo.recordMail, goalOf: (month: string) => goals.find((g) => g.month === month) ?? null };
+  return { handle, actuals, recordMail: mailDemo.recordMail };
 }
 
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
@@ -6228,8 +6262,8 @@ export function createDemoFetch(): typeof fetch {
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
-  const sponsorStore = createSponsorStore(() => currentMe().user);
-  const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.goalOf(m));
+  const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.actuals(m));
+  const sponsorStore = createSponsorStore(() => currentMe().user, goalsStore.sponsorGoals);
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
   const lpSiteConfigStore = createLpSiteConfigStore({
     publish: lpStore.publish,

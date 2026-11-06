@@ -34,3 +34,13 @@ export function AppReadOnlyNotice({ appId, testId }: { appId: string; testId?: s
     </div>
   );
 }
+
+/** アプリは編集でも、範囲の外の画面では押せない理由を出す (運営メンバーの編集範囲など)。 */
+export function ScopeReadOnlyNotice({ message, testId }: { message: string; testId: string }): JSX.Element {
+  return (
+    <div style={style} role="status" data-testid={testId}>
+      <span aria-hidden>👁</span>
+      <span>{message}</span>
+    </div>
+  );
+}

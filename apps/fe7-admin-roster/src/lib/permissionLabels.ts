@@ -23,6 +23,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   lp: "LP管理",
   audit: "監査ログ",
   hr: "人事",
+  members: "運営メンバー",
   sponsor: "スポンサー",
   goals: "目標管理",
   github: "GitHub 連携",
@@ -77,6 +78,10 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "notif:broadcast_publish": { label: "管理者向け通知をメンバーへ公開", description: "「Notification管理」画面で管理者向けの通知を確認し、メンバー全体へ公開・公開解除できるようになります（誰に届くかの一覧もここで見られます）。" },
   "notif:admin": { label: "フィードバック一覧・新機能のお知らせ配信", description: "メンバーから届いたフィードバックの一覧を確認でき、新機能のお知らせ（リリースノート）を全体へ配信できるようになります。" },
   // ↓ ロール管理には出さない鍵（policy.HIDDEN_PERMISSION_KEYS）。実効権限の一覧など別画面用の表示名だけ残す。
+  "members:roster_view": { label: "運営名簿の閲覧", description: "運営名簿のタブと、連絡先などの個人情報を見られます。運営メンバーの閲覧範囲で設定します。" },
+  "members:roster_edit": { label: "運営名簿の編集", description: "本人の情報の編集やアカウントの紐付けができます。運営メンバーの編集範囲で設定します。" },
+  "members:mail_view": { label: "メール名簿の閲覧", description: "メール名簿のタブを見られます。運営メンバーの閲覧範囲で設定します。" },
+  "members:mail_edit": { label: "メール名簿の編集", description: "ロール管理の編集と「名簿・ロールの管理」も持つロールが、メール名簿を編集できます。運営メンバーの編集範囲で設定します。" },
   "notif:inbox:self": { label: "自分の受信箱", description: "通知アプリを「閲覧」以上にすると自動で付きます。自分あての通知を受信箱で閲覧・既読管理できます。" },
   "notif:prefs:self": { label: "自分の通知設定", description: "通知アプリを「閲覧」以上にすると自動で付きます。自分の通知の受け取り方（設定）を確認・変更できます。" },
   "notif:send": { label: "通知の送信（未使用）", description: "現在この権限で使える機能はありません（通知の送信はサービス間でのみ行われます）。" },

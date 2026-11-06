@@ -159,6 +159,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.getOverview(reqCtx(c)));
   });
 
+  // 組織図までのロール向け。形は overview と同じで、個人情報の項目は空。
+  app.get("/members/org-overview", async (c) => {
+    return c.json(await svc.getOrgOverview(reqCtx(c)));
+  });
+
   // チーム単位メンション用の自分視点のチーム情報 (AUTHENTICATED in the table: signed-in なら
   // 誰でも可・名簿キー不要)。名簿を読む権限が無い一般メンバーでも「@統括チーム」を選べて、
   // 受け取った側もチップをチーム名で読める必要があるため。返すのはチーム(id/key/name/color)と
@@ -208,6 +213,10 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.patch("/members/people/:id", async (c) => {
     const body = await readJson<member.UpdateMemberRequest>(c);
     return c.json(await svc.updateMember(reqCtx(c), c.req.param("id"), body));
+  });
+  app.patch("/members/people/:id/org", async (c) => {
+    const body = await readJson<member.UpdateMemberOrgRequest>(c);
+    return c.json(await svc.updateMemberOrg(reqCtx(c), c.req.param("id"), body));
   });
   app.delete("/members/people/:id", async (c) => {
     await svc.deleteMember(reqCtx(c), c.req.param("id"));
@@ -350,11 +359,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     await sponsorLeadSvc.remove(reqCtx(c), c.req.param("id"));
     return c.body(null, 204);
   });
-  app.get("/members/sponsor/goals", async (c) => c.json(await sponsorLeadSvc.listGoals(reqCtx(c))));
-  app.put("/members/sponsor/goals/:month", async (c) => {
-    const body = await readJson<sponsor.PutGoalRequest>(c);
-    return c.json(await sponsorLeadSvc.putGoal(reqCtx(c), c.req.param("month"), body));
-  });
+  // 目標値は目標管理アプリの KPI が正で、ここは読むだけ。
+  app.get("/members/sponsor/goals", async (c) => c.json(await goalSvc.sponsorGoals()));
   app.get("/members/sponsor/cards", async (c) => c.json(await sponsorSvc.list(reqCtx(c))));
   app.post("/members/sponsor/cards", async (c) => {
     const body = await readJson<sponsor.CreateCardRequest>(c);

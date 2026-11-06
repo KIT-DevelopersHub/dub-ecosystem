@@ -196,3 +196,18 @@ CREATE TABLE driveshare_attendance_settings (
 );
 `.trim(),
 };
+
+// Physical twin: infra/d1/migrations/driveshare/0005_google_api_usage.sql (lockstep test).
+// Calendar / Meet calls per UTC minute, read by usage-meter for the 無料枠 dashboard.
+export const DRIVESHARE_GOOGLE_API_USAGE_MIGRATION: Migration = {
+  namespace: "driveshare",
+  id: "0005_google_api_usage",
+  up: `
+CREATE TABLE driveshare_google_api_usage (
+  api    TEXT NOT NULL CHECK (api IN ('calendar','meet')),
+  minute TEXT NOT NULL,
+  calls  INTEGER NOT NULL,
+  PRIMARY KEY (api, minute)
+);
+`.trim(),
+};

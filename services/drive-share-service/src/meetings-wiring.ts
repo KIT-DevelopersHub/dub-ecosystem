@@ -6,6 +6,7 @@
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { common } from "@dub/types";
 import { createMockCalendarClient, createMockCalendarState } from "./calendar-mock-client";
+import { createGoogleCallRecorder } from "./google/api-usage";
 import { createGoogleCalendarClient, type CalendarClient } from "./google/calendar-client";
 import { createTokenProvider, isInvalidGrant } from "./google/token";
 import { importTokenKey } from "./google/crypto";
@@ -18,6 +19,7 @@ import { createMemberDirectory } from "./member-directory";
 import { createD1MeetingStore } from "./meetings-store";
 import { createD1AttendanceStore } from "./attendance-store";
 import { createAttendanceService, type AttendanceService, type MeetRecordsAccess } from "./attendance-service";
+import { createRemoteSyncState, type MeetingSyncState } from "./meeting-sync-state";
 import { createMeetingsService, type MeetingAccount, type MeetingsService } from "./meetings-service";
 import { createIdentityRoleMembership } from "./role-membership";
 import { createGoogleDriveShareClient } from "./google/client";
@@ -75,16 +77,17 @@ export async function resolveMeetingAccount(env: Env, resolved: ResolvedCredenti
     email: resolved.source === "connected" ? resolved.row.email : null,
     calendarReady,
     meetReady,
-    calendar: createGoogleCalendarClient({ token, ...(fetchImpl ? { fetchImpl } : {}) }),
+    calendar: createGoogleCalendarClient({ token, recordCall: createGoogleCallRecorder(env.DB), ...(fetchImpl ? { fetchImpl } : {}) }),
   };
 }
+
+const meetingSyncStub = (ns: NonNullable<Env["MEETING_SYNC"]>) => ns.get(ns.idFromName(`meetings:${common.DUB_DEFAULT_ORG_ID}`));
 
 /** Make sure the MeetingSyncDO alarm is scheduled (hourly), or due within `soonMs`
  *  (no binding = no-op). */
 export async function kickMeetingSync(env: Env, soonMs?: number): Promise<void> {
   if (!env.MEETING_SYNC) return;
-  const stub = env.MEETING_SYNC.get(env.MEETING_SYNC.idFromName(`meetings:${common.DUB_DEFAULT_ORG_ID}`));
-  await stub.fetch("https://meeting-sync/kick", {
+  await meetingSyncStub(env.MEETING_SYNC).fetch("https://meeting-sync/kick", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(soonMs === undefined ? {} : { soonMs }),
@@ -94,13 +97,15 @@ export async function kickMeetingSync(env: Env, soonMs?: number): Promise<void> 
 export async function buildMeetingsService(
   env: Env,
   ctx: { requestId: string; userId?: string },
-  opts: { system?: boolean; googleBudget?: number; syncTimeLimitMs?: number; background?: (work: Promise<unknown>) => void } = {},
+  opts: { system?: boolean; googleBudget?: number; syncTimeLimitMs?: number; background?: (work: Promise<unknown>) => void; syncState?: MeetingSyncState } = {},
 ): Promise<MeetingsService> {
   const orgId = common.DUB_DEFAULT_ORG_ID;
   const accountStore = createD1GoogleAccountStore(createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId }));
   const key = await importTokenKey(env.DRIVESHARE_TOKEN_ENC_KEY);
   let account: Promise<MeetingAccount> | null = null;
   const reqCtx = { requestId: ctx.requestId, ...(ctx.userId ? { userId: ctx.userId } : {}) };
+  const ns = env.MEETING_SYNC;
+  const syncState = opts.syncState ?? (ns ? createRemoteSyncState((path, init) => meetingSyncStub(ns).fetch(`https://meeting-sync${path}`, init as never) as unknown as Promise<Response>) : undefined);
   return createMeetingsService({
     store: createD1MeetingStore(createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId })),
     attendance: createD1AttendanceStore(createDbClient(env.DB, { namespace: "driveshare", requestId: ctx.requestId })),
@@ -116,6 +121,7 @@ export async function buildMeetingsService(
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
     ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
     ...(opts.background ? { background: opts.background } : {}),
+    ...(syncState ? { syncState } : {}),
   });
 }
 
@@ -132,7 +138,7 @@ export async function resolveMeetRecords(env: Env, resolved: ResolvedCredentials
   } catch {
     ready = false;
   }
-  return { ready, client: createGoogleMeetRecordsClient({ token, ...(fetchImpl ? { fetchImpl } : {}) }) };
+  return { ready, client: createGoogleMeetRecordsClient({ token, recordCall: createGoogleCallRecorder(env.DB), ...(fetchImpl ? { fetchImpl } : {}) }) };
 }
 
 async function meetRecordsFor(env: Env, requestId: string): Promise<MeetRecordsAccess> {

@@ -39,9 +39,17 @@ describe("goal", () => {
     expect(goal.elapsedDays("2026-12", now)).toBe(0);
   });
 
-  it("links only the sponsor tab targets that are set", () => {
-    expect(goal.linkedTargetsOf({ contacted: 15, proposed: null, agreed: 3, amount: null })).toEqual({ sponsor_contacted: 15, sponsor_agreed: 3 });
-    expect(goal.linkedTargetsOf(null)).toEqual({});
+  it("builds the sponsor tab goals from every team's KPIs", () => {
+    const kpi = (metric: goal.GoalMetric, target: number) => ({ metric, target });
+    expect(goal.sponsorGoalsOf([
+      { month: "2026-10", kpis: [kpi("sponsor_amount", 500)] },
+      { month: "2026-11", kpis: [kpi("sponsor_contacted", 10), kpi("tasks_done", 99), kpi("sponsor_cards", 99)] },
+      { month: "2026-11", kpis: [kpi("sponsor_contacted", 15), kpi("sponsor_agreed", 3)] },
+      { month: "2026-12", kpis: [kpi("tasks_done", 5)] },
+    ])).toEqual([
+      { month: "2026-11", contacted: 15, proposed: null, agreed: 3, amount: null },
+      { month: "2026-10", contacted: null, proposed: null, agreed: null, amount: 500 },
+    ]);
   });
 
   it("validates months", () => {

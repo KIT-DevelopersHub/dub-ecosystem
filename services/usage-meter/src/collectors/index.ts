@@ -11,6 +11,7 @@
 import type { DbClient } from "@dub/db";
 import type { Env } from "../env";
 import { cloudflareCollector } from "./cloudflare";
+import { gcpCollector } from "./gcp";
 import { resendCollector } from "./resend";
 
 export type MetricMap = Partial<Record<string, number>>;
@@ -30,5 +31,5 @@ export interface Collector {
 export const COLLECTORS: readonly Collector[] = [
   cloudflareCollector,
   resendCollector,
-  // gcpCollector,  // <- add here when a GCP collector + MASTER "gcp" rows land.
+  gcpCollector,
 ];

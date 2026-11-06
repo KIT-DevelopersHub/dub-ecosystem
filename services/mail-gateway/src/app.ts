@@ -44,8 +44,8 @@ import { isCompanyAddress, resolveReplyFromAddress, resolveUserFromAddress } fro
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, setInboundReadState, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
-import { parseListMessagesQuery, parseReadStateRequest, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
-import { countFolders, listInboundFolder } from "./folders";
+import { parseBulkRequest, parseListMessagesQuery, parseReadStateRequest, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
+import { applyBulkAction, countFolders, listInboundFolder } from "./folders";
 import { assertTargetAllowed, getForwardSetting, parseForwardPatch, parseRegisterRequest, registerForwardTarget, removeForwardSetting, setForwardEnabled } from "./user-forward";
 import { addBlock, assertBlockAllowed, listBlocks, loadMatcher, markBlocked, normalizeBlockValue, parseBlockRequest, removeBlock } from "./blocks";
 
@@ -307,6 +307,14 @@ export function createApp() {
     const { ids, read } = parseReadStateRequest(await c.req.json().catch(() => null));
     await setInboundReadState(dbOf(c), ids, ownerOf(c), read);
     return c.json({ updated: ids.length, read });
+  });
+
+  // 全件選択: one action over a whole view, loaded by the client or not. Everything it changes
+  // is the caller's own (their read stamps, their flags), so 閲覧 is the right tier here too.
+  ext.post("/bulk", async (c) => {
+    const { folder, action } = parseBulkRequest(await c.req.json().catch(() => null));
+    const updated = await applyBulkAction(dbOf(c), await inboundScopeOf(c), ownerOf(c), folder, action);
+    return c.json({ updated });
   });
 
   ext.post("/messages/:id/read", async (c) => {

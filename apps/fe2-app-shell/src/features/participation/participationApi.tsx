@@ -41,6 +41,8 @@ export interface ParticipationApi {
   candidates(id: string): Promise<ListParticipationCandidatesResponse>;
   /** 名簿全体（手動紐付けの検索対象）を取得 (identity:read)。既存の overview を流用。 */
   overview(): Promise<MembersOverview>;
+  /** 組織図までのロール向け: 個人情報を落とした overview。 */
+  orgOverview(): Promise<MembersOverview>;
   /** 反映確定 (link/create/skip/unlink)。roster を書き換えるので identity:admin。 */
   resolve(id: string, body: ResolveParticipationRequest): Promise<ResolveParticipationResponse>;
   /** オンボーディング案内 (管理タブ)。閲覧 = 参加届の閲覧、書き込み = 参加届の編集。 */
@@ -88,6 +90,7 @@ export function createParticipationApi(api: ApiClient): ParticipationApi {
         path: `${BASE}/participation/${encodeURIComponent(id)}/candidates`,
       }),
     overview: () => api.request<MembersOverview>({ method: "GET", path: `${BASE}/overview` }),
+    orgOverview: () => api.request<MembersOverview>({ method: "GET", path: `${BASE}/org-overview` }),
     resolve: (id, body) =>
       api.request<ResolveParticipationResponse, ResolveParticipationRequest>({
         method: "POST",
