@@ -207,6 +207,13 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.provision(orgId, body, ctxOf(c)));
   });
 
+  // 名簿で在籍 (added) かつ紐付いた人の招待中アカウントを有効化 (member-service only)。
+  // By user id from the roster link — never by an email — and invited-only (see service).
+  app.post("/internal/users/:id/activate", async (c) => {
+    const body = await readJson<identity.ActivateInvitedUserRequest>(c);
+    return c.json(await svc.activateInvited(c.req.param("id"), orgId, body, ctxOf(c)));
+  });
+
   // Identity master by id — internal S2S read for the gateway /me composition.
   // External clients reach the user via /identity/users/:id (auth'd); the gateway
   // 404s this bare path, and the INTERNAL rule is the second line of defence.

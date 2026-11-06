@@ -209,10 +209,14 @@ export class HrService {
       if (!person || person.orgId !== this.deps.orgId || person.archivedAt !== null) {
         throw errors.validationFailed([{ field: "memberId", reason: "not_found" }]);
       }
+      let joined = person;
       if (person.status === "invited" || person.status === "considering") {
         const promoted = { ...person, status: "added" as const, version: person.version + 1, updatedAt: this.deps.now() };
         if (!(await this.deps.repo.updatePerson(promoted, person.version))) throw errVersionConflict(person.id);
+        joined = promoted;
       }
+      // 既にアカウントに紐付いた人なら、招待中のアカウントを有効化 (best-effort)。
+      await this.members.activateLinkedIdentity(ctx, joined, "hr.join");
       memberId = person.id;
     } else {
       const grade = cur.grade ? member.normalizeGrade(cur.grade) : null;
