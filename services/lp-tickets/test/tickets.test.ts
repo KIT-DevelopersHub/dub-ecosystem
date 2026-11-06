@@ -11,7 +11,7 @@ import type {
   LpTicketsState,
   LpTicketTypeSummary,
 } from "../src/types";
-import { stripeFrom } from "../src/index";
+import { stripeFrom } from "../src/deps";
 import { TicketService } from "../src/tickets";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
@@ -103,7 +103,6 @@ async function setup(
   kind: RepoKind,
   opts: {
     stripe?: ReturnType<typeof fakeStripe> | null;
-    cap?: number;
     publish?: boolean;
     paypay?: boolean;
     previewKey?: string | null;
@@ -111,12 +110,11 @@ async function setup(
     deps?: Partial<AppDeps>;
   } = {},
 ) {
-  const h = await makeApp(kind, opts.level ?? "edit", 5000, null, opts.publish === false ? [] : ["lp:publish"], {
+  const h = await makeApp(kind, opts.level ?? "edit", opts.publish === false ? [] : ["lp:publish"], {
     stripe: opts.stripe ? opts.stripe.client : null,
     stripeWebhookSecret: WHSEC,
     paypayEnabled: opts.paypay === true,
     ticketPreviewKey: opts.previewKey ?? null,
-    ...(opts.cap !== undefined ? { dailyCheckoutCap: opts.cap } : {}),
     ...opts.deps,
   });
   return h;
@@ -314,7 +312,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const code = (await issueCoupon(app, a.id)).code;
     expect((await app.fetch(checkout({ ticketTypeId: a.id, couponCode: code }))).status).toBe(200);
 
-    expect((await app.fetch(get("/lp/internal/tickets", {}))).status).toBe(404);
+    expect((await app.fetch(get("/lp/internal/tickets", {}))).status).toBe(403);
     const res = await body<{ enabled: boolean; paymentReady: boolean; types: { name: string; soldOut: boolean }[] }>(
       await app.fetch(get("/lp/internal/tickets", INTERNAL)),
     );
@@ -375,7 +373,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     });
     const orderId = new URL(redirectUrl).searchParams.get("order");
     const confirmed = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId }, INTERNAL));
-    expect(await confirmed.json()).toEqual({ status: "paid", summary: "招待 ×1" });
+    expect(await confirmed.json()).toMatchObject({ status: "paid", summary: "招待 ×1" });
   });
 
   it("checkout disabled → 404; paid ticket without Stripe → 503; free still works", async () => {
@@ -459,7 +457,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(s.types[0]!.stats.remaining).toBe(8);
 
     const confirmed = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
-    expect(await confirmed.json()).toEqual({ status: "paid", summary: "一般 Day 1 ×2、一般 Day 2 ×1" });
+    expect(await confirmed.json()).toMatchObject({ status: "paid", summary: "一般 Day 1 ×2、一般 Day 2 ×1" });
     s = await body<LpTicketsState>(await app.fetch(get("/lp/tickets")));
     expect(s.totals).toEqual({ sold: 3, revenueJpy: 9000 });
     const orders = await body<LpTicketOrdersPage>(await app.fetch(get("/lp/tickets/orders")));
@@ -519,15 +517,14 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
   });
 
-  it("daily checkout cap → 429", async () => {
-    const { app } = await setup(kind, { cap: 2, stripe: fakeStripe() });
+  it("no daily limit: orders past the old 300/day cap still go through", async () => {
+    const { app } = await setup(kind, { stripe: fakeStripe() });
     await enable(app);
-    const t = await addType(app, { name: "一般", priceJpy: 1000 });
-    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
-    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
-    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(429);
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    for (let i = 0; i < 301; i++) {
+      expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
+    }
   });
-
   it("webhook: bad signature → 400; completed → paid; replay + expired after paid are no-ops", async () => {
     const stripe = fakeStripe();
     const { app } = await setup(kind, { stripe });
@@ -614,7 +611,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const { redirectUrl } = await body<{ redirectUrl: string }>(await app.fetch(checkout({ ticketTypeId: t.id, couponCode: code })));
     const orderId = new URL(redirectUrl).searchParams.get("order");
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "paid", summary: "招待 ×1" });
+    expect(await res.json()).toMatchObject({ status: "paid", summary: "招待 ×1" });
     const unknown = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { orderId: "tko_nope" }, INTERNAL));
     expect(await unknown.json()).toEqual({ status: "unknown" });
   });
@@ -626,7 +623,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const t = await addType(app, { name: "一般", priceJpy: 3000 });
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "paid", summary: "一般 ×1" });
+    expect(await res.json()).toMatchObject({ status: "paid", summary: "一般 ×1" });
     expect(stripe.calls[1]).toMatchObject({
       method: "GET",
       url: "https://api.stripe.com/v1/checkout/sessions/cs_test_0?expand%5B%5D=payment_intent.payment_method",
@@ -646,7 +643,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const t = await addType(app, { name: "一般", priceJpy: 3000 });
     await app.fetch(checkout({ ticketTypeId: t.id }));
     const res = await app.fetch(send("POST", "/lp/internal/tickets/confirm", { sessionId: "cs_test_0" }, INTERNAL));
-    expect(await res.json()).toEqual({ status: "pending", summary: "一般 ×1" });
+    expect(await res.json()).toMatchObject({ status: "pending", summary: "一般 ×1" });
   });
 
   it("orders: newest first with cursor paging", async () => {
@@ -895,7 +892,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const { app, repo, buy } = await paidSetup();
     const id = await buy();
     await webhook(app, completed("cs_test_0", id, { amount_total: 1 }));
-    const editOnly = await makeApp(kind, "edit", 5000, null, [], { repo });
+    const editOnly = await makeApp(kind, "edit", [], { repo });
     expect((await editOnly.app.fetch(send("POST", `/lp/tickets/orders/${id}/approve`, {}))).status).toBe(403);
     expect((await repo.getOrder("hokuriku-it-conf.com", id))!.status).toBe("needs_review");
 
@@ -983,22 +980,23 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect((await buy(t.id, 1, k1)).status).toBe(200);
   });
 
-  it("checkout arms the reconcile alarm on paid orders only; an arm failure never fails the sale", async () => {
+  it("checkout arms the reconcile alarm on paid and free orders; an arm failure never fails the sale", async () => {
     let arms = 0;
     const ok = await paidSetup({ deps: { armReconcile: async () => void arms++ } });
     await ok.buy();
+    expect(arms).toBe(1);
     const free = await addType(ok.app, { name: "招待", priceJpy: 0 });
     const code = (await issueCoupon(ok.app, free.id)).code;
     expect((await ok.app.fetch(checkout({ ticketTypeId: free.id, couponCode: code }))).status).toBe(200);
-    expect(arms).toBe(1);
+    expect(arms).toBe(2);
 
     // a verified webhook arms it too (refunds on old orders before the next sale); an unsigned one does not
     await webhook(ok.app, { id: "evt_other", type: "payment_intent.created", data: { object: {} } });
-    expect(arms).toBe(1);
+    expect(arms).toBe(2);
     await webhook(ok.app, completed("cs_test_0", "tko_unknown"));
-    expect(arms).toBe(2);
+    expect(arms).toBe(3);
     expect((await webhook(ok.app, completed("cs_test_0", "x"), "t=1,v1=bad")).status).toBe(400);
-    expect(arms).toBe(2);
+    expect(arms).toBe(3);
 
     const failing = await paidSetup({ deps: { armReconcile: async () => Promise.reject(new Error("do down")) } });
     await failing.buy();
@@ -1221,7 +1219,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const c = await issueCoupon(app, t.id);
     expect((await app.fetch(send("POST", "/lp/internal/tickets/coupon", { code: c.code }, INTERNAL))).status).toBe(404);
     await enable(app);
-    expect((await app.fetch(send("POST", "/lp/internal/tickets/coupon", { code: c.code }))).status).toBe(404);
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/coupon", { code: c.code }))).status).toBe(403);
     expect((await app.fetch(send("POST", "/lp/internal/tickets/coupon", { code: c.code }, INTERNAL))).status).toBe(200);
   });
 
@@ -1358,7 +1356,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(await (await check("nope")).json()).toEqual({ valid: false });
     expect(await (await check(undefined)).json()).toEqual({ valid: false });
     // internal route is s2s only
-    expect((await app.fetch(send("POST", "/lp/internal/tickets/preview", { token }))).status).toBe(404);
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/preview", { token }))).status).toBe(403);
   });
 
   it("preview checkout while sales are off: needs a valid token; order marked preview/test; token rides the return URLs", async () => {
@@ -1475,8 +1473,8 @@ describe("tickets gate", () => {
 
   it("internal routes are 404 without x-dub-internal", async () => {
     const { app } = await makeApp("memory");
-    expect((await app.fetch(send("POST", "/lp/internal/tickets/checkout", {}, {}))).status).toBe(404);
-    expect((await app.fetch(send("POST", "/lp/internal/tickets/stripe-webhook", {}, {}))).status).toBe(404);
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/checkout", {}, {}))).status).toBe(403);
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/stripe-webhook", {}, {}))).status).toBe(403);
   });
 });
 

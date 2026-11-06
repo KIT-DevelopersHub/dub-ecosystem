@@ -177,10 +177,10 @@ describe("policy gate (LP管理)", () => {
     expect((await view.app.fetch(get(`/lp/stats?${RANGE}`, {}))).status).toBe(401);
   });
 
-  it("the beacon landing is s2s only (404 without x-dub-internal)", async () => {
+  it("the beacon landing is s2s only (403 without x-dub-internal)", async () => {
     const { app } = await makeApp("memory");
     const res = await app.fetch(send("POST", "/lp/internal/visits", { device: "mobile", visitorKey: "a" }, {}));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     expect((await app.fetch(ingest({ device: "tablet" }))).status).toBe(400);
   });
 });

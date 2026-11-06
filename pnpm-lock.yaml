@@ -553,6 +553,9 @@ importers:
       next:
         specifier: ^14.2.15
         version: 14.2.35(@playwright/test@1.62.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      qrcode-generator:
+        specifier: 2.0.4
+        version: 2.0.4
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -1529,9 +1532,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4
         version: 4.20260702.1
-      '@dub/auth-client':
-        specifier: workspace:*
-        version: link:../../packages/auth-client
       '@dub/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -1544,6 +1544,36 @@ importers:
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
+      '@dub/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      hono:
+        specifier: ^4.6.14
+        version: 4.13.1
+
+  services/lp-tickets:
+    dependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4
+        version: 4.20260702.1
+      '@dub/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@dub/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
+      '@dub/http':
+        specifier: workspace:*
+        version: link:../../packages/http
+      '@dub/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@dub/policy-gate':
+        specifier: workspace:*
+        version: link:../../packages/policy-gate
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -1961,6 +1991,7 @@ packages:
 
   '@cloudflare/vitest-pool-workers@0.8.71':
     resolution: {integrity: sha512-keu2HCLQfRNwbmLBCDXJgCFpANTaYnQpE01fBOo4CNwiWHUT7SZGN7w64RKiSWRHyYppStXBuE5Ng7F42+flpg==}
+    deprecated: '@cloudflare/vitest-pool-workers has been renamed to @cloudflare/vitest-plugin. This package will not receive future updates.'
     peerDependencies:
       '@vitest/runner': 2.0.x - 3.2.x
       '@vitest/snapshot': 2.0.x - 3.2.x
@@ -5829,6 +5860,9 @@ packages:
   pvutils@1.2.0:
     resolution: {integrity: sha512-BbubeCEyTuQjVMakvJQ/Sxbc93F2pwmbsxONT/ZRrwU7Ua38d8unYTwXpTVLAKJ4BDuH9IGztCjQcd/N/39Dvg==}
     engines: {node: '>=16.0.0'}
+
+  qrcode-generator@2.0.4:
+    resolution: {integrity: sha512-mZSiP6RnbHl4xL2Ap5HfkjLnmxfKcPWpWe/c+5XxCuetEenqmNFf1FH/ftXPCtFG5/TDobjsjz6sSNL0Sr8Z9g==}
 
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
@@ -11109,6 +11143,8 @@ snapshots:
       tslib: 2.8.1
 
   pvutils@1.2.0: {}
+
+  qrcode-generator@2.0.4: {}
 
   queue-microtask@1.2.3: {}
 

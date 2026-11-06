@@ -26,7 +26,7 @@ import {
   useRemoveApplicant,
   useUpdateApplicant,
 } from "./hrHooks.ts";
-import { ApplicantFormAnswers } from "./ApplicantFormAnswers.tsx";
+import { ApplicantFormAnswers, ParticipationLinkButton } from "./ApplicantFormAnswers.tsx";
 import styles from "./hr.module.css";
 
 export const STAGE_LABELS = hr.APPLICANT_STAGE_LABELS;
@@ -366,6 +366,8 @@ export function ApplicantDrawer({
         </dl>
 
         <ApplicantFormAnswers applicantId={a.id} />
+
+        <ParticipationLinkButton applicant={a} />
 
         {canWrite ? (
           <div>

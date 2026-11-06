@@ -60,6 +60,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: unused,
+    exportTicketOrders: async () => new Blob(["x"]),
     approveTicketOrder: unused,
     listTicketCoupons: unused,
     createTicketCoupon: unused,

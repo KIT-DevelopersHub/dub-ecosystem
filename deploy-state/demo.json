@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "aba4b657",
-  "branch": "commander/task-ctask_01M6K67DC307AVHF1CW1AEVVCC",
+  "deployedSha": "154a1c88",
+  "branch": "commander/task-ctask_01M6R7Q3R7FWS2FESNH5MD0MKJ",
   "actor": "ko-tarou",
-  "markers": ["「オンボーディング案内」タブ"],
+  "markers": ["fe7-roles-delete-unavailable"],
   "live": true,
-  "verifiedAt": "2026-11-04T12:02:25Z",
-  "updatedAt": "2026-11-04T12:02:25Z",
-  "note": "ctask_01M6K67DC307AVHF1CW1AEVVCC: 参加届の回答/オンボーディング案内を人事タブへ"
+  "verifiedAt": "2026-11-06T11:09:02Z",
+  "updatedAt": "2026-11-06T11:09:02Z",
+  "note": "ctask_01M6R7Q3R7FWS2FESNH5MD0MKJ: ロール削除の導線と締め出しガード"
 }

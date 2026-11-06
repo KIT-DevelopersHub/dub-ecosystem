@@ -1,15 +1,15 @@
 // LP 登壇者募集: validation + ProposalService (settings / fields / submissions / public submit).
-// The custom-field vocabulary and answer validation are shared with tickets.
+// The custom-field vocabulary and answer validation are shared with lp-tickets (@dub/types lp).
 import { errors, type FieldError } from "@dub/errors";
 import { lp } from "@dub/types";
-import { BUYER_EMAIL_MAX, BUYER_NAME_MAX, CLIENT_KEY_RE, EMAIL_RE, jstDayStartIso, parseAnswers, parseFields } from "./tickets";
+import { dayJst } from "./domain";
 import type {
   AppDeps,
   LpProposal,
   LpProposalStatus,
   LpProposalsPage,
   LpProposalsState,
-  LpTicketField,
+  LpFormField,
   ProposalRow,
   ReqCtx,
 } from "./types";
@@ -22,7 +22,7 @@ const RESERVED_PROPOSAL_FIELD_IDS: ReadonlySet<string> = new Set(["name", "email
 const STATUSES: ReadonlySet<LpProposalStatus> = new Set(["submitted", "accepted", "rejected"]);
 
 /** Fields shown until LP管理 saves its own list (fields_json NULL). */
-export const DEFAULT_PROPOSAL_FIELDS: readonly LpTicketField[] = [
+export const DEFAULT_PROPOSAL_FIELDS: readonly LpFormField[] = [
   { id: "format", label: "発表形式", type: "select", required: true, options: ["セッション（30分）", "LT（5分）"] },
   { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
   { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
@@ -44,7 +44,7 @@ export interface ProposalInput {
 }
 
 /** Validates the public form against the configured fields. Throws 400 with per-field reasons. */
-export function parseProposal(body: unknown, fields: readonly LpTicketField[]): ProposalInput {
+export function parseProposal(body: unknown, fields: readonly LpFormField[]): ProposalInput {
   const b = (body ?? {}) as Record<string, unknown>;
   const bad: FieldError[] = [];
   const text = (k: string, max: number): string => {
@@ -53,14 +53,19 @@ export function parseProposal(body: unknown, fields: readonly LpTicketField[]): 
     else if (v.length > max) bad.push({ field: k, reason: "too_long" });
     return v;
   };
-  const name = text("name", BUYER_NAME_MAX);
-  const email = text("email", BUYER_EMAIL_MAX);
-  if (email && email.length <= BUYER_EMAIL_MAX && !EMAIL_RE.test(email)) bad.push({ field: "email", reason: "invalid" });
+  const name = text("name", lp.LP_BUYER_NAME_MAX);
+  const email = text("email", lp.LP_BUYER_EMAIL_MAX);
+  if (email && email.length <= lp.LP_BUYER_EMAIL_MAX && !lp.LP_EMAIL_RE.test(email)) bad.push({ field: "email", reason: "invalid" });
   const title = text("title", PROPOSAL_TITLE_MAX);
   const abstract = text("abstract", PROPOSAL_ABSTRACT_MAX);
-  const answers = parseAnswers(b.answers, fields, bad);
+  const answers = lp.parseLpAnswers(b.answers, fields, bad);
   if (bad.length > 0) throw errors.validationFailed(bad);
   return { name, email, title, abstract, answers };
+}
+
+/** JST midnight of the day containing `iso`, as a UTC ISO string (comparable to created_at). */
+function jstDayStartIso(iso: string): string {
+  return new Date(`${dayJst(iso)}T00:00:00+09:00`).toISOString();
 }
 
 export function proposalCursor(p: { createdAt: string; id: string }): string {
@@ -76,7 +81,7 @@ export class ProposalService {
     return this.deps.repo;
   }
 
-  private async fields(): Promise<LpTicketField[]> {
+  private async fields(): Promise<LpFormField[]> {
     return (await this.repo.getProposalSettings(PROPOSAL_SITE))?.fields ?? [...DEFAULT_PROPOSAL_FIELDS];
   }
 
@@ -104,7 +109,8 @@ export class ProposalService {
   }
 
   async setFields(ctx: ReqCtx, body: unknown): Promise<LpProposalsState> {
-    const fields = parseFields(body, RESERVED_PROPOSAL_FIELD_IDS);
+    const { fields, issues } = lp.parseLpFields(body, RESERVED_PROPOSAL_FIELD_IDS);
+    if (issues.length > 0) throw errors.validationFailed(issues);
     await this.repo.setProposalFields(PROPOSAL_SITE, fields, ctx.userId, this.deps.now());
     return this.getState();
   }
@@ -132,7 +138,7 @@ export class ProposalService {
 
   // ---- internal (public LP Worker) ----
 
-  async getPublic(): Promise<{ enabled: boolean; fields: LpTicketField[] }> {
+  async getPublic(): Promise<{ enabled: boolean; fields: LpFormField[] }> {
     const settings = await this.repo.getProposalSettings(PROPOSAL_SITE);
     return { enabled: settings?.enabled ?? false, fields: settings?.fields ?? [...DEFAULT_PROPOSAL_FIELDS] };
   }
@@ -142,7 +148,7 @@ export class ProposalService {
     if (!settings?.enabled) throw errors.notFound("lp_proposals");
     const input = parseProposal(body, settings.fields ?? DEFAULT_PROPOSAL_FIELDS);
     const raw = (body as { clientKey?: unknown } | null)?.clientKey;
-    const clientKey = typeof raw === "string" && CLIENT_KEY_RE.test(raw) ? raw : null;
+    const clientKey = typeof raw === "string" && lp.LP_CLIENT_KEY_RE.test(raw) ? raw : null;
     const now = this.deps.now();
     const since = jstDayStartIso(now);
     if (clientKey && (await this.repo.countProposalsSince(PROPOSAL_SITE, since, clientKey)) >= PER_CLIENT_DAILY_CAP) {

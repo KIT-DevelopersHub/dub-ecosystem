@@ -11,11 +11,11 @@
     "build": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@dub/auth-client": "workspace:*",
     "@dub/db": "workspace:*",
     "@dub/errors": "workspace:*",
     "@dub/http": "workspace:*",
     "@dub/observability": "workspace:*",
+    "@dub/policy-gate": "workspace:*",
     "@dub/types": "workspace:*",
     "hono": "^4.6.14"
   },

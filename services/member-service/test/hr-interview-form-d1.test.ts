@@ -63,7 +63,7 @@ describe("面談申し込みフォーム (D1 / SQLite)", () => {
     const sub = await call(app, "POST", "/members/internal/hr/interview-form", {
       internal: true,
       userId: null,
-      body: { answers: { name: "佐藤 花", email: "hana@example.com", interests: ["開発"] } },
+      body: { answers: { last_name: "佐藤", first_name: "花", email: "hana@example.com", interests: ["開発"] } },
     });
     expect(sub.status).toBe(201);
 

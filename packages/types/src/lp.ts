@@ -341,7 +341,7 @@ export const LP_FIELD_DESCRIPTION_MAX = 200;
 export const LP_MULTISELECT_SEPARATOR = "\n";
 
 const LP_CHOICE_FIELD_TYPES: readonly string[] = ["radio", "multiselect", "select"];
-const LP_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const LP_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LP_PHONE_RE = /^[0-9+\-() ]{6,30}$/;
 const LP_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -369,4 +369,106 @@ export function lpFieldAnswerProblem(f: { type: LpFieldType; options: readonly s
     return real ? null : "日付を選び直してください";
   }
   return null;
+}
+
+// ---- Form parsing shared by lp-tickets and lp-analytics (proposals). No @dub/errors here: this file
+// also runs in the LP Worker, so problems come back as issues and each service throws its own 400. ----
+
+export const LP_FIELDS_MAX = 20;
+export const LP_FIELD_LABEL_MAX = 60;
+export const LP_FIELD_OPTIONS_MAX = 20;
+export const LP_FIELD_OPTION_MAX = 60;
+export const LP_CHECKBOX_YES = "はい";
+export const LP_BUYER_NAME_MAX = 100;
+export const LP_BUYER_EMAIL_MAX = 254;
+/** Hashed sender IP from the public LP Worker (clientKeyFor). Anything else is treated as absent. */
+export const LP_CLIENT_KEY_RE = /^[a-f0-9]{16,64}$/;
+
+const LP_FIELD_ID_RE = /^[a-z0-9_-]{1,40}$/;
+const LP_ANSWER_MAX: Record<LpFieldType, number> = {
+  text: 200,
+  textarea: 2000,
+  radio: LP_FIELD_OPTION_MAX,
+  multiselect: (LP_FIELD_OPTION_MAX + 1) * LP_FIELD_OPTIONS_MAX,
+  select: LP_FIELD_OPTION_MAX,
+  checkbox: 10,
+  date: 10,
+  email: LP_BUYER_EMAIL_MAX,
+  phone: 30,
+};
+
+export interface LpFormField {
+  id: string;
+  label: string;
+  /** 回答者に見せる補足説明（無ければキーごと持たない）。 */
+  description?: string;
+  type: LpFieldType;
+  required: boolean;
+  options: string[];
+}
+
+export interface LpFormAnswer {
+  fieldId: string;
+  label: string;
+  value: string;
+}
+
+/** `reserved` = fixed-field ids the caller's form already has (custom fields must not reuse them). */
+export function parseLpFields(body: unknown, reserved: ReadonlySet<string>): { fields: LpFormField[]; issues: LpConfigIssue[] } {
+  const raw = (body as { fields?: unknown } | null)?.fields;
+  if (!Array.isArray(raw)) return { fields: [], issues: [{ field: "fields", reason: "required" }] };
+  if (raw.length > LP_FIELDS_MAX) return { fields: [], issues: [{ field: "fields", reason: "too_many" }] };
+  const bad: LpConfigIssue[] = [];
+  const seen = new Set<string>();
+  const out: LpFormField[] = [];
+  raw.forEach((f0, i) => {
+    const f = (f0 ?? {}) as Record<string, unknown>;
+    const at = (k: string) => `fields[${i}].${k}`;
+    const before = bad.length;
+    const id = typeof f.id === "string" ? f.id : "";
+    if (!LP_FIELD_ID_RE.test(id) || reserved.has(id)) bad.push({ field: at("id"), reason: "invalid" });
+    else if (seen.has(id)) bad.push({ field: at("id"), reason: "duplicate" });
+    seen.add(id);
+    const label = typeof f.label === "string" ? f.label.trim() : "";
+    if (label.length === 0) bad.push({ field: at("label"), reason: "required" });
+    else if (label.length > LP_FIELD_LABEL_MAX) bad.push({ field: at("label"), reason: "too_long" });
+    const description = typeof f.description === "string" ? f.description.trim() : "";
+    if (description.length > LP_FIELD_DESCRIPTION_MAX) bad.push({ field: at("description"), reason: "too_long" });
+    const type = f.type as LpFieldType;
+    if (!isLpFieldType(type)) bad.push({ field: at("type"), reason: "invalid" });
+    if (typeof f.required !== "boolean") bad.push({ field: at("required"), reason: "invalid" });
+    let options: string[] = [];
+    if (isLpChoiceField(type)) {
+      const opts = Array.isArray(f.options) ? f.options : [];
+      options = opts.map((o) => (typeof o === "string" ? o.trim() : ""));
+      if (options.length < 1 || options.length > LP_FIELD_OPTIONS_MAX) bad.push({ field: at("options"), reason: "invalid_count" });
+      else if (options.some((o) => o.length === 0 || o.length > LP_FIELD_OPTION_MAX || o.includes(LP_MULTISELECT_SEPARATOR))) {
+        bad.push({ field: at("options"), reason: "invalid" });
+      }
+      else if (new Set(options).size !== options.length) bad.push({ field: at("options"), reason: "duplicate" });
+    }
+    if (bad.length === before) {
+      out.push({ id, label, ...(description ? { description } : {}), type, required: f.required as boolean, options });
+    }
+  });
+  return { fields: bad.length > 0 ? [] : out, issues: bad };
+}
+
+/** Answers to the configured custom fields (label snapshot kept). Problems go to `bad`. */
+export function parseLpAnswers(raw: unknown, fields: readonly LpFormField[], bad: LpConfigIssue[]): LpFormAnswer[] {
+  const rawAnswers = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const answers: LpFormAnswer[] = [];
+  for (const f of fields) {
+    const v0 = rawAnswers[f.id];
+    const value = typeof v0 === "string" ? v0.trim() : "";
+    const key = `answers.${f.id}`;
+    if (f.required && value === "") bad.push({ field: key, reason: "required" });
+    else if (value.length > LP_ANSWER_MAX[f.type]) bad.push({ field: key, reason: "too_long" });
+    else if (value !== "" && lpFieldAnswerProblem(f, value)) bad.push({ field: key, reason: "invalid" });
+    else if (value !== "" && f.type === "checkbox" && value !== LP_CHECKBOX_YES) bad.push({ field: key, reason: "invalid" });
+    // 回答は表示用の 1 文字列で持つ（一覧・CSV はこのまま出す）。
+    const shown = f.type === "multiselect" ? value.split(LP_MULTISELECT_SEPARATOR).join("、") : value;
+    answers.push({ fieldId: f.id, label: f.label, value: shown });
+  }
+  return answers;
 }

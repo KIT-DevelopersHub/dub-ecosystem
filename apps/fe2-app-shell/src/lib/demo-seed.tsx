@@ -1910,7 +1910,9 @@ function createRosterStore() {
           return u ? json(detail(u)) : problem("NOT_FOUND", "user not found", 404);
         }
       }
-      if (pathname === "/api/v1/identity/roles") return json(page(roles));
+      if (pathname === "/api/v1/identity/roles") {
+        return json(page(roles.map((r) => ({ ...r, memberCount: users.filter((u) => u.roleIds.includes(r.id)).length }))));
+      }
       // 通知管理「誰に届くか」: derived from the LIVE demo roles, so toggling 「管理者向け通知を
       // 受け取る」 in ロール管理 changes this summary in the same session (mirrors identity
       // GET /internal/permission-holders behind notification GET /audiences).
@@ -2064,6 +2066,7 @@ function createRosterStore() {
           if (role.isSystem) return problem("CONFLICT", "システムロールは削除できません", 409);
           roles.splice(roles.indexOf(role), 1);
           for (const r of roles) r.mailVisibleRoleIds = r.mailVisibleRoleIds.filter((t) => t !== role.id);
+          for (const u of users) u.roleIds = u.roleIds.filter((t) => t !== role.id);
           audit("identity.role.deleted", "role", role.id, { name: role.name });
           return json(null, 204);
         }
@@ -5532,6 +5535,12 @@ function createLpTicketsStore() {
 
     if (method === "POST" && pathname === "/api/v1/lp/tickets/preview-token") {
       return problem("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", 409);
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/orders/export") {
+      const head = "注文番号,氏名,メールアドレス,枚数,金額\n";
+      const lines = orders.map((o) => [o.id, o.buyerName, o.buyerEmail, o.quantity, o.amountJpy].join(",")).join("\n");
+      return new Response(`\ufeff${head}${lines}\n`, { status: 200, headers: { "content-type": "text/csv; charset=utf-8" } });
     }
 
     if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
