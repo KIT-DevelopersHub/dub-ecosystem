@@ -8,6 +8,8 @@ import { useGoalsApi } from "./GoalsProvider.tsx";
 
 const listKey = (month: string) => queryKeys.feature("goals", "list", month);
 const saveKey = (month: string, teamId: string) => queryKeys.feature("goals", "save", month, teamId);
+/** スポンサーの目標タブは KPI の目標値を表示しているので、変えたらそちらも読み直す。 */
+const SPONSOR_GOALS_KEY = queryKeys.feature("sponsor", "goals");
 
 type List = goal.ListGoalsResponse;
 
@@ -26,10 +28,10 @@ export function useGoals(month: string) {
 }
 
 /** 保存直後は、指標を変えた KPI の実績がまだ分からない。手入力と変更なしの分だけ先に見せる。 */
-export function optimisticGoal(teamId: string, month: string, body: goal.PutGoalRequest, prev: goal.TeamGoal | undefined, linkedTargets: goal.LinkedTargets = {}): goal.TeamGoal {
+export function optimisticGoal(teamId: string, month: string, body: goal.PutGoalRequest, prev: goal.TeamGoal | undefined): goal.TeamGoal {
   const kpis = body.kpis.map((k): goal.KpiProgress => {
     const known = k.metric === "manual" ? k.manualActual : (prev?.kpis.find((p) => p.metric === k.metric)?.actual ?? null);
-    return { ...k, status: known === null ? "empty" : "ok", actual: known, linked: linkedTargets[k.metric] !== undefined, percent: goal.kpiPercent(known, k.target) };
+    return { ...k, status: known === null ? "empty" : "ok", actual: known, percent: goal.kpiPercent(known, k.target) };
   });
   return {
     teamId, month, title: body.title, kpis, percent: goal.goalPercent(kpis),
@@ -55,11 +57,14 @@ export function useSaveGoal(month: string, teamId: string) {
       await qc.cancelQueries({ queryKey: listKey(month) });
       const snapshot = qc.getQueryData<List>(listKey(month));
       const prev = snapshot?.goals.find((g) => g.teamId === teamId);
-      const next = optimisticGoal(teamId, month, body, prev, snapshot?.linkedTargets);
+      const next = optimisticGoal(teamId, month, body, prev);
       patchGoals(qc, month, (goals) => (prev ? goals.map((g) => (g.teamId === teamId ? next : g)) : [...goals, next]));
       return { snapshot };
     },
-    onSuccess: (saved) => patchGoals(qc, month, (goals) => [...goals.filter((g) => g.teamId !== teamId), saved]),
+    onSuccess: (saved) => {
+      patchGoals(qc, month, (goals) => [...goals.filter((g) => g.teamId !== teamId), saved]);
+      void qc.invalidateQueries({ queryKey: SPONSOR_GOALS_KEY });
+    },
     onError: (err, _body, c) => {
       qc.setQueryData(listKey(month), c?.snapshot);
       void qc.invalidateQueries({ queryKey: listKey(month) });
@@ -80,6 +85,7 @@ export function useRemoveGoal(month: string, teamId: string) {
       patchGoals(qc, month, (goals) => goals.filter((g) => g.teamId !== teamId));
       return { snapshot };
     },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: SPONSOR_GOALS_KEY }),
     onError: (err, _v, c) => {
       qc.setQueryData(listKey(month), c?.snapshot);
       void qc.invalidateQueries({ queryKey: listKey(month) });

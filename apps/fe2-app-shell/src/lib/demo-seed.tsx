@@ -5877,7 +5877,11 @@ function createLpProposalsStore() {
 
 // ── 目標管理 (member-service /members/goals の demo) ─────────────────────────────
 // 保存はメモリ上。実績は本物と同じ指標の見本値を月ごとに持ち、計算は @dub/types goal を使う。
-function createGoalsStore(me: () => { id: string; displayName: string }, teams: () => goalValues.GoalTeam[], sponsorGoal: (month: string) => sponsorValues.GoalTargets | null) {
+function createGoalsStore(
+  me: () => { id: string; displayName: string },
+  teams: () => goalValues.GoalTeam[],
+  sponsorActuals: (month: string) => Partial<Record<goalValues.GoalMetric, number>>,
+) {
   type Row = Omit<goalValues.TeamGoal, "kpis" | "percent"> & { kpis: goalValues.Kpi[] };
   const month = goalValues.currentMonth();
   const prev = goalValues.shiftMonth(month, -1);
@@ -5887,10 +5891,11 @@ function createGoalsStore(me: () => { id: string; displayName: string }, teams: 
   });
   const rows: Row[] = [
     row("team_dev", month, "参加者向け機能を期日どおりに出す", [kpi("期日までに終えるタスク", "tasks_done", 18), kpi("タスク完了率", "tasks_done_rate", 90)]),
-    row("team_sponsor", month, "協賛の打診を増やす", [kpi("新規接触数", "sponsor_contacted", 15), kpi("協賛額", "sponsor_amount", 1_000_000), kpi("お礼状の送付", "manual", 10, 4)]),
+    row("team_sponsor", month, "協賛の打診を増やす", [kpi("新規接触数", "sponsor_contacted", 15), kpi("提案数", "sponsor_proposed", 4), kpi("内諾・契約数", "sponsor_agreed", 2), kpi("協賛額", "sponsor_amount", 1_000_000), kpi("お礼状の送付", "manual", 10, 4)]),
     row("team_pr", month, "LP の認知を広げる", [kpi("LP の訪問者数", "lp_visitors", 1000), kpi("SNS 投稿数", "manual", 12, 13)]),
     row("team_hq", month, "運営メンバーを増やす", [kpi("応募者数", "hr_applicants", 8), kpi("採用数", "hr_hired", 3)]),
     row("team_dev", prev, "参加者向け機能の土台を作る", [kpi("期日までに終えるタスク", "tasks_done", 12)]),
+    row("team_sponsor", prev, "協賛の打診を始める", [kpi("新規接触数", "sponsor_contacted", 2), kpi("提案数", "sponsor_proposed", 1), kpi("内諾・契約数", "sponsor_agreed", 1)]),
   ];
   const actuals = (teamId: string, m: string): Partial<Record<goalValues.GoalMetric, number | null>> => {
     const scale = m === month ? 1 : m === prev ? 1.3 : 0;
@@ -5900,24 +5905,22 @@ function createGoalsStore(me: () => { id: string; displayName: string }, teams: 
       tasks_done: Math.round(done * scale),
       tasks_done_rate: total === 0 || scale === 0 ? null : Math.round((Math.round(done * scale) / total) * 100),
       hr_applicants: Math.round(5 * scale), hr_interviews: Math.round(4 * scale), hr_hired: Math.round(scale),
-      sponsor_cards: Math.round(13 * scale), sponsor_contacted: Math.round(9 * scale), sponsor_proposed: Math.round(4 * scale),
-      sponsor_agreed: Math.round(scale), sponsor_amount: Math.round(300_000 * scale), participations: Math.round(6 * scale), lp_visitors: Math.round(640 * scale),
+      sponsor_cards: Math.round(13 * scale), participations: Math.round(6 * scale), lp_visitors: Math.round(640 * scale),
+      ...sponsorActuals(m),
     };
   };
   const toGoal = ({ kpis, ...r }: Row): goalValues.TeamGoal => {
     const a = actuals(r.teamId, r.month);
-    const linked = goalValues.linkedTargetsOf(sponsorGoal(r.month));
     const progress = kpis.map((k): goalValues.KpiProgress => {
       const actual = k.metric === "manual" ? k.manualActual : (a[k.metric] ?? null);
-      const target = linked[k.metric] ?? k.target;
-      return { ...k, target, status: actual === null ? "empty" : "ok", actual, linked: linked[k.metric] !== undefined, percent: goalValues.kpiPercent(actual, target) };
+      return { ...k, status: actual === null ? "empty" : "ok", actual, percent: goalValues.kpiPercent(actual, k.target) };
     });
     return { ...r, kpis: progress, percent: goalValues.goalPercent(progress) };
   };
   function handle(method: string, pathname: string, url: URL, body: any): Response | null {
     if (pathname === "/api/v1/members/goals" && method === "GET") {
       const m = url.searchParams.get("month") ?? month;
-      const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal), linkedTargets: goalValues.linkedTargetsOf(sponsorGoal(m)) };
+      const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal) };
       return json(res);
     }
     const hit = /^\/api\/v1\/members\/goals\/([^/]+)\/(\d{4}-\d{2})$/.exec(pathname);
@@ -5936,7 +5939,7 @@ function createGoalsStore(me: () => { id: string; displayName: string }, teams: 
     if (i < 0) rows.push(next); else rows[i] = next;
     return json(toGoal(next));
   }
-  return { handle };
+  return { handle, sponsorGoals: () => goalValues.sponsorGoalsOf(rows) };
 }
 
 // ── スポンサー (member-service /members/sponsor/* の demo) ──────────────────────
@@ -5956,7 +5959,7 @@ function demoCardSvg(company: string, person: string, title: string, accent: str
     `<circle cx="790" cy="150" r="56" fill="${accent}" opacity="0.85"/></svg>`;
 }
 
-function createSponsorStore(me: () => { id: string; displayName: string }) {
+function createSponsorStore(me: () => { id: string; displayName: string }, sponsorGoals: () => sponsorValues.MonthlyGoal[]) {
   // 常に過去 (今日の分も 30 分前) にして、新しく登録した名刺が先頭に来るようにする。
   const at = (daysAgo: number): string => new Date(Date.now() - daysAgo * 86_400_000 - 30 * 60_000).toISOString();
   const enc = new TextEncoder();
@@ -6052,19 +6055,17 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
       firstContactOn: dayOn(-50), lastContactOn: dayOn(-30), expectedAmount: 0, note: "今年度の予算が確保できず見送り。",
     }),
   ];
-  // 今月は途中経過、先月は達成済みの見本。
-  const monthOf = (offset: number): string => {
-    const d = new Date();
-    return new Date(Date.UTC(d.getFullYear(), d.getMonth() + offset, 15)).toISOString().slice(0, 7);
+  // 目標管理の実績。スポンサーの目標タブと同じ数字になるよう、同じ見本の企業から数える。
+  const actuals = (month: string): Partial<Record<goalValues.GoalMetric, number>> => {
+    const inMonth = (on: string | null) => on?.startsWith(`${month}-`) ?? false;
+    const agreed = leads.filter((l) => inMonth(l.agreedOn) && l.status !== "見送り");
+    return {
+      sponsor_contacted: leads.filter((l) => inMonth(l.firstContactOn)).length,
+      sponsor_proposed: leads.filter((l) => inMonth(l.proposedOn)).length,
+      sponsor_agreed: agreed.length,
+      sponsor_amount: agreed.reduce((sum, l) => sum + (l.expectedAmount ?? 0), 0),
+    };
   };
-  type Goal = sponsorValues.MonthlyGoal;
-  const goal = (month: string, t: sponsorValues.GoalTargets): Goal => ({
-    ...t, month, version: 1, updatedBy: "usr_sponsor" as Goal["updatedBy"], updatedByName: "鈴木 一郎", updatedAt: at(1),
-  });
-  const goals: Goal[] = [
-    goal(monthOf(0), { contacted: 10, proposed: 4, agreed: 2, amount: 500000 }),
-    goal(monthOf(-1), { contacted: 2, proposed: 1, agreed: 1, amount: null }),
-  ];
   let leadSeq = 0;
   const LEAD_FIELDS = [
     "companyName", "industry", "owner", "contactName", "contactRole", "contactEmail", "source", "contactType", "evidence", "priority", "plan", "status",
@@ -6123,21 +6124,7 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     if (!pathname.startsWith("/api/v1/members/sponsor/")) return null;
     const now = new Date().toISOString();
     if (pathname.startsWith("/api/v1/members/sponsor/leads")) return handleLeads(method, pathname, body, now);
-    if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") return json({ goals: goals.map((g) => ({ ...g })) });
-    const goalPath = /^\/api\/v1\/members\/sponsor\/goals\/(\d{4}-\d{2})$/.exec(pathname);
-    if (goalPath && method === "PUT") {
-      const month = goalPath[1]!;
-      const cur = goals.find((g) => g.month === month);
-      if ((cur?.version ?? 0) !== body?.expectedVersion) return err("SPONSOR_VERSION_CONFLICT", 409);
-      const u = me();
-      const next: Goal = {
-        month, contacted: body.contacted, proposed: body.proposed, agreed: body.agreed, amount: body.amount, version: body.expectedVersion + 1,
-        updatedBy: u.id as Goal["updatedBy"], updatedByName: u.displayName, updatedAt: now,
-      };
-      if (cur) goals.splice(goals.indexOf(cur), 1);
-      goals.push(next);
-      return json({ ...next });
-    }
+    if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") return json({ goals: sponsorGoals() });
     if (pathname === "/api/v1/members/sponsor/cards") {
       if (method === "GET") return json({ cards: [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((c) => ({ ...c })) });
       if (method === "POST") {
@@ -6189,7 +6176,7 @@ function createSponsorStore(me: () => { id: string; displayName: string }) {
     return null;
   }
 
-  return { handle, goalOf: (month: string) => goals.find((g) => g.month === month) ?? null };
+  return { handle, actuals };
 }
 
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
@@ -6257,8 +6244,8 @@ export function createDemoFetch(): typeof fetch {
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
-  const sponsorStore = createSponsorStore(() => currentMe().user);
-  const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.goalOf(m));
+  const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.actuals(m));
+  const sponsorStore = createSponsorStore(() => currentMe().user, goalsStore.sponsorGoals);
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
   const lpSiteConfigStore = createLpSiteConfigStore({
     publish: lpStore.publish,

@@ -149,36 +149,11 @@ describe("スポンサー: 節目の日付", () => {
 });
 
 describe("スポンサー: 月間目標", () => {
-  const GOALS = "/members/sponsor/goals";
-  const body = { contacted: 10, proposed: 3, agreed: null, amount: 500000, expectedVersion: 0 };
-
-  it("creates, then updates under the optimistic lock", async () => {
-    const app = createApp(makeDeps());
-    const created = await call(app, "PUT", `${GOALS}/2026-11`, { body });
-    expect(created.status).toBe(200);
-    expect(created.json).toMatchObject({ month: "2026-11", contacted: 10, agreed: null, version: 1 });
-    expect((await call(app, "PUT", `${GOALS}/2026-11`, { body })).status).toBe(409);
-    expect((await call(app, "PUT", `${GOALS}/2027-01`, { body: { ...body, expectedVersion: 5 } })).status).toBe(409);
-    expect((await call(app, "PUT", `${GOALS}/2026-11`, { body: { ...body, contacted: 12, expectedVersion: 1 } })).json).toMatchObject({ contacted: 12, version: 2 });
-    await call(app, "PUT", `${GOALS}/2026-12`, { body });
-    expect((await call(app, "GET", GOALS)).json.goals.map((g: { month: string }) => g.month)).toEqual(["2026-12", "2026-11"]);
-  });
-
-  it.each([
-    ["2026-13", body],
-    ["2026-1", body],
-    ["2026-11", { ...body, contacted: 0 }],
-    ["2026-11", { ...body, amount: 1.5 }],
-    ["2026-11", { ...body, contacted: "10" }],
-    ["2026-11", { contacted: 1 }],
-  ])("rejects %s %j", async (month, b) => {
-    expect((await call(createApp(makeDeps()), "PUT", `${GOALS}/${month}`, { body: b })).status).toBe(400);
-  });
-
-  it("lets a viewer read but not set goals", async () => {
+  it("lets a viewer read goals without the goals app", async () => {
     const viewer = createApp(makeDeps({ authz: fakeAuthz(new Set(["app:sponsor:view", "sponsor:read"] as identity.PermissionKey[])) }));
-    expect((await call(viewer, "GET", GOALS)).status).toBe(200);
-    expect((await call(viewer, "PUT", `${GOALS}/2026-11`, { body })).status).toBe(403);
+    const res = await call(viewer, "GET", "/members/sponsor/goals");
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ goals: [] });
   });
 });
 
@@ -210,27 +185,6 @@ describe("createD1SponsorLeadRepo", () => {
     await repo.createLeads([row]);
     expect(await repo.getLead("lead_1")).toEqual(row);
     expect(await repo.listLeads("org_x")).toEqual([row]);
-  });
-
-  it("saves a goal with one bind per placeholder, reports a version miss, and maps rows back", async () => {
-    let binds: unknown[] = [];
-    let changes = 1;
-    const db = {
-      namespace: "member",
-      run: async (sql: string, ...b: unknown[]) => {
-        expect((sql.match(/\?/g) ?? []).length).toBe(b.length);
-        binds = b;
-        return { success: true, meta: { changes, durationMs: 0 } };
-      },
-      all: async () => [{ month: "2026-11", contacted_target: 5, proposed_target: null, agreed_target: 1, amount_target: 100, version: 2, updated_by: "u", updated_by_name: null, updated_at: "t" }],
-    } as unknown as DbClient;
-    const repo = createD1SponsorLeadRepo(db);
-    const goal = { month: "2026-11", contacted: 5, proposed: null, agreed: 1, amount: 100, version: 2, updatedBy: "u", updatedByName: null, updatedAt: "t" };
-    expect(await repo.putGoal("org_x", goal, 1)).toBe(true);
-    expect(binds.at(-1)).toBe(1);
-    changes = 0;
-    expect(await repo.putGoal("org_x", goal, 1)).toBe(false);
-    expect(await repo.listGoals("org_x")).toEqual([goal]);
   });
 
   it("updates under the optimistic lock with one bind per placeholder", async () => {

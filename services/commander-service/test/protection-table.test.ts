@@ -20,6 +20,7 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { createApp } from "../src/app";
 import type { Env } from "../src/env";
 import {
+  CONFIRM,
   OPEN,
   OPERATOR,
   PROTECTION_TABLE,
@@ -57,7 +58,7 @@ async function call(env: Env, key: string, headers: Record<string, string> = {})
 }
 
 const ALL_KEYS = Object.keys(PROTECTION_TABLE);
-const PROTECTED_KEYS = ALL_KEYS.filter((k) => PROTECTION_TABLE[k as keyof typeof PROTECTION_TABLE] === OPERATOR);
+const PROTECTED_KEYS = ALL_KEYS.filter((k) => PROTECTION_TABLE[k as keyof typeof PROTECTION_TABLE] !== OPEN);
 
 describe("route coverage (PROTECTION_TABLE <-> router)", () => {
   it("every registered endpoint has exactly one rule, and no rule is orphaned", () => {
@@ -133,6 +134,9 @@ describe("route x protection (frozen)", () => {
     "DELETE /chats/:id": OPERATOR,
     "POST /chats/:id/messages": OPERATOR,
     "PATCH /chats/:id/messages/:mid": OPERATOR,
+
+    "GET /prs/:number/checks": OPERATOR,
+    "POST /prs/:number/confirm": CONFIRM,
   };
 
   it("matches the committed protection of every route", () => {
@@ -162,9 +166,10 @@ describe("route x protection (frozen)", () => {
       "GET /bundles",
       "GET /chats",
       "GET /chats/:id",
+      "GET /prs/:number/checks",
     ]);
-    // 10 protected + GET /health = the 11 GET routes the router registers.
-    expect(protectableRouteKeys(createApp()).filter((k) => k.startsWith("GET "))).toHaveLength(11);
+    // 11 protected + GET /health = the 12 GET routes the router registers.
+    expect(protectableRouteKeys(createApp()).filter((k) => k.startsWith("GET "))).toHaveLength(12);
   });
 });
 
@@ -212,8 +217,9 @@ describe("fail-closed: COMMANDER_OPERATOR_TOKEN not configured", () => {
 describe("the correct token opens every protected route", () => {
   it.each(PROTECTED_KEYS)("does not deny %s", async (key) => {
     // Handlers may answer 400/404 for the placeholder ids and empty bodies used here; what
-    // matters is that the AUTHORIZATION layer is no longer the thing refusing.
-    const res = await call(makeEnv(), key, { "x-commander-token": TOKEN });
+    // matters is that the AUTHORIZATION layer is no longer the thing refusing. The confirm
+    // switch is on here so the CONFIRM route is judged by its token like the rest.
+    const res = await call(makeEnv({ COMMANDER_PR_CONFIRM_ENABLED: "1" }), key, { "x-commander-token": TOKEN });
     expect([401, 403, 503]).not.toContain(res.status);
   });
 });
@@ -308,5 +314,28 @@ describe("CORS origin allowlist", () => {
   it("sends no CORS grant to a non-browser caller (daemon fetch / curl: no Origin)", async () => {
     const res = await get("/health", {});
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
+
+describe("CONFIRM (production approval: adds 確認した)", () => {
+  it("only the confirm route carries CONFIRM", () => {
+    expect(ALL_KEYS.filter((k) => PROTECTION_TABLE[k as keyof typeof PROTECTION_TABLE] === CONFIRM)).toEqual([
+      "POST /prs/:number/confirm",
+    ]);
+  });
+
+  it("403s with the right token while the confirm switch is off", async () => {
+    const res = await call(makeEnv(), "POST /prs/:number/confirm", { "x-commander-token": TOKEN });
+    expect(res.status).toBe(403);
+    expect(res.body).toMatch(/confirm_disabled/);
+  });
+
+  it("is reached (not gate-refused) with the token AND the switch on", async () => {
+    const res = await call(makeEnv({ COMMANDER_PR_CONFIRM_ENABLED: "1" }), "POST /prs/:number/confirm", {
+      "x-commander-token": TOKEN,
+    });
+    // The handler answers (400: no headSha), proving the gate let it through.
+    expect(res.status).toBe(400);
+    expect(res.body).toMatch(/head_sha_required/);
   });
 });

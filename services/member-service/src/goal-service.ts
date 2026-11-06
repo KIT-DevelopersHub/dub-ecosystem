@@ -4,7 +4,7 @@
 // unavailable として返す (止まっている連携を「進捗 0%」に見せない)。
 import type { RequestContext } from "@dub/http";
 import { DubError, errors } from "@dub/errors";
-import { goal } from "@dub/types";
+import { goal, type sponsor } from "@dub/types";
 import type { GoalMetricSources, GoalRepo, GoalRow, MemberMonthCounts, TeamTaskCounts } from "./goal-repo";
 import type { ReqCtx } from "./service";
 import type { AppDeps } from "./types";
@@ -46,15 +46,11 @@ const LOCAL_METRICS: readonly goal.GoalMetric[] = [
   "hr_applicants", "hr_interviews", "hr_hired", "sponsor_cards", "sponsor_contacted", "sponsor_proposed", "sponsor_agreed", "sponsor_amount", "participations",
 ];
 
-export function progressOf(saved: goal.Kpi, teamId: string, a: Actuals, linkedTargets: goal.LinkedTargets): goal.KpiProgress {
-  // 目標タブに値があればそれが正。消されたら保存時の値に戻る。
-  const linkedTarget = linkedTargets[saved.metric];
-  const kpi = linkedTarget === undefined ? saved : { ...saved, target: linkedTarget };
+export function progressOf(kpi: goal.Kpi, teamId: string, a: Actuals): goal.KpiProgress {
   const done = (status: goal.KpiStatus, actual: number | null): goal.KpiProgress => ({
     ...kpi,
     status,
     actual,
-    linked: linkedTarget !== undefined,
     percent: goal.kpiPercent(actual, kpi.target),
   });
   const { metric } = kpi;
@@ -69,7 +65,7 @@ export function progressOf(saved: goal.Kpi, teamId: string, a: Actuals, linkedTa
   return a.member === null ? done("unavailable", null) : done("ok", a.member[metric]);
 }
 
-export interface GoalDeps extends Pick<AppDeps, "orgId" | "now" | "repo" | "sponsorLeadRepo"> {
+export interface GoalDeps extends Pick<AppDeps, "orgId" | "now" | "repo"> {
   goalRepo: GoalRepo;
   goalSources: GoalMetricSources;
 }
@@ -88,14 +84,9 @@ export class GoalService {
     return { member, tasks: tasks && new Map(tasks.map((t) => [t.teamId, t])), lpVisitors };
   }
 
-  private async linkedTargets(month: string): Promise<goal.LinkedTargets> {
-    const monthly = (await this.deps.sponsorLeadRepo.listGoals(this.deps.orgId)).find((g) => g.month === month);
-    return goal.linkedTargetsOf(monthly ?? null);
-  }
-
-  private toGoal(r: GoalRow, a: Actuals, linked: goal.LinkedTargets): goal.TeamGoal {
+  private toGoal(r: GoalRow, a: Actuals): goal.TeamGoal {
     const { orgId: _o, kpis, ...rest } = r;
-    const progress = kpis.map((k) => progressOf(k, r.teamId, a, linked));
+    const progress = kpis.map((k) => progressOf(k, r.teamId, a));
     return { ...rest, kpis: progress, percent: goal.goalPercent(progress) };
   }
 
@@ -103,14 +94,18 @@ export class GoalService {
     const { goalRepo, orgId, repo } = this.deps;
     const target = month ?? goal.currentMonth(new Date(this.deps.now()));
     if (!goal.isMonth(target)) throw errors.validationFailed([{ field: "month", reason: "invalid" }]);
-    const [teams, rows, linkedTargets] = await Promise.all([repo.listTeams(orgId), goalRepo.list(orgId, target), this.linkedTargets(target)]);
+    const [teams, rows] = await Promise.all([repo.listTeams(orgId), goalRepo.list(orgId, target)]);
     const actuals = await this.collect(ctx, target, rows);
     return {
       month: target,
       teams: teams.map((t) => ({ id: t.id, name: t.name, color: t.color })),
-      goals: rows.map((r) => this.toGoal(r, actuals, linkedTargets)),
-      linkedTargets,
+      goals: rows.map((r) => this.toGoal(r, actuals)),
     };
+  }
+
+  /** スポンサーの「目標」タブに出す目標値。実績はタブが営業進捗から数える。 */
+  async sponsorGoals(): Promise<sponsor.ListGoalsResponse> {
+    return { goals: goal.sponsorGoalsOf(await this.deps.goalRepo.listAll(this.deps.orgId)) };
   }
 
   async put(ctx: ReqCtx, teamId: string, month: string, body: goal.PutGoalRequest): Promise<goal.TeamGoal> {
@@ -131,8 +126,7 @@ export class GoalService {
       updatedAt: now(),
     };
     if (!(await goalRepo.save(row, body.expectedVersion))) throw errVersionConflict();
-    const [actuals, linkedTargets] = await Promise.all([this.collect(ctx, month, [row]), this.linkedTargets(month)]);
-    return this.toGoal(row, actuals, linkedTargets);
+    return this.toGoal(row, await this.collect(ctx, month, [row]));
   }
 
   async remove(teamId: string, month: string): Promise<void> {
