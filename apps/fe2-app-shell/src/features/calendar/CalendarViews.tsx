@@ -346,6 +346,7 @@ function TimedBlock({
         past && styles.past,
         isVacationTask(it.task) && styles.vacation,
         drag.draggingId === it.task.id && styles.dragging,
+        drag.deniedId === it.task.id && styles.dragDenied,
       )}
       style={{
         top: (p.top / 60) * HOUR_PX,

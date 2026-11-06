@@ -358,6 +358,16 @@
 .resizeBottom { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; cursor: ns-resize; }
 .resizeRight { position: absolute; top: 0; right: 0; bottom: 0; width: 6px; cursor: ew-resize; }
 .dragging { box-shadow: var(--dub-shadow-lg); opacity: 0.9; z-index: 5; }
+/* A locked item refuses the drag: a short shake, kept in place. */
+.dragDenied { animation: dragDeniedShake 0.4s ease-in-out; cursor: not-allowed; z-index: 5; }
+@keyframes dragDeniedShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dragDenied { animation: none; outline: 2px solid var(--dub-color-border-focus, currentColor); }
+}
 .isDragging { user-select: none; }
 .isDragging * { cursor: grabbing !important; }
 .tgGhost { box-shadow: var(--dub-shadow-lg); z-index: 3; pointer-events: none; }

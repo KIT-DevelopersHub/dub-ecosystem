@@ -3,7 +3,7 @@
 // through the canonical task-service API, so they also show up in マイタスク/ガント.
 // No new backend: reads GET /api/v1/tasks (self-scoped), writes POST/PATCH/DELETE.
 // ミーティング (drive-share-service /meetings) are drawn alongside as their own calendars.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ConfirmDialog, Icon, IconButton, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
 import { keepPreviousData, useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -89,6 +89,7 @@ const NO_KEYS: readonly string[] = [];
 const NO_CHOICES: MeetingTargetChoices = {};
 /** Writes of one 予定: each needs the version the one before it returns. */
 const ITEM_WRITE_KEY = ["calendar", "item-write"] as const;
+const DENIED_TOAST_GAP_MS = 3_000;
 const decodeHidden = (v: unknown): readonly string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : NO_KEYS;
 const WATCHED_TEAMS_STORAGE = "dub.calendar.watchedTeams";
@@ -509,22 +510,37 @@ export function CalendarScreen(): JSX.Element {
     select: (m) => (m.state.variables as { item: CalendarItem } | undefined)?.item.task.id,
   }).join();
   const meetingOccById = meetingOcc.byId;
-  const canDragItem = useCallback(
+  const mayMoveItem = useCallback(
     (it: CalendarItem) => {
       if (isMeetingTask(it.task)) {
-        const occ = meetingOccById.get(it.task.id);
-        return access.canEdit && accountReady && !isPendingMeetingTask(it.task) && !updateMeeting.isPending && occ?.meeting.recurrence === "none";
+        return access.canEdit && accountReady && meetingOccById.get(it.task.id)?.meeting.recurrence === "none";
       }
       // Only one's own: a stray 4px drag must not move a colleague's 予定 (編集 still can).
-      const mine = (it.task.assigneeId ?? it.task.createdBy) === currentUserId;
-      return canWrite && mine && isScheduleTask(it.task) && !it.task.id.startsWith("tmp_") && !writing.split(",").includes(it.task.id);
+      return canWrite && isScheduleTask(it.task) && (it.task.assigneeId ?? it.task.createdBy) === currentUserId;
     },
-    [access.canEdit, accountReady, canWrite, currentUserId, meetingOccById, writing, updateMeeting.isPending],
+    [access.canEdit, accountReady, canWrite, currentUserId, meetingOccById],
   );
+  const isItemBusy = useCallback(
+    (it: CalendarItem) =>
+      isMeetingTask(it.task)
+        ? isPendingMeetingTask(it.task) || updateMeeting.isPending
+        : it.task.id.startsWith("tmp_") || writing.split(",").includes(it.task.id),
+    [updateMeeting.isPending, writing],
+  );
+  const canDragItem = useCallback((it: CalendarItem) => mayMoveItem(it) && !isItemBusy(it), [mayMoveItem, isItemBusy]);
+  const isItemLocked = useCallback((it: CalendarItem) => !mayMoveItem(it) && !isItemBusy(it), [mayMoveItem, isItemBusy]);
+  const lastDenied = useRef(0);
   const [meetingMove, setMeetingMove] = useState<{ item: CalendarItem; dates: ItemDates } | null>(null);
   const { api: itemDrag, preview: dragPreview } = useItemDrag({
     canDrag: canDragItem,
+    isLocked: isItemLocked,
     onStart: () => setPanel(null),
+    // One toast per burst of tries: it stays up about this long anyway.
+    onDenied: () => {
+      if (Date.now() - lastDenied.current < DENIED_TOAST_GAP_MS) return;
+      lastDenied.current = Date.now();
+      toast.show({ kind: "warning", title: "権限不足で実行できません", durationMs: DENIED_TOAST_GAP_MS });
+    },
     onDrop: (item, dates) => {
       if (sameDates(item.task, dates)) return;
       // Moving a meeting mails everyone invited, so it is asked first (Google asks too).

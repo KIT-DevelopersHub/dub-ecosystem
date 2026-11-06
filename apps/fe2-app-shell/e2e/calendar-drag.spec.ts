@@ -159,8 +159,20 @@ test.describe("ミーティング", () => {
     const item = page.locator('[data-testid^="calendar-item-meet:mtg_rec"]');
     await item.evaluate((el) => el.scrollIntoView({ block: "center" }));
     const from = await center(item);
-    await dragTo(page, from, { x: from.x, y: from.y + HOUR_PX });
+    await dragTo(page, from, { x: from.x, y: from.y + HOUR_PX }, false);
+    await expect(item).toHaveClass(/dragDenied/);
+    const warning = page.getByTestId("toast-warning").filter({ hasText: "権限不足で実行できません" });
+    await expect(warning).toHaveCount(1);
+    await page.mouse.up();
     await expect(page.getByTestId("calendar-meeting-move-confirm")).toHaveCount(0);
     await expect(item).toContainText("15:00～16:00");
+    // The refused drag opened nothing, and repeating it does not pile up toasts.
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await dragTo(page, from, { x: from.x, y: from.y + HOUR_PX });
+    await expect(warning).toHaveCount(1);
+
+    await expect(item).not.toHaveClass(/dragDenied/);
+    await item.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
   });
 });

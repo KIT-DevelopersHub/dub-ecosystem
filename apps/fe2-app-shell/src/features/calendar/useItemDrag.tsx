@@ -9,6 +9,8 @@ const DRAG_THRESHOLD_PX = 4;
 const EDGE_PX = 36;
 const SCROLL_STEP_PX = 12;
 const SCROLL_TICK_MS = 30;
+/** Matches the .dragDenied animation. */
+const DENIED_MS = 400;
 
 export interface ItemDragPreview {
   id: string;
@@ -18,11 +20,13 @@ export interface ItemDragPreview {
 export interface ItemDragApi {
   /** The item being dragged, drawn at its preview dates. */
   draggingId: string | null;
+  /** The item just refused a drag: it shakes for a moment. */
+  deniedId: string | null;
   canDrag: (it: CalendarItem) => boolean;
   begin: (e: ReactPointerEvent, it: CalendarItem) => void;
 }
 
-const ItemDragContext = createContext<ItemDragApi>({ draggingId: null, canDrag: () => false, begin: () => undefined });
+const ItemDragContext = createContext<ItemDragApi>({ draggingId: null, deniedId: null, canDrag: () => false, begin: () => undefined });
 export const ItemDragProvider = ItemDragContext.Provider;
 export const useItemDragContext = (): ItemDragApi => useContext(ItemDragContext);
 
@@ -47,30 +51,71 @@ function swallowNextClick(): void {
 
 export function useItemDrag({
   canDrag,
+  isLocked,
   onStart,
   onDrop,
+  onDenied,
 }: {
   canDrag: (it: CalendarItem) => boolean;
+  /** Can never be dragged by this user (a row merely waiting for a write is neither). */
+  isLocked: (it: CalendarItem) => boolean;
   onStart: () => void;
   onDrop: (it: CalendarItem, dates: ItemDates) => void;
+  onDenied: () => void;
 }): { api: ItemDragApi; preview: ItemDragPreview | null } {
   const [preview, setPreview] = useState<ItemDragPreview | null>(null);
   const previewRef = useRef<ItemDragPreview | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
-  const latest = useRef({ onStart, onDrop });
-  latest.current = { onStart, onDrop };
-  useEffect(() => () => cleanupRef.current?.(), []);
+  const [deniedId, setDeniedId] = useState<string | null>(null);
+  const deniedTimer = useRef<number | undefined>(undefined);
+  const latest = useRef({ onStart, onDrop, onDenied });
+  latest.current = { onStart, onDrop, onDenied };
+  useEffect(
+    () => () => {
+      cleanupRef.current?.();
+      window.clearTimeout(deniedTimer.current);
+    },
+    [],
+  );
 
   const show = (next: ItemDragPreview | null) => {
     previewRef.current = next;
     setPreview(next);
   };
 
+  /** A drag attempt on a locked item: refuse it once the pointer really moves (a click stays a click). */
+  const watchRefusal = useCallback((id: string, x: number, y: number) => {
+    const onMove = (ev: PointerEvent) => {
+      if (ev.buttons === 0) return cleanupRef.current?.();
+      if (Math.hypot(ev.clientX - x, ev.clientY - y) < DRAG_THRESHOLD_PX) return;
+      cleanupRef.current?.();
+      window.addEventListener("pointerup", swallowNextClick, { once: true });
+      window.clearTimeout(deniedTimer.current);
+      setDeniedId(id);
+      deniedTimer.current = window.setTimeout(() => setDeniedId(null), DENIED_MS);
+      latest.current.onDenied();
+    };
+    const stop = () => cleanupRef.current?.();
+    cleanupRef.current = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      cleanupRef.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  }, []);
+
   const begin = useCallback(
     (e: ReactPointerEvent, item: CalendarItem) => {
       // ctrl+click is a right click on macOS: its pointerup may never come.
-      if (e.button !== 0 || e.ctrlKey || e.pointerType === "touch" || !canDrag(item)) return;
+      if (e.button !== 0 || e.ctrlKey || e.pointerType === "touch") return;
       cleanupRef.current?.();
+      if (!canDrag(item)) {
+        if (isLocked(item)) watchRefusal(item.task.id, e.clientX, e.clientY);
+        return;
+      }
       const origin = { x: e.clientX, y: e.clientY };
       const pointer = { ...origin };
       const mode = (e.target as Element).closest("[data-cal-resize]") ? "resize" : "move";
@@ -150,9 +195,9 @@ export function useItemDrag({
       window.addEventListener("pointercancel", onCancel);
       window.addEventListener("keydown", onKey, true);
     },
-    [canDrag],
+    [canDrag, isLocked, watchRefusal],
   );
 
-  const api = useMemo<ItemDragApi>(() => ({ draggingId: preview?.id ?? null, canDrag, begin }), [preview, canDrag, begin]);
+  const api = useMemo<ItemDragApi>(() => ({ draggingId: preview?.id ?? null, deniedId, canDrag, begin }), [preview, deniedId, canDrag, begin]);
   return { api, preview };
 }

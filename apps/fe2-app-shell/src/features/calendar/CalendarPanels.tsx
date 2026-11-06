@@ -612,7 +612,7 @@ export function ItemButton({
   const banner = item.allDay || item.startDay !== item.endDay;
   const vacation = banner && isVacationTask(item.task) ? styles.vacation : "";
   const drag = useItemDragContext();
-  const dragging = drag.draggingId === item.task.id ? styles.dragging : "";
+  const dragging = drag.draggingId === item.task.id ? styles.dragging : drag.deniedId === item.task.id ? styles.dragDenied : "";
   return (
     <button
       type="button"
