@@ -36,7 +36,7 @@ function KpiRow({ kpi, saving }: { kpi: goal.KpiProgress; saving: boolean }): JS
       <Meter percent={kpi.percent} label={kpi.name} />
       <div className={styles.kpiFoot}>
         <span>{value}</span>
-        <span>{auto ? `${metric.source}から自動集計${metric.scope === "org" ? "（全体）" : ""}${kpi.linked ? "・目標は目標タブと連動" : ""}` : "手入力"}</span>
+        <span>{auto ? `${metric.source}から自動集計${metric.scope === "org" ? "（全体）" : ""}` : "手入力"}</span>
       </div>
     </li>
   );
@@ -121,7 +121,7 @@ export function GoalsScreen(): JSX.Element {
           </div>
         )}
       </Stack>
-      {editing && <GoalDrawer key={`${editing.id}-${month}`} team={editing} month={month} goal={goalOf(editing.id)} linkedTargets={list.data?.linkedTargets ?? {}} onClose={() => setEditing(null)} />}
+      {editing && <GoalDrawer key={`${editing.id}-${month}`} team={editing} month={month} goal={goalOf(editing.id)} onClose={() => setEditing(null)} />}
     </div>
   );
 }
