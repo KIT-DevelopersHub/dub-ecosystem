@@ -9,6 +9,7 @@
 - [API](#api)
 - [フロントエンド](#フロントエンド)
 - [名刺の文字の自動読み取り（OCR）](#名刺の文字の自動読み取りocr)
+- [営業進捗](#営業進捗)
 - [リリース手順と migration](#リリース手順と-migration)
 - [フェーズ2 以降の TODO](#フェーズ2-以降の-todo)
 
@@ -36,11 +37,12 @@
 
 ## データモデル
 
-D1 `member` namespace に新規テーブル 1 つ（`infra/d1/migrations/member/0020_sponsor_cards.sql`、additive）。
+D1 `member` namespace のテーブル（いずれも additive）。
 
 | テーブル | 役割 |
 |---|---|
 | `member_sponsor_cards` | 名刺。会社名・氏名・部署・役職・メール・電話・メモ・写真の形式（`image_content_type`、NULL = 写真なし）・登録者（`created_by` と登録時点の名簿上の氏名 `created_by_name`）・`version`（楽観ロック）・`archived_at`（論理削除） |
+| `member_sponsor_leads` | 営業先（スプレッドシートの 1 行 = 1 社）。`infra/d1/migrations/member/0021_sponsor_leads.sql`。[営業進捗](#営業進捗)を参照 |
 
 写真本体は R2（既存バケット `dub-file-attachments`、キー `sponsor/cards/<cardId>`、バインディング `SPONSOR_FILES`）。
 1 名刺 1 枚で、撮り直しは上書き。削除時は R2 からも消す（best-effort）。
@@ -101,8 +103,7 @@ D1 `member` namespace に新規テーブル 1 つ（`infra/d1/migrations/member/
 - 企業 = 名刺の `companyName` を照合キー（NFKC・小文字・法人格「株式会社」「(株)」等・空白/記号を除く）でまとめたもの
   （`features/sponsor/companies.ts`）。表示名はいちばん多い表記（同数なら新しい名刺の表記）。
 - 入力時、会社名の下に「登録済みの企業」候補を出し、押すとその表記に揃える（別表記での分裂を防ぐ）。
-- DB・API は変えない（migration なし）。協賛ステータスなど企業そのものに情報を持たせる段階で企業テーブルを作り、
-  そのときの初期データはこの照合キーで名刺から作れる。
+- 協賛ステータスなど企業そのものの情報は `member_sponsor_leads` に持つ（名刺とは外部キーなしで、この照合キーで結ぶ）。
 - ランチャー・ホームに「スポンサー」。`releaseGate.PUBLISHED_APPS` には入れていないので admin 以外はグレー表示。
 - demo（`VITE_DEMO=1`）: `lib/demo-seed.tsx` に名刺 store（写真あり/なし/未入力の seed）。撮影した写真も demo 上で一覧に出る。
 
@@ -126,16 +127,38 @@ D1 `member` namespace に新規テーブル 1 つ（`infra/d1/migrations/member/
   ページ分割を自動解析（`PSM.AUTO`）にしている。
 - 限界: 縦書き・装飾フォント・暗い/斜めの写真は読めないことがある。その場合も手入力で登録できる（あくまで下書き）。
 
+## 営業進捗
+
+何社に声をかけて、どこまで進んだかをチームで管理する。これまでスプレッドシート（`02_営業管理`）で管理していた表を
+そのままアプリに移したもの。
+
+- **画面**: `/sponsor/leads`（「営業」タブ）。`features/sponsor/SponsorLeadsScreen.tsx`。上に集計 4 つ、下に表。
+  - 集計はスプレッドシートの「現在の営業状況」と同じ数え方（`leads.ts` の `summarizeLeads`）: 登録企業数 / 接触済 = 未接触以外（見送りも含む）/
+    提案済 = 提案済以降 / 内諾・契約 = 内諾 + 契約済。
+  - 既定で見える列は 企業名・ステータス・優先度・営業担当・検討プラン・最終接触日・次回アクション・次回アクション日。残りは「表示列」でオンにする。
+    既定の並びは進んでいる順（見送りは最後）。
+  - ステータスは表の中で変えられる。ほかの項目は行を押して開く詳細から編集する。会社名の照合キーが同じ名刺があれば、詳細に出てそのまま開ける。
+  - 次回アクション日を過ぎた行には「期限切れ」（契約済・見送りを除く）。
+- **項目**: スプレッドシートの列と 1 対 1（`No.` だけは行番号なので持たない）。選択肢の値はスプレッドシートの表記そのままで、SoT は `@dub/types` `sponsor`。
+  - 業界・接点区分は実データが選択肢に収まっていないので自由入力。担当者メールは「a／b（CC）」があるので形式を検査しない。
+- **取り込み**: 「スプレッドシートから取り込む」にシートを見出しごと貼り付ける（`leadImport.ts`）。Excel / Google スプレッドシートのコピーはタブ区切りで届く。
+  - 列は見出しの名前で読むので、順番が変わってもよい。読み取れない値は空にして、取り込む前に一覧で知らせる（「なし」は警告しない）。
+  - サーバは全行を検証してからまとめて登録する（1 行でも不正なら何も入らない）。照合キーが同じ企業は飛ばすので、貼り直しても重複しない。1 回 500 社まで。
+- **実データはリポジトリに入れない**: このリポジトリは公開なので、企業名・担当者・メールを migration や seed に書かない。本番へは取り込み画面から入れる。demo は架空の企業。
+- **API**（`/members/sponsor/leads`）: `GET` 一覧 / `POST` 追加 / `POST /import` 取り込み / `GET /:id` / `PATCH /:id`（`expectedVersion` 必須・409）/ `DELETE /:id`（論理削除）。
+- **権限**: 名刺と同じ。閲覧 = `sponsor:read`、追加・編集・取り込み = `sponsor:write`、削除 = `sponsor:admin`。
+
 ## リリース手順と migration
 
 1. demo で確認 → staging で実 backend（D1・R2 往復）を確認 → 本番デプロイ（admin のみ利用可）→
    スポンサーチームのロールに権限を付与 → メンバー公開（`PUBLISHED_APPS` に `sponsor` を足す 1 行）。
 2. **本番デプロイ前に D1 migration を適用する**（前方のみ・additive）:
    - `infra/d1/migrations/member/0020_sponsor_cards.sql`（新規テーブル）
+   - `infra/d1/migrations/member/0021_sponsor_leads.sql`（新規テーブル）
    - `infra/d1/migrations/identity/0029_sponsor_app_perms.sql`（admin への 5 キー付与）
 
 ## フェーズ2 以降の TODO
 
-- 企業テーブル化と協賛ステータス管理（今は会社名でまとめるだけ）。
+- 名刺から営業先を 1 回で追加する導線（今は「企業を追加」で手入力）。
 - 新しい名刺が共有されたらチームに通知。
 - vCard 書き出し / 連絡先への追加。

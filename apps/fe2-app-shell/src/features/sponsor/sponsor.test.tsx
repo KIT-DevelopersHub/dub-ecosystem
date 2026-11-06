@@ -54,6 +54,12 @@ function fakeApi(overrides: Partial<SponsorApi> = {}): SponsorApi {
     remove: unused,
     uploadImage: unused,
     image: () => Promise.resolve(new Blob(["x"], { type: "image/jpeg" })),
+    listLeads: () => Promise.resolve({ leads: [] }),
+    getLead: unused,
+    createLead: unused,
+    importLeads: unused,
+    updateLead: unused,
+    removeLead: unused,
     ...overrides,
   };
 }

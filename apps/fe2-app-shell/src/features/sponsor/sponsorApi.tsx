@@ -14,6 +14,12 @@ export interface SponsorApi {
   uploadImage(id: string, image: Blob): Promise<sponsor.BusinessCard>;
   /** 写真本体 (認証付き)。表示側で object URL にする。 */
   image(id: string): Promise<Blob>;
+  listLeads(): Promise<sponsor.ListLeadsResponse>;
+  getLead(id: string): Promise<sponsor.SponsorLead>;
+  createLead(body: sponsor.CreateLeadRequest): Promise<sponsor.SponsorLead>;
+  importLeads(body: sponsor.ImportLeadsRequest): Promise<sponsor.ImportLeadsResponse>;
+  updateLead(id: string, body: sponsor.UpdateLeadRequest): Promise<sponsor.SponsorLead>;
+  removeLead(id: string): Promise<void>;
 }
 
 const BASE = "/api/v1/members/sponsor";
@@ -21,6 +27,7 @@ const enc = encodeURIComponent;
 
 export function createSponsorApi(api: ApiClient): SponsorApi {
   const card = (id: string) => `${BASE}/cards/${enc(id)}` as const;
+  const lead = (id: string) => `${BASE}/leads/${enc(id)}` as const;
   return {
     list: () => api.request<sponsor.ListCardsResponse>({ method: "GET", path: `${BASE}/cards` }),
     get: (id) => api.request<sponsor.BusinessCard>({ method: "GET", path: card(id) }),
@@ -37,5 +44,14 @@ export function createSponsorApi(api: ApiClient): SponsorApi {
         headers: { "content-type": image.type || "image/jpeg" },
       }),
     image: (id) => api.download(`${card(id)}/image`),
+    listLeads: () => api.request<sponsor.ListLeadsResponse>({ method: "GET", path: `${BASE}/leads` }),
+    getLead: (id) => api.request<sponsor.SponsorLead>({ method: "GET", path: lead(id) }),
+    createLead: (body) => api.request<sponsor.SponsorLead, sponsor.CreateLeadRequest>({ method: "POST", path: `${BASE}/leads`, body }),
+    importLeads: (body) =>
+      api.request<sponsor.ImportLeadsResponse, sponsor.ImportLeadsRequest>({ method: "POST", path: `${BASE}/leads/import`, body }),
+    updateLead: (id, body) => api.request<sponsor.SponsorLead, sponsor.UpdateLeadRequest>({ method: "PATCH", path: lead(id), body }),
+    removeLead: async (id) => {
+      await api.request<void>({ method: "DELETE", path: lead(id) });
+    },
   };
 }

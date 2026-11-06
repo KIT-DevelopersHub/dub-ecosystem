@@ -411,6 +411,46 @@ CREATE INDEX idx_member_sponsor_cards_org ON member_sponsor_cards(org_id, update
 `.trim(),
 };
 
+// 0021: スポンサーアプリの営業進捗 (新規テーブル・additive)。Mirrors 0021_sponsor_leads.sql (schema-lockstep).
+export const MEMBER_SPONSOR_LEADS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0021_sponsor_leads",
+  up: `
+CREATE TABLE member_sponsor_leads (
+  id                TEXT PRIMARY KEY,
+  org_id            TEXT NOT NULL,
+  company_name      TEXT NOT NULL,
+  industry          TEXT,
+  owner             TEXT,
+  contact_name      TEXT,
+  contact_role      TEXT,
+  contact_email     TEXT,
+  source            TEXT,
+  contact_type      TEXT,
+  evidence          TEXT,
+  priority          TEXT,
+  plan              TEXT,
+  status            TEXT NOT NULL,
+  first_contact_on  TEXT,
+  last_contact_on   TEXT,
+  next_action       TEXT,
+  next_action_on    TEXT,
+  expected_amount   INTEGER,
+  confidence        TEXT,
+  budget_period     TEXT,
+  decision_period   TEXT,
+  note              TEXT,
+  version           INTEGER NOT NULL,
+  created_by        TEXT NOT NULL,
+  created_by_name   TEXT,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
+  archived_at       TEXT
+);
+CREATE INDEX idx_member_sponsor_leads_org ON member_sponsor_leads(org_id, updated_at) WHERE archived_at IS NULL;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -433,4 +473,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_POSITION_MIGRATION,
   MEMBER_HR_INTERVIEW_FORM_MIGRATION,
   MEMBER_SPONSOR_CARDS_MIGRATION,
+  MEMBER_SPONSOR_LEADS_MIGRATION,
 ];

@@ -166,13 +166,18 @@ const SPONSOR_READS = [
   "GET /members/sponsor/cards",
   "GET /members/sponsor/cards/:id",
   "GET /members/sponsor/cards/:id/image",
+  "GET /members/sponsor/leads",
+  "GET /members/sponsor/leads/:id",
 ];
 const SPONSOR_WRITES = [
   "PATCH /members/sponsor/cards/:id",
+  "PATCH /members/sponsor/leads/:id",
   "POST /members/sponsor/cards",
+  "POST /members/sponsor/leads",
+  "POST /members/sponsor/leads/import",
   "PUT /members/sponsor/cards/:id/image",
 ];
-const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id"];
+const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/sponsor/leads/:id"];
 // チーム・役職ロールの一括付与: ロール管理と同格 (管理 編集 + identity:admin)。
 const ROLE_SYNC_ADMIN = ["POST /members/role-sync/backfill"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).

@@ -1,15 +1,17 @@
-// スポンサーのタブ帯 (名刺 ⇄ 企業)。HrTabs と同じく URL に紐づける。
+// スポンサーのタブ帯 (名刺 ⇄ 企業 ⇄ 営業)。HrTabs と同じく URL に紐づける。
 import { useNavigate } from "@tanstack/react-router";
 import { Tabs } from "@dub/ui";
 
-export type SponsorTabId = "cards" | "companies";
+export type SponsorTabId = "cards" | "companies" | "leads";
 
 export const CARDS_PATH = "/sponsor";
 export const COMPANIES_PATH = "/sponsor/companies";
+export const LEADS_PATH = "/sponsor/leads";
 
 const TABS = [
   { id: "cards", label: "名刺", path: CARDS_PATH },
   { id: "companies", label: "企業", path: COMPANIES_PATH },
+  { id: "leads", label: "営業", path: LEADS_PATH },
 ] as const;
 
 export function SponsorTabs({ active }: { active: SponsorTabId }): JSX.Element {
