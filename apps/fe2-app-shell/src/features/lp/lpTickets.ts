@@ -1,5 +1,6 @@
 // LP管理 → チケット の純粋関数。検証ルールは契約（lp-analytics 側の 400 判定）と同じ値で持つ:
 // サーバーで弾かれる入力を先に画面で止め、楽観更新が即ロールバックされる体験を作らない。
+import { lp } from "@dub/types";
 import type {
   LpTicketCoupon,
   LpTicketCouponInput,
@@ -25,12 +26,9 @@ export const TICKET_FIELD_LABEL_MAX = 60;
 export const TICKET_FIELD_OPTIONS_MAX = 20;
 export const TICKET_FIELD_ID_RE = /^[a-z0-9_-]{1,40}$/;
 
-export const FIELD_TYPE_LABELS: Record<LpTicketFieldType, string> = {
-  text: "テキスト",
-  textarea: "長文",
-  select: "選択肢",
-  checkbox: "チェック",
-};
+export const FIELD_TYPE_LABELS: Record<LpTicketFieldType, string> = lp.LP_FIELD_TYPE_LABELS;
+export const TICKET_FIELD_DESCRIPTION_MAX = lp.LP_FIELD_DESCRIPTION_MAX;
+export const isChoiceField = lp.isLpChoiceField;
 
 export const ORDER_STATUS: Record<LpTicketOrderStatus, { label: string; tone: "success" | "warning" | "neutral" }> = {
   paid: { label: "支払い済み", tone: "success" },
@@ -186,7 +184,9 @@ export function validateTicketFields(fields: LpTicketField[]): Record<string, st
     if (!TICKET_FIELD_ID_RE.test(f.id) || seen.has(f.id)) errors[f.id] = "項目 ID が不正です（作り直してください）";
     else if (label.length === 0) errors[f.id] = "項目名を入力してください";
     else if (label.length > TICKET_FIELD_LABEL_MAX) errors[f.id] = `項目名は${TICKET_FIELD_LABEL_MAX}文字以内にしてください`;
-    else if (f.type === "select") {
+    else if ((f.description?.length ?? 0) > TICKET_FIELD_DESCRIPTION_MAX) {
+      errors[f.id] = `補足説明は${TICKET_FIELD_DESCRIPTION_MAX}文字以内にしてください`;
+    } else if (isChoiceField(f.type)) {
       if (f.options.length === 0) errors[f.id] = "選択肢を 1 つ以上入力してください（1 行に 1 つ）";
       else if (f.options.length > TICKET_FIELD_OPTIONS_MAX) errors[f.id] = `選択肢は${TICKET_FIELD_OPTIONS_MAX}個までです`;
       else if (f.options.some((o) => o.length > TICKET_FIELD_LABEL_MAX))
@@ -198,12 +198,13 @@ export function validateTicketFields(fields: LpTicketField[]): Record<string, st
   return errors;
 }
 
-/** 保存前の正規化: label の前後空白を落とし、select 以外は options を空にする。 */
+/** 保存前の正規化: label の前後空白を落とし、選択式以外は options を空に、空の補足説明はキーごと消す。 */
 export function normalizeTicketFields(fields: LpTicketField[]): LpTicketField[] {
-  return fields.map((f) => ({
+  return fields.map(({ description, ...f }) => ({
     ...f,
+    ...(description?.trim() ? { description: description.trim() } : {}),
     label: f.label.trim(),
-    options: f.type === "select" ? f.options.map((o) => o.trim()).filter((o) => o.length > 0) : [],
+    options: isChoiceField(f.type) ? f.options.map((o) => o.trim()).filter((o) => o.length > 0) : [],
   }));
 }
 
