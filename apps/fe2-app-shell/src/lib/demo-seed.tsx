@@ -4303,6 +4303,7 @@ function createMembersStore() {
   members.push(mk("member_hr1", "小林 葵", "メンバー", "added", ["team_dev"], members.length, "aoi@example.com", "情報工学科", "1年"));
   members.push(mk("member_hr2", "佐野 陸", "メンバー", "added", ["team_pr"], members.length, "riku@example.com", "メディア情報学科", "2年"));
   members.push(mk("member_hr3", "高橋 美咲", "メンバー", "added", ["team_venue"], members.length, "misaki@example.com", "建築学科", "1年"));
+  members.push(mk("member_hr4", "野村 蓮", "メンバー", "added", ["team_dev"], members.length, "ren@example.com", "情報工学科", "2年"));
   const applicants: DemoApplicant[] = [
     applicant("app_demo_1", "青木 陽向", "scheduling", 1, { nameKana: "あおき ひなた", email: "hinata@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", motivation: "運営ツールの開発に関わりたいです。" }),
     applicant("app_demo_2", "井上 さくら", "scheduling", 2, { nameKana: "いのうえ さくら", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", source: "紹介" }),
@@ -4314,6 +4315,8 @@ function createMembersStore() {
     applicant("app_demo_8", "佐野 陸", "onboarding", 3, { nameKana: "さの りく", email: "riku@example.com", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", memberId: "member_hr2", version: 5, interviewAt: hrAt(12, 18) }),
     applicant("app_demo_9", "高橋 美咲", "onboarded", 6, { nameKana: "たかはし みさき", email: "misaki@example.com", department: "建築学科", grade: "1年", desiredTeamId: "team_venue", memberId: "member_hr3", version: 6, interviewAt: hrAt(20, 18) }),
     applicant("app_demo_10", "千葉 拓海", "withdrawn", 5, { nameKana: "ちば たくみ", department: "電気電子工学科", grade: "1年", source: "紹介" }),
+    // 採用後に辞退へ動かした人 (memberId が残る)。
+    applicant("app_demo_11", "野村 蓮", "withdrawn", 4, { nameKana: "のむら れん", email: "ren@example.com", department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", memberId: "member_hr4", version: 5, interviewAt: hrAt(11, 18) }),
   ];
   const hrEvents: hr.ApplicantEvent[] = [];
   let hrSeq = 0;
@@ -4413,8 +4416,8 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
-      // 本番と同じ: 名簿に結ばれた人 (採用済み) は 409。
-      if (a.memberId !== null) return err("HR_APPLICANT_JOINED", 409);
+      // 本番と同じ: 採用〜オンボーディング完了の人は 409。
+      if (hr.blocksRemoval(a.stage, a.memberId !== null)) return err("HR_APPLICANT_JOINED", 409);
       hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });

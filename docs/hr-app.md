@@ -119,7 +119,7 @@ D1 `member` namespace に新規テーブル 3 つ（`infra/d1/migrations/member/
 | `POST /members/hr/applicants` | 登録（`面談日程調整中` + 履歴 `created`） |
 | `GET /members/hr/applicants/:id` | 詳細 + 履歴 |
 | `PATCH /members/hr/applicants/:id` | 項目・面談日の更新（`expectedVersion` 必須・409） |
-| `DELETE /members/hr/applicants/:id` | 論理削除（`archived_at`・`hr:admin`）。履歴 `deleted` を追記し、履歴とフォーム回答は残す。名簿に結ばれた人（採用済み）は 409 `HR_APPLICANT_JOINED` |
+| `DELETE /members/hr/applicants/:id` | 論理削除（`archived_at`・`hr:admin`）。履歴 `deleted` を追記し、履歴とフォーム回答は残す。採用〜オンボーディング完了（`hr.blocksRemoval`）の人は 409 `HR_APPLICANT_JOINED`。採用後に辞退などへ動かした人は削除でき、名簿の行は残す |
 | `POST /members/hr/applicants/:id/stage` | ステータス変更（名簿にいない人の採用系は 409 `HR_JOIN_REQUIRED`） |
 | `POST /members/hr/applicants/:id/notes` | メモ追加 |
 | `POST /members/hr/applicants/:id/join` | 採用（名簿へ追加。既に名簿にいれば 409） |
