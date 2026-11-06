@@ -23,6 +23,7 @@ import { CommandPalette, type PaletteCommand } from "./CommandPalette.tsx";
 import { createGlobalContentSearch } from "./globalContentSearch.ts";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
 import { ImpersonationBanner } from "./ImpersonationBanner.tsx";
+import { HeaderAccountSwitcher } from "./HeaderAccountSwitcher.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 
 type Can = (permission: identity.PermissionKey) => boolean;
@@ -290,9 +291,14 @@ export function AppShellLayout({
         {title}
       </a>
       {email ? (
-        <span className="fe2-brandline-account" data-testid="fe2-header-account" title={email}>
-          {email}
-        </span>
+        api ? (
+          // 代理表示: identity:impersonate を持つ人にはメールがメンバー検索のドロップダウンになる。
+          <HeaderAccountSwitcher api={api} email={email} />
+        ) : (
+          <span className="fe2-brandline-account" data-testid="fe2-header-account" title={email}>
+            {email}
+          </span>
+        )
       ) : null}
     </span>
   );

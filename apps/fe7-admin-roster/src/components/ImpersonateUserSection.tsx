@@ -7,7 +7,8 @@
 import { useState } from "react";
 import type { identity } from "@dub/types";
 import { auth } from "@dub/types";
-import { Button, ConfirmDialog, Divider } from "@dub/ui";
+import { Button, Divider } from "@dub/ui";
+import { ImpersonateConfirmDialog } from "@dub/app-ui";
 import { useRosterContext } from "../providers/RosterProvider";
 import { usePermissions } from "../hooks/usePermissions";
 import { useStartImpersonation, useUser } from "../hooks/useRosterApi";
@@ -94,19 +95,10 @@ export function ImpersonateUserSection({
           {auth.IMPERSONATION_REFUSAL_LABEL[refusal]}
         </p>
       ) : null}
-      <ConfirmDialog
+      <ImpersonateConfirmDialog
         open={confirm}
-        title={`${user.displayName}さんとして表示しますか？`}
-        message={
-          <>
-            <span>{user.displayName}さんの権限で、{minutes}分間アプリを表示します。上部のバナーからいつでも自分に戻れます。</span>
-            <ul className={styles.list}>
-              <li>表示中の操作はすべてあなたの名前で記録されます</li>
-              <li>パスワード・ログイン方法・権限の変更とメール送信はできません</li>
-            </ul>
-          </>
-        }
-        confirmLabel="表示する"
+        displayName={user.displayName}
+        minutes={minutes}
         onConfirm={enter}
         onCancel={() => setConfirm(false)}
         testId="fe7-user-impersonate-confirm"

@@ -29,7 +29,6 @@ export interface PermissionCatalogEntry {
 export const PERMISSION_CATALOG = [
   { key: "identity:read", name: "Read roster", description: "View roster, roles and the permission catalog", domain: "identity", dangerous: false },
   { key: "identity:admin", name: "Administer identity", description: "Update users, invite, role CRUD, grant/revoke", domain: "identity", dangerous: true },
-  { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "identity", dangerous: true },
   { key: "event:read", name: "Read events", description: "View events/actions (gantt view reuses this)", domain: "event", dangerous: false },
   { key: "event:write", name: "Write events", description: "Create/update events and actions", domain: "event", dangerous: false },
   { key: "event:admin", name: "Administer events", description: "Archive and closed-phase transitions", domain: "event", dangerous: true },
@@ -123,6 +122,9 @@ export const PERMISSION_CATALOG = [
   { key: "sponsor:admin", name: "Delete sponsor business cards", description: "Delete shared business cards (photo and contact details)", domain: "sponsor", dangerous: true },
   { key: "app:sponsor:view", name: "Open スポンサー app", description: "Open and view the スポンサー app", domain: "app", dangerous: false },
   { key: "app:sponsor:edit", name: "Edit in スポンサー app", description: "Act inside the スポンサー app (implies view)", domain: "app", dangerous: false },
+  // 代理表示 (admin impersonation). Own domain so ロール管理 shows it under 「その他」 as its own
+  // group (it is an org-wide capability, not part of the roster app's 詳細設定).
+  { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "impersonation", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
 // Closed union of the 88 keys (open `${string}:${string}` template retired).

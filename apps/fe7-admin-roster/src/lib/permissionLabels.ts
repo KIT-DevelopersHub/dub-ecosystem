@@ -28,6 +28,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   drive: "Google Drive",
   calendar: "カレンダー",
   webhook: "Webhook",
+  impersonation: "代理表示",
   app: "アプリのアクセス権",
 };
 

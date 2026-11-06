@@ -47,7 +47,7 @@ describe("ImpersonateUserSection", () => {
     const client = createMockClient({ me: makeMe(IMPERSONATOR) });
     // grant bob the key through his detail read
     const get = client.get.bind(client);
-    vi.spyOn(client, "get").mockImplementation(async (path: string, q?: Record<string, string | number | boolean | undefined>) => {
+    vi.spyOn(client, "get").mockImplementation(async (path: string, q?: Record<string, unknown>) => {
       const res = (await get(path, q)) as Record<string, unknown>;
       if (path.endsWith("/identity/users/user_bob")) return { ...res, permissions: ["identity:read", "identity:impersonate"] } as never;
       return res as never;

@@ -157,6 +157,9 @@ export interface ApiClient {
      *  admin's own session cookie server-side (POST /api/v1/auth/impersonation/stop). The
      *  caller reloads the shell afterwards so every cache is re-read as the admin. */
     stopImpersonation(): Promise<void>;
+    /** 代理表示 start (identity:impersonate): the gateway swaps the session cookie to a
+     *  60-minute impersonation of `userId`. The caller reloads the shell afterwards. */
+    startImpersonation(userId: string): Promise<authTypes.StartImpersonationResponse>;
     /** Passkeys (WebAuthn). Raw JSON in/out — lib/passkey.tsx drives the browser half. */
     passkeys: {
       loginOptions(): Promise<PublicKeyCredentialRequestOptionsJSON>;
@@ -418,6 +421,12 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
         }),
       stopImpersonation: () =>
         request<void, Record<string, never>>({ method: "POST", path: "/api/v1/auth/impersonation/stop", body: {} }),
+      startImpersonation: (userId: string) =>
+        request<authTypes.StartImpersonationResponse, Record<string, never>>({
+          method: "POST",
+          path: `/api/v1/admin/users/${encodeURIComponent(userId)}/impersonation`,
+          body: {},
+        }),
       passkeys: {
         loginOptions: () =>
           request<PublicKeyCredentialRequestOptionsJSON, Record<string, never>>({ method: "POST", path: "/api/v1/auth/passkey/login/options", body: {} }),
