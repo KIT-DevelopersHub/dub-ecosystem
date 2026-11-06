@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "sponsor-card-ocr",
+  "worker": "dub-demo-sponsor-card-ocr",
+  "url": "https://dub-demo-sponsor-card-ocr.developershub-site.workers.dev",
+  "deployedSha": "baa71477",
+  "branch": "commander/task-ctask_01M6PHNNQ7W4E2VM3S0922HRF4",
+  "actor": "ko-tarou",
+  "markers": ["fe2-sponsor-ocr-status","fe2-sponsor-ocr-retry"],
+  "live": true,
+  "verifiedAt": "2026-11-05T19:20:55Z",
+  "updatedAt": "2026-11-05T19:20:55Z",
+  "note": "スポンサー: 名刺の文字の自動読み取り (端末内 OCR)"
+}

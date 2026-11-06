@@ -2,6 +2,7 @@
 //   (1) demo transport が /members/sponsor/* の契約に応答する (REAL api-client 経由): seed・登録 → 写真の往復・409
 //   (2) 一覧: 表示 / 検索 / 権限で主ボタン・編集・削除が出し分く
 //   (3) 撮影: カメラ非対応 → 写真を選ぶ → 保存で一覧に増える / 写真だけ失敗 → 再送 / カメラはアンマウントで止まる
+//   (4) 文字の自動読み取り: 写真を使うと空欄に下書き (手入力は上書きしない) / 失敗 → もう一度読み取る
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
@@ -20,6 +21,9 @@ import { companyKey, groupCompanies, suggestCompanies } from "./companies.ts";
 
 const navigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate, useRouter: () => null }));
+// OCR 本体 (Tesseract.js / Web Worker) は jsdom で動かないので差し替える。既定は「何も読めない」。
+const readCard = vi.fn<typeof import("./cardOcr.ts").readCard>(() => Promise.resolve({ text: "", draft: {} }));
+vi.mock("./cardOcr.ts", () => ({ readCard: (...a: Parameters<typeof readCard>) => readCard(...a) }));
 
 const ADMIN = editorPermissions("sponsor", ["sponsor:read", "sponsor:write", "sponsor:admin"]);
 const WRITER = editorPermissions("sponsor", ["sponsor:read", "sponsor:write"]);
@@ -71,6 +75,7 @@ const names = () => screen.queryAllByTestId("fe2-sponsor-card-name").map((el) =>
 
 beforeEach(() => {
   navigate.mockReset();
+  readCard.mockReset().mockResolvedValue({ text: "", draft: {} });
   // jsdom に canvas は無い: 縮小できない環境として扱わせる (選んだ JPEG をそのまま使う経路)。
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
 });
@@ -321,6 +326,36 @@ describe("SponsorScanScreen (撮影 → 入力 → 保存)", () => {
     } finally {
       Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
     }
+  });
+
+  it("reads the photo and fills only the empty fields (手入力は上書きしない)", async () => {
+    let resolve!: (r: Awaited<ReturnType<typeof readCard>>) => void;
+    readCard.mockImplementationOnce((_img, onProgress) => {
+      onProgress?.(0.4);
+      return new Promise((r) => (resolve = r));
+    });
+    renderWith(<SponsorScanScreen />, fakeApi());
+    await pickPhotoAndFill("手入力の会社");
+    expect((await screen.findByTestId("fe2-sponsor-ocr-status")).textContent).toContain("40%");
+    expect(readCard).toHaveBeenCalledWith(expect.any(Blob), expect.any(Function), expect.any(AbortSignal));
+    await act(async () => resolve({ text: "", draft: { companyName: "株式会社能登ソフト", personName: "山田太郎", email: "taro@noto.jp" } }));
+    expect((await screen.findByTestId("fe2-sponsor-ocr-done")).textContent).toContain("2 項目");
+    const value = (k: string) => (screen.getByTestId(`fe2-sponsor-field-${k}`) as HTMLInputElement).value;
+    expect(value("companyName")).toBe("手入力の会社");
+    expect(value("personName")).toBe("山田太郎");
+    expect(value("email")).toBe("taro@noto.jp");
+  });
+
+  it("when reading fails, もう一度読み取る runs it again; 読み取りをやめる stops it", async () => {
+    readCard.mockRejectedValueOnce(new Error("load failed")).mockImplementationOnce(() => new Promise(() => undefined));
+    renderWith(<SponsorScanScreen />, fakeApi());
+    await pickPhotoAndFill("");
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-ocr-retry"));
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-ocr-cancel"));
+    expect(readCard).toHaveBeenCalledTimes(2);
+    expect(readCard.mock.calls[1]?.[2]?.aborted).toBe(true);
+    // やめた後も、写真からの読み取りはいつでもやり直せる。
+    expect(await screen.findByTestId("fe2-sponsor-ocr-start")).toBeTruthy();
   });
 
   it("a viewer cannot open the scan form", async () => {
