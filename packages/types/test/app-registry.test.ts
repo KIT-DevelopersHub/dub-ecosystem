@@ -150,6 +150,11 @@ describe("APP_MANIFEST — canonical app ↔ RBAC coverage", () => {
 });
 
 describe("withRequiredAppDomainKeys — per-app grant carries its domain read key(s)", () => {
+  it("チャットを有効にしても chat:create は付け直さない (「作成できない」を保存できる)", () => {
+    const out = appRegistry.withRequiredAppDomainKeys(["app:chat:edit"]);
+    expect(out).toEqual(["app:chat:edit", "app:chat:view"]);
+  });
+
   it("granting app:members:edit bundles app:members:view + identity:read (edit ⇒ view)", () => {
     const out = new Set(appRegistry.withRequiredAppDomainKeys(["app:members:edit"]));
     expect(out.has("app:members:edit")).toBe(true);

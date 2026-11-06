@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 95-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 96-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(95);
+    expect(catalog).toHaveLength(96);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -471,6 +471,39 @@ describe("chat channel delete + org-wide sections (demo store)", () => {
         }
         expect((err as ApiError | undefined)?.status, `${req.method} ${req.path}`).toBe(403);
       }
+    } finally {
+      globalThis.localStorage.removeItem("dub_demo_account");
+    }
+  });
+
+  it("creates channels like chat-service: 3 択の鍵どおりに private / public / DM を通す", async () => {
+    const a = api();
+    const create = async (body: unknown) => {
+      try {
+        await a.request({ method: "POST", path: "/api/v1/chat/channels", body });
+        return 201;
+      } catch (e) {
+        return (e as { status: number }).status;
+      }
+    };
+    const pub = { type: "topic", visibility: "public", name: "pub" };
+    const priv = { type: "topic", visibility: "private", name: "priv" };
+    const dm = { type: "dm", visibility: "private", name: "DM", memberIds: ["usr_bob"] };
+
+    expect(await create(priv)).toBe(201);
+    const listed = await a.request<{ name: string; visibility: string }[]>({ method: "GET", path: "/api/v1/chat/channels" });
+    expect(listed.find((c) => c.name === "priv")?.visibility).toBe("private");
+
+    try {
+      globalThis.localStorage.setItem("dub_demo_account", "usr_chat_public");
+      expect(await create(pub)).toBe(201);
+      expect(await create(priv)).toBe(403);
+      expect(await create(dm)).toBe(201);
+
+      globalThis.localStorage.setItem("dub_demo_account", "usr_chat_none");
+      expect(await create(pub)).toBe(403);
+      expect(await create(priv)).toBe(403);
+      expect(await create(dm)).toBe(403);
     } finally {
       globalThis.localStorage.removeItem("dub_demo_account");
     }

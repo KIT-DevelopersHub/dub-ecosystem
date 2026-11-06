@@ -214,6 +214,18 @@ export class ChatService {
     const visibility =
       type === "dm" ? "private" : body.visibility === "public" ? "public" : body.visibility === "private" ? "private" : null;
     if (!visibility) throw errors.validationFailed([{ field: "visibility", reason: "invalid" }]);
+    // POLICY_TABLE's chat:create covers public channels and DMs; a DM is private by nature, not
+    // by the caller's choice, so only a real private channel needs the extra key. It lives here
+    // because the gate cannot see the request body.
+    if (type !== "dm" && visibility === "private") {
+      const held = await this.deps.authz(ctx.userId, this.deps.orgId, ["chat:create_private"]);
+      if (!held.includes("chat:create_private")) {
+        throw new DubError(CommonErrorCodes.FORBIDDEN, "chat:create_private required", {
+          status: 403,
+          details: { missing: ["chat:create_private"] },
+        });
+      }
+    }
     // A DM is labelled per viewer from memberIds. The stored name is a neutral fallback: the
     // creator's view of "the other side" would show the recipient their own name.
     const name = type === "dm" ? "DM" : nonEmptyString(body.name, "name");

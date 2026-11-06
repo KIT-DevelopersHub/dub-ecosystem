@@ -16,7 +16,7 @@ object PermissionCatalog {
         "file:read", "file:write", "file:admin",
         "notif:send", "notif:admin",
         "mail:send", "mail:read", "mail:admin",
-        "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility",
+        "chat:create", "chat:create_private", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility",
         "infra:read", "infra:deploy", "infra:dns", "infra:admin",
         "audit:read",
         "hr:read", "hr:write", "hr:admin",

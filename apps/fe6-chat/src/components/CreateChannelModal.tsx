@@ -8,6 +8,8 @@ import styles from "../styles/chat.module.css";
 
 export interface CreateChannelModalProps {
   open: boolean;
+  /** chat:create_private: without it Private stays visible but disabled, with the reason. */
+  canCreatePrivate: boolean;
   onClose: () => void;
   onCreate: (req: CreateChannelRequest) => void | Promise<void>;
 }
@@ -21,7 +23,7 @@ export function normalizeChannelName(raw: string): string {
     .slice(0, 80);
 }
 
-export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelModalProps) {
+export function CreateChannelModal({ open, canCreatePrivate, onClose, onCreate }: CreateChannelModalProps) {
   const [name, setName] = useState("");
   const [topic, setTopic] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
@@ -97,6 +99,7 @@ export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelMod
               type="radio"
               name="visibility"
               checked={visibility === "private"}
+              disabled={!canCreatePrivate}
               data-testid="fe6-create-private"
               onChange={() => setVisibility("private")}
             />
@@ -104,6 +107,11 @@ export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelMod
               <strong>🔒 Private</strong> — 招待されたメンバーのみ
             </span>
           </label>
+          {!canCreatePrivate && (
+            <span className={styles.createHint} data-testid="fe6-create-private-denied">
+              プライベートチャンネルを作成する権限がありません
+            </span>
+          )}
         </div>
 
         <div className={styles.createActions}>
