@@ -311,7 +311,6 @@ export interface LpTicketRepo {
   /** Per type: paid tickets/revenue + pending tickets of orders created at/after `pendingSince`. */
   ticketAggregates(site: string, pendingSince: string): Promise<TicketTypeAgg[]>;
   /** Orders created at/after `since` (daily checkout cap). */
-  countOrdersSince(site: string, since: string): Promise<number>;
   /** Tickets in this sender's pending orders created at/after `pendingSince` (seats it holds unpaid right now). */
   heldPendingByClient(site: string, clientKey: string, pendingSince: string): Promise<number>;
   /**
@@ -538,7 +537,6 @@ export interface AppDeps {
   newOrderId: () => string;
   newCouponId: () => string;
   /** 1 日 (JST) に作れる checkout の上限。公開フォームからの書き込み濫用の天井。 */
-  dailyCheckoutCap: number;
   /** null = STRIPE_SECRET_KEY 未設定（paymentReady=false）。 */
   stripe: StripeClient | null;
   /** STRIPE_WEBHOOK_SECRET。null なら webhook は常に 400。 */

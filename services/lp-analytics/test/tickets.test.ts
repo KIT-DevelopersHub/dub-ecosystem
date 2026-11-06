@@ -103,7 +103,6 @@ async function setup(
   kind: RepoKind,
   opts: {
     stripe?: ReturnType<typeof fakeStripe> | null;
-    cap?: number;
     publish?: boolean;
     paypay?: boolean;
     previewKey?: string | null;
@@ -116,7 +115,6 @@ async function setup(
     stripeWebhookSecret: WHSEC,
     paypayEnabled: opts.paypay === true,
     ticketPreviewKey: opts.previewKey ?? null,
-    ...(opts.cap !== undefined ? { dailyCheckoutCap: opts.cap } : {}),
     ...opts.deps,
   });
   return h;
@@ -519,15 +517,14 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
   });
 
-  it("daily checkout cap → 429", async () => {
-    const { app } = await setup(kind, { cap: 2, stripe: fakeStripe() });
+  it("no daily limit: orders past the old 300/day cap still go through", async () => {
+    const { app } = await setup(kind, { stripe: fakeStripe() });
     await enable(app);
-    const t = await addType(app, { name: "一般", priceJpy: 1000 });
-    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
-    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
-    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(429);
+    const t = await addType(app, { name: "一般", priceJpy: 3000 });
+    for (let i = 0; i < 301; i++) {
+      expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
+    }
   });
-
   it("webhook: bad signature → 400; completed → paid; replay + expired after paid are no-ops", async () => {
     const stripe = fakeStripe();
     const { app } = await setup(kind, { stripe });

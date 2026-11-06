@@ -94,9 +94,6 @@ export class InMemoryLpRepo implements LpRepo {
     }
     return [...m.values()];
   }
-  async countOrdersSince(site: string, since: string) {
-    return this.orders.filter((o) => o.site === site && o.createdAt >= since).length;
-  }
   async heldPendingByClient(site: string, clientKey: string, pendingSince: string) {
     return this.orders
       .filter((o) => o.site === site && o.clientKey === clientKey && o.status === "pending" && o.createdAt >= pendingSince)

@@ -660,9 +660,6 @@ export class TicketService {
     const stripe = this.deps.stripe;
     if (!free && !stripe) throw paymentNotConfigured();
 
-    if ((await this.repo.countOrdersSince(TICKET_SITE, jstDayStartIso(now))) >= this.deps.dailyCheckoutCap) {
-      throw errors.rateLimited(60);
-    }
     const quantity = items.reduce((n, i) => n + i.quantity, 0);
     if (
       !free &&

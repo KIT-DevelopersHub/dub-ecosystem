@@ -12,7 +12,6 @@ import type { AppDeps } from "./types";
 
 const DEFAULT_LP_BASE_URL = "https://hokuriku-it-conf.com";
 const DEFAULT_DAILY_VISIT_CAP = 5000;
-const DEFAULT_DAILY_CHECKOUT_CAP = 300;
 const DEFAULT_DAILY_PROPOSAL_CAP = 200;
 
 function siteTrafficFrom(env: Env): AppDeps["siteTraffic"] {
@@ -62,8 +61,6 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newTicketTypeId: () => newId("tkt"),
     newOrderId: () => newId("tko"),
     newCouponId: () => newId("tkc"),
-    dailyCheckoutCap:
-      Number(env.LP_DAILY_CHECKOUT_CAP) > 0 ? Number(env.LP_DAILY_CHECKOUT_CAP) : DEFAULT_DAILY_CHECKOUT_CAP,
     stripe: stripeFrom(env),
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
     armReconcile: reconcileArmer(env),

@@ -26,8 +26,6 @@ export interface Env {
    * 決済手段そのものはダッシュボード管理（動的な決済手段）なので、これは表記だけのスイッチ。
    */
   LP_PAYPAY_ENABLED?: string;
-  /** 1 日 (JST) に作れる checkout の上限（既定 300）。 */
-  LP_DAILY_CHECKOUT_CAP?: string;
   /** 1 日 (JST) に受け付ける登壇応募の上限（既定 200）。 */
   LP_DAILY_PROPOSAL_CAP?: string;
   /** Free plan only: alarm loop that runs the ticket payment reconcile (no cron slot left). */

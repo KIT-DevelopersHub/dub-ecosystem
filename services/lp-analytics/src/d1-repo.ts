@@ -277,14 +277,6 @@ function ticketRepo(db: DbClient): LpTicketRepo {
       );
       return rows.map((r) => ({ ticketTypeId: r.k, sold: r.sold ?? 0, pending: r.pending ?? 0, revenueJpy: r.revenue ?? 0 }));
     },
-    async countOrdersSince(site, since) {
-      const r = await db.first<{ c: number }>(
-        "SELECT COUNT(*) AS c FROM lp_ticket_orders WHERE site = ? AND created_at >= ?",
-        site,
-        since,
-      );
-      return r?.c ?? 0;
-    },
     async heldPendingByClient(site, clientKey, pendingSince) {
       const r = await db.first<{ n: number | null }>(
         `SELECT SUM(quantity) AS n FROM lp_ticket_orders
