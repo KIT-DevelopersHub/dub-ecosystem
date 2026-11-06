@@ -187,7 +187,7 @@ export function SponsorLeadsScreen(): JSX.Element {
   const addButtons = (
     <>
       <Button variant="secondary" testId="fe2-sponsor-lead-import-open" onClick={() => setImporting(true)}>
-        スプレッドシートから取り込む
+        シートを取り込む
       </Button>
       <Button testId="fe2-sponsor-lead-add" onClick={() => setCreating(true)}>
         企業を追加

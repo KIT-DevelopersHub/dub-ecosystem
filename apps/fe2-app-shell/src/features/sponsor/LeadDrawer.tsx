@@ -194,7 +194,7 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
                 {SECTIONS.map((s) => (
                   <div key={s.title} className={styles.detailSection}>
                     <h3 className={styles.leadSectionTitle}>{s.title}</h3>
-                    <dl className={styles.fields}>
+                    <dl className={`${styles.fields} ${styles.leadFields}`}>
                       {s.fields.map((f) => (
                         <Fragment key={f.key}>
                           <dt>{f.label}</dt>
