@@ -848,6 +848,7 @@ export function Board({
                         onCancel={handleCancelRun}
                         pending={item.taskId.startsWith("optimistic-")}
                         slotWaiting={candidateIds.has(item.taskId)}
+                        {...(api.prs ? { prs: api.prs } : {})}
                       />
                     );
                     if (!picking) return card;

@@ -111,6 +111,23 @@ pnpm --filter @dub/commander-web dev
 daemon のアドレスを変えた場合は `VITE_COMMANDER_DAEMON` で上書き（既定 `http://127.0.0.1:4319`）。
 フェーズゲート API のアドレスは `VITE_COMMANDER_API` で上書き（既定 `http://127.0.0.1:8787`）。
 
+### PR の CI 状況と「確認」ボタン
+
+PR を持つタスクカードに CI の通過数（例 `✓ 5/5` / `✕ 3/5 · 2件失敗` / `実行中`）を出し、押すと
+チェックごとの結果とリンクが開く。「確認」は GitHub の PR に `確認した`（本番ゲート）ラベルを付ける。
+
+| 変数（commander-service） | 既定 | 意味 |
+|---|---|---|
+| `COMMANDER_GITHUB_TOKEN` | (空) | GitHub トークン。`dev-up.sh` が `~/DubVault/secrets/commander-github-token.txt`、無ければ `gh auth token` から渡す（表示しない） |
+| `COMMANDER_GITHUB_REPO` | `KIT-DevelopersHub/dub-ecosystem` | 扱う repo（これ以外の PR は 400） |
+| `COMMANDER_PR_CONFIRM_ENABLED` | (空) | `1` で「確認」を有効化。`dev-up.sh` はトークンがあれば `1`（`COMMANDER_PR_CONFIRM_ENABLED=0 bash commander/dev-up.sh` で無効） |
+| `COMMANDER_CONFIRM_CHECKS_POLICY` | `block` | `block` = 必須 CI が緑でなければ拒否 / `warn` = 警告して許可 |
+
+「確認」は、マージ済み・クローズ済み・Draft・確認済み・表示後に push された・トークンに権限が無い、の
+いずれでも拒否する。押した記録（誰の GitHub ログインで、どの PR / commit に、その時の CI）は成否に
+かかわらず `commander_pr_confirmations` に残る。UI だけ試すなら
+`VITE_COMMANDER_DEMO=1 pnpm --filter @dub/commander-web exec vite` でサンプルのボードが出る。
+
 ### 3) フェーズゲート API（commander-service・任意）
 
 フェーズ管理 UI を動かすときだけ起動する（実 D1 が要る）。
