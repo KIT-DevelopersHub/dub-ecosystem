@@ -88,6 +88,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: PolicyGateVars }> {
   // The public LP Worker asks which version to serve (service binding, x-dub-internal only;
   // no user / request id needed). Read-only, one row.
   app.get("/lp/internal/publish", async (c) => c.json({ versionId: (await svc.getPublish()).versionId }));
+  // 目標管理 (member-service) が月の訪問者数を読む。件数だけ。
+  app.get("/lp/internal/goal-metrics", async (c) => {
+    const month = c.req.query("month");
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) throw errors.validationFailed([{ field: "month", reason: "invalid" }]);
+    const total = await deps.repo.total({ orgId: deps.orgId, from: `${month}-01`, to: `${month}-31`, includeBots: false });
+    return c.json({ visitors: total.uniques });
+  });
   // 登壇者募集 (public LP Worker → service binding).
   app.get("/lp/internal/proposals", async (c) => c.json(await proposals.getPublic()));
   // 公開設定の layout（public LP Worker → service binding）。下書きと本番の両方を返す。

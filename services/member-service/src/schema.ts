@@ -474,6 +474,26 @@ CREATE TABLE member_sponsor_goals (
 `.trim(),
 };
 
+export const MEMBER_GOALS_MIGRATION: Migration = {
+  id: "0023_goals",
+  namespace: "member",
+  up: `
+CREATE TABLE member_goals (
+  org_id           TEXT NOT NULL,
+  team_id          TEXT NOT NULL,
+  month            TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  kpis_json        TEXT NOT NULL,
+  version          INTEGER NOT NULL,
+  updated_by       TEXT NOT NULL,
+  updated_by_name  TEXT,
+  updated_at       TEXT NOT NULL,
+  PRIMARY KEY (org_id, team_id, month)
+);
+CREATE INDEX idx_member_goals_org_month ON member_goals(org_id, month);
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -498,4 +518,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SPONSOR_CARDS_MIGRATION,
   MEMBER_SPONSOR_LEADS_MIGRATION,
   MEMBER_SPONSOR_GOALS_MIGRATION,
+  MEMBER_GOALS_MIGRATION,
 ];

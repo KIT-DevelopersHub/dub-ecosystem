@@ -6,6 +6,7 @@ import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
 import type { HrFormRepo } from "./hr-form-repo";
+import type { GoalMetricSources, GoalRepo } from "./goal-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
 import type { SponsorLeadRepo } from "./sponsor-lead-repo";
 import type { RoleSyncPort } from "./roleSync";
@@ -204,6 +205,9 @@ export interface AppDeps {
   /** スポンサー営業進捗 (member_sponsor_leads) の永続化 (sponsor-lead-repo.ts)。 */
   sponsorLeadRepo: SponsorLeadRepo;
   newSponsorLeadId: () => string;
+  /** 目標管理 (member_goals) の永続化と、他サービスの実績の取り口 (goal-repo.ts)。 */
+  goalRepo: GoalRepo;
+  goalSources: GoalMetricSources;
   /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
    *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
   roleSync?: RoleSyncPort;
