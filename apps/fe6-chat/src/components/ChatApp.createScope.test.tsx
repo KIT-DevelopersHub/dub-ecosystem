@@ -1,6 +1,6 @@
 // 作成できるチャンネルの 3 択が、チャット画面の作成導線にそのまま反映されること。
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { common, identity } from "@dub/types";
 import { ChatRuntimeProvider, type ChatRuntime } from "../context";
@@ -35,7 +35,8 @@ describe("作成導線と作成範囲", () => {
     await userEvent.click(await screen.findByTestId("fe6-channel-create"));
     expect(screen.queryByTestId("fe6-create-private-denied")).not.toBeInTheDocument();
 
-    await userEvent.type(screen.getByTestId("fe6-create-name"), "secret");
+    // userEvent.type は 1 文字ごとに ChatApp 全体を描き直し、CI の負荷で 5 秒を超える。
+    fireEvent.change(screen.getByTestId("fe6-create-name"), { target: { value: "secret" } });
     await userEvent.click(screen.getByTestId("fe6-create-private"));
     await userEvent.click(screen.getByTestId("fe6-create-submit"));
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ visibility: "private" }));
