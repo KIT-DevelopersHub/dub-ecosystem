@@ -1715,6 +1715,20 @@ async function withTestPurchase(config: TicketConfig, token: string | null, deps
  * Handles /tickets*. Returns null when the request is not a tickets route, or the feature is
  * off / unavailable — the caller then serves the normal version 404.
  */
+/** Internal caller over a service binding (adds the s2s marker). null = no binding, or the demo. */
+export function internalFetch(
+  binding: { fetch(input: string, init?: RequestInit): Promise<Response> } | undefined,
+  host: string,
+  demo: boolean,
+): ((path: string, init: RequestInit) => Promise<Response>) | null {
+  if (!binding || demo) return null;
+  return (path, init) => {
+    const headers = new Headers(init.headers);
+    headers.set("x-dub-internal", "1");
+    return binding.fetch(`https://${host}${path}`, { ...init, headers });
+  };
+}
+
 export async function handleTickets(req: Request, deps: TicketsDeps): Promise<Response | null> {
   const url = new URL(req.url);
   const route = matchTicketsRoute(url.pathname);
