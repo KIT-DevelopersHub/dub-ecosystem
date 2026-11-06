@@ -76,6 +76,8 @@ export function buildInboundDeps(env: Env, ctx: RequestContext): InboundDeps {
     ...(blobs ? { blobs } : {}),
     // identity binding: resolves an inbound recipient address → roster userId (Inbox scope).
     identity: env.SVC_IDENTITY,
+    // member binding: expands a team mailing list to its members' userIds.
+    member: env.SVC_MEMBER,
     // Owner-resolution address policy. Same expressions as buildSendDeps so the address we
     // auto-CC on send is exactly the address we refuse to hand ownership to on the way
     // back in (an env override must not silently disable the exclusion).

@@ -39,6 +39,7 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0021_sender_blocks.sql"),
   join(HERE, "../db/0022_sender_blocks_kind_index.sql"),
   join(HERE, "../db/0023_user_forward.sql"),
+  join(HERE, "../db/0024_team_list.sql"),
 ];
 
 function norm(v: unknown): unknown {

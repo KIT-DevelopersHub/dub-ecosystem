@@ -40,6 +40,18 @@ describe("GET /members/internal/team-members", () => {
     expect(res.json.userIds).toEqual(["usr_kota", "usr_kurokawa", "usr_kanai", "usr_kanemu"]);
   });
 
+  it("leaves out declined people only when asked (mailing lists), not for mentions", async () => {
+    const app = createApp(makeDeps());
+    const { hq } = await seedTeamWithPeople(app);
+    const people = (await call(app, "GET", "/members/overview")).json.members as { id: string; identityUserId: string | null; version: number }[];
+    const kota = people.find((p) => p.identityUserId === "usr_kota")!;
+    await call(app, "PATCH", `/members/people/${kota.id}`, { body: { status: "declined", version: kota.version } });
+    const mention = await call(app, "GET", `/members/internal/team-members?teamIds=${hq}`, { internal: true });
+    expect(mention.json.userIds).toContain("usr_kota");
+    const list = await call(app, "GET", `/members/internal/team-members?teamIds=${hq}&excludeDeclined=1`, { internal: true });
+    expect(list.json.userIds).toEqual(["usr_kurokawa", "usr_kanemu"]);
+  });
+
   it("returns an empty list for an unknown or empty teamIds", async () => {
     const app = createApp(makeDeps());
     await seedTeamWithPeople(app);
