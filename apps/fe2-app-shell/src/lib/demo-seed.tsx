@@ -876,8 +876,10 @@ function writeImpersonation(imp: DemoImpersonation | null): void {
 function currentAccount(): DemoAccount {
   const imp = readImpersonation();
   if (imp) {
+    // Permissions are the ROSTER's (role-derived, captured at start) — what the member really
+    // holds — even when the member is also a switcher persona; the persona keeps its inbox.
     const known = DEMO_ACCOUNTS.find((a) => a.id === imp.subject.id);
-    return known ?? { ...imp.subject, inbox: [] };
+    return known ? { ...known, permissions: imp.subject.permissions } : { ...imp.subject, inbox: [] };
   }
   return signedInAccount();
 }
@@ -5952,11 +5954,10 @@ export function createDemoFetch(): typeof fetch {
           target: { id: target.id, status: target.status, roleIds: target.roleIds, holdsImpersonate: target.permissions.includes(authValues.IMPERSONATE_PERMISSION) },
         });
         if (refusal) return problem("AUTH_IMPERSONATION_NOT_ALLOWED", "This member cannot be impersonated", 403, { reason: refusal });
-        const known = DEMO_ACCOUNTS.find((a) => a.id === target.id);
         const startedAt = Date.now();
         const next: DemoImpersonation = {
           actorId: actor.id,
-          subject: { id: target.id, displayName: target.displayName, email: target.email, permissions: known?.permissions ?? target.permissions },
+          subject: { id: target.id, displayName: target.displayName, email: target.email, permissions: target.permissions },
           startedAt,
           expiresAt: startedAt + authValues.IMPERSONATION_DEFAULT_TTL_SEC * 1000,
         };

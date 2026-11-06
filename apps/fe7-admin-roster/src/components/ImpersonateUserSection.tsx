@@ -7,7 +7,7 @@
 import { useState } from "react";
 import type { identity } from "@dub/types";
 import { auth } from "@dub/types";
-import { Button, ConfirmDialog } from "@dub/ui";
+import { Button, ConfirmDialog, Divider } from "@dub/ui";
 import { useRosterContext } from "../providers/RosterProvider";
 import { usePermissions } from "../hooks/usePermissions";
 import { useStartImpersonation, useUser } from "../hooks/useRosterApi";
@@ -74,6 +74,7 @@ export function ImpersonateUserSection({
 
   return (
     <div className={styles.section} data-testid="fe7-user-impersonate">
+      <Divider />
       <span className={styles.title}>このメンバーとして表示</span>
       <p className={styles.help}>
         このメンバーに見えている画面をそのまま確認できます（{minutes}分で自動的に自分に戻ります）。
