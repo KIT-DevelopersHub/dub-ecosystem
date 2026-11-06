@@ -11,7 +11,7 @@ import type {
   LpTicketsState,
   LpTicketTypeSummary,
 } from "../src/types";
-import { stripeFrom } from "../src/index";
+import { stripeFrom } from "../src/deps";
 import { TicketService } from "../src/tickets";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
@@ -110,7 +110,7 @@ async function setup(
     deps?: Partial<AppDeps>;
   } = {},
 ) {
-  const h = await makeApp(kind, opts.level ?? "edit", 5000, null, opts.publish === false ? [] : ["lp:publish"], {
+  const h = await makeApp(kind, opts.level ?? "edit", opts.publish === false ? [] : ["lp:publish"], {
     stripe: opts.stripe ? opts.stripe.client : null,
     stripeWebhookSecret: WHSEC,
     paypayEnabled: opts.paypay === true,
@@ -312,7 +312,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const code = (await issueCoupon(app, a.id)).code;
     expect((await app.fetch(checkout({ ticketTypeId: a.id, couponCode: code }))).status).toBe(200);
 
-    expect((await app.fetch(get("/lp/internal/tickets", {}))).status).toBe(404);
+    expect((await app.fetch(get("/lp/internal/tickets", {}))).status).toBe(403);
     const res = await body<{ enabled: boolean; paymentReady: boolean; types: { name: string; soldOut: boolean }[] }>(
       await app.fetch(get("/lp/internal/tickets", INTERNAL)),
     );
@@ -892,7 +892,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const { app, repo, buy } = await paidSetup();
     const id = await buy();
     await webhook(app, completed("cs_test_0", id, { amount_total: 1 }));
-    const editOnly = await makeApp(kind, "edit", 5000, null, [], { repo });
+    const editOnly = await makeApp(kind, "edit", [], { repo });
     expect((await editOnly.app.fetch(send("POST", `/lp/tickets/orders/${id}/approve`, {}))).status).toBe(403);
     expect((await repo.getOrder("hokuriku-it-conf.com", id))!.status).toBe("needs_review");
 
@@ -1218,7 +1218,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     const c = await issueCoupon(app, t.id);
     expect((await app.fetch(send("POST", "/lp/internal/tickets/coupon", { code: c.code }, INTERNAL))).status).toBe(404);
     await enable(app);
-    expect((await app.fetch(send("POST", "/lp/internal/tickets/coupon", { code: c.code }))).status).toBe(404);
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/coupon", { code: c.code }))).status).toBe(403);
     expect((await app.fetch(send("POST", "/lp/internal/tickets/coupon", { code: c.code }, INTERNAL))).status).toBe(200);
   });
 
@@ -1355,7 +1355,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(await (await check("nope")).json()).toEqual({ valid: false });
     expect(await (await check(undefined)).json()).toEqual({ valid: false });
     // internal route is s2s only
-    expect((await app.fetch(send("POST", "/lp/internal/tickets/preview", { token }))).status).toBe(404);
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/preview", { token }))).status).toBe(403);
   });
 
   it("preview checkout while sales are off: needs a valid token; order marked preview/test; token rides the return URLs", async () => {
@@ -1472,8 +1472,8 @@ describe("tickets gate", () => {
 
   it("internal routes are 404 without x-dub-internal", async () => {
     const { app } = await makeApp("memory");
-    expect((await app.fetch(send("POST", "/lp/internal/tickets/checkout", {}, {}))).status).toBe(404);
-    expect((await app.fetch(send("POST", "/lp/internal/tickets/stripe-webhook", {}, {}))).status).toBe(404);
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/checkout", {}, {}))).status).toBe(403);
+    expect((await app.fetch(send("POST", "/lp/internal/tickets/stripe-webhook", {}, {}))).status).toBe(403);
   });
 });
 

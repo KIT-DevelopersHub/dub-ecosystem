@@ -1,12 +1,11 @@
-// AppDeps wiring from the runtime env. Split from index.ts so the reconcile Durable Object can
-// build the same deps without importing the entry module.
+// AppDeps wiring from the runtime env.
 import { createDbClient, newId, nowIso } from "@dub/db";
 import { createAuthClient } from "@dub/auth-client";
 import { common } from "@dub/types";
 import { consoleSink } from "@dub/observability";
 import { createD1LpRepo } from "./d1-repo";
 import { createCfSiteTrafficSource } from "./site-traffic";
-import { createStripeClient, isLiveStripeKey, usableStripeKey } from "./stripe";
+import { createTicketReleaseClient } from "./ticket-release";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -19,27 +18,6 @@ function siteTrafficFrom(env: Env): AppDeps["siteTraffic"] {
   return token && accountId && siteTag ? createCfSiteTrafficSource({ token, accountId, siteTag }) : null;
 }
 
-/**
- * Payments need BOTH secrets (charging without a webhook secret risks money taken but no ticket)
- * and a usable key (sk_live_ only with STRIPE_ALLOW_LIVE="1").
- */
-export function stripeFrom(
-  env: Pick<Env, "STRIPE_SECRET_KEY" | "STRIPE_WEBHOOK_SECRET" | "STRIPE_ALLOW_LIVE">,
-): AppDeps["stripe"] {
-  const key = usableStripeKey(env.STRIPE_SECRET_KEY, env.STRIPE_ALLOW_LIVE);
-  return key && env.STRIPE_WEBHOOK_SECRET ? createStripeClient(key) : null;
-}
-
-/** Free plan only (wrangler.free.toml binds TICKET_RECONCILE_DO); the paid topology runs the cron instead. */
-function reconcileArmer(env: Env): AppDeps["armReconcile"] {
-  const ns = env.TICKET_RECONCILE_DO;
-  if (!ns) return null;
-  return async () => {
-    const res = await ns.get(ns.idFromName("lp-tickets")).fetch("https://lp-tickets-reconcile/arm", { method: "POST" });
-    if (!res.ok) throw new Error(`reconcile arm: ${res.status}`);
-  };
-}
-
 export function buildDeps(env: Env, requestId?: string): AppDeps {
   const db = createDbClient(env.DB, {
     namespace: "lp",
@@ -47,7 +25,6 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     logger: (e) =>
       consoleSink({ level: "debug", message: "db", service: "lp-analytics", fields: { sql: e.sql, ms: e.durationMs } }),
   });
-  const stripeKey = usableStripeKey(env.STRIPE_SECRET_KEY, env.STRIPE_ALLOW_LIVE);
   return {
     repo: createD1LpRepo(db),
     authz: createAuthClient({ identityBinding: env.SVC_IDENTITY, serviceName: "lp-analytics", mode: "trustedHeader" }),
@@ -58,14 +35,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newVisitId: () => newId("lpv"),
     dailyVisitCap: Number(env.LP_DAILY_VISIT_CAP) > 0 ? Number(env.LP_DAILY_VISIT_CAP) : DEFAULT_DAILY_VISIT_CAP,
     siteTraffic: siteTrafficFrom(env),
-    newTicketTypeId: () => newId("tkt"),
-    newOrderId: () => newId("tko"),
-    newCouponId: () => newId("tkc"),
-    stripe: stripeFrom(env),
-    stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || null,
-    armReconcile: reconcileArmer(env),
-    paypayEnabled: env.LP_PAYPAY_ENABLED === "1",
-    ticketPreviewKey: stripeKey && !isLiveStripeKey(stripeKey) ? stripeKey : null,
+    ticketRelease: createTicketReleaseClient(env.SVC_LP_TICKETS, requestId ?? ""),
     newProposalId: () => newId("lpp"),
     newSiteConfigHistoryId: () => newId("lph"),
     dailyProposalCap:

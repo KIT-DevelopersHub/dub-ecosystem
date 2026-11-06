@@ -4,7 +4,6 @@
 import type { MiddlewareHandler, Context } from "hono";
 import type { common, identity, lp, policy } from "@dub/types";
 import type { SiteTrafficSource } from "./site-traffic";
-import type { StripeClient } from "./stripe";
 
 export type LpDevice = "mobile" | "desktop" | "bot" | "unknown";
 /** redirect = arrived through an issued 流入URL (linkId set); ingest = no matching link. */
@@ -128,232 +127,9 @@ export interface AggregateRow {
   lastVisitAt: string | null;
 }
 
-// ---- tickets wire (lockstep with fe2 lpApi.tsx) ----
-export type LpTicketFieldType = lp.LpFieldType;
-export type LpTicketField = lp.LpFormField;
-export interface LpTicketType {
-  id: string;
-  name: string;
-  description: string;
-  priceJpy: number;
-  capacity: number | null;
-  /** 対象日（例 "Day 1"）。"" = 通し/共通。 */
-  dayLabel: string;
-  /** 1 回の購入で買える上限枚数。 */
-  maxPerOrder: number;
-  active: boolean;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-}
-/** sold / pending are ticket counts (sum of quantities), not orders. pending = held but not sold (fresh pending + needs_review). */
-export interface LpTicketTypeStats {
-  sold: number;
-  pending: number;
-  revenueJpy: number;
-  remaining: number | null;
-}
-export interface LpTicketTypeSummary extends LpTicketType {
-  stats: LpTicketTypeStats;
-}
-/** Methods we advertise. Orders store Stripe's raw PaymentMethod.type (may be others, e.g. "link"). */
-export type LpTicketPaymentMethod = "card" | "paypay";
-
-export interface LpTicketsState {
-  site: string;
-  enabled: boolean;
-  /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える（enabled の間だけ効く）。 */
-  ctaEnabled: boolean;
-  paymentReady: boolean;
-  /** Stripe がテストキーで動いていて、プレビューからテスト購入できる（本番キーなら false）。 */
-  previewCheckout: boolean;
-  /** Payment methods the LP advertises (Dashboard-managed on Stripe). PayPay only with LP_PAYPAY_ENABLED=1. */
-  paymentMethods: LpTicketPaymentMethod[];
-  publicUrl: string;
-  fields: LpTicketField[];
-  types: LpTicketTypeSummary[];
-  totals: { sold: number; revenueJpy: number };
-  updatedAt: string | null;
-  updatedBy: string | null;
-}
-/** needs_review = Stripe says paid but amount/currency mismatched, or disputed: a human must look (seat kept). */
-export type LpTicketOrderStatus = "pending" | "paid" | "expired" | "refunded" | "needs_review";
-export type LpTicketAnswer = lp.LpFormAnswer;
-export interface LpTicketOrderItem {
-  ticketTypeId: string;
-  ticketTypeName: string;
-  dayLabel: string;
-  unitPriceJpy: number;
-  quantity: number;
-}
-export interface LpTicketOrder {
-  id: string;
-  items: LpTicketOrderItem[];
-  /** 合計枚数 */
-  quantity: number;
-  /** 合計金額 */
-  amountJpy: number;
-  status: LpTicketOrderStatus;
-  buyerName: string;
-  buyerEmail: string;
-  answers: LpTicketAnswer[];
-  createdAt: string;
-  paidAt: string | null;
-  /** Why it is / was needs_review (amount_mismatch / currency_mismatch / oversold / dispute). Kept after approval. */
-  reviewReason: string | null;
-  /** The coupon this order used (a coupon order is always 0 yen). */
-  couponId: string | null;
-  /** Stripe PaymentMethod.type used ("card" | "paypay" | ...). null = free / unknown / not yet paid. */
-  paymentMethod: string | null;
-  /** LP管理のプレビュー（テスト購入トークン）から作られた注文。 */
-  preview: boolean;
-  /** テスト注文（プレビュー由来、または Stripe テストモードの決済 cs_test_）。実際の請求はない。 */
-  test: boolean;
-}
-export interface LpTicketOrdersPage {
-  items: LpTicketOrder[];
-  nextCursor: string | null;
-}
-export interface LpTicketTypeInput {
-  name: string;
-  description: string;
-  priceJpy: number;
-  capacity: number | null;
-  dayLabel: string;
-  maxPerOrder: number;
-  active: boolean;
-}
-
-/** 無料券のクーポン。1 コード = 1 券種 x 最大 maxUses 枚。used = 使った枚数（席の押さえと同じ規則で数える）。 */
-export interface LpTicketCoupon {
-  id: string;
-  code: string;
-  label: string;
-  ticketTypeId: string;
-  maxUses: number;
-  used: number;
-  expiresAt: string | null;
-  active: boolean;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-}
-export interface LpTicketCouponsPage {
-  items: LpTicketCoupon[];
-}
-
-// ---- tickets persistence ----
-export interface TicketSettingsRow {
-  site: string;
-  enabled: boolean;
-  ctaEnabled: boolean;
-  fields: LpTicketField[];
-  updatedBy: string | null;
-  updatedAt: string;
-}
-export interface TicketTypeRow extends LpTicketType {
-  site: string;
-}
-export interface TicketOrderRow extends Omit<LpTicketOrder, "test"> {
-  site: string;
-  stripeSessionId: string | null;
-  paymentIntentId: string | null;
-  refundedAt: string | null;
-  /** Who turned needs_review into paid ('stripe' = dispute won) and when. */
-  resolvedBy: string | null;
-  resolvedAt: string | null;
-  /** Hashed sender IP from the public LP Worker (per-sender hold cap). Never the raw IP. */
-  clientKey: string | null;
-}
-export interface TicketCouponRow extends Omit<LpTicketCoupon, "used"> {
-  site: string;
-}
-export interface TicketTypeAgg {
-  ticketTypeId: string;
-  sold: number;
-  pending: number;
-  revenueJpy: number;
-}
-
-export interface PaidSettlement {
-  paidAt: string;
-  sessionId: string | null;
-  paymentIntentId: string | null;
-  /**
-   * Set (= pendingSince) for a late settle: in the SAME statement, if any item no longer fits its
-   * type's capacity next to the other held orders, the order becomes needs_review "oversold" instead of paid.
-   */
-  capacitySince?: string;
-}
-
-export interface LpTicketRepo {
-  getTicketSettings(site: string): Promise<TicketSettingsRow | null>;
-  /** Upsert; only the given column changes. */
-  setTicketEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
-  setTicketCta(site: string, ctaEnabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
-  setTicketFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string): Promise<void>;
-  listTicketTypes(site: string): Promise<TicketTypeRow[]>;
-  getTicketType(site: string, id: string): Promise<TicketTypeRow | null>;
-  insertTicketType(row: TicketTypeRow): Promise<void>;
-  updateTicketType(row: TicketTypeRow): Promise<void>;
-  /** Per type: paid tickets/revenue + pending tickets of orders created at/after `pendingSince`. */
-  ticketAggregates(site: string, pendingSince: string): Promise<TicketTypeAgg[]>;
-  /** Orders created at/after `since` (daily checkout cap). */
-  /** Tickets in this sender's pending orders created at/after `pendingSince` (seats it holds unpaid right now). */
-  heldPendingByClient(site: string, clientKey: string, pendingSince: string): Promise<number>;
-  /**
-   * Seat hold for every item: held (paid + fresh pending) + quantity <= capacity per type
-   * (capacity null = unlimited). All-or-nothing: on a short item nothing stays held and that
-   * item's ticketTypeId is returned.
-   */
-  /**
-   * With row.couponId: in the SAME batch, the order is only inserted while it is one line of the coupon's
-   * type, the coupon is active, not expired at row.createdAt, and its held uses + row.quantity <= max_uses
-   * (else "coupon_used_up").
-   */
-  insertOrderIfAvailable(
-    row: TicketOrderRow,
-    capacities: ReadonlyMap<string, number | null>,
-    pendingSince: string,
-  ): Promise<{ ok: true } | { ok: false; reason: "sold_out"; ticketTypeId: string } | { ok: false; reason: "coupon_used_up" }>;
-  /** false when (site, code) already exists. */
-  insertCoupon(row: TicketCouponRow): Promise<boolean>;
-  getCoupon(site: string, id: string): Promise<TicketCouponRow | null>;
-  /** `code` is already normalized. */
-  getCouponByCode(site: string, code: string): Promise<TicketCouponRow | null>;
-  setCouponActive(site: string, id: string, active: boolean, updatedAt: string): Promise<boolean>;
-  /** Newest first. */
-  listCoupons(site: string): Promise<TicketCouponRow[]>;
-  /** Tickets used per coupon (held orders: paid / needs_review / fresh pending). */
-  couponUses(site: string, pendingSince: string): Promise<Map<string, number>>;
-  getOrder(site: string, id: string): Promise<TicketOrderRow | null>;
-  getOrderBySession(sessionId: string): Promise<TicketOrderRow | null>;
-  setOrderSession(id: string, sessionId: string): Promise<void>;
-  getOrderByPaymentIntent(paymentIntentId: string): Promise<TicketOrderRow | null>;
-  /** pending|expired -> paid, or needs_review "oversold" (see capacitySince). "Paid wins" over a late expiry. null = no transition. */
-  markOrderPaid(id: string, p: PaidSettlement): Promise<"paid" | "needs_review" | null>;
-  /** pending -> expired only (never from paid). */
-  markOrderExpired(id: string): Promise<boolean>;
-  /** pending|expired|paid -> needs_review. */
-  markOrderNeedsReview(id: string, reason: string, paymentIntentId?: string | null): Promise<boolean>;
-  /** paid|needs_review -> refunded (releases the seat). */
-  markOrderRefunded(id: string, refundedAt: string): Promise<boolean>;
-  /** needs_review -> paid (paid_at kept if set). `onlyReason` restricts it to that review_reason. */
-  approveOrder(id: string, resolvedBy: string, resolvedAt: string, onlyReason?: string): Promise<boolean>;
-  /** Fills payment_intent_id only where it is still NULL. */
-  setOrderPaymentIntent(id: string, paymentIntentId: string): Promise<void>;
-  /** Backfill: paid / needs_review orders with a session but no payment_intent_id (pre-0007), oldest first. */
-  listMissingPaymentIntent(site: string, livemode: boolean, limit: number): Promise<TicketOrderRow[]>;
-  /** Reconcile: pending orders with a Stripe session, from <= created_at < to, oldest first. */
-  listPendingWithSession(site: string, from: string, to: string, limit: number): Promise<TicketOrderRow[]>;
-  /** Reconcile: pending orders without a session created before `before` -> expired. Returns count. */
-  expireSessionlessPending(site: string, before: string): Promise<number>;
-  setOrderPaymentMethod(id: string, method: string): Promise<void>;
-  /** 0006 migration. Display-only marker; callers swallow failures. */
-  markOrderPreview(id: string): Promise<void>;
-  /** Newest first, keyset by (created_at, id). */
-  listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
-}
+// ---- custom form fields (shared with lp-tickets via @dub/types) ----
+export type LpFormField = lp.LpFormField;
+export type LpFormAnswer = lp.LpFormAnswer;
 
 // ---- proposals wire (lockstep with fe2 lpApi.tsx) ----
 /** submitted = 未対応 / accepted = 採択 / rejected = 見送り。 */
@@ -363,7 +139,7 @@ export interface LpProposalsState {
   enabled: boolean;
   publicUrl: string;
   /** 追加の入力項目（氏名・メール・タイトル・概要は固定なので含めない）。未保存なら既定の項目。 */
-  fields: LpTicketField[];
+  fields: LpFormField[];
   totals: { total: number; accepted: number; rejected: number };
   updatedAt: string | null;
   updatedBy: string | null;
@@ -374,7 +150,7 @@ export interface LpProposal {
   email: string;
   title: string;
   abstract: string;
-  answers: LpTicketAnswer[];
+  answers: LpFormAnswer[];
   status: LpProposalStatus;
   reviewedBy: string | null;
   createdAt: string;
@@ -390,7 +166,7 @@ export interface ProposalSettingsRow {
   site: string;
   enabled: boolean;
   /** null = never saved (use the service default). */
-  fields: LpTicketField[] | null;
+  fields: LpFormField[] | null;
   updatedBy: string | null;
   updatedAt: string;
 }
@@ -404,7 +180,7 @@ export interface LpProposalRepo {
   getProposalSettings(site: string): Promise<ProposalSettingsRow | null>;
   /** Upsert; only the given column changes. */
   setProposalEnabled(site: string, enabled: boolean, updatedBy: string, updatedAt: string): Promise<void>;
-  setProposalFields(site: string, fields: LpTicketField[], updatedBy: string, updatedAt: string): Promise<void>;
+  setProposalFields(site: string, fields: LpFormField[], updatedBy: string, updatedAt: string): Promise<void>;
   insertProposal(row: ProposalRow): Promise<void>;
   getProposal(site: string, id: string): Promise<ProposalRow | null>;
   /** false when the proposal does not exist. */
@@ -462,15 +238,15 @@ export interface LpSiteConfigRepo {
   ): Promise<boolean>;
   /**
    * 本番反映を 1 トランザクションで書く: lp_site_config.published_json + revision、lp_publish、
-   * lp_ticket_settings.enabled / cta_enabled、lp_proposal_settings.enabled、履歴 1 行。
-   * 既存 3 テーブルは値が変わる行だけ更新する（変わらない項目の更新者・日時は残す）。false = revision 不一致（何も書かない）。
+   * lp_proposal_settings.enabled、履歴 1 行。チケットの販売状態は別 D1（lp-tickets）なのでここでは書かない。
+   * 既存 2 テーブルは値が変わる行だけ更新する（変わらない項目の更新者・日時は残す）。false = revision 不一致（何も書かない）。
    */
   publishSiteConfig(input: SiteConfigPublishInput): Promise<boolean>;
   /** 本番反映の履歴（新しい順）。 */
   listSiteConfigHistory(site: string, limit: number): Promise<SiteConfigHistoryRow[]>;
 }
 
-export interface LpRepo extends LpTicketRepo, LpProposalRepo, LpSiteConfigRepo {
+export interface LpRepo extends LpProposalRepo, LpSiteConfigRepo {
   listLinks(orgId: string): Promise<LinkRow[]>;
   getLink(orgId: string, id: string): Promise<LinkRow | null>;
   getLinkBySlug(orgId: string, slug: string): Promise<LinkRow | null>;
@@ -508,6 +284,18 @@ export interface Authz {
   ): MiddlewareHandler;
 }
 
+/** lp-tickets が正本の release 2 項目（チケット販売 on/off・LP の CTA 差し替え）。 */
+export interface TicketRelease {
+  ticketsEnabled: boolean;
+  ticketsCtaEnabled: boolean;
+}
+
+/** lp-tickets への s2s（SVC_LP_TICKETS）。読めない時は throw する = 不明な値で本番を書き換えない。 */
+export interface TicketReleaseClient {
+  get(): Promise<TicketRelease>;
+  set(release: TicketRelease, updatedBy: common.UserId): Promise<void>;
+}
+
 export interface AppDeps {
   repo: LpRepo;
   authz: Authz;
@@ -521,23 +309,7 @@ export interface AppDeps {
   dailyVisitCap: number;
   /** Cloudflare Web Analytics reader. null when not configured in this environment. */
   siteTraffic: SiteTrafficSource | null;
-  newTicketTypeId: () => string;
-  newOrderId: () => string;
-  newCouponId: () => string;
-  /** 1 日 (JST) に作れる checkout の上限。公開フォームからの書き込み濫用の天井。 */
-  /** null = STRIPE_SECRET_KEY 未設定（paymentReady=false）。 */
-  stripe: StripeClient | null;
-  /** STRIPE_WEBHOOK_SECRET。null なら webhook は常に 400。 */
-  stripeWebhookSecret: string | null;
-  /** Free plan: arms the reconcile alarm loop (TicketReconcileDO). null = cron drives reconcile (paid) / tests. */
-  armReconcile: (() => Promise<void>) | null;
-  /**
-   * LP管理「プレビュー」のテスト購入トークンの鍵（Stripe のテストキー sk_test_ / rk_test_）。
-   * 未設定・本番キーなら null = テスト購入トークンを発行も検証もしない。
-   */
-  ticketPreviewKey: string | null;
-  /** LP_PAYPAY_ENABLED="1": PayPay is on in the Stripe Dashboard, so the LP / LP管理 advertise it. */
-  paypayEnabled: boolean;
+  ticketRelease: TicketReleaseClient;
   newProposalId: () => string;
   /** 本番反映の履歴 id（lp_site_config_history）。 */
   newSiteConfigHistoryId: () => string;

@@ -9,7 +9,7 @@ import type {
   LpProposalStatus,
   LpProposalsPage,
   LpProposalsState,
-  LpTicketField,
+  LpFormField,
   ProposalRow,
   ReqCtx,
 } from "./types";
@@ -22,7 +22,7 @@ const RESERVED_PROPOSAL_FIELD_IDS: ReadonlySet<string> = new Set(["name", "email
 const STATUSES: ReadonlySet<LpProposalStatus> = new Set(["submitted", "accepted", "rejected"]);
 
 /** Fields shown until LP管理 saves its own list (fields_json NULL). */
-export const DEFAULT_PROPOSAL_FIELDS: readonly LpTicketField[] = [
+export const DEFAULT_PROPOSAL_FIELDS: readonly LpFormField[] = [
   { id: "format", label: "発表形式", type: "select", required: true, options: ["セッション（30分）", "LT（5分）"] },
   { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
   { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
@@ -44,7 +44,7 @@ export interface ProposalInput {
 }
 
 /** Validates the public form against the configured fields. Throws 400 with per-field reasons. */
-export function parseProposal(body: unknown, fields: readonly LpTicketField[]): ProposalInput {
+export function parseProposal(body: unknown, fields: readonly LpFormField[]): ProposalInput {
   const b = (body ?? {}) as Record<string, unknown>;
   const bad: FieldError[] = [];
   const text = (k: string, max: number): string => {
@@ -81,7 +81,7 @@ export class ProposalService {
     return this.deps.repo;
   }
 
-  private async fields(): Promise<LpTicketField[]> {
+  private async fields(): Promise<LpFormField[]> {
     return (await this.repo.getProposalSettings(PROPOSAL_SITE))?.fields ?? [...DEFAULT_PROPOSAL_FIELDS];
   }
 
@@ -138,7 +138,7 @@ export class ProposalService {
 
   // ---- internal (public LP Worker) ----
 
-  async getPublic(): Promise<{ enabled: boolean; fields: LpTicketField[] }> {
+  async getPublic(): Promise<{ enabled: boolean; fields: LpFormField[] }> {
     const settings = await this.repo.getProposalSettings(PROPOSAL_SITE);
     return { enabled: settings?.enabled ?? false, fields: settings?.fields ?? [...DEFAULT_PROPOSAL_FIELDS] };
   }

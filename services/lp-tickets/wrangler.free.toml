@@ -1,0 +1,51 @@
+# Free-tier deploy of lp-tickets as `dub-lp-tickets` (internal; reached only over service bindings:
+# api-gateway SVC_LP_TICKETS, the public LP Worker LP_TICKETS, lp-analytics SVC_LP_TICKETS).
+# workers_dev MUST stay false and no routes: INTERNAL rules trust x-dub-internal, which is only
+# unforgeable while nothing but those bindings can reach this Worker.
+#
+# deploy-prod.sh が api-gateway より前に流す。初回の切り替えは docs/runbooks/09-lp-tickets-cutover.md
+# の順に行う。スキーマの適用は手動:
+#   npx wrangler d1 execute dub-tickets --remote --file services/lp-tickets/db/0001_init.sql
+name = "dub-lp-tickets"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# 専用 D1。REPLACE_AT_CUTOVER は切り替え時に `wrangler d1 create dub-tickets` の id へ置き換える
+# （置き換えるまで deploy-prod.sh は何もデプロイせず止まる）。staging は gen-staging-configs.sh が差し替える。
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-tickets"
+database_id = "REPLACE_AT_CUTOVER"
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (app:lp:view / app:lp:edit / lp:publish)
+
+[vars]
+DUB_DEFAULT_ORG_ID = "org_devhub"
+LP_BASE_URL = "https://hokuriku-it-conf.com"
+# チケット購入 (Stripe Checkout)。secret が無ければ「決済準備中」(有料券 503・無料券はクーポンで動く):
+#   npx wrangler secret put STRIPE_SECRET_KEY       (sk_test_... = サンドボックス / sk_live_... = 本物の決済)
+# sk_live_ は STRIPE_ALLOW_LIVE = "1" を足すまで拒否される（決済準備中扱い）。本物の決済開始時だけ足す。
+#   npx wrangler secret put STRIPE_WEBHOOK_SECRET   (whsec_... 公開 LP の /tickets/stripe-webhook 用)
+# LP管理「プレビュー」(販売あり) のテスト購入は STRIPE_SECRET_KEY がテストキー (sk_test_) の時だけ有効（設定不要）。
+# PayPay: 決済手段は Stripe ダッシュボード管理（コードは payment_method_types を送らない）。
+#   ダッシュボードで PayPay を有効化し審査が通ったら、LP / LP管理 の表記を出すために:
+# LP_PAYPAY_ENABLED = "1"
+
+# --- Ticket payment reconcile via a Durable Object ALARM, NOT a Cron Trigger. The account is at
+# the Workers FREE plan's 5/5 cron cap (a 6th cron makes CF reject this deploy); a DO alarm does
+# not count against it. Same pattern as github-sync's GithubReconcileDO. No manual bootstrap:
+# every paid checkout arms the loop (src/reconcile-do.ts), then it reschedules itself every 10 min.
+[[durable_objects.bindings]]
+name = "TICKET_RECONCILE_DO"
+class_name = "TicketReconcileDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TicketReconcileDO"]   # SQLite-backed DO is available on the Workers Free plan

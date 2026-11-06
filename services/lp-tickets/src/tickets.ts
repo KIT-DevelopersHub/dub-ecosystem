@@ -97,7 +97,7 @@ export interface ReconcileSummary {
 }
 
 function log(level: LogLevel, message: string, fields: Record<string, unknown>): void {
-  consoleSink({ level, message, service: "lp-analytics", fields });
+  consoleSink({ level, message, service: "lp-tickets", fields });
 }
 
 /**
@@ -442,6 +442,23 @@ export class TicketService {
     if (typeof enabled !== "boolean") throw errors.validationFailed([{ field: "enabled", reason: "required" }]);
     await this.repo.setTicketCta(TICKET_SITE, enabled, ctx.userId, this.deps.now());
     return this.getState();
+  }
+
+  // ---- 公開設定の release（lp-analytics の本番反映から s2s で届く） ----
+
+  async getRelease(): Promise<{ ticketsEnabled: boolean; ticketsCtaEnabled: boolean }> {
+    const s = await this.repo.getTicketSettings(TICKET_SITE);
+    return { ticketsEnabled: s?.enabled ?? false, ticketsCtaEnabled: s?.ctaEnabled ?? false };
+  }
+
+  async setRelease(ctx: ReqCtx, body: unknown): Promise<{ ticketsEnabled: boolean; ticketsCtaEnabled: boolean }> {
+    const b = (body ?? {}) as { ticketsEnabled?: unknown; ticketsCtaEnabled?: unknown };
+    const bad: FieldError[] = [];
+    if (typeof b.ticketsEnabled !== "boolean") bad.push({ field: "ticketsEnabled", reason: "required" });
+    if (typeof b.ticketsCtaEnabled !== "boolean") bad.push({ field: "ticketsCtaEnabled", reason: "required" });
+    if (bad.length > 0) throw errors.validationFailed(bad);
+    await this.repo.setTicketRelease(TICKET_SITE, b.ticketsEnabled as boolean, b.ticketsCtaEnabled as boolean, ctx.userId, this.deps.now());
+    return this.getRelease();
   }
 
   async setFields(ctx: ReqCtx, body: unknown): Promise<LpTicketsState> {
