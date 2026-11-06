@@ -56,6 +56,7 @@ export const SCOPE: Readonly<Record<string, readonly string[]>> = {
   "drive-proxy": ["/drive/"],
   "file-meta": ["/files"],
   "lp-analytics": ["/lp/"],
+  "lp-tickets": ["/lp/tickets"],
   // Not behind the gateway: the local service, gated by its protection-table.ts.
   "commander-service": ["/features", "/tasks", "/runs", "/chats"],
 };

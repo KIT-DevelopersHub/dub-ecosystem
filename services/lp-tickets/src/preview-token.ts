@@ -1,5 +1,5 @@
 // LP管理「プレビュー」のテスト購入トークン: "<exp>.<hmac>"（exp = unix 秒）。
-// LP管理（ログイン + lp edit）だけが発行し、検証も lp-analytics だけが行う。鍵は Stripe の
+// LP管理（ログイン + lp edit）だけが発行し、検証も lp-tickets だけが行う。鍵は Stripe の
 // テストキーからラベル付き HMAC で導出するので、テストキーが無い（未設定・本番キー）環境では
 // 発行も検証もできない = 本物の決済に化けない。
 export const PREVIEW_TOKEN_TTL_SEC = 60 * 60;

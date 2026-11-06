@@ -5538,6 +5538,12 @@ function createLpTicketsStore() {
       return problem("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", 409);
     }
 
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/orders/export") {
+      const head = "注文番号,氏名,メールアドレス,枚数,金額\n";
+      const lines = orders.map((o) => [o.id, o.buyerName, o.buyerEmail, o.quantity, o.amountJpy].join(",")).join("\n");
+      return new Response(`\ufeff${head}${lines}\n`, { status: 200, headers: { "content-type": "text/csv; charset=utf-8" } });
+    }
+
     if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
       const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
       const cursor = url.searchParams.get("cursor");
