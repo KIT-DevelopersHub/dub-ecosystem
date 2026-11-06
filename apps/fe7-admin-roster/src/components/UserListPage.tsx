@@ -25,6 +25,7 @@ import { InlineRoleEditor } from "./InlineRoleEditor";
 import { InviteUserDialog } from "./InviteUserDialog";
 import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
 import { IssuedAddressesDialog } from "./IssuedAddressesDialog";
+import { TeamMailingListsDialog } from "./TeamMailingListsDialog";
 import { SyncPreviewDialog } from "./SyncPreviewDialog";
 import { MemberLinkDialog } from "./MemberLinkDialog";
 import { AccountMailPrompt, accountMailTargetOf, type AccountMailTarget } from "./AccountMailPrompt";
@@ -116,6 +117,7 @@ export function UserListPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
   const [manageAddressesOpen, setManageAddressesOpen] = useState(false);
+  const [teamListsOpen, setTeamListsOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkAccount, setLinkAccount] = useState<RosterUser | null>(null);
   // アカウント発行メール: asked right after a link when the member has a Gmail.
@@ -293,6 +295,11 @@ export function UserListPage() {
                 発行済みアドレス
               </Button>
             ) : null}
+            {canManageRouting ? (
+              <Button variant="secondary" onClick={() => setTeamListsOpen(true)} testId="fe7-users-team-lists">
+                メーリングリスト
+              </Button>
+            ) : null}
             {canInvite ? (
               <Button variant="secondary" onClick={() => setInviteOpen(true)} testId="fe7-users-invite">
                 ユーザーを招待
@@ -429,6 +436,7 @@ export function UserListPage() {
         onCreated={openPreview}
       />
       <IssuedAddressesDialog open={manageAddressesOpen} onClose={() => setManageAddressesOpen(false)} />
+      <TeamMailingListsDialog open={teamListsOpen} onClose={() => setTeamListsOpen(false)} />
       <SyncPreviewDialog
         open={previewOpen}
         preview={preview.data ?? null}

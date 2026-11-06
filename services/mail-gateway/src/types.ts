@@ -60,6 +60,8 @@ export interface InboundDeps {
    *  inbound message to a roster userId (Inbox account scope). Optional so unit tests that
    *  don't exercise owner resolution can omit it (owner then resolves to null). */
   identity?: Fetcher;
+  /** member-service binding (internal S2S): expands a team mailing list to its members. */
+  member?: Fetcher;
   /** Compliance archive address (MAIL_ARCHIVE_CC) — excluded from owner resolution.
    *  See OwnerAddressPolicy.archiveAddress. */
   archiveAddress?: string | null;

@@ -26,7 +26,7 @@ import { consoleSink, HEADERS } from "@dub/observability";
 import type { auditLog, mail } from "@dub/types";
 import { common } from "@dub/types";
 import { SERVICE_NAME } from "./config";
-import { buildAuditEnv, buildSendDeps } from "./deps";
+import { buildAuditEnv, buildDb, buildSendDeps } from "./deps";
 import type { AppBindings } from "./env";
 import {
   CfEmailRoutingClient,
@@ -45,6 +45,7 @@ import {
   parseUpdateRuleRequest,
 } from "./email-routing-validation";
 import { sendMail } from "./send";
+import { findActiveTeamList } from "./team-list";
 
 /** Mount the Email Routing admin routes on the external app. */
 export function registerEmailRoutingAdmin(ext: Hono<AppBindings>): void {
@@ -103,7 +104,8 @@ export function registerEmailRoutingAdmin(ext: Hono<AppBindings>): void {
     const client = new CfEmailRoutingClient(cfg);
     // Idempotency / abuse guard: never mint a second rule for an address already issued.
     const existing = await client.listRules();
-    if (issuedAddressesFromRules(existing, cfg.zoneName).some((a) => a.address === address)) {
+    const isList = (await findActiveTeamList(buildDb(c.env, c.get("dubCtx").requestId), address)) !== null;
+    if (isList || issuedAddressesFromRules(existing, cfg.zoneName).some((a) => a.address === address)) {
       throw new DubError("MAIL_EMAIL_ROUTING_CONFLICT", `address already issued: ${address}`, { status: 409 });
     }
     const rule = await audited(c, "mail.email_routing.address.issue", "email_routing_address", address, () =>
@@ -181,7 +183,7 @@ export function registerEmailRoutingAdmin(ext: Hono<AppBindings>): void {
  * publish never masks the real outcome: a publish error is logged, not thrown, and the
  * CF result / error propagates unchanged.
  */
-async function audited<T>(
+export async function audited<T>(
   c: Context<AppBindings>,
   action: string,
   resourceType: string,

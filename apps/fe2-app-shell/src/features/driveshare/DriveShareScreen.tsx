@@ -677,12 +677,6 @@ function ShareDriftCard({ fileId }: { fileId: string }): JSX.Element {
       ? toDisplayableError(query.error)
       : { code: "INTERNAL", message: "差分を確認できませんでした。" };
     body = <ErrorState testId="fe2-driveshare-drift-error" error={display} onRetry={() => void query.refetch()} />;
-  } else if (query.data.grantCount === 0) {
-    body = (
-      <small data-testid="fe2-driveshare-drift-nobaseline" style={MUTED}>
-        ロール権限が無いため比べる基準がありません。ロールで共有を追加すると、そのロール以外への共有などの差分をここで確認できます。
-      </small>
-    );
   } else if (query.data.items.length === 0) {
     badge = (
       <Badge tone="success" testId="fe2-driveshare-drift-badge">
@@ -691,7 +685,9 @@ function ShareDriftCard({ fileId }: { fileId: string }): JSX.Element {
     );
     body = (
       <small data-testid="fe2-driveshare-drift-clean" style={MUTED}>
-        ロールの設定どおりに共有されています（{query.data.matchedCount}人が一致）。
+        {query.data.grantCount === 0
+          ? "ロール権限は無く、ほかの人への共有もありません。"
+          : `ロールの設定どおりに共有されています（${query.data.matchedCount}人が一致）。`}
       </small>
     );
   } else {
@@ -730,6 +726,11 @@ function ShareDriftCard({ fileId }: { fileId: string }): JSX.Element {
 function ShareDriftList({ drift }: { drift: FileShareDrift }): JSX.Element {
   return (
     <Stack gap={3}>
+      {drift.grantCount === 0 ? (
+        <small data-testid="fe2-driveshare-drift-noroles" style={MUTED}>
+          このファイルにロール権限はありません。残っている共有はすべてロール外です。
+        </small>
+      ) : null}
       {DRIFT_KIND_ORDER.map((kind) => {
         const items = drift.items.filter((i) => i.kind === kind);
         if (items.length === 0) return null;

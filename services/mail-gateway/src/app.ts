@@ -33,6 +33,7 @@ import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } f
 import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin } from "./email-routing-routes";
+import { registerTeamListAdmin } from "./team-list-routes";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
 import { handleResendWebhook } from "./resend-webhook";
 import { buildAuditEnv, buildBlobs, buildDb, buildSendDeps } from "./deps";
@@ -583,6 +584,7 @@ export function createApp() {
   // admin console. Every one of its 12 routes is listed individually in POLICY_TABLE, so a
   // route added in that file without a table line is denied and turns coverage red.
   registerEmailRoutingAdmin(ext);
+  registerTeamListAdmin(ext);
 
   // ---- production canary results (read-only; `mail:admin` in the table). Recent synthetic
   // mail probes, newest first, plus the effective config (null = disabled).
