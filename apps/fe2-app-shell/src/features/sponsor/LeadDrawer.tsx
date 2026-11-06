@@ -35,6 +35,8 @@ const SECTIONS: { title: string; fields: FieldDef[] }[] = [
       { key: "owner", label: "営業担当", kind: "text" },
       { key: "firstContactOn", label: "初回連絡日", kind: "date" },
       { key: "lastContactOn", label: "最終接触日", kind: "date" },
+      { key: "proposedOn", label: "提案日", kind: "date" },
+      { key: "agreedOn", label: "内諾日", kind: "date" },
       { key: "nextAction", label: "次回アクション", kind: "text", placeholder: "例: 資料送付・担当者へ再連絡" },
       { key: "nextActionOn", label: "次回アクション日", kind: "date" },
     ],

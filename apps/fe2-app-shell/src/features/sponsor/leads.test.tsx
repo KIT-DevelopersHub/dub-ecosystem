@@ -13,6 +13,8 @@ import { createDemoFetch } from "../../lib/demo-seed.tsx";
 import { createSponsorApi, type SponsorApi } from "./sponsorApi.tsx";
 import { SponsorApiProvider } from "./SponsorProvider.tsx";
 import { SponsorLeadsScreen } from "./SponsorLeadsScreen.tsx";
+import { SponsorGoalsScreen } from "./SponsorGoalsScreen.tsx";
+import { achievement, currentMonth, monthActuals, monthLabel, shiftMonth, undatedLeads } from "./goals.ts";
 import { isOverdue, sortLeads, summarizeLeads, todayIso } from "./leads.ts";
 import { parseAmount, parseDate, parseLeadSheet, parseTsv } from "./leadImport.ts";
 
@@ -26,21 +28,19 @@ function lead(over: Partial<sponsor.SponsorLead> = {}): sponsor.SponsorLead {
   return {
     id: "lead_1", companyName: "株式会社北陸テック", industry: null, owner: "鈴木", contactName: null, contactRole: null, contactEmail: null,
     source: null, contactType: null, evidence: null, priority: null, plan: null, status: "未接触", firstContactOn: null, lastContactOn: null,
-    nextAction: null, nextActionOn: null, expectedAmount: null, confidence: null, budgetPeriod: null, decisionPeriod: null, note: null,
+    proposedOn: null, agreedOn: null, nextAction: null, nextActionOn: null, expectedAmount: null, confidence: null, budgetPeriod: null, decisionPeriod: null, note: null,
     version: 1, createdBy: "usr_1" as sponsor.SponsorLead["createdBy"], createdByName: "鈴木 一郎",
     createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", ...over,
   };
 }
 
-function renderScreen(api: SponsorApi, permissions: readonly identity.PermissionKey[] = ADMIN) {
+function renderScreen(api: SponsorApi, permissions: readonly identity.PermissionKey[] = ADMIN, screenNode: JSX.Element = <SponsorLeadsScreen />) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
         <FakeAuthProvider permissions={permissions}>
-          <SponsorApiProvider value={api}>
-            <SponsorLeadsScreen />
-          </SponsorApiProvider>
+          <SponsorApiProvider value={api}>{screenNode}</SponsorApiProvider>
         </FakeAuthProvider>
       </ToastProvider>
     </QueryClientProvider>,
@@ -302,5 +302,94 @@ describe("営業タブ", () => {
     expect(await screen.findByTestId("fe2-sponsor-leads-empty")).toBeTruthy();
     expect(screen.getByTestId("fe2-sponsor-lead-import-open")).toBeTruthy();
     expect(screen.queryByTestId("fe2-sponsor-lead-stats")).toBeNull();
+  });
+});
+
+describe("月間目標", () => {
+  const M = "2026-11";
+  const leads = [
+    lead({ id: "a", firstContactOn: "2026-11-01", proposedOn: "2026-11-02", agreedOn: "2026-11-30", status: "内諾", expectedAmount: 300000 }),
+    lead({ id: "b", firstContactOn: "2026-11-30", proposedOn: "2026-10-31", agreedOn: "2026-11-05", status: "見送り", expectedAmount: 900000 }),
+    lead({ id: "c", firstContactOn: "2026-10-31", status: "初回連絡" }),
+    lead({ id: "d", status: "社内検討" }),
+    lead({ id: "e", status: "未接触" }),
+  ];
+
+  it("counts by the milestone dates of that month, leaving 見送り out of 内諾 and 協賛額", () => {
+    expect(monthActuals(leads, M)).toEqual({ contacted: 2, proposed: 1, agreed: 1, amount: 300000 });
+    expect(monthActuals(leads, "2026-10")).toEqual({ contacted: 1, proposed: 1, agreed: 0, amount: 0 });
+    expect(undatedLeads(leads)).toBe(1);
+  });
+
+  it("computes the rate, over 100% included, and none without a target", () => {
+    expect(achievement(1, 3)).toBe(33);
+    expect(achievement(5, 4)).toBe(125);
+    expect(achievement(5, null)).toBeNull();
+  });
+
+  it("moves across years", () => {
+    expect(shiftMonth("2026-01", -1)).toBe("2025-12");
+    expect(shiftMonth("2026-12", 1)).toBe("2027-01");
+    expect(monthLabel("2026-09")).toBe("2026年9月");
+  });
+
+  it("sets a goal and shows the rate against actuals from the lead list", async () => {
+    let saved: sponsor.PutGoalRequest | null = null;
+    const month = currentMonth();
+    const api: SponsorApi = {
+      ...demoApi(),
+      listGoals: () => Promise.resolve({ goals: [] }),
+      listLeads: () => Promise.resolve({ leads: [lead({ firstContactOn: `${month}-01`, status: "初回連絡" })] }),
+      putGoal: (m, body) => {
+        saved = body;
+        return Promise.resolve({ ...body, month: m, version: 1, updatedBy: "u" as sponsor.MonthlyGoal["updatedBy"], updatedByName: null, updatedAt: "t" });
+      },
+    };
+    renderScreen(api, ADMIN, <SponsorGoalsScreen />);
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-goal-edit"));
+    const save = (await screen.findByTestId("fe2-sponsor-goal-save")) as HTMLButtonElement;
+    fireEvent.change(screen.getByTestId("fe2-sponsor-goal-field-contacted"), { target: { value: "0" } });
+    expect(save.disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("fe2-sponsor-goal-field-contacted"), { target: { value: "4" } });
+    fireEvent.change(screen.getByTestId("fe2-sponsor-goal-field-amount"), { target: { value: "¥500,000" } });
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-goal-rate-contacted").textContent).toBe("25%"));
+    await waitFor(() => expect(saved).toEqual({ contacted: 4, proposed: null, agreed: null, amount: 500000, expectedVersion: 0 }));
+    expect(screen.queryByTestId("fe2-sponsor-goal-rate-proposed")).toBeNull();
+  });
+
+  it("rolls the goal back with a notice on 409", async () => {
+    const month = currentMonth();
+    const goal = { month, contacted: 4, proposed: null, agreed: null, amount: null, version: 2, updatedBy: "u" as sponsor.MonthlyGoal["updatedBy"], updatedByName: null, updatedAt: "t" };
+    const api: SponsorApi = {
+      ...demoApi(),
+      listGoals: () => Promise.resolve({ goals: [goal] }),
+      listLeads: () => Promise.resolve({ leads: [] }),
+      putGoal: () => Promise.reject(new ApiError(409, { error: { code: "SPONSOR_VERSION_CONFLICT", message: "x", retryable: false } } as never)),
+    };
+    renderScreen(api, ADMIN, <SponsorGoalsScreen />);
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-goal-edit"));
+    fireEvent.change(await screen.findByTestId("fe2-sponsor-goal-field-contacted"), { target: { value: "8" } });
+    fireEvent.click(screen.getByTestId("fe2-sponsor-goal-save"));
+    expect(await screen.findByText("他の人が更新しました")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-goal-rate-contacted").textContent).toBe("0%"));
+  });
+
+  it("is read-only for viewers, and moves between months", async () => {
+    renderScreen(demoApi(), VIEWER, <SponsorGoalsScreen />);
+    expect(await screen.findByTestId("fe2-sponsor-goal-contacted")).toBeTruthy();
+    expect(screen.queryByTestId("fe2-sponsor-goal-edit")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe2-sponsor-goal-prev"));
+    expect(screen.getByTestId("fe2-sponsor-goal-month").textContent).toBe(monthLabel(shiftMonth(currentMonth(), -1)));
+    fireEvent.click(screen.getByTestId("fe2-sponsor-goal-today"));
+    expect(screen.getByTestId("fe2-sponsor-goal-month").textContent).toBe(monthLabel(currentMonth()));
+  });
+
+  it("stamps today's date on the demo transport when the status advances", async () => {
+    const api = demoApi();
+    const target = (await api.listLeads()).leads.find((l) => l.status === "未接触")!;
+    const updated = await api.updateLead(target.id, { status: "提案済", expectedVersion: target.version });
+    const today = sponsor.jstDate(new Date().toISOString());
+    expect(updated).toMatchObject({ firstContactOn: today, proposedOn: today, agreedOn: null });
   });
 });

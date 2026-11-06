@@ -9,10 +9,7 @@ const PROPOSED = sponsor.LEAD_STATUSES.indexOf("提案済");
 /** ここより後ろのステータスを「内諾・契約」に数える。 */
 const AGREED = sponsor.LEAD_STATUSES.indexOf("内諾");
 
-/** 進み具合 (見送りは最下位)。 */
-export function statusRank(s: sponsor.LeadStatus): number {
-  return s === "見送り" ? -1 : sponsor.LEAD_STATUSES.indexOf(s);
-}
+const { leadStatusRank: statusRank } = sponsor;
 
 export interface LeadSummary {
   total: number;

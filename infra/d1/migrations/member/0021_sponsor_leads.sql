@@ -18,6 +18,8 @@ CREATE TABLE member_sponsor_leads (
   status            TEXT NOT NULL,
   first_contact_on  TEXT,
   last_contact_on   TEXT,
+  proposed_on       TEXT,
+  agreed_on         TEXT,
   next_action       TEXT,
   next_action_on    TEXT,
   expected_amount   INTEGER,

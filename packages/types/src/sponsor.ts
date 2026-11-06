@@ -116,6 +116,9 @@ export interface LeadFields {
   status: LeadStatus;
   firstContactOn: string | null;
   lastContactOn: string | null;
+  /** 提案日・内諾日。ステータスが進んだ時に自動で入る (手で直せる)。月間目標の実績の基準。 */
+  proposedOn: string | null;
+  agreedOn: string | null;
   nextAction: string | null;
   nextActionOn: string | null;
   /** 想定協賛額 (円)。 */
@@ -156,6 +159,72 @@ export interface ImportLeadsResponse {
   leads: SponsorLead[];
   /** 登録済みの企業 (companyKey が同じ) なので飛ばした行数。 */
   skipped: number;
+}
+
+/** 進み具合 (見送りは最下位)。 */
+export function leadStatusRank(s: LeadStatus): number {
+  return s === "見送り" ? -1 : LEAD_STATUSES.indexOf(s);
+}
+
+/** 日本時間の暦日 (YYYY-MM-DD)。 */
+export function jstDate(iso: string): string {
+  return new Date(Date.parse(iso) + 9 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/** そのステータスに達した日を持つ項目。 */
+const MILESTONES = [
+  { field: "firstContactOn", reachedAt: "初回連絡" },
+  { field: "proposedOn", reachedAt: "提案済" },
+  { field: "agreedOn", reachedAt: "内諾" },
+] as const;
+
+/**
+ * ステータスの変更に合わせて節目の日付を埋める。進んだら今日を入れ (既に日付があれば残す)、節目より手前へ戻したら消す。
+ * 見送りは過去の節目を残す。explicit = 今回の更新で手入力された項目 (触らない)。
+ */
+export function applyLeadMilestones<T extends Pick<LeadFields, "status" | "firstContactOn" | "proposedOn" | "agreedOn">>(
+  prevStatus: LeadStatus,
+  next: T,
+  explicit: readonly string[],
+  today: string,
+): T {
+  if (next.status === "見送り" || next.status === prevStatus) return next;
+  const out = { ...next };
+  for (const { field, reachedAt } of MILESTONES) {
+    if (explicit.includes(field)) continue;
+    const reached = leadStatusRank(next.status) >= leadStatusRank(reachedAt);
+    const wasReached = leadStatusRank(prevStatus) >= leadStatusRank(reachedAt);
+    if (reached && !wasReached) out[field] ??= today;
+    if (!reached && wasReached) out[field] = null;
+  }
+  return out;
+}
+
+// ── 月間目標 ──────────────────────────────────────────────
+
+/** 目標を置く指標。金額だけ円、ほかは社数。 */
+export const GOAL_METRICS = ["contacted", "proposed", "agreed", "amount"] as const;
+export type GoalMetric = (typeof GOAL_METRICS)[number];
+
+export type GoalTargets = Record<GoalMetric, number | null>;
+
+/** 1 か月の目標。null = その指標は目標なし。 */
+export interface MonthlyGoal extends GoalTargets {
+  /** YYYY-MM。 */
+  month: string;
+  version: number;
+  updatedBy: UserId;
+  updatedByName: string | null;
+  updatedAt: ISODateTime;
+}
+
+export interface ListGoalsResponse {
+  goals: MonthlyGoal[];
+}
+
+export interface PutGoalRequest extends GoalTargets {
+  /** 新規は 0。 */
+  expectedVersion: number;
 }
 
 const LEGAL_FORMS =

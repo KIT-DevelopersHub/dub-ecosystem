@@ -10,6 +10,7 @@
 - [フロントエンド](#フロントエンド)
 - [名刺の文字の自動読み取り（OCR）](#名刺の文字の自動読み取りocr)
 - [営業進捗](#営業進捗)
+- [月間目標](#月間目標)
 - [リリース手順と migration](#リリース手順と-migration)
 - [フェーズ2 以降の TODO](#フェーズ2-以降の-todo)
 
@@ -43,6 +44,7 @@ D1 `member` namespace のテーブル（いずれも additive）。
 |---|---|
 | `member_sponsor_cards` | 名刺。会社名・氏名・部署・役職・メール・電話・メモ・写真の形式（`image_content_type`、NULL = 写真なし）・登録者（`created_by` と登録時点の名簿上の氏名 `created_by_name`）・`version`（楽観ロック）・`archived_at`（論理削除） |
 | `member_sponsor_leads` | 営業先（スプレッドシートの 1 行 = 1 社）。`infra/d1/migrations/member/0021_sponsor_leads.sql`。[営業進捗](#営業進捗)を参照 |
+| `member_sponsor_goals` | 月間目標（1 か月 1 行）。`infra/d1/migrations/member/0022_sponsor_goals.sql`。[月間目標](#月間目標)を参照 |
 
 写真本体は R2（既存バケット `dub-file-attachments`、キー `sponsor/cards/<cardId>`、バインディング `SPONSOR_FILES`）。
 1 名刺 1 枚で、撮り直しは上書き。削除時は R2 からも消す（best-effort）。
@@ -145,9 +147,35 @@ D1 `member` namespace のテーブル（いずれも additive）。
   - 列は見出しの名前で読むので、順番が変わってもよい。読み取れない値は空にして、取り込む前に一覧で知らせる（「なし」「-」は空として扱う）。
     長すぎて保存できない値があるときは、どの企業のどの列かを出して取り込みを止める。
   - サーバは全行を検証してからまとめて登録する（1 行でも不正なら何も入らない）。照合キーが同じ企業は飛ばすので、貼り直しても重複しない（DB の一意制約は無いので、2 人が同時に取り込むと重複しうる）。1 回 500 社まで。
-- **実データはリポジトリに入れない**: このリポジトリは公開なので、企業名・担当者・メールを migration や seed に書かない。本番へは取り込み画面から入れる。demo は架空の企業。
+- **実データはリポジトリに入れない**: このリポジトリは公開なので、企業名・担当者・メールを migration や seed に書かない。demo も認証なしの公開 URL なので架空の企業のみ。
+- **初期データの投入**: `apps/fe2-app-shell/scripts/sponsor-leads-seed.ts` が手元の Excel から SQL を作る（入力も出力もリポジトリの外）。
+  migration の適用後に、staging → 本番の順で適用する。同じ企業名の行があれば入れないので再実行してよい。
+
+  ```sh
+  pnpm -C infra/d1 exec tsx "$PWD/apps/fe2-app-shell/scripts/sponsor-leads-seed.ts" ~/Downloads/営業進捗管理.xlsm /tmp/sponsor-leads-seed.sql
+  wrangler d1 execute <dub-core-staging2 など> --remote --file /tmp/sponsor-leads-seed.sql
+  rm /tmp/sponsor-leads-seed.sql
+  ```
 - **API**（`/members/sponsor/leads`）: `GET` 一覧 / `POST` 追加 / `POST /import` 取り込み / `GET /:id` / `PATCH /:id`（`expectedVersion` 必須・409）/ `DELETE /:id`（論理削除）。
 - **権限**: 名刺と同じ。閲覧 = `sponsor:read`、追加・編集・取り込み = `sponsor:write`、削除 = `sponsor:admin`。
+
+## 月間目標
+
+月ごとの目標に対する達成率を見る。`/sponsor/goals`（「目標」タブ）。`features/sponsor/SponsorGoalsScreen.tsx` / `goals.ts`。
+
+- **指標は 4 つ**。実績は保存せず、営業進捗の日付から数える（`monthActuals`）。
+
+  | 指標 | 数え方 |
+  |---|---|
+  | 新規接触（社） | 初回連絡日がその月 |
+  | 提案（社） | 提案日がその月 |
+  | 内諾・契約（社） | 内諾日がその月（見送りを除く） |
+  | 協賛額（円） | その月に内諾した企業の想定協賛額の合計（見送りを除く） |
+
+- **日付の記録**: ステータスが進むと、初回連絡日・提案日・内諾日を日本時間の今日で自動で埋める（`sponsor.applyLeadMilestones`）。既に日付があれば残し、手前へ戻すと消す。見送りでは残す。詳細から手で直せる。
+  取り込みと初期データでは埋めない（過去の日付は分からないため）。日付のない企業は月の実績に入らず、画面に社数を出す。
+- **目標**: 指標ごとに任意（空欄は目標なしで、達成率を出さない）。保存は `PUT /members/sponsor/goals/:month`（`expectedVersion`、新規は 0・409）。閲覧 = `sponsor:read`、設定 = `sponsor:write`。
+- 達成率は 100% を超えても数値はそのまま出し、メーターは 100% で止める。
 
 ## リリース手順と migration
 
@@ -156,6 +184,7 @@ D1 `member` namespace のテーブル（いずれも additive）。
 2. **本番デプロイ前に D1 migration を適用する**（前方のみ・additive）:
    - `infra/d1/migrations/member/0020_sponsor_cards.sql`（新規テーブル）
    - `infra/d1/migrations/member/0021_sponsor_leads.sql`（新規テーブル）
+   - `infra/d1/migrations/member/0022_sponsor_goals.sql`（新規テーブル）
    - `infra/d1/migrations/identity/0029_sponsor_app_perms.sql`（admin への 5 キー付与）
 
 ## フェーズ2 以降の TODO

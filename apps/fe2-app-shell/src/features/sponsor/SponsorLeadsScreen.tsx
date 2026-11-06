@@ -131,7 +131,7 @@ export function SponsorLeadsScreen(): JSX.Element {
     defaultHidden: true,
     cell: (l) => (l[key] as string | null) ?? "—",
   });
-  const date = (key: "firstContactOn", header: string): ColumnDef<Lead> => ({
+  const date = (key: "firstContactOn" | "proposedOn" | "agreedOn", header: string): ColumnDef<Lead> => ({
     key,
     header,
     noWrap: true,
@@ -180,6 +180,8 @@ export function SponsorLeadsScreen(): JSX.Element {
     text("source", "接点・紹介元"),
     text("contactType", "接点区分", "12rem"),
     date("firstContactOn", "初回連絡日"),
+    date("proposedOn", "提案日"),
+    date("agreedOn", "内諾日"),
     { key: "amount", header: "想定協賛額", sortable: true, noWrap: true, align: "right", defaultHidden: true, cell: (l) => formatAmount(l.expectedAmount) },
     text("confidence", "確度", "4rem"),
     text("budgetPeriod", "予算年度・時期"),

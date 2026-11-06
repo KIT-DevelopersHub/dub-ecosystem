@@ -196,4 +196,6 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /members/sponsor/leads/import": appLevel("sponsor", "edit", "sponsor:write"),
   "PATCH /members/sponsor/leads/:id": appLevel("sponsor", "edit", "sponsor:write"),
   "DELETE /members/sponsor/leads/:id": appLevel("sponsor", "edit", "sponsor:admin"),
+  "GET /members/sponsor/goals": appLevel("sponsor", "view", "sponsor:read"),
+  "PUT /members/sponsor/goals/:month": appLevel("sponsor", "edit", "sponsor:write"),
 });

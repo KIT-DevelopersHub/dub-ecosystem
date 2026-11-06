@@ -17,6 +17,8 @@ const HEADERS: Record<string, Key> = {
   ステータス: "status",
   初回連絡日: "firstContactOn",
   最終接触日: "lastContactOn",
+  提案日: "proposedOn",
+  内諾日: "agreedOn",
   次回アクション: "nextAction",
   次回アクション日: "nextActionOn",
   想定協賛額: "expectedAmount",
@@ -117,7 +119,7 @@ export interface ParsedLeads {
   errors: string[];
 }
 
-const DATE_KEYS: readonly Key[] = ["firstContactOn", "lastContactOn", "nextActionOn"];
+const DATE_KEYS: readonly Key[] = ["firstContactOn", "lastContactOn", "proposedOn", "agreedOn", "nextActionOn"];
 const CHOICES: Partial<Record<Key, readonly string[]>> = {
   plan: sponsor.LEAD_PLANS,
   confidence: sponsor.LEAD_CONFIDENCES,

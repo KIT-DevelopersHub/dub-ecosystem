@@ -69,7 +69,7 @@ export function SponsorFrame({
         <PageHeader
           testId="fe2-sponsor-header"
           title="スポンサー"
-          description="スポンサーチームで受け取った名刺と、つながりのある企業、営業の進捗を共有します。"
+          description="スポンサーチームで受け取った名刺と、つながりのある企業、営業の進捗と目標を共有します。"
           actions={actions}
         />
         <SponsorTabs active={active} />

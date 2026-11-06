@@ -60,6 +60,8 @@ function fakeApi(overrides: Partial<SponsorApi> = {}): SponsorApi {
     importLeads: unused,
     updateLead: unused,
     removeLead: unused,
+    listGoals: () => Promise.resolve({ goals: [] }),
+    putGoal: unused,
     ...overrides,
   };
 }

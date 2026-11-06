@@ -433,6 +433,8 @@ CREATE TABLE member_sponsor_leads (
   status            TEXT NOT NULL,
   first_contact_on  TEXT,
   last_contact_on   TEXT,
+  proposed_on       TEXT,
+  agreed_on         TEXT,
   next_action       TEXT,
   next_action_on    TEXT,
   expected_amount   INTEGER,
@@ -448,6 +450,27 @@ CREATE TABLE member_sponsor_leads (
   archived_at       TEXT
 );
 CREATE INDEX idx_member_sponsor_leads_org ON member_sponsor_leads(org_id, updated_at) WHERE archived_at IS NULL;
+`.trim(),
+};
+
+// 0022: スポンサーアプリの月間目標 (新規テーブル・additive)。Mirrors 0022_sponsor_goals.sql (schema-lockstep).
+export const MEMBER_SPONSOR_GOALS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0022_sponsor_goals",
+  up: `
+CREATE TABLE member_sponsor_goals (
+  org_id            TEXT NOT NULL,
+  month             TEXT NOT NULL,
+  contacted_target  INTEGER,
+  proposed_target   INTEGER,
+  agreed_target     INTEGER,
+  amount_target     INTEGER,
+  version           INTEGER NOT NULL,
+  updated_by        TEXT NOT NULL,
+  updated_by_name   TEXT,
+  updated_at        TEXT NOT NULL,
+  PRIMARY KEY (org_id, month)
+);
 `.trim(),
 };
 
@@ -474,4 +497,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_HR_INTERVIEW_FORM_MIGRATION,
   MEMBER_SPONSOR_CARDS_MIGRATION,
   MEMBER_SPONSOR_LEADS_MIGRATION,
+  MEMBER_SPONSOR_GOALS_MIGRATION,
 ];

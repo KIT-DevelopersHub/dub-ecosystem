@@ -68,3 +68,29 @@ test("タブから遷移でき、スマホ幅でも横にはみ出さない", as
   expect(overflow).toBeLessThanOrEqual(0);
   await shot(page, "06-mobile");
 });
+
+test("目標タブ: 目標を設定すると達成率が出て、ステータスを進めると実績が増える", async ({ page }) => {
+  await page.goto("/sponsor/leads");
+  await expect(page.getByTestId("fe2-sponsor-leads-table")).toBeVisible();
+  await page.getByRole("tab", { name: "目標" }).click();
+  await expect(page).toHaveURL(/\/sponsor\/goals$/);
+  await expect(page.getByTestId("fe2-sponsor-goal-rate-contacted")).toBeVisible();
+  await shot(page, "07-goals");
+
+  await page.getByTestId("fe2-sponsor-goal-edit").click();
+  await page.getByTestId("fe2-sponsor-goal-field-contacted").fill("20");
+  await shot(page, "08-goal-dialog");
+  await page.getByTestId("fe2-sponsor-goal-save").click();
+  await expect(page.getByTestId("fe2-sponsor-goal-contacted")).toContainText("/ 20 社");
+  const before = Number((await page.getByTestId("fe2-sponsor-goal-actual-contacted").textContent())?.replace(/\D/g, ""));
+
+  await page.getByRole("tab", { name: "営業" }).click();
+  await page.getByTestId("fe2-sponsor-lead-status-lead_demo_8").selectOption("初回連絡");
+  await page.getByRole("tab", { name: "目標" }).click();
+  await expect(page.getByTestId("fe2-sponsor-goal-actual-contacted")).toHaveText(`${before + 1} 社`);
+
+  // 履歴の行から月を移れる。
+  await page.getByTestId("fe2-sponsor-goal-prev").click();
+  await expect(page.getByTestId("fe2-sponsor-goals-history")).toBeVisible();
+  await shot(page, "09-prev-month");
+});

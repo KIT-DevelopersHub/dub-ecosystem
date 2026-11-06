@@ -8,6 +8,7 @@ import { useAuth } from "../../auth/AuthProvider.tsx";
 import { useSponsorApi } from "./SponsorProvider.tsx";
 
 export const LEADS_KEY = queryKeys.feature("sponsor", "leads");
+export const GOALS_KEY = queryKeys.feature("sponsor", "goals");
 
 /** 楽観的に足した (まだサーバに無い) 行の id 接頭辞。 */
 const TEMP_PREFIX = "tmp_";
@@ -124,5 +125,47 @@ export function useImportLeads() {
       toast.show({ kind: "success", title: `${leads.length} 社を取り込みました`, description: skipped > 0 ? `登録済みの ${skipped} 社は飛ばしました。` : undefined });
     },
     onError: (err) => toast.show({ kind: "error", title: "取り込めませんでした", description: messageFor(err, "通信を確認してもう一度お試しください。") }),
+  });
+}
+
+export function useGoals() {
+  const api = useSponsorApi();
+  return useQuery({ queryKey: GOALS_KEY, queryFn: () => api.listGoals(), staleTime: 15_000 });
+}
+
+function patchGoals(qc: QueryClient, month: string, next: sponsor.MonthlyGoal | null): void {
+  qc.setQueryData<sponsor.ListGoalsResponse>(GOALS_KEY, (prev) =>
+    prev ? { goals: [...prev.goals.filter((g) => g.month !== month), ...(next ? [next] : [])] } : prev,
+  );
+}
+
+/** 月間目標の保存 (楽観的)。409 は他の人の更新 → 読み直して知らせる。 */
+export function usePutGoal() {
+  const api = useSponsorApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const auth = useAuth();
+  const me = auth.status === "authenticated" ? auth.me.user : null;
+  return useMutation<sponsor.MonthlyGoal, unknown, { month: string; targets: sponsor.GoalTargets; expectedVersion: number }, { prev: sponsor.MonthlyGoal | null }>({
+    mutationFn: ({ month, targets, expectedVersion }) => api.putGoal(month, { ...targets, expectedVersion }),
+    onMutate: async ({ month, targets, expectedVersion }) => {
+      await qc.cancelQueries({ queryKey: GOALS_KEY, exact: true });
+      const prev = qc.getQueryData<sponsor.ListGoalsResponse>(GOALS_KEY)?.goals.find((g) => g.month === month) ?? null;
+      patchGoals(qc, month, {
+        ...targets, month, version: expectedVersion, updatedBy: (me?.id ?? "") as sponsor.MonthlyGoal["updatedBy"],
+        updatedByName: me?.displayName ?? null, updatedAt: new Date().toISOString(),
+      });
+      return { prev };
+    },
+    onError: (err, { month }, ctx) => {
+      if (ctx) patchGoals(qc, month, ctx.prev);
+      if (ApiError.isApiError(err) && err.status === 409) {
+        toast.show({ kind: "error", title: "他の人が更新しました", description: "最新の目標を読み込みました。確認してからもう一度編集してください。" });
+        void qc.invalidateQueries({ queryKey: GOALS_KEY });
+        return;
+      }
+      toast.show({ kind: "error", title: messageFor(err, "目標を保存できませんでした") });
+    },
+    onSuccess: (goal) => patchGoals(qc, goal.month, goal),
   });
 }

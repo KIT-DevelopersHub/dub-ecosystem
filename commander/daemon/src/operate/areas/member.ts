@@ -332,6 +332,15 @@ export const MEMBER: AreaSpec = {
     { service: "member-service", route: "DELETE /members/sponsor/cards/:id" },
     { service: "member-service", route: "PUT /members/sponsor/cards/:id/image" },
     { service: "member-service", route: "GET /members/sponsor/cards/:id/image" },
+    // 営業進捗と月間目標 (/members/sponsor/leads・goals) も新設したばかり。協賛額や担当者の連絡先を含む。
+    { service: "member-service", route: "GET /members/sponsor/leads" },
+    { service: "member-service", route: "GET /members/sponsor/leads/:id" },
+    { service: "member-service", route: "POST /members/sponsor/leads" },
+    { service: "member-service", route: "POST /members/sponsor/leads/import" },
+    { service: "member-service", route: "PATCH /members/sponsor/leads/:id" },
+    { service: "member-service", route: "DELETE /members/sponsor/leads/:id" },
+    { service: "member-service", route: "GET /members/sponsor/goals" },
+    { service: "member-service", route: "PUT /members/sponsor/goals/:month" },
   ],
   ownerOpenedIrreversible: {
     "mail.issued.create": "確認メールの送信は取り消せないが、受信は mail.issued.setEnabled で停止できる",

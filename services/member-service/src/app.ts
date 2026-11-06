@@ -314,6 +314,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     await sponsorLeadSvc.remove(reqCtx(c), c.req.param("id"));
     return c.body(null, 204);
   });
+  app.get("/members/sponsor/goals", async (c) => c.json(await sponsorLeadSvc.listGoals(reqCtx(c))));
+  app.put("/members/sponsor/goals/:month", async (c) => {
+    const body = await readJson<sponsor.PutGoalRequest>(c);
+    return c.json(await sponsorLeadSvc.putGoal(reqCtx(c), c.req.param("month"), body));
+  });
   app.get("/members/sponsor/cards", async (c) => c.json(await sponsorSvc.list(reqCtx(c))));
   app.post("/members/sponsor/cards", async (c) => {
     const body = await readJson<sponsor.CreateCardRequest>(c);

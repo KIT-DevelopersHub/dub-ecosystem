@@ -20,6 +20,8 @@ export interface SponsorApi {
   importLeads(body: sponsor.ImportLeadsRequest): Promise<sponsor.ImportLeadsResponse>;
   updateLead(id: string, body: sponsor.UpdateLeadRequest): Promise<sponsor.SponsorLead>;
   removeLead(id: string): Promise<void>;
+  listGoals(): Promise<sponsor.ListGoalsResponse>;
+  putGoal(month: string, body: sponsor.PutGoalRequest): Promise<sponsor.MonthlyGoal>;
 }
 
 const BASE = "/api/v1/members/sponsor";
@@ -53,5 +55,7 @@ export function createSponsorApi(api: ApiClient): SponsorApi {
     removeLead: async (id) => {
       await api.request<void>({ method: "DELETE", path: lead(id) });
     },
+    listGoals: () => api.request<sponsor.ListGoalsResponse>({ method: "GET", path: `${BASE}/goals` }),
+    putGoal: (month, body) => api.request<sponsor.MonthlyGoal, sponsor.PutGoalRequest>({ method: "PUT", path: `${BASE}/goals/${enc(month)}`, body }),
   };
 }
