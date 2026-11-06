@@ -346,10 +346,8 @@ export const MEMBER: AreaSpec = {
     { service: "member-service", route: "DELETE /members/sponsor/leads/:id" },
     { service: "member-service", route: "GET /members/sponsor/goals" },
     { service: "member-service", route: "PUT /members/sponsor/goals/:month" },
-    // メール連携 (紐付け・自動更新の履歴・既存メールからの一括補完) も新設したばかり。一括補完は全社の日付を書き換えうる。
-    { service: "member-service", route: "GET /members/sponsor/mail-links" },
-    { service: "member-service", route: "POST /members/sponsor/leads/:id/mail-links" },
-    { service: "member-service", route: "DELETE /members/sponsor/mail-links/:id" },
+    // メール連携 (担当者メールへの登録・自動更新の履歴・既存メールからの一括補完) も新設したばかり。一括補完は全社の日付を書き換えうる。
+    { service: "member-service", route: "POST /members/sponsor/leads/:id/contact-emails" },
     { service: "member-service", route: "GET /members/sponsor/leads/:id/activity" },
     { service: "member-service", route: "POST /members/sponsor/leads/mail-backfill" },
   ],

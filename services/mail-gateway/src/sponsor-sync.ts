@@ -1,6 +1,6 @@
 // スポンサーのメール連携 (mail-gateway 側)。営業先の進捗は member-service が持つので、ここは
 //   1. 人が送ったメール / 受け取ったメールを member-service に知らせる (notifySponsorContact)
-//   2. member-service の求めで、指定アドレス・ドメインとのメールを集計して返す (querySponsorContacts)
+//   2. member-service の求めで、登録アドレスとのメールを集計して返す (querySponsorContacts)
 // だけを行う。どの営業先か・何を変えるかは member-service (@dub/types sponsor の決まり) が決める。
 //
 // 知らせるのは best-effort: 失敗してもメールの送受信は失敗させない (ログだけ)。取りこぼしは
@@ -73,7 +73,7 @@ export function isAutoReply(autoSubmitted: string | null | undefined, loopMarker
   return Boolean(loopMarker) || (Boolean(v) && v !== "no");
 }
 
-const ADDRESS_FILTER = `(address IN (SELECT value FROM json_each(?)) OR substr(address, instr(address, '@') + 1) IN (SELECT value FROM json_each(?)))`;
+const ADDRESS_FILTER = `address IN (SELECT value FROM json_each(?))`;
 
 // 人が送った (owner あり) 送信済みメールの To / Cc。日時は送信を受け付けた時刻。
 const SENT_SQL = `SELECT address, min(at) AS first_at, max(at) AS last_at, count(*) AS n FROM (
@@ -100,14 +100,10 @@ interface AggRow {
   n: number;
 }
 
-/** 指定アドレス / ドメインとのメールを、相手アドレス × 方向ごとに集計する (D1 の読み取り 2 回)。 */
+/** 指定アドレスとのメールを、相手アドレス × 方向ごとに集計する (D1 の読み取り 2 回)。 */
 export async function querySponsorContacts(db: DbClient, q: sponsor.MailContactsQuery): Promise<sponsor.MailContactSummary[]> {
   const addresses = JSON.stringify(q.addresses);
-  const domains = JSON.stringify(q.domains);
-  const [sent, received] = await Promise.all([
-    db.all<AggRow>(SENT_SQL, addresses, domains),
-    db.all<AggRow>(RECEIVED_SQL, addresses, domains),
-  ]);
+  const [sent, received] = await Promise.all([db.all<AggRow>(SENT_SQL, addresses), db.all<AggRow>(RECEIVED_SQL, addresses)]);
   const to = (direction: sponsor.MailDirection) => (r: AggRow): sponsor.MailContactSummary => ({
     address: r.address,
     direction,
@@ -120,11 +116,9 @@ export async function querySponsorContacts(db: DbClient, q: sponsor.MailContacts
 
 /** POST /internal/sponsor/contacts の入力検証 (小文字・重複なし・上限)。 */
 export function parseContactsQuery(body: unknown): sponsor.MailContactsQuery | null {
-  const b = (body ?? {}) as { addresses?: unknown; domains?: unknown };
-  if (!Array.isArray(b.addresses) || !Array.isArray(b.domains)) return null;
-  const strings = (v: unknown[]) => [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()).filter(Boolean))];
-  const addresses = strings(b.addresses);
-  const domains = strings(b.domains);
-  if (addresses.length > sponsor.MAIL_CONTACTS_QUERY_MAX || domains.length > sponsor.MAIL_CONTACTS_QUERY_MAX) return null;
-  return { addresses, domains };
+  const b = (body ?? {}) as { addresses?: unknown };
+  if (!Array.isArray(b.addresses)) return null;
+  const addresses = [...new Set(b.addresses.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()).filter(Boolean))];
+  if (addresses.length > sponsor.MAIL_CONTACTS_QUERY_MAX) return null;
+  return { addresses };
 }

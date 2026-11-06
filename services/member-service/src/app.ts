@@ -328,14 +328,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     const body = await readJson<sponsor.MailBackfillRequest>(c);
     return c.json(await sponsorMailSvc.backfill(reqCtx(c), body));
   });
-  app.get("/members/sponsor/mail-links", async (c) => c.json(await sponsorMailSvc.listLinks(reqCtx(c))));
-  app.post("/members/sponsor/leads/:id/mail-links", async (c) => {
-    const body = await readJson<sponsor.CreateMailLinkRequest>(c);
-    return c.json(await sponsorMailSvc.createLink(reqCtx(c), c.req.param("id"), body), 201);
-  });
-  app.delete("/members/sponsor/mail-links/:id", async (c) => {
-    await sponsorMailSvc.deleteLink(reqCtx(c), c.req.param("id"));
-    return c.body(null, 204);
+  app.post("/members/sponsor/leads/:id/contact-emails", async (c) => {
+    const body = await readJson<sponsor.RegisterContactEmailRequest>(c);
+    return c.json(await sponsorMailSvc.registerContactEmail(reqCtx(c), c.req.param("id"), body));
   });
   app.get("/members/sponsor/leads/:id/activity", async (c) => c.json(await sponsorMailSvc.listActivity(reqCtx(c), c.req.param("id"))));
   app.post("/members/sponsor/leads", async (c) => {

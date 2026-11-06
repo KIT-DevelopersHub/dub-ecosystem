@@ -8,12 +8,12 @@ import { sponsor } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { formatOn } from "./leads.ts";
 import { useMailBackfill } from "./mailSyncHooks.ts";
+import { MAIL_RULE_TEXT, MATCH_LABEL } from "./LeadMailSection.tsx";
 import styles from "./sponsor.module.css";
 
 type Proposal = sponsor.MailBackfillProposal;
 
 const FIELD_LABEL: Record<sponsor.MailSyncField, string> = { status: "ステータス", firstContactOn: "初回連絡日", lastContactOn: "最終接触日" };
-const MATCH_LABEL: Record<sponsor.MailMatchBy, string> = { link: "紐付け", email: "担当者メール", domain: "同じドメイン" };
 const show = (c: sponsor.LeadFieldChange, v: string | null) => (v === null ? "—" : c.field === "status" ? v : formatOn(v));
 
 const columns: ColumnDef<Proposal>[] = [
@@ -38,7 +38,7 @@ const columns: ColumnDef<Proposal>[] = [
     minWidth: "14rem",
     cell: (p) => (
       <span className={styles.note}>
-        {MATCH_LABEL[p.matchedBy]}で一致・
+        {MATCH_LABEL[p.matchedBy]}に登録済み・
         {p.evidence
           .slice(0, 2)
           .map((e) => `${formatOn(sponsor.jstDate(e.at))} ${e.direction === "sent" ? "送信" : "受信"} ${e.counterpart}`)
@@ -100,7 +100,7 @@ export function MailBackfillDialog({ open, onClose }: { open: boolean; onClose: 
         testId="fe2-sponsor-backfill-empty"
         icon="search"
         title="補完できる日付はありません"
-        description="担当者メールが空の企業は、メール画面の「スポンサー企業に紐付け」で相手のアドレスを紐付けると、そのメールから日付が入ります。"
+        description="担当者メールや名刺のアドレスが無い企業は数えられません。メール画面の「企業の担当者メールに登録」で相手のアドレスを登録すると、そのメールから日付が入ります。"
       />
     );
   } else {
@@ -114,6 +114,7 @@ export function MailBackfillDialog({ open, onClose }: { open: boolean; onClose: 
       <Stack gap={4}>
         <p className={styles.note}>
           Dub のメールで営業先と送受信した記録から、初回連絡日・最終接触日とステータス（未接触→初回連絡・初回連絡→返信あり）を埋めます。
+          {MAIL_RULE_TEXT}
           入っている日付は、メールの方が早い (初回連絡日) / 遅い (最終接触日) 時だけ置き換えます。見送りのステータスは変えません。
         </p>
         <FormError testId="fe2-sponsor-backfill-error">{errorText}</FormError>

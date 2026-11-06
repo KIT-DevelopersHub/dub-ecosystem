@@ -87,22 +87,20 @@ describe("sponsor sync — inbound", () => {
 });
 
 describe("sponsor sync — contacts query", () => {
-  it("aggregates human sends (To + Cc) and non-automatic receipts by counterpart, filtered by address or domain", async () => {
+  it("aggregates human sends (To + Cc) and non-automatic receipts per requested address only", async () => {
     const h = makeHarness();
     await sendMail(sendDeps(h), req, "s1", "usr_alice");
     await sendMail(sendDeps(h), { ...req, cc: [] }, "s2", "usr_alice");
-    await sendMail(sendDeps(h, { ownerUserId: null }), { ...req, to: [{ email: "system@b.example.jp" }] }, "sys", "notification");
+    await sendMail(sendDeps(h, { ownerUserId: null }), { ...req, to: [{ email: "yamada@a.example.jp" }], cc: [] }, "sys", "notification");
     await handleInbound(inboundDeps(h), inbound("r1", "sato@a.example.jp"));
     await handleInbound(inboundDeps(h), inbound("r2", "sato@a.example.jp", { "auto-submitted": "auto-replied" }));
-    await handleInbound(inboundDeps(h), inbound("r3", "x@other.example.jp"));
+    await handleInbound(inboundDeps(h), inbound("r3", "x@a.example.jp"));
 
-    const byAddress = await querySponsorContacts(h.db, { addresses: ["yamada@a.example.jp"], domains: [] });
-    expect(byAddress).toEqual([expect.objectContaining({ address: "yamada@a.example.jp", direction: "sent", count: 2 })]);
-
-    const byDomain = await querySponsorContacts(h.db, { addresses: [], domains: ["a.example.jp", "b.example.jp"] });
+    const got = await querySponsorContacts(h.db, { addresses: ["yamada@a.example.jp", "sato@a.example.jp"] });
     const key = (c: sponsor.MailContactSummary) => `${c.direction}:${c.address}:${c.count}`;
-    expect(byDomain.map(key).sort()).toEqual(["received:sato@a.example.jp:1", "sent:sato@a.example.jp:1", "sent:yamada@a.example.jp:2"]);
-    const yamada = byDomain.find((c) => c.address === "yamada@a.example.jp")!;
+    // システム送信・自動応答・頼んでいないアドレス (同じドメインの x@) は数えない。
+    expect(got.map(key).sort()).toEqual(["received:sato@a.example.jp:1", "sent:sato@a.example.jp:1", "sent:yamada@a.example.jp:2"]);
+    const yamada = got.find((c) => c.address === "yamada@a.example.jp")!;
     expect(yamada.firstAt <= yamada.lastAt).toBe(true);
   });
 
@@ -118,8 +116,8 @@ describe("sponsor sync — contacts query", () => {
         }),
         env,
       );
-    expect((await post({ addresses: [], domains: [] }, false)).status).toBe(403);
-    const ok = await post({ addresses: ["A@x.example.jp"], domains: ["x.example.jp"] }, true);
+    expect((await post({ addresses: [] }, false)).status).toBe(403);
+    const ok = await post({ addresses: ["A@x.example.jp"] }, true);
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ contacts: [] });
     expect((await post({ addresses: "nope" }, true)).status).toBe(400);

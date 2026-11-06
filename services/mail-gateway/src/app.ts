@@ -628,7 +628,7 @@ export function createApp() {
   // reports whether we are still inside the cooldown window plus an ETA estimate.
   app.get("/internal/status", (c) => sendStatus(c));
 
-  // スポンサーのメール連携 (member-service → ここ, s2s のみ)。指定アドレス / ドメインとのメールの集計。
+  // スポンサーのメール連携 (member-service → ここ, s2s のみ)。登録アドレスとのメールの集計。
   app.post("/internal/sponsor/contacts", async (c) => {
     const q = parseContactsQuery(await c.req.json().catch(() => null));
     if (!q) throw errors.validationFailed([{ field: "addresses", reason: "invalid" }]);

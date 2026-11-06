@@ -202,11 +202,9 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /members/sponsor/leads/:id": appLevel("sponsor", "edit", "sponsor:admin"),
   "GET /members/sponsor/goals": appLevel("sponsor", "view", "sponsor:read"),
   "PUT /members/sponsor/goals/:month": appLevel("sponsor", "edit", "sponsor:write"),
-  // メール連携: 紐付けと自動更新の履歴は営業進捗と同じ段階。既存メールからの一括補完は全社の日付を
-  // 書き換えうるので削除と同じ sponsor:admin。
-  "GET /members/sponsor/mail-links": appLevel("sponsor", "view", "sponsor:read"),
-  "POST /members/sponsor/leads/:id/mail-links": appLevel("sponsor", "edit", "sponsor:write"),
-  "DELETE /members/sponsor/mail-links/:id": appLevel("sponsor", "edit", "sponsor:write"),
+  // メール連携: メールの相手を担当者メールに登録 (= 営業先の編集) と自動更新の履歴は営業進捗と同じ段階。
+  // 既存メールからの一括補完は全社の日付を書き換えうるので削除と同じ sponsor:admin。
+  "POST /members/sponsor/leads/:id/contact-emails": appLevel("sponsor", "edit", "sponsor:write"),
   "GET /members/sponsor/leads/:id/activity": appLevel("sponsor", "view", "sponsor:read"),
   "POST /members/sponsor/leads/mail-backfill": appLevel("sponsor", "edit", "sponsor:admin"),
 

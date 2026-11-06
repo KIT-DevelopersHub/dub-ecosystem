@@ -1,18 +1,15 @@
 // sponsor (メール連携) — Dub のメールで営業先とやり取りしたら、営業進捗の日付とステータスを自動で進める。
 // 照合 (どの営業先宛てのメールか) と更新の決まり (何をどう変えるか) はここ 1 か所に置き、
 // member-service (本番) と fe2 の demo が同じ関数を使う。sponsor.ts から再エクスポートされる。
+//
+// 数えるのは「登録したアドレス」とのメールだけ。推測 (同じドメインの別の人など) では数えない:
+//   1. 営業先の担当者メール欄にあるアドレス
+//   2. 名刺に登録したメールアドレス (名刺の会社名の照合キー companyKey が同じ営業先のもの)
 import type { ISODateTime, UserId } from "./common";
 import type { LeadFields, LeadStatus, SponsorLead } from "./sponsor";
+import { companyKey } from "./sponsor-company";
 
 // ── 照合 ──────────────────────────────────────────────────
-
-/** 個人向けのフリーメール。同じドメインでも別の会社なので、ドメインでは照合しない。 */
-export const FREE_MAIL_DOMAINS: readonly string[] = [
-  "gmail.com", "googlemail.com", "yahoo.co.jp", "yahoo.com", "ymail.ne.jp", "outlook.com", "outlook.jp", "hotmail.com",
-  "hotmail.co.jp", "live.com", "live.jp", "msn.com", "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com",
-  "gmx.com", "mail.com", "zoho.com", "yandex.com", "qq.com", "163.com", "naver.com", "nifty.com", "biglobe.ne.jp", "so-net.ne.jp",
-  "ocn.ne.jp", "docomo.ne.jp", "ezweb.ne.jp", "au.com", "softbank.ne.jp", "i.softbank.jp", "ymobile.ne.jp", "rakuten.jp",
-];
 
 /** こちら側 (Dub) のドメイン。社内のやり取りは営業先との接触ではない。 */
 export const OWN_MAIL_DOMAINS: readonly string[] = ["developershub.jp"];
@@ -35,14 +32,13 @@ export function mailDomain(address: string): string {
   return address.slice(address.lastIndexOf("@") + 1).toLowerCase();
 }
 
-/** ドメインで照合してよいか (フリーメール・自社ドメインは不可)。 */
-export function isCompanyDomain(domain: string): boolean {
-  const d = domain.toLowerCase();
-  return !FREE_MAIL_DOMAINS.includes(d) && !OWN_MAIL_DOMAINS.includes(d);
+/** 社外のアドレスか (自社ドメインは営業先との接触ではない)。 */
+export function isExternalAddress(address: string): boolean {
+  return !OWN_MAIL_DOMAINS.includes(mailDomain(address));
 }
 
-/** どうやって営業先と結び付いたか。link = 画面で紐付けた / email = 担当者メールと一致 / domain = 担当者メールと同じ会社ドメイン。 */
-export type MailMatchBy = "link" | "email" | "domain";
+/** どこに登録されたアドレスで営業先と結び付いたか。contact = 担当者メール / card = 名刺。 */
+export type MailMatchBy = "contact" | "card";
 
 export interface LeadMatch {
   leadId: string;
@@ -50,45 +46,45 @@ export interface LeadMatch {
 }
 
 /** 照合に使う営業先 (論理削除済みは渡さない)。 */
-export type MatchableLead = Pick<LeadFields, "contactEmail"> & { id: string };
+export type MatchableLead = Pick<LeadFields, "contactEmail" | "companyName"> & { id: string };
 
-/** 画面で紐付けたアドレス。 */
-export interface MailLinkRef {
-  leadId: string;
-  address: string;
+/** 照合に使う名刺 (論理削除済みは渡さない)。 */
+export interface MatchableCard {
+  email: string | null;
+  companyName: string | null;
+}
+
+/** 営業先ごとの登録アドレス (担当者メール + 同じ会社の名刺のメール)。画面の説明にも使う。 */
+export function registeredAddresses(lead: MatchableLead, cards: readonly MatchableCard[]): { address: string; by: MailMatchBy }[] {
+  const out = new Map<string, MailMatchBy>();
+  for (const a of parseContactEmails(lead.contactEmail)) if (isExternalAddress(a)) out.set(a, "contact");
+  const key = companyKey(lead.companyName);
+  for (const c of cards) {
+    if (!c.companyName || companyKey(c.companyName) !== key) continue;
+    for (const a of parseContactEmails(c.email)) if (isExternalAddress(a) && !out.has(a)) out.set(a, "card");
+  }
+  return [...out].map(([address, by]) => ({ address, by }));
 }
 
 /**
- * 相手のアドレス → 営業先。優先順は 紐付け → 担当者メールと完全一致 → 会社ドメインが一致。
- * 2 社以上に当たる (曖昧な) ときは更新しないので null (下の段にも落とさない)。
+ * 相手のアドレス → 営業先。登録したアドレス (担当者メール・名刺のメール) と完全に一致した時だけ。
+ * 同じアドレスが 2 社以上に登録されている (曖昧な) ときは更新しないので null。
  */
-export function buildLeadMatcher(leads: readonly MatchableLead[], links: readonly MailLinkRef[]): (address: string) => LeadMatch | null {
-  const alive = new Set(leads.map((l) => l.id));
-  const linked = new Map<string, string>();
-  for (const k of links) {
-    const a = normalizeAddress(k.address);
-    if (a && alive.has(k.leadId)) linked.set(a, k.leadId);
-  }
-  const byAddress = new Map<string, Set<string>>();
-  const byDomain = new Map<string, Set<string>>();
-  const add = (map: Map<string, Set<string>>, key: string, id: string) => map.set(key, (map.get(key) ?? new Set()).add(id));
+export function buildLeadMatcher(leads: readonly MatchableLead[], cards: readonly MatchableCard[]): (address: string) => LeadMatch | null {
+  const byAddress = new Map<string, Map<string, MailMatchBy>>();
   for (const l of leads) {
-    for (const a of parseContactEmails(l.contactEmail)) {
-      add(byAddress, a, l.id);
-      if (isCompanyDomain(mailDomain(a))) add(byDomain, mailDomain(a), l.id);
+    for (const { address, by } of registeredAddresses(l, cards)) {
+      const owners = byAddress.get(address) ?? new Map<string, MailMatchBy>();
+      if (!owners.has(l.id)) owners.set(l.id, by);
+      byAddress.set(address, owners);
     }
   }
-  for (const [a, id] of linked) if (isCompanyDomain(mailDomain(a))) add(byDomain, mailDomain(a), id);
-
   return (raw) => {
     const address = normalizeAddress(raw);
-    if (!address || OWN_MAIL_DOMAINS.includes(mailDomain(address))) return null;
-    const link = linked.get(address);
-    if (link) return { leadId: link, by: "link" };
-    const exact = byAddress.get(address);
-    if (exact) return exact.size === 1 ? { leadId: [...exact][0]!, by: "email" } : null;
-    const dom = byDomain.get(mailDomain(address));
-    return dom && dom.size === 1 ? { leadId: [...dom][0]!, by: "domain" } : null;
+    const owners = address ? byAddress.get(address) : undefined;
+    if (!owners || owners.size !== 1) return null;
+    const [leadId, by] = [...owners][0]!;
+    return { leadId, by };
   };
 }
 
@@ -142,35 +138,18 @@ export function applyMailContacts<T extends MailSyncFields>(lead: T, contacts: r
 
 // ── wire 契約 ─────────────────────────────────────────────
 
-/** 画面で営業先に紐付けたメールアドレス (以後このアドレスとのメールはこの営業先として数える)。 */
-export interface SponsorMailLink {
-  id: string;
-  leadId: string;
+/** メール画面から、相手のアドレスを営業先の担当者メールに登録する (以後このアドレスとのメールを数える)。 */
+export interface RegisterContactEmailRequest {
   address: string;
-  /** 紐付けたスレッド (どのメールから紐付けたかの記録)。 */
-  threadId: string | null;
-  createdBy: UserId;
-  createdByName: string | null;
-  createdAt: ISODateTime;
 }
 
-export interface ListMailLinksResponse {
-  links: SponsorMailLink[];
-}
-
-export interface CreateMailLinkRequest {
-  address: string;
-  threadId?: string | null;
-}
-
-export interface CreateMailLinkResponse {
-  link: SponsorMailLink;
-  /** 紐付け後の営業先 (担当者メールの補完・既存メールからの更新を反映済み)。 */
+export interface RegisterContactEmailResponse {
+  /** 登録後の営業先 (担当者メールへの追加・既存メールからの更新を反映済み)。 */
   lead: SponsorLead;
 }
 
-/** 自動更新の由来。live = 送受信した時 / link = 紐付けた時に既存メールから / backfill = 管理者の一括補完。 */
-export type MailSyncSource = "live" | "link" | "backfill";
+/** 自動更新の由来。live = 送受信した時 / register = アドレスを登録した時に既存メールから / backfill = 管理者の一括補完。 */
+export type MailSyncSource = "live" | "register" | "backfill";
 
 /** 営業先の履歴 1 件 (メールからの自動更新)。件名・本文は持たない (メールの持ち主以外にも見えるため)。 */
 export interface LeadActivity {
@@ -242,10 +221,9 @@ export interface MailActivityResult {
   updated: number;
 }
 
-/** member-service → mail-gateway: このアドレス / ドメインとのメールの集計をください。 */
+/** member-service → mail-gateway: このアドレスとのメールの集計をください。 */
 export interface MailContactsQuery {
   addresses: string[];
-  domains: string[];
 }
 
 /** 相手 1 アドレス × 方向ごとの集計 (送信は人が送ったもの、受信は自動応答を除く)。 */

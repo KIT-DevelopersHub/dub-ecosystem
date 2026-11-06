@@ -1,7 +1,8 @@
 // demo (VITE_DEMO=1) のスポンサーのメール連携。本番の member-service + mail-gateway の代わりに、
 // メモリ上の「送受信の記録」と同じ決まり (@dub/types sponsor の buildLeadMatcher / applyMailContacts) で営業先を更新する。
 // - メール画面から送る (POST /mail/outbox) → recordMail("sent") → 宛先の営業先が 初回連絡 + 日付。
-// - 紐付け・履歴・既存メールからの一括補完の API。seed の「過去のメール」で一括補完の差分が出る。
+// - 数えるのは登録したアドレス (担当者メール・同じ会社の名刺のメール) だけ。
+// - 担当者メールへの登録・履歴・既存メールからの一括補完の API。seed の「過去のメール」で一括補完の差分が出る。
 // 企業・アドレスはすべて架空 (example.jp)。リロードで消える。
 import { sponsor } from "@dub/types";
 
@@ -19,8 +20,7 @@ function json(body: unknown, status = 200): Response {
 }
 const err = (code: string, status: number) => json({ error: { code, message: code, retryable: false } }, status);
 
-export function createSponsorMailDemo(leads: Lead[], me: () => { id: string; displayName: string }) {
-  const links: sponsor.SponsorMailLink[] = [];
+export function createSponsorMailDemo(leads: Lead[], cards: readonly sponsor.BusinessCard[]) {
   const activity: sponsor.LeadActivity[] = [];
   const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
   // Dub に残っている「過去のメール」(一括補完の材料)。
@@ -28,14 +28,14 @@ export function createSponsorMailDemo(leads: Lead[], me: () => { id: string; dis
     { direction: "sent", at: daysAgo(21), address: "kato@nomi-robotics.example.jp", mailbox: "suzuki@developershub.jp" },
     { direction: "received", at: daysAgo(19), address: "kato@nomi-robotics.example.jp", mailbox: "suzuki@developershub.jp" },
     { direction: "sent", at: daysAgo(25), address: "sato@kaga-data.example.jp", mailbox: "mori@developershub.jp" },
-    // demo の受信トレイにある ACME からのメール。メール画面で営業先に紐付けると、この送受信から日付が入る。
+    // demo の受信トレイにある ACME からのメール。メール画面で企業の担当者メールに登録すると、この送受信から日付が入る。
     { direction: "sent", at: daysAgo(5), address: "sponsor@acme.co.jp", mailbox: "demo@developershub.jp" },
     { direction: "received", at: daysAgo(3), address: "sponsor@acme.co.jp", mailbox: "demo@developershub.jp" },
   ];
   let seq = 0;
   // demo の削除は配列から抜くので、ここにある行が全部生きている。
   const alive = () => leads;
-  const matcher = () => sponsor.buildLeadMatcher(alive(), links);
+  const matcher = () => sponsor.buildLeadMatcher(alive(), cards);
 
   /** 決まりを当てて (変化があれば) 保存し、履歴を 1 件残す。 */
   function apply(lead: Lead, events: readonly (MailEvent & { by: sponsor.MailMatchBy })[], source: sponsor.MailSyncSource, dryRun: boolean) {
@@ -68,7 +68,7 @@ export function createSponsorMailDemo(leads: Lead[], me: () => { id: string; dis
   function recordMail(direction: sponsor.MailDirection, counterparts: readonly string[], at: string, mailbox: string | null): void {
     const events = counterparts
       .map((c) => sponsor.normalizeAddress(c))
-      .filter((a): a is string => !!a && !sponsor.OWN_MAIL_DOMAINS.includes(sponsor.mailDomain(a)))
+      .filter((a): a is string => !!a && sponsor.isExternalAddress(a))
       .map((address) => ({ direction, at, address, mailbox }));
     log.push(...events);
     for (const [leadId, evs] of eventsByLead(events)) {
@@ -79,14 +79,6 @@ export function createSponsorMailDemo(leads: Lead[], me: () => { id: string; dis
 
   function handle(method: string, pathname: string, body: any): Response | null {
     const base = "/api/v1/members/sponsor";
-    if (pathname === `${base}/mail-links` && method === "GET") return json({ links: links.map((l) => ({ ...l })) });
-    const del = new RegExp(`^${base}/mail-links/([^/]+)$`).exec(pathname);
-    if (del && method === "DELETE") {
-      const i = links.findIndex((l) => l.id === decodeURIComponent(del[1]!));
-      if (i < 0) return err("SPONSOR_MAIL_LINK_NOT_FOUND", 404);
-      links.splice(i, 1);
-      return json(null, 204);
-    }
     if (pathname === `${base}/leads/mail-backfill` && method === "POST") {
       if (typeof body?.dryRun !== "boolean") return err("VALIDATION_FAILED", 400);
       const offset = body.offset ?? 0;
@@ -98,7 +90,7 @@ export function createSponsorMailDemo(leads: Lead[], me: () => { id: string; dis
         const lead = leads.find((l) => l.id === leadId)!;
         const changes = apply(lead, evs, "backfill", body.dryRun);
         if (changes.length === 0) continue;
-        const by = evs.some((e) => e.by === "link") ? "link" : evs.some((e) => e.by === "email") ? "email" : "domain";
+        const by = evs.some((e) => e.by === "contact") ? "contact" : "card";
         proposals.push({
           leadId, companyName: lead.companyName, matchedBy: by, changes,
           evidence: evs.map((e) => ({ direction: e.direction, at: e.at, counterpart: e.address })),
@@ -112,26 +104,21 @@ export function createSponsorMailDemo(leads: Lead[], me: () => { id: string; dis
       };
       return json(res);
     }
-    const sub = new RegExp(`^${base}/leads/([^/]+)/(mail-links|activity)$`).exec(pathname);
+    const sub = new RegExp(`^${base}/leads/([^/]+)/(contact-emails|activity)$`).exec(pathname);
     if (!sub) return null;
     const lead = alive().find((l) => l.id === decodeURIComponent(sub[1]!));
     if (!lead) return err("SPONSOR_LEAD_NOT_FOUND", 404);
     if (sub[2] === "activity" && method === "GET") return json({ activity: activity.filter((a) => a.leadId === lead.id) });
-    if (sub[2] === "mail-links" && method === "POST") {
+    if (sub[2] === "contact-emails" && method === "POST") {
       const address = sponsor.normalizeAddress(body?.address);
-      if (!address || sponsor.OWN_MAIL_DOMAINS.includes(sponsor.mailDomain(address))) return err("VALIDATION_FAILED", 400);
-      const u = me();
-      const prev = links.findIndex((l) => l.address === address);
-      const link: sponsor.SponsorMailLink = {
-        id: prev >= 0 ? links[prev]!.id : `mlink_demo_${++seq}`, leadId: lead.id, address, threadId: body?.threadId ?? null,
-        createdBy: u.id as sponsor.SponsorMailLink["createdBy"], createdByName: u.displayName, createdAt: new Date().toISOString(),
-      };
-      if (prev >= 0) links.splice(prev, 1);
-      links.unshift(link);
-      if (lead.contactEmail === null) Object.assign(lead, { contactEmail: address, version: lead.version + 1, updatedAt: link.createdAt });
+      if (!address || !sponsor.isExternalAddress(address)) return err("VALIDATION_FAILED", 400);
+      if (!sponsor.parseContactEmails(lead.contactEmail).includes(address)) {
+        const contactEmail = lead.contactEmail ? `${lead.contactEmail}／${address}` : address;
+        Object.assign(lead, { contactEmail, version: lead.version + 1, updatedAt: new Date().toISOString() });
+      }
       const evs = eventsByLead(log.filter((e) => e.address === address), new Set([lead.id])).get(lead.id) ?? [];
-      if (evs.length > 0) apply(lead, evs, "link", false);
-      return json({ link: { ...link }, lead: { ...lead } } satisfies sponsor.CreateMailLinkResponse, 201);
+      if (evs.length > 0) apply(lead, evs, "register", false);
+      return json({ lead: { ...lead } } satisfies sponsor.RegisterContactEmailResponse);
     }
     return null;
   }

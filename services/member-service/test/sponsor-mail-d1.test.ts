@@ -17,7 +17,7 @@ const migration = (id: string) => readFileSync(new URL(`../../../infra/d1/migrat
 function makeD1(): D1Database {
   const raw = new DatabaseSync(":memory:");
   raw.exec(migration("0021_sponsor_leads"));
-  raw.exec(migration("0023_sponsor_mail_sync"));
+  raw.exec(migration("0024_sponsor_mail_sync"));
   const prepare = (sql: string) => {
     const stmt = raw.prepare(sql);
     let args: unknown[] = [];
@@ -60,7 +60,7 @@ const lead = (id: string, f: Partial<LeadRow> = {}): LeadRow => ({
 
 const activity = (id: string, leadId: string): ActivityRow => ({
   id, orgId: "org_x", leadId, source: "live", direction: "sent", mailAt: "2026-11-05T01:00:00.000Z", counterpart: "a@x.example.jp",
-  matchedBy: "email", mailbox: "suzuki@developershub.jp",
+  matchedBy: "contact", mailbox: "suzuki@developershub.jp",
   changes: [{ field: "status", from: "未接触", to: "初回連絡" }], createdAt: "2026-11-05T01:00:01.000Z",
 });
 
@@ -83,17 +83,5 @@ describe("createD1SponsorMailRepo (real SQLite)", () => {
     expect((await mail.listActivity("org_x", "l1")).map((a) => a.id)).toEqual(["a1"]);
     expect(await mail.listActivity("org_x", "l2")).toEqual([]);
     expect((await mail.listActivity("org_x", "l3"))[0]).toMatchObject({ id: "a3", changes: [{ field: "status", from: "未接触", to: "初回連絡" }] });
-  });
-
-  it("keeps one link per address (re-linking moves it) and deletes by id", async () => {
-    const db = createDbClient(makeD1(), { namespace: "member" });
-    const mail = createD1SponsorMailRepo(db);
-    const base = { orgId: "org_x", threadId: null, createdBy: "usr_1", createdByName: null, createdAt: "2026-11-05T00:00:00.000Z" };
-    const first = await mail.upsertLink({ ...base, id: "m1", leadId: "l1", address: "a@x.example.jp" });
-    const moved = await mail.upsertLink({ ...base, id: "m2", leadId: "l2", address: "a@x.example.jp", threadId: "thr_1" });
-    expect(moved).toMatchObject({ id: first.id, leadId: "l2", threadId: "thr_1" });
-    expect(await mail.listLinks("org_x")).toHaveLength(1);
-    expect(await mail.deleteLink("org_x", "m1")).toBe(true);
-    expect(await mail.deleteLink("org_x", "m1")).toBe(false);
   });
 });

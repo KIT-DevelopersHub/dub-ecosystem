@@ -227,15 +227,8 @@ export interface PutGoalRequest extends GoalTargets {
   expectedVersion: number;
 }
 
-const LEGAL_FORMS =
-  /株式会社|有限会社|合同会社|合資会社|合名会社|一般社団法人|一般財団法人|公益社団法人|公益財団法人|特定非営利活動法人|npo法人|\((株|有|同|資|名|社|財)\)/g;
-
-/** 会社名の照合キー。法人格・空白・記号を除いた NFKC 小文字。 */
-export function companyKey(name: string): string {
-  const base = name.normalize("NFKC").toLowerCase();
-  const key = base.replace(LEGAL_FORMS, "").replace(/[\s・.,、。'"]/g, "");
-  return key === "" ? base.trim() : key;
-}
+// 会社名の照合キー (companyKey) は名刺・営業先・メール連携で共有するので別ファイル。
+export * from "./sponsor-company";
 
 // メール連携 (照合・更新の決まり・wire 契約) は別ファイル。
 export * from "./sponsor-mail";

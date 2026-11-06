@@ -178,7 +178,6 @@ const SPONSOR_READS = [
   "GET /members/sponsor/leads",
   "GET /members/sponsor/leads/:id",
   "GET /members/sponsor/leads/:id/activity",
-  "GET /members/sponsor/mail-links",
 ];
 const SPONSOR_WRITES = [
   "PATCH /members/sponsor/cards/:id",
@@ -186,8 +185,7 @@ const SPONSOR_WRITES = [
   "POST /members/sponsor/cards",
   "POST /members/sponsor/leads",
   "POST /members/sponsor/leads/import",
-  "POST /members/sponsor/leads/:id/mail-links",
-  "DELETE /members/sponsor/mail-links/:id",
+  "POST /members/sponsor/leads/:id/contact-emails",
   "PUT /members/sponsor/goals/:month",
   "PUT /members/sponsor/cards/:id/image",
 ];

@@ -229,7 +229,7 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
                     </div>
                   </div>
                 ) : null}
-                <LeadMailSection leadId={lead.id} />
+                <LeadMailSection lead={lead} />
                 {canWrite || canAdmin ? (
                   <div className={styles.inlineActions}>
                     {canWrite ? (

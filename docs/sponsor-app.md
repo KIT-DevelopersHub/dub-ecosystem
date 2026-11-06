@@ -46,7 +46,7 @@ D1 `member` namespace のテーブル（いずれも additive）。
 | `member_sponsor_cards` | 名刺。会社名・氏名・部署・役職・メール・電話・メモ・写真の形式（`image_content_type`、NULL = 写真なし）・登録者（`created_by` と登録時点の名簿上の氏名 `created_by_name`）・`version`（楽観ロック）・`archived_at`（論理削除） |
 | `member_sponsor_leads` | 営業先（スプレッドシートの 1 行 = 1 社）。`infra/d1/migrations/member/0021_sponsor_leads.sql`。[営業進捗](#営業進捗)を参照 |
 | `member_sponsor_goals` | 月間目標（1 か月 1 行）。`infra/d1/migrations/member/0022_sponsor_goals.sql`。[月間目標](#月間目標)を参照 |
-| `member_sponsor_mail_links` / `member_sponsor_lead_activity` | メール連携の紐付けたアドレス（1 アドレス = 1 社）と自動更新の履歴。`infra/d1/migrations/member/0023_sponsor_mail_sync.sql`。[メール連携](#メール連携送受信から進捗を自動更新)を参照 |
+| `member_sponsor_lead_activity` | メール連携の自動更新の履歴。`infra/d1/migrations/member/0024_sponsor_mail_sync.sql`。[メール連携](#メール連携送受信から進捗を自動更新)を参照 |
 
 写真本体は R2（既存バケット `dub-file-attachments`、キー `sponsor/cards/<cardId>`、バインディング `SPONSOR_FILES`）。
 1 名刺 1 枚で、撮り直しは上書き。削除時は R2 からも消す（best-effort）。
@@ -186,9 +186,13 @@ D1 `member` namespace のテーブル（いずれも additive）。
 スポンサーチームは Dub のメールで企業に初回連絡を送る。その送受信から営業進捗（`member_sponsor_leads`）の日付とステータスを自動で進め、
 目標タブの「新規接触」（初回連絡日で数える）が手入力なしで実態に合うようにする。
 
-- **照合（どの営業先宛てのメールか）**: 相手のアドレスごとに、(1) 画面で紐付けたアドレス → (2) 担当者メール欄のどれかと完全一致
-  （「a／b（CC）」のような複数表記も読む）→ (3) 担当者メールと同じ会社ドメイン（フリーメール・自社ドメインは使わない）。
-  2 社以上に当たる（曖昧な）ときは何も変えない。正本は `@dub/types` `sponsor.buildLeadMatcher`。
+- **数えるのは登録したアドレスとのメールだけ**（推測はしない）。画面にも「名刺または担当者メールに登録したアドレスとのメールだけを数えます」と出す。
+  1. 営業先の **担当者メール** 欄のアドレス（「a／b（CC）」のような複数表記も読む）。
+  2. **名刺** に登録したメールアドレス。名刺と営業先は外部キーを持たないので、既存と同じく会社名の照合キー（`companyKey`。
+     法人格・表記ゆれを除く）が同じ営業先のものとして数える。営業先が無い会社の名刺は数えない。
+  - 同じ会社のドメインでも、登録していないアドレス（別の担当者・info@ など）とのメールは数えない。
+  - 同じアドレスが 2 社に登録されている（曖昧な）ときは何も変えない。自社ドメイン（developershub.jp）は数えない。
+  - 正本は `@dub/types` `sponsor.buildLeadMatcher` / `sponsor.registeredAddresses`。
 - **更新の決まり**（`sponsor.applyMailContacts`・単体テストあり）:
   - 送信: 初回連絡日 = 空かメールより遅ければメールの日（日本時間）/ 最終接触日 = 遅い方 / 未接触 → 初回連絡。
   - 受信: 最終接触日 = 遅い方 / 初回連絡 → 返信あり。初回連絡日は変えない。
@@ -197,21 +201,24 @@ D1 `member` namespace のテーブル（いずれも additive）。
   - 送受信のたび: mail-gateway が人の送ったメール（owner あり）と、初めて保存した受信（自動応答・ループ・ブロック済みを除く）を
     `POST /members/internal/sponsor/mail-activity`（INTERNAL）で知らせる。best-effort（失敗してもメールは失敗しない）。渡すのはアドレスと日時だけで、件名・本文は渡さない。
     `MAIL_SPONSOR_SYNC=off`（mail-gateway の vars）で止められる。
-  - 紐付け: メール画面のスレッドの件名の下「スポンサー企業に紐付け」（`sponsor:write`）。営業先を検索して選ぶと、そのアドレスを紐付け、
-    担当者メールが空なら入れ、そのアドレスとの既存メールから日付をすぐ入れる。以後このアドレス（と同じ会社ドメイン）とのメールはこの営業先。
+  - メール画面から登録: スレッドの件名の下に「スポンサー」行を出し、相手が登録済みか（どの企業の担当者メール / 名刺か）を表示する。
+    未登録なら `sponsor:write` のある人が「企業の担当者メールに登録」で営業先を検索して選ぶと、そのアドレスを担当者メールに追記し
+    （`POST /members/sponsor/leads/:id/contact-emails`）、そのアドレスとの既存メールから日付をすぐ入れる。登録先は担当者メール欄そのものなので、
+    外す時は詳細の「編集する」で担当者メールから消す（別の表は持たない）。
   - 一括補完: 営業タブ「メールから日付を補完」（`sponsor:admin`）。まず確認（保存しない差分）→「N 社に反映する」。
     `POST /members/sponsor/leads/mail-backfill {dryRun, offset, limit}` を営業先 50 社ずつ（最大 100）最後まで送る。
-    1 回の呼び出しは D1 数回 + mail-gateway の集計 1 回（`POST /internal/sponsor/contacts`）で、Workers 無料プランの 50 subrequest に収まる。
+    1 回の呼び出しは D1 数回 + mail-gateway の集計 1 回（`POST /internal/sponsor/contacts`・登録アドレスだけを渡す）で、Workers 無料プランの 50 subrequest に収まる。
 - **楽観ロック**: 自動更新も `version` を見て保存し、手入力と競合したら最新を読み直して決まりを当て直す（最大 3 回）。手入力の値は残る。
   営業先の更新と履歴の追加は同じ D1 batch で、更新が当たった時だけ履歴が入る。
-- **履歴**: 詳細ドロワーの「メール」欄に「メールから自動更新: 2026/11/04 送信 suzuki@… → yamada@…（担当者メールで一致）」と変わった項目を出す。
-  件名・本文は残さない（メールの持ち主以外のチーム全員に見えるため）。紐付けたアドレスもここに出て、`sponsor:write` なら外せる。
-- **API**: `GET /members/sponsor/mail-links`（read）/ `POST /members/sponsor/leads/:id/mail-links`（write）/ `DELETE /members/sponsor/mail-links/:id`（write）/
-  `GET /members/sponsor/leads/:id/activity`（read）/ `POST /members/sponsor/leads/mail-backfill`（admin）。
+- **履歴**: 詳細ドロワーの「メール」欄に、数えるアドレスの一覧（担当者メール / 名刺）と
+  「メールから自動更新: 2026/11/04 送信 suzuki@… → tanaka@…（名刺に登録済み）」+ 変わった項目を出す。件名・本文は残さない（メールの持ち主以外のチーム全員に見えるため）。
+- **API**: `POST /members/sponsor/leads/:id/contact-emails`（write）/ `GET /members/sponsor/leads/:id/activity`（read）/
+  `POST /members/sponsor/leads/mail-backfill`（admin）。
 - **バインディング**: member-service に `SVC_MAIL`（→ mail-gateway）。mail-gateway は既に `SVC_MEMBER` を持つので相互になる。
   member-service が先にデプロイされるが、本番・staging では mail-gateway が既にあるので順序はそのままでよい。
-- **demo**: 輪島メディア（未接触・担当者メールあり）宛てにメール画面から送ると 初回連絡 + 今日の日付になり、目標タブの今月の新規接触に入る。
-  受信トレイの ACME のメールは紐付けの見本、能美ロボティクス・加賀データサービスは一括補完の見本。
+- **demo**: 輪島メディア（未接触・担当者メールは空・名刺に tanaka@ あり）。メール画面から info@wajima-media… に送っても変わらず、
+  名刺の tanaka@wajima-media… に送ると 初回連絡 + 今日の日付になり、目標タブの今月の新規接触に入る。受信トレイの ACME のメールは
+  「担当者メールに登録」の見本、能美ロボティクス（名刺）・加賀データサービス（担当者メール）は一括補完の見本。
 
 ## リリース手順と migration
 
@@ -221,7 +228,7 @@ D1 `member` namespace のテーブル（いずれも additive）。
    - `infra/d1/migrations/member/0020_sponsor_cards.sql`（新規テーブル）
    - `infra/d1/migrations/member/0021_sponsor_leads.sql`（新規テーブル）
    - `infra/d1/migrations/member/0022_sponsor_goals.sql`（新規テーブル）
-   - `infra/d1/migrations/member/0023_sponsor_mail_sync.sql`（新規テーブル 2 つ・メール連携）
+   - `infra/d1/migrations/member/0024_sponsor_mail_sync.sql`（新規テーブル・メール連携の履歴）
    - `infra/d1/migrations/identity/0029_sponsor_app_perms.sql`（admin への 5 キー付与）
 
 ## フェーズ2 以降の TODO

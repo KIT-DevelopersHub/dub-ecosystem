@@ -1,9 +1,10 @@
 // スポンサーのメール連携。Dub のメールで営業先とやり取りしたら、営業進捗の日付とステータスを自動で進める。
+// 数えるのは「登録したアドレス」(営業先の担当者メール・同じ会社の名刺のメール) とのメールだけ。
 // 照合と更新の決まりは @dub/types sponsor (buildLeadMatcher / applyMailContacts) が唯一の正本で、ここは
 // 「どのメールを・どの営業先に・どう保存するか」だけを持つ。
 //
 // - 送受信のたび (live): mail-gateway が /members/internal/sponsor/mail-activity を呼ぶ (best-effort)。
-// - 画面で紐付けた時 (link): そのアドレスとの既存メールを mail-gateway から集計して当てる。
+// - メール画面から相手を担当者メールに登録した時 (register): そのアドレスとの既存メールを mail-gateway から集計して当てる。
 // - 管理者の一括補完 (backfill): 営業先を offset/limit で区切って同じことをする (1 回の呼び出しで D1 と
 //   mail-gateway を合わせて十数回以内 = Workers 無料プランの 50 subrequest に収まる)。
 // どの経路も決まりが単調 (日付は min/max・ステータスは前にだけ) なので、何度当てても結果は同じ。
@@ -14,7 +15,8 @@ import { DubError, errors } from "@dub/errors";
 import { sponsor } from "@dub/types";
 import type { ReqCtx } from "./service";
 import type { LeadRow, SponsorLeadRepo } from "./sponsor-lead-repo";
-import type { ActivityRow, LeadAutoUpdate, MailLinkRow, SponsorMailRepo } from "./sponsor-mail-repo";
+import type { ActivityRow, LeadAutoUpdate, SponsorMailRepo } from "./sponsor-mail-repo";
+import type { CardRow, SponsorRepo } from "./sponsor-repo";
 import type { AppDeps } from "./types";
 
 /** mail-gateway の集計 (POST /internal/sponsor/contacts)。未結線なら undefined。 */
@@ -22,10 +24,11 @@ export interface MailContactsSource {
   query(ctx: { requestId: string }, q: sponsor.MailContactsQuery): Promise<sponsor.MailContactSummary[]>;
 }
 
-export interface SponsorMailDeps extends Pick<AppDeps, "orgId" | "now" | "repo"> {
+export interface SponsorMailDeps extends Pick<AppDeps, "orgId" | "now"> {
   sponsorLeadRepo: SponsorLeadRepo;
+  sponsorRepo: SponsorRepo;
   sponsorMailRepo: SponsorMailRepo;
-  newSponsorMailId: (prefix: "mlink" | "lact") => string;
+  newSponsorMailId: (prefix: "lact") => string;
   mailContacts?: MailContactsSource;
 }
 
@@ -53,11 +56,9 @@ interface Outcome {
   applied: boolean;
 }
 
-const MATCH_RANK: Record<sponsor.MailMatchBy, number> = { link: 0, email: 1, domain: 2 };
-
 const invalid = (field: string, reason = "invalid"): DubError => errors.validationFailed([{ field, reason }]);
 const errLeadNotFound = (id: string): DubError => new DubError("SPONSOR_LEAD_NOT_FOUND", `Sponsor lead not found: ${id}`, { status: 404 });
-const errLinkNotFound = (id: string): DubError => new DubError("SPONSOR_MAIL_LINK_NOT_FOUND", `Mail link not found: ${id}`, { status: 404 });
+const errVersionConflict = (id: string): DubError => new DubError("SPONSOR_VERSION_CONFLICT", `Version conflict for ${id}`, { status: 409 });
 
 const contactsOf = (evidence: readonly Evidence[]): sponsor.MailContact[] =>
   evidence.map((e) => ({ direction: e.direction, on: sponsor.jstDate(e.at) }));
@@ -69,19 +70,20 @@ function primaryEvidence(evidence: readonly Evidence[], changes: readonly sponso
   return sent ?? [...evidence].sort((a, b) => b.at.localeCompare(a.at))[0]!;
 }
 
-function bestMatch(evidence: readonly Evidence[]): sponsor.MailMatchBy {
-  return evidence.reduce<sponsor.MailMatchBy>((m, e) => (MATCH_RANK[e.matchedBy] < MATCH_RANK[m] ? e.matchedBy : m), "domain");
-}
+/** 担当者メールで一致したものがあれば contact (表示の優先)。 */
+const bestMatch = (evidence: readonly Evidence[]): sponsor.MailMatchBy => (evidence.some((e) => e.matchedBy === "contact") ? "contact" : "card");
+
+const toLead = ({ orgId: _o, archivedAt: _a, ...rest }: LeadRow): sponsor.SponsorLead => rest;
 
 export class SponsorMailService {
   constructor(private readonly deps: SponsorMailDeps) {}
 
-  private async matcher(): Promise<{ leads: LeadRow[]; links: MailLinkRow[]; match: (a: string) => sponsor.LeadMatch | null }> {
-    const [leads, links] = await Promise.all([
+  private async matcher(): Promise<{ leads: LeadRow[]; cards: CardRow[]; match: (a: string) => sponsor.LeadMatch | null }> {
+    const [leads, cards] = await Promise.all([
       this.deps.sponsorLeadRepo.listLeads(this.deps.orgId),
-      this.deps.sponsorMailRepo.listLinks(this.deps.orgId),
+      this.deps.sponsorRepo.listCards(this.deps.orgId),
     ]);
-    return { leads, links, match: sponsor.buildLeadMatcher(leads, links) };
+    return { leads, cards, match: sponsor.buildLeadMatcher(leads, cards) };
   }
 
   /**
@@ -114,7 +116,7 @@ export class SponsorMailService {
           direction: ev.direction,
           mailAt: ev.at,
           counterpart: ev.counterpart,
-          matchedBy: bestMatch(plan.evidence),
+          matchedBy: ev.matchedBy,
           mailbox: ev.mailbox,
           changes,
           createdAt: now,
@@ -164,8 +166,6 @@ export class SponsorMailService {
     return { updated: outcomes.filter((o) => o.applied).length };
   }
 
-  // ── 集計を営業先ごとの計画に ──────────────────────────────
-
   /** mail-gateway の集計を、照合できた営業先ごとの根拠に分ける (onlyLeads に入る営業先だけ)。 */
   private plansFrom(
     summaries: readonly sponsor.MailContactSummary[],
@@ -186,76 +186,48 @@ export class SponsorMailService {
     return [...plans.values()];
   }
 
-  /** 営業先の担当者メールと紐付けから、mail-gateway に聞くアドレスとドメインを作る。 */
-  private queryFor(leads: readonly LeadRow[], links: readonly MailLinkRow[]): sponsor.MailContactsQuery {
-    const ids = new Set(leads.map((l) => l.id));
-    const addresses = new Set<string>();
-    for (const l of leads) for (const a of sponsor.parseContactEmails(l.contactEmail)) addresses.add(a);
-    for (const k of links) if (ids.has(k.leadId)) addresses.add(k.address);
-    const domains = new Set([...addresses].map(sponsor.mailDomain).filter(sponsor.isCompanyDomain));
-    return {
-      addresses: [...addresses].slice(0, sponsor.MAIL_CONTACTS_QUERY_MAX),
-      domains: [...domains].slice(0, sponsor.MAIL_CONTACTS_QUERY_MAX),
-    };
-  }
-
-  // ── 画面: 紐付け ──────────────────────────────────────────
-
-  async listLinks(_ctx: ReqCtx): Promise<sponsor.ListMailLinksResponse> {
-    const links = await this.deps.sponsorMailRepo.listLinks(this.deps.orgId);
-    return { links: links.map(({ orgId: _o, ...l }) => l) };
-  }
+  // ── 画面: メールの相手を担当者メールに登録 ─────────────────
 
   /**
-   * アドレスを営業先に紐付ける。担当者メールが空なら入れ、そのアドレスとの既存メールをすぐ当てる
-   * (mail-gateway が使えない時は紐付けだけ保存して、次のメールから効く)。
+   * メール画面から、相手のアドレスを営業先の担当者メールに足す (「a／b」の形で追記・既にあれば何もしない)。
+   * 以後このアドレスとのメールはこの営業先として数え、既存メールからの日付もすぐ入れる
+   * (mail-gateway が使えない時は登録だけ保存して、次のメールから効く)。
    */
-  async createLink(ctx: ReqCtx, leadId: string, body: sponsor.CreateMailLinkRequest): Promise<sponsor.CreateMailLinkResponse> {
-    const b = (body ?? {}) as Partial<sponsor.CreateMailLinkRequest>;
+  async registerContactEmail(_ctx: ReqCtx, leadId: string, body: sponsor.RegisterContactEmailRequest): Promise<sponsor.RegisterContactEmailResponse> {
+    const b = (body ?? {}) as Partial<sponsor.RegisterContactEmailRequest>;
     const address = sponsor.normalizeAddress(typeof b.address === "string" ? b.address : null);
     if (!address) throw invalid("address");
-    if (sponsor.OWN_MAIL_DOMAINS.includes(sponsor.mailDomain(address))) throw invalid("address", "internal");
-    const threadId = typeof b.threadId === "string" && b.threadId.trim() !== "" ? b.threadId.trim().slice(0, 500) : null;
+    if (!sponsor.isExternalAddress(address)) throw invalid("address", "internal");
 
-    let lead = await this.deps.sponsorLeadRepo.getLead(leadId);
-    if (!lead || lead.orgId !== this.deps.orgId || lead.archivedAt !== null) throw errLeadNotFound(leadId);
-    const person = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, ctx.userId);
-    const link = await this.deps.sponsorMailRepo.upsertLink({
-      id: this.deps.newSponsorMailId("mlink"),
-      orgId: this.deps.orgId,
-      leadId,
-      address,
-      threadId,
-      createdBy: ctx.userId,
-      createdByName: person?.name ?? null,
-      createdAt: this.deps.now(),
-    });
-
-    // 担当者メールが空なら入れる (手入力と同じく version を進める。競合したら読み直して、まだ空なら入れる)。
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS && lead && lead.contactEmail === null; attempt++) {
-      const next: LeadRow = { ...lead, contactEmail: address, version: lead.version + 1, updatedAt: this.deps.now() };
-      if (await this.deps.sponsorLeadRepo.updateLead(next, lead.version)) lead = next;
-      else lead = await this.deps.sponsorLeadRepo.getLead(leadId);
-    }
-
-    if (this.deps.mailContacts && lead) {
-      try {
-        const summaries = await this.deps.mailContacts.query(ctx, { addresses: [address], domains: [] });
-        const { leads, match } = await this.matcher();
-        const [outcome] = await this.commit(leads, this.plansFrom(summaries, match, new Set([leadId])), "link", false);
-        if (outcome) lead = outcome.lead;
-      } catch {
-        // 集計できなくても紐付けは保存済み。次の送受信から効く。
+    let lead: LeadRow | null = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const cur = await this.deps.sponsorLeadRepo.getLead(leadId);
+      if (!cur || cur.orgId !== this.deps.orgId || cur.archivedAt !== null) throw errLeadNotFound(leadId);
+      if (sponsor.parseContactEmails(cur.contactEmail).includes(address)) {
+        lead = cur;
+        break;
+      }
+      const contactEmail = cur.contactEmail ? `${cur.contactEmail}／${address}` : address;
+      if (contactEmail.length > sponsor.CARD_FIELD_MAX) throw invalid("address", "too_long");
+      const next: LeadRow = { ...cur, contactEmail, version: cur.version + 1, updatedAt: this.deps.now() };
+      if (await this.deps.sponsorLeadRepo.updateLead(next, cur.version)) {
+        lead = next;
+        break;
       }
     }
-    if (!lead) throw errLeadNotFound(leadId);
-    const { orgId: _o, ...savedLink } = link;
-    const { orgId: _lo, archivedAt: _a, ...savedLead } = lead;
-    return { link: savedLink, lead: savedLead };
-  }
+    if (!lead) throw errVersionConflict(leadId);
 
-  async deleteLink(_ctx: ReqCtx, id: string): Promise<void> {
-    if (!(await this.deps.sponsorMailRepo.deleteLink(this.deps.orgId, id))) throw errLinkNotFound(id);
+    if (this.deps.mailContacts) {
+      try {
+        const summaries = await this.deps.mailContacts.query(_ctx, { addresses: [address] });
+        const { leads, match } = await this.matcher();
+        const [outcome] = await this.commit(leads, this.plansFrom(summaries, match, new Set([leadId])), "register", false);
+        if (outcome) lead = outcome.lead;
+      } catch {
+        // 集計できなくても登録は保存済み。次の送受信から効く。
+      }
+    }
+    return { lead: toLead(lead) };
   }
 
   async listActivity(_ctx: ReqCtx, leadId: string): Promise<sponsor.ListLeadActivityResponse> {
@@ -275,16 +247,16 @@ export class SponsorMailService {
     if (!Number.isInteger(limit) || limit < 1 || limit > sponsor.MAIL_BACKFILL_MAX_LIMIT) throw invalid("limit");
     if (!this.deps.mailContacts) throw new DubError("SPONSOR_MAIL_UNAVAILABLE", "mail-gateway binding is not configured", { status: 503 });
 
-    // 照合 (曖昧さの判定) は全社で、更新はこのページの営業先だけ。id 順で区切るので並びが変わってもずれない。
-    const { leads, links, match } = await this.matcher();
+    // 照合 (同じアドレスが 2 社に登録されていないか) は全社で、更新はこのページの営業先だけ。id 順で区切る。
+    const { leads, cards, match } = await this.matcher();
     const ordered = [...leads].sort((a, x) => a.id.localeCompare(x.id));
     const page = ordered.slice(offset, offset + limit);
     const nextOffset = offset + limit < ordered.length ? offset + limit : null;
     const base = { dryRun: b.dryRun, offset, limit, total: ordered.length, nextOffset };
 
-    const q = this.queryFor(page, links);
-    if (q.addresses.length === 0) return { ...base, proposals: [] };
-    const summaries = await this.deps.mailContacts.query(ctx, q);
+    const addresses = [...new Set(page.flatMap((l) => sponsor.registeredAddresses(l, cards).map((r) => r.address)))].slice(0, sponsor.MAIL_CONTACTS_QUERY_MAX);
+    if (addresses.length === 0) return { ...base, proposals: [] };
+    const summaries = await this.deps.mailContacts.query(ctx, { addresses });
     const plans = this.plansFrom(summaries, match, new Set(page.map((l) => l.id)));
     const outcomes = await this.commit(leads, plans, "backfill", b.dryRun);
     const proposals = outcomes

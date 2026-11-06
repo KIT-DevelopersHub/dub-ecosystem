@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { sponsor } from "../src/index";
 
-const lead = (id: string, contactEmail: string | null) => ({ id, contactEmail });
+const lead = (id: string, companyName: string, contactEmail: string | null = null) => ({ id, companyName, contactEmail });
+const card = (companyName: string | null, email: string | null) => ({ companyName, email });
 
 describe("parseContactEmails", () => {
   it("reads several addresses written with ／, commas and (CC) notes", () => {
@@ -23,49 +24,55 @@ describe("parseContactEmails", () => {
   });
 });
 
-describe("buildLeadMatcher", () => {
+describe("buildLeadMatcher (登録したアドレスだけ)", () => {
   const leads = [
-    lead("l_a", "yamada@hokuriku.example.jp"),
-    lead("l_b", "info@kanazawa.example.jp／sales@kanazawa.example.jp"),
-    lead("l_c", "taro@gmail.com"),
-    lead("l_d", "ceo@shared.example.jp"),
-    lead("l_e", "cto@shared.example.jp"),
-    lead("l_f", null),
+    lead("l_a", "株式会社北陸テック", "yamada@hokuriku.example.jp"),
+    lead("l_b", "金沢クラウド合同会社", "info@kanazawa.example.jp／sales@kanazawa.example.jp"),
+    lead("l_c", "能登ソフトウェア株式会社"),
+  ];
+  const cards = [
+    // 表記ゆれ「（株）」でも同じ会社 (companyKey) の名刺。
+    card("（株）北陸テック", "kawaguchi@hokuriku.example.jp"),
+    card("能登ソフトウェア", "ishikawa@noto.example.jp"),
+    // 営業先の無い会社の名刺は数えない。
+    card("加賀デジタル協会", "komatsu@kaga.example.jp"),
+    card(null, "nobody@x.example.jp"),
   ];
 
-  it("matches the exact contact address first", () => {
-    const match = sponsor.buildLeadMatcher(leads, []);
-    expect(match("YAMADA@hokuriku.example.jp")).toEqual({ leadId: "l_a", by: "email" });
-    expect(match("sales@kanazawa.example.jp")).toEqual({ leadId: "l_b", by: "email" });
-    expect(match("taro@gmail.com")).toEqual({ leadId: "l_c", by: "email" });
+  it("matches the lead's contact email (several written in one cell)", () => {
+    const match = sponsor.buildLeadMatcher(leads, cards);
+    expect(match("YAMADA@hokuriku.example.jp")).toEqual({ leadId: "l_a", by: "contact" });
+    expect(match("sales@kanazawa.example.jp")).toEqual({ leadId: "l_b", by: "contact" });
   });
 
-  it("falls back to the company domain, but never for free mail or our own domain", () => {
-    const match = sponsor.buildLeadMatcher(leads, []);
-    expect(match("someone@hokuriku.example.jp")).toEqual({ leadId: "l_a", by: "domain" });
-    expect(match("hanako@gmail.com")).toBeNull();
+  it("matches an email registered on a business card of the same company", () => {
+    const match = sponsor.buildLeadMatcher(leads, cards);
+    expect(match("kawaguchi@hokuriku.example.jp")).toEqual({ leadId: "l_a", by: "card" });
+    expect(match("ishikawa@noto.example.jp")).toEqual({ leadId: "l_c", by: "card" });
+    expect(match("komatsu@kaga.example.jp")).toBeNull();
+    expect(match("nobody@x.example.jp")).toBeNull();
+  });
+
+  it("never guesses from the domain: another person at the same company does not count", () => {
+    const match = sponsor.buildLeadMatcher(leads, cards);
+    expect(match("someone@hokuriku.example.jp")).toBeNull();
+    expect(match("new@noto.example.jp")).toBeNull();
     expect(match("suzuki@developershub.jp")).toBeNull();
-    expect(match("x@unknown.example.jp")).toBeNull();
   });
 
-  it("does not update anything when a domain or an address points at two leads", () => {
-    const match = sponsor.buildLeadMatcher([...leads, lead("l_dup", "yamada@hokuriku.example.jp")], []);
-    expect(match("someone@shared.example.jp")).toBeNull();
-    // 完全一致が 2 社 → ドメインにも落とさない。
+  it("does not update anything when the same address is registered for two leads", () => {
+    const match = sponsor.buildLeadMatcher([...leads, lead("l_dup", "別会社", "yamada@hokuriku.example.jp")], cards);
     expect(match("yamada@hokuriku.example.jp")).toBeNull();
+    // 会社名の照合キーが同じ営業先が 2 社あると、名刺のアドレスも曖昧。
+    const twins = sponsor.buildLeadMatcher([...leads, lead("l_twin", "北陸テック")], cards);
+    expect(twins("kawaguchi@hokuriku.example.jp")).toBeNull();
   });
 
-  it("prefers an explicit link and learns its domain; links to removed leads are ignored", () => {
-    const match = sponsor.buildLeadMatcher(leads, [
-      { leadId: "l_f", address: "Contact@newco.example.jp" },
-      { leadId: "l_e", address: "ceo@shared.example.jp" },
-      { leadId: "l_gone", address: "x@gone.example.jp" },
+  it("lists a lead's registered addresses (contact first, our own domain left out)", () => {
+    expect(sponsor.registeredAddresses(lead("l_a", "株式会社北陸テック", "yamada@hokuriku.example.jp／me@developershub.jp"), cards)).toEqual([
+      { address: "yamada@hokuriku.example.jp", by: "contact" },
+      { address: "kawaguchi@hokuriku.example.jp", by: "card" },
     ]);
-    expect(match("contact@newco.example.jp")).toEqual({ leadId: "l_f", by: "link" });
-    expect(match("other@newco.example.jp")).toEqual({ leadId: "l_f", by: "domain" });
-    // 紐付けが 2 社の担当者メールより優先 (曖昧さを人が解消した)。
-    expect(match("ceo@shared.example.jp")).toEqual({ leadId: "l_e", by: "link" });
-    expect(match("x@gone.example.jp")).toBeNull();
   });
 });
 

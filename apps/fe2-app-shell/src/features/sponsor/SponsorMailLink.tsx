@@ -1,7 +1,7 @@
-// メール画面 (スレッドの読み取りペイン) の「スポンサー企業に紐付け」。
-// 相手のアドレスがどの営業先として数えられるか (紐付け / 担当者メール / 会社ドメイン) を出し、
-// sponsor:write のある人は営業先を検索して紐付け (付け替え) できる。紐付けると、そのアドレスとの既存メールから
-// 初回連絡日などがすぐ入り、以後のメールも自動で数えられる。
+// メール画面 (スレッドの読み取りペイン) の「スポンサー」行。
+// 営業進捗が自動で進むのは「登録したアドレス」(営業先の担当者メール・その会社の名刺のメール) とのメールだけ。
+// この行は相手のアドレスが登録済みか (どの企業の担当者メール / 名刺か) を出し、sponsor:write のある人は
+// 営業先を検索して「担当者メールに登録」できる。登録すると、そのアドレスとの既存メールから日付がすぐ入る。
 // メール feature はスポンサーの Provider の内側に置かれる (featureModules の adaptMail)。外では何も出さない。
 import { useMemo, useState } from "react";
 import { Badge, Select } from "@dub/ui";
@@ -10,17 +10,18 @@ import { sponsor } from "@dub/types";
 import { useOptionalCanEdit } from "../../auth/AuthProvider.tsx";
 import { useOptionalSponsorApi } from "./SponsorProvider.tsx";
 import { useLeads } from "./leadHooks.ts";
-import { useLinkMail, useMailLinks } from "./mailSyncHooks.ts";
+import { useCards } from "./sponsorHooks.ts";
+import { useRegisterContactEmail } from "./mailSyncHooks.ts";
 import styles from "./SponsorMailLink.module.css";
 
-const HOW: Record<sponsor.MailMatchBy, string> = { link: "紐付け済み", email: "担当者メールと一致", domain: "同じ会社のドメイン" };
+const HOW: Record<sponsor.MailMatchBy, string> = { contact: "担当者メールに登録済み", card: "名刺に登録済み" };
 
 /** 社外の相手だけ (自社ドメインを除く・重複なし・出てきた順)。 */
 export function externalAddresses(addresses: readonly string[]): string[] {
   const out: string[] = [];
   for (const raw of addresses) {
     const a = sponsor.normalizeAddress(raw);
-    if (a && !sponsor.OWN_MAIL_DOMAINS.includes(sponsor.mailDomain(a)) && !out.includes(a)) out.push(a);
+    if (a && sponsor.isExternalAddress(a) && !out.includes(a)) out.push(a);
   }
   return out;
 }
@@ -30,20 +31,20 @@ export function SponsorMailLink({ addresses, threadId }: { addresses: readonly s
   const canWrite = useOptionalCanEdit("sponsor", "sponsor:write") ?? false;
   const external = useMemo(() => externalAddresses(addresses), [addresses]);
   if (!api || !canWrite || external.length === 0) return null;
-  return <LinkRow addresses={external} threadId={threadId} />;
+  return <RegisterRow addresses={external} threadId={threadId} />;
 }
 
-function LinkRow({ addresses, threadId }: { addresses: string[]; threadId: string }): JSX.Element {
+function RegisterRow({ addresses, threadId }: { addresses: string[]; threadId: string }): JSX.Element {
   const [address, setAddress] = useState(addresses[0]!);
   const current = addresses.includes(address) ? address : addresses[0]!;
   const leads = useLeads();
-  const links = useMailLinks();
-  const link = useLinkMail();
+  const cards = useCards();
+  const register = useRegisterContactEmail();
 
   const all = leads.data?.leads ?? [];
   const match = useMemo(
-    () => (leads.data && links.data ? sponsor.buildLeadMatcher(leads.data.leads, links.data.links)(current) : null),
-    [leads.data, links.data, current],
+    () => (leads.data && cards.data ? sponsor.buildLeadMatcher(leads.data.leads, cards.data.cards)(current) : null),
+    [leads.data, cards.data, current],
   );
   const matched = match ? all.find((l) => l.id === match.leadId) ?? null : null;
 
@@ -55,7 +56,7 @@ function LinkRow({ addresses, threadId }: { addresses: string[]; threadId: strin
           id: l.id,
           label: l.companyName,
           description: [l.status, l.contactEmail].filter(Boolean).join("・"),
-          ...(matched?.id === l.id && match?.by === "link" ? { disabledReason: "紐付け済み" } : {}),
+          ...(matched?.id === l.id ? { disabledReason: HOW[match!.by] } : {}),
           testId: `fe2-sponsor-mail-link-option-${l.id}`,
         })),
     [all, matched, match],
@@ -87,19 +88,23 @@ function LinkRow({ addresses, threadId }: { addresses: string[]; threadId: strin
             {HOW[match.by]}
           </span>
         </>
-      ) : null}
+      ) : (
+        <span className={styles.how} data-testid="fe2-sponsor-mail-link-how">
+          未登録のアドレス（このメールは営業進捗に数えません）
+        </span>
+      )}
       <SearchableMenu
         testId="fe2-sponsor-mail-link-menu"
-        label="スポンサー企業に紐付け"
-        trigger={matched ? "別の企業に紐付け" : "スポンサー企業に紐付け"}
-        heading={`${current} とのメールを数える企業`}
+        label="企業の担当者メールに登録"
+        trigger={matched ? "別の企業に登録" : "企業の担当者メールに登録"}
+        heading={`${current} を担当者メールに登録する企業`}
         searchPlaceholder="企業名・メールで検索"
         emptyText="該当する企業がありません"
-        loading={leads.isLoading || links.isLoading}
+        loading={leads.isLoading || cards.isLoading}
         items={items}
         onSelect={(item) => {
           const lead = all.find((l) => l.id === item.id);
-          if (lead) link.mutate({ lead, address: current, threadId });
+          if (lead) register.mutate({ lead, address: current });
         }}
       />
     </div>
