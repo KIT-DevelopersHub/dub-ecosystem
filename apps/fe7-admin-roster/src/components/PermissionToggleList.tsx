@@ -3,7 +3,7 @@
 import type { identity } from "@dub/types";
 import { Badge, Switch } from "@dub/ui";
 import { permissionLabel, permissionDescription } from "../lib/permissionLabels";
-import { togglePermission } from "../lib/permissionMatrix";
+import { appRequiredKeys, togglePermission } from "../lib/permissionMatrix";
 
 export const toggleListStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "var(--dub-space-2, 8px)" };
 const rowStyle: React.CSSProperties = {
@@ -45,26 +45,30 @@ export function PermissionToggleList({
   testIdPrefix: string;
 }) {
   const locked = new Set(lockedKeys);
+  const required = appRequiredKeys(selected);
 
   return (
     <div style={toggleListStyle}>
       {entries.map((entry) => {
         const key = entry.key as identity.PermissionKey;
         const keyLocked = locked.has(key);
+        const checked = selected.includes(key);
+        const requiredBy = checked ? required.get(key) : undefined;
         return (
           <ToggleRow
             key={key}
             id={`${testIdPrefix}-${key}`}
             testIdPrefix={testIdPrefix}
             testIdKey={key}
-            checked={selected.includes(key)}
-            disabled={disabled || keyLocked}
+            checked={checked}
+            disabled={disabled || keyLocked || requiredBy !== undefined}
             onChange={() => onChange(togglePermission(selected, key))}
             title={permissionLabel(key, entry.name)}
             meta={
               <>
                 <span style={keyStyle}>{key}</span>
                 {keyLocked ? <Badge tone="neutral">固定</Badge> : null}
+                {requiredBy && !keyLocked ? <Badge tone="neutral" testId={`${testIdPrefix}-required-${key}`}>{requiredBy}に必要</Badge> : null}
               </>
             }
             description={permissionDescription(key, entry.description)}
