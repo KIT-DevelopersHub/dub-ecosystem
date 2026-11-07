@@ -57,10 +57,23 @@ export interface InterviewOverview {
   invites: InterviewInvite[];
 }
 
-export interface AddInterviewSlotRequest {
+export interface NewInterviewSlot {
   startAt: ISODateTime;
   durationMinutes: number;
 }
+
+/** 面談タブのコマ表でドラッグした範囲をまとめて登録する。自分の枠と重なるコマは黙って飛ばす。 */
+export interface AddInterviewSlotsRequest {
+  slots: NewInterviewSlot[];
+}
+
+/** まとめて外す。予約の入った枠は外さない (先に予約を取り消す)。 */
+export interface RemoveInterviewSlotsRequest {
+  ids: string[];
+}
+
+/** 1 回で扱える枠の数 (1 週間・30 分のコマ表をすべて塗っても収まる)。 */
+export const MAX_SLOTS_PER_REQUEST = 200;
 
 export type SaveInterviewSettingsRequest = InterviewSettings;
 

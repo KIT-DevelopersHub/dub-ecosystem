@@ -21,7 +21,6 @@ const DAILY_INVITE_CAP = 30;
 const DAY_MS = 86_400_000;
 
 const errSlotNotFound = (id: string): DubError => new DubError("HR_SLOT_NOT_FOUND", `Slot not found: ${id}`, { status: 404 });
-const errSlotDuplicate = (): DubError => new DubError("HR_SLOT_DUPLICATE", "You already have a slot at this time", { status: 409 });
 const errSlotBooked = (id: string): DubError => new DubError("HR_SLOT_BOOKED", `Slot ${id} is booked; release it first`, { status: 409 });
 const errSlotTaken = (): DubError => new DubError("HR_SLOT_TAKEN", "This slot is no longer available", { status: 409 });
 const errInviteNotFound = (): DubError => new DubError("HR_INVITE_NOT_FOUND", "Invite not found", { status: 404 });
@@ -104,33 +103,57 @@ export class HrInterviewService {
     };
   }
 
-  async addSlot(ctx: ReqCtx, body: hrInterview.AddInterviewSlotRequest): Promise<hrInterview.InterviewOverview> {
-    const b = (body ?? {}) as Partial<hrInterview.AddInterviewSlotRequest>;
-    const startMs = typeof b.startAt === "string" ? Date.parse(b.startAt) : Number.NaN;
-    if (Number.isNaN(startMs)) throw errors.validationFailed([{ field: "startAt", reason: "invalid" }]);
-    if (startMs <= Date.parse(this.deps.now())) throw errors.validationFailed([{ field: "startAt", reason: "in_the_past" }]);
-    const duration = b.durationMinutes as (typeof hrInterview.SLOT_DURATIONS_MINUTES)[number];
-    if (!hrInterview.SLOT_DURATIONS_MINUTES.includes(duration)) {
-      throw errors.validationFailed([{ field: "durationMinutes", reason: "invalid" }]);
+  /** 1 件でも形が不正なら全体を 400。自分の枠 (既存・同じ依頼の中) と重なるコマは飛ばす (塗り直しても増えない)。 */
+  async addSlots(ctx: ReqCtx, body: hrInterview.AddInterviewSlotsRequest): Promise<hrInterview.InterviewOverview> {
+    const items = (body ?? {}).slots;
+    if (!Array.isArray(items) || items.length === 0 || items.length > hrInterview.MAX_SLOTS_PER_REQUEST) {
+      throw errors.validationFailed([{ field: "slots", reason: "invalid" }]);
     }
-    const endAt = new Date(startMs + duration * 60_000).toISOString();
-    const startAt = new Date(startMs).toISOString();
-    const overlaps = (await this.slots()).some((s) => s.interviewerId === ctx.userId && s.startAt < endAt && s.endAt > startAt);
-    if (overlaps) throw errSlotDuplicate();
-    const name = (await this.members.listGoogleEmails([ctx.userId])).items[0]?.name ?? "担当者";
-    const added = await this.repo.addSlot({
-      id: this.deps.newHrId("hsl"),
-      orgId: this.deps.orgId,
-      startAt,
-      endAt,
-      interviewerId: ctx.userId,
-      interviewerName: name,
-      applicantId: null,
-      bookedAt: null,
-      createdAt: this.deps.now(),
+    const nowMs = Date.parse(this.deps.now());
+    const wanted = items.map((raw, i) => {
+      const it = (raw ?? {}) as Partial<hrInterview.NewInterviewSlot>;
+      const startMs = typeof it.startAt === "string" ? Date.parse(it.startAt) : Number.NaN;
+      if (Number.isNaN(startMs)) throw errors.validationFailed([{ field: `slots[${i}].startAt`, reason: "invalid" }]);
+      if (startMs <= nowMs) throw errors.validationFailed([{ field: `slots[${i}].startAt`, reason: "in_the_past" }]);
+      const duration = it.durationMinutes as (typeof hrInterview.SLOT_DURATIONS_MINUTES)[number];
+      if (!hrInterview.SLOT_DURATIONS_MINUTES.includes(duration)) {
+        throw errors.validationFailed([{ field: `slots[${i}].durationMinutes`, reason: "invalid" }]);
+      }
+      return { startAt: new Date(startMs).toISOString(), endAt: new Date(startMs + duration * 60_000).toISOString() };
     });
-    if (!added) throw errSlotDuplicate();
-    await this.releaseHeld(ctx);
+    const taken: { startAt: string; endAt: string }[] = (await this.slots()).filter((s) => s.interviewerId === ctx.userId);
+    const accepted: { startAt: string; endAt: string }[] = [];
+    for (const w of wanted.sort((a, b) => (a.startAt < b.startAt ? -1 : 1))) {
+      if (taken.some((s) => s.startAt < w.endAt && s.endAt > w.startAt)) continue;
+      taken.push(w);
+      accepted.push(w);
+    }
+    if (accepted.length > 0) {
+      const name = (await this.members.listGoogleEmails([ctx.userId])).items[0]?.name ?? "担当者";
+      await this.repo.addSlots(
+        accepted.map((w) => ({
+          id: this.deps.newHrId("hsl"),
+          orgId: this.deps.orgId,
+          ...w,
+          interviewerId: ctx.userId,
+          interviewerName: name,
+          applicantId: null,
+          bookedAt: null,
+          createdAt: this.deps.now(),
+        })),
+      );
+      await this.releaseHeld(ctx);
+    }
+    return this.overview();
+  }
+
+  /** まとめて外す。予約の入った枠と、無い id は飛ばす。 */
+  async removeSlots(body: hrInterview.RemoveInterviewSlotsRequest): Promise<hrInterview.InterviewOverview> {
+    const ids = (body ?? {}).ids;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > hrInterview.MAX_SLOTS_PER_REQUEST || !ids.every((id) => typeof id === "string")) {
+      throw errors.validationFailed([{ field: "ids", reason: "invalid" }]);
+    }
+    await this.repo.deleteOpenSlots(this.deps.orgId, ids);
     return this.overview();
   }
 

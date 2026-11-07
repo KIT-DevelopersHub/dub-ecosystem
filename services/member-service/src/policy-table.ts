@@ -194,6 +194,7 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /members/hr/interviews": appLevel("hr", "view", "hr:read"),
   "PUT /members/hr/interviews/settings": appLevel("hr", "edit", "hr:write"),
   "POST /members/hr/interviews/slots": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/slots/delete": appLevel("hr", "edit", "hr:write"),
   "DELETE /members/hr/interviews/slots/:id": appLevel("hr", "edit", "hr:write"),
   "POST /members/hr/interviews/slots/:id/release": appLevel("hr", "edit", "hr:write"),
   "POST /members/hr/interviews/invites/:id/send": appLevel("hr", "edit", "hr:write"),

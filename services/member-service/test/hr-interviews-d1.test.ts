@@ -64,7 +64,7 @@ function setup() {
   const apply = (email: string) =>
     call(app, "POST", "/members/internal/hr/interview-form", { internal: true, userId: null, body: { answers: { ...ANSWERS, email } } });
   const slot = (day: number) =>
-    call(app, "POST", "/members/hr/interviews/slots", { body: { startAt: `2026-09-0${day}T05:00:00.000Z`, durationMinutes: 45 } });
+    call(app, "POST", "/members/hr/interviews/slots", { body: { slots: [{ startAt: `2026-09-0${day}T05:00:00.000Z`, durationMinutes: 45 }] } });
   const book = (token: string, slotId: string) =>
     call(app, "POST", "/members/internal/hr/interview-booking/book", { internal: true, userId: null, body: { token, slotId } });
   const tokenOf = (body: string) => decodeURIComponent(/#t=(\S+)/.exec(body)![1]!);
@@ -81,7 +81,7 @@ describe("面談の日程調整 (D1 / SQLite)", () => {
     await slot(1);
     await slot(2);
     expect(mails).toHaveLength(0);
-    expect((await slot(1)).json.error.code).toBe("HR_SLOT_DUPLICATE");
+    expect((await slot(1)).json.slots).toHaveLength(2); // 自分の枠と重なるので増えない
     await slot(3);
     expect(mails).toHaveLength(2);
 
@@ -99,6 +99,21 @@ describe("面談の日程調整 (D1 / SQLite)", () => {
     expect((await call(app, "DELETE", `/members/hr/interviews/slots/${a.id}`)).status).toBe(409);
     expect((await call(app, "POST", `/members/hr/interviews/slots/${a.id}/release`)).status).toBe(200);
     expect((await call(app, "DELETE", `/members/hr/interviews/slots/${b.id}`)).status).toBe(200);
+    const left = (await call(app, "POST", "/members/hr/interviews/slots/delete", { body: { ids: [a.id] } })).json.slots;
+    expect(left).toHaveLength(1);
+  });
+
+  it("adds a whole dragged week in one batch", async () => {
+    const { app } = setup();
+    const slots = Array.from({ length: 168 }, (_, i) => ({
+      startAt: new Date(Date.parse("2026-09-01T00:00:00.000Z") + i * 30 * 60_000).toISOString(),
+      durationMinutes: 30,
+    }));
+    const res = await call(app, "POST", "/members/hr/interviews/slots", { body: { slots } });
+    expect(res.status).toBe(201);
+    expect(res.json.slots).toHaveLength(168);
+    const ids = res.json.slots.map((s: { id: string }) => s.id);
+    expect((await call(app, "POST", "/members/hr/interviews/slots/delete", { body: { ids } })).json.slots).toHaveLength(0);
   });
 
   it("the partial UNIQUE stops one applicant from holding two slots, even past the service's stage check", async () => {

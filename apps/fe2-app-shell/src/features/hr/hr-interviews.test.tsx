@@ -23,7 +23,19 @@ const client = () => createApiClient({ baseUrl: "https://demo.local", fetchImpl:
 
 function renderScreen(perms = EDITOR, tweak?: (api: InterviewsApi) => InterviewsApi) {
   const c = client();
-  const api = createInterviewsApi(c);
+  // demo の担当者 (usr_demo) をテストのログイン中の人 (usr_test) に読み替え、自分の枠として扱う。
+  const raw = createInterviewsApi(c);
+  type O = Awaited<ReturnType<InterviewsApi["overview"]>>;
+  const asMe = (p: Promise<O>) =>
+    p.then((o) => ({ ...o, slots: o.slots.map((x) => (x.interviewerId === "usr_demo" ? { ...x, interviewerId: "usr_test" } : x)) }));
+  const api: InterviewsApi = {
+    ...raw,
+    overview: () => asMe(raw.overview()),
+    addSlots: (b) => asMe(raw.addSlots(b)),
+    removeSlots: (b) => asMe(raw.removeSlots(b)),
+    removeSlot: (id) => asMe(raw.removeSlot(id)),
+    saveSettings: (b) => asMe(raw.saveSettings(b)),
+  };
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <ToastProvider>
@@ -48,24 +60,65 @@ function renderBooking(hash: string) {
   );
 }
 
-async function addSlot(day: number): Promise<void> {
-  fireEvent.change(screen.getByTestId("fe2-hr-slot-start"), { target: { value: `2030-01-${String(day).padStart(2, "0")}T14:00` } });
-  fireEvent.click(screen.getByTestId("fe2-hr-slot-add"));
+/** jsdom は座標を持たないので、指の下のコマを「次に返すコマ」で差し替える。 */
+function dragAcross(from: string, to: string): void {
+  const grid = screen.getByTestId("fe2-hr-slot-grid");
+  const at = (key: string) => {
+    document.elementFromPoint = () => screen.getByTestId(`fe2-hr-cell-${key}`);
+  };
+  at(from);
+  fireEvent.pointerDown(grid, { pointerId: 1, button: 0, pointerType: "mouse", clientX: 1, clientY: 1 });
+  at(to);
+  fireEvent.pointerMove(grid, { pointerId: 1, clientX: 2, clientY: 2 });
+  fireEvent.pointerUp(grid, { pointerId: 1 });
 }
 
+const mineCount = () => document.querySelectorAll('[data-cell][data-kind="mine"]').length;
+
 describe("面談タブ", () => {
-  it("shows the shortfall and held count, then releases once enough slots are added", async () => {
+  it("shows the shortfall and held count, then releases once a dragged range fills the candidates", async () => {
     renderScreen();
     await screen.findByTestId("fe2-hr-interviews-status");
     expect(screen.getByTestId("fe2-hr-interviews-open-count").textContent).toBe("3");
     expect(screen.getByTestId("fe2-hr-interviews-status-message").textContent).toContain("2 人への案内メールを保留");
     expect(within(screen.getByTestId("fe2-hr-interviews-invite-table")).getAllByText("メール保留中")).toHaveLength(2);
 
-    await addSlot(1);
-    await waitFor(() => expect(screen.getByTestId("fe2-hr-interviews-open-count").textContent).toBe("4"));
-    await addSlot(2);
-    await waitFor(() => expect(screen.getByTestId("fe2-hr-interviews-status-message").textContent).toContain("候補が揃っています"));
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    expect(mineCount()).toBe(0);
+    dragAcross("1:2", "2:3"); // 火・水 × 2 コマ = 4 コマ
+    await waitFor(() => expect(mineCount()).toBe(4));
+    await waitFor(() => expect(screen.getByTestId("fe2-hr-interviews-open-count").textContent).toBe("7"));
+    expect(screen.getByTestId("fe2-hr-interviews-status-message").textContent).toContain("候補が揃っています");
     expect(within(screen.getByTestId("fe2-hr-interviews-invite-table")).getAllByText("メール送信済み")).toHaveLength(2);
+
+    dragAcross("1:2", "1:3"); // 自分の枠から始めると外す
+    await waitFor(() => expect(screen.getByTestId("fe2-hr-interviews-open-count").textContent).toBe("5"));
+    expect(mineCount()).toBe(2);
+  });
+
+  it("toggles one cell from the keyboard", async () => {
+    renderScreen();
+    await screen.findByTestId("fe2-hr-slot-grid");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    fireEvent.click(screen.getByTestId("fe2-hr-cell-0:0"), { detail: 0 });
+    await waitFor(() => expect(screen.getByTestId("fe2-hr-interviews-open-count").textContent).toBe("4"));
+    // マウスの click (detail 1) は pointer 側で処理するので二重に切り替えない
+    fireEvent.click(screen.getByTestId("fe2-hr-cell-0:1"), { detail: 1 });
+    expect(mineCount()).toBe(1);
+  });
+
+  it("rolls the painted cells back when the server refuses", async () => {
+    let refuse = (_: Error): void => {};
+    renderScreen(EDITOR, (api) => ({ ...api, addSlots: () => new Promise((_, reject) => (refuse = reject)) }));
+    await screen.findByTestId("fe2-hr-slot-grid");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    dragAcross("3:0", "3:5");
+    await waitFor(() => expect(mineCount()).toBe(6)); // 応答を待たずに塗る
+    refuse(new Error("down"));
+    await waitFor(() => expect(mineCount()).toBe(0));
   });
 
   it("lowering the setting releases held invites", async () => {
@@ -97,7 +150,9 @@ describe("面談タブ", () => {
   it("gives a viewer no write controls", async () => {
     renderScreen(VIEWER);
     await screen.findByTestId("fe2-hr-interviews-status");
-    expect(screen.queryByTestId("fe2-hr-slot-add")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    expect(screen.getByTestId("fe2-hr-cell-0:0")).toHaveProperty("disabled", true);
     expect(screen.queryByTestId("fe2-hr-interviews-min")).toBeNull();
     expect(screen.queryByRole("button", { name: "今すぐ送る" })).toBeNull();
   });

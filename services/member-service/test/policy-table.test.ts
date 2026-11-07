@@ -173,6 +173,7 @@ const HR_WRITES = [
   "POST /members/hr/interview-form/responses",
   "POST /members/hr/interviews/invites/:id/send",
   "POST /members/hr/interviews/slots",
+  "POST /members/hr/interviews/slots/delete",
   "POST /members/hr/interviews/slots/:id/release",
   "PUT /members/hr/interview-form",
   "PUT /members/hr/interviews/settings",

@@ -16,8 +16,9 @@ type Overview = hrInterview.InterviewOverview;
 
 export interface InterviewsApi {
   overview(): Promise<Overview>;
-  addSlot(body: hrInterview.AddInterviewSlotRequest): Promise<Overview>;
+  addSlots(body: hrInterview.AddInterviewSlotsRequest): Promise<Overview>;
   removeSlot(id: string): Promise<Overview>;
+  removeSlots(body: hrInterview.RemoveInterviewSlotsRequest): Promise<Overview>;
   releaseBooking(id: string): Promise<Overview>;
   saveSettings(body: hrInterview.SaveInterviewSettingsRequest): Promise<Overview>;
   sendInvite(id: string): Promise<Overview>;
@@ -32,7 +33,8 @@ export function createInterviewsApi(api: ApiClient): InterviewsApi {
   const post = <B,>(path: `/api/v1/${string}`, body?: B) => api.request<Overview, B>({ method: "POST", path, ...(body === undefined ? {} : { body }) });
   return {
     overview: () => api.request<Overview>({ method: "GET", path: BASE }),
-    addSlot: (body) => post(`${BASE}/slots`, body),
+    addSlots: (body) => post(`${BASE}/slots`, body),
+    removeSlots: (body) => post(`${BASE}/slots/delete`, body),
     removeSlot: (id) => api.request<Overview>({ method: "DELETE", path: `${BASE}/slots/${encodeURIComponent(id)}` }),
     releaseBooking: (id) => post(`${BASE}/slots/${encodeURIComponent(id)}/release`),
     saveSettings: (body) => api.request<Overview, typeof body>({ method: "PUT", path: `${BASE}/settings`, body }),
@@ -66,7 +68,6 @@ const OVERVIEW_KEY = queryKeys.feature("hr", "interviews");
 const BOOKING_KEY = (token: string) => queryKeys.feature("hr", "interview-booking", token);
 
 const ERROR_MESSAGES: Record<string, string> = {
-  HR_SLOT_DUPLICATE: "同じ時間に重なる枠を既に登録しています",
   HR_SLOT_BOOKED: "予約が入っている枠は削除できません。先に予約を取り消してください",
   HR_SLOT_TAKEN: "この日程は埋まりました。別の日程をお選びください",
   HR_BOOKING_CLOSED: "この URL では日程を選べなくなりました",
@@ -113,24 +114,36 @@ function useOptimisticOverview<V>(
   });
 }
 
-export function useAddSlot() {
+/** コマ表でドラッグした範囲をまとめて足す (楽観的: 自分の枠として先に塗る)。 */
+export function useAddSlots(meId: string) {
   const api = useInterviewsApi();
-  return useOptimisticOverview<hrInterview.AddInterviewSlotRequest>(
-    (body) => api.addSlot(body),
-    (cur, { startAt, durationMinutes }) => {
-      const slot: hrInterview.InterviewSlot = {
-        id: `pending_${startAt}`,
-        startAt,
-        endAt: new Date(Date.parse(startAt) + durationMinutes * 60_000).toISOString(),
-        interviewerId: "",
-        interviewerName: "",
-        applicantId: null,
-        applicantName: null,
-        bookedAt: null,
-      };
-      return { ...cur, slots: [...cur.slots, slot].sort((a, b) => (a.startAt < b.startAt ? -1 : 1)) };
+  return useOptimisticOverview<hrInterview.NewInterviewSlot[]>(
+    (slots) => api.addSlots({ slots }),
+    (cur, items) => {
+      const added = items.map(
+        ({ startAt, durationMinutes }): hrInterview.InterviewSlot => ({
+          id: `pending_${startAt}`,
+          startAt,
+          endAt: new Date(Date.parse(startAt) + durationMinutes * 60_000).toISOString(),
+          interviewerId: meId,
+          interviewerName: "",
+          applicantId: null,
+          applicantName: null,
+          bookedAt: null,
+        }),
+      );
+      return { ...cur, slots: [...cur.slots, ...added].sort((a, b) => (a.startAt < b.startAt ? -1 : 1)) };
     },
-    "枠を追加できませんでした",
+    "日程を登録できませんでした",
+  );
+}
+
+export function useRemoveSlots() {
+  const api = useInterviewsApi();
+  return useOptimisticOverview<string[]>(
+    (ids) => api.removeSlots({ ids }),
+    (cur, ids) => ({ ...cur, slots: cur.slots.filter((s) => !ids.includes(s.id)) }),
+    "日程を外せませんでした",
   );
 }
 

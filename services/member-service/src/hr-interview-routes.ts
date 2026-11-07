@@ -36,7 +36,10 @@ export function registerHrInterviewRoutes(app: Hono<any>, svc: HrInterviewServic
     return c.json(await svc.saveSettings(reqCtx(c), await readJson<hrInterview.SaveInterviewSettingsRequest>(c)));
   });
   app.post("/members/hr/interviews/slots", async (c) => {
-    return c.json(await svc.addSlot(reqCtx(c), await readJson<hrInterview.AddInterviewSlotRequest>(c)), 201);
+    return c.json(await svc.addSlots(reqCtx(c), await readJson<hrInterview.AddInterviewSlotsRequest>(c)), 201);
+  });
+  app.post("/members/hr/interviews/slots/delete", async (c) => {
+    return c.json(await svc.removeSlots(await readJson<hrInterview.RemoveInterviewSlotsRequest>(c)));
   });
   app.delete("/members/hr/interviews/slots/:id", async (c) => c.json(await svc.removeSlot(c.req.param("id"))));
   app.post("/members/hr/interviews/slots/:id/release", async (c) => c.json(await svc.releaseBooking(reqCtx(c), c.req.param("id"))));

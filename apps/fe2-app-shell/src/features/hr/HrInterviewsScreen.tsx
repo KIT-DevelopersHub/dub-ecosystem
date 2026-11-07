@@ -1,6 +1,6 @@
 // 人事 → 面談。人事が面談できる日程を登録し、応募者はメールの URL からその候補を選ぶ。
 //  - 案内メール: 選べる候補の数と、メールを送り始める候補数の設定。足りない間は保留する。
-//  - 面談できる日程: 枠の追加・削除・予約の取り消し。
+//  - 面談できる日程: 1 週間のコマ表をドラッグしてまとめて登録/外す。下の一覧で削除・予約の取り消し。
 //  - 応募者への案内: メールの状況。保留中でも人事の判断で「今すぐ送る」ことができる。
 import { useMemo, useState } from "react";
 import {
@@ -12,7 +12,6 @@ import {
   EmptyState,
   ErrorState,
   FormField,
-  Select,
   SkeletonCard,
   SkeletonTable,
   Stack,
@@ -21,14 +20,17 @@ import {
   type ColumnDef,
 } from "@dub/ui";
 import { hrInterview } from "@dub/types";
+import { useAuth } from "../../auth/AuthProvider.tsx";
+import { InterviewSlotGrid } from "./InterviewSlotGrid.tsx";
 import { HrFrame } from "./HrApplicantsScreen.tsx";
 import { useHrCapability } from "./HrShared.tsx";
 import { formatDateTime } from "./ApplicantFormAnswers.tsx";
 import {
-  useAddSlot,
+  useAddSlots,
   useInterviewOverview,
   useReleaseBooking,
   useRemoveSlot,
+  useRemoveSlots,
   useSaveInterviewSettings,
   useSendInvite,
 } from "./interviewsApi.tsx";
@@ -37,7 +39,6 @@ import styles from "./interviews.module.css";
 type Overview = hrInterview.InterviewOverview;
 
 const INVITE_TONES: Record<hrInterview.InterviewInviteStatus, BadgeTone> = { held: "warning", sent: "info", booked: "success" };
-const DURATION_OPTIONS = hrInterview.SLOT_DURATIONS_MINUTES.map((m) => ({ value: String(m), label: `${m} 分` }));
 
 export function HrInterviewsScreen(): JSX.Element {
   const overview = useInterviewOverview();
@@ -144,7 +145,13 @@ function MailStatusCard({ data, canWrite }: { data: Overview; canWrite: boolean 
 }
 
 function SlotsCard({ data, canWrite }: { data: Overview; canWrite: boolean }): JSX.Element {
+  const auth = useAuth();
+  const meId = auth.status === "authenticated" ? auth.me.user.id : "";
+  const addMany = useAddSlots(meId);
+  const removeMany = useRemoveSlots();
   const remove = useRemoveSlot();
+  const now = Date.now();
+  const upcoming = data.slots.filter((s) => Date.parse(s.endAt) > now);
   const release = useReleaseBooking();
   const [releasing, setReleasing] = useState<hrInterview.InterviewSlot | null>(null);
 
@@ -182,16 +189,23 @@ function SlotsCard({ data, canWrite }: { data: Overview; canWrite: boolean }): J
   return (
     <Card testId="fe2-hr-interviews-slots" header={<h2 className={styles.cardTitle}>面談できる日程</h2>}>
       <Stack gap={4}>
-        {canWrite ? <AddSlotForm /> : null}
-        {data.slots.length === 0 ? (
+        <InterviewSlotGrid
+          slots={data.slots}
+          meId={meId}
+          canWrite={canWrite}
+          onAdd={(slots) => addMany.mutate(slots)}
+          onRemove={(ids) => removeMany.mutate(ids)}
+        />
+        <h3 className={styles.subTitle}>これからの日程</h3>
+        {upcoming.length === 0 ? (
           <EmptyState
             testId="fe2-hr-interviews-slots-empty"
             icon="clock"
             title="まだ日程がありません"
-            description="面談できる日時を追加すると、応募者が選べる候補になります。"
+            description="上のコマ表で空いている時間をドラッグすると、応募者が選べる候補になります。"
           />
         ) : (
-          <DataTable<hrInterview.InterviewSlot> testId="fe2-hr-interviews-slot-table" columns={columns} rows={data.slots} rowKey={(s) => s.id} />
+          <DataTable<hrInterview.InterviewSlot> testId="fe2-hr-interviews-slot-table" columns={columns} rows={upcoming} rowKey={(s) => s.id} />
         )}
       </Stack>
       <ConfirmDialog
@@ -208,41 +222,6 @@ function SlotsCard({ data, canWrite }: { data: Overview; canWrite: boolean }): J
         }}
       />
     </Card>
-  );
-}
-
-function AddSlotForm(): JSX.Element {
-  const add = useAddSlot();
-  const [startAt, setStartAt] = useState("");
-  const [duration, setDuration] = useState(String(hrInterview.DEFAULT_SLOT_DURATION_MINUTES));
-  return (
-    <form
-      className={styles.addForm}
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!startAt) return;
-        add.mutate({ startAt: new Date(startAt).toISOString(), durationMinutes: Number(duration) });
-        setStartAt("");
-      }}
-    >
-      <FormField label="開始日時" htmlFor="fe2-hr-slot-start">
-        <input
-          id="fe2-hr-slot-start"
-          data-testid="fe2-hr-slot-start"
-          type="datetime-local"
-          step={300}
-          className={styles.dateInput}
-          value={startAt}
-          onChange={(e) => setStartAt(e.target.value)}
-        />
-      </FormField>
-      <FormField label="長さ" htmlFor="fe2-hr-slot-duration">
-        <Select id="fe2-hr-slot-duration" testId="fe2-hr-slot-duration" value={duration} options={DURATION_OPTIONS} onChange={setDuration} />
-      </FormField>
-      <Button type="submit" testId="fe2-hr-slot-add" disabled={!startAt}>
-        日程を追加
-      </Button>
-    </form>
   );
 }
 

@@ -32,10 +32,12 @@ export interface HrInterviewRepo {
   listSlots(orgId: common.OrgId, since: common.ISODateTime): Promise<SlotRow[]>;
   getSlot(id: string): Promise<SlotRow | null>;
   findSlotByApplicant(applicantId: string): Promise<SlotRow | null>;
-  /** 同じ担当者・同じ開始の枠が既にあれば false。 */
-  addSlot(row: SlotRow): Promise<boolean>;
+  /** まとめて足す (1 トランザクション)。同じ担当者・同じ開始の枠が既にあるものは飛ばす。 */
+  addSlots(rows: readonly SlotRow[]): Promise<void>;
   /** 予約の無い枠だけ消す。消せたら true。 */
   deleteOpenSlot(id: string): Promise<boolean>;
+  /** 予約の無い枠だけまとめて消す (1 トランザクション)。 */
+  deleteOpenSlots(orgId: common.OrgId, ids: readonly string[]): Promise<void>;
   /** 枠が空いていて、応募者がまだどの枠も持っていないときだけ予約して true (同時押しはここで 1 人に絞る)。 */
   bookSlot(id: string, applicantId: string, bookedAt: common.ISODateTime): Promise<boolean>;
   /** 予約を外す。この応募者の予約が外れたら true。 */
@@ -77,17 +79,23 @@ export class InMemoryHrInterviewRepo implements HrInterviewRepo {
     const s = [...this.slots.values()].find((x) => x.applicantId === applicantId);
     return s ? { ...s } : null;
   }
-  async addSlot(row: SlotRow): Promise<boolean> {
-    const dup = [...this.slots.values()].some(
-      (s) => s.orgId === row.orgId && s.interviewerId === row.interviewerId && s.startAt === row.startAt,
-    );
-    if (dup) return false;
-    this.slots.set(row.id, { ...row });
-    return true;
+  async addSlots(rows: readonly SlotRow[]): Promise<void> {
+    for (const row of rows) {
+      const dup = [...this.slots.values()].some(
+        (s) => s.orgId === row.orgId && s.interviewerId === row.interviewerId && s.startAt === row.startAt,
+      );
+      if (!dup) this.slots.set(row.id, { ...row });
+    }
   }
   async deleteOpenSlot(id: string): Promise<boolean> {
     if (this.slots.get(id)?.applicantId !== null) return false;
     return this.slots.delete(id);
+  }
+  async deleteOpenSlots(orgId: common.OrgId, ids: readonly string[]): Promise<void> {
+    for (const id of ids) {
+      const s = this.slots.get(id);
+      if (s && s.orgId === orgId && s.applicantId === null) this.slots.delete(id);
+    }
   }
   async bookSlot(id: string, applicantId: string, bookedAt: common.ISODateTime): Promise<boolean> {
     const s = this.slots.get(id);
@@ -199,13 +207,25 @@ export function createD1HrInterviewRepo(db: DbClient): HrInterviewRepo {
       const r = await db.first<SlotDbRow>(`SELECT * FROM member_hr_interview_slots WHERE applicant_id = ?`, applicantId);
       return r ? toSlot(r) : null;
     },
-    async addSlot(s) {
-      const res = await db.run(
-        `INSERT OR IGNORE INTO member_hr_interview_slots (id, org_id, start_at, end_at, interviewer_id, interviewer_name, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        s.id, s.orgId, s.startAt, s.endAt, s.interviewerId, s.interviewerName, s.createdAt,
+    async addSlots(rows) {
+      if (rows.length === 0) return;
+      // D1 の batch = 1 トランザクション。行ごとに文を分け、1 文の bind 上限 (100) に当たらないようにする。
+      await db.batch(
+        rows.map((s) => ({
+          sql: `INSERT OR IGNORE INTO member_hr_interview_slots (id, org_id, start_at, end_at, interviewer_id, interviewer_name, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          binds: [s.id, s.orgId, s.startAt, s.endAt, s.interviewerId, s.interviewerName, s.createdAt],
+        })),
       );
-      return res.meta.changes > 0;
+    },
+    async deleteOpenSlots(orgId, ids) {
+      if (ids.length === 0) return;
+      await db.batch(
+        ids.map((id) => ({
+          sql: `DELETE FROM member_hr_interview_slots WHERE id = ? AND org_id = ? AND applicant_id IS NULL`,
+          binds: [id, orgId],
+        })),
+      );
     },
     async deleteOpenSlot(id) {
       const res = await db.run(`DELETE FROM member_hr_interview_slots WHERE id = ? AND applicant_id IS NULL`, id);

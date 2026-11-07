@@ -42,7 +42,7 @@ const apply = (app: App, email = "taro@example.com") =>
 const addSlot = (app: App, day: number, userId = "user_caller") =>
   call(app, "POST", "/members/hr/interviews/slots", {
     userId,
-    body: { startAt: `2026-09-${String(day).padStart(2, "0")}T05:00:00.000Z`, durationMinutes: 30 },
+    body: { slots: [{ startAt: `2026-09-${String(day).padStart(2, "0")}T05:00:00.000Z`, durationMinutes: 30 }] },
   });
 
 const overview = async (app: App): Promise<hrInterview.InterviewOverview> => (await call(app, "GET", "/members/hr/interviews")).json;
@@ -102,22 +102,41 @@ describe("人事: 面談メールの保留", () => {
     expect(mails).toHaveLength(0);
   });
 
-  it("rejects a past slot and the same interviewer's duplicate", async () => {
+  it("rejects the whole request when any item is malformed or in the past", async () => {
     const { app } = setup();
-    await addSlot(app, 1);
-    expect((await addSlot(app, 1)).json.error.code).toBe("HR_SLOT_DUPLICATE");
-    const past = await call(app, "POST", "/members/hr/interviews/slots", { body: { startAt: "2026-01-01T00:00:00.000Z", durationMinutes: 30 } });
-    expect(past.status).toBe(400);
+    const post = (slots: unknown) => call(app, "POST", "/members/hr/interviews/slots", { body: { slots } });
+    expect((await post([{ startAt: "2026-09-01T05:00:00.000Z", durationMinutes: 30 }, { startAt: "2026-01-01T00:00:00.000Z", durationMinutes: 30 }])).json.error.details).toEqual([
+      { field: "slots[1].startAt", reason: "in_the_past" },
+    ]);
+    expect((await post([])).status).toBe(400);
+    expect((await post(Array.from({ length: 201 }, () => ({ startAt: "2026-09-01T05:00:00.000Z", durationMinutes: 30 })))).status).toBe(400);
+    expect((await overview(app)).slots).toHaveLength(0);
   });
 
-  it("rejects the same interviewer's overlapping slot but allows back-to-back and another interviewer", async () => {
+  it("adds a dragged range at once, skipping cells that overlap the same interviewer's slots", async () => {
     const { app } = setup();
-    const add = (startAt: string, durationMinutes: number, userId = "user_caller") =>
-      call(app, "POST", "/members/hr/interviews/slots", { userId, body: { startAt, durationMinutes } });
-    expect((await add("2026-09-01T05:00:00.000Z", 60)).status).toBe(201);
-    expect((await add("2026-09-01T05:30:00.000Z", 30)).json.error.code).toBe("HR_SLOT_DUPLICATE");
-    expect((await add("2026-09-01T06:00:00.000Z", 30)).status).toBe(201);
-    expect((await add("2026-09-01T05:30:00.000Z", 30, "user_b")).status).toBe(201);
+    const cells = (from: number, n: number, minutes = 30) =>
+      Array.from({ length: n }, (_, i) => ({ startAt: new Date(Date.parse("2026-09-01T00:00:00.000Z") + (from + i) * minutes * 60_000).toISOString(), durationMinutes: minutes }));
+    await call(app, "POST", "/members/hr/interviews/slots", { body: { slots: cells(2, 1, 60) } }); // 02:00-03:00
+    const res = await call(app, "POST", "/members/hr/interviews/slots", { body: { slots: [...cells(0, 8), ...cells(0, 2)] } });
+    expect(res.status).toBe(201);
+    // 00:00-04:00 の 8 コマのうち 02:00-03:00 と重なる 2 コマを飛ばし、重複分も 1 回だけ
+    expect(res.json.slots).toHaveLength(7);
+    // 別の担当者は同じ時間に入れられる
+    expect((await call(app, "POST", "/members/hr/interviews/slots", { userId: "user_b", body: { slots: cells(0, 2) } })).json.slots).toHaveLength(9);
+  });
+
+  it("removes several open slots at once but keeps a booked one", async () => {
+    const { app, mails } = setup();
+    await withSlots(app, 5);
+    await apply(app);
+    const token = tokenOf(mails[0]!.mail);
+    const ids = (await overview(app)).slots.map((s) => s.id);
+    await book(app, token, ids[0]!);
+    const res = await call(app, "POST", "/members/hr/interviews/slots/delete", { body: { ids: [...ids, "nope"] } });
+    expect(res.status).toBe(200);
+    expect(res.json.slots.map((s: { id: string }) => s.id)).toEqual([ids[0]]);
+    expect((await call(app, "POST", "/members/hr/interviews/slots/delete", { body: { ids: [] } })).status).toBe(400);
   });
 
   it("keeps the submission and the held invite when the mail fails, and retries on the next trigger", async () => {

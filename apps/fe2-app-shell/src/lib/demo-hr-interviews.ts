@@ -38,10 +38,10 @@ export function createHrInterviewsDemoStore(deps: {
     slots.sort((a, b) => (a.startAt < b.startAt ? -1 : 1));
   }
 
+  // 日本時間 14:00 (コマ表は日本時間で並ぶ)。
   for (const days of [2, 3, 5]) {
-    const d = new Date(Date.now() + days * 86_400_000);
-    d.setHours(14, 0, 0, 0);
-    addSlot(d.toISOString(), 30);
+    const jstMidnight = Math.floor((Date.now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000;
+    addSlot(new Date(jstMidnight + days * 86_400_000 + 14 * 3_600_000).toISOString(), 30);
   }
 
   const openSlots = () => hrInterview.publicSlots(slots, new Date().toISOString());
@@ -121,9 +121,20 @@ export function createHrInterviewsDemoStore(deps: {
       return json(await overview());
     }
     if (rest === "/slots" && method === "POST") {
-      if (slots.some((s) => s.startAt === body?.startAt)) return problem("HR_SLOT_DUPLICATE", 409);
-      addSlot(body.startAt, body.durationMinutes);
+      const items: hrInterview.NewInterviewSlot[] = Array.isArray(body?.slots) ? body.slots : [];
+      if (items.length === 0 || items.some((i) => Date.parse(i.startAt) <= Date.now())) return problem("VALIDATION_FAILED", 400);
+      for (const it of items) {
+        const start = Date.parse(it.startAt);
+        const end = start + it.durationMinutes * 60_000;
+        const overlap = slots.some((s) => s.interviewerId === ME && Date.parse(s.startAt) < end && Date.parse(s.endAt) > start);
+        if (!overlap) addSlot(new Date(start).toISOString(), it.durationMinutes);
+      }
       return json(await overview(), 201);
+    }
+    if (rest === "/slots/delete" && method === "POST") {
+      const ids = new Set<string>(Array.isArray(body?.ids) ? body.ids : []);
+      for (let i = slots.length - 1; i >= 0; i--) if (ids.has(slots[i]!.id) && !slots[i]!.applicantId) slots.splice(i, 1);
+      return json(await overview());
     }
     const slotMatch = /^\/slots\/([^/]+)(\/release)?$/.exec(rest);
     if (slotMatch) {
