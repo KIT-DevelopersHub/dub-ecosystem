@@ -146,7 +146,7 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     const { onChange } = setup([]);
     await user.click(screen.getByTestId("fe7-app-name-chat"));
     await user.click(screen.getByTestId("fe7-app-dialog-level-view"));
-    expect(onChange.mock.calls[0]?.[0]).toEqual(["app:chat:view", "chat:create"]);
+    expect(onChange.mock.calls[0]?.[0]).toEqual(appRegistry.withRequiredAppDomainKeys(["app:chat:view"]));
   });
 
   // メッセージ削除ポリシーはロール管理から撤去（ロールの権限ではなくチャット側の設定）。
