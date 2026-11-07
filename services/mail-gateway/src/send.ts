@@ -23,6 +23,7 @@ import {
 } from "./repo";
 import type { OutboundMail } from "./provider";
 import type { SendDeps } from "./types";
+import { notifySponsorContact } from "./sponsor-sync";
 
 /** FNV-1a 32-bit hex over the canonical request (same key + different body -> 409). */
 export function hashRequest(req: mail.SendMailRequest): string {
@@ -257,6 +258,15 @@ export async function sendMail(
         ownedId,
         req.attachments.map(decodeInputAttachment),
       );
+    }
+    // スポンサーのメール連携: 人が送ったメールだけ (best-effort・throw しない)。相手 = To + Cc (Bcc は除く)。
+    if (deps.ownerUserId) {
+      await notifySponsorContact(deps.sponsor, deps.ctx, {
+        direction: "sent",
+        at: nowIso(),
+        counterparts: [...req.to, ...(req.cc ?? [])].map((a) => a.email),
+        mailbox: fromAddress,
+      });
     }
     await publishSent(deps, messageId, requester);
     await audit(deps, "success", messageId, requester, null);

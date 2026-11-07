@@ -72,6 +72,10 @@ export const POLICY_TABLE = definePolicyTable({
   // would let one compromised s2s caller send as any user; see app.ts.
   "POST /send": INTERNAL,
 
+  // ---- スポンサーのメール連携: member-service が登録アドレスとの既存メールを集計する (アドレスと日時の集計だけ・本文なし) ----
+  // INTERNAL: api-gateway は /mail/* しか通さないので外からは届かないが、届かないことを表で宣言する。
+  "POST /internal/sponsor/contacts": INTERNAL,
+
   // ---- user-facing mail app (ロール管理 tier + fine-grained key) ----
   // 編集 on メール + mail:send — anything that puts (or queues) a message on the wire.
   "POST /mail/outbox": appLevel("mail", "edit", "mail:send"),

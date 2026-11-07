@@ -23,6 +23,7 @@ import { isTempLead, useLeads, useUpdateLead } from "./leadHooks.ts";
 import { formatAmount, formatOn, isOverdue, sortLeads, STATUS_TONE, summarizeLeads, todayIso } from "./leads.ts";
 import { LeadCreateDrawer, LeadDrawer } from "./LeadDrawer.tsx";
 import { LeadImportDialog } from "./LeadImportDialog.tsx";
+import { MailBackfillDialog } from "./MailBackfillDialog.tsx";
 import { memberOptions, UNKNOWN_MEMBER, useSponsorCapability } from "./SponsorShared.tsx";
 import { SponsorFrame } from "./SponsorCardsScreen.tsx";
 import styles from "./sponsor.module.css";
@@ -80,7 +81,7 @@ function Stats({ leads }: { leads: readonly Lead[] }): JSX.Element {
 
 export function SponsorLeadsScreen(): JSX.Element {
   const list = useLeads();
-  const { canWrite } = useSponsorCapability();
+  const { canWrite, canAdmin } = useSponsorCapability();
   const [query, setQuery] = useState("");
   const [statuses, setStatuses] = useState<string[]>([]);
   const [owners, setOwners] = useState<string[]>([]);
@@ -88,6 +89,7 @@ export function SponsorLeadsScreen(): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
 
   const all = list.data?.leads ?? [];
   const opened = all.find((l) => l.id === openId) ?? null;
@@ -192,6 +194,11 @@ export function SponsorLeadsScreen(): JSX.Element {
 
   const addButtons = (
     <>
+      {canAdmin ? (
+        <Button variant="secondary" testId="fe2-sponsor-lead-backfill-open" onClick={() => setBackfilling(true)}>
+          メールから日付を補完
+        </Button>
+      ) : null}
       <Button variant="secondary" testId="fe2-sponsor-lead-import-open" onClick={() => setImporting(true)}>
         シートを取り込む
       </Button>
@@ -298,6 +305,7 @@ export function SponsorLeadsScreen(): JSX.Element {
         <LeadDrawer lead={opened} onClose={() => setOpenId(null)} />
         <LeadCreateDrawer open={creating} onClose={() => setCreating(false)} />
         <LeadImportDialog open={importing} onClose={() => setImporting(false)} existing={all} />
+        {canAdmin ? <MailBackfillDialog open={backfilling} onClose={() => setBackfilling(false)} /> : null}
       </>
     </SponsorFrame>
   );

@@ -188,6 +188,7 @@ const SPONSOR_READS = [
   "GET /members/sponsor/goals",
   "GET /members/sponsor/leads",
   "GET /members/sponsor/leads/:id",
+  "GET /members/sponsor/leads/:id/activity",
 ];
 const SPONSOR_WRITES = [
   "PATCH /members/sponsor/cards/:id",
@@ -195,9 +196,10 @@ const SPONSOR_WRITES = [
   "POST /members/sponsor/cards",
   "POST /members/sponsor/leads",
   "POST /members/sponsor/leads/import",
+  "POST /members/sponsor/leads/:id/contact-emails",
   "PUT /members/sponsor/cards/:id/image",
 ];
-const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/sponsor/leads/:id"];
+const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/sponsor/leads/:id", "POST /members/sponsor/leads/mail-backfill"];
 // 目標管理: 閲覧 (+goals:read) / 編集。
 const GOALS_READS = ["GET /members/goals"];
 const GOALS_WRITES = ["DELETE /members/goals/:teamId/:month", "PUT /members/goals/:teamId/:month"];
@@ -216,6 +218,7 @@ const INTERNAL_ROUTES = [
   "POST /members/internal/hr/interview-booking/book",
   "POST /members/internal/hr/interview-booking/view",
   "POST /members/internal/hr/interview-form",
+  "POST /members/internal/sponsor/mail-activity",
   "POST /members/internal/me/participation",
   "POST /members/internal/participation",
 ];

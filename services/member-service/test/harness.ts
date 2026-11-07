@@ -12,6 +12,7 @@ import { InMemoryHrInterviewRepo } from "../src/hr-interview-repo";
 import { InMemoryGoalRepo } from "../src/goal-repo";
 import { InMemorySponsorRepo, type SponsorImageStore } from "../src/sponsor-repo";
 import { InMemorySponsorLeadRepo } from "../src/sponsor-lead-repo";
+import { InMemorySponsorMailRepo } from "../src/sponsor-mail-repo";
 import type { AppDeps } from "../src/types";
 
 /**
@@ -68,6 +69,7 @@ export class FakeImageStore implements SponsorImageStore {
 let seq = 0;
 export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: InMemoryMemberRepo } {
   const repo = new InMemoryMemberRepo();
+  const leadRepo = new InMemorySponsorLeadRepo();
   const deps: AppDeps = {
     repo,
     authz: fakeAuthz(adminGrants()),
@@ -84,8 +86,10 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     sponsorRepo: new InMemorySponsorRepo(),
     sponsorImages: new FakeImageStore(),
     newSponsorCardId: () => `card_${String(seq++).padStart(6, "0")}`,
-    sponsorLeadRepo: new InMemorySponsorLeadRepo(),
+    sponsorLeadRepo: leadRepo,
     newSponsorLeadId: () => `lead_${String(seq++).padStart(6, "0")}`,
+    sponsorMailRepo: new InMemorySponsorMailRepo(leadRepo),
+    newSponsorMailId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
     goalRepo: new InMemoryGoalRepo(),
     goalSources: { teamTasks: async () => [], lpVisitors: async () => 0 },
     ...overrides,

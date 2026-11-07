@@ -178,13 +178,13 @@ D1 `member` namespace に新規テーブル 3 つ（`infra/d1/migrations/member/
 - **同時押し**: `bookSlot` の `UPDATE ... WHERE applicant_id IS NULL` と部分 UNIQUE（1 人 1 枠）で 1 人に絞る。負けた人には 409 `HR_SLOT_TAKEN` を返し、最新の候補を出し直す。
 - **予約の取り消し**: 予約のある枠は削除できない。面談タブの「予約を取り消す」で空きに戻し、応募者を面談日程調整中へ戻す。同じ URL で選び直せる。本人への連絡は人事が行う。
 - **トークン**: 32 バイトの乱数。漏れても面談を 1 件予約できるだけなので、再送で同じ URL を使えるよう平文で持つ（メール本文は mail-gateway の送信ログとアーカイブ CC にも残る）。人事の API にも返さない。URL の fragment に載せ、公開 API は body で受ける。
-- **メール**: mail-gateway の `POST /send`（Service Binding `SVC_MAIL_GATEWAY`）。`x-dub-user-id` があると本人の `mail:send` を要求されるので、ユーザー無しのシステム送信で呼ぶ。宛先の URL は `APP_BASE_URL`。どちらかが無い環境ではメールは保留のまま。
+- **メール**: mail-gateway の `POST /send`（Service Binding `SVC_MAIL`。スポンサーのメール連携と同じ binding）。`x-dub-user-id` があると本人の `mail:send` を要求されるので、ユーザー無しのシステム送信で呼ぶ。宛先の URL は `APP_BASE_URL`。どちらかが無い環境ではメールは保留のまま。
 - **API**: `GET /members/hr/interviews`（閲覧 + hr:read）・`PUT .../settings`・`POST .../slots`・`POST .../slots/delete`・`DELETE .../slots/:id`・`POST .../slots/:id/release`・`POST .../invites/:id/send`（編集 + hr:write）・公開は gateway `POST /api/v1/public/hr-interview-booking/{view,book}`（PUBLIC → member-service `/members/internal/hr/interview-booking/*` INTERNAL）。契約の SoT は `@dub/types` の `hrInterview`。
 - **画面**: 人事 → 面談 タブ（`/hr/interviews`）。候補数と保留の状況・送り始める候補数の設定・日程の登録・案内の一覧。
 - **日程の登録（コマ表）**: 1 週間 × 9:00〜21:00 を 30 分（60 分に切り替え可）のコマで並べる（常に日本時間）。空いているコマから囲むようにドラッグすると、囲んだ長方形（日 × 時間）のコマを 1 コマ = 1 枠でまとめて登録する。自分の枠から始めると、囲んだ自分の枠をまとめて外す。予約済み・過去のコマは触れない。キーボードは各コマのボタンで 1 コマずつ。保存は 1 回のリクエスト（`POST .../slots` に `{ slots: [...] }`・`POST .../slots/delete` に `{ ids }`、最大 200 件、D1 の batch = 1 トランザクション）で、楽観的に先に塗る。自分の枠と重なるコマはサーバーでも飛ばすので、塗り直しても増えない。
 - **demo**: メールは送らない。公開ページは `/interview-book#t=demo`。
 - **未対応**: 候補が尽きたあとに枠を足しても自動では再通知しない（面談タブに表示し、「再送」で知らせる）、公開フォームの Turnstile 必須化、応募者自身による日程変更（確認メールに返信してもらい、人事が取り消す）、面談の場所・URL の案内、Google カレンダー連携、保留が続いたときの人事への通知。
-- **migration**: `infra/d1/migrations/member/0024_hr_interviews.sql`（新規 3 テーブルのみの additive）。
+- **migration**: `infra/d1/migrations/member/0025_hr_interviews.sql`（新規 3 テーブルのみの additive）。
 
 ## リリース手順と migration
 
@@ -192,7 +192,7 @@ D1 `member` namespace に新規テーブル 3 つ（`infra/d1/migrations/member/
 2. **本番デプロイ前に D1 migration を適用する**（前方のみ・additive）:
    - `infra/d1/migrations/member/0017_hr.sql`（新規テーブル 3 つ）
    - `infra/d1/migrations/identity/0025_hr_app_perms.sql`（admin への 5 キー付与）
-   - `infra/d1/migrations/member/0024_hr_interviews.sql`（面談の日程調整の新規テーブル 3 つ）
+   - `infra/d1/migrations/member/0025_hr_interviews.sql`（面談の日程調整の新規テーブル 3 つ）
 
 ## フェーズ2 以降の TODO
 

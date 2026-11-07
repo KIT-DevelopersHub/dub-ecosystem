@@ -350,6 +350,10 @@ export const MEMBER: AreaSpec = {
     { service: "member-service", route: "PATCH /members/sponsor/leads/:id" },
     { service: "member-service", route: "DELETE /members/sponsor/leads/:id" },
     { service: "member-service", route: "GET /members/sponsor/goals" },
+    // メール連携 (担当者メールへの登録・自動更新の履歴・既存メールからの一括補完) も新設したばかり。一括補完は全社の日付を書き換えうる。
+    { service: "member-service", route: "POST /members/sponsor/leads/:id/contact-emails" },
+    { service: "member-service", route: "GET /members/sponsor/leads/:id/activity" },
+    { service: "member-service", route: "POST /members/sponsor/leads/mail-backfill" },
   ],
   ownerOpenedIrreversible: {
     "mail.issued.create": "確認メールの送信は取り消せないが、受信は mail.issued.setEnabled で停止できる",

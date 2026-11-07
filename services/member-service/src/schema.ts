@@ -494,11 +494,33 @@ CREATE INDEX idx_member_goals_org_month ON member_goals(org_id, month);
 `.trim(),
 };
 
-// 0024: 人事アプリの面談の日程調整 (面談枠・招待・設定) の新規テーブル (additive)。
-// Mirrors 0024_hr_interviews.sql (schema-lockstep).
+// 0024: スポンサーのメール連携 (メールからの自動更新の履歴。新規テーブルのみ・additive)。Mirrors 0024_sponsor_mail_sync.sql (schema-lockstep).
+export const MEMBER_SPONSOR_MAIL_SYNC_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0024_sponsor_mail_sync",
+  up: `
+CREATE TABLE member_sponsor_lead_activity (
+  id                TEXT PRIMARY KEY,
+  org_id            TEXT NOT NULL,
+  lead_id           TEXT NOT NULL,
+  source            TEXT NOT NULL,
+  direction         TEXT NOT NULL,
+  mail_at           TEXT NOT NULL,
+  counterpart       TEXT NOT NULL,
+  matched_by        TEXT NOT NULL,
+  mailbox           TEXT,
+  changes_json      TEXT NOT NULL,
+  created_at        TEXT NOT NULL
+);
+CREATE INDEX idx_member_sponsor_lead_activity_lead ON member_sponsor_lead_activity(lead_id, created_at);
+`.trim(),
+};
+
+// 0025: 人事アプリの面談の日程調整 (面談枠・招待・設定) の新規テーブル (additive)。
+// Mirrors 0025_hr_interviews.sql (schema-lockstep).
 export const MEMBER_HR_INTERVIEWS_MIGRATION: Migration = {
   namespace: "member",
-  id: "0024_hr_interviews",
+  id: "0025_hr_interviews",
   up: `
 CREATE TABLE member_hr_interview_slots (
   id                TEXT PRIMARY KEY,
@@ -559,5 +581,6 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SPONSOR_LEADS_MIGRATION,
   MEMBER_SPONSOR_GOALS_MIGRATION,
   MEMBER_GOALS_MIGRATION,
+  MEMBER_SPONSOR_MAIL_SYNC_MIGRATION,
   MEMBER_HR_INTERVIEWS_MIGRATION,
 ];

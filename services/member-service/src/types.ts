@@ -11,6 +11,8 @@ import type { HrMailSender, InterviewerNotifier } from "./hr-interview-mail";
 import type { GoalMetricSources, GoalRepo } from "./goal-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
 import type { SponsorLeadRepo } from "./sponsor-lead-repo";
+import type { SponsorMailRepo } from "./sponsor-mail-repo";
+import type { MailContactsSource } from "./sponsor-mail-service";
 import type { RoleSyncPort } from "./roleSync";
 import type { ProfileReminderTarget } from "./profileReminder";
 import type { IdentityActivationPort } from "./identityActivation";
@@ -217,6 +219,13 @@ export interface AppDeps {
   /** スポンサー営業進捗 (member_sponsor_leads) の永続化 (sponsor-lead-repo.ts)。 */
   sponsorLeadRepo: SponsorLeadRepo;
   newSponsorLeadId: () => string;
+  /** スポンサーのメール連携 (自動更新の履歴) の永続化 (sponsor-mail-repo.ts)。 */
+  sponsorMailRepo: SponsorMailRepo;
+  /** メール連携の履歴の id 採番。 */
+  newSponsorMailId: (prefix: "lact") => string;
+  /** mail-gateway のメール集計 (アドレス登録時の反映・一括補完)。index.ts で SVC_MAIL に結線。
+   *  undefined なら登録だけ保存し、一括補完は 503。 */
+  mailContacts?: MailContactsSource;
   /** 目標管理 (member_goals) の永続化と、他サービスの実績の取り口 (goal-repo.ts)。 */
   goalRepo: GoalRepo;
   goalSources: GoalMetricSources;

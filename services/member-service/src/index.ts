@@ -15,6 +15,8 @@ import { interviewerNotifierVia, sendHrMailVia } from "./hr-interview-mail";
 import { createD1GoalRepo, createGoalSources } from "./goal-repo";
 import { createD1SponsorRepo, r2ImageStore } from "./sponsor-repo";
 import { createD1SponsorLeadRepo } from "./sponsor-lead-repo";
+import { createD1SponsorMailRepo } from "./sponsor-mail-repo";
+import { mailContactsVia } from "./sponsor-mail-client";
 import { notifyAdminsOfParticipation } from "./participationNotify";
 import { sendProfileReminderVia } from "./profileReminder";
 import { createIdentityRoleSync } from "./roleSync";
@@ -51,7 +53,7 @@ export function buildDeps(env: Env, requestId?: string, exec?: ExecutionContext)
     hrRepo: createD1HrRepo(db),
     hrFormRepo: createD1HrFormRepo(db),
     hrInterviewRepo: createD1HrInterviewRepo(db),
-    ...(env.SVC_MAIL_GATEWAY ? { sendHrMail: sendHrMailVia(env.SVC_MAIL_GATEWAY) } : {}),
+    ...(env.SVC_MAIL ? { sendHrMail: sendHrMailVia(env.SVC_MAIL) } : {}),
     ...(env.SVC_NOTIFICATION ? { notifyInterviewer: interviewerNotifierVia(env.SVC_NOTIFICATION) } : {}),
     ...(env.APP_BASE_URL ? { appBaseUrl: env.APP_BASE_URL } : {}),
     ...(exec ? { defer: (work: Promise<void>) => exec.waitUntil(work) } : {}),
@@ -65,6 +67,9 @@ export function buildDeps(env: Env, requestId?: string, exec?: ExecutionContext)
     newSponsorCardId: () => newId("card"),
     sponsorLeadRepo: createD1SponsorLeadRepo(db),
     newSponsorLeadId: () => newId("lead"),
+    sponsorMailRepo: createD1SponsorMailRepo(db),
+    newSponsorMailId: (prefix) => newId(prefix),
+    ...(env.SVC_MAIL ? { mailContacts: mailContactsVia(env.SVC_MAIL) } : {}),
     goalRepo: createD1GoalRepo(db),
     goalSources: createGoalSources(env),
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。

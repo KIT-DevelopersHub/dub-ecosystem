@@ -161,8 +161,8 @@ describe("営業タブ", () => {
   it("shows the summary, filters by status, and opens the detail", async () => {
     renderScreen(demoApi());
     expect(await screen.findByTestId("fe2-sponsor-leads-table")).toBeTruthy();
-    expect(screen.getByTestId("fe2-sponsor-lead-stat-total").textContent).toBe("10");
-    expect(screen.getByTestId("fe2-sponsor-lead-stat-contacted").textContent).toBe("8");
+    expect(screen.getByTestId("fe2-sponsor-lead-stat-total").textContent).toBe("11");
+    expect(screen.getByTestId("fe2-sponsor-lead-stat-contacted").textContent).toBe("9");
     expect(screen.getByTestId("fe2-sponsor-lead-stat-proposed").textContent).toBe("3");
     expect(screen.getByTestId("fe2-sponsor-lead-stat-agreed").textContent).toBe("1");
     // 既定は進んでいる順 (見送りは最後)。
@@ -270,7 +270,7 @@ describe("営業タブ", () => {
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() => expect(names()).toContain("新規テスト株式会社"));
-    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-lead-stat-total").textContent).toBe("11"));
+    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-lead-stat-total").textContent).toBe("12"));
   });
 
   it("imports a pasted sheet: previews, skips registered companies, then adds to the table", async () => {
@@ -292,7 +292,7 @@ describe("営業タブ", () => {
     expect(screen.getByTestId("fe2-sponsor-lead-import-warnings").textContent).toContain("Diamond");
 
     fireEvent.click(submit);
-    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-lead-stat-total").textContent).toBe("12"));
+    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-lead-stat-total").textContent).toBe("13"));
     expect(names()).toContain("輪島取り込み株式会社");
     expect(await screen.findByText("2 社を取り込みました")).toBeTruthy();
   });
