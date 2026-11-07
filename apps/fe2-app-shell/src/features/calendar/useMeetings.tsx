@@ -33,6 +33,17 @@ export function useMeetingTargetsQuery(enabled: boolean) {
   return useQuery({ queryKey: MEETING_TARGETS_KEY, queryFn: () => api.listMeetingTargets(), enabled, staleTime: 60_000 });
 }
 
+/** Answers change in Google Calendar, not in Dub: re-read on every open, but not on every re-render. */
+export function useMeetingAttendeesQuery(meetingId: string | null, date: string | undefined) {
+  const api = useCalendarApi();
+  return useQuery({
+    queryKey: ["calendar", "meeting-attendees", meetingId, date ?? null] as const,
+    queryFn: () => api.listMeetingAttendees(meetingId!, date),
+    enabled: meetingId !== null && !meetingId.startsWith("tmp_"),
+    staleTime: 30_000,
+  });
+}
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : "もう一度お試しください。";
 }
