@@ -253,7 +253,8 @@ const NAME_PIECE = new RegExp(`^[${CJK}]{1,4}$`);
 // 罫線やロゴを読んだだけの行。
 const SCRATCH = /^[\u30fc\s_=~|.,:;'"`-]+$/;
 
-function sameRow(a: CardBox, b: CardBox): boolean {
+/** 同じ高さに並び、横の隙間が文字の高さの 3 倍以内か。 */
+export function sameRow(a: CardBox, b: CardBox): boolean {
   const overlap = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
   const height = Math.min(a.y1 - a.y0, b.y1 - b.y0);
   const gap = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1);
