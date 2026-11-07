@@ -35,6 +35,21 @@ export function lockedKeysForRole(role: { name: string; isSystem: boolean }): id
     : [];
 }
 
+/**
+ * Domain keys the currently granted apps depend on, mapped to the first such app's label.
+ * withRequiredAppDomainKeys re-adds them on save, so the UI shows them as fixed instead of
+ * offering a switch whose OFF can never be saved.
+ */
+export function appRequiredKeys(selected: readonly identity.PermissionKey[]): Map<identity.PermissionKey, string> {
+  const held = new Set(selected);
+  const required = new Map<identity.PermissionKey, string>();
+  for (const app of appRegistry.APP_MANIFEST) {
+    if (!held.has(app.access.view) && !held.has(app.access.edit)) continue;
+    for (const key of app.permissions) if (!required.has(key)) required.set(key, app.label);
+  }
+  return required;
+}
+
 function sameSet(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a);
@@ -45,13 +60,14 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
  * Build the PATCH body carrying ONLY changed fields (design §2-4 "差分のみ" and
  * test "差分のみ UpdateRoleRequest に載る"). Returns null when nothing changed.
  *
- * Both sides are first run through withRequiredAppDomainKeys so a per-app toggle is
+ * The saved set is run through withRequiredAppDomainKeys so a per-app toggle is
  * saved as EFFECTIVE 実効権限: granting an app (app:<id>:view|edit) auto-bundles the
  * domain read key(s) that app needs (identity:read 等) — the fix for the 抜け where the
- * per-app toggle was front-end-only and the domain API still 403'd. Normalizing BOTH
- * sides means (a) a legacy under-normalized role is not spuriously reported dirty on
- * open, and (b) the domain key required by an app-grant cannot be toggled off while the
- * grant remains (it is a dependency of the grant). Adds READ keys only — never
+ * per-app toggle was front-end-only and the domain API still 403'd. The diff is taken
+ * against the STORED set: (a) an untouched legacy under-normalized role is not reported
+ * dirty on open, (b) stripping a domain key a still-granted app depends on normalizes
+ * back to the stored set = no change, and (c) explicitly granting a key the legacy role
+ * lacks IS a change even if an app already implies it. Adds READ keys only — never
  * domain write/admin — so this never escalates a role to org-admin.
  */
 export function buildRoleUpdate(
@@ -64,9 +80,8 @@ export function buildRoleUpdate(
   if (next.mailVisibleRoleIds !== undefined && !sameSet(original.mailVisibleRoleIds ?? [], next.mailVisibleRoleIds)) {
     patch.mailVisibleRoleIds = [...next.mailVisibleRoleIds].sort();
   }
-  const originalPerms = appRegistry.withRequiredAppDomainKeys(original.permissions);
   const nextPerms = appRegistry.withRequiredAppDomainKeys(next.permissions);
-  if (!sameSet(originalPerms, nextPerms)) {
+  if (!sameSet(original.permissions, next.permissions) && !sameSet(original.permissions, nextPerms)) {
     patch.permissions = nextPerms; // already sorted, domain-key-bundled
   }
   return Object.keys(patch).length === 0 ? null : patch;

@@ -99,6 +99,6 @@ describe("system role editing (self-lockout guard)", () => {
     await user.click(screen.getByTestId(`${ns}-app-name-members`));
     const membersDialog = await screen.findByTestId(`${ns}-app-dialog`);
     expect((within(membersDialog).getByTestId(`${ns}-app-dialog-toggle-identity:admin`) as HTMLInputElement).disabled).toBe(true);
-    expect((within(membersDialog).getByTestId(`${ns}-app-dialog-toggle-identity:read`) as HTMLInputElement).disabled).toBe(false);
+    expect((within(membersDialog).getByTestId(`${ns}-app-dialog-toggle-identity:read`) as HTMLInputElement).disabled).toBe(true);
   });
 });
