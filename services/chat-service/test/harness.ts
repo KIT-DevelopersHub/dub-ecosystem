@@ -104,6 +104,7 @@ export const ALL_CHAT_KEYS: identity.PermissionKey[] = [
   "app:chat:view",
   "app:chat:edit",
   "chat:create",
+  "chat:create_private",
   "chat:moderate",
 ];
 

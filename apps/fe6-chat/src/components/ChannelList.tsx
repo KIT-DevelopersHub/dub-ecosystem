@@ -1,6 +1,6 @@
 // Dark "workspace" sidebar: collapsible sections (Channels / DMs / Events),
 // #-prefixed channels, presence dots on DMs, unread = bold name + mention/count
-// badge. "New channel" (+) is gated by can("chat:create") upstream via canCreate.
+// badge. "New channel" (+) is gated by 編集 + chat:create upstream via canCreate.
 // Slack-style information design — built from @dub/ui + own glyphs, no Slack assets.
 // Org-wide sections (one shared set) render above the default groups for everyone. Only
 // with `sectionActions` (chat:manage_sections) do the create / rename / delete entries and
