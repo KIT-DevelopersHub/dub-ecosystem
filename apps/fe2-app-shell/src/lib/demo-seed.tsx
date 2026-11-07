@@ -27,6 +27,7 @@ import { auth as authValues, identity as identityValues, notification as notific
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
+import { createSponsorMailDemo } from "./demo-sponsor-mail.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
@@ -6025,6 +6026,14 @@ function createSponsorStore(me: () => { id: string; displayName: string }, spons
       companyName: "（株）北陸テック", personName: "川口 恵", department: "人事部", title: "採用担当",
       email: "kawaguchi@hokuriku-tech.example.jp", note: "学生向けハッカソンの後援に関心あり。", createdByName: "佐藤 三郎",
     }),
+    // メール連携の見本: 名刺のアドレスとのメールは、同じ会社の営業先 (輪島メディア / 能美ロボティクス) として数える。
+    card("card_demo_6", 2, {
+      companyName: "輪島メディア株式会社", personName: "田中 美咲", department: "広報部", title: "課長", email: "tanaka@wajima-media.example.jp",
+      note: "Hackit の会場で名刺交換。協賛の案内を送る。",
+    }),
+    card("card_demo_7", 8, {
+      companyName: "能美ロボティクス（株）", personName: "加藤 誠", department: "技術開発部", title: "部長", email: "kato@nomi-robotics.example.jp",
+    }),
     // テキスト未入力 (写真だけ撮って後で入力する想定)。
     card("card_demo_4", 0, { hasImage: true, createdBy: ME_ID as Card["createdBy"], createdByName: "デモ 管理者" }),
   ];
@@ -6073,7 +6082,7 @@ function createSponsorStore(me: () => { id: string; displayName: string }, spons
       status: "社内検討", firstContactOn: dayOn(-20), lastContactOn: dayOn(-10), proposedOn: dayOn(-10), nextAction: "検討状況を確認", nextActionOn: dayOn(1),
     }),
     lead("lead_demo_4", 5, {
-      companyName: "加賀データサービス株式会社", owner: "森", source: "インターン", contactType: "インターン先", priority: "B", status: "提案予定",
+      companyName: "加賀データサービス株式会社", owner: "森", contactEmail: "sato@kaga-data.example.jp", source: "インターン", contactType: "インターン先", priority: "B", status: "提案予定",
       firstContactOn: dayOn(-14), lastContactOn: dayOn(-5), nextAction: "協賛資料を作成", nextActionOn: dayOn(6),
     }),
     lead("lead_demo_5", 6, {
@@ -6082,13 +6091,20 @@ function createSponsorStore(me: () => { id: string; displayName: string }, spons
     }),
     lead("lead_demo_6", 7, { companyName: "七尾ネットワークス株式会社", industry: "通信", owner: "森", source: "Hackit", priority: "B", status: "初回連絡", firstContactOn: dayOn(-6) }),
     lead("lead_demo_7", 8, { companyName: "小松リサーチ株式会社", industry: "コンサル", source: "Hackit", status: "初回連絡", firstContactOn: dayOn(-5) }),
+    // メール連携の見本: 未接触・担当者メールは空。名刺 (card_demo_6) のアドレス宛てに送ると 初回連絡 + 日付が入り、
+    // 同じドメインでも名刺に無いアドレス (info@…) 宛てでは何も変わらない。
     lead("lead_demo_8", 9, { companyName: "輪島メディア株式会社", industry: "広告・メディア", owner: "松島", source: "知人の紹介", status: "未接触" }),
     lead("lead_demo_9", 10, { companyName: "珠洲エナジー株式会社", industry: "インフラ", source: "紹介候補", status: "未接触" }),
     lead("lead_demo_10", 12, {
       companyName: "松任システムズ株式会社", owner: "鈴木", source: "インターン", contactType: "インターン先", plan: "その他", status: "見送り",
       firstContactOn: dayOn(-50), lastContactOn: dayOn(-30), expectedAmount: 0, note: "今年度の予算が確保できず見送り。",
     }),
+    // 返信まで進んだのに初回連絡日が空 (取り込んだ行) → 「メールから日付を補完」で過去の送受信から埋まる。
+    lead("lead_demo_11", 4, {
+      companyName: "能美ロボティクス株式会社", industry: "製造", owner: "鈴木", contactName: "加藤 誠", source: "Hackit", status: "返信あり",
+    }),
   ];
+  const mailDemo = createSponsorMailDemo(leads, cards);
   // 目標管理の実績。スポンサーの目標タブと同じ数字になるよう、同じ見本の企業から数える。
   const actuals = (month: string): Partial<Record<goalValues.GoalMetric, number>> => {
     const inMonth = (on: string | null) => on?.startsWith(`${month}-`) ?? false;
@@ -6157,6 +6173,8 @@ function createSponsorStore(me: () => { id: string; displayName: string }, spons
   async function handle(method: string, pathname: string, body: any, raw: unknown, headers: Headers): Promise<Response | null> {
     if (!pathname.startsWith("/api/v1/members/sponsor/")) return null;
     const now = new Date().toISOString();
+    const mailHit = mailDemo.handle(method, pathname, body);
+    if (mailHit) return mailHit;
     if (pathname.startsWith("/api/v1/members/sponsor/leads")) return handleLeads(method, pathname, body, now);
     if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") return json({ goals: sponsorGoals() });
     if (pathname === "/api/v1/members/sponsor/cards") {
@@ -6210,7 +6228,7 @@ function createSponsorStore(me: () => { id: string; displayName: string }, spons
     return null;
   }
 
-  return { handle, actuals };
+  return { handle, actuals, recordMail: mailDemo.recordMail };
 }
 
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
@@ -6408,6 +6426,16 @@ export function createDemoFetch(): typeof fetch {
     const sponsorHit = await sponsorStore.handle(method, url.pathname, parsedBody, init?.body, new Headers(init?.headers));
     if (sponsorHit) return sponsorHit;
 
+    // メールを送ったら、宛先がスポンサーの営業先なら進捗を進める (本番の mail-gateway → member-service 通知の代わり)。
+    if (method === "POST" && url.pathname === "/api/v1/mail/outbox") {
+      const res = mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers));
+      if (res?.ok) {
+        const sent = (parsedBody ?? {}) as Partial<mail.SendMailRequest>;
+        const me = currentMe().user;
+        sponsorStore.recordMail("sent", [...(sent.to ?? []), ...(sent.cc ?? [])].map((a) => a.email), new Date().toISOString(), me.email ?? null);
+      }
+      if (res) return res;
+    }
     const goalsHit = goalsStore.handle(method, url.pathname, url, parsedBody);
     if (goalsHit) return goalsHit;
 

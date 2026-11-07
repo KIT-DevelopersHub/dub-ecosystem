@@ -21,6 +21,10 @@ export interface SponsorApi {
   updateLead(id: string, body: sponsor.UpdateLeadRequest): Promise<sponsor.SponsorLead>;
   removeLead(id: string): Promise<void>;
   listGoals(): Promise<sponsor.ListGoalsResponse>;
+  // メール連携: メールの相手を担当者メールに登録・自動更新の履歴・既存メールからの一括補完。
+  registerContactEmail(leadId: string, body: sponsor.RegisterContactEmailRequest): Promise<sponsor.RegisterContactEmailResponse>;
+  listLeadActivity(leadId: string): Promise<sponsor.ListLeadActivityResponse>;
+  mailBackfill(body: sponsor.MailBackfillRequest): Promise<sponsor.MailBackfillResponse>;
 }
 
 const BASE = "/api/v1/members/sponsor";
@@ -55,5 +59,10 @@ export function createSponsorApi(api: ApiClient): SponsorApi {
       await api.request<void>({ method: "DELETE", path: lead(id) });
     },
     listGoals: () => api.request<sponsor.ListGoalsResponse>({ method: "GET", path: `${BASE}/goals` }),
+    registerContactEmail: (leadId, body) =>
+      api.request<sponsor.RegisterContactEmailResponse, sponsor.RegisterContactEmailRequest>({ method: "POST", path: `${lead(leadId)}/contact-emails`, body }),
+    listLeadActivity: (leadId) => api.request<sponsor.ListLeadActivityResponse>({ method: "GET", path: `${lead(leadId)}/activity` }),
+    mailBackfill: (body) =>
+      api.request<sponsor.MailBackfillResponse, sponsor.MailBackfillRequest>({ method: "POST", path: `${BASE}/leads/mail-backfill`, body }),
   };
 }
