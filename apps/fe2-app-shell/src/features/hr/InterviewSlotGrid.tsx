@@ -1,7 +1,8 @@
 // 面談可能な日程を登録するマス目。今日から 7 日 × 9:00〜21:00 を 30 分 (60 分に切り替え可) のマスで並べる。
 //  1. 空いているマスをクリック / ドラッグで選ぶ (何度でも足せる。選んだマスをもう一度押すと外れる)
 //  2. 「登録する」で選んだマスをまとめて登録する
-// 自分の登録済みのマスを選ぶと「登録を外す」になる。予約済み・過去のマスは選べない。
+// 自分の登録済みのマスから選び始めると「登録を外す」になる (ドラッグで囲めばまとめて選べる・
+// 「自分の登録をすべて選ぶ」で表示中の 7 日分を一度に選べる)。予約済み・過去のマスは選べない。
 // マウスもタッチも pointer イベントで扱う (指の下のマスは elementFromPoint で拾う)。キーボードは各マスのボタンで。
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button, Select } from "@dub/ui";
@@ -90,9 +91,13 @@ export function InterviewSlotGrid({ slots, meId, canWrite, onAdd, onRemove }: Pr
   }, [drag]);
   const dragMode = drag ? modeFor(stateOf(drag.anchor)) : null;
 
-  /** 囲んだマスを選択に足す。1 マスだけ押して、それが選択済みなら外す (押し直しで取り消せる)。 */
-  const select = (cells: Cell[]) => {
-    const mode = modeFor(stateOf(cells[0]!));
+  /**
+   * 囲んだマスを選択に足す。足すか外すかは押し始めたマス (anchor) で決める — 長方形の左上で決めると、
+   * 登録済みから左や上へドラッグした時や、囲んだ範囲の左上が空きの時に「登録」扱いになってしまう。
+   * 1 マスだけ押して、それが選択済みなら外す (押し直しで取り消せる)。
+   */
+  const select = (cells: Cell[], anchor: Cell) => {
+    const mode = modeFor(stateOf(anchor));
     if (!mode) return;
     const target = cells.filter((c) => modeFor(stateOf(c)) === mode).map(keyOf);
     const base = live && live.mode === mode ? new Set(live.keys) : new Set<string>();
@@ -124,7 +129,7 @@ export function InterviewSlotGrid({ slots, meId, canWrite, onAdd, onRemove }: Pr
     const d = dragRef.current;
     if (!d) return;
     updateDrag(null);
-    select(cellsBetween(d.anchor, d.current));
+    select(cellsBetween(d.anchor, d.current), d.anchor);
   };
 
   const move = (next: number) => {
@@ -140,6 +145,9 @@ export function InterviewSlotGrid({ slots, meId, canWrite, onAdd, onRemove }: Pr
     setSelection(null);
   };
 
+  const mineKeys = [...states].filter(([, s]) => s.kind === "mine").map(([k]) => k);
+  const selectAllMine = () => setSelection(mineKeys.length > 0 ? { mode: "remove", keys: new Set(mineKeys) } : null);
+
   const count = live?.keys.size ?? 0;
   const removeCount = live?.mode === "remove" ? planChange("remove", [...live.keys].map(cellOf), stateOf, rangeOf, step).remove.length : 0;
   return (
@@ -148,6 +156,7 @@ export function InterviewSlotGrid({ slots, meId, canWrite, onAdd, onRemove }: Pr
         <ol className={styles.steps}>
           <li>面談できる時間のマスを、クリックかドラッグで選びます（何度でも追加できます）。</li>
           <li>「登録する」を押すと、選んだマスが応募者の選べる候補になります。</li>
+          <li>外すときは、登録済み（青）のマスから同じようにドラッグして「登録を外す」を押します。</li>
         </ol>
       ) : null}
       <div className={styles.gridToolbar}>
@@ -215,7 +224,7 @@ export function InterviewSlotGrid({ slots, meId, canWrite, onAdd, onRemove }: Pr
               }
               selectedMode={drag ? dragMode : (live?.mode ?? null)}
               canWrite={canWrite}
-              onKeyToggle={(c) => select([c])}
+              onKeyToggle={(c) => select([c], c)}
             />
           );
         })}
@@ -230,6 +239,9 @@ export function InterviewSlotGrid({ slots, meId, canWrite, onAdd, onRemove }: Pr
                 : `登録済みの ${removeCount} 件を選んでいます`}
           </span>
           <div className={styles.actionButtons}>
+            <Button variant="ghost" testId="fe2-hr-grid-select-mine" disabled={mineKeys.length === 0} onClick={selectAllMine}>
+              自分の登録をすべて選ぶ
+            </Button>
             <Button variant="ghost" testId="fe2-hr-grid-clear" disabled={count === 0} onClick={() => setSelection(null)}>
               選択を解除
             </Button>

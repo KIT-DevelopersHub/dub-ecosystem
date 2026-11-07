@@ -102,6 +102,38 @@ describe("面談タブ", () => {
     expect(mineCount()).toBe(2);
   });
 
+  it("selects registered cells for removal by dragging from one of them in any direction", async () => {
+    renderScreen();
+    await screen.findByTestId("fe2-hr-slot-grid");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    // 登録済み: 1:3 と 2:2 (階段状)。長方形の左上 1:2 は空き。
+    dragAcross("1:3", "1:3");
+    dragAcross("2:2", "2:2");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-commit"));
+    await waitFor(() => expect(mineCount()).toBe(2));
+
+    // 登録済みの 2:2 から左下へドラッグ → 外すモードで 2 マスとも選ばれる
+    dragAcross("2:2", "1:3");
+    expect(screen.getByTestId("fe2-hr-grid-selected").textContent).toBe("登録済みの 2 件を選んでいます");
+    expect(screen.getByTestId("fe2-hr-grid-commit").textContent).toBe("登録を外す");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-commit"));
+    await waitFor(() => expect(mineCount()).toBe(0));
+  });
+
+  it("「自分の登録をすべて選ぶ」 selects every own registration shown", async () => {
+    renderScreen();
+    await screen.findByTestId("fe2-hr-slot-grid");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    expect(screen.getByTestId("fe2-hr-grid-select-mine")).toHaveProperty("disabled", true);
+    dragAcross("0:0", "3:1");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-commit"));
+    await waitFor(() => expect(mineCount()).toBe(8));
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-select-mine"));
+    expect(screen.getByTestId("fe2-hr-grid-selected").textContent).toBe("登録済みの 8 件を選んでいます");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-commit"));
+    await waitFor(() => expect(mineCount()).toBe(0));
+  });
+
   it("adds to the selection over several drags, unselects a clicked cell, and works from the keyboard", async () => {
     renderScreen();
     await screen.findByTestId("fe2-hr-slot-grid");

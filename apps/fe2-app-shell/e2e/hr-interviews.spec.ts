@@ -32,15 +32,19 @@ test("候補が足りない間は保留し、揃うと送信済みになる", as
 
   // 登録済み (自分) を選ぶと「登録を外す」になる
   await page.getByTestId("fe2-hr-cell-1:0").evaluate((el) => el.scrollIntoView({ block: "center" }));
-  const mineFrom = (await page.getByTestId("fe2-hr-cell-1:0").boundingBox())!;
-  const mineTo = (await page.getByTestId("fe2-hr-cell-1:1").boundingBox())!;
+  // 右下の登録済みから左上へ (逆向き) ドラッグしても、登録済み 4 マスをまとめて選べる
+  const mineFrom = (await page.getByTestId("fe2-hr-cell-2:1").boundingBox())!;
+  const mineTo = (await page.getByTestId("fe2-hr-cell-1:0").boundingBox())!;
   await page.mouse.move(mineFrom.x + mineFrom.width / 2, mineFrom.y + mineFrom.height / 2);
   await page.mouse.down();
   await page.mouse.move(mineTo.x + mineTo.width / 2, mineTo.y + mineTo.height / 2, { steps: 4 });
   await page.mouse.up();
   await expect(page.getByTestId("fe2-hr-grid-commit")).toHaveText("登録を外す");
+  await expect(page.getByTestId("fe2-hr-grid-selected")).toHaveText("登録済みの 4 件を選んでいます");
+  await page.getByTestId("fe2-hr-slot-grid").screenshot({ path: shot("remove-selected") });
   await page.getByTestId("fe2-hr-grid-commit").click();
-  await expect(page.locator('[data-cell][data-kind="mine"]')).toHaveCount(2);
+  await expect(page.locator('[data-cell][data-kind="mine"]')).toHaveCount(0);
+  await expect(page.getByTestId("fe2-hr-interviews-open-count")).toHaveText("3");
 });
 
 test("応募者が日程を選ぶと確定し、人事の画面に反映される", async ({ page }) => {
