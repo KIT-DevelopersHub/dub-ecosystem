@@ -3,12 +3,12 @@
   "slug": "hr-interviews",
   "worker": "dub-demo-hr-interviews",
   "url": "https://dub-demo-hr-interviews.developershub-site.workers.dev",
-  "deployedSha": "8f651d4f",
+  "deployedSha": "7fd4e6bd",
   "branch": "commander/task-ctask_01M6RY27QH8Q8ZB8KXHXGFFK7C",
   "actor": "ko-tarou",
-  "markers": ["fe2-hr-interviews-register","fe2-hr-grid-commit"],
+  "markers": ["fe2-hr-grid-select-mine","fe2-hr-interviews-register"],
   "live": true,
-  "verifiedAt": "2026-11-07T18:19:58Z",
-  "updatedAt": "2026-11-07T18:19:58Z",
-  "note": "人事 面談タブ: 30 分マス目で選んで登録"
+  "verifiedAt": "2026-11-07T18:29:31Z",
+  "updatedAt": "2026-11-07T18:29:31Z",
+  "note": "人事 面談タブ: 登録済みもドラッグでまとめて外す"
 }
