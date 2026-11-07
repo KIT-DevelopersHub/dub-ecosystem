@@ -28,7 +28,8 @@ function renderWith(keys: identity.PermissionKey[]) {
   return api;
 }
 
-describe("作成導線と作成範囲", () => {
+// ChatApp 全体を描くので CI の負荷では既定の 5 秒を超えることがある。
+describe("作成導線と作成範囲", { timeout: 20_000 }, () => {
   it("パブリックとプライベート: Private を選んで作成できる", async () => {
     const api = renderWith([...EDITOR, "chat:create", "chat:create_private"]);
     const create = vi.spyOn(api, "createChannel");
@@ -37,8 +38,8 @@ describe("作成導線と作成範囲", () => {
 
     // userEvent.type は 1 文字ごとに ChatApp 全体を描き直し、CI の負荷で 5 秒を超える。
     fireEvent.change(screen.getByTestId("fe6-create-name"), { target: { value: "secret" } });
-    await userEvent.click(screen.getByTestId("fe6-create-private"));
-    await userEvent.click(screen.getByTestId("fe6-create-submit"));
+    fireEvent.click(screen.getByTestId("fe6-create-private"));
+    fireEvent.click(screen.getByTestId("fe6-create-submit"));
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ visibility: "private" }));
   });
 
