@@ -70,14 +70,14 @@ describe("parseCardLines (Tesseract の実出力に基づく)", () => {
   });
 
   it("uses the email domain to recognize latin company names", () => {
-    const d = parseCardLines([at("Hokuriku Data Lab", 60, 45), at("CTO", 200, 25), at("Kenji Ota", 240, 60)], "ota@hokuriku-data.jp");
+    const d = parseCardLines([at("Hokuriku Data Lab", 60, 45), at("CTO", 200, 25), at("Kenji Ota", 240, 60), at("ota@hokuriku-data.jp", 330, 20)]);
     expect(d.companyName).toBe("Hokuriku Data Lab");
     expect(d.personName).toBe("Kenji Ota");
     expect(d.title).toBe("CTO");
   });
 
   it("uses the email local part to find a latin name", () => {
-    const d = parseCardLines([at("Blue Harbor", 60, 60), at("Daniel Moore", 200, 40)], "daniel.moore@bh.example.com");
+    const d = parseCardLines([at("Blue Harbor", 60, 60), at("Daniel Moore", 200, 40), at("daniel.moore@bh.example.com", 300, 20)]);
     expect(d.personName).toBe("Daniel Moore");
     expect(d.companyName).toBe("Blue Harbor");
   });
@@ -129,26 +129,15 @@ describe("parseCardLines (Tesseract の実出力に基づく)", () => {
   });
 });
 
-describe("メール・電話 (2 パス目の英語モデル)", () => {
-  it("prefers digits and letters from the latin pass", () => {
-    const d = parseCardText("TEL 076-123-4367 / FAX 076-123-4368\nE-mail: taro@noto-softcojp", "TEL 076-123-4567 / FAX 076-123-4568\nE-mail: taro@noto-soft.co.jp");
-    expect(d.phone).toBe("076-123-4567");
-    expect(d.email).toBe("taro@noto-soft.co.jp");
-  });
-
-  it("inherits japanese labels the latin pass could not read", () => {
-    const d = parseCardText(["ファクス 03-1111-2229", "電話 03-1111-2222"].join("\n"), ["HF 03-1111-2229", "HH 03-1111-2222"].join("\n"));
-    expect(d.phone).toBe("03-1111-2222");
+describe("メール・電話", () => {
+  it("skips the FAX number on the same line", () => {
+    expect(parseCardText("TEL 076-123-4567 / FAX 076-123-4568").phone).toBe("076-123-4567");
+    expect(parseCardText(["ファクス 03-1111-2229", "電話 03-1111-2222"].join("\n")).phone).toBe("03-1111-2222");
   });
 
   it("prefers a mobile number by its prefix", () => {
     expect(parseCardText("TEL 03-1111-2222 携帯 090-1111-2223").phone).toBe("090-1111-2223");
     expect(parseCardText("+81 (0)3 6000 1234").phone).toBe("+81-(0)3-6000-1234");
-  });
-
-  it("falls back to the first pass when the latin pass found nothing", () => {
-    expect(parseCardText("TEL 03-1234-5678\na@b.co.jp", "garbage").phone).toBe("03-1234-5678");
-    expect(parseCardText("TEL 03-1234-5678\na@b.co.jp", "garbage").email).toBe("a@b.co.jp");
   });
 
   it.each([
@@ -162,8 +151,17 @@ describe("メール・電話 (2 パス目の英語モデル)", () => {
     expect(parseCardText(raw).email).toBe(want);
   });
 
-  it("takes the longer email when the latin pass lost the head", () => {
-    expect(parseCardText("sakura.morita@harukaze.jp", "morita@harukaze.jp").email).toBe("sakura.morita@harukaze.jp");
+  it.each([
+    ["t.onizukaWtori-denshi.co.jp", "t.onizuka@tori-denshi.co.jp"],
+    ["E-mail: inoue@ green-energyco jp", "inoue@green-energy.co.jp"],
+    ["y sakai@ hanamaru-foods.co jp", "y.sakai@hanamaru-foods.co.jp"],
+  ])("repairs a misread @ or dot: %s", (raw, want) => {
+    expect(parseCardText(raw).email).toBe(want);
+  });
+
+  it("keeps a real W in an address and does not invent an email from a URL", () => {
+    expect(parseCardText("Walter@acme.com").email).toBe("Walter@acme.com");
+    expect(parseCardText("https://www.noto-soft.co.jp").email).toBeUndefined();
   });
 
   it("repairs letters in a phone number and rejects number-like noise", () => {
@@ -178,6 +176,12 @@ describe("メール・電話 (2 パス目の英語モデル)", () => {
 });
 
 describe("normalizeLine / mergeDraft", () => {
+  it("maps simplified chinese characters the OCR model may output to japanese forms", () => {
+    expect(normalizeLine("营业本部")).toBe("営業本部");
+    expect(normalizeLine("爱知县名古屋市")).toBe("愛知県名古屋市");
+    expect(normalizeLine("会社 黒田")).toBe("会社黒田");
+  });
+
   it("normalizes width and CJK gaps but keeps latin word spaces", () => {
     expect(normalizeLine("  Ｔａｒｏ　Ｙａｍａｄａ  ")).toBe("Taro Yamada");
     expect(normalizeLine("山 田  太 郎")).toBe("山田太郎");

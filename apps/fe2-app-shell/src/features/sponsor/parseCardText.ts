@@ -59,10 +59,21 @@ const SURNAMES = new Set(
 const hasSurname = (s: string): boolean =>
   s.length >= 3 && [1, 2, 3].some((n) => s.length > n && SURNAMES.has(s.slice(0, n)));
 
-/** OCR の癖を均す: 全角→半角 (NFKC)・日本語の文字間に入る空白を詰める・連続空白を 1 つに。 */
+// 中国語の簡体字 → 日本の字体。OCR のモデルが中日共通なので、日本の名刺でも簡体字で出ることがある
+// (营業→営業)。ここに挙げた字は日本語では使わないので、置き換えても正しい字を壊さない。
+const SIMPLIFIED: Record<string, string> = Object.fromEntries(
+  [..."营営业業发発务務动動产産术術设設计計经経济済东東县県门門间間关関开開长長车車电電话話网網络絡际際应応现現实実时時书書张張陈陳刘劉杨楊赵趙问問广広处処头頭贸貿资資银銀险険证証农農构構园園馆館疗療药薬师師员員职職课課组組织織团団总総监監执執级級项項规規质質环環绍紹软軟统統报報讯訊邮郵编編辑輯传伝达達运運输輸华華汉漢黑黒爱愛轻軽键鍵钢鋼铁鉄线線练練绿緑红紅针針钟鐘镇鎮阳陽阴陰陆陸隶隷难難页頁顾顧题題风風飞飛饭飯验験鸟鳥齐斉龙竜"].reduce<[string, string][]>(
+    (acc, ch, i, all) => (i % 2 === 0 ? [...acc, [ch, all[i + 1]!]] : acc),
+    [],
+  ),
+);
+const SIMPLIFIED_RE = new RegExp(`[${Object.keys(SIMPLIFIED).join("")}]`, "g");
+
+/** OCR の癖を均す: 全角→半角 (NFKC)・簡体字→日本の字体・日本語の文字間に入る空白を詰める・連続空白を 1 つに。 */
 export function normalizeLine(raw: string): string {
   return raw
     .normalize("NFKC")
+    .replace(SIMPLIFIED_RE, (c) => SIMPLIFIED[c] ?? c)
     .replace(CJK_GAP, "")
     .replace(/\(\s*([株有])\s*\)/g, "($1)")
     .replace(/\s+/g, " ")
@@ -86,21 +97,23 @@ function repairDomain(line: string): string {
   return line.slice(0, at + 1) + domain;
 }
 
-function emailIn(lines: string[]): string | undefined {
+/**
+ * 「@」の読み違いを直す: 小文字だけのアドレスに紛れた W・©・® (t.onizukaWtori-denshi.co.jp)。
+ * 「y sakai@」のように頭文字の後ろの点が空白になったものもつなぐ。
+ */
+function repairAt(line: string): string {
+  const fixed = line.includes("@")
+    ? line
+    : line.replace(/\b([a-z0-9._-]+)[W©®](?=[a-z0-9-]+(?:\.[a-z0-9-]+)*[. ](?:jp|com|net|org|io|co|or|ne|ac)\b)/, "$1@");
+  return fixed.replace(/(?<![A-Za-z0-9])([a-z]) (?=[a-z0-9._-]+\s*@)/, "$1.");
+}
+
+function findEmail(lines: string[]): string | undefined {
   for (const l of lines) {
-    const m = EMAIL.exec(repairDomain(compactAt(l)));
+    const m = EMAIL.exec(repairDomain(compactAt(repairAt(l))));
     if (m) return m[0];
   }
   return undefined;
-}
-
-/** 英語モデルの結果を優先。 */
-function findEmail(lines: string[], latinLines: string[]): string | undefined {
-  const latin = emailIn(latinLines);
-  const ja = emailIn(lines);
-  // 先頭や区切りの点が欠けただけなら長い方。
-  if (latin && ja && (ja.endsWith(latin) || alnum(ja) === alnum(latin))) return ja.length > latin.length ? ja : latin;
-  return latin ?? ja;
 }
 
 interface PhoneHit {
@@ -141,28 +154,9 @@ function phoneHits(lines: string[]): PhoneHit[] {
   return hits;
 }
 
-const distance = (a: string, b: string): number => {
-  if (a.length !== b.length) return Infinity;
-  let d = 0;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++;
-  return d;
-};
-
-/**
- * 電話: 数字は英語モデルの結果を信じ、「ファクス」など日本語のラベルは日本語モデルの同じ番号から引き継ぐ。
- * FAX は除き、携帯 (090/080/070) → それ以外の順 (同じなら先に出た番号)。
- */
-function findPhone(lines: string[], latinLines: string[]): string | undefined {
-  const ja = phoneHits(lines);
-  const latin = phoneHits(latinLines);
-  const merged = latin.map((h) => {
-    const near = ja.reduce<PhoneHit | undefined>(
-      (best, j) => (distance(j.digits, h.digits) < (best ? distance(best.digits, h.digits) : 4) ? j : best),
-      undefined,
-    );
-    return { ...h, fax: h.fax || !!near?.fax };
-  });
-  const hits = (merged.length > 0 ? merged : ja).filter((h) => !h.fax);
+/** 電話: FAX は除き、携帯 (090/080/070) → それ以外の順 (同じなら先に出た番号)。 */
+function findPhone(lines: string[]): string | undefined {
+  const hits = phoneHits(lines).filter((h) => !h.fax);
   return (hits.find((h) => h.mobile) ?? hits[0])?.phone;
 }
 
@@ -292,18 +286,17 @@ function joinNamePieces(lines: CardLine[]): CardLine[] {
 }
 
 /**
- * 行の一覧 → 下書き。latinText = 英語モデルだけで読んだ全文 (数字と英字はこちらが正確なのでメール・電話に使う)。
+ * 行の一覧 → 下書き。
  */
-export function parseCardLines(input: CardLine[], latinText = ""): CardDraft {
+export function parseCardLines(input: CardLine[]): CardDraft {
   const lines = joinNamePieces(input.map((l) => ({ ...l, text: normalizeLine(l.text) })).filter((l) => !SCRATCH.test(l.text)))
     .map((l) => ({ text: l.text, size: l.bbox ? l.bbox.y1 - l.bbox.y0 : 0 }))
     .filter((l) => l.text.length >= 2);
   const texts = lines.map((l) => l.text);
-  const latinLines = latinText.split(/\r?\n/).map(normalizeLine);
   const out: CardDraft = {};
-  const email = findEmail(texts, latinLines);
+  const email = findEmail(texts);
   if (email) out.email = email;
-  const phone = findPhone(texts, latinLines);
+  const phone = findPhone(texts);
   if (phone) out.phone = phone;
 
   const rest = lines.filter((l) => !l.text.includes("@") && !NUMBERS.test(l.text) && !TEL.test(l.text) && !NOISE.test(l.text));
@@ -359,8 +352,8 @@ export function parseCardLines(input: CardLine[], latinText = ""): CardDraft {
   return out;
 }
 
-export function parseCardText(text: string, latinText = ""): CardDraft {
-  return parseCardLines(text.split(/\r?\n/).map((l) => ({ text: l })), latinText);
+export function parseCardText(text: string): CardDraft {
+  return parseCardLines(text.split(/\r?\n/).map((l) => ({ text: l })));
 }
 
 /**
