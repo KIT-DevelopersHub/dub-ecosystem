@@ -9,6 +9,7 @@ import type { RequestContext } from "@dub/http";
 import type { MailProvider } from "./provider";
 import type { MailBlobStore } from "./attachments";
 import type { RetryOptions } from "./retry";
+import type { SponsorSyncPort } from "./sponsor-sync";
 
 // The publish targets publishEvent(env, ...) needs: keyed by the frozen queue binding
 // names in @dub/events CONSUMER_QUEUE_BINDINGS. The string index signature keeps it
@@ -45,6 +46,9 @@ export interface SendDeps {
   /** Attachment body store (R2). Absent => attachments are rejected at validation and
    *  never stored (feature degrades loudly, never silently drops a file). */
   blobs?: MailBlobStore;
+  /** スポンサーのメール連携 (member-service への通知)。人が送ったメール (ownerUserId あり) だけ知らせる。
+   *  Absent => 知らせない (テスト・SVC_MEMBER 無し・MAIL_SPONSOR_SYNC=off)。 */
+  sponsor?: SponsorSyncPort;
 }
 
 export interface InboundDeps {
@@ -68,6 +72,8 @@ export interface InboundDeps {
   /** Shared system address (MAIL_FROM_ADDRESS) — owner only as a last resort.
    *  See OwnerAddressPolicy.sharedAddress. */
   sharedAddress?: string | null;
+  /** スポンサーのメール連携 (member-service への通知)。初めて保存したメールだけ知らせる。Absent => 知らせない。 */
+  sponsor?: SponsorSyncPort;
 }
 
 // Normalized inbound message parsed from a raw RFC822 message (Email Routing).

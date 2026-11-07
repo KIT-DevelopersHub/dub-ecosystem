@@ -27,6 +27,7 @@ import type { goal, hr, sponsor } from "@dub/types";
 import { GoalService } from "./goal-service";
 import { SponsorService } from "./sponsor-service";
 import { SponsorLeadService } from "./sponsor-lead-service";
+import { SponsorMailService } from "./sponsor-mail-service";
 
 // Actor stamped on a 参加届 that arrives through the public (unauthenticated) path.
 // The gateway forwards it as a genuine service-to-service call (x-dub-internal), but
@@ -74,6 +75,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const hrSvc = new HrService(deps, svc);
   const sponsorSvc = new SponsorService(deps);
   const sponsorLeadSvc = new SponsorLeadService(deps);
+  const sponsorMailSvc = new SponsorMailService(deps);
   const goalSvc = new GoalService(deps);
   const app = new Hono<{ Variables: Vars }>();
 
@@ -125,6 +127,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
 
   // 公開オンボーディング案内 (gateway GET /api/v1/public/onboarding → ここ, s2s のみ)。
   // 未ログインの新メンバーが見るページの中身。案内項目は公開前提なので応答は管理画面と同じ。
+  // スポンサーのメール連携 (mail-gateway → member-service, s2s のみ・ユーザーなし)。
+  app.post("/members/internal/sponsor/mail-activity", async (c) => {
+    const body = await readJson<sponsor.MailActivityNotice>(c);
+    return c.json(await sponsorMailSvc.recordMailActivity(body));
+  });
+
   app.get("/members/internal/onboarding", async (c) => {
     return c.json(await svc.getOnboardingGuide());
   });
@@ -324,6 +332,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   // 認可は表 (スポンサーアプリの 閲覧/編集 + sponsor:read / sponsor:write / sponsor:admin)。
   // 写真は JSON ではなく生のバイト列 (Content-Type = 形式)。形式・サイズ・楽観ロックはハンドラ (sponsor-service)。
   app.get("/members/sponsor/leads", async (c) => c.json(await sponsorLeadSvc.list(reqCtx(c))));
+  // メール連携 (sponsor-mail-service)。一括補完は :id より先に登録する。
+  app.post("/members/sponsor/leads/mail-backfill", async (c) => {
+    const body = await readJson<sponsor.MailBackfillRequest>(c);
+    return c.json(await sponsorMailSvc.backfill(reqCtx(c), body));
+  });
+  app.post("/members/sponsor/leads/:id/contact-emails", async (c) => {
+    const body = await readJson<sponsor.RegisterContactEmailRequest>(c);
+    return c.json(await sponsorMailSvc.registerContactEmail(reqCtx(c), c.req.param("id"), body));
+  });
+  app.get("/members/sponsor/leads/:id/activity", async (c) => c.json(await sponsorMailSvc.listActivity(reqCtx(c), c.req.param("id"))));
   app.post("/members/sponsor/leads", async (c) => {
     const body = await readJson<sponsor.CreateLeadRequest>(c);
     return c.json(await sponsorLeadSvc.create(reqCtx(c), body), 201);
