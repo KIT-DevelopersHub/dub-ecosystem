@@ -140,11 +140,18 @@
   font-weight: var(--dub-font-weight-bold);
 }
 
-/* ── コマ表 ───────────────────────────────────────────── */
+/* ── 日程のマス目 ───────────────────────────────────── */
 .gridWrap {
   display: flex;
   flex-direction: column;
-  gap: var(--dub-space-3);
+  gap: var(--dub-space-4);
+}
+
+.steps {
+  margin: 0;
+  padding-left: var(--dub-space-6);
+  color: var(--dub-color-text-secondary);
+  line-height: 1.8;
 }
 
 .gridToolbar {
@@ -182,57 +189,78 @@
 .legendItem::before {
   content: "";
   display: inline-block;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   margin-right: var(--dub-space-1);
-  vertical-align: -1px;
+  vertical-align: -2px;
   border-radius: 3px;
   border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
 }
 
+.legendItem[data-kind="selected"]::before { background: var(--dub-color-brand-100); border: 2px solid var(--dub-color-brand-500); }
 .legendItem[data-kind="mine"]::before { background: var(--dub-color-brand-500); border-color: var(--dub-color-brand-500); }
 .legendItem[data-kind="booked"]::before { background: var(--dub-color-success-500); border-color: var(--dub-color-success-500); }
-.legendItem[data-kind="others"]::before { background: var(--dub-color-surface-sunken); }
+.legendItem[data-kind="others"]::before { background: var(--dub-color-brand-50); }
+.legendItem[data-kind="past"]::before { background: var(--dub-color-surface-sunken); }
 
 .grid {
-  --hr-grid-row: 26px;
+  --hr-grid-row: 28px;
   display: grid;
-  grid-template-columns: 52px repeat(7, minmax(64px, 1fr));
+  grid-template-columns: 64px repeat(7, minmax(72px, 1fr));
   overflow-x: auto;
-  border: 1px solid var(--dub-color-border-default);
-  border-radius: var(--dub-radius-sm);
+  border-top: 1px solid var(--dub-color-border-default);
+  border-left: 1px solid var(--dub-color-border-default);
   user-select: none;
   touch-action: none;
+}
+
+/* マス目: すべてのマスに右と下の線を引く (正時は少し濃く)。 */
+.corner,
+.dayHead,
+.timeHead,
+.cell {
+  border-right: 1px solid var(--dub-color-border-default);
+  border-bottom: 1px solid var(--dub-color-border-default);
 }
 
 .corner,
 .dayHead,
 .timeHead {
-  background: var(--dub-color-surface-raised);
+  background: var(--dub-color-surface-sunken);
   font-size: var(--dub-font-size-sm);
   color: var(--dub-color-text-secondary);
+}
+
+.corner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--dub-font-size-xs);
 }
 
 .dayHead {
   padding: var(--dub-space-2) 0;
   text-align: center;
   font-weight: var(--dub-font-weight-bold);
-  border-bottom: 1px solid var(--dub-color-border-default);
-  border-left: 1px solid var(--dub-color-border-default);
 }
 
 .timeHead {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   padding-right: var(--dub-space-2);
-  text-align: right;
-  line-height: 1;
-  transform: translateY(-0.4em);
+  font-size: var(--dub-font-size-xs);
+}
+
+.timeHead:not([data-hour]) {
+  color: var(--dub-color-text-muted);
 }
 
 .cell {
   padding: 0 var(--dub-space-1);
-  border: 0;
-  border-left: 1px solid var(--dub-color-border-default);
-  border-top: 1px solid var(--dub-color-surface-sunken);
+  border-top: 0;
+  border-left: 0;
   background: var(--dub-color-surface-raised);
   color: var(--dub-color-text-secondary);
   font: inherit;
@@ -243,14 +271,41 @@
   cursor: pointer;
 }
 
+.cell:not(:disabled):hover { background: var(--dub-color-brand-50); }
 .cell:disabled { cursor: default; }
 .cell[data-kind="past"] { background: var(--dub-color-surface-sunken); }
-.cell[data-kind="others"] { background: var(--dub-color-surface-sunken); }
+.cell[data-kind="others"] { background: var(--dub-color-brand-50); }
 .cell[data-kind="mine"] { background: var(--dub-color-brand-500); color: var(--dub-color-text-inverse); }
 .cell[data-kind="booked"] { background: var(--dub-color-success-500); color: var(--dub-color-text-inverse); }
-.cell[data-preview="add"] { background: var(--dub-color-brand-100); outline: 2px solid var(--dub-color-brand-500); outline-offset: -2px; }
-.cell[data-preview="remove"] { opacity: 0.35; }
+.cell[data-selected="add"] { background: var(--dub-color-brand-100); box-shadow: inset 0 0 0 2px var(--dub-color-brand-500); }
+.cell[data-selected="remove"] { background: var(--dub-color-danger-100); color: var(--dub-color-text-primary); box-shadow: inset 0 0 0 2px var(--dub-color-danger-600); }
 .cell:focus-visible { outline: 2px solid var(--dub-color-border-focus); outline-offset: -2px; }
+
+.actionBar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-raised);
+  color: var(--dub-color-text-secondary);
+}
+
+.actionBar[data-active] {
+  border-color: var(--dub-color-brand-500);
+  color: var(--dub-color-text-primary);
+  font-weight: var(--dub-font-weight-bold);
+}
+
+.actionButtons {
+  display: flex;
+  gap: var(--dub-space-2);
+}
 
 .subTitle {
   margin: var(--dub-space-4) 0 0;

@@ -83,30 +83,39 @@ describe("面談タブ", () => {
     expect(screen.getByTestId("fe2-hr-interviews-status-message").textContent).toContain("2 人への案内メールを保留");
     expect(within(screen.getByTestId("fe2-hr-interviews-invite-table")).getAllByText("メール保留中")).toHaveLength(2);
 
-    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
-    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-next")); // 7 日後から = すべて未来
     expect(mineCount()).toBe(0);
-    dragAcross("1:2", "2:3"); // 火・水 × 2 コマ = 4 コマ
+    expect(screen.getByTestId("fe2-hr-grid-commit")).toHaveProperty("disabled", true);
+    dragAcross("1:2", "2:3"); // 2 日 × 2 マス = 4 マスを選ぶ (まだ登録しない)
+    expect(screen.getByTestId("fe2-hr-grid-selected").textContent).toBe("4 マスを選んでいます");
+    expect(mineCount()).toBe(0);
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-commit"));
     await waitFor(() => expect(mineCount()).toBe(4));
     await waitFor(() => expect(screen.getByTestId("fe2-hr-interviews-open-count").textContent).toBe("7"));
     expect(screen.getByTestId("fe2-hr-interviews-status-message").textContent).toContain("候補が揃っています");
     expect(within(screen.getByTestId("fe2-hr-interviews-invite-table")).getAllByText("メール送信済み")).toHaveLength(2);
 
-    dragAcross("1:2", "1:3"); // 自分の枠から始めると外す
+    dragAcross("1:2", "1:3"); // 登録済みを選ぶと「登録を外す」
+    expect(screen.getByTestId("fe2-hr-grid-commit").textContent).toBe("登録を外す");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-commit"));
     await waitFor(() => expect(screen.getByTestId("fe2-hr-interviews-open-count").textContent).toBe("5"));
     expect(mineCount()).toBe(2);
   });
 
-  it("toggles one cell from the keyboard", async () => {
+  it("adds to the selection over several drags, unselects a clicked cell, and works from the keyboard", async () => {
     renderScreen();
     await screen.findByTestId("fe2-hr-slot-grid");
     fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
-    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
-    fireEvent.click(screen.getByTestId("fe2-hr-cell-0:0"), { detail: 0 });
-    await waitFor(() => expect(screen.getByTestId("fe2-hr-interviews-open-count").textContent).toBe("4"));
-    // マウスの click (detail 1) は pointer 側で処理するので二重に切り替えない
-    fireEvent.click(screen.getByTestId("fe2-hr-cell-0:1"), { detail: 1 });
-    expect(mineCount()).toBe(1);
+    dragAcross("0:0", "0:1");
+    dragAcross("2:4", "2:4");
+    expect(screen.getByTestId("fe2-hr-grid-selected").textContent).toBe("3 マスを選んでいます");
+    dragAcross("0:0", "0:0"); // 選択済みを押し直すと外れる
+    fireEvent.click(screen.getByTestId("fe2-hr-cell-5:0"), { detail: 0 }); // キーボード
+    // マウスの click (detail 1) は pointer 側で処理するので二重に数えない
+    fireEvent.click(screen.getByTestId("fe2-hr-cell-6:0"), { detail: 1 });
+    expect(screen.getByTestId("fe2-hr-grid-selected").textContent).toBe("3 マスを選んでいます");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-clear"));
+    expect(screen.getByTestId("fe2-hr-grid-selected").textContent).toBe("マスが選ばれていません");
   });
 
   it("rolls the painted cells back when the server refuses", async () => {
@@ -114,8 +123,8 @@ describe("面談タブ", () => {
     renderScreen(EDITOR, (api) => ({ ...api, addSlots: () => new Promise((_, reject) => (refuse = reject)) }));
     await screen.findByTestId("fe2-hr-slot-grid");
     fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
-    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
     dragAcross("3:0", "3:5");
+    fireEvent.click(screen.getByTestId("fe2-hr-grid-commit"));
     await waitFor(() => expect(mineCount()).toBe(6)); // 応答を待たずに塗る
     refuse(new Error("down"));
     await waitFor(() => expect(mineCount()).toBe(0));
@@ -150,9 +159,7 @@ describe("面談タブ", () => {
   it("gives a viewer no write controls", async () => {
     renderScreen(VIEWER);
     await screen.findByTestId("fe2-hr-interviews-status");
-    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
-    fireEvent.click(screen.getByTestId("fe2-hr-grid-next"));
-    expect(screen.getByTestId("fe2-hr-cell-0:0")).toHaveProperty("disabled", true);
+    expect(screen.queryByTestId("fe2-hr-interviews-register")).toBeNull();
     expect(screen.queryByTestId("fe2-hr-interviews-min")).toBeNull();
     expect(screen.queryByRole("button", { name: "今すぐ送る" })).toBeNull();
   });

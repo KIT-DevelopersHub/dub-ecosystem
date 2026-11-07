@@ -1,6 +1,7 @@
 // 人事 → 面談。人事が面談できる日程を登録し、応募者はメールの URL からその候補を選ぶ。
 //  - 案内メール: 選べる候補の数と、メールを送り始める候補数の設定。足りない間は保留する。
-//  - 面談できる日程: 1 週間のコマ表をドラッグしてまとめて登録/外す。下の一覧で削除・予約の取り消し。
+//  - 面談可能な日程を登録 (先頭): 30 分のマス目を選んで「登録する」。自分の登録済みを選ぶと外せる。
+//  - 登録済みの日程: 一覧で削除・予約の取り消し。
 //  - 応募者への案内: メールの状況。保留中でも人事の判断で「今すぐ送る」ことができる。
 import { useMemo, useState } from "react";
 import {
@@ -63,6 +64,7 @@ export function HrInterviewsScreen(): JSX.Element {
   } else {
     body = (
       <Stack gap={6}>
+        {canWrite ? <RegisterCard data={overview.data} /> : null}
         <MailStatusCard data={overview.data} canWrite={canWrite} />
         <SlotsCard data={overview.data} canWrite={canWrite} />
         <InvitesCard data={overview.data} canWrite={canWrite} />
@@ -144,11 +146,30 @@ function MailStatusCard({ data, canWrite }: { data: Overview; canWrite: boolean 
   );
 }
 
-function SlotsCard({ data, canWrite }: { data: Overview; canWrite: boolean }): JSX.Element {
+function useMeId(): string {
   const auth = useAuth();
-  const meId = auth.status === "authenticated" ? auth.me.user.id : "";
+  return auth.status === "authenticated" ? auth.me.user.id : "";
+}
+
+/** タブの先頭: 面談できる時間をマス目で選んで登録する。 */
+function RegisterCard({ data }: { data: Overview }): JSX.Element {
+  const meId = useMeId();
   const addMany = useAddSlots(meId);
   const removeMany = useRemoveSlots();
+  return (
+    <Card testId="fe2-hr-interviews-register" header={<h2 className={styles.cardTitle}>面談可能な日程を登録</h2>}>
+      <InterviewSlotGrid
+        slots={data.slots}
+        meId={meId}
+        canWrite
+        onAdd={(slots) => addMany.mutate(slots)}
+        onRemove={(ids) => removeMany.mutate(ids)}
+      />
+    </Card>
+  );
+}
+
+function SlotsCard({ data, canWrite }: { data: Overview; canWrite: boolean }): JSX.Element {
   const remove = useRemoveSlot();
   const now = Date.now();
   const upcoming = data.slots.filter((s) => Date.parse(s.endAt) > now);
@@ -187,22 +208,14 @@ function SlotsCard({ data, canWrite }: { data: Overview; canWrite: boolean }): J
   );
 
   return (
-    <Card testId="fe2-hr-interviews-slots" header={<h2 className={styles.cardTitle}>面談できる日程</h2>}>
+    <Card testId="fe2-hr-interviews-slots" header={<h2 className={styles.cardTitle}>登録済みの日程</h2>}>
       <Stack gap={4}>
-        <InterviewSlotGrid
-          slots={data.slots}
-          meId={meId}
-          canWrite={canWrite}
-          onAdd={(slots) => addMany.mutate(slots)}
-          onRemove={(ids) => removeMany.mutate(ids)}
-        />
-        <h3 className={styles.subTitle}>これからの日程</h3>
         {upcoming.length === 0 ? (
           <EmptyState
             testId="fe2-hr-interviews-slots-empty"
             icon="clock"
             title="まだ日程がありません"
-            description="上のコマ表で空いている時間をドラッグすると、応募者が選べる候補になります。"
+            description="「面談可能な日程を登録」でマスを選んで登録すると、ここに並び、応募者が選べる候補になります。"
           />
         ) : (
           <DataTable<hrInterview.InterviewSlot> testId="fe2-hr-interviews-slot-table" columns={columns} rows={upcoming} rowKey={(s) => s.id} />
