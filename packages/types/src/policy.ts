@@ -130,6 +130,7 @@ export function setAppAccessLevel(
 const IMPLIED_DETAIL_KEYS: readonly (readonly [PermissionKey, PermissionKey])[] = [
   ["drive:settings_edit", "drive:settings_view"],
   ["calendar:meetings_edit", "calendar:meetings_view"],
+  ["chat:create_private", "chat:create"],
   // 運営メンバーの範囲は積み上げ式。1 周で閉じるよう上位の鍵から順に並べる。
   ["members:mail_edit", "members:mail_view"],
   ["members:mail_edit", "members:roster_edit"],
@@ -233,6 +234,48 @@ export function setMembersScope(
     if (next[m] >= 1) set.add(MEMBERS_SCOPE_KEYS[m].roster);
     if (next[m] >= 2) set.add(MEMBERS_SCOPE_KEYS[m].mail);
   }
+  return [...set].sort();
+}
+
+// ── チャンネル作成の範囲 ──────────────────────────────────────────────────────
+/**
+ * チャットで何を作成できるか。3 段階が「編集」のときだけ効く (サーバの表が app:chat:edit も要求する)。
+ *   none   = 何も作成できない (DM も始められない)
+ *   public = パブリックチャンネルと DM
+ *   all    = + プライベートチャンネル
+ */
+export const ChatCreateScope = { None: "none", Public: "public", All: "all" } as const;
+export type ChatCreateScope = (typeof ChatCreateScope)[keyof typeof ChatCreateScope];
+
+/** 狭い順。ロール管理の選択肢の並びを兼ねる。 */
+export const CHAT_CREATE_SCOPES: readonly ChatCreateScope[] = ["none", "public", "all"];
+
+export const CHAT_CREATE_SCOPE_LABELS: Record<ChatCreateScope, string> = {
+  none: "作成できない",
+  public: "パブリックのみ",
+  all: "パブリックとプライベート",
+};
+
+export const CHAT_CREATE_SCOPE_DESCRIPTIONS: Record<ChatCreateScope, string> = {
+  none: "チャンネルも DM も新しく作成できません",
+  public: "パブリックチャンネルを作成できます。DM も始められます",
+  all: "パブリックチャンネルに加えて、プライベートチャンネルも作成できます。DM も始められます",
+};
+
+/** `granted` の作成範囲。chat:create が無ければ、もう一方の鍵があっても作成できない (サーバと同じ)。 */
+export function chatCreateScopeOf(granted: Iterable<PermissionKey>): ChatCreateScope {
+  const set = granted instanceof Set ? granted : new Set(granted);
+  if (!set.has("chat:create")) return ChatCreateScope.None;
+  return set.has("chat:create_private") ? ChatCreateScope.All : ChatCreateScope.Public;
+}
+
+/** 作成範囲を `scope` にした新しい鍵集合。他の鍵には触らない。 */
+export function setChatCreateScope(granted: readonly PermissionKey[], scope: ChatCreateScope): PermissionKey[] {
+  const set = new Set(granted);
+  set.delete("chat:create");
+  set.delete("chat:create_private");
+  if (scope !== ChatCreateScope.None) set.add("chat:create");
+  if (scope === ChatCreateScope.All) set.add("chat:create_private");
   return [...set].sort();
 }
 
@@ -404,6 +447,8 @@ export function claimedDetailKeys(): PermissionKey[] {
  *   - notif:send — gates nothing (POST /notify is INTERNAL in the notification policy table).
  *   - members:roster_* / members:mail_* — 運営メンバーの 詳細設定で範囲の選択肢として出す (MembersScope)。
  *     個別のトグルにすると「閲覧は無いのに編集はある」状態を作れてしまう。
+ *   - chat:create / chat:create_private — チャットの詳細設定で 3 択として出す (ChatCreateScope)。
+ *     個別のトグルにすると「パブリックは作れないのにプライベートは作れる」状態に見えてしまう。
  * Each entry needs a reason; the partition test treats this as the 4th bucket.
  */
 export const HIDDEN_PERMISSION_KEYS: readonly PermissionKey[] = [
@@ -411,6 +456,8 @@ export const HIDDEN_PERMISSION_KEYS: readonly PermissionKey[] = [
   "notif:prefs:self",
   "notif:send",
   ...Object.values(MEMBERS_SCOPE_KEYS).flatMap((k) => [k.roster, k.mail]),
+  "chat:create",
+  "chat:create_private",
 ];
 
 /**

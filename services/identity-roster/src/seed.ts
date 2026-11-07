@@ -80,7 +80,7 @@ const MAINTAINER_KEYS: identity.PermissionKey[] = [
   "notif:send", "notif:admin", "notif:broadcast_publish",
   "notif:receive_admin", "notif:receive_all",
   "mail:send", "mail:read",
-  "chat:create", "chat:moderate",
+  "chat:create", "chat:create_private", "chat:moderate",
   "usage:view",
   "infra:read", "infra:deploy",
   "audit:read",
@@ -101,11 +101,11 @@ const SYSTEM_ROLES: { name: string; permissions: identity.PermissionKey[] }[] = 
   },
   {
     name: "organizer",
-    permissions: withAppAccess(["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "notif:receive_all", "chat:create", "usage:view", "infra:read", "audit:read"]),
+    permissions: withAppAccess(["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "notif:receive_all", "chat:create", "chat:create_private", "usage:view", "infra:read", "audit:read"]),
   },
   {
     name: "member",
-    permissions: withAppAccess(["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "notif:receive_all", "chat:create", "usage:view"]),
+    permissions: withAppAccess(["identity:read", "event:read", "task:read", "task:write", "file:read", "file:write", "notif:receive_all", "chat:create", "chat:create_private", "usage:view"]),
   },
 ];
 

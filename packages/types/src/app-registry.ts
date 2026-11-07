@@ -96,8 +96,10 @@ export const APP_MANIFEST = [
   // withRequiredAppDomainKeys) and notif:send gates nothing; both are policy.HIDDEN_PERMISSION_KEYS.
   { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self", "notif:prefs:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" },
     detailPermissions: ["notif:receive_all", "notif:receive_admin", "notif:broadcast_publish", "notif:admin"] },
-  { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" },
-    detailPermissions: ["chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility"] },
+  // チャットのサービスに読み取り用のドメインキーは無く、3 段階の鍵だけで開ける。chat:create をここに
+  // 置くと保存のたびに付け直され (withRequiredAppDomainKeys)、「作成できない」を選べなくなる。
+  { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["app:chat:view"], access: { view: "app:chat:view", edit: "app:chat:edit" },
+    detailPermissions: ["chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility"] },
   { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" },
     detailPermissions: ["mail:read", "mail:send", "mail:read_all", "mail:read_role_shared", "mail:admin"] },
   { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true,
