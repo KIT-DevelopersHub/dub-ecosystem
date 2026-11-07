@@ -53,7 +53,10 @@ export const PERMISSION_CATALOG = [
   { key: "mail:read_all", name: "Read all mail", description: "View every user's mail (oversight/archive)", domain: "mail", dangerous: true },
   { key: "mail:read_role_shared", name: "Read role-shared mail", description: "View mail delivered to other holders of a role that carries this key", domain: "mail", dangerous: true },
   { key: "mail:admin", name: "Administer mail", description: "Manage mailbox/watch/rules", domain: "mail", dangerous: true },
-  { key: "chat:create", name: "Create channels", description: "Create chat channels", domain: "chat", dangerous: false },
+  // チャンネル作成は積み上げ式の 3 択 (作成できない / パブリックのみ / プライベートも)。ロール管理は
+  // トグルではなく 1 つの選択肢として出す (policy.chatCreateScopeOf)。create_private ⇒ create。
+  { key: "chat:create", name: "Create channels", description: "Create public chat channels and start DMs", domain: "chat", dangerous: false },
+  { key: "chat:create_private", name: "Create private channels", description: "Also create private chat channels (implies chat:create)", domain: "chat", dangerous: false },
   { key: "chat:moderate", name: "Moderate chat", description: "Manage channels and delete others' messages", domain: "chat", dangerous: true },
   { key: "chat:delete_channel", name: "Delete channels", description: "Permanently delete chat channels and all their messages", domain: "chat", dangerous: true },
   { key: "chat:slack_import", name: "Import from Slack", description: "Import Slack channel history (messages, threads, reactions, files) into new chat channels", domain: "chat", dangerous: true },
@@ -136,7 +139,7 @@ export const PERMISSION_CATALOG = [
   { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "impersonation", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 95 keys (open `${string}:${string}` template retired).
+// Closed union of the 96 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

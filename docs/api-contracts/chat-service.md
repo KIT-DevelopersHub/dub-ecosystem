@@ -162,7 +162,7 @@ All external paths are under the gateway mount `/api/v1/chat` (native: `/m/v1/ch
 | Method & path (external) | Auth / permission | Purpose |
 |---|---|---|
 | `GET /api/v1/chat/channels` | session | List the caller's channels (paginated) |
-| `POST /api/v1/chat/channels` | session + `chat:create` | Create a channel (DM is idempotent per member set) |
+| `POST /api/v1/chat/channels` | session + `chat:create` (private channel: + `chat:create_private`) | Create a channel (DM is idempotent per member set) |
 | `GET /api/v1/chat/channels/:id` | session | Read a channel + the caller's membership |
 | `PATCH /api/v1/chat/channels/:id` | session + channel-admin | Rename / retopic / archive (version-checked) |
 | `GET /api/v1/chat/channels/:id/members` | session (readable) | List the channel's member roster (presence / admin badge) |
@@ -185,7 +185,7 @@ All external paths are under the gateway mount `/api/v1/chat` (native: `/m/v1/ch
 | `POST /internal/system-messages` | `x-dub-internal: 1` (notification only) | Deliver a system post to a channel or a user's DM |
 | `GET /health` | none | Liveness (`{ "status": "ok", "service": "chat-service" }`) |
 
-Only `POST /channels` needs a catalog permission (`chat:create`); every other user-facing
+Only `POST /channels` needs a catalog permission (`chat:create`, plus `chat:create_private` for a private channel); every other user-facing
 endpoint gates on **channel membership / role**, not a global permission. `chat:moderate`
 (⚠ dangerous) lets a non-member act as a channel admin (moderation).
 
@@ -219,7 +219,7 @@ Response `200` (`Paginated<Channel>`):
 
 ### `POST /channels`
 
-Requires `chat:create`. Request (`CreateChannelRequest`):
+Requires `chat:create`. A private channel (`type` is not `dm`) also requires `chat:create_private`, otherwise `403 FORBIDDEN`. Request (`CreateChannelRequest`):
 
 ```json
 {

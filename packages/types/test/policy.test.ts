@@ -201,6 +201,37 @@ describe("decide() — default deny with a usable reason", () => {
   });
 });
 
+describe("チャンネル作成の 3 択", () => {
+  it("鍵から範囲を読む (chat:create が無ければ作成できない)", () => {
+    expect(policy.chatCreateScopeOf([])).toBe("none");
+    expect(policy.chatCreateScopeOf(["chat:create"])).toBe("public");
+    expect(policy.chatCreateScopeOf(["chat:create", "chat:create_private"])).toBe("all");
+    expect(policy.chatCreateScopeOf(["chat:create_private"])).toBe("none");
+  });
+
+  it("範囲を変えるとその 2 本だけが動く", () => {
+    const base: Key[] = ["app:chat:edit", "app:chat:view", "chat:moderate"];
+    for (const scope of policy.CHAT_CREATE_SCOPES) {
+      const next = policy.setChatCreateScope([...base, "chat:create", "chat:create_private"], scope);
+      expect(policy.chatCreateScopeOf(next)).toBe(scope);
+      expect(next).toEqual(expect.arrayContaining(base));
+    }
+    expect(policy.setChatCreateScope(["chat:create", "chat:create_private"], "none")).toEqual([]);
+    expect(policy.setChatCreateScope(["chat:create", "chat:create_private"], "public")).toEqual(["chat:create"]);
+  });
+
+  it("保存経路の正規化が chat:create_private ⇒ chat:create を保つ", () => {
+    expect(policy.normalizeAppAccessKeys(["chat:create_private"])).toEqual(["chat:create", "chat:create_private"]);
+    expect(policy.normalizeAppAccessKeys(["chat:create"])).toEqual(["chat:create"]);
+  });
+
+  it("3 択で選ぶ鍵はトグルに出ない", () => {
+    const shown = policy.appDetailPermissions("chat").map((e) => e.key);
+    expect(shown).not.toContain("chat:create");
+    expect(shown).not.toContain("chat:create_private");
+  });
+});
+
 describe("catalog partition — 詳細設定 vs その他", () => {
   it("an app's 詳細 keys resolve to real catalog entries", () => {
     const entries = policy.appDetailPermissions("mail");

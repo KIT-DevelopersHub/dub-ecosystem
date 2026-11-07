@@ -61,6 +61,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "mail:send",
   "mail:admin",
   "chat:create",
+  "chat:create_private",
   // The real admin role holds chat:moderate (identity 0002): rename / topic / archive /
   // members in the channel details modal. Hard delete is its own key (admin only by default).
   "chat:moderate",
@@ -851,6 +852,10 @@ const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filte
   (k) => k !== "chat:manage_sections" && k !== "chat:change_visibility",
 );
 
+// チャンネル作成の 3 択の見え方を ?demo_account= で確かめる用 (全権限 = usr_bob)。
+const CHAT_CREATE_PUBLIC_PERMISSIONS: identity.PermissionKey[] = CHAT_EDITOR_PERMISSIONS.filter((k) => k !== "chat:create_private");
+const CHAT_CREATE_NONE_PERMISSIONS: identity.PermissionKey[] = CHAT_CREATE_PUBLIC_PERMISSIONS.filter((k) => k !== "chat:create");
+
 // 運営メンバーの範囲の見え方を ?demo_account= で確かめる用。
 const MEMBERS_SCOPE_ORG_CHART_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:"));
 const MEMBERS_SCOPE_ROSTER_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:mail_"));
@@ -863,6 +868,8 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
   { id: "usr_scope_org", displayName: "範囲 組織図まで", email: "scope-org@developershub.jp", permissions: MEMBERS_SCOPE_ORG_CHART_PERMISSIONS, inbox: [] },
   { id: "usr_scope_roster", displayName: "範囲 メール名簿以外", email: "scope-roster@developershub.jp", permissions: MEMBERS_SCOPE_ROSTER_PERMISSIONS, inbox: [] },
+  { id: "usr_chat_public", displayName: "作成 パブリックのみ", email: "chat-public@developershub.jp", permissions: CHAT_CREATE_PUBLIC_PERMISSIONS, inbox: [] },
+  { id: "usr_chat_none", displayName: "作成 できない", email: "chat-none@developershub.jp", permissions: CHAT_CREATE_NONE_PERMISSIONS, inbox: [] },
   { id: "usr_lead", displayName: "統括 山本", email: "lead@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: LEAD_INBOX.map((m) => ({ ...m })), roleShareWith: ["usr_bob", "usr_sponsor"] },
 ];
 
@@ -1754,6 +1761,7 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
   "mail:send",
   "mail:admin",
   "chat:create",
+  "chat:create_private",
   "chat:moderate",
   "github:read",
   "notif:send",
@@ -2461,9 +2469,35 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       return json({ url: target, preview: mockUnfurl(target) });
     }
     if (method === "POST" && pathname === "/api/v1/chat/channels") {
-      // DM only (channel creation is otherwise not demoed). Same participant set ->
-      // the existing DM, mirroring chat-service's dm_key dedup.
-      const req = (body ?? {}) as { type?: string; name?: string; memberIds?: string[] };
+      // Same gates as chat-service: 編集 + chat:create, plus chat:create_private for a private
+      // channel. Same participant set -> the existing DM (dm_key dedup).
+      const req = (body ?? {}) as { type?: string; name?: string; topic?: string; visibility?: "public" | "private"; memberIds?: string[] };
+      const perms = currentAccount().permissions;
+      const missing = !perms.includes("app:chat:edit")
+        ? "app:chat:edit"
+        : !perms.includes("chat:create")
+          ? "chat:create"
+          : req.type !== "dm" && req.visibility === "private" && !perms.includes("chat:create_private")
+            ? "chat:create_private"
+            : null;
+      if (missing) {
+        return json({ error: { code: "FORBIDDEN", message: `${missing} required`, retryable: false } } satisfies ErrorResponse, 403);
+      }
+      if (req.type === "topic") {
+        const created: DemoChatChannel = {
+          id: `chn_topic_${Date.now().toString(36)}`,
+          type: "topic",
+          name: req.name || "channel",
+          topic: req.topic ?? null,
+          eventId: null,
+          memberCount: 1,
+          roster: [{ userId: currentAccount().id, role: "admin", joinedAt: CH_TS }],
+          visibility: req.visibility === "private" ? "private" : "public",
+        };
+        all.push(created);
+        byId.set(created.id, created);
+        return json(toWire(created), 201);
+      }
       if (req.type !== "dm") return notFound(`POST ${pathname} (type=${String(req.type)})`);
       const memberIds = [...new Set([currentAccount().id, ...(req.memberIds ?? [])])];
       const key = [...memberIds].sort().join(",");
