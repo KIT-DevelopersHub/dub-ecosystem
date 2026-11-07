@@ -3,12 +3,12 @@
   "slug": "sponsor-card-ocr-accuracy",
   "worker": "dub-demo-sponsor-card-ocr-accuracy",
   "url": "https://dub-demo-sponsor-card-ocr-accuracy.developershub-site.workers.dev",
-  "deployedSha": "8aaf8221",
+  "deployedSha": "bae6af5c",
   "branch": "commander/task-ctask_01M6RY8PRCFRAYRFG24BGJME2X",
   "actor": "ko-tarou",
-  "markers": ["card ocr: reread failed"],
+  "markers": ["营営业業发発"],
   "live": true,
-  "verifiedAt": "2026-11-07T13:54:37Z",
-  "updatedAt": "2026-11-07T13:54:37Z",
+  "verifiedAt": "2026-11-07T18:40:04Z",
+  "updatedAt": "2026-11-07T18:40:04Z",
   "note": "スポンサー: 名刺の読み取り精度の改善 (PR #797)"
 }
