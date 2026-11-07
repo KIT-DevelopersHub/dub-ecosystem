@@ -8,8 +8,9 @@ describe("largeRows / replaceRows (大きい文字の行の読み直し)", () =>
     const lines = [at("株式会社大和精密", 150, 110, 400, 40), at("に 所", 149, 362, 76, 56), at("野", 243, 345, 80, 76), at("正樹", 530, 353, 176, 79)];
     const rows = largeRows(lines);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.members).toEqual([2, 3]);
-    expect(rows[0]!.box).toEqual({ x0: 243, y0: 345, x1: 706, y1: 432 });
+    // 「に 所」(誤読された「宇」) も半分以上の高さなので含める。
+    expect(rows[0]!.members).toEqual([2, 3, 1]);
+    expect(rows[0]!.box).toEqual({ x0: 149, y0: 345, x1: 706, y1: 432 });
   });
 
   it("does not join a large line with a much smaller one in the same row", () => {

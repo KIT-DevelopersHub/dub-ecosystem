@@ -27,6 +27,12 @@ export interface Row {
 }
 
 const height = (b: CardBox): number => b.y1 - b.y0;
+const union = (a: CardBox, b: CardBox): CardBox => ({
+  x0: Math.min(a.x0, b.x0),
+  y0: Math.min(a.y0, b.y0),
+  x1: Math.max(a.x1, b.x1),
+  y1: Math.max(a.y1, b.y1),
+});
 
 /**
  * 大きい文字の行を、同じ高さに並ぶ断片ごとにまとめる (「宇野」「正樹」・1 文字ずつ割れた氏名)。
@@ -43,7 +49,16 @@ export function largeRows(lines: CardLine[]): Row[] {
       return;
     }
     row.members.push(i);
-    row.box = { x0: Math.min(row.box.x0, b.x0), y0: Math.min(row.box.y0, b.y0), x1: Math.max(row.box.x1, b.x1), y1: Math.max(row.box.y1, b.y1) };
+    row.box = union(row.box, b);
+  });
+  // 誤読で小さく出た断片 (「宇」→「=」) も同じ行なら含める。含めないと切り出しの端で欠ける。
+  lines.forEach((l, i) => {
+    const b = l.bbox;
+    if (!b) return;
+    const row = rows.find((r) => !r.members.includes(i) && sameRow(r.box, b) && height(b) >= height(r.box) / 2);
+    if (!row) return;
+    row.members.push(i);
+    row.box = union(row.box, b);
   });
   return rows;
 }

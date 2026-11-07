@@ -118,6 +118,10 @@ describe("parseCardLines (Tesseract の実出力に基づく)", () => {
     expect(parseCardLines([at("ーー", 20, 10), at("ー", 34, 10), at("株式会社ハルカゼ", 60, 40)]).companyName).toBe("株式会社ハルカゼ");
   });
 
+  it("trims junk symbols around a name", () => {
+    expect(parseCardLines([at("営業 部", 100, 26), at("|野 正樹 _", 130, 70)]).personName).toBe("野正樹");
+  });
+
   it("joins several department lines", () => {
     const d = parseCardLines([at("経営 企画 本部", 100, 26), at("DX 推進 室 主査", 130, 26)]);
     expect(d.department).toBe("経営企画本部 DX 推進室");

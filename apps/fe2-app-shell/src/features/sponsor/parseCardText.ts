@@ -69,6 +69,8 @@ export function normalizeLine(raw: string): string {
     .trim();
 }
 
+/** 行の前後に付いた記号のゴミ (「|野正樹」「山田太郎 _」) を落とす。 */
+const trimJunk = (s: string): string => s.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
 const compactAt = (l: string): string => l.replace(/\s*([@.])\s*/g, "$1");
 const alnum = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -332,10 +334,10 @@ export function parseCardLines(input: CardLine[], latinText = ""): CardDraft {
     if (dt) {
       if (dt.title) out.title ??= dt.title;
       if (dt.department) out.department = out.department ? `${out.department} ${dt.department}` : dt.department;
-      if (dt.tail) cands.push({ ...base, text: dt.tail, nextToRole: true });
+      if (dt.tail) cands.push({ ...base, text: trimJunk(dt.tail), nextToRole: true });
       return;
     }
-    if (!legal.includes(l) && !FURIGANA.test(l.text)) cands.push({ ...base, text: l.text });
+    if (!legal.includes(l) && !FURIGANA.test(l.text)) cands.push({ ...base, text: trimJunk(l.text) });
   });
 
   const org = emailOrg(email);
