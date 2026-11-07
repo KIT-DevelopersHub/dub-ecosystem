@@ -87,11 +87,11 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(screen.getByTestId("fe7-app-state-events").textContent).toBe("無効");
   });
 
-  it("selecting 編集 emits BOTH graded keys (edit ⇒ view)", async () => {
+  it("selecting 編集 emits BOTH graded keys (edit ⇒ view) plus the app's required key", async () => {
     const user = userEvent.setup();
     const { onChange } = setup([]);
     await user.click(screen.getByTestId("fe7-app-level-mail-edit"));
-    expect(onChange.mock.calls[0]?.[0]).toEqual(["app:mail:edit", "app:mail:view"]);
+    expect(onChange.mock.calls[0]?.[0]).toEqual(["app:mail:edit", "app:mail:view", "mail:read"]);
   });
 
   it("selecting 無効 clears the app's graded keys but keeps its detail keys", async () => {
@@ -146,7 +146,7 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     const { onChange } = setup([]);
     await user.click(screen.getByTestId("fe7-app-name-chat"));
     await user.click(screen.getByTestId("fe7-app-dialog-level-view"));
-    expect(onChange.mock.calls[0]?.[0]).toEqual(["app:chat:view"]);
+    expect(onChange.mock.calls[0]?.[0]).toEqual(["app:chat:view", "chat:create"]);
   });
 
   // メッセージ削除ポリシーはロール管理から撤去（ロールの権限ではなくチャット側の設定）。
@@ -197,11 +197,13 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     // 「閲覧」にすると、同じトグルがそのまま操作できるようになる
     await user.click(within(dialog).getByTestId("fe7-app-dialog-level-view"));
     expect(within(dialog).queryByTestId("fe7-app-dialog-detail-locked")).not.toBeInTheDocument();
-    const toggle = within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement;
+    const toggle = within(dialog).getByTestId("fe7-app-dialog-toggle-mail:send") as HTMLInputElement;
     expect(toggle.disabled).toBe(false);
     await user.click(toggle);
-    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByTestId("fe7-app-detail-count-mail").textContent).toBe("1 / 5");
+    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:send") as HTMLInputElement).checked).toBe(true);
+    // mail:read はアプリに必須なので有効化と同時に入り、固定表示になる
+    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByTestId("fe7-app-detail-count-mail").textContent).toBe("2 / 5");
   });
 
   // その他側と対称の到達性テスト: アプリが宣言した細かい権限は必ずそのダイアログに出る
