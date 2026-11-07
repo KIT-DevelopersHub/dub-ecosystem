@@ -28,7 +28,9 @@
 // A Google Calendar usage limit ends the run on the spot and pauses the sync for QUOTA_PAUSE_MS
 // (state in MeetingSyncDO): while paused it makes no Calendar call, from the alarm or by hand. Only
 // Calendar counts: Meet REST (openMeet, the ingest) and Drive have quotas of their own, keep
-// running, and a limit on them pauses nothing.
+// running, and a limit on them pauses nothing. A limit hit while sharing the calendars pauses only
+// the shares (aclWritesNotBefore): attendees — the invites of members who just joined a role — keep
+// their hourly turn. Sharing ~60 members on every target calendar is what keeps running into it.
 //
 // To stay under those limits the sync spends little: a calendar whose share list has not changed
 // costs no listAcl (one full check a day still catches changes made in Google), a share that failed
@@ -547,6 +549,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     const owner = account.email ? lower(account.email) : null;
     const pace = { left: ACL_WRITES_PER_RUN, deferred: false };
     const touched: Record<string, CalendarAclState> = {};
+    let sharesPausedUntil: number | null = null;
     try {
       for (const c of await store.listCalendars(orgId, account.accountId)) {
         const st: CalendarAclState = { fingerprint: null, checkedAt: 0, ...state.acl[c.calendarId], retryAt: { ...state.acl[c.calendarId]?.retryAt } };
@@ -558,17 +561,24 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
             pace.deferred = true; // the paced continuation, not the two-minute one
             break;
           }
-          if (isCalendarQuota(err)) throw err;
+          if (isCalendarQuota(err)) {
+            // Shares only: a share limit must not hold back the invites of people who just joined a role.
+            sharesPausedUntil = nowMs + QUOTA_PAUSE_MS;
+            log("meeting_shares_quota_paused", { pausedUntil: new Date(sharesPausedUntil).toISOString(), reason: err.reason, operation: err.operation, googleMessage: err.googleMessage });
+            break;
+          }
           log("meeting_calendar_acl_sync_failed", { calendarId: c.calendarId, message: err instanceof Error ? err.message : String(err) });
         } finally {
           if (JSON.stringify(st) !== before) touched[c.calendarId] = st;
         }
       }
     } finally {
+      const notBefore = sharesPausedUntil ?? (pace.deferred ? nowMs + ACL_WRITE_INTERVAL_MS : null);
       await syncState
-        .save({ acl: touched, ...(pace.deferred ? { aclWritesNotBefore: nowMs + ACL_WRITE_INTERVAL_MS } : {}) })
+        .save({ acl: touched, ...(notBefore !== null ? { aclWritesNotBefore: notBefore } : {}) })
         .catch((err: unknown) => log("meeting_acl_state_save_failed", { message: err instanceof Error ? err.message : String(err) }));
     }
+    if (sharesPausedUntil !== null) return QUOTA_PAUSE_MS;
     return pace.deferred ? ACL_WRITE_INTERVAL_MS : null;
   }
 

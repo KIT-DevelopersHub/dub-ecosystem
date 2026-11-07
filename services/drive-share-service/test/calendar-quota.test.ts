@@ -1,5 +1,6 @@
-// A Google Calendar usage limit: the run stops at once, the sync pauses (MeetingSyncDO storage),
-// other APIs keep running, and the user is told it was the calendar, not Drive.
+// A Google Calendar usage limit: the run stops at once, the sync pauses (MeetingSyncDO storage) —
+// only the shares when it was a share — other APIs keep running, and the user is told it was the
+// calendar, not Drive.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { DubError } from "@dub/errors";
 import { GoogleQuotaError, isCalendarQuota, mapGoogleError } from "../src/drive-client";
@@ -119,9 +120,9 @@ describe("real Calendar client", () => {
 });
 
 describe("sync on a calendar limit", () => {
-  it("stops at the first refused share, then counts as finished so nothing re-runs it", async () => {
+  it("a refused share pauses the shares only, and the run still counts as finished", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { service, spy } = setup();
+    const { service, spy, syncState } = setup();
     await service.create("usr_admin", BASE);
     spy.calls.length = 0;
     spy.fail("insertAcl", quota);
@@ -129,48 +130,93 @@ describe("sync on a calendar limit", () => {
     const r = await service.sync({ system: true });
 
     expect(spy.count("insertAcl")).toBe(1); // four members, one call
-    expect(spy.count("openMeet")).toBe(0);
     expect(r.complete).toBe(true);
-    expect(r.quotaPausedUntil).toBe(Date.parse("2026-10-14T00:00:00.000Z") + QUOTA_PAUSE_MS);
+    expect(r.quotaPausedUntil).toBeUndefined();
+    expect(r.aclContinueMs).toBe(QUOTA_PAUSE_MS);
+    const state = await syncState.load();
+    expect(state.pausedUntil).toBeNull();
+    expect(state.aclWritesNotBefore).toBe(Date.parse("2026-10-14T00:00:00.000Z") + QUOTA_PAUSE_MS);
     const events = warn.mock.calls.map((c) => JSON.parse(c[0] as string));
-    const paused = events.filter((e) => e.event === "meeting_sync_quota_paused");
+    const paused = events.filter((e) => e.event === "meeting_shares_quota_paused");
     expect(paused).toHaveLength(1);
     expect(paused[0]).toMatchObject({ reason: "quotaExceeded", operation: "acl.insert", pausedUntil: "2026-10-14T06:00:00.000Z" });
+    expect(events.some((e) => e.event === "meeting_sync_quota_paused")).toBe(false);
     expect(events.some((e) => e.event === "meeting_calendar_acl_failed")).toBe(false);
   });
 
-  it("stops the remaining meetings when getEvent hits the limit", async () => {
+  it("a member who joins the role while shares are paused is still invited on the next run", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const users: ActiveUser[] = USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] }));
+    users.push({ id: "usr_e", email: "e@dub.example", name: "e", roleIds: [] });
+    const spy = spied();
+    const now = { iso: "2026-10-14T00:00:00.000Z" };
+    const { service, store } = buildMeetings({ roster: fakeRoster({}, { role_dev: "開発" }, users), calendar: spy.client, syncState: createInMemorySyncState(), now: () => now.iso });
+    const m = await service.create("usr_admin", BASE);
+    spy.fail("insertAcl", quota);
+    await service.sync({ system: true }); // shares hit the limit
+    spy.calls.length = 0;
+
+    users[4]!.roleIds.push("role_dev"); // the role is granted afterwards
+    now.iso = "2026-10-14T01:00:00.000Z";
+    const r = await service.sync({ system: true });
+
+    expect(r.invitedAdded).toBe(1);
+    expect((await store.listInvites(m.id)).map((i) => i.email)).toContain("e@dub.example");
+    expect(spy.count("patchEvent")).toBe(1);
+    expect(spy.count("insertAcl")).toBe(0); // shares wait out their pause
+  });
+
+  it("shares resume once their pause is over", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { service, spy, now, store } = setup();
+    await service.create("usr_admin", BASE);
+    spy.fail("insertAcl", quota);
+    await service.sync({ system: true });
+    spy.heal();
+
+    now.iso = "2026-10-14T05:59:59.000Z";
+    const waiting = await service.sync({ system: true });
+    expect(store.acl).toHaveLength(0);
+    expect(waiting.aclContinueMs).toBe(1000);
+
+    now.iso = "2026-10-14T06:00:00.000Z";
+    await service.sync({ system: true });
+    expect(store.acl).toHaveLength(4);
+  });
+
+  it("a manual sync whose shares hit the limit still answers", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { service, spy, syncState } = setup();
+    await service.create("usr_admin", BASE);
+    spy.fail("insertAcl", quota);
+
+    await expect(service.sync()).resolves.toMatchObject({ complete: true });
+    expect((await syncState.load()).pausedUntil).toBeNull();
+  });
+
+  it("a limit on the event calls pauses the whole sync", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { service, spy } = setup();
     await service.create("usr_admin", BASE);
-    await service.create("usr_admin", { ...BASE, title: "別" });
     spy.calls.length = 0;
     spy.fail("getEvent", quota);
 
-    await service.sync({ system: true });
-
-    expect(spy.calls).toEqual(["getEvent"]);
-  });
-
-  it("one address failing for another reason still lets the others through", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { service, spy, store } = setup();
-    await service.create("usr_admin", BASE);
-    let n = 0;
-    spy.fail("insertAcl", () => (++n === 1 ? new Error("cannot share") : null));
-
     const r = await service.sync({ system: true });
 
-    expect(spy.count("insertAcl")).toBe(4);
-    expect(store.acl).toHaveLength(3);
-    expect(r.quotaPausedUntil).toBeUndefined();
+    expect(r.complete).toBe(true);
+    expect(r.quotaPausedUntil).toBe(Date.parse("2026-10-14T00:00:00.000Z") + QUOTA_PAUSE_MS);
+    expect(spy.count("insertAcl")).toBe(0);
+    expect(spy.count("openMeet")).toBe(0);
+    const paused = warn.mock.calls.map((c) => JSON.parse(c[0] as string)).filter((e) => e.event === "meeting_sync_quota_paused");
+    expect(paused).toHaveLength(1);
+    expect(paused[0]).toMatchObject({ pausedUntil: "2026-10-14T06:00:00.000Z" });
   });
 
   it("makes no Calendar call while paused, opens Meets, and resumes after the deadline", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { service, spy, now, store } = setup();
     await service.create("usr_admin", BASE);
-    spy.fail("insertAcl", quota);
+    spy.fail("getEvent", quota);
     await service.sync({ system: true });
     spy.heal();
     spy.calls.length = 0;
@@ -192,7 +238,7 @@ describe("sync on a calendar limit", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { service, spy, now } = setup();
     await service.create("usr_admin", BASE);
-    spy.fail("insertAcl", quota);
+    spy.fail("getEvent", quota);
     await service.sync({ system: true });
 
     now.iso = "2026-10-14T06:00:00.000Z";
@@ -202,11 +248,11 @@ describe("sync on a calendar limit", () => {
     expect(warn.mock.calls.filter((c) => String(c[0]).includes("meeting_sync_quota_paused"))).toHaveLength(2);
   });
 
-  it("a manual sync that hits the limit shows it and pauses the alarm too", async () => {
+  it("a manual sync that hits the limit on an event shows it and pauses the alarm too", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { service, spy, syncState, kicks } = setup();
     await service.create("usr_admin", BASE);
-    spy.fail("insertAcl", quota);
+    spy.fail("getEvent", quota);
     kicks.length = 0;
 
     await expect(service.sync()).rejects.toThrow(CAL_MESSAGE);
