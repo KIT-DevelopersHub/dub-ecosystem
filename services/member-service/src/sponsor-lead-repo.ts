@@ -121,7 +121,7 @@ const FIELD_COLUMNS = [
   "confidence", "budget_period", "decision_period", "note",
 ] as const;
 
-const fieldValues = (l: LeadRow): unknown[] => [
+export const fieldValues = (l: LeadRow): unknown[] => [
   l.companyName, l.industry, l.owner, l.contactName, l.contactRole, l.contactEmail, l.source, l.contactType, l.evidence,
   l.priority, l.plan, l.status, l.firstContactOn, l.lastContactOn, l.proposedOn, l.agreedOn, l.nextAction, l.nextActionOn, l.expectedAmount,
   l.confidence, l.budgetPeriod, l.decisionPeriod, l.note,
@@ -129,7 +129,7 @@ const fieldValues = (l: LeadRow): unknown[] => [
 
 const INSERT_COLUMNS = ["id", "org_id", ...FIELD_COLUMNS, "version", "created_by", "created_by_name", "created_at", "updated_at", "archived_at"];
 const INSERT_SQL = `INSERT INTO member_sponsor_leads (${INSERT_COLUMNS.join(", ")}) VALUES (${INSERT_COLUMNS.map(() => "?").join(", ")})`;
-const UPDATE_SQL = `UPDATE member_sponsor_leads SET ${FIELD_COLUMNS.map((c) => `${c} = ?`).join(", ")}, version = ?, updated_at = ?, archived_at = ? WHERE id = ? AND version = ?`;
+export const UPDATE_SQL = `UPDATE member_sponsor_leads SET ${FIELD_COLUMNS.map((c) => `${c} = ?`).join(", ")}, version = ?, updated_at = ?, archived_at = ? WHERE id = ? AND version = ?`;
 
 export function createD1SponsorLeadRepo(db: DbClient): SponsorLeadRepo {
   return {

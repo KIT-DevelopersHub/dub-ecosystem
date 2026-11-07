@@ -11,6 +11,7 @@ import { formatAmount, formatOn } from "./leads.ts";
 import { parseAmount } from "./leadImport.ts";
 import { useSponsorCapability } from "./SponsorShared.tsx";
 import { CardDrawer } from "./CardDrawer.tsx";
+import { LeadMailSection } from "./LeadMailSection.tsx";
 import styles from "./sponsor.module.css";
 
 type Lead = sponsor.SponsorLead;
@@ -228,6 +229,7 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
                     </div>
                   </div>
                 ) : null}
+                <LeadMailSection lead={lead} />
                 {canWrite || canAdmin ? (
                   <div className={styles.inlineActions}>
                     {canWrite ? (

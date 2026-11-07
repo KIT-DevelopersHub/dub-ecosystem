@@ -5,7 +5,7 @@
 // mail.message.received (mail-automation). Loop-prevention headers are passed through
 // untouched — the decision is mail-automation's, not ours.
 import { createEvent, publishEvent } from "@dub/events";
-import { ulid } from "@dub/db";
+import { nowIso, ulid } from "@dub/db";
 import { consoleSink } from "@dub/observability";
 import type { mail } from "@dub/types";
 import { SERVICE_NAME } from "./config";
@@ -27,6 +27,7 @@ import { deliverToTeam, findActiveTeamList } from "./team-list";
 import { loadMatcher } from "./blocks";
 import type { InboundDeps, OwnerAddressPolicy, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
+import { isAutoReply, notifySponsorContact } from "./sponsor-sync";
 
 function stripAngle(id: string): string {
   return id.trim().replace(/^<|>$/g, "").trim();
@@ -316,6 +317,12 @@ async function ingestCopy(deps: InboundDeps, raw: RawInbound, isListCopy: boolea
       });
       return { processed: true, message };
     }
+  }
+
+  // スポンサーのメール連携: 初めて保存したメールだけ (別の宛先のコピー・再配送は上で戻っている)。
+  // 自動応答は「返信あり」にしない。日時は Dub が受け取った時刻 (差出人の Date ヘッダは使わない)。
+  if (!isAutoReply(loop["auto-submitted"], loop["x-dub-mail-loop"])) {
+    await notifySponsorContact(deps.sponsor, deps.ctx, { direction: "received", at: nowIso(), counterparts: [message.from.email], mailbox: envelopeTo || null });
   }
 
   const event = createEvent(

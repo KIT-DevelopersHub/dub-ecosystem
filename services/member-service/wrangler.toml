@@ -24,6 +24,13 @@ service = "identity-roster"
 binding = "SVC_NOTIFICATION"
 service = "notification"
 
+# mail-gateway: スポンサーのメール連携で登録アドレスとの既存メールを集計する (POST /internal/sponsor/contacts)。
+# mail-gateway も SVC_MEMBER でこの Worker を束ねる (相互)。member-service が先にデプロイされるので、
+# 束ね先の mail-gateway が既に存在する環境 (本番・staging) でだけ有効 — 新規環境の初回は一度外してデプロイする (CF 10143)。
+[[services]]
+binding = "SVC_MAIL"
+service = "mail-gateway"
+
 # 目標管理の実績 (チームのタスク件数 / LP の訪問者数)。件数だけを内部 API から読む。
 [[services]]
 binding = "SVC_TASK"

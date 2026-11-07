@@ -26,7 +26,8 @@ import { policyGate, sharedAuthzGranter } from "@dub/policy-gate";
 import { HEADERS, consoleSink } from "@dub/observability";
 import { publishAudit } from "@dub/events";
 import { nowIso } from "@dub/db";
-import { common, mail, type identity } from "@dub/types";
+import { common, mail, type identity, type sponsor } from "@dub/types";
+import { parseContactsQuery, querySponsorContacts } from "./sponsor-sync";
 import type { AppBindings } from "./env";
 import { POLICY_TABLE } from "./policy-table";
 import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
@@ -634,6 +635,14 @@ export function createApp() {
   // provider's own 429 already carries the exact Retry-After to the caller; this endpoint
   // reports whether we are still inside the cooldown window plus an ETA estimate.
   app.get("/internal/status", (c) => sendStatus(c));
+
+  // スポンサーのメール連携 (member-service → ここ, s2s のみ)。登録アドレスとのメールの集計。
+  app.post("/internal/sponsor/contacts", async (c) => {
+    const q = parseContactsQuery(await c.req.json().catch(() => null));
+    if (!q) throw errors.validationFailed([{ field: "addresses", reason: "invalid" }]);
+    const contacts = await querySponsorContacts(dbOf(c), q);
+    return c.json({ contacts } satisfies sponsor.MailContactsResponse);
+  });
 
   // ---- ops: quota/health self-report (INTERNAL in the table, minimal in the CF-routing
   // model).

@@ -123,6 +123,16 @@ describe("seedReferenceData / system roles", () => {
     }
   });
 
+  it("chat:create_private starts ON for every system role that holds chat:create (0033 と同じ結果)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    for (const name of ["admin", "maintainer", "organizer", "member"]) {
+      const perms = (await repo.getRoleByName(ORG_ID, name))!.permissions;
+      expect(perms, name).toContain("chat:create");
+      expect(perms, name).toContain("chat:create_private");
+    }
+  });
+
   it("スポンサー (app:sponsor:* / sponsor:*) starts ON for admin only — unreleased app, other roles opt in via ロール管理", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);
