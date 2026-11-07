@@ -330,7 +330,7 @@ gateway が `x-dub-*` を剥離するため外部からは詐称不能。
 | POST /internal/system-messages | ×(internal) | inline `x-dub-internal` | `INTERNAL` | notification からのシステム投稿 |
 | GET /chat/unfurl | ○ | `requireAuth` | `appLevel("chat","view")` | OGP 取得プロキシ |
 | GET /chat/channels | ○ | `requireAuth`(自分の所属のみ) | `appLevel("chat","view")` | 参加チャンネル閲覧 |
-| POST /chat/channels | ○ | `requireAuth` + `chat:create` | `appLevel("chat","edit","chat:create")` | チャンネル作成 |
+| POST /chat/channels | ○ | `requireAuth` + `chat:create` | `appLevel("chat","edit","chat:create")` | チャンネル作成。プライベートは handler で `chat:create_private` も要求 |
 | GET /chat/channels/:id | ○ | `requireAuth` + `loadReadable` | `appLevel("chat","view")` | 可視性で判定 |
 | PATCH /chat/channels/:id | ○ | `requireAuth` + `isChannelAdmin` | `appLevel("chat","edit")` | 設定変更は管理者層 |
 | GET /chat/channels/:id/members | ○ | `requireAuth` + `loadReadable` | `appLevel("chat","view")` | メンバー一覧 |

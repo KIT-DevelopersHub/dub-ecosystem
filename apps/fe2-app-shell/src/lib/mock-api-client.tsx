@@ -41,6 +41,7 @@ const DEFAULT_SEED: MockSeed = {
       "notif:prefs:self",
       "mail:read",
       "chat:create",
+      "chat:create_private",
       "app:events:view",
       "app:tasks:view",
       "app:gantt:view",

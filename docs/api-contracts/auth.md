@@ -317,7 +317,7 @@ Self-service keys carry a `:self` scope segment. Every entry declares `dangerous
 | file | `file:read`, `file:write`, `file:admin` ⚠ |
 | notif | `notif:send`, `notif:admin`, `notif:inbox:self`, `notif:prefs:self` |
 | mail | `mail:send` ⚠, `mail:read`, `mail:admin` ⚠ |
-| chat | `chat:create`, `chat:moderate` ⚠, `chat:delete_channel` ⚠, `chat:slack_import` ⚠, `chat:emoji_import` ⚠, `chat:manage_sections`, `chat:change_visibility` ⚠ |
+| chat | `chat:create`, `chat:create_private`, `chat:moderate` ⚠, `chat:delete_channel` ⚠, `chat:slack_import` ⚠, `chat:emoji_import` ⚠, `chat:manage_sections`, `chat:change_visibility` ⚠ |
 | infra | `infra:read`, `infra:deploy` ⚠, `infra:dns` ⚠, `infra:admin` ⚠ |
 | audit | `audit:read` |
 | hr | `hr:read`, `hr:write`, `hr:admin` ⚠ |

@@ -94,8 +94,9 @@ export const POLICY_TABLE = definePolicyTable({
 
   // ---- writes needing a 詳細 key on top of 編集 ----
   // `chat:create` — creating a channel is the one write that is not scoped to an existing
-  // channel, so there is no handler-side instance check to pair with: this rule is the WHOLE
-  // decision for it.
+  // channel. This rule decides public channels and DMs; a PRIVATE channel additionally needs
+  // `chat:create_private`, which createChannel asserts because the visibility is in the request
+  // body and the gate does not read bodies.
   "POST /chat/channels": appLevel("chat", "edit", "chat:create"),
   // `chat:moderate` (dangerous key) — the org-wide delete policy decides whether anyone's
   // message is erased physically or tombstoned, so it is admin/maintainer territory, not
