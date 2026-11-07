@@ -72,6 +72,10 @@ export const POLICY_TABLE = definePolicyTable({
   // `system:public-hr-interview-form` に帰属し、応募者を 面談日程調整中 で作る (hr-form-service)。
   "GET /members/internal/hr/interview-form": INTERNAL,
   "POST /members/internal/hr/interview-form": INTERNAL,
+  // 公開の面談日程選択。api-gateway の PUBLIC POST /api/v1/public/hr-interview-booking/* が s2s で転送する。
+  // 誰の予約かはメールで渡したトークンでハンドラが判定する (hr-interview-service)。
+  "POST /members/internal/hr/interview-booking/view": INTERNAL,
+  "POST /members/internal/hr/interview-booking/book": INTERNAL,
 
   // Self 参加届 (アカウント設定 -> 参加情報), reached through api-gateway's GET|POST
   // /api/v1/me/participation, which authenticates the session and forwards the caller's
@@ -189,6 +193,14 @@ export const POLICY_TABLE = definePolicyTable({
   "PUT /members/hr/interview-form": appLevel("hr", "edit", "hr:write"),
   "GET /members/hr/interview-form/responses": appLevel("hr", "view", "hr:read"),
   "POST /members/hr/interview-form/responses": appLevel("hr", "edit", "hr:write"),
+  // 面談の日程調整: 枠・招待の一覧は応募者の個人情報と同格なので 閲覧 + hr:read。枠・設定の編集とメール送信は 編集 + hr:write。
+  "GET /members/hr/interviews": appLevel("hr", "view", "hr:read"),
+  "PUT /members/hr/interviews/settings": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/slots": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/slots/delete": appLevel("hr", "edit", "hr:write"),
+  "DELETE /members/hr/interviews/slots/:id": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/slots/:id/release": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/invites/:id/send": appLevel("hr", "edit", "hr:write"),
   "GET /members/hr/onboarding": appLevel("hr", "view", "hr:read"),
   "PUT /members/hr/onboarding/:memberId/items/:itemId": appLevel("hr", "edit", "hr:write"),
   // ---- スポンサー (スポンサーアプリ: 名刺の共有) ----

@@ -313,7 +313,7 @@ describe("HrTabs", () => {
   it("shows 参加届の回答 / オンボーディング案内 (moved from 運営メンバー) to holders of the 参加届 keys", async () => {
     renderWith(<HrTabs active="applicants" />, fakeApi(), [...EDITOR, ...viewerPermissions("participation", ["identity:read"])]);
     await screen.findByTestId("fe2-hr-tabs-tab-form");
-    expect(tabIds()).toEqual(["applicants", "form", "participation", "onboarding", "guide", "attendance"]);
+    expect(tabIds()).toEqual(["applicants", "form", "interviews", "participation", "onboarding", "guide", "attendance"]);
     fireEvent.click(screen.getByTestId("fe2-hr-tabs-tab-participation"));
     expect(navigateMock).toHaveBeenLastCalledWith({ to: "/participation/list" });
     fireEvent.click(screen.getByTestId("fe2-hr-tabs-tab-guide"));
@@ -323,7 +323,7 @@ describe("HrTabs", () => {
   it("hides tabs whose route the caller cannot open (no dead tabs)", async () => {
     renderWith(<HrTabs active="applicants" />, fakeApi(), EDITOR);
     await screen.findByTestId("fe2-hr-tabs-tab-form");
-    expect(tabIds()).toEqual(["applicants", "form", "onboarding", "attendance"]);
+    expect(tabIds()).toEqual(["applicants", "form", "interviews", "onboarding", "attendance"]);
   });
 });
 

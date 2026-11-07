@@ -3,6 +3,7 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import { createHrApi, type HrApi } from "./hrApi.tsx";
 import { InterviewFormProvider } from "./interviewFormApi.tsx";
+import { InterviewsProvider } from "./interviewsApi.tsx";
 
 const HrApiCtx = createContext<HrApi | null>(null);
 
@@ -11,7 +12,9 @@ export function HrProvider({ api, children }: { api: ApiClient; children: ReactN
   // 面談申し込みフォームの api も同じ api-client から配る (応募者の詳細ドロワーが回答を読む)。
   return (
     <HrApiCtx.Provider value={value}>
-      <InterviewFormProvider api={api}>{children}</InterviewFormProvider>
+      <InterviewFormProvider api={api}>
+        <InterviewsProvider api={api}>{children}</InterviewsProvider>
+      </InterviewFormProvider>
     </HrApiCtx.Provider>
   );
 }

@@ -23,6 +23,9 @@ const errBadTransition = (from: string, to: string): DubError =>
   new DubError("HR_INVALID_TRANSITION", `Cannot move applicant from ${from} to ${to}`, { status: 409 });
 const errApplicantJoined = (id: string): DubError =>
   new DubError("HR_APPLICANT_JOINED", `Applicant ${id} has joined the roster; remove the member instead`, { status: 409 });
+/** 応募者が日程を選べる状態ではない (辞退・選考が進んだなど)。 */
+export const errBookingClosed = (): DubError =>
+  new DubError("HR_BOOKING_CLOSED", "This booking link can no longer be used", { status: 409 });
 const errJoinRequired = (id: string): DubError =>
   new DubError("HR_JOIN_REQUIRED", `Applicant ${id} is not on the roster yet; use POST /join (採用) first`, { status: 409 });
 
@@ -63,7 +66,7 @@ function toApplicant(r: ApplicantRow): hr.Applicant {
 
 export interface HrDeps extends Pick<AppDeps, "orgId" | "now" | "repo"> {
   hrRepo: HrRepo;
-  newHrId: (prefix: "app" | "hre" | "hfr") => string;
+  newHrId: AppDeps["newHrId"];
 }
 
 export class HrService {
@@ -182,6 +185,37 @@ export class HrService {
     if (!(await this.deps.hrRepo.updateApplicant(next, expected))) throw errVersionConflict(id);
     await this.event(ctx, id, "stage", { fromStage: cur.stage, toStage: body.stage, body: text(body.note, "note") });
     return this.get(ctx, id);
+  }
+
+  /** 応募者が日程を選んだ: 面談確定にして面談日を入れる。人事の同時編集に負けないよう読み直して数回試す。 */
+  async confirmInterview(ctx: ReqCtx, id: string, interviewAt: string, note: string): Promise<void> {
+    for (let i = 0; i < 3; i++) {
+      const cur = await this.load(id);
+      if (cur.stage !== "scheduling") throw errBookingClosed(); // 読み直した間に辞退された場合に上書きしない
+      const next: ApplicantRow = { ...cur, stage: "interview_set", interviewAt, version: cur.version + 1, updatedAt: this.deps.now() };
+      if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) continue;
+      // ここから先は確定済み。履歴だけ書けなくても呼び出し側に枠を解放させない。
+      await this.event(ctx, id, "stage", { fromStage: cur.stage, toStage: "interview_set", body: note }).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn(JSON.stringify({ level: "warn", service: "member-service", msg: "hr interview event failed", applicantId: id, requestId: ctx.requestId, error: String(err) }));
+      });
+      return;
+    }
+    throw errVersionConflict(id);
+  }
+
+  /** 人事が予約を取り消した: 面談日を消し、面談確定なら面談日程調整中へ戻す (同じ URL で選び直せる)。 */
+  async cancelInterview(ctx: ReqCtx, id: string, note: string): Promise<void> {
+    for (let i = 0; i < 3; i++) {
+      const cur = await this.deps.hrRepo.getApplicant(id);
+      if (!cur || cur.orgId !== this.deps.orgId || cur.archivedAt !== null) return;
+      const stage: hr.ApplicantStage = cur.stage === "interview_set" ? "scheduling" : cur.stage;
+      const next: ApplicantRow = { ...cur, stage, interviewAt: null, version: cur.version + 1, updatedAt: this.deps.now() };
+      if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) continue;
+      await this.event(ctx, id, "stage", { fromStage: cur.stage, toStage: stage, body: note });
+      return;
+    }
+    throw errVersionConflict(id);
   }
 
   async addNote(ctx: ReqCtx, id: string, body: hr.AddApplicantNoteRequest): Promise<hr.ApplicantDetail> {

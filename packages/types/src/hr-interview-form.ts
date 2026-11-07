@@ -231,7 +231,7 @@ export function defaultInterviewForm(): Omit<InterviewForm, "version" | "updated
   return {
     title: "面談申し込みフォーム",
     description:
-      "DevelopersHub の運営メンバーに興味を持っていただきありがとうございます。参加届の前に、まずは面談でお話ししましょう。以下を入力して送信してください。担当者から面談日程のご連絡をします。",
+      "DevelopersHub の運営メンバーに興味を持っていただきありがとうございます。参加届の前に、まずは面談でお話ししましょう。以下を入力して送信してください。送信後、面談日程を選ぶためのご案内をメールでお送りします。",
     accepting: true,
     questions: [
       ...splitQuestions("name", true),

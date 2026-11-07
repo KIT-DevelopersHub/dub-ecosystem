@@ -23,6 +23,8 @@ import { MemberService, type ReqCtx } from "./service";
 import { HrService } from "./hr-service";
 import { HrFormService } from "./hr-form-service";
 import { registerHrInterviewFormRoutes } from "./hr-form-routes";
+import { HrInterviewService } from "./hr-interview-service";
+import { registerHrInterviewRoutes } from "./hr-interview-routes";
 import type { goal, hr, sponsor } from "@dub/types";
 import { GoalService } from "./goal-service";
 import { SponsorService } from "./sponsor-service";
@@ -280,7 +282,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
 
   // ---- 人事: 面談申し込みフォーム (定義の編集・回答・公開ページの s2s 受付)。ルートは hr-form-routes.ts ----
-  registerHrInterviewFormRoutes(app, new HrFormService(deps, hrSvc));
+  const hrInterviewSvc = new HrInterviewService(deps, hrSvc, svc);
+  registerHrInterviewFormRoutes(app, new HrFormService(deps, hrSvc, (ctx, id) => hrInterviewSvc.onApplied(ctx, id)));
+  registerHrInterviewRoutes(app, hrInterviewSvc);
 
   // ---- 人事 (面談 → 採用 → オンボーディング) ----
   // 認可は表 (人事アプリの 閲覧/編集 + hr:read / hr:write / hr:admin)。採用 (join) は名簿に行を

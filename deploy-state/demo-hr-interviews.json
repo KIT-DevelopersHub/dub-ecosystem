@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "hr-interviews",
+  "worker": "dub-demo-hr-interviews",
+  "url": "https://dub-demo-hr-interviews.developershub-site.workers.dev",
+  "deployedSha": "a68d8116",
+  "branch": "commander/task-ctask_01M6RY27QH8Q8ZB8KXHXGFFK7C",
+  "actor": "ko-tarou",
+  "markers": ["fe2-hr-slot-grid","interview-booking-submit"],
+  "live": true,
+  "verifiedAt": "2026-11-07T13:48:10Z",
+  "updatedAt": "2026-11-07T13:48:10Z",
+  "note": "人事 面談タブ: コマ表ドラッグで一括登録"
+}

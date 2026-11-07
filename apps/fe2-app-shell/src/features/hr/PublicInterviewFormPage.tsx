@@ -1,7 +1,7 @@
 // 面談申し込みフォームの PUBLIC ページ (/interview-apply)。申し込む人はまだ Dub のアカウントを持って
 // いないので、参加届 (/participate) と同じくシェルの外 (RequireAuth の外) に置く。質問は人事アプリで
 // 編集したもの (GET /api/v1/public/hr-interview-form) をそのまま描く。送信すると応募者として
-// 面談日程調整中 で登録され、人事から面談日程の連絡が届く。
+// 面談日程調整中 で登録され、日程を選ぶ URL の案内メールが届く。
 // bot 対策: 人には見えない囮の欄 (website) を置き、gateway が埋まった送信を黙って捨てる。
 import { useState } from "react";
 import { Button, Card, EmptyState, ErrorState, SkeletonList } from "@dub/ui";
@@ -74,7 +74,7 @@ function PublicForm({ form }: { form: hrForm.PublicInterviewForm }): JSX.Element
         <Card testId="interview-form-public-thanks">
           <div className={styles.thanks}>
             <p className={styles.thanksLead}>送信しました。ありがとうございます！</p>
-            <p className={styles.muted}>入力いただいたメールアドレスに、担当者から面談日程のご連絡をします。</p>
+            <p className={styles.muted}>入力いただいたメールアドレスに、面談日程を選ぶためのご案内をお送りします。少しお時間をいただく場合があります。</p>
             <Button
               variant="secondary"
               testId="interview-form-public-again"

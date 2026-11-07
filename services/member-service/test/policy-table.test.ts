@@ -161,15 +161,22 @@ const HR_READS = [
   "GET /members/hr/applicants/:id",
   "GET /members/hr/interview-form",
   "GET /members/hr/interview-form/responses",
+  "GET /members/hr/interviews",
   "GET /members/hr/onboarding",
 ];
 const HR_WRITES = [
+  "DELETE /members/hr/interviews/slots/:id",
   "PATCH /members/hr/applicants/:id",
   "POST /members/hr/applicants",
   "POST /members/hr/applicants/:id/notes",
   "POST /members/hr/applicants/:id/stage",
   "POST /members/hr/interview-form/responses",
+  "POST /members/hr/interviews/invites/:id/send",
+  "POST /members/hr/interviews/slots",
+  "POST /members/hr/interviews/slots/delete",
+  "POST /members/hr/interviews/slots/:id/release",
   "PUT /members/hr/interview-form",
+  "PUT /members/hr/interviews/settings",
   "PUT /members/hr/onboarding/:memberId/items/:itemId",
 ];
 const HR_ADMIN = ["DELETE /members/hr/applicants/:id", "POST /members/hr/applicants/:id/join"];
@@ -208,6 +215,8 @@ const INTERNAL_ROUTES = [
   "GET /members/internal/onboarding",
   "GET /members/internal/team-members",
   "POST /members/internal/google-emails",
+  "POST /members/internal/hr/interview-booking/book",
+  "POST /members/internal/hr/interview-booking/view",
   "POST /members/internal/hr/interview-form",
   "POST /members/internal/sponsor/mail-activity",
   "POST /members/internal/me/participation",

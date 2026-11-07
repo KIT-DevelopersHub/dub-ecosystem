@@ -27,6 +27,7 @@ import { auth as authValues, identity as identityValues, notification as notific
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
+import { createHrInterviewsDemoStore } from "./demo-hr-interviews.ts";
 import { createSponsorMailDemo } from "./demo-sponsor-mail.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
@@ -6253,6 +6254,24 @@ export function createDemoFetch(): typeof fetch {
       membersStore.handle("POST", `/api/v1/members/hr/applicants/${id}/notes`, new URL("https://demo.local"), { body: text });
     },
   });
+  // 人事 > 面談 (応募者は上の人事 demo を読み、予約で面談確定へ動かす)。
+  const hrApplicants = async () =>
+    (await membersStore.handle("GET", "/api/v1/members/hr/applicants", new URL("https://demo.local"), undefined)!.json()) as hr.ListApplicantsResponse;
+  const moveApplicant = async (id: string, stage: hr.ApplicantStage, interviewAt: string | null) => {
+    const a = (await hrApplicants()).applicants.find((x) => x.id === id);
+    if (!a) return;
+    const base = `/api/v1/members/hr/applicants/${id}`;
+    membersStore.handle("PATCH", base, new URL("https://demo.local"), { interviewAt, expectedVersion: a.version });
+    membersStore.handle("POST", `${base}/stage`, new URL("https://demo.local"), { stage, expectedVersion: a.version + 1 });
+  };
+  const hrInterviewsStore = createHrInterviewsDemoStore({
+    listApplicants: async () => {
+      await hrInterviewFormStore.handle("GET", "/api/v1/members/hr/interview-form", new URL("https://demo.local"), undefined);
+      return hrApplicants();
+    },
+    confirmInterview: (id, at) => moveApplicant(id, "interview_set", at),
+    cancelInterview: (id) => moveApplicant(id, "scheduling", null),
+  });
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
   const chatStore = createChatStore({ addUsers: roster.addUsers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
@@ -6385,6 +6404,9 @@ export function createDemoFetch(): typeof fetch {
         return json(res);
       }
     }
+
+    const hrInterviewsHit = await hrInterviewsStore.handle(method, url.pathname, parsedBody);
+    if (hrInterviewsHit) return hrInterviewsHit;
 
     const hrFormHit = await hrInterviewFormStore.handle(method, url.pathname, url, parsedBody);
     if (hrFormHit) return hrFormHit;

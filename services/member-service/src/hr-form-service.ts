@@ -46,6 +46,8 @@ export class HrFormService {
   constructor(
     private readonly deps: HrFormDeps,
     private readonly hrSvc: HrService,
+    /** 回答が応募者に結ばれたあと (面談の案内メール)。失敗しても回答は受け付ける。 */
+    private readonly onApplied: (ctx: ReqCtx, applicantId: string) => Promise<void> = async () => {},
   ) {}
 
   async getForm(): Promise<hrForm.InterviewForm> {
@@ -137,6 +139,7 @@ export class HrFormService {
       createdAt: this.deps.now(),
     };
     await this.deps.hrFormRepo.addResponse({ ...response, orgId: this.deps.orgId, formKey: INTERVIEW_FORM_KEY });
+    await this.onApplied(ctx, applicantId);
     return { response, applicantId, deduped: existing !== null };
   }
 
