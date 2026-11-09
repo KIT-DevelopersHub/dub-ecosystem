@@ -181,7 +181,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 96-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 97-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +190,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(96);
+    expect(catalog).toHaveLength(97);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -832,5 +832,44 @@ describe("demo 代理表示 (admin impersonation twin)", () => {
       .catch((e: unknown) => e);
     expect((err as ApiError).status).toBe(403);
     expect((err as ApiError).details).toEqual({ reason: "self" });
+  });
+});
+
+describe("参加届からのアカウント発行 (人事・members:onboard_mail)", () => {
+  const as = async <T,>(account: string, fn: () => Promise<T>): Promise<T> => {
+    globalThis.localStorage.setItem("dub_demo_account", account);
+    try {
+      return await fn();
+    } finally {
+      globalThis.localStorage.removeItem("dub_demo_account");
+    }
+  };
+  const onboard = (a: ReturnType<typeof api>, body: unknown) =>
+    a.request<{ address: string; identityUserId: string; member: { identityUserId: string | null }; accountMail: { sent: boolean } }>({
+      method: "POST",
+      path: "/api/v1/admin/participation/part_seed_2/onboard-account",
+      body,
+    });
+
+  it("人事は identity:admin なしで発行でき、ロールは一般メンバー固定・既にアカウントがあれば 409", async () => {
+    await as("usr_hr", async () => {
+      const a = api();
+      const me = await a.auth.me();
+      expect(me.permissions).not.toContain("identity:admin");
+      await a.request({ method: "POST", path: "/api/v1/members/participation/part_seed_2/resolve", body: { action: "create" } });
+      const res = await onboard(a, { localPart: "minoru.tanaka", sendAccountMail: true, roleIds: ["role_sys_admin"] });
+      expect(res.address).toBe("minoru.tanaka@developershub.jp");
+      expect(res.member.identityUserId).toBe(res.identityUserId);
+      expect(res.accountMail.sent).toBe(true);
+      const again = await onboard(a, { localPart: "minoru.tanaka2" }).catch((e: unknown) => e);
+      expect(ApiError.isApiError(again) && again.status).toBe(409);
+    });
+  });
+
+  it("新しい鍵が無ければ 403", async () => {
+    await as("usr_hr_before", async () => {
+      const err = await onboard(api(), { localPart: "x" }).catch((e: unknown) => e);
+      expect(ApiError.isApiError(err) && err.status).toBe(403);
+    });
   });
 });

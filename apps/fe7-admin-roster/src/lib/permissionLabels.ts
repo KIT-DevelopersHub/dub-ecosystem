@@ -82,6 +82,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "members:roster_edit": { label: "運営名簿の編集", description: "本人の情報の編集やアカウントの紐付けができます。運営メンバーの編集範囲で設定します。" },
   "members:mail_view": { label: "メール名簿の閲覧", description: "メール名簿のタブを見られます。運営メンバーの閲覧範囲で設定します。" },
   "members:mail_edit": { label: "メール名簿の編集", description: "ロール管理の編集と「名簿・ロールの管理」も持つロールが、メール名簿を編集できます。運営メンバーの編集範囲で設定します。" },
+  "members:onboard_mail": { label: "参加届からのアカウント発行", description: "参加届の一覧で、まだアカウントの無い人に @developershub.jp のアドレスとログインアカウントを作り、運営メンバーに紐付けて、ログイン情報を Gmail に送れます。付くロールは一般メンバーと、名簿の所属チーム・役職から自動で付くロールだけです。既存のアカウントの変更やロールの付与はできません。" },
   "notif:inbox:self": { label: "自分の受信箱", description: "通知アプリを「閲覧」以上にすると自動で付きます。自分あての通知を受信箱で閲覧・既読管理できます。" },
   "notif:prefs:self": { label: "自分の通知設定", description: "通知アプリを「閲覧」以上にすると自動で付きます。自分の通知の受け取り方（設定）を確認・変更できます。" },
   "notif:send": { label: "通知の送信（未使用）", description: "現在この権限で使える機能はありません（通知の送信はサービス間でのみ行われます）。" },

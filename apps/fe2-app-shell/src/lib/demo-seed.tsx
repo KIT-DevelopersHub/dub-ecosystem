@@ -42,6 +42,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "members:roster_edit",
   "members:mail_view",
   "members:mail_edit",
+  // 参加届からのアカウント発行 (人事向け・アドレス + アカウント + 紐付け + 案内メールを 1 回で)。
+  "members:onboard_mail",
   // 代理表示 (admin impersonation): メール名簿の「このメンバーとして表示」。
   "identity:impersonate",
   "event:read",
@@ -860,6 +862,11 @@ const CHAT_CREATE_NONE_PERMISSIONS: identity.PermissionKey[] = CHAT_CREATE_PUBLI
 const MEMBERS_SCOPE_ORG_CHART_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:"));
 const MEMBERS_SCOPE_ROSTER_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:mail_"));
 
+// 人事: mail:admin + members:mail_edit はあるが、ロール管理の編集と identity:admin は無い。
+// ?demo_account=usr_hr で参加届からの発行が出ること、usr_hr_before (新しい鍵なし) で出ないことを見る。
+const HR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "identity:admin" && k !== "app:admin:edit");
+const HR_BEFORE_PERMISSIONS: identity.PermissionKey[] = HR_PERMISSIONS.filter((k) => k !== "members:onboard_mail");
+
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
   { id: "usr_bob", displayName: "佐藤 太郎", email: "taro@developershub.jp", permissions: CHAT_EDITOR_PERMISSIONS, inbox: B_INBOX.map((m) => ({ ...m })) },
@@ -870,6 +877,8 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: "usr_scope_roster", displayName: "範囲 メール名簿以外", email: "scope-roster@developershub.jp", permissions: MEMBERS_SCOPE_ROSTER_PERMISSIONS, inbox: [] },
   { id: "usr_chat_public", displayName: "作成 パブリックのみ", email: "chat-public@developershub.jp", permissions: CHAT_CREATE_PUBLIC_PERMISSIONS, inbox: [] },
   { id: "usr_chat_none", displayName: "作成 できない", email: "chat-none@developershub.jp", permissions: CHAT_CREATE_NONE_PERMISSIONS, inbox: [] },
+  { id: "usr_hr", displayName: "人事 担当", email: "hr@developershub.jp", permissions: HR_PERMISSIONS, inbox: [] },
+  { id: "usr_hr_before", displayName: "人事 (発行の鍵なし)", email: "hr-before@developershub.jp", permissions: HR_BEFORE_PERMISSIONS, inbox: [] },
   { id: "usr_lead", displayName: "統括 山本", email: "lead@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: LEAD_INBOX.map((m) => ({ ...m })), roleShareWith: ["usr_bob", "usr_sponsor"] },
 ];
 
@@ -2157,7 +2166,23 @@ function createRosterStore() {
     return users.find((u) => u.id === id);
   }
 
-  return { handle, addUsers, findUser };
+  /** 参加届からの発行 (gateway onboard-account の demo 版): アドレス + 招待中アカウント
+   *  (一般メンバー固定)。既にアドレス / アカウントがあれば何も作らず 409。 */
+  function onboard(localPart: string, displayName: string): { user: DemoRosterUser; address: string } | Response {
+    const address = `${localPart}@${EMAIL_DOMAIN}`;
+    if (users.some((u) => u.email === address)) return problem("GATEWAY_ONBOARD_EMAIL_EXISTS", `${address} のアカウントは既にあります`, 409);
+    if (emails.some((a) => a.localPart === localPart) || teamLists.some((l) => l.localPart === localPart)) {
+      return problem("MAIL_EMAIL_ROUTING_CONFLICT", "このアドレスは既に使われています", 409);
+    }
+    const memberRole = roles.find((r) => r.isSystem && r.name === "member");
+    emails.push({ id: rid("eml"), localPart, address, destination: MAIL_WORKER_DESTINATION, enabled: true, createdAt: isoNow() });
+    const user: DemoRosterUser = { id: rid("usr"), orgId: ORG, displayName, email: address, githubLogin: null, avatarUrl: null, status: "active", source: "manual", roleIds: memberRole ? [memberRole.id] : [], createdAt: isoNow(), updatedAt: isoNow() };
+    users.push(user);
+    audit("identity.user.invited", "user", user.id, { email: address, via: "participation-onboard" });
+    return { user, address };
+  }
+
+  return { handle, addUsers, findUser, onboard };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -4913,7 +4938,23 @@ function createMembersStore() {
     });
   }
 
-  return { handle, findByIdentity, selfEntry, listTeams: () => teams.map((t) => ({ id: t.id, name: t.name, color: t.color })) };
+  /** 参加届からの発行の対象: 参加届に紐付いた追加済の名簿行で、まだアカウントの無い人だけ。 */
+  function onboardTarget(participationId: string): { participation: any; member: DemoMember } | Response {
+    const p = participations.find((x) => x.id === participationId);
+    if (!p) return json({ error: { code: "MEMBER_PARTICIPATION_NOT_FOUND", message: "not found", retryable: false } }, 404);
+    const mem = p.reviewState === "added" ? members.find((m) => m.id === p.memberId) : undefined;
+    if (!mem) return json({ error: { code: "MEMBER_ONBOARD_NOT_ADDED", message: "参加届がまだ運営メンバーに追加されていません", retryable: false } }, 409);
+    if (mem.identityUserId) return json({ error: { code: "MEMBER_ONBOARD_ALREADY_HAS_ACCOUNT", message: "この人には既にアカウントがあります", retryable: false } }, 409);
+    return { participation: p, member: mem };
+  }
+  function linkOnboarded(mem: DemoMember, identityUserId: string): DemoMember {
+    mem.identityUserId = identityUserId;
+    mem.version += 1;
+    mem.updatedAt = isoNow();
+    return { ...mem, teamIds: [...mem.teamIds] };
+  }
+
+  return { handle, findByIdentity, selfEntry, onboardTarget, linkOnboarded, listTeams: () => teams.map((t) => ({ id: t.id, name: t.name, color: t.color })) };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -6385,6 +6426,33 @@ export function createDemoFetch(): typeof fetch {
 
     // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
     if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));
+
+    // 参加届からのアカウント発行 (gateway-owned・members:onboard_mail)。ロールは送らせず一般メンバー
+    // 固定・対象は参加届の「アカウントの無い人」だけ。案内メールは実際には送らない。
+    {
+      const ob = /^\/api\/v1\/admin\/participation\/([^/]+)\/onboard-account$/.exec(url.pathname);
+      if (ob && method === "POST") {
+        if (!currentAccount().permissions.includes("members:onboard_mail")) {
+          return problem("FORBIDDEN", "permission denied: members:onboard_mail", 403);
+        }
+        const req = (parsedBody ?? {}) as { localPart?: unknown; sendAccountMail?: unknown };
+        const localPart = typeof req.localPart === "string" ? req.localPart.trim().toLowerCase() : "";
+        if (!/^[a-z0-9._%+-]{1,64}$/.test(localPart)) {
+          return problem("VALIDATION_FAILED", "メールアドレスは半角英小文字・数字と . _ % + - で入力してください", 400, [{ field: "localPart", reason: "invalid" }]);
+        }
+        if (["info", "archive", "admin", "administrator", "root", "postmaster", "hostmaster", "webmaster", "abuse", "security", "noreply", "no-reply", "mailer-daemon", "support", "contact", "hello", "staff", "hr", "system"].includes(localPart)) {
+          return problem("VALIDATION_FAILED", `${localPart}@ は運営用のアドレスなので発行できません`, 400, [{ field: "localPart", reason: "reserved" }]);
+        }
+        const target = membersStore.onboardTarget(decodeURIComponent(ob[1]!));
+        if (target instanceof Response) return target;
+        const made = roster.onboard(localPart, target.participation.name);
+        if (made instanceof Response) return made;
+        const linked = membersStore.linkOnboarded(target.member, made.user.id);
+        const to = (linked.gmail ?? "").trim() || null;
+        const requested = req.sendAccountMail === true;
+        return json({ address: made.address, identityUserId: made.user.id, member: linked, accountMail: { requested, sent: requested && to !== null, to } }, 201);
+      }
+    }
 
     // アカウント発行メール (gateway-owned): member Gmail (to) + login (cc). Nothing is sent.
     {

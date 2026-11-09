@@ -154,6 +154,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.updateSelfParticipation(ctx, ctx.userId, body));
   });
 
+  // 参加届からのアカウント発行 (api-gateway onboard-account only)。対象 = 参加届に紐付いた
+  // 追加済の名簿行でアカウントがまだ無い人。呼び出し元の鍵は gateway の表が検査済み。
+  app.get("/members/internal/participation/:id/onboard-target", async (c) => {
+    return c.json(await svc.onboardTarget(c.req.param("id")));
+  });
+  app.post("/members/internal/participation/:id/onboard-link", async (c) => {
+    const body = await readJson<member.OnboardLinkRequest>(c);
+    return c.json(await svc.onboardLink(reqCtx(c), c.req.param("id"), body));
+  });
+
   // ---- overview (all three views) ----
   app.get("/members/overview", async (c) => {
     return c.json(await svc.getOverview(reqCtx(c)));

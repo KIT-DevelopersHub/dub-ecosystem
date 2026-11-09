@@ -171,7 +171,7 @@ const ADMIN = [
   "DELETE /mail/admin/lists/:id",
 ].sort();
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
-const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/status", "POST /internal/sponsor/contacts", "POST /internal/webhooks/resend", "POST /send"];
+const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/status", "POST /internal/email-routing/issued-addresses", "POST /internal/email-routing/issued-addresses/lookup", "POST /internal/email-routing/issued-addresses/revoke", "POST /internal/sponsor/contacts", "POST /internal/webhooks/resend", "POST /send"];
 // The one PUBLIC route, hence in EVERY row below including the empty-key one. Stated rather
 // than hidden: that is the fact a matrix is for.
 const PUBLIC_ROUTES = ["GET /internal/health"];
@@ -206,7 +206,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(59);
+    expect(everyRoute).toHaveLength(62);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing

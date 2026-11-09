@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (95 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (97 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -131,6 +131,7 @@ export const PERMISSION_CATALOG = [
   { key: "members:roster_edit", name: "Edit 運営名簿", description: "Edit members' personal details and link login accounts (implies view)", domain: "members", dangerous: false },
   { key: "members:mail_view", name: "View メール名簿", description: "Open the メール名簿 tab (implies 運営名簿 view)", domain: "members", dangerous: false },
   { key: "members:mail_edit", name: "Edit メール名簿", description: "Required to change accounts in the メール名簿 tab, on top of ロール管理 edit + identity:admin (implies view)", domain: "members", dangerous: false },
+  { key: "members:onboard_mail", name: "Issue accounts from 参加届", description: "From the 参加届 list, issue an @developershub.jp address and a login account for a person with no account yet (the server fixes the role to member; team/position roles then follow from the 名簿 as for any link), link it, and send the login info to their Gmail. Cannot change existing accounts or grant other roles", domain: "members", dangerous: true },
   { key: "goals:read", name: "Read team goals", description: "View every team's monthly goals, KPIs and progress", domain: "goals", dangerous: false },
   { key: "app:goals:view", name: "Open 目標管理 app", description: "Open and view the 目標管理 app", domain: "app", dangerous: false },
   { key: "app:goals:edit", name: "Edit in 目標管理 app", description: "Set and change team goals and KPIs (implies view)", domain: "app", dangerous: false },
@@ -139,7 +140,7 @@ export const PERMISSION_CATALOG = [
   { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "impersonation", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 96 keys (open `${string}:${string}` template retired).
+// Closed union of the 97 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

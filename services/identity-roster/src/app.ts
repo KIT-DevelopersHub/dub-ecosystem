@@ -214,6 +214,16 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.activateInvited(c.req.param("id"), orgId, body, ctxOf(c)));
   });
 
+  // 参加届からのアカウント発行 (api-gateway onboard-account only)。ロールは service が固定し、
+  // body の roleIds は読まない。取り消しは招待中・固定ロールのみのアカウントだけ (補償用)。
+  app.post("/internal/users/onboard", async (c) => {
+    const body = await readJson<{ email?: unknown; displayName?: unknown; furigana?: unknown }>(c);
+    return c.json(await svc.onboardInvite(orgId, body ?? {}, ctxOf(c)), 201);
+  });
+  app.post("/internal/users/:id/discard-onboard", async (c) => {
+    return c.json(await svc.discardOnboardInvite(c.req.param("id"), orgId, ctxOf(c)));
+  });
+
   // Identity master by id — internal S2S read for the gateway /me composition.
   // External clients reach the user via /identity/users/:id (auth'd); the gateway
   // 404s this bare path, and the INTERNAL rule is the second line of defence.
