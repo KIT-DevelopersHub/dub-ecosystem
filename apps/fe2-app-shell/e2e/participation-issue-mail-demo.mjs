@@ -4,6 +4,7 @@
 //   After : usr_hr は 追加する(新規) -> 発行ダイアログ (ローマ字案 / 一般メンバー固定 / Gmail に送る ON)
 //           -> 発行する -> 完了トースト -> 名簿の紐付けアカウントに発行アドレス
 //   link (招待中との結合) 後も聞かれ、「今はしない」で閉じられる。狭幅も撮る。
+// Home 導線: 人事 > 参加届の回答一覧 -> 追加 -> 発行 -> 運営メンバー > 名簿。
 // Usage: E2E_BASE=https://dub-demo-<slug>.developershub-site.workers.dev node e2e/participation-issue-mail-demo.mjs
 import { chromium } from "@playwright/test";
 import { mkdirSync } from "node:fs";
@@ -21,9 +22,8 @@ const ok = (m) => console.log(`  ok: ${m}`);
 const fail = (m) => { throw new Error(m); };
 
 async function openList(page, account) {
-  await page.goto(`${BASE}/?demo_account=${account}`, { waitUntil: "networkidle" });
-  await page.locator('a[href="/members"]').first().click();
-  await page.getByTestId("member-roster-subnav-tab-participation-list").click();
+  // 回答一覧は 人事 > 参加届の回答一覧 (/participation/list)。
+  await page.goto(`${BASE}/participation/list?demo_account=${account}`, { waitUntil: "networkidle" });
   const table = page.getByTestId("participation-list-table");
   await table.waitFor({ timeout: 20000 });
   return table;
@@ -89,7 +89,11 @@ try {
   ok("link 後も発行を聞かれる; 今はしない で閉じる");
 
   // 名簿で 田中 実 が発行アドレスのアカウントに紐付いている
-  await page.getByTestId("member-roster-subnav-tab-member-roster").click();
+  // SPA 内で移動する (再読み込みすると demo の状態が初期化される)。
+  await page.evaluate(() => {
+    history.pushState({}, "", "/members/roster");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
   const members = page.getByTestId("members-table");
   await members.waitFor({ timeout: 20000 });
   const row = members.getByRole("row").filter({ hasText: "田中 実" });
