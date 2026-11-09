@@ -21,9 +21,10 @@ function excerpt(message: string): string {
   return oneLine.length > FEEDBACK_EXCERPT_LEN ? `${oneLine.slice(0, FEEDBACK_EXCERPT_LEN)}…` : oneLine;
 }
 
-/** Admin-facing label: "フィードバック" for the original flow, else "問い合わせ（<種別>）". */
+/** Admin-facing label: "フィードバック" / "権限の申請" as-is, else "問い合わせ（<種別>）". */
 export function inquiryHeading(item: Pick<notification.FeedbackItem, "kind">): string {
-  return item.kind === "feedback" ? "フィードバック" : `問い合わせ（${INQUIRY_KIND_LABELS[item.kind] ?? item.kind}）`;
+  if (item.kind === "feedback" || item.kind === "permission_request") return INQUIRY_KIND_LABELS[item.kind];
+  return `問い合わせ（${INQUIRY_KIND_LABELS[item.kind] ?? item.kind}）`;
 }
 
 /** 種別 + (feedback only) カテゴリ lines shared by the email and in-app bodies. */

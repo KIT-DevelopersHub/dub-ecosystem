@@ -181,7 +181,8 @@ export function MemberRosterPage(): JSX.Element {
       <AppReadOnlyNotice appId="members" testId="member-roster-readonly-notice" />
       {canEditApp && !canEdit ? (
         <ScopeReadOnlyNotice
-          message="運営名簿は閲覧のみです。編集できる範囲を広げるには管理者に依頼してください。"
+          appId="members"
+          message="運営名簿は閲覧のみのため、編集できません（編集範囲の外です）。"
           testId="member-roster-scope-notice"
         />
       ) : null}
