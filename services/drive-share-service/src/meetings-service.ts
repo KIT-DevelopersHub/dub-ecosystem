@@ -1,10 +1,13 @@
 // カレンダー > ミーティング. Meetings are events on the shared Google account connected in Drive共有 >
 // 設定. Each target (a role, or "all" = every active member) owns ONE secondary calendar on that
 // account (created lazily, named after the role / 全体); every meeting is an event on its target's
-// calendar with a Meet link and the target's members as attendees. Every target calendar is shared
-// read-only with every active member so anyone can show it in their own Google Calendar.
+// calendar with a Meet link and the target's members as attendees. A target calendar is shared
+// read-only with that target's members only (the 全体 one with every active member), so each member
+// gets the "add this calendar" mail just for their own roles.
 //
-// Invite address per member: 名簿 Gmail if present, else the Dub login address.
+// Invite / share address per member: the 名簿 Gmail. A member without one (hasGoogle false) and the
+// shared group / bot addresses (NON_PERSONAL_LOCAL_PARTS) are left out of both: they have no Google
+// account, and mailing them only bounced.
 // Reconcile (POST /meetings/sync and the hourly MeetingSyncDO alarm) keeps attendees and calendar
 // shares in step with role membership, removing ONLY what we added (the invite / ACL ledgers) —
 // never a guest or share someone added by hand in Google Calendar.
@@ -30,7 +33,7 @@
 // Calendar counts: Meet REST (openMeet, the ingest) and Drive have quotas of their own, keep
 // running, and a limit on them pauses nothing. A limit hit while sharing the calendars pauses only
 // the shares (aclWritesNotBefore): attendees — the invites of members who just joined a role — keep
-// their hourly turn. Sharing ~60 members on every target calendar is what keeps running into it.
+// their hourly turn. Sharing ~60 members on every target calendar is what kept running into it.
 //
 // To stay under those limits the sync spends little: a calendar whose share list has not changed
 // costs no listAcl (one full check a day still catches changes made in Google), a share that failed
@@ -68,6 +71,9 @@ export const ACL_WRITES_PER_RUN = 10;
 export const ACL_WRITE_INTERVAL_MS = 15 * 60 * 1000;
 /** A meeting stays in the sync this long after it ended, so edits made in Google still arrive. */
 export const ENDED_SYNC_GRACE_MS = 24 * 60 * 60 * 1000;
+/** Org-domain mailboxes that are routing aliases / bots, not a person's Google account. */
+const ORG_MAIL_DOMAIN = "developershub.jp";
+const NON_PERSONAL_LOCAL_PARTS = new Set(["member", "maintainer", "commander-bot"]);
 const NO_CALENDAR_SCOPE =
   "Google アカウントにカレンダーの権限がありません。Drive共有 > 設定 で同じアカウントを「再接続」してください。";
 
@@ -350,8 +356,17 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
    *  one kept must belong to the target, or the sync would uninvite the address. */
   const uniqueEmails = (list: Invitee[]) => [...new Map([...list].reverse().map((i) => [i.email, i])).values()].reverse();
 
-  const forTarget = (all: Invitee[], targetId: string) =>
-    uniqueEmails(targetId === meeting.ALL_MEMBERS_TARGET_ID ? all : all.filter((i) => i.roleIds.includes(targetId)));
+  /** Has a Google account to receive the invite / share (see the header). */
+  const reachable = (i: Invitee) => {
+    if (!i.hasGoogle) return false;
+    const [local, domain] = i.email.split("@");
+    return !(domain === ORG_MAIL_DOMAIN && NON_PERSONAL_LOCAL_PARTS.has(local ?? ""));
+  };
+
+  const membersOf = (all: Invitee[], targetId: string) =>
+    targetId === meeting.ALL_MEMBERS_TARGET_ID ? all : all.filter((i) => i.roleIds.includes(targetId));
+
+  const forTarget = (all: Invitee[], targetId: string) => uniqueEmails(membersOf(all, targetId).filter(reachable));
 
   const inviteesOf = async (targetId: string) =>
     forTarget(await invitees(targetId === meeting.ALL_MEMBERS_TARGET_ID ? undefined : targetId), targetId);
@@ -538,11 +553,11 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
   /** The share step of the sync. Returns ms until a continuation is due, null = nothing left. What
    *  was learned is saved even when a limit ends the step midway. */
-  async function syncShares(cal: CalendarClient, account: MeetingAccount, desired: Set<string>, state: MeetingSyncSnapshot): Promise<number | null> {
+  async function syncShares(cal: CalendarClient, account: MeetingAccount, all: Invitee[], state: MeetingSyncSnapshot): Promise<number | null> {
     const nowMs = Date.parse(deps.now());
     if (state.aclWritesNotBefore > nowMs) return state.aclWritesNotBefore - nowMs;
     // Same reading as the attendees' empty target: a glitch, never a reason to unshare everyone.
-    if (desired.size === 0) {
+    if (all.length === 0) {
       log("meeting_sync_empty_members_skipped", {});
       return null;
     }
@@ -554,7 +569,14 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       for (const c of await store.listCalendars(orgId, account.accountId)) {
         const st: CalendarAclState = { fingerprint: null, checkedAt: 0, ...state.acl[c.calendarId], retryAt: { ...state.acl[c.calendarId]?.retryAt } };
         const before = JSON.stringify(st);
+        const desired = new Set(forTarget(all, c.targetId).map((i) => i.email));
         try {
+          // A role with no members at all keeps its shares, as its meetings keep their attendees:
+          // likelier a glitch than a role emptied on purpose.
+          if (membersOf(all, c.targetId).length === 0) {
+            log("meeting_calendar_empty_target_skipped", { calendarId: c.calendarId, targetId: c.targetId });
+            continue;
+          }
           await reconcileAcl(cal, c.calendarId, desired, owner, st, pace, nowMs);
         } catch (err) {
           if (err instanceof BudgetExhausted) {
@@ -809,7 +831,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         }
 
         if (out.complete) {
-          const continueMs = await syncShares(cal, account, new Set(all.map((i) => i.email)), state);
+          const continueMs = await syncShares(cal, account, all, state);
           if (continueMs !== null) out.aclContinueMs = continueMs;
         }
       } catch (err) {

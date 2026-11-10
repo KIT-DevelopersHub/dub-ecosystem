@@ -158,7 +158,7 @@ export function useMeetingMutations(targets: readonly meeting.MeetingTarget[]): 
         toast.show({
           kind: "warning",
           title: "Gmail 未登録のメンバーがいます",
-          description: `Gmail 未登録のため Dub アドレスで招待: ${r.withoutGoogleAccount.map((x) => x.name).join("、")}`,
+          description: `Gmail 未登録のため招待・カレンダー共有していません: ${r.withoutGoogleAccount.map((x) => x.name).join("、")}`,
           durationMs: 10_000,
         });
       }
