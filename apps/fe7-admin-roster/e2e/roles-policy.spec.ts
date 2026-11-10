@@ -66,3 +66,45 @@ test("ロール管理: アプリのアクセス権が軸、アプリ内の話は
   await expect(page.getByTestId("fe7-role-role_admin-other-granted-infra")).toHaveText("1 / 4");
   await expect(page.getByTestId("fe7-role-role_admin-save")).toBeEnabled();
 });
+
+test("ロール管理: 保存すると離脱確認が残らず、アプリに必須の権限は固定で見える", async ({ page }) => {
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.type());
+    void d.accept();
+  });
+  const leavePrompted = () =>
+    page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+
+  await page.goto("/");
+  await page.getByTestId("fe7-nav-shield").click();
+  await page.getByTestId("fe7-roles-open-role_organizer").click();
+  const ns = "fe7-role-role_organizer";
+
+  // LP管理 を有効にすると、必須の infra:read は ON の固定表示になる
+  await page.getByTestId(`${ns}-app-level-lp-view`).click();
+  await page.getByTestId(`${ns}-other-name-infra`).click();
+  const other = page.getByTestId(`${ns}-other-dialog`);
+  await expect(other.getByTestId(`${ns}-other-toggle-infra:read`)).toBeChecked();
+  await expect(other.getByTestId(`${ns}-other-toggle-infra:read`)).toBeDisabled();
+  await expect(other.getByTestId(`${ns}-other-required-infra:read`)).toHaveText("LP管理に必要");
+
+  // 「その他」の変更が保存でき、保存後は離脱確認が出ない
+  await other.locator(`label[for="${ns}-other-infra:deploy"]`).click();
+  await other.screenshot({ path: "e2e/.output/13-roles-required-key.png" });
+  await other.getByTestId(`${ns}-other-dialog-close`).click();
+  expect(await leavePrompted()).toBe(true);
+
+  await page.getByTestId(`${ns}-save`).click();
+  await page.getByTestId(`${ns}-save-confirm`).getByRole("button", { name: "確認" }).click();
+  await expect(page.getByText("ロールを保存しました")).toBeVisible();
+  await expect(page.getByText("変更はありません")).toHaveCount(0);
+  await expect.poll(leavePrompted).toBe(false);
+
+  await page.reload();
+  expect(dialogs).toEqual([]);
+});

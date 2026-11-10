@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "99bc44cd",
-  "branch": "commander/task-ctask_01M6RBR2HBF86HD9PM7MF6JTVG",
+  "deployedSha": "11dbfb06",
+  "branch": "commander/task-ctask_01M6RYG5MFPYN96W9FB3M87C4T",
   "actor": "ko-tarou",
-  "markers": ["メール名簿以外", "members-scope-edit-locked", "member-roster-scope-notice"],
+  "markers": ["-required-"],
   "live": true,
-  "verifiedAt": "2026-11-06T12:41:50Z",
-  "updatedAt": "2026-11-06T12:41:50Z",
-  "note": "ctask_01M6RBR2HBF86HD9PM7MF6JTVG 運営メンバーの範囲"
+  "verifiedAt": "2026-11-06T17:57:03Z",
+  "updatedAt": "2026-11-06T17:57:03Z",
+  "note": "role save fix"
 }

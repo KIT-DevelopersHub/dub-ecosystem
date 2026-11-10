@@ -6,6 +6,8 @@ export const eventKeys = {
   all: ["events"] as const,
   lists: () => [...eventKeys.all, "list"] as const,
   list: (query: Partial<event.ListEventsQuery>) => [...eventKeys.lists(), query] as const,
+  // Separate slot: infinite pages have a different cache shape than list().
+  listInfinite: (query: Partial<event.ListEventsQuery>) => [...eventKeys.lists(), "infinite", query] as const,
   details: () => [...eventKeys.all, "detail"] as const,
   detail: (eventId: common.EventId) => [...eventKeys.details(), eventId] as const,
   eventDetails: (eventId: common.EventId) => [...eventKeys.detail(eventId), "eventDetails"] as const,

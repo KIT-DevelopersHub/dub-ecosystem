@@ -1,5 +1,5 @@
 // TanStack Query read hooks. All keys start with "events" (queryKeys.ts).
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { common, event, identity } from "@dub/types";
 import { useEventApi } from "../context/ApiContext";
 import { eventKeys } from "../lib/queryKeys";
@@ -13,6 +13,17 @@ export function useEventsQuery(query: event.ListEventsQuery) {
   return useQuery<event.ListEventsResponse>({
     queryKey: eventKeys.list(query),
     queryFn: () => api.listEvents(query),
+  });
+}
+
+// Cursor-paged list for LoadMore. A new filter is a new key, so pages reset.
+export function useEventsInfiniteQuery(query: Omit<event.ListEventsQuery, "cursor">) {
+  const api = useEventApi();
+  return useInfiniteQuery({
+    queryKey: eventKeys.listInfinite(query),
+    queryFn: ({ pageParam }) => api.listEvents({ ...query, ...(pageParam ? { cursor: pageParam } : {}) }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
   });
 }
 

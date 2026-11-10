@@ -311,7 +311,11 @@ export function useUpdateRole(roleId: common.RoleId) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (req: UpdateRoleRequest) => api.updateRole(roleId, req),
-    onSuccess: () => {
+    onSuccess: (updated) => {
+      // 再取得を待たずに保存結果を反映し、保存直後に未保存扱いのまま離脱ガードが出ないようにする。
+      qc.setQueryData<common.Paginated<RoleView>>(queryKeys.roles(), (list) =>
+        list && { ...list, items: list.items.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)) },
+      );
       qc.invalidateQueries({ queryKey: queryKeys.roles() });
       qc.invalidateQueries({ queryKey: queryKeys.role(roleId) });
     },
