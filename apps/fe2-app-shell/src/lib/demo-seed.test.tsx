@@ -145,6 +145,17 @@ describe("calendar meetings (カレンダー > ミーティング)", () => {
     expect(targets.items.filter((t) => t.isMine).map((t) => t.id)).toEqual(["all", "role_lead"]);
   });
 
+  it("serves each meeting's invitees with Google-style answers (a guest on the kickoff)", async () => {
+    const a = api();
+    type Res = { items: { userId: string | null; name: string; response: string }[]; responsesAvailable: boolean };
+    const all = await a.request<Res>({ method: "GET", path: "/api/v1/meetings/mtg_all/attendees", query: { date: "2026-11-09" } });
+    expect(all.responsesAvailable).toBe(true);
+    expect(all.items).toHaveLength(7);
+    expect(new Set(all.items.map((i) => i.response)).size).toBeGreaterThan(1);
+    const kickoff = await a.request<Res>({ method: "GET", path: "/api/v1/meetings/mtg_kickoff/attendees" });
+    expect(kickoff.items.find((i) => i.userId === null)?.name).toBe("協賛企業 ご担当者");
+  });
+
   it("create → patch → delete round-trips in the session, with a fake Meet link", async () => {
     const a = api();
     const created = await a.request<Meeting>({

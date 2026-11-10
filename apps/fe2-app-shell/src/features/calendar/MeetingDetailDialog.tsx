@@ -1,9 +1,10 @@
-// Meeting detail shown when a meeting chip is clicked: when / who / Meet link, plus
-// edit + delete (with confirmation) for meetings_edit holders.
+// Meeting detail shown when a meeting chip is clicked: when / who (with Google Calendar answers) /
+// Meet link, plus edit + delete (with confirmation) for meetings_edit holders.
 import { useState } from "react";
 import { Button, ConfirmDialog, Modal } from "@dub/ui";
 import type { meeting } from "@dub/types";
 import { formatOccurrence, jstParts, recurrenceLabel } from "./meeting-occurrences";
+import { MeetingAttendees } from "./MeetingAttendees.tsx";
 
 const row = { display: "flex", gap: "var(--dub-space-4)", padding: "var(--dub-space-2) 0", alignItems: "baseline" } as const;
 const label = { color: "var(--dub-color-text-muted)", minWidth: "5.5rem", fontSize: "var(--dub-font-size-sm)" } as const;
@@ -81,10 +82,6 @@ export function MeetingDetailDialog({
             <span style={label}>対象</span>
             <span style={value} data-testid={`${tid}-target`}>{m.targetName}</span>
           </div>
-          <div style={row}>
-            <span style={label}>招待</span>
-            <span style={value} data-testid={`${tid}-attendees`}>{pending ? "作成中…" : `${m.attendeeCount}人`}</span>
-          </div>
           {m.trackAttendance ? (
             <div style={row}>
               <span style={label}>出席</span>
@@ -93,6 +90,15 @@ export function MeetingDetailDialog({
               </span>
             </div>
           ) : null}
+          {pending ? (
+            <div style={row}>
+              <span style={label}>参加者</span>
+              <span style={value} data-testid={`${tid}-attendees`}>作成中…</span>
+            </div>
+          ) : (
+            // This occurrence's answers (they can differ per occurrence of a series).
+            <MeetingAttendees meetingId={m.id} date={m.recurrence === "none" ? undefined : jstParts(occurrence.startsAt)?.date} />
+          )}
           {m.description ? (
             <div style={{ ...row, flexDirection: "column", gap: "var(--dub-space-1)" }}>
               <span style={label}>メモ</span>
