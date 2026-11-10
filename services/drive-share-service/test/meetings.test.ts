@@ -153,26 +153,27 @@ describe("create", () => {
     expect(open).toHaveBeenCalledWith(m.meetUrl);
   });
 
-  it("creates the target calendar lazily, invites members at 名簿 Gmail else Dub address; the kicked sync shares it with everyone", async () => {
+  it("creates the target calendar lazily, invites members at their 名簿 Gmail; the kicked sync shares it with the role", async () => {
     const { service, store, calendar, kicks } = buildMeetings({ roster: roster(), directory: GMAIL });
     const m = await service.create("usr_admin", BASE);
-    expect(m).toMatchObject({ title: "開発定例", targetId: "role_dev", targetName: "開発", attendeeCount: 2, recurrence: "weekly" });
+    // usr_b has no 名簿 Gmail: no Google account to invite
+    expect(m).toMatchObject({ title: "開発定例", targetId: "role_dev", targetName: "開発", attendeeCount: 1, recurrence: "weekly" });
     expect(m.meetUrl).toMatch(/^https:\/\/meet\.google\.com\//);
 
     const mock = calendar as ReturnType<typeof createMockCalendarClient>;
     const [calId, cal] = [...mock.state.calendars.entries()][0]!;
     expect(cal.summary).toBe("開発");
     const ev = [...cal.events.values()][0]!;
-    expect(ev.attendees.map((a) => a.email).sort()).toEqual(["a.gmail@gmail.com", "b@dub.example"]);
+    expect(ev.attendees.map((a) => a.email).sort()).toEqual(["a.gmail@gmail.com"]);
     expect(ev.recurrence).toEqual(["RRULE:FREQ=WEEKLY"]);
     expect(ev.timeZone).toBe("Asia/Tokyo");
     // sharing is one Google call per member: not in the request (gateway 15 s), the kicked sync does it
     expect(cal.acl.filter((r) => r.role === "reader")).toEqual([]);
     expect(kicks).toEqual([60_000]);
     await service.sync();
-    // shared read-only with every active member (not only the role)
-    expect(cal.acl.filter((r) => r.role === "reader").map((r) => r.email).sort()).toEqual(["a.gmail@gmail.com", "b@dub.example", "c@dub.example"]);
-    expect((await store.listAcl("org_devhub", calId)).length).toBe(3);
+    // shared read-only with the role's members only
+    expect(cal.acl.filter((r) => r.role === "reader").map((r) => r.email).sort()).toEqual(["a.gmail@gmail.com"]);
+    expect((await store.listAcl("org_devhub", calId)).length).toBe(1);
 
     // a second meeting for the same target reuses the calendar
     await service.create("usr_admin", { ...BASE, title: "別の会" });
@@ -223,7 +224,7 @@ describe("create", () => {
       recurrence: ["RRULE:FREQ=WEEKLY;UNTIL=20270331T145959Z"],
       conferenceData: { createRequest: { requestId: "req-fixed", conferenceSolutionKey: { type: "hangoutsMeet" } } },
     });
-    expect(insert.body.attendees.map((a: { email: string }) => a.email).sort()).toEqual(["a.gmail@gmail.com", "b@dub.example"]);
+    expect(insert.body.attendees.map((a: { email: string }) => a.email).sort()).toEqual(["a.gmail@gmail.com"]);
     const created = calls.find((c) => new URL(c.url).pathname.endsWith("/calendars"))!;
     expect(created.body).toEqual({ summary: "開発", timeZone: "Asia/Tokyo" });
   });
@@ -326,6 +327,8 @@ describe("update / delete", () => {
 
 describe("attendees (参加メンバーと出欠)", () => {
   type MockCal = ReturnType<typeof createMockCalendarClient>;
+  // usr_b's Gmail is their Dub address here: members without one are not invited at all.
+  const GMAIL = staticMemberDirectory({ usr_a: { gmail: "a.gmail@gmail.com", name: "A" }, usr_b: { gmail: "b@dub.example", name: "B" } });
   const eventOf = (calendar: unknown) => [...[...(calendar as MockCal).state.calendars.values()][0]!.events.values()][0]!;
 
   it("lists invitees by name with Google's answers; hand-added guests by address; the shared account itself is left out", async () => {
@@ -411,7 +414,7 @@ describe("reconcile (sync)", () => {
     ];
     const r = await service.sync();
     expect(r).toMatchObject({ meetings: 1, invitedAdded: 1, invitedRemoved: 1, complete: true });
-    expect(r.withoutGoogleAccount.map((w) => w.userId).sort()).toEqual(["usr_b", "usr_c"]);
+    expect(r.withoutGoogleAccount).toEqual([]);
 
     const after = [...cal.events.values()][0]!;
     expect(after.attendees.map((a) => a.email).sort()).toEqual(["b@dub.example", "c@dub.example", "guest@example.com"]);
@@ -480,7 +483,66 @@ describe("reconcile (sync)", () => {
     await service.create("usr_admin", BASE);
     await service.sync();
     const cal = [...base.state.calendars.values()][0]!;
-    expect(cal.acl.filter((r) => r.role === "reader").map((r) => r.email).sort()).toEqual(["b@dub.example", "c@dub.example"]);
+    expect(cal.acl.filter((r) => r.role === "reader").map((r) => r.email).sort()).toEqual(["b@dub.example"]);
+  });
+});
+
+describe("calendar shares follow the target", () => {
+  const readers = (cal: { acl: { role: string; email: string | null }[] }) => cal.acl.filter((r) => r.role === "reader").map((r) => r.email).sort();
+
+  async function setup(directory = staticMemberDirectory({
+    usr_a: { gmail: "a@gmail.com", name: "A" },
+    usr_b: { gmail: "b@gmail.com", name: "B" },
+    usr_c: { gmail: "c@gmail.com", name: "C" },
+  })) {
+    const people = { users: USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] })) };
+    const dynamicRoster = { ...roster(), listActiveUsers: async (roleId?: string) => people.users.filter((u) => !roleId || u.roleIds.includes(roleId)) };
+    const built = buildMeetings({ roster: dynamicRoster, directory });
+    const mock = built.calendar as ReturnType<typeof createMockCalendarClient>;
+    await built.service.create("usr_admin", BASE);
+    await built.service.create("usr_admin", { ...BASE, targetId: "role_pr" });
+    await built.service.create("usr_admin", { ...BASE, targetId: meeting.ALL_MEMBERS_TARGET_ID });
+    const bySummary = () => new Map([...mock.state.calendars.entries()].map(([id, c]) => [c.summary, { id, ...c }]));
+    return { ...built, people, bySummary };
+  }
+
+  it("a role calendar is shared with that role's members only, 全体 with everyone", async () => {
+    const { service, bySummary } = await setup();
+    await service.sync();
+    const cals = bySummary();
+    expect(readers(cals.get("開発")!)).toEqual(["a@gmail.com", "b@gmail.com"]);
+    expect(readers(cals.get("広報")!)).toEqual(["b@gmail.com", "c@gmail.com"]);
+    expect(readers(cals.get("全体")!)).toEqual(["a@gmail.com", "b@gmail.com", "c@gmail.com"]);
+  });
+
+  it("a member who leaves a role loses that calendar's share only (removal through the ledger)", async () => {
+    const { service, bySummary, people, store, calendar } = await setup();
+    await service.sync();
+    people.users.find((u) => u.id === "usr_b")!.roleIds = ["role_pr"]; // leaves 開発
+    const del = vi.spyOn(calendar, "deleteAcl");
+    await service.sync();
+    const cals = bySummary();
+    expect(readers(cals.get("開発")!)).toEqual(["a@gmail.com"]);
+    expect((await store.listAcl("org_devhub", cals.get("開発")!.id)).map((r) => r.email)).toEqual(["a@gmail.com"]);
+    expect(readers(cals.get("広報")!)).toEqual(["b@gmail.com", "c@gmail.com"]);
+    expect(readers(cals.get("全体")!)).toEqual(["a@gmail.com", "b@gmail.com", "c@gmail.com"]);
+    expect(del).toHaveBeenCalledTimes(1);
+  });
+
+  it("an address without a Google account (no 名簿 Gmail, or a group / bot address) gets no share and no invite", async () => {
+    const directory = staticMemberDirectory({
+      usr_a: { gmail: "a@gmail.com", name: "A" },
+      usr_b: { gmail: "member@developershub.jp", name: "B" },
+      // usr_c: no 名簿 Gmail
+    });
+    const { service, bySummary } = await setup(directory);
+    const r = await service.sync();
+    expect(r.withoutGoogleAccount.map((w) => w.userId)).toEqual(["usr_c"]);
+    for (const cal of bySummary().values()) {
+      expect(readers(cal).every((e) => e === "a@gmail.com")).toBe(true);
+      for (const ev of cal.events.values()) expect(ev.attendees.map((a) => a.email).every((e) => e === "a@gmail.com")).toBe(true);
+    }
+    expect(readers(bySummary().get("全体")!)).toEqual(["a@gmail.com"]);
   });
 });
 

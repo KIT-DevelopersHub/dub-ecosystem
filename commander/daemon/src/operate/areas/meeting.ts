@@ -133,7 +133,7 @@ export const MEETING: AreaSpec = {
       reversible: false,
       risk: "high",
       description: "ミーティングの招待を今のロールの所属メンバーに合わせ直す",
-      hint: "新しく所属した人を招待し、抜けた人からは Dub が付けた招待だけを外す（手で追加したゲストは残る）。1時間ごとに自動でも走る。応答 invitedAdded・invitedRemoved・withoutGoogleAccount[]（名簿に Gmail が無く Dub のアドレスで招待した人）",
+      hint: "新しく所属した人を招待し、抜けた人からは Dub が付けた招待だけを外す（手で追加したゲストは残る）。1時間ごとに自動でも走る。応答 invitedAdded・invitedRemoved・withoutGoogleAccount[]（名簿に Gmail が無く招待・カレンダー共有していない人）",
       impact: `{count}回の同期で、新しく所属した人が招待され、抜けた人は招待から外れます。${MAIL_NOTE}`,
       unverifiable: "同期は招待の差分を合わせる操作で、結果は応答の件数でしか分からない（一覧には同期の状態が出ない）",
     },
