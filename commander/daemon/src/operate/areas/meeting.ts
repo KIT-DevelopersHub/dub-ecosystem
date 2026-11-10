@@ -30,6 +30,15 @@ export const MEETING: AreaSpec = {
       description: "ミーティングの対象（ロールと全体）を取得する",
       hint: "items[].id（ロール id、全体は \"all\"）・name・memberCount。meetings.create の targetId はここから選ぶ",
     }),
+    read({
+      id: "meetings.attendees",
+      area: "meeting",
+      path: "/meetings/:id/attendees",
+      service: SHARE,
+      requires: VIEW,
+      description: "ミーティングの参加者と出欠の返事を取得する",
+      hint: "params.id は meetings.list の items[].id。query.date（YYYY-MM-DD・日本時間、任意）で繰り返しの1回分を指定、無ければシリーズ全体。items[].userId（手で追加したゲストは null）・name・email（ゲストのみ）・response(accepted|declined|tentative|needsAction)・comment。responsesAvailable=false なら Google を読めず返事は全員 needsAction",
+    }),
     {
       id: "meetings.create",
       area: "meeting",

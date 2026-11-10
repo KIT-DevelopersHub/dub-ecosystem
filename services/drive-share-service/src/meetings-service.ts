@@ -33,7 +33,7 @@
 // Calendar counts: Meet REST (openMeet, the ingest) and Drive have quotas of their own, keep
 // running, and a limit on them pauses nothing. A limit hit while sharing the calendars pauses only
 // the shares (aclWritesNotBefore): attendees — the invites of members who just joined a role — keep
-// their hourly turn. Sharing ~60 members on every target calendar is what kept running into it.
+// their hourly turn. Sharing ~60 members on every target calendar is what keeps running into it.
 //
 // To stay under those limits the sync spends little: a calendar whose share list has not changed
 // costs no listAcl (one full check a day still catches changes made in Google), a share that failed
@@ -130,6 +130,8 @@ export interface MeetingsService {
   create(userId: string, body: unknown): Promise<meeting.Meeting>;
   update(id: string, body: unknown, userId?: string): Promise<meeting.Meeting>;
   remove(id: string): Promise<void>;
+  /** Invitees and their answers in Google Calendar; `date` (JST) = one occurrence of a series. */
+  attendees(id: string, date?: string): Promise<meeting.ListMeetingAttendeesResponse>;
   /** opts.system = the alarm: a not-ready account is skipped instead of a 409.
    *  opts.aclOnly = a paced continuation: only the calendar shares. */
   sync(opts?: { system?: boolean; aclOnly?: boolean }): Promise<SyncResult>;
@@ -179,6 +181,15 @@ function budgeted(client: CalendarClient, limit: number, deadline = Infinity): C
 }
 
 const lower = (e: string) => e.trim().toLowerCase();
+
+const RESPONSE_ORDER: readonly meeting.MeetingResponseStatus[] = ["accepted", "tentative", "declined", "needsAction"];
+const responseOf = (v: unknown): meeting.MeetingResponseStatus =>
+  RESPONSE_ORDER.includes(v as meeting.MeetingResponseStatus) ? (v as meeting.MeetingResponseStatus) : "needsAction";
+
+/** Google's id of one occurrence of a recurring event: `<eventId>_<UTC start, basic format>`. */
+export function instanceIdFor(eventId: string, startsAt: string): string {
+  return `${eventId}_${new Date(startsAt).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`;
+}
 
 /** The Google event id of a meeting: base32hex ("a"–"v", digits) as Google requires, unique per meeting. */
 export function eventIdFor(meetingId: string): string {
@@ -781,6 +792,60 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         log("meeting_delete_other_account", { meetingId: id, accountId: row.accountId });
       }
       await store.deleteMeeting(id);
+    },
+
+    async attendees(id, date) {
+      if (date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        throw errors.validationFailed([{ field: "date", reason: "invalid" }], "日付の形式が正しくありません。");
+      }
+      const row = await store.getMeeting(orgId, id);
+      if (!row) throw errors.notFound("meeting", id);
+      const [ledger, users] = await Promise.all([store.listInvites(row.id), deps.roster.listActiveUsers()]);
+      const nameOf = new Map(users.map((u) => [u.id, u.name]));
+      const byEmail = new Map(ledger.map((r) => [r.email, r]));
+
+      // Read-only and best-effort: answers are a nicety, the invitee list must still show.
+      let ev: CalendarEvent | null = null;
+      let available = false;
+      try {
+        const [account, state] = await Promise.all([deps.account(), syncState.load()]);
+        const paused = state.pausedUntil !== null && state.pausedUntil > Date.parse(deps.now());
+        if (account.calendarReady && account.accountId === row.accountId && !paused && row.syncedAt !== null) {
+          const cal = budgeted(account.calendar, 2);
+          const occ = date && row.recurrence !== "none" ? meeting.occurrenceStarts(row, date, date)[0] : undefined;
+          if (occ) ev = await cal.getEvent(row.calendarId, instanceIdFor(row.googleEventId, occ.startsAt));
+          ev ??= await cal.getEvent(row.calendarId, row.googleEventId);
+          available = ev !== null;
+        }
+      } catch (err) {
+        if (isCalendarQuota(err)) await pauseSync(err);
+        log("meeting_attendees_read_failed", { meetingId: id, message: err instanceof Error ? err.message : String(err) });
+      }
+
+      const items: meeting.MeetingAttendee[] = [];
+      const seen = new Set<string>();
+      for (const a of ev?.attendees ?? []) {
+        // The shared account itself (organizer) and rooms are not people invited.
+        if (a.self === true || a.resource === true) continue;
+        const email = lower(a.email);
+        if (seen.has(email)) continue;
+        seen.add(email);
+        const inv = byEmail.get(email);
+        const comment = typeof a.comment === "string" && a.comment.trim() ? a.comment.trim() : null;
+        const displayName = typeof a.displayName === "string" && a.displayName.trim() ? a.displayName.trim() : null;
+        items.push(
+          inv?.userId
+            ? { userId: inv.userId as meeting.MeetingAttendee["userId"], name: nameOf.get(inv.userId) ?? displayName ?? email, email: null, response: responseOf(a.responseStatus), comment }
+            : { userId: null, name: displayName ?? email, email, response: responseOf(a.responseStatus), comment },
+        );
+      }
+      // Invited by Dub but not (yet) on the event Google returned: still invited, no answer.
+      for (const r of ledger) {
+        if (seen.has(r.email)) continue;
+        items.push({ userId: (r.userId ?? null) as meeting.MeetingAttendee["userId"], name: (r.userId && nameOf.get(r.userId)) || r.email, email: r.userId ? null : r.email, response: "needsAction", comment: null });
+      }
+      items.sort((x, y) => RESPONSE_ORDER.indexOf(x.response) - RESPONSE_ORDER.indexOf(y.response) || x.name.localeCompare(y.name, "ja"));
+      return { items, responsesAvailable: available };
     },
 
     async sync(opts) {

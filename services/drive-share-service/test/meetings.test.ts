@@ -325,6 +325,74 @@ describe("update / delete", () => {
   });
 });
 
+describe("attendees (参加メンバーと出欠)", () => {
+  type MockCal = ReturnType<typeof createMockCalendarClient>;
+  // usr_b's Gmail is their Dub address here: members without one are not invited at all.
+  const GMAIL = staticMemberDirectory({ usr_a: { gmail: "a.gmail@gmail.com", name: "A" }, usr_b: { gmail: "b@dub.example", name: "B" } });
+  const eventOf = (calendar: unknown) => [...[...(calendar as MockCal).state.calendars.values()][0]!.events.values()][0]!;
+
+  it("lists invitees by name with Google's answers; hand-added guests by address; the shared account itself is left out", async () => {
+    const { service, calendar } = buildMeetings({ roster: roster(), directory: GMAIL });
+    const m = await service.create("usr_admin", BASE);
+    const ev = eventOf(calendar);
+    ev.attendees = [
+      { email: "hackit@gmail.com", self: true, organizer: true, responseStatus: "accepted" },
+      { email: "a.gmail@gmail.com", responseStatus: "accepted" },
+      { email: "b@dub.example", responseStatus: "declined", comment: " 授業です " },
+      { email: "Guest@Example.com", displayName: "外部 ゲスト", responseStatus: "tentative" },
+    ];
+    const res = await service.attendees(m.id);
+    expect(res.responsesAvailable).toBe(true);
+    expect(res.items).toEqual([
+      { userId: "usr_a", name: "A", email: null, response: "accepted", comment: null },
+      { userId: null, name: "外部 ゲスト", email: "guest@example.com", response: "tentative", comment: null },
+      { userId: "usr_b", name: "B", email: null, response: "declined", comment: "授業です" },
+    ]);
+  });
+
+  it("an invitee not on the event yet, or an unknown answer, reads as 未返信", async () => {
+    const { service, calendar } = buildMeetings({ roster: roster(), directory: GMAIL });
+    const m = await service.create("usr_admin", BASE);
+    eventOf(calendar).attendees = [{ email: "a.gmail@gmail.com", responseStatus: "weird" }];
+    const res = await service.attendees(m.id);
+    expect(res.items.map((i) => [i.name, i.response])).toEqual([
+      ["A", "needsAction"],
+      ["B", "needsAction"],
+    ]);
+  });
+
+  it("?date= reads that occurrence's instance first, then falls back to the series", async () => {
+    const { service, calendar } = buildMeetings({ roster: roster(), directory: GMAIL });
+    const m = await service.create("usr_admin", BASE);
+    const get = vi.spyOn(calendar, "getEvent");
+    await service.attendees(m.id, "2026-10-27");
+    expect(get.mock.calls.map((c) => c[1])).toEqual([`${eventIdFor(m.id)}_20261027T100000Z`]);
+    get.mockClear();
+    get.mockResolvedValueOnce(null);
+    expect((await service.attendees(m.id, "2026-10-27")).responsesAvailable).toBe(true);
+    expect(get.mock.calls.map((c) => c[1])).toEqual([`${eventIdFor(m.id)}_20261027T100000Z`, eventIdFor(m.id)]);
+  });
+
+  it("Google unreadable (scope missing / error) still lists the invitees, with answers unavailable", async () => {
+    const off = buildMeetings({ roster: roster(), directory: GMAIL });
+    const m = await off.service.create("usr_admin", BASE);
+    vi.spyOn(off.calendar, "getEvent").mockRejectedValueOnce(new Error("boom"));
+    const res = await off.service.attendees(m.id);
+    expect(res.responsesAvailable).toBe(false);
+    expect(res.items.map((i) => [i.userId, i.response])).toEqual([
+      ["usr_a", "needsAction"],
+      ["usr_b", "needsAction"],
+    ]);
+  });
+
+  it("unknown meeting 404, bad date 400", async () => {
+    const { service } = buildMeetings({ roster: roster() });
+    await expect(service.attendees("nope")).rejects.toMatchObject({ code: CommonErrorCodes.NOT_FOUND });
+    const m = await service.create("usr_admin", BASE);
+    await expect(service.attendees(m.id, "10/27")).rejects.toMatchObject({ code: CommonErrorCodes.VALIDATION_FAILED });
+  });
+});
+
 describe("reconcile (sync)", () => {
   it("adds new role members and removes departed ones it invited — never a hand-added guest or share", async () => {
     let users = USERS;

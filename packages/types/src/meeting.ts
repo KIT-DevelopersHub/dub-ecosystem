@@ -93,6 +93,34 @@ export interface CreateMeetingRequest {
 
 export type UpdateMeetingRequest = Partial<CreateMeetingRequest>;
 
+/** An invitee's answer in Google Calendar (the event's attendees[].responseStatus). */
+export type MeetingResponseStatus = "accepted" | "declined" | "tentative" | "needsAction";
+export const MEETING_RESPONSE_LABELS: Record<MeetingResponseStatus, string> = {
+  accepted: "参加",
+  declined: "不参加",
+  tentative: "未定",
+  needsAction: "未返信",
+};
+
+export interface MeetingAttendee {
+  /** The Dub member, null for a guest added by hand in Google Calendar. */
+  userId: UserId | null;
+  name: string;
+  /** Guests only (members are shown by name). */
+  email: string | null;
+  response: MeetingResponseStatus;
+  /** The note left with the answer in Google Calendar. */
+  comment: string | null;
+}
+
+/** GET /meetings/:id/attendees?date=YYYY-MM-DD — who is invited and their answers. `date` (JST)
+ *  picks one occurrence of a series (answers can differ per occurrence); absent = the series. */
+export interface ListMeetingAttendeesResponse {
+  items: MeetingAttendee[];
+  /** false = Google could not be read now (usage limit / account not ready): every answer is needsAction. */
+  responsesAvailable: boolean;
+}
+
 export interface SyncMeetingsResponse {
   syncedAt: ISODateTime;
   meetings: number;
