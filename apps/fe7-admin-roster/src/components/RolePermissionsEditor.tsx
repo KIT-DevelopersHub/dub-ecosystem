@@ -86,7 +86,14 @@ export function RolePermissionsEditor({ role, initialDetailAppId = null }: { rol
       return;
     }
     update.mutate(patch, {
-      onSuccess: () => { draft.clear(); toast({ kind: "success", title: "ロールを保存しました" }); },
+      onSuccess: (saved) => {
+        // サーバーが正規化した値を新しい基準にする（ローカルの生の値を残すと dirty が消えない）。
+        setName(saved.name);
+        setPerms([...saved.permissions]);
+        setMailVisible([...(saved.mailVisibleRoleIds ?? [])]);
+        draft.clear();
+        toast({ kind: "success", title: "ロールを保存しました" });
+      },
       onError: (err) => toast({ kind: "error", title: "保存に失敗しました", description: errorMessage(err) }),
     });
   }

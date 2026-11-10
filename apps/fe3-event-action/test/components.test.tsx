@@ -42,6 +42,27 @@ describe("EventListPage (test observations #1, #2, #8, #9)", () => {
     fireEvent.change(screen.getByTestId("fe3-eventlist-phase-filter"), { target: { value: "open" } });
     expect(nav.setSearch).toHaveBeenCalledWith("phase=open");
   });
+
+  it("LoadMore fetches the next page by cursor and appends it", async () => {
+    setAuth(["event:read"]);
+    const base = createMockEventApi({ events: 2, actionsPerEvent: 0 });
+    const all = (await base.listEvents({ includeArchived: false })).items;
+    const [first, second] = all;
+    const listEvents = vi.fn(async (q: event.ListEventsQuery): Promise<event.ListEventsResponse> =>
+      q.cursor === "c2" ? { items: [second!], nextCursor: null } : { items: [first!], nextCursor: "c2" },
+    );
+    renderWithProviders(<EventListPage />, { api: { ...base, listEvents } });
+
+    await screen.findByText(first!.title);
+    expect(screen.queryByText(second!.title)).toBeNull();
+
+    await userEvent.click(screen.getByTestId("fe3-eventlist-loadmore"));
+
+    await screen.findByText(second!.title);
+    expect(screen.getByText(first!.title)).toBeInTheDocument();
+    expect(listEvents).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "c2" }));
+    await waitFor(() => expect(screen.queryByTestId("fe3-eventlist-loadmore")).toBeNull());
+  });
 });
 
 describe("PhaseTransitionControl (test observations #7, #8)", () => {

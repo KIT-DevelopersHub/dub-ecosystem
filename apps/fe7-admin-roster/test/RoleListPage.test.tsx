@@ -79,9 +79,9 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     const dialog = await screen.findByTestId("fe7-role-role_organizer-app-dialog");
     await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-level-view"));
     const toggle = within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-toggle-task:read");
-    expect((toggle as HTMLInputElement).checked).toBe(false);
-    await user.click(toggle);
+    // アプリに必須の鍵は有効化と同時に入り、そのアプリが有効な間は外せない。
     expect((toggle as HTMLInputElement).checked).toBe(true);
+    expect((toggle as HTMLInputElement).disabled).toBe(true);
     await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-close"));
 
     // role_organizer starts with 2 permissions (event:read, event:write)
@@ -195,8 +195,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     const dialog = await screen.findByTestId("fe7-role-role_organizer-app-dialog");
     await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-level-view"));
     const toggle = within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-toggle-task:read") as HTMLInputElement;
-    expect(toggle.checked).toBe(false);
-    await user.click(toggle);
+    expect(toggle.checked).toBe(true);
     await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-close"));
     await user.click(screen.getByTestId("fe7-role-role_organizer-save"));
     const confirm = await screen.findByTestId("fe7-role-role_organizer-save-confirm");
