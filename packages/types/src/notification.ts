@@ -133,8 +133,10 @@ export type FeedbackCategory = "bug" | "idea" | "question" | "other";
  * What the submission is about (⚙ → 問い合わせ). "feedback" is the original widget flow
  * (refined by `category`); the others are member requests to the organisers. Non-feedback
  * kinds carry their structured fields (枚数・候補日時 etc.) inside `message`.
+ * "permission_request" is not a dialog choice: it is filed by the 権限を申請する button
+ * shown where the member can open an app but lacks a permission inside it.
  */
-export type InquiryKind = "feedback" | "business_card" | "invite_friend" | "interview" | "other";
+export type InquiryKind = "feedback" | "business_card" | "invite_friend" | "interview" | "other" | "permission_request";
 
 export interface CreateFeedbackRequest {
   message: string; // 1..4000

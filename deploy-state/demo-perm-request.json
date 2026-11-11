@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "perm-request",
+  "worker": "dub-demo-perm-request",
+  "url": "https://dub-demo-perm-request.developershub-site.workers.dev",
+  "deployedSha": "7c426b62",
+  "branch": "commander/task-ctask_01M6ZF6ACP6M5DZ1SCYDRG34E0",
+  "actor": "ko-tarou",
+  "markers": ["perm-dialog-","infra:read"],
+  "live": true,
+  "verifiedAt": "2026-11-11T04:51:45Z",
+  "updatedAt": "2026-11-11T04:51:45Z",
+  "note": "ctask_01M6ZF6ACP6M5DZ1SCYDRG34E0 閲覧のみアカウント修正"
+}

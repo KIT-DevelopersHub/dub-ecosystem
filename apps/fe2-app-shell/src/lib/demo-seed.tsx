@@ -526,6 +526,8 @@ const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
   { id: "ntfn_adm_0006", type: "deploy.deployment.status_changed", title: "デプロイ完了: fe2-app-shell", body: "SPA シェルの本番デプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T01:15:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0007", type: "feedback", title: "新しいフィードバック: 通知の一括操作がほしい", body: "カテゴリ: idea\n送信ユーザー: usr_bob\n\n大量に公開する時に一括操作がほしいです", audience: "admin", createdAt: "2026-08-02T01:00:00Z", publishedBroadcastId: null },
   // ⚙ → 問い合わせ (non-feedback kind) as the backend labels it.
+  // 「権限を申請する」ボタン (kind=permission_request) から届く通知の見え方。
+  { id: "ntfn_adm_0009", type: "feedback", title: "新しい権限の申請: 申請者: 一般メンバー 花子 アプリ: 運営メンバー 状況: 運営メンバーは閲覧のみの権限のため、作成・…", body: "種別: 権限の申請\n送信ユーザー: usr_member\n発生ページ: 運営メンバー\n\n申請者: 一般メンバー 花子 アプリ: 運営メンバー 状況: 運営メンバーは閲覧のみの権限のため、作成・編集・削除はできません。 希望する権限: 運営メンバーの編集", audience: "admin", createdAt: "2026-08-02T00:50:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0008", type: "feedback", title: "新しい問い合わせ（名刺が切れた）: 希望枚数: 50枚", body: "種別: 名刺が切れた\n送信ユーザー: usr_alice\n発生ページ: ホーム\n\n希望枚数: 50枚", audience: "admin", createdAt: "2026-08-02T00:45:00Z", publishedBroadcastId: null },
 ];
 
@@ -534,9 +536,9 @@ const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
 function recordInquiryDemo(body: notification.CreateFeedbackRequest | null): { id: string } {
   const id = `nfb_demo_${Date.now()}`;
   const kind = body?.kind ?? "feedback";
-  const label = INQUIRY_KIND_SPECS.find((s) => s.kind === kind)?.label ?? kind;
+  const label = kind === "permission_request" ? "権限の申請" : (INQUIRY_KIND_SPECS.find((s) => s.kind === kind)?.label ?? kind);
   const message = (body?.message ?? "").replace(/\s+/g, " ").trim();
-  const heading = kind === "feedback" ? "フィードバック" : `問い合わせ（${label}）`;
+  const heading = kind === "feedback" || kind === "permission_request" ? label : `問い合わせ（${label}）`;
   const lines = [`種別: ${label}`];
   if (kind === "feedback") lines.push(`カテゴリ: ${body?.category ?? "other"}`);
   ADMIN_NOTIFICATIONS.unshift({
@@ -863,6 +865,19 @@ const CHAT_CREATE_NONE_PERMISSIONS: identity.PermissionKey[] = CHAT_CREATE_PUBLI
 const MEMBERS_SCOPE_ORG_CHART_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:"));
 const MEMBERS_SCOPE_ROSTER_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:mail_"));
 
+// 一般メンバー相当で、運営メンバー / 参加届 / LP / 通知 だけ「閲覧」・他アプリは「無効」・管理者権限なし。
+// 権限不足ダイアログ(+ 権限を申請する)の見え方を ?demo_account=usr_members_view で確かめる用。
+const MEMBERS_VIEW_ONLY_APPS = ["members", "participation", "lp", "notifications"] as const;
+const MEMBERS_VIEW_ONLY_PERMISSIONS: identity.PermissionKey[] = [
+  ...MEMBER_ACCOUNT_PERMISSIONS,
+  "members:roster_view",
+  "infra:read", // LP管理 のルートが要求する
+  ...MEMBERS_VIEW_ONLY_APPS.flatMap((id) => {
+    const view = appRegistry.getApp(id)?.access.view;
+    return view ? [view] : [];
+  }),
+];
+
 // 人事: mail:admin + members:mail_edit はあるが、ロール管理の編集と identity:admin は無い。
 // ?demo_account=usr_hr で参加届からの発行が出ること、usr_hr_before (新しい鍵なし) で出ないことを見る。
 const HR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "identity:admin" && k !== "app:admin:edit");
@@ -876,6 +891,7 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
   { id: "usr_scope_org", displayName: "範囲 組織図まで", email: "scope-org@developershub.jp", permissions: MEMBERS_SCOPE_ORG_CHART_PERMISSIONS, inbox: [] },
   { id: "usr_scope_roster", displayName: "範囲 メール名簿以外", email: "scope-roster@developershub.jp", permissions: MEMBERS_SCOPE_ROSTER_PERMISSIONS, inbox: [] },
+  { id: "usr_members_view", displayName: "閲覧のみ 運営メンバー", email: "members-view@developershub.jp", permissions: MEMBERS_VIEW_ONLY_PERMISSIONS, inbox: [] },
   { id: "usr_chat_public", displayName: "作成 パブリックのみ", email: "chat-public@developershub.jp", permissions: CHAT_CREATE_PUBLIC_PERMISSIONS, inbox: [] },
   { id: "usr_chat_none", displayName: "作成 できない", email: "chat-none@developershub.jp", permissions: CHAT_CREATE_NONE_PERMISSIONS, inbox: [] },
   { id: "usr_hr", displayName: "人事 担当", email: "hr@developershub.jp", permissions: HR_PERMISSIONS, inbox: [] },

@@ -23,6 +23,8 @@ interface AuthContextValue {
   /** Per-app 無効/閲覧/編集 for every registered app (fail-closed 無効 while /me loads). */
   appLevel(appId: string): policy.AppAccessLevel;
   onUnauthenticated: () => void;
+  /** The shell api-client, for shared chrome (e.g. 権限を申請する) that sends as the viewer. */
+  api: ApiClient;
 }
 
 const AuthCtx = createContext<AuthContextValue | null>(null);
@@ -143,9 +145,10 @@ export function AuthProvider({
       can: (p: PermissionKey) => perms?.has(p) ?? false,
       appLevel: (appId: string) => levels?.[appId] ?? policy.AppAccessLevel.None,
       onUnauthenticated: onUnauthenticated ?? (() => {}),
+      api,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.status === "authenticated" ? state.me : null, onUnauthenticated]);
+  }, [state.status, state.status === "authenticated" ? state.me : null, onUnauthenticated, api]);
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
@@ -198,6 +201,12 @@ export function useOptionalCanEdit(appId: string, permission: PermissionKey): bo
   const ctx = useContext(AuthCtx);
   if (!ctx) return null;
   return ctx.appLevel(appId) === policy.AppAccessLevel.Edit && ctx.can(permission);
+}
+
+/** The viewer's display name + the shell api-client, for chrome that files a request as them. */
+export function useViewerApi(): { api: ApiClient; displayName: string | null } {
+  const { api, state } = useAuthCtx();
+  return { api, displayName: state.status === "authenticated" ? state.me.user.displayName : null };
 }
 
 /**

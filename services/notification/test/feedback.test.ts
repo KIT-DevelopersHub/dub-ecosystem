@@ -210,6 +210,28 @@ describe("in-app feedback", () => {
     expect(input.body).toContain("種別: 面談を希望");
   });
 
+  it("permission_request: accepted by POST /feedback and labelled 権限の申請 (not 問い合わせ（…）)", async () => {
+    const h = makeTestEnv();
+    const req = reqOf(createApp({ mail: recordingMail("ok") }), h);
+    const res = await req("/feedback", jsonPost({ message: "アプリ: 名簿\n希望: 編集", kind: "permission_request" }));
+    expect(res.status).toBe(201);
+    const item: notification.FeedbackItem = {
+      id: "nfb_3",
+      userId: "usr_a",
+      category: "other",
+      kind: "permission_request",
+      message: "アプリ: 名簿",
+      pageUrl: null,
+      pageName: null,
+      readAt: null,
+      createdAt: "2026-11-09T00:00:00.000Z",
+    };
+    expect(buildFeedbackEmail(item).subject).toBe("権限の申請: アプリ: 名簿");
+    const input = buildFeedbackNotifyInput(item, "req_p");
+    expect(input.title).toBe("新しい権限の申請: アプリ: 名簿");
+    expect(input.recipients).toEqual({ audiences: ["admin"] });
+  });
+
   it("buildFeedbackEmail: subject carries the excerpt + admin recipient", () => {
     const email = buildFeedbackEmail({
       id: "nfb_1",

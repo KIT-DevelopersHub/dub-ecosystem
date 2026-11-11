@@ -33,7 +33,7 @@ import {
   useMediaQuery,
 } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { usePermissionGate } from "../../auth/PermissionGate.tsx";
 import type { LpSiteConfig } from "./lpApi.tsx";
 import { useLpApi } from "./LpProvider.tsx";
 import { useLpTickets } from "./lpTicketsHooks.ts";
@@ -110,6 +110,17 @@ export function LpSiteConfigScreen(): JSX.Element {
   const stagedDiff = useMemo(() => (state && staged ? diffSiteConfig(state.published, staged) : []), [state, staged]);
   const draftDiff = useMemo(() => (state ? diffSiteConfig(state.published, state.draft) : []), [state]);
   const canChange = live ? canPublish && !publish.isPending : canEdit;
+  // 権限が足りない人が押したら権限不足ダイアログ(申請付き)。本番は lp:publish、下書きは LP の編集。
+  const gate = usePermissionGate(
+    live && canEdit
+      ? { appId: "lp", locked: !canPublish, scope: "scope", reason: "本番への反映には lp:publish 権限が必要です。" }
+      : { appId: "lp", locked: !canEdit },
+  );
+  const requestButton = gate.locked ? (
+    <Button variant="ghost" size="sm" onClick={gate.open} testId="fe2-lp-config-request-permission">
+      権限を申請する
+    </Button>
+  ) : null;
 
   const switchEnv = (next: LpConfigEnv): void => {
     if (next !== env) void navigate({ to: "/lp", search: { env: next }, replace: true });
@@ -213,8 +224,8 @@ export function LpSiteConfigScreen(): JSX.Element {
         <Button
           variant="primary"
           size="sm"
-          disabled={!canPublish || stagedDiff.length === 0 || publish.isPending}
-          onClick={() => staged && setConfirm({ from: state.published, to: staged })}
+          disabled={stagedDiff.length === 0 || publish.isPending}
+          onClick={gate.guard(() => staged && setConfirm({ from: state.published, to: staged }))}
           testId="fe2-lp-config-publish"
         >
           本番に反映…
@@ -225,8 +236,8 @@ export function LpSiteConfigScreen(): JSX.Element {
         <Button
           variant="secondary"
           size="sm"
-          disabled={!canEdit || draftDiff.length === 0 || reset.isPending}
-          onClick={() => setResetting(true)}
+          disabled={draftDiff.length === 0 || reset.isPending}
+          onClick={gate.guard(() => setResetting(true))}
           testId="fe2-lp-config-reset"
         >
           本番の内容に戻す
@@ -275,6 +286,7 @@ export function LpSiteConfigScreen(): JSX.Element {
               本番の設定です。変更は「本番に反映」を押して確認するまで公開されません。
               {!canPublish ? " 変更には lp:publish 権限が必要です。" : ""}
             </span>
+            {requestButton}
           </p>
         ) : (
           <p className={styles.previewNotice} data-testid="fe2-lp-config-draft-notice">
@@ -282,7 +294,9 @@ export function LpSiteConfigScreen(): JSX.Element {
             <span>
               ここはプレビュー（下書き）です。変えるたびに自動で保存され、プレビューにだけ映ります。本番の LP
               を変えられるのは「本番」タブの「本番に反映…」だけです。
+              {!canEdit ? " 閲覧のみの権限のため変更できません。" : ""}
             </span>
+            {requestButton}
           </p>
         )}
         {live && stagedDiff.length > 0 ? (
@@ -331,7 +345,7 @@ export function LpSiteConfigScreen(): JSX.Element {
         description="北陸ITカンファレンスのランディングページ（LP）の見た目と公開状態を、下書きで確かめてから本番に反映します。"
       />
       <LpTabs active="config" />
-      <AppReadOnlyNotice appId="lp" />
+      {gate.dialog}
       {/* 操作は全部この帯に置き、スクロールしても上に貼り付ける（下まで降りなくてよい）。 */}
       <div ref={barRef} className={styles.stickyBar} data-env={env} data-testid="fe2-lp-config-actionbar">
         <SegmentedControl<LpConfigEnv>
