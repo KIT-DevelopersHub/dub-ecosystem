@@ -2,11 +2,13 @@
 // 保存は楽観的: 一覧に先に足してすぐ戻り、裏で登録 → 写真を送信 (sponsorHooks.useSaveCard)。
 // 前回の保存が失敗していたら、その入力と写真を復元して開く。
 // 撮った写真は端末内で文字を読み取り (cardOcr)、空欄の項目に下書きとして入れる。手で入れた・直した値は上書きしない。
+// 「まとめて」に切り替えると何枚も撮ってから一度に読み取り、確認して一括保存する (SponsorBatchReview)。
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Button, EmptyState, PageHeader, Spinner, Stack } from "@dub/ui";
+import { Button, EmptyState, PageHeader, SegmentedControl, Spinner, Stack } from "@dub/ui";
 import { DraftRestoredNotice } from "@dub/app-ui";
 import { CardCapture } from "./CardCapture.tsx";
+import { newBatch, SponsorBatchReview, type BatchItem } from "./SponsorBatchReview.tsx";
 import { readCard } from "./cardOcr.ts";
 import { mergeDraft, type CardDraft } from "./parseCardText.ts";
 import { useCompanies, useObjectUrl, useSaveCard } from "./sponsorHooks.ts";
@@ -16,7 +18,13 @@ import styles from "./sponsor.module.css";
 
 const LIST_PATH = "/sponsor";
 
-type Step = { kind: "capture" } | { kind: "form"; image: Blob | null };
+type Step = { kind: "capture" } | { kind: "form"; image: Blob | null } | { kind: "batch"; items: BatchItem[] };
+type Mode = "single" | "batch";
+
+const MODES = [
+  { value: "single" as const, label: "1 枚ずつ", testId: "fe2-sponsor-mode-single" },
+  { value: "batch" as const, label: "まとめて", testId: "fe2-sponsor-mode-batch" },
+];
 
 type Ocr =
   | { kind: "idle" }
@@ -106,6 +114,7 @@ export function SponsorScanScreen(): JSX.Element {
   const [restored] = useState(() => pending.get().draft);
   const [restoredVisible, setRestoredVisible] = useState(restored !== null);
   const [step, setStep] = useState<Step>(() => (restored ? { kind: "form", image: restored.image } : { kind: "capture" }));
+  const [mode, setMode] = useState<Mode>("single");
   const [form, setForm] = useState<CardFormValues>(() => (restored ? formFromCard(restored.fields) : EMPTY_FORM));
   const photoUrl = useObjectUrl(step.kind === "form" ? step.image : null);
   // 撮った (選んだ) 写真だけ読み取る。復元した下書きは入力済みなので読まない。
@@ -165,16 +174,48 @@ export function SponsorScanScreen(): JSX.Element {
         />
 
         {step.kind === "capture" ? (
-          <CardCapture
-            onConfirm={(image) => {
-              setStep({ kind: "form", image });
-              setOcrRun({ image });
+          <>
+            <SegmentedControl
+              testId="fe2-sponsor-mode"
+              aria-label="撮り方"
+              options={MODES}
+              value={mode}
+              onChange={setMode}
+            />
+            <CardCapture
+              key={mode}
+              onConfirm={(image) => {
+                setStep({ kind: "form", image });
+                setOcrRun({ image });
+              }}
+              onConfirmMany={
+                mode === "batch"
+                  ? (images) => {
+                      // 1 枚だけなら、いつもの入力画面で読む。
+                      if (images.length === 1) {
+                        setStep({ kind: "form", image: images[0]! });
+                        setOcrRun({ image: images[0]! });
+                      } else setStep({ kind: "batch", items: newBatch(images) });
+                    }
+                  : undefined
+              }
+              extraAction={
+                mode === "single" ? (
+                  <Button variant="ghost" size="lg" testId="fe2-sponsor-skip-photo" onClick={() => setStep({ kind: "form", image: null })}>
+                    写真なしで入力
+                  </Button>
+                ) : undefined
+              }
+            />
+          </>
+        ) : step.kind === "batch" ? (
+          <SponsorBatchReview
+            initial={step.items}
+            companies={companies.map((c) => c.name)}
+            onSave={(cards) => {
+              for (const c of cards) void save(c.form, c.image);
+              back();
             }}
-            extraAction={
-              <Button variant="ghost" size="lg" testId="fe2-sponsor-skip-photo" onClick={() => setStep({ kind: "form", image: null })}>
-                写真なしで入力
-              </Button>
-            }
           />
         ) : (
           // <form> にしない: スマホの改行キー (次の項目へ) で途中保存されるのを防ぐ。

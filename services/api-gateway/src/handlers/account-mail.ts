@@ -18,7 +18,7 @@ import { common, type auth, type identity, type mail, type member } from "@dub/t
 import type { GatewayEnv } from "../env";
 import type { GatewayVariables } from "../context";
 import { getRequestId } from "../context";
-import { createServices } from "../services";
+import { createServices, type GatewayServices } from "../services";
 import { authedActor } from "../policy";
 
 type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
@@ -57,6 +57,26 @@ export function buildAccountMailBody(c: AccountMailContent): string {
     "",
     "Developers Hub 運営",
   ].join("\n");
+}
+
+/** Send the account-issue mail to `to` (cc the login address) as a SYSTEM call: without a
+ *  userId mail-gateway does not require the caller to hold mail:send. Returns the messageId. */
+export async function sendAccountMailAsSystem(
+  svc: GatewayServices,
+  requestId: string,
+  a: { targetId: string; to: string; content: AccountMailContent },
+): Promise<string> {
+  const req: mail.SendMailRequest = {
+    to: [{ email: a.to, name: a.content.name }],
+    cc: [{ email: a.content.loginEmail }],
+    subject: ACCOUNT_MAIL_SUBJECT,
+    textBody: buildAccountMailBody(a.content),
+  };
+  const sysCtx: RequestContext = { requestId, caller: "api-gateway" };
+  const sent = await svc.mail.post<mail.SendMailResponse, mail.SendMailRequest>(sysCtx, "/send", req, {
+    idempotencyKey: `account-mail:${a.targetId}:${requestId}`,
+  });
+  return sent.messageId;
 }
 
 /** POST /api/v1/admin/users/:userId/account-mail — send the login info to the member's Gmail. */
@@ -101,16 +121,10 @@ export async function adminSendAccountMailHandler(c: Ctx): Promise<Response> {
   }
 
   const appUrl = c.env.APP_BASE_URL || DEFAULT_APP_BASE_URL;
-  const req: mail.SendMailRequest = {
-    to: [{ email: gmail, name: linked.name }],
-    cc: [{ email: loginEmail }],
-    subject: ACCOUNT_MAIL_SUBJECT,
-    textBody: buildAccountMailBody({ name: linked.name, appUrl, loginEmail, password, generated: passwordSource === "generated" }),
-  };
-  // System send: without a userId mail-gateway does not require the admin to hold mail:send.
-  const sysCtx: RequestContext = { requestId, caller: "api-gateway" };
-  const sent = await svc.mail.post<mail.SendMailResponse, mail.SendMailRequest>(sysCtx, "/send", req, {
-    idempotencyKey: `account-mail:${targetId}:${requestId}`,
+  const messageId = await sendAccountMailAsSystem(svc, requestId, {
+    targetId,
+    to: gmail,
+    content: { name: linked.name, appUrl, loginEmail, password, generated: passwordSource === "generated" },
   });
 
   const res: auth.AdminSendAccountMailResponse = {
@@ -119,7 +133,7 @@ export async function adminSendAccountMailHandler(c: Ctx): Promise<Response> {
     cc: loginEmail,
     appUrl,
     passwordSource,
-    messageId: sent.messageId,
+    messageId,
   };
   return c.json(res);
 }

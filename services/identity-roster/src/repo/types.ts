@@ -80,6 +80,9 @@ export interface IdentityRepo {
   getUsersByEmails(orgId: string, emails: string[]): Promise<UserRow[]>;
   listUsers(filter: ListUsersFilter): Promise<UserPage>;
   createUser(row: UserRow): Promise<void>;
+  /** Hard delete of a still-invited row (onboarding rollback; assignments removed first).
+   *  false = nothing deleted (gone, or no longer invited). */
+  deleteInvitedUser(userId: string): Promise<boolean>;
   updateUser(userId: string, patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>, updatedAt: string): Promise<void>;
   /** invited -> active only while the row is still invited (compare-and-set). false = it was
    *  not invited at write time, so a concurrent disable is never overwritten. */

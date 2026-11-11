@@ -76,6 +76,14 @@ export const POLICY_TABLE = definePolicyTable({
   // INTERNAL: api-gateway は /mail/* しか通さないので外からは届かないが、届かないことを表で宣言する。
   "POST /internal/sponsor/contacts": INTERNAL,
 
+  // ---- 参加届からのアドレス発行: api-gateway onboard-account → ここ (s2s のみ) ----
+  // 呼び出し元の鍵 (members:onboard_mail) は gateway の表が検査済み。revoke は後続の段が
+  // 失敗した時に今発行した分を戻す補償 (アドレス指定・Worker 宛ての発行アドレスだけ・冪等)。
+  // 外部の同等ルートは ["mail:admin"] のまま。
+  "POST /internal/email-routing/issued-addresses": INTERNAL,
+  "POST /internal/email-routing/issued-addresses/lookup": INTERNAL,
+  "POST /internal/email-routing/issued-addresses/revoke": INTERNAL,
+
   // ---- user-facing mail app (ロール管理 tier + fine-grained key) ----
   // 編集 on メール + mail:send — anything that puts (or queues) a message on the wire.
   "POST /mail/outbox": appLevel("mail", "edit", "mail:send"),

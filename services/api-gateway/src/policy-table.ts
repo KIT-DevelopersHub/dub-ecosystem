@@ -125,6 +125,12 @@ export const POLICY_TABLE = definePolicyTable({
   // Same subject shape (`:userId` from the caller) and the same secret: the account-issue
   // mail carries that user's password to their Gmail, so it needs exactly the view right.
   "POST /api/v1/admin/users/:userId/account-mail": ["identity:admin"],
+  // 参加届からのアカウント発行 (人事向け)。identity:admin / mail:admin / ロール管理の編集を
+  // 渡さずに済むよう専用の鍵 1 つで開ける。安全性は鍵ではなく形で担保する: 対象は参加届から
+  // 導かれる「アカウントの無い人」だけ・ロールは identity-roster が一般メンバーに固定・
+  // 既存アカウントには触れない (handlers/participation-onboard.ts)。`:participationId` は
+  // 呼び出し元が選ぶが、選べるのは参加届の行だけで、既存アカウントは 409 で弾かれる。
+  "POST /api/v1/admin/participation/:participationId/onboard-account": ["members:onboard_mail"],
   // 代理表示 (admin impersonation) start. Same `:userId`-subject shape; demands the dedicated
   // key, not identity:admin (granted separately, default role_sys_admin only). Target
   // eligibility (self / inactive / privileged / nested) is auth-service's instance check, and

@@ -86,6 +86,13 @@ export const POLICY_TABLE = definePolicyTable({
   // `reqCtx` check, which gate.ts prescribes for INTERNAL routes that need an actor).
   "GET /members/internal/me/participation": INTERNAL,
   "POST /members/internal/me/participation": INTERNAL,
+
+  // 参加届からのアカウント発行 (api-gateway POST /api/v1/admin/participation/:id/onboard-account
+  // -> ここ)。鍵 (members:onboard_mail) は gateway の表が検査済みで、ここは対象の確認と紐付けだけ:
+  // 参加届に紐付いた追加済の名簿行で、まだアカウントの無い人に限る (service が保証)。既存の
+  // 紐付けは張り替えない。internalWithKeys にしないのは、鍵の検査を 2 か所に分けないため。
+  "GET /members/internal/participation/:id/onboard-target": INTERNAL,
+  "POST /members/internal/participation/:id/onboard-link": INTERNAL,
   // スポンサーのメール連携: mail-gateway が Dub のメールを送った / 受け取った時に呼ぶ (system origin・ユーザーなし)。
   // 営業先の日付とステータスを決まりどおりに進めるだけで、本文・件名は受け取らない。
   "POST /members/internal/sponsor/mail-activity": INTERNAL,

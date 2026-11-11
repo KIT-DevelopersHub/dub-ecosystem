@@ -607,6 +607,38 @@ export interface LinkIdentityRequest {
   version: number;
 }
 
+// ---- 参加届からのアカウント発行 (人事向け・members:onboard_mail) ----------------------
+// api-gateway POST /api/v1/admin/participation/:participationId/onboard-account が
+// アドレス発行 → アカウント作成 (一般メンバー固定) → 名簿と紐付け → (任意) 案内メール を
+// 1 回で行う。対象は参加届に紐付いていて、まだアカウントの無い人だけ。
+
+/** member-service GET /members/internal/participation/:id/onboard-target の応答。 */
+export interface OnboardTargetResponse {
+  participation: Participation;
+  member: Member;
+}
+
+/** member-service POST /members/internal/participation/:id/onboard-link の本文。 */
+export interface OnboardLinkRequest {
+  identityUserId: string;
+}
+
+/** ロールは受け取らない (サーバーが一般メンバーに固定する)。 */
+export interface OnboardAccountRequest {
+  /** @developershub.jp の前の部分。 */
+  localPart: string;
+  /** 名簿の Gmail に案内メール (ログイン情報) を送るか。既定 false。 */
+  sendAccountMail?: boolean;
+}
+
+export interface OnboardAccountResponse {
+  address: string;
+  identityUserId: string;
+  member: Member;
+  /** 案内メールの結果。送らなかった時は requested=false。送れなくても発行自体は成功。 */
+  accountMail: { requested: boolean; sent: boolean; to: string | null };
+}
+
 // ---- オンボーディング (新メンバーへの「やってほしいこと」案内) ------------------------
 // 管理者が 運営メンバー・名簿 → オンボーディング タブで項目を並べ、ログイン不要の公開ページ
 // (/onboarding) がそれをそのまま表示する。項目は公開前提の案内文なので全フィールドを

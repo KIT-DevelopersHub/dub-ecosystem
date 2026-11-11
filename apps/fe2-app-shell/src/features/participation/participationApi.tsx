@@ -3,7 +3,7 @@
 // resolve at the gateway to services/member-service (participation lives there,
 // next to 運営メンバー管理, so submitting can reflect onto the roster in one hop).
 import type { ApiClient } from "../../lib/api-client.tsx";
-import type { auth, common, identity } from "@dub/types";
+import type { member } from "@dub/types";
 import type {
   ListOnboardingItemsResponse,
   ListParticipationCandidatesResponse,
@@ -20,14 +20,7 @@ import type {
   ResolveParticipationResponse,
   SubmitParticipationRequest,
   UpdateOnboardingItemRequest,
-  RosterMember,
 } from "./contracts.ts";
-
-/** 発行済み受信アドレス (mail-gateway POST /issued-addresses の応答のうち使う分)。 */
-export interface IssuedMailAddress {
-  id: string;
-  address: string;
-}
 
 export interface ParticipationApi {
   /** Canonical team list, to resolve 所属チーム names (identity:read). */
@@ -56,23 +49,15 @@ export interface ParticipationApi {
   saveOnboardingMeeting(input: SaveOnboardingMeetingRequest): Promise<SaveOnboardingMeetingResponse>;
   /** 公開ページ用 (未ログインで読める)。 */
   publicOnboarding(): Promise<OnboardingGuide>;
-  /** 追加と同時のメール発行で付けるロールの候補 (identity:read)。 */
-  listRoles(): Promise<identity.Role[]>;
-  /** @developershub.jp の受信アドレスを発行 (mail:admin)。 */
-  issueMailAddress(localPart: string): Promise<IssuedMailAddress>;
-  /** 発行したアドレスでログインアカウントを作りロールを付与 (identity:admin)。 */
-  inviteAccount(input: identity.InviteUserRequest): Promise<identity.IdentityUser>;
-  /** 運営メンバーをログインアカウントに紐付け (運営メンバーの編集)。 */
-  linkAccount(memberId: string, input: { identityUserId: string; version: number }): Promise<RosterMember>;
-  /** アカウント発行メール: login + password to the member's Gmail (identity:admin)。 */
-  sendAccountMail(identityUserId: string): Promise<auth.AdminSendAccountMailResponse>;
+  /** 参加届からのアカウント発行: アドレス + アカウント (一般メンバー固定) + 紐付け + (任意)
+   *  案内メールを 1 回で (gateway-owned・members:onboard_mail)。 */
+  onboardAccount(participationId: string, input: member.OnboardAccountRequest): Promise<member.OnboardAccountResponse>;
 }
 
 const BASE = "/api/v1/members";
 // 参加届の送信だけは未認証で開放された公開エンドポイント (gateway-owned)。
 const PUBLIC_SUBMIT = "/api/v1/public/participation";
 const ONBOARDING = `${BASE}/onboarding`;
-const ROLE_PAGE_LIMIT = 100;
 
 export function createParticipationApi(api: ApiClient): ParticipationApi {
   return {
@@ -122,39 +107,11 @@ export function createParticipationApi(api: ApiClient): ParticipationApi {
         body: input,
       }),
     publicOnboarding: () => api.request<OnboardingGuide>({ method: "GET", path: "/api/v1/public/onboarding" }),
-    listRoles: async () => {
-      const page = await api.request<common.Paginated<identity.Role>>({
-        method: "GET",
-        path: "/api/v1/identity/roles",
-        query: { limit: ROLE_PAGE_LIMIT },
-      });
-      return page.items;
-    },
-    issueMailAddress: (localPart) =>
-      api.request<IssuedMailAddress, { localPart: string }>({
+    onboardAccount: (participationId, input) =>
+      api.request<member.OnboardAccountResponse, member.OnboardAccountRequest>({
         method: "POST",
-        path: "/api/v1/mail/admin/email-routing/issued-addresses",
-        body: { localPart },
-      }),
-    inviteAccount: async (input) => {
-      const res = await api.request<{ user: identity.IdentityUser }, identity.InviteUserRequest>({
-        method: "POST",
-        path: "/api/v1/identity/users/invite",
+        path: `/api/v1/admin/participation/${encodeURIComponent(participationId)}/onboard-account`,
         body: input,
-      });
-      return res.user;
-    },
-    linkAccount: (memberId, input) =>
-      api.request<RosterMember, { identityUserId: string; version: number }>({
-        method: "POST",
-        path: `${BASE}/people/${encodeURIComponent(memberId)}/identity-link`,
-        body: input,
-      }),
-    sendAccountMail: (identityUserId) =>
-      api.request<auth.AdminSendAccountMailResponse>({
-        method: "POST",
-        path: `/api/v1/admin/users/${encodeURIComponent(identityUserId)}/account-mail`,
-        body: {},
       }),
   };
 }

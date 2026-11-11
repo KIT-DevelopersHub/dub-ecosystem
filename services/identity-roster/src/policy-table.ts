@@ -110,6 +110,11 @@ export const POLICY_TABLE = definePolicyTable({
   // 名簿の確定 (members/participation の編集権限) は member-service 側の表が既に検査済みで、
   // ここは invited -> active しかできない (停止中は触らない・service が保証)。
   "POST /internal/users/:id/activate": INTERNAL,
+  // api-gateway onboard-account: 参加届の人に招待中アカウントを作る / 後続失敗時に取り消す。
+  // 呼び出し元の鍵 (members:onboard_mail) は gateway の表が検査済み。ロールは service が
+  // 一般メンバー 1 つに固定し、取り消しは招待中・固定ロールのみに限る (既存アカウントに届かない)。
+  "POST /internal/users/onboard": INTERNAL,
+  "POST /internal/users/:id/discard-onboard": INTERNAL,
   "GET /users/:id": INTERNAL,
   "POST /internal/users/:id/profile": INTERNAL,
   "GET /internal/users": INTERNAL,
