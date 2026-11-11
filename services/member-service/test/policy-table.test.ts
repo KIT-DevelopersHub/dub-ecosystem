@@ -206,12 +206,14 @@ const INTERNAL_ROUTES = [
   "GET /members/internal/hr/interview-form",
   "GET /members/internal/me/participation",
   "GET /members/internal/onboarding",
+  "GET /members/internal/participation/:id/onboard-target",
   "GET /members/internal/team-members",
   "POST /members/internal/google-emails",
   "POST /members/internal/hr/interview-form",
   "POST /members/internal/sponsor/mail-activity",
   "POST /members/internal/me/participation",
   "POST /members/internal/participation",
+  "POST /members/internal/participation/:id/onboard-link",
 ];
 // The whole external surface — what a caller can reach through api-gateway at most.
 const FULL = [

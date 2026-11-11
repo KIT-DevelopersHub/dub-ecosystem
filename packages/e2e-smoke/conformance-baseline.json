@@ -5,6 +5,7 @@
       "GET /api/v1/me/participation",
       "GET /api/v1/me/profile",
       "GET /api/v1/public/hr-interview-form",
+      "POST /api/v1/admin/participation/{}/onboard-account",
       "POST /api/v1/admin/users/{}/account-mail",
       "POST /api/v1/admin/users/{}/password",
       "POST /api/v1/me/participation",
@@ -32,7 +33,8 @@
       "POST /auth/passkey/register/options",
       "POST /auth/passkey/register/verify",
       "POST /auth/password",
-      "POST /internal/admin/users/{}/password"
+      "POST /internal/admin/users/{}/password",
+      "POST /internal/onboard/users/{}/initial-password"
     ],
     "missingInCode": []
   },
@@ -107,6 +109,8 @@
       "POST /identity/users/{}/offboard",
       "POST /internal/users/avatars",
       "POST /internal/users/lookup",
+      "POST /internal/users/onboard",
+      "POST /internal/users/{}/discard-onboard",
       "POST /internal/users/{}/profile",
       "POST /internal/webauthn/challenges",
       "POST /internal/webauthn/challenges/take",

@@ -5,8 +5,8 @@
 // 突合候補を提示し、同一人物なら結合(link=在籍へ昇格・重複なし)、候補が無ければ新規
 // (create) を確認ダイアログで確定する。反映は組織図(体制図)にも重複なく反映される。
 // 追加済の行は「紐付けを解除」で未処理に戻せる (名簿メンバー自体はそのまま残る)。
-// 追加の直後に「メールアドレスも発行しますか？」を出し、発行・アカウント作成(ロール付与)・
-// 紐付けまで続けて行える (IssueMailDialog)。
+// 追加の直後に「メールアドレスも発行しますか？」を出し、発行・アカウント作成(一般メンバー固定)・
+// 紐付け・案内メールまで 1 回で行える (IssueMailDialog / members:onboard_mail)。
 // Route gate = identity:read; 反映確定(resolve)はサーバで identity:admin (fail-close)。
 import { useMemo, useState } from "react";
 import { DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, TextField, EmptyState, SkeletonLoader, ErrorState } from "@dub/ui";
@@ -21,8 +21,6 @@ import { PUBLIC_PARTICIPATION_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
 import { HrFrame } from "../hr/HrApplicantsScreen.tsx";
 import { IssueMailDialog } from "./IssueMailDialog.tsx";
-import { useParticipationApi } from "./ParticipationProvider.tsx";
-import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
 import styles from "./participation.module.css";
 
 /** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
@@ -81,12 +79,10 @@ export function ParticipationListPage(): JSX.Element {
   // (申請ボタン付き)を出す。
   const { canEdit } = useAppCapability("participation");
   const gate = usePermissionGate({ appId: "participation", locked: !canEdit });
-  // メール発行はアドレス発行(mail:admin)・アカウント作成(管理アプリの編集 + identity:admin)・
-  // 名簿との紐付け(運営メンバーの編集)を全部持つ人だけ。持たない人には聞かない (403 になるため)。
+  // メール発行は gateway の onboard-account 1 本で、鍵も members:onboard_mail 1 つ (人事向け)。
+  // ロール管理の編集や identity:admin は要らない。持たない人には聞かない (403 になるため)。
   const { can } = usePermissions();
-  const adminCap = useAppCapability("admin");
-  const membersCap = useAppCapability("members");
-  const canIssueMail = adminCap.canEdit && membersCap.canEdit && can("identity:admin") && can("mail:admin") && can("members:mail_edit");
+  const canIssueMail = can("members:onboard_mail");
   const list = useParticipationList();
   const teamsQuery = useParticipationTeams();
   const resolveMut = useResolveParticipation();
@@ -96,9 +92,6 @@ export function ParticipationListPage(): JSX.Element {
   const [skipTarget, setSkipTarget] = useState<Participation | null>(null);
   const [unlinkTarget, setUnlinkTarget] = useState<Participation | null>(null);
   const [issueTarget, setIssueTarget] = useState<{ participation: Participation; member: RosterMember } | null>(null);
-  // 発行→紐付けまで済んだら、続けてアカウント発行メールを送るか聞く (Gmail がある時だけ)。
-  const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
-  const participationApi = useParticipationApi();
   // 解除確認に「誰との紐付けか」を出すため、確認を開いた時だけ名簿を引く。
   const rosterQuery = useParticipationRosterMembers(unlinkTarget !== null);
   const unlinkMemberName = unlinkTarget?.memberId
@@ -239,17 +232,8 @@ export function ParticipationListPage(): JSX.Element {
             member={issueTarget.member}
             defaultLocalPart={emailCandidate(issueTarget.participation) ?? ""}
             onClose={() => setIssueTarget(null)}
-            onIssued={(progress) => {
-              const { participation, member } = issueTarget;
-              setIssueTarget(null);
-              setMailTarget(
-                accountMailTarget(progress.identityUserId, member.name, member.gmail || participation.gmail, progress.address),
-              );
-            }}
           />
         ) : null}
-
-        <AccountMailPrompt target={mailTarget} send={participationApi.sendAccountMail} onClose={() => setMailTarget(null)} />
 
         <ConfirmDialog
           open={skipTarget !== null}

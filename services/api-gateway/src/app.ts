@@ -24,6 +24,7 @@ import { publicLpVisitHandler } from "./handlers/public-lp-visit";
 import { publicResendWebhookHandler } from "./handlers/public-resend-webhook";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
 import { adminSendAccountMailHandler } from "./handlers/account-mail";
+import { participationOnboardHandler } from "./handlers/participation-onboard";
 import { startImpersonationHandler } from "./handlers/impersonation";
 import { impersonationGuard, auditLogSink, type ImpersonationAuditSink } from "./impersonation";
 import { getSelfProfileHandler, updateSelfProfileHandler } from "./handlers/self-profile";
@@ -111,6 +112,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.get(`${API_PREFIX}/admin/users/:userId/password`, adminViewPasswordHandler);
   // アカウント発行メール: member Gmail <- login + password, cc the devhub address.
   app.post(`${API_PREFIX}/admin/users/:userId/account-mail`, adminSendAccountMailHandler);
+  // 参加届からのアカウント発行 (人事): アドレス発行 + アカウント作成 + 紐付け + 案内メールを 1 回で。
+  app.post(`${API_PREFIX}/admin/participation/:participationId/onboard-account`, participationOnboardHandler);
   // 代理表示 (admin impersonation) start. Stop lives on the auth segment (/auth/impersonation/stop).
   app.post(`${API_PREFIX}/admin/users/:userId/impersonation`, startImpersonationHandler);
 

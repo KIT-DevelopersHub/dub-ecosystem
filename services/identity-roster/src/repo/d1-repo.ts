@@ -191,6 +191,10 @@ export class D1IdentityRepo implements IdentityRepo {
       row.updatedAt,
     );
   }
+  async deleteInvitedUser(userId: string): Promise<boolean> {
+    const res = await this.db.run("DELETE FROM identity_users WHERE id = ? AND status = 'invited'", userId);
+    return (res.meta?.changes ?? 0) > 0;
+  }
   async updateUser(
     userId: string,
     patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>,
