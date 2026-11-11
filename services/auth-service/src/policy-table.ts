@@ -161,6 +161,9 @@ export const POLICY_TABLE = definePolicyTable({
   // Plaintext password VIEW (decision B, risk accepted). Same rule as the setter — a read this
   // sensitive is not a weaker operation. Every successful view is audited by the handler.
   "GET /internal/admin/users/:userId/password": internalWithKeys(["identity:admin"]),
+  // 参加届からのアカウント発行の案内メール用。パスワードの無いアカウントに初期パスワードを
+  // 作るだけ (上書き・閲覧はできない)。鍵は人事が持つ members:onboard_mail。
+  "POST /internal/onboard/users/:userId/initial-password": internalWithKeys(["members:onboard_mail"]),
   // Admin impersonation start. Same shape as the password pair: s2s from the gateway-owned
   // POST /api/v1/admin/users/:userId/impersonation, AND the dedicated key — identity:admin
   // alone is not enough (impersonation is granted separately, default role_sys_admin only).

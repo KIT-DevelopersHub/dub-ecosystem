@@ -137,6 +137,7 @@ const INTERNAL_ROUTES = [
   "POST /internal/admin/users/:userId/password",
   "GET /internal/admin/users/:userId/password",
   "POST /internal/admin/users/:userId/impersonation",
+  "POST /internal/onboard/users/:userId/initial-password",
 ].sort();
 
 /** Every permission key in the catalog — the strongest caller that could ever exist. */

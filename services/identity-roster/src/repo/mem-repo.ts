@@ -80,6 +80,10 @@ export class MemIdentityRepo implements IdentityRepo {
   async createUser(row: UserRow): Promise<void> {
     this.users.set(row.id, { ...row });
   }
+  async deleteInvitedUser(userId: string): Promise<boolean> {
+    if (this.users.get(userId)?.status !== "invited") return false;
+    return this.users.delete(userId);
+  }
   async updateUser(
     userId: string,
     patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>,

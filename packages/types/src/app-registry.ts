@@ -108,7 +108,7 @@ export const APP_MANIFEST = [
   // 名簿・ロール story belongs inside the roster app, so identity:admin lives in this app's
   // 詳細設定 rather than ロール管理's.
   { id: "members", label: "運営メンバー", navPath: "/members", domain: "identity", permissions: ["identity:read"], access: { view: "app:members:view", edit: "app:members:edit" },
-    detailPermissions: ["identity:read", "identity:admin"] },
+    detailPermissions: ["identity:read", "identity:admin", "members:onboard_mail"] },
   // 参加届 rides 運営メンバー's identity:* keys (see gantt above) → no own fine-grained key.
   { id: "participation", label: "参加届", navPath: "/participation", domain: "identity", permissions: ["identity:read"], access: { view: "app:participation:view", edit: "app:participation:edit" }, openToAllAuthenticated: true,
     detailPermissions: [] },

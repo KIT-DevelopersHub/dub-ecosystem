@@ -33,6 +33,7 @@ import {
   issueReceivingRuleInput,
   issuedAddressesFromRules,
   issuedAddressFromRule,
+  type IssuedEmailAddress,
   MAIL_WORKER_DESTINATION_LABEL,
   requireEmailRoutingConfig,
   rosterAddressesFromRules,
@@ -98,32 +99,7 @@ export function registerEmailRoutingAdmin(ext: Hono<AppBindings>): void {
     return c.json({ items: issuedAddressesFromRules(rules, cfg.zoneName), nextCursor: null });
   });
 
-  ext.post("/admin/email-routing/issued-addresses", async (c) => {
-    const cfg = requireEmailRoutingConfig(c.env);
-    const { localPart, address } = parseIssueAddressRequest(await c.req.json().catch(() => null), cfg.zoneName);
-    const client = new CfEmailRoutingClient(cfg);
-    // Idempotency / abuse guard: never mint a second rule for an address already issued.
-    const existing = await client.listRules();
-    const isList = (await findActiveTeamList(buildDb(c.env, c.get("dubCtx").requestId), address)) !== null;
-    if (isList || issuedAddressesFromRules(existing, cfg.zoneName).some((a) => a.address === address)) {
-      throw new DubError("MAIL_EMAIL_ROUTING_CONFLICT", `address already issued: ${address}`, { status: 409 });
-    }
-    const rule = await audited(c, "mail.email_routing.address.issue", "email_routing_address", address, () =>
-      client.createRule(issueReceivingRuleInput(address, localPart, cfg.workerName)),
-    );
-    const issued = issuedAddressFromRule(rule, cfg.zoneName) ?? {
-      id: rule.id,
-      localPart,
-      address,
-      destination: MAIL_WORKER_DESTINATION_LABEL,
-      enabled: rule.enabled,
-      createdAt: nowIso(),
-    };
-    // Confirmation mail is best-effort: the address is already issued, so a send hiccup
-    // must never turn a successful issue into a 5xx. The outcome is surfaced as a flag.
-    const confirmationEmailSent = await sendIssuanceConfirmation(c, address);
-    return c.json({ ...issued, createdAt: issued.createdAt || nowIso(), confirmationEmailSent }, 201);
-  });
+  ext.post("/admin/email-routing/issued-addresses", async (c) => c.json(await issueAddress(c), 201));
 
   ext.patch("/admin/email-routing/issued-addresses/:id", async (c) => {
     const cfg = requireEmailRoutingConfig(c.env);
@@ -135,14 +111,7 @@ export function registerEmailRoutingAdmin(ext: Hono<AppBindings>): void {
     return c.json(issuedAddressFromRule(rule, cfg.zoneName) ?? { id, enabled }, 200);
   });
 
-  ext.delete("/admin/email-routing/issued-addresses/:id", async (c) => {
-    const cfg = requireEmailRoutingConfig(c.env);
-    const id = c.req.param("id");
-    const result = await audited(c, "mail.email_routing.address.revoke", "email_routing_address", id, () =>
-      new CfEmailRoutingClient(cfg).deleteRule(id),
-    );
-    return c.json({ id: result.id }, 200);
-  });
+  ext.delete("/admin/email-routing/issued-addresses/:id", async (c) => c.json(await revokeAddress(c, c.req.param("id")), 200));
 
   // ---- routing rules ----
   ext.get("/admin/email-routing/rules", async (c) => {
@@ -176,6 +145,75 @@ export function registerEmailRoutingAdmin(ext: Hono<AppBindings>): void {
     );
     return c.json(result, 200);
   });
+}
+
+/**
+ * Internal twins of issue / revoke (INTERNAL in the table). api-gateway's 参加届
+ * onboard-account calls them on behalf of a caller whose key the gateway's own table
+ * already checked; the revoke is its rollback when a later step fails.
+ */
+export function registerEmailRoutingInternal(app: Hono<AppBindings>): void {
+  app.post("/internal/email-routing/issued-addresses", async (c) => c.json(await issueAddress(c), 201));
+  // Is `address` already issued (or a team list)? Lets the caller prove the address did not
+  // exist BEFORE it issues, so a later rollback-by-address can only remove its own rule.
+  app.post("/internal/email-routing/issued-addresses/lookup", async (c) => {
+    const cfg = requireEmailRoutingConfig(c.env);
+    const raw = (await c.req.json().catch(() => null)) as { address?: unknown } | null;
+    const address = typeof raw?.address === "string" ? raw.address.trim().toLowerCase() : "";
+    const rules = await new CfEmailRoutingClient(cfg).listRules();
+    const isList = (await findActiveTeamList(buildDb(c.env, c.get("dubCtx").requestId), address)) !== null;
+    const taken = isList || rosterAddressesFromRules(rules, cfg.zoneName).some((a) => a.address === address);
+    return c.json({ taken }, 200);
+  });
+
+  // Rollback by ADDRESS (the caller may not know the rule id after a timeout). Only an issued
+  // Worker-destination rule is ever removed — forwarding rules and team lists are untouched —
+  // and a missing one is a no-op, so retries are safe.
+  app.post("/internal/email-routing/issued-addresses/revoke", async (c) => {
+    const cfg = requireEmailRoutingConfig(c.env);
+    const raw = (await c.req.json().catch(() => null)) as { address?: unknown } | null;
+    const address = typeof raw?.address === "string" ? raw.address.trim().toLowerCase() : "";
+    const hit = issuedAddressesFromRules(await new CfEmailRoutingClient(cfg).listRules(), cfg.zoneName).find((a) => a.address === address);
+    if (!hit) return c.json({ revoked: false }, 200);
+    await revokeAddress(c, hit.id);
+    return c.json({ revoked: true, id: hit.id }, 200);
+  });
+}
+
+/** Issue `localPart@zone` as a receiving rule. 409 when already issued or a team list. */
+async function issueAddress(c: Context<AppBindings>): Promise<IssuedEmailAddress & { confirmationEmailSent: boolean }> {
+  const cfg = requireEmailRoutingConfig(c.env);
+  const { localPart, address } = parseIssueAddressRequest(await c.req.json().catch(() => null), cfg.zoneName);
+  const client = new CfEmailRoutingClient(cfg);
+  // Idempotency / abuse guard: never mint a second rule for an address already issued.
+  const existing = await client.listRules();
+  const isList = (await findActiveTeamList(buildDb(c.env, c.get("dubCtx").requestId), address)) !== null;
+  if (isList || issuedAddressesFromRules(existing, cfg.zoneName).some((a) => a.address === address)) {
+    throw new DubError("MAIL_EMAIL_ROUTING_CONFLICT", `address already issued: ${address}`, { status: 409 });
+  }
+  const rule = await audited(c, "mail.email_routing.address.issue", "email_routing_address", address, () =>
+    client.createRule(issueReceivingRuleInput(address, localPart, cfg.workerName)),
+  );
+  const issued = issuedAddressFromRule(rule, cfg.zoneName) ?? {
+    id: rule.id,
+    localPart,
+    address,
+    destination: MAIL_WORKER_DESTINATION_LABEL,
+    enabled: rule.enabled,
+    createdAt: nowIso(),
+  };
+  // Confirmation mail is best-effort: the address is already issued, so a send hiccup
+  // must never turn a successful issue into a 5xx. The outcome is surfaced as a flag.
+  const confirmationEmailSent = await sendIssuanceConfirmation(c, address);
+  return { ...issued, createdAt: issued.createdAt || nowIso(), confirmationEmailSent };
+}
+
+async function revokeAddress(c: Context<AppBindings>, id: string): Promise<{ id: string }> {
+  const cfg = requireEmailRoutingConfig(c.env);
+  const result = await audited(c, "mail.email_routing.address.revoke", "email_routing_address", id, () =>
+    new CfEmailRoutingClient(cfg).deleteRule(id),
+  );
+  return { id: result.id };
 }
 
 /**

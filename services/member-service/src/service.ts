@@ -563,6 +563,36 @@ export class MemberService {
     return toMember(next, await this.currentTeamIds(id));
   }
 
+  /** 参加届からのアカウント発行の対象 (api-gateway onboard-account が最初に読む)。 */
+  async onboardTarget(participationId: string): Promise<member.OnboardTargetResponse> {
+    const { p, person } = await this.loadOnboardTarget(participationId, null);
+    return { participation: toParticipation(p), member: toMember(person, await this.currentTeamIds(person.id)) };
+  }
+
+  /** 対象を再確認してから紐付ける。同じアカウントに既に紐付いていれば成功 (再試行で冪等)。 */
+  async onboardLink(ctx: ReqCtx, participationId: string, body: member.OnboardLinkRequest | null): Promise<member.Member> {
+    const identityUserId = typeof body?.identityUserId === "string" ? body.identityUserId.trim() : "";
+    if (!identityUserId) throw errors.validationFailed([{ field: "identityUserId", reason: "required" }]);
+    const { person } = await this.loadOnboardTarget(participationId, identityUserId);
+    if (person.identityUserId === identityUserId) return toMember(person, await this.currentTeamIds(person.id));
+    return this.linkIdentity(ctx, person.id, { identityUserId, version: person.version });
+  }
+
+  /** 参加届に紐付いた (追加済) 名簿行で、アカウントがまだ無いこと。`linkedTo` と同じなら可。 */
+  private async loadOnboardTarget(participationId: string, linkedTo: string | null): Promise<{ p: ParticipationRow; person: PersonRow }> {
+    const p = await this.deps.repo.getParticipation(participationId);
+    if (!p || p.orgId !== this.deps.orgId) throw errParticipationNotFound(participationId);
+    if (p.reviewState !== "added" || !p.memberId) {
+      throw new DubError("MEMBER_ONBOARD_NOT_ADDED", "参加届がまだ運営メンバーに追加されていません", { status: 409 });
+    }
+    const person = await this.deps.repo.getPerson(p.memberId);
+    if (!person || person.orgId !== this.deps.orgId || person.archivedAt) throw errPersonNotFound(p.memberId);
+    if (person.identityUserId && person.identityUserId !== linkedTo) {
+      throw new DubError("MEMBER_ONBOARD_ALREADY_HAS_ACCOUNT", "この人には既にアカウントがあります", { status: 409 });
+    }
+    return { p, person };
+  }
+
   /** Reverse lookup used by offboarding fan-out: the member linked to an identity user. */
   async getByIdentityUserId(_ctx: ReqCtx, identityUserId: string): Promise<member.Member | null> {
     const cur = await this.deps.repo.getPersonByIdentityUserId(this.deps.orgId, identityUserId);

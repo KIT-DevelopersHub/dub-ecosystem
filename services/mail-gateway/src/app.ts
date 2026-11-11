@@ -33,7 +33,7 @@ import { POLICY_TABLE } from "./policy-table";
 import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
 import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
-import { registerEmailRoutingAdmin } from "./email-routing-routes";
+import { registerEmailRoutingAdmin, registerEmailRoutingInternal } from "./email-routing-routes";
 import { registerTeamListAdmin } from "./team-list-routes";
 import { registerDrafts } from "./drafts";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
@@ -630,6 +630,7 @@ export function createApp() {
   });
 
   app.route("/mail", ext);
+  registerEmailRoutingInternal(app);
 
   // ---- status: live send-health self-report (INTERNAL in the table). Derives "directly
   // rate-limited" from the send-log so an operator dashboard (fe7 admin) can surface it. The
