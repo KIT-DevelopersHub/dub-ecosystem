@@ -3,6 +3,7 @@
 //   (2) 一覧: 表示 / 検索 / 権限で主ボタン・編集・削除が出し分く
 //   (3) 撮影: カメラ非対応 → 写真を選ぶ → 保存で一覧に増える / 写真だけ失敗 → 再送 / カメラはアンマウントで止まる
 //   (4) 文字の自動読み取り: 写真を使うと空欄に下書き (手入力は上書きしない) / 失敗 → もう一度読み取る
+//   (5) まとめてスキャン: 複数枚 → 1 枚ずつ順に読む → 直す・外す → 一括保存 / 縦長の枠
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
@@ -21,7 +22,7 @@ import { companyKey, groupCompanies, suggestCompanies } from "./companies.ts";
 
 const navigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate, useRouter: () => null }));
-// OCR 本体 (Tesseract.js / Web Worker) は jsdom で動かないので差し替える。既定は「何も読めない」。
+// OCR 本体 (onnxruntime-web / wasm) は jsdom で動かないので差し替える。既定は「何も読めない」。
 const readCard = vi.fn<typeof import("./cardOcr.ts").readCard>(() => Promise.resolve({ text: "", draft: {} }));
 vi.mock("./cardOcr.ts", () => ({ readCard: (...a: Parameters<typeof readCard>) => readCard(...a) }));
 
@@ -366,6 +367,71 @@ describe("SponsorScanScreen (撮影 → 入力 → 保存)", () => {
     expect(readCard.mock.calls[1]?.[2]?.aborted).toBe(true);
     // やめた後も、写真からの読み取りはいつでもやり直せる。
     expect(await screen.findByTestId("fe2-sponsor-ocr-start")).toBeTruthy();
+  });
+
+  it("まとめて: reads the photos one by one, lets you fix / drop one, then saves the rest at once", async () => {
+    const resolvers: ((r: Awaited<ReturnType<typeof readCard>>) => void)[] = [];
+    readCard.mockImplementation(() => new Promise((r) => resolvers.push(r)));
+    const create = vi.fn((b: sponsor.CreateCardRequest) => Promise.resolve(card({ id: `card_${b.personName}`, ...b, version: 1 })));
+    const uploadImage = vi.fn((id: string) => Promise.resolve(card({ id, hasImage: true, version: 2 })));
+    renderWith(<SponsorScanScreen />, fakeApi({ create, uploadImage }));
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-mode-batch"));
+    expect(screen.queryByTestId("fe2-sponsor-skip-photo")).toBeNull();
+    expect(screen.getByTestId("fe2-sponsor-read-all")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("fe2-sponsor-file"), { target: { files: [jpeg(), jpeg(), jpeg()] } });
+    expect(await screen.findByTestId("fe2-sponsor-tray-2")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("fe2-sponsor-read-all"));
+
+    // 1 枚目だけ読み始め、残りは待機。読み終わるまで保存できない。
+    await waitFor(() => expect(readCard).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("fe2-sponsor-batch-status-1").textContent).toBe("待機中");
+    expect(screen.getByTestId("fe2-sponsor-batch-save")).toBeDisabled();
+    await act(async () => resolvers[0]!({ text: "", draft: { personName: "山田太郎", companyName: "能登ソフト" } }));
+    await waitFor(() => expect(readCard).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("fe2-sponsor-batch-name-0").textContent).toBe("山田太郎");
+    await act(async () => resolvers[1]!({ text: "", draft: { personName: "佐藤花子" } }));
+    await act(async () => resolvers[2]!({ text: "", draft: {} }));
+    expect((await screen.findByTestId("fe2-sponsor-batch-status-2")).textContent).toBe("読めませんでした");
+
+    // 開いて直す・1 枚外す
+    fireEvent.click(screen.getByTestId("fe2-sponsor-batch-toggle-1"));
+    fireEvent.change(screen.getByTestId("fe2-sponsor-field-companyName"), { target: { value: "加賀テック" } });
+    fireEvent.click(screen.getByTestId("fe2-sponsor-batch-remove-2"));
+    expect(screen.queryByTestId("fe2-sponsor-batch-item-2")).toBeNull();
+
+    const save = screen.getByTestId("fe2-sponsor-batch-save");
+    expect(save.textContent).toBe("2 枚を保存");
+    fireEvent.click(save);
+    expect(navigate).toHaveBeenCalledWith({ to: "/sponsor" });
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ personName: "山田太郎", companyName: "能登ソフト" }));
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ personName: "佐藤花子", companyName: "加賀テック" }));
+    await waitFor(() => expect(uploadImage).toHaveBeenCalledTimes(2));
+  });
+
+  it("まとめて: a single photo goes to the usual form", async () => {
+    renderWith(<SponsorScanScreen />, fakeApi());
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-mode-batch"));
+    fireEvent.change(screen.getByTestId("fe2-sponsor-file"), { target: { files: [jpeg()] } });
+    fireEvent.click(await screen.findByTestId("fe2-sponsor-read-all"));
+    expect(await screen.findByTestId("fe2-sponsor-scan-form")).toBeTruthy();
+    expect(readCard).toHaveBeenCalledTimes(1);
+  });
+
+  it("縦長: switches the camera frame to a portrait card", async () => {
+    const getUserMedia = vi.fn(() => Promise.resolve({ getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    try {
+      const view = renderWith(<SponsorScanScreen />, fakeApi());
+      await waitFor(() => expect(screen.getByTestId("fe2-sponsor-shutter")).not.toBeDisabled());
+      const frame = () => view.container.querySelector("[data-orientation]");
+      expect(frame()?.getAttribute("data-orientation")).toBe("landscape");
+      fireEvent.click(screen.getByTestId("fe2-sponsor-orient-portrait"));
+      expect(frame()?.getAttribute("data-orientation")).toBe("portrait");
+    } finally {
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
+    }
   });
 
   it("a viewer cannot open the scan form", async () => {
