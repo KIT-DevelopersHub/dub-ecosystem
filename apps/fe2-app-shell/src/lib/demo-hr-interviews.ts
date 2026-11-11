@@ -56,6 +56,8 @@ export function createHrInterviewsDemoStore(deps: {
   addSlot(at(3, 14), 30, SUZUKI);
   addSlot(at(2, 16), 30, SUZUKI, { applicantId: "app_demo_booked_other", applicantName: "小林 陽菜" });
   addSlot(at(2, 16, 30), 30, SATO, { applicantId: "app_demo_booked_other2", applicantName: "中村 蓮" });
+  // 面談確定 (予約済み) の 宇野 蒼。「面談結果を登録」を試す相手。
+  addSlot(at(3, 18), 30, { id: ME, name: "デモ 人事" }, { applicantId: "app_demo_3", applicantName: "宇野 蒼" });
 
   const openSlots = () => hrInterview.publicSlots(slots, new Date().toISOString());
 

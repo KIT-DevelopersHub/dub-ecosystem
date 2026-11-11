@@ -515,3 +515,17 @@ export const SOURCE_STAFF = "面談申し込みフォーム（代理入力）";
 
 /** 公開フォームのパス (シェルの外・ログイン不要)。 */
 export const PUBLIC_INTERVIEW_FORM_PATH = "/interview-apply";
+
+/** 公開の参加届ページ。入力済みリンクは fragment (#prefill=<base64url JSON>) に載せ、サーバーに送らない。 */
+export const PUBLIC_PARTICIPATION_PATH = "/participate";
+const PREFILL_PREFIX = "#prefill=";
+
+function toBase64Url(text: string): string {
+  const bin = String.fromCharCode(...new TextEncoder().encode(text));
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** 参加届の入力済みリンクのパス (画面のコピーと合格メールで同じ形)。 */
+export function participationPrefillPath(prefill: ParticipationPrefill): string {
+  return `${PUBLIC_PARTICIPATION_PATH}${PREFILL_PREFIX}${toBase64Url(JSON.stringify(prefill))}`;
+}

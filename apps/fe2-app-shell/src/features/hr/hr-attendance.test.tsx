@@ -86,7 +86,7 @@ function report(): meeting.AttendanceReportResponse {
 function fakeApi(over: Partial<HrApi> = {}): HrApi {
   const unused = () => Promise.reject(new Error("unused"));
   return {
-    list: unused, get: unused, create: unused, update: unused, moveStage: unused, addNote: unused, join: unused, remove: unused,
+    list: unused, get: unused, create: unused, update: unused, moveStage: unused, addNote: unused, join: unused, remove: unused, registerResult: unused,
     onboarding: unused, setCheck: unused, teams: () => Promise.resolve({ teams: [] }),
     attendance: () => Promise.resolve(report()),
     setAttendance: vi.fn(async (_m, _d, userId, status) => ({ record: status ? rec(userId, status, "manual") : null })),

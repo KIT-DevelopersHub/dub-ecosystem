@@ -6,15 +6,11 @@ import { emptyProfileDraft, toProfileDraft, type PersonProfileDraft } from "../.
 import { kanaToRomaji } from "../../lib/romaji.ts";
 
 // module.tsx はページ一式を読み込むので、人事側から import しても重くならないようここに置く。
-export const PUBLIC_PARTICIPATION_PATH = "/participate";
+// パスと組み立ては @dub/types hrForm が SoT (合格メールもサーバーで同じリンクを作る)。
+export const PUBLIC_PARTICIPATION_PATH = hrForm.PUBLIC_PARTICIPATION_PATH;
 
 const PREFIX = "#prefill=";
 const MAX_LENGTH = 4000;
-
-function toBase64Url(text: string): string {
-  const bin = String.fromCharCode(...new TextEncoder().encode(text));
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
 
 function fromBase64Url(encoded: string): string {
   const bin = atob(encoded.replace(/-/g, "+").replace(/_/g, "/"));
@@ -22,7 +18,7 @@ function fromBase64Url(encoded: string): string {
 }
 
 export function prefillPath(prefill: hrForm.ParticipationPrefill): string {
-  return `${PUBLIC_PARTICIPATION_PATH}${PREFIX}${toBase64Url(JSON.stringify(prefill))}`;
+  return hrForm.participationPrefillPath(prefill);
 }
 
 /** リンクの値を入力欄の下書きにする。ローマ字はふりがなから埋める。読めないリンクは null (空のフォームで始める)。 */

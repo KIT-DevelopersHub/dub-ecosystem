@@ -47,16 +47,21 @@ export const RESERVED_LOCAL_PARTS: ReadonlySet<string> = new Set([
   "security", "noreply", "no-reply", "mailer-daemon", "support", "contact", "hello", "staff", "hr", "system",
 ]);
 
-function parseBody(raw: unknown): { localPart: string; sendAccountMail: boolean } {
-  const o = (raw ?? {}) as Partial<member.OnboardAccountRequest>;
-  const localPart = typeof o.localPart === "string" ? o.localPart.trim().toLowerCase() : "";
+/** Validate a requested @developershub.jp local part (shared by every onboard flow). */
+export function parseLocalPart(v: unknown): string {
+  const localPart = typeof v === "string" ? v.trim().toLowerCase() : "";
   if (!LOCAL_PART_RE.test(localPart)) {
     throw errors.validationFailed([{ field: "localPart", reason: "invalid" }], "メールアドレスは半角英小文字・数字と . _ % + - で入力してください");
   }
   if (RESERVED_LOCAL_PARTS.has(localPart)) {
     throw errors.validationFailed([{ field: "localPart", reason: "reserved" }], `${localPart}@ は運営用のアドレスなので発行できません`);
   }
-  return { localPart, sendAccountMail: o.sendAccountMail === true };
+  return localPart;
+}
+
+function parseBody(raw: unknown): { localPart: string; sendAccountMail: boolean } {
+  const o = (raw ?? {}) as Partial<member.OnboardAccountRequest>;
+  return { localPart: parseLocalPart(o.localPart), sendAccountMail: o.sendAccountMail === true };
 }
 
 /** A 4xx from a callee means it refused before creating anything; anything else is unknown. */
@@ -124,23 +129,18 @@ async function failAfter(svc: GatewayServices, ctx: RequestContext, made: Made, 
   });
 }
 
-export const ONBOARD_PARTIAL = "GATEWAY_ONBOARD_PARTIAL";
-/** mail-gateway issue = CF list + D1 + CF create + confirmation send in one call. */
-const ISSUE_TIMEOUT_MS = 25_000;
-
-/** POST /api/v1/admin/participation/:participationId/onboard-account */
-export async function participationOnboardHandler(c: Ctx): Promise<Response> {
-  const requestId = getRequestId(c);
-  const svc = createServices(c.env);
-  // members:onboard_mail was already enforced by the gate (POLICY_TABLE).
-  const authed = authedActor(c);
-  const ctx: RequestContext = { requestId, userId: authed.userId, caller: "api-gateway" };
-  const pid = encodeURIComponent(c.req.param("participationId") ?? "");
-  const { localPart, sendAccountMail } = parseBody(await c.req.json().catch(() => null));
-  const address = `${localPart}@${DEVHUB_MAIL_DOMAIN}`;
-
-  // 1-2: checks only — nothing is created before all pass.
-  const target = await svc.member.get<member.OnboardTargetResponse>(ctx, `/members/internal/participation/${pid}/onboard-target`);
+/**
+ * Steps 2-5 shared by every onboard flow (参加届 / 面談結果の合格): check the address is free, issue
+ * it, create the invited account (role fixed by identity-roster), then `link` it to the roster.
+ * `link` must be idempotent server-side for the same identityUserId. All-or-nothing by compensation.
+ */
+export async function issueLinkedAccount<L>(
+  svc: GatewayServices,
+  ctx: RequestContext,
+  a: { address: string; localPart: string; displayName: string; furigana?: string | undefined; link: (identityUserId: string) => Promise<L> },
+): Promise<{ user: identity.IdentityUser; member: L }> {
+  const { address, localPart } = a;
+  // 2: checks only — nothing is created before all pass.
   const existing = await svc.identity.post<{ user: identity.IdentityUser | null }>(ctx, "/internal/users/lookup", { email: address });
   if (existing.user) {
     throw new DubError("GATEWAY_ONBOARD_EMAIL_EXISTS", `${address} のアカウントは既にあります`, { status: 409 });
@@ -163,12 +163,11 @@ export async function participationOnboardHandler(c: Ctx): Promise<Response> {
   // 4. the account (role fixed by identity-roster)
   let user: identity.IdentityUser;
   try {
-    const furigana = furiganaOf(target.participation);
     user = (
       await svc.identity.post<{ user: identity.IdentityUser }>(ctx, "/internal/users/onboard", {
         email: address,
-        displayName: target.participation.name,
-        ...(furigana ? { furigana } : {}),
+        displayName: a.displayName,
+        ...(a.furigana ? { furigana: a.furigana } : {}),
       })
     ).user;
   } catch (err) {
@@ -177,9 +176,8 @@ export async function participationOnboardHandler(c: Ctx): Promise<Response> {
   made.account = user.id;
 
   // 5. the roster link — idempotent server-side, so one re-check settles a lost response
-  const linkPath = `/members/internal/participation/${pid}/onboard-link`;
-  const link = (): Promise<member.Member> => svc.member.post<member.Member>(ctx, linkPath, { identityUserId: user.id });
-  let linked: member.Member;
+  const link = (): Promise<L> => a.link(user.id);
+  let linked: L;
   try {
     linked = await link();
   } catch (err) {
@@ -190,6 +188,35 @@ export async function participationOnboardHandler(c: Ctx): Promise<Response> {
       return failAfter(svc, ctx, made, err);
     }
   }
+
+  return { user, member: linked };
+}
+
+export const ONBOARD_PARTIAL = "GATEWAY_ONBOARD_PARTIAL";
+/** mail-gateway issue = CF list + D1 + CF create + confirmation send in one call. */
+const ISSUE_TIMEOUT_MS = 25_000;
+
+/** POST /api/v1/admin/participation/:participationId/onboard-account */
+export async function participationOnboardHandler(c: Ctx): Promise<Response> {
+  const requestId = getRequestId(c);
+  const svc = createServices(c.env);
+  // members:onboard_mail was already enforced by the gate (POLICY_TABLE).
+  const authed = authedActor(c);
+  const ctx: RequestContext = { requestId, userId: authed.userId, caller: "api-gateway" };
+  const pid = encodeURIComponent(c.req.param("participationId") ?? "");
+  const { localPart, sendAccountMail } = parseBody(await c.req.json().catch(() => null));
+  const address = `${localPart}@${DEVHUB_MAIL_DOMAIN}`;
+
+  // 1. the target (参加届に紐付いた追加済の名簿行で、アカウントがまだ無い人)
+  const target = await svc.member.get<member.OnboardTargetResponse>(ctx, `/members/internal/participation/${pid}/onboard-target`);
+  const { user, member: linked } = await issueLinkedAccount(svc, ctx, {
+    address,
+    localPart,
+    displayName: target.participation.name,
+    furigana: furiganaOf(target.participation),
+    link: (identityUserId) =>
+      svc.member.post<member.Member>(ctx, `/members/internal/participation/${pid}/onboard-link`, { identityUserId }),
+  });
 
   // 6. the account-issue mail (best-effort)
   // 案内メールの宛先は名簿の Gmail (ユーザー名簿の account-mail と同じ)。

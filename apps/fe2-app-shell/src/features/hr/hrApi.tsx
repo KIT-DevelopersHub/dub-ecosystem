@@ -1,7 +1,7 @@
 // 人事 feature の api アダプタ。シェルの api-client (session cookie / 401→refresh / requestId /
 // エラー正規化) に乗り、/api/v1/members/hr/* → gateway → member-service に届く。
 // 契約型は @dub/types `hr` (SoT) をそのまま使い、ここでは再定義しない。
-import type { hr, meeting, member } from "@dub/types";
+import type { hr, hrResult, meeting, member } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 export interface HrApi {
@@ -13,6 +13,8 @@ export interface HrApi {
   addNote(id: string, body: hr.AddApplicantNoteRequest): Promise<hr.ApplicantDetail>;
   join(id: string, body: hr.JoinApplicantRequest): Promise<hr.JoinApplicantResponse>;
   remove(id: string): Promise<void>;
+  /** 面談結果の登録 (api-gateway: 合否メール・合格はアカウント発行まで)。二度目は登録済みを返すだけ。 */
+  registerResult(id: string, body: hrResult.RegisterInterviewResultRequest): Promise<hrResult.RegisterInterviewResultResponse>;
   onboarding(): Promise<hr.ListOnboardingProgressResponse>;
   setCheck(memberId: string, itemId: string, checked: boolean): Promise<hr.OnboardingProgress>;
   /** 希望チームの選択肢 (名簿のチーム一覧)。 */
@@ -60,6 +62,12 @@ export function createHrApi(api: ApiClient): HrApi {
     remove: async (id) => {
       await api.request<{ ok: true }>({ method: "DELETE", path: `${BASE}/applicants/${enc(id)}` });
     },
+    registerResult: (id, body) =>
+      api.request<hrResult.RegisterInterviewResultResponse, hrResult.RegisterInterviewResultRequest>({
+        method: "POST",
+        path: `/api/v1/admin/hr/applicants/${enc(id)}/interview-result`,
+        body,
+      }),
     onboarding: () => api.request<hr.ListOnboardingProgressResponse>({ method: "GET", path: `${BASE}/onboarding` }),
     setCheck: (memberId, itemId, checked) =>
       api.request<hr.OnboardingProgress, hr.SetOnboardingCheckRequest>({

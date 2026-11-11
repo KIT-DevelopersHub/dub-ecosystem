@@ -7,6 +7,7 @@ import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
 import type { HrFormRepo } from "./hr-form-repo";
 import type { HrInterviewRepo } from "./hr-interview-repo";
+import type { HrResultRepo } from "./hr-result-repo";
 import type { HrMailSender, InterviewerNotifier } from "./hr-interview-mail";
 import type { GoalMetricSources, GoalRepo } from "./goal-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
@@ -201,6 +202,8 @@ export interface AppDeps {
   hrFormRepo: HrFormRepo;
   /** 面談の日程調整 (member_hr_interview_*) の永続化 (hr-interview-repo.ts)。 */
   hrInterviewRepo: HrInterviewRepo;
+  /** 面談結果 (member_hr_interview_results) の永続化 (hr-result-repo.ts)。 */
+  hrResultRepo: HrResultRepo;
   /** 応募者への案内メール (mail-gateway)。undefined ならメールは保留のまま (binding の無い環境)。 */
   sendHrMail?: HrMailSender;
   /** 予約を担当者へ知らせる in-app 通知 (best-effort)。 */
@@ -210,7 +213,7 @@ export interface AppDeps {
   /** 応答のあとも続ける処理 (本番は ExecutionContext.waitUntil)。undefined なら待ってから応答する。 */
   defer?: (work: Promise<void>) => void;
   /** 人事の id 採番 (app = 応募者 / hre = 履歴 / hfr = フォームの回答 / hsl = 面談枠 / hin = 招待)。 */
-  newHrId: (prefix: "app" | "hre" | "hfr" | "hsl" | "hin") => string;
+  newHrId: (prefix: "app" | "hre" | "hfr" | "hsl" | "hin" | "hir") => string;
   /** スポンサー (member_sponsor_cards) の永続化 (sponsor-repo.ts)。 */
   sponsorRepo: SponsorRepo;
   /** 名刺写真の置き場 (本番 R2 SPONSOR_FILES)。undefined なら写真ルートだけ 503。 */

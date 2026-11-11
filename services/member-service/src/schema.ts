@@ -556,6 +556,47 @@ CREATE TABLE member_hr_interview_settings (
 `.trim(),
 };
 
+// 0026: 人事アプリの面談結果 (合否・合格のアカウント発行・メール) の新規テーブル (additive)。
+// Mirrors 0026_hr_interview_results.sql (schema-lockstep).
+export const MEMBER_HR_INTERVIEW_RESULTS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0026_hr_interview_results",
+  up: `
+CREATE TABLE member_hr_interview_results (
+  id                       TEXT PRIMARY KEY,
+  org_id                   TEXT NOT NULL,
+  applicant_id             TEXT NOT NULL UNIQUE REFERENCES member_hr_applicants(id),
+  decision                 TEXT NOT NULL,
+  reason                   TEXT NOT NULL,
+  include_reason           INTEGER NOT NULL DEFAULT 0,
+  status                   TEXT NOT NULL,
+  issued_address           TEXT,
+  issued_identity_user_id  TEXT,
+  issued_member_id         TEXT,
+  mail_sent_at             TEXT,
+  lease_until              TEXT,
+  created_by               TEXT NOT NULL,
+  created_at               TEXT NOT NULL,
+  completed_at             TEXT
+);
+CREATE INDEX idx_member_hr_interview_results_org ON member_hr_interview_results(org_id, created_at);
+`.trim(),
+};
+
+// 0027: 予約済みなのに 面談日程調整中 の応募者を 面談確定 にそろえる (冪等なデータ更新)。
+// Mirrors 0027_hr_booked_interview_set.sql (schema-lockstep).
+export const MEMBER_HR_BOOKED_BACKFILL_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0027_hr_booked_interview_set",
+  up: `
+UPDATE member_hr_applicants
+SET stage = 'interview_set', version = version + 1
+WHERE stage = 'scheduling'
+  AND archived_at IS NULL
+  AND id IN (SELECT applicant_id FROM member_hr_interview_slots WHERE applicant_id IS NOT NULL);
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -583,4 +624,6 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_GOALS_MIGRATION,
   MEMBER_SPONSOR_MAIL_SYNC_MIGRATION,
   MEMBER_HR_INTERVIEWS_MIGRATION,
+  MEMBER_HR_INTERVIEW_RESULTS_MIGRATION,
+  MEMBER_HR_BOOKED_BACKFILL_MIGRATION,
 ];

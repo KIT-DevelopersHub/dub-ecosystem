@@ -1,5 +1,5 @@
-// 人事の共通部品: 権限フラグ・ステータスバッジ/プルダウン・採用の確認ダイアログ・
-// 応募者詳細ドロワー・押した値を即座に重ねる usePendingOverlay。
+// 人事の共通部品: 権限フラグ・ステータスバッジ・応募者詳細ドロワー・押した値を即座に重ねる usePendingOverlay。
+// ステータスは手で変えない (面談の予約で 面談確定、面談結果の登録で 採用 / 不採用)。
 import { useCallback, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -15,7 +15,7 @@ import {
   Textarea,
   type BadgeTone,
 } from "@dub/ui";
-import { hr } from "@dub/types";
+import { hr, hrResult } from "@dub/types";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import {
   useAddNote,
@@ -51,10 +51,12 @@ export function StageBadge({ stage }: { stage: hr.ApplicantStage }): JSX.Element
 }
 
 /** 人事アプリでの操作可否。表 (member-service policy-table) と同じ組み合わせ。 */
-export function useHrCapability(): { canWrite: boolean; canAdmin: boolean } {
+export function useHrCapability(): { canWrite: boolean; canAdmin: boolean; canRegister: boolean } {
   const { canEdit } = useAppCapability("hr");
   const { can } = usePermissions();
-  return { canWrite: canEdit && can("hr:write"), canAdmin: canEdit && can("hr:admin") };
+  const canWrite = canEdit && can("hr:write");
+  // 面談結果の登録 (gateway): hr:write + 合格のアカウント発行の鍵 members:onboard_mail。
+  return { canWrite, canAdmin: canEdit && can("hr:admin"), canRegister: canWrite && can("members:onboard_mail") };
 }
 
 /**
@@ -103,93 +105,6 @@ function toLocalInput(iso: string | null): string {
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/**
- * 採用の確認待ち。名簿にいない人を 採用 / オンボーディング調整 / オンボーディング完了 にしようと
- * したときに開き、確定で POST /join (名簿に追加)。採用より先のステータスを選んでいたら続けて動かす。
- */
-export interface JoinRequest {
-  applicant: hr.Applicant;
-  target: hr.ApplicantStage;
-}
-
-export function JoinConfirmDialog({ request, onDone }: { request: JoinRequest | null; onDone: () => void }): JSX.Element {
-  const join = useJoinApplicant();
-  const move = useMoveStage();
-  const teams = useHrTeams();
-  const a = request?.applicant;
-  const team = teams.data?.teams.find((t) => t.id === a?.desiredTeamId);
-  return (
-    <ConfirmDialog
-      testId="fe2-hr-join-confirm"
-      open={request !== null}
-      title="採用して名簿に追加しますか？"
-      message={
-        a
-          ? `${a.name} さんを「採用」にし、在籍メンバーとして運営メンバー・名簿に追加します。${team ? `希望チーム（${team.name}）にも所属します。` : ""}`
-          : ""
-      }
-      confirmLabel="採用して名簿に追加"
-      onCancel={onDone}
-      onConfirm={async () => {
-        if (!request) return;
-        try {
-          const res = await join.mutateAsync({ applicant: request.applicant });
-          if (request.target !== "hired") {
-            await move.mutateAsync({ applicant: res.applicant, stage: request.target });
-          }
-        } catch {
-          // トーストは hooks 側で出す。
-        }
-        onDone();
-      }}
-    />
-  );
-}
-
-/**
- * ステータスのプルダウン (表の行・詳細ドロワー共通)。楽観的に変わり、失敗で戻る。名簿にいない人の
- * 採用系は onRequestJoin (確認ダイアログ) に回す。
- */
-export function StatusSelect({
-  applicant,
-  onRequestJoin,
-  testId,
-}: {
-  applicant: hr.Applicant;
-  onRequestJoin: (req: JoinRequest) => void;
-  testId?: string;
-}): JSX.Element {
-  const move = useMoveStage();
-  const { canAdmin } = useHrCapability();
-  const overlay = usePendingOverlay<hr.ApplicantStage>();
-  const hasMember = applicant.memberId !== null;
-  const shown = overlay.get(applicant.id) ?? applicant.stage;
-  return (
-    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <Select<hr.ApplicantStage>
-        id={`hr-status-${applicant.id}`}
-        testId={testId}
-        value={shown}
-        options={hr.APPLICANT_STAGES.map((s) => ({
-          value: s,
-          label: hr.requiresJoin(s, hasMember) ? `${STAGE_LABELS[s]}（名簿に追加）` : STAGE_LABELS[s],
-          // 名簿への追加 (採用) は hr:admin のみ。
-          disabled: hr.requiresJoin(s, hasMember) && !canAdmin,
-        }))}
-        onChange={(stage) => {
-          if (stage === applicant.stage) return;
-          if (hr.requiresJoin(stage, hasMember)) {
-            onRequestJoin({ applicant, target: stage });
-            return;
-          }
-          overlay.set(applicant.id, stage);
-          move.mutate({ applicant, stage }, { onSettled: () => overlay.clear(applicant.id) });
-        }}
-      />
-    </span>
-  );
 }
 
 function eventLabel(e: hr.ApplicantEvent): string {
@@ -286,16 +201,17 @@ export function RemoveApplicantButton({
 export function ApplicantDrawer({
   applicantId,
   onClose,
-  onRequestJoin,
+  onRequestResult,
 }: {
   applicantId: string | null;
   onClose: () => void;
-  onRequestJoin: (req: JoinRequest) => void;
+  /** 面談確定・面談済みの人の「面談結果を登録」。 */
+  onRequestResult?: (a: hr.Applicant) => void;
 }): JSX.Element {
   const detail = useApplicantDetail(applicantId);
   const navigate = useNavigate();
   const teams = useHrTeams();
-  const { canWrite, canAdmin } = useHrCapability();
+  const { canWrite, canAdmin, canRegister } = useHrCapability();
   const addNote = useAddNote();
   const update = useUpdateApplicant();
   const [note, setNote] = useState("");
@@ -317,13 +233,15 @@ export function ApplicantDrawer({
     const team = teams.data?.teams.find((t) => t.id === a.desiredTeamId);
     body = (
       <div className={styles.detail} data-testid="fe2-hr-detail">
-        {canWrite ? (
-          <FormField label="ステータス" htmlFor={`hr-status-${a.id}`}>
-            <StatusSelect applicant={a} onRequestJoin={onRequestJoin} testId="fe2-hr-detail-status" />
-          </FormField>
-        ) : (
+        {/* ステータスは手で変えない: 予約で 面談確定、結果の登録で 採用 / 不採用 に進む。 */}
+        <div className={styles.stageCell} data-testid="fe2-hr-detail-status">
           <StageBadge stage={a.stage} />
-        )}
+          {canRegister && onRequestResult && hrResult.RESULT_STAGES.includes(a.stage) ? (
+            <Button size="sm" variant="primary" testId="fe2-hr-detail-result" onClick={() => onRequestResult(a)}>
+              面談結果を登録
+            </Button>
+          ) : null}
+        </div>
         {canWrite ? (
           <FormField label="面談日" htmlFor="hr-detail-interview">
             <input

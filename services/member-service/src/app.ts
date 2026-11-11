@@ -25,7 +25,8 @@ import { HrFormService } from "./hr-form-service";
 import { registerHrInterviewFormRoutes } from "./hr-form-routes";
 import { HrInterviewService } from "./hr-interview-service";
 import { registerHrInterviewRoutes } from "./hr-interview-routes";
-import type { goal, hr, sponsor } from "@dub/types";
+import { HrResultService } from "./hr-result-service";
+import type { goal, hr, hrResult, sponsor } from "@dub/types";
 import { GoalService } from "./goal-service";
 import { SponsorService } from "./sponsor-service";
 import { SponsorLeadService } from "./sponsor-lead-service";
@@ -295,6 +296,22 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const hrInterviewSvc = new HrInterviewService(deps, hrSvc, svc);
   registerHrInterviewFormRoutes(app, new HrFormService(deps, hrSvc, (ctx, id) => hrInterviewSvc.onApplied(ctx, id)));
   registerHrInterviewRoutes(app, hrInterviewSvc);
+  // 面談結果の登録 (api-gateway interview-result だけが呼ぶ。INTERNAL)。
+  const hrResultSvc = new HrResultService(deps, hrSvc, svc);
+  app.post("/members/internal/hr/applicants/:id/interview-result/claim", async (c) => {
+    const body = await readJson<hrResult.ClaimInterviewResultRequest>(c);
+    return c.json(await hrResultSvc.claim(reqCtx(c), c.req.param("id"), body));
+  });
+  app.post("/members/internal/hr/applicants/:id/interview-result/link", async (c) => {
+    const body = await readJson<hrResult.LinkInterviewResultRequest>(c);
+    return c.json(await hrResultSvc.link(reqCtx(c), c.req.param("id"), body));
+  });
+  app.post("/members/internal/hr/applicants/:id/interview-result/complete", async (c) => {
+    return c.json(await hrResultSvc.complete(reqCtx(c), c.req.param("id")));
+  });
+  app.post("/members/internal/hr/applicants/:id/interview-result/release", async (c) => {
+    return c.json(await hrResultSvc.release(c.req.param("id")));
+  });
 
   // ---- 人事 (面談 → 採用 → オンボーディング) ----
   // 認可は表 (人事アプリの 閲覧/編集 + hr:read / hr:write / hr:admin)。採用 (join) は名簿に行を

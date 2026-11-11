@@ -5,6 +5,7 @@
       "GET /api/v1/me/participation",
       "GET /api/v1/me/profile",
       "GET /api/v1/public/hr-interview-form",
+      "POST /api/v1/admin/hr/applicants/{}/interview-result",
       "POST /api/v1/admin/participation/{}/onboard-account",
       "POST /api/v1/admin/users/{}/account-mail",
       "POST /api/v1/admin/users/{}/password",
