@@ -53,6 +53,9 @@ export interface MeetingTarget {
   memberCount: number;
   /** The caller belongs to it (the calendar's default-on filter in Dub). */
   isMine: boolean;
+  /** Its Google calendar id, only when `isMine` and the calendar exists (first meeting made). Shares
+   *  send no mail, so Dub links it as 「Googleカレンダーに追加」. */
+  calendarId?: string;
 }
 
 /** A member who could not be invited with a Google account (no Gmail on their 名簿 row);

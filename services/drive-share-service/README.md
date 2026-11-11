@@ -155,10 +155,13 @@ to the system admin role only.
   with (no Google account: mail to them bounced). Members without a Gmail are reported in
   `POST /meetings/sync` → `withoutGoogleAccount`.
 - **Calendar sharing**: a role calendar is shared read-only (ACL `reader`) with that role's
-  members only; the 全体 calendar with every active member. Google mails each new reader an
-  "add this calendar" link, so members get it only for their own roles. Someone who leaves a role
-  loses that share on the next sync (no mail). Attendees see their own meetings on their main
-  calendar regardless.
+  members only; the 全体 calendar with every active member. Shares are made with
+  `sendNotifications=false`: Google sends **no** share mail (it used to mail every member once per
+  calendar). Instead `GET /meetings/targets` returns `calendarId` on the caller's own calendars and
+  カレンダー > ミーティング shows 「Googleカレンダーに追加」 beside each (Google's
+  `calendar.google.com/calendar/u/0/r?cid=<base64 id>` link). Someone who leaves a role loses that
+  share on the next sync (no mail). Attendees see their own meetings on their main calendar
+  regardless, and still get Google's meeting invitations (`sendUpdates=all`).
 - **Recurrence**: RRULE in `Asia/Tokyo` — weekly / biweekly / monthly_weekday (第N X曜日 of the
   first occurrence; a 5th weekday means the last one, `-1`), optional `until` (inclusive JST date).
 - **Automatic follow**: `MeetingSyncDO` (SQLite Durable Object **alarm**, no cron slot) runs the

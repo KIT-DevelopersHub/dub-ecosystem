@@ -110,6 +110,21 @@ describe("real Calendar client", () => {
     await expect(c.insertAcl("cal", "a@b.c")).rejects.toMatchObject({ api: "calendar", operation: "acl.insert" });
   });
 
+  it("shares a calendar without Google's share mail (sendNotifications=false)", async () => {
+    const calls: { url: URL; method: string; body: unknown }[] = [];
+    const fetchImpl = (async (input: string, init?: RequestInit) => {
+      calls.push({ url: new URL(String(input)), method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+      return answer(200, { id: "user:a@b.c" });
+    }) as unknown as typeof fetch;
+    const c = createGoogleCalendarClient({ token, fetchImpl });
+    await expect(c.insertAcl("cal_dev@group.calendar.google.com", "a@b.c")).resolves.toEqual({ id: "user:a@b.c" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.url.pathname).toBe("/calendar/v3/calendars/cal_dev%40group.calendar.google.com/acl");
+    expect(calls[0]!.url.searchParams.get("sendNotifications")).toBe("false");
+    expect(calls[0]!.body).toEqual({ role: "reader", scope: { type: "user", value: "a@b.c" } });
+  });
+
   it("a limit on Meet REST is a Meet limit, even through the calendar client", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const c = createGoogleCalendarClient({ token, fetchImpl: (async () => answer(429, { error: { message: "x", status: "RESOURCE_EXHAUSTED" } })) as typeof fetch });
