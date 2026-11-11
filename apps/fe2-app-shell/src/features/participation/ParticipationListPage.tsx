@@ -13,7 +13,7 @@ import { DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, TextFi
 import type { ColumnDef, BadgeTone } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { usePermissionGate } from "../../auth/PermissionGate.tsx";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
 import { POSITION_LABEL, REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
@@ -75,9 +75,10 @@ function emailCandidate(p: Participation): string | null {
 
 export function ParticipationListPage(): JSX.Element {
   // 反映確定(resolve)は member-service 側で 参加届 app の「編集」を要求する
-  // (requireParticipationEdit)。同じ判定を UI にも効かせ、閲覧のみの運営には押せる形で
-  // 見せない — 押しても 403 になるボタンを出さないため。
+  // (requireParticipationEdit)。閲覧のみの運営が押したら、403 の代わりに権限不足ダイアログ
+  // (申請ボタン付き)を出す。
   const { canEdit } = useAppCapability("participation");
+  const gate = usePermissionGate({ appId: "participation", locked: !canEdit });
   // メール発行は gateway の onboard-account 1 本で、鍵も members:onboard_mail 1 つ (人事向け)。
   // ロール管理の編集や identity:admin は要らない。持たない人には聞かない (403 になるため)。
   const { can } = usePermissions();
@@ -132,16 +133,16 @@ export function ParticipationListPage(): JSX.Element {
           {reviewLabel(p)}
         </Badge>
         {p.reviewState === "added" ? (
-          <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setUnlinkTarget(p)} testId={`participation-unlink-${p.id}`}>
+          <Button size="sm" variant="secondary" onClick={gate.guard(() => setUnlinkTarget(p))} testId={`participation-unlink-${p.id}`}>
             紐付けを解除
           </Button>
         ) : (
           <>
-            <Button size="sm" variant="primary" disabled={!canEdit} onClick={() => setAddTarget(p)} testId={`participation-add-${p.id}`}>
+            <Button size="sm" variant="primary" onClick={gate.guard(() => setAddTarget(p))} testId={`participation-add-${p.id}`}>
               追加する
             </Button>
             {p.reviewState === "pending" ? (
-              <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setSkipTarget(p)} testId={`participation-skip-${p.id}`}>
+              <Button size="sm" variant="secondary" onClick={gate.guard(() => setSkipTarget(p))} testId={`participation-skip-${p.id}`}>
                 しない
               </Button>
             ) : null}
@@ -186,7 +187,7 @@ export function ParticipationListPage(): JSX.Element {
   return (
     <HrFrame active="participation">
       <div data-testid="participation-list-page">
-        <AppReadOnlyNotice appId="participation" testId="participation-readonly-notice" />
+        {gate.dialog}
         <p className={styles.sectionHint}>送信された参加届を確認できます（運営のみ）。左端で運営メンバーに追加するか選べます。行をクリックすると詳細が開きます。</p>
         <div className={styles.listShare}>
           <PublicUrlCard

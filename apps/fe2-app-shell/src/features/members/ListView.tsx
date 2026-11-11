@@ -11,7 +11,8 @@
 // 選択は localStorage にユーザー単位で保存される。
 //
 // 編集: 行クリックで編集ダイアログを開く（操作列は右端で横スクロールしないと見えないため）。
-// 行内のボタンは stopPropagation で行クリックと分ける。readOnly(閲覧のみ)では書き込み操作を無効化する。
+// 行内のボタンは stopPropagation で行クリックと分ける。readOnly(閲覧のみ)では行クリックで編集を開かない
+// (行内ボタンは押せる。権限不足ダイアログを出すのは呼び出し側の guard)。
 import type { MouseEvent, ReactNode } from "react";
 import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
@@ -73,7 +74,7 @@ export function ListView({
   accountLabels: Map<string, string>;
   /** member id -> 氏名: リーダー列で leaderId を氏名表示する。省略時は列を出さない。 */
   leaderNames?: Map<string, string>;
-  /** 閲覧のみの権限 — 編集/削除/紐付けは押せず、行クリックでも編集を開かない. */
+  /** 閲覧のみの権限 — 行クリックで編集を開かない (行内ボタンの権限案内は呼び出し側が guard する). */
   readOnly?: boolean;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
@@ -126,12 +127,12 @@ export function ListView({
               <Truncate text={accountLabels.get(m.identityUserId) ?? m.identityUserId} max="9rem" />
             </Tag>
             <StopRowClick>
-              <IconButton name="x" aria-label={`${m.name} のアカウント紐付けを解除`} disabled={readOnly} onClick={() => onUnlink(m)} testId={`members-unlink-${m.id}`} />
+              <IconButton name="x" aria-label={`${m.name} のアカウント紐付けを解除`} onClick={() => onUnlink(m)} testId={`members-unlink-${m.id}`} />
             </StopRowClick>
           </span>
         ) : (
           <StopRowClick>
-            <Button variant="ghost" size="sm" disabled={readOnly} onClick={() => onLink(m)} testId={`members-link-${m.id}`}>
+            <Button variant="ghost" size="sm" onClick={() => onLink(m)} testId={`members-link-${m.id}`}>
               未設定・紐付け
             </Button>
           </StopRowClick>
@@ -184,7 +185,6 @@ export function ListView({
             <IconButton
               name="send"
               aria-label={`${m.name} にアカウント発行メールを送る`}
-              disabled={readOnly}
               onClick={() => onSendAccountMail(m)}
               testId={`members-account-mail-${m.id}`}
             />
@@ -193,17 +193,15 @@ export function ListView({
             <IconButton
               name="bell"
               aria-label={`${m.name} に情報の入力を催促する`}
-              disabled={readOnly}
               onClick={() => onRemind(m)}
               testId={`members-remind-${m.id}`}
             />
           ) : null}
-          <IconButton name="edit" aria-label={`${m.name} を編集`} disabled={readOnly} onClick={() => onEdit(m)} testId={`members-edit-${m.id}`} />
+          <IconButton name="edit" aria-label={`${m.name} を編集`} onClick={() => onEdit(m)} testId={`members-edit-${m.id}`} />
           <IconButton
             name="trash"
             aria-label={`${m.name} を削除`}
             variant="danger"
-            disabled={readOnly}
             onClick={() => onDelete(m)}
             testId={`members-delete-${m.id}`}
           />

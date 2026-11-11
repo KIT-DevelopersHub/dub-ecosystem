@@ -77,7 +77,7 @@ export const CHAT_DM_NOTIFY_TYPE = "chat.dm";
 export const FEEDBACK_CATEGORIES = ["bug", "idea", "question", "other"] as const;
 // 問い合わせ種別 (mirrors notification.InquiryKind). Validated app-side; the column has no
 // CHECK so a new kind never needs a table rebuild.
-export const INQUIRY_KINDS = ["feedback", "business_card", "invite_friend", "interview", "other"] as const;
+export const INQUIRY_KINDS = ["feedback", "business_card", "invite_friend", "interview", "other", "permission_request"] as const;
 // Admin-facing labels for the notification title/body and email.
 export const INQUIRY_KIND_LABELS: Record<(typeof INQUIRY_KINDS)[number], string> = {
   feedback: "フィードバック",
@@ -85,6 +85,7 @@ export const INQUIRY_KIND_LABELS: Record<(typeof INQUIRY_KINDS)[number], string>
   invite_friend: "友達を誘いたい",
   interview: "面談を希望",
   other: "その他",
+  permission_request: "権限の申請",
 };
 export const FEEDBACK_MESSAGE_MAX = 4000;
 export const FEEDBACK_PAGE_URL_MAX = 2048;
