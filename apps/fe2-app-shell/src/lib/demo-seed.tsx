@@ -3325,6 +3325,29 @@ function seedMeetings(): meeting.Meeting[] {
   ];
 }
 
+/** Invitees of a demo meeting with stable, varied answers per occurrence (as if from Google Calendar).
+ *  ?meetingAnswers=unavailable previews the "could not read Google" state. */
+function demoMeetingAttendees(m: meeting.Meeting, date: string | null): meeting.ListMeetingAttendeesResponse {
+  const unavailable = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("meetingAnswers") === "unavailable";
+  const people = DEMO_REGULAR_PEOPLE.filter((p) => m.targetId === "all" || p.roleIds.includes(m.targetId));
+  const answers: meeting.MeetingResponseStatus[] = ["accepted", "accepted", "declined", "tentative", "accepted", "needsAction"];
+  const seed = [...`${m.id}${date ?? ""}`].reduce((n, ch) => n + ch.charCodeAt(0), 0);
+  const items: meeting.MeetingAttendee[] = people.map((p, i) => {
+    const response = unavailable ? "needsAction" : answers[(seed + i) % answers.length]!;
+    return {
+      userId: p.userId as meeting.MeetingAttendee["userId"],
+      name: p.name,
+      email: null,
+      response,
+      comment: response === "declined" ? "授業と重なっているため欠席します" : null,
+    };
+  });
+  if (m.id === "mtg_kickoff") items.push({ userId: null, name: "協賛企業 ご担当者", email: "sponsor@example.com", response: unavailable ? "needsAction" : "tentative", comment: null });
+  const order: meeting.MeetingResponseStatus[] = ["accepted", "tentative", "declined", "needsAction"];
+  items.sort((a, b) => order.indexOf(a.response) - order.indexOf(b.response) || a.name.localeCompare(b.name, "ja"));
+  return { items, responsesAvailable: !unavailable };
+}
+
 function createMeetingsDemoStore() {
   const storage = (): Storage | null => {
     try {
@@ -3406,6 +3429,12 @@ function createMeetingsDemoStore() {
         return problem("UPSTREAM_TIMEOUT", "Gateway Timeout", 504);
       }
       return json(created, 201);
+    }
+    const attendeesM = /^\/api\/v1\/meetings\/([^/]+)\/attendees$/.exec(pathname);
+    if (method === "GET" && attendeesM) {
+      const found = read().find((m) => m.id === decodeURIComponent(attendeesM[1]!));
+      if (!found) return problem("NOT_FOUND", "meeting not found", 404);
+      return json(demoMeetingAttendees(found, url?.searchParams.get("date") ?? null));
     }
     const one = /^\/api\/v1\/meetings\/([^/]+)$/.exec(pathname);
     if (one) {

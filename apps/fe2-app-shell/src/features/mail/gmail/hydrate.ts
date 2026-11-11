@@ -41,11 +41,32 @@ export function inboxItemsToThreads(items: mail.MailMessageListItem[]): MailThre
   return order.map((id) => byThread.get(id)!);
 }
 
-/** Combine received + sent into the thread list the store renders. A sent REPLY (its
- *  threadId matches a received thread) is folded INTO that conversation so it stays
- *  visible in the thread instead of showing as a detached Sent row; every other sent
- *  message becomes its own Sent thread as before. Mirrors the server-side union in
- *  GET /threads/:id, so the list view and the opened conversation agree. */
+/** Local part of a message id (`maillog_x@d` -> `maillog_x`). */
+const localOf = (id: string): string => id.split("@")[0] ?? id;
+
+/** One sent list row -> the outbound message it renders as. */
+function sentItemToMessage(it: mail.MailSentListItem, me: MailPerson): MailMsg {
+  return {
+    id: it.id,
+    messageId: it.id, // bare send-log id: replyPlan rebuilds the wire Message-Id from it
+    from: it.from ?? me,
+    to: it.to,
+    ...(it.cc && it.cc.length > 0 ? { cc: it.cc } : {}),
+    ...(it.bcc && it.bcc.length > 0 ? { bcc: it.bcc } : {}),
+    date: it.sentAt,
+    body: it.snippet,
+    read: true,
+    outbound: true,
+    ...(it.mine === false ? { mine: false } : {}),
+  };
+}
+
+/** Combine received + sent into ONE list of conversations (Gmail). Every send goes into its
+ *  conversation: a received thread with the same id (our reply, or the send that the replies
+ *  answer), else a Sent thread shared with our other sends in it. The conversation id is the
+ *  server summary's (`conversation.id`), else the reply's `threadId`; a send that opened a
+ *  thread with no summary (older gateway) still matches the received thread keyed by its own
+ *  RFC id (`<send-log id>@domain`). A lone send stays its own thread, keyed by its id. */
 export function combineThreads(
   inboxItems: mail.MailMessageListItem[],
   sentItems: mail.MailSentListItem[],
@@ -53,31 +74,32 @@ export function combineThreads(
 ): MailThreadModel[] {
   const inboxThreads = inboxItemsToThreads(inboxItems);
   const byId = new Map(inboxThreads.map((t) => [t.id, t]));
-  const standalone: mail.MailSentListItem[] = [];
+  const byLocal = new Map(inboxThreads.filter((t) => t.id.startsWith("maillog_")).map((t) => [localOf(t.id), t]));
+  const sentThreads = new Map<string, MailThreadModel>();
+  const sentOrder: string[] = [];
   for (const s of sentItems) {
-    const parent = s.threadId ? byId.get(s.threadId) : undefined;
-    if (parent) {
-      parent.messages.push({
-        id: s.id,
-        messageId: s.id,
-        from: s.from ?? me,
-        to: s.to,
-        ...(s.cc && s.cc.length > 0 ? { cc: s.cc } : {}),
-        ...(s.bcc && s.bcc.length > 0 ? { bcc: s.bcc } : {}),
-        date: s.sentAt,
-        body: s.snippet,
-        read: true,
-        outbound: true,
-        ...(s.mine === false ? { mine: false } : {}),
-      });
-      parent.messages.sort((a, b) => a.date.localeCompare(b.date));
+    const key = s.conversation?.id ?? s.threadId;
+    const target = (key ? byId.get(key) : undefined) ?? byLocal.get(s.id) ?? (key ? sentThreads.get(key) : undefined);
+    const msg = sentItemToMessage(s, me);
+    if (target) {
+      // A conversation is titled by its first message (Gmail), not a later "Re:".
+      if (s.subject && msg.date < (target.messages[0]?.date ?? "")) target.subject = s.subject;
+      if (!target.messages.some((m) => m.id === s.id)) target.messages.push(msg);
+      target.messages.sort((a, b) => a.date.localeCompare(b.date));
     } else {
-      standalone.push(s);
+      const id = key && s.conversation ? key : s.id;
+      sentOrder.push(id);
+      sentThreads.set(id, { id, subject: s.subject, folder: "sent", starred: false, labels: [], messages: [msg] });
+    }
+    const t = target ?? sentThreads.get(s.conversation && key ? key : s.id);
+    if (t && s.conversation) {
+      t.conversationSize = Math.max(t.conversationSize ?? 0, s.conversation.messageCount);
+      if (s.conversation.repliedBy.length > 0) t.repliedBy = s.conversation.repliedBy;
     }
   }
   // A send to a Dub-routed mailbox also arrives as a received copy: show it once.
   for (const t of inboxThreads) t.messages = dedupeLoopback(t.messages);
-  return [...inboxThreads, ...sentItemsToThreads(standalone, me)];
+  return [...inboxThreads, ...sentOrder.map((id) => sentThreads.get(id)!)];
 }
 
 /** Sent messages -> sent threads (one message each; the send-log has no thread grouping). */
@@ -88,21 +110,7 @@ export function sentItemsToThreads(items: mail.MailSentListItem[], me: MailPerso
     folder: "sent" as const,
     starred: false,
     labels: [],
-    messages: [
-      {
-        id: it.id,
-        messageId: it.id, // bare send-log id: replyPlan rebuilds the wire Message-Id from it
-        from: it.from ?? me,
-        to: it.to,
-        ...(it.cc && it.cc.length > 0 ? { cc: it.cc } : {}),
-        ...(it.bcc && it.bcc.length > 0 ? { bcc: it.bcc } : {}),
-        date: it.sentAt,
-        body: it.snippet,
-        read: true,
-        outbound: true,
-        ...(it.mine === false ? { mine: false } : {}),
-      },
-    ],
+    messages: [sentItemToMessage(it, me)],
   }));
 }
 

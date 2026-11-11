@@ -121,6 +121,16 @@ export function stubGoogleAccount(): GoogleAccountService {
   });
 }
 
+/** Every member's login address is a Google account (meetings skip members without one). */
+export function googleAtLoginAddress(roster: RoleMembership): MemberDirectory {
+  return {
+    async googleEmails(userIds) {
+      const users = await roster.listActiveUsers();
+      return new Map(users.filter((u) => userIds.includes(u.id)).map((u) => [u.id, { gmail: u.email.toLowerCase(), name: u.name }]));
+    },
+  };
+}
+
 /** カレンダー > ミーティング over an in-memory store + the mock calendar (ready account). */
 export function buildMeetings(opts: {
   roster?: RoleMembership;
@@ -144,11 +154,12 @@ export function buildMeetings(opts: {
   let tick = 0;
   const kicks: (number | undefined)[] = [];
   const attendance = opts.attendance ?? createInMemoryAttendanceStore();
+  const roster = opts.roster ?? fakeRoster({}, {});
   const service = createMeetingsService({
     store,
     attendance,
-    roster: opts.roster ?? fakeRoster({}, {}),
-    directory: opts.directory ?? staticMemberDirectory(),
+    roster,
+    directory: opts.directory ?? googleAtLoginAddress(roster),
     account: async () => ({
       accountId: opts.accountId ?? "dga_1",
       email: opts.accountEmail === undefined ? "hackit@gmail.com" : opts.accountEmail,

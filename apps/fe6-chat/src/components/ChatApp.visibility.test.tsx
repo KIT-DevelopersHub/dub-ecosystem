@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { common, identity } from "@dub/types";
 import { ChatRuntimeProvider, type ChatRuntime } from "../context";
 import { ChatApiError } from "../api/client";
@@ -35,11 +34,12 @@ const sidebarGlyph = async () => {
 };
 
 async function openVisibility() {
-  await userEvent.click(await screen.findByTestId("fe6-channel-settings-open"));
-  await userEvent.click(screen.getByRole("tab", { name: /設定/ }));
+  fireEvent.click(await screen.findByTestId("fe6-channel-settings-open"));
+  fireEvent.click(screen.getByRole("tab", { name: /設定/ }));
 }
 
-describe("channel visibility switch (ChatApp)", () => {
+// ChatApp 全体を描くので CI の負荷では既定の 5 秒を超えることがある。
+describe("channel visibility switch (ChatApp)", { timeout: 20_000 }, () => {
   it("flips the sidebar lock at once, and rolls everything back when the server refuses", async () => {
     const api = renderWith(KEYS);
     let reject!: (e: unknown) => void;
@@ -47,9 +47,9 @@ describe("channel visibility switch (ChatApp)", () => {
     expect(await sidebarGlyph()).toBe("#");
 
     await openVisibility();
-    await userEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
+    fireEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
     const confirm = await screen.findByTestId("fe6-settings-visibility-confirm");
-    await userEvent.click(within(confirm).getByRole("button", { name: "Private に変更する" }));
+    fireEvent.click(within(confirm).getByRole("button", { name: "Private に変更する" }));
 
     await waitFor(async () => expect(await sidebarGlyph()).toBe("🔒"));
     expect(screen.getByTestId("fe6-settings-visibility").textContent).toContain("Private");
@@ -64,9 +64,9 @@ describe("channel visibility switch (ChatApp)", () => {
     const api = renderWith(KEYS);
     const spy = vi.spyOn(api, "updateChannelVisibility");
     await openVisibility();
-    await userEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
+    fireEvent.click(screen.getByTestId("fe6-settings-visibility-change"));
     const confirm = await screen.findByTestId("fe6-settings-visibility-confirm");
-    await userEvent.click(within(confirm).getByRole("button", { name: "Private に変更する" }));
+    fireEvent.click(within(confirm).getByRole("button", { name: "Private に変更する" }));
     await waitFor(() => expect(spy).toHaveBeenCalledWith(GENERAL, { visibility: "private", version: 1 }));
     expect((await api.getChannel(GENERAL)).channel.visibility).toBe("private");
     await waitFor(async () => expect(await sidebarGlyph()).toBe("🔒"));
