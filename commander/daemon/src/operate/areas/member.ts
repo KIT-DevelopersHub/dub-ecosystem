@@ -328,6 +328,14 @@ export const MEMBER: AreaSpec = {
     { service: "member-service", route: "PUT /members/hr/interview-form" },
     { service: "member-service", route: "GET /members/hr/interview-form/responses" },
     { service: "member-service", route: "POST /members/hr/interview-form/responses" },
+    // 面談の日程調整 (面談枠・案内メール)。公開の日程選択 /members/internal/hr/interview-booking/* は INTERNAL で対象外。
+    { service: "member-service", route: "GET /members/hr/interviews" },
+    { service: "member-service", route: "PUT /members/hr/interviews/settings" },
+    { service: "member-service", route: "POST /members/hr/interviews/slots" },
+    { service: "member-service", route: "POST /members/hr/interviews/slots/delete" },
+    { service: "member-service", route: "DELETE /members/hr/interviews/slots/:id" },
+    { service: "member-service", route: "POST /members/hr/interviews/slots/:id/release" },
+    { service: "member-service", route: "POST /members/hr/interviews/invites/:id/send" },
     { service: "member-service", route: "GET /members/hr/onboarding" },
     { service: "member-service", route: "PUT /members/hr/onboarding/:memberId/items/:itemId" },
     // スポンサー (名刺の共有 /members/sponsor/*) も新設したばかり。写真のバイト列を扱うので Commander からは触らせない方向。
