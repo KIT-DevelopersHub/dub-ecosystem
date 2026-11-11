@@ -862,11 +862,18 @@ const CHAT_CREATE_NONE_PERMISSIONS: identity.PermissionKey[] = CHAT_CREATE_PUBLI
 const MEMBERS_SCOPE_ORG_CHART_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:"));
 const MEMBERS_SCOPE_ROSTER_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:mail_"));
 
-// 運営メンバー を「閲覧」にした人 (全権限から app:members:edit だけ外す)。「権限が不足しています」+
-// 「権限を申請する」の見え方を ?demo_account=usr_members_view で確かめる用。
-const MEMBERS_VIEW_ONLY_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter(
-  (k) => k !== appRegistry.getApp("members")?.access.edit,
-);
+// 一般メンバー相当で、運営メンバー / 参加届 / LP / 通知 だけ「閲覧」・他アプリは「無効」・管理者権限なし。
+// 権限不足ダイアログ(+ 権限を申請する)の見え方を ?demo_account=usr_members_view で確かめる用。
+const MEMBERS_VIEW_ONLY_APPS = ["members", "participation", "lp", "notifications"] as const;
+const MEMBERS_VIEW_ONLY_PERMISSIONS: identity.PermissionKey[] = [
+  ...MEMBER_ACCOUNT_PERMISSIONS,
+  "members:roster_view",
+  "infra:read", // LP管理 のルートが要求する
+  ...MEMBERS_VIEW_ONLY_APPS.flatMap((id) => {
+    const view = appRegistry.getApp(id)?.access.view;
+    return view ? [view] : [];
+  }),
+];
 
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
