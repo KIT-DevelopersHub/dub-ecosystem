@@ -30,6 +30,7 @@ export * as lp from "./lp"; // lp-analytics (LP管理: 公開版切り替え)
 export * as meeting from "./meeting"; // drive-share-service /meetings (カレンダー > ミーティング)
 export * as hr from "./hr"; // member-service /members/hr/* (人事: 応募→選考→参加→オンボーディング)
 export * as hrForm from "./hr-interview-form"; // 人事: 面談申し込みフォーム (編集できる質問 + 回答 → 応募者)
+export * as hrInterview from "./hr-interview"; // 人事: 面談の日程調整 (面談枠・案内メールの保留・公開の日程選択)
 export * as goal from "./goal"; // member-service /members/goals (目標管理: チームの月間目標と KPI)
 export * as sponsor from "./sponsor"; // member-service /members/sponsor/* (スポンサー: 名刺の共有)
 

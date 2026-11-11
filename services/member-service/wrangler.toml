@@ -51,3 +51,5 @@ enabled = true
 
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
+# 公開ページの起点 (面談の日程選択 URL)。api-gateway の APP_BASE_URL と同じ値。
+APP_BASE_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev"

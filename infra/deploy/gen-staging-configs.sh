@@ -179,6 +179,12 @@ gen_one() {
       /^WEBAUTHN_ORIGINS = "/ {
         print "WEBAUTHN_ORIGINS = \"" FE2ORIGIN "\""; next
       }
+      # --- member-service mails applicants a booking link: it must open the STAGING fe2, whose
+      #     gateway reads the same staging D1 that issued the token. Scoped to this worker so
+      #     the existing api-gateway value is left as it was. ---
+      /^APP_BASE_URL = "/ && FILENAME ~ /member-service/ {
+        print "APP_BASE_URL = \"" FE2ORIGIN "\""; next
+      }
       # --- default: swap resource ids + extend gateway CORS, then print ---
       {
         gsub(DUBCORE_ID, DUBCORE_STG)

@@ -11,6 +11,8 @@
       "POST /api/v1/me/participation",
       "POST /api/v1/me/password",
       "POST /api/v1/me/profile",
+      "POST /api/v1/public/hr-interview-booking/book",
+      "POST /api/v1/public/hr-interview-booking/view",
       "POST /api/v1/public/hr-interview-form",
       "POST /api/v1/public/lp-visits",
       "POST /api/v1/public/participation",
