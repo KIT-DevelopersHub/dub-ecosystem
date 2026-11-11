@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "meeting-attendees",
+  "worker": "dub-demo-meeting-attendees",
+  "url": "https://dub-demo-meeting-attendees.developershub-site.workers.dev",
+  "deployedSha": "b386365e",
+  "branch": "commander/task-ctask_01M6VKKE5582BPTKZM5AZS3HW5",
+  "actor": "ko-tarou",
+  "markers": ["calendar-meeting-attendees"],
+  "live": true,
+  "verifiedAt": "2026-11-07T18:25:24Z",
+  "updatedAt": "2026-11-07T18:25:24Z",
+  "note": "カレンダー: ミーティング詳細に参加者と出欠"
+}

@@ -105,6 +105,11 @@ export interface MailThreadModel {
    *  threads leave 受信トレイ / 自分宛て / スター付き / unread counts and show only under
    *  ブロック済み — nothing is deleted, so unblocking puts them straight back. */
   blocked?: boolean;
+  /** Server-known size of the conversation (Sent list summary): replies may not be loaded
+   *  yet, so the row count and the open-thread fetch go by this. Absent = what is loaded. */
+  conversationSize?: number;
+  /** Who replied in it (from the same summary), newest last. */
+  repliedBy?: MailPerson[];
 }
 
 // ---- pure helpers ----
@@ -141,6 +146,27 @@ export function hasSharedMail(threads: MailThreadModel[]): boolean {
 export function sharedRecipientLabel(t: MailThreadModel): string {
   const p = t.messages.find((m) => !m.outbound)?.to[0];
   return p && (p.name?.trim() || p.email) ? `${displayName(p)} 宛て` : "共有メール";
+}
+
+/** Messages in the conversation: the loaded ones, or the server count when larger. */
+export function threadSize(t: MailThreadModel): number {
+  return Math.max(t.messages.length, t.conversationSize ?? 0);
+}
+
+/** The conversation has messages that are not loaded yet (only our sends are). */
+export function hasUnloadedReplies(t: MailThreadModel): boolean {
+  return (t.conversationSize ?? 0) > t.messages.length;
+}
+
+/** Who a 送信済み row is named after (Gmail): the recipient of a lone send, or
+ *  "自分, <latest replier>" once someone answered. `avatar` is that other person. */
+export function sentRowPeople(t: MailThreadModel, me: MailPerson): { label: string; avatar: MailPerson } {
+  const lastReceived = [...t.messages].reverse().find((m) => !m.outbound);
+  const replier = lastReceived?.from ?? t.repliedBy?.at(-1);
+  if (replier) return { label: `自分, ${displayName(replier)}`, avatar: replier };
+  const lastSent = [...t.messages].reverse().find((m) => m.outbound);
+  const to = lastSent?.to[0] ?? me;
+  return { label: displayName(to), avatar: to };
 }
 
 /** Newest message drives the row's timestamp + preview. */

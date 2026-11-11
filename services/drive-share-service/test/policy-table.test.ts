@@ -133,7 +133,7 @@ const SETTINGS_WRITE = [
   "POST /driveshare/google-account/connect",
 ];
 // カレンダー > ミーティング.
-const MEETINGS_READ = ["GET /meetings", "GET /meetings/targets"];
+const MEETINGS_READ = ["GET /meetings", "GET /meetings/:id/attendees", "GET /meetings/targets"];
 const MEETINGS_WRITE = ["DELETE /meetings/:id", "PATCH /meetings/:id", "POST /meetings", "POST /meetings/sync"];
 // 定例の出席: the caller's own join + their own 定例 list (AUTHENTICATED; join asserts target membership).
 const SELF = ["GET /meetings/me/regulars", "POST /meetings/:id/join", "POST /meetings/me/google-link/callback", "POST /meetings/me/google-link/start"];
