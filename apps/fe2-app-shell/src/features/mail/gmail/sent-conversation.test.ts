@@ -44,6 +44,7 @@ describe("combineThreads: a send and its replies are one conversation", () => {
     const t = threads[0]!;
     expect(t.id).toBe("maillog_ROOT@developershub.jp");
     expect(t.messages.map((m) => m.id)).toEqual(["maillog_ROOT", "r1", "r2"]); // chronological
+    expect(t.subject).toBe("見積もりの件"); // titled by the opening send, not the "Re:"
     expect(inFolder(t, "sent")).toBe(true);
     expect(sentRowPeople(t, SELF).label).toBe("自分, Boss");
     expect(threadSize(t)).toBe(3);

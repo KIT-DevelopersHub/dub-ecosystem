@@ -82,8 +82,8 @@ export function combineThreads(
     const target = (key ? byId.get(key) : undefined) ?? byLocal.get(s.id) ?? (key ? sentThreads.get(key) : undefined);
     const msg = sentItemToMessage(s, me);
     if (target) {
-      // A Sent-only conversation is titled by its first message (not a later "Re:").
-      if (target.folder === "sent" && msg.date < (target.messages[0]?.date ?? "")) target.subject = s.subject;
+      // A conversation is titled by its first message (Gmail), not a later "Re:".
+      if (s.subject && msg.date < (target.messages[0]?.date ?? "")) target.subject = s.subject;
       if (!target.messages.some((m) => m.id === s.id)) target.messages.push(msg);
       target.messages.sort((a, b) => a.date.localeCompare(b.date));
     } else {
