@@ -1,7 +1,7 @@
 // REAL Google Calendar v3 client (カレンダー > ミーティング) — the ONLY place raw Calendar calls
 // live. Raw fetch like ./client.ts: every non-2xx goes through mapGoogleError, a 401 triggers
 // one forced token refresh + retry. Event writes always pass sendUpdates=all so attendees get
-// Google's own invitation / update / cancellation mail.
+// Google's own invitation / update / cancellation mail; calendar shares (ACL) never mail.
 import { errors } from "@dub/errors";
 import { retryFetch } from "@dub/http";
 import { mapGoogleError, type GoogleErrorSource } from "../drive-client";
@@ -202,9 +202,11 @@ export function createGoogleCalendarClient(deps: { token: TokenProvider; fetchIm
     },
 
     async insertAcl(calendarId, email) {
-      // sendNotifications stays at Google's default (true): the share mail carries the
-      // "add this calendar" link members use to show it in their own calendar list.
-      const res = await call(`${cal(calendarId)}/acl`, {
+      // No share mail: Google's default (true) mailed every member once per calendar. Members
+      // add the calendar from Dub instead (カレンダー > ミーティング「Googleカレンダーに追加」).
+      const url = new URL(`${cal(calendarId)}/acl`);
+      url.searchParams.set("sendNotifications", "false");
+      const res = await call(url.toString(), {
         method: "POST",
         body: JSON.stringify({ role: "reader", scope: { type: "user", value: email } }),
       });

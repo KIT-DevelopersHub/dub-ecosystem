@@ -330,6 +330,7 @@ export function createApp() {
     const page = await listSent(dbOf(c), {
       ownerUserId: await scopeOf(c),
       viewer: ownerOf(c),
+      inboundScope: await inboundScopeOf(c),
       limit: q.limit,
       ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
       ...(q.q !== undefined ? { q: q.q } : {}),

@@ -76,6 +76,7 @@ function fakeApi(over: Partial<CalendarApi> = {}, account: meeting.MeetingAccoun
     deleteMeeting: vi.fn(() => Promise.resolve()),
     syncMeetings: vi.fn(),
     joinMeeting: vi.fn(async () => ({ meetUrl: "https://meet.google.com/abc-defg-hij", recordedFor: null })),
+    listMeetingAttendees: vi.fn(async () => ({ items: [], responsesAvailable: true })),
     ...over,
   };
   return api;
@@ -122,6 +123,50 @@ describe("カレンダー > ミーティング permissions", () => {
     expect(within(detail).getByTestId("calendar-meeting-detail-join")).toBeInTheDocument();
     expect(screen.queryByTestId("calendar-meeting-detail-edit")).not.toBeInTheDocument();
     expect(screen.queryByTestId("calendar-meeting-detail-delete")).not.toBeInTheDocument();
+  });
+
+  it("the detail lists invitees with their Google Calendar answers for the clicked occurrence", async () => {
+    const api = fakeApi({
+      listMeetingAttendees: vi.fn(async () => ({
+        responsesAvailable: true,
+        items: [
+          { userId: "usr_a" as common.UserId, name: "山田 恵美", email: null, response: "accepted" as const, comment: null },
+          { userId: null, name: "外部 ゲスト", email: "guest@example.com", response: "tentative" as const, comment: null },
+          { userId: "usr_b" as common.UserId, name: "佐藤 太郎", email: null, response: "declined" as const, comment: "授業です" },
+          { userId: "usr_c" as common.UserId, name: "鈴木 一郎", email: null, response: "needsAction" as const, comment: null },
+        ],
+      })),
+    });
+    render(wrap(<CalendarScreen />, api, VIEW));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
+    const chip = chipsOf("mtg_all")[0]!;
+    await userEvent.click(chip);
+    const section = await screen.findByTestId("calendar-meeting-attendees");
+    await waitFor(() => expect(within(section).getAllByTestId("calendar-meeting-attendees-row")).toHaveLength(4));
+    expect(section).toHaveTextContent("参加者 4人");
+    expect(within(section).getByTestId("calendar-meeting-attendees-summary")).toHaveTextContent("参加 1 · 未定 1 · 不参加 1 · 未返信 1");
+    expect(within(section).getAllByTestId("calendar-meeting-attendees-response").map((b) => b.textContent)).toEqual(["参加", "未定", "不参加", "未返信"]);
+    expect(section).toHaveTextContent("guest@example.com");
+    expect(section).toHaveTextContent("「授業です」");
+    // A weekly meeting asks for the clicked occurrence (its JST date, from the chip id).
+    const day = chip.getAttribute("data-testid")!.split(":").pop();
+    expect(api.listMeetingAttendees).toHaveBeenCalledWith("mtg_all", day);
+  });
+
+  it("answers Google could not provide are hidden, the invitee list still shows", async () => {
+    const api = fakeApi({
+      listMeetingAttendees: vi.fn(async () => ({
+        responsesAvailable: false,
+        items: [{ userId: "usr_a" as common.UserId, name: "山田 恵美", email: null, response: "needsAction" as const, comment: null }],
+      })),
+    });
+    render(wrap(<CalendarScreen />, api, VIEW));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
+    await userEvent.click(chipsOf("mtg_all")[0]!);
+    const section = await screen.findByTestId("calendar-meeting-attendees");
+    await within(section).findByTestId("calendar-meeting-attendees-unavailable");
+    expect(within(section).getAllByTestId("calendar-meeting-attendees-row")).toHaveLength(1);
+    expect(within(section).queryByTestId("calendar-meeting-attendees-response")).not.toBeInTheDocument();
   });
 
   it("a 定例 shows that attendance is taken, and Meet に参加 goes through the join (records attendance)", async () => {
