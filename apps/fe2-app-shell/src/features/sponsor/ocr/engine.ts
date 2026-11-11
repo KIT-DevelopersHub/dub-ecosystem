@@ -7,6 +7,11 @@ import type { CardLine } from "../parseCardText.ts";
 import dictText from "./ppocrv6_dict.txt?raw";
 import {
   ctcDecode,
+  readingScore,
+  stripScores,
+  toHorizontalReading,
+  verticalShare,
+  type ReadLine,
   detBoxes,
   detSize,
   isVertical,
@@ -150,8 +155,28 @@ export interface ReadOptions {
   signal?: AbortSignal;
 }
 
-/** 写真 → 位置つきの行。 */
-export async function readLines(image: Blob, { onProgress, signal }: ReadOptions = {}): Promise<CardLine[]> {
+type Canvas = ReturnType<typeof canvas>;
+
+/** 90° 回した写真 (dir = 1 で時計回り)。横向きに撮れた名刺用。 */
+function rotate90(src: Canvas, dir: 1 | -1): Canvas {
+  const out = canvas(src.c.height, src.c.width);
+  out.ctx.translate(out.c.width / 2, out.c.height / 2);
+  out.ctx.rotate((dir * Math.PI) / 2);
+  out.ctx.drawImage(src.c, -src.c.width / 2, -src.c.height / 2);
+  return out;
+}
+
+// 推論は 1 本ずつ (同じセッションを同時に走らせない)。中断された読み取りの推論が残っていても次を重ねない。
+let queue: Promise<unknown> = Promise.resolve();
+
+/** 写真 → 位置つきの行。縦長の行が多い (縦書き・横向きの写真) ときは向きを試して、いちばんよく読めたものを採る。 */
+export function readLines(image: Blob, options: ReadOptions = {}): Promise<CardLine[]> {
+  const run = queue.then(() => readLinesNow(image, options));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function readLinesNow(image: Blob, { onProgress, signal }: ReadOptions): Promise<CardLine[]> {
   const live = () => {
     if (signal?.aborted) throw new DOMException("aborted", "AbortError");
   };
@@ -159,6 +184,46 @@ export async function readLines(image: Blob, { onProgress, signal }: ReadOptions
   live();
   onProgress?.(0.6);
   const { ort, det, rec, dict } = engine;
+
+  const detect = async (src: Canvas): Promise<RotRect[]> => {
+    const size = detSize(src.c.width, src.c.height);
+    const small = canvas(size.width, size.height);
+    small.ctx.imageSmoothingQuality = "high";
+    small.ctx.drawImage(src.c, 0, 0, size.width, size.height);
+    const input = new ort.Tensor("float32", toTensor(small.ctx.getImageData(0, 0, size.width, size.height)), [1, 3, size.height, size.width]);
+    const out = await det.run({ [det.inputNames[0]!]: input });
+    live();
+    const prob = out[det.outputNames[0]!]!.data as Float32Array;
+    return detBoxes(prob, size.width, size.height).map((b) => scaleRect(b.rect, src.c.width / size.width, src.c.height / size.height));
+  };
+
+  // 認識: 幅の近い行をまとめて 1 回の推論にする。onFrac = 0〜1。
+  const recognize = async (src: Canvas, rects: RotRect[], onFrac: (f: number) => void): Promise<ReadLine[]> => {
+    const items = rects.map((r) => ({ r, width: recWidth(r) })).sort((a, b) => a.width - b.width);
+    const lines: ReadLine[] = [];
+    for (let i = 0; i < items.length; i += REC_BATCH) {
+      live();
+      const batch = items.slice(i, i + REC_BATCH);
+      const width = batch[batch.length - 1]!.width;
+      const plane = REC_HEIGHT * width;
+      const input = new Float32Array(batch.length * 3 * plane);
+      batch.forEach((it, j) => toTensor(cropLine(src.c, it.r, it.width), input, j * 3 * plane, width));
+      const out = await rec.run({ [rec.inputNames[0]!]: new ort.Tensor("float32", input, [batch.length, 3, REC_HEIGHT, width]) });
+      const t = out[rec.outputNames[0]!]!;
+      const [, steps, classes] = t.dims as [number, number, number];
+      const data = t.data as Float32Array;
+      batch.forEach((it, j) => {
+        const { text, score } = ctcDecode(data, steps, classes, dict, j * steps * classes);
+        if (!text.trim() || score < MIN_TEXT_SCORE) return;
+        const cs = rectCorners(it.r);
+        const xs = cs.map((c) => c[0]);
+        const ys = cs.map((c) => c[1]);
+        lines.push({ text, score, bbox: { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) } });
+      });
+      onFrac(Math.min(items.length, i + REC_BATCH) / Math.max(items.length, 1));
+    }
+    return lines;
+  };
 
   const bitmap = await createImageBitmap(image);
   const src = canvas(bitmap.width, bitmap.height);
@@ -168,41 +233,18 @@ export async function readLines(image: Blob, { onProgress, signal }: ReadOptions
   stretchContrast(full);
   src.ctx.putImageData(full, 0, 0);
 
-  // 検出
-  const size = detSize(src.c.width, src.c.height);
-  const small = canvas(size.width, size.height);
-  small.ctx.imageSmoothingQuality = "high";
-  small.ctx.drawImage(src.c, 0, 0, size.width, size.height);
-  const detIn = new ort.Tensor("float32", toTensor(small.ctx.getImageData(0, 0, size.width, size.height)), [1, 3, size.height, size.width]);
-  const detOut = await det.run({ [det.inputNames[0]!]: detIn });
-  live();
+  const rects = await detect(src);
   onProgress?.(0.7);
-  const prob = detOut[det.outputNames[0]!]!.data as Float32Array;
-  const rects = detBoxes(prob, size.width, size.height).map((b) => scaleRect(b.rect, src.c.width / size.width, src.c.height / size.height));
+  if (verticalShare(rects) < 0.5) return stripScores(await recognize(src, rects, (f) => onProgress?.(0.7 + 0.3 * f)));
 
-  // 認識: 幅の近い行をまとめて 1 回の推論にする。
-  const items = rects.map((r) => ({ r, width: recWidth(r) })).sort((a, b) => a.width - b.width);
-  const lines: CardLine[] = [];
-  for (let i = 0; i < items.length; i += REC_BATCH) {
-    live();
-    const batch = items.slice(i, i + REC_BATCH);
-    const width = batch[batch.length - 1]!.width;
-    const plane = REC_HEIGHT * width;
-    const input = new Float32Array(batch.length * 3 * plane);
-    batch.forEach((it, j) => toTensor(cropLine(src.c, it.r, it.width), input, j * 3 * plane, width));
-    const out = await rec.run({ [rec.inputNames[0]!]: new ort.Tensor("float32", input, [batch.length, 3, REC_HEIGHT, width]) });
-    const t = out[rec.outputNames[0]!]!;
-    const [, steps, classes] = t.dims as [number, number, number];
-    const data = t.data as Float32Array;
-    batch.forEach((it, j) => {
-      const { text, score } = ctcDecode(data, steps, classes, dict, j * steps * classes);
-      if (!text.trim() || score < MIN_TEXT_SCORE) return;
-      const cs = rectCorners(it.r);
-      const xs = cs.map((c) => c[0]);
-      const ys = cs.map((c) => c[1]);
-      lines.push({ text, bbox: { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) } });
-    });
-    onProgress?.(0.7 + (0.3 * Math.min(items.length, i + REC_BATCH)) / Math.max(items.length, 1));
+  // 縦長の行が多い = 縦書きの名刺か、横向きに撮れた写真。そのまま (行ごとに回して読む) と左右に 90° 回した写真を比べる。
+  const asIs = toHorizontalReading(await recognize(src, rects, (f) => onProgress?.(0.7 + 0.1 * f)), src.c.width);
+  const tries = [asIs];
+  for (const [i, dir] of ([1, -1] as const).entries()) {
+    const turned = rotate90(src, dir);
+    const base = 0.8 + 0.1 * i;
+    tries.push(await recognize(turned, await detect(turned), (f) => onProgress?.(base + 0.1 * f)));
   }
-  return lines;
+  const best = tries.reduce((a, b) => (readingScore(b) > readingScore(a) ? b : a));
+  return stripScores(best);
 }

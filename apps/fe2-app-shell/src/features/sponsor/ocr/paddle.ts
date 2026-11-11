@@ -282,3 +282,35 @@ export function ctcDecode(probs: Float32Array, steps: number, classes: number, d
   }
   return { text, score: count > 0 ? sum / count : 0 };
 }
+
+/** 認識した行 (確信度つき)。 */
+export interface ReadLine {
+  text: string;
+  score: number;
+  bbox: { x0: number; y0: number; x1: number; y1: number };
+}
+
+/** 縦長の行 (縦書き・横向きの写真) が文字の量で占める割合。 */
+export function verticalShare(rects: RotRect[]): number {
+  let vertical = 0;
+  let total = 0;
+  for (const r of rects) {
+    const len = Math.max(r.w, r.h);
+    total += len;
+    if (isVertical(r)) vertical += len;
+  }
+  return total > 0 ? vertical / total : 0;
+}
+
+/** どれだけよく読めたか: 確信度 × 文字数 の合計。向きの候補を比べるのに使う。 */
+export const readingScore = (lines: ReadLine[]): number => lines.reduce((s, l) => s + l.score * l.text.length, 0);
+
+/**
+ * 縦書きの行の位置を「横書きに直した位置」に写す (右の列 → 上の行、列の上 → 行の左)。
+ * 振り分けは横書きの並び (上から下・左から右) を前提にしているため。
+ */
+export function toHorizontalReading(lines: ReadLine[], width: number): ReadLine[] {
+  return lines.map((l) => ({ ...l, bbox: { x0: l.bbox.y0, y0: width - l.bbox.x1, x1: l.bbox.y1, y1: width - l.bbox.x0 } }));
+}
+
+export const stripScores = (lines: ReadLine[]): { text: string; bbox: ReadLine["bbox"] }[] => lines.map(({ text, bbox }) => ({ text, bbox }));

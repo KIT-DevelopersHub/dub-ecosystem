@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ctcDecode, detBoxes, detSize, isVertical, minAreaRect, recWidth, rectCorners, stretchContrast, toTensor } from "./paddle.ts";
+import { ctcDecode, detBoxes, detSize, isVertical, minAreaRect, readingScore, recWidth, rectCorners, stretchContrast, toHorizontalReading, toTensor, verticalShare } from "./paddle.ts";
 
 describe("PP-OCR の前処理・後処理", () => {
   it("fits the detector input to 736px and multiples of 32 without upscaling", () => {
@@ -70,5 +70,25 @@ describe("PP-OCR の前処理・後処理", () => {
     const { text, score } = ctcDecode(new Float32Array(rows.flat()), rows.length, 4, dict);
     expect(text).toBe("aa b");
     expect(score).toBeCloseTo(0.75, 3);
+  });
+
+  it("measures how much of the text runs vertically (縦書き・横向きの写真)", () => {
+    const flat = { cx: 0, cy: 0, w: 200, h: 30, angle: 0 };
+    const tall = { cx: 0, cy: 0, w: 30, h: 300, angle: 0 };
+    expect(verticalShare([flat, flat])).toBe(0);
+    expect(verticalShare([flat, tall])).toBeCloseTo(0.6, 2);
+    expect(verticalShare([])).toBe(0);
+  });
+
+  it("scores a reading by confidence × length", () => {
+    expect(readingScore([{ text: "山田太郎", score: 0.9, bbox: { x0: 0, y0: 0, x1: 1, y1: 1 } }, { text: "x", score: 0.5, bbox: { x0: 0, y0: 0, x1: 1, y1: 1 } }])).toBeCloseTo(4.1, 5);
+  });
+
+  it("maps vertical columns to horizontal rows: the right column comes first", () => {
+    const right = { text: "株式会社能登ソフト", score: 1, bbox: { x0: 800, y0: 50, x1: 840, y1: 500 } };
+    const left = { text: "山田太郎", score: 1, bbox: { x0: 500, y0: 100, x1: 580, y1: 600 } };
+    const [r, l] = toHorizontalReading([right, left], 1000);
+    expect(r!.bbox).toEqual({ x0: 50, y0: 160, x1: 500, y1: 200 });
+    expect(l!.bbox.y0).toBeGreaterThan(r!.bbox.y0);
   });
 });
