@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "participation-onboard-hr",
+  "worker": "dub-demo-participation-onboard-hr",
+  "url": "https://dub-demo-participation-onboard-hr.developershub-site.workers.dev",
+  "deployedSha": "153f0630",
+  "branch": "commander/task-ctask_01M6ZRRMMYH74GHN64FD0F0G46",
+  "actor": "ko-tarou",
+  "markers": ["participation-issue-mail-role-fixed","members:onboard_mail","onboard-account"],
+  "live": true,
+  "verifiedAt": "2026-11-09T10:30:31Z",
+  "updatedAt": "2026-11-09T10:30:31Z",
+  "note": "人事向け: 参加届からのアカウント発行 (members:onboard_mail)"
+}

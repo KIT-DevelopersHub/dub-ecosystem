@@ -18,7 +18,7 @@
 // proves a credential presented in the request; it never consults a permission key. Removing
 // it would not simplify anything, it would unauthenticate login.
 import { Hono } from "hono";
-import { dubErrorHandler, errors, toResponse, type FieldError } from "@dub/errors";
+import { DubError, dubErrorHandler, errors, toResponse, type FieldError } from "@dub/errors";
 import { extractContext, newRequestId, type RequestContext } from "@dub/http";
 import { policyGate, type PermissionGranter, type PolicyGateVars } from "@dub/policy-gate";
 import { auth as authRules } from "@dub/types";
@@ -30,6 +30,9 @@ import { verifyPassword, setCredential, decryptSecret, generatePassword } from "
 import { POLICY_TABLE } from "./policy-table";
 import { PasskeyError, toSummary } from "./passkeys";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
+
+/** 参加届からの発行で初期パスワードを作れるのは、作成直後のアカウントだけ。 */
+const ONBOARD_PASSWORD_WINDOW_MS = 15 * 60 * 1000;
 
 // ---- local response shapes (requests + SessionInfo are frozen in @dub/types) ----
 type RefreshResponse = { session: auth.SessionInfo } | { token: string; session: auth.SessionInfo };
@@ -370,6 +373,43 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     });
     const res = generated ? { ok: true as const, password } : { ok: true as const };
     return c.json(res);
+  });
+
+  // ---- POST /internal/onboard/users/:userId/initial-password ----
+  // 参加届からのアカウント発行 (api-gateway onboard-account) が、今作ったアカウントの案内メール
+  // 用に初期パスワードを 1 度だけ作る。パスワードがまだ無いアカウントだけ (既存の資格情報は
+  // 上書きしない = 既存アカウントを乗っ取れない)。生成のみ・mustChange 固定・値は 1 度だけ返す。
+  // AUTHZ: internalWithKeys(["members:onboard_mail"]) — 人事は identity:admin を持たないので
+  // 上の管理者用ルートとは別の扉にする。
+  app.post("/internal/onboard/users/:userId/initial-password", async (c) => {
+    const ctx = ctxOf(c);
+    const actor = c.get("userId");
+    const targetId = c.req.param("userId");
+    const target = await deps.identity.getUser(ctx, targetId);
+    if (!target) throw errors.notFound("user", targetId);
+    // 多重防御: 同じ発行呼び出しで今作ったアカウントだけ (作成から 15 分以内・停止されていない)。
+    // パスキーだけで使っている既存アカウント等には届かない。
+    const ageMs = Date.now() - Date.parse(target.createdAt);
+    const fresh = Number.isFinite(ageMs) && ageMs >= -60_000 && ageMs <= ONBOARD_PASSWORD_WINDOW_MS;
+    if (!fresh || (target.status !== "invited" && target.status !== "active")) {
+      throw new DubError("AUTH_ONBOARD_NOT_FRESH", "only a just-issued onboarding account can get an initial password", { status: 409 });
+    }
+    const email = target.email.trim().toLowerCase();
+    if (await deps.passwords.get(email)) {
+      throw new DubError("AUTH_PASSWORD_ALREADY_SET", "this account already has a password", { status: 409 });
+    }
+    const password = generatePassword();
+    await setCredential(deps.passwords, { email, password, encKey: config.passwordEncKey || undefined, setBy: actor, mustChange: true });
+    await deps.audit.record({
+      action: "auth.password.set",
+      actorId: actor,
+      result: "success",
+      requestId: ctx.requestId,
+      resourceType: "user",
+      resourceId: targetId,
+      details: { method: "generated", via: "participation-onboard" },
+    });
+    return c.json({ ok: true as const, password });
   });
 
   // ---- GET /internal/admin/users/:userId/password (#5c) ----

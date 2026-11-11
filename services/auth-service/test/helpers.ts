@@ -93,6 +93,8 @@ export class FakeIdentity implements IdentityClient {
   admins = new Set<string>();
   // userIds that hold identity:impersonate (admin impersonation)
   impersonators = new Set<string>();
+  // userIds that hold members:onboard_mail (参加届からのアカウント発行)
+  onboarders = new Set<string>();
 
   async provision(_ctx: RequestContext, input: identity.ProvisionUserRequest): Promise<ProvisionResult> {
     this.calls.push(input);
@@ -108,6 +110,7 @@ export class FakeIdentity implements IdentityClient {
   async hasPermission(_ctx: RequestContext, userId: string, permission: identity.PermissionKey): Promise<boolean> {
     if (permission === "identity:admin") return this.admins.has(userId);
     if (permission === "identity:impersonate") return this.impersonators.has(userId);
+    if (permission === "members:onboard_mail") return this.onboarders.has(userId);
     return true;
   }
 

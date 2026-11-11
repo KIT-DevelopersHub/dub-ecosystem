@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 
 // 回答一覧 / オンボーディング案内 は人事のタブ帯 (HrTabs = useNavigate) の中に描かれる。
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouter: () => null }));
-import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
+import { ApiError, type ApiClient, type RequestInput } from "../../lib/api-client.tsx";
 import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { createParticipationApi, type ParticipationApi } from "./participationApi.tsx";
 import { ParticipationApiProvider } from "./ParticipationProvider.tsx";
@@ -632,21 +632,13 @@ describe("PublicOnboardingPage", () => {
 });
 
 describe("ParticipationListPage — 追加と同時のメール発行", () => {
-  const ADDED_MEMBER = rosterMember({ id: "m_new", name: "田中 実", status: "added", version: 2 });
+  const ADDED_MEMBER = rosterMember({ id: "m_new", name: "田中 実", status: "added", version: 2, gmail: "minoru.tanaka@gmail.com" });
   const TANAKA: Participation = {
     ...SUBMISSION, id: "p_2", name: "田中 実", lastName: "田中", firstName: "実",
     lastNameKana: "たなか", firstNameKana: "みのる", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
   };
-  const ROLES = [
-    { id: "role_sys_admin", orgId: "org", name: "admin", permissions: [], isSystem: true },
-    { id: "role_sys_member", orgId: "org", name: "member", permissions: [], isSystem: true },
-  ];
-  // 参加届・管理・運営メンバーの編集 + identity:admin + mail:admin = 発行まで出来る人。
-  const issuer = [
-    ...editorPermissions("participation", ["identity:read", "identity:admin", "mail:admin", "members:mail_edit"]),
-    ...editorPermissions("admin"),
-    ...editorPermissions("members"),
-  ];
+  // 人事: 参加届の編集 + members:onboard_mail だけ。identity:admin もロール管理の編集も無い。
+  const hr = editorPermissions("participation", ["identity:read", "mail:admin", "members:mail_edit", "members:onboard_mail"]);
 
   function issueApi(over: Partial<ParticipationApi> = {}): ParticipationApi {
     return makeApi({
@@ -655,10 +647,14 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
       resolve: vi.fn((id: string) =>
         Promise.resolve({ participation: { ...TANAKA, id, reviewState: "added" as const }, member: ADDED_MEMBER }),
       ),
-      listRoles: vi.fn(() => Promise.resolve(ROLES)),
-      issueMailAddress: vi.fn((localPart: string) => Promise.resolve({ id: "eml_1", address: `${localPart}@developershub.jp` })),
-      inviteAccount: vi.fn(() => Promise.resolve({ id: "usr_new" } as never)),
-      linkAccount: vi.fn(() => Promise.resolve(ADDED_MEMBER)),
+      onboardAccount: vi.fn((_pid: string, input: { localPart: string; sendAccountMail?: boolean }) =>
+        Promise.resolve({
+          address: `${input.localPart}@developershub.jp`,
+          identityUserId: "usr_new",
+          member: { ...ADDED_MEMBER, identityUserId: "usr_new" },
+          accountMail: { requested: input.sendAccountMail === true, sent: input.sendAccountMail === true, to: TANAKA.gmail },
+        }),
+      ),
       ...over,
     });
   }
@@ -668,69 +664,78 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
     await userEvent.click(await screen.findByTestId("participation-resolve-create"));
   }
 
-  it("追加後に発行を聞き、ローマ字の案とロールで 発行→アカウント作成→紐付け まで行う", async () => {
+  it("members:onboard_mail だけで発行を聞き、ローマ字の案で 1 回の呼び出しにまとめて送る (ロールは送らない)", async () => {
     const api = issueApi();
-    render(wrap(<ParticipationListPage />, api, issuer));
+    render(wrap(<ParticipationListPage />, api, hr));
     await addAsNew();
     expect(await screen.findByTestId("participation-issue-mail-dialog")).toBeInTheDocument();
     expect(screen.getByTestId("participation-issue-mail-localpart")).toHaveValue("minoru.tanaka");
-    // 一般メンバーのロールが最初から選ばれている。
-    expect(await screen.findByLabelText("member")).toBeChecked();
-    expect(screen.getByLabelText("admin")).not.toBeChecked();
+    // ロールは選ばせず、固定であることを明示する。
+    expect(screen.getByTestId("participation-issue-mail-role-fixed")).toHaveTextContent("一般メンバー（固定）");
+    expect(screen.queryByRole("checkbox", { name: "admin" })).toBeNull();
+    // Gmail がある人はログイン情報のメールが最初から ON。
+    expect(screen.getByLabelText(`ログイン情報を ${ADDED_MEMBER.gmail} に送る`)).toBeChecked();
     await userEvent.click(screen.getByTestId("participation-issue-mail-submit"));
-    await waitFor(() => expect(api.linkAccount).toHaveBeenCalledWith("m_new", { identityUserId: "usr_new", version: 2 }));
-    expect(api.issueMailAddress).toHaveBeenCalledWith("minoru.tanaka");
-    expect(api.inviteAccount).toHaveBeenCalledWith({
-      email: "minoru.tanaka@developershub.jp", displayName: "田中 実", furigana: "たなか みのる", roleIds: ["role_sys_member"],
-    });
+    await waitFor(() =>
+      expect(api.onboardAccount).toHaveBeenCalledWith("p_2", { localPart: "minoru.tanaka", sendAccountMail: true }),
+    );
     await waitFor(() => expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument());
   });
 
-  it("発行→紐付けが済んだら、続けてアカウント発行メールを送るか聞き、送る で API を呼ぶ", async () => {
-    const sendAccountMail = vi.fn(() =>
-      Promise.resolve({ ok: true as const, to: TANAKA.gmail ?? "", cc: "minoru.tanaka@developershub.jp", appUrl: "https://dub-fe2-app-shell.developershub-site.workers.dev", passwordSource: "generated" as const, messageId: "m" }),
-    );
-    const api = issueApi({ sendAccountMail });
-    render(wrap(<ParticipationListPage />, api, issuer));
+  it("メールのチェックを外すと案内メールを頼まない", async () => {
+    const api = issueApi();
+    render(wrap(<ParticipationListPage />, api, hr));
     await addAsNew();
-    await userEvent.click(await screen.findByTestId("participation-issue-mail-submit"));
-    const dialog = await screen.findByTestId("account-mail-dialog");
-    expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
-    expect(within(dialog).getByTestId("account-mail-dialog-to")).toHaveTextContent(TANAKA.gmail ?? "");
-    expect(within(dialog).getByTestId("account-mail-dialog-cc")).toHaveTextContent("minoru.tanaka@developershub.jp");
-    await userEvent.click(within(dialog).getByTestId("account-mail-dialog-send"));
-    await waitFor(() => expect(sendAccountMail).toHaveBeenCalledWith("usr_new"));
+    await userEvent.click(await screen.findByLabelText(`ログイン情報を ${ADDED_MEMBER.gmail} に送る`));
+    await userEvent.click(screen.getByTestId("participation-issue-mail-submit"));
+    await waitFor(() =>
+      expect(api.onboardAccount).toHaveBeenCalledWith("p_2", { localPart: "minoru.tanaka", sendAccountMail: false }),
+    );
   });
 
-  it("途中で失敗したら、再試行は発行済みのアドレスを作り直さず続きから行う", async () => {
-    const inviteAccount = vi
+  it("失敗したらダイアログに理由を出し、そのままもう一度発行できる", async () => {
+    const onboardAccount = vi
       .fn()
-      .mockRejectedValueOnce(new Error("boom"))
-      .mockResolvedValueOnce({ id: "usr_new" });
-    const api = issueApi({ inviteAccount });
-    render(wrap(<ParticipationListPage />, api, issuer));
+      .mockRejectedValueOnce(new ApiError(409, { error: { code: "MAIL_EMAIL_ROUTING_CONFLICT", message: "このアドレスは既に使われています", retryable: false } }))
+      .mockResolvedValueOnce({ address: "minoru.tanaka@developershub.jp", identityUserId: "usr_new", member: ADDED_MEMBER, accountMail: { requested: false, sent: false, to: null } });
+    const api = issueApi({ onboardAccount });
+    render(wrap(<ParticipationListPage />, api, hr));
     await addAsNew();
-    await screen.findByLabelText("member");
+    await userEvent.click(await screen.findByTestId("participation-issue-mail-submit"));
+    expect(await screen.findByText("このアドレスは既に使われています")).toBeInTheDocument();
+    expect(screen.getByTestId("participation-issue-mail-submit")).toHaveTextContent("もう一度発行する");
     await userEvent.click(screen.getByTestId("participation-issue-mail-submit"));
-    expect(await screen.findByTestId("participation-issue-mail-error")).toHaveTextContent("minoru.tanaka@developershub.jp は発行済み");
-    await userEvent.click(screen.getByTestId("participation-issue-mail-submit"));
-    await waitFor(() => expect(api.linkAccount).toHaveBeenCalledTimes(1));
-    expect(api.issueMailAddress).toHaveBeenCalledTimes(1);
-    expect(inviteAccount).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(onboardAccount).toHaveBeenCalledTimes(2));
+  });
+
+  it("作成済みの分を戻しきれなかった時は再試行させず、管理者への連絡を出す", async () => {
+    const onboardAccount = vi.fn().mockRejectedValue(
+      new ApiError(502, { error: { code: "GATEWAY_ONBOARD_PARTIAL", message: "途中で失敗しました", retryable: false } }),
+    );
+    render(wrap(<ParticipationListPage />, issueApi({ onboardAccount }), hr));
+    await addAsNew();
+    await userEvent.click(await screen.findByTestId("participation-issue-mail-submit"));
+    expect(await screen.findByTestId("participation-issue-mail-stuck")).toHaveTextContent("管理者に連絡してください");
+    expect(screen.getByTestId("participation-issue-mail-submit")).toBeDisabled();
   });
 
   it("「今はしない」なら何も発行しない", async () => {
     const api = issueApi();
-    render(wrap(<ParticipationListPage />, api, issuer));
+    render(wrap(<ParticipationListPage />, api, hr));
     await addAsNew();
     await userEvent.click(await screen.findByTestId("participation-issue-mail-later"));
     expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
-    expect(api.issueMailAddress).not.toHaveBeenCalled();
+    expect(api.onboardAccount).not.toHaveBeenCalled();
   });
 
-  it("メール管理の権限が無い人や、既にアカウントのある人には聞かない", async () => {
+  it("members:onboard_mail の無い人 (旧 5 条件を持つだけの人も) や、既にアカウントのある人には聞かない", async () => {
     const api = issueApi();
-    const { unmount } = render(wrap(<ParticipationListPage />, api));
+    const old5 = [
+      ...editorPermissions("participation", ["identity:read", "identity:admin", "mail:admin", "members:mail_edit"]),
+      ...editorPermissions("admin"),
+      ...editorPermissions("members"),
+    ];
+    const { unmount } = render(wrap(<ParticipationListPage />, api, old5));
     await addAsNew();
     await waitFor(() => expect(api.resolve).toHaveBeenCalled());
     expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
@@ -741,7 +746,7 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
         Promise.resolve({ participation: { ...TANAKA, id, reviewState: "added" as const }, member: { ...ADDED_MEMBER, identityUserId: "usr_old" } }),
       ),
     });
-    render(wrap(<ParticipationListPage />, linked, issuer));
+    render(wrap(<ParticipationListPage />, linked, hr));
     await addAsNew();
     await waitFor(() => expect(linked.resolve).toHaveBeenCalled());
     expect(screen.queryByTestId("participation-issue-mail-dialog")).not.toBeInTheDocument();
@@ -749,16 +754,12 @@ describe("ParticipationListPage — 追加と同時のメール発行", () => {
 });
 
 describe("createParticipationApi — メール発行まわり", () => {
-  it("invite は { user } を剥がして返し、紐付けは identity-link に POST する", async () => {
-    const { api, calls } = fakeApiClient({ user: { id: "usr_1" } });
+  it("onboardAccount は gateway の onboard-account 1 本に POST する", async () => {
+    const { api, calls } = fakeApiClient({ address: "a@developershub.jp" });
     const papi = createParticipationApi(api);
-    await expect(papi.inviteAccount({ email: "a@developershub.jp", roleIds: [] })).resolves.toEqual({ id: "usr_1" });
-    await papi.issueMailAddress("a");
-    await papi.linkAccount("m_1", { identityUserId: "usr_1", version: 3 });
-    expect(calls.map((c) => [c.method, c.path])).toEqual([
-      ["POST", "/api/v1/identity/users/invite"],
-      ["POST", "/api/v1/mail/admin/email-routing/issued-addresses"],
-      ["POST", "/api/v1/members/people/m_1/identity-link"],
+    await papi.onboardAccount("p_1", { localPart: "a", sendAccountMail: true });
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      ["POST", "/api/v1/admin/participation/p_1/onboard-account", { localPart: "a", sendAccountMail: true }],
     ]);
   });
 });

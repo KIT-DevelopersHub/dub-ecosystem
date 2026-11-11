@@ -32,6 +32,10 @@ import type {
 const ADMIN: identity.PermissionKey = "identity:admin";
 const { MANAGED_ROLE_ID_PREFIX, AUTO_ASSIGNMENT_SOURCE: AUTO_SOURCE } = identityContract;
 /** Upper bound on one managed-role list (teams + 3 役職) — a crafted body cannot fan out unbounded writes. */
+/** 参加届からの発行で付ける唯一のロール (一般メンバーのシステムロール)。 */
+export const ONBOARD_ROLE_NAME = "member";
+/** 取り消せるのは作成直後 (同じ発行呼び出しの補償) の招待だけ。古い招待には届かない。 */
+const ONBOARD_DISCARD_WINDOW_MS = 15 * 60 * 1000;
 const MAX_MANAGED_ROLES = 200;
 const AUTHZ_TTL_SECONDS = 60;
 const MAX_BATCH_CHECKS = 20;
@@ -243,6 +247,54 @@ export class IdentityService {
     await this.d.audit.publish(this.record("identity.user.invited", "success", ctx, orgId, "user", user.id, { email }));
     const assignments = await this.d.repo.listAssignmentsByUser(user.id, orgId);
     return { user: this.toIdentityUser(user, assignments) };
+  }
+
+  /**
+   * 参加届からのアカウント発行 (api-gateway の onboard-account だけが呼ぶ・INTERNAL)。
+   * ロールは呼び出し側に選ばせず、ここで一般メンバーのシステムロール 1 つに固定する。
+   * 既存メールなら invite と同じ 409 EMAIL_EXISTS (既存アカウントは変更しない)。
+   */
+  async onboardInvite(orgId: string, req: { email?: unknown; displayName?: unknown; furigana?: unknown }, ctx: RequestCtx): Promise<InviteUserResponse> {
+    const role = await this.onboardRole(orgId);
+    return this.invite(
+      orgId,
+      {
+        email: typeof req.email === "string" ? req.email : "",
+        ...(typeof req.displayName === "string" && req.displayName.trim() ? { displayName: req.displayName.trim() } : {}),
+        ...(typeof req.furigana === "string" ? { furigana: req.furigana } : {}),
+        roleIds: [role.id],
+      },
+      ctx,
+    );
+  }
+
+  /**
+   * onboardInvite の取り消し (後続の段が失敗した時の補償)。作成から 15 分以内・招待中のまま・
+   * 固定ロール以外を持たないアカウントだけを消す。それ以外は 409 で触らない。
+   * 既に無ければ no-op (再実行しても安全)。
+   */
+  async discardOnboardInvite(userId: string, orgId: string, ctx: RequestCtx): Promise<{ discarded: boolean }> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) return { discarded: false };
+    const role = await this.onboardRole(orgId);
+    const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    const ageMs = Date.parse(this.d.now()) - Date.parse(user.createdAt);
+    const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= ONBOARD_DISCARD_WINDOW_MS;
+    if (user.status !== "invited" || user.source !== "manual" || !fresh || assignments.some((a) => a.roleId !== role.id)) {
+      throw errors.conflict("only an untouched onboarding invite can be discarded", { code: "IDENTITY_NOT_DISCARDABLE" });
+    }
+    for (const a of assignments) await this.d.repo.deleteAssignment(a.id);
+    const discarded = await this.d.repo.deleteInvitedUser(userId);
+    if (discarded) {
+      await this.d.audit.publish(this.record("identity.user.invite_discarded", "success", ctx, orgId, "user", userId, { email: user.email }));
+    }
+    return { discarded };
+  }
+
+  private async onboardRole(orgId: string): Promise<RoleRow> {
+    const role = await this.d.repo.getRoleByName(orgId, ONBOARD_ROLE_NAME);
+    if (!role || !role.isSystem) throw errors.internal(`onboarding role "${ONBOARD_ROLE_NAME}" is missing`);
+    return role;
   }
 
   async provision(orgId: string, req: { email: string; displayName: string; githubLogin?: string }, ctx: RequestCtx): Promise<ProvisionUserResponse> {
