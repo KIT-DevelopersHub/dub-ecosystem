@@ -373,6 +373,15 @@ Response `200` — `{ id, messages }`:
 `messages` is `mail.MailMessage[]`. A thread with no messages → `404
 MAIL_MESSAGE_NOT_FOUND`.
 
+#### `GET /sent` — conversation summary (ADDITIVE)
+
+Each `mail.MailSentListItem` may carry `conversation: mail.MailSentConversation`
+(`{ id, messageCount, latestAt, repliedBy }`) when its thread holds other messages the
+caller can see: received ones in their inbound scope plus their own sends. `id` is the
+`GET /threads/:id` key — a reply's `thread_id`, or for a send that opened the thread its
+RFC Message-Id `<send-log id>@<From domain>`, which is what replies to it are threaded
+under. Absent = a lone send. Lets 送信済み open the whole conversation (Gmail).
+
 ### 5.5 `GET /mailboxes`
 
 List configured inbound mailboxes. Permission: `mail:admin`. Response `200` —

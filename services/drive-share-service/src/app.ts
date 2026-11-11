@@ -192,6 +192,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.body(null, 204);
   });
 
+  // Who is invited and their answers in Google Calendar (?date= one occurrence of a series).
+  app.get("/meetings/:id/attendees", async (c) => c.json(await (await deps.meetings()).attendees(c.req.param("id"), c.req.query("date"))));
+
   // ---- 定例の出席 (same gateway segment /meetings) ----
   // The caller opens the Meet from Dub: recorded present when it is a 定例 within its window.
   app.post("/meetings/:id/join", async (c) => c.json(await deps.attendance().join(c.get("userId"), c.req.param("id"))));

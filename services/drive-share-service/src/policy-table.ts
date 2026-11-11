@@ -67,6 +67,7 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /meetings/sync": MEETINGS_EDIT,
   "PATCH /meetings/:id": MEETINGS_EDIT,
   "DELETE /meetings/:id": MEETINGS_EDIT,
+  "GET /meetings/:id/attendees": MEETINGS_VIEW,
 
   // ---- 定例の出席 ----
   // Joining a 定例 from Dub records ONLY the caller's own attendance, and the handler asserts the
