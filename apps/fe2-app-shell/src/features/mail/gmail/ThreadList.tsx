@@ -14,9 +14,11 @@ import {
   pendingReplyIds,
   relativeDate,
   replyNudge,
+  sentRowPeople,
   sharedRecipientLabel,
   snippet,
   threadMine,
+  threadSize,
   threadUnread,
   type Label,
   type MailThreadModel,
@@ -247,9 +249,11 @@ function ThreadRow({
   const last = latest(thread);
   const checked = state.checked.has(thread.id);
   const nudge = replyNudge(thread, now, pendingReplies);
-  // In 送信済み a row is named after who it went to, even in a conversation they started.
-  const lastSent = [...thread.messages].reverse().find((m) => m.outbound);
-  const people = (thread.folder === "sent" || state.folder === "sent") && lastSent ? lastSent.to[0] ?? state.me : last.from;
+  // In 送信済み a row is named after who it went to — "自分, <replier>" once answered (Gmail).
+  const sentView = (thread.folder === "sent" || state.folder === "sent") && thread.messages.some((m) => m.outbound);
+  const sentPeople = sentView ? sentRowPeople(thread, state.me) : null;
+  const people = sentPeople ? sentPeople.avatar : last.from;
+  const size = threadSize(thread);
   const cursor = state.cursorId === thread.id;
   const rowRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -367,9 +371,9 @@ function ThreadRow({
             color: "var(--dub-color-text-primary)",
           }}
         >
-          {displayName(people)}
-          {thread.messages.length > 1 ? (
-            <span style={{ color: "var(--dub-color-text-muted)", fontWeight: 400 }}> {thread.messages.length}</span>
+          {sentPeople ? sentPeople.label : displayName(people)}
+          {size > 1 ? (
+            <span data-testid="fe2-mail-thread-count" style={{ color: "var(--dub-color-text-muted)", fontWeight: 400 }}> {size}</span>
           ) : null}
         </span>
 

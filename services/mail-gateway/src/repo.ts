@@ -336,7 +336,15 @@ export function inboundSearchClause(q: string): { sql: string; binds: string[] }
  *  listInbound); ULID ids sort in creation order so the id cursor tracks created_at. */
 export async function listSent(
   db: DbClient,
-  q: { ownerUserId: MailScope; viewer?: string; cursor?: string; limit: number; q?: string },
+  q: {
+    ownerUserId: MailScope;
+    viewer?: string;
+    cursor?: string;
+    limit: number;
+    q?: string;
+    /** The viewer's inbound scope: when given, each row gets its conversation summary. */
+    inboundScope?: InboundScope;
+  },
 ): Promise<common.Paginated<mail.MailSentListItem>> {
   // Fail-closed account scope: only the signed-in user's own delivered sends. A NULL
   // owner_user_id (system send / legacy row) never matches `= ?`, so it is invisible.
@@ -366,8 +374,10 @@ export async function listSent(
   const hasMore = rows.length > q.limit;
   const page = hasMore ? rows.slice(0, q.limit) : rows;
   const last = page[page.length - 1];
+  const items = page.map((r) => sendRowToListItem(r, q.viewer));
+  if (q.inboundScope !== undefined) await attachSentConversations(db, page, items, { sent: q.ownerUserId, inbound: q.inboundScope });
   return {
-    items: page.map((r) => sendRowToListItem(r, q.viewer)),
+    items,
     nextCursor: hasMore && last ? encodeCursor(last.id) : null,
   };
 }
@@ -386,6 +396,109 @@ export async function getSentDetail(db: DbClient, id: string, scope: MailScope, 
   }
   const row = await db.first<SendLogRow>(sql, ...binds);
   return row ? sendRowToDetail(row, viewer) : null;
+}
+
+/** RFC Message-Id of one of our sends (`<send-log id>@<From domain>`). Shared with the send
+ *  core so the id we put on the wire and the thread key we look up here never drift. */
+export function rfcMessageIdOf(logId: string, fromAddress: string): string {
+  return `${logId}@${fromAddress.split("@")[1] ?? "developershub.jp"}`;
+}
+
+/** Thread key of a sent row: a reply carries its conversation's thread id; a send that
+ *  opened a conversation is keyed by its own RFC Message-Id, which is exactly what the
+ *  replies to it are threaded under (resolveThreadId). null = legacy row without a From. */
+export function sentThreadKey(r: Pick<SendLogRow, "id" | "thread_id" | "from_address">): string | null {
+  if (r.thread_id) return r.thread_id;
+  return r.from_address ? rfcMessageIdOf(r.id, r.from_address) : null;
+}
+
+/** Local part of a message id (`maillog_x@d` -> `maillog_x`). */
+function localPart(id: string): string {
+  return id.split("@")[0] ?? id;
+}
+
+/**
+ * Attach the Gmail-style conversation summary to Sent list rows: for each row's thread,
+ * count what the viewer can see — received messages in their INBOUND scope plus their own
+ * sends (Sent scope) — and name who replied. Without it a send that got answered read as a
+ * lone message in 送信済み and the replies were unreachable from there. Two queries per
+ * page (thread_id is indexed on both tables); rows whose thread holds only themselves get
+ * nothing. A received copy of one of our own sends (sent to a Dub mailbox) is the same
+ * message and is not counted twice.
+ */
+export async function attachSentConversations(
+  db: DbClient,
+  rows: Pick<SendLogRow, "id" | "thread_id" | "from_address">[],
+  items: mail.MailSentListItem[],
+  scope: { sent: MailScope; inbound: InboundScope },
+): Promise<void> {
+  const keys = [...new Set(rows.map(sentThreadKey).filter((k): k is string => k !== null))];
+  if (keys.length === 0) return;
+  const keysJson = JSON.stringify(keys);
+  const inWhere = ["thread_id IN (SELECT value FROM json_each(?))"];
+  const inBinds: unknown[] = [keysJson];
+  const owner = inboundOwnerClause(scope.inbound);
+  if (owner) {
+    inWhere.push(owner.sql);
+    inBinds.push(...owner.binds);
+  }
+  const inbound = await db.all<{ message_id: string; thread_id: string; from_json: string; received_at: string }>(
+    `SELECT message_id, thread_id, from_json, received_at FROM mail_inbound WHERE ${inWhere.join(" AND ")} ORDER BY received_at ASC, id ASC`,
+    ...inBinds,
+  );
+  // Our sends in those threads: replies (thread_id) and the roots themselves (by id).
+  const sentWhere = ["status = 'sent'", "(thread_id IN (SELECT value FROM json_each(?)) OR id IN (SELECT value FROM json_each(?)))"];
+  const sentBinds: unknown[] = [keysJson, JSON.stringify(keys.map(localPart))];
+  if (!isReadAll(scope.sent)) {
+    sentWhere.push("owner_user_id = ?");
+    sentBinds.push(scope.sent);
+  }
+  const sent = await db.all<{ id: string; thread_id: string | null; from_address: string | null; updated_at: string }>(
+    `SELECT id, thread_id, from_address, updated_at FROM mail_send_log WHERE ${sentWhere.join(" AND ")}`,
+    ...sentBinds,
+  );
+
+  const byKey = new Map<string, { sentIds: Set<string>; latestAt: string; inbound: typeof inbound }>();
+  const conv = (k: string) => {
+    let c = byKey.get(k);
+    if (!c) byKey.set(k, (c = { sentIds: new Set(), latestAt: "", inbound: [] }));
+    return c;
+  };
+  for (const s of sent) {
+    const k = sentThreadKey(s);
+    if (k === null || !keys.includes(k)) continue;
+    const c = conv(k);
+    c.sentIds.add(s.id);
+    if (s.updated_at > c.latestAt) c.latestAt = s.updated_at;
+  }
+  for (const m of inbound) conv(m.thread_id).inbound.push(m);
+
+  rows.forEach((r, i) => {
+    const k = sentThreadKey(r);
+    const c = k === null ? undefined : byKey.get(k);
+    const item = items[i];
+    if (!c || !item || k === null) return;
+    c.sentIds.add(r.id); // the row itself always counts (read_all may list another owner's send)
+    const received = c.inbound.filter((m) => !c.sentIds.has(localPart(m.message_id)));
+    const messageCount = c.sentIds.size + received.length;
+    if (messageCount < 2) return;
+    const repliedBy: mail.MailAddress[] = [];
+    let latestAt = c.latestAt;
+    for (const m of received) {
+      if (m.received_at > latestAt) latestAt = m.received_at;
+      let from: mail.MailAddress;
+      try {
+        from = JSON.parse(m.from_json) as mail.MailAddress;
+      } catch {
+        continue;
+      }
+      const email = (from.email ?? "").toLowerCase();
+      const at = repliedBy.findIndex((p) => p.email.toLowerCase() === email);
+      if (at >= 0) repliedBy.splice(at, 1); // re-append so the newest replier ends up last
+      repliedBy.push(from);
+    }
+    item.conversation = { id: k, messageCount, latestAt: latestAt || item.sentAt, repliedBy };
+  });
 }
 
 // ---- inbound ----
