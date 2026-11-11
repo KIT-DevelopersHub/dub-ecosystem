@@ -24,25 +24,38 @@ export function createHrInterviewsDemoStore(deps: {
   const sent = new Map<string, string>(); // applicantId -> sentAt
   const slots: hrInterview.InterviewSlot[] = [];
 
-  function addSlot(startAt: string, durationMinutes: number, name = "デモ 人事"): void {
+  function addSlot(
+    startAt: string,
+    durationMinutes: number,
+    who: { id: string; name: string } = { id: ME, name: "デモ 人事" },
+    booking: { applicantId: string; applicantName: string } | null = null,
+  ): void {
     slots.push({
       id: `hsl_demo_${++seq}`,
       startAt,
       endAt: new Date(Date.parse(startAt) + durationMinutes * 60_000).toISOString(),
-      interviewerId: ME,
-      interviewerName: name,
-      applicantId: null,
-      applicantName: null,
-      bookedAt: null,
+      interviewerId: who.id,
+      interviewerName: who.name,
+      applicantId: booking?.applicantId ?? null,
+      applicantName: booking?.applicantName ?? null,
+      bookedAt: booking ? new Date().toISOString() : null,
     });
     slots.sort((a, b) => (a.startAt < b.startAt ? -1 : 1));
   }
 
-  // 日本時間 14:00 (コマ表は日本時間で並ぶ)。
-  for (const days of [2, 3, 5]) {
-    const jstMidnight = Math.floor((Date.now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000;
-    addSlot(new Date(jstMidnight + days * 86_400_000 + 14 * 3_600_000).toISOString(), 30);
-  }
+  // 日本時間で置く (マス目は日本時間で並ぶ)。自分の空き 3 つ = 候補 3 (既定の 5 に足りず保留が見える)。
+  const jstMidnight = Math.floor((Date.now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000;
+  const at = (days: number, hour: number, minute = 0) =>
+    new Date(jstMidnight + days * 86_400_000 + (hour * 60 + minute) * 60_000).toISOString();
+  // 候補 3 = 自分の 2 日後・5 日後 14:00 + 他の人の 3 日後 14:00 (佐藤・鈴木の 2 人が同じ時刻 = 1 候補)。
+  // 他の人の枠はマス目に名前が薄く出る。予約済みは候補に数えない。
+  const SATO = { id: "usr_demo_sato", name: "佐藤 花子" };
+  const SUZUKI = { id: "usr_demo_suzuki", name: "鈴木 一郎" };
+  for (const days of [2, 5]) addSlot(at(days, 14), 30);
+  addSlot(at(3, 14), 30, SATO);
+  addSlot(at(3, 14), 30, SUZUKI);
+  addSlot(at(2, 16), 30, SUZUKI, { applicantId: "app_demo_booked_other", applicantName: "小林 陽菜" });
+  addSlot(at(2, 16, 30), 30, SATO, { applicantId: "app_demo_booked_other2", applicantName: "中村 蓮" });
 
   const openSlots = () => hrInterview.publicSlots(slots, new Date().toISOString());
 
@@ -82,7 +95,8 @@ export function createHrInterviewsDemoStore(deps: {
 
   async function bookingFor(): Promise<hr.ApplicantListItem | null> {
     const applicants = await targets();
-    const booked = slots.find((s) => s.applicantId !== null);
+    // 予約済みの枠のうち、人事 demo の応募者のもの (他の人の seed の予約は応募者の画面の対象外)。
+    const booked = slots.find((s) => s.applicantId !== null && applicants.some((a) => a.id === s.applicantId));
     return applicants.find((a) => a.id === booked?.applicantId) ?? applicants.find((a) => a.stage === "scheduling") ?? null;
   }
 

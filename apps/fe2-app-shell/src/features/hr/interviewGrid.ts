@@ -56,7 +56,8 @@ export type CellState =
   | { kind: "past" }
   | { kind: "booked"; slot: hrInterview.InterviewSlot }
   | { kind: "mine"; slot: hrInterview.InterviewSlot }
-  | { kind: "free"; others: number };
+  /** 自分は空き。others = 同じ時間に重なる他の人の枠 (空き・予約済みとも)。 */
+  | { kind: "free"; others: hrInterview.InterviewSlot[] };
 
 const overlaps = (s: hrInterview.InterviewSlot, startMs: number, endMs: number) =>
   Date.parse(s.startAt) < endMs && Date.parse(s.endAt) > startMs;
@@ -66,7 +67,30 @@ export function cellState(slots: readonly hrInterview.InterviewSlot[], meId: str
   const mine = here.find((s) => s.interviewerId === meId);
   if (mine) return mine.applicantId ? { kind: "booked", slot: mine } : { kind: "mine", slot: mine };
   if (range.startMs <= nowMs) return { kind: "past" };
-  return { kind: "free", others: here.filter((s) => s.applicantId === null).length };
+  return { kind: "free", others: here };
+}
+
+/** 名前の先頭 (苗字) だけ。マスが狭いので「田中 太郎」→「田中」。 */
+const shortName = (name: string): string => name.trim().split(/\s+/u)[0] || "担当者";
+
+/**
+ * 他の人の枠をマスに出す文言。予約が入っていれば「担当: 応募者」を優先して薄い緑、空きだけなら名前を薄い青で。
+ * 複数人は「田中・佐藤」、3 人以上は「田中 他 2」。title には全員分を出す。
+ */
+export function othersView(others: readonly hrInterview.InterviewSlot[]): { tone: "booked" | "open"; text: string; title: string } | null {
+  if (others.length === 0) return null;
+  const booked = others.filter((s) => s.applicantId !== null);
+  const title = others
+    .map((s) => `${s.interviewerName || "担当者"}（${s.applicantId ? `予約: ${s.applicantName ?? "応募者"}` : "空き"}）`)
+    .join("\n");
+  if (booked.length > 0) {
+    const b = booked[0]!;
+    const more = others.length > 1 ? ` 他 ${others.length - 1}` : "";
+    return { tone: "booked", text: `${shortName(b.interviewerName)}: ${b.applicantName ?? "予約"}${more}`, title };
+  }
+  const names = [...new Set(others.map((s) => shortName(s.interviewerName)))];
+  const text = names.length <= 2 ? names.join("・") : `${names[0]} 他 ${names.length - 1}`;
+  return { tone: "open", text, title };
 }
 
 /** ドラッグの始点と今の位置で囲んだ長方形 (日 × 時間)。 */

@@ -6,6 +6,9 @@ const shot = (name: string) => `e2e/.output/hr-interviews-${name}.png`;
 test("候補が足りない間は保留し、揃うと送信済みになる", async ({ page }) => {
   await page.goto("/hr/interviews");
   await page.getByTestId("fe2-hr-interviews-register").screenshot({ path: shot("register") });
+  // 他の人の枠は名前を薄く出す (空き = 名前、予約 = 名前: 応募者)
+  await expect(page.locator('[data-cell][data-kind="others"]', { hasText: "佐藤・鈴木" })).toHaveCount(1);
+  await expect(page.locator('[data-cell][data-kind="othersBooked"]', { hasText: "鈴木: 小林 陽菜" })).toHaveCount(1);
   await expect(page.getByTestId("fe2-hr-interviews-status-message")).toContainText("保留しています");
   await expect(page.getByTestId("fe2-hr-interviews-open-count")).toHaveText("3");
   await page.screenshot({ path: shot("held"), fullPage: true });

@@ -17,6 +17,7 @@ import {
   GRID_STEPS,
   jstDayOf,
   modeFor,
+  othersView,
   planChange,
   rowCount,
   timeLabel,
@@ -191,7 +192,8 @@ export function InterviewSlotGrid({ slots, meId, canWrite, onAdd, onRemove }: Pr
         <span className={styles.legendItem} data-kind="selected">選択中</span>
         <span className={styles.legendItem} data-kind="mine">登録済み（自分）</span>
         <span className={styles.legendItem} data-kind="booked">予約が入った</span>
-        <span className={styles.legendItem} data-kind="others">他の人が登録済み</span>
+        <span className={styles.legendItem} data-kind="others">他の人の空き（名前）</span>
+        <span className={styles.legendItem} data-kind="othersBooked">他の人の予約（名前: 応募者）</span>
         <span className={styles.legendItem} data-kind="past">過去</span>
       </div>
       <div
@@ -288,8 +290,9 @@ function Row({
       {Array.from({ length: DAYS }, (_, day) => {
         const key = `${day}:${row}`;
         const s = stateOf({ day, row });
-        const kind = s.kind === "free" && s.others > 0 ? "others" : s.kind;
-        const text = s.kind === "booked" ? (s.slot.applicantName ?? "予約") : s.kind === "free" && s.others > 0 ? `他 ${s.others}` : "";
+        const others = s.kind === "free" ? othersView(s.others) : null;
+        const kind = others ? (others.tone === "booked" ? "othersBooked" : "others") : s.kind;
+        const text = s.kind === "booked" ? (s.slot.applicantName ?? "予約") : (others?.text ?? "");
         const selected = isSelected(key, s) ? (selectedMode ?? undefined) : undefined;
         return (
           <button
@@ -301,9 +304,10 @@ function Row({
             data-hour={onHour || undefined}
             data-selected={selected}
             data-testid={`fe2-hr-cell-${key}`}
+            title={others?.title}
             aria-pressed={selected !== undefined}
             disabled={!canWrite || modeFor(s) === null}
-            aria-label={`${label} ${s.kind === "mine" ? "登録済み" : s.kind === "booked" ? `予約済み ${text}` : s.kind === "past" ? "過去" : "空き"}`}
+            aria-label={`${label} ${s.kind === "mine" ? "登録済み" : s.kind === "booked" ? `予約済み ${text}` : s.kind === "past" ? "過去" : `空き${others ? `（${others.title.replace(/\n/gu, "、")}）` : ""}`}`}
             // マウス/タッチは pointer で処理済み。キーボード (Enter/Space) の click だけ拾う。
             onClick={(e) => {
               if (e.detail === 0) onKeyToggle({ day, row });

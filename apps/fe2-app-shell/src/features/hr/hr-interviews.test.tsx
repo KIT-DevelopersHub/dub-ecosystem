@@ -134,6 +134,19 @@ describe("面談タブ", () => {
     await waitFor(() => expect(mineCount()).toBe(0));
   });
 
+  it("shows other interviewers' slots by name in a faint tone, and still lets me register there", async () => {
+    renderScreen();
+    await screen.findByTestId("fe2-hr-slot-grid");
+    const others = [...document.querySelectorAll<HTMLElement>('[data-cell][data-kind="others"]')];
+    expect(others.map((c) => c.textContent)).toContain("佐藤・鈴木");
+    const booked = [...document.querySelectorAll<HTMLElement>('[data-cell][data-kind="othersBooked"]')];
+    expect(booked.map((c) => c.textContent)).toEqual(expect.arrayContaining(["鈴木: 小林 陽菜", "佐藤: 中村 蓮"]));
+    expect(booked[0]!.title).toMatch(/予約: /u);
+    // 他の人の枠のマスでも、自分の分は登録できる
+    const key = others.find((c) => c.textContent === "佐藤・鈴木")!.dataset.cell!;
+    expect(screen.getByTestId(`fe2-hr-cell-${key}`)).toHaveProperty("disabled", false);
+  });
+
   it("adds to the selection over several drags, unselects a clicked cell, and works from the keyboard", async () => {
     renderScreen();
     await screen.findByTestId("fe2-hr-slot-grid");
@@ -182,10 +195,11 @@ describe("面談タブ", () => {
     });
     renderScreen(EDITOR, (api) => ({ ...api, removeSlot: () => pending }));
     const table = await screen.findByTestId("fe2-hr-interviews-slot-table");
+    const before = within(table).getAllByRole("button", { name: "削除" }).length;
     fireEvent.click(within(table).getAllByRole("button", { name: "削除" })[0]!);
-    await waitFor(() => expect(within(table).getAllByRole("button", { name: "削除" })).toHaveLength(2));
+    await waitFor(() => expect(within(table).getAllByRole("button", { name: "削除" })).toHaveLength(before - 1));
     refuse(new Error("down"));
-    await waitFor(() => expect(within(table).getAllByRole("button", { name: "削除" })).toHaveLength(3));
+    await waitFor(() => expect(within(table).getAllByRole("button", { name: "削除" })).toHaveLength(before));
   });
 
   it("gives a viewer no write controls", async () => {
