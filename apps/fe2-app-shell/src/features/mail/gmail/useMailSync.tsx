@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 import type { MailApi } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
-import { dedupeLoopback, type MailMsg } from "./mailModel.ts";
+import { dedupeLoopback, hasUnloadedReplies, type MailMsg } from "./mailModel.ts";
 import { PAGE_SIZE, pageSourceOf, searchViewOf, selectVisible, serverViewOf, useMailStore } from "./useMailStore.tsx";
 
 /** What the server last knew per thread. noReplyAt is compared as-is; the POST sends only the
@@ -275,9 +275,10 @@ export function useMailSync(): void {
     void (async () => {
       try {
         // Sent-only, wherever it is filed now: trashing or archiving one changes `folder`, but
-        // it is still a send-log row that GET /threads/:id has never heard of.
-        if (thread.messages.every((m) => m.outbound)) {
-          const detail = await api.getSent(thread.id);
+        // it is still a send-log row that GET /threads/:id has never heard of — unless the
+        // Sent summary says replies exist (送信済み → open the whole conversation, Gmail).
+        if (thread.messages.every((m) => m.outbound) && !hasUnloadedReplies(thread)) {
+          const detail = await api.getSent(thread.messages[0]?.id ?? thread.id);
           if (alive) {
             done = true;
             dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages: [sentDetailToMessage(detail, me)] });
@@ -289,7 +290,16 @@ export function useMailSync(): void {
           // maillog id would 404). Best-effort — a failure never blocks opening the thread.
           const known = thread.messages;
           for (const m of known) if (!m.outbound && m.mine !== false) void api.markRead(m.id).catch(() => undefined);
-          const full = await api.getThread(thread.id);
+          // A conversation reached from 送信済み may have no received message loaded (and
+          // none visible any more): a 404 then just means "our sends only".
+          const sentOnly = known.every((m) => m.outbound);
+          const full = await api.getThread(thread.id).catch((e: unknown) => {
+            if (sentOnly) return { id: thread.id, messages: [] };
+            throw e;
+          });
+          // Replies fetched here for the first time were never marked read: do it now.
+          for (const m of full.messages)
+            if (!m.read && m.mine !== false && !known.some((k) => k.id === m.id)) void api.markRead(m.id).catch(() => undefined);
           // getThread returns RECEIVED messages only. Preserve our own replies (folded Sent
           // rows, outbound=true) that it omits, so a sent reply stays visible in the thread
           // instead of vanishing on refresh. Dedup by id, order by date. Force read=true so a

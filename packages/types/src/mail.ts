@@ -217,6 +217,21 @@ export interface MailSentListItem {
   // (mail:read_all). Absent/true = the viewer sent it. Lets a client keep someone else's
   // From out of "my addresses" (自分 labelling, reply-all exclusion, reply addressing).
   mine?: boolean;
+  // ADDITIVE (Sent → conversation, Gmail parity): the conversation this send belongs to,
+  // present only when it holds other messages the viewer can see (a reply received, or a
+  // further send of ours). Absent = a lone send.
+  conversation?: MailSentConversation;
+}
+/** The conversation a sent row belongs to (Gmail's Sent list opens the whole thread). */
+export interface MailSentConversation {
+  /** Thread id: the key of GET /threads/:id and the received rows' `threadId`. */
+  id: string;
+  /** Messages the viewer can see in it: received (in their scope) + their own sends. */
+  messageCount: number;
+  /** Newest message time in the conversation. */
+  latestAt: ISODateTime;
+  /** Distinct senders of the received messages, oldest first (newest replier last). */
+  repliedBy: MailAddress[];
 }
 /** Sent-folder detail: the list row plus the full body. htmlBody optional (present
  *  only when the send carried an HTML part) and MUST be sanitized before rendering. */
