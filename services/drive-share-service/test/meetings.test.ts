@@ -180,6 +180,17 @@ describe("create", () => {
     expect(mock.state.calendars.size).toBe(1);
   });
 
+  it("targets carry the Google calendar id of the caller's own calendars only (for 「Googleカレンダーに追加」)", async () => {
+    const { service } = buildMeetings({ roster: roster() });
+    await service.create("usr_admin", BASE);
+    const mine = await service.targets("usr_a");
+    expect(mine.items.find((t) => t.id === "role_dev")?.calendarId).toEqual(expect.any(String));
+    expect(mine.items.find((t) => t.id === "role_pr")).not.toHaveProperty("calendarId"); // no meeting yet = no calendar
+    expect(mine.items.find((t) => t.id === "all")).not.toHaveProperty("calendarId");
+    const other = await service.targets("usr_c");
+    expect(other.items.find((t) => t.id === "role_dev")).not.toHaveProperty("calendarId"); // not their role
+  });
+
   it("全体 targets every active member and its calendar is named 全体", async () => {
     const { service, calendar } = buildMeetings({ roster: roster() });
     const m = await service.create("usr_admin", { ...BASE, targetId: "all" });

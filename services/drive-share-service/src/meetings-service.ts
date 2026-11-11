@@ -389,6 +389,17 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     else await work;
   }
 
+  /** targetId → Google calendar id on the current account; empty when the account cannot be read. */
+  async function myCalendarIds(): Promise<Map<string, string>> {
+    try {
+      const account = await deps.account();
+      return new Map((await store.listCalendars(orgId, account.accountId)).map((c) => [c.targetId, c.calendarId]));
+    } catch (err) {
+      log("meeting_target_calendars_failed", { message: err instanceof Error ? err.message : String(err) });
+      return new Map();
+    }
+  }
+
   /** The target's calendar on this account, created on first use. */
   async function ensureCalendar(cal: CalendarClient, accountId: string, targetId: string, name: string): Promise<string> {
     const existing = await store.getCalendar(orgId, targetId, accountId);
@@ -660,7 +671,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     },
 
     async targets(userId) {
-      const [roles, users] = await Promise.all([deps.roster.listRoles(), deps.roster.listActiveUsers()]);
+      const [roles, users, calendars] = await Promise.all([deps.roster.listRoles(), deps.roster.listActiveUsers(), myCalendarIds()]);
       const me = users.find((u) => u.id === userId);
       const items: meeting.MeetingTarget[] = [
         { id: meeting.ALL_MEMBERS_TARGET_ID, name: ALL_TARGET_NAME, memberCount: users.length, isMine: true },
@@ -670,7 +681,11 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
           memberCount: users.filter((u) => u.roleIds.includes(r.id)).length,
           isMine: !!me?.roleIds.includes(r.id),
         })),
-      ];
+      ].map((t) => {
+        // Only the caller's own calendars: those are the ones shared with them (no share mail any more).
+        const calendarId = t.isMine ? calendars.get(t.id) : undefined;
+        return calendarId ? { ...t, calendarId } : t;
+      });
       return { items };
     },
 
