@@ -21,7 +21,7 @@ import {
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { usePermissionGate, type PermissionGate } from "../../auth/PermissionGate.tsx";
 import {
   isPendingOnboardingItem,
   useCreateOnboardingItem,
@@ -50,6 +50,8 @@ import styles from "./participation.module.css";
 
 export function OnboardingAdminPage(): JSX.Element {
   const { canEdit } = useAppCapability("participation");
+  // 閲覧のみでも追加/編集/削除は押せる。押したら権限不足ダイアログ(申請付き)を出す。
+  const gate = usePermissionGate({ appId: "participation", locked: !canEdit });
   const list = useOnboardingItems();
   const createMut = useCreateOnboardingItem();
   const updateMut = useUpdateOnboardingItem();
@@ -124,24 +126,22 @@ export function OnboardingAdminPage(): JSX.Element {
                 </a>
               ) : null}
             </div>
-            {canEdit ? (
-              <div className={styles.onboardingActions}>
-                <IconButton
-                  name="edit"
-                  aria-label={`「${item.title}」を編集`}
-                  disabled={isPendingOnboardingItem(item)}
-                  onClick={() => setEditing(item)}
-                  testId={`onboarding-admin-edit-${item.id}`}
-                />
-                <IconButton
-                  name="trash"
-                  aria-label={`「${item.title}」を削除`}
-                  disabled={isPendingOnboardingItem(item)}
-                  onClick={() => setDeleteTarget(item)}
-                  testId={`onboarding-admin-delete-${item.id}`}
-                />
-              </div>
-            ) : null}
+            <div className={styles.onboardingActions}>
+              <IconButton
+                name="edit"
+                aria-label={`「${item.title}」を編集`}
+                disabled={isPendingOnboardingItem(item)}
+                onClick={gate.guard(() => setEditing(item))}
+                testId={`onboarding-admin-edit-${item.id}`}
+              />
+              <IconButton
+                name="trash"
+                aria-label={`「${item.title}」を削除`}
+                disabled={isPendingOnboardingItem(item)}
+                onClick={gate.guard(() => setDeleteTarget(item))}
+                testId={`onboarding-admin-delete-${item.id}`}
+              />
+            </div>
           </div>
         )}
       />
@@ -151,7 +151,7 @@ export function OnboardingAdminPage(): JSX.Element {
   return (
     <HrFrame active="guide">
       <div className={styles.onboardingPage} data-testid="onboarding-admin-page">
-        <AppReadOnlyNotice appId="participation" testId="onboarding-readonly-notice" />
+        {gate.dialog}
         <p className={styles.sectionHint}>新しく入った人に最初にやってほしいことをまとめ、ログイン不要の案内ページで共有します。</p>
 
         <PublicUrlCard
@@ -165,11 +165,9 @@ export function OnboardingAdminPage(): JSX.Element {
           header={
             <div className={styles.sectionHeader}>
               <span>案内する項目</span>
-              {canEdit ? (
-                <Button size="sm" iconLeft={<Icon name="plus" />} onClick={() => setEditing("new")} testId="onboarding-admin-add">
-                  項目を追加
-                </Button>
-              ) : null}
+              <Button size="sm" iconLeft={<Icon name="plus" />} onClick={gate.guard(() => setEditing("new"))} testId="onboarding-admin-add">
+                項目を追加
+              </Button>
             </div>
           }
           testId="onboarding-admin-items"
@@ -180,7 +178,7 @@ export function OnboardingAdminPage(): JSX.Element {
           {body}
         </Card>
 
-        {list.data ? <MeetingsCard guide={list.data} canEdit={canEdit} /> : null}
+        {list.data ? <MeetingsCard guide={list.data} guard={gate.guard} /> : null}
 
         {editing !== null ? (
           <ItemDialog item={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSave={onSave} />
@@ -213,7 +211,7 @@ interface MeetingTarget {
 }
 
 /** 全体 / チームのミーティング案内。カレンダー招待は送らず、日時とリンクを案内ページに出す。 */
-function MeetingsCard({ guide, canEdit }: { guide: OnboardingGuide; canEdit: boolean }): JSX.Element {
+function MeetingsCard({ guide, guard }: { guide: OnboardingGuide; guard: PermissionGate["guard"] }): JSX.Element {
   const saveMut = useSaveOnboardingMeeting();
   const [editing, setEditing] = useState<MeetingTarget | null>(null);
   const targets: MeetingTarget[] = [
@@ -252,13 +250,11 @@ function MeetingsCard({ guide, canEdit }: { guide: OnboardingGuide; canEdit: boo
                   <span className={styles.meetingUnset}>未設定（案内ページには「追って連絡します」と表示）</span>
                 )}
               </div>
-              {canEdit ? (
-                <div className={styles.onboardingActions}>
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(t)} testId={`onboarding-meeting-edit-${key}`}>
-                    {m ? "編集" : "設定"}
-                  </Button>
-                </div>
-              ) : null}
+              <div className={styles.onboardingActions}>
+                <Button size="sm" variant="secondary" onClick={guard(() => setEditing(t))} testId={`onboarding-meeting-edit-${key}`}>
+                  {m ? "編集" : "設定"}
+                </Button>
+              </div>
             </li>
           );
         })}

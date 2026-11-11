@@ -124,26 +124,31 @@ describe("MembersPage — 運営メンバーの範囲", () => {
     expect(Object.keys(patch).sort()).toEqual(["leaderId", "position", "roleTitle", "status", "teamIds", "version"]);
   });
 
-  it("運営名簿: 閲覧だけの範囲なら書き込みは無効", async () => {
+  it("運営名簿: 閲覧だけの範囲で追加を押すと、編集範囲の権限不足ダイアログが出る", async () => {
     render(wrap(<MemberRosterPage />, makeApi(), editorPermissions("members", ["identity:read", "members:roster_view"])));
-    const add = await screen.findByTestId("member-roster-add-member");
-    expect((add as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId("member-roster-remind") as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId("member-roster-scope-notice")).toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId("member-roster-add-member"));
+    const dialog = await screen.findByRole("dialog", { name: "権限が不足しています" });
+    expect(within(dialog).getByText("運営名簿は編集範囲の外のため、編集できません。")).toBeInTheDocument();
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
   });
 });
 
 describe("MembersPage — 3 段階 (policy) の 閲覧 tier", () => {
   // ロール管理で 運営メンバー を「閲覧」にした運営: member-service は書き込みを 403 にするので
-  // (requireMembersEdit)、UI も同じ判定で全書き込み操作を無効化し、理由を一行示す。
-  it("閲覧のみのとき、追加/編集/削除がすべて押せず理由が表示される", async () => {
+  // (requireMembersEdit)、UI は書き込み操作の代わりに権限不足ダイアログ(申請付き)を出す。
+  it.each([
+    ["members-add-member", null],
+    ["members-add-team", null],
+    [null, "山田太郎 を編集"],
+    [null, "山田太郎 を削除"],
+  ])("閲覧のみのとき %s%s を押すと操作せず権限不足ダイアログが出る", async (testId, name) => {
     render(wrap(<MembersPage />, makeApi(), viewerPermissions("members", ["identity:read"])));
     expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("members-readonly-notice")).toBeInTheDocument());
-    expect((screen.getByTestId("members-add-member") as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId("members-add-team") as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "山田太郎 を編集" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "山田太郎 を削除" }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await userEvent.click(testId ? screen.getByTestId(testId) : screen.getByRole("button", { name: name! }));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
+    expect(screen.getByTestId("perm-dialog-members-request")).toHaveTextContent("権限を申請する");
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
   });
 
   it("編集のときは操作可能で、閲覧バナーも出ない", async () => {
@@ -451,12 +456,13 @@ describe("MemberRosterPage (運営名簿から編集)", () => {
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
   });
 
-  it("閲覧のみ: 行クリックで編集を開かず、書き込み操作は無効", async () => {
+  it("閲覧のみ: 行クリックでは何も開かず、編集ボタンは権限不足ダイアログを出す", async () => {
     render(wrap(<MemberRosterPage />, makeApi(), viewerPermissions("members", ["identity:read", "members:roster_view"])));
     await userEvent.click(await screen.findByText("山田太郎"));
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
-    expect(screen.getByTestId("member-roster-readonly-notice")).toBeInTheDocument();
-    expect(screen.getByTestId("member-roster-add-member")).toBeDisabled();
-    expect(screen.getByTestId("members-edit-m1")).toBeDisabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("members-edit-m1"));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
   });
 });

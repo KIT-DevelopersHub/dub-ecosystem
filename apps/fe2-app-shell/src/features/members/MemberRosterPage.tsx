@@ -22,7 +22,7 @@ import {
 import type { SelectOption } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice, ScopeReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { usePermissionGate } from "../../auth/PermissionGate.tsx";
 import { useMembersOverview, useDeleteMember, useIdentityUsers, useUnlinkIdentity } from "./hooks.ts";
 import { useMembersApi } from "./MembersProvider.tsx";
 import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
@@ -53,6 +53,12 @@ export function MemberRosterPage(): JSX.Element {
   const { canEdit: canEditApp } = useAppCapability("members");
   const { can } = usePermissions();
   const canEdit = canEditApp && can("members:roster_edit");
+  // 閲覧のみ / 編集範囲の外でも書き込みボタンは押せる。押したら権限不足ダイアログ(申請付き)。
+  const gate = usePermissionGate(
+    canEditApp
+      ? { appId: "members", locked: !canEdit, scope: "scope", reason: "運営名簿は編集範囲の外のため、編集できません。" }
+      : { appId: "members", locked: !canEdit },
+  );
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const identityUsers = useIdentityUsers();
@@ -178,14 +184,7 @@ export function MemberRosterPage(): JSX.Element {
 
   return (
     <div data-testid="member-roster-page">
-      <AppReadOnlyNotice appId="members" testId="member-roster-readonly-notice" />
-      {canEditApp && !canEdit ? (
-        <ScopeReadOnlyNotice
-          appId="members"
-          message="運営名簿は閲覧のみのため、編集できません（編集範囲の外です）。"
-          testId="member-roster-scope-notice"
-        />
-      ) : null}
+      {gate.dialog}
       <PageHeader
         title="運営名簿"
         description={
@@ -209,13 +208,13 @@ export function MemberRosterPage(): JSX.Element {
             />
             <Button
               variant="secondary"
-              disabled={!canEdit || remindable.length === 0 || remind.isPending}
-              onClick={() => setRemindTargets(remindable)}
+              disabled={remindable.length === 0 || remind.isPending}
+              onClick={gate.guard(() => setRemindTargets(remindable))}
               testId="member-roster-remind"
             >
               {`未入力を催促（${remindable.length}人）`}
             </Button>
-            <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} disabled={!canEdit} onClick={openAddMember} testId="member-roster-add-member">
+            <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={gate.guard(openAddMember)} testId="member-roster-add-member">
               メンバーを追加
             </Button>
           </>
@@ -264,13 +263,13 @@ export function MemberRosterPage(): JSX.Element {
         accountLabels={accountLabels}
         leaderNames={leaderNames}
         readOnly={!canEdit}
-        onEdit={openEditMember}
-        onDelete={(m) => setConfirm(m)}
-        onLink={(m) => setLinkDialog({ open: true, member: m })}
-        onUnlink={(m) => unlinkIdentity.mutate({ id: m.id, version: m.version })}
-        onSendAccountMail={openAccountMail}
+        onEdit={gate.guard(openEditMember)}
+        onDelete={gate.guard((m: OrgMember) => setConfirm(m))}
+        onLink={gate.guard((m: OrgMember) => setLinkDialog({ open: true, member: m }))}
+        onUnlink={gate.guard((m: OrgMember) => unlinkIdentity.mutate({ id: m.id, version: m.version }))}
+        onSendAccountMail={gate.guard(openAccountMail)}
         canSendAccountMail={(m) => mailTargetOf(m) !== null}
-        {...(remind.isPending ? {} : { onRemind: (m: OrgMember) => setRemindTargets([m]) })}
+        {...(remind.isPending ? {} : { onRemind: gate.guard((m: OrgMember) => setRemindTargets([m])) })}
       />
 
       <MemberFormDialog

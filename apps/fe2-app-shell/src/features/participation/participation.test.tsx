@@ -318,21 +318,22 @@ const SUBMISSION: Participation = {
 };
 
 describe("ParticipationListPage — 3 段階 (policy) の 閲覧 tier", () => {
-  it("閲覧のみのとき 反映確定(追加する/しない)を押せない", async () => {
-    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })) });
+  it.each(["participation-add-p_1", "participation-skip-p_1"])("閲覧のみのとき %s を押すと反映せず権限不足ダイアログが出る", async (testId) => {
+    const resolve = vi.fn();
+    const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [SUBMISSION] })), resolve });
     render(wrap(<ParticipationListPage />, api, viewerPermissions("participation", ["identity:read"])));
     expect(await screen.findByTestId("participation-list-table")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("participation-readonly-notice")).toBeInTheDocument());
-    expect((screen.getByTestId("participation-add-p_1") as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId("participation-skip-p_1") as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(screen.getByTestId(testId));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
+    expect(resolve).not.toHaveBeenCalled();
   });
 
-  it("閲覧のみのとき 紐付けを解除 も押せない", async () => {
+  it("閲覧のみのとき 紐付けを解除 も権限不足ダイアログになる", async () => {
     const linked: Participation = { ...SUBMISSION, memberId: "m_link", reviewState: "added", matchKind: "linked_existing" };
     const api = makeApi({ list: vi.fn(() => Promise.resolve({ participations: [linked] })) });
     render(wrap(<ParticipationListPage />, api, viewerPermissions("participation", ["identity:read"])));
-    await waitFor(() => expect(screen.getByTestId("participation-readonly-notice")).toBeInTheDocument());
-    expect((screen.getByTestId("participation-unlink-p_1") as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(await screen.findByTestId("participation-unlink-p_1"));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
   });
 });
 
@@ -517,13 +518,16 @@ describe("OnboardingAdminPage", () => {
     await waitFor(() => expect(api.deleteOnboarding).toHaveBeenCalledWith("onb_1"));
   });
 
-  it("is read-only for a 閲覧 subject (no add / edit / delete)", async () => {
+  it("a 閲覧 subject gets the permission dialog instead of add / edit", async () => {
     const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide(ITEMS))) });
     render(wrap(<OnboardingAdminPage />, api, viewerPermissions("participation")));
     expect(await screen.findByText("Discord に参加")).toBeInTheDocument();
-    expect(screen.queryByTestId("onboarding-admin-add")).toBeNull();
-    expect(screen.queryByTestId("onboarding-admin-edit-onb_1")).toBeNull();
-    expect(screen.getByTestId("onboarding-readonly-notice")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("onboarding-admin-add"));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("perm-dialog-participation-close"));
+    await userEvent.click(screen.getByTestId("onboarding-admin-edit-onb_1"));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /項目/ })).toBeNull();
   });
 });
 
@@ -567,11 +571,12 @@ describe("OnboardingAdminPage meetings", () => {
     await waitFor(() => expect(api.saveOnboardingMeeting).toHaveBeenCalledWith({ teamId: null, schedule: null, url: null }));
   });
 
-  it("hides meeting editing for a 閲覧 subject", async () => {
+  it("meeting editing shows the permission dialog for a 閲覧 subject", async () => {
     const api = makeApi({ listOnboarding: vi.fn(() => Promise.resolve(guide([], { teams: TEAMS }))) });
     render(wrap(<OnboardingAdminPage />, api, viewerPermissions("participation")));
     expect(await screen.findByTestId("onboarding-meeting-team_dev")).toBeInTheDocument();
-    expect(screen.queryByTestId("onboarding-meeting-edit-team_dev")).toBeNull();
+    await userEvent.click(screen.getByTestId("onboarding-meeting-edit-team_dev"));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
   });
 });
 
