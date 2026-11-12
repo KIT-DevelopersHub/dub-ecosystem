@@ -520,9 +520,26 @@ export const PUBLIC_INTERVIEW_FORM_PATH = "/interview-apply";
 export const PUBLIC_PARTICIPATION_PATH = "/participate";
 const PREFILL_PREFIX = "#prefill=";
 
+const B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+// types は DOM/Node の型を持たないため TextEncoder/btoa を使わず自前で UTF-8 → base64url。
 function toBase64Url(text: string): string {
-  const bin = String.fromCharCode(...new TextEncoder().encode(text));
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const bytes: number[] = [];
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c < 0x80) bytes.push(c);
+    else if (c < 0x800) bytes.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else bytes.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i]! << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+    out += B64URL[(n >> 18) & 63]! + B64URL[(n >> 12) & 63]!;
+    if (i + 1 < bytes.length) out += B64URL[(n >> 6) & 63]!;
+    if (i + 2 < bytes.length) out += B64URL[n & 63]!;
+  }
+  return out;
 }
 
 /** 参加届の入力済みリンクのパス (画面のコピーと合格メールで同じ形)。 */
