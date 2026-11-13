@@ -336,7 +336,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     }
   }
 
-  /** Role id -> name (identity:read of the acting user). */
+  /** Role id -> name (internal S2S read, so the system actor gets it too). */
   async function roleNames(): Promise<Map<string, string>> {
     return new Map((await deps.roster.listRoles()).map((r) => [r.id, r.name]));
   }

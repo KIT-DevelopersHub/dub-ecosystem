@@ -136,7 +136,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
   const expectedOf = (users: ActiveUser[], targetId: string) =>
     targetId === meeting.ALL_MEMBERS_TARGET_ID ? users : users.filter((u) => u.roleIds.includes(targetId));
 
-  /** Role names, best-effort (needs identity:read of the caller; a failure just shows a placeholder). */
+  /** Role names, best-effort (a failed read just shows a placeholder). */
   async function names(): Promise<Map<string, string>> {
     try {
       return new Map((await deps.roster.listRoles()).map((r) => [r.id, r.name]));

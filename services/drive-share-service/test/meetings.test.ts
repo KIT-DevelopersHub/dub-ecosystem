@@ -16,9 +16,9 @@ import { eventIdFor } from "../src/meetings-service";
 import { createInMemoryMeetingStore } from "../src/meetings-store";
 import { nextAlarmAt } from "../src/meeting-sync-do";
 import { resolveMeetingAccount } from "../src/meetings-wiring";
-import type { ActiveUser } from "../src/role-membership";
+import { createIdentityRoleMembership, type ActiveUser } from "../src/role-membership";
 import type { Env } from "../src/env";
-import { AUTHED, buildAttendance, buildGoogleLink, buildMeetings, buildRoleGrants, fakeRoster, memAuthzHolding, stubGoogleAccount } from "./helpers";
+import { AUTHED, buildAttendance, buildGoogleLink, buildMeetings, buildRoleGrants, fakeIdentityBinding, fakeRoster, memAuthzHolding, stubGoogleAccount } from "./helpers";
 
 const USERS: ActiveUser[] = [
   { id: "usr_a", email: "a@dub.example", name: "A", roleIds: ["role_dev"] },
@@ -605,6 +605,38 @@ describe("calendar shares follow the target", () => {
       expect(readers(bySummary().get("開発")!)).toEqual(["a@gmail.com", "b@gmail.com", "by-hand@gmail.com"]);
       expect((await store.listAcl("org_devhub", devId)).length).toBe(2);
       expect(del).not.toHaveBeenCalled();
+    });
+
+    // The hourly MeetingSyncDO alarm builds the service as the SYSTEM (requestId, no userId)
+    // over the real identity client. The in-memory roster cannot show the difference, so this
+    // one runs over a binding that gates like identity-roster: /identity/roles 401s an
+    // actor-less call (what left the stale shares in prod), /internal/* serves it.
+    it("the hourly alarm (system actor, no user id) revokes a deleted role's shares too", async () => {
+      const people = { users: USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] })), roles: { ...NAMES } as Record<string, string> };
+      const { binding, calls } = fakeIdentityBinding(people);
+      const directory = staticMemberDirectory({ usr_a: { gmail: "a@gmail.com", name: "A" }, usr_b: { gmail: "b@gmail.com", name: "B" }, usr_c: { gmail: "c@gmail.com", name: "C" } });
+      const alarmRoster = () => createIdentityRoleMembership(binding, { requestId: "req_alarm" });
+      // Run 1: shares the 開発 calendar with its members.
+      const first = buildMeetings({ roster: alarmRoster(), directory });
+      await first.service.create("usr_admin", BASE);
+      await first.service.sync({ system: true });
+      const mock = first.calendar as ReturnType<typeof createMockCalendarClient>;
+      const devId = [...mock.state.calendars.keys()][0]!;
+      expect(readers(mock.state.calendars.get(devId)!)).toEqual(["a@gmail.com", "b@gmail.com"]);
+      await first.calendar.insertAcl(devId, "by-hand@gmail.com");
+      // The role is deleted in ロール管理 (its assignments go with it).
+      for (const u of people.users) u.roleIds = u.roleIds.filter((r) => r !== "role_dev");
+      delete people.roles.role_dev;
+      // Run 2: a fresh service per alarm, as runSync builds one, still as the system.
+      const second = buildMeetings({ roster: alarmRoster(), directory, store: first.store, calendar: first.calendar, attendance: first.attendance });
+      const del = vi.spyOn(second.calendar, "deleteAcl");
+      await second.service.sync({ system: true });
+      expect(readers(mock.state.calendars.get(devId)!)).toEqual(["by-hand@gmail.com"]);
+      expect(await second.store.listAcl("org_devhub", devId)).toEqual([]);
+      expect(del).toHaveBeenCalledTimes(2);
+      // The role list came off the internal route with no acting user; the key-gated route was never tried.
+      expect(calls.some((c) => c.path === "/internal/roles" && c.userId === null && c.internal)).toBe(true);
+      expect(calls.some((c) => c.path === "/identity/roles")).toBe(false);
     });
   });
 });

@@ -55,9 +55,9 @@ function lazyDriveClient(load: () => Promise<DriveShareClient>): DriveShareClien
   };
 }
 
-/** Per-request request context (from the trusted x-dub-* headers). The role-membership
- *  client needs the acting user id so identity can resolve /identity/roles (identity:read),
- *  so the app is built per request — mirrors member-service's buildDeps(env, requestId). */
+/** Per-request request context (from the trusted x-dub-* headers). The acting user id is
+ *  forwarded to identity / member for attribution, so the app is built per request — mirrors
+ *  member-service's buildDeps(env, requestId). */
 interface ReqCtx {
   requestId: string;
   userId?: string;
