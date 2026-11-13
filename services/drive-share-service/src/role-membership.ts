@@ -3,8 +3,9 @@
 // wiring in index.ts (createServiceClient) but hits:
 //   • GET /internal/users?role=<roleId>&status=active — the internal S2S role expansion
 //     (x-dub-internal only, no identity:read needed). Paginated via nextCursor.
-//   • GET /identity/roles — role id→name map for display (identity:read; every system
-//     role carries identity:read, so the forwarded acting user always passes).
+//   • GET /internal/roles — role id→name map and the role list (x-dub-internal only). The
+//     hourly MeetingSyncDO alarm runs as the system with no user id, and the key-gated
+//     /identity/roles 401s that caller, so the internal twin is the one read here.
 // A fresh instance is built per request (memoisation is request-scoped, so a long-lived
 // isolate never serves stale role membership).
 import { createServiceClient, type RequestContext } from "@dub/http";
@@ -28,7 +29,7 @@ export interface RoleMembership {
   /** Active users of a role, or of the whole org when roleId is omitted ("全体"). Internal S2S
    *  only, so it also works for the system actor of the hourly meeting sync. */
   listActiveUsers(roleId?: string): Promise<ActiveUser[]>;
-  /** Every role (id + name). Needs the acting user (identity:read). */
+  /** Every role (id + name). Internal S2S only, so it also works for the system actor. */
   listRoles(): Promise<{ id: string; name: string }[]>;
 }
 
@@ -55,7 +56,7 @@ export function createIdentityRoleMembership(binding: Fetcher, ctx: RequestConte
     const map = new Map<string, string>();
     let cursor: string | undefined;
     do {
-      const page = await client.get<RolesPage>(ctx, "/identity/roles", {
+      const page = await client.get<RolesPage>(ctx, "/internal/roles", {
         query: { limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
       });
       for (const r of page.items) map.set(r.id, r.name);

@@ -118,6 +118,10 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /users/:id": INTERNAL,
   "POST /internal/users/:id/profile": INTERNAL,
   "GET /internal/users": INTERNAL,
+  // drive-share-service's hourly MeetingSyncDO alarm (system actor, no user id) telling a
+  // deleted role from an empty one. Same page as GET /identity/roles; INTERNAL because the
+  // key-gated route 401s an actor-less s2s call (gate.ts: keys need someone to hold them).
+  "GET /internal/roles": INTERNAL,
   // notification-service audience fan-out + 通知管理「誰に届くか」 (roles + active holders of one key).
   "GET /internal/permission-holders": INTERNAL,
   "POST /internal/users/lookup": INTERNAL,
