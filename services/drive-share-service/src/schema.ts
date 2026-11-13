@@ -211,3 +211,25 @@ CREATE TABLE driveshare_google_api_usage (
 );
 `.trim(),
 };
+
+// Physical twin: infra/d1/migrations/driveshare/0006_meeting_targets.sql (lockstep test).
+// 複数の対象: a meeting invites the union of its targets (全体 / roles / members). Additive: the
+// meeting's target_id stays (its calendar), and the backfill copies it as the first target.
+export const DRIVESHARE_MEETING_TARGETS_MIGRATION: Migration = {
+  namespace: "driveshare",
+  id: "0006_meeting_targets",
+  up: `
+CREATE TABLE driveshare_meeting_targets (
+  org_id     TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('all','role','person')),
+  target_id  TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  PRIMARY KEY (meeting_id, kind, target_id)
+);
+CREATE INDEX idx_driveshare_meeting_targets_org ON driveshare_meeting_targets(org_id, meeting_id);
+INSERT OR IGNORE INTO driveshare_meeting_targets (org_id, meeting_id, kind, target_id, position)
+SELECT org_id, id, CASE WHEN target_id = 'all' THEN 'all' ELSE 'role' END, target_id, 0
+  FROM driveshare_meetings;
+`.trim(),
+};

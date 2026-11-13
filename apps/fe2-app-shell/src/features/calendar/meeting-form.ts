@@ -8,7 +8,8 @@ export const TITLE_MAX = 100;
 
 export interface MeetingFormValues {
   title: string;
-  targetId: string;
+  /** Who to invite (全体 / roles / members), in the order added. */
+  targets: meeting.MeetingTargetRef[];
   /** "YYYY-MM-DD" JST. */
   date: string;
   /** "HH:MM" JST. */
@@ -35,7 +36,7 @@ export const TIME_OPTIONS: string[] = Array.from({ length: 96 }, (_, i) => {
 export function emptyMeetingForm(now: Date = new Date()): MeetingFormValues {
   return {
     title: "",
-    targetId: meeting.ALL_MEMBERS_TARGET_ID,
+    targets: [{ kind: "all", id: meeting.ALL_MEMBERS_TARGET_ID }],
     date: jstParts(now.toISOString())?.date ?? "",
     time: "21:00",
     durationMinutes: 60,
@@ -61,7 +62,7 @@ export function meetingFormFromDraft(
   const durationMinutes = DURATION_OPTIONS.reduce<number>((best, o) => (Math.abs(o - length) < Math.abs(best - length) ? o : best), DURATION_OPTIONS[0]);
   return {
     ...emptyMeetingForm(),
-    ...(targets.some((t) => t.id === d.label) ? { targetId: d.label } : {}),
+    ...(targets.some((t) => t.id === d.label) ? { targets: meeting.legacyTargets(d.label) } : {}),
     title: d.title.trim().slice(0, TITLE_MAX),
     date: d.startDate,
     time: d.startTime,
@@ -76,7 +77,7 @@ export function meetingToForm(m: meeting.Meeting): MeetingFormValues {
   const p = jstParts(m.startsAt);
   return {
     title: m.title,
-    targetId: m.targetId,
+    targets: meeting.targetsOfMeeting(m).map(({ kind, id }) => ({ kind, id })),
     date: p?.date ?? "",
     time: p?.time ?? "",
     durationMinutes: m.durationMinutes,
@@ -95,7 +96,8 @@ export function validateMeetingForm(v: MeetingFormValues): MeetingFormErrors {
   const title = v.title.trim();
   if (!title) e.title = "タイトルを入力してください";
   else if (title.length > TITLE_MAX) e.title = `タイトルは${TITLE_MAX}文字以内で入力してください`;
-  if (!v.targetId) e.targetId = "対象を選んでください";
+  if (v.targets.length === 0) e.targets = "対象を1つ以上追加してください";
+  else if (v.targets.length > meeting.MEETING_TARGETS_MAX) e.targets = `対象は${meeting.MEETING_TARGETS_MAX}件までです`;
   if (!DATE_RE.test(v.date)) e.date = "日付を選んでください";
   if (!TIME_RE.test(v.time)) e.time = "開始時刻を選んでください";
   if (!(DURATION_OPTIONS as readonly number[]).includes(v.durationMinutes)) e.durationMinutes = "所要時間を選んでください";
@@ -112,7 +114,9 @@ export function toMeetingRequest(v: MeetingFormValues): meeting.CreateMeetingReq
   return {
     title: v.title.trim(),
     description: description ? description : null,
-    targetId: v.targetId,
+    targets: v.targets,
+    // Also the legacy single target, so a server from before 複数の対象 still takes the request.
+    ...(meeting.calendarTargetOf(v.targets) !== meeting.PEOPLE_CALENDAR_TARGET_ID ? { targetId: meeting.calendarTargetOf(v.targets) } : {}),
     startsAt: jstToUtcIso(v.date, v.time),
     durationMinutes: v.durationMinutes,
     recurrence: v.recurrence,
@@ -144,6 +148,29 @@ export function isMeetingTargetVisible(
   if (targetId === meeting.ALL_MEMBERS_TARGET_ID || targets === "error" || created.has(targetId)) return true;
   if (targets === null) return false;
   return targets.find((t) => t.id === targetId)?.isMine ?? true;
+}
+
+/**
+ * Whether a meeting is drawn: when any of its 全体 / role targets is shown, or — for a member target
+ * — when that member is me or I made it (someone else's 1:1 does not crowd my calendar).
+ */
+export function isMeetingVisible(
+  m: meeting.Meeting,
+  isTargetVisible: (targetId: string) => boolean,
+  currentUserId: string | null | undefined,
+): boolean {
+  return meeting.targetsOfMeeting(m).some((t) =>
+    t.kind === "person" ? !!currentUserId && (t.id === currentUserId || m.createdBy === currentUserId) : isTargetVisible(t.id),
+  );
+}
+
+/** Value <-> target ref for the chip field ("role:role_x" / "person:usr_x" / "all:all"). */
+export const targetValue = meeting.targetKey;
+export function targetFromValue(v: string): meeting.MeetingTargetRef | null {
+  const i = v.indexOf(":");
+  const kind = v.slice(0, i) as meeting.MeetingTargetKind;
+  const id = v.slice(i + 1);
+  return i > 0 && meeting.MEETING_TARGET_KINDS.includes(kind) && id ? { kind, id } : null;
 }
 
 export function parseMeetingTargetChoices(v: unknown): MeetingTargetChoices {

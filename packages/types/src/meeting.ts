@@ -8,6 +8,75 @@ import type { ISODate, ISODateTime, UserId } from "./common";
 /** The pseudo target meaning "every active member" (its calendar is named 全体). */
 export const ALL_MEMBERS_TARGET_ID = "all";
 
+/** The calendar of a meeting whose targets are people only (named 個別, shared with nobody). */
+export const PEOPLE_CALENDAR_TARGET_ID = "people";
+
+/** One invitee group of a meeting: 全体, a role, or one member. A meeting has one or more. */
+export type MeetingTargetKind = "all" | "role" | "person";
+export const MEETING_TARGET_KINDS: readonly MeetingTargetKind[] = ["all", "role", "person"];
+export interface MeetingTargetRef {
+  kind: MeetingTargetKind;
+  /** "all" for kind all, a roleId, or a userId. */
+  id: string;
+}
+/** A target as a meeting returns it (name resolved; a deleted role / gone member keeps its id). */
+export interface MeetingTargetInfo extends MeetingTargetRef {
+  name: string;
+}
+export const MEETING_TARGETS_MAX = 50;
+
+/** The target list of a pre-multi-target meeting / request (a role id or "all"). */
+export function legacyTargets(targetId: string): MeetingTargetRef[] {
+  return [targetId === ALL_MEMBERS_TARGET_ID ? { kind: "all", id: ALL_MEMBERS_TARGET_ID } : { kind: "role", id: targetId }];
+}
+
+export const targetKey = (t: MeetingTargetRef): string => `${t.kind}:${t.id}`;
+
+/**
+ * The one validation of a request's targets, shared by the SPA and drive-share-service.
+ * `targets` wins; else the legacy single `targetId`. Duplicates are dropped (order kept);
+ * null = missing / malformed / empty / too many.
+ */
+export function parseMeetingTargets(body: { targets?: unknown; targetId?: unknown }): MeetingTargetRef[] | null {
+  if (body.targets === undefined) {
+    return typeof body.targetId === "string" && body.targetId.length > 0 ? legacyTargets(body.targetId) : null;
+  }
+  if (!Array.isArray(body.targets) || body.targets.length === 0) return null;
+  const out: MeetingTargetRef[] = [];
+  const seen = new Set<string>();
+  for (const raw of body.targets) {
+    if (!raw || typeof raw !== "object") return null;
+    const { kind, id } = raw as { kind?: unknown; id?: unknown };
+    if (!MEETING_TARGET_KINDS.includes(kind as MeetingTargetKind) || typeof id !== "string" || id.length === 0 || id.length > 200) return null;
+    if (kind === "all" && id !== ALL_MEMBERS_TARGET_ID) return null;
+    if (kind !== "all" && id === ALL_MEMBERS_TARGET_ID) return null;
+    const t = { kind: kind as MeetingTargetKind, id };
+    if (seen.has(targetKey(t))) continue;
+    seen.add(targetKey(t));
+    out.push(t);
+  }
+  return out.length > MEETING_TARGETS_MAX ? null : out;
+}
+
+/**
+ * The calendar the meeting's event lives on: 全体 when it is a target, else the first role, else
+ * the 個別 calendar. Every other target is reached by invitation only.
+ */
+export function calendarTargetOf(targets: readonly MeetingTargetRef[]): string {
+  if (targets.some((t) => t.kind === "all")) return ALL_MEMBERS_TARGET_ID;
+  return targets.find((t) => t.kind === "role")?.id ?? PEOPLE_CALENDAR_TARGET_ID;
+}
+
+/** A meeting's targets; one from an older server (no `targets`) reads as its single target. */
+export function targetsOfMeeting(m: { targetId: string; targetName: string; targets?: MeetingTargetInfo[] }): MeetingTargetInfo[] {
+  return m.targets && m.targets.length > 0 ? m.targets : legacyTargets(m.targetId).map((t) => ({ ...t, name: m.targetName }));
+}
+
+/** Whether a member is invited by any of the targets. */
+export function isInMeetingTargets(user: { id: string; roleIds: readonly string[] }, targets: readonly MeetingTargetRef[]): boolean {
+  return targets.some((t) => t.kind === "all" || (t.kind === "role" ? user.roleIds.includes(t.id) : user.id === t.id));
+}
+
 /**
  *  none            単発
  *  weekly          毎週 (same weekday)
@@ -24,10 +93,12 @@ export interface Meeting {
   id: string;
   title: string;
   description: string | null;
-  /** roleId, or ALL_MEMBERS_TARGET_ID. */
+  /** The calendar the event is on: calendarTargetOf(targets) (roleId, "all" or "people"). */
   targetId: string;
-  /** Role name, or "全体". */
+  /** Every target's name, joined with "、". */
   targetName: string;
+  /** Who is invited: the union of these. */
+  targets: MeetingTargetInfo[];
   /** First occurrence start (UTC ISO). */
   startsAt: ISODateTime;
   durationMinutes: number;
@@ -78,14 +149,25 @@ export interface ListMeetingsResponse {
   account: MeetingAccountState;
 }
 
+/** An active member who can be added as a person target. */
+export interface MeetingPersonOption {
+  id: UserId;
+  name: string;
+}
+
 export interface ListMeetingTargetsResponse {
   items: MeetingTarget[];
+  /** Active members, for person targets. Absent from an older server. */
+  people?: MeetingPersonOption[];
 }
 
 export interface CreateMeetingRequest {
   title: string;
   description?: string | null;
-  targetId: string;
+  /** Who to invite (one or more). Wins over targetId. */
+  targets?: MeetingTargetRef[];
+  /** Legacy single target (a roleId or "all"): read when `targets` is absent. */
+  targetId?: string;
   startsAt: ISODateTime;
   durationMinutes: number;
   recurrence: MeetingRecurrence;

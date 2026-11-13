@@ -54,7 +54,7 @@ import { MeetingDetailDialog } from "./MeetingDetailDialog.tsx";
 import { MeetingFilter } from "./MeetingFilter.tsx";
 import { MeetingFormDialog } from "./MeetingFormDialog.tsx";
 import { useUserPref } from "./calendar-prefs";
-import { isMeetingTargetVisible, meetingFormFromDraft, parseMeetingTargetChoices, type MeetingFormValues, type MeetingTargetChoices } from "./meeting-form";
+import { isMeetingTargetVisible, isMeetingVisible, meetingFormFromDraft, parseMeetingTargetChoices, type MeetingFormValues, type MeetingTargetChoices } from "./meeting-form";
 import { formatOccurrence, meetingTasks, type MeetingOccurrence } from "./meeting-occurrences";
 import { ItemDragProvider, useItemDrag } from "./useItemDrag.tsx";
 import { useMeetingMutations, useMeetingTargetsQuery, useMeetingsAccess, useMeetingsQuery } from "./useMeetings.tsx";
@@ -201,7 +201,8 @@ export function CalendarScreen(): JSX.Element {
   const meetingsQ = useMeetingsQuery(access.canView);
   const targetsQ = useMeetingTargetsQuery(access.canView);
   const targets = useMemo(() => targetsQ.data?.items ?? [], [targetsQ.data]);
-  const { create: createMeeting, update: updateMeeting, remove: removeMeeting, sync } = useMeetingMutations(targets);
+  const meetingPeople = useMemo(() => targetsQ.data?.people ?? [], [targetsQ.data]);
+  const { create: createMeeting, update: updateMeeting, remove: removeMeeting, sync } = useMeetingMutations(targets, meetingPeople);
   // Default = the calendars I belong to (+ 全体); a manual choice is remembered per user.
   const [targetChoices, setTargetChoices] = useUserPref(MEETING_TARGETS_PREF, currentUserId, parseMeetingTargetChoices, NO_CHOICES);
   const targetState = targetsQ.isError ? "error" : (targetsQ.data?.items ?? null);
@@ -222,9 +223,9 @@ export function CalendarScreen(): JSX.Element {
   const firstKey = dayKeyOf(days[0]!);
   const lastKey = dayKeyOf(days[days.length - 1]!);
   const meetingOcc = useMemo(() => {
-    const shown = (meetingsQ.data?.items ?? []).filter((m) => isTargetVisible(m.targetId));
+    const shown = (meetingsQ.data?.items ?? []).filter((m) => isMeetingVisible(m, isTargetVisible, currentUserId));
     return meetingTasks(shown, firstKey, lastKey);
-  }, [meetingsQ.data, isTargetVisible, firstKey, lastKey]);
+  }, [meetingsQ.data, isTargetVisible, currentUserId, firstKey, lastKey]);
 
   // Scope to the caller's own tasks (担当/依頼) — task-service's "/me rule" rejects a
   // bare list — plus every task of the 他のチーム and the people the caller added. One
@@ -491,7 +492,8 @@ export function CalendarScreen(): JSX.Element {
     const editing = meetingForm?.editing ?? null;
     setMeetingForm(null);
     // The calendar just written to is shown, even if it was unticked (it lands where the user looks).
-    if (!isTargetVisible(body.targetId)) setTargetChoices((prev) => ({ ...prev, [body.targetId]: true }));
+    const hidden = (body.targets ?? []).filter((t) => t.kind !== "person" && !isTargetVisible(t.id)).map((t) => t.id);
+    if (hidden.length > 0) setTargetChoices((prev) => ({ ...prev, ...Object.fromEntries(hidden.map((id) => [id, true])) }));
     if (editing) {
       updateMeeting.mutate({ id: editing.id, body }, { onSuccess: () => toast.show({ kind: "success", title: "ミーティングを更新しました" }) });
     } else {
@@ -985,6 +987,8 @@ export function CalendarScreen(): JSX.Element {
             editing={meetingForm?.editing ?? null}
             initial={meetingForm?.initial ?? null}
             targets={targets}
+            people={meetingPeople}
+            targetsLoading={targetsQ.isPending}
             accountEmail={account?.email ?? null}
             onClose={() => setMeetingForm(null)}
             onSubmit={submitMeeting}
