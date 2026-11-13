@@ -76,6 +76,11 @@ export const POLICY_TABLE = definePolicyTable({
   // 誰の予約かはメールで渡したトークンでハンドラが判定する (hr-interview-service)。
   "POST /members/internal/hr/interview-booking/view": INTERNAL,
   "POST /members/internal/hr/interview-booking/book": INTERNAL,
+  // 面談結果の登録 (api-gateway POST /api/v1/admin/hr/applicants/:id/interview-result が鍵を検査済み)。
+  "POST /members/internal/hr/applicants/:id/interview-result/claim": INTERNAL,
+  "POST /members/internal/hr/applicants/:id/interview-result/link": INTERNAL,
+  "POST /members/internal/hr/applicants/:id/interview-result/complete": INTERNAL,
+  "POST /members/internal/hr/applicants/:id/interview-result/release": INTERNAL,
 
   // Self 参加届 (アカウント設定 -> 参加情報), reached through api-gateway's GET|POST
   // /api/v1/me/participation, which authenticates the session and forwards the caller's

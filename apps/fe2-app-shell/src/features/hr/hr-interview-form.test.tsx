@@ -211,7 +211,7 @@ describe("応募者の詳細", () => {
     const formApi = createInterviewFormApi(api);
     const { responses } = await formApi.responses();
     const publicOne = responses.find((r) => r.via === "public")!;
-    renderWith(<ApplicantDrawer applicantId={publicOne.applicantId} onClose={() => undefined} onRequestJoin={() => undefined} />, formApi, {
+    renderWith(<ApplicantDrawer applicantId={publicOne.applicantId} onClose={() => undefined} />, formApi, {
       hrClient: api,
     });
     await screen.findByTestId("fe2-hr-detail-answers");
@@ -235,7 +235,7 @@ describe("応募者の詳細", () => {
     const formApi = createInterviewFormApi(api);
     const { responses } = await formApi.responses();
     const publicOne = responses.find((r) => r.via === "public")!;
-    renderWith(<ApplicantDrawer applicantId={publicOne.applicantId} onClose={() => undefined} onRequestJoin={() => undefined} />, formApi, {
+    renderWith(<ApplicantDrawer applicantId={publicOne.applicantId} onClose={() => undefined} />, formApi, {
       hrClient: api,
     });
     const answers = await screen.findByTestId("fe2-hr-detail-answers");

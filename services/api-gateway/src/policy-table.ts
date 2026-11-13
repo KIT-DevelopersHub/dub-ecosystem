@@ -131,6 +131,10 @@ export const POLICY_TABLE = definePolicyTable({
   // 既存アカウントには触れない (handlers/participation-onboard.ts)。`:participationId` は
   // 呼び出し元が選ぶが、選べるのは参加届の行だけで、既存アカウントは 409 で弾かれる。
   "POST /api/v1/admin/participation/:participationId/onboard-account": ["members:onboard_mail"],
+  // 面談結果の登録 (人事)。合格はアカウントを発行するので参加届からの発行と同じ鍵も要る。
+  // 対象は応募者から導かれ (面談確定/面談済みで結果が未登録の人だけ)、ロールは identity-roster が
+  // 一般メンバーに固定・既存アカウントには触れない (handlers/hr-interview-result.ts)。
+  "POST /api/v1/admin/hr/applicants/:applicantId/interview-result": ["hr:write", "members:onboard_mail"],
   // 代理表示 (admin impersonation) start. Same `:userId`-subject shape; demands the dedicated
   // key, not identity:admin (granted separately, default role_sys_admin only). Target
   // eligibility (self / inactive / privileged / nested) is auth-service's instance check, and

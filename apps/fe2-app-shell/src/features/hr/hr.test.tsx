@@ -1,14 +1,14 @@
 // 人事アプリのテスト。
 //   (1) demo transport が /members/hr/* の契約に応答する (REAL api-client 経由): 全ステータスの seed・
 //       寛容な遷移と /join 必須・採用で名簿に在籍が増える・チェックでステータスが自動で進む
-//   (2) 表: 全員表示 / 絞り込みと件数 (オンボーディング前 含む) / 並べ替え / 検索 / その場でステータス変更
-//       (楽観的・失敗で戻る) / 採用は確認ダイアログ経由 / 閲覧者はプルダウンなし
+//   (2) 表: 全員表示 / 絞り込みと件数 (オンボーディング前 含む) / 並べ替え / 検索 / ステータスは表示だけ
+//       (プルダウンなし) / 面談確定の人だけ「面談結果を登録」(合否・理由・プレビュー・確認 → 1 回だけ送る)
 //   (2b) 削除: 行のごみ箱 → 確認ダイアログ → 楽観的に消える / 失敗で戻る / 採用済み・hr:admin なしは押せない
 //   (3) オンボーディング: チェックが一瞬も外れない (押した値を即座に表示) / 進捗バーが埋まる
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
-import type { hr, identity } from "@dub/types";
+import type { hr, hrResult, identity } from "@dub/types";
 import { describe, expect, it, vi } from "vitest";
 import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { createApiClient } from "../../lib/api-client.tsx";
@@ -24,6 +24,8 @@ vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock, useR
 
 const EDITOR = editorPermissions("hr", ["hr:read", "hr:write", "hr:admin"]);
 const VIEWER = viewerPermissions("hr", ["hr:read"]);
+// 面談結果の登録 (合格でアカウント発行) には発行の鍵も要る。
+const RECRUITER = editorPermissions("hr", ["hr:read", "hr:write", "members:onboard_mail"]);
 
 function demoApi(fetchImpl = createDemoFetch()): HrApi {
   return createHrApi(createApiClient({ baseUrl: "https://demo.local", fetchImpl }));
@@ -39,7 +41,7 @@ function applicant(over: Partial<hr.ApplicantListItem> = {}): hr.ApplicantListIt
 
 const ROWS: hr.ApplicantListItem[] = [
   applicant(),
-  applicant({ id: "app_2", name: "井上 さくら", nameKana: "いのうえ さくら", stage: "interview_set", latestNote: "Meet で確定", updatedAt: "2026-10-03T00:00:00Z" }),
+  applicant({ id: "app_2", name: "井上 さくら", nameKana: "いのうえ さくら", email: "sakura@gmail.com", stage: "interview_set", latestNote: "Meet で確定", updatedAt: "2026-10-03T00:00:00Z" }),
   applicant({ id: "app_3", name: "小林 葵", nameKana: "こばやし あおい", stage: "hired", memberId: "m1", updatedAt: "2026-10-02T00:00:00Z" }),
   applicant({ id: "app_4", name: "佐野 陸", nameKana: "さの りく", stage: "onboarding", memberId: "m2", updatedAt: "2026-10-04T00:00:00Z" }),
   applicant({ id: "app_5", name: "高橋 美咲", nameKana: "たかはし みさき", stage: "onboarded", memberId: "m3" }),
@@ -56,6 +58,7 @@ function fakeApi(overrides: Partial<HrApi> = {}): HrApi {
     addNote: unused,
     join: unused,
     remove: unused,
+    registerResult: unused,
     onboarding: unused,
     setCheck: unused,
     attendance: unused,
@@ -83,7 +86,7 @@ function renderWith(node: JSX.Element, api: HrApi, permissions: readonly identit
 
 const countOf = (id: string) => screen.getByTestId(`fe2-hr-filter-${id}-count`).textContent;
 const rowNames = () => screen.queryAllByTestId(/^fe2-hr-row-app_\d+$/).map((el) => el.textContent);
-const statusSelect = (id: string) => screen.getByTestId(`fe2-hr-row-${id}-status`) as HTMLSelectElement;
+const statusCell = (id: string) => screen.getByTestId(`fe2-hr-row-${id}-status`);
 
 describe("demo transport (人事)", () => {
   it("seeds every status and enforces the rules (permissive, /join required for roster statuses)", async () => {
@@ -116,6 +119,19 @@ describe("demo transport (人事)", () => {
     for (const it of ob.items) p = await api.setCheck(res.memberId, it.id, true);
     expect(p).toMatchObject({ completed: true, stage: "onboarded" });
     expect((await api.get(target.id)).applicant.stage).toBe("onboarded");
+  });
+});
+
+describe("demo transport (面談結果)", () => {
+  it("registers once per applicant: a second call returns the stored result and issues nothing", async () => {
+    const api = demoApi();
+    const target = (await api.list()).applicants.find((a) => a.stage === "interview_set" && a.email)!;
+    const first = await api.registerResult(target.id, { decision: "pass", reason: "良い", localPart: "sou.uno" });
+    expect(first).toMatchObject({ alreadyRegistered: false, result: { issuedAddress: "sou.uno@developershub.jp" }, applicant: { stage: "hired" } });
+    const again = await api.registerResult(target.id, { decision: "pass", reason: "良い", localPart: "sou.uno" });
+    expect(again).toMatchObject({ alreadyRegistered: true, result: { id: first.result.id } });
+    const scheduling = (await api.list()).applicants.find((a) => a.stage === "scheduling")!;
+    await expect(api.registerResult(scheduling.id, { decision: "fail", reason: "x" })).rejects.toMatchObject({ status: 409 });
   });
 });
 
@@ -254,46 +270,86 @@ describe("HrApplicantsScreen (表)", () => {
     expect(rowNames()).toEqual(["小林 葵"]);
   });
 
-  it("changes status inline optimistically (no flicker) and rolls back on failure", async () => {
-    let resolve!: (d: hr.ApplicantDetail) => void;
-    const moveStage = vi.fn(() => new Promise<hr.ApplicantDetail>((r) => (resolve = r)));
-    renderWith(<HrApplicantsScreen />, fakeApi({ moveStage }));
+  it("has no status dropdown: the stage is a read-only badge (changes come only from booking / 面談結果)", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi());
     await screen.findByTestId("fe2-hr-row-app_1");
-    fireEvent.change(statusSelect("app_1"), { target: { value: "interview_set" } });
-    // 応答前・同じ描画でもう新しい値。
-    expect(statusSelect("app_1").value).toBe("interview_set");
-    await waitFor(() => expect(moveStage).toHaveBeenCalledWith("app_1", { stage: "interview_set", expectedVersion: 1 }));
-    expect(statusSelect("app_1").value).toBe("interview_set");
-    await act(async () => resolve({ applicant: applicant({ stage: "interview_set", version: 2 }), events: [] }));
-    expect(statusSelect("app_1").value).toBe("interview_set");
+    expect(document.querySelector("select")).toBeNull();
+    expect(within(statusCell("app_1")).getByText("面談日程調整中")).toBeTruthy();
+    expect(within(statusCell("app_2")).getByText("面談確定")).toBeTruthy();
   });
 
-  it("rolls the status back when the move fails", async () => {
-    const moveStage = vi.fn(() => Promise.reject(new Error("boom")));
-    renderWith(<HrApplicantsScreen />, fakeApi({ moveStage }));
+  it("shows 面談結果を登録 only for 面談確定 / 面談済み, and only with the issuing key", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi(), RECRUITER);
     await screen.findByTestId("fe2-hr-row-app_1");
-    fireEvent.change(statusSelect("app_1"), { target: { value: "rejected" } });
-    await waitFor(() => expect(moveStage).toHaveBeenCalled());
-    await waitFor(() => expect(statusSelect("app_1").value).toBe("scheduling"));
+    expect(screen.getByTestId("fe2-hr-row-app_2-result")).toBeTruthy();
+    expect(screen.queryByTestId("fe2-hr-row-app_1-result")).toBeNull(); // 面談日程調整中
+    expect(screen.queryByTestId("fe2-hr-row-app_3-result")).toBeNull(); // 採用
   });
 
-  it("採用 for a non-member goes through the confirm dialog (→ 名簿に追加), not silently", async () => {
-    const join = vi.fn(() => Promise.resolve<hr.JoinApplicantResponse>({ applicant: applicant({ stage: "hired", memberId: "m9", version: 2 }), memberId: "m9" }));
-    const moveStage = vi.fn();
-    renderWith(<HrApplicantsScreen />, fakeApi({ join, moveStage: moveStage as unknown as HrApi["moveStage"] }));
-    await screen.findByTestId("fe2-hr-row-app_1");
-    fireEvent.change(statusSelect("app_1"), { target: { value: "hired" } });
-    expect(join).not.toHaveBeenCalled();
-    const dialog = await screen.findByTestId("fe2-hr-join-confirm");
-    fireEvent.click(within(dialog).getByRole("button", { name: "採用して名簿に追加" }));
-    await waitFor(() => expect(join).toHaveBeenCalledWith("app_1", { expectedVersion: 1 }));
-    expect(moveStage).not.toHaveBeenCalled();
+  it("an editor without members:onboard_mail, or a viewer, gets no register action", async () => {
+    renderWith(<HrApplicantsScreen />, fakeApi(), EDITOR);
+    await screen.findByTestId("fe2-hr-row-app_2");
+    expect(screen.queryByTestId("fe2-hr-row-app_2-result")).toBeNull();
   });
 
-  it("a viewer sees badges instead of dropdowns and no register action", async () => {
+  it("不合格: reason required, mail preview without the reason by default, confirm step, then one call", async () => {
+    const registerResult = vi.fn(async (id: string, body: hrResult.RegisterInterviewResultRequest) => ({
+      result: { id: "hir_1", applicantId: id, decision: body.decision, status: "done" } as hrResult.InterviewResult,
+      applicant: applicant({ id, name: "井上 さくら", stage: "rejected", version: 3 }),
+      alreadyRegistered: false,
+      accountMailSent: false,
+    }));
+    renderWith(<HrApplicantsScreen />, fakeApi({ registerResult }), RECRUITER);
+    fireEvent.click(await screen.findByTestId("fe2-hr-row-app_2-result"));
+    const dialog = await screen.findByTestId("fe2-hr-result-dialog");
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-decision-fail"));
+    expect((within(dialog).getByTestId("fe2-hr-result-next") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(within(dialog).getByTestId("fe2-hr-result-reason"), { target: { value: "日程が合わず" } });
+    const preview = within(dialog).getByTestId("fe2-hr-result-preview").textContent ?? "";
+    expect(preview).toContain("面談結果のご連絡");
+    expect(preview).toContain("ご期待に沿いかねる");
+    expect(preview).not.toContain("日程が合わず");
+    expect((within(dialog).getByTestId("fe2-hr-result-include-reason") as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-next"));
+    expect(await within(dialog).findByTestId("fe2-hr-result-confirm")).toBeTruthy();
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-submit"));
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-submit"));
+    await waitFor(() => expect(registerResult).toHaveBeenCalledTimes(1));
+    expect(registerResult).toHaveBeenCalledWith("app_2", { decision: "fail", reason: "日程が合わず", includeReasonInMail: false });
+    await waitFor(() => expect(within(statusCell("app_2")).getByText("不採用")).toBeTruthy());
+  });
+
+  it("合格: proposes 名.姓 from the kana, lets HR edit it, previews the address + URLs, and sends localPart", async () => {
+    const registerResult = vi.fn(async (id: string, body: hrResult.RegisterInterviewResultRequest) => ({
+      result: { id: "hir_1", applicantId: id, decision: body.decision, status: "done" } as hrResult.InterviewResult,
+      applicant: applicant({ id, stage: "hired", memberId: "m9", version: 3 }),
+      alreadyRegistered: false,
+      accountMailSent: true,
+    }));
+    renderWith(<HrApplicantsScreen />, fakeApi({ registerResult }), RECRUITER);
+    fireEvent.click(await screen.findByTestId("fe2-hr-row-app_2-result"));
+    const dialog = await screen.findByTestId("fe2-hr-result-dialog");
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-decision-pass"));
+    const local = within(dialog).getByTestId("fe2-hr-result-localpart") as HTMLInputElement;
+    expect(local.value).toBe("sakura.inoue");
+    fireEvent.change(local, { target: { value: "s.inoue" } });
+    fireEvent.change(within(dialog).getByTestId("fe2-hr-result-reason"), { target: { value: "主体性" } });
+    const preview = within(dialog).getByTestId("fe2-hr-result-preview").textContent ?? "";
+    expect(preview).toContain("s.inoue@developershub.jp");
+    expect(preview).toContain("/participate#prefill=");
+    expect(preview).toContain("/onboarding");
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-next"));
+    expect(within(dialog).getByTestId("fe2-hr-result-confirm").textContent).toContain("s.inoue@developershub.jp");
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-submit"));
+    await waitFor(() =>
+      expect(registerResult).toHaveBeenCalledWith("app_2", { decision: "pass", reason: "主体性", includeReasonInMail: false, localPart: "s.inoue" }),
+    );
+  });
+
+  it("a viewer sees badges and no register action", async () => {
     renderWith(<HrApplicantsScreen />, fakeApi(), VIEWER);
     await screen.findByTestId("fe2-hr-row-app_1");
-    expect(screen.queryByTestId("fe2-hr-row-app_1-status")).toBeNull();
+    expect(screen.queryByTestId("fe2-hr-row-app_2-result")).toBeNull();
     expect(screen.queryByTestId("fe2-hr-enter-on-behalf")).toBeNull();
   });
 

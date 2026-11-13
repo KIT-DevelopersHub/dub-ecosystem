@@ -6,7 +6,7 @@
 // 画面側は usePendingOverlay (HrShared) で「押した値」を即座に重ねて表示する。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@dub/ui";
-import type { hr, meeting } from "@dub/types";
+import type { hr, hrResult, meeting } from "@dub/types";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useHrApi } from "./HrProvider.tsx";
@@ -403,5 +403,25 @@ export function useIngestAttendance() {
       void qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
     },
     onError: (err) => toast.show({ kind: "error", title: messageFor(err, "取り込めませんでした") }),
+  });
+}
+
+/**
+ * 面談結果の登録。アカウント発行とメール送信を伴うので確認ダイアログの後ろで非楽観 (成功してから一覧を書き換える)。
+ * サーバーが応募者ごとに 1 件に絞るので、二度押しでも発行・送信は 1 回だけ。
+ */
+export function useRegisterInterviewResult() {
+  const api = useHrApi();
+  const qc = useQueryClient();
+  return useMutation<hrResult.RegisterInterviewResultResponse, unknown, { applicantId: string; body: hrResult.RegisterInterviewResultRequest }>({
+    mutationFn: ({ applicantId, body }) => api.registerResult(applicantId, body),
+    onSuccess: (res) => {
+      qc.setQueryData<hr.ListApplicantsResponse>(HR_LIST_KEY, (prev) =>
+        prev ? { applicants: prev.applicants.map((a) => (a.id === res.applicant.id ? { ...a, ...res.applicant } : a)) } : prev,
+      );
+      void qc.invalidateQueries({ queryKey: HR_DETAIL_KEY(res.applicant.id) });
+      void qc.invalidateQueries({ queryKey: HR_ONBOARDING_KEY });
+      void qc.invalidateQueries({ queryKey: MEMBERS_OVERVIEW_KEY });
+    },
   });
 }

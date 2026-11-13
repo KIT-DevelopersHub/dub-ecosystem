@@ -204,6 +204,28 @@ export class HrService {
     throw errVersionConflict(id);
   }
 
+  /**
+   * 面談結果の登録で進める (面談確定/面談済み → 採用/不採用)。同時編集に負けないよう読み直して数回試す。
+   * 既に to なら何もしない (再試行で冪等)。memberId を渡すと名簿の行も結ぶ。
+   */
+  async applyResult(ctx: ReqCtx, id: string, to: hr.ApplicantStage, note: string, memberId?: string): Promise<hr.Applicant> {
+    for (let i = 0; i < 3; i++) {
+      const cur = await this.load(id);
+      if (cur.stage === to && (memberId === undefined || cur.memberId === memberId)) return toApplicant(cur);
+      const next: ApplicantRow = {
+        ...cur,
+        stage: to,
+        ...(memberId !== undefined ? { memberId } : {}),
+        version: cur.version + 1,
+        updatedAt: this.deps.now(),
+      };
+      if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) continue;
+      await this.event(ctx, id, memberId !== undefined ? "joined" : "stage", { fromStage: cur.stage, toStage: to, body: note });
+      return toApplicant(next);
+    }
+    throw errVersionConflict(id);
+  }
+
   /** 人事が予約を取り消した: 面談日を消し、面談確定なら面談日程調整中へ戻す (同じ URL で選び直せる)。 */
   async cancelInterview(ctx: ReqCtx, id: string, note: string): Promise<void> {
     for (let i = 0; i < 3; i++) {

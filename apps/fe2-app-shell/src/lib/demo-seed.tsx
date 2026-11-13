@@ -23,9 +23,13 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, sponsor as sponsorValues, goal as goalValues, lp as lpValues, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
+
+/** demo で「送った」面談結果メール (実際には送らない)。ローカル確認用に window.__dubDemoHrMails でも見える。 */
+export const demoHrOutbox: Array<{ to: string; subject: string; textBody: string }> = [];
+if (typeof window !== "undefined") (window as unknown as { __dubDemoHrMails?: typeof demoHrOutbox }).__dubDemoHrMails = demoHrOutbox;
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
 import { createHrInterviewsDemoStore } from "./demo-hr-interviews.ts";
 import { createSponsorMailDemo } from "./demo-sponsor-mail.ts";
@@ -4584,6 +4588,59 @@ function createMembersStore() {
     return null;
   }
 
+  // 面談結果 (gateway interview-result の demo 版)。応募者ごとに 1 件・2 回目は登録済みを返すだけ。
+  // メールは送らず demoOutbox に積む (ローカル確認用: window.__dubDemoHrMails)。
+  const hrResults = new Map<string, hrResultValues.InterviewResult>();
+  const nowIsoHr = () => new Date().toISOString();
+  function hrRegisterResult(
+    applicantId: string,
+    req: { decision: hrResultValues.InterviewDecision; reason: string; includeReasonInMail: boolean },
+    issue: ((displayName: string) => { identityUserId: string; address: string } | Response) | null,
+  ): Response {
+    const a = applicants.find((x) => x.id === applicantId);
+    if (!a) return json({ error: { code: "HR_APPLICANT_NOT_FOUND", message: "応募者が見つかりません", retryable: false } }, 404);
+    const done = hrResults.get(applicantId);
+    if (done) return json({ result: { ...done }, applicant: { ...a }, alreadyRegistered: true, accountMailSent: false });
+    if (!hrResultValues.RESULT_STAGES.includes(a.stage)) {
+      return json({ error: { code: "HR_RESULT_NOT_ELIGIBLE", message: "面談確定・面談済みの人だけ登録できます", retryable: false } }, 409);
+    }
+    if (!a.email) return json({ error: { code: "HR_RESULT_NO_EMAIL", message: "応募者のメールアドレスが無いため結果を送れません", retryable: false } }, 409);
+    let issued: { identityUserId: string; address: string } | null = null;
+    let memberId: string | null = null;
+    if (req.decision === "pass") {
+      const made = issue ? issue(a.name) : null;
+      if (made instanceof Response) return made;
+      issued = made;
+      const created = mk(nid("member"), a.name, "メンバー", "added", a.desiredTeamId ? [a.desiredTeamId] : [], members.length, a.email, a.department, a.grade, issued?.identityUserId ?? null);
+      members.push(created);
+      memberId = created.id;
+    }
+    const from = a.stage;
+    a.stage = hrResultValues.DECISION_STAGE[req.decision];
+    if (memberId) a.memberId = memberId;
+    a.version += 1;
+    a.updatedAt = nowIsoHr();
+    hrEvent(a.id, memberId ? "joined" : "stage", from, a.stage, `面談結果: ${hrResultValues.DECISION_LABELS[req.decision]}（${req.reason}）`, nowIsoHr());
+    const origin = typeof window === "undefined" ? "https://demo.local" : window.location.origin;
+    const mail = hrResultValues.renderResultMail({
+      decision: req.decision,
+      name: a.name,
+      reason: req.includeReasonInMail ? req.reason : null,
+      address: issued?.address ?? null,
+      appUrl: `${origin}/`,
+      participationUrl: `${origin}${hrFormValues.participationPrefillPath(hrFormValues.participationPrefill(a, null))}`,
+      onboardingUrl: `${origin}${hrResultValues.PUBLIC_ONBOARDING_PATH}`,
+    });
+    demoHrOutbox.push({ to: a.email, ...mail });
+    const result: hrResultValues.InterviewResult = {
+      id: nid("hir"), applicantId, decision: req.decision, reason: req.reason, includeReasonInMail: req.includeReasonInMail, status: "done",
+      issuedAddress: issued?.address ?? null, issuedIdentityUserId: issued?.identityUserId ?? null, issuedMemberId: memberId,
+      mailSentAt: nowIsoHr(), createdBy: ME_ID, createdAt: nowIsoHr(), completedAt: nowIsoHr(),
+    };
+    hrResults.set(applicantId, result);
+    return json({ result, applicant: { ...a }, alreadyRegistered: false, accountMailSent: req.decision === "pass" }, 201);
+  }
+
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
 
   const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -5000,7 +5057,7 @@ function createMembersStore() {
     return { ...mem, teamIds: [...mem.teamIds] };
   }
 
-  return { handle, findByIdentity, selfEntry, onboardTarget, linkOnboarded, listTeams: () => teams.map((t) => ({ id: t.id, name: t.name, color: t.color })) };
+  return { handle, findByIdentity, selfEntry, onboardTarget, linkOnboarded, hrRegisterResult, listTeams: () => teams.map((t) => ({ id: t.id, name: t.name, color: t.color })) };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
@@ -6515,6 +6572,35 @@ export function createDemoFetch(): typeof fetch {
         const to = (linked.gmail ?? "").trim() || null;
         const requested = req.sendAccountMail === true;
         return json({ address: made.address, identityUserId: made.user.id, member: linked, accountMail: { requested, sent: requested && to !== null, to } }, 201);
+      }
+    }
+
+    // 面談結果の登録 (gateway-owned・hr:write + members:onboard_mail)。合格は上と同じ demo の発行を使う。
+    // メールは送らない (window.__dubDemoHrMails に積むだけ)。
+    {
+      const ir = /^\/api\/v1\/admin\/hr\/applicants\/([^/]+)\/interview-result$/.exec(url.pathname);
+      if (ir && method === "POST") {
+        const perms = currentAccount().permissions;
+        if (!perms.includes("members:onboard_mail") || !perms.includes("hr:write")) {
+          return problem("FORBIDDEN", "permission denied: hr:write + members:onboard_mail", 403);
+        }
+        const req = (parsedBody ?? {}) as { decision?: unknown; reason?: unknown; includeReasonInMail?: unknown; localPart?: unknown };
+        if (!hrResultValues.isInterviewDecision(req.decision)) return problem("VALIDATION_FAILED", "合否を選んでください", 400, [{ field: "decision", reason: "invalid" }]);
+        const reason = typeof req.reason === "string" ? req.reason.trim() : "";
+        if (!reason) return problem("VALIDATION_FAILED", "理由を入力してください", 400, [{ field: "reason", reason: "required" }]);
+        const localPart = typeof req.localPart === "string" ? req.localPart.trim().toLowerCase() : "";
+        if (req.decision === "pass" && !/^[a-z0-9._%+-]{1,64}$/.test(localPart)) {
+          return problem("VALIDATION_FAILED", "メールアドレスは半角英小文字・数字と . _ % + - で入力してください", 400, [{ field: "localPart", reason: "invalid" }]);
+        }
+        await new Promise((r) => setTimeout(r, 600)); // 発行と送信の待ちを本番らしく見せる
+        return membersStore.hrRegisterResult(
+          decodeURIComponent(ir[1]!),
+          { decision: req.decision, reason, includeReasonInMail: req.includeReasonInMail === true },
+          (displayName) => {
+            const made = roster.onboard(localPart, displayName);
+            return made instanceof Response ? made : { identityUserId: made.user.id, address: made.address };
+          },
+        );
       }
     }
 
