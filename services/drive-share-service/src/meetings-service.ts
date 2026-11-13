@@ -587,6 +587,22 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     const pace = { left: ACL_WRITES_PER_RUN, deferred: false };
     const touched: Record<string, CalendarAclState> = {};
     let sharesPausedUntil: number | null = null;
+    // Read once, only when a calendar's target has no members. null = unknown (the read failed or
+    // came back empty), which never counts as deleted.
+    let roleIds: Set<string> | null | undefined;
+    const targetDeleted = async (targetId: string): Promise<boolean> => {
+      if (targetId === meeting.ALL_MEMBERS_TARGET_ID) return false;
+      if (roleIds === undefined) {
+        try {
+          const roles = await deps.roster.listRoles();
+          roleIds = roles.length > 0 ? new Set(roles.map((r) => r.id)) : null;
+        } catch (err) {
+          log("meeting_calendar_roles_read_failed", { message: err instanceof Error ? err.message : String(err) });
+          roleIds = null;
+        }
+      }
+      return roleIds !== null && !roleIds.has(targetId);
+    };
     try {
       for (const c of await store.listCalendars(orgId, account.accountId)) {
         const st: CalendarAclState = { fingerprint: null, checkedAt: 0, ...state.acl[c.calendarId], retryAt: { ...state.acl[c.calendarId]?.retryAt } };
@@ -594,10 +610,17 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         const desired = new Set(forTarget(all, c.targetId).map((i) => i.email));
         try {
           // A role with no members at all keeps its shares, as its meetings keep their attendees:
-          // likelier a glitch than a role emptied on purpose.
+          // likelier a glitch than a role emptied on purpose. A role that is gone from a role list
+          // read just now is no glitch, though: its calendar loses every share Dub made.
           if (membersOf(all, c.targetId).length === 0) {
-            log("meeting_calendar_empty_target_skipped", { calendarId: c.calendarId, targetId: c.targetId });
-            continue;
+            if (!(await targetDeleted(c.targetId))) {
+              log("meeting_calendar_empty_target_skipped", { calendarId: c.calendarId, targetId: c.targetId });
+              continue;
+            }
+            const recorded = (await store.listAcl(orgId, c.calendarId)).length;
+            if (recorded === 0) continue; // already revoked; shares added by hand stay
+            log("meeting_calendar_target_deleted_revoking", { calendarId: c.calendarId, targetId: c.targetId, count: recorded });
+            desired.clear();
           }
           await reconcileAcl(cal, c.calendarId, desired, owner, st, pace, nowMs);
         } catch (err) {

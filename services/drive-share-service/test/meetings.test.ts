@@ -506,8 +506,19 @@ describe("calendar shares follow the target", () => {
     usr_b: { gmail: "b@gmail.com", name: "B" },
     usr_c: { gmail: "c@gmail.com", name: "C" },
   })) {
-    const people = { users: USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] })) };
-    const dynamicRoster = { ...roster(), listActiveUsers: async (roleId?: string) => people.users.filter((u) => !roleId || u.roleIds.includes(roleId)) };
+    const people = {
+      users: USERS.map((u) => ({ ...u, roleIds: [...u.roleIds] })),
+      roles: { ...NAMES } as Record<string, string>,
+      rolesFail: false,
+    };
+    const dynamicRoster = {
+      ...roster(),
+      listActiveUsers: async (roleId?: string) => people.users.filter((u) => !roleId || u.roleIds.includes(roleId)),
+      listRoles: async () => {
+        if (people.rolesFail) throw new Error("identity unavailable");
+        return Object.entries(people.roles).map(([id, name]) => ({ id, name }));
+      },
+    };
     const built = buildMeetings({ roster: dynamicRoster, directory });
     const mock = built.calendar as ReturnType<typeof createMockCalendarClient>;
     await built.service.create("usr_admin", BASE);
@@ -554,6 +565,47 @@ describe("calendar shares follow the target", () => {
       for (const ev of cal.events.values()) expect(ev.attendees.map((a) => a.email).every((e) => e === "a@gmail.com")).toBe(true);
     }
     expect(readers(bySummary().get("全体")!)).toEqual(["a@gmail.com"]);
+  });
+  describe("a target role with no members", () => {
+    async function emptied(opts: { deleteRole: boolean; rolesFail?: boolean }) {
+      const built = await setup();
+      const { service, bySummary, people, calendar } = built;
+      await service.sync();
+      const devId = bySummary().get("開発")!.id;
+      await calendar.insertAcl(devId, "by-hand@gmail.com"); // shared by hand in Google Calendar
+      for (const u of people.users) u.roleIds = u.roleIds.filter((r) => r !== "role_dev");
+      if (opts.deleteRole) delete people.roles.role_dev;
+      people.rolesFail = !!opts.rolesFail;
+      const del = vi.spyOn(calendar, "deleteAcl");
+      const logs: string[] = [];
+      const info = vi.spyOn(console, "warn").mockImplementation((line: unknown) => void logs.push(String(line)));
+      await service.sync();
+      info.mockRestore();
+      return { ...built, devId, del, logs };
+    }
+
+    it("a deleted role's calendar loses every share Dub made (ledger only; by-hand shares stay)", async () => {
+      const { bySummary, store, devId, del, logs } = await emptied({ deleteRole: true });
+      expect(readers(bySummary().get("開発")!)).toEqual(["by-hand@gmail.com"]);
+      expect(await store.listAcl("org_devhub", devId)).toEqual([]);
+      expect(del).toHaveBeenCalledTimes(2);
+      expect(logs.some((l) => l.includes("meeting_calendar_target_deleted_revoking") && l.includes('"count":2'))).toBe(true);
+      expect(readers(bySummary().get("広報")!)).toEqual(["b@gmail.com", "c@gmail.com"]);
+    });
+
+    it("a role that still exists but has 0 members keeps its shares (likelier a glitch)", async () => {
+      const { bySummary, store, devId, del } = await emptied({ deleteRole: false });
+      expect(readers(bySummary().get("開発")!)).toEqual(["a@gmail.com", "b@gmail.com", "by-hand@gmail.com"]);
+      expect((await store.listAcl("org_devhub", devId)).length).toBe(2);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("a failed role list read keeps the shares too", async () => {
+      const { bySummary, store, devId, del } = await emptied({ deleteRole: true, rolesFail: true });
+      expect(readers(bySummary().get("開発")!)).toEqual(["a@gmail.com", "b@gmail.com", "by-hand@gmail.com"]);
+      expect((await store.listAcl("org_devhub", devId)).length).toBe(2);
+      expect(del).not.toHaveBeenCalled();
+    });
   });
 });
 

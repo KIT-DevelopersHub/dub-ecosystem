@@ -169,7 +169,10 @@ to the system admin role only.
   new role members, removes ONLY attendees / calendar shares that Dub added (ledgers
   `driveshare_meeting_invites` / `driveshare_meeting_calendar_acl`) — guests and shares added by
   hand in Google Calendar are never touched — and patches an event (`sendUpdates=all`) only when
-  its attendee list changed. Google calls run against a per-invocation budget; a run cut short
+  its attendee list changed. A role calendar whose role has 0 members keeps its shares (likelier a
+  roster glitch), unless the role is gone from a role list read that succeeded (non-empty): a
+  deleted role's calendar then loses every share in the ledger (`meeting_calendar_target_deleted_revoking`
+  with `count`); hand-added shares stay. A failed role read keeps the shares. Google calls run against a per-invocation budget; a run cut short
   continues 2 minutes later.
 - **Mock**: when Drive is mocked (`DRIVESHARE_MOCK=1` or no account / secret), an in-memory
   calendar is used too (per isolate).
