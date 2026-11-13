@@ -4594,7 +4594,7 @@ function createMembersStore() {
   const nowIsoHr = () => new Date().toISOString();
   function hrRegisterResult(
     applicantId: string,
-    req: { decision: hrResultValues.InterviewDecision; reason: string; includeReasonInMail: boolean },
+    req: { decision: hrResultValues.InterviewDecision; reason: string; includeReasonInMail: boolean } & hrResultValues.PassPlacement,
     issue: ((displayName: string) => { identityUserId: string; address: string } | Response) | null,
   ): Response {
     const a = applicants.find((x) => x.id === applicantId);
@@ -4607,11 +4607,20 @@ function createMembersStore() {
     if (!a.email) return json({ error: { code: "HR_RESULT_NO_EMAIL", message: "応募者のメールアドレスが無いため結果を送れません", retryable: false } }, 409);
     let issued: { identityUserId: string; address: string } | null = null;
     let memberId: string | null = null;
+    // 合格の所属 (member-service と同じ確認: 組織のチーム・在籍中のメンバーでなければ 400)。省略 = 希望チーム・上長なし。
+    const placeTeams = req.decision === "pass" && req.teamIds !== undefined ? [...new Set(req.teamIds)] : null;
+    const placeLeader = req.decision === "pass" && req.leaderId ? req.leaderId : null;
+    if (placeTeams?.some((t) => !teams.some((x) => x.id === t))) {
+      return json({ error: { code: "VALIDATION_FAILED", message: "存在しないチームが選ばれています", retryable: false, details: [{ field: "teamIds", reason: "unknown_team" }] } }, 400);
+    }
+    if (placeLeader && !members.some((m) => m.id === placeLeader)) {
+      return json({ error: { code: "VALIDATION_FAILED", message: "上長が名簿にいません", retryable: false, details: [{ field: "leaderId", reason: "unknown_member" }] } }, 400);
+    }
     if (req.decision === "pass") {
       const made = issue ? issue(a.name) : null;
       if (made instanceof Response) return made;
       issued = made;
-      const created = mk(nid("member"), a.name, "メンバー", "added", a.desiredTeamId ? [a.desiredTeamId] : [], members.length, a.email, a.department, a.grade, issued?.identityUserId ?? null);
+      const created = mk(nid("member"), a.name, "メンバー", "added", placeTeams ?? (a.desiredTeamId ? [a.desiredTeamId] : []), members.length, a.email, a.department, a.grade, issued?.identityUserId ?? null, placeLeader);
       members.push(created);
       memberId = created.id;
     }
@@ -4627,6 +4636,7 @@ function createMembersStore() {
       name: a.name,
       reason: req.includeReasonInMail ? req.reason : null,
       address: issued?.address ?? null,
+      teamNames: memberId ? teams.filter((t) => members.find((m) => m.id === memberId)?.teamIds.includes(t.id)).map((t) => t.name) : null,
       appUrl: `${origin}/`,
       participationUrl: `${origin}${hrFormValues.participationPrefillPath(hrFormValues.participationPrefill(a, null))}`,
       onboardingUrl: `${origin}${hrResultValues.PUBLIC_ONBOARDING_PATH}`,
@@ -6584,7 +6594,7 @@ export function createDemoFetch(): typeof fetch {
         if (!perms.includes("members:onboard_mail") || !perms.includes("hr:write")) {
           return problem("FORBIDDEN", "permission denied: hr:write + members:onboard_mail", 403);
         }
-        const req = (parsedBody ?? {}) as { decision?: unknown; reason?: unknown; includeReasonInMail?: unknown; localPart?: unknown };
+        const req = (parsedBody ?? {}) as { decision?: unknown; reason?: unknown; includeReasonInMail?: unknown; localPart?: unknown; teamIds?: unknown; leaderId?: unknown };
         if (!hrResultValues.isInterviewDecision(req.decision)) return problem("VALIDATION_FAILED", "合否を選んでください", 400, [{ field: "decision", reason: "invalid" }]);
         const reason = typeof req.reason === "string" ? req.reason.trim() : "";
         if (!reason) return problem("VALIDATION_FAILED", "理由を入力してください", 400, [{ field: "reason", reason: "required" }]);
@@ -6595,7 +6605,13 @@ export function createDemoFetch(): typeof fetch {
         await new Promise((r) => setTimeout(r, 600)); // 発行と送信の待ちを本番らしく見せる
         return membersStore.hrRegisterResult(
           decodeURIComponent(ir[1]!),
-          { decision: req.decision, reason, includeReasonInMail: req.includeReasonInMail === true },
+          {
+            decision: req.decision,
+            reason,
+            includeReasonInMail: req.includeReasonInMail === true,
+            ...(Array.isArray(req.teamIds) ? { teamIds: req.teamIds.filter((t): t is string => typeof t === "string") } : {}),
+            ...(typeof req.leaderId === "string" ? { leaderId: req.leaderId } : {}),
+          },
           (displayName) => {
             const made = roster.onboard(localPart, displayName);
             return made instanceof Response ? made : { identityUserId: made.user.id, address: made.address };
