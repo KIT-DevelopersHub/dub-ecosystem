@@ -83,6 +83,23 @@ describe("POST /api/v1/admin/hr/applicants/:id/interview-result", () => {
     expect(hit(s.mem, `${BASE}/release`)).toHaveLength(0);
   });
 
+  it("pass with team and leader: forwards them to claim (checked before issuing) and link (used when the roster row is made)", async () => {
+    const s = setup();
+    const placement = { teamIds: ["team_a", "team_b"], leaderId: "mem_lead" };
+    const res = await s.send({ decision: "pass", reason: "良い", localPart: "taro.yamada", ...placement });
+    expect(res.status).toBe(201);
+    expect(await hit(s.mem, `${BASE}/claim`)[0]!.json()).toMatchObject(placement);
+    expect(await hit(s.mem, `${BASE}/link`)[0]!.json()).toEqual({ identityUserId: "usr_new", address: ADDRESS, ...placement });
+  });
+
+  it("an invalid team at claim (400) stops before any address or account is issued", async () => {
+    const s = setup({ claim: json(400, { error: { code: "VALIDATION_FAILED", message: "x", retryable: false, details: [{ field: "teamIds", reason: "unknown_team" }] } }) });
+    const res = await s.send({ decision: "pass", reason: "良い", localPart: "taro.yamada", teamIds: ["team_nope"] });
+    expect(res.status).toBe(400);
+    expect(s.mailB.requests).toHaveLength(0);
+    expect(hit(s.idn, "/internal/users/onboard")).toHaveLength(0);
+  });
+
   it("fail: no account, no address — only claim and complete", async () => {
     const s = setup();
     const res = await s.send({ decision: "fail", reason: "今回は見送り" });

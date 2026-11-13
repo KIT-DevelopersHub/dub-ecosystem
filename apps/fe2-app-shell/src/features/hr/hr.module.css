@@ -285,3 +285,20 @@
   align-items: center;
   gap: var(--dub-space-3);
 }
+
+/* 合格の所属チーム (運営メンバーの編集と同じ見た目のチェックの一覧)。 */
+.teamCheckList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+}
+.placementEmpty {
+  margin: 0;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+}

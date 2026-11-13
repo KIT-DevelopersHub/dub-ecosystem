@@ -19,6 +19,8 @@ export interface HrApi {
   setCheck(memberId: string, itemId: string, checked: boolean): Promise<hr.OnboardingProgress>;
   /** 希望チームの選択肢 (名簿のチーム一覧)。 */
   teams(): Promise<{ teams: member.Team[] }>;
+  /** 合格で選ぶ上長の候補 (組織図までの範囲の名簿。アーカイブ済みは含まない)。 */
+  orgMembers(): Promise<member.MembersOverview>;
   /** 定例の出席レポート (drive-share-service GET /meetings/attendance, 人事 閲覧 + hr:read)。 */
   attendance(range: { from: string; to: string }): Promise<meeting.AttendanceReportResponse>;
   /** 出席の手修正 (null = 記録を消す = 欠席)。 */
@@ -76,6 +78,7 @@ export function createHrApi(api: ApiClient): HrApi {
         body: { checked },
       }),
     teams: () => api.request<{ teams: member.Team[] }>({ method: "GET", path: "/api/v1/members/teams" }),
+    orgMembers: () => api.request<member.MembersOverview>({ method: "GET", path: "/api/v1/members/org-overview" }),
     attendance: ({ from, to }) =>
       api.request<meeting.AttendanceReportResponse>({ method: "GET", path: "/api/v1/meetings/attendance", query: { from, to } }),
     setAttendance: (meetingId, date, userId, status) =>

@@ -8,7 +8,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
-import type { hr, hrResult, identity } from "@dub/types";
+import type { hr, hrResult, identity, member } from "@dub/types";
 import { describe, expect, it, vi } from "vitest";
 import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { createApiClient } from "../../lib/api-client.tsx";
@@ -67,6 +67,7 @@ function fakeApi(overrides: Partial<HrApi> = {}): HrApi {
     confirmParticipant: unused,
     updateAttendanceSettings: unused,
     teams: () => Promise.resolve({ teams: [] }),
+    orgMembers: () => Promise.resolve({ teams: [], members: [] }),
     ...overrides,
   };
 }
@@ -342,7 +343,54 @@ describe("HrApplicantsScreen (表)", () => {
     expect(within(dialog).getByTestId("fe2-hr-result-confirm").textContent).toContain("s.inoue@developershub.jp");
     fireEvent.click(within(dialog).getByTestId("fe2-hr-result-submit"));
     await waitFor(() =>
-      expect(registerResult).toHaveBeenCalledWith("app_2", { decision: "pass", reason: "主体性", includeReasonInMail: false, localPart: "s.inoue" }),
+      expect(registerResult).toHaveBeenCalledWith("app_2", {
+        decision: "pass",
+        reason: "主体性",
+        includeReasonInMail: false,
+        localPart: "s.inoue",
+        teamIds: [],
+        leaderId: null,
+      }),
+    );
+  });
+
+  it("合格: picks the teams (desired team pre-checked) and the leader, shows them in the confirm step and sends them", async () => {
+    const registerResult = vi.fn(async (id: string, body: hrResult.RegisterInterviewResultRequest) => ({
+      result: { id: "hir_1", applicantId: id, decision: body.decision, status: "done" } as hrResult.InterviewResult,
+      applicant: applicant({ id, stage: "hired", memberId: "m9", version: 3 }),
+      alreadyRegistered: false,
+      accountMailSent: true,
+    }));
+    const team = (id: string, name: string) => ({ id, name }) as member.Team;
+    const person = (id: string, name: string, roleTitle: string, status: member.MemberStatus = "added") =>
+      ({ id, name, roleTitle, status, position: null, leaderId: null, teamIds: [], sortOrder: 0 }) as unknown as member.Member;
+    const api = fakeApi({
+      registerResult,
+      list: () => Promise.resolve({ applicants: ROWS.map((r) => (r.id === "app_2" ? { ...r, desiredTeamId: "team_dev" } : { ...r })) }),
+      teams: () => Promise.resolve({ teams: [team("team_dev", "開発"), team("team_pr", "広報")] }),
+      orgMembers: () =>
+        Promise.resolve({ teams: [], members: [person("mem_lead", "荒木 大地", "開発リーダー"), person("mem_gone", "辞退 太郎", "メンバー", "declined")] }),
+    });
+    renderWith(<HrApplicantsScreen />, api, RECRUITER);
+    fireEvent.click(await screen.findByTestId("fe2-hr-row-app_2-result"));
+    const dialog = await screen.findByTestId("fe2-hr-result-dialog");
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-decision-pass"));
+    fireEvent.change(within(dialog).getByTestId("fe2-hr-result-reason"), { target: { value: "主体性" } });
+    await within(dialog).findByTestId("fe2-hr-result-teams");
+    expect((within(dialog).getByTestId("fe2-hr-result-team-team_dev") as HTMLInputElement).checked).toBe(true);
+    expect((within(dialog).getByTestId("fe2-hr-result-team-team_pr") as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-team-team_pr"));
+    const leader = (await within(dialog).findByTestId("fe2-hr-result-leader")) as HTMLSelectElement;
+    expect(leader.textContent).toContain("荒木 大地");
+    expect(leader.textContent).not.toContain("辞退 太郎");
+    fireEvent.change(leader, { target: { value: "mem_lead" } });
+    expect(within(dialog).getByTestId("fe2-hr-result-preview").textContent).toContain("所属チーム: 開発、広報");
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-next"));
+    expect(within(dialog).getByTestId("fe2-hr-result-confirm-teams").textContent).toContain("開発、広報");
+    expect(within(dialog).getByTestId("fe2-hr-result-confirm-leader").textContent).toContain("荒木 大地");
+    fireEvent.click(within(dialog).getByTestId("fe2-hr-result-submit"));
+    await waitFor(() =>
+      expect(registerResult).toHaveBeenCalledWith("app_2", expect.objectContaining({ teamIds: ["team_dev", "team_pr"], leaderId: "mem_lead" })),
     );
   });
 

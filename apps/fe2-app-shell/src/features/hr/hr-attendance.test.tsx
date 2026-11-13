@@ -87,7 +87,7 @@ function fakeApi(over: Partial<HrApi> = {}): HrApi {
   const unused = () => Promise.reject(new Error("unused"));
   return {
     list: unused, get: unused, create: unused, update: unused, moveStage: unused, addNote: unused, join: unused, remove: unused, registerResult: unused,
-    onboarding: unused, setCheck: unused, teams: () => Promise.resolve({ teams: [] }),
+    onboarding: unused, setCheck: unused, teams: () => Promise.resolve({ teams: [] }), orgMembers: unused,
     attendance: () => Promise.resolve(report()),
     setAttendance: vi.fn(async (_m, _d, userId, status) => ({ record: status ? rec(userId, status, "manual") : null })),
     ingestAttendance: vi.fn(async () => ({ occurrences: 2, participants: 7, complete: true, skipped: null })),
