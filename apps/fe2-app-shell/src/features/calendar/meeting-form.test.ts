@@ -8,11 +8,14 @@ import {
   toMeetingRequest,
   validateMeetingForm,
   type MeetingFormValues,
+  isMeetingVisible,
+  targetFromValue,
+  targetValue,
 } from "./meeting-form";
 
 const valid: MeetingFormValues = {
   title: "  全体定例 ",
-  targetId: "all",
+  targets: [{ kind: "all", id: "all" }],
   date: "2026-10-19",
   time: "21:00",
   durationMinutes: 60,
@@ -28,8 +31,8 @@ describe("validateMeetingForm", () => {
   });
 
   it("flags missing title / target / date / time", () => {
-    const e = validateMeetingForm({ ...valid, title: " ", targetId: "", date: "", time: "" });
-    expect(Object.keys(e).sort()).toEqual(["date", "targetId", "time", "title"]);
+    const e = validateMeetingForm({ ...valid, title: " ", targets: [], date: "", time: "" });
+    expect(Object.keys(e).sort()).toEqual(["date", "targets", "time", "title"]);
   });
 
   it("rejects an end date before the start, only when repeating", () => {
@@ -43,6 +46,7 @@ describe("toMeetingRequest", () => {
     expect(toMeetingRequest(valid)).toEqual({
       title: "全体定例",
       description: null,
+      targets: [{ kind: "all", id: "all" }],
       targetId: "all",
       startsAt: "2026-10-19T12:00:00.000Z",
       durationMinutes: 60,
@@ -50,6 +54,13 @@ describe("toMeetingRequest", () => {
       until: null,
       trackAttendance: false,
     });
+  });
+
+  it("sends every target, plus the legacy targetId of the calendar (none for people only)", () => {
+    const body = toMeetingRequest({ ...valid, targets: [{ kind: "person", id: "usr_a" }, { kind: "role", id: "role_dev" }] });
+    expect(body.targets).toEqual([{ kind: "person", id: "usr_a" }, { kind: "role", id: "role_dev" }]);
+    expect(body.targetId).toBe("role_dev");
+    expect("targetId" in toMeetingRequest({ ...valid, targets: [{ kind: "person", id: "usr_a" }] })).toBe(false);
   });
 
   it("carries 定例として出席を取る", () => {
@@ -67,7 +78,7 @@ describe("toMeetingRequest", () => {
 
   it("new form defaults to 全体 / 21:00 / 60 min / 毎週 on today's JST date", () => {
     const f = emptyMeetingForm(new Date("2026-10-13T16:00:00Z")); // 10/14 01:00 JST
-    expect(f).toMatchObject({ targetId: "all", time: "21:00", durationMinutes: 60, recurrence: "weekly", date: "2026-10-14" });
+    expect(f).toMatchObject({ targets: [{ kind: "all", id: "all" }], time: "21:00", durationMinutes: 60, recurrence: "weekly", date: "2026-10-14" });
   });
 });
 
@@ -81,14 +92,14 @@ describe("meetingFormFromDraft", () => {
       time: "19:00",
       durationMinutes: 60,
       recurrence: "biweekly",
-      targetId: "all",
+      targets: [{ kind: "all", id: "all" }],
       until: "",
     });
   });
   it("a role label that is a meeting target becomes the target", () => {
     const targets: meeting.MeetingTarget[] = [{ id: "role_lead", name: "統括", memberCount: 2, isMine: true }];
-    expect(meetingFormFromDraft({ ...draft, label: "role_lead" }, "weekly", targets).targetId).toBe("role_lead");
-    expect(meetingFormFromDraft({ ...draft, label: "role_gone" }, "weekly", targets).targetId).toBe("all");
+    expect(meetingFormFromDraft({ ...draft, label: "role_lead" }, "weekly", targets).targets).toEqual([{ kind: "role", id: "role_lead" }]);
+    expect(meetingFormFromDraft({ ...draft, label: "role_gone" }, "weekly", targets).targets).toEqual([{ kind: "all", id: "all" }]);
   });
   it("snaps the length to the nearest 所要時間 option", () => {
     expect(meetingFormFromDraft({ ...draft, endTime: "19:50" }, "weekly").durationMinutes).toBe(45);
@@ -132,5 +143,22 @@ describe("表示するカレンダー filter", () => {
     expect(parseMeetingTargetChoices({ a: true, b: "x", c: false })).toEqual({ a: true, c: false });
     expect(parseMeetingTargetChoices(["a"])).toEqual({});
     expect(parseMeetingTargetChoices(null)).toEqual({});
+  });
+});
+
+describe("isMeetingVisible / chip values", () => {
+  const m = (targets: meeting.MeetingTargetInfo[], createdBy = "usr_other") =>
+    ({ targetId: "x", targetName: "", targets, createdBy }) as unknown as meeting.Meeting;
+  it("shows a meeting when any role target is shown; a member target only for that member or its maker", () => {
+    const shown = (id: string) => id === "role_b";
+    expect(isMeetingVisible(m([{ kind: "role", id: "role_a", name: "" }, { kind: "role", id: "role_b", name: "" }]), shown, "me")).toBe(true);
+    expect(isMeetingVisible(m([{ kind: "role", id: "role_a", name: "" }]), shown, "me")).toBe(false);
+    expect(isMeetingVisible(m([{ kind: "person", id: "me", name: "" }]), shown, "me")).toBe(true);
+    expect(isMeetingVisible(m([{ kind: "person", id: "usr_x", name: "" }]), shown, "me")).toBe(false);
+    expect(isMeetingVisible(m([{ kind: "person", id: "usr_x", name: "" }], "me"), shown, "me")).toBe(true);
+  });
+  it("round-trips a chip value", () => {
+    expect(targetFromValue(targetValue({ kind: "person", id: "usr:a@b" }))).toEqual({ kind: "person", id: "usr:a@b" });
+    expect(targetFromValue("team:x")).toBeNull();
   });
 });

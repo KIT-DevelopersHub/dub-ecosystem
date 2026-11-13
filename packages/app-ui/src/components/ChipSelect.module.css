@@ -1,0 +1,168 @@
+/* ChipSelect — Google-Calendar-style chip picker. Tokens only (@dub/tokens), so it themes with the
+ * app and works inside the @dub/ui Modal portal. */
+.field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--dub-space-2);
+  min-height: 40px;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-base);
+  cursor: text;
+}
+.field:focus-within {
+  border-color: var(--dub-color-border-focus);
+  box-shadow: 0 0 0 3px var(--dub-color-brand-100);
+}
+.field[data-invalid="true"] {
+  border-color: var(--dub-color-danger-500);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  max-width: 100%;
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border-radius: var(--dub-radius-full);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-line-height-tight);
+  cursor: default;
+}
+/* Groups (全体 / roles) read apart from single people at a glance. */
+.chip[data-tone="brand"] {
+  border-color: var(--dub-color-brand-100);
+  background: var(--dub-color-brand-100);
+  color: var(--dub-color-brand-700);
+}
+.chipIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.chipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chipRemove {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: var(--dub-space-1);
+  border-radius: var(--dub-radius-full);
+  color: inherit;
+  opacity: 0.7;
+  line-height: 1;
+}
+.chipRemove:hover {
+  opacity: 1;
+  background: var(--dub-color-surface-raised);
+}
+.chipRemove:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+}
+
+.input {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  font-family: inherit;
+  padding: var(--dub-space-1) 0;
+}
+.input::placeholder {
+  color: var(--dub-color-text-muted);
+}
+
+.listbox {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: var(--dub-z-index-dropdown);
+  margin: var(--dub-space-1) 0 0;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--dub-space-1);
+  list-style: none;
+  background: var(--dub-color-surface-overlay);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-lg);
+}
+.option {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  width: 100%;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-radius: var(--dub-radius-sm);
+  cursor: pointer;
+}
+.option:hover,
+.option[data-active="true"] {
+  background: var(--dub-color-surface-sunken);
+}
+.optionIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--dub-radius-full);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+}
+.optionIcon[data-tone="brand"] {
+  background: var(--dub-color-brand-100);
+  color: var(--dub-color-brand-700);
+}
+.optionText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.optionLabel {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-primary);
+}
+.optionDescription {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.skeletonRow {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-2) var(--dub-space-3);
+}
+.empty {
+  padding: var(--dub-space-3);
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

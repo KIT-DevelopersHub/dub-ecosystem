@@ -3310,6 +3310,7 @@ function seedMeetings(): meeting.Meeting[] {
       description: "今週の進捗共有と来週の予定確認",
       targetId: "all",
       targetName: "全体",
+      targets: [{ kind: "all", id: "all", name: "全体" }],
       startsAt: "2026-09-07T12:00:00.000Z", // 月曜 21:00 JST
       durationMinutes: 60,
       recurrence: "weekly",
@@ -3326,6 +3327,7 @@ function seedMeetings(): meeting.Meeting[] {
       description: null,
       targetId: "role_lead",
       targetName: "統括",
+      targets: [{ kind: "role", id: "role_lead", name: "統括" }],
       startsAt: "2026-09-10T11:00:00.000Z", // 木曜 20:00 JST
       durationMinutes: 30,
       recurrence: "biweekly",
@@ -3342,6 +3344,7 @@ function seedMeetings(): meeting.Meeting[] {
       description: "デモ用: いま開催中（開始10分後）の定例。ダッシュボードの「定例に参加」から参加すると出席になります。",
       targetId: "role_member",
       targetName: "member",
+      targets: [{ kind: "role", id: "role_member", name: "member" }],
       startsAt: demoNowMinus(10),
       durationMinutes: 60,
       recurrence: "weekly",
@@ -3357,14 +3360,18 @@ function seedMeetings(): meeting.Meeting[] {
       title: "Hackit 秋 キックオフ",
       description: "会場・広報・審査の担当決め",
       targetId: "role_maintainer",
-      targetName: "maintainer",
+      targetName: "maintainer、統括 山本",
+      targets: [
+        { kind: "role", id: "role_maintainer", name: "maintainer" },
+        { kind: "person", id: "usr_lead", name: "統括 山本" },
+      ],
       startsAt: demoJstAt(3, 19, 0),
       durationMinutes: 90,
       recurrence: "none",
       until: null,
       meetUrl: "https://meet.google.com/vwx-yzab-cde",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_kickoff",
-      attendeeCount: 3,
+      attendeeCount: 4,
       trackAttendance: false,
     },
   ];
@@ -3374,7 +3381,8 @@ function seedMeetings(): meeting.Meeting[] {
  *  ?meetingAnswers=unavailable previews the "could not read Google" state. */
 function demoMeetingAttendees(m: meeting.Meeting, date: string | null): meeting.ListMeetingAttendeesResponse {
   const unavailable = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("meetingAnswers") === "unavailable";
-  const people = DEMO_REGULAR_PEOPLE.filter((p) => m.targetId === "all" || p.roleIds.includes(m.targetId));
+  const targets = meetingValues.targetsOfMeeting(m);
+  const people = DEMO_REGULAR_PEOPLE.filter((p) => meetingValues.isInMeetingTargets({ id: p.userId, roleIds: p.roleIds }, targets));
   const answers: meeting.MeetingResponseStatus[] = ["accepted", "accepted", "declined", "tentative", "accepted", "needsAction"];
   const seed = [...`${m.id}${date ?? ""}`].reduce((n, ch) => n + ch.charCodeAt(0), 0);
   const items: meeting.MeetingAttendee[] = people.map((p, i) => {
@@ -3417,7 +3425,20 @@ function createMeetingsDemoStore() {
     if (mode === "reconnect") return { email: "hackit.dub@gmail.com", calendarReady: false };
     return { email: "hackit.dub@gmail.com", calendarReady: true };
   };
-  const target = (id: string) => DEMO_MEETING_TARGETS.find((t) => t.id === id);
+  /** Targets of a body with names, or null when one is unknown (the service's 400). */
+  const resolveTargets = (b: { targets?: unknown; targetId?: unknown }): meeting.MeetingTargetInfo[] | null => {
+    const refs = meetingValues.parseMeetingTargets(b);
+    if (!refs) return null;
+    const out: meeting.MeetingTargetInfo[] = [];
+    for (const r of refs) {
+      const name = r.kind === "person" ? DEMO_REGULAR_PEOPLE.find((p) => p.userId === r.id)?.name : DEMO_MEETING_TARGETS.find((t) => t.id === r.id)?.name;
+      if (!name) return null;
+      out.push({ ...r, name });
+    }
+    return out;
+  };
+  const invitedCount = (targets: meeting.MeetingTargetRef[]) =>
+    DEMO_REGULAR_PEOPLE.filter((p) => meetingValues.isInMeetingTargets({ id: p.userId, roleIds: p.roleIds }, targets)).length;
   const BASE = "/api/v1/meetings";
   const attendance = createAttendanceDemo(read);
 
@@ -3430,7 +3451,10 @@ function createMeetingsDemoStore() {
       return json(res);
     }
     if (method === "GET" && pathname === `${BASE}/targets`) {
-      const res: meeting.ListMeetingTargetsResponse = { items: DEMO_MEETING_TARGETS };
+      const res: meeting.ListMeetingTargetsResponse = {
+        items: DEMO_MEETING_TARGETS,
+        people: DEMO_REGULAR_PEOPLE.map((p) => ({ id: p.userId as meeting.MeetingPersonOption["id"], name: p.name })),
+      };
       return json(res);
     }
     if (method === "POST" && pathname === `${BASE}/sync`) {
@@ -3445,7 +3469,7 @@ function createMeetingsDemoStore() {
     }
     if (method === "POST" && pathname === BASE) {
       const b = (body ?? {}) as Partial<meeting.CreateMeetingRequest>;
-      const t = b.targetId ? target(b.targetId) : undefined;
+      const t = resolveTargets(b);
       if (!b.title?.trim() || !t || !b.startsAt || !b.durationMinutes || !b.recurrence) {
         return problem("VALIDATION_FAILED", "タイトル・対象・日時・所要時間・繰り返しは必須です", 400);
       }
@@ -3454,15 +3478,16 @@ function createMeetingsDemoStore() {
         id: `mtg_${Date.now().toString(36)}`,
         title: b.title.trim(),
         description: b.description ?? null,
-        targetId: t.id,
-        targetName: t.name,
+        targetId: meetingValues.calendarTargetOf(t),
+        targetName: t.map((x) => x.name).join("、"),
+        targets: t,
         startsAt: b.startsAt,
         durationMinutes: b.durationMinutes,
         recurrence: b.recurrence,
         until: b.recurrence === "none" ? null : (b.until ?? null),
         meetUrl: demoMeetUrl(),
         htmlLink: "https://calendar.google.com/calendar/",
-        attendeeCount: t.memberCount,
+        attendeeCount: invitedCount(t),
         trackAttendance: b.trackAttendance ?? false,
         createdBy: ME_ID as meeting.Meeting["createdBy"],
         createdAt: now,
@@ -3493,15 +3518,16 @@ function createMeetingsDemoStore() {
       }
       if (method === "PATCH") {
         const b = (body ?? {}) as meeting.UpdateMeetingRequest;
-        const t = b.targetId ? target(b.targetId) : target(found.targetId);
+        const t = b.targets !== undefined || b.targetId !== undefined ? resolveTargets(b) : meetingValues.targetsOfMeeting(found);
         if (!t) return problem("VALIDATION_FAILED", "対象が見つかりません", 400);
         const next: meeting.Meeting = {
           ...found,
           ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)),
           description: b.description !== undefined ? b.description ?? null : found.description,
-          targetId: t.id,
-          targetName: t.name,
-          attendeeCount: t.memberCount,
+          targetId: meetingValues.calendarTargetOf(t),
+          targetName: t.map((x) => x.name).join("、"),
+          targets: t,
+          attendeeCount: invitedCount(t),
           updatedAt: new Date().toISOString(),
         };
         if (next.recurrence === "none") next.until = null;

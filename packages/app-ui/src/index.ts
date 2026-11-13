@@ -26,6 +26,7 @@ export {
   type ListKeyboardNav,
 } from "./hooks/useListKeyboardNav";
 
+export { ChipSelect, type ChipSelectProps, type ChipSelectOption } from "./components/ChipSelect";
 export { RolePicker, type RolePickerProps, type RoleOption } from "./components/RolePicker";
 export { DialogActions, type DialogActionsProps } from "./components/DialogActions";
 export { FormError, type FormErrorProps } from "./components/FormError";

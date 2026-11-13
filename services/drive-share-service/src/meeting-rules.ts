@@ -16,7 +16,8 @@ const LAST_OCCURRENCE_WINDOW_MS = 62 * 24 * 60 * 60 * 1000;
 export interface MeetingFields {
   title: string;
   description: string | null;
-  targetId: string;
+  /** Who is invited (never empty). The event's calendar is calendarTargetOf(targets). */
+  targets: meeting.MeetingTargetRef[];
   /** UTC ISO (toISOString). */
   startsAt: string;
   durationMinutes: number;
@@ -104,8 +105,8 @@ type Input = Partial<meeting.CreateMeetingRequest>;
 
 /**
  * Validate a create body, or an update body merged over the stored fields (`base`). Role
- * existence is checked by the caller (needs identity); here targetId must merely be a non-empty
- * string. Messages are Japanese, shown as-is by the SPA.
+ * existence is checked by the caller (needs identity); here the targets must merely be
+ * well-formed (meeting.parseMeetingTargets). Messages are Japanese, shown as-is by the SPA.
  */
 export function validateMeeting(body: unknown, base?: MeetingFields): MeetingFields {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -128,9 +129,10 @@ export function validateMeeting(body: unknown, base?: MeetingFields): MeetingFie
     throw errors.validationFailed([{ field: "description", reason: "too_long" }], `説明は ${DESCRIPTION_MAX} 文字以内で入力してください。`);
   }
 
-  const targetId = pick("targetId");
-  if (typeof targetId !== "string" || targetId.length === 0) {
-    throw errors.validationFailed([{ field: "targetId", reason: "required" }], "対象（ロールまたは全体）を選んでください。");
+  // targets[] (or the legacy single targetId) from the body, else the stored ones.
+  const targets = "targets" in b || "targetId" in b ? meeting.parseMeetingTargets(b) : base?.targets ?? meeting.parseMeetingTargets(b);
+  if (!targets) {
+    throw errors.validationFailed([{ field: "targets", reason: "required" }], "対象（全体・ロール・メンバー）を1つ以上選んでください。");
   }
 
   const startsAtRaw = pick("startsAt");
@@ -168,7 +170,7 @@ export function validateMeeting(body: unknown, base?: MeetingFields): MeetingFie
   return {
     title: title.trim(),
     description,
-    targetId,
+    targets,
     startsAt,
     durationMinutes,
     recurrence: recurrence as meeting.MeetingRecurrence,

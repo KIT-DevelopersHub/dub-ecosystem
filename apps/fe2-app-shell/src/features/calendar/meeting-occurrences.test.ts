@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { meeting } from "@dub/types";
+import { meeting as meetingValues } from "@dub/types";
 import {
   endTime,
   expandOccurrences,
@@ -17,6 +18,7 @@ function mk(over: Partial<meeting.Meeting>): meeting.Meeting {
     description: null,
     targetId: "all",
     targetName: "全体",
+    targets: meetingValues.legacyTargets(over.targetId ?? "all").map((t) => ({ ...t, name: over.targetName ?? "全体" })),
     startsAt: "2026-09-07T12:00:00.000Z", // Mon 2026-09-07 21:00 JST
     durationMinutes: 60,
     recurrence: "none",
