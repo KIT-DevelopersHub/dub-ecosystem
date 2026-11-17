@@ -26,7 +26,9 @@ const roster = () => fakeRoster({}, { role_dev: "開発", role_pr: "広報" }, U
 const MEET = "https://meet.google.com/abc-defg-hij";
 
 function row(over: Partial<MeetingRow>): MeetingRow {
+  const targetId = over.targetId ?? "all";
   return {
+    targets: meeting.legacyTargets(targetId),
     id: "dsm_all",
     orgId: ORG,
     targetId: "all",

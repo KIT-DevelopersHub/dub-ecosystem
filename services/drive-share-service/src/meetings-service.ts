@@ -5,6 +5,11 @@
 // read-only with that target's members only (the 全体 one with every active member), so each member
 // gets the "add this calendar" mail just for their own roles.
 //
+// A meeting has one or more targets (全体 / roles / individual members) and invites their union.
+// Its event still sits on ONE target calendar (meeting.calendarTargetOf: 全体 if a target, else the
+// first role, else the 個別 calendar that is shared with nobody); members of the other targets get
+// the invitation only. Calendar shares therefore stay per role, exactly as before.
+//
 // Invite / share address per member: the 名簿 Gmail. A member without one (hasGoogle false) and the
 // shared group / bot addresses (NON_PERSONAL_LOCAL_PARTS) are left out of both: they have no Google
 // account, and mailing them only bounced.
@@ -52,6 +57,26 @@ import { createInMemorySyncState, type CalendarAclState, type MeetingSyncSnapsho
 import type { RoleMembership } from "./role-membership";
 
 export const ALL_TARGET_NAME = "全体";
+export const PEOPLE_CALENDAR_NAME = "個別";
+const DELETED_ROLE_NAME = "（削除されたロール）";
+const GONE_MEMBER_NAME = "（無効なメンバー）";
+
+/** Each target with its name, for a response (a deleted role / gone member keeps a placeholder). */
+export function describeTargets(
+  targets: readonly meeting.MeetingTargetRef[],
+  roleNames: ReadonlyMap<string, string>,
+  userNames: ReadonlyMap<string, string> = new Map(),
+): meeting.MeetingTargetInfo[] {
+  return targets.map((t) => ({
+    ...t,
+    name: t.kind === "all" ? ALL_TARGET_NAME : t.kind === "role" ? roleNames.get(t.id) ?? DELETED_ROLE_NAME : userNames.get(t.id) ?? GONE_MEMBER_NAME,
+  }));
+}
+
+export const targetsLabel = (infos: readonly meeting.MeetingTargetInfo[]) => infos.map((t) => t.name).join("、");
+
+const sameTargets = (a: readonly meeting.MeetingTargetRef[], b: readonly meeting.MeetingTargetRef[]) =>
+  a.length === b.length && a.every((t, i) => meeting.targetKey(t) === meeting.targetKey(b[i]!));
 const SOON_MS = 60_000;
 const SYNC_TIME_LIMIT_MS = 8_000;
 /** A list pulls the sync this close, so edits made in Google Calendar show up quickly… */
@@ -231,7 +256,7 @@ function fieldsOf(m: MeetingRow): MeetingFields {
   return {
     title: m.title,
     description: m.description,
-    targetId: m.targetId,
+    targets: m.targets,
     startsAt: m.startsAt,
     durationMinutes: m.durationMinutes,
     recurrence: m.recurrence,
@@ -259,13 +284,14 @@ function trackAttendanceOf(body: unknown): boolean | undefined {
   return v;
 }
 
-function toMeeting(m: MeetingRow, targetName: string, attendeeCount: number, trackAttendance: boolean): meeting.Meeting {
+function toMeeting(m: MeetingRow, targets: meeting.MeetingTargetInfo[], attendeeCount: number, trackAttendance: boolean): meeting.Meeting {
   return {
     id: m.id,
     title: m.title,
     description: m.description,
     targetId: m.targetId,
-    targetName,
+    targetName: targetsLabel(targets),
+    targets,
     startsAt: m.startsAt,
     durationMinutes: m.durationMinutes,
     recurrence: m.recurrence,
@@ -341,15 +367,32 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     return new Map((await deps.roster.listRoles()).map((r) => [r.id, r.name]));
   }
 
-  async function targetName(targetId: string, names?: Map<string, string>): Promise<string | null> {
-    if (targetId === meeting.ALL_MEMBERS_TARGET_ID) return ALL_TARGET_NAME;
-    return (names ?? (await roleNames())).get(targetId) ?? null;
-  }
-
-  async function requireTargetName(targetId: string): Promise<string> {
-    const name = await targetName(targetId);
-    if (!name) throw errors.validationFailed([{ field: "targetId", reason: "unknown_role" }], "対象のロールが見つかりません。");
-    return name;
+  /** Check a write's targets: each role must exist and each person be an active member, except a
+   *  target the meeting already had (a role deleted since stays until someone removes it). Returns
+   *  the targets with names, and the name of the calendar the event goes on. */
+  async function requireTargets(
+    targets: readonly meeting.MeetingTargetRef[],
+    kept: readonly meeting.MeetingTargetRef[] = [],
+  ): Promise<{ infos: meeting.MeetingTargetInfo[]; calendarName: string }> {
+    const keptKeys = new Set(kept.map(meeting.targetKey));
+    const names = targets.some((t) => t.kind === "role") ? await roleNames() : new Map<string, string>();
+    const users = targets.some((t) => t.kind === "person") ? await deps.roster.listActiveUsers() : [];
+    const userNames = new Map(users.map((u) => [u.id, u.name]));
+    for (const t of targets) {
+      if (keptKeys.has(meeting.targetKey(t))) continue;
+      if (t.kind === "role" && !names.has(t.id)) {
+        throw errors.validationFailed([{ field: "targets", reason: "unknown_role" }], "対象のロールが見つかりません。");
+      }
+      if (t.kind === "person" && !userNames.has(t.id)) {
+        throw errors.validationFailed([{ field: "targets", reason: "unknown_member" }], "対象のメンバーが見つかりません。");
+      }
+    }
+    const calendarTarget = meeting.calendarTargetOf(targets);
+    const calendarName =
+      calendarTarget === meeting.ALL_MEMBERS_TARGET_ID ? ALL_TARGET_NAME
+      : calendarTarget === meeting.PEOPLE_CALENDAR_TARGET_ID ? PEOPLE_CALENDAR_NAME
+      : names.get(calendarTarget) ?? DELETED_ROLE_NAME;
+    return { infos: describeTargets(targets, names, userNames), calendarName };
   }
 
   /** Active members with their invite address (one identity listing + one 名簿 lookup). identity
@@ -374,13 +417,58 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     return !(domain === ORG_MAIL_DOMAIN && NON_PERSONAL_LOCAL_PARTS.has(local ?? ""));
   };
 
-  const membersOf = (all: Invitee[], targetId: string) =>
-    targetId === meeting.ALL_MEMBERS_TARGET_ID ? all : all.filter((i) => i.roleIds.includes(targetId));
+  /** Members of one calendar's target (a role or 全体; the 個別 calendar has none). */
+  const membersOf = (all: Invitee[], calendarTargetId: string) =>
+    calendarTargetId === meeting.ALL_MEMBERS_TARGET_ID ? all
+    : calendarTargetId === meeting.PEOPLE_CALENDAR_TARGET_ID ? []
+    : all.filter((i) => i.roleIds.includes(calendarTargetId));
 
-  const forTarget = (all: Invitee[], targetId: string) => uniqueEmails(membersOf(all, targetId).filter(reachable));
+  const inTargets = (i: Invitee, targets: readonly meeting.MeetingTargetRef[]) =>
+    meeting.isInMeetingTargets({ id: i.userId, roleIds: i.roleIds }, targets);
 
-  const inviteesOf = async (targetId: string) =>
-    forTarget(await invitees(targetId === meeting.ALL_MEMBERS_TARGET_ID ? undefined : targetId), targetId);
+  const forTarget = (all: Invitee[], calendarTargetId: string) => uniqueEmails(membersOf(all, calendarTargetId).filter(reachable));
+
+  /** Who a meeting invites: the union of its targets' members. */
+  const forTargets = (all: Invitee[], targets: readonly meeting.MeetingTargetRef[]) => uniqueEmails(all.filter((i) => inTargets(i, targets)).filter(reachable));
+
+  /** A lone role is read narrowed (identity reads roles per listed user); anything else in full. */
+  const inviteesOf = async (targets: readonly meeting.MeetingTargetRef[]) => {
+    const lone = targets.length === 1 && targets[0]!.kind === "role" ? targets[0]!.id : undefined;
+    return forTargets(await invitees(lone), targets);
+  };
+
+  /**
+   * Whether removing invitees is safe for these targets. A role target with no members at all is
+   * likelier an identity glitch than a role emptied on purpose, so it blocks every removal — unless
+   * the role list read just now no longer has it (deleted: it contributes nobody, and the other
+   * targets' members stay). Same reading as the calendar shares (#812).
+   */
+  async function removalsSafe(all: Invitee[], targets: readonly meeting.MeetingTargetRef[], isDeleted: (roleId: string) => Promise<boolean>): Promise<boolean> {
+    for (const t of targets) {
+      if (t.kind !== "role" || all.some((i) => i.roleIds.includes(t.id))) continue;
+      if (!(await isDeleted(t.id))) return false;
+    }
+    return true;
+  }
+
+  /** "Is this role gone?" for one run: the role list is read once, on first need. A failed or
+   *  empty read answers false (unknown never counts as deleted). */
+  function deletedRoleChecker(): (roleId: string) => Promise<boolean> {
+    let roleIds: Set<string> | null | undefined;
+    return async (roleId) => {
+      if (roleId === meeting.ALL_MEMBERS_TARGET_ID || roleId === meeting.PEOPLE_CALENDAR_TARGET_ID) return false;
+      if (roleIds === undefined) {
+        try {
+          const roles = await deps.roster.listRoles();
+          roleIds = roles.length > 0 ? new Set(roles.map((r) => r.id)) : null;
+        } catch (err) {
+          log("meeting_calendar_roles_read_failed", { message: err instanceof Error ? err.message : String(err) });
+          roleIds = null;
+        }
+      }
+      return roleIds !== null && !roleIds.has(roleId);
+    };
+  }
 
   /** Open the Meet without holding the response; the sync retries one that did not get through. */
   async function openMeetAfterResponse(account: MeetingAccount, meetUrl: string | null): Promise<void> {
@@ -496,6 +584,8 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     cal: CalendarClient,
     row: MeetingRow,
     desired: Invitee[],
+    /** false = add only (a target read as empty without being deleted). */
+    allowRemove = true,
   ): Promise<{ added: number; removed: number }> {
     let m = row;
     let ev = await cal.getEvent(m.calendarId, m.googleEventId);
@@ -540,12 +630,15 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     // An empty target with invites on record is far more likely a transient identity glitch than
     // a role emptied on purpose — never mass-uninvite on it.
     if (desired.length === 0 && ledger.length > 0) {
-      log("meeting_sync_empty_target_skipped", { meetingId: m.id, targetId: m.targetId });
+      log("meeting_sync_empty_target_skipped", { meetingId: m.id, targets: m.targets.map(meeting.targetKey) });
       await store.updateMeetingIf({ ...m, syncedAt: deps.now() }, row.updatedAt);
       return { added: 0, removed: 0 };
     }
     const want = new Map(desired.map((d) => [d.email, d]));
-    const removeSet = new Set(ledger.filter((r) => !want.has(r.email)).map((r) => r.email));
+    const removeSet = new Set(allowRemove ? ledger.filter((r) => !want.has(r.email)).map((r) => r.email) : []);
+    if (!allowRemove && ledger.some((r) => !want.has(r.email))) {
+      log("meeting_sync_removals_held", { meetingId: m.id, targets: m.targets.map(meeting.targetKey) });
+    }
     const current = new Set(ev.attendees.map((a) => lower(a.email)));
     const kept: CalendarAttendee[] = ev.attendees.filter((a) => !removeSet.has(lower(a.email)));
     const toAdd = desired.filter((d) => !current.has(d.email));
@@ -575,7 +668,13 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
   /** The share step of the sync. Returns ms until a continuation is due, null = nothing left. What
    *  was learned is saved even when a limit ends the step midway. */
-  async function syncShares(cal: CalendarClient, account: MeetingAccount, all: Invitee[], state: MeetingSyncSnapshot): Promise<number | null> {
+  async function syncShares(
+    cal: CalendarClient,
+    account: MeetingAccount,
+    all: Invitee[],
+    state: MeetingSyncSnapshot,
+    targetDeleted: (roleId: string) => Promise<boolean>,
+  ): Promise<number | null> {
     const nowMs = Date.parse(deps.now());
     if (state.aclWritesNotBefore > nowMs) return state.aclWritesNotBefore - nowMs;
     // Same reading as the attendees' empty target: a glitch, never a reason to unshare everyone.
@@ -587,24 +686,10 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
     const pace = { left: ACL_WRITES_PER_RUN, deferred: false };
     const touched: Record<string, CalendarAclState> = {};
     let sharesPausedUntil: number | null = null;
-    // Read once, only when a calendar's target has no members. null = unknown (the read failed or
-    // came back empty), which never counts as deleted.
-    let roleIds: Set<string> | null | undefined;
-    const targetDeleted = async (targetId: string): Promise<boolean> => {
-      if (targetId === meeting.ALL_MEMBERS_TARGET_ID) return false;
-      if (roleIds === undefined) {
-        try {
-          const roles = await deps.roster.listRoles();
-          roleIds = roles.length > 0 ? new Set(roles.map((r) => r.id)) : null;
-        } catch (err) {
-          log("meeting_calendar_roles_read_failed", { message: err instanceof Error ? err.message : String(err) });
-          roleIds = null;
-        }
-      }
-      return roleIds !== null && !roleIds.has(targetId);
-    };
     try {
       for (const c of await store.listCalendars(orgId, account.accountId)) {
+        // The 個別 calendar (people-only meetings) is shared with nobody: its people are invited.
+        if (c.targetId === meeting.PEOPLE_CALENDAR_TARGET_ID) continue;
         const st: CalendarAclState = { fingerprint: null, checkedAt: 0, ...state.acl[c.calendarId], retryAt: { ...state.acl[c.calendarId]?.retryAt } };
         const before = JSON.stringify(st);
         const desired = new Set(forTarget(all, c.targetId).map((i) => i.email));
@@ -671,11 +756,19 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       const lastSync = Math.max(0, ...synced.map((r) => (r.syncedAt ? Date.parse(r.syncedAt) : 0)));
       if (synced.length > 0 && nowMs - lastSync > LIST_KICK_MIN_GAP_MS) await kick(LIST_SOON_MS);
       let names = new Map<string, string>();
-      if (rows.some((r) => r.targetId !== meeting.ALL_MEMBERS_TARGET_ID)) {
+      if (rows.some((r) => r.targets.some((t) => t.kind === "role"))) {
         try {
           names = await roleNames();
         } catch (err) {
           log("meeting_role_names_failed", { message: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      let userNames = new Map<string, string>();
+      if (rows.some((r) => r.targets.some((t) => t.kind === "person"))) {
+        try {
+          userNames = new Map((await deps.roster.listActiveUsers()).map((u) => [u.id, u.name]));
+        } catch (err) {
+          log("meeting_member_names_failed", { message: err instanceof Error ? err.message : String(err) });
         }
       }
       let account: meeting.MeetingAccountState = { email: null, calendarReady: false };
@@ -686,9 +779,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         log("meeting_account_state_failed", { message: err instanceof Error ? err.message : String(err) });
       }
       return {
-        items: rows.map((r) =>
-          toMeeting(r, r.targetId === meeting.ALL_MEMBERS_TARGET_ID ? ALL_TARGET_NAME : names.get(r.targetId) ?? "（削除されたロール）", counts.get(r.id) ?? 0, regulars.has(r.id)),
-        ),
+        items: rows.map((r) => toMeeting(r, describeTargets(r.targets, names, userNames), counts.get(r.id) ?? 0, regulars.has(r.id))),
         account,
       };
     },
@@ -709,25 +800,28 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         const calendarId = t.isMine ? calendars.get(t.id) : undefined;
         return calendarId ? { ...t, calendarId } : t;
       });
-      return { items };
+      const people = users.map((u) => ({ id: u.id as meeting.MeetingPersonOption["id"], name: u.name })).sort((a, b) => a.name.localeCompare(b.name, "ja"));
+      return { items, people };
     },
 
     async create(userId, body) {
       const f = validateMeeting(body);
       const track = trackAttendanceOf(body) ?? false;
       const began = Date.now();
-      const [name, account, members] = await Promise.all([requireTargetName(f.targetId), readyAccount(), inviteesOf(f.targetId)]);
+      const [{ infos, calendarName }, account, members] = await Promise.all([requireTargets(f.targets), readyAccount(), inviteesOf(f.targets)]);
+      const calendarTarget = meeting.calendarTargetOf(f.targets);
       const cal = budgeted(account.calendar, budgetLimit);
       const preparedAt = Date.now();
 
-      const calendarId = await ensureCalendar(cal, account.accountId, f.targetId, name);
+      const calendarId = await ensureCalendar(cal, account.accountId, calendarTarget, calendarName);
       const calendarAt = Date.now();
       const at = deps.now();
       const id = deps.newId();
       const row: MeetingRow = {
         id,
         orgId,
-        targetId: f.targetId,
+        targetId: calendarTarget,
+        targets: f.targets,
         accountId: account.accountId,
         calendarId,
         googleEventId: eventIdFor(id),
@@ -766,7 +860,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       await openMeetAfterResponse(account, done.meetUrl);
       if (track) await deps.attendance.setRegular(orgId, done.id, true, userId, deps.now());
       log("meeting_create_timing", { meetingId: id, attendees: members.length, prepareMs: preparedAt - began, calendarMs: calendarAt - preparedAt, insertEventMs: insertMs, totalMs: Date.now() - began });
-      return toMeeting(done, name, members.length, track);
+      return toMeeting(done, infos, members.length, track);
     },
 
     async update(id, body, userId) {
@@ -774,7 +868,9 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       if (!row) throw errors.notFound("meeting", id);
       const f = validateMeeting(body, fieldsOf(row));
       const track = trackAttendanceOf(body);
-      const name = await requireTargetName(f.targetId);
+      const { infos, calendarName } = await requireTargets(f.targets, row.targets);
+      const calendarTarget = meeting.calendarTargetOf(f.targets);
+      const targetsChanged = !sameTargets(f.targets, row.targets);
       const account = await readyAccount();
       if (account.accountId !== row.accountId) {
         throw errors.conflict("このミーティングは以前の Google アカウントで作成されています。削除して作り直してください。", { reason: "account_switched" });
@@ -784,12 +880,12 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       let next: MeetingRow;
       let attendeeCount: number;
 
-      if (f.targetId !== row.targetId) {
-        // Moving target = a new event on the other calendar (new Meet link), then drop the old one.
-        const members = await inviteesOf(f.targetId);
-        const calendarId = await ensureCalendar(cal, account.accountId, f.targetId, name);
+      if (calendarTarget !== row.targetId) {
+        // Moving calendar = a new event on the other calendar (new Meet link), then drop the old one.
+        const members = await inviteesOf(f.targets);
+        const calendarId = await ensureCalendar(cal, account.accountId, calendarTarget, calendarName);
         const ev = await cal.insertEvent(calendarId, { ...eventInput(f), attendees: members.map((m) => ({ email: m.email })) });
-        next = { ...row, ...f, calendarId, googleEventId: ev.id, meetUrl: ev.meetUrl, htmlLink: ev.htmlLink, updatedAt: at, syncedAt: at };
+        next = { ...row, ...f, targetId: calendarTarget, calendarId, googleEventId: ev.id, meetUrl: ev.meetUrl, htmlLink: ev.htmlLink, updatedAt: at, syncedAt: at };
         await store.updateMeeting(next);
         await store.replaceInvites(row.id, members.map((m) => ({ meetingId: row.id, email: m.email, userId: m.userId })));
         await openMeetAfterResponse(account, next.meetUrl);
@@ -804,20 +900,42 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         // Only what changed: a time change must not write back a title or description edited in
         // Google Calendar that the sync has not pulled yet (or never will: HTML descriptions).
         const { summary, description, recurrence, ...when } = eventInput(f);
+        // Targets changed on the same calendar: re-invite now (the sync would only within a minute).
+        // Guests added by hand stay, and only invites we made are removed, as in the sync.
+        let invites: { attendees: CalendarAttendee[]; ledger: { meetingId: string; email: string; userId: string | null }[] } | null = null;
+        if (targetsChanged) {
+          const [all, current, ledger] = await Promise.all([invitees(), cal.getEvent(row.calendarId, row.googleEventId), store.listInvites(row.id)]);
+          const desired = forTargets(all, f.targets);
+          const allowRemove = desired.length > 0 && (await removalsSafe(all, f.targets, deletedRoleChecker()));
+          if (current && !isOver({ ...fieldsOf(row), ...f }, Date.parse(at))) {
+            const want = new Set(desired.map((d) => d.email));
+            const drop = new Set(allowRemove ? ledger.filter((r) => !want.has(r.email)).map((r) => r.email) : []);
+            const present = new Set(current.attendees.map((a) => lower(a.email)));
+            invites = {
+              attendees: [...current.attendees.filter((a) => !drop.has(lower(a.email))), ...desired.filter((d) => !present.has(d.email)).map((d) => ({ email: d.email }))],
+              ledger: [
+                ...ledger.filter((r) => !drop.has(r.email)),
+                ...desired.filter((d) => !ledger.some((r) => r.email === d.email)).map((d) => ({ meetingId: row.id, email: d.email, userId: d.userId })),
+              ],
+            };
+          }
+        }
         const ev = await cal.patchEvent(row.calendarId, row.googleEventId, {
           ...when,
           ...(f.title !== row.title ? { summary } : {}),
           ...(f.description !== row.description ? { description } : {}),
           ...(f.recurrence !== row.recurrence || f.until !== row.until ? { recurrence } : {}),
+          ...(invites ? { attendees: invites.attendees } : {}),
         });
         next = { ...row, ...f, meetUrl: ev.meetUrl ?? row.meetUrl, htmlLink: ev.htmlLink ?? row.htmlLink, updatedAt: at };
         await store.updateMeeting(next);
-        attendeeCount = (await store.listInvites(row.id)).length;
+        if (invites) await store.replaceInvites(row.id, invites.ledger);
+        attendeeCount = invites ? invites.ledger.length : (await store.listInvites(row.id)).length;
       }
       await kick(SOON_MS);
       if (track !== undefined) await deps.attendance.setRegular(orgId, row.id, track, userId ?? row.createdBy, deps.now());
       const regular = track ?? (await deps.attendance.listRegularIds(orgId)).has(row.id);
-      return toMeeting(next, name, attendeeCount, regular);
+      return toMeeting(next, infos, attendeeCount, regular);
     },
 
     async remove(id) {
@@ -907,6 +1025,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       // Strict: without the 名簿 every Gmail would read as changed, and the sync would swap all
       // invites and shares to login addresses, then back, mailing everyone both ways.
       const all = await invitees(undefined, true);
+      const targetDeleted = deletedRoleChecker();
       const out: SyncResult = { ...empty, withoutGoogleAccount: uniqueEmails(all).filter((i) => !i.hasGoogle).map((i) => ({ userId: i.userId, name: i.name, email: i.email })) };
 
       try {
@@ -916,7 +1035,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
           let stoppedAt: string | null = null;
           for (const m of rows.slice(Math.max(0, rows.findIndex((r) => r.id === state.meetingCursor)))) {
             try {
-              const r = await reconcileMeeting(cal, m, forTarget(all, m.targetId));
+              const r = await reconcileMeeting(cal, m, forTargets(all, m.targets), await removalsSafe(all, m.targets, targetDeleted));
               out.meetings++;
               out.invitedAdded += r.added;
               out.invitedRemoved += r.removed;
@@ -934,7 +1053,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         }
 
         if (out.complete) {
-          const continueMs = await syncShares(cal, account, all, state);
+          const continueMs = await syncShares(cal, account, all, state, targetDeleted);
           if (continueMs !== null) out.aclContinueMs = continueMs;
         }
       } catch (err) {

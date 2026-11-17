@@ -3,7 +3,7 @@
 // reconcile only ever removes what it added. D1 in production, in-memory for unit tests (same
 // observable semantics, mirroring role-grants-store.ts). Timestamps are service-set (nowIso).
 import type { DbClient } from "@dub/db";
-import type { meeting } from "@dub/types";
+import { meeting } from "@dub/types";
 
 export interface MeetingCalendarRow {
   orgId: string;
@@ -16,7 +16,11 @@ export interface MeetingCalendarRow {
 export interface MeetingRow {
   id: string;
   orgId: string;
+  /** The calendar's target (meeting.calendarTargetOf(targets)); also what an older worker reads. */
   targetId: string;
+  /** Who is invited (driveshare_meeting_targets, 0006). A meeting without rows there — made before
+   *  0006 or by an older worker — reads as legacyTargets(targetId). */
+  targets: meeting.MeetingTargetRef[];
   accountId: string;
   calendarId: string;
   googleEventId: string;
@@ -61,7 +65,8 @@ export interface MeetingStore {
   /** updateMeeting only while the stored updated_at is still `expectedUpdatedAt` (the sync must not
    *  overwrite a user edit that landed after it read the row). false = skipped. */
   updateMeetingIf(row: MeetingRow, expectedUpdatedAt: string): Promise<boolean>;
-  /** Deletes the meeting and its invite ledger. */
+  /** insertMeeting / updateMeeting also write `targets`; updateMeetingIf leaves them alone. */
+  /** Deletes the meeting, its targets and its invite ledger. */
   deleteMeeting(id: string): Promise<void>;
   /** deleteMeeting only while it still points at that event (not moved meanwhile). false = skipped. */
   deleteMeetingIf(id: string, calendarId: string, googleEventId: string): Promise<boolean>;
@@ -101,11 +106,12 @@ interface MeetingDbRow {
   synced_at: string | null;
 }
 
-function toMeetingRow(r: MeetingDbRow): MeetingRow {
+function toMeetingRow(r: MeetingDbRow, targets: meeting.MeetingTargetRef[] | undefined): MeetingRow {
   return {
     id: r.id,
     orgId: r.org_id,
     targetId: r.target_id,
+    targets: targets && targets.length > 0 ? targets : meeting.legacyTargets(r.target_id),
     accountId: r.account_id,
     calendarId: r.calendar_id,
     googleEventId: r.google_event_id,
@@ -123,6 +129,27 @@ function toMeetingRow(r: MeetingDbRow): MeetingRow {
     syncedAt: r.synced_at,
   };
 }
+
+interface TargetDbRow {
+  meeting_id: string;
+  kind: string;
+  target_id: string;
+}
+
+function groupTargets(rows: TargetDbRow[]): Map<string, meeting.MeetingTargetRef[]> {
+  const out = new Map<string, meeting.MeetingTargetRef[]>();
+  for (const r of rows) {
+    if (!meeting.MEETING_TARGET_KINDS.includes(r.kind as meeting.MeetingTargetKind)) continue;
+    out.set(r.meeting_id, [...(out.get(r.meeting_id) ?? []), { kind: r.kind as meeting.MeetingTargetKind, id: r.target_id }]);
+  }
+  return out;
+}
+
+const insertTargets = (m: MeetingRow) =>
+  m.targets.map((t, i) => ({
+    sql: `INSERT OR REPLACE INTO driveshare_meeting_targets (org_id, meeting_id, kind, target_id, position) VALUES (?, ?, ?, ?, ?)`,
+    binds: [m.orgId, m.id, t.kind, t.id, i],
+  }));
 
 interface CalendarDbRow {
   org_id: string;
@@ -167,37 +194,51 @@ export function createD1MeetingStore(db: DbClient): MeetingStore {
     },
 
     async listMeetings(orgId) {
-      const rows = await db.all<MeetingDbRow>(
-        `SELECT * FROM driveshare_meetings WHERE org_id = ? ORDER BY starts_at ASC, id ASC`,
-        orgId,
-      );
-      return rows.map(toMeetingRow);
+      const [rows, targets] = await Promise.all([
+        db.all<MeetingDbRow>(`SELECT * FROM driveshare_meetings WHERE org_id = ? ORDER BY starts_at ASC, id ASC`, orgId),
+        db.all<TargetDbRow>(`SELECT * FROM driveshare_meeting_targets WHERE org_id = ? ORDER BY meeting_id ASC, position ASC`, orgId),
+      ]);
+      const byMeeting = groupTargets(targets);
+      return rows.map((r) => toMeetingRow(r, byMeeting.get(r.id)));
     },
     async getMeeting(orgId, id) {
       const r = await db.first<MeetingDbRow>(`SELECT * FROM driveshare_meetings WHERE org_id = ? AND id = ?`, orgId, id);
-      return r ? toMeetingRow(r) : null;
+      if (!r) return null;
+      const targets = await db.all<TargetDbRow>(`SELECT * FROM driveshare_meeting_targets WHERE meeting_id = ? ORDER BY position ASC`, id);
+      return toMeetingRow(r, groupTargets(targets).get(id));
     },
     async insertMeeting(m) {
-      await db.run(
-        `INSERT INTO driveshare_meetings
-           (id, org_id, target_id, account_id, calendar_id, google_event_id, title, description, starts_at,
-            duration_minutes, recurrence, until, meet_url, html_link, created_by, created_at, updated_at, synced_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        m.id, m.orgId, m.targetId, m.accountId, m.calendarId, m.googleEventId, m.title, m.description, m.startsAt,
-        m.durationMinutes, m.recurrence, m.until, m.meetUrl, m.htmlLink, m.createdBy, m.createdAt, m.updatedAt, m.syncedAt,
-      );
+      await db.batch([
+        {
+          sql: `INSERT INTO driveshare_meetings
+                  (id, org_id, target_id, account_id, calendar_id, google_event_id, title, description, starts_at,
+                   duration_minutes, recurrence, until, meet_url, html_link, created_by, created_at, updated_at, synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          binds: [
+            m.id, m.orgId, m.targetId, m.accountId, m.calendarId, m.googleEventId, m.title, m.description, m.startsAt,
+            m.durationMinutes, m.recurrence, m.until, m.meetUrl, m.htmlLink, m.createdBy, m.createdAt, m.updatedAt, m.syncedAt,
+          ],
+        },
+        ...insertTargets(m),
+      ]);
     },
     async updateMeeting(m) {
-      await db.run(
-        `UPDATE driveshare_meetings SET
-           target_id = ?, account_id = ?, calendar_id = ?, google_event_id = ?, title = ?, description = ?,
-           starts_at = ?, duration_minutes = ?, recurrence = ?, until = ?, meet_url = ?, html_link = ?,
-           updated_at = ?, synced_at = ?
-         WHERE id = ?`,
-        m.targetId, m.accountId, m.calendarId, m.googleEventId, m.title, m.description,
-        m.startsAt, m.durationMinutes, m.recurrence, m.until, m.meetUrl, m.htmlLink,
-        m.updatedAt, m.syncedAt, m.id,
-      );
+      await db.batch([
+        {
+          sql: `UPDATE driveshare_meetings SET
+                  target_id = ?, account_id = ?, calendar_id = ?, google_event_id = ?, title = ?, description = ?,
+                  starts_at = ?, duration_minutes = ?, recurrence = ?, until = ?, meet_url = ?, html_link = ?,
+                  updated_at = ?, synced_at = ?
+                WHERE id = ?`,
+          binds: [
+            m.targetId, m.accountId, m.calendarId, m.googleEventId, m.title, m.description,
+            m.startsAt, m.durationMinutes, m.recurrence, m.until, m.meetUrl, m.htmlLink,
+            m.updatedAt, m.syncedAt, m.id,
+          ],
+        },
+        { sql: `DELETE FROM driveshare_meeting_targets WHERE meeting_id = ?`, binds: [m.id] },
+        ...insertTargets(m),
+      ]);
     },
     async updateMeetingIf(m, expectedUpdatedAt) {
       const r = await db.run(
@@ -213,12 +254,18 @@ export function createD1MeetingStore(db: DbClient): MeetingStore {
       return r.meta.changes > 0;
     },
     async deleteMeeting(id) {
+      await db.run(`DELETE FROM driveshare_meeting_targets WHERE meeting_id = ?`, id);
       await db.run(`DELETE FROM driveshare_meeting_invites WHERE meeting_id = ?`, id);
       await db.run(`DELETE FROM driveshare_meetings WHERE id = ?`, id);
     },
     async deleteMeetingIf(id, calendarId, googleEventId) {
-      // Invites first (they reference the meeting: FK), both in one batch = one transaction.
-      const [, r] = await db.batch([
+      // Invites first (they reference the meeting: FK), all in one batch = one transaction.
+      const [, , r] = await db.batch([
+        {
+          sql: `DELETE FROM driveshare_meeting_targets WHERE meeting_id = ? AND EXISTS
+                  (SELECT 1 FROM driveshare_meetings WHERE id = ? AND calendar_id = ? AND google_event_id = ?)`,
+          binds: [id, id, calendarId, googleEventId],
+        },
         {
           sql: `DELETE FROM driveshare_meeting_invites WHERE meeting_id = ? AND EXISTS
                   (SELECT 1 FROM driveshare_meetings WHERE id = ? AND calendar_id = ? AND google_event_id = ?)`,
@@ -320,14 +367,15 @@ export function createInMemoryMeetingStore(): MeetingStore & {
       return m && m.orgId === orgId ? { ...m } : null;
     },
     async insertMeeting(row: MeetingRow) {
-      meetings.set(row.id, { ...row });
+      meetings.set(row.id, { ...row, targets: [...row.targets] });
     },
     async updateMeeting(row: MeetingRow) {
-      if (meetings.has(row.id)) meetings.set(row.id, { ...row });
+      if (meetings.has(row.id)) meetings.set(row.id, { ...row, targets: [...row.targets] });
     },
     async updateMeetingIf(row: MeetingRow, expectedUpdatedAt: string) {
-      if (meetings.get(row.id)?.updatedAt !== expectedUpdatedAt) return false;
-      meetings.set(row.id, { ...row });
+      const stored = meetings.get(row.id);
+      if (stored?.updatedAt !== expectedUpdatedAt) return false;
+      meetings.set(row.id, { ...row, targets: stored.targets }); // as D1: targets untouched
       return true;
     },
     async deleteMeeting(id: string) {

@@ -15,6 +15,7 @@ import type { MeetRecordsClient } from "./google/meet-records-client";
 import { runMeetIngest } from "./meet-ingest";
 import { jstDate } from "./meeting-rules";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
+import { describeTargets, targetsLabel } from "./meetings-service";
 import type { ActiveUser, RoleMembership } from "./role-membership";
 
 const MS_PER_DAY = 86_400_000;
@@ -22,7 +23,6 @@ const DEFAULT_RANGE_DAYS = 84;
 const MAX_RANGE_DAYS = 366;
 /** How far ahead "next occurrence" looks (a monthly meeting always has one within this). */
 const NEXT_LOOKAHEAD_DAYS = 62;
-const ALL_TARGET_NAME = "全体";
 /** Google calls of a manual 「今すぐ取り込む」 (request path: the gateway gives 15 s). */
 const MANUAL_INGEST_BUDGET = 25;
 const MANUAL_INGEST_TIME_MS = 9_000;
@@ -133,8 +133,8 @@ function presenceOf(rows: readonly ParticipantRow[]): meeting.MeetPresence | nul
 export function createAttendanceService(deps: AttendanceDeps): AttendanceService {
   const { orgId } = deps;
 
-  const expectedOf = (users: ActiveUser[], targetId: string) =>
-    targetId === meeting.ALL_MEMBERS_TARGET_ID ? users : users.filter((u) => u.roleIds.includes(targetId));
+  /** The union of the meeting's targets (全体 / roles / members). */
+  const expectedOf = (users: ActiveUser[], m: MeetingRow) => users.filter((u) => meeting.isInMeetingTargets(u, m.targets));
 
   /** Role names, best-effort (needs identity:read of the caller; a failure just shows a placeholder). */
   async function names(): Promise<Map<string, string>> {
@@ -144,8 +144,8 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
       return new Map();
     }
   }
-  const targetName = (targetId: string, n: Map<string, string>) =>
-    targetId === meeting.ALL_MEMBERS_TARGET_ID ? ALL_TARGET_NAME : n.get(targetId) ?? "（削除されたロール）";
+  const targetName = (m: MeetingRow, n: Map<string, string>, users: readonly ActiveUser[] = []) =>
+    targetsLabel(describeTargets(m.targets, n, new Map(users.map((u) => [u.id, u.name]))));
 
   async function regularMeetings(): Promise<MeetingRow[]> {
     const ids = await deps.store.listRegularIds(orgId);
@@ -167,7 +167,8 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
       const m = await deps.meetings.getMeeting(orgId, meetingId);
       if (!m) throw errors.notFound("meeting", meetingId);
       // Instance check (the route is AUTHENTICATED): only the meeting's own members may join through Dub.
-      const users = await deps.roster.listActiveUsers(m.targetId === meeting.ALL_MEMBERS_TARGET_ID ? undefined : m.targetId);
+      const lone = m.targets.length === 1 && m.targets[0]!.kind === "role" ? m.targets[0]!.id : undefined;
+      const users = expectedOf(await deps.roster.listActiveUsers(lone), m);
       if (!users.some((u) => u.id === userId)) throw errors.forbidden("この定例の対象メンバーではありません。");
       const regular = (await deps.store.listRegularIds(orgId)).has(m.id);
       const now = deps.now();
@@ -193,10 +194,11 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
       const linked = (await deps.store.listLinks(orgId)).some((l) => l.userId === userId);
       const rows = await regularMeetings();
       if (rows.length === 0) return { items: [], googleLinked: linked };
-      const me = (await deps.roster.listActiveUsers()).find((u) => u.id === userId);
+      const users = await deps.roster.listActiveUsers();
+      const me = users.find((u) => u.id === userId);
       if (!me) return { items: [], googleLinked: linked };
-      const mine = rows.filter((m) => m.targetId === meeting.ALL_MEMBERS_TARGET_ID || me.roleIds.includes(m.targetId));
-      const n = mine.some((m) => m.targetId !== meeting.ALL_MEMBERS_TARGET_ID) ? await names() : new Map<string, string>();
+      const mine = rows.filter((m) => meeting.isInMeetingTargets(me, m.targets));
+      const n = mine.some((m) => m.targets.some((t) => t.kind === "role")) ? await names() : new Map<string, string>();
       const now = deps.now();
       const today = jstDate(now);
       const items: meeting.MyRegularMeeting[] = [];
@@ -208,7 +210,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
         items.push({
           id: m.id,
           title: m.title,
-          targetName: targetName(m.targetId, n),
+          targetName: targetName(m, n, users),
           kind: meeting.regularKindOf(m.targetId),
           meetUrl: m.meetUrl,
           next,
@@ -260,7 +262,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
       const nowMs = Date.parse(now);
 
       const meetings: meeting.AttendanceMeeting[] = rows.map((m) => {
-        const expected = expectedOf(users, m.targetId);
+        const expected = expectedOf(users, m);
         const expectedIds = new Set(expected.map((u) => u.id));
         const threshold = Math.ceil((m.durationMinutes * 60 * percent) / 100);
         const occurrences: meeting.AttendanceOccurrence[] = meeting
@@ -325,7 +327,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
           id: m.id,
           title: m.title,
           targetId: m.targetId,
-          targetName: targetName(m.targetId, n),
+          targetName: targetName(m, n, users),
           kind: meeting.regularKindOf(m.targetId),
           durationMinutes: m.durationMinutes,
           recurrence: m.recurrence,
@@ -359,7 +361,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
         await deps.store.removeRecord(m.id, date, userId, "manual");
         return { record: null };
       }
-      const users = expectedOf(await deps.roster.listActiveUsers(), m.targetId);
+      const users = expectedOf(await deps.roster.listActiveUsers(), m);
       if (!users.some((u) => u.id === userId)) {
         throw errors.validationFailed([{ field: "userId", reason: "not_expected" }], "この定例の対象メンバーではありません。");
       }
