@@ -26,7 +26,21 @@ import { issueLinkedAccount, parseLocalPart } from "./participation-onboard";
 
 type Ctx = Context<{ Bindings: GatewayEnv; Variables: GatewayVariables }>;
 
-function parseBody(raw: unknown): Omit<hrResult.RegisterInterviewResultRequest, "localPart"> & { localPart: string | null } {
+type ParsedBody = Omit<hrResult.RegisterInterviewResultRequest, "localPart" | keyof hrResult.PassPlacement> & {
+  localPart: string | null;
+  placement: hrResult.PassPlacement;
+};
+
+/** 合格の所属 (チーム・上長) はそのまま member-service に渡す (存在の確認は claim が発行前に行う)。 */
+function placementOf(o: Partial<hrResult.RegisterInterviewResultRequest>): hrResult.PassPlacement {
+  if (o.decision !== "pass") return {};
+  return {
+    ...(o.teamIds !== undefined ? { teamIds: o.teamIds } : {}),
+    ...(o.leaderId !== undefined ? { leaderId: o.leaderId } : {}),
+  };
+}
+
+function parseBody(raw: unknown): ParsedBody {
   const o = (raw ?? {}) as Partial<hrResult.RegisterInterviewResultRequest>;
   if (!hrResult.isInterviewDecision(o.decision)) throw errors.validationFailed([{ field: "decision", reason: "invalid" }]);
   if (typeof o.reason !== "string" || o.reason.trim() === "") throw errors.validationFailed([{ field: "reason", reason: "required" }]);
@@ -35,6 +49,7 @@ function parseBody(raw: unknown): Omit<hrResult.RegisterInterviewResultRequest, 
     reason: o.reason,
     includeReasonInMail: o.includeReasonInMail === true,
     localPart: o.decision === "pass" ? parseLocalPart(o.localPart) : null,
+    placement: placementOf(o),
   };
 }
 
@@ -52,6 +67,7 @@ export async function hrInterviewResultHandler(c: Ctx): Promise<Response> {
     decision: body.decision,
     reason: body.reason,
     includeReasonInMail: body.includeReasonInMail === true,
+    ...body.placement,
   });
   if (!claim.proceed) {
     const res: hrResult.RegisterInterviewResultResponse = { result: claim.result, applicant: claim.applicant, alreadyRegistered: true, accountMailSent: false };
@@ -69,7 +85,7 @@ export async function hrInterviewResultHandler(c: Ctx): Promise<Response> {
         displayName: claim.applicant.name,
         furigana: claim.applicant.nameKana ?? undefined,
         link: (identityUserId) =>
-          svc.member.post<hr.Applicant, hrResult.LinkInterviewResultRequest>(ctx, `${base}/link`, { identityUserId, address }),
+          svc.member.post<hr.Applicant, hrResult.LinkInterviewResultRequest>(ctx, `${base}/link`, { identityUserId, address, ...body.placement }),
       });
       accountMailSent = await sendLoginMail(c, svc, ctx, { userId: user.id, to: claim.applicant.email, name: claim.applicant.name, address });
     } else if (r.decision === "pass" && r.issuedIdentityUserId && r.issuedAddress) {
@@ -77,6 +93,7 @@ export async function hrInterviewResultHandler(c: Ctx): Promise<Response> {
       await svc.member.post<hr.Applicant, hrResult.LinkInterviewResultRequest>(ctx, `${base}/link`, {
         identityUserId: r.issuedIdentityUserId,
         address: r.issuedAddress,
+        ...body.placement,
       });
     }
     const done = await svc.member.post<hrResult.CompleteInterviewResultResponse, hrResult.CompleteInterviewResultRequest>(ctx, `${base}/complete`, {

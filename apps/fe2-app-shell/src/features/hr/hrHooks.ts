@@ -15,6 +15,7 @@ export const HR_LIST_KEY = queryKeys.feature("hr", "applicants");
 export const HR_DETAIL_KEY = (id: string) => queryKeys.feature("hr", "applicant", id);
 export const HR_ONBOARDING_KEY = queryKeys.feature("hr", "onboarding");
 export const HR_TEAMS_KEY = queryKeys.feature("hr", "teams");
+export const HR_ORG_MEMBERS_KEY = queryKeys.feature("hr", "org-members");
 export const HR_ATTENDANCE_KEY = (from: string, to: string) => queryKeys.feature("hr", "attendance", `${from}_${to}`);
 /** interviewFormApi の RESPONSES_KEY と同じ prefix (interviewFormApi → hrHooks の向きの import を保つ)。 */
 const HR_FORM_RESPONSES_KEY = queryKeys.feature("hr", "interview-form-responses");
@@ -42,6 +43,12 @@ export function useApplicantDetail(id: string | null) {
 export function useHrTeams() {
   const api = useHrApi();
   return useQuery({ queryKey: HR_TEAMS_KEY, queryFn: () => api.teams(), staleTime: 60_000, retry: false });
+}
+
+/** 合格の上長の候補。読めない (権限・障害) ときは上長を選ばずに登録できる。 */
+export function useHrOrgMembers(enabled: boolean) {
+  const api = useHrApi();
+  return useQuery({ queryKey: HR_ORG_MEMBERS_KEY, queryFn: () => api.orgMembers(), staleTime: 60_000, retry: false, enabled });
 }
 
 export function useHrOnboarding() {
@@ -422,6 +429,7 @@ export function useRegisterInterviewResult() {
       void qc.invalidateQueries({ queryKey: HR_DETAIL_KEY(res.applicant.id) });
       void qc.invalidateQueries({ queryKey: HR_ONBOARDING_KEY });
       void qc.invalidateQueries({ queryKey: MEMBERS_OVERVIEW_KEY });
+      void qc.invalidateQueries({ queryKey: HR_ORG_MEMBERS_KEY });
     },
   });
 }

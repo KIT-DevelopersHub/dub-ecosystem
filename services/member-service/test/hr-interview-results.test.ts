@@ -160,6 +160,91 @@ describe("人事: 面談結果 — 合格", () => {
   });
 });
 
+describe("人事: 面談結果 — 合格の所属 (チーム・上長)", () => {
+  async function team(app: App, name: string): Promise<string> {
+    return (await call(app, "POST", "/members/teams", { body: { name } })).json.id as string;
+  }
+  async function person(app: App, name: string): Promise<string> {
+    return (await call(app, "POST", "/members/people", { body: { name, status: "added" } })).json.id as string;
+  }
+  const teamIdsOf = async (deps: AppDeps, memberId: string): Promise<string[]> =>
+    (await deps.repo.teamLinksForOrg(deps.orgId)).filter((l) => l.personId === memberId).map((l) => l.teamId).sort();
+
+  it("writes the chosen teams and leader on the new roster row and names the teams in the pass mail", async () => {
+    const { app, mails, deps } = setup();
+    const venue = await team(app, "会場");
+    const pr = await team(app, "広報");
+    const leader = await person(app, "上長 一郎");
+    const id = await bookedApplicant(app, mails);
+    const placement = { teamIds: [venue, pr, venue], leaderId: leader };
+    expect((await claim(app, id, { decision: "pass", reason: "ok", ...placement })).json.proceed).toBe(true);
+    const linked = await link(app, id, { identityUserId: "usr_new", address: "a@developershub.jp", ...placement });
+    expect(linked.status).toBe(200);
+    const memberId = linked.json.memberId as string;
+    expect((await deps.repo.getPerson(memberId))?.leaderId).toBe(leader);
+    expect(await teamIdsOf(deps, memberId)).toEqual([venue, pr].sort());
+
+    // 再試行 (応答が失われた): 名簿の行もチームの結び付きも増えない。
+    await link(app, id, { identityUserId: "usr_new", address: "a@developershub.jp", teamIds: [pr], leaderId: null });
+    expect(await teamIdsOf(deps, memberId)).toEqual([venue, pr].sort());
+    expect((await deps.repo.getPerson(memberId))?.leaderId).toBe(leader);
+
+    await complete(app, id);
+    expect(mails.at(-1)!.mail.textBody).toContain("所属チーム: 会場、広報");
+  });
+
+  it("an empty team list means no team, even when the applicant had a desired team", async () => {
+    const { app, mails, deps } = setup();
+    const id = await bookedApplicant(app, mails);
+    const venue = await team(app, "会場");
+    await deps.hrRepo.updateApplicant({ ...(await deps.hrRepo.getApplicant(id))!, desiredTeamId: venue, version: 99 }, (await deps.hrRepo.getApplicant(id))!.version);
+    await claim(app, id, { decision: "pass", reason: "ok", teamIds: [] });
+    const linked = await link(app, id, { identityUserId: "usr_new", address: "a@developershub.jp", teamIds: [] });
+    expect(await teamIdsOf(deps, linked.json.memberId)).toEqual([]);
+    await complete(app, id);
+    expect(mails.at(-1)!.mail.textBody).not.toContain("所属チーム:");
+  });
+
+  it("omitted fields keep the old behavior: the desired team, no leader", async () => {
+    const { app, mails, deps } = setup();
+    const id = await bookedApplicant(app, mails);
+    const venue = await team(app, "会場");
+    await deps.hrRepo.updateApplicant({ ...(await deps.hrRepo.getApplicant(id))!, desiredTeamId: venue, version: 99 }, (await deps.hrRepo.getApplicant(id))!.version);
+    await claim(app, id, { decision: "pass", reason: "ok" });
+    const linked = await link(app, id, { identityUserId: "usr_new", address: "a@developershub.jp" });
+    expect(await teamIdsOf(deps, linked.json.memberId)).toEqual([venue]);
+    expect((await deps.repo.getPerson(linked.json.memberId))?.leaderId).toBeNull();
+  });
+
+  it("an unknown team is 400 at claim (before any account is issued) and nothing is claimed", async () => {
+    const { app, mails } = setup();
+    const id = await bookedApplicant(app, mails);
+    const res = await claim(app, id, { decision: "pass", reason: "ok", teamIds: ["team_nope"] });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.json)).toContain("teamIds");
+    expect((await claim(app, id, { decision: "pass", reason: "ok", teamIds: "x" as never })).status).toBe(400);
+    // 占有していないので、正しい値ですぐ登録できる。
+    expect((await claim(app, id, { decision: "pass", reason: "ok" })).json.proceed).toBe(true);
+  });
+
+  it("an unknown or archived leader is 400", async () => {
+    const { app, mails } = setup();
+    const id = await bookedApplicant(app, mails);
+    expect((await claim(app, id, { decision: "pass", reason: "ok", leaderId: "mem_nope" })).status).toBe(400);
+    const gone = await person(app, "退任 次郎");
+    await call(app, "DELETE", `/members/people/${gone}`);
+    const res = await claim(app, id, { decision: "pass", reason: "ok", leaderId: gone });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.json)).toContain("leaderId");
+  });
+
+  it("a fail ignores team and leader", async () => {
+    const { app, mails } = setup();
+    const id = await bookedApplicant(app, mails);
+    expect((await claim(app, id, { decision: "fail", reason: "x", teamIds: ["team_nope"], leaderId: "mem_nope" })).status).toBe(200);
+  });
+});
+
 describe("人事: 面談結果 — 二度押し・再試行", () => {
   it("a second claim while the first is running is 409, and after completion returns the result without doing anything", async () => {
     const { app, mails } = setup();

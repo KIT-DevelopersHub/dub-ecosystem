@@ -39,6 +39,12 @@ function toApplicant(r: ApplicantRow): hr.Applicant {
   return wire;
 }
 
+/** 合格の所属を確かめたもの。teamIds = undefined は「希望チーム」(従来どおり)。 */
+interface Placement {
+  teamIds: string[] | undefined;
+  leaderId: string | null;
+}
+
 function reasonOf(v: unknown): string {
   if (typeof v !== "string" || v.trim() === "") throw errors.validationFailed([{ field: "reason", reason: "required" }]);
   if (v.trim().length > hrResult.MAX_REASON_LENGTH) throw errors.validationFailed([{ field: "reason", reason: "too_long" }]);
@@ -58,6 +64,40 @@ export class HrResultService {
     return a;
   }
 
+  /**
+   * 合格の所属 (チーム・上長) を確かめる。チームは組織に在ること、上長は組織の在籍中 (アーカイブされていない)
+   * メンバーであること。違えば 400 (claim はアカウント発行より前なので、何も発行せずに止まる)。
+   */
+  private async placement(body: hrResult.PassPlacement | null | undefined): Promise<Placement> {
+    const rawTeams = body?.teamIds;
+    let teamIds: string[] | undefined;
+    if (rawTeams !== undefined) {
+      if (!Array.isArray(rawTeams) || rawTeams.some((t) => typeof t !== "string" || t.trim() === "")) {
+        throw errors.validationFailed([{ field: "teamIds", reason: "invalid" }]);
+      }
+      teamIds = [...new Set(rawTeams.map((t) => t.trim()))];
+      if (teamIds.length > 0) {
+        const known = new Set((await this.deps.repo.listTeams(this.deps.orgId)).map((t) => t.id));
+        const unknown = teamIds.find((t) => !known.has(t));
+        if (unknown !== undefined) throw errors.validationFailed([{ field: "teamIds", reason: "unknown_team", message: unknown }]);
+      }
+    }
+    const rawLeader = body?.leaderId;
+    let leaderId: string | null = null;
+    if (rawLeader !== undefined && rawLeader !== null) {
+      if (typeof rawLeader !== "string") throw errors.validationFailed([{ field: "leaderId", reason: "invalid" }]);
+      const id = rawLeader.trim();
+      if (id !== "") {
+        const leader = await this.deps.repo.getPerson(id);
+        if (!leader || leader.orgId !== this.deps.orgId || leader.archivedAt !== null) {
+          throw errors.validationFailed([{ field: "leaderId", reason: "unknown_member", message: id }]);
+        }
+        leaderId = id;
+      }
+    }
+    return { teamIds, leaderId };
+  }
+
   private leaseUntil(): string {
     return new Date(Date.parse(this.deps.now()) + LEASE_MS).toISOString();
   }
@@ -70,6 +110,7 @@ export class HrResultService {
     const a = await this.applicant(applicantId);
     const existing = await this.deps.hrResultRepo.get(applicantId);
     if (existing?.status === "done") return { result: toResult(existing), applicant: toApplicant(a), proceed: false };
+    if (decision === "pass") await this.placement(body);
     if (existing) {
       const patch = { decision, reason, includeReasonInMail, createdBy: ctx.userId };
       if (!(await this.deps.hrResultRepo.reclaim(applicantId, patch, this.deps.now(), this.leaseUntil()))) throw errInProgress();
@@ -119,6 +160,8 @@ export class HrResultService {
     const r = await this.processing(applicantId);
     if (r.decision !== "pass") throw errNoResult();
     const a = await this.applicant(applicantId);
+    // 名簿の行を作るのは 1 回だけなので、所属もその時の 1 回だけ書く (再試行でチームの結び付きを重ねない)。
+    const place = (r.issuedMemberId ?? a.memberId) ? null : await this.placement(body);
     await this.deps.hrResultRepo.recordIssued(applicantId, { issuedAddress: address, issuedIdentityUserId: identityUserId });
 
     let memberId = r.issuedMemberId ?? a.memberId;
@@ -128,7 +171,8 @@ export class HrResultService {
         ...prefill,
         name: a.name,
         status: "added",
-        teamIds: a.desiredTeamId ? [a.desiredTeamId] : [],
+        teamIds: place?.teamIds ?? (a.desiredTeamId ? [a.desiredTeamId] : []),
+        leaderId: place?.leaderId ?? null,
         contact: a.email,
       });
       memberId = created.id;
@@ -148,6 +192,14 @@ export class HrResultService {
     return list[0] ?? null;
   }
 
+  /** 合格で作った名簿の行の所属チーム名 (メールに載せる)。 */
+  private async teamNamesOf(memberId: string | null): Promise<string[]> {
+    if (!memberId) return [];
+    const [links, teams] = await Promise.all([this.deps.repo.teamLinksForOrg(this.deps.orgId), this.deps.repo.listTeams(this.deps.orgId)]);
+    const ids = new Set(links.filter((l) => l.personId === memberId).map((l) => l.teamId));
+    return teams.filter((t) => ids.has(t.id)).map((t) => t.name);
+  }
+
   /** 合否のメールを組み立てる (宛先・件名・本文)。プレビューと同じ hrResult.renderResultMail。 */
   async buildMail(applicantId: string, r: ResultRow, a: ApplicantRow): Promise<{ to: string; subject: string; textBody: string }> {
     const base = this.deps.appBaseUrl ?? "";
@@ -157,6 +209,7 @@ export class HrResultService {
       name: a.name,
       reason: r.includeReasonInMail ? r.reason : null,
       address: r.issuedAddress,
+      teamNames: r.decision === "pass" ? await this.teamNamesOf(r.issuedMemberId) : null,
       appUrl: base ? hrResult.absoluteUrl(base, "/") : null,
       participationUrl: base ? hrResult.absoluteUrl(base, hrForm.participationPrefillPath(prefill)) : null,
       onboardingUrl: base ? hrResult.absoluteUrl(base, hrResult.PUBLIC_ONBOARDING_PATH) : null,

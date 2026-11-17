@@ -51,7 +51,18 @@ export interface InterviewResult {
   completedAt: ISODateTime | null;
 }
 
-export interface RegisterInterviewResultRequest {
+/**
+ * 合格で名簿の行を作る時の所属 (任意・合格のときだけ使う)。省略すると従来どおり
+ * (チーム = 応募者の希望チーム・上長なし)。名簿の行を作った後の再試行では変えない (最初に作った時の値のまま)。
+ */
+export interface PassPlacement {
+  /** 所属チーム (member_teams.id・複数可)。省略 = 希望チーム、[] = チームなし。 */
+  teamIds?: string[];
+  /** 上長 (member_people.id・在籍中のメンバー)。省略・null = なし。 */
+  leaderId?: string | null;
+}
+
+export interface RegisterInterviewResultRequest extends PassPlacement {
   decision: InterviewDecision;
   reason: string;
   includeReasonInMail?: boolean;
@@ -71,7 +82,8 @@ export interface RegisterInterviewResultResponse {
 // ---- api-gateway ⇄ member-service (INTERNAL) ----
 
 /** POST /members/internal/hr/applicants/:id/interview-result/claim */
-export interface ClaimInterviewResultRequest {
+/** placement は合格のとき、アカウントを発行する前にここで確かめる (存在しないチーム・上長は 400)。 */
+export interface ClaimInterviewResultRequest extends PassPlacement {
   decision: InterviewDecision;
   reason: string;
   includeReasonInMail?: boolean;
@@ -85,7 +97,8 @@ export interface ClaimInterviewResultResponse {
 }
 
 /** POST /members/internal/hr/applicants/:id/interview-result/link (合格のみ) */
-export interface LinkInterviewResultRequest {
+/** placement は名簿の行をこの呼び出しで作る時だけ使う。 */
+export interface LinkInterviewResultRequest extends PassPlacement {
   identityUserId: string;
   address: string;
 }
@@ -115,6 +128,8 @@ export interface ResultMailInput {
   reason: string | null;
   /** 合格: 発行したアドレス。 */
   address?: string | null;
+  /** 合格: 所属チームの名前 (空・省略なら載せない)。 */
+  teamNames?: readonly string[] | null;
   /** 合格: アプリの URL (ログイン先)。 */
   appUrl?: string | null;
   /** 合格: 参加届の URL。 */
@@ -161,6 +176,7 @@ export function renderResultMail(m: ResultMailInput): ResultMail {
       "",
       "■ あなたの Dub アカウント",
       `メールアドレス: ${m.address ?? "（発行後にお知らせします）"}`,
+      ...(m.teamNames && m.teamNames.length > 0 ? [`所属チーム: ${m.teamNames.join("、")}`] : []),
       `ログイン URL: ${m.appUrl ?? ""}`,
       "初期パスワードは、別のメール「【Developers Hub】アカウント発行のお知らせ」でお送りしています。",
       "初回ログイン時にパスワードの変更をお願いします。",
