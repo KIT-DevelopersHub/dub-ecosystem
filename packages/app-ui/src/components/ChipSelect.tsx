@@ -59,6 +59,11 @@ export function ChipSelect({
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
   const composingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Blur closes the list after a short delay (so an option's mousedown lands first). A refocus
+  // before then — e.g. the chip × handing focus back — must cancel it, or the list stays closed
+  // while the input is focused and Enter adds nothing.
+  const blurTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(blurTimerRef.current), []);
 
   const byValue = useMemo(() => new Map(options.map((o) => [o.value, o])), [options]);
   const chosen = useMemo(
@@ -135,8 +140,14 @@ export function ChipSelect({
         aria-activedescendant={showList && activeIndex >= 0 ? optionId(activeIndex) : undefined}
         autoComplete="off"
         onChange={(e) => setDraft(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+        onFocus={() => {
+          window.clearTimeout(blurTimerRef.current);
+          setFocused(true);
+        }}
+        onBlur={() => {
+          window.clearTimeout(blurTimerRef.current);
+          blurTimerRef.current = window.setTimeout(() => setFocused(false), 120);
+        }}
         onCompositionStart={() => {
           composingRef.current = true;
         }}
