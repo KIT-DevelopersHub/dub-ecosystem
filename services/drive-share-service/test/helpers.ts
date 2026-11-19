@@ -1,6 +1,7 @@
 // Shared in-memory fakes for drive-share-service unit tests. No network, no real bindings.
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { identity } from "@dub/types";
+import type { Fetcher } from "@cloudflare/workers-types";
 import type { ActiveUser, RoleMembership } from "../src/role-membership";
 import { createRoleGrantsService, type RoleGrantsService } from "../src/role-grants-service";
 import { createInMemoryRoleGrantStore, type RoleGrantStore } from "../src/role-grants-store";
@@ -219,4 +220,48 @@ export function buildGoogleLink(opts: { env?: Env; fetchImpl?: typeof fetch; att
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   });
   return { service, states, attendance };
+}
+
+/** One call the fake identity binding served. */
+export interface IdentityCall {
+  method: string;
+  path: string;
+  /** x-dub-user-id as sent, or null when the call carried no acting user (system). */
+  userId: string | null;
+  internal: boolean;
+}
+
+/**
+ * A fake SVC_IDENTITY binding that answers like identity-roster's policy gate does: every
+ * route needs the x-dub-internal marker (403 without), `/identity/roles` is key-gated and so
+ * 401s a call with no x-dub-user-id (the hourly alarm's system actor), while `/internal/roles`
+ * and `/internal/users` serve any marked caller. Single page; `people` is read live, so a
+ * test may delete a role or change memberships between syncs.
+ */
+export function fakeIdentityBinding(people: { users: ActiveUser[]; roles: Record<string, string> }): { binding: Fetcher; calls: IdentityCall[] } {
+  const calls: IdentityCall[] = [];
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const deny = (status: number, code: string, message: string) => json(status, { error: { code, message, retryable: false } });
+  const rolesPage = () => json(200, { items: Object.entries(people.roles).map(([id, name]) => ({ id, name })), nextCursor: null });
+  const fetch = async (req: Request): Promise<Response> => {
+    const url = new URL(req.url);
+    const userId = req.headers.get("x-dub-user-id");
+    const internal = req.headers.get("x-dub-internal") !== null;
+    calls.push({ method: req.method, path: url.pathname, userId, internal });
+    if (!internal) return deny(403, "FORBIDDEN", "internal-only");
+    if (url.pathname === "/identity/roles") {
+      if (!userId) return deny(401, "UNAUTHENTICATED", "no actor");
+      return rolesPage();
+    }
+    if (url.pathname === "/internal/roles") return rolesPage();
+    if (url.pathname === "/internal/users") {
+      const role = url.searchParams.get("role");
+      const items = people.users
+        .filter((u) => !role || u.roleIds.includes(role))
+        .map((u) => ({ id: u.id, email: u.email, displayName: u.name, roleIds: [...u.roleIds] }));
+      return json(200, { items, nextCursor: null });
+    }
+    return deny(404, "NOT_FOUND", url.pathname);
+  };
+  return { binding: { fetch } as unknown as Fetcher, calls };
 }

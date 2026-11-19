@@ -154,6 +154,7 @@ gateway で `auth="public"`(エッジでセッション不要)。`app.use` は�
 | GET /users/:id | ×(internal) | `requireInternal` | `INTERNAL` | gateway `/me` 合成用 |
 | POST /internal/users/:id/profile | ×(internal) | `requireInternal` | `INTERNAL` | gateway が自分の userId に限定して転送 |
 | GET /internal/users | ×(internal) | `requireInternal` | `INTERNAL` | 通知ファンアウトのロール展開 |
+| GET /internal/roles | ×(internal) | (新規) | `INTERNAL` | drive-share の時間毎同期(system actor)がロール削除を判定 |
 | POST /internal/users/lookup | ×(internal) | `requireInternal` | `INTERNAL` | ログイン許可リスト照会 |
 | POST /authz/check | ×(internal) | `requireInternal` | `INTERNAL` | **全サービスの認可判定の起点** |
 | GET /internal/users/:id/permissions | ×(internal) | `requireInternal` | `INTERNAL` | 実効権限の取得 |

@@ -258,6 +258,13 @@ export function createApp(opts: AppOptions): App {
     return c.json(out);
   });
 
+  // Role list — internal S2S read for drive-share-service's hourly meeting sync, which runs
+  // as the system (no user id) and so cannot pass the identity:read gate on /identity/roles.
+  // Same { items, nextCursor } page as GET /identity/roles.
+  app.get("/internal/roles", async (c) => {
+    return c.json(await svc.listRoles(orgId, numParam(c.req.query("limit")), c.req.query("cursor")));
+  });
+
   // Permission → holders (roles + active user ids) — internal S2S read for notification
   // audience fan-out (notif:receive_admin / notif:receive_all) and 通知管理「誰に届くか」.
   // INTERNAL like /internal/users: the caller acts for the system, and a permission-holder
