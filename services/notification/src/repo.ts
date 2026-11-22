@@ -153,14 +153,18 @@ export async function backfillBroadcastInbox(db: DbClient, userId: string): Prom
  * broadcast backfill (retention purge bounds the admin-audience row count). Returns rows
  * newly created. notif_* tables only (@dub/db guard).
  */
-export async function backfillAdminAudienceInbox(db: DbClient, userId: string): Promise<number> {
+export async function backfillAdminAudienceInbox(db: DbClient, userId: string, sinceIso?: string): Promise<number> {
+  // `sinceIso` bounds the scan to recent rows (idx_notif_audience_created) for the polled
+  // unread-count path; GET /inbox omits it and still backfills everything.
+  const since = sinceIso !== undefined ? " AND n.created_at >= ?" : "";
   const missing = await db.all<{ id: string }>(
     `SELECT n.id FROM notif_notifications n
-      WHERE n.audience = ?
+      WHERE n.audience = ?${since}
         AND NOT EXISTS (
           SELECT 1 FROM notif_inbox i WHERE i.notification_id = n.id AND i.user_id = ?
         )`,
     AUDIENCE_ADMIN,
+    ...(sinceIso !== undefined ? [sinceIso] : []),
     userId,
   );
   for (const r of missing) {

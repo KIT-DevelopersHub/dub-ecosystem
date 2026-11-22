@@ -386,6 +386,19 @@ describe("admin-audience lazy backfill (CI single-INSERT model)", () => {
     expect(await backfillAdminAudienceInbox(h.db, "usr_admin")).toBe(0);
     expect(await unreadCount(h.db, "usr_admin", true)).toBe(1);
   });
+
+  it("sinceIso bounds the backfill to recent rows; the full backfill still picks up older ones", async () => {
+    const h = makeTestEnv();
+    const old = await insertNotification(h.db, adminInput({ dedupKey: "deploy:old" }));
+    await insertNotification(h.db, adminInput({ dedupKey: "deploy:new" }));
+    await h.db.run("UPDATE notif_notifications SET created_at = ? WHERE id = ?", "2020-01-01T00:00:00.000Z", old);
+
+    const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    expect(await backfillAdminAudienceInbox(h.db, "usr_admin", since)).toBe(1);
+    expect(await unreadCount(h.db, "usr_admin", true)).toBe(1);
+    expect(await backfillAdminAudienceInbox(h.db, "usr_admin")).toBe(1);
+    expect(await unreadCount(h.db, "usr_admin", true)).toBe(2);
+  });
 });
 
 describe("HTTP — Notification management gate + end-to-end publish", () => {

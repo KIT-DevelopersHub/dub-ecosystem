@@ -74,6 +74,9 @@ import { signWsTicket, ticketExpiryMs, DEV_WS_SECRET } from "./wsticket";
 // replaced with the url-encoded user id. Overridden per-env by NOTIF_RT_DO_URL_BASE.
 const DEFAULT_DO_URL_BASE = "wss://dub-notification-service.developershub-site.workers.dev/ws/:id";
 
+/** unread-count's admin backfill window (index-bounded). Older rows arrive via GET /inbox. */
+const UNREAD_BACKFILL_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+
 interface GetPreferencesResponse {
   userId: string;
   entries: notification.PreferenceEntry[];
@@ -364,7 +367,8 @@ export function createApp(options: CreateAppOptions = {}) {
       // Same backfills as GET /inbox so the header unread badge counts what the list shows.
       const { admin, broadcasts } = await receiverFlags(c, userId);
       if (broadcasts) await backfillBroadcastInbox(db, userId);
-      if (admin) await backfillAdminAudienceInbox(db, userId);
+      // Polled by the header badge: only recent admin rows here; GET /inbox does the full backfill.
+      if (admin) await backfillAdminAudienceInbox(db, userId, new Date(Date.now() - UNREAD_BACKFILL_WINDOW_MS).toISOString());
       const count = await unreadCount(db, userId, admin);
       return c.json({ count } satisfies notification.UnreadCountResponse);
     });
