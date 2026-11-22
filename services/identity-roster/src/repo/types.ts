@@ -93,6 +93,8 @@ export interface IdentityRepo {
 
   // roles
   getRole(roleId: string): Promise<RoleRow | null>;
+  /** Roles (with permissions) for the given ids in one read; unknown ids are absent. */
+  getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]>;
   getRoleByName(orgId: string, name: string): Promise<RoleRow | null>;
   listRoles(orgId: string, limit: number, cursor?: string): Promise<{ items: RoleRow[]; nextCursor: string | null }>;
   createRole(row: RoleRow, mailVisibleRoleIds?: string[]): Promise<void>;

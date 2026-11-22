@@ -62,6 +62,20 @@ function seedInterleaved(raw: Raw): { blocked: number; clean: number } {
 }
 
 describe("GET /mail/messages?folder= (conversation paging, blocked excluded before LIMIT)", () => {
+  it("withTotal=0 skips the total (same page otherwise); counts carries the same number", async () => {
+    const { env: e, raw } = env();
+    const { clean } = seedInterleaved(raw);
+    await block(e, "spam.example", "domain");
+    await block(e, "bad@x.example");
+    const full = await page(e, "inbox");
+    const lean = await page(e, "inbox", undefined, "&withTotal=0");
+    expect(lean.total).toBeUndefined();
+    expect(lean.threads).toEqual(full.threads);
+    expect(lean.nextCursor).toBe(full.nextCursor);
+    const res = await app.fetch(new Request("https://svc/mail/counts", { headers: hdr() }), e);
+    expect(((await res.json()) as mail.MailFolderCounts).inbox.total).toBe(clean);
+  });
+
   it("pages 1 and 2 of 受信トレイ are both full (50) with no blocked sender; totals are exact", async () => {
     const { env: e, raw } = env();
     const { blocked, clean } = seedInterleaved(raw);

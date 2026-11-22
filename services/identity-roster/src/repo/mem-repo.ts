@@ -107,6 +107,14 @@ export class MemIdentityRepo implements IdentityRepo {
     const r = this.roles.get(roleId);
     return r ? { ...r, permissions: [...r.permissions] } : null;
   }
+  async getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]> {
+    const out: RoleRow[] = [];
+    for (const id of new Set(roleIds)) {
+      const r = this.roles.get(id);
+      if (r) out.push({ ...r, permissions: [...r.permissions] });
+    }
+    return out;
+  }
   async getRoleByName(orgId: string, name: string): Promise<RoleRow | null> {
     for (const r of this.roles.values()) {
       if (r.orgId === orgId && r.name === name) return { ...r, permissions: [...r.permissions] };

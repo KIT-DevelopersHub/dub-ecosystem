@@ -19,6 +19,9 @@ export interface ListMailMessagesQuery extends CursorQuery {
   // excepted). The response then carries `total` (conversations in the view). Absent = the
   // legacy message-level list (no folder filtering), kept for older clients.
   folder?: MailFolderView;
+  // ADDITIVE (folder views): false skips the view's `total` COUNT(*) (response omits it). Clients
+  // that already hold GET /mail/counts (same per-view totals) use this on background re-syncs.
+  withTotal?: boolean;
 }
 
 /** Server-side mailbox views for GET /mail/messages?folder=. `all` = every view except
@@ -51,7 +54,7 @@ export type MailFolderCounts = Record<Exclude<MailFolderView, "all">, MailFolder
 // separately spec'd — documenting it is a noted follow-up). See
 // docs/api-contracts/_wire-contract-enforcement.md.
 export const MAIL_WIRE = {
-  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "folder", "limit", "q", "threadId"] },
+  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "folder", "limit", "q", "threadId", "withTotal"] },
 } as const;
 
 // Compile-time tie: every query key the descriptor lists must be a real key of the typed
