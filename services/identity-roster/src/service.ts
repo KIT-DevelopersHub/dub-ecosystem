@@ -116,12 +116,9 @@ export class IdentityService {
   private async loadEvalContext(userId: string, orgId: string): Promise<EvalContext> {
     const user = await this.d.repo.getUser(userId);
     const assignments = user ? await this.d.repo.listAssignmentsByUser(userId, orgId) : [];
-    const roleById = new Map<string, RoleRow>();
-    for (const a of assignments) {
-      if (roleById.has(a.roleId)) continue;
-      const role = await this.d.repo.getRole(a.roleId);
-      if (role) roleById.set(role.id, role);
-    }
+    // One roles+permissions read for all of the user's roles (was getRole + permissionsOf per role).
+    const roles = assignments.length > 0 ? await this.d.repo.getRolesByIds(assignments.map((a) => a.roleId)) : [];
+    const roleById = new Map<string, RoleRow>(roles.map((r) => [r.id, r]));
     return { user, orgId, roleById, assignments };
   }
 
