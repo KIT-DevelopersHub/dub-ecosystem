@@ -267,6 +267,7 @@ export function createApp() {
         limit: q.limit,
         ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
         ...(q.q !== undefined ? { q: q.q } : {}),
+        ...(q.withTotal === false ? { withTotal: false } : {}),
       });
       for (const m of folderPage.items) hideArchiveCc(m, archiveOf(c));
       markBlocked(folderPage.items, await loadMatcher(dbOf(c), viewer));

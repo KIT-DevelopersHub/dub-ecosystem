@@ -32,6 +32,8 @@ export interface InboxQuery {
   q?: string;
   /** Folder view: conversation-paged with blocked senders + flags filtered server-side. */
   folder?: mail.MailFolderView;
+  /** false: skip the view's total COUNT (the caller takes it from counts()). */
+  withTotal?: boolean;
 }
 
 export interface SentQuery {
@@ -136,6 +138,7 @@ export function createMailApi(api: ApiClient): MailApi {
       if (query?.threadId !== undefined) q.threadId = query.threadId;
       if (query?.q !== undefined) q.q = query.q;
       if (query?.folder !== undefined) q.folder = query.folder;
+      if (query?.withTotal === false) q.withTotal = "0";
       const hasQuery = Object.keys(q).length > 0;
       return api.request<mail.MailMessagePage>({ method: "GET", path: `${MAIL}/messages`, ...(hasQuery ? { query: q } : {}) });
     },
