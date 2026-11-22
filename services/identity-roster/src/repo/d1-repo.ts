@@ -26,6 +26,8 @@ interface UserDb {
   created_at: string;
   updated_at: string;
 }
+const ROLE_ID_CHUNK = 50;
+
 interface RoleDb {
   id: string;
   org_id: string;
@@ -252,6 +254,29 @@ export class D1IdentityRepo implements IdentityRepo {
     const r = await this.db.first<RoleDb>("SELECT * FROM identity_roles WHERE id = ?", roleId);
     if (!r) return null;
     return this.toRole(r, await this.permissionsOf(roleId));
+  }
+  async getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]> {
+    // One query per chunk (roles LEFT JOIN permissions) instead of getRole + permissionsOf per
+    // role — loadEvalContext runs on every authz check. Chunked to stay under D1's bind limit.
+    const ids = [...new Set(roleIds)];
+    const byId = new Map<string, RoleRow>();
+    for (let i = 0; i < ids.length; i += ROLE_ID_CHUNK) {
+      const chunk = ids.slice(i, i + ROLE_ID_CHUNK);
+      const rows = await this.db.all<RoleDb & { permission_key: string | null }>(
+        `SELECT r.id, r.org_id, r.name, r.is_system, r.created_at, r.updated_at, rp.permission_key
+           FROM identity_roles r
+           LEFT JOIN identity_role_permissions rp ON rp.role_id = r.id
+          WHERE r.id IN (${chunk.map(() => "?").join(", ")})
+          ORDER BY r.id, rp.permission_key`,
+        ...chunk,
+      );
+      for (const r of rows) {
+        let role = byId.get(r.id);
+        if (!role) byId.set(r.id, (role = this.toRole(r, [])));
+        if (r.permission_key !== null) role.permissions.push(r.permission_key as identity.PermissionKey);
+      }
+    }
+    return [...byId.values()];
   }
   async getRoleByName(orgId: string, name: string): Promise<RoleRow | null> {
     const r = await this.db.first<RoleDb>("SELECT * FROM identity_roles WHERE org_id = ? AND name = ?", orgId, name);
