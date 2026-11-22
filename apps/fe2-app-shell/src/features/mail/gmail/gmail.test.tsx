@@ -11,7 +11,7 @@ import type { mail } from "@dub/types";
 import type { MailApi } from "../mailApi.tsx";
 import { MailApiProvider } from "../MailProvider.tsx";
 import { GmailApp } from "./GmailApp.tsx";
-import { MAIL_POLL_MS } from "./useMailSync.tsx";
+import { MAIL_POLL_MS, MAIL_REFOCUS_MIN_MS } from "./useMailSync.tsx";
 import { reducer, initialMailState, type MailState } from "./useMailStore.tsx";
 import { hasSharedMail, inFolder, sharedRecipientLabel, threadMine, threadUnread, type MailThreadModel } from "./mailModel.ts";
 import {
@@ -281,10 +281,63 @@ describe("GmailApp (hydrates from the gateway)", () => {
         vi.advanceTimersByTime(MAIL_POLL_MS);
       });
       await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+      // Coming back right after a sync does not re-fetch; after MAIL_REFOCUS_MIN_MS it does.
       await act(async () => {
         document.dispatchEvent(new Event("visibilitychange"));
       });
+      expect(listInbox).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        vi.advanceTimersByTime(MAIL_REFOCUS_MIN_MS);
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
       await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(3));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not poll while the window is unfocused or the tab is hidden; refocus re-syncs", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const visibility = vi.spyOn(document, "visibilityState", "get");
+    try {
+      const listInbox = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+      render(wrap(<GmailApp />, fakeApi({ listInbox })));
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        window.dispatchEvent(new Event("blur"));
+        vi.advanceTimersByTime(MAIL_POLL_MS);
+      });
+      expect(listInbox).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+      visibility.mockReturnValue("hidden");
+      await act(async () => {
+        vi.advanceTimersByTime(MAIL_POLL_MS);
+      });
+      expect(listInbox).toHaveBeenCalledTimes(2);
+    } finally {
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("a background sync takes the view total from counts() instead of the list's COUNT", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const view = { total: 0, unread: 0 };
+      const counts = vi.fn().mockResolvedValue({ inbox: view, mine: view, others: view, starred: view, archive: view, trash: view, blocked: view });
+      const listInbox = vi.fn().mockResolvedValue({ items: [], nextCursor: null, total: 0 });
+      render(wrap(<GmailApp />, fakeApi({ listInbox, counts })));
+      await waitFor(() => expect(counts).toHaveBeenCalledTimes(1));
+      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox" }); // first load keeps its total
+      await act(async () => {
+        vi.advanceTimersByTime(MAIL_POLL_MS);
+      });
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", withTotal: false });
+      await waitFor(() => expect(counts).toHaveBeenCalledTimes(2)); // one counts() per sync, not two
     } finally {
       vi.useRealTimers();
     }
@@ -968,7 +1021,7 @@ describe("Gmail-style pagination (cursor-paged folder list)", () => {
         vi.advanceTimersByTime(MAIL_POLL_MS);
       });
       await waitFor(() => expect(listInbox.mock.calls.length).toBe(calls + 1));
-      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", cursor: "c2" });
+      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", cursor: "c2", withTotal: false });
       expect(screen.getByTestId("fe2-mail-page-range")).toHaveTextContent("51–53");
       expect(screen.queryByTestId("fe2-mail-list-loading")).toBeNull(); // no skeleton flicker
     } finally {

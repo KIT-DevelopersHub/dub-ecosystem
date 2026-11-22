@@ -346,9 +346,12 @@ export function parseListMessagesQuery(q: Record<string, string | undefined>): {
   limit: number;
   q?: string;
   folder?: mail.MailFolderView;
+  withTotal?: boolean;
 } {
   const fe: FieldError[] = [];
-  const out: { threadId?: string; cursor?: string; limit: number; q?: string; folder?: mail.MailFolderView } = { limit: DEFAULT_QUERY_LIMIT };
+  const out: { threadId?: string; cursor?: string; limit: number; q?: string; folder?: mail.MailFolderView; withTotal?: boolean } = { limit: DEFAULT_QUERY_LIMIT };
+
+  if (q.withTotal === "0" || q.withTotal === "false") out.withTotal = false;
 
   if (q.folder !== undefined && q.folder !== "") {
     if ((mail.MAIL_FOLDER_VIEWS as readonly string[]).includes(q.folder)) out.folder = q.folder as mail.MailFolderView;

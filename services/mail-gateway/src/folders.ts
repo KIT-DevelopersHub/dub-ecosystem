@@ -109,7 +109,7 @@ function viewFrom(scope: InboundScope, viewer: string, q: string | undefined): S
  *  (fewer only on the last page), newest conversation first, plus the view's total. */
 export async function listInboundFolder(
   db: DbClient,
-  q: { scope: InboundScope; viewer: string; folder: View; cursor?: string; limit: number; q?: string },
+  q: { scope: InboundScope; viewer: string; folder: View; cursor?: string; limit: number; q?: string; withTotal?: boolean },
 ): Promise<mail.MailMessagePage> {
   const from = viewFrom(q.scope, q.viewer, q.q);
   const pred = VIEW_PREDICATE[q.folder];
@@ -123,9 +123,14 @@ export async function listInboundFolder(
   );
   const hasMore = threads.length > q.limit;
   const page = hasMore ? threads.slice(0, q.limit) : threads;
-  const totalRow = await db.first<{ n: number }>(`SELECT COUNT(*) AS n ${from.sql} WHERE ${pred}`, ...from.binds);
-  const total = Number(totalRow?.n ?? 0);
-  if (page.length === 0) return { items: [], nextCursor: null, total };
+  // withTotal=false: the caller already has the view's total from GET /mail/counts.
+  let total: number | undefined;
+  if (q.withTotal !== false) {
+    const totalRow = await db.first<{ n: number }>(`SELECT COUNT(*) AS n ${from.sql} WHERE ${pred}`, ...from.binds);
+    total = Number(totalRow?.n ?? 0);
+  }
+  const withTotal = total !== undefined ? { total } : {};
+  if (page.length === 0) return { items: [], nextCursor: null, ...withTotal };
 
   const sel = inboundSelect(q.viewer);
   const where = ["thread_id IN (SELECT value FROM json_each(?))"];
@@ -145,7 +150,7 @@ export async function listInboundFolder(
   return {
     items: rows.map((r) => rowToListItem(r, q.viewer)),
     nextCursor: hasMore ? encodeCursor(last.last_id) : null,
-    total,
+    ...withTotal,
   };
 }
 

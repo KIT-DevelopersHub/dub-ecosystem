@@ -140,6 +140,14 @@ paths:
           schema:
             type: string
             enum: [inbox, mine, others, starred, archive, trash, blocked, all]
+        - name: withTotal
+          in: query
+          description: >-
+            Folder views only. `0` / `false` skips the view's `total` count (the response omits
+            it); clients that already hold GET /mail/counts use this on background re-syncs.
+          schema:
+            type: string
+            enum: ['0', 'false']
       responses:
         '200':
           description: Page of messages
