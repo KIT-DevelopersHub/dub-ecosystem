@@ -11,7 +11,7 @@
 # A bind target Worker must already exist or the binding fails to resolve. auth
 # also binds SVC_IDENTITY, so identity must land first. Order therefore is:
 #   identity-roster -> auth-service -> peripheral services -> api-gateway
-#   -> fe2-app-shell -> mo3-mobile-bff
+#   -> fe2-app-shell -> lp-conference-next (public LP) -> mo3-mobile-bff
 #
 # Requires in env:
 #   CLOUDFLARE_API_TOKEN     (Workers Scripts:Edit, D1:Edit, Workers KV:Edit — see docs/DEPLOY.md)
@@ -65,6 +65,19 @@ if grep -q 'REPLACE_AT_CUTOVER' services/lp-tickets/wrangler.free.toml; then
   echo "::error::services/lp-tickets/wrangler.free.toml still has REPLACE_AT_CUTOVER. Create dub-tickets and set its id first — see docs/runbooks/09-lp-tickets-cutover.md." >&2
   exit 1
 fi
+
+# 公開 LP (lp-conference-next) の全版バンドルを、何もデプロイする前に作る（失敗したら途中まで新しい状態にしない）。
+# versions.json の ref "HEAD" の版は作業ツリーから作るので、main に入った LP の変更はこのビルドで初めて本番に載る。
+# ほかの版は固定 SHA を git archive するため、浅い checkout では作れない（deploy.yml は fetch-depth: 0）。
+# WHY: 以前は LP だけ手動デプロイで、#821 の新セクションが main → 本番デプロイ後も LP に出なかった。
+LP_APP=apps/lp-conference-next
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo false)" = "true" ]; then
+  echo "::error::shallow clone — ${LP_APP}/scripts/build-bundle.mjs needs full history (actions/checkout fetch-depth: 0)." >&2
+  exit 1
+fi
+echo "::group::build lp-conference-next bundle"
+pnpm --filter @dub/lp-conference-next build:bundle
+echo "::endgroup::"
 
 deploy() {
   local name="$1" config="$2"
@@ -164,6 +177,14 @@ fi
 # Worker name is `dub-fe2-app-shell` (defined in the config). The old unprefixed
 # `fe2-app-shell` worker is a decommissioned orphan (308-redirects to canonical).
 deploy dub-fe2-app-shell apps/fe2-app-shell/wrangler.free.toml
+
+# --- 5b. public LP (hokuriku-it-conf.com). Binds LP_FLAG (dub-lp-analytics) + LP_TICKETS (dub-lp-tickets),
+#     both deployed in step 3. Bundle built at the top of this script. ---
+deploy lp-conference-next "${LP_APP}/wrangler.toml"
+if [ "${SKIP_HEALTHCHECK:-0}" != "1" ]; then
+  LP="${LP_HEALTH_URL:-https://hokuriku-it-conf.com}"
+  check "lp /" "${LP%/}/" 200
+fi
 
 # --- 6. mo3 mobile BFF (binds SVC_AUTH/IDENTITY/EVENT/TASK/NOTIFICATION) ---
 deploy mo3-mobile-bff apps/mo3-mobile-bff/wrangler.free.toml
