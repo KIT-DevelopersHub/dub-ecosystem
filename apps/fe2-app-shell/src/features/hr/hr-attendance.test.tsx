@@ -152,7 +152,8 @@ describe("demo transport (定例の出席 / Meet)", () => {
     const api = createApiClient({ baseUrl: "https://demo.local", fetchImpl: createDemoFetch() });
     const mine = await api.request<meeting.ListMyRegularMeetingsResponse>({ method: "GET", path: "/api/v1/meetings/me/regulars" });
     expect(mine.googleLinked).toBe(false);
-    expect(mine.items[0]).toMatchObject({ id: "mtg_member_now", joinOpen: true });
+    // 全体定例（月曜 21:00 JST）が開催中の時間帯は並びが入れ替わるので、先頭ではなく id で探す
+    expect(mine.items.find((m) => m.id === "mtg_member_now")).toMatchObject({ id: "mtg_member_now", joinOpen: true });
     const joined = await api.request<meeting.JoinMeetingResponse>({ method: "POST", path: "/api/v1/meetings/mtg_member_now/join" });
     expect(joined.recordedFor).not.toBeNull();
     const start = await api.request<meeting.StartGoogleLinkResponse>({ method: "POST", path: "/api/v1/meetings/me/google-link/start", body: { redirectUri: "x" } });
@@ -160,7 +161,7 @@ describe("demo transport (定例の出席 / Meet)", () => {
     await api.request({ method: "POST", path: "/api/v1/meetings/me/google-link/callback", body: { code: "demo", state } });
     const after = await api.request<meeting.ListMyRegularMeetingsResponse>({ method: "GET", path: "/api/v1/meetings/me/regulars" });
     expect(after.googleLinked).toBe(true);
-    expect(after.items[0]!.attended).toBe(true);
+    expect(after.items.find((m) => m.id === "mtg_member_now")!.attended).toBe(true);
   });
 });
 

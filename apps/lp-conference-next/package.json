@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:bundle": "node scripts/build-bundle.mjs",
+    "test": "node --test worker/*.test.ts src/lib/*.test.ts",
     "test:worker": "node --test worker/*.test.ts src/lib/*.test.ts"
   },
   "dependencies": {

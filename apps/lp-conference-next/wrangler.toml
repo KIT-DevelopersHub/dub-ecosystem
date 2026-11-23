@@ -9,10 +9,10 @@
 # DEFAULT_VERSION) and `?version=3.1` previews (session cookie + noindex + banner).
 # /_v/* skips the Worker (served straight from assets = no request quota used).
 #
-# Deploy (PRODUCTION — only with explicit owner approval):
+# Deploy: infra/deploy/deploy-prod.sh (deploy.yml, every merge to main) builds the bundle and
+# deploys this Worker. Manual re-deploy (same steps):
 #   pnpm --filter @dub/lp-conference-next build:bundle
-#   export CLOUDFLARE_API_TOKEN=$(cat ~/DubVault/secrets/cf-token.txt)
-#   npx wrangler deploy --config apps/lp-conference-next/wrangler.toml
+#   pnpm dlx wrangler@4.35.0 deploy --config apps/lp-conference-next/wrangler.toml
 name = "lp-conference-next"
 main = "worker/index.ts"
 compatibility_date = "2026-08-01"

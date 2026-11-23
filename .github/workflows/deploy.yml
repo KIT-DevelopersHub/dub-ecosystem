@@ -42,7 +42,7 @@ jobs:
   deploy:
     name: verify · deploy · smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45  # first run builds every LP version (cold .bundle-cache)
     # First run auto-creates this environment (no protection). Add required reviewers
     # under Settings → Environments → production to gate deploys behind approval.
     environment: production
@@ -62,6 +62,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # deploy-prod.sh builds the public LP bundle, which `git archive`s every pinned
+          # version in apps/lp-conference-next/versions.json — needs the full history.
+          fetch-depth: 0
 
       # --- Gate #2 (fail-close): production label gate ---------------------------------
       # Defence in depth for prod-gate.yml (which enforces the `確認した` label at MERGE
@@ -129,6 +133,16 @@ jobs:
           key: turbo-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             turbo-${{ runner.os }}-
+
+      # Pinned LP versions (versions.json refs other than HEAD) never change, so their Next builds
+      # are cached by build-bundle.mjs under .bundle-cache/<id>-<sha>-<fixes>/. Only HEAD rebuilds.
+      - name: Restore LP bundle cache
+        uses: actions/cache@v4
+        with:
+          path: apps/lp-conference-next/.bundle-cache
+          key: lp-bundle-${{ runner.os }}-${{ hashFiles('apps/lp-conference-next/versions.json', 'apps/lp-conference-next/content-fixes.json') }}
+          restore-keys: |
+            lp-bundle-${{ runner.os }}-
 
       # --- Green gate: identical checks to ci.yml, in-job, before any deploy ---
       - name: Typecheck
