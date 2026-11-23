@@ -1,0 +1,153 @@
+/* 中身のセクションの項目エディタ（LpContentEditor）と、公開設定の右列の「項目」行。
+   モーダルは body へ portal されるので --dub-* トークンだけを使う。 */
+
+.note {
+  margin: 0;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-lineHeight-relaxed);
+}
+
+.listHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+}
+
+.count {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+  min-height: 56px;
+}
+
+.row[data-dragging] {
+  box-shadow: var(--dub-shadow-md);
+}
+
+.handle {
+  display: inline-flex;
+  color: var(--dub-color-text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.thumb {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-muted);
+}
+
+.thumb[data-shape="round"] {
+  border-radius: var(--dub-radius-full);
+}
+
+.thumb[data-shape="wide"] {
+  width: 64px;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.thumb[data-shape="square"] img,
+.thumb[data-shape="round"] img {
+  object-fit: cover;
+}
+
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rowTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--dub-font-weight-medium);
+}
+
+.rowSub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+}
+
+.rowActions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+}
+
+.confirmText {
+  margin-right: var(--dub-space-1);
+  color: var(--dub-color-danger-700);
+  font-size: var(--dub-font-size-sm);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-5);
+}
+
+.checkRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+}
+
+.urlRow {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+}
+
+.urlRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 公開設定の右列: 項目の件数と「編集」 */
+.contentRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2) var(--dub-space-4);
+}
+
+.contentCount {
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+}

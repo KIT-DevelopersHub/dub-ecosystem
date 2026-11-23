@@ -38,6 +38,8 @@ import {
 import { handlePass, matchPassRoute } from "./ticket-pass.ts";
 import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supportsSiteConfig } from "./site-config.ts";
 import { bridgeScript, parseExtraOrigins, shouldInjectBridge } from "./preview-bridge.ts";
+import { contentInjections, contentSelector } from "./lp-content.ts";
+import type { LpContentSectionId } from "../../../packages/types/src/lp.ts";
 
 interface Fetcher {
   fetch(input: Request | string, init?: RequestInit): Promise<Response>;
@@ -257,7 +259,10 @@ export default {
     const spCfg = page && proposals ? await proposals : null;
     // 公開設定は v3.6 以降の版だけ（古い版は属性を知らないので付けない）。
     const siteConfig = page && layout !== null && supportsSiteConfig(r.version);
-    const attrs = siteConfig ? htmlAttributes(await layout) : {};
+    const siteLayoutValue = siteConfig ? await layout : null;
+    const attrs = htmlAttributes(siteLayoutValue);
+    // 中身（協力団体・お知らせ・登壇者・スポンサー）。公開表示は表示中のセクションだけ、プレビューは全部。
+    const content = Object.entries(contentInjections(siteLayoutValue, r.preview || cfgDraft)) as [LpContentSectionId, string][];
     const previewing = [
       siteConfig && cfgDraft ? "下書きの公開設定" : null,
       cfg?.enabled && cfg.preview ? "チケット販売" : null,
@@ -281,13 +286,15 @@ export default {
       ticketsInjection(cfg, false) +
       proposalsInjection(spCfg);
     const attrEntries = Object.entries(attrs);
-    if (inject || attrEntries.length > 0) headers.delete("etag");
+    const changed = !!inject || attrEntries.length > 0 || content.length > 0;
+    if (changed) headers.delete("etag");
     const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-    if ((!inject && attrEntries.length === 0) || !isHtml) return out;
+    if (!changed || !isHtml) return out;
     let rw = new HTMLRewriter();
     if (attrEntries.length > 0) {
       rw = rw.on("html", { element: (el) => attrEntries.forEach(([k, v]) => el.setAttribute(k, v)) });
     }
+    for (const [id, html] of content) rw = rw.on(contentSelector(id), { element: (el) => el.append(html, { html: true }) });
     if (inject) rw = rw.on("body", { element: (el) => el.append(inject, { html: true }) });
     return rw.transform(out);
   },

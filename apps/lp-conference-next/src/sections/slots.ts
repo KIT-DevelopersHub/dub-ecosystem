@@ -35,7 +35,12 @@ export function siteConfigCss(registry: Registry): string {
       rules.push(`html[${attr}="${v}"] ${slot}>[data-lp-variant="${v}"]{display:contents}`);
       rules.push(`html[${attr}="${v}"] ${slot}>[data-lp-variant="${d}"]{display:none}`);
     }
-    if (def.hideable) {
+    if (def.hideable && def.defaultVisible === false) {
+      // 既定で隠れるセクション: 属性（バリアント）が付いたときだけ出す。属性の無い古い Worker・設定が取れないときは出ない。
+      rules.push(
+        `html:not([${attr}]) ${slot},html[${attr}="${HIDDEN}"] ${slot},html:not([${attr}]) [data-lp-nav="${id}"],html[${attr}="${HIDDEN}"] [data-lp-nav="${id}"]{display:none!important}`,
+      );
+    } else if (def.hideable) {
       rules.push(`html[${attr}="${HIDDEN}"] ${slot},html[${attr}="${HIDDEN}"] [data-lp-nav="${id}"]{display:none!important}`);
     }
     for (const [rawK, o] of Object.entries(def.options ?? {})) {

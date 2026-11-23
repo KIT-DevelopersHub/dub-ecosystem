@@ -39,6 +39,8 @@ export interface LpSectionDef {
   label: string;
   /** 「表示しない」を許すか。 */
   hideable: boolean;
+  /** 書いていないときに表示するか（省略 = true）。false は新設のセクション用: 有効にするまで本番は変わらない。 */
+  defaultVisible?: boolean;
   defaultVariant: string;
   /** variantId → 表示名。 */
   variants: Readonly<Record<string, string>>;
@@ -53,6 +55,10 @@ export const LP_SECTION_REGISTRY = {
     variants: { a: "標準" },
     options: { banner: { kind: "boolean", label: "帯（告知バナー）を表示", default: true } },
   },
+  // 中身（項目の一覧）を LP管理で編集するセクション（LP_CONTENT_FIELDS）。既定は非表示・項目が 0 件のあいだも出ない。
+  partners: { label: "協力団体ロゴ", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "ロゴの帯" } },
+  news: { label: "お知らせ", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "一覧" } },
+  speakers: { label: "登壇者情報", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "2列カード" } },
   join: { label: "参加・登壇 (Join)", hideable: true, defaultVariant: "a", variants: { a: "2カード" } },
   program: { label: "プログラム", hideable: true, defaultVariant: "a", variants: { a: "標準" } },
   about: { label: "とは？", hideable: true, defaultVariant: "a", variants: { a: "3点" } },
@@ -72,6 +78,8 @@ export const LP_SECTION_REGISTRY = {
     },
   },
   vision: { label: "ビジョン", hideable: true, defaultVariant: "a", variants: { a: "標準" } },
+  // お問い合わせ（CTA の帯）とフッターはページの締めなので、スポンサーはその手前に置く。
+  sponsors: { label: "スポンサー", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "プラン別" } },
   contact: { label: "お問い合わせ", hideable: true, defaultVariant: "a", variants: { a: "標準" } },
   footer: { label: "フッター", hideable: false, defaultVariant: "a", variants: { a: "標準" } },
 } as const satisfies Record<string, LpSectionDef>;
@@ -95,6 +103,245 @@ export interface LpLayout {
   schema: 1;
   /** 書いていないセクションは既定値。 */
   sections: Partial<Record<LpSectionId, LpSectionSetting>>;
+  /** 項目の一覧（協力団体・お知らせ・登壇者・スポンサー）。書いていない一覧は 0 件。 */
+  content?: Partial<LpContent>;
+}
+
+// ---- 公開設定の中身（項目の一覧）----
+// セクションの表示/非表示と同じ下書き → 本番反映の流れに乗せるため、layout.content に持つ（同じ JSON 列・追加の表は無い）。
+// 項目の欄は LP_CONTENT_FIELDS が唯一の定義: LP管理のフォーム・lp-analytics の検証・LP Worker の正規化が全部これを読む。
+// 画像は URL（https:// か LP 内の /パス）。LP 用の画像アップロードの仕組みはまだ無い。
+
+export const LP_CONTENT_SECTION_IDS = ["partners", "news", "speakers", "sponsors"] as const;
+export type LpContentSectionId = (typeof LP_CONTENT_SECTION_IDS)[number];
+
+export const LP_SPONSOR_TIERS = ["title", "gold", "silver", "bronze"] as const;
+export type LpSponsorTier = (typeof LP_SPONSOR_TIERS)[number];
+export const LP_SPONSOR_TIER_LABELS: Readonly<Record<LpSponsorTier, string>> = {
+  title: "Title",
+  gold: "Gold",
+  silver: "Silver",
+  bronze: "Bronze",
+};
+
+export interface LpPartnerItem {
+  id: string;
+  name: string;
+  logoUrl: string;
+  /** "" = リンクなし。 */
+  url: string;
+}
+
+export interface LpNewsItem {
+  id: string;
+  /** YYYY-MM-DD */
+  date: string;
+  text: string;
+  url: string;
+  /** 強調（目印と下線）。 */
+  highlight: boolean;
+}
+
+export interface LpSpeakerItem {
+  id: string;
+  name: string;
+  furigana: string;
+  affiliation: string;
+  photoUrl: string;
+  /** 開くと見えるメッセージ（100〜150 文字程度）。"" ならボタンを出さない。 */
+  message: string;
+}
+
+export interface LpSponsorItem {
+  id: string;
+  tier: LpSponsorTier;
+  name: string;
+  logoUrl: string;
+  url: string;
+  /** 短い説明。LP に出すのは Title プランだけ。 */
+  description: string;
+}
+
+export interface LpContent {
+  partners: LpPartnerItem[];
+  news: LpNewsItem[];
+  speakers: LpSpeakerItem[];
+  sponsors: LpSponsorItem[];
+}
+
+export type LpContentFieldKind = "text" | "textarea" | "url" | "image" | "date" | "boolean" | "tier";
+
+export interface LpContentFieldDef {
+  key: string;
+  label: string;
+  kind: LpContentFieldKind;
+  required: boolean;
+  /** 文字数の上限（text / textarea）。 */
+  max?: number;
+  /** 入力欄の補足。 */
+  hint?: string;
+}
+
+export const LP_CONTENT_URL_MAX = 500;
+export const LP_CONTENT_ITEM_ID_RE = /^[a-z0-9_-]{1,40}$/;
+
+/** セクション → 項目の欄（並び = フォームの並び）。 */
+export const LP_CONTENT_FIELDS: { readonly [S in LpContentSectionId]: readonly LpContentFieldDef[] } = {
+  partners: [
+    { key: "name", label: "団体名", kind: "text", required: true, max: 80 },
+    { key: "logoUrl", label: "ロゴ画像の URL", kind: "image", required: true, hint: "正方形の画像がきれいに収まります（円形に切り抜いて表示）。" },
+    { key: "url", label: "リンク先 URL", kind: "url", required: false },
+  ],
+  news: [
+    { key: "date", label: "日付", kind: "date", required: true },
+    { key: "text", label: "本文", kind: "text", required: true, max: 120 },
+    { key: "url", label: "リンク先 URL", kind: "url", required: false },
+    { key: "highlight", label: "強調する", kind: "boolean", required: false, hint: "目印と下線で目立たせます。" },
+  ],
+  speakers: [
+    { key: "name", label: "名前", kind: "text", required: true, max: 40 },
+    { key: "furigana", label: "ふりがな", kind: "text", required: false, max: 60 },
+    { key: "affiliation", label: "所属", kind: "text", required: false, max: 80 },
+    { key: "photoUrl", label: "写真の URL", kind: "image", required: false, hint: "正方形の写真がきれいに収まります。" },
+    { key: "message", label: "メッセージ", kind: "textarea", required: false, max: 200, hint: "100〜150 文字程度。▼ で開くと見えます。" },
+  ],
+  sponsors: [
+    { key: "tier", label: "プラン", kind: "tier", required: true },
+    { key: "name", label: "会社名", kind: "text", required: true, max: 80 },
+    { key: "logoUrl", label: "ロゴ画像の URL", kind: "image", required: false, hint: "横長のロゴがきれいに収まります。" },
+    { key: "url", label: "リンク先 URL", kind: "url", required: false },
+    { key: "description", label: "説明", kind: "textarea", required: false, max: 120, hint: "LP に出るのは Title プランだけです。" },
+  ],
+};
+
+/** 1 セクションの項目数の上限。 */
+export const LP_CONTENT_MAX_ITEMS: Readonly<Record<LpContentSectionId, number>> = {
+  partners: 40,
+  news: 50,
+  speakers: 60,
+  sponsors: 80,
+};
+
+export type LpContentItem<S extends LpContentSectionId> = LpContent[S][number];
+
+export function isLpContentSection(id: string): id is LpContentSectionId {
+  return (LP_CONTENT_SECTION_IDS as readonly string[]).includes(id);
+}
+
+/** 画像・リンクの URL として受け付けるか: http(s) の絶対 URL か、LP 内の /パス（// は不可）。 */
+export function isLpContentUrl(v: string): boolean {
+  if (v.length > LP_CONTENT_URL_MAX || /\s/.test(v)) return false;
+  if (v.startsWith("/")) return !v.startsWith("//") && !v.startsWith("/\\");
+  // この package は DOM / Workers の型を持たないので URL クラスではなく形で検める。
+  return /^https?:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*(:\d{1,5})?([/?#]\S*)?$/i.test(v);
+}
+
+function isRealDate(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const t = Date.parse(`${v}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().startsWith(v);
+}
+
+/** 欄 1 つの値を検める（文字列は前後の空白を落とす）。 */
+function contentFieldValue(f: LpContentFieldDef, raw: unknown): { value: string | boolean; reason: string | null } {
+  if (f.kind === "boolean") return raw === undefined ? { value: false, reason: null } : typeof raw === "boolean" ? { value: raw, reason: null } : { value: false, reason: "invalid" };
+  if (raw !== undefined && typeof raw !== "string") return { value: "", reason: "invalid" };
+  const v = (raw ?? "").trim();
+  if (v === "") return { value: "", reason: f.required ? "required" : null };
+  if (f.kind === "tier") return { value: v, reason: (LP_SPONSOR_TIERS as readonly string[]).includes(v) ? null : "invalid" };
+  if (f.kind === "date") return { value: v, reason: isRealDate(v) ? null : "invalid" };
+  if (f.kind === "url" || f.kind === "image") return { value: v, reason: isLpContentUrl(v) ? null : "invalid_url" };
+  if (f.max !== undefined && v.length > f.max) return { value: v, reason: "too_long" };
+  return { value: v, reason: null };
+}
+
+/** 1 項目を検める。issues が空なら item は欄が全部そろった正規形。 */
+export function validateContentItem<S extends LpContentSectionId>(
+  section: S,
+  raw: unknown,
+  path = "item",
+): { item: LpContentItem<S> | null; issues: LpConfigIssue[] } {
+  if (!isRecord(raw)) return { item: null, issues: [{ field: path, reason: "invalid" }] };
+  const issues: LpConfigIssue[] = [];
+  const id = typeof raw.id === "string" ? raw.id : "";
+  if (!LP_CONTENT_ITEM_ID_RE.test(id)) issues.push({ field: `${path}.id`, reason: "invalid" });
+  const out: Record<string, string | boolean> = { id };
+  for (const f of LP_CONTENT_FIELDS[section]) {
+    const { value, reason } = contentFieldValue(f, raw[f.key]);
+    if (reason) issues.push({ field: `${path}.${f.key}`, reason });
+    out[f.key] = value;
+  }
+  return { item: issues.length === 0 ? (out as unknown as LpContentItem<S>) : null, issues };
+}
+
+/** 書いていない一覧を 0 件で埋めた中身。 */
+export function resolveContent(layout: LpLayout): LpContent {
+  const c = layout.content ?? {};
+  return { partners: c.partners ?? [], news: c.news ?? [], speakers: c.speakers ?? [], sponsors: c.sponsors ?? [] };
+}
+
+/** 中身の 1 セクションを差し替えた layout（ほかはそのまま）。 */
+export function setContent<S extends LpContentSectionId>(layout: LpLayout, section: S, items: LpContent[S]): LpLayout {
+  return { ...layout, content: { ...layout.content, [section]: items } };
+}
+
+/** 寛容: 壊れた項目・重複 ID・上限を超えた分は捨てる。 */
+function normalizeContent(raw: unknown): Partial<LpContent> {
+  const out: Partial<Record<LpContentSectionId, unknown[]>> = {};
+  if (!isRecord(raw)) return out as Partial<LpContent>;
+  for (const id of LP_CONTENT_SECTION_IDS) {
+    const list = raw[id];
+    if (!Array.isArray(list)) continue;
+    const seen = new Set<string>();
+    const items: unknown[] = [];
+    for (const r of list) {
+      const { item } = validateContentItem(id, r);
+      if (!item || seen.has(item.id) || items.length >= LP_CONTENT_MAX_ITEMS[id]) continue;
+      seen.add(item.id);
+      items.push(item);
+    }
+    out[id] = items;
+  }
+  return out as Partial<LpContent>;
+}
+
+/** 厳格: 書き込み API 用。 */
+function validateContent(raw: unknown, path: string): { content: Partial<LpContent>; issues: LpConfigIssue[] } {
+  const issues: LpConfigIssue[] = [];
+  const out: Partial<Record<LpContentSectionId, unknown[]>> = {};
+  if (!isRecord(raw)) return { content: {}, issues: [{ field: path, reason: "invalid" }] };
+  for (const [key, list] of Object.entries(raw)) {
+    const at = `${path}.${key}`;
+    if (!isLpContentSection(key)) {
+      issues.push({ field: at, reason: "unknown_section" });
+      continue;
+    }
+    if (!Array.isArray(list)) {
+      issues.push({ field: at, reason: "invalid" });
+      continue;
+    }
+    if (list.length > LP_CONTENT_MAX_ITEMS[key]) {
+      issues.push({ field: at, reason: "too_many" });
+      continue;
+    }
+    const seen = new Set<string>();
+    const items: unknown[] = [];
+    list.forEach((r, i) => {
+      const v = validateContentItem(key, r, `${at}[${i}]`);
+      issues.push(...v.issues);
+      if (!v.item) return;
+      if (seen.has(v.item.id)) issues.push({ field: `${at}[${i}].id`, reason: "duplicate" });
+      seen.add(v.item.id);
+      items.push(v.item);
+    });
+    out[key] = items;
+  }
+  return { content: out as Partial<LpContent>, issues };
+}
+
+/** その中身のセクションに LP に出す項目があるか（0 件のあいだは表示にしても出さない）。 */
+export function hasContentItems(layout: LpLayout, section: LpContentSectionId): boolean {
+  return resolveContent(layout)[section].length > 0;
 }
 
 /** 本番反映の設定。本番の値は既存テーブル（lp_publish / lp_ticket_settings / lp_proposal_settings）が正本。 */
@@ -171,7 +418,7 @@ export function resolveSection(layout: LpLayout, id: LpSectionId): LpSectionSett
   for (const [k, o] of Object.entries(def.options ?? {})) options[k] = s && hasKey(s.options, k) ? s.options[k]! : o.default;
   return {
     variant: s && hasKey(def.variants, s.variant) ? s.variant : def.defaultVariant,
-    visible: def.hideable ? (s?.visible ?? true) : true,
+    visible: def.hideable ? (s?.visible ?? def.defaultVisible ?? true) : true,
     options,
   };
 }
@@ -195,10 +442,11 @@ export function normalizeLayout(raw: unknown): LpLayout {
     }
     out.sections[id as LpSectionId] = {
       variant: typeof v.variant === "string" && hasKey(def.variants, v.variant) ? v.variant : def.defaultVariant,
-      visible: def.hideable && typeof v.visible === "boolean" ? v.visible : true,
+      visible: def.hideable ? (typeof v.visible === "boolean" ? v.visible : (def.defaultVisible ?? true)) : true,
       options,
     };
   }
+  if (isRecord(raw) && raw.content !== undefined) out.content = normalizeContent(raw.content);
   return out;
 }
 
@@ -223,8 +471,15 @@ export function layoutAttributes(registry: Readonly<Record<string, LpSectionDef>
   for (const [id, def] of Object.entries(registry)) {
     const s = (layout.sections as Record<string, LpSectionSetting | undefined>)[id];
     if (!s) continue;
-    if (def.hideable && s.visible === false) out[lpSectionAttr(id)] = LP_HIDDEN;
-    else if (hasKey(def.variants, s.variant) && s.variant !== def.defaultVariant) out[lpSectionAttr(id)] = s.variant;
+    const shownByDefault = def.defaultVisible ?? true;
+    // 中身のセクションは項目が 0 件なら表示にしても出さない（見出しだけの空の帯を出さない）。
+    const visible = s.visible !== false && (!isLpContentSection(id) || hasContentItems(layout, id));
+    if (def.hideable && !visible) {
+      if (shownByDefault) out[lpSectionAttr(id)] = LP_HIDDEN;
+    } else if (hasKey(def.variants, s.variant) && (s.variant !== def.defaultVariant || !shownByDefault)) {
+      // 既定で隠れるセクションは、表示のときに属性（バリアント）を付けて出す。
+      out[lpSectionAttr(id)] = s.variant;
+    }
     for (const [k, o] of Object.entries(def.options ?? {})) {
       if (!hasKey(s.options, k)) continue;
       const v = s.options[k];
@@ -246,6 +501,11 @@ export function validateLayout(raw: unknown, path = "layout"): { layout: LpLayou
   const layout = defaultLayout();
   if (!isRecord(raw)) return { layout, issues: [{ field: path, reason: "required" }] };
   if (raw.schema !== 1) issues.push({ field: `${path}.schema`, reason: "unsupported" });
+  if (raw.content !== undefined) {
+    const c = validateContent(raw.content, `${path}.content`);
+    issues.push(...c.issues);
+    layout.content = c.content;
+  }
   if (raw.sections === undefined) return { layout, issues };
   if (!isRecord(raw.sections)) return { layout, issues: [...issues, { field: `${path}.sections`, reason: "invalid" }] };
   for (const [id, v] of Object.entries(raw.sections)) {
@@ -264,7 +524,7 @@ export function validateLayout(raw: unknown, path = "layout"): { layout: LpLayou
       if (typeof v.variant === "string" && hasKey(def.variants, v.variant)) variant = v.variant;
       else issues.push({ field: `${at}.variant`, reason: "unknown_variant" });
     }
-    let visible = true;
+    let visible = def.hideable ? (def.defaultVisible ?? true) : true;
     if (v.visible !== undefined) {
       if (typeof v.visible !== "boolean") issues.push({ field: `${at}.visible`, reason: "invalid" });
       else if (!v.visible && !def.hideable) issues.push({ field: `${at}.visible`, reason: "not_hideable" });
