@@ -26,6 +26,11 @@ const BLOCK_GAP = 16;
 const MAX_DOC_HEIGHT = 40000;
 /** 連続して切り替えたときに読み直しを 1 回にまとめる待ち時間。 */
 export const MINI_PREVIEW_DEBOUNCE_MS = 500;
+/**
+ * 中身（項目）が変わったら読み直すまでの待ち時間。属性と違って lp:config では映せないので、保存の後に
+ * LP Worker の下書きキャッシュ（3 秒）が切れるのを待ってから読み直す。
+ */
+export const CONTENT_RELOAD_MS = 3200;
 /** 読み込み後この時間 lp:sections が来なければ「位置の分からない LP」とみなす。 */
 export const BRIDGE_TIMEOUT_MS = 3000;
 
@@ -52,9 +57,10 @@ export function attrsKey(attrs: Readonly<Record<string, string>>): string {
   return JSON.stringify(Object.entries(attrs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-export function miniPreviewSrc(url: string, refreshKey: number): string {
-  if (!refreshKey) return url;
-  return `${url}${url.includes("?") ? "&" : "?"}_r=${refreshKey}`;
+export function miniPreviewSrc(url: string, refreshKey: number, contentReloads = 0): string {
+  const params = [refreshKey ? `_r=${refreshKey}` : "", contentReloads ? `_c=${contentReloads}` : ""].filter(Boolean);
+  if (params.length === 0) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}${params.join("&")}`;
 }
 
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
@@ -120,6 +126,7 @@ function useWidth(ref: React.RefObject<HTMLElement>): number {
 export function LpSectionEditor({
   url,
   refreshKey,
+  contentKey = "",
   attrs,
   title,
   notes,
@@ -132,6 +139,8 @@ export function LpSectionEditor({
   url: string;
   /** 保存のたびに変わる値。即時反映できない（古い橋渡しの）LP だけ、これの変化で読み直す。 */
   refreshKey: number;
+  /** 中身（項目）の保存済みの値。変わったら少し待って読み直す（lp:config では映せない）。 */
+  contentKey?: string;
   /** 画面上の設定を当てた <html> の data-lp-* 属性（layoutAttributes の結果）。変わるたびに即時に LP へ送る。 */
   attrs: Readonly<Record<string, string>>;
   title: string;
@@ -146,8 +155,8 @@ export function LpSectionEditor({
   narrow?: boolean;
 }): JSX.Element {
   // いま iframe に読ませている URL と refreshKey。即時反映できる LP では refreshKey が変わっても読み直さない。
-  const [frame, setFrame] = useState({ url, key: refreshKey });
-  const src = miniPreviewSrc(frame.url, frame.key);
+  const [frame, setFrame] = useState({ url, key: refreshKey, content: contentKey, reloads: 0 });
+  const src = miniPreviewSrc(frame.url, frame.key, frame.reloads);
   const [liveConfig, setLiveConfig] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -261,14 +270,18 @@ export function LpSectionEditor({
   // 読み直すのは URL（版・チケット・募集）が変わったときと、即時反映できない LP で保存されたとき。
   useEffect(() => {
     const stale = url !== frame.url || (!liveConfig && refreshKey !== frame.key);
-    if (!stale) return undefined;
-    const t = setTimeout(() => {
-      setRefreshing(true);
-      if (url !== frame.url) setLiveConfig(false);
-      setFrame({ url, key: refreshKey });
-    }, MINI_PREVIEW_DEBOUNCE_MS);
+    const contentStale = contentKey !== frame.content;
+    if (!stale && !contentStale) return undefined;
+    const t = setTimeout(
+      () => {
+        setRefreshing(true);
+        if (url !== frame.url) setLiveConfig(false);
+        setFrame({ url, key: refreshKey, content: contentKey, reloads: frame.reloads + (contentStale ? 1 : 0) });
+      },
+      contentStale && !stale ? CONTENT_RELOAD_MS : MINI_PREVIEW_DEBOUNCE_MS,
+    );
     return () => clearTimeout(t);
-  }, [url, refreshKey, frame, liveConfig]);
+  }, [url, refreshKey, contentKey, frame, liveConfig]);
 
   // ブロックの高さを測って置き直す（高さが変わったら＝切り替えでラベルが変わった等、もう一度）。
   const [heights, setHeights] = useState<Record<string, number>>({});

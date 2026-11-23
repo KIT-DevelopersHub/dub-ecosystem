@@ -26,6 +26,7 @@ import { SectionSlot } from "@/sections/SectionSlot";
 //  are omitted — the conference has no matching content to flow in.)
 //
 // 公開設定（LP管理）で切り替えるセクションは SectionSlot で包む（sections/variants.tsx）。
+// 協力団体ロゴ・お知らせ・登壇者情報・スポンサーは中身を LP管理で編集し、LP Worker が差し込む（既定は非表示）。
 // Hero と Marquee は登録簿に無いので常に出る。
 const config = snapshot as LpConfig;
 // ローカル確認専用: LP_SUPPORTERS_FIXTURE=1 で「支援者情報」をダミー（○○ ○○様）に差し替える。本番ビルドでは使わない。
@@ -42,12 +43,16 @@ export default function Page() {
       <ScrollProgress />
       <SectionSlot id="header" props={{ nav: config.nav, cta: config.hero.primaryCta, banner: config.crowdfunding.banner }} />
       <Hero data={config.hero} subheading={config.catch.lead} />
+      <SectionSlot id="partners" props={{}} />
+      <SectionSlot id="news" props={{}} />
+      <SectionSlot id="speakers" props={{}} />
       <SectionSlot id="join" props={{ data: config.apply }} />
       <SectionSlot id="program" props={{ data: config.program }} />
       <Marquee sub={config.catch.lead} />
       <SectionSlot id="about" props={{ data: config.about }} />
       <SectionSlot id="crowdfunding" props={{ data: crowdfunding }} />
       <SectionSlot id="vision" props={{ eyebrow: "VISION", statement: config.catch.heading }} />
+      <SectionSlot id="sponsors" props={{}} />
       <SectionSlot id="contact" props={{ data: config.contact, siteUrl }} />
       <SectionSlot id="footer" props={{ data: config.footer, nav: config.nav }} />
     </>

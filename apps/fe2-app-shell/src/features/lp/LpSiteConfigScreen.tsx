@@ -46,6 +46,7 @@ import {
   RELEASE_FLAGS,
   setRelease,
   setSection,
+  setSectionContent,
   versionName,
   type ConfigDiff,
   type LpConfigEnv,
@@ -53,6 +54,9 @@ import {
 import { useDraftAutosave, useLpSiteConfig, usePublishSiteConfig, useResetDraft } from "./lpSiteConfigHooks.ts";
 import { formatSwitchedAt, LP_PUBLIC_URL, lpViewUrl } from "./lpPublish.ts";
 import { LpSectionEditor } from "./LpSectionEditor.tsx";
+import { LpContentEditor } from "./LpContentEditor.tsx";
+import type { ContentItem } from "./lpContent.ts";
+import contentStyles from "./lpContent.module.css";
 import { LP_VERSIONS, type LpVersion } from "./lpVersions.ts";
 import { LpViewer } from "./LpViewer.tsx";
 import { LpTabs } from "./LpTabs.tsx";
@@ -200,6 +204,13 @@ export function LpSiteConfigScreen(): JSX.Element {
       : IS_DEMO
         ? "デモ環境です。セクションの切り替えが LP に映るのは、LP の v3.6 がデプロイされてからです。"
         : null;
+  // 中身（項目）は属性では映せないので、保存が落ち着いたら読み直す（本番タブは反映済みの中身）。
+  const contentJson = state ? JSON.stringify(lp.resolveContent((live ? state.published : state.draft).layout)) : "";
+  const [settledContent, setSettledContent] = useState<string | null>(null);
+  useEffect(() => {
+    if (!autosave.saving && contentJson) setSettledContent(contentJson);
+  }, [autosave.saving, contentJson]);
+  const contentKey = settledContent ?? contentJson;
   // 「変更あり」の印: 下書きは本番との差、本番はためた変更。
   const changedSections = useMemo(
     () => new Set((live ? stagedDiff : draftDiff).map((d) => d.key.split(".")[0] ?? d.key)),
@@ -315,6 +326,7 @@ export function LpSiteConfigScreen(): JSX.Element {
           <LpSectionEditor
             url={mini.url}
             refreshKey={mini.refreshKey}
+            contentKey={contentKey}
             attrs={miniAttrs}
             title={live ? "本番のプレビューとセクションの設定" : "下書きのプレビューとセクションの設定"}
             notes={miniNote ? [miniNote] : []}
@@ -514,6 +526,9 @@ function SectionControls({
   const options = Object.entries(def.options ?? {});
   // 非表示のセクションのパターン・オプションは選べない（表示にしたときに選ぶ）。
   const hiddenNow = !cur.visible;
+  const contentId = lp.isLpContentSection(id) ? id : null;
+  const contentItems: ContentItem[] = contentId ? lp.resolveContent(config.layout)[contentId] : [];
+  const [editing, setEditing] = useState(false);
   return (
     <section className={styles.lpEditorSection} data-testid={`fe2-lp-config-section-${id}`}>
       <div className={styles.lpBlockHead}>
@@ -529,7 +544,38 @@ function SectionControls({
           onChange={(v) => onChange(setSection(config, id, { visible: v }))}
         />
       </div>
-      {variants.length === 1 && options.length > 0 ? null : (
+      {contentId ? (
+        <>
+          <div className={contentStyles.contentRow}>
+            <span className={contentStyles.contentCount} data-testid={`fe2-lp-config-${id}-count`}>
+              項目 {contentItems.length} 件
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              iconLeft={<Icon name={disabled ? "list" : "edit"} />}
+              onClick={() => setEditing(true)}
+              testId={`fe2-lp-config-${id}-edit`}
+            >
+              {disabled ? "項目を見る" : "項目を編集"}
+            </Button>
+          </div>
+          {contentItems.length === 0 ? (
+            <span className={styles.note} data-testid={`fe2-lp-config-${id}-empty-note`}>
+              項目が 0 件のあいだは、表示にしても LP には出ません。
+            </span>
+          ) : null}
+          <LpContentEditor
+            section={contentId}
+            items={contentItems}
+            open={editing}
+            disabled={disabled}
+            onClose={() => setEditing(false)}
+            onChange={(next) => onChange(setSectionContent(config, contentId, next))}
+          />
+        </>
+      ) : null}
+      {contentId || (variants.length === 1 && options.length > 0) ? null : (
         <div className={styles.lpBlockRow}>
           <span>バリアント</span>
           {variants.length >= 2 && variants.length <= 4 ? (

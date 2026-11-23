@@ -227,6 +227,51 @@ describe.each<RepoKind>(["memory", "d1"])("lp site-config (%s repo)", (kind) => 
   });
 });
 
+describe.each<RepoKind>(["memory", "d1"])("lp site-config content (%s repo)", (kind) => {
+  const withContent: lp.LpLayout = {
+    schema: 1,
+    sections: { news: { variant: "a", visible: true, options: {} } },
+    content: {
+      news: [{ id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", url: "https://hokuriku-it-conf.com/tickets", highlight: true }],
+      sponsors: [{ id: "s1", tier: "title", name: "○○株式会社", logoUrl: "/sponsors/a.png", url: "", description: "説明" }],
+    },
+  };
+
+  it("items ride the draft → publish flow and reach the LP Worker via /lp/internal/site-config", async () => {
+    const { app } = await publisher(kind);
+    const saved = await app.fetch(send("PUT", "/lp/site-config/draft", { config: config({}, withContent), revision: 0 }));
+    expect(saved.status).toBe(200);
+    const s = await body<lp.LpSiteConfigState>(saved);
+    expect(s.draft.layout.content).toEqual(withContent.content);
+    // 本番はまだ空（下書きだけ）。
+    expect(s.published.layout.content).toBeUndefined();
+    expect(await body(await app.fetch(get("/lp/internal/site-config", INTERNAL)))).toEqual({ published: lp.defaultLayout(), draft: withContent });
+
+    expect((await app.fetch(send("POST", "/lp/site-config/publish", { config: config({}, withContent), revision: 1 }))).status).toBe(200);
+    expect((await body<lp.LpInternalSiteConfig>(await app.fetch(get("/lp/internal/site-config", INTERNAL)))).published).toEqual(withContent);
+  });
+
+  it("invalid items → 400 with the field path (bad URL / missing name / unknown tier / duplicate id / too long)", async () => {
+    const { app } = await publisher(kind);
+    const item = withContent.content!.sponsors![0]!;
+    const cases: [unknown, string, string][] = [
+      [{ sponsors: [{ ...item, logoUrl: "javascript:alert(1)" }] }, "config.layout.content.sponsors[0].logoUrl", "invalid_url"],
+      [{ sponsors: [{ ...item, name: " " }] }, "config.layout.content.sponsors[0].name", "required"],
+      [{ sponsors: [{ ...item, tier: "platinum" }] }, "config.layout.content.sponsors[0].tier", "invalid"],
+      [{ sponsors: [item, item] }, "config.layout.content.sponsors[1].id", "duplicate"],
+      [{ sponsors: [{ ...item, description: "あ".repeat(121) }] }, "config.layout.content.sponsors[0].description", "too_long"],
+      [{ news: [{ id: "n1", date: "2026-02-30", text: "x", url: "", highlight: false }] }, "config.layout.content.news[0].date", "invalid"],
+      [{ talks: [] }, "config.layout.content.talks", "unknown_section"],
+    ];
+    for (const [content, field, reason] of cases) {
+      const res = await app.fetch(send("PUT", "/lp/site-config/draft", { config: config({}, { schema: 1, sections: {}, content } as lp.LpLayout), revision: 0 }));
+      expect(res.status).toBe(400);
+      expect(await body<{ error: { details: unknown } }>(res)).toMatchObject({ error: { details: [{ field, reason }] } });
+    }
+    expect((await body<lp.LpSiteConfigState>(await app.fetch(get("/lp/site-config")))).revision).toBe(0);
+  });
+});
+
 describe("site-config gate", () => {
   it("publish needs lp:publish: 編集 → 403, 閲覧 + lp:publish → 403; nothing written", async () => {
     const edit = await makeApp("memory", "edit");

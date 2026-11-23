@@ -1,0 +1,452 @@
+/* 公開設定の中身で埋めるセクション（協力団体ロゴ・お知らせ・登壇者情報・スポンサー）。
+   中身の HTML は LP Worker（worker/lp-content.ts）が差し込む。色・角丸・影は globals.css の --lp-* を使う。 */
+
+.lp-dark {
+  --lp-x-bg: #0b0d3b;
+  --lp-x-ink: #ffffff;
+  --lp-x-soft: rgba(255, 255, 255, 0.78);
+  --lp-x-line: rgba(255, 255, 255, 0.28);
+  --lp-x-eyebrow: #8fe3f0;
+  --lp-x-yellow: #f7dd6b;
+  position: relative;
+  color: var(--lp-x-ink);
+  background: radial-gradient(120% 70% at 50% 0%, #15196a 0%, var(--lp-x-bg) 62%);
+  padding-block: clamp(4rem, 9vw, 7rem);
+  overflow: hidden;
+}
+
+/* ---- 共通の見出し（-speakers / 登壇者情報）---- */
+.lp-xhead {
+  text-align: center;
+  margin-bottom: clamp(2.25rem, 5vw, 3.5rem);
+}
+.lp-xhead-eyebrow {
+  display: block;
+  font-family: var(--font-inter), sans-serif;
+  font-size: clamp(0.95rem, 1.6vw, 1.1rem);
+  font-weight: 500;
+  letter-spacing: 0.32em;
+  color: var(--lp-x-eyebrow, var(--lp-teal));
+}
+.lp-xhead-title {
+  margin: 0.9rem 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.9rem, 4.4vw, 2.9rem);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: inherit;
+}
+
+/* ---- 協力団体ロゴ（ヒーローの直下の明るい帯）---- */
+.lp-partners {
+  background: var(--lp-surface-alt);
+  border-block: 1px solid var(--lp-border-soft);
+  padding-block: clamp(1.1rem, 2.6vw, 1.6rem);
+  overflow: hidden;
+}
+.lp-partners-viewport {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+.lp-partners-track {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: clamp(1rem, 3vw, 2.5rem);
+  margin: 0;
+  padding: 0 clamp(1rem, 4vw, 2rem);
+  list-style: none;
+}
+/* 数が多いときは流す（同じ並びを 2 回描いて -50% ずらし続ける）。 */
+.lp-partners-viewport[data-marquee="on"] {
+  justify-content: flex-start;
+  width: max-content;
+  animation: lp-partners-marquee 48s linear infinite;
+  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+.lp-partners-viewport[data-marquee="on"] .lp-partners-track {
+  flex-wrap: nowrap;
+  padding-inline: 0 clamp(1rem, 3vw, 2.5rem);
+}
+.lp-partners:hover .lp-partners-viewport[data-marquee="on"],
+.lp-partners:focus-within .lp-partners-viewport[data-marquee="on"] {
+  animation-play-state: paused;
+}
+@keyframes lp-partners-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.lp-partner-link {
+  display: grid;
+  place-items: center;
+  width: clamp(64px, 8vw, 92px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--lp-surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+a.lp-partner-link:hover,
+a.lp-partner-link:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.lp-partner-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ---- お知らせ（濃い藍の帯 + 白い角丸カード）---- */
+.lp-news {
+  position: relative;
+  background: var(--lp-heading);
+  padding-block: clamp(3.5rem, 8vw, 6rem);
+  overflow: hidden;
+}
+.lp-news-inner { position: relative; z-index: 1; }
+.lp-news-eyebrow {
+  text-align: center;
+  color: #fff;
+  margin-bottom: clamp(1.5rem, 3.5vw, 2.25rem);
+}
+.lp-sparkle {
+  position: absolute;
+  width: clamp(120px, 18vw, 230px);
+  aspect-ratio: 1;
+  background: no-repeat center / contain
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none' stroke='white' stroke-width='0.8'%3E%3Cpath d='M50 2C54 34 66 46 98 50C66 54 54 66 50 98C46 66 34 54 2 50C34 46 46 34 50 2Z'/%3E%3Cpath d='M78 6C79.6 18 82 20.4 94 22C82 23.6 79.6 26 78 38C76.4 26 74 23.6 62 22C74 20.4 76.4 18 78 6Z'/%3E%3C/svg%3E");
+  opacity: 0.55;
+  pointer-events: none;
+}
+.lp-sparkle--a { top: -1.5rem; right: -1rem; }
+.lp-sparkle--b { bottom: -2.5rem; left: -2rem; transform: rotate(18deg) scale(0.8); }
+.lp-news-card {
+  max-width: 880px;
+  margin-inline: auto;
+  background: var(--lp-surface);
+  border-radius: clamp(24px, 4vw, 44px);
+  padding: clamp(1.75rem, 4.5vw, 3rem) clamp(1.25rem, 5vw, 4rem) clamp(1.5rem, 4vw, 2.75rem);
+  box-shadow: var(--shadow-xl);
+}
+.lp-news-title {
+  margin: 0 0 clamp(1.1rem, 2.5vw, 1.6rem);
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 4.2vw, 2.6rem);
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  color: var(--lp-heading);
+}
+.lp-news-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid rgba(16, 28, 168, 0.55);
+}
+.lp-news-item {
+  display: grid;
+  grid-template-columns: 12.5em 1fr;
+  align-items: baseline;
+  gap: 0.35rem 1.5rem;
+  padding: clamp(1rem, 2.4vw, 1.4rem) 0.25rem;
+  border-bottom: 1px solid rgba(16, 28, 168, 0.55);
+}
+.lp-news-date {
+  font-family: var(--font-inter), sans-serif;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(0.95rem, 1.8vw, 1.1rem);
+  color: var(--lp-ink);
+  white-space: nowrap;
+}
+.lp-news-text {
+  margin: 0;
+  font-size: clamp(0.98rem, 1.9vw, 1.12rem);
+  line-height: 1.75;
+  color: var(--lp-ink);
+}
+.lp-news-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(16, 28, 168, 0.35);
+  text-underline-offset: 0.22em;
+}
+.lp-news-link:hover { color: var(--lp-link); }
+.lp-news-link[target="_blank"]::after { content: " ↗"; font-size: 0.85em; }
+/* 強調: 目印 + 黄色のマーカー下線 */
+.lp-news-item[data-highlight="on"] .lp-news-text > :last-child {
+  background: linear-gradient(transparent 72%, #fbe38a 72%, #fbe38a 92%, transparent 92%);
+  font-weight: 700;
+  text-decoration: none;
+}
+.lp-news-mark {
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 0.35em;
+  vertical-align: -0.18em;
+  background: no-repeat center / contain
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23e0a92b'%3E%3Cpath d='M3 10v4a1 1 0 0 0 1 1h2l4.5 4V5L6 9H4a1 1 0 0 0-1 1Zm10-4.2v12.4c3.1-.9 5-3.4 5-6.2s-1.9-5.3-5-6.2Zm6.2-2.1-1 1.4C20 6.6 21 9.2 21 12s-1 5.4-2.8 6.9l1 1.4C21.6 18.4 23 15.4 23 12s-1.4-6.4-3.8-8.3Z'/%3E%3C/svg%3E");
+}
+
+/* ---- 登壇者情報（2 列カード・写真に黄色のずらし影・▼で開くメッセージ）---- */
+.lp-speakers-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(1.5rem, 3.5vw, 2.75rem) clamp(1.5rem, 4vw, 3.5rem);
+  margin: 0 auto;
+  padding: 0;
+  max-width: 920px;
+  list-style: none;
+  align-items: start;
+}
+.lp-speaker-card {
+  border-block: 1px solid var(--lp-x-line);
+  padding-block: clamp(1rem, 2.2vw, 1.4rem);
+}
+.lp-speaker-head {
+  position: relative;
+  display: grid;
+  grid-template-columns: clamp(96px, 13vw, 132px) 1fr;
+  gap: clamp(1rem, 2.4vw, 1.5rem);
+  align-items: center;
+  list-style: none;
+}
+summary.lp-speaker-head { cursor: pointer; }
+summary.lp-speaker-head::-webkit-details-marker { display: none; }
+.lp-speaker-photo {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  background: #cbd1da;
+  box-shadow: 8px 8px 0 var(--lp-x-yellow);
+}
+.lp-speaker-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.lp-speaker-initial {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: #5b6474;
+}
+.lp-speaker-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  padding-right: 2.4rem;
+}
+.lp-speaker-name {
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 2.6vw, 1.65rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1.35;
+}
+.lp-speaker-kana {
+  font-size: 0.88rem;
+  letter-spacing: 0.12em;
+  color: var(--lp-x-soft);
+}
+.lp-speaker-aff {
+  margin-top: 0.55rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--lp-x-soft);
+}
+.lp-speaker-toggle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 6px;
+  background: #eceef2;
+  transition: background 0.2s ease;
+}
+.lp-speaker-toggle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 0;
+  height: 0;
+  border-left: 0.42rem solid transparent;
+  border-right: 0.42rem solid transparent;
+  border-top: 0.62rem solid #0b0d3b;
+  transform: translateY(1px);
+  transition: transform 0.25s ease;
+}
+summary.lp-speaker-head:hover .lp-speaker-toggle { background: #fff; }
+.lp-speaker-card[open] .lp-speaker-toggle::before { transform: translateY(-1px) rotate(180deg); }
+.lp-speaker-msg {
+  margin-top: 1rem;
+  padding: 1rem 1.15rem 1.2rem;
+  border-radius: var(--radius-sm);
+  background: #eceef2;
+  color: var(--lp-ink);
+  box-shadow: 0 0 0 3px #8b5cf6;
+  animation: lp-speaker-open 0.25s ease;
+}
+.lp-speaker-msg-title {
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px dashed #9aa1ad;
+  font-weight: 900;
+}
+.lp-speaker-msg-body {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.85;
+  white-space: pre-line;
+}
+@keyframes lp-speaker-open {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- スポンサー（プラン別・大きな縁取りの英字 + 色付きのプラン名）---- */
+.lp-sponsors .lp-xhead { margin-bottom: clamp(1.5rem, 3vw, 2.25rem); }
+.lp-sponsor-tier {
+  --tier: #f2706b;
+  margin-top: clamp(2.5rem, 6vw, 4.5rem);
+}
+.lp-sponsor-tier[data-tier="gold"] { --tier: #e9c25a; }
+.lp-sponsor-tier[data-tier="silver"] { --tier: #cfe6f2; }
+.lp-sponsor-tier[data-tier="bronze"] { --tier: #f3b06a; }
+.lp-sponsor-tier-head {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin: 0 0 clamp(1.25rem, 3vw, 2rem);
+  min-height: clamp(4.5rem, 11vw, 8rem);
+}
+.lp-sponsor-tier-ghost,
+.lp-sponsor-tier-label {
+  grid-area: 1 / 1;
+  font-family: "Georgia", "Times New Roman", var(--font-display), serif;
+  font-weight: 900;
+  line-height: 1;
+}
+.lp-sponsor-tier-ghost {
+  font-size: clamp(4.5rem, 14vw, 9.5rem);
+  letter-spacing: 0.04em;
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.22);
+  transform: translateY(0.18em);
+  user-select: none;
+}
+.lp-sponsor-tier-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: clamp(1.9rem, 4.6vw, 3rem);
+  letter-spacing: 0.06em;
+  color: var(--tier);
+}
+.lp-sponsor-tier-label::before,
+.lp-sponsor-tier-label::after {
+  content: "";
+  width: clamp(1.5rem, 4vw, 3rem);
+  height: 2px;
+  background: var(--tier);
+}
+.lp-sponsor-grid {
+  --cols: 3;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  gap: clamp(0.75rem, 2vw, 1.25rem);
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+  max-width: 820px;
+}
+.lp-sponsor-tier[data-tier="title"] .lp-sponsor-grid { --cols: 1; max-width: 400px; }
+.lp-sponsor-tier[data-tier="silver"] .lp-sponsor-grid { --cols: 4; max-width: 880px; }
+.lp-sponsor-tier[data-tier="bronze"] .lp-sponsor-grid { --cols: 5; max-width: 920px; }
+.lp-sponsor-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0.6rem 0.6rem 0.75rem;
+  background: #f7f8fc;
+  border-radius: 6px;
+  color: var(--lp-ink);
+  text-decoration: none;
+  box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.6);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+a.lp-sponsor-card:hover,
+a.lp-sponsor-card:focus-visible {
+  transform: translateY(-3px);
+  box-shadow: 0 0 0 2px var(--tier), 0 14px 28px -14px rgba(0, 0, 0, 0.7);
+}
+.lp-sponsor-logo {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  background: #fff;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.lp-sponsor-img {
+  width: 86%;
+  height: 80%;
+  object-fit: contain;
+}
+.lp-sponsor-noimg {
+  padding: 0.5rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  text-align: center;
+  color: var(--lp-ink-mute);
+}
+.lp-sponsor-name {
+  margin-top: 0.55rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.lp-sponsor-desc {
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  color: var(--lp-ink-soft);
+}
+.lp-sponsor-tier[data-tier="title"] .lp-sponsor-card { padding: 1rem 1rem 1.25rem; }
+.lp-sponsor-tier[data-tier="title"] .lp-sponsor-name { font-size: 1.15rem; }
+.lp-sponsor-tier[data-tier="title"] .lp-sponsor-desc { font-size: 0.9rem; }
+.lp-sponsor-tier[data-tier="bronze"] .lp-sponsor-name { font-size: 0.76rem; }
+
+@media (max-width: 860px) {
+  .lp-sponsor-tier[data-tier="gold"] .lp-sponsor-grid { --cols: 2; }
+  .lp-sponsor-tier[data-tier="silver"] .lp-sponsor-grid { --cols: 3; }
+  .lp-sponsor-tier[data-tier="bronze"] .lp-sponsor-grid { --cols: 4; }
+}
+
+@media (max-width: 640px) {
+  .lp-speakers-grid { grid-template-columns: 1fr; }
+  .lp-news-item { grid-template-columns: 1fr; gap: 0.25rem; }
+  .lp-news-date { font-size: 0.9rem; color: var(--lp-ink-soft); }
+  .lp-sponsor-tier[data-tier="title"] .lp-sponsor-grid { max-width: 320px; }
+  .lp-sponsor-tier[data-tier="silver"] .lp-sponsor-grid { --cols: 2; }
+  .lp-sponsor-tier[data-tier="bronze"] .lp-sponsor-grid { --cols: 3; }
+  .lp-sponsor-name { font-size: 0.78rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-partners-viewport[data-marquee="on"] { animation: none; width: 100%; overflow-x: auto; }
+  .lp-partners-viewport[data-marquee="on"] .lp-partners-track[aria-hidden="true"] { display: none; }
+  .lp-speaker-msg { animation: none; }
+}
