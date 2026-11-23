@@ -161,7 +161,7 @@ describe("demo transport (定例の出席 / Meet)", () => {
     await api.request({ method: "POST", path: "/api/v1/meetings/me/google-link/callback", body: { code: "demo", state } });
     const after = await api.request<meeting.ListMyRegularMeetingsResponse>({ method: "GET", path: "/api/v1/meetings/me/regulars" });
     expect(after.googleLinked).toBe(true);
-    expect(after.items[0]!.attended).toBe(true);
+    expect(after.items.find((m) => m.id === "mtg_member_now")!.attended).toBe(true);
   });
 });
 
