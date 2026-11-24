@@ -22,7 +22,8 @@ function todayIso(now: Date): string {
 export function emptyDraft(section: lp.LpContentSectionId, now = new Date()): ContentDraft {
   const out: ContentDraft = {};
   for (const f of lp.LP_CONTENT_FIELDS[section]) {
-    out[f.key] = f.kind === "boolean" ? false : f.kind === "date" ? todayIso(now) : f.kind === "tier" ? "gold" : "";
+    out[f.key] =
+      f.kind === "boolean" ? false : f.kind === "date" ? todayIso(now) : f.kind === "tier" ? "gold" : f.kind === "newsMode" ? lp.LP_NEWS_MODES[0] : "";
   }
   return out;
 }
@@ -30,7 +31,9 @@ export function emptyDraft(section: lp.LpContentSectionId, now = new Date()): Co
 export function draftOf(section: lp.LpContentSectionId, item: ContentItem): ContentDraft {
   const rec = item as unknown as Record<string, string | boolean>;
   const out: ContentDraft = {};
-  for (const f of lp.LP_CONTENT_FIELDS[section]) out[f.key] = rec[f.key] ?? (f.kind === "boolean" ? false : "");
+  for (const f of lp.LP_CONTENT_FIELDS[section]) {
+    out[f.key] = rec[f.key] ?? (f.kind === "boolean" ? false : f.kind === "newsMode" ? lp.LP_NEWS_MODES[0] : "");
+  }
   return out;
 }
 
@@ -67,7 +70,8 @@ export function itemSummary(section: lp.LpContentSectionId, item: ContentItem): 
     }
     case "news": {
       const n = item as lp.LpNewsItem;
-      return { title: n.text, sub: `${n.date.replace(/-/g, "/")}${n.highlight ? "・強調" : ""}${n.url ? "・リンクあり" : ""}`, image: null };
+      const action = n.mode === "dialog" ? "・ダイアログで詳細" : n.url ? "・リンクあり" : "";
+      return { title: n.text, sub: `${n.date.replace(/-/g, "/")}${n.highlight ? "・強調" : ""}${action}`, image: null };
     }
     case "speakers": {
       const s = item as lp.LpSpeakerItem;

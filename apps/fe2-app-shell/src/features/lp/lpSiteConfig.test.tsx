@@ -589,7 +589,7 @@ describe("demo transport serves /lp/site-config", () => {
 });
 
 describe("LpSiteConfigScreen — 中身のセクション（協力団体・お知らせ・登壇者・スポンサー）", () => {
-  const NEWS: lp.LpNewsItem = { id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", url: "", highlight: true };
+  const NEWS: lp.LpNewsItem = { id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", mode: "link", url: "", body: "", highlight: true };
 
   it("diff: an item change shows up as one line per section", () => {
     const after = { ...BASE, layout: lp.setContent(BASE.layout, "news", [NEWS]) };
@@ -650,6 +650,55 @@ describe("LpSiteConfigScreen — 中身のセクション（協力団体・お�
     expect(screen.getByTestId("fe2-lp-content-news-empty")).toBeInTheDocument();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(3));
     expect(lp.resolveContent(save.mock.calls[2]![0].config.layout).news).toEqual([]);
+  });
+
+  it("news dialog mode: the URL field gives way to a Markdown editor with a live, sanitized preview", async () => {
+    const save = vi.fn(({ config, revision }: { config: LpSiteConfig; revision: number }) =>
+      Promise.resolve(siteState({ draft: config, revision: revision + 1 })),
+    );
+    renderScreen(fakeApi({ saveSiteConfigDraft: save }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-config-news-edit"));
+    fireEvent.click(screen.getByTestId("fe2-lp-content-news-add"));
+    // 既定は「外部リンクに飛ぶ」: URL 欄があり、Markdown 欄は無い。
+    expect(screen.getByTestId("fe2-lp-content-news-url")).toBeInTheDocument();
+    expect(screen.queryByTestId("fe2-lp-content-news-body")).toBeNull();
+    fireEvent.click(screen.getByTestId("fe2-lp-content-news-mode-dialog"));
+    expect(screen.queryByTestId("fe2-lp-content-news-url")).toBeNull();
+    fireEvent.change(screen.getByTestId("fe2-lp-content-news-text"), { target: { value: "登壇者を発表しました" } });
+    // 詳細が空なら保存しない。
+    fireEvent.click(screen.getByTestId("fe2-lp-content-news-form-save"));
+    expect(screen.getByText("詳細（Markdown）を入力してください")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("fe2-lp-content-news-body"), {
+      target: { value: "## 登壇者\n**山田** さん\n<script>alert(1)</script>\n[x](javascript:alert(1))" },
+    });
+    const preview = screen.getByTestId("fe2-lp-content-news-body-preview");
+    expect(preview.querySelector("h3")).toHaveTextContent("登壇者");
+    expect(preview.querySelector("strong")).toHaveTextContent("山田");
+    expect(preview.querySelector("script")).toBeNull();
+    expect(preview.innerHTML).not.toContain("javascript:");
+    fireEvent.click(screen.getByTestId("fe2-lp-content-news-form-save"));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(lp.resolveContent(save.mock.calls[0]![0].config.layout).news).toMatchObject([
+      { text: "登壇者を発表しました", mode: "dialog", url: "", body: expect.stringContaining("## 登壇者") },
+    ]);
+    expect(screen.getByText(/・ダイアログで詳細/)).toBeInTheDocument();
+  });
+
+  it("image URL fields: Drive hint, skeleton while loading, a sharing hint when the image fails", async () => {
+    renderScreen();
+    fireEvent.click(await screen.findByTestId("fe2-lp-config-partners-edit"));
+    fireEvent.click(screen.getByTestId("fe2-lp-content-partners-add"));
+    expect(screen.getByText(/リンクを知っている全員/)).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("fe2-lp-content-partners-logoUrl"), {
+      target: { value: "https://drive.google.com/file/d/1pi6s-HA6FR0YyWVVPbXonxmqTOn2QInr/view?usp=sharing" },
+    });
+    const wrap = screen.getByTestId("fe2-lp-content-partners-logoUrl-preview");
+    expect(wrap).toHaveAttribute("data-state", "loading");
+    const img = wrap.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe("https://lh3.googleusercontent.com/d/1pi6s-HA6FR0YyWVVPbXonxmqTOn2QInr=w400");
+    fireEvent.error(img);
+    expect(wrap).toHaveAttribute("data-state", "error");
+    expect(within(wrap).getByRole("status")).toHaveTextContent("リンクを知っている全員");
   });
 
   it("a failed save rolls the items back (and toasts)", async () => {
