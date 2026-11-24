@@ -18,6 +18,7 @@ export interface Env {
   SVC_AUDIT_LOG?: Fetcher; // audit-log sync POST /internal/log
   SVC_AUDIT?: Fetcher; // audit-log async ingest (free-tier outbox drain delivery target)
   SVC_AUTH?: Fetcher; // auth-service POST /internal/revoke-user
+  SVC_DRIVE_SHARE?: Fetcher; // drive-share-service POST /internal/role-membership (immediate delivery; the outbox is the fallback)
   DUB_DEFAULT_ORG_ID?: string;
 }
 

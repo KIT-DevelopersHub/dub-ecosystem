@@ -133,3 +133,40 @@ describe("createRoleMembershipSink (freeq outbox)", () => {
     await expect(failing.changed({ orgId: ORG_ID, userId: "u", change: "removed", roleIds: ["r"], reason: "revoke" })).resolves.toBeUndefined();
   });
 });
+
+describe("createRoleMembershipSink: immediate delivery", () => {
+  function fakeDriveShare(status: number) {
+    const calls: { url: string; headers: Record<string, string>; body: unknown }[] = [];
+    const svc = {
+      async fetch(url: string, init: RequestInit) {
+        calls.push({ url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) });
+        return new Response("{}", { status });
+      },
+    };
+    return { svc, calls };
+  }
+
+  it("POSTs the same message to drive-share in the background and marks the outbox row done", async () => {
+    const { d1, raw } = makeOutboxD1();
+    const ds = fakeDriveShare(200);
+    const work: Promise<unknown>[] = [];
+    const sink = createRoleMembershipSink({ OUTBOX_DB: d1, SVC_DRIVE_SHARE: ds.svc } as unknown as Env, { now: () => "t", newId: (p) => `${p}_1`, background: (p) => void work.push(p) });
+    await sink.changed({ orgId: ORG_ID, userId: "user_1", change: "added", roleIds: ["role_a"], reason: "assign" });
+    await Promise.all(work);
+
+    expect(ds.calls).toHaveLength(1);
+    expect(ds.calls[0]!.url).toBe("https://drive-share/internal/role-membership");
+    expect(ds.calls[0]!.headers["x-dub-internal"]).toBe("1");
+    expect(ds.calls[0]!.body).toMatchObject({ id: "rm_1", change: "added", roleIds: ["role_a"] });
+    expect(raw.prepare("SELECT status FROM freeq_outbox WHERE id = 'rm_1'").get()).toMatchObject({ status: "done" });
+  });
+
+  it("a failed direct delivery leaves the row pending for freeq-drain", async () => {
+    const { d1, raw } = makeOutboxD1();
+    const work: Promise<unknown>[] = [];
+    const sink = createRoleMembershipSink({ OUTBOX_DB: d1, SVC_DRIVE_SHARE: fakeDriveShare(503).svc } as unknown as Env, { now: () => "t", newId: (p) => `${p}_1`, background: (p) => void work.push(p) });
+    await sink.changed({ orgId: ORG_ID, userId: "user_1", change: "removed", roleIds: ["role_a"], reason: "revoke" });
+    await Promise.all(work);
+    expect(raw.prepare("SELECT status FROM freeq_outbox WHERE id = 'rm_1'").get()).toMatchObject({ status: "pending" });
+  });
+});

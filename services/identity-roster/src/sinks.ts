@@ -6,6 +6,7 @@ import { publishAudit, type AuditRecordEnvelopeV1 } from "@dub/events";
 import { errors } from "@dub/errors";
 import type { auditLog } from "@dub/types";
 import { enqueue } from "@dub/freeq";
+import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import { identity } from "@dub/types";
 import type { AuditSink, RequestCtx, RoleMembershipSink, SessionRevoker } from "./deps";
 import type { Env } from "./env";
@@ -65,11 +66,32 @@ export function createSessionRevoker(env: Env): SessionRevoker {
  * Role membership changes -> the @dub/freeq outbox (topic identity.ROLE_MEMBERSHIP_TOPIC), delivered
  * by freeq-drain to drive-share-service POST /internal/role-membership with retry + backoff. The row
  * id is the message id, so a retried enqueue is a no-op. Without OUTBOX_DB nothing is written.
+ *
+ * Plus an immediate side-channel (same pattern as chat-service -> notification): with SVC_DRIVE_SHARE
+ * and a `background` (ctx.waitUntil), the same message is POSTed right after the response; on a 2xx
+ * the outbox row is marked done so the drain does not redeliver it (a redelivery would be harmless —
+ * the receiver is idempotent). Any failure leaves the row pending for the drain.
  */
-export function createRoleMembershipSink(env: Env, deps: { now: () => string; newId: (prefix: string) => string }): RoleMembershipSink {
+export function createRoleMembershipSink(
+  env: Env,
+  deps: { now: () => string; newId: (prefix: string) => string; background?: (work: Promise<unknown>) => void },
+): RoleMembershipSink {
+  const deliverNow = async (msg: identity.RoleMembershipChangedV1, queued: boolean): Promise<void> => {
+    try {
+      const res = await env.SVC_DRIVE_SHARE!.fetch("https://drive-share/internal/role-membership", {
+        method: "POST",
+        headers: { "content-type": "application/json", [HDR_INTERNAL]: INTERNAL_HEADER_VALUE },
+        body: JSON.stringify(msg),
+      });
+      if (!res.ok) throw new Error(`drive-share answered ${res.status}`);
+      if (queued) await env.OUTBOX_DB!.prepare("UPDATE freeq_outbox SET status = 'done', attempts = attempts + 1 WHERE id = ? AND status = 'pending'").bind(msg.id).run();
+    } catch (err) {
+      console.warn(JSON.stringify({ service: SERVICE, event: "role_membership_direct_failed", messageId: msg.id, queued, message: err instanceof Error ? err.message : String(err) }));
+    }
+  };
   return {
     async changed(notice): Promise<void> {
-      if (!env.OUTBOX_DB || notice.roleIds.length === 0) return;
+      if (notice.roleIds.length === 0) return;
       const msg: identity.RoleMembershipChangedV1 = {
         type: "identity.role_membership.changed",
         version: 1,
@@ -81,12 +103,17 @@ export function createRoleMembershipSink(env: Env, deps: { now: () => string; ne
         roleIds: [...new Set(notice.roleIds)],
         reason: notice.reason,
       };
-      try {
-        await enqueue(env.OUTBOX_DB, identity.ROLE_MEMBERSHIP_TOPIC, msg, { id: msg.id });
-      } catch (err) {
-        // best-effort: the role change itself already committed
-        console.warn(JSON.stringify({ service: SERVICE, event: "role_membership_enqueue_failed", userId: notice.userId, change: notice.change, message: err instanceof Error ? err.message : String(err) }));
+      let queued = false;
+      if (env.OUTBOX_DB) {
+        try {
+          await enqueue(env.OUTBOX_DB, identity.ROLE_MEMBERSHIP_TOPIC, msg, { id: msg.id });
+          queued = true;
+        } catch (err) {
+          // best-effort: the role change itself already committed
+          console.warn(JSON.stringify({ service: SERVICE, event: "role_membership_enqueue_failed", userId: notice.userId, change: notice.change, message: err instanceof Error ? err.message : String(err) }));
+        }
       }
+      if (env.SVC_DRIVE_SHARE && deps.background) deps.background(deliverNow(msg, queued));
     },
   };
 }
