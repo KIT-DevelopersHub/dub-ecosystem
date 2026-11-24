@@ -56,7 +56,6 @@ export const LP_SECTION_REGISTRY = {
     options: { banner: { kind: "boolean", label: "帯（告知バナー）を表示", default: true } },
   },
   // 中身（項目の一覧）を LP管理で編集するセクション（LP_CONTENT_FIELDS）。既定は非表示・項目が 0 件のあいだも出ない。
-  partners: { label: "協力団体ロゴ", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "ロゴの帯" } },
   news: { label: "お知らせ", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "一覧" } },
   speakers: { label: "登壇者情報", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "2列カード" } },
   join: { label: "参加・登壇 (Join)", hideable: true, defaultVariant: "a", variants: { a: "2カード" } },
@@ -80,6 +79,8 @@ export const LP_SECTION_REGISTRY = {
   vision: { label: "ビジョン", hideable: true, defaultVariant: "a", variants: { a: "標準" } },
   // お問い合わせ（CTA の帯）とフッターはページの締めなので、スポンサーはその手前に置く。
   sponsors: { label: "スポンサー", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "プラン別" } },
+  // 協力団体はスポンサーより目立たせないので、スポンサーの後・お問い合わせの手前に控えめな帯で置く。
+  partners: { label: "協力団体ロゴ", hideable: true, defaultVisible: false, defaultVariant: "a", variants: { a: "ロゴの帯" } },
   contact: { label: "お問い合わせ", hideable: true, defaultVariant: "a", variants: { a: "標準" } },
   footer: { label: "フッター", hideable: false, defaultVariant: "a", variants: { a: "標準" } },
 } as const satisfies Record<string, LpSectionDef>;

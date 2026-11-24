@@ -500,10 +500,14 @@ describe("LpSiteConfigScreen — LP（左）とセクションの設定（右）
     expect(screen.getByTestId("fe2-lp-config-mini-box").style.height).toBe("1200px");
     const top = (id: string) => (document.querySelector(`[data-lp-block="${id}"]`) as HTMLElement).style.top;
     expect([top("header"), top("join"), top("program")]).toEqual(["0px", "360px", "600px"]);
-    // 各設定は次の設定の手前までの帯の中で貼り付く。LP に無い（既定で非表示の）協力団体〜登壇者の設定は
+    // 各設定は次の設定の手前までの帯の中で貼り付く。LP に無い（既定で非表示の）お知らせ・登壇者の設定は
     // ヘッダーの設定のすぐ下に 16px ずつ並ぶ（jsdom は高さ 0）ので、登壇者の帯が参加・登壇の手前まで伸びる。
-    expect([top("partners"), top("news"), top("speakers")]).toEqual(["16px", "32px", "48px"]);
-    expect((document.querySelector('[data-lp-block="speakers"]') as HTMLElement).style.height).toBe("296px");
+    expect([top("news"), top("speakers")]).toEqual(["16px", "32px"]);
+    expect((document.querySelector('[data-lp-block="speakers"]') as HTMLElement).style.height).toBe("312px");
+    // 協力団体はスポンサーの後（お問い合わせの手前）: プログラムの後の about〜スポンサーに続いて並ぶ。
+    expect(top("partners")).toBe("680px");
+    const order = [...document.querySelectorAll("[data-lp-block]")].map((el) => el.getAttribute("data-lp-block"));
+    expect(order.slice(order.indexOf("sponsors"), order.indexOf("sponsors") + 3)).toEqual(["sponsors", "partners", "contact"]);
   });
 
   it("hovering a block outlines the section in the LP; clicking a section in the LP picks its block", async () => {

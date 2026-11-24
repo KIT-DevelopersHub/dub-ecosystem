@@ -28,7 +28,7 @@ function Head({ eyebrow, title, id }: { eyebrow: string; title: string; id: stri
 export function Partners(_props: ShellProps) {
   return (
     <section id="partners" className="lp-partners" aria-labelledby="partners-title">
-      <h2 className="sr-only" id="partners-title">
+      <h2 className="lp-partners-title" id="partners-title">
         協力団体
       </h2>
       <Slot id="partners" className="lp-partners-body" />

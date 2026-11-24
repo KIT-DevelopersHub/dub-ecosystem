@@ -127,13 +127,13 @@ describe("content sections (協力団体・お知らせ・登壇者・スポン�
     content,
   });
 
-  it("are hidden by default and sit in the LP order (hero → partners → news → speakers → … → sponsors → contact)", () => {
+  it("are hidden by default and sit in the LP order (hero → news → speakers → … → sponsors → partners → contact)", () => {
     for (const id of lp.LP_CONTENT_SECTION_IDS) {
       expect(lp.LP_SECTION_REGISTRY[id].defaultVisible).toBe(false);
       expect(lp.resolveSection(lp.defaultLayout(), id).visible).toBe(false);
     }
-    expect(lp.LP_SECTION_IDS.slice(0, 5)).toEqual(["header", "partners", "news", "speakers", "join"]);
-    expect(lp.LP_SECTION_IDS.slice(-3)).toEqual(["sponsors", "contact", "footer"]);
+    expect(lp.LP_SECTION_IDS.slice(0, 4)).toEqual(["header", "news", "speakers", "join"]);
+    expect(lp.LP_SECTION_IDS.slice(-4)).toEqual(["sponsors", "partners", "contact", "footer"]);
   });
 
   it("layoutAttributes: shown only when visible AND it has items (the default stays attribute-free)", () => {
