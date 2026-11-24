@@ -112,6 +112,7 @@ export interface LpLayout {
 // セクションの表示/非表示と同じ下書き → 本番反映の流れに乗せるため、layout.content に持つ（同じ JSON 列・追加の表は無い）。
 // 項目の欄は LP_CONTENT_FIELDS が唯一の定義: LP管理のフォーム・lp-analytics の検証・LP Worker の正規化が全部これを読む。
 // 画像は URL（https:// か LP 内の /パス）。LP 用の画像アップロードの仕組みはまだ無い。
+// Google ドライブの共有リンクは保存はそのまま、描くときに toEmbeddableImageUrl（lp-markdown.ts）で直す。
 
 export const LP_CONTENT_SECTION_IDS = ["partners", "news", "speakers", "sponsors"] as const;
 export type LpContentSectionId = (typeof LP_CONTENT_SECTION_IDS)[number];
@@ -133,12 +134,25 @@ export interface LpPartnerItem {
   url: string;
 }
 
+/** お知らせを押したとき: 外部リンクに飛ぶ / ダイアログで詳細（Markdown）を出す。 */
+export const LP_NEWS_MODES = ["link", "dialog"] as const;
+export type LpNewsMode = (typeof LP_NEWS_MODES)[number];
+export const LP_NEWS_MODE_LABELS: Readonly<Record<LpNewsMode, string>> = {
+  link: "外部リンクに飛ぶ",
+  dialog: "ダイアログで詳細を表示",
+};
+
 export interface LpNewsItem {
   id: string;
   /** YYYY-MM-DD */
   date: string;
   text: string;
+  /** 書いていない古い項目は "link"（#821 までの動き）。 */
+  mode: LpNewsMode;
+  /** link のときのリンク先（"" = リンクなし）。 */
   url: string;
+  /** dialog のときの詳細（Markdown・lp-markdown.ts の renderLpMarkdown で描く）。 */
+  body: string;
   /** 強調（目印と下線）。 */
   highlight: boolean;
 }
@@ -170,7 +184,7 @@ export interface LpContent {
   sponsors: LpSponsorItem[];
 }
 
-export type LpContentFieldKind = "text" | "textarea" | "url" | "image" | "date" | "boolean" | "tier";
+export type LpContentFieldKind = "text" | "textarea" | "markdown" | "url" | "image" | "date" | "boolean" | "tier" | "newsMode";
 
 export interface LpContentFieldDef {
   key: string;
@@ -181,35 +195,53 @@ export interface LpContentFieldDef {
   max?: number;
   /** 入力欄の補足。 */
   hint?: string;
+  /** ほかの欄がこの値のときだけ使う欄（フォームでも隠す）。使わないあいだは required を問わない。 */
+  showWhen?: { key: string; value: string };
 }
 
+/** 画像 URL 欄の共通の補足（Google ドライブの共有リンクも使える）。 */
+export const LP_IMAGE_URL_HINT =
+  "Google ドライブの共有リンクも使えます（共有を「リンクを知っている全員」にしてください）。横にプレビューが出れば LP にも出ます。";
+
 export const LP_CONTENT_URL_MAX = 500;
+/** お知らせ詳細（Markdown）の文字数の上限（下書きと本番の 2 つの JSON が 1 行に入るので 50 件 × 日本語でも D1 の行の上限に収まる大きさ）。 */
+export const LP_NEWS_BODY_MAX = 4000;
 export const LP_CONTENT_ITEM_ID_RE = /^[a-z0-9_-]{1,40}$/;
 
 /** セクション → 項目の欄（並び = フォームの並び）。 */
 export const LP_CONTENT_FIELDS: { readonly [S in LpContentSectionId]: readonly LpContentFieldDef[] } = {
   partners: [
     { key: "name", label: "団体名", kind: "text", required: true, max: 80 },
-    { key: "logoUrl", label: "ロゴ画像の URL", kind: "image", required: true, hint: "正方形の画像がきれいに収まります（円形に切り抜いて表示）。" },
+    { key: "logoUrl", label: "ロゴ画像の URL", kind: "image", required: true, hint: `正方形の画像がきれいに収まります（円形に切り抜いて表示）。${LP_IMAGE_URL_HINT}` },
     { key: "url", label: "リンク先 URL", kind: "url", required: false },
   ],
   news: [
     { key: "date", label: "日付", kind: "date", required: true },
     { key: "text", label: "本文", kind: "text", required: true, max: 120 },
-    { key: "url", label: "リンク先 URL", kind: "url", required: false },
+    { key: "mode", label: "押したとき", kind: "newsMode", required: false },
+    { key: "url", label: "リンク先 URL", kind: "url", required: false, hint: "新しいタブで開きます。空ならリンクなしの文字だけ。", showWhen: { key: "mode", value: "link" } },
+    {
+      key: "body",
+      label: "詳細（Markdown）",
+      kind: "markdown",
+      required: true,
+      max: LP_NEWS_BODY_MAX,
+      hint: "# 見出し・**太字**・- 箇条書き・> 引用・[文字](https://…)・![説明](画像の URL) が使えます。",
+      showWhen: { key: "mode", value: "dialog" },
+    },
     { key: "highlight", label: "強調する", kind: "boolean", required: false, hint: "目印と下線で目立たせます。" },
   ],
   speakers: [
     { key: "name", label: "名前", kind: "text", required: true, max: 40 },
     { key: "furigana", label: "ふりがな", kind: "text", required: false, max: 60 },
     { key: "affiliation", label: "所属", kind: "text", required: false, max: 80 },
-    { key: "photoUrl", label: "写真の URL", kind: "image", required: false, hint: "正方形の写真がきれいに収まります。" },
+    { key: "photoUrl", label: "写真の URL", kind: "image", required: false, hint: `正方形の写真がきれいに収まります。${LP_IMAGE_URL_HINT}` },
     { key: "message", label: "メッセージ", kind: "textarea", required: false, max: 200, hint: "100〜150 文字程度。▼ で開くと見えます。" },
   ],
   sponsors: [
     { key: "tier", label: "プラン", kind: "tier", required: true },
     { key: "name", label: "会社名", kind: "text", required: true, max: 80 },
-    { key: "logoUrl", label: "ロゴ画像の URL", kind: "image", required: false, hint: "横長のロゴがきれいに収まります。" },
+    { key: "logoUrl", label: "ロゴ画像の URL", kind: "image", required: false, hint: `横長のロゴがきれいに収まります。${LP_IMAGE_URL_HINT}` },
     { key: "url", label: "リンク先 URL", kind: "url", required: false },
     { key: "description", label: "説明", kind: "textarea", required: false, max: 120, hint: "LP に出るのは Title プランだけです。" },
   ],
@@ -248,12 +280,18 @@ function contentFieldValue(f: LpContentFieldDef, raw: unknown): { value: string 
   if (f.kind === "boolean") return raw === undefined ? { value: false, reason: null } : typeof raw === "boolean" ? { value: raw, reason: null } : { value: false, reason: "invalid" };
   if (raw !== undefined && typeof raw !== "string") return { value: "", reason: "invalid" };
   const v = (raw ?? "").trim();
+  if (f.kind === "newsMode") return { value: v || LP_NEWS_MODES[0], reason: v === "" || (LP_NEWS_MODES as readonly string[]).includes(v) ? null : "invalid" };
   if (v === "") return { value: "", reason: f.required ? "required" : null };
   if (f.kind === "tier") return { value: v, reason: (LP_SPONSOR_TIERS as readonly string[]).includes(v) ? null : "invalid" };
   if (f.kind === "date") return { value: v, reason: isRealDate(v) ? null : "invalid" };
   if (f.kind === "url" || f.kind === "image") return { value: v, reason: isLpContentUrl(v) ? null : "invalid_url" };
   if (f.max !== undefined && v.length > f.max) return { value: v, reason: "too_long" };
   return { value: v, reason: null };
+}
+
+/** その欄を今使うか（showWhen の欄は先に並べてあること）。 */
+export function isContentFieldShown(f: LpContentFieldDef, values: Readonly<Record<string, unknown>>): boolean {
+  return !f.showWhen || values[f.showWhen.key] === f.showWhen.value;
 }
 
 /** 1 項目を検める。issues が空なら item は欄が全部そろった正規形。 */
@@ -269,6 +307,11 @@ export function validateContentItem<S extends LpContentSectionId>(
   const out: Record<string, string | boolean> = { id };
   for (const f of LP_CONTENT_FIELDS[section]) {
     const { value, reason } = contentFieldValue(f, raw[f.key]);
+    // 使っていない欄（showWhen が外れている）は問わない: 正しい値なら残し、空・不正なら "" にする。
+    if (!isContentFieldShown(f, out)) {
+      out[f.key] = reason ? "" : value;
+      continue;
+    }
     if (reason) issues.push({ field: `${path}.${f.key}`, reason });
     out[f.key] = value;
   }

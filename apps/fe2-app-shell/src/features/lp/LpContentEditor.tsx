@@ -4,7 +4,7 @@
 // 変更は確定した瞬間に onChange で親へ渡す: 下書きタブは楽観的に自動保存（失敗で戻す）、本番タブは未反映の変更にためる。
 // 欄は @dub/types の LP_CONTENT_FIELDS から汎用に描く。モーダルは body へ portal されるので --dub-* トークンだけで描く。
 import { useState } from "react";
-import { lp } from "@dub/types";
+import { lp, lpMarkdown } from "@dub/types";
 import {
   Button,
   Checkbox,
@@ -14,7 +14,9 @@ import {
   Icon,
   IconButton,
   Modal,
+  SegmentedControl,
   Select,
+  Skeleton,
   SortableList,
   Stack,
   TextField,
@@ -33,11 +35,12 @@ import {
 } from "./lpContent.ts";
 import styles from "./lpContent.module.css";
 
+const NEWS_MODE_OPTIONS = lp.LP_NEWS_MODES.map((m) => ({ value: m as string, label: lp.LP_NEWS_MODE_LABELS[m], testId: `fe2-lp-content-news-mode-${m}` }));
 const TIER_OPTIONS = lp.LP_SPONSOR_TIERS.map((t) => ({ value: t as string, label: `${lp.LP_SPONSOR_TIER_LABELS[t]} プラン` }));
 
 const NOTES: Record<lp.LpContentSectionId, string> = {
   partners: "スポンサーの後（お問い合わせの手前）に丸いロゴで並びます。8 団体以上になるとロゴがゆっくり流れます。",
-  news: "上から順に並びます（新しいお知らせを上へ）。「強調する」にした行は目印と下線が付きます。",
+  news: "上から順に並びます（新しいお知らせを上へ）。押したときに外部リンクへ飛ぶか、ダイアログで詳細（Markdown）を出すかを項目ごとに選べます。「強調する」にした行は目印と下線が付きます。",
   speakers: "2 列のカードで並びます（スマホは 1 列）。メッセージは ▼ を押すと開きます。",
   sponsors: "プランごとにまとめて並びます（Title → Gold → Silver → Bronze）。説明が LP に出るのは Title だけです。",
 };
@@ -130,7 +133,7 @@ export function LpContentEditor({
     <Modal
       open={open}
       onClose={close}
-      size="md"
+      size={view.kind === "form" && section === "news" ? "lg" : "md"}
       title={view.kind === "form" ? `${def.label}: ${view.id ? "項目を編集" : "項目を追加"}` : `${def.label}の項目`}
       footer={formFooter}
       testId={P}
@@ -144,7 +147,7 @@ export function LpContentEditor({
           }}
           data-testid={`${P}-form`}
         >
-          {fields.map((f) => (
+          {fields.filter((f) => lp.isContentFieldShown(f, view.draft)).map((f) => (
             <ContentField
               key={f.key}
               section={section}
@@ -202,7 +205,7 @@ export function LpContentEditor({
                     ) : null}
                     {section !== "news" ? (
                       <span className={styles.thumb} data-shape={section === "sponsors" ? "wide" : section === "partners" ? "round" : "square"}>
-                        {s.image ? <img src={s.image} alt="" loading="lazy" /> : <Icon name="file" />}
+                        {s.image ? <img src={lpMarkdown.toEmbeddableImageUrl(s.image, 200)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <Icon name="file" />}
                       </span>
                     ) : null}
                     <span className={styles.rowText}>
@@ -263,7 +266,27 @@ function ContentField({
       </div>
     );
   }
-  const preview = (f.kind === "image" && text && lp.isLpContentUrl(text)) ? text : null;
+  if (f.kind === "newsMode") {
+    return (
+      <div className={styles.modeRow}>
+        <SegmentedControl
+          caption={f.label}
+          options={NEWS_MODE_OPTIONS.map((o) => ({ ...o, disabled }))}
+          value={text || lp.LP_NEWS_MODES[0]}
+          onChange={onChange}
+          testId={id}
+        />
+      </div>
+    );
+  }
+  if (f.kind === "markdown") {
+    return (
+      <FormField label={f.label} htmlFor={id} required={f.required} {...(error ? { error } : {})} {...(help ? { help } : {})}>
+        <MarkdownEditor id={id} value={text} invalid={!!error} disabled={disabled} onChange={onChange} />
+      </FormField>
+    );
+  }
+  const preview = f.kind === "image" && text && lp.isLpContentUrl(text) ? text : null;
   return (
     <FormField label={f.label} htmlFor={id} required={f.required} {...(error ? { error } : {})} {...(help ? { help } : {})}>
       {f.kind === "textarea" ? (
@@ -285,12 +308,80 @@ function ContentField({
             onChange={onChange}
           />
           {preview ? (
-            <span className={styles.thumb} data-shape={section === "sponsors" ? "wide" : section === "partners" ? "round" : "square"}>
-              <img src={preview} alt="" />
-            </span>
+            <ImagePreview
+              key={preview}
+              src={preview}
+              shape={section === "sponsors" ? "wide" : section === "partners" ? "round" : "square"}
+              testId={`${id}-preview`}
+            />
           ) : null}
         </div>
       )}
     </FormField>
+  );
+}
+
+/** 画像 URL のプレビュー。読み込み中はスケルトン、出なければ共有設定の案内（Google ドライブの共有リンクは直して出す）。 */
+function ImagePreview({ src, shape, testId }: { src: string; shape: "wide" | "round" | "square"; testId: string }): JSX.Element {
+  const [state, setState] = useState<"loading" | "ok" | "error">("loading");
+  const drive = lpMarkdown.googleDriveFileId(src) !== null;
+  return (
+    <span className={styles.previewWrap} data-testid={testId} data-state={state}>
+      <span className={styles.thumb} data-shape={shape}>
+        {state === "loading" ? (
+          <span className={styles.thumbSkeleton}>
+            <Skeleton variant="rect" width="100%" height="100%" />
+          </span>
+        ) : null}
+        {state === "error" ? (
+          <Icon name="alert-triangle" />
+        ) : (
+          <img
+            src={lpMarkdown.toEmbeddableImageUrl(src, 400)}
+            alt=""
+            referrerPolicy="no-referrer"
+            data-loading={state === "loading" || undefined}
+            onLoad={() => setState("ok")}
+            onError={() => setState("error")}
+          />
+        )}
+      </span>
+      {state === "error" ? (
+        <span className={styles.previewError} role="status">
+          {drive ? "画像を読み込めません。ドライブの共有を「リンクを知っている全員」にしてください。" : "画像を読み込めません。URL を確認してください。"}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Markdown の入力 + その場のプレビュー（LP のダイアログと同じ描画 = lpMarkdown.renderLpMarkdown）。 */
+function MarkdownEditor({
+  id,
+  value,
+  invalid,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  invalid: boolean;
+  disabled: boolean;
+  onChange: (v: string) => void;
+}): JSX.Element {
+  // renderLpMarkdown の出力は入力を全部エスケープし、決まったタグと http(s) の URL だけを出す（packages/types/test/lp-markdown.test.ts）。
+  const html = lpMarkdown.renderLpMarkdown(value);
+  return (
+    <div className={styles.mdEditor}>
+      <Textarea id={id} testId={id} value={value} rows={14} invalid={invalid} disabled={disabled} onChange={onChange} />
+      <section className={styles.mdPreviewPane} aria-label="プレビュー" data-testid={`${id}-preview`}>
+        <span className={styles.mdPreviewLabel}>プレビュー</span>
+        {html ? (
+          <div className={styles.md} dangerouslySetInnerHTML={{ __html: html }} />
+        ) : (
+          <p className={styles.mdEmpty}>ここに LP のダイアログでの見え方が出ます。</p>
+        )}
+      </section>
+    </div>
   );
 }

@@ -3,6 +3,7 @@
 // 入れ物は dangerouslySetInnerHTML にしておく: hydrate のとき React が差し込まれた中身を消さない。
 // 既定は非表示（登録簿の defaultVisible: false）なので、Worker を通らない表示では枠ごと出ない。
 import type { LpContentSectionId } from "@/sections/registry";
+import { NewsDialog } from "./NewsDialog";
 import "./content-sections.css";
 
 /** 枠は props を取らない（SectionSlot に渡す props の形をそろえるための型）。 */
@@ -52,6 +53,7 @@ export function News(_props: ShellProps) {
           <Slot id="news" className="lp-news-body" />
         </div>
       </div>
+      <NewsDialog />
     </section>
   );
 }

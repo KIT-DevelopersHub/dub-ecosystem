@@ -232,7 +232,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp site-config content (%s repo)", (k
     schema: 1,
     sections: { news: { variant: "a", visible: true, options: {} } },
     content: {
-      news: [{ id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", url: "https://hokuriku-it-conf.com/tickets", highlight: true }],
+      news: [{ id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", mode: "link", url: "https://hokuriku-it-conf.com/tickets", body: "", highlight: true }],
       sponsors: [{ id: "s1", tier: "title", name: "○○株式会社", logoUrl: "/sponsors/a.png", url: "", description: "説明" }],
     },
   };

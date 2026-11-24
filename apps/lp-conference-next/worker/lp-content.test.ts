@@ -21,7 +21,7 @@ test("formatNewsDate: 2026-11-22 → 2026/11/22(日)", () => {
 });
 
 test("everything is escaped; unsafe URLs are dropped", () => {
-  const html = renderNews([{ id: "n", date: "2026-11-22", text: '<script>alert("x")</script>', url: "javascript:alert(1)", highlight: false }]);
+  const html = renderNews([{ id: "n", date: "2026-11-22", text: '<script>alert("x")</script>', url: "javascript:alert(1)", mode: "link", body: "", highlight: false }]);
   assert.ok(!html.includes("<script>"));
   assert.ok(html.includes("&lt;script&gt;"));
   assert.ok(!html.includes("javascript:"));
@@ -31,11 +31,52 @@ test("everything is escaped; unsafe URLs are dropped", () => {
 
 test("news: highlighted rows get the mark; external links open in a new tab", () => {
   const html = renderNews([
-    { id: "a", date: "2026-11-22", text: "チケット販売を開始しました。", url: "https://example.com/t", highlight: true },
-    { id: "b", date: "2026-11-20", text: "あああ", url: "", highlight: false },
+    { id: "a", date: "2026-11-22", text: "チケット販売を開始しました。", url: "https://example.com/t", mode: "link", body: "", highlight: true },
+    { id: "b", date: "2026-11-20", text: "あああ", url: "", mode: "link", body: "", highlight: false },
   ]);
   assert.match(html, /data-highlight="on".*lp-news-mark.*target="_blank"/s);
   assert.match(html, /data-highlight="off"><time class="lp-news-date" datetime="2026-11-20">2026\/11\/20\(金\)/);
+});
+
+test("news link mode: external URL opens in a new tab with rel=noopener; internal paths stay in the tab", () => {
+  const html = renderNews([
+    { id: "a", date: "2026-11-22", text: "外部", mode: "link", url: "https://example.com/t", body: "", highlight: false },
+    { id: "b", date: "2026-11-22", text: "内部", mode: "link", url: "/tickets", body: "", highlight: false },
+  ]);
+  assert.match(html, /<a class="lp-news-link" href="https:\/\/example.com\/t" target="_blank" rel="noopener noreferrer">外部<\/a>/);
+  assert.match(html, /<a class="lp-news-link" href="\/tickets">内部<\/a>/);
+  assert.ok(!html.includes("data-news-open"));
+});
+
+test("news dialog mode: a button that opens the dialog + the sanitized body in a <template>", () => {
+  const html = renderNews([
+    {
+      id: "d1",
+      date: "2026-11-22",
+      text: "登壇者を発表しました",
+      mode: "dialog",
+      url: "https://ignored.example",
+      body: "## 見出し\n**太字**\n![写真](https://drive.google.com/file/d/1pi6s-HA6FR0YyWVVPbXonxmqTOn2QInr/view?usp=sharing)\n<script>alert(1)</script>\n[x](javascript:alert(1))",
+      highlight: true,
+    },
+  ]);
+  assert.match(html, /<button type="button" class="lp-news-link lp-news-open" data-news-open="d1" aria-haspopup="dialog">登壇者を発表しました<\/button>/);
+  assert.match(html, /<template data-news-body="d1"><h3>見出し<\/h3>/);
+  assert.ok(html.includes("https://lh3.googleusercontent.com/d/1pi6s-HA6FR0YyWVVPbXonxmqTOn2QInr=w1600"));
+  assert.ok(!html.includes("<script>"));
+  assert.ok(!html.includes("javascript:"));
+  assert.ok(!html.includes("ignored.example"));
+  // 本文が空の dialog はただの文字（押しても何も起きないボタンを出さない）
+  const empty = renderNews([{ id: "d2", date: "2026-11-22", text: "空", mode: "dialog", url: "", body: " ", highlight: false }]);
+  assert.ok(!empty.includes("<button"));
+});
+
+test("images given as Google Drive share links are rendered via lh3 (sponsors / partners / speakers)", () => {
+  const drive = "https://drive.google.com/open?id=1pi6s-HA6FR0YyWVVPbXonxmqTOn2QInr";
+  const lh3 = "https://lh3.googleusercontent.com/d/1pi6s-HA6FR0YyWVVPbXonxmqTOn2QInr=w1600";
+  assert.ok(renderSponsors([{ id: "s", tier: "gold", name: "A", logoUrl: drive, url: "", description: "" }]).includes(`src="${lh3}"`));
+  assert.ok(renderPartners([{ id: "p", name: "B", logoUrl: drive, url: "" }]).includes(`src="${lh3}"`));
+  assert.ok(renderSpeakers([{ id: "k", name: "C", furigana: "", affiliation: "", photoUrl: drive, message: "" }]).includes(`src="${lh3}"`));
 });
 
 test("partners: a centered row while few, a marquee (doubled, second copy hidden from AT) when many", () => {
@@ -74,7 +115,7 @@ test("contentInjections: public = visible sections only; preview = every section
     schema: 1,
     sections: { news: { variant: "a", visible: true, options: {} } },
     content: {
-      news: [{ id: "n", date: "2026-11-22", text: "x", url: "", highlight: false }],
+      news: [{ id: "n", date: "2026-11-22", text: "x", url: "", mode: "link", body: "", highlight: false }],
       speakers: [{ id: "s", name: "y", furigana: "", affiliation: "", photoUrl: "", message: "" }],
     },
   };
