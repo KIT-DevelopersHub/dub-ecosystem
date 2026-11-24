@@ -2,7 +2,7 @@
 // wiring lives in sinks.ts / index.ts; tests inject fakes. Keeping side-effecting
 // collaborators (audit, session revoke) behind interfaces is what lets the RBAC
 // semantics be unit-tested without SES/Queue/auth being live (9-B/C/E pending).
-import type { auditLog } from "@dub/types";
+import type { auditLog, identity } from "@dub/types";
 import type { IdentityRepo } from "./repo/types";
 import type { WebauthnRepo } from "./repo/webauthn";
 
@@ -24,12 +24,30 @@ export interface SessionRevoker {
   revokeUser(userId: string, ctx: RequestCtx): Promise<void>;
 }
 
+/** One user's role membership changed. drive-share-service follows it (Drive共有 grants and
+ *  ミーティング invitations of those roles reach / leave the user). */
+export interface RoleMembershipNotice {
+  orgId: string;
+  userId: string;
+  change: identity.RoleMembershipChange;
+  roleIds: string[];
+  reason: identity.RoleMembershipReason;
+}
+
+export interface RoleMembershipSink {
+  /** Best-effort (an outbox row): never throws into the business flow. A lost notice is caught by
+   *  drive-share-service's hourly sync (joins) or the role-grant backfill (leaves). */
+  changed(notice: RoleMembershipNotice): Promise<void>;
+}
+
 export interface Deps {
   repo: IdentityRepo;
   /** Passkey credential store (/internal/webauthn/*). Absent => those routes 503. */
   webauthn?: WebauthnRepo;
   audit: AuditSink;
   revoker: SessionRevoker;
+  /** Role membership changes for drive-share-service. Absent = nobody listens (tests, bare deploys). */
+  membership?: RoleMembershipSink;
   now: () => string; // @dub/db nowIso
   newId: (prefix: string) => string; // @dub/db newId
   defaultOrgId: string; // common.DUB_DEFAULT_ORG_ID

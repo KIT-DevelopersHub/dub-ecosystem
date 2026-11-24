@@ -5,7 +5,9 @@ import { createServiceClient, type RequestContext } from "@dub/http";
 import { publishAudit, type AuditRecordEnvelopeV1 } from "@dub/events";
 import { errors } from "@dub/errors";
 import type { auditLog } from "@dub/types";
-import type { AuditSink, RequestCtx, SessionRevoker } from "./deps";
+import { enqueue } from "@dub/freeq";
+import { identity } from "@dub/types";
+import type { AuditSink, RequestCtx, RoleMembershipSink, SessionRevoker } from "./deps";
 import type { Env } from "./env";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
 
@@ -54,6 +56,36 @@ export function createSessionRevoker(env: Env): SessionRevoker {
         await client.post(rc, "/internal/revoke-user", { userId }, { idempotencyKey: `revoke:${userId}:${ctx.requestId}` });
       } catch (cause) {
         throw errors.upstreamUnavailable("auth-service", cause); // fail-close: suspend aborts
+      }
+    },
+  };
+}
+
+/**
+ * Role membership changes -> the @dub/freeq outbox (topic identity.ROLE_MEMBERSHIP_TOPIC), delivered
+ * by freeq-drain to drive-share-service POST /internal/role-membership with retry + backoff. The row
+ * id is the message id, so a retried enqueue is a no-op. Without OUTBOX_DB nothing is written.
+ */
+export function createRoleMembershipSink(env: Env, deps: { now: () => string; newId: (prefix: string) => string }): RoleMembershipSink {
+  return {
+    async changed(notice): Promise<void> {
+      if (!env.OUTBOX_DB || notice.roleIds.length === 0) return;
+      const msg: identity.RoleMembershipChangedV1 = {
+        type: "identity.role_membership.changed",
+        version: 1,
+        id: deps.newId("rm"),
+        occurredAt: deps.now(),
+        orgId: notice.orgId,
+        userId: notice.userId,
+        change: notice.change,
+        roleIds: [...new Set(notice.roleIds)],
+        reason: notice.reason,
+      };
+      try {
+        await enqueue(env.OUTBOX_DB, identity.ROLE_MEMBERSHIP_TOPIC, msg, { id: msg.id });
+      } catch (err) {
+        // best-effort: the role change itself already committed
+        console.warn(JSON.stringify({ service: SERVICE, event: "role_membership_enqueue_failed", userId: notice.userId, change: notice.change, message: err instanceof Error ? err.message : String(err) }));
       }
     },
   };
