@@ -36,7 +36,7 @@ import styles from "./lpContent.module.css";
 const TIER_OPTIONS = lp.LP_SPONSOR_TIERS.map((t) => ({ value: t as string, label: `${lp.LP_SPONSOR_TIER_LABELS[t]} プラン` }));
 
 const NOTES: Record<lp.LpContentSectionId, string> = {
-  partners: "ヒーローのすぐ下に丸いロゴで並びます。8 団体以上になるとロゴがゆっくり流れます。",
+  partners: "スポンサーの後（お問い合わせの手前）に丸いロゴで並びます。8 団体以上になるとロゴがゆっくり流れます。",
   news: "上から順に並びます（新しいお知らせを上へ）。「強調する」にした行は目印と下線が付きます。",
   speakers: "2 列のカードで並びます（スマホは 1 列）。メッセージは ▼ を押すと開きます。",
   sponsors: "プランごとにまとめて並びます（Title → Gold → Silver → Bronze）。説明が LP に出るのは Title だけです。",

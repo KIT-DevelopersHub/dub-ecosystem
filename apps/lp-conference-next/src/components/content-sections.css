@@ -37,12 +37,21 @@
   color: inherit;
 }
 
-/* ---- 協力団体ロゴ（ヒーローの直下の明るい帯）---- */
+/* ---- 協力団体ロゴ（スポンサーの後・お問い合わせの手前の控えめな明るい帯）----
+   スポンサー（濃い帯）より目立たせない: 小さな見出し + 小さめのロゴ。 */
 .lp-partners {
-  background: var(--lp-surface-alt);
-  border-block: 1px solid var(--lp-border-soft);
-  padding-block: clamp(1.1rem, 2.6vw, 1.6rem);
+  background: var(--lp-surface);
+  border-bottom: 1px solid var(--lp-border-soft);
+  padding-block: clamp(2.25rem, 5vw, 3.25rem);
   overflow: hidden;
+}
+.lp-partners-title {
+  margin: 0 0 clamp(1rem, 2.4vw, 1.4rem);
+  text-align: center;
+  font-size: clamp(0.85rem, 1.5vw, 0.95rem);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--lp-ink-soft);
 }
 .lp-partners-viewport {
   display: flex;
@@ -80,7 +89,7 @@
 .lp-partner-link {
   display: grid;
   place-items: center;
-  width: clamp(64px, 8vw, 92px);
+  width: clamp(56px, 7vw, 80px);
   aspect-ratio: 1;
   border-radius: 50%;
   background: var(--lp-surface);
