@@ -1,14 +1,17 @@
 // Delivers a PendingSend through MailApi and reports the outcome to the store, so a
 // failure is visible (送信できませんでした + 再試行) and the compose is restored, never lost.
 import type { Dispatch } from "react";
-import type { mail } from "@dub/types";
+import { auth as authRules, type mail } from "@dub/types";
 import type { MailApi } from "../mailApi.tsx";
 import { composeWindowDraftKey } from "./ComposeWindow.tsx";
 import type { MailAction, PendingSend } from "./useMailStore.tsx";
 
 /** A failure the user can act on; anything else is the bar's plain 送信できませんでした. */
-function failureReason(err: unknown): string | undefined {
-  const status = (err as { status?: unknown } | null)?.status;
+export function failureReason(err: unknown): string | undefined {
+  const e = err as { status?: unknown; code?: unknown } | null;
+  const status = e?.status;
+  // 代理表示中の送信はエッジで意図的に 403 (IMPERSONATION_ACTION_BLOCKED)。権限不足と区別する。
+  if (e?.code === "IMPERSONATION_ACTION_BLOCKED") return authRules.IMPERSONATION_BLOCKED_MESSAGE;
   if (status === 413) return "添付ファイルが大きすぎるため送信できませんでした";
   if (status === 403) return "メールを送信する権限がありません";
   return undefined;

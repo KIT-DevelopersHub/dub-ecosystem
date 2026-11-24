@@ -31,7 +31,7 @@ export interface ComposeState {
   persisted?: boolean;
   /** Stored files to pull in on open: a forward's originals, or a reopened draft's. */
   seed?: { source: AttachmentSource; messageId: string; attachments: mail.MailAttachment[] };
-  /** Reopened with text the user wrote (failed send / reload), which must be kept even though
+  /** Reopened with text the user wrote (failed send / reload / 予約の編集), which must be kept even though
    *  it matches how this window opened. */
   restored?: boolean;
   /** Files read in a previous window of this compose (restored after a failed send). */
