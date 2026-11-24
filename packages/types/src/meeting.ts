@@ -514,3 +514,74 @@ export interface ListMyRegularMeetingsResponse {
   /** The caller linked a Google account (Meet attendance is then automatic). */
   googleLinked: boolean;
 }
+
+// ---- Role follow: reconcile every role grant (Drive共有 + ミーティング) with current members ----
+
+/** POST /driveshare/role-grants/reconcile (admin). dryRun defaults to TRUE: only an explicit
+ *  `dryRun: false` writes. Repeat the call while `applied.remaining > 0`. */
+export interface RoleGrantReconcileRequest {
+  dryRun?: boolean;
+}
+
+/** One Drive permission the reconcile would create / delete. */
+export interface DriveReconcileItem {
+  grantId: string;
+  fileId: string;
+  roleId: string;
+  email: string;
+  driveRole: "reader" | "commenter" | "writer";
+}
+
+/** One invitation the calendar sync would add / remove. */
+export interface CalendarReconcileItem {
+  meetingId: string;
+  title: string;
+  email: string;
+}
+
+export interface RoleGrantReconcilePlan {
+  drive: {
+    grants: number;
+    /** Members (名簿 Gmail) of a granted role who have no permission Dub knows of. */
+    toShare: DriveReconcileItem[];
+    /** Permissions Dub created for someone no longer in the role (and on no other grant of the file). */
+    toRevoke: DriveReconcileItem[];
+    /** Grants whose role no longer exists: left alone (remove the grant in Drive共有). */
+    orphanGrants: { grantId: string; fileId: string; roleId: string }[];
+    /** Role members without a 名簿 Gmail: never shared automatically. */
+    withoutGmail: number;
+  };
+  calendar: {
+    /** Meetings still to come (or a series still running). */
+    meetings: number;
+    /** Ended meetings: never changed (Google would mail every attendee about a past meeting). */
+    skippedPast: number;
+    toInvite: CalendarReconcileItem[];
+    toUninvite: CalendarReconcileItem[];
+    /** Meetings whose removals are held (a role read as empty: likelier a glitch than intended). */
+    removalsHeld: string[];
+  };
+}
+
+export interface RoleGrantReconcileResponse extends RoleGrantReconcilePlan {
+  dryRun: boolean;
+  /** Only when dryRun is false. The calendar part runs in the hourly sync, pulled to now. */
+  applied?: {
+    shared: number;
+    revoked: number;
+    skipped: { email: string; reason: string }[];
+    /** Drive items left for the next call (per-call budget). */
+    remaining: number;
+    calendarSyncKicked: boolean;
+  };
+}
+
+/** POST /internal/role-membership (freeq-drain -> drive-share-service; the body is identity.RoleMembershipChangedV1).
+ *  Non-2xx = retried by the outbox. */
+export interface RoleMembershipFollowResponse {
+  /** The message was malformed: acknowledged and dropped (logged). */
+  ignored?: boolean;
+  /** null = no Google account connected (or ignored): nothing to share on. */
+  drive: { grants: number; shared: number; revoked: number; held: number; refused: number } | null;
+  calendarSyncKicked: boolean;
+}

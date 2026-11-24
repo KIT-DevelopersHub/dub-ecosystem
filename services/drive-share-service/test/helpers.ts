@@ -93,6 +93,7 @@ export function buildRoleGrants(opts: {
   directory?: MemberDirectory;
   clock?: () => number;
   kick?: () => Promise<void>;
+  strictDirectory?: boolean;
 }): { service: RoleGrantsService; store: RoleGrantStore } {
   const store = opts.store ?? createInMemoryRoleGrantStore();
   const service = createRoleGrantsService({
@@ -101,6 +102,7 @@ export function buildRoleGrants(opts: {
     ...(opts.directory ? { directory: opts.directory } : {}),
     ...(opts.clock ? { clock: opts.clock } : {}),
     ...(opts.kick ? { kick: opts.kick } : {}),
+    ...(opts.strictDirectory ? { strictDirectory: true } : {}),
     store,
     orgId: common.DUB_DEFAULT_ORG_ID,
     now: () => `2026-08-13T00:00:${String(clock++ % 60).padStart(2, "0")}.000Z`,

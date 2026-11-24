@@ -24,7 +24,9 @@ import { createMeetingsService, type MeetingAccount, type MeetingsService } from
 import { createIdentityRoleMembership } from "./role-membership";
 import { createGoogleDriveShareClient } from "./google/client";
 import { createD1RoleGrantStore } from "./role-grants-store";
-import { createRoleGrantsService, type RoleSyncResult, type RoleSyncResume } from "./role-grants-service";
+import { createRoleGrantsService, type RoleGrantsService, type RoleSyncResult, type RoleSyncResume } from "./role-grants-service";
+import { createRoleFollowService, type RoleFollowService } from "./role-follow";
+import { createMockDriveShareClient } from "./mock-client";
 import { SECRET_ACCOUNT_ID } from "./types";
 import { mockForced, type Env } from "./env";
 
@@ -175,25 +177,48 @@ export async function runScheduledMeetIngest(env: Env, opts: { budget: number; d
   );
 }
 
-/** The hourly Drive共有 follow of role membership (MeetingSyncDO alarm). null = skipped: the mock,
- *  or no usable account — nothing real to share on. */
-export async function runScheduledRoleShareSync(env: Env, opts: { budgetMs: number; maxWrites: number; resume?: RoleSyncResume }): Promise<RoleSyncResult | null> {
-  const requestId = newId("req");
+/** Role grants as the system actor (no user): over the real Drive when an account is usable, else
+ *  over the mock (live: false — nothing real to share on, but the ledger can still be planned).
+ *  `strict` = a 名簿 outage throws instead of reading as "nobody has a Gmail". */
+export async function buildSystemRoleGrants(env: Env, opts: { requestId: string; strict?: boolean }): Promise<{ service: RoleGrantsService; live: boolean }> {
   const orgId = common.DUB_DEFAULT_ORG_ID;
-  const db = createDbClient(env.DB, { namespace: "driveshare", requestId });
+  const db = createDbClient(env.DB, { namespace: "driveshare", requestId: opts.requestId });
   const key = await importTokenKey(env.DRIVESHARE_TOKEN_ENC_KEY);
   const resolved = await resolveDriveCredentials({ env, store: createD1GoogleAccountStore(db), orgId, key });
-  if (mockForced(env) || resolved.source === "none" || resolved.source === "unusable") return null;
-  return createRoleGrantsService({
-    drive: createGoogleDriveShareClient({ token: createTokenProvider({ credentials: resolved.credentials }) }),
-    roster: createIdentityRoleMembership(env.SVC_IDENTITY, { requestId }),
-    directory: createMemberDirectory(env.SVC_MEMBER, { requestId }),
+  const live = !(mockForced(env) || resolved.source === "none" || resolved.source === "unusable");
+  const service = createRoleGrantsService({
+    drive: live
+      ? createGoogleDriveShareClient({ token: createTokenProvider({ credentials: resolved.credentials }) })
+      : createMockDriveShareClient(),
+    roster: createIdentityRoleMembership(env.SVC_IDENTITY, { requestId: opts.requestId }),
+    directory: createMemberDirectory(env.SVC_MEMBER, { requestId: opts.requestId }),
     store: createD1RoleGrantStore(db),
     orgId,
     now: nowIso,
     newId: () => newId("dsg"),
-  }).syncMembers(opts);
+    ...(opts.strict ? { strictDirectory: true } : {}),
+  });
+  return { service, live };
 }
+
+/** The hourly Drive共有 follow of role membership (MeetingSyncDO alarm). null = skipped: the mock,
+ *  or no usable account — nothing real to share on. */
+export async function runScheduledRoleShareSync(env: Env, opts: { budgetMs: number; maxWrites: number; resume?: RoleSyncResume }): Promise<RoleSyncResult | null> {
+  const { service, live } = await buildSystemRoleGrants(env, { requestId: newId("req") });
+  return live ? service.syncMembers(opts) : null;
+}
+
+/** Role follow (POST /internal/role-membership) and the backfill (POST /driveshare/role-grants/reconcile). */
+export function buildRoleFollowService(env: Env, ctx: { requestId: string; userId?: string }): RoleFollowService {
+  return createRoleFollowService({
+    roleGrants: () => buildSystemRoleGrants(env, { requestId: ctx.requestId, strict: true }),
+    meetings: () => buildMeetingsService(env, ctx, { system: true }),
+    kickCalendar: () => kickMeetingSync(env, ROLE_FOLLOW_KICK_SOON_MS),
+  });
+}
+
+/** A membership change pulls the meeting sync this close. */
+const ROLE_FOLLOW_KICK_SOON_MS = 30_000;
 
 /** 「Googleと連携」 for the acting member. */
 export function buildGoogleLinkService(env: Env, ctx: { requestId: string }): GoogleLinkService {

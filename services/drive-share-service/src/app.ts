@@ -18,6 +18,7 @@ import type { GoogleAccountService } from "./google-account";
 import type { MeetingsService } from "./meetings-service";
 import type { AttendanceService } from "./attendance-service";
 import type { GoogleLinkService } from "./google-link";
+import type { RoleFollowService } from "./role-follow";
 import { POLICY_TABLE } from "./policy-table";
 import type {
   CompleteGoogleConnectRequest,
@@ -44,6 +45,9 @@ export interface AppDeps {
   attendance: () => AttendanceService;
   /** 「Googleと連携」 (Meet attendance matches the member automatically). */
   googleLink: () => GoogleLinkService;
+  /** Role follow (outbox delivery) + the role-grant backfill. Lazy, like meetings. Absent (tests that
+   *  do not exercise it) = those two routes answer 503. */
+  roleFollow?: () => RoleFollowService;
 }
 
 type Vars = PolicyGateVars;
@@ -58,6 +62,10 @@ async function parseBody<T>(c: Context): Promise<T> {
 
 export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const app = new Hono<{ Variables: Vars }>();
+  const roleFollow = (): RoleFollowService => {
+    if (!deps.roleFollow) throw errors.upstreamUnavailable("role-follow");
+    return deps.roleFollow();
+  };
   app.onError(dubErrorHandler({ service: "drive-share-service" }));
 
   // The authorization layer. First and only — every route below is gated by POLICY_TABLE.
@@ -136,6 +144,20 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.post("/driveshare/files/:id/role-grants/:roleId/reapply", async (c) => {
     const cursor = c.req.query("cursor");
     return c.json(await deps.roleGrants.reapply(c.req.param("id"), c.req.param("roleId"), cursor));
+  });
+
+  // The one-off backfill: every role grant (Drive + ミーティング) against current members.
+  // Dry-run unless the body says { "dryRun": false }; repeat while applied.remaining > 0.
+  app.post("/driveshare/role-grants/reconcile", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    return c.json(await roleFollow().reconcile(body));
+  });
+
+  // freeq-drain delivers identity's role membership changes here (outbox topic
+  // identity.ROLE_MEMBERSHIP_TOPIC). Non-2xx = retried with backoff.
+  app.post("/internal/role-membership", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    return c.json(await roleFollow().handle(body));
   });
 
   // ---- link sharing on/off ----

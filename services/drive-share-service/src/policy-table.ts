@@ -52,6 +52,11 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /driveshare/files/:id/role-grants/:roleId": appLevel("driveshare", "edit", "drive:write"),
   "POST /driveshare/files/:id/role-grants/:roleId/reapply": appLevel("driveshare", "edit", "drive:write"),
   "PUT /driveshare/files/:id/link": appLevel("driveshare", "edit", "drive:write"),
+  // The backfill shares / unshares across EVERY grant of the org: the same admin-only keys as the
+  // Google account settings (identity/0017 gives drive:settings_edit to the system admin only).
+  "POST /driveshare/role-grants/reconcile": GOOGLE_ACCOUNT_EDIT,
+  // Role membership changes, delivered by freeq-drain over a Service Binding (s2s only).
+  "POST /internal/role-membership": INTERNAL,
 
   // ---- the Google accounts themselves: Drive共有 の「設定」 ----
   "GET /driveshare/google-account": GOOGLE_ACCOUNT_VIEW,

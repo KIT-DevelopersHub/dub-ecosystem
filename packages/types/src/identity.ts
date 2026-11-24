@@ -328,6 +328,42 @@ export interface PutUserManagedRolesResponse {
   manual: RoleId[];
 }
 
+/** freeq outbox topic: identity-roster -> drive-share-service (POST /internal/role-membership).
+ *  A role's Drive共有 and ミーティング follow its members: identity writes one message per user
+ *  whenever that user's effective role membership changes, and drive-share-service re-reads the
+ *  roster and reconciles (idempotent, so at-least-once delivery is fine). */
+export const ROLE_MEMBERSHIP_TOPIC = "driveshare.role_membership";
+
+/** added = the user now counts for these roles (assigned, or became active while holding them);
+ *  removed = the user no longer does (revoked, role deleted, disabled / offboarded). */
+export type RoleMembershipChange = "added" | "removed";
+
+/** Why the membership changed (logs only). */
+export type RoleMembershipReason =
+  | "assign"
+  | "revoke"
+  | "managed-sync"
+  | "managed-catalog"
+  | "role-delete"
+  | "activate"
+  | "deactivate"
+  | "offboard";
+
+/** Payload of ROLE_MEMBERSHIP_TOPIC. The receiver never trusts it for WHO is a member — it only
+ *  says which roles to re-check; the roster is read again on delivery. */
+export interface RoleMembershipChangedV1 {
+  type: "identity.role_membership.changed";
+  version: 1;
+  /** ULID; also the outbox row id (dedupes a retried enqueue). */
+  id: string;
+  occurredAt: ISODateTime;
+  orgId: OrgId;
+  userId: UserId;
+  change: RoleMembershipChange;
+  roleIds: RoleId[];
+  reason: RoleMembershipReason;
+}
+
 /** POST /internal/users/:id/activate — 名簿 (member-service) が「在籍 (added) でこの
  *  アカウントに紐付いた」と確定した人の招待中アカウントを有効化する (invited -> active)。
  *  invited 以外 (active / disabled / rejected) には触れない (冪等・停止を上書きしない)。 */
