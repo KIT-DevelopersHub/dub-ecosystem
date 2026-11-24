@@ -120,7 +120,7 @@ describe("validateSiteConfig (strict)", () => {
 });
 
 describe("content sections (協力団体・お知らせ・登壇者・スポンサー)", () => {
-  const news = { id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", url: "", highlight: true };
+  const news: lp.LpNewsItem = { id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", mode: "link", url: "", body: "", highlight: true };
   const on = (content: Partial<lp.LpContent>): lp.LpLayout => ({
     schema: 1,
     sections: { news: { variant: "a", visible: true, options: {} } },
@@ -161,6 +161,30 @@ describe("content sections (協力団体・お知らせ・登壇者・スポン�
     const raw = on({ news: [news, { ...news }, { id: "bad id", date: "x" } as never, { ...news, id: "n2", text: "  2件目  " }] });
     expect(lp.normalizeLayout(raw).content).toEqual({ news: [news, { ...news, id: "n2", text: "2件目" }] });
     expect(lp.normalizeLayout({ schema: 1, sections: {} })).toEqual(lp.defaultLayout());
+  });
+
+  it("news: items saved before mode/body existed read as link mode (no migration)", () => {
+    const old = { id: "n1", date: "2026-11-22", text: "旧", url: "https://example.com", highlight: false };
+    expect(lp.validateContentItem("news", old)).toEqual({ item: { ...old, mode: "link", body: "" }, issues: [] });
+  });
+
+  it("news dialog mode: body required only in dialog mode; the unused field is not checked", () => {
+    const dialog = { ...news, mode: "dialog", body: "" };
+    expect(lp.validateContentItem("news", dialog).issues).toEqual([{ field: "item.body", reason: "required" }]);
+    expect(lp.validateContentItem("news", { ...dialog, body: "# 詳細" }).item).toMatchObject({ mode: "dialog", body: "# 詳細" });
+    // dialog のとき不正な url は捨てる（エラーにしない）。link のとき body は問わない。
+    expect(lp.validateContentItem("news", { ...dialog, body: "x", url: "javascript:x" })).toMatchObject({ item: { url: "" }, issues: [] });
+    expect(lp.validateContentItem("news", { ...news, body: "" }).issues).toEqual([]);
+    expect(lp.validateContentItem("news", { ...news, mode: "popup" }).issues).toEqual([{ field: "item.mode", reason: "invalid" }]);
+    expect(lp.validateContentItem("news", { ...dialog, body: "あ".repeat(lp.LP_NEWS_BODY_MAX + 1) }).issues).toEqual([
+      { field: "item.body", reason: "too_long" },
+    ]);
+  });
+
+  it("isContentFieldShown follows showWhen", () => {
+    const body = lp.LP_CONTENT_FIELDS.news.find((f) => f.key === "body")!;
+    expect(lp.isContentFieldShown(body, { mode: "dialog" })).toBe(true);
+    expect(lp.isContentFieldShown(body, { mode: "link" })).toBe(false);
   });
 
   it("isLpContentUrl: http(s) or an LP-relative /path only", () => {

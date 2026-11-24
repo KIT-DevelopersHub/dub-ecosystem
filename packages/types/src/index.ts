@@ -27,6 +27,7 @@ export * as member from "./member"; // member-service (運営メンバー管理;
 export * as appRegistry from "./app-registry"; // canonical launcher app set ↔ per-app RBAC keys (SoT)
 export * as policy from "./policy"; // RBAC policy layer (PDP): 無効/閲覧/編集 levels, capability flags, decisions
 export * as lp from "./lp"; // lp-analytics (LP管理: 公開版切り替え)
+export * as lpMarkdown from "./lp-markdown"; // LP お知らせ詳細の Markdown 描画・Google ドライブ画像 URL の正規化（LP Worker と LP管理で共用）
 export * as meeting from "./meeting"; // drive-share-service /meetings (カレンダー > ミーティング)
 export * as hr from "./hr"; // member-service /members/hr/* (人事: 応募→選考→参加→オンボーディング)
 export * as hrForm from "./hr-interview-form"; // 人事: 面談申し込みフォーム (編集できる質問 + 回答 → 応募者)
