@@ -12,12 +12,14 @@
 // (durable, retried with backoff, NEVER acked). No topic is ever dropped by not knowing
 // about it.
 import type { Fetcher } from "@cloudflare/workers-types";
+import { identity } from "@dub/types";
 import type { Deliver } from "@dub/freeq";
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import type { Env, ServiceBindingName } from "./env";
 
 export const AUDIT_ASYNC_PATH = "/internal/audit-async";
 export const EVENTS_ASYNC_PATH = "/internal/events-async";
+export const ROLE_MEMBERSHIP_PATH = "/internal/role-membership";
 
 // Thrown for topics with no live consumer route (explicit defer or the default). Keeps
 // the outbox row pending/durable — it is redelivered on the next drain, never acked.
@@ -72,6 +74,11 @@ export const ROUTES: Readonly<Record<string, Route>> = {
   // 改善#5: mail-automation now exposes /internal/events-async, so mail.message.received
   // is DELIVERED (auto-reply fires) instead of sitting pending forever on the free tier.
   "evt.mail-automation": { kind: "deliver", binding: "SVC_MAIL_AUTOMATION", path: EVENTS_ASYNC_PATH, origin: "https://mail-automation" },
+
+  // identity-roster role membership changes -> drive-share-service, so a role's Drive共有 grants and
+  // ミーティング invitations follow people who join / leave the role later (RoleMembershipChangedV1,
+  // forwarded verbatim; the receiver is idempotent and answers non-2xx to be retried).
+  [identity.ROLE_MEMBERSHIP_TOPIC]: { kind: "deliver", binding: "SVC_DRIVE_SHARE", path: ROLE_MEMBERSHIP_PATH, origin: "https://drive-share" },
 
   // No live consumer route yet -> DEFER (durable/pending; follow-ups when routes land):
   "deploy.job": DEFER, // processed in-process inside deploy-service only; no HTTP route
