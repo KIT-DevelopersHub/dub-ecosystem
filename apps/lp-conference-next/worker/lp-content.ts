@@ -17,6 +17,7 @@ import {
   type LpSpeakerItem,
   type LpSponsorItem,
 } from "../../../packages/types/src/lp.ts";
+import { renderLpMarkdown, toEmbeddableImageUrl } from "../../../packages/types/src/lp-markdown.ts";
 import { escapeHtml as e } from "./html.ts";
 
 /** これ以上の協力団体はロゴを流す（マーキー）。少ないうちは中央に並べる。 */
@@ -33,8 +34,11 @@ export function formatNewsDate(date: string): string {
 
 const safeUrl = (u: string): string | null => (u && isLpContentUrl(u) ? u : null);
 const external = (u: string): string => (/^https?:\/\//.test(u) ? ' target="_blank" rel="noopener noreferrer"' : "");
+// Google ドライブの共有リンクはここで画像の URL に直す（保存は入力のまま）。
 const img = (src: string | null, alt: string, cls: string): string =>
-  src ? `<img class="${cls}" src="${e(src)}" alt="${e(alt)}" loading="lazy" decoding="async">` : "";
+  src
+    ? `<img class="${cls}" src="${e(toEmbeddableImageUrl(src))}" alt="${e(alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
+    : "";
 
 function partnerItems(items: readonly LpPartnerItem[], copy: boolean): string {
   return items
@@ -60,14 +64,25 @@ export function renderPartners(items: readonly LpPartnerItem[]): string {
   );
 }
 
+/** お知らせ 1 行の本文: link = リンク（外部は新しいタブ）/ dialog = ダイアログを開くボタン + 詳細の <template>。 */
+function newsText(n: LpNewsItem): string {
+  if (n.mode === "dialog" && n.body.trim()) {
+    // 詳細は <template> に入れておき、LP の NewsDialog（クライアント）が開くときに複製して出す。
+    // 中身は renderLpMarkdown が作った安全な HTML（入力は全部エスケープ・決まったタグだけ・http(s) のみ）。
+    return (
+      `<button type="button" class="lp-news-link lp-news-open" data-news-open="${e(n.id)}" aria-haspopup="dialog">${e(n.text)}</button>` +
+      `<template data-news-body="${e(n.id)}">${renderLpMarkdown(n.body)}</template>`
+    );
+  }
+  const url = n.mode === "dialog" ? null : safeUrl(n.url);
+  return url ? `<a class="lp-news-link" href="${e(url)}"${external(url)}>${e(n.text)}</a>` : `<span>${e(n.text)}</span>`;
+}
+
 export function renderNews(items: readonly LpNewsItem[]): string {
   if (items.length === 0) return "";
   const rows = items
     .map((n) => {
-      const url = safeUrl(n.url);
-      const text = url
-        ? `<a class="lp-news-link" href="${e(url)}"${external(url)}>${e(n.text)}</a>`
-        : `<span>${e(n.text)}</span>`;
+      const text = newsText(n);
       return (
         `<li class="lp-news-item" data-highlight="${n.highlight ? "on" : "off"}">` +
         `<time class="lp-news-date" datetime="${e(n.date)}">${e(formatNewsDate(n.date))}</time>` +
