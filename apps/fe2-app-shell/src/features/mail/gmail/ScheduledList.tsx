@@ -54,6 +54,10 @@ export function ScheduledList(): JSX.Element {
             subject: detail.subject,
             body: detail.textBody,
             ...(detail.inReplyTo ? { inReplyTo: detail.inReplyTo, mode: "reply" as const } : {}),
+            // The parked row is gone now, so this text exists nowhere else: keep it as a
+            // draft even if the user closes without changing anything (Gmail: 予約を取り消す
+            // -> 下書き). Without this, ✕ silently dropped the mail.
+            restored: true,
           },
         });
         dispatch({ type: "REQUEST_SYNC" });
