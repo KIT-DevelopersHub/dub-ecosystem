@@ -34,7 +34,7 @@ export function NotificationFilterBar(props: NotificationFilterBarProps): ReactN
           id="fe5-inbox-unreadonly"
           checked={filter.unreadOnly}
           onChange={(unreadOnly) => onChange({ ...filter, unreadOnly })}
-          label="Unread only"
+          label="未読のみ"
           testId="fe5-inbox-unreadtoggle"
         />
       </div>
