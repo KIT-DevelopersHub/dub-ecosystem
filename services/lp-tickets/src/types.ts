@@ -21,6 +21,9 @@ export type LpTicketOrdersPage = lpTickets.LpTicketOrdersPage;
 export type LpTicketTypeInput = lpTickets.LpTicketTypeInput;
 export type LpTicketCoupon = lpTickets.LpTicketCoupon;
 export type LpTicketCouponsPage = lpTickets.LpTicketCouponsPage;
+export type LpTicketRefundResult = lpTickets.LpTicketRefundResult;
+export type LpTicketRefundResponse = lpTickets.LpTicketRefundResponse;
+export type LpTicketRefundErrorReason = lpTickets.LpTicketRefundErrorReason;
 
 // ---- tickets persistence ----
 export interface TicketSettingsRow {

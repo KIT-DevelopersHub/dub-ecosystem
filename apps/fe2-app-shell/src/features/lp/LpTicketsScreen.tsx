@@ -35,6 +35,7 @@ import {
   useLpTicketCoupons,
   useLpTicketOrders,
   useLpTickets,
+  useRefundTicketOrder,
 } from "./lpTicketsHooks.ts";
 import {
   ORDER_STATUS,
@@ -44,6 +45,7 @@ import {
   orderItemLabel,
   paymentMethodLabel,
   paymentMethodsLabel,
+  refundActionFor,
   reviewReasonLabel,
 } from "./lpTickets.ts";
 import { LpTicketTypesCard } from "./LpTicketTypes.tsx";
@@ -179,6 +181,8 @@ function SalesStatusCard({ state }: { state: LpTicketsState }): JSX.Element {
 function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
   const orders = useLpTicketOrders(true);
   const approve = useApproveTicketOrder();
+  const refund = useRefundTicketOrder();
+  const [refunding, setRefunding] = useState<LpTicketOrder | null>(null);
   const exportCsv = useExportTicketOrders();
   const [confirming, setConfirming] = useState<LpTicketOrder | null>(null);
   const rows = useMemo(() => orders.data?.pages.flatMap((p) => p.items) ?? [], [orders.data]);
@@ -217,6 +221,7 @@ function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
               couponCode={o.couponId ? (couponCodes.get(o.couponId) ?? null) : null}
               canApprove={canApprove}
               onApprove={() => setConfirming(o)}
+              onRefund={() => setRefunding(o)}
             />
           ))}
         </div>
@@ -281,12 +286,62 @@ function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
             <ul style={{ margin: 0, paddingLeft: "var(--dub-space-5)", display: "grid", gap: "var(--dub-space-2)" }}>
               <li>Stripe ダッシュボードで入金額を確認してから確定してください。</li>
               <li>確定するとチケットが有効になり、販売数・売上に入ります。</li>
-              <li>確定しない場合は、Stripe で返金すると自動で「返金済み」になり、席が空きます。</li>
+              <li>確定しない場合は、購入者一覧の「返金する」（または Stripe で返金）で「返金済み」になり、席が空きます。</li>
             </ul>
           </Stack>
         </Modal>
       ) : null}
+      {refunding ? (
+        <RefundDialog
+          order={refunding}
+          onClose={() => setRefunding(null)}
+          onConfirm={() => {
+            const id = refunding.id;
+            setRefunding(null);
+            refund.mutate({ id });
+          }}
+        />
+      ) : null}
     </Card>
+  );
+}
+
+function RefundDialog({ order: o, onClose, onConfirm }: { order: LpTicketOrder; onClose: () => void; onConfirm: () => void }): JSX.Element {
+  const cancel = refundActionFor(o) === "cancel";
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={cancel ? "この申し込みを取り消しますか？" : "この注文を返金しますか？"}
+      size="sm"
+      testId="fe2-lp-ticket-order-refund-dialog"
+      footer={
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--dub-space-3)" }}>
+          <Button variant="secondary" onClick={onClose} testId="fe2-lp-ticket-order-refund-cancel">
+            やめる
+          </Button>
+          <Button variant="danger" onClick={onConfirm} testId="fe2-lp-ticket-order-refund-confirm">
+            {cancel ? "取り消す" : "返金する"}
+          </Button>
+        </div>
+      }
+    >
+      <Stack gap={4}>
+        <span className={styles.note}>
+          {o.buyerName}（{formatPrice(o.amountJpy)}・計 {o.quantity.toLocaleString("ja-JP")} 枚）
+          {o.test ? " ／ テスト注文" : ""}
+        </span>
+        <ul style={{ margin: 0, paddingLeft: "var(--dub-space-5)", display: "grid", gap: "var(--dub-space-2)" }}>
+          {cancel ? (
+            <li>無料の申し込みなので、お金の動きはありません。</li>
+          ) : (
+            <li>Stripe で全額を返金します。取り消せません。</li>
+          )}
+          <li>この注文のチケットはすべて無効になり、当日の受付でも「無効」と表示されます。</li>
+          <li>席が空き、販売数・売上から外れます。購入者へのメールは自動では送られません。</li>
+        </ul>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -295,15 +350,19 @@ function OrderRow({
   couponCode,
   canApprove,
   onApprove,
+  onRefund,
 }: {
   order: LpTicketOrder;
   /** o.couponId のコード（一覧から引けたときだけ）。 */
   couponCode: string | null;
+  /** lp:publish（確定・返金/取消はお金と券を動かす操作）。 */
   canApprove: boolean;
   onApprove: () => void;
+  onRefund: () => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const status = ORDER_STATUS[o.status];
+  const refundAction = canApprove ? refundActionFor(o) : null;
   return (
     <div className={styles.orderRow} data-testid={`fe2-lp-ticket-order-${o.id}`}>
       <div className={styles.orderLine}>
@@ -389,6 +448,13 @@ function OrderRow({
             ))
           )}
         </dl>
+      ) : null}
+      {open && refundAction ? (
+        <div className={styles.orderReview}>
+          <Button variant="danger" size="sm" onClick={onRefund} testId={`fe2-lp-ticket-order-refund-${o.id}`}>
+            {refundAction === "cancel" ? "申し込みを取り消す" : "返金する"}
+          </Button>
+        </div>
       ) : null}
     </div>
   );

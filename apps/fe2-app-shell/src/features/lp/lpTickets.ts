@@ -6,6 +6,7 @@ import type {
   LpTicketCouponInput,
   LpTicketField,
   LpTicketFieldType,
+  LpTicketOrder,
   LpTicketOrderItem,
   LpTicketOrderStatus,
   LpTicketTypeInput,
@@ -29,6 +30,16 @@ export const TICKET_FIELD_ID_RE = /^[a-z0-9_-]{1,40}$/;
 export const FIELD_TYPE_LABELS: Record<LpTicketFieldType, string> = lp.LP_FIELD_TYPE_LABELS;
 export const TICKET_FIELD_DESCRIPTION_MAX = lp.LP_FIELD_DESCRIPTION_MAX;
 export const isChoiceField = lp.isLpChoiceField;
+
+/**
+ * 購入者一覧の「返金/取消」ボタン。支払い済み・要確認の注文だけ（審理中のチャージバックは Stripe が決めるので出さない）。
+ * 0 円（クーポン・無料券）は Stripe を通っていないので「取消」、有料は Stripe で全額「返金」。
+ */
+export function refundActionFor(o: Pick<LpTicketOrder, "status" | "reviewReason" | "amountJpy">): "refund" | "cancel" | null {
+  if (o.status !== "paid" && o.status !== "needs_review") return null;
+  if (o.status === "needs_review" && o.reviewReason === "dispute") return null;
+  return o.amountJpy === 0 ? "cancel" : "refund";
+}
 
 export const ORDER_STATUS: Record<LpTicketOrderStatus, { label: string; tone: "success" | "warning" | "neutral" }> = {
   paid: { label: "支払い済み", tone: "success" },

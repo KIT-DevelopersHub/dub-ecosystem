@@ -40,6 +40,7 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /lp/tickets/orders": EDIT,
   "GET /lp/tickets/orders/export": PUBLISH,
   "POST /lp/tickets/orders/:id/approve": PUBLISH,
+  "POST /lp/tickets/orders/:id/refund": PUBLISH,
   "GET /lp/tickets/coupons": PUBLISH,
   "POST /lp/tickets/coupons": PUBLISH,
   "PATCH /lp/tickets/coupons/:id": PUBLISH,

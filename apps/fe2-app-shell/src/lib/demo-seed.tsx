@@ -5474,6 +5474,7 @@ function createLpStore() {
 //   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
 //   GET   /api/v1/lp/tickets/orders      ?cursor&limit   newest first
 //   POST  /api/v1/lp/tickets/orders/:id/approve        needs_review -> paid (409 otherwise)
+//   POST  /api/v1/lp/tickets/orders/:id/refund         paid|needs_review -> refunded ({ result, order }; 0 円 = cancelled)
 //   GET   /api/v1/lp/tickets/coupons     newest first; used = held tickets (paid / pending / needs_review)
 //   POST  /api/v1/lp/tickets/coupons     { ticketTypeId, maxUses 1..1000, label? <=60, expiresAt? future }  201
 //   PATCH /api/v1/lp/tickets/coupons/:id { active }   no delete (orders reference coupons)
@@ -5870,6 +5871,18 @@ function createLpTicketsStore() {
       o.status = "paid";
       o.paidAt = o.paidAt ?? new Date().toISOString();
       return json(o);
+    }
+
+    // デモは Stripe を持たないので、有料も即「返金済み」（本番は Stripe の返金完了で反映）。
+    const refundMatch = method === "POST" ? /^\/api\/v1\/lp\/tickets\/orders\/([^/]+)\/refund$/.exec(pathname) : null;
+    if (refundMatch) {
+      const o = orders.find((x) => x.id === decodeURIComponent(refundMatch[1]!));
+      if (!o) return json({ error: { code: "NOT_FOUND", message: "order not found" } }, 404);
+      if (o.status !== "paid" && o.status !== "needs_review") {
+        return json({ error: { code: "LP_TICKET_REFUND_REFUSED", message: "この注文は返金・取消できません", details: { reason: "not_refundable" } } }, 409);
+      }
+      o.status = "refunded";
+      return json({ result: o.amountJpy === 0 ? "cancelled" : "refunded", order: o });
     }
 
     return null;

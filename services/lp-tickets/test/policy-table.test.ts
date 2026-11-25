@@ -22,6 +22,7 @@ const PUBLISH = [
   "POST /lp/tickets/cta",
   "POST /lp/tickets/enabled",
   "POST /lp/tickets/orders/:id/approve",
+  "POST /lp/tickets/orders/:id/refund",
 ];
 
 function allowedRoutes(keys: identity.PermissionKey[]): string[] {

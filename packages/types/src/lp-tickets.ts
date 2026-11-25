@@ -143,3 +143,32 @@ export interface LpTicketCouponInput {
   /** ISO・未来 */
   expiresAt?: string;
 }
+
+/**
+ * POST /api/v1/lp/tickets/orders/:id/refund の結果（app:lp:edit + lp:publish）。
+ * - refunded: 有料。Stripe の返金が完了し、注文は返金済み・チケットは無効（void）になった。
+ * - refund_pending: 有料。Stripe が返金を受け付けたが未完了（PayPay など）。完了は charge.refunded の webhook で反映される。
+ * - cancelled: 無料（0 円）注文の取消。その場で返金済み・チケットは無効になる。
+ * void のチケットは当日受付でも「無効」として扱う。
+ */
+export type LpTicketRefundResult = "refunded" | "refund_pending" | "cancelled";
+
+export interface LpTicketRefundResponse {
+  result: LpTicketRefundResult;
+  order: LpTicketOrder;
+}
+
+/**
+ * 返金/取消できない時の details.reason。
+ * 409: not_refundable（支払い済み/要確認でない）・dispute_open（チャージバック審理中）・
+ *      payment_intent_missing（Stripe の決済が紐付いていない）・stripe_mode_mismatch（テスト注文と本番キー等の食い違い）・
+ *      refund_rejected（Stripe が返金を断った）
+ * 503: payment_not_configured（Stripe 未設定）
+ */
+export type LpTicketRefundErrorReason =
+  | "not_refundable"
+  | "dispute_open"
+  | "payment_intent_missing"
+  | "stripe_mode_mismatch"
+  | "refund_rejected"
+  | "payment_not_configured";
