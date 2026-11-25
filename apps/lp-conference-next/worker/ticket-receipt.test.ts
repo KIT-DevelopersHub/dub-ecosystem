@@ -52,13 +52,13 @@ test("render: amount incl. tax, items, order no., date, issuer; unset issuer fie
   assert.ok(!html.includes("消費税"));
   assert.ok(!html.includes("<form"), "宛名 already set: no form");
   assert.ok(html.includes("@media print"));
-  const inv = renderReceiptPage({ ...R, taxJpy: 545, issuer: { ...R.issuer, invoiceRegistrationNo: "T1234567890123", address: "石川県" } }, TOKEN);
-  assert.ok(inv.includes("登録番号 T1234567890123"));
+  const inv = renderReceiptPage({ ...R, taxJpy: 545, issuer: { ...R.issuer, invoiceRegistrationNo: "T7000012050002", address: "石川県" } }, TOKEN);
+  assert.ok(inv.includes("登録番号 T7000012050002"));
   assert.ok(inv.includes("うち消費税（10%） ¥545"));
   assert.ok(!inv.includes("未設定"));
   // 会計アプリの設定: 事務局名・電話・税率がそのまま出る。
   const custom = renderReceiptPage(
-    { ...R, taxJpy: 444, issuer: { ...R.issuer, office: "DevHub 会計担当", phone: "076-000-0000", taxRatePercent: 8, invoiceRegistrationNo: "T1234567890123" } },
+    { ...R, taxJpy: 444, issuer: { ...R.issuer, office: "DevHub 会計担当", phone: "076-000-0000", taxRatePercent: 8, invoiceRegistrationNo: "T7000012050002" } },
     TOKEN,
   );
   assert.ok(custom.includes("DevHub 会計担当"));

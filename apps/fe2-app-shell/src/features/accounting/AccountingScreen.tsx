@@ -54,7 +54,7 @@ const SECTIONS: { title: string; fields: FieldDef[] }[] = [
   {
     title: "インボイス",
     fields: [
-      { key: "invoiceRegistrationNo", label: "適格請求書発行事業者の登録番号", placeholder: "T1234567890123", help: "T と 13 桁の数字。入れると領収書に登録番号と消費税額の内訳が出ます。" },
+      { key: "invoiceRegistrationNo", label: "適格請求書発行事業者の登録番号", placeholder: "T7000012050002", help: "T と 13 桁の数字。入れると領収書に登録番号と消費税額の内訳が出ます。" },
     ],
   },
 ];

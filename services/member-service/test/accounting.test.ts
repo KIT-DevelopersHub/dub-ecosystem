@@ -15,7 +15,7 @@ const BASE = {
   phone: "",
   email: "info@developershub.jp",
   url: "https://developershub.jp",
-  invoiceRegistrationNo: "t 1234-5678-90123",
+  invoiceRegistrationNo: "t 7000-0120-50002",
   taxRatePercent: 10,
 };
 
@@ -28,7 +28,7 @@ describe("会計 発行者情報", () => {
     expect(saved.status).toBe(200);
     expect(saved.json).toMatchObject({
       postalCode: "920-1234",
-      invoiceRegistrationNo: "T1234567890123",
+      invoiceRegistrationNo: "T7000012050002",
       phone: null,
       version: 1,
       updatedBy: "user_caller",
@@ -51,6 +51,9 @@ describe("会計 発行者情報", () => {
     const fields = (bad.json.error.details as { field: string; reason: string }[]).map((d) => `${d.field}:${d.reason}`).sort();
     expect(fields).toEqual(["invoiceRegistrationNo:invalid", "name:required", "postalCode:invalid", "taxRatePercent:invalid"]);
     expect((await call(app, "GET", "/members/accounting/issuer")).json.issuer).toBeNull();
+    const wrongDigit = await call(app, "PUT", "/members/accounting/issuer", { body: { ...BASE, invoiceRegistrationNo: "T1234567890123", expectedVersion: 0 } });
+    expect(wrongDigit.status).toBe(400);
+    expect(wrongDigit.json.error.details).toEqual([{ field: "invoiceRegistrationNo", reason: "check_digit" }]);
   });
 
   it("requires expectedVersion and loses the optimistic lock to a newer save", async () => {
@@ -88,7 +91,7 @@ describe("createD1AccountingRepo", () => {
     const repo = createD1AccountingRepo(db);
     const row: IssuerRow = {
       orgId: "org_x", name: "法人", officeName: null, postalCode: "920-0000", address: null, phone: null,
-      email: null, url: null, invoiceRegistrationNo: "T1234567890123", taxRatePercent: 10,
+      email: null, url: null, invoiceRegistrationNo: "T7000012050002", taxRatePercent: 10,
       version: 1, updatedBy: "usr_1" as IssuerRow["updatedBy"], updatedByName: "佐藤", updatedAt: NOW(),
     };
     expect(await repo.getIssuer("org_x")).toBeNull();

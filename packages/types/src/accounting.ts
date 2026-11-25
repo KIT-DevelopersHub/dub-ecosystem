@@ -50,7 +50,7 @@ export interface PutIssuerRequest extends IssuerSettings {
 }
 
 export type IssuerField = keyof IssuerSettings;
-export type IssuerFieldError = { field: IssuerField; reason: "required" | "too_long" | "invalid" };
+export type IssuerFieldError = { field: IssuerField; reason: "required" | "too_long" | "invalid" | "check_digit" };
 
 const FULLWIDTH_DIGIT = /[０-９]/g;
 const halfWidth = (s: string): string => s.replace(FULLWIDTH_DIGIT, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
@@ -61,6 +61,19 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 export function normalizeInvoiceRegistrationNo(raw: string): string | null {
   const s = halfWidth(raw.normalize("NFKC")).replace(/[\s-]/g, "").toUpperCase();
   return /^T\d{13}$/.test(s) ? s : null;
+}
+
+/**
+ * 登録番号の確認用の数字 (先頭の 1 桁) が合っているか。法人番号と同じ式 (国税庁「法人番号の指定等に関する省令」):
+ * 残り 12 桁を右から P1..P12 とし、Q = 奇数番目 1・偶数番目 2 で 9 − (Σ P×Q mod 9)。
+ */
+export function invoiceRegistrationNoCheckDigitOk(normalized: string): boolean {
+  const m = /^T(\d)(\d{12})$/.exec(normalized);
+  if (!m) return false;
+  const base = m[2]!;
+  let sum = 0;
+  for (let n = 1; n <= 12; n++) sum += Number(base[12 - n]) * (n % 2 === 1 ? 1 : 2);
+  return Number(m[1]) === 9 - (sum % 9);
 }
 
 /** 郵便番号の正規化: 7 桁を NNN-NNNN に。形が違えば null。 */
@@ -124,7 +137,11 @@ export function parseIssuerInput(raw: unknown): { ok: true; value: IssuerSetting
   });
   const email = shaped("email", ISSUER_EMAIL_MAX, (s) => (EMAIL_RE.test(s) ? s : null));
   const url = shaped("url", ISSUER_URL_MAX, (s) => (URL_RE.test(s) ? s : null));
-  const invoiceRegistrationNo = shaped("invoiceRegistrationNo", 20, normalizeInvoiceRegistrationNo);
+  let invoiceRegistrationNo = shaped("invoiceRegistrationNo", 20, normalizeInvoiceRegistrationNo);
+  if (invoiceRegistrationNo !== null && !invoiceRegistrationNoCheckDigitOk(invoiceRegistrationNo)) {
+    errors.push({ field: "invoiceRegistrationNo", reason: "check_digit" });
+    invoiceRegistrationNo = null;
+  }
   const rate = b.taxRatePercent ?? DEFAULT_TAX_RATE;
   if (!TAX_RATES.includes(rate as TaxRatePercent)) errors.push({ field: "taxRatePercent", reason: "invalid" });
 
@@ -139,8 +156,9 @@ export function parseIssuerInput(raw: unknown): { ok: true; value: IssuerSetting
 export function issuerErrorMessage(e: IssuerFieldError): string {
   if (e.reason === "required") return "入力してください";
   if (e.reason === "too_long") return "長すぎます";
+  if (e.reason === "check_digit") return "登録番号が正しくありません（T のすぐ後の確認用の数字が合いません）";
   switch (e.field) {
-    case "invoiceRegistrationNo": return "T と 13 桁の数字で入力してください（例: T1234567890123）";
+    case "invoiceRegistrationNo": return "T と 13 桁の数字で入力してください（例: T7000012050002）";
     case "postalCode": return "7 桁の数字で入力してください（例: 920-0000）";
     case "phone": return "数字とハイフンで入力してください（例: 076-000-0000）";
     case "email": return "メールアドレスの形で入力してください";

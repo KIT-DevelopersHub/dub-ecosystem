@@ -22,7 +22,7 @@ const SETTINGS: accounting.IssuerSettings = {
   phone: "076-000-0000",
   email: "ops@example.com",
   url: "https://example.com",
-  invoiceRegistrationNo: "T1234567890123",
+  invoiceRegistrationNo: "T7000012050002",
   taxRatePercent: 8,
 };
 
@@ -112,7 +112,7 @@ describe("receiptOf", () => {
   it("states tax only with an invoice registration number; issuer details are not invented", () => {
     expect(taxIncluded(6000)).toBe(545);
     expect(taxIncluded(3300)).toBe(300);
-    expect(receiptOf(base, { ...RECEIPT_ISSUER, invoiceRegistrationNo: "T1234567890123" })?.taxJpy).toBe(545);
+    expect(receiptOf(base, { ...RECEIPT_ISSUER, invoiceRegistrationNo: "T7000012050002" })?.taxJpy).toBe(545);
     expect(RECEIPT_ISSUER.address).toBeNull();
     expect(RECEIPT_ISSUER.invoiceRegistrationNo).toBeNull();
   });
@@ -125,7 +125,7 @@ describe("receiptOf", () => {
       name: "一般社団法人 テスト",
       address: "〒920-1234 石川県金沢市テスト町 1-2-3",
       phone: "076-000-0000",
-      invoiceRegistrationNo: "T1234567890123",
+      invoiceRegistrationNo: "T7000012050002",
       taxRatePercent: 8,
     });
     // 内訳は設定の税率で出す: 6000 * 8 / 108。

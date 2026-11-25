@@ -50,8 +50,8 @@ describe("会計 demo transport", () => {
     const api = createAccountingApi(createApiClient({ baseUrl: "http://demo", fetchImpl: createDemoFetch() }));
     expect((await api.getIssuer()).issuer).toBeNull();
     const base = { name: "法人", officeName: null, postalCode: null, address: null, phone: null, email: null, url: null, taxRatePercent: 10 as const };
-    const saved = await api.putIssuer({ ...base, invoiceRegistrationNo: "t1234567890123", expectedVersion: 0 });
-    expect(saved).toMatchObject({ version: 1, invoiceRegistrationNo: "T1234567890123" });
+    const saved = await api.putIssuer({ ...base, invoiceRegistrationNo: "t7000012050002", expectedVersion: 0 });
+    expect(saved).toMatchObject({ version: 1, invoiceRegistrationNo: "T7000012050002" });
     await expect(api.putIssuer({ ...base, invoiceRegistrationNo: null, expectedVersion: 0 })).rejects.toMatchObject({ status: 409 });
     await expect(api.putIssuer({ ...base, invoiceRegistrationNo: "T12", expectedVersion: 1 })).rejects.toMatchObject({ status: 400 });
   });
@@ -76,19 +76,28 @@ describe("AccountingScreen", () => {
     expect(api.putIssuer).not.toHaveBeenCalled();
   });
 
+  it("blocks a registration number whose check digit does not match", async () => {
+    const api = fakeApi(ISSUER);
+    mount(api);
+    fireEvent.change(await screen.findByTestId("fe2-accounting-field-invoiceRegistrationNo"), { target: { value: "T1234567890123" } });
+    fireEvent.click(screen.getByTestId("fe2-accounting-save"));
+    expect(await screen.findByText(/登録番号が正しくありません/)).toBeInTheDocument();
+    expect(api.putIssuer).not.toHaveBeenCalled();
+  });
+
   it("saves the normalized values with the current version", async () => {
     const api = fakeApi(ISSUER);
     mount(api);
-    fireEvent.change(await screen.findByTestId("fe2-accounting-field-invoiceRegistrationNo"), { target: { value: "t 1234-5678-90123" } });
+    fireEvent.change(await screen.findByTestId("fe2-accounting-field-invoiceRegistrationNo"), { target: { value: "t 7000-0120-50002" } });
     fireEvent.change(field("postalCode"), { target: { value: "9201234" } });
     fireEvent.click(screen.getByTestId("fe2-accounting-save"));
     await waitFor(() =>
       expect(api.putIssuer).toHaveBeenCalledWith({
         ...ISSUER, version: undefined, updatedBy: undefined, updatedByName: undefined, updatedAt: undefined,
-        postalCode: "920-1234", invoiceRegistrationNo: "T1234567890123", expectedVersion: 3,
+        postalCode: "920-1234", invoiceRegistrationNo: "T7000012050002", expectedVersion: 3,
       }),
     );
-    expect(field("invoiceRegistrationNo")).toHaveValue("T1234567890123");
+    expect(field("invoiceRegistrationNo")).toHaveValue("T7000012050002");
     expect(await screen.findByText("発行者情報を保存しました")).toBeInTheDocument();
   });
 
