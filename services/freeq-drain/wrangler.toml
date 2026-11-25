@@ -85,6 +85,10 @@ service = "mo3-mobile-bff"         # POST /internal/events-async (evt.mobile-bff
 binding = "SVC_MAIL_AUTOMATION"
 service = "dub-mail-automation"    # POST /internal/events-async (evt.mail-automation, 改善#5)
 
+[[services]]
+binding = "SVC_CHAT"
+service = "dub-chat-service"       # POST /internal/events-async (evt.chat, #850 Slack times)
+
 # --- NO cron trigger. The drain is driven by the FreeqDrainDO alarm (above), which does not
 #     consume a slot on the Workers FREE plan's 5-cron account cap. ---
 

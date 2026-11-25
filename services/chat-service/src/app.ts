@@ -44,6 +44,8 @@ import { POLICY_TABLE } from "./policy-table";
 import { validateUnfurlUrl, UNFURL_CACHE_TTL_SECONDS, type UnfurlResponse } from "./unfurl";
 import type { SlackImporter } from "./slack-import";
 import type { CustomEmojis } from "./custom-emoji";
+import type { SlackTimes } from "./slack-times";
+import type { DubEventEnvelope } from "@dub/events";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getDubCtx(c: Context): RequestContext | undefined {
@@ -109,6 +111,30 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     const body = await readJson<PostSystemMessageRequest>(c);
     const created = await svc.postSystemMessage({ requestId }, body);
     return c.json(created, 201);
+  });
+
+  // freeq-drain -> chat domain events (evt.chat). identity.user.activated creates the member's
+  // Slack times channel (#850). 2xx = ack; a thrown 5xx / 429 = the drain retries with backoff.
+  // Permanent Slack problems (scopes, bad token, not configured) are acked and logged: retrying
+  // cannot fix them, and the admin bulk action picks the member up once they are fixed.
+  app.post("/internal/events-async", async (c) => {
+    const env = await readJson<DubEventEnvelope>(c);
+    if (env?.name !== "identity.user.activated") return c.json({ ok: true, ignored: true });
+    const times = deps.slackTimes;
+    if (!times || !times.config.autoCreate) return c.json({ ok: true, skipped: "disabled" });
+    const payload = env.payload as { userId?: unknown };
+    if (typeof payload?.userId !== "string") return c.json({ ok: true, skipped: "invalid_payload" });
+    try {
+      const item = await times.ensureForUser(payload.userId);
+      return c.json({ ok: true, item });
+    } catch (err) {
+      const e = err as { status?: number; code?: string; message?: string };
+      if (e.status === 412 || e.status === 409) {
+        console.warn(JSON.stringify({ level: "warn", service: "chat-service", message: "slack times skipped", userId: payload.userId, code: e.code, err: e.message }));
+        return c.json({ ok: true, skipped: e.code ?? "failed" });
+      }
+      throw err;
+    }
   });
 
   // ---- link preview (OGP unfurl) ----
@@ -329,6 +355,30 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.post("/chat/slack-import/jobs/:id/step", async (c) => {
     reqCtx(c);
     return c.json(await importer().step(c.req.param("id")));
+  });
+
+  // ---- Slack times channels (#850; admin) ----
+  // Gated by 編集 + chat:slack_times. preview = dry run (Slack reads only); bulk = bounded
+  // batch, the browser calls again while `remaining > 0`.
+  const slackTimes = (): SlackTimes => {
+    if (!deps.slackTimes) throw errors.preconditionFailed("slack_times_not_configured");
+    return deps.slackTimes;
+  };
+  app.get("/chat/slack-times/preview", async (c) => {
+    reqCtx(c);
+    return c.json(await slackTimes().preview());
+  });
+  app.post("/chat/slack-times/bulk", async (c) => {
+    reqCtx(c);
+    const body = await readJson<{ userIds?: unknown }>(c);
+    let userIds: string[] | undefined;
+    if (body.userIds !== undefined) {
+      if (!Array.isArray(body.userIds) || body.userIds.some((u) => typeof u !== "string")) {
+        throw errors.validationFailed([{ field: "userIds", reason: "invalid" }]);
+      }
+      userIds = body.userIds as string[];
+    }
+    return c.json(await slackTimes().bulk(userIds));
   });
 
   // ---- custom emoji (reactions render ":name:" as the image when a row exists) ----

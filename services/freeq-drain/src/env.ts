@@ -23,6 +23,7 @@ export interface Env {
   SVC_GITHUB_SYNC?: Fetcher; // github-sync      POST /internal/events-async
   SVC_MOBILE_BFF?: Fetcher; // mo3-mobile-bff   POST /internal/events-async
   SVC_MAIL_AUTOMATION?: Fetcher; // mail-automation POST /internal/events-async (改善#5)
+  SVC_CHAT?: Fetcher; // chat-service    POST /internal/events-async (evt.chat, #850 Slack times)
 }
 
 // The env keys that hold a consumer service binding (used by the routing map).
@@ -34,7 +35,8 @@ export type ServiceBindingName =
   | "SVC_FILE_META"
   | "SVC_GITHUB_SYNC"
   | "SVC_MOBILE_BFF"
-  | "SVC_MAIL_AUTOMATION";
+  | "SVC_MAIL_AUTOMATION"
+  | "SVC_CHAT";
 
 // The env keys that hold a freeq outbox D1, drained in this fixed order each tick.
 // ONE entry per PHYSICAL D1: only dub-core and auth-outbox exist. DB_DRIVE / DB_MOBILE are

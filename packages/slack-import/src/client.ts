@@ -17,6 +17,8 @@
 //   files:read                           url_private download
 //   bookmarks:read                       bookmarks.list
 //   emoji:read                           emoji.list (custom emoji import; Tier 2 ~20 req/min)
+//   channels:manage / groups:write       conversations.create (times channels, #850)
+//   channels:write.invites / groups:write.invites  conversations.invite (times channels)
 // The bot must be INVITED to every private channel in scope. Public channels are joined.
 import type { SlackBookmark, SlackChannel, SlackMessage, SlackUser } from "./mapping";
 import { isSlackEmojiUrl } from "./emoji";
@@ -50,6 +52,8 @@ export class SlackApiError extends Error {
     public readonly slackError: string,
     /** Seconds Slack asked us to wait (429 only). */
     public readonly retryAfterSec: number | null = null,
+    /** missing_scope only: the scope(s) Slack says the token lacks (`needed`). */
+    public readonly needed: string | null = null,
   ) {
     super(`Slack API ${method} failed: ${slackError}`);
     this.name = "SlackApiError";
@@ -63,15 +67,22 @@ export function createSlackClient(opts: SlackClientOptions) {
   const baseRetryDelayMs = opts.baseRetryDelayMs ?? 1000;
   const maxRetries = opts.maxRetries ?? 5;
 
-  async function call<T>(method: string, params: Params): Promise<T> {
+  /** GET for reads; `post` = form-encoded POST (Slack's recommended shape for write methods). */
+  async function call<T>(method: string, params: Params, post = false): Promise<T> {
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null) qs.set(k, String(v));
     }
     for (let attempt = 0; ; attempt++) {
-      const res = await fetchImpl(`${SLACK_API_BASE}/${method}?${qs.toString()}`, {
-        headers: { Authorization: `Bearer ${opts.token}` },
-      });
+      const res = post
+        ? await fetchImpl(`${SLACK_API_BASE}/${method}`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${opts.token}`, "Content-Type": "application/x-www-form-urlencoded" },
+            body: qs.toString(),
+          })
+        : await fetchImpl(`${SLACK_API_BASE}/${method}?${qs.toString()}`, {
+            headers: { Authorization: `Bearer ${opts.token}` },
+          });
       if (res.status === 429) {
         const header = res.headers.get("Retry-After");
         const retryAfterSec = header !== null && Number.isFinite(Number(header)) ? Number(header) : null;
@@ -79,8 +90,8 @@ export function createSlackClient(opts: SlackClientOptions) {
         await sleep(retryAfterSec !== null ? retryAfterSec * 1000 : baseRetryDelayMs * 2 ** attempt);
         continue;
       }
-      const body = (await res.json()) as { ok: boolean; error?: string } & T;
-      if (!body.ok) throw new SlackApiError(method, body.error ?? "unknown_error");
+      const body = (await res.json()) as { ok: boolean; error?: string; needed?: string } & T;
+      if (!body.ok) throw new SlackApiError(method, body.error ?? "unknown_error", null, body.needed ?? null);
       return body;
     }
   }
@@ -173,6 +184,33 @@ export function createSlackClient(opts: SlackClientOptions) {
         return bytes.byteLength > maxBytes ? null : { bytes, contentType: res.headers.get("content-type") };
       } catch {
         return null;
+      }
+    },
+
+    /** users.lookupByEmail (users:read.email). Null when no Slack account has that email. */
+    async lookupUserByEmail(email: string): Promise<SlackUser | null> {
+      try {
+        const res = await call<{ user?: SlackUser }>("users.lookupByEmail", { email });
+        return res.user ?? null;
+      } catch (err) {
+        if (err instanceof SlackApiError && err.slackError === "users_not_found") return null;
+        throw err;
+      }
+    },
+
+    /** conversations.create (channels:manage / groups:write). Throws SlackApiError("name_taken"). */
+    async createChannel(name: string, isPrivate: boolean): Promise<SlackChannel> {
+      const res = await call<{ channel: SlackChannel }>("conversations.create", { name, is_private: isPrivate }, true);
+      return res.channel;
+    },
+
+    /** conversations.invite (channels:write.invites / groups:write.invites). already_in_channel is a no-op. */
+    async inviteToChannel(channelId: string, userIds: readonly string[]): Promise<void> {
+      try {
+        await call("conversations.invite", { channel: channelId, users: userIds.join(",") }, true);
+      } catch (err) {
+        if (err instanceof SlackApiError && err.slackError === "already_in_channel") return;
+        throw err;
       }
     },
 

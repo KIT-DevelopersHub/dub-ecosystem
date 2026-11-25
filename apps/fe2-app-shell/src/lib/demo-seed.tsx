@@ -75,6 +75,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:delete_channel",
   "chat:slack_import",
   "chat:emoji_import",
+  "chat:slack_times",
   "chat:manage_sections",
   "chat:change_visibility",
   "audit:read",

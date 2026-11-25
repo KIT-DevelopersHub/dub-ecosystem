@@ -39,4 +39,12 @@ export interface Env {
   // ATTACHMENTS = R2 dub-file-attachments; absent => files are counted as skipped.
   SLACK_BOT_TOKEN?: string;
   ATTACHMENTS?: R2Bucket;
+
+  // Slack times channels (#850, src/slack-times.ts). Plain vars, all optional:
+  //   SLACK_TIMES_PREFIX  channel name prefix (default "times-")
+  //   SLACK_TIMES_PRIVATE "true" = private channels (default public)
+  //   SLACK_TIMES_AUTO    "false" = no auto-create on member activation (default on)
+  SLACK_TIMES_PREFIX?: string;
+  SLACK_TIMES_PRIVATE?: string;
+  SLACK_TIMES_AUTO?: string;
 }

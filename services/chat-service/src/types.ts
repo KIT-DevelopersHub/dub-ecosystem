@@ -6,6 +6,7 @@
 // that will be lifted into @dub/types `chat` once 9-C freezes the DDL. They live
 // here for now so this unit does not mutate the shared package (unit boundary).
 // The @dub/events chat payloads ARE frozen and are used verbatim by the service.
+import type { SlackTimes } from "./slack-times";
 import type { common, auditLog, chat } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { DubEventName, DubEventPayloadMap } from "@dub/events";
@@ -425,4 +426,7 @@ export interface AppDeps {
   // Workspace custom emoji (src/custom-emoji.ts). Absent => the list is empty and the image /
   // import routes answer 412 (not configured).
   customEmoji?: CustomEmojis;
+  // Slack times channels (src/slack-times.ts, #850). Absent => preview / bulk answer 412 and
+  // identity.user.activated events are acked without action.
+  slackTimes?: SlackTimes;
 }

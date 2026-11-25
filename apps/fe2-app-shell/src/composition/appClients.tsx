@@ -54,7 +54,7 @@ import type {
   UpdateSectionRequest,
   WsTicketResponse,
 } from "./featureEntries.tsx";
-import type { common, identity } from "@dub/types";
+import type { chat, common, identity } from "@dub/types";
 
 type ApiPath = `/api/v1/${string}`;
 type QueryValue = string | number | boolean | undefined;
@@ -320,6 +320,10 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
     customEmojiImage: (name: string) => api.download(`${CHAT}/custom-emojis/${encodeURIComponent(name)}/image` as `/api/v1/${string}`),
     importSlackEmojis: (after: string | null) =>
       api.request<EmojiImportResult>({ method: "POST", path: `${CHAT}/custom-emojis/slack-import` as ApiPath, body: { after } }),
+    // Slack times channels (#850; 編集 + chat:slack_times) — mirrors HttpChatClient.
+    previewSlackTimes: () => api.request<chat.SlackTimesPreviewResponse>({ method: "GET", path: `${CHAT}/slack-times/preview` as ApiPath }),
+    bulkCreateSlackTimes: (userIds?: string[]) =>
+      api.request<chat.SlackTimesBulkResponse>({ method: "POST", path: `${CHAT}/slack-times/bulk` as ApiPath, body: userIds ? { userIds } : {} }),
     // Link preview is best-effort: a blocked URL (400) or a network error simply
     // means "no card" — never surface it as a chat error.
     unfurl: (url: string): Promise<UnfurlPreview | null> =>

@@ -96,6 +96,19 @@ describe("deliver (audit.record + live evt.*)", () => {
     expect(readRow(raw, "r4")).toMatchObject({ status: "done" });
   });
 
+  it("POSTs evt.chat to SVC_CHAT https://svc/internal/events-async (#850 Slack times)", async () => {
+    const { d1, raw } = makeD1();
+    const chatSvc = fakeSvc(200);
+    const env = { SVC_CHAT: chatSvc.svc } as unknown as Env;
+    const envelope = { id: "evt_c1", name: "identity.user.activated", payload: { userId: "usr_a" } };
+    seed(raw, "rc", "evt.chat", envelope);
+    const res = await drain(d1, makeDeliver(env), OPTS);
+    expect(res.delivered).toBe(1);
+    expect(chatSvc.calls[0]!.url).toBe("https://svc/internal/events-async");
+    expect(chatSvc.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
+    expect(readRow(raw, "rc")).toMatchObject({ status: "done" });
+  });
+
   it("keeps evt.mail-automation PENDING (retries) when the binding is absent — never acked (改善#5)", async () => {
     const { d1, raw } = makeD1();
     seed(raw, "r5", "evt.mail-automation", { id: "evt_m2", name: "mail.message.received", payload: {} });

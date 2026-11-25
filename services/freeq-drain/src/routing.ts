@@ -99,6 +99,11 @@ export const ROUTES: Readonly<Record<string, Route>> = {
     maxAgeMs: MAIL_AUTOMATION_MAX_AGE_MS,
   },
 
+  // #850: identity.user.activated -> chat-service creates the member's Slack times channel.
+  // origin MUST be "https://svc": chat-service 404s every non-"svc" host (workers.dev is on
+  // for its realtime WS), exactly like notification above.
+  "evt.chat": { kind: "deliver", binding: "SVC_CHAT", path: EVENTS_ASYNC_PATH, origin: "https://svc" },
+
   // No live consumer route yet -> DEFER (durable/pending; follow-ups when routes land):
   "deploy.job": DEFER, // processed in-process inside deploy-service only; no HTTP route
 };

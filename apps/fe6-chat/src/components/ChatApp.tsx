@@ -20,6 +20,7 @@ import { NewDmModal } from "./NewDmModal";
 import { SectionNameModal } from "./SectionNameModal";
 import { SlackImportModal } from "./slack-import/SlackImportModal";
 import { EmojiImportModal } from "./custom-emoji/EmojiImportModal";
+import { SlackTimesModal } from "./slack-times/SlackTimesModal";
 import { CustomEmojiProvider } from "./CustomEmoji";
 import { useChatSections } from "../hooks/useChatSections";
 import { useMessageReminders } from "../hooks/useMessageReminders";
@@ -68,6 +69,9 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
   const [createOpen, setCreateOpen] = useState(false);
   const [newDmOpen, setNewDmOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [slackTimesOpen, setSlackTimesOpen] = useState(false);
+  // Same keys as /chat/slack-times/* (admin only by default); hidden when the client lacks it.
+  const canSlackTimes = can("app:chat:edit") && can("chat:slack_times") && Boolean(api.previewSlackTimes);
   // Same keys chat-service's POLICY_TABLE requires for /chat/slack-import/* (admin only by default).
   const canImport = can("app:chat:edit") && can("chat:slack_import");
   // Sections are one org-wide set: everyone sees them, only these keys may organize them
@@ -309,6 +313,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
           : {})}
         {...(canImport ? { onImport: () => setImportOpen(true) } : {})}
         {...(onImportEmoji ? { onImportEmoji } : {})}
+        {...(canSlackTimes ? { onSlackTimes: () => setSlackTimesOpen(true) } : {})}
         later={{ count: laterBadge, active: laterOpen, onOpen: openLater }}
       />
     </>
@@ -379,6 +384,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
       )}
 
       <CreateChannelModal open={createOpen} canCreatePrivate={canCreatePrivate} onClose={() => setCreateOpen(false)} onCreate={onCreateChannel} />
+      <SlackTimesModal open={slackTimesOpen} onClose={() => setSlackTimesOpen(false)} />
       <SlackImportModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
