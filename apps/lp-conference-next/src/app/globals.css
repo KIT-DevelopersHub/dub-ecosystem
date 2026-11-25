@@ -3134,6 +3134,10 @@ button.site-head-cta,
   font-weight: 600;
   color: var(--lp-ink-mute);
 }
+/* 参加者カード: チケット販売 on（Worker が html に data-lp-join-tickets="on"）で購入リンクに切り替え */
+.svc-card-link.svc-card-alt--on { display: none; }
+html[data-lp-join-tickets="on"] .svc-card-link.svc-card-alt--off { display: none; }
+html[data-lp-join-tickets="on"] .svc-card-link.svc-card-alt--on { display: flex; }
 
 /* --- Contact: JOIN disabled + SNS ボタン --- */
 .git-btn.is-disabled {
