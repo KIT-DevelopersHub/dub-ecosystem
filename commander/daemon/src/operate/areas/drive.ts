@@ -317,6 +317,12 @@ export const DRIVE: AreaSpec = {
     { service: SHARE, route: "POST /driveshare/google-account/callback", reason: GOOGLE_ACCOUNT },
     { service: SHARE, route: "POST /driveshare/google-account/active", reason: GOOGLE_ACCOUNT },
     { service: SHARE, route: "DELETE /driveshare/google-account/accounts/:id", reason: GOOGLE_ACCOUNT },
+    {
+      service: SHARE,
+      route: "POST /driveshare/role-grants/reconcile",
+      reason:
+        "組織の全ロール共有を一括で共有・解除し直すバルク処理（対象を1件ずつ列挙・検証できない）。Google アカウントの無い人へ招待メールが飛び取り消せず、管理者専用（drive:settings_edit）",
+    },
   ],
   pending: [],
   ownerOpenedIrreversible: {

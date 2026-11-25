@@ -8,7 +8,7 @@ import { createApp } from "../src/app";
 import { MemIdentityRepo } from "../src/repo/mem-repo";
 import { MemWebauthnRepo } from "../src/repo/webauthn";
 import { seedReferenceData } from "../src/seed";
-import type { AuditSink, Deps, RequestCtx, SessionRevoker } from "../src/deps";
+import type { AuditSink, Deps, RequestCtx, RoleMembershipNotice, RoleMembershipOutcome, RoleMembershipSink, SessionRevoker } from "../src/deps";
 import type { UserRow } from "../src/repo/types";
 
 export class FakeAudit implements AuditSink {
@@ -33,6 +33,16 @@ export class FakeRevoker implements SessionRevoker {
   }
 }
 
+export class FakeMembership implements RoleMembershipSink {
+  notices: RoleMembershipNotice[] = [];
+  /** What drive-share "answers" (ok by default). */
+  outcome: RoleMembershipOutcome = { ok: true };
+  async changed(notice: RoleMembershipNotice): Promise<RoleMembershipOutcome> {
+    this.notices.push(notice);
+    return this.outcome;
+  }
+}
+
 export const ORG_ID = common.DUB_DEFAULT_ORG_ID;
 
 export interface Harness {
@@ -40,6 +50,7 @@ export interface Harness {
   repo: MemIdentityRepo;
   audit: FakeAudit;
   revoker: FakeRevoker;
+  membership: FakeMembership;
   deps: Deps;
   adminId: string;
   memberId: string;
@@ -81,10 +92,11 @@ export async function makeHarness(): Promise<Harness> {
   await repo.createAssignment({ id: newId("ra"), userId: adminId, roleId: adminRole.id, orgId: ORG_ID, resourceType: null, resourceId: null, grantedBy: adminId, grantedAt: now() });
   await repo.createAssignment({ id: newId("ra"), userId: memberId, roleId: memberRole.id, orgId: ORG_ID, resourceType: null, resourceId: null, grantedBy: adminId, grantedAt: now() });
 
-  const deps: Deps = { repo, webauthn: new MemWebauthnRepo(), audit, revoker, now, newId, defaultOrgId: ORG_ID };
+  const membership = new FakeMembership();
+  const deps: Deps = { repo, webauthn: new MemWebauthnRepo(), audit, revoker, membership, now, newId, defaultOrgId: ORG_ID };
   const app = createApp({ deps, defaultOrgId: ORG_ID });
 
-  return { app, repo, audit, revoker, deps, adminId, memberId, adminRoleId: adminRole.id, memberRoleId: memberRole.id };
+  return { app, repo, audit, revoker, membership, deps, adminId, memberId, adminRoleId: adminRole.id, memberRoleId: memberRole.id };
 }
 
 // request helpers

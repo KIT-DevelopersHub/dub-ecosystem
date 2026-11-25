@@ -4,7 +4,7 @@
 import { DubError, errors, CommonErrorCodes, type FieldError } from "@dub/errors";
 import type { common, identity } from "@dub/types";
 import { policy, identity as identityContract } from "@dub/types";
-import type { Deps, RequestCtx } from "./deps";
+import type { Deps, RequestCtx, RoleMembershipOutcome } from "./deps";
 import type { AssignmentRow, RoleRow, UserRow } from "./repo/types";
 import { evaluate, effectiveOrgWidePermissions, type EvalContext } from "./authz";
 import { isPermissionKey } from "./permissions";
@@ -51,6 +51,32 @@ const TRIGGER_RE = /^[a-z][a-z0-9._-]{0,63}$/;
 
 export class IdentityService {
   constructor(private readonly d: Deps) {}
+
+  // ---------- role membership notices (drive-share-service follows them) ----------
+  /** Tell drive-share-service that `userId` joined / left `roleIds`, and WAIT: the Drive共有 grants and
+   *  ミーティング invitations of those roles follow right now. Never throws — a failure leaves the role
+   *  change committed and is reported in the response (propagationWarnings) and the audit log. */
+  private async notifyMembership(ctx: RequestCtx, orgId: string, userId: string, change: identity.RoleMembershipChange, roleIds: readonly string[], reason: identity.RoleMembershipReason): Promise<void> {
+    if (!this.d.membership || roleIds.length === 0) return;
+    const ids = [...new Set(roleIds)];
+    let outcome: RoleMembershipOutcome;
+    try {
+      outcome = await this.d.membership.changed({ orgId, userId, change, roleIds: ids, reason });
+    } catch (err) {
+      outcome = { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+    if (outcome.ok) return;
+    ctx.warnings?.push({ userId, change, roleIds: ids, reason, message: outcome.message });
+    await this.d.audit.publish(this.record("identity.role.propagation_failed", "failure", ctx, orgId, "user", userId, { change, roleIds: ids, reason, message: outcome.message }));
+  }
+
+  /** A user who becomes active starts counting for every role they hold; one who stops being active
+   *  stops counting for all of them (role membership lists active users only). */
+  private async notifyStatusChange(ctx: RequestCtx, orgId: string, userId: string, before: string, after: string): Promise<void> {
+    if ((before === "active") === (after === "active")) return;
+    const roleIds = (await this.d.repo.listAssignmentsByUser(userId, orgId)).map((a) => a.roleId);
+    await this.notifyMembership(ctx, orgId, userId, after === "active" ? "added" : "removed", roleIds, after === "active" ? "activate" : "deactivate");
+  }
 
   // ---------- read helpers ----------
   private orgWideRoleIds(assignments: AssignmentRow[]): common.RoleId[] {
@@ -323,6 +349,7 @@ export class IdentityService {
     );
     const updated = (await this.d.repo.getUser(existing.id))!;
     const assignments = await this.d.repo.listAssignmentsByUser(updated.id, orgId);
+    await this.notifyStatusChange(ctx, orgId, updated.id, existing.status, updated.status);
     return { status: "provisioned", user: this.toIdentityUser(updated, assignments) };
   }
 
@@ -354,6 +381,7 @@ export class IdentityService {
     );
     const activated = await this.d.repo.activateIfInvited(userId, this.d.now());
     const after = (await this.d.repo.getUser(userId))!;
+    if (activated) await this.notifyStatusChange(ctx, orgId, userId, "invited", after.status);
     return { dryRun, activated, previousStatus: "invited", status: after.status };
   }
 
@@ -382,6 +410,7 @@ export class IdentityService {
     await this.d.repo.updateUser(userId, patch, this.d.now());
     await this.d.audit.publish(this.record("identity.user.updated", "success", ctx, orgId, "user", userId, { fields: Object.keys(patch) }));
     const updated = (await this.d.repo.getUser(userId))!;
+    await this.notifyStatusChange(ctx, orgId, userId, user.status, updated.status);
     const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
     return this.toIdentityUser(updated, assignments);
   }
@@ -471,6 +500,7 @@ export class IdentityService {
     // 2) strip all role assignments (org-wide + resource-scoped).
     const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
     for (const a of assignments) await this.d.repo.deleteAssignment(a.id);
+    await this.notifyMembership(ctx, orgId, userId, "removed", assignments.map((a) => a.roleId), "offboard");
     steps.push(
       assignments.length > 0
         ? { step: "revoke-roles", status: "done", detail: String(assignments.length) }
@@ -625,6 +655,7 @@ export class IdentityService {
           patch.status = "active";
         }
         await this.d.repo.updateUser(existing.id, patch, now);
+        if (patch.status) await this.notifyStatusChange(ctx, orgId, existing.id, existing.status, patch.status);
         updated++;
       }
     }
@@ -638,6 +669,7 @@ export class IdentityService {
     for (const u of owned) {
       if (seen.has(u.email.toLowerCase()) || u.status === "disabled" || admins.has(u.id)) continue;
       await this.d.repo.updateUser(u.id, { status: "disabled" }, now);
+      await this.notifyStatusChange(ctx, orgId, u.id, u.status, "disabled");
       deactivated++;
     }
 
@@ -716,8 +748,10 @@ export class IdentityService {
     if (role.permissions.includes(ADMIN) && !(await this.adminSurvivesRoleDelete(roleId, orgId))) {
       throw errors.conflict("このロールを削除すると管理者が 0 人になるため削除できません", { code: "LAST_ADMIN" });
     }
+    const holders = new Set((await this.d.repo.listAssignmentsByRole(roleId)).map((a) => a.userId));
     await this.d.repo.deleteRole(roleId);
     await this.d.audit.publish(this.record("identity.role.deleted", "success", ctx, orgId, "role", roleId, {}));
+    for (const userId of holders) await this.notifyMembership(ctx, orgId, userId, "removed", [roleId], "role-delete");
   }
 
   // ---------- assignments ----------
@@ -777,6 +811,7 @@ export class IdentityService {
     // write-ahead sync audit (SYNC_AUDIT_ACTIONS: identity.role.assigned).
     await this.d.audit.logSync(this.record("identity.role.assigned", "success", ctx, orgId, "user", userId, { roleId: req.roleId, resourceType, resourceId }));
     await this.d.repo.createAssignment(assignment);
+    await this.notifyMembership(ctx, orgId, userId, "added", [req.roleId], "assign");
     return this.toAssignmentView(assignment, role.name);
   }
 
@@ -796,6 +831,7 @@ export class IdentityService {
     // write-ahead sync audit (SYNC_AUDIT_ACTIONS: identity.role.revoked).
     await this.d.audit.logSync(this.record("identity.role.revoked", "success", ctx, orgId, "user", userId, { assignmentId, roleId: assignment.roleId }));
     await this.d.repo.deleteAssignment(assignmentId);
+    await this.notifyMembership(ctx, orgId, userId, "removed", [assignment.roleId], "revoke");
   }
 
   // ---------- managed roles (名簿のチーム・役職 -> 自動ロール) ----------
@@ -891,6 +927,7 @@ export class IdentityService {
         await this.d.repo.deleteRole(role.id);
         await this.d.audit.publish(this.record("identity.role.deleted", "success", ctx, orgId, "role", role.id, { managed: true }));
       }
+      for (const userId of new Set(auto.map((a) => a.userId))) await this.notifyMembership(ctx, orgId, userId, "removed", [role.id], "managed-catalog");
     }
     return { dryRun, created, renamed, deleted, kept };
   }
@@ -940,6 +977,8 @@ export class IdentityService {
     }
     for (const a of stale) await this.d.repo.deleteAssignment(a.id);
     await this.d.audit.publish(this.record("identity.role.managed_synced", "success", ctx, orgId, "user", userId, { added, removed }));
+    await this.notifyMembership(ctx, orgId, userId, "added", added, "managed-sync");
+    await this.notifyMembership(ctx, orgId, userId, "removed", removed, "managed-sync");
     return { dryRun, added, removed, manual };
   }
 

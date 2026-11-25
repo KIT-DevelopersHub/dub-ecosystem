@@ -328,6 +328,58 @@ export interface PutUserManagedRolesResponse {
   manual: RoleId[];
 }
 
+/** identity-roster -> drive-share-service POST /internal/role-membership, sent synchronously as part of
+ *  every change of a user's role membership, so a role's Drive共有 grants and ミーティング invitations
+ *  reach (or leave) that user right then. drive-share re-reads the roster on receipt and is idempotent.
+ *  A failure never fails the role change: it is reported back as `propagationWarnings`. */
+export const ROLE_MEMBERSHIP_PATH = "/internal/role-membership";
+
+/** added = the user now counts for these roles (assigned, or became active while holding them);
+ *  removed = the user no longer does (revoked, role deleted, disabled / offboarded). */
+export type RoleMembershipChange = "added" | "removed";
+
+/** Why the membership changed (logs only). */
+export type RoleMembershipReason =
+  | "assign"
+  | "revoke"
+  | "managed-sync"
+  | "managed-catalog"
+  | "role-delete"
+  | "activate"
+  | "deactivate"
+  | "offboard";
+
+/** Body of ROLE_MEMBERSHIP_PATH. The receiver never trusts it for WHO is a member — it only says
+ *  which roles to re-check; the roster is read again on receipt. */
+export interface RoleMembershipChangedV1 {
+  type: "identity.role_membership.changed";
+  version: 1;
+  /** Unique per notice (logs). */
+  id: string;
+  occurredAt: ISODateTime;
+  orgId: OrgId;
+  userId: UserId;
+  change: RoleMembershipChange;
+  roleIds: RoleId[];
+  reason: RoleMembershipReason;
+}
+
+/** A role membership change whose Drive共有 / ミーティング follow did not (fully) happen. The role change
+ *  itself is committed; the hourly sync is the safety net for joins, 再適用 / the role-grant backfill
+ *  for leaves. */
+export interface RolePropagationWarning {
+  userId: UserId;
+  change: RoleMembershipChange;
+  roleIds: RoleId[];
+  reason: RoleMembershipReason;
+  /** Japanese, for the admin UI. */
+  message: string;
+}
+
+/** Response header on any identity response that carries propagation warnings: their count. The JSON
+ *  body (when it is an object) also gets `propagationWarnings: RolePropagationWarning[]`. */
+export const PROPAGATION_WARNING_HEADER = "x-dub-propagation-warnings";
+
 /** POST /internal/users/:id/activate — 名簿 (member-service) が「在籍 (added) でこの
  *  アカウントに紐付いた」と確定した人の招待中アカウントを有効化する (invited -> active)。
  *  invited 以外 (active / disabled / rejected) には触れない (冪等・停止を上書きしない)。 */
