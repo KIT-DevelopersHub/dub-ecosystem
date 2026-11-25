@@ -1,7 +1,12 @@
 // One aggregated drain pass over every bound freeq outbox D1. Reuses @dub/freeq's drain()
 // (which owns claim/backoff/failed bookkeeping) with the shared topic-aware deliver.
 //
-// - batchSize 25: bounded work per DB per tick.
+// - batchSize 10 per physical DB: each row costs 2 subrequests (deliver + status UPDATE),
+//   plus 1 claim SELECT per DB and 1 prune DELETE per DB. 2 DBs * (1 + 2*10) + 2 = 44, under
+//   the Workers FREE plan's 50-subrequests-per-invocation cap. The old 25 x 4 aliased DBs
+//   (~200 subrequests) blew the cap every tick. Throughput: 10 rows/DB/min = 14,400/DB/day.
+// - expire: user-facing topics with a TTL (routing.ts maxAgeMs) are retired, not delivered,
+//   once stale — a recovered drain never mails/pushes weeks-old events.
 // - maxAttempts 16 (FINITE): a row that cannot be delivered — a topic with no live route
 //   (deploy.job), or a consumer down past the whole backoff ladder (~hours) — eventually
 //   reaches the terminal `failed` state instead of being re-UPDATEd forever. An UNBOUNDED
@@ -16,11 +21,18 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { drain, pruneOutbox, type DrainResult, type PruneOptions } from "@dub/freeq";
 import type { Env } from "./env";
 import { OUTBOX_DB_BINDINGS, type OutboxDbBinding } from "./env";
-import { makeDeliver } from "./routing";
+import { expireStale, makeDeliver } from "./routing";
 
 // Finite maxAttempts (8..16 window). 16 * a 1h-capped exponential backoff gives a
 // multi-hour delivery window before a row is declared terminally failed.
-export const DRAIN_OPTS = { batchSize: 25, maxAttempts: 16 } as const;
+export const DRAIN_OPTS = { batchSize: 10, maxAttempts: 16 } as const;
+
+// Workers FREE plan: 50 subrequests (fetch / service binding / D1 query) per invocation.
+export const FREE_PLAN_SUBREQUEST_CAP = 50;
+/** Worst-case subrequests one alarm tick can issue (drain all DBs + one prune pass). */
+export function worstCaseSubrequestsPerTick(dbCount: number = OUTBOX_DB_BINDINGS.length): number {
+  return dbCount * (1 + 2 * DRAIN_OPTS.batchSize) + dbCount;
+}
 
 export type DrainAllEntry = ({ ok: true } & DrainResult) | { ok: false; error: string };
 export type DrainAllResult = Partial<Record<OutboxDbBinding, DrainAllEntry>>;
@@ -37,7 +49,7 @@ export async function drainAll(env: Env): Promise<DrainAllResult> {
     const db = env[name] as D1Database | undefined;
     if (!db) continue; // binding not present in this deploy: nothing to drain
     try {
-      const res = await drain(db, deliver, DRAIN_OPTS);
+      const res = await drain(db, deliver, { ...DRAIN_OPTS, expire: expireStale });
       out[name] = { ok: true, ...res };
     } catch (err) {
       out[name] = { ok: false, error: err instanceof Error ? err.message : String(err) };
