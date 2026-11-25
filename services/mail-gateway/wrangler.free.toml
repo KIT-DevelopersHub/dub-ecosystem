@@ -57,6 +57,12 @@ service = "dub-member-service"
 binding = "SVC_NOTIFICATION"
 service = "dub-notification-service"
 
+# Cron backstop for the freeq-drain DO alarm loop (src/freeq-kick.ts): every */5 tick POSTs the
+# idempotent /internal/drain/kick so a dropped alarm is re-armed within 5 minutes. Best-effort.
+[[services]]
+binding = "SVC_FREEQ_DRAIN"
+service = "freeq-drain"
+
 # --- Cron: every 5 minutes (ONE trigger). The scheduled handler runs the 予約送信
 # (scheduled-send) drain on EVERY tick — a "send later" mail has ~5-minute delivery
 # granularity. Mail is kept indefinitely (no retention purge). The Workers FREE plan caps the account at 5 cron triggers, so we keep mail-gateway's

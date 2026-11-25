@@ -12,7 +12,7 @@
 // (durable, retried with backoff, NEVER acked). No topic is ever dropped by not knowing
 // about it.
 import type { Fetcher } from "@cloudflare/workers-types";
-import type { Deliver } from "@dub/freeq";
+import type { Deliver, OutboxRow } from "@dub/freeq";
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import type { Env, ServiceBindingName } from "./env";
 
@@ -36,6 +36,11 @@ export interface DeliverRoute {
   binding: ServiceBindingName;
   path: string;
   origin: string; // arbitrary; Service Bindings ignore the host, but fetch() needs a URL
+  // Staleness TTL for USER-FACING side effects (inbox/push/email, auto-reply mail). A row
+  // older than this is retired as `failed` ("expired: ...") instead of delivered, so a drain
+  // that stalls and later recovers can never mail/push people about weeks-old events.
+  // Omitted = no TTL (internal, idempotent consumers such as audit: late is better than lost).
+  maxAgeMs?: number;
 }
 export interface DeferRoute {
   kind: "defer";
@@ -43,6 +48,15 @@ export interface DeferRoute {
 export type Route = DeliverRoute | DeferRoute;
 
 const DEFER: DeferRoute = { kind: "defer" };
+
+// User-facing TTLs (see DeliverRoute.maxAgeMs). A notification (inbox + push + task email)
+// older than a day is noise; an auto-reply to mail received hours ago is worse than none.
+export const NOTIFICATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export const MAIL_AUTOMATION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+// Per-delivery timeout. A hung consumer must not pin the alarm invocation for minutes
+// (the 2026-09 stall saw ~3min alarm invocations); a timeout throws -> normal retry/backoff.
+export const DELIVER_TIMEOUT_MS = 15 * 1000;
 
 // Topic -> destination. Verified topic strings:
 //   audit.record            = AUDIT_TOPIC (publishAudit channel, all services)
@@ -63,7 +77,13 @@ export const ROUTES: Readonly<Record<string, Route>> = {
   // its header-trusting HTTP API (incl. /internal/events-async) to service-binding callers
   // (host "svc"). A non-svc host is rejected as a spoofable public request. Service
   // bindings ignore the host for routing, so "svc" delivers correctly over the binding.
-  "evt.notification": { kind: "deliver", binding: "SVC_NOTIFICATION", path: EVENTS_ASYNC_PATH, origin: "https://svc" },
+  "evt.notification": {
+    kind: "deliver",
+    binding: "SVC_NOTIFICATION",
+    path: EVENTS_ASYNC_PATH,
+    origin: "https://svc",
+    maxAgeMs: NOTIFICATION_MAX_AGE_MS,
+  },
   "evt.task": { kind: "deliver", binding: "SVC_TASK", path: EVENTS_ASYNC_PATH, origin: "https://task-service" },
   "evt.gantt": { kind: "deliver", binding: "SVC_GANTT", path: EVENTS_ASYNC_PATH, origin: "https://gantt-service" },
   "evt.file-meta": { kind: "deliver", binding: "SVC_FILE_META", path: EVENTS_ASYNC_PATH, origin: "https://file-meta" },
@@ -71,7 +91,13 @@ export const ROUTES: Readonly<Record<string, Route>> = {
   "evt.mobile-bff": { kind: "deliver", binding: "SVC_MOBILE_BFF", path: EVENTS_ASYNC_PATH, origin: "https://mobile-bff" },
   // 改善#5: mail-automation now exposes /internal/events-async, so mail.message.received
   // is DELIVERED (auto-reply fires) instead of sitting pending forever on the free tier.
-  "evt.mail-automation": { kind: "deliver", binding: "SVC_MAIL_AUTOMATION", path: EVENTS_ASYNC_PATH, origin: "https://mail-automation" },
+  "evt.mail-automation": {
+    kind: "deliver",
+    binding: "SVC_MAIL_AUTOMATION",
+    path: EVENTS_ASYNC_PATH,
+    origin: "https://mail-automation",
+    maxAgeMs: MAIL_AUTOMATION_MAX_AGE_MS,
+  },
 
   // No live consumer route yet -> DEFER (durable/pending; follow-ups when routes land):
   "deploy.job": DEFER, // processed in-process inside deploy-service only; no HTTP route
@@ -80,6 +106,19 @@ export const ROUTES: Readonly<Record<string, Route>> = {
 /** Resolve a topic to its route. DEFAULT = DEFER (never ack an unknown topic). */
 export function routeFor(topic: string): Route {
   return ROUTES[topic] ?? DEFER;
+}
+
+/**
+ * DrainOptions.expire for the shared outbox: retire a row whose route has a maxAgeMs and
+ * whose created_at is older than it. Rows with an unparseable created_at are not expired.
+ */
+export function expireStale(row: Pick<OutboxRow, "topic" | "created_at">, now: number): string | null {
+  const route = routeFor(row.topic);
+  if (route.kind !== "deliver" || route.maxAgeMs === undefined) return null;
+  const created = Date.parse(row.created_at);
+  if (!Number.isFinite(created)) return null;
+  const age = now - created;
+  return age > route.maxAgeMs ? `stale ${row.topic} (age ${Math.round(age / 60000)}min > ${route.maxAgeMs / 60000}min)` : null;
 }
 
 /**
@@ -100,6 +139,7 @@ export function makeDeliver(env: Env): Deliver {
       method: "POST",
       headers: { "content-type": "application/json", [HDR_INTERNAL]: INTERNAL_HEADER_VALUE },
       body: JSON.stringify(payload), // payload IS the envelope the producer built; verbatim
+      signal: AbortSignal.timeout(DELIVER_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`freeq-drain: ${topic} -> ${route.binding}${route.path} returned ${res.status}`);
   };

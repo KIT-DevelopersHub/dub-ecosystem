@@ -11,8 +11,8 @@ export interface Env {
   // --- freeq outbox D1s (one drain pass each) ---
   DB_CORE?: D1Database; // shared dub-core outbox (audit-log, chat, deploy, event, file-meta, github-sync, identity-roster, mail-gateway, notification, task)
   DB_AUTH?: D1Database; // auth-service's separate auth-outbox
-  DB_DRIVE?: D1Database; // drive-proxy's separate dub-drive-proxy-watch outbox
-  DB_MOBILE?: D1Database; // mo3-mobile-bff's mobile outbox
+  DB_DRIVE?: D1Database; // alias of dub-core (drive-proxy writes there); NOT drained separately
+  DB_MOBILE?: D1Database; // alias of dub-core (mo3-mobile-bff writes there); NOT drained separately
 
   // --- live consumer service bindings (routing destinations) ---
   SVC_AUDIT_LOG?: Fetcher; // audit-log       POST /internal/audit-async
@@ -37,5 +37,9 @@ export type ServiceBindingName =
   | "SVC_MAIL_AUTOMATION";
 
 // The env keys that hold a freeq outbox D1, drained in this fixed order each tick.
-export const OUTBOX_DB_BINDINGS = ["DB_CORE", "DB_AUTH", "DB_DRIVE", "DB_MOBILE"] as const;
+// ONE entry per PHYSICAL D1: only dub-core and auth-outbox exist. DB_DRIVE / DB_MOBILE are
+// aliases of dub-core (wrangler.toml), so draining them too ran the same table 3x per tick
+// and tripled the per-invocation subrequest count — the Free plan's 50-subrequest cap was
+// blown every tick ("Too many subrequests by single Worker invocation", 2026-09).
+export const OUTBOX_DB_BINDINGS = ["DB_CORE", "DB_AUTH"] as const;
 export type OutboxDbBinding = (typeof OUTBOX_DB_BINDINGS)[number];

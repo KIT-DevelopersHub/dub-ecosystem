@@ -66,7 +66,7 @@ describe("pruneAll (retention across bound DBs, best-effort, pending-safe)", () 
 
     expect(out.DB_CORE).toEqual({ ok: true, deleted: 2 });
     expect(out.DB_AUTH).toEqual({ ok: true, deleted: 1 });
-    expect(out.DB_DRIVE).toBeUndefined(); // unbound -> skipped
+    expect(Object.keys(out)).not.toContain("DB_DRIVE"); // alias of dub-core -> never drained separately
     expect(readRow(core.raw, "c-done")).toBeUndefined();
     expect(readRow(core.raw, "c-failed")).toBeUndefined();
     expect(readRow(core.raw, "c-pending")).toMatchObject({ status: "pending" });

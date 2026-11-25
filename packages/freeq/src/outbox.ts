@@ -87,7 +87,15 @@ export interface DrainOptions extends BackoffOptions {
   batchSize?: number; // max rows claimed per drain (default 25)
   maxAttempts?: number; // attempts before a row is marked failed (default 8)
   now?: () => number; // clock injection (tests)
+  // Optional staleness gate, checked BEFORE delivery. Return a reason string to retire the
+  // row without delivering it (status -> terminal `failed`, last_error "expired: <reason>",
+  // counted in `failed`); return null to deliver normally. Lets a consumer refuse to fire
+  // user-facing side effects (emails, pushes, auto-replies) for messages that are far too
+  // old to still be meaningful — e.g. a backlog left behind by a stalled drain.
+  expire?: (row: OutboxRow, now: number) => string | null;
 }
+
+export const EXPIRED_ERROR_PREFIX = "expired: ";
 
 export interface DrainResult {
   claimed: number;
@@ -127,6 +135,15 @@ export async function drain(db: D1Database, deliver: Deliver, opts: DrainOptions
 
   for (const row of rows) {
     const attempts = row.attempts + 1;
+    const expiredReason = opts.expire?.(row, now) ?? null;
+    if (expiredReason !== null) {
+      await db
+        .prepare(`UPDATE ${OUTBOX_TABLE} SET status = 'failed', last_error = ? WHERE id = ? AND status = 'pending'`)
+        .bind(EXPIRED_ERROR_PREFIX + expiredReason, row.id)
+        .run();
+      out.failed++;
+      continue;
+    }
     try {
       await deliver({ id: row.id, topic: row.topic, payload: JSON.parse(row.payload), attempts });
       await db

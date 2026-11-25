@@ -9,6 +9,7 @@ import { handleInbound } from "./inbound";
 import { forwardToUserTarget, sweepPendingForwards } from "./user-forward";
 import { headersToMap, type RawInbound } from "./mime";
 import { runScheduledSendDrain } from "./scheduled-send";
+import { kickFreeqDrain } from "./freeq-kick";
 import { isCanaryInbound, runCanary } from "./canary";
 import { runRowCountSnapshot } from "./row-count";
 import { common } from "@dub/types";
@@ -119,11 +120,16 @@ const handler = {
   // Business cron: scheduled-send drain on EVERY tick (*/5 → ~5m 予約送信 granularity).
   // $0: the schedule row is the durable timer, this cron is the ticker. Mail is kept
   // indefinitely — there is intentionally NO retention purge here.
-  // The freeq outbox drain stays OUT of here (it moved to the standalone freeq-drain DO).
+  // The freeq outbox drain stays OUT of here (it moved to the standalone freeq-drain DO);
+  // this cron only KICKS that DO's alarm as a backstop (freeq-kick.ts).
   // Also: the once-a-UTC-day row-count snapshot + decrease alert (row-count.ts) and the
   // production canary (canary.ts: checks pending probes every tick, sends on
   // MAIL_CANARY_INTERVAL_MIN slots, disabled by default). Neither throws.
-  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env, execCtx?: ExecutionContext): Promise<void> {
+    // freeq-drain alarm backstop (never throws). Off the critical path via waitUntil.
+    const kick = kickFreeqDrain(env);
+    if (execCtx) execCtx.waitUntil(kick);
+    else await kick;
     await runScheduledSendDrain(env);
     const ctx = { requestId: newRequestId(), caller: SERVICE_NAME };
     await runRowCountSnapshot(

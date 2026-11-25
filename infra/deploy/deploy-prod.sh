@@ -136,6 +136,12 @@ deploy mail-gateway    services/mail-gateway/wrangler.free.toml
 deploy deploy-service  services/deploy-service/wrangler.free.toml
 deploy github-sync     services/github-sync/wrangler.free.toml
 deploy audit-log       services/audit-log/wrangler.free.toml
+# freeq-drain: the ONLY drainer of every freeq outbox (DO alarm, no cron slot). It used to be
+# deployed by hand and fell out of this script, so drain fixes never reached prod. Its
+# upstream bindings (audit-log, notification, task, gantt, file-meta, github-sync,
+# mo3-mobile-bff, mail-automation) already exist in prod. mail-gateway binds it
+# (SVC_FREEQ_DRAIN, cron backstop that re-arms the alarm every 5 minutes).
+deploy freeq-drain     services/freeq-drain/wrangler.toml
 # usage-meter binds SVC_IDENTITY (step 1) + SVC_NOTIFICATION/SVC_MAIL_GATEWAY (above), and is
 # itself bound by api-gateway (SVC_USAGE_METER, step 4) — so it lands last in this tier, after
 # its own upstreams exist and before the gateway that binds it. SQLite-DO alarm, no cron slot.
