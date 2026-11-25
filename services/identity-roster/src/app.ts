@@ -19,7 +19,7 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { DubError, dubErrorHandler, errors, CommonErrorCodes } from "@dub/errors";
 import { DUB_HEADERS, newRequestId } from "@dub/http";
 import { policyGate } from "@dub/policy-gate";
-import type { identity } from "@dub/types";
+import { identity as identityContract, type identity } from "@dub/types";
 import type { AppVariables } from "./env";
 import type { Deps } from "./deps";
 import type { RequestCtx } from "./deps";
@@ -39,7 +39,7 @@ type Ctx = Context<Env>;
 type App = Hono<Env>;
 
 function ctxOf(c: Ctx): RequestCtx {
-  return { requestId: c.get("requestId"), actorId: c.get("userId") };
+  return { requestId: c.get("requestId"), actorId: c.get("userId"), warnings: c.get("propagationWarnings") };
 }
 
 async function readJson<T>(c: { req: { json: () => Promise<unknown> } }): Promise<T> {
@@ -65,7 +65,23 @@ export function createApp(opts: AppOptions): App {
     const requestId = c.req.header(DUB_HEADERS.requestId) ?? newRequestId();
     c.set("requestId", requestId);
     c.set("userId", c.req.header(DUB_HEADERS.userId) ?? null);
+    const warnings: identity.RolePropagationWarning[] = [];
+    c.set("propagationWarnings", warnings);
     await next();
+    // A role change that committed but whose Drive共有 / ミーティング follow failed: tell the caller
+    // (header always; `propagationWarnings` in a JSON object body) so the admin UI can show it.
+    if (warnings.length === 0) return;
+    const headers = new Headers(c.res.headers);
+    headers.set(identityContract.PROPAGATION_WARNING_HEADER, String(warnings.length));
+    let body: BodyInit | null = c.res.body;
+    if ((headers.get("content-type") ?? "").includes("application/json")) {
+      const parsed = (await c.res.clone().json().catch(() => null)) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = JSON.stringify({ ...(parsed as Record<string, unknown>), propagationWarnings: warnings });
+        headers.delete("content-length");
+      }
+    }
+    c.res = new Response(body, { status: c.res.status, headers });
   });
 
   // ---- THE authorization layer. Mounted on every route, so it runs before every handler,

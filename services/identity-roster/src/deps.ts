@@ -2,13 +2,15 @@
 // wiring lives in sinks.ts / index.ts; tests inject fakes. Keeping side-effecting
 // collaborators (audit, session revoke) behind interfaces is what lets the RBAC
 // semantics be unit-tested without SES/Queue/auth being live (9-B/C/E pending).
-import type { auditLog } from "@dub/types";
+import type { auditLog, identity } from "@dub/types";
 import type { IdentityRepo } from "./repo/types";
 import type { WebauthnRepo } from "./repo/webauthn";
 
 export interface RequestCtx {
   requestId: string;
   actorId: string | null;
+  /** Collects the request's role-propagation failures (returned to the caller as propagationWarnings). */
+  warnings?: identity.RolePropagationWarning[];
 }
 
 export interface AuditSink {
@@ -24,12 +26,33 @@ export interface SessionRevoker {
   revokeUser(userId: string, ctx: RequestCtx): Promise<void>;
 }
 
+/** One user's role membership changed. drive-share-service follows it (Drive共有 grants and
+ *  ミーティング invitations of those roles reach / leave the user). */
+export interface RoleMembershipNotice {
+  orgId: string;
+  userId: string;
+  change: identity.RoleMembershipChange;
+  roleIds: string[];
+  reason: identity.RoleMembershipReason;
+}
+
+/** ok false = the follow did not (fully) happen; `message` says what, in Japanese. */
+export type RoleMembershipOutcome = { ok: true } | { ok: false; message: string };
+
+export interface RoleMembershipSink {
+  /** Synchronous: drive-share-service shares / unshares right now and answers. Never throws — a
+   *  failure is an outcome, so the role change itself is never rolled back for it. */
+  changed(notice: RoleMembershipNotice): Promise<RoleMembershipOutcome>;
+}
+
 export interface Deps {
   repo: IdentityRepo;
   /** Passkey credential store (/internal/webauthn/*). Absent => those routes 503. */
   webauthn?: WebauthnRepo;
   audit: AuditSink;
   revoker: SessionRevoker;
+  /** Role membership changes for drive-share-service. Absent = nobody listens (tests, bare deploys). */
+  membership?: RoleMembershipSink;
   now: () => string; // @dub/db nowIso
   newId: (prefix: string) => string; // @dub/db newId
   defaultOrgId: string; // common.DUB_DEFAULT_ORG_ID

@@ -17,7 +17,8 @@
 //     grant on the same file still needs that email; then drop the grant + ledger.
 //   reapply (reconcile): apply + remove departed members' permissions (our-only, guarded).
 import { DubError, errors } from "@dub/errors";
-import { NON_GOOGLE_USER_JA, type DriveShareClient } from "./drive-client";
+import { GoogleQuotaError, NON_GOOGLE_USER_JA, type DriveShareClient } from "./drive-client";
+import type { meeting } from "@dub/types";
 import type { GrantMemberRow, GrantRow, RoleGrantStore } from "./role-grants-store";
 import type { RoleMembership } from "./role-membership";
 import { staticMemberDirectory, type MemberDirectory } from "./member-directory";
@@ -48,6 +49,29 @@ export interface RoleGrantsDeps {
   clock?: () => number;
   /** Make sure the hourly sync is running (MeetingSyncDO), once a grant exists to follow. */
   kick?: () => Promise<void>;
+  /** Fail (instead of reading "nobody has a Gmail") when the 名簿 lookup fails. Set for the paths
+   *  that may take access away or that are retried on failure (role follow, reconcile). */
+  strictDirectory?: boolean;
+}
+
+/** What following one membership change did (POST /internal/role-membership). */
+export interface RoleFollowResult {
+  grants: number;
+  shared: number;
+  revoked: number;
+  skipped: SkippedMember[];
+  /** Grants whose removals were held (role unknown or read as empty). */
+  held: number;
+  /** false = the per-call budget ran out; the caller retries (every step is idempotent). */
+  complete: boolean;
+}
+
+/** One reconcile call over every grant (dryRun false). */
+export interface RoleReconcileApplied {
+  shared: number;
+  revoked: number;
+  skipped: SkippedMember[];
+  remaining: number;
 }
 
 /** Where an unfinished background sync continues: the grant, and the last member handled. */
@@ -77,6 +101,20 @@ export interface RoleGrantsService {
   drift(fileId: string): Promise<FileShareDrift>;
   /** The hourly follow of role membership: share with members added since the last run. */
   syncMembers(opts: { budgetMs: number; maxWrites: number; resume?: RoleSyncResume }): Promise<RoleSyncResult>;
+  /** A user joined / left these roles: bring every grant of those roles in line now. Joining shares
+   *  (名簿 Gmail only, like the hourly sync); leaving deletes ONLY permissions Dub created, only when
+   *  no other grant on the file still needs the address, and never when the role is unknown or reads
+   *  as empty (a glitch must not unshare everyone). Throws on a transient failure (the caller reports it). */
+  followRoles(roleIds: readonly string[], change: "added" | "removed", opts: { budgetMs: number; maxWrites: number }): Promise<RoleFollowResult>;
+  /** Read-only, no Google call: what a full reconcile would share / revoke (ledger vs roster). */
+  planReconcile(): Promise<meeting.RoleGrantReconcilePlan["drive"]>;
+  /** Apply the plan within the budget (Drive is consulted per grant). Repeat while remaining > 0. */
+  applyReconcile(opts: { budgetMs: number; maxWrites: number }): Promise<RoleReconcileApplied>;
+}
+
+/** A failure worth retrying later (a limit, Google or a Dub service down) — not a refusal of one address. */
+export function isTransient(err: unknown): boolean {
+  return err instanceof GoogleQuotaError || (err instanceof DubError && err.status >= 500);
 }
 
 /** Index a file's Drive permissions by lowercased user email (ignores anyone/domain). */
@@ -116,7 +154,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
   function loadTargets(): Promise<(ShareTarget & { roleIds: string[] })[]> {
     return (allTargets ??= (async () => {
       const users = await roster.listActiveUsers();
-      const google = await directory.googleEmails(users.map((u) => u.id));
+      const google = await directory.googleEmails(users.map((u) => u.id), deps.strictDirectory ? { strict: true } : undefined);
       return users.map((u) => {
         const gmail = google.get(u.id)?.gmail ?? null;
         return { email: (gmail ?? u.email).trim().toLowerCase(), hasGoogle: gmail !== null, roleIds: u.roleIds };
@@ -159,21 +197,25 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
   async function reconcile(
     grant: GrantRow,
     driveRole: AssignableDriveRole,
-    opts: { removeDeparted: boolean; cursor?: string; onlyGoogle?: boolean; budgetMs?: number; maxWrites?: number },
-  ): Promise<{ skipped: SkippedMember[]; invited: InvitedMember[]; nextCursor: string | null; remaining: number; writes: number; created: number }> {
+    opts: { removeDeparted: boolean; cursor?: string; onlyGoogle?: boolean; budgetMs?: number; maxWrites?: number; rethrowTransient?: boolean },
+  ): Promise<{ skipped: SkippedMember[]; invited: InvitedMember[]; nextCursor: string | null; remaining: number; writes: number; created: number; deleted: number }> {
     const startedAt = clock();
     const budgetMs = opts.budgetMs ?? WRITE_BUDGET_MS;
     const maxWrites = opts.maxWrites ?? MAX_WRITES_PER_CALL;
     let writes = 0;
     let created = 0;
+    let deleted = 0;
     const budgetSpent = (): boolean => writes >= maxWrites || clock() - startedAt >= budgetMs;
 
     const prev = await store.listMembers(grant.id);
     const prevByEmail = new Map(prev.map((m) => [m.email, m]));
 
-    const targets = (await shareTargets(grant.roleId)).filter((t) => !opts.onlyGoogle || t.hasGoogle);
+    const allTargets = await shareTargets(grant.roleId);
+    const targets = allTargets.filter((t) => !opts.onlyGoogle || t.hasGoogle);
     const emails = targets.map((t) => t.email).sort(); // already lowercased+deduped
-    const emailSet = new Set(emails);
+    // Departure is judged on EVERY member: one shared at a login address (no Gmail) by hand is
+    // still a member even when this run only shares at Gmail addresses.
+    const emailSet = new Set(allTargets.map((t) => t.email));
     const noGmail = new Set(targets.filter((t) => !t.hasGoogle).map((t) => t.email));
 
     const perms = (await drive.listPermissions(grant.fileId)).permissions;
@@ -251,6 +293,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
           await createOurs(email);
         }
       } catch (err) {
+        if (opts.rethrowTransient && isTransient(err)) throw err;
         skipped.push({ email, reason: reasonFor(email, err) });
       }
       lastDone = email;
@@ -267,15 +310,17 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
           const permissionId = m.permissionId ?? permByEmail.get(m.email)?.id;
           if (m.createdByUs === 1 && permissionId) {
             // Our permission, member departed — delete unless another grant still needs it.
-            const held = await store.emailHeldByOtherGrant(orgId, grant.fileId, grant.id, m.email);
+            const held = await heldElsewhere(grant, m.email, permissionId);
             if (!held) {
               writes++;
               await drive.deletePermission(grant.fileId, permissionId);
+              deleted++;
             }
           }
           // created_by_us=0 departed: just forget the row; never delete an individual share.
           await store.deleteMember(grant.id, m.email);
         } catch (err) {
+          if (opts.rethrowTransient && isTransient(err)) throw err;
           skipped.push({ email: m.email, reason: reasonFor(m.email, err) });
         }
       }
@@ -283,7 +328,39 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
 
     const remaining = nextCursor === null ? 0 : emails.filter((e) => e > nextCursor!).length;
     console.log(JSON.stringify({ service: "drive-share-service", event: "role_grant_reconciled", grantId: grant.id, members: emails.length, writes, skipped: skipped.length, remaining, ms: clock() - startedAt }));
-    return { skipped, invited, nextCursor, remaining, writes, created };
+    return { skipped, invited, nextCursor, remaining, writes, created, deleted };
+  }
+
+  /** Does another grant on the same file still need `email`? Its ledger row may say created_by_us=0
+   *  for the very permission THIS grant created (it was there first when that grant was applied).
+   *  Then ownership is handed over (that row becomes ours), so the last grant to lose the member
+   *  deletes it — instead of this grant unsharing someone another role still covers. */
+  async function heldElsewhere(grant: GrantRow, email: string, permissionId: string): Promise<boolean> {
+    if (await store.emailHeldByOtherGrant(orgId, grant.fileId, grant.id, email)) return true;
+    for (const other of await store.listGrantsByFile(orgId, grant.fileId)) {
+      if (other.id === grant.id) continue;
+      const row = (await store.listMembers(other.id)).find((r) => r.email === email);
+      if (row && (row.permissionId === permissionId || row.permissionId === null)) {
+        await store.upsertMember({ grantId: other.id, email, permissionId, createdByUs: 1 });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Role ids that exist now. Throws when the list cannot be read or reads empty: "unknown" must
+   *  never count as "deleted" on a path that takes access away. */
+  async function existingRoleIds(): Promise<Set<string>> {
+    const roles = await roster.listRoles();
+    if (roles.length === 0) throw errors.upstreamUnavailable("identity-roster");
+    return new Set(roles.map((r) => r.id));
+  }
+
+  /** May this grant lose members now? Not when its role is gone (orphan: left to an admin) or reads
+   *  as empty (likelier an identity glitch than a role emptied on purpose — same rule as meetings). */
+  async function removalsSafe(grant: GrantRow, roleIds: Set<string>): Promise<boolean> {
+    if (!roleIds.has(grant.roleId)) return false;
+    return (await shareTargets(grant.roleId)).length > 0;
   }
 
   async function toRoleFileGrant(
@@ -311,7 +388,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
     };
   }
 
-  return {
+  const service: RoleGrantsService = {
     async listAll(): Promise<RoleFileGrant[]> {
       allTargets = null;
       const grants = await store.listGrants(orgId);
@@ -353,7 +430,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       const members = await store.listMembers(grant.id);
       for (const m of members) {
         if (m.createdByUs !== 1 || !m.permissionId) continue; // never delete pre-existing shares
-        const held = await store.emailHeldByOtherGrant(orgId, fileId, grant.id, m.email);
+        const held = await heldElsewhere(grant, m.email, m.permissionId);
         if (!held) await drive.deletePermission(fileId, m.permissionId);
       }
       await store.deleteGrant(grant.id);
@@ -424,5 +501,106 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       }
       return result;
     },
+
+    async followRoles(roleIds, change, { budgetMs, maxWrites }): Promise<RoleFollowResult> {
+      allTargets = null;
+      const startedAt = clock();
+      const wanted = new Set(roleIds);
+      const grants = (await store.listGrants(orgId)).filter((g) => wanted.has(g.roleId));
+      const out: RoleFollowResult = { grants: grants.length, shared: 0, revoked: 0, skipped: [], held: 0, complete: true };
+      if (grants.length === 0) return out;
+      const known = change === "removed" ? await existingRoleIds() : null;
+      let writesLeft = maxWrites;
+      for (const grant of grants) {
+        const msLeft = budgetMs - (clock() - startedAt);
+        if (writesLeft <= 0 || msLeft <= 0) {
+          out.complete = false;
+          break;
+        }
+        let removeDeparted = false;
+        if (known) {
+          removeDeparted = await removalsSafe(grant, known);
+          if (!removeDeparted) {
+            out.held++;
+            console.warn(JSON.stringify({ service: "drive-share-service", event: "role_follow_removal_held", grantId: grant.id, roleId: grant.roleId, roleKnown: known.has(grant.roleId) }));
+          }
+        }
+        // Joining shares at Gmail only (like the hourly sync: a login address could mail an invite
+        // nobody can recall); leaving runs the departed phase too.
+        const res = await reconcile(grant, grant.driveRole, { removeDeparted, onlyGoogle: true, budgetMs: msLeft, maxWrites: writesLeft, rethrowTransient: true });
+        writesLeft -= res.writes;
+        out.shared += res.created;
+        out.revoked += res.deleted;
+        out.skipped.push(...res.skipped);
+        if (res.nextCursor !== null) {
+          out.complete = false;
+          break;
+        }
+      }
+      return out;
+    },
+
+    async planReconcile() {
+      allTargets = null;
+      const grants = await store.listGrants(orgId);
+      const known = await existingRoleIds();
+      const plan: meeting.RoleGrantReconcilePlan["drive"] = { grants: grants.length, toShare: [], toRevoke: [], orphanGrants: [], withoutGmail: 0 };
+      const noGmail = new Set<string>();
+      const ledgers = new Map<string, GrantMemberRow[]>();
+      for (const g of grants) ledgers.set(g.id, await store.listMembers(g.id));
+      for (const g of grants) {
+        if (!known.has(g.roleId)) {
+          plan.orphanGrants.push({ grantId: g.id, fileId: g.fileId, roleId: g.roleId });
+          continue;
+        }
+        const targets = await shareTargets(g.roleId);
+        const ledger = ledgers.get(g.id) ?? [];
+        const recorded = new Set(ledger.filter((m) => m.permissionId !== null).map((m) => m.email));
+        const item = (email: string) => ({ grantId: g.id, fileId: g.fileId, roleId: g.roleId, email, driveRole: g.driveRole });
+        for (const t of targets) {
+          if (!t.hasGoogle) noGmail.add(t.email);
+          else if (!recorded.has(t.email)) plan.toShare.push(item(t.email));
+        }
+        if (targets.length === 0) continue; // removals held (see removalsSafe)
+        const members = new Set(targets.map((t) => t.email));
+        for (const m of ledger) {
+          if (members.has(m.email) || m.createdByUs !== 1) continue;
+          const held = grants.some((o) => o.id !== g.id && o.fileId === g.fileId && (ledgers.get(o.id) ?? []).some((x) => x.email === m.email));
+          if (!held) plan.toRevoke.push(item(m.email));
+        }
+      }
+      plan.withoutGmail = noGmail.size;
+      return plan;
+    },
+
+    async applyReconcile({ budgetMs, maxWrites }): Promise<RoleReconcileApplied> {
+      allTargets = null;
+      const startedAt = clock();
+      const known = await existingRoleIds();
+      const out: RoleReconcileApplied = { shared: 0, revoked: 0, skipped: [], remaining: 0 };
+      let writesLeft = maxWrites;
+      let stopped = false;
+      for (const grant of await store.listGrants(orgId)) {
+        if (!known.has(grant.roleId)) continue; // orphan: reported by the plan, never touched here
+        const msLeft = budgetMs - (clock() - startedAt);
+        if (stopped || writesLeft <= 0 || msLeft <= 0) {
+          stopped = true;
+          continue;
+        }
+        const removeDeparted = await removalsSafe(grant, known);
+        const res = await reconcile(grant, grant.driveRole, { removeDeparted, onlyGoogle: true, budgetMs: msLeft, maxWrites: writesLeft });
+        writesLeft -= res.writes;
+        out.shared += res.created;
+        out.revoked += res.deleted;
+        out.skipped.push(...res.skipped);
+        if (res.nextCursor !== null) stopped = true;
+      }
+      if (stopped) {
+        const plan = await service.planReconcile();
+        out.remaining = plan.toShare.length + plan.toRevoke.length;
+      }
+      return out;
+    },
   };
+  return service;
 }
