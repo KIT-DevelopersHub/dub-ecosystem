@@ -15,6 +15,7 @@
   --lp-ink-mute: #6b7280;     /* muted captions (on white ~4.9:1) */
   --lp-participant: #2f2ce0;  /* 参加者 heading */
   --lp-speaker: #17805c;      /* 登壇 heading (darkened for AA on white, 4.9:1) */
+  --lp-sponsor: #a5520c;      /* スポンサー accent (amber, AA on white ~5.6:1) */
   --lp-blue: #2f61d6;         /* accent blue */
   --lp-blue-deep: #1e3fa8;
   --lp-blue-btn: #2a5fd0;
@@ -1793,6 +1794,7 @@ img { max-width: 100%; height: auto; display: block; }
 .svc-card-link:hover .svc-icon { transform: rotate(-5deg) scale(1.05); }
 .svc-icon--participant { background: linear-gradient(135deg, #2f4fd4 0%, #1c2f96 100%); }
 .svc-icon--speaker { background: linear-gradient(135deg, #0e8a68 0%, #0a5c44 100%); }
+.svc-icon--sponsor { background: linear-gradient(135deg, #d9770a 0%, #9a4a08 100%); }
 .svc-card-title {
   margin: 0 0 0.85rem;
   font-family: var(--font-display);
@@ -1817,9 +1819,17 @@ img { max-width: 100%; height: auto; display: block; }
   color: var(--lp-blue-deep);
 }
 .svc-card--speaker .svc-card-cta { color: var(--lp-speaker); }
+.svc-card--sponsor .svc-card-cta { color: var(--lp-sponsor); }
 .svc-card-cta .arrow { transition: transform 0.22s ease; }
 .svc-card-link:hover .svc-card-cta .arrow { transform: translateX(5px); }
-@media (max-width: 760px) { .svc-grid { grid-template-columns: 1fr; } }
+/* 3 cards: 1 row on desktop / sponsor spans the 2nd row on tablet / stacked on mobile */
+.svc-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(1.25rem, 2.2vw, 1.75rem); }
+.svc-grid--3 .svc-card-link { padding: clamp(1.75rem, 2.6vw, 2.5rem); }
+@media (max-width: 1080px) {
+  .svc-grid--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .svc-grid--3 > .svc-card:last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) { .svc-grid, .svc-grid--3 { grid-template-columns: 1fr; } }
 
 /* ---- Program → Featured Work (filter tabs + grid) ---- */
 .work { background: var(--lp-surface-alt); }
@@ -2633,6 +2643,7 @@ img { max-width: 100%; height: auto; display: block; }
 .git-btn .arrow { position: static; transform: none; }
 .git-btn:hover .arrow { transform: translateX(3px); }
 .svc-card--speaker .svc-card-cta .arrow { background: var(--lp-speaker); }
+.svc-card--sponsor .svc-card-cta .arrow { background: var(--lp-sponsor); }
 
 /* ---- Program → Design-Platform row list ---- */
 .program-block .prow-list {

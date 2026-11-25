@@ -2,18 +2,18 @@ import { Reveal } from "@/components/Reveal";
 import { SectionHead } from "@/components/SectionHead";
 import type { ApplyConfig } from "@/config/types";
 
-// Apply — reproduces goodpatch's "dual service cards" skeleton: two equal-width
-// cards side-by-side, each with an icon (top), a heading, description, and a
+// Apply — reproduces goodpatch's "dual service cards" skeleton: equal-width
+// cards side-by-side (参加者 / 登壇 / スポンサー), each with an icon (top), a heading, description, and a
 // "View Details"-style arrow CTA. Filled with the conference's participant /
-// speaker copy and original inline-SVG icons (no goodpatch assets).
+// speaker / sponsor copy and original inline-SVG icons (no goodpatch assets).
 export function Apply({ data, index }: { data: ApplyConfig; index?: string }) {
   return (
     <section id="apply" className="section svc">
       <div className="container">
         <SectionHead eyebrow="JOIN" index={index} title={data.heading} />
-        <div className="svc-grid">
-          {/* 受付未開始 — 参加登録 / 登壇応募のフォームはまだ公開していないため、
-              両カードとも押せない disabled 状態で「準備中」を明示する。 */}
+        <div className={`svc-grid${data.sponsor ? " svc-grid--3" : ""}`}>
+          {/* 受付未開始 — 参加登録 / 登壇応募 / スポンサー申込のフォームはまだ公開していないため、
+              全カードとも押せない disabled 状態で「準備中」を明示する。 */}
           <ServiceCard
             variant="participant"
             icon={<IconTicket />}
@@ -32,6 +32,17 @@ export function Apply({ data, index }: { data: ApplyConfig; index?: string }) {
             disabled
             delay={120}
           />
+          {data.sponsor && (
+            <ServiceCard
+              variant="sponsor"
+              icon={<IconHandshake />}
+              title={data.sponsor.title}
+              body={data.sponsor.body}
+              cta={{ label: data.sponsor.cta.label, href: data.sponsor.cta.href }}
+              disabled
+              delay={240}
+            />
+          )}
         </div>
       </div>
     </section>
@@ -47,7 +58,7 @@ function ServiceCard({
   disabled = false,
   delay,
 }: {
-  variant: "participant" | "speaker";
+  variant: "participant" | "speaker" | "sponsor";
   icon: React.ReactNode;
   title: string;
   body: string;
@@ -114,6 +125,17 @@ function IconMic() {
     <svg {...svgCommon}>
       <rect x="9" y="3" width="6" height="11" rx="3" />
       <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
+    </svg>
+  );
+}
+function IconHandshake() {
+  return (
+    <svg {...svgCommon}>
+      <path d="m11 17 2 2a1 1 0 1 0 3-3" />
+      <path d="m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4" />
+      <path d="m21 3 1 11h-2" />
+      <path d="M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3" />
+      <path d="M3 4h8" />
     </svg>
   );
 }
