@@ -72,12 +72,40 @@ export function daysUntil(targetISO: string, now: Date = new Date()): number | n
 }
 
 // ── the headline event the countdown tracks (本戦) ──────────────────────────────
-export const CONFERENCE = {
-  name: "北陸ITカンファレンス",
-  /** 本戦 開催日 (JST). Live countdown target. */
-  dateISO: "2026-08-22T01:00:00+09:00",
-  dateLabel: "2026/08/22",
-} as const;
+// The date comes from the event data (event-service startsAt), never a hardcoded
+// constant (#858). This pattern is the single config that says which event is 本戦.
+export const CONFERENCE_TITLE_PATTERN = /北陸\s*IT\s*カンファレンス|Hokuriku\s*IT\s*Conference/i;
+
+export interface ConferenceTarget {
+  name: string;
+  dateISO: string;
+  /** JST calendar date, e.g. "2027/09/14". */
+  dateLabel: string;
+}
+
+const JST_DATE = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** The nearest future 本戦 among `events`, or null when none is scheduled (unset or
+ *  already past) — the caller hides the countdown instead of showing 0 日. */
+export function pickConference(
+  events: readonly { title: string; startsAt: string | null }[],
+  now: Date = new Date(),
+): ConferenceTarget | null {
+  let best: { title: string; at: Date } | null = null;
+  for (const e of events) {
+    if (!e.startsAt || !CONFERENCE_TITLE_PATTERN.test(e.title)) continue;
+    const at = new Date(e.startsAt);
+    if (Number.isNaN(at.getTime()) || at.getTime() <= now.getTime()) continue;
+    if (!best || at < best.at) best = { title: e.title, at };
+  }
+  if (!best) return null;
+  return { name: best.title, dateISO: best.at.toISOString(), dateLabel: JST_DATE.format(best.at) };
+}
 
 // ── free-tier usage (Cloudflare / Resend), live from usage-meter via /bff/home ──
 export interface FreeTierMetric {

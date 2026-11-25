@@ -44,6 +44,32 @@ const OK_HOME: gateway.BffHomeResponse = {
   partialErrors: [],
 };
 
+function makeApiWithEvents(home: gateway.BffHomeResponse, future: { id: string; title: string; startsAt: string | null }[]): ApiClient {
+  return {
+    bff: { home: () => Promise.resolve(home) },
+    request: (input: { path: string }) =>
+      input.path === "/api/v1/events"
+        ? Promise.resolve({ items: future.map((e) => ({ ...e, phase: "preparing" })), nextCursor: null })
+        : Promise.reject(new Error("not stubbed")),
+  } as unknown as ApiClient;
+}
+
+describe("HomeScreen 本戦 countdown (#858)", () => {
+  it("reads the date from the conference event", async () => {
+    const future = new Date(Date.now() + 10 * 86_400_000 - 60_000).toISOString();
+    render(wrap(<HomeScreen api={makeApiWithEvents(OK_HOME, [{ id: "c", title: "北陸ITカンファレンス 2027", startsAt: future }])} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("北陸ITカンファレンス 2027"));
+    expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("10");
+  });
+
+  it("hides the tile when no conference date is set or it has passed", async () => {
+    const home = { ...OK_HOME, upcomingEvents: [{ id: "c", title: "北陸ITカンファレンス", phase: "preparing" as const, startsAt: "2026-08-22T01:00:00+09:00" }] };
+    render(wrap(<HomeScreen api={makeApiWithEvents(home, [])} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-tasks")).toBeInTheDocument());
+    expect(screen.queryByTestId("fe2-kpi-countdown")).not.toBeInTheDocument();
+  });
+});
+
 describe("HomeScreen", () => {
   beforeEach(() => {
     localStorage.clear();

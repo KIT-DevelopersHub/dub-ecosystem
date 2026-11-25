@@ -7,6 +7,7 @@ import {
   clampPct,
   daysUntil,
   freeTierFromMetrics,
+  pickConference,
   statusMeta,
   taskCompletionPct,
   taskSegmentsFromCounts,
@@ -57,6 +58,30 @@ describe("daysUntil", () => {
   });
   it("returns null on an invalid date", () => {
     expect(daysUntil("not-a-date")).toBeNull();
+  });
+});
+
+describe("pickConference (#858)", () => {
+  const now = new Date("2026-11-26T00:00:00Z");
+  it("takes the 本戦 date from the conference event data (nearest future match)", () => {
+    const t = pickConference(
+      [
+        { title: "運営定例", startsAt: "2026-12-01T00:00:00Z" },
+        { title: "Hokuriku IT Conference 2026", startsAt: "2027-09-14T00:00:00Z" },
+        { title: "北陸ITカンファレンス 2028", startsAt: "2028-09-10T00:00:00Z" },
+      ],
+      now,
+    );
+    expect(t).toEqual({
+      name: "Hokuriku IT Conference 2026",
+      dateISO: "2027-09-14T00:00:00.000Z",
+      dateLabel: "2027/09/14",
+    });
+  });
+  it("returns null when the conference is past or has no date (tile hides)", () => {
+    expect(pickConference([{ title: "北陸ITカンファレンス 2026", startsAt: "2026-08-22T01:00:00+09:00" }], now)).toBeNull();
+    expect(pickConference([{ title: "北陸ITカンファレンス", startsAt: null }], now)).toBeNull();
+    expect(pickConference([], now)).toBeNull();
   });
 });
 
