@@ -7,6 +7,7 @@
 # の順に行う。スキーマの適用は手動:
 #   npx wrangler d1 execute dub-tickets --remote --file services/lp-tickets/db/0001_init.sql
 #   npx wrangler d1 execute dub-tickets --remote --file services/lp-tickets/db/0002_delivery.sql
+#   npx wrangler d1 execute dub-tickets --remote --file services/lp-tickets/db/0003_checkin.sql  # 1 回だけ（ALTER は再実行で止まる）
 name = "dub-lp-tickets"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"

@@ -20,7 +20,7 @@ import { ticketToken, verifyTicketToken } from "../src/ticket-token";
 import { TicketService } from "../src/tickets";
 import type { AppDeps, BackupStore, OutboxRow, TicketOrderRow } from "../src/types";
 import type { Env } from "../src/env";
-import { DELIVERY_SQL, INIT_SQL, get, makeApp, send, type RepoKind } from "./harness";
+import { CHECKIN_SQL, DELIVERY_SQL, INIT_SQL, get, makeApp, send, type RepoKind } from "./harness";
 
 const SITE = "hokuriku-it-conf.com";
 const SECRET = "ticket-secret-for-tests";
@@ -894,6 +894,7 @@ describe("reconcile DO", () => {
     const { db } = memoryD1();
     await db.exec(INIT_SQL);
     await db.exec(DELIVERY_SQL);
+    await db.exec(CHECKIN_SQL);
     for (const q of sql) await db.exec(q);
     const env = { DB: db, SVC_IDENTITY: {}, RESEND_API_KEY: "re_k", TICKET_TOKEN_SECRET: SECRET } as unknown as Env;
     return new TicketReconcileDO(s.state as never, env);
