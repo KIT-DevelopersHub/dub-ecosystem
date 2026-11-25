@@ -5,7 +5,9 @@ import { createServiceClient, type RequestContext } from "@dub/http";
 import { publishAudit, type AuditRecordEnvelopeV1 } from "@dub/events";
 import { errors } from "@dub/errors";
 import type { auditLog } from "@dub/types";
-import type { AuditSink, RequestCtx, SessionRevoker } from "./deps";
+import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
+import { identity, type meeting } from "@dub/types";
+import type { AuditSink, RequestCtx, RoleMembershipOutcome, RoleMembershipSink, SessionRevoker } from "./deps";
 import type { Env } from "./env";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
 
@@ -57,4 +59,60 @@ export function createSessionRevoker(env: Env): SessionRevoker {
       }
     },
   };
+}
+
+/** identity waits this long for drive-share inside the admin's request (api-gateway cuts at 15 s). */
+export const ROLE_MEMBERSHIP_TIMEOUT_MS = 10_000;
+
+/**
+ * Role membership changes -> drive-share-service POST /internal/role-membership, synchronously: the
+ * caller awaits it, so the role's Drive共有 grants and ミーティング invitations reach (or leave) the user
+ * as part of the change. No queue. Without SVC_DRIVE_SHARE (tests, bare deploys) nothing is sent.
+ */
+export function createRoleMembershipSink(
+  env: Env,
+  deps: { now: () => string; newId: (prefix: string) => string; timeoutMs?: number },
+): RoleMembershipSink {
+  const timeoutMs = deps.timeoutMs ?? ROLE_MEMBERSHIP_TIMEOUT_MS;
+  return {
+    async changed(notice): Promise<RoleMembershipOutcome> {
+      const svc = env.SVC_DRIVE_SHARE;
+      if (!svc || notice.roleIds.length === 0) return { ok: true };
+      const msg: identity.RoleMembershipChangedV1 = {
+        type: "identity.role_membership.changed",
+        version: 1,
+        id: deps.newId("rm"),
+        occurredAt: deps.now(),
+        orgId: notice.orgId,
+        userId: notice.userId,
+        change: notice.change,
+        roleIds: [...new Set(notice.roleIds)],
+        reason: notice.reason,
+      };
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), timeoutMs);
+      try {
+        const res = await svc.fetch(`https://drive-share${identity.ROLE_MEMBERSHIP_PATH}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", [HDR_INTERNAL]: INTERNAL_HEADER_VALUE },
+          body: JSON.stringify(msg),
+          signal: abort.signal,
+        });
+        if (!res.ok) return fail(msg, `Drive共有・ミーティングへの反映に失敗しました（HTTP ${res.status}）。`);
+        const body = (await res.json().catch(() => null)) as meeting.RoleMembershipFollowResponse | null;
+        if (body && body.complete === false) return fail(msg, (body.problems ?? []).join(" ") || "Drive共有・ミーティングへの反映が一部終わりませんでした。");
+        return { ok: true };
+      } catch (err) {
+        const timedOut = abort.signal.aborted;
+        return fail(msg, timedOut ? `Drive共有・ミーティングへの反映が ${Math.round(timeoutMs / 1000)} 秒以内に終わりませんでした。` : `Drive共有・ミーティングへ届きませんでした（${err instanceof Error ? err.message : String(err)}）。`);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
+function fail(msg: identity.RoleMembershipChangedV1, message: string): RoleMembershipOutcome {
+  console.warn(JSON.stringify({ service: SERVICE, event: "role_membership_propagation_failed", messageId: msg.id, userId: msg.userId, change: msg.change, roleIds: msg.roleIds, reason: msg.reason, message }));
+  return { ok: false, message };
 }

@@ -1,123 +1,26 @@
-// Service-local types for lp-tickets (LP チケット販売). The wire shapes mirror the contract frozen
-// by fe2 (apps/fe2-app-shell/src/features/lp/lpApi.tsx) — keep them in lockstep.
+// Service-local types for lp-tickets (LP チケット販売). The wire shapes come from the shared
+// contract @dub/types lpTickets (also read by fe2) — never redeclare them here.
 import type { PermissionGranter } from "@dub/policy-gate";
-import type { common, lp } from "@dub/types";
+import type { common, lpTickets } from "@dub/types";
 import type { Mailer } from "./mailer";
 import type { StripeClient } from "./stripe";
 
-// ---- tickets wire (lockstep with fe2 lpApi.tsx) ----
-export type LpTicketFieldType = lp.LpFieldType;
-export type LpTicketField = lp.LpFormField;
-export interface LpTicketType {
-  id: string;
-  name: string;
-  description: string;
-  priceJpy: number;
-  capacity: number | null;
-  /** 対象日（例 "Day 1"）。"" = 通し/共通。 */
-  dayLabel: string;
-  /** 1 回の購入で買える上限枚数。 */
-  maxPerOrder: number;
-  active: boolean;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-}
-/** sold / pending are ticket counts (sum of quantities), not orders. pending = held but not sold (fresh pending + needs_review). */
-export interface LpTicketTypeStats {
-  sold: number;
-  pending: number;
-  revenueJpy: number;
-  remaining: number | null;
-}
-export interface LpTicketTypeSummary extends LpTicketType {
-  stats: LpTicketTypeStats;
-}
-/** Methods we advertise. Orders store Stripe's raw PaymentMethod.type (may be others, e.g. "link"). */
-export type LpTicketPaymentMethod = "card" | "paypay";
-
-export interface LpTicketsState {
-  site: string;
-  enabled: boolean;
-  /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える（enabled の間だけ効く）。 */
-  ctaEnabled: boolean;
-  paymentReady: boolean;
-  /** Stripe がテストキーで動いていて、プレビューからテスト購入できる（本番キーなら false）。 */
-  previewCheckout: boolean;
-  /** Payment methods the LP advertises (Dashboard-managed on Stripe). PayPay only with LP_PAYPAY_ENABLED=1. */
-  paymentMethods: LpTicketPaymentMethod[];
-  publicUrl: string;
-  fields: LpTicketField[];
-  types: LpTicketTypeSummary[];
-  totals: { sold: number; revenueJpy: number };
-  updatedAt: string | null;
-  updatedBy: string | null;
-}
-/** needs_review = Stripe says paid but amount/currency mismatched, or disputed: a human must look (seat kept). */
-export type LpTicketOrderStatus = "pending" | "paid" | "expired" | "refunded" | "needs_review";
-export type LpTicketAnswer = lp.LpFormAnswer;
-export interface LpTicketOrderItem {
-  ticketTypeId: string;
-  ticketTypeName: string;
-  dayLabel: string;
-  unitPriceJpy: number;
-  quantity: number;
-}
-export interface LpTicketOrder {
-  id: string;
-  items: LpTicketOrderItem[];
-  /** 合計枚数 */
-  quantity: number;
-  /** 合計金額 */
-  amountJpy: number;
-  status: LpTicketOrderStatus;
-  buyerName: string;
-  buyerEmail: string;
-  answers: LpTicketAnswer[];
-  createdAt: string;
-  paidAt: string | null;
-  /** Why it is / was needs_review (amount_mismatch / currency_mismatch / oversold / dispute). Kept after approval. */
-  reviewReason: string | null;
-  /** The coupon this order used (a coupon order is always 0 yen). */
-  couponId: string | null;
-  /** Stripe PaymentMethod.type used ("card" | "paypay" | ...). null = free / unknown / not yet paid. */
-  paymentMethod: string | null;
-  /** LP管理のプレビュー（テスト購入トークン）から作られた注文。 */
-  preview: boolean;
-  /** テスト注文（プレビュー由来、または Stripe テストモードの決済 cs_test_）。実際の請求はない。 */
-  test: boolean;
-}
-export interface LpTicketOrdersPage {
-  items: LpTicketOrder[];
-  nextCursor: string | null;
-}
-export interface LpTicketTypeInput {
-  name: string;
-  description: string;
-  priceJpy: number;
-  capacity: number | null;
-  dayLabel: string;
-  maxPerOrder: number;
-  active: boolean;
-}
-
-/** 無料券のクーポン。1 コード = 1 券種 x 最大 maxUses 枚。used = 使った枚数（席の押さえと同じ規則で数える）。 */
-export interface LpTicketCoupon {
-  id: string;
-  code: string;
-  label: string;
-  ticketTypeId: string;
-  maxUses: number;
-  used: number;
-  expiresAt: string | null;
-  active: boolean;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-}
-export interface LpTicketCouponsPage {
-  items: LpTicketCoupon[];
-}
+// ---- tickets wire (契約は @dub/types lpTickets が唯一の定義) ----
+export type LpTicketFieldType = lpTickets.LpTicketFieldType;
+export type LpTicketField = lpTickets.LpTicketField;
+export type LpTicketType = lpTickets.LpTicketType;
+export type LpTicketTypeStats = lpTickets.LpTicketTypeStats;
+export type LpTicketTypeSummary = lpTickets.LpTicketTypeSummary;
+export type LpTicketPaymentMethod = lpTickets.LpTicketPaymentMethod;
+export type LpTicketsState = lpTickets.LpTicketsState;
+export type LpTicketOrderStatus = lpTickets.LpTicketOrderStatus;
+export type LpTicketAnswer = lpTickets.LpTicketAnswer;
+export type LpTicketOrderItem = lpTickets.LpTicketOrderItem;
+export type LpTicketOrder = lpTickets.LpTicketOrder;
+export type LpTicketOrdersPage = lpTickets.LpTicketOrdersPage;
+export type LpTicketTypeInput = lpTickets.LpTicketTypeInput;
+export type LpTicketCoupon = lpTickets.LpTicketCoupon;
+export type LpTicketCouponsPage = lpTickets.LpTicketCouponsPage;
 
 // ---- tickets persistence ----
 export interface TicketSettingsRow {
