@@ -1,6 +1,6 @@
 // LP管理 → チケット の純粋関数。検証ルールは契約（lp-analytics 側の 400 判定）と同じ値で持つ:
 // サーバーで弾かれる入力を先に画面で止め、楽観更新が即ロールバックされる体験を作らない。
-import { lp } from "@dub/types";
+import { lp, lpTickets } from "@dub/types";
 import type {
   LpTicketCoupon,
   LpTicketCouponInput,
@@ -40,6 +40,17 @@ export function refundActionFor(o: Pick<LpTicketOrder, "status" | "reviewReason"
   if (o.status === "needs_review" && o.reviewReason === "dispute") return null;
   return o.amountJpy === 0 ? "cancel" : "refund";
 }
+
+/** 返金・取消の期限（開催最終日の当日まで・JST）。過ぎたらボタンを出さず、この理由を出す。期限は @dub/types が正典。 */
+export function refundWindowClosed(nowIso: string = new Date().toISOString()): boolean {
+  return !lpTickets.isLpTicketRefundOpen(nowIso);
+}
+
+/** 例 "2027/9/14"（開催最終日）。 */
+export const REFUND_LAST_DAY_LABEL = (() => {
+  const [y, m, d] = (lpTickets.LP_TICKET_EVENT_DAYS[lpTickets.LP_TICKET_EVENT_DAYS.length - 1] ?? "").split("-");
+  return `${y}/${Number(m)}/${Number(d)}`;
+})();
 
 export const ORDER_STATUS: Record<LpTicketOrderStatus, { label: string; tone: "success" | "warning" | "neutral" }> = {
   paid: { label: "支払い済み", tone: "success" },

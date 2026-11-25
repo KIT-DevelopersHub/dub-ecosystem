@@ -1,5 +1,7 @@
 // LP管理: 返金（有料 = Stripe Refund API）/ 取消（0 円）。Stripe は fetch を差し替えた偽物で、実際には呼ばない。
 import { describe, it, expect } from "vitest";
+import { lpTickets } from "@dub/types";
+import type { Mailer, OutboundMail } from "../src/mailer";
 import { createStripeClient, signStripePayload } from "../src/stripe";
 import type { LpTicketCoupon, LpTicketRefundResponse, LpTicketTypeSummary } from "../src/types";
 import { get, makeApp, send, type RepoKind } from "./harness";
@@ -59,12 +61,32 @@ const checkout = (b: Record<string, unknown>) =>
 
 const refundReq = (id: string) => send("POST", `/lp/tickets/orders/${id}/refund`, {});
 
+/** Records every mail; refundMails() = the buyer refund notices only. */
+function recordingMailer() {
+  const sent: { mail: OutboundMail; key: string }[] = [];
+  const mailer: Mailer = {
+    send: async (mail, key) => {
+      sent.push({ mail, key });
+      return { ok: true, id: `re_${sent.length}` };
+    },
+  };
+  return { mailer, sent, refundMails: () => sent.filter((s) => s.key.endsWith(":buyer_refund")) };
+}
+
+const chargeRefunded = (pi: string) => ({
+  id: `evt_refunded_${pi}`,
+  type: "charge.refunded",
+  data: { object: { id: "ch_1", payment_intent: pi, amount: 3000, amount_refunded: 3000, livemode: false } },
+});
+
 describe.each<RepoKind>(["memory", "d1"])("lp tickets refund (%s repo)", (kind) => {
   async function setup(opts: { stripe?: ReturnType<typeof fakeStripe> | null; publish?: boolean } = {}) {
     const stripe = opts.stripe === undefined ? fakeStripe() : opts.stripe;
+    const mail = recordingMailer();
     const h = await makeApp(kind, "edit", opts.publish === false ? [] : ["lp:publish"], {
       stripe: stripe ? stripe.client : null,
       stripeWebhookSecret: WHSEC,
+      mailer: mail.mailer,
     });
     expect((await h.app.fetch(send("POST", "/lp/tickets/enabled", { enabled: true }))).status).toBe(200);
     const res = await h.app.fetch(send("POST", "/lp/tickets/types", { name: "一般", description: "", priceJpy: 3000, capacity: 2, active: true }));
@@ -93,8 +115,88 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets refund (%s repo)", (kind) 
       return orders[0]!.id;
     };
     const sold = async () => (await body<{ types: LpTicketTypeSummary[] }>(await h.app.fetch(get("/lp/tickets")))).types[0]!.stats;
-    return { ...h, stripe, t, buyPaid, buyFree, sold };
+    return { ...h, stripe, mail, t, buyPaid, buyFree, sold };
   }
+
+  it("mail: immediate refund sends the refund notice once; the charge.refunded that follows sends nothing", async () => {
+    const { app, mail, buyPaid } = await setup();
+    const id = await buyPaid();
+    expect((await body<LpTicketRefundResponse>(await app.fetch(refundReq(id)))).result).toBe("refunded");
+    await webhook(app, chargeRefunded("pi_cs_test_0"));
+    await app.fetch(refundReq(id)); // 409, no mail
+    const sent = mail.refundMails();
+    expect(sent).toHaveLength(1);
+    const m = sent[0]!;
+    expect(m.key).toBe(`${id}:buyer_refund`);
+    expect(m.mail.to).toBe("taro@example.com");
+    expect(m.mail.subject).toBe(`【北陸ITカンファレンス 2027】返金（お申し込みの取消）のお知らせ（注文番号 ${id.slice(-8).toUpperCase()}）`);
+    expect(m.mail.text).toContain(`注文番号: ${id.slice(-8).toUpperCase()}`);
+    expect(m.mail.text).toContain("返金額: ¥3,000");
+    expect(m.mail.text).toContain("チケットはすべて無効");
+    expect(m.mail.text).toContain("カード会社");
+    expect(m.mail.text).not.toContain("/t/");
+    expect(m.mail.html).toContain("返金額: <strong>¥3,000</strong>");
+  });
+
+  it("mail: refund_pending sends nothing until charge.refunded, then exactly once (webhook replay too)", async () => {
+    const stripe = fakeStripe(() => ({ status: 200, json: { id: "re_2", status: "pending", amount: 3000 } }));
+    const { app, mail, buyPaid } = await setup({ stripe });
+    const id = await buyPaid();
+    expect((await body<LpTicketRefundResponse>(await app.fetch(refundReq(id)))).result).toBe("refund_pending");
+    expect(mail.refundMails()).toHaveLength(0);
+    await webhook(app, chargeRefunded("pi_cs_test_0"));
+    await webhook(app, chargeRefunded("pi_cs_test_0"));
+    expect(mail.refundMails().map((s) => s.key)).toEqual([`${id}:buyer_refund`]);
+  });
+
+  it("mail: a refund made in the Stripe dashboard (charge.refunded only) also notifies once", async () => {
+    const { app, mail, buyPaid } = await setup();
+    const id = await buyPaid();
+    await webhook(app, chargeRefunded("pi_cs_test_0"));
+    expect(mail.refundMails().map((s) => s.key)).toEqual([`${id}:buyer_refund`]);
+  });
+
+  it("mail: free cancel sends the cancel notice once (no refund amount / card note)", async () => {
+    const { app, mail, buyFree } = await setup();
+    const id = await buyFree();
+    expect((await body<LpTicketRefundResponse>(await app.fetch(refundReq(id)))).result).toBe("cancelled");
+    await app.fetch(refundReq(id));
+    const sent = mail.refundMails();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.mail.subject).toContain("お申し込みの取消のお知らせ");
+    expect(sent[0]!.mail.text).toContain("お支払い: なし（無料）");
+    expect(sent[0]!.mail.text).not.toContain("返金額");
+    expect(sent[0]!.mail.text).not.toContain("カード会社");
+  });
+
+  it("mail: a failed send never fails the refund", async () => {
+    const { app, repo, buyFree } = await setup();
+    const id = await buyFree();
+    const broken = await makeApp(kind, "edit", ["lp:publish"], {
+      repo,
+      mailer: { send: async () => ({ ok: false, failure: "transient", error: "down" }) },
+    });
+    expect((await broken.app.fetch(refundReq(id))).status).toBe(200);
+    expect((await repo.getOrder(SITE, id))!.status).toBe("refunded");
+  });
+
+  it("deadline: open until the last event day 23:59:59.999 JST, 409 refund_window_closed from 00:00 the day after", async () => {
+    expect(lpTickets.LP_TICKET_REFUND_CLOSES_AT).toBe("2027-09-14T15:00:00.000Z");
+    const { app, clock, repo, stripe, mail, buyPaid, buyFree } = await setup();
+    const a = await buyPaid();
+    const c = await buyFree();
+    clock.set("2027-09-14T14:59:59.999Z"); // 9/14 23:59:59.999 JST
+    expect((await body<LpTicketRefundResponse>(await app.fetch(refundReq(a)))).result).toBe("refunded");
+    clock.set("2027-09-14T15:00:00.000Z"); // 9/15 00:00 JST
+    const res = await app.fetch(refundReq(c));
+    expect(res.status).toBe(409);
+    const text = JSON.stringify(await res.json());
+    expect(text).toContain("refund_window_closed");
+    expect(text).toContain("2027-09-14T15:00:00.000Z");
+    expect((await repo.getOrder(SITE, c))!.status).toBe("paid");
+    expect(stripe!.calls.filter((x) => x.url.endsWith("/refunds"))).toHaveLength(1);
+    expect(mail.refundMails()).toHaveLength(1);
+  });
 
   it("paid order: Stripe refund (idempotency key refund:<id>) succeeded → refunded, tickets void, seat freed", async () => {
     const { app, repo, stripe, buyPaid, sold } = await setup();

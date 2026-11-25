@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, lp as lpValues, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 
@@ -5880,6 +5880,9 @@ function createLpTicketsStore() {
       if (!o) return json({ error: { code: "NOT_FOUND", message: "order not found" } }, 404);
       if (o.status !== "paid" && o.status !== "needs_review") {
         return json({ error: { code: "LP_TICKET_REFUND_REFUSED", message: "この注文は返金・取消できません", details: { reason: "not_refundable" } } }, 409);
+      }
+      if (!lpTickets.isLpTicketRefundOpen(new Date().toISOString())) {
+        return json({ error: { code: "LP_TICKET_REFUND_REFUSED", message: "返金・取消の受付は開催最終日で終了しました", details: { reason: "refund_window_closed" } } }, 409);
       }
       o.status = "refunded";
       return json({ result: o.amountJpy === 0 ? "cancelled" : "refunded", order: o });

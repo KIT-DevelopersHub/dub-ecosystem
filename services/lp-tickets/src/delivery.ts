@@ -8,7 +8,7 @@
 import { consoleSink, type LogLevel } from "@dub/observability";
 import { lp } from "@dub/types";
 import { ordersCsv } from "./ticket-csv";
-import { EVENT_NAME, isTestOrder, orderNumber, renderBuyerMail, renderOpsMail, type RenderedMail, type TicketPass } from "./ticket-mail";
+import { EVENT_NAME, isTestOrder, orderNumber, renderBuyerMail, renderOpsMail, renderRefundMail, type RenderedMail, type TicketPass } from "./ticket-mail";
 import { ticketToken, verifyTicketToken } from "./ticket-token";
 import type { OutboundMail } from "./mailer";
 import type { AppDeps, OutboxKind, OutboxRow, OutboxUpdate, TicketOrderRow, TicketRow } from "./types";
@@ -152,6 +152,34 @@ export class TicketDelivery {
   async onPaid(orderId: string): Promise<void> {
     await this.fulfill(orderId);
     this.sendSoon(orderId);
+  }
+
+  /**
+   * 返金・取消が確定した時の購入者あてメール。呼ぶのは markOrderRefunded が true を返した側だけ
+   * （条件付き UPDATE なので、即時返金と後から来る charge.refunded のどちらか一方だけ = 1 回）。
+   * Idempotency-Key は <orderId>:buyer_refund。失敗しても返金の経路は止めない（ログだけ）。
+   */
+  async onRefunded(orderId: string): Promise<void> {
+    const work = this.sendRefundMail(orderId);
+    if (this.deps.defer) this.deps.defer(work);
+    else await work;
+  }
+
+  private async sendRefundMail(orderId: string): Promise<void> {
+    try {
+      const mailer = this.deps.mailer;
+      if (!mailer) {
+        log("error", "lp ticket refund mail not sent: RESEND_API_KEY is not set", { orderId });
+        return;
+      }
+      const order = await this.repo.getOrder(SITE, orderId);
+      if (!order || order.status !== "refunded") return;
+      const res = await mailer.send({ from: this.deps.ticketMailFrom, to: order.buyerEmail, ...renderRefundMail(order) }, `${orderId}:buyer_refund`);
+      if (res.ok) log("info", "lp ticket refund mail sent", { orderId });
+      else log("error", "lp ticket refund mail not sent", { orderId, failure: res.failure, error: res.error });
+    } catch (e) {
+      log("error", "lp ticket refund mail failed", { orderId, error: String(e) });
+    }
   }
 
   /** The buyer's mail right after payment. In a burst Resend answers 429 and the alarm takes over. */

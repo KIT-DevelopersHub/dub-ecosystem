@@ -34,6 +34,7 @@ import {
   paymentMethodLabel,
   paymentMethodsLabel,
   refundActionFor,
+  refundWindowClosed,
   todayJst,
   validateCouponDraft,
   validateTicketFields,
@@ -278,6 +279,14 @@ describe("demo transport serves the tickets wire contract", () => {
     expect(await api.refundTicketOrder("ord_011")).toMatchObject({ result: "cancelled", order: { amountJpy: 0 } });
     const d1 = (await api.getTickets()).types.find((t) => t.id === "tt_general_d1")!;
     expect(d1.stats).toMatchObject({ sold: 7 });
+  });
+});
+
+describe("refundWindowClosed", () => {
+  it("is open through the last event day (JST) and closed from 00:00 JST the next day", () => {
+    expect(refundWindowClosed("2026-11-26T00:00:00.000Z")).toBe(false);
+    expect(refundWindowClosed("2027-09-14T14:59:59.999Z")).toBe(false);
+    expect(refundWindowClosed("2027-09-14T15:00:00.000Z")).toBe(true);
   });
 });
 
@@ -637,6 +646,34 @@ describe("LpTicketsScreen", () => {
         expect(screen.queryByTestId("fe2-lp-ticket-order-refund-ord_p")).not.toBeInTheDocument();
         cleanup();
       }
+    });
+
+    it("after the last event day (JST) the button is gone and the reason is shown instead", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(new Date("2027-09-14T14:59:59.999Z")); // 9/14 23:59:59 JST: still open
+        renderScreen(fakeApi({ listTicketOrders: list(paidOrder()) }));
+        await openDetails();
+        expect(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p")).toBeInTheDocument();
+        cleanup();
+
+        vi.setSystemTime(new Date("2027-09-14T15:00:00.000Z")); // 9/15 00:00 JST: closed
+        renderScreen(fakeApi({ listTicketOrders: list(paidOrder()) }));
+        await openDetails();
+        expect(screen.queryByTestId("fe2-lp-ticket-order-refund-ord_p")).not.toBeInTheDocument();
+        expect(screen.getByTestId("fe2-lp-ticket-order-refund-closed-ord_p")).toHaveTextContent("開催最終日（2027/9/14）までで終了しました");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("the dialog says a notice mail goes to the buyer", async () => {
+      renderScreen(fakeApi({ listTicketOrders: list(paidOrder()) }));
+      await openDetails();
+      fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p"));
+      const dialog = await screen.findByTestId("fe2-lp-ticket-order-refund-dialog");
+      expect(dialog).toHaveTextContent("返金が完了すると、購入者（i@example.com）にお知らせのメールが自動で送られます");
+      expect(dialog).not.toHaveTextContent("自動では送られません");
     });
 
     it("a 0-yen order says 取り消す, and the dialog says no money moves", async () => {

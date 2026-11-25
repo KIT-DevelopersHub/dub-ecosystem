@@ -45,7 +45,9 @@ import {
   orderItemLabel,
   paymentMethodLabel,
   paymentMethodsLabel,
+  REFUND_LAST_DAY_LABEL,
   refundActionFor,
+  refundWindowClosed,
   reviewReasonLabel,
 } from "./lpTickets.ts";
 import { LpTicketTypesCard } from "./LpTicketTypes.tsx";
@@ -338,7 +340,8 @@ function RefundDialog({ order: o, onClose, onConfirm }: { order: LpTicketOrder; 
             <li>Stripe で全額を返金します。取り消せません。</li>
           )}
           <li>この注文のチケットはすべて無効になり、当日の受付でも「無効」と表示されます。</li>
-          <li>席が空き、販売数・売上から外れます。購入者へのメールは自動では送られません。</li>
+          <li>席が空き、販売数・売上から外れます。</li>
+          <li>{cancel ? "取消" : "返金"}が完了すると、購入者（{o.buyerEmail}）にお知らせのメールが自動で送られます。</li>
         </ul>
       </Stack>
     </Modal>
@@ -451,9 +454,15 @@ function OrderRow({
       ) : null}
       {open && refundAction ? (
         <div className={styles.orderReview}>
-          <Button variant="danger" size="sm" onClick={onRefund} testId={`fe2-lp-ticket-order-refund-${o.id}`}>
-            {refundAction === "cancel" ? "申し込みを取り消す" : "返金する"}
-          </Button>
+          {refundWindowClosed() ? (
+            <span className={styles.note} data-testid={`fe2-lp-ticket-order-refund-closed-${o.id}`}>
+              返金・取消の受付は開催最終日（{REFUND_LAST_DAY_LABEL}）までで終了しました。
+            </span>
+          ) : (
+            <Button variant="danger" size="sm" onClick={onRefund} testId={`fe2-lp-ticket-order-refund-${o.id}`}>
+              {refundAction === "cancel" ? "申し込みを取り消す" : "返金する"}
+            </Button>
+          )}
         </div>
       ) : null}
     </div>

@@ -2,7 +2,7 @@
 // Prices always come from D1; the client never supplies an amount.
 import { DubError, errors, type FieldError } from "@dub/errors";
 import { consoleSink, type LogLevel } from "@dub/observability";
-import { lp } from "@dub/types";
+import { lp, lpTickets } from "@dub/types";
 import { TicketDelivery, jstDay, type DeliverySummary, type PublicPass } from "./delivery";
 import { issuePreviewToken, verifyPreviewToken } from "./preview-token";
 import { StripeRequestError, stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
@@ -818,6 +818,11 @@ export class TicketService {
     if (order.status !== "paid" && order.status !== "needs_review") {
       throw refundRefused("not_refundable", "この注文は返金・取消できません", { status: order.status });
     }
+    if (!lpTickets.isLpTicketRefundOpen(this.deps.now())) {
+      throw refundRefused("refund_window_closed", "返金・取消の受付は開催最終日で終了しました", {
+        closesAt: lpTickets.LP_TICKET_REFUND_CLOSES_AT,
+      });
+    }
     if (order.status === "needs_review" && order.reviewReason === "dispute") {
       throw refundRefused("dispute_open", "チャージバックの審理中です。結果は Stripe から自動で反映されます");
     }
@@ -831,6 +836,7 @@ export class TicketService {
         throw refundRefused("not_refundable", "この注文は返金・取消できません", { status: order.status });
       }
       log("warn", "lp ticket free order cancelled", { orderId: id, by: ctx.userId });
+      await this.delivery.onRefunded(id);
       return done("cancelled");
     }
 
@@ -861,7 +867,7 @@ export class TicketService {
     }
     log("warn", "lp ticket refund requested", { orderId: id, by: ctx.userId, refundId: refund.id, refundStatus: refund.status });
     if (refund.status === "succeeded") {
-      await this.repo.markOrderRefunded(id, this.deps.now());
+      if (await this.repo.markOrderRefunded(id, this.deps.now())) await this.delivery.onRefunded(id);
       return done("refunded");
     }
     return done("refund_pending");
@@ -1087,7 +1093,7 @@ export class TicketService {
       log("info", "lp ticket partial refund: order unchanged", { orderId: order.id, amount, refunded });
       return;
     }
-    await this.repo.markOrderRefunded(order.id, this.deps.now());
+    if (await this.repo.markOrderRefunded(order.id, this.deps.now())) await this.delivery.onRefunded(order.id);
   }
 
   /** Stripe webhook (raw body). Bad / missing signature → 400. Unknown events / orders / other mode → ignored. */
