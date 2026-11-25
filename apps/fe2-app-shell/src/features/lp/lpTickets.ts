@@ -89,6 +89,8 @@ export interface TicketTypeDraft {
   dayLabel: string;
   maxPerOrder: string;
   active: boolean;
+  /** 無料参加登録（クーポン無しで申し込める）。価格が 0 のときだけ送る（有料なら常に false）。 */
+  openRegistration: boolean;
 }
 
 export type TicketTypeDraftErrors = Partial<
@@ -139,7 +141,16 @@ export function validateTicketType(draft: TicketTypeDraft): {
   if (Object.keys(errors).length > 0) return { errors, input: null };
   return {
     errors,
-    input: { name, description, priceJpy: price, capacity, dayLabel, maxPerOrder, active: draft.active },
+    input: {
+      name,
+      description,
+      priceJpy: price,
+      capacity,
+      dayLabel,
+      maxPerOrder,
+      active: draft.active,
+      openRegistration: price === 0 && draft.openRegistration,
+    },
   };
 }
 
@@ -236,6 +247,9 @@ export const COUPON_MAX_USES_MAX = 1000;
 export const COUPON_ISSUE_LABEL = "クーポンを発行";
 /** 券種編集で 0 円のときの補足。 */
 export const COUPON_ONLY_NOTE = "0 円の券種はクーポンコードでのみ申し込めます";
+/** 0 円で「無料参加登録」を有効にしたときの補足。 */
+export const OPEN_REGISTRATION_NOTE =
+  "購入ページに「無料で参加登録」と表示され、誰でもクーポン無しで申し込めます（1 回 1 枚・同じメールアドレスは 1 回まで）";
 
 /** 使えるか: 停止 > 期限切れ > 上限到達 の順で 1 つに決める（手で止めたものを最優先で見せる）。 */
 export type CouponState = "active" | "paused" | "expired" | "used_up";

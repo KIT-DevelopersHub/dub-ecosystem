@@ -5492,6 +5492,7 @@ type DemoTicketType = {
   dayLabel: string;
   maxPerOrder: number;
   active: boolean;
+  openRegistration: boolean;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -5545,6 +5546,7 @@ function validDemoTicketType(input: Record<string, unknown>, partial: boolean): 
   if (has("dayLabel") && (typeof input.dayLabel !== "string" || input.dayLabel.trim().length > 30)) return "dayLabel";
   if (has("maxPerOrder") && (!isInt(input.maxPerOrder) || input.maxPerOrder < 1 || input.maxPerOrder > 20)) return "maxPerOrder";
   if (has("active") && typeof input.active !== "boolean") return "active";
+  if (has("openRegistration") && typeof input.openRegistration !== "boolean") return "openRegistration";
   return null;
 }
 
@@ -5610,13 +5612,28 @@ function createLpTicketsStore() {
     dayLabel: string,
     maxPerOrder: number,
     sortOrder: number,
-  ): DemoTicketType => ({ id, name, description, priceJpy, capacity, dayLabel, maxPerOrder, active: true, sortOrder, createdAt: t0, updatedAt: t0 });
+    openRegistration = false,
+  ): DemoTicketType => ({
+    id,
+    name,
+    description,
+    priceJpy,
+    capacity,
+    dayLabel,
+    maxPerOrder,
+    active: true,
+    openRegistration,
+    sortOrder,
+    createdAt: t0,
+    updatedAt: t0,
+  });
   const types: DemoTicketType[] = [
     tt("tt_general_d1", "一般", "社会人・一般の方", 3000, 200, D1, 10, 0),
     tt("tt_student_d1", "学生", "学生証を当日ご提示ください", 1000, 100, D1, 10, 1),
     tt("tt_general_d2", "一般", "社会人・一般の方", 3000, 200, D2, 10, 2),
     tt("tt_student_d2", "学生", "学生証を当日ご提示ください", 1000, 100, D2, 10, 3),
     tt("tt_invite", "招待", "登壇者・スポンサー向け（両日）", 0, null, "", 5, 4),
+    tt("tt_signup", "オンライン視聴", "配信の視聴（無料・クーポン不要）", 0, 500, "", 1, 5, true),
   ];
   const seedOrders: [string, [string, number][], string, DemoTicketOrderStatus, string, string, string][] = [
     // [id, [[typeId, 枚数]...], buyer, status, createdAt, 所属, 参加区分]
@@ -5761,6 +5778,8 @@ function createLpTicketsStore() {
     if (method === "POST" && pathname === "/api/v1/lp/tickets/types") {
       const bad = validDemoTicketType(req, false);
       if (bad) return problem("VALIDATION_FAILED", `券種の入力が正しくありません（${bad}）`, 400);
+      if (req.openRegistration === true && req.priceJpy !== 0)
+        return problem("VALIDATION_FAILED", "無料参加登録は 0 円の券種だけに設定できます", 400);
       const now = new Date().toISOString();
       const created: DemoTicketType = {
         id: `tt_${Math.random().toString(36).slice(2, 10)}`,
@@ -5771,6 +5790,7 @@ function createLpTicketsStore() {
         dayLabel: typeof req.dayLabel === "string" ? req.dayLabel.trim() : "",
         maxPerOrder: typeof req.maxPerOrder === "number" ? req.maxPerOrder : 10,
         active: typeof req.active === "boolean" ? req.active : true,
+        openRegistration: req.openRegistration === true,
         sortOrder: types.length,
         createdAt: now,
         updatedAt: now,
@@ -5785,6 +5805,9 @@ function createLpTicketsStore() {
       if (!t) return problem("NOT_FOUND", "その券種は見つかりません", 404);
       const bad = validDemoTicketType(req, true);
       if (bad) return problem("VALIDATION_FAILED", `券種の入力が正しくありません（${bad}）`, 400);
+      const nextPrice = typeof req.priceJpy === "number" ? req.priceJpy : t.priceJpy;
+      const nextOpen = typeof req.openRegistration === "boolean" ? req.openRegistration : t.openRegistration;
+      if (nextOpen && nextPrice !== 0) return problem("VALIDATION_FAILED", "無料参加登録は 0 円の券種だけに設定できます", 400);
       if (typeof req.name === "string") t.name = req.name.trim();
       if (typeof req.description === "string") t.description = req.description.trim();
       if (typeof req.priceJpy === "number") t.priceJpy = req.priceJpy;
@@ -5792,6 +5815,7 @@ function createLpTicketsStore() {
       if (typeof req.dayLabel === "string") t.dayLabel = req.dayLabel.trim();
       if (typeof req.maxPerOrder === "number") t.maxPerOrder = req.maxPerOrder;
       if (typeof req.active === "boolean") t.active = req.active;
+      if (typeof req.openRegistration === "boolean") t.openRegistration = req.openRegistration;
       t.updatedAt = new Date().toISOString();
       return json(summary(t));
     }

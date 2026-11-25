@@ -59,6 +59,7 @@ function ticketType(over: Partial<LpTicketTypeSummary> = {}): LpTicketTypeSummar
     dayLabel: "",
     maxPerOrder: 10,
     active: true,
+    openRegistration: false,
     sortOrder: 0,
     createdAt: "2026-10-01T00:00:00Z",
     updatedAt: "2026-10-01T00:00:00Z",
@@ -138,7 +139,13 @@ function renderScreen(api: LpApi, permissions: readonly identity.PermissionKey[]
 }
 
 describe("lpTickets (pure)", () => {
-  const draft = { name: "学生", description: "", price: "1000", capacity: "", dayLabel: "", maxPerOrder: "10", active: true };
+  const draft = { name: "学生", description: "", price: "1000", capacity: "", dayLabel: "", maxPerOrder: "10", active: true, openRegistration: false };
+
+  it("sends openRegistration only for a 0 yen type", () => {
+    expect(validateTicketType({ ...draft, price: "0", openRegistration: true }).input?.openRegistration).toBe(true);
+    expect(validateTicketType({ ...draft, price: "1000", openRegistration: true }).input?.openRegistration).toBe(false);
+    expect(validateTicketType({ ...draft, price: "0" }).input?.openRegistration).toBe(false);
+  });
 
   it("accepts free (0) and >= 50 yen, rejects 1..49 (Stripe minimum)", () => {
     expect(validateTicketType({ ...draft, price: "0" }).input?.priceJpy).toBe(0);
@@ -207,6 +214,7 @@ describe("demo transport serves the tickets wire contract", () => {
       "一般|Day 2 · 9/14(火)",
       "学生|Day 2 · 9/14(火)",
       "招待|",
+      "オンライン視聴|",
     ]);
     expect(s.types.find((t) => t.name === "招待")!.capacity).toBeNull();
     expect(s.types.every((t) => t.maxPerOrder >= 1 && t.maxPerOrder <= 20)).toBe(true);
@@ -825,6 +833,47 @@ describe("LpTicketsScreen coupons", () => {
     expect(within(dialog).getByTestId("fe2-lp-ticket-type-coupon-note")).toHaveTextContent("0 円の券種はクーポンコードでのみ申し込めます");
     fireEvent.change(within(dialog).getByTestId("fe2-lp-ticket-type-price"), { target: { value: "1000" } });
     expect(within(dialog).queryByTestId("fe2-lp-ticket-type-coupon-note")).toBeNull();
+  });
+
+  it("free type: the 無料で参加登録 switch appears at 0 yen and is sent on save", async () => {
+    const create = vi.fn((input: Parameters<LpApi["createTicketType"]>[0]) =>
+      Promise.resolve(ticketType({ ...input, openRegistration: input.openRegistration ?? false, id: "tt_new" })),
+    );
+    renderScreen(fakeApi({ createTicketType: create }));
+    fireEvent.click(await screen.findByTestId("fe2-lp-ticket-type-add"));
+    const dialog = await screen.findByTestId("fe2-lp-ticket-type-dialog");
+    expect(within(dialog).queryByTestId("fe2-lp-ticket-type-open-registration")).toBeNull();
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-ticket-type-name"), { target: { value: "学生" } });
+    fireEvent.change(within(dialog).getByTestId("fe2-lp-ticket-type-price"), { target: { value: "0" } });
+    const sw = within(dialog).getByTestId("fe2-lp-ticket-type-open-registration");
+    fireEvent.click(sw.querySelector("input") ?? sw);
+    expect(within(dialog).getByTestId("fe2-lp-ticket-type-open-registration-note")).toHaveTextContent("無料で参加登録");
+    expect(within(dialog).queryByTestId("fe2-lp-ticket-type-coupon-note")).toBeNull();
+    fireEvent.click(within(dialog).getByTestId("fe2-lp-ticket-type-save"));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0]).toMatchObject({ name: "学生", priceJpy: 0, openRegistration: true });
+  });
+
+  it("labels a free type 無料参加登録 vs クーポン専用 in the list", async () => {
+    const types = [
+      ticketType({ id: "fr", name: "学生", priceJpy: 0, openRegistration: true }),
+      ticketType({ id: "cp", name: "招待", priceJpy: 0 }),
+    ];
+    renderScreen(fakeApi({ getTickets: () => Promise.resolve(baseState({ types })) }));
+    expect(await screen.findByTestId("fe2-lp-ticket-type-open-registration-fr")).toHaveTextContent("無料参加登録");
+    expect(screen.queryByTestId("fe2-lp-ticket-type-coupon-only-fr")).toBeNull();
+    expect(screen.getByTestId("fe2-lp-ticket-type-coupon-only-cp")).toHaveTextContent("クーポン専用");
+  });
+
+  it("demo transport: openRegistration is 0-yen only and survives a PATCH", async () => {
+    const api = demoLpApi();
+    const t = await api.createTicketType({ name: "無料", description: "", priceJpy: 0, capacity: null, dayLabel: "", maxPerOrder: 1, active: true, openRegistration: true });
+    expect(t.openRegistration).toBe(true);
+    await expect(api.updateTicketType(t.id, { priceJpy: 1000 })).rejects.toThrow();
+    expect((await api.updateTicketType(t.id, { name: "無料2" })).openRegistration).toBe(true);
+    await expect(
+      api.createTicketType({ name: "x", description: "", priceJpy: 1000, capacity: null, dayLabel: "", maxPerOrder: 1, active: true, openRegistration: true }),
+    ).rejects.toThrow();
   });
 
   it("renders the seeded demo coupons end to end", async () => {

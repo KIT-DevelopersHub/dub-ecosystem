@@ -26,6 +26,9 @@ import {
   DEMO_COUPONS,
   normalizeCouponCode,
   quantityCap,
+  submitLabel,
+  FREE_SIGNUP_LABEL,
+  BUY_LABEL,
   FailureLimiter,
   COUPON_FAIL_MAX,
   COUPON_FAIL_WINDOW_MS,
@@ -46,6 +49,7 @@ const tt = (o: Partial<PublicTicketType> & { id: string }): PublicTicketType => 
   remaining: null,
   soldOut: false,
   couponOnly: false,
+  openRegistration: false,
   ...o,
 });
 const CFG: TicketConfig = {
@@ -281,8 +285,8 @@ test("parseConfig validates shape (v2 fields with defaults)", () => {
     paymentMethods: ["card"],
     fields: [{ id: "a", label: "A", type: "text", required: false, options: [] }],
     types: [
-      { id: "t", name: "T", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false },
-      { id: "u", name: "U", description: "", priceJpy: 500, dayLabel: "Day 1", maxPerOrder: 4, remaining: 0, soldOut: true, couponOnly: false },
+      { id: "t", name: "T", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false, openRegistration: false },
+      { id: "u", name: "U", description: "", priceJpy: 500, dayLabel: "Day 1", maxPerOrder: 4, remaining: 0, soldOut: true, couponOnly: false, openRegistration: false },
     ],
   });
   assert.equal(parseConfig({ enabled: true, fields: [], types: [] })?.ctaEnabled, false);
@@ -1003,4 +1007,51 @@ test("thanks: shows the order number from confirm, escaped, only for a paid orde
   assert.ok(!pending.includes("注文番号"));
   const paidNoNumber = await (await handleTickets(new Request(url), mk({ status: "paid" })))!.text();
   assert.ok(!paidNoNumber.includes("注文番号"));
+});
+
+test("無料参加登録 (openRegistration): parse, 1 per order, badge, submit label, already_registered", () => {
+  const c = parseConfig({
+    enabled: true,
+    fields: [],
+    types: [
+      { id: "f", name: "学生", priceJpy: 0, openRegistration: true, couponOnly: false },
+      { id: "bad", name: "X", priceJpy: 1000, openRegistration: true },
+      { id: "both", name: "Y", priceJpy: 0, openRegistration: true, couponOnly: true },
+    ],
+  })!;
+  assert.deepEqual(
+    c.types.map((t) => [t.openRegistration, t.couponOnly]),
+    [
+      [true, false],
+      [false, false],
+      [true, false],
+    ],
+  );
+
+  const FREE = tt({ id: "free", name: "学生", priceJpy: 0, maxPerOrder: 5, openRegistration: true });
+  const PAID = tt({ id: "paid", name: "一般", priceJpy: 3000 });
+  assert.equal(quantityCap(FREE, true), 1);
+  assert.equal(quantityCap(tt({ id: "z", priceJpy: 0, openRegistration: true, soldOut: true }), true), 0);
+
+  const only = { ...CFG, types: [FREE] };
+  const html = renderTicketsPage({ config: only });
+  assert.ok(html.includes(`<span class="badge cp">${FREE_SIGNUP_LABEL}</span>`));
+  assert.ok(html.includes(`<span data-submit-label>${FREE_SIGNUP_LABEL}</span>`));
+  assert.ok(html.includes('data-open="1"'));
+  assert.ok(!html.includes('data-buy-label="')); // nothing to switch
+  assert.ok(!html.includes("Stripe の決済画面"));
+
+  const mixed = { ...CFG, paymentReady: true, types: [FREE, PAID] };
+  const m0 = renderTicketsPage({ config: mixed });
+  assert.ok(m0.includes(`data-free-label="${FREE_SIGNUP_LABEL}" data-buy-label="${BUY_LABEL}"`));
+  assert.ok(m0.includes(`<span data-submit-label>${BUY_LABEL}</span>`));
+  assert.equal(submitLabel(mixed, mixed.types, null, { qty_free: "1" }), FREE_SIGNUP_LABEL);
+  assert.equal(submitLabel(mixed, mixed.types, null, { qty_free: "1", qty_paid: "1" }), BUY_LABEL);
+  assert.equal(submitLabel(mixed, mixed.types, { code: "ABCDE23456", ticketTypeId: "paid", remainingUses: 1 }, {}), "申し込む");
+
+  const dup = mapCheckoutError(409, { error: { code: "LP_TICKET_ALREADY_REGISTERED", details: { reason: "already_registered" } } }, only);
+  assert.match(dup.email ?? "", /すでに参加登録/);
+  assert.match(dup._form ?? "", /参加登録済み/);
+  const mix = mapCheckoutError(400, { error: { details: [{ field: "items", reason: "free_with_paid" }] } }, mixed);
+  assert.match(mix.items ?? "", /有料の券種とは別に/);
 });

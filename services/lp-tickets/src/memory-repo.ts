@@ -94,7 +94,22 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
       .filter((o) => o.site === site && o.clientKey === clientKey && o.status === "pending" && o.createdAt >= pendingSince)
       .reduce((n, o) => n + o.quantity, 0);
   }
-  async insertOrderIfAvailable(row: TicketOrderRow, capacities: ReadonlyMap<string, number | null>, pendingSince: string) {
+  async countFreeSignupsByClient(site: string, clientKey: string, since: string) {
+    return this.orders.filter((o) => o.site === site && o.clientKey === clientKey && isFreeSignup(o) && o.createdAt >= since).length;
+  }
+  async insertOrderIfAvailable(
+    row: TicketOrderRow,
+    capacities: ReadonlyMap<string, number | null>,
+    pendingSince: string,
+    opts?: { uniqueFreeEmail?: boolean },
+  ) {
+    if (opts?.uniqueFreeEmail) {
+      const email = row.buyerEmail.toLowerCase();
+      const dup = this.orders.some(
+        (o) => o.site === row.site && isFreeSignup(o) && !o.preview && this.isHeld(o, pendingSince) && o.buyerEmail.toLowerCase() === email,
+      );
+      if (dup) return { ok: false as const, reason: "already_registered" as const };
+    }
     const short = row.items.find((i) => {
       const capacity = capacities.get(i.ticketTypeId) ?? null;
       return capacity !== null && this.held(row.site, i.ticketTypeId, pendingSince) + i.quantity > capacity;
@@ -366,3 +381,6 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
     this.jobs.set(key, value);
   }
 }
+
+/** 無料参加登録 = 0 yen without a coupon (coupon orders are 0 yen too, but are invitations). */
+const isFreeSignup = (o: TicketOrderRow): boolean => o.amountJpy === 0 && o.couponId === null;

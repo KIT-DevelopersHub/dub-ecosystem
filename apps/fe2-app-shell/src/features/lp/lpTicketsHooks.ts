@@ -158,7 +158,9 @@ export function useSaveTicketType() {
       if (prev) {
         let types: LpTicketTypeSummary[];
         if (id) {
-          types = prev.types.map((t) => (t.id === id ? { ...t, ...input } : t));
+          types = prev.types.map((t) =>
+            t.id === id ? { ...t, ...input, openRegistration: input.openRegistration ?? t.openRegistration } : t,
+          );
         } else {
           tempId = `${OPTIMISTIC_PREFIX}${Date.now()}`;
           const now = new Date().toISOString();
@@ -167,6 +169,7 @@ export function useSaveTicketType() {
             ...prev.types,
             {
               ...full,
+              openRegistration: full.openRegistration ?? false,
               id: tempId,
               sortOrder: prev.types.length,
               createdAt: now,
